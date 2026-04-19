@@ -18,7 +18,7 @@ from qdrant_client import AsyncQdrantClient
 from config import get_settings
 from models.schemas import IngestionConfig, IngestJobResponse, SourceTier, WriteState
 from services.embedder import embed_batch
-from services.ingestion import format_router, source_classifier, tier_chunker
+from services.ingestion import docling_adapter, tier_chunker
 from services.secrets import decrypt as _decrypt_api_key
 from services.storage import mongo_reader, mongo_writer, qdrant_writer
 
@@ -74,18 +74,33 @@ async def run_ingest_job(
     Idempotent: checks write_state and resumes from the first incomplete leg.
     """
 
-    # ── Decode + Classify + Chunk ─────────────────────────────────────────────
-    decode_result = format_router.route(data, filename=filename)
-    doc_id = decode_result.doc_id
-    source_tier = source_classifier.classify(
-        decode_result.text, decode_result.source_mime, decode_result.pages
+    # ── Parse via docling sidecar + chunk ─────────────────────────────────────
+    # Phase 7.6 — docling replaces format_router + source_classifier. The
+    # adapter pre-augments plain-text uploads with synthetic headers so
+    # docling promotes them into real section_header items.
+    import hashlib
+    import mimetypes
+    import re as _re
+
+    mime_hint, _ = mimetypes.guess_type(filename)
+    parse_result = await docling_adapter.parse_document(
+        data,
+        filename=filename,
+        mime=mime_hint or "application/octet-stream",
+        do_ocr=getattr(ingestion_config, "docling_ocr_enabled", True),
     )
+
+    # Stable doc_id from normalized markdown — same content → same id, lets
+    # idempotent re-ingest catch existing write_state.
+    _norm = _re.sub(r"\s+", " ", (parse_result.markdown or parse_result.text or "").strip())
+    doc_id = hashlib.sha256(_norm.encode("utf-8")).hexdigest()
+    source_tier = parse_result.source_tier
+    source_mime = mime_hint or "application/octet-stream"
+
     parents, children, injected_headers = tier_chunker.chunk(
-        text=decode_result.text,
-        source_tier=source_tier,
+        parse_result=parse_result,
         doc_id=doc_id,
         corpus_id=corpus_id,
-        pages=decode_result.pages,
     )
 
     # Derive per-doc chunking_config snapshot (Wave A.1) — captures which strategy
@@ -172,7 +187,7 @@ async def run_ingest_job(
             "user_id": user_id,
             "file_id": file_id,
             "filename": filename,
-            "source_mime": decode_result.source_mime,
+            "source_mime": source_mime,
             "source_tier": source_tier.value,
             "ingestion_config": ingestion_config.model_dump(),
             "chunking_config": chunking_config,  # Wave A.1 — per-doc strategy audit

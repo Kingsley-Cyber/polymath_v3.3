@@ -354,3 +354,31 @@ The migration HALTS on any per-corpus failure (does NOT drop the legacy globals)
 `RetrieverOrchestrator._resolve_collections(tier, corpus_ids, collections)` (note the new `corpus_ids` arg) expands to per-corpus collection names. The multi-corpus loop scopes each `funnel_b.search(...)` call to its own corpus's collections — passing all b_cols to every per-corpus call would still be correct (the payload filter on `corpus_id` would zero out the cross-corpus hits) but wastes Qdrant work.
 
 The corpus_id payload filter is RETAINED in every search call as defense-in-depth, even though per-corpus collections already isolate data physically.
+
+---
+
+## ⚪ Phase 7.6 — Docling Sidecar Replaces format_router + source_classifier
+
+### 60. Docling Is the Parser
+The ingestion pipeline no longer uses `format_router` (pypdf / BeautifulSoup / unstructured) or the regex `source_classifier`. Both are replaced by a CPU-only **docling sidecar** at `docling_svc/` (image: `polymath_v33-docling`, internal hostname `http://docling:8500`). The backend talks to it through `services/ingestion/docling_adapter.py` — that adapter is the ONLY caller; nothing else in the codebase imports from `docling` or `docling-core`.
+
+**Why a sidecar instead of in-backend:** docling pulls torch + torchvision + accelerate (~2 GB) and downloads layout/OCR model weights on first run (~1.5 GB more). It also requires `httpx>=0.28` which would force a major bump for the 45 backend httpx call sites. Sidecar keeps backend image small and isolates ML model lifecycle. Mirrors the embedder/reranker pattern.
+
+**Pipeline flow now:**
+1. `worker.py` calls `docling_adapter.parse_document(bytes, filename, mime, do_ocr=...)`.
+2. The adapter pre-augments **plain-text uploads** with `inject_synthetic_headers` BEFORE handing bytes to docling — this is how `Onboarding.txt` / `Product Overview.txt` keep classifying as `tier_b_plus` (docling itself treats raw .txt as unstructured).
+3. Docling returns markdown + per-section walk + per-page (PDF only) + structure stats.
+4. `docling_adapter._classify_tier(...)` maps to `SourceTier` (HTML→tier_b, multi-page PDF→ocr_ast, augmented .txt with structure→tier_b_plus, has_structure→tier_a, else tier_c).
+5. `tier_chunker.chunk(parse_result, doc_id, corpus_id)` consumes the section walk to build parents — no more re-parsing.
+
+### 61. `inject_synthetic_headers` Is Pre-Parse, Not Post-Parse
+`b_plus_normalizer._likely_structured` and `looks_like_b_plus` are GONE — classification is docling's job now. What survives: `_PATTERNS`, `InjectedHeader`, and `inject_synthetic_headers`. The injector runs INSIDE the adapter, BEFORE the bytes reach docling — so docling sees real `#`/`##` markers and produces proper `section_header` items. The audit list rides through the response into the document record (same shape as before).
+
+### 62. `IngestionConfig.docling_ocr_enabled` Default True
+New per-corpus field controls the docling sidecar's OCR pass on PDFs / images. Default True. Set False for text-only PDFs to cut ingest latency by 50-60%. Other formats ignore the flag — docling's PdfFormatOption is the only place it's wired.
+
+### 63. Model Weights Persist via Named Volumes
+`docling_models` and `docling_hf_cache` are named docker volumes mounted into the sidecar (`/app/docling_models` and `/app/hf_cache`). Without these, every `docker compose down` would force a 1.5 GB re-download on next boot. Pre-fetched at image build time via the Dockerfile's `download_models()` step — failure is tolerated and runtime fetch retries.
+
+### 64. Sidecar Auth Surface
+The docling sidecar exposes port 8500 on the **host** (`ports: - "8500:8500"`) for debugging. If you don't want it externally reachable, switch `ports:` to `expose:` in `docker-compose.yml` — backend reaches it on the docker network either way via `http://docling:8500`. There is no auth on `/parse` itself; rely on network isolation.

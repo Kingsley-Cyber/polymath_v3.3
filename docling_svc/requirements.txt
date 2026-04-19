@@ -1,0 +1,8 @@
+# docling sidecar — keep this set MINIMAL.
+# Backend stays clean of torch/transformers; parsing happens here only.
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+docling==2.90.0
+# Pin pydantic to a 2.x range matching backend's so payload schemas line up.
+pydantic>=2.5,<3

@@ -1,0 +1,497 @@
+# Polymath RAG v3.3 - Docker Compose Configuration
+# All services for the hierarchical RAG system
+# Models mounted from ./download (no runtime downloads)
+
+services:
+  # ============================================================
+  # DATABASES
+  # ============================================================
+
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: polymath
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-polymath}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  mongo-express:
+    image: mongo-express
+    ports:
+      - "8083:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_USER:-polymath}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD}
+      ME_CONFIG_MONGODB_URL: mongodb://${MONGO_USER:-polymath}:${MONGO_PASSWORD}@mongodb:27017/
+      ME_CONFIG_BASICAUTH: "false"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bash",
+          "-c",
+          "exec 3<>/dev/tcp/localhost/6333 && echo -e 'GET /healthz HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '200' <&3",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5-community
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "cypher-shell -u neo4j -p ${NEO4J_PASSWORD} 'RETURN 1' || exit 1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8085:8081/tcp"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================
+  # AI SERVICES
+  # ============================================================
+
+  ollama:
+    image: ollama/ollama:latest
+    # Host port 11434 is kept free for the native Windows Ollama app. The
+    # compose Ollama stays reachable on the Docker network at ollama:11434
+    # (backend + LiteLLM use the internal hostname). To talk to the compose
+    # Ollama from the host, run `docker compose exec ollama ollama …`.
+    # ports:
+    #   - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+      - ./download:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # One-shot: pulls default models into ollama after it's healthy
+  # Run manually: docker compose run --rm ollama-pull
+  ollama-pull:
+    image: ollama/ollama:latest
+    profiles: ["setup"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "=== Pulling nomic-embed-text (768d embeddings) ==="
+        ollama pull nomic-embed-text
+        echo "=== Pulling qwen3:0.6b (default chat model) ==="
+        ollama pull qwen3:0.6b
+        echo "=== Models available ==="
+        ollama list
+    volumes:
+      - ollama_models:/root/.ollama
+    network_mode: "service:ollama"
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  litellm:
+    # Pinned — later LiteLLM tags (including main-stable, main-latest) require
+    # a Postgres DB for master_key auth. main-v1.60.0 is pre-regression and
+    # works DB-less; bump carefully only after validating master-key path.
+    image: ghcr.io/berriai/litellm:main-v1.60.0
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml
+    command: ["--config", "/app/config.yaml"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      Z_AI_API_KEY: ${Z_AI_API_KEY:-}
+      MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+      MIMO_API_KEY: ${MIMO_API_KEY:-}
+    depends_on:
+      ollama:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:4000/')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  # ============================================================
+  # EMBEDDER — sentence-transformers GPU service
+  # Loads any HF safetensors model from MODEL_PATH — no hardcoding
+  # API: POST http://embedder:80/embeddings (OpenAI-compatible)
+  #      GET  http://embedder:80/info       (model name, dim, device)
+  #      GET  http://embedder:80/health
+  # ============================================================
+  embedder:
+    build: ./embedder
+    ports:
+      - "8082:80"
+    volumes:
+      - ./download/Qwen3-Embedding-0.6B:/model:ro
+    environment:
+      MODEL_PATH: /model
+      MODEL_NAME: Qwen3-Embedding-0.6B
+      EMBED_BATCH_SIZE: "32"
+      EMBED_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # ============================================================
+  # RERANKER — sentence-transformers cross-encoder
+  # Model: cross-encoder/ms-marco-MiniLM-L6-v2 (safetensors)
+  # API: POST http://reranker:8080/rerank
+  # Note: llama.cpp cannot run BERT cross-encoders — custom service required
+  # ============================================================
+  reranker:
+    build: ./reranker
+    ports:
+      - "8081:8080"
+    volumes:
+      - C:/Users/Sammb/Downloads/polymath_rag/models:/models:ro
+    environment:
+      MODEL_PATH: /models/ms-marco-MiniLM-L6-v2
+      RERANKER_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # ============================================================
+  # DOCLING SIDECAR — IBM Docling parser as a CPU-only service
+  # API: POST http://docling:8500/parse
+  # First boot downloads ~1.5 GB of layout/OCR model weights to a named
+  # volume so subsequent restarts don't pay the cost again.
+  # ============================================================
+  docling:
+    build: ./docling_svc
+    ports:
+      - "8500:8500"
+    volumes:
+      - docling_models:/app/docling_models
+      - docling_hf_cache:/app/hf_cache
+    environment:
+      DOCLING_ARTIFACTS_PATH: /app/docling_models
+      HF_HOME: /app/hf_cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # ============================================================
+  # AUTOMATION
+  # ============================================================
+
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    environment:
+      N8N_HOST: "0.0.0.0"
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://n8n:5678/
+      GENERIC_TIMEZONE: UTC
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5678/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ============================================================
+  # APPLICATION
+  # ============================================================
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./download:/models:ro
+    environment:
+      MONGODB_URI: mongodb://${MONGO_USER:-polymath}:${MONGO_PASSWORD}@mongodb:27017/polymath?authSource=admin
+      QDRANT_URL: http://qdrant:6333
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      NEO4J_ENABLED: ${NEO4J_ENABLED:-false}
+      LITELLM_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      OLLAMA_URL: http://ollama:11434
+      REDIS_URL: redis://redis:6379
+      RERANKER_URL: http://reranker:8080
+      EMBEDDER_URL: http://embedder:80
+      MODELS_DIR: /models
+      N8N_URL: http://n8n:5678
+      # Phase 14.3 — Modal cloud GPU (primary ingestion embed path; see .env.example)
+      MODAL_ENABLED: ${MODAL_ENABLED:-false}
+      MODAL_EMBEDDER_URL: ${MODAL_EMBEDDER_URL:-}
+      MODAL_API_KEY: ${MODAL_API_KEY:-}
+      MODAL_TIMEOUT_SECONDS: ${MODAL_TIMEOUT_SECONDS:-300.0}
+      # SiliconFlow cloud embedding API (alternative to Modal)
+      SILICONFLOW_ENABLED: ${SILICONFLOW_ENABLED:-false}
+      SILICONFLOW_EMBEDDER_URL: ${SILICONFLOW_EMBEDDER_URL:-https://api.siliconflow.com/v1/embeddings}
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
+      SILICONFLOW_TIMEOUT_SECONDS: ${SILICONFLOW_TIMEOUT_SECONDS:-120.0}
+      # Default chat model — must be installed locally (or a cloud route with
+      # a working api key). Fallback picks an Ollama model that tends to be
+      # pre-pulled on dev rigs; override via DEFAULT_COMPLETION_MODEL in .env.
+      DEFAULT_COMPLETION_MODEL: ${DEFAULT_COMPLETION_MODEL:-ollama/qwen3:1.7b}
+      # Phase 14.1 — Agentic mode defaults (user-overridable at runtime)
+      AGENTIC_MODE_ENABLED: ${AGENTIC_MODE_ENABLED:-false}
+      AGENTIC_MODEL: ${AGENTIC_MODEL:-ollama/qwen3:1.7b}
+      # Phase 17 — HyDE dedicated model (cheap/fast hypothetical generator)
+      HYDE_MODEL: ${HYDE_MODEL:-ollama/qwen3:1.7b}
+      # Auth secrets — config.py validators reject missing/empty. Set in .env;
+      # the backend image built 2026-04-18 enforces these (older images didn't).
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD}
+      # Phase 7.6 — Docling sidecar (parser replacement for unstructured/regex)
+      DOCLING_URL: http://docling:8500
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
+      reranker:
+        condition: service_healthy
+      embedder:
+        condition: service_healthy
+      docling:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  # ============================================================
+  # MCP SIDECAR (Phase 8) — exposes the same retrieval / graph layer
+  # over Model Context Protocol (streamable-HTTP) for agents:
+  #   - Claude Desktop (via host-side stdio proxy → mcp.kingsleylab.xyz)
+  #   - openclaw / custom agents (direct streamable-HTTP)
+  # Tools are thin adapters over backend.services.* — no duplicated logic.
+  # ============================================================
+
+  mcp:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.mcp
+    container_name: polymath-mcp
+    ports:
+      - "8765:8765"
+    environment:
+      # Service discovery — same hostnames the backend uses
+      MONGODB_URI: mongodb://${MONGO_USER:-polymath}:${MONGO_PASSWORD}@mongodb:27017/polymath?authSource=admin
+      QDRANT_URL: http://qdrant:6333
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      LITELLM_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      OLLAMA_URL: http://ollama:11434
+      REDIS_URL: redis://redis:6379
+      RERANKER_URL: http://reranker:8080
+      EMBEDDER_URL: http://embedder:80
+      # Auth — reuse the backend's JWT secret so tokens issued by /api/auth
+      # validate identically here. DEFAULT_ADMIN_PASSWORD is unused by MCP at
+      # runtime (only auth_service.bootstrap consumes it), but Pydantic Settings
+      # requires it during config load — so we pass it through.
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD}
+      # MCP-specific (Phase 8)
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8765"
+      MCP_TRANSPORT: streamable-http
+      MCP_REQUIRE_AUTH: ${MCP_REQUIRE_AUTH:-true}
+      MCP_DEFAULT_TOP_K: "5"
+      # Static API key for system-level access (no per-user corpus scoping).
+      # Tried BEFORE JWT validation via constant-time compare. Leave blank to
+      # require JWT for every request. Set in .env, never commit.
+      MCP_API_KEY: ${MCP_API_KEY:-}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
+      embedder:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================
+  # TUNNEL (Cloudflare — optional, fails gracefully if no token)
+  # ============================================================
+
+  # ============================================================
+  # DISABLED 2026-04-18 — sibling `cloudflared-tunnel` container (outside compose)
+  # already runs the tunnel with a valid token. The compose-managed copy was
+  # crash-looping on "Provided Tunnel token is not valid" because .env's
+  # CLOUDFLARE_TUNNEL_TOKEN is stale/empty. Re-enable by uncommenting and
+  # setting a fresh token in .env, then `docker stop cloudflared-tunnel` so
+  # they don't fight for the same routes.
+  # ============================================================
+  # cloudflared:
+  #   image: cloudflare/cloudflared:latest
+  #   restart: unless-stopped
+  #   command: tunnel --no-autoupdate run
+  #   environment:
+  #     TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+  #   depends_on:
+  #     frontend:
+  #       condition: service_healthy
+  #     backend:
+  #       condition: service_healthy
+  #     mcp:
+  #       condition: service_healthy
+
+# ============================================================
+# VOLUMES
+# ============================================================
+
+volumes:
+  mongodb_data:
+  qdrant_data:
+  neo4j_data:
+  redis_data:
+  ollama_models:
+  n8n_data:
+  docling_models:
+  docling_hf_cache:

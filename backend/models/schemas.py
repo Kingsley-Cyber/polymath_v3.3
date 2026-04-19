@@ -651,6 +651,14 @@ class IngestionConfig(BaseModel):
         default_factory=lambda: ["naive", "hrag"],
         description="Qdrant collections to write during ingest: naive | hrag | graph",
     )
+    docling_ocr_enabled: bool = Field(
+        default=True,
+        description=(
+            "Phase 7.6 — when True, the docling sidecar runs OCR on PDFs / "
+            "images during parsing. Set False for text-only PDFs to cut "
+            "ingest latency by 50-60%. Other formats ignore this flag."
+        ),
+    )
 
     # UI hint — also load-bearing at runtime for the extraction pool.
     # When True: worker reuses summary_models for GHOST B (extraction_models is

@@ -1,19 +1,21 @@
 """
 B+ tier synthetic header injection.
 
-Takes plain text that has recoverable structure (chapter/section markers like
-"Chapter 1", "Section 2.3", "PART III") but no native Markdown headers, and
-injects `#` / `##` headers in front of each detected marker line so the
-downstream tier_a chunker can split at heading boundaries.
+Phase 7.6 — classification responsibility moved to the docling sidecar +
+docling_adapter._classify_tier(). This module now only provides the
+PRE-PARSE injector that turns plain-text chapter/section markers into real
+markdown `#`/`##` headers. The adapter calls inject_synthetic_headers
+BEFORE handing the bytes to docling so docling promotes them into proper
+section_header items.
 
-Why a separate tier:
-  tier_a — native MD headers already present → split as-is
-  tier_b — HTML/structured, different preprocessing
-  tier_b_plus — this module's target: prose with implicit structure
-  tier_c — truly flat prose, no markers → token-budget split
+Pattern families (most-specific first; first match wins):
+  • PART, Chapter, Appendix          → H1
+  • Numbered sections (1.2, Section X) → H2
+  • Plain-text semantic headings (ALL CAPS line, "Title:")
+                                      → H1 / H2 (softer signals)
 
-Every injection is logged in `injected_headers` for auditability and migration
-debugging. The audit list is attached to the document record by the worker.
+Every injection is logged in `injected_headers` for auditability. The audit
+list rides through the docling response into the document record.
 """
 
 from __future__ import annotations
@@ -85,37 +87,6 @@ class InjectedHeader:
     original_line: str     # verbatim line text before the `#` prefix
 
 
-def _likely_structured(text: str) -> bool:
-    """
-    Quick heuristic: does the text have enough markers to warrant B+ treatment?
-
-    Qualifies on any of:
-      - >=2 chapter/part/appendix markers
-      - >=3 numbered section markers
-      - >=2 plain-text semantic-heading markers (ALL CAPS / colon-suffixed)
-      - >=1 chapter marker combined with >=2 soft markers
-    """
-    ch_hits = 0
-    sect_hits = 0
-    soft_hits = 0
-    for line in text.splitlines():
-        for name, regex, _level in _PATTERNS:
-            if regex.match(line):
-                if name.startswith(("chapter", "part", "appendix")):
-                    ch_hits += 1
-                elif name.startswith(("caps_", "colon_")):
-                    soft_hits += 1
-                else:
-                    sect_hits += 1
-                break
-    return (
-        ch_hits >= 2
-        or sect_hits >= 3
-        or soft_hits >= 2
-        or (ch_hits >= 1 and soft_hits >= 2)
-    )
-
-
 def inject_synthetic_headers(
     text: str,
 ) -> tuple[str, list[InjectedHeader]]:
@@ -157,13 +128,3 @@ def inject_synthetic_headers(
             out_lines.append(raw_line)
 
     return "\n".join(out_lines), audit
-
-
-def looks_like_b_plus(text: str, has_native_headings: bool) -> bool:
-    """
-    Classifier helper — True when the text has NO native MD headings but has
-    enough chapter/section markers that B+ injection would recover structure.
-    """
-    if has_native_headings:
-        return False
-    return _likely_structured(text)
