@@ -1,0 +1,14 @@
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
+frontend/node_modules/
+graphify-out/cache/
+*.log
+.env
+.env.*
+!.env.example
