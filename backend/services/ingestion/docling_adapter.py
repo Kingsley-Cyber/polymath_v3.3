@@ -29,7 +29,10 @@ from services.ingestion.b_plus_normalizer import inject_synthetic_headers
 logger = logging.getLogger(__name__)
 
 DOCLING_URL = os.getenv("DOCLING_URL", "http://docling:8500")
-DOCLING_TIMEOUT_SECONDS = float(os.getenv("DOCLING_TIMEOUT_SECONDS", "300"))
+# 10 min default — large OCR PDFs can legitimately take minutes; the
+# previous 300s default would kill real docs. Override with
+# DOCLING_TIMEOUT_SECONDS env var for batch jobs.
+DOCLING_TIMEOUT_SECONDS = float(os.getenv("DOCLING_TIMEOUT_SECONDS", "600"))
 
 _PLAIN_TEXT_MIMES = {"text/plain", "application/octet-stream"}
 _PLAIN_TEXT_EXTS = {".txt", ".text", ".log"}

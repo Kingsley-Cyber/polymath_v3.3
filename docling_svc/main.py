@@ -39,6 +39,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 app = FastAPI(title="Polymath Docling Sidecar", version="1.0.0")
 
+# Hard cap on upload size — fail cleanly with HTTP 413 instead of OOMing
+# the worker on a 500 MB garbage payload. Real-world DOCX/PDF tops out
+# around 100 MB; 150 MB leaves headroom.
+MAX_UPLOAD_BYTES = 150 * 1024 * 1024
+
 
 class Section(BaseModel):
     heading_path: list[str]
@@ -174,6 +179,11 @@ async def parse(
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="empty upload")
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"payload too large: {len(raw)} bytes (max {MAX_UPLOAD_BYTES})",
+        )
 
     converter = _get_converter(do_ocr)
     stream = DocumentStream(name=file.filename or "upload", stream=BytesIO(raw))

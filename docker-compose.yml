@@ -269,8 +269,11 @@ services:
   # ============================================================
   docling:
     build: ./docling_svc
-    ports:
-      - "8500:8500"
+    # Internal-only — backend reaches it on the docker network via
+    # http://docling:8500. No host port; mirrors embedder/reranker pattern
+    # so the parse endpoint + model weights aren't on the host network.
+    expose:
+      - "8500"
     volumes:
       - docling_models:/app/docling_models
       - docling_hf_cache:/app/hf_cache
