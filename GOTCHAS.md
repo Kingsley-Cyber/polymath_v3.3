@@ -380,5 +380,43 @@ New per-corpus field controls the docling sidecar's OCR pass on PDFs / images. D
 ### 63. Model Weights Persist via Named Volumes
 `docling_models` and `docling_hf_cache` are named docker volumes mounted into the sidecar (`/app/docling_models` and `/app/hf_cache`). Without these, every `docker compose down` would force a 1.5 GB re-download on next boot. Pre-fetched at image build time via the Dockerfile's `download_models()` step — failure is tolerated and runtime fetch retries.
 
-### 64. Sidecar Auth Surface
-The docling sidecar exposes port 8500 on the **host** (`ports: - "8500:8500"`) for debugging. If you don't want it externally reachable, switch `ports:` to `expose:` in `docker-compose.yml` — backend reaches it on the docker network either way via `http://docling:8500`. There is no auth on `/parse` itself; rely on network isolation.
+### 64. Sidecar Auth Surface (Internal-Only Now)
+The docling sidecar uses `expose: - "8500"` (NOT `ports:`) — it is reachable only on the docker network at `http://docling:8500`. There is no auth on `/parse` itself; isolation comes from the network boundary. Don't switch back to `ports:` without thinking about who can hit `/parse` from the host. Also: the sidecar enforces a 150 MB upload cap (HTTP 413) and the backend adapter uses a 600s read timeout — both env-overridable but tuned for typical PDF/DOCX sizes.
+
+### 65. GPU Pinning — docling on RTX 3090, Embedder on RTX 4070
+Both docling and the embedder run on CUDA, on **different** physical GPUs:
+
+- `docling`  → RTX 3090 (24 GB) — layout/OCR model holds ~2-4 GB resident
+- `embedder` → RTX 4070 (12 GB) — Qwen3-Embedding-0.6B + bursty batched embeds
+
+**The pin lives at the torch layer, not the docker layer.** On Docker Desktop for Windows, both `device_ids: ['0']` and `NVIDIA_VISIBLE_DEVICES=0` in `docker-compose.yml` are silently IGNORED — the container always sees both GPUs via `nvidia-smi`. The load-bearing pin is two env vars on each service:
+
+```yaml
+docling:
+  environment:
+    CUDA_DEVICE_ORDER: PCI_BUS_ID    # deterministic numbering by PCI bus
+    CUDA_VISIBLE_DEVICES: "0"        # torch sees only the 3090
+embedder:
+  environment:
+    CUDA_DEVICE_ORDER: PCI_BUS_ID
+    CUDA_VISIBLE_DEVICES: "1"        # torch sees only the 4070
+```
+
+`CUDA_VISIBLE_DEVICES` filters at torch import time; this is the one that actually works. The compose `deploy.resources.reservations.devices` block + `NVIDIA_VISIBLE_DEVICES` are kept for documentation and for hosts where they DO take effect (Linux Swarm), but on Windows Docker Desktop they're inert.
+
+**Do NOT use `count: 1`** for either service — even when device_ids isn't honored, `count: 1` would still let docker pick a GPU at random for compute reservation (where applicable), and we want the explicit pin documented in code.
+
+Verify after any compose edit:
+
+```bash
+docker exec polymath_v33-docling-1  python -c "import torch; print(torch.cuda.get_device_name(0))"
+# → NVIDIA GeForce RTX 3090
+docker exec polymath_v33-embedder-1 python -c "import torch; print(torch.cuda.get_device_name(0))"
+# → NVIDIA GeForce RTX 4070
+```
+
+`torch.cuda.device_count()` should be **1** in each container. If it's 2, the env var pin didn't take — check for typos in compose.
+
+If you add a third GPU consumer (vLLM, etc.), pin it to whichever card is least loaded. During an ingest run keep `nvidia-smi -l 1` open and confirm the split: 3090 grows when docling parses; 4070 grows when embedder batches.
+
+To switch docling back to CPU (CPU-only dev box): change the Dockerfile's `--extra-index-url https://download.pytorch.org/whl/cu121` back to `cpu`, drop the `deploy.resources.reservations` block, rebuild. The sidecar's `_CUDA_OK` runtime check ensures it boots either way (falls back to `AcceleratorDevice.AUTO`).

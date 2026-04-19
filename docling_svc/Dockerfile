@@ -1,6 +1,7 @@
 # Polymath docling sidecar — wraps IBM Docling behind a thin FastAPI POST /parse.
-# CPU-only PyTorch keeps the image under ~3 GB. The backend talks to this
-# service over HTTP via services/ingestion/docling_adapter.py.
+# CUDA-enabled PyTorch (cu121). Backend talks to this service over HTTP via
+# services/ingestion/docling_adapter.py. Pinned to GPU 0 (RTX 3090) via
+# device_ids in docker-compose.yml — see GOTCHAS #65.
 
 FROM python:3.11-slim AS base
 
@@ -20,9 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# CPU-only torch first to avoid pulling the multi-GB CUDA wheels by default.
+# CUDA-enabled torch (cu121 — driver 591 supports CUDA 12.x). The wheel
+# bundles the CUDA runtime libs so we don't need a full nvidia base image.
 RUN pip install --upgrade pip && \
-    pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+    pip install --extra-index-url https://download.pytorch.org/whl/cu121 \
         "torch>=2.2.2,<3" "torchvision>=0,<1"
 
 COPY requirements.txt .

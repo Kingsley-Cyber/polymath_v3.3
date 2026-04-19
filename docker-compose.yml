@@ -216,12 +216,18 @@ services:
       MODEL_NAME: Qwen3-Embedding-0.6B
       EMBED_BATCH_SIZE: "32"
       EMBED_DEVICE: cuda
+      # GPU pinning — see docling service for the rationale. CUDA_VISIBLE_DEVICES
+      # is the load-bearing filter at the torch layer; PCI_BUS_ID ordering
+      # makes "1" deterministically mean the 4070.
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      CUDA_VISIBLE_DEVICES: "1"            # RTX 4070
+      NVIDIA_VISIBLE_DEVICES: "1"
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ['1']
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
@@ -280,6 +286,23 @@ services:
     environment:
       DOCLING_ARTIFACTS_PATH: /app/docling_models
       HF_HOME: /app/hf_cache
+      # GPU pinning — Docker Desktop on Windows ignores both `device_ids` and
+      # `NVIDIA_VISIBLE_DEVICES` for filtering, so we pin at the TORCH layer
+      # via CUDA_VISIBLE_DEVICES (read at torch import). CUDA_DEVICE_ORDER
+      # forces deterministic device numbering by PCI bus instead of torch's
+      # "fastest first" heuristic. NVIDIA_VISIBLE_DEVICES is kept as a hint
+      # in case Docker improves its honoring; deploy.resources below is the
+      # compose-spec idiom but currently load-bearing only on swarm hosts.
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      CUDA_VISIBLE_DEVICES: "0"            # RTX 3090
+      NVIDIA_VISIBLE_DEVICES: "0"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8500/health"]
       interval: 15s

@@ -34,6 +34,21 @@ from docling.document_converter import (
     PdfFormatOption,
 )
 
+# CUDA pin — explicit beats relying on device='auto'. When CUDA isn't
+# available (e.g. running this image on a CPU-only host for dev), fall
+# back to CPU so the sidecar still boots.
+try:
+    import torch  # noqa: F401  (used by the .is_available() check)
+    from docling.datamodel.accelerator_options import (
+        AcceleratorDevice,
+        AcceleratorOptions,
+    )
+    _CUDA_OK = torch.cuda.is_available()
+except Exception:  # pragma: no cover - defensive
+    AcceleratorDevice = None  # type: ignore[assignment]
+    AcceleratorOptions = None  # type: ignore[assignment]
+    _CUDA_OK = False
+
 logger = logging.getLogger("docling_svc")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -75,19 +90,26 @@ def _get_converter(do_ocr: bool) -> DocumentConverter:
     pdf_opts = PdfPipelineOptions()
     pdf_opts.do_ocr = do_ocr
     pdf_opts.do_table_structure = True
+    if _CUDA_OK and AcceleratorOptions is not None:
+        pdf_opts.accelerator_options = AcceleratorOptions(
+            device=AcceleratorDevice.CUDA,
+            num_threads=4,
+        )
     conv = DocumentConverter(
         format_options={
             InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_opts),
         }
     )
     _converters[do_ocr] = conv
-    logger.info("DocumentConverter built (do_ocr=%s)", do_ocr)
+    logger.info(
+        "DocumentConverter built (do_ocr=%s, cuda=%s)", do_ocr, _CUDA_OK
+    )
     return conv
 
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    return {"status": "ok", "ocr_default": True}
+    return {"status": "ok", "ocr_default": True, "cuda": _CUDA_OK}
 
 
 def _walk_sections(doc) -> tuple[list[Section], int, int]:
