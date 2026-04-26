@@ -1,0 +1,1012 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
+import { Loader2, MessageSquare, SendHorizontal, Sparkles, Trash2, X } from "lucide-react";
+import {
+  deleteGraphSession,
+  discoverGraph,
+  getGraphSession,
+  getGraphSuggestions,
+  listGraphSessions,
+} from "../../lib/api";
+import { contextGraphFromDiscoverResponse } from "../../lib/contextGraph";
+import { useChatStore } from "../../stores/chatStore";
+import { useGraphSessionStore } from "../../stores/graphSessionStore";
+import { useSettingsStore } from "../../stores/settingsStore";
+import type {
+  AutoSynthesisItem,
+  AutoSynthesisPayload,
+  DiscoverMode,
+  GraphSourceMetadata,
+  GraphDiscoverResponse,
+  GraphDiscoverSession,
+} from "../../types";
+
+interface DiscoveryPanelProps {
+  corpusId: string | null;
+  onClose: () => void;
+}
+
+type Phase = "idle" | "curating" | "synthesizing" | "done" | "error";
+type MissionSection = "themes" | "bridges" | "gaps" | "signals" | "moves" | "trace";
+
+type ReceiptFile = {
+  doc_id: string;
+  source_label: string;
+  source?: GraphSourceMetadata;
+  chunk_count: number;
+  chunk_ids: string[];
+  has_temporal?: boolean;
+};
+
+type ReceiptChunk = {
+  chunk_id: string;
+  doc_id: string;
+  source_label: string;
+  source?: GraphSourceMetadata;
+  preview: string;
+  has_temporal?: boolean;
+};
+
+const MISSION_CONTEXT_GRAPH_EVENT = "mission-control-context-graph";
+const PANEL_WIDTH_STORAGE_KEY = "mission-control-panel-width";
+const PANEL_DEFAULT_WIDTH = 672;
+const PANEL_MIN_WIDTH = 420;
+const PANEL_VIEWPORT_MARGIN = 24;
+
+function panelWidthBounds() {
+  if (typeof window === "undefined") {
+    return {
+      min: PANEL_MIN_WIDTH,
+      max: PANEL_DEFAULT_WIDTH,
+      preferred: PANEL_DEFAULT_WIDTH,
+    };
+  }
+  const max = Math.max(320, window.innerWidth - PANEL_VIEWPORT_MARGIN);
+  const min = Math.min(PANEL_MIN_WIDTH, max);
+  return {
+    min,
+    max,
+    preferred: Math.min(PANEL_DEFAULT_WIDTH, max),
+  };
+}
+
+function clampPanelWidth(value: number) {
+  const bounds = panelWidthBounds();
+  return Math.min(bounds.max, Math.max(bounds.min, Math.round(value)));
+}
+
+function storedPanelWidth() {
+  if (typeof window === "undefined") return PANEL_DEFAULT_WIDTH;
+  const stored = Number(window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY));
+  if (Number.isFinite(stored) && stored > 0) return clampPanelWidth(stored);
+  return panelWidthBounds().preferred;
+}
+
+export function DiscoveryPanel({ corpusId, onClose }: DiscoveryPanelProps) {
+  const turns = useGraphSessionStore((s) => s.turns);
+  const activeSessionId = useGraphSessionStore((s) => s.activeSessionId);
+  const sessions = useGraphSessionStore((s) => s.sessions);
+  const loading = useGraphSessionStore((s) => s.loading);
+  const error = useGraphSessionStore((s) => s.error);
+  const draftQuerySeed = useGraphSessionStore((s) => s.draftQuerySeed);
+  const nodeNavigation = useGraphSessionStore((s) => s.nodeNavigation);
+  const setActiveCorpus = useGraphSessionStore((s) => s.setActiveCorpus);
+  const setActiveSession = useGraphSessionStore((s) => s.setActiveSession);
+  const setTurns = useGraphSessionStore((s) => s.setTurns);
+  const resetTurns = useGraphSessionStore((s) => s.resetTurns);
+  const pushTurn = useGraphSessionStore((s) => s.pushTurn);
+  const setLoading = useGraphSessionStore((s) => s.setLoading);
+  const setError = useGraphSessionStore((s) => s.setError);
+  const setSessions = useGraphSessionStore((s) => s.setSessions);
+  const clearNodeNavigation = useGraphSessionStore((s) => s.clearNodeNavigation);
+  const setPendingPrompt = useChatStore((s) => s.setPendingPrompt);
+  const selectedModel = useSettingsStore((s) => s.selectedModel);
+  const [query, setQuery] = useState("");
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
+  const [requestStartedAt, setRequestStartedAt] = useState<number | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [lastDurationMs, setLastDurationMs] = useState<number | null>(null);
+  const [activeQuery, setActiveQuery] = useState("");
+  const [panelWidth, setPanelWidth] = useState(storedPanelWidth);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inFlightRef = useRef(false);
+  const seenDraft = useRef<number | null>(null);
+  const seenNode = useRef<number | null>(null);
+  const panelWidthRef = useRef(panelWidth);
+  const latest = turns.length ? turns[turns.length - 1].response : null;
+
+  const refreshSessions = useCallback(async () => {
+    if (!corpusId) {
+      setSessions([]);
+      return;
+    }
+    try {
+      setSessions(await listGraphSessions(corpusId));
+    } catch (err) {
+      console.warn("Failed to load graph sessions", err);
+    }
+  }, [corpusId, setSessions]);
+
+  useEffect(() => {
+    setActiveCorpus(corpusId);
+    setPhase("idle");
+    setQuery("");
+    void refreshSessions();
+  }, [corpusId, refreshSessions, setActiveCorpus]);
+
+  useEffect(() => {
+    if (!corpusId) {
+      setSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    getGraphSuggestions(corpusId)
+      .then((payload) => {
+        if (!cancelled) setSuggestions(payload.suggestions.slice(0, 5).map((item) => item.text));
+      })
+      .catch(() => {
+        if (!cancelled) setSuggestions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [corpusId]);
+
+  useEffect(() => {
+    if (!draftQuerySeed || draftQuerySeed.nonce === seenDraft.current) return;
+    seenDraft.current = draftQuerySeed.nonce;
+    setQuery(draftQuerySeed.text);
+    window.setTimeout(() => inputRef.current?.focus(), 20);
+  }, [draftQuerySeed]);
+
+  useEffect(() => {
+    if (!nodeNavigation || nodeNavigation.nonce === seenNode.current) return;
+    seenNode.current = nodeNavigation.nonce;
+    const targets = nodeNavigation.links.map((link) => sectionForJump(link.section)).filter(Boolean);
+    if (targets.length === 1 && targets[0] === "themes") scrollToSection("themes");
+  }, [nodeNavigation]);
+
+  useEffect(() => {
+    if (!loading || !requestStartedAt) return;
+    const tick = () => setElapsedMs(Date.now() - requestStartedAt);
+    tick();
+    const timer = window.setInterval(tick, 500);
+    return () => window.clearInterval(timer);
+  }, [loading, requestStartedAt]);
+
+  useEffect(() => {
+    panelWidthRef.current = panelWidth;
+  }, [panelWidth]);
+
+  useEffect(() => {
+    const handleResize = () => setPanelWidth((width) => clampPanelWidth(width));
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const persistPanelWidth = useCallback((width: number) => {
+    window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(clampPanelWidth(width)));
+  }, []);
+
+  const beginPanelResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = panelWidthRef.current;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const nextWidth = clampPanelWidth(startWidth + startX - moveEvent.clientX);
+      panelWidthRef.current = nextWidth;
+      setPanelWidth(nextWidth);
+    };
+    const onUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      persistPanelWidth(panelWidthRef.current);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }, [persistPanelWidth]);
+
+  const resizePanelWithKeyboard = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 96 : 32;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      setPanelWidth((width) => {
+        const next = clampPanelWidth(width + step);
+        panelWidthRef.current = next;
+        persistPanelWidth(next);
+        return next;
+      });
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      setPanelWidth((width) => {
+        const next = clampPanelWidth(width - step);
+        panelWidthRef.current = next;
+        persistPanelWidth(next);
+        return next;
+      });
+    }
+  }, [persistPanelWidth]);
+
+  const runDiscover = useCallback(async (rawQuery: string) => {
+    const text = rawQuery.trim();
+    if (!text) return;
+    if (inFlightRef.current) return;
+    if (!corpusId) {
+      setError("Select a corpus before opening Mission Control.");
+      setPhase("error");
+      return;
+    }
+    inFlightRef.current = true;
+    setLoading(true);
+    setError(null);
+    setPhase("curating");
+    setActiveQuery(text);
+    const startedAt = Date.now();
+    setRequestStartedAt(startedAt);
+    setElapsedMs(0);
+    setLastDurationMs(null);
+    const timers = [window.setTimeout(() => setPhase("synthesizing"), 500)];
+    try {
+      const response = await discoverGraph({
+        corpus_id: corpusId,
+        query: text,
+        mode: "auto",
+        session_id: activeSessionId ?? undefined,
+        model: selectedModel || undefined,
+      });
+      setActiveSession(response.session_id);
+      pushTurn({
+        query: text,
+        mode: (response.mode || "auto") as DiscoverMode,
+        response,
+        createdAt: Date.now(),
+      });
+      emitContextGraph(response);
+      setQuery("");
+      setPhase("done");
+      setLastDurationMs(Date.now() - startedAt);
+      void refreshSessions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Graph discovery failed.");
+      setPhase("error");
+      setLastDurationMs(Date.now() - startedAt);
+    } finally {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      inFlightRef.current = false;
+      setLoading(false);
+      setRequestStartedAt(null);
+      setActiveQuery("");
+    }
+  }, [activeSessionId, corpusId, pushTurn, refreshSessions, selectedModel, setActiveSession, setError, setLoading]);
+
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void runDiscover(query);
+  };
+
+  const openSession = useCallback(async (sessionId: string) => {
+    setLoadingSessionId(sessionId);
+    setError(null);
+    try {
+      setActiveSession(sessionId);
+      const detail = await getGraphSession(sessionId);
+      const sessionTurns = detail.turns
+          .filter((turn) => turn.response)
+          .map((turn) => ({
+            query: turn.query,
+            mode: (turn.mode || turn.response?.mode || "auto") as DiscoverMode,
+            response: turn.response as GraphDiscoverResponse,
+            createdAt: Date.parse(turn.created_at) || Date.now(),
+          }));
+      setTurns(sessionTurns);
+      const latestTurn = sessionTurns[sessionTurns.length - 1];
+      if (latestTurn) emitContextGraph(latestTurn.response);
+      setSessionsOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load graph session.");
+    } finally {
+      setLoadingSessionId(null);
+    }
+  }, [setActiveSession, setError, setTurns]);
+
+  const removeSession = useCallback(async (sessionId: string) => {
+    try {
+      await deleteGraphSession(sessionId);
+      if (activeSessionId === sessionId) {
+        setActiveSession(null);
+        resetTurns();
+      }
+      await refreshSessions();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete graph session.");
+    }
+  }, [activeSessionId, refreshSessions, resetTurns, setActiveSession, setError]);
+
+  const newRead = () => {
+    setActiveSession(null);
+    resetTurns();
+    setPhase("idle");
+    setError(null);
+    window.setTimeout(() => inputRef.current?.focus(), 20);
+  };
+
+  const sendLatestToChat = useCallback(() => {
+    if (!latest) return;
+    setPendingPrompt(chatPromptForGraphRead(latest));
+    onClose();
+  }, [latest, onClose, setPendingPrompt]);
+
+  const trimmedQuery = query.trim();
+  const submitDisabled = loading || !trimmedQuery;
+  const submitTitle = loading
+    ? "Graph synthesis is already running"
+    : !trimmedQuery
+      ? "Type a graph query first"
+      : !corpusId
+        ? "Select a corpus before graph synthesis can run"
+        : "Run graph synthesis";
+  const footerStatus = loading
+    ? `sent to /api/graph/discover · ${phase === "synthesizing" ? "synthesizing insight" : "curating graph"}`
+    : !corpusId
+      ? "select a corpus before graph synthesis can run"
+      : !trimmedQuery && lastDurationMs == null
+        ? "type a graph question to enable send"
+        : lastDurationMs != null
+          ? `last graph query finished in ${formatDuration(lastDurationMs)}`
+          : "enter sends one graph synthesis request";
+
+  return (
+    <aside
+      className="relative flex h-full shrink-0 flex-col border-l border-white/10 bg-[#050607] text-neutral-100 shadow-2xl"
+      style={{ width: panelWidth }}
+    >
+      <div
+        role="separator"
+        aria-label="Resize Mission Control panel"
+        aria-orientation="vertical"
+        tabIndex={0}
+        onPointerDown={beginPanelResize}
+        onKeyDown={resizePanelWithKeyboard}
+        className="group absolute inset-y-0 left-0 z-30 flex w-3 -translate-x-1/2 cursor-col-resize touch-none items-center justify-center outline-none"
+        title="Drag to resize Mission Control"
+      >
+        <div className="h-16 w-[2px] rounded-full bg-white/10 transition-colors group-hover:bg-amber-200/60 group-focus:bg-amber-200/70" />
+      </div>
+      <header className="border-b border-white/10 bg-[#08090d]/95 px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.28em] text-amber-200/80">
+              <Sparkles className="h-3.5 w-3.5" /> Mission Control
+            </div>
+            <h2 className="mt-1 truncate text-sm font-semibold tracking-wide text-neutral-50">Auto-Synthesis Graph Query</h2>
+            <p className="mt-1 text-[11px] leading-relaxed text-neutral-500">
+Query-first synthesis. Groups are query-scoped concept/document neighborhoods, not whole-corpus buckets.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-white/10 bg-white/[0.03] p-1.5 text-neutral-400 hover:border-white/20 hover:text-neutral-100"
+            aria-label="Close graph view"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button type="button" onClick={newRead} className="rounded border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] uppercase tracking-wider text-neutral-300 hover:border-amber-200/30 hover:text-amber-100">new read</button>
+          <button type="button" onClick={() => setSessionsOpen((v) => !v)} className="rounded border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] uppercase tracking-wider text-neutral-400 hover:border-white/20 hover:text-neutral-100">sessions {sessions.length || ""}</button>
+          {latest && (
+            <button type="button" onClick={sendLatestToChat} className="inline-flex items-center gap-1.5 rounded border border-emerald-300/20 bg-emerald-300/[0.04] px-2.5 py-1 text-[10px] uppercase tracking-wider text-emerald-100/80 hover:border-emerald-200/40 hover:text-emerald-50" title="Copy this graph synthesis into the chat input for review before sending.">
+              <MessageSquare className="h-3 w-3" />
+              send to chat
+            </button>
+          )}
+        </div>
+        <RequestStages phase={phase} loading={loading} hasResponse={!!latest} elapsedMs={elapsedMs} />
+      </header>
+
+      {sessionsOpen && (
+        <SessionShelf
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          loadingSessionId={loadingSessionId}
+          onOpen={openSession}
+          onDelete={removeSession}
+        />
+      )}
+
+      {nodeNavigation && (
+        <div className="border-b border-amber-200/15 bg-amber-200/[0.045] px-4 py-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase tracking-[0.24em] text-amber-100/70">node jump targets</div>
+              <div className="mt-0.5 truncate text-[12px] text-neutral-200">{nodeNavigation.entityName}</div>
+            </div>
+            <button type="button" onClick={clearNodeNavigation} className="text-neutral-600 hover:text-neutral-200" aria-label="Close node jump targets"><X className="h-3.5 w-3.5" /></button>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {nodeNavigation.links.map((link, index) => {
+              const section = sectionForJump(link.section);
+              if (!section) return null;
+              return (
+                <button key={`${link.section}:${link.detail}:${index}`} type="button" onClick={() => scrollToSection(section)} className="rounded border border-amber-200/20 bg-black/25 px-2 py-1 text-[10px] text-amber-100/80 hover:border-amber-100/40" title={link.detail}>
+                  {link.label || section}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <main className="min-h-0 flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
+        {loading && <RunningQueryBanner phase={phase} query={activeQuery} elapsedMs={elapsedMs} />}
+        {error && <div className="mb-4 rounded border border-red-400/25 bg-red-500/[0.06] px-3 py-2 text-[12px] leading-relaxed text-red-100">{error}</div>}
+        {latest ? <MissionRead response={latest} onPickQuery={setQuery} /> : <EmptyState suggestions={suggestions} onPickSuggestion={setQuery} />}
+      </main>
+
+      <form onSubmit={onSubmit} className="border-t border-white/10 bg-[#07080b] p-3">
+        <div className="flex items-center gap-2 rounded border border-white/10 bg-black/35 px-2 py-2 focus-within:border-amber-200/40">
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            disabled={loading}
+            placeholder={corpusId ? "Ask the corpus what structure it sees..." : "Select a corpus first"}
+            className="min-w-0 flex-1 bg-transparent px-1 text-[13px] text-neutral-100 placeholder:text-neutral-600 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={submitDisabled}
+            title={submitTitle}
+            className="inline-flex h-8 w-8 items-center justify-center rounded border border-amber-200/25 bg-amber-200/10 text-amber-100 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-neutral-600"
+            aria-label="Run graph synthesis"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizontal className="h-4 w-4" />}
+          </button>
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-3 font-mono text-[9px] uppercase tracking-wider text-neutral-600">
+          <span className={loading ? "text-amber-100/80" : !corpusId ? "text-red-200/80" : "text-neutral-600"}>
+            {footerStatus}
+          </span>
+          {loading && <span className="shrink-0 text-amber-100/70">{formatDuration(elapsedMs)}</span>}
+        </div>
+      </form>
+    </aside>
+  );
+}
+
+function emitContextGraph(response: GraphDiscoverResponse) {
+  const contextGraph = contextGraphFromDiscoverResponse(response);
+  if (!contextGraph?.nodes?.length) return;
+  window.dispatchEvent(
+    new CustomEvent(MISSION_CONTEXT_GRAPH_EVENT, { detail: contextGraph }),
+  );
+}
+
+function chatPromptForGraphRead(response: GraphDiscoverResponse): string {
+  const synthesis = synthesisForResponse(response);
+  const files = receiptFiles(response)
+    .slice(0, 6)
+    .map((file, index) => `- ${readableSourceLabel(file.source_label, index)} (${file.chunk_count || file.chunk_ids?.length || 0} chunks)`)
+    .join("\n");
+  const section = (label: string, items: AutoSynthesisItem[]) => {
+    const lines = items
+      .slice(0, 3)
+      .map((item) => `- ${item.title}: ${clamp(item.body, 260)}`);
+    return lines.length ? `${label}\n${lines.join("\n")}` : "";
+  };
+  return [
+    "Use this Mission Control graph synthesis as context for my next chat turn. Verify any new claims against retrieval before answering.",
+    `Graph query: ${response.query}`,
+    `Corpus: ${response.corpus_id}`,
+    `Headline: ${synthesis.headline}`,
+    section("Themes:", synthesis.themes),
+    section("Bridges:", synthesis.bridges),
+    section("Gaps:", synthesis.gaps),
+    section("Emerging Signals:", synthesis.emerging_signals),
+    section("Next Moves:", synthesis.next_moves),
+    files ? `Evidence files sent to the graph LLM:\n${files}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function RequestStages({ phase, loading, hasResponse, elapsedMs }: { phase: Phase; loading: boolean; hasResponse: boolean; elapsedMs: number }) {
+  const steps = [
+    { id: "curating", label: "curating graph" },
+    { id: "synthesizing", label: "synthesizing insight" },
+  ] as const;
+  const activeIndex = steps.findIndex((step) => step.id === phase);
+  return (
+    <div className="mt-3 space-y-1.5">
+      <div className="grid gap-1.5 sm:grid-cols-2">
+        {steps.map((step, index) => {
+          const complete = (!loading && (hasResponse || phase === "done")) || (loading && activeIndex > index);
+          const active = loading && activeIndex === index;
+          return (
+            <div key={step.id} className={cx("flex items-center gap-2 rounded border px-2 py-1.5 text-[10px] uppercase tracking-wider", complete ? "border-emerald-300/20 bg-emerald-300/[0.04] text-emerald-100/80" : active ? "border-amber-200/30 bg-amber-200/[0.06] text-amber-100" : "border-white/10 bg-white/[0.02] text-neutral-600")}>
+              {active ? <Loader2 className="h-3 w-3 animate-spin" /> : <span className={cx("h-1.5 w-1.5 rounded-full", complete ? "bg-emerald-300/70" : "bg-neutral-700")} />}
+              <span>{step.label}</span>
+              {active && <span className="ml-auto text-amber-100/60">{formatDuration(elapsedMs)}</span>}
+            </div>
+          );
+        })}
+      </div>
+      {loading && <div className="h-[2px] overflow-hidden rounded-full bg-white/10"><div className="h-full w-1/3 animate-pulse bg-amber-200/70" /></div>}
+    </div>
+  );
+}
+
+function RunningQueryBanner({ phase, query, elapsedMs }: { phase: Phase; query: string; elapsedMs: number }) {
+  const label = phase === "synthesizing" ? "Synthesizing insight" : "Curating graph";
+  return (
+    <div className="sticky top-0 z-20 mb-4 rounded border border-amber-200/25 bg-[#11141b]/95 px-3 py-2 font-mono shadow-[0_0_42px_rgba(0,0,0,0.45)]">
+      <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-amber-100/80">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <span>{label}</span>
+        <span className="ml-auto text-amber-100/60">{formatDuration(elapsedMs)}</span>
+      </div>
+      <div className="mt-1 truncate text-[11px] text-neutral-400">{query || "Graph query request is running"}</div>
+    </div>
+  );
+}
+
+function MissionRead({ response, onPickQuery }: { response: GraphDiscoverResponse; onPickQuery: (text: string) => void }) {
+  const synthesis = useMemo(() => synthesisForResponse(response), [response]);
+  const sparse = !!response.insight_packet_summary?.sparse;
+  const temporal = !!response.insight_packet_summary?.temporal_support;
+  return (
+    <div className="space-y-5">
+      <GroupingBasis response={response} />
+      <ContextTerminal response={response} />
+      <article className="space-y-5 text-[13px] leading-6 text-neutral-300">
+        <section id="mission-headline" className="border-b border-white/10 pb-4">
+          <div className="mb-2 text-[10px] uppercase tracking-[0.28em] text-neutral-500">Structural Headline</div>
+          <h3 className="text-xl font-semibold leading-tight tracking-tight text-neutral-50">{synthesis.headline || "The graph did not have enough evidence for a confident synthesis."}</h3>
+          <div className="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-wider">
+            <span className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-neutral-500">{sparse ? "sparse evidence" : "bounded evidence packet"}</span>
+            <span className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-neutral-500">{temporal ? "ordered sources available" : "non-temporal signals"}</span>
+          </div>
+        </section>
+        <InsightSection id="themes" title="Themes" items={synthesis.themes} empty="No query-scoped concept neighborhood had enough packet evidence." />
+        <InsightSection id="bridges" title="Bridges" items={synthesis.bridges} empty="No bridge is strong enough to elevate beyond the graph overlay." />
+        <InsightSection id="gaps" title="Gaps" items={synthesis.gaps} empty="No evidence-backed gap hypothesis was returned." />
+        <InsightSection id="signals" title="Emerging Signals" items={synthesis.emerging_signals} empty="No recurring signal stood out in the bounded packet." />
+        <NextMoves items={synthesis.next_moves} onPickQuery={onPickQuery} />
+        <EvidenceTrace response={response} notes={synthesis.evidence_notes} />
+      </article>
+    </div>
+  );
+}
+
+function GroupingBasis({ response }: { response: GraphDiscoverResponse }) {
+  const context = contextGraphFromDiscoverResponse(response);
+  const meta = context?.meta || {};
+  const files = receiptFiles(response);
+  const groups = context?.nodes.filter((node) => node.kind === "topic") || [];
+  const docs = context?.nodes.filter((node) => node.kind === "document") || [];
+  const basis = String(
+    meta.grouping_basis ||
+      "Only concepts and files surfaced by this query are grouped; the whole corpus is not pre-bucketed for this view."
+  );
+  return (
+    <section className="rounded border border-amber-200/20 bg-amber-200/[0.045] px-3 py-3">
+      <div className="text-[10px] uppercase tracking-[0.28em] text-amber-100/80">how this corpus was forced to group</div>
+      <p className="mt-2 text-[13px] leading-6 text-neutral-300">{basis}</p>
+      <div className="mt-3 grid grid-cols-3 gap-2 font-mono text-[10px]">
+        <div className="rounded border border-white/10 bg-black/25 px-2 py-1.5"><div className="text-neutral-200">{groups.length}</div><div className="uppercase tracking-wider text-neutral-600">query groups</div></div>
+        <div className="rounded border border-white/10 bg-black/25 px-2 py-1.5"><div className="text-neutral-200">{docs.length || files.length}</div><div className="uppercase tracking-wider text-neutral-600">unique files</div></div>
+        <div className="rounded border border-white/10 bg-black/25 px-2 py-1.5"><div className="text-neutral-200">{response.graph.nodes.length}</div><div className="uppercase tracking-wider text-neutral-600">concept nodes</div></div>
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-neutral-500">
+        If a group appears, it came from the bounded working set for this query. Documents remain individual evidence nodes so the LLM receipt can be audited file by file.
+      </p>
+    </section>
+  );
+}
+
+
+function ContextTerminal({ response }: { response: GraphDiscoverResponse }) {
+  const llm = response.trace?.llm_context;
+  const files = receiptFiles(response);
+  const chunks = receiptChunks(response);
+  const context = contextGraphFromDiscoverResponse(response);
+  const groups = context?.nodes.filter((node) => node.kind === "topic").length ?? 0;
+  const documents = context?.nodes.filter((node) => node.kind === "document").length ?? files.length;
+  const concepts = context?.nodes.filter((node) => node.kind !== "topic" && node.kind !== "document").length ?? response.graph.nodes.length;
+  const gaps = context?.links.filter((link) => link.suggested).length ?? response.gaps_v2?.length ?? 0;
+  const counts = llm?.counts ?? response.insight_packet_summary?.counts ?? {};
+  const visibility = llm?.visibility ?? {};
+  const chunkCap = Number(visibility.max_evidence_chunks ?? counts.evidence_chunks ?? chunks.length) || chunks.length;
+  const entityCap = Number(visibility.max_entities ?? counts.entities ?? concepts) || concepts;
+
+  return (
+    <section className="rounded border border-emerald-300/15 bg-[#030504] p-3 font-mono shadow-[0_0_48px_rgba(0,0,0,0.35)]">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[9px] uppercase tracking-[0.3em] text-emerald-200/80">terminal context graph</div>
+          <div className="mt-1 text-[10px] text-neutral-600">$ graph.packet --llm-receipt --obsidian-lens</div>
+        </div>
+        <div className="text-[9px] uppercase tracking-[0.2em] text-neutral-600">{response.insight_packet_summary?.sparse ? "sparse" : "ready"}</div>
+      </div>
+      <div className="grid grid-cols-4 gap-1.5">
+        <TerminalStat label="groups" value={groups} tone="gold" />
+        <TerminalStat label="concepts" value={concepts} tone="neutral" />
+        <TerminalStat label="files" value={documents} tone="gold" />
+        <TerminalStat label="gaps" value={gaps} tone="muted" />
+      </div>
+      <div className="mt-3 space-y-1 text-[10px] leading-relaxed text-neutral-500">
+        <TerminalLine command="labels" text="query groups + evidence files first; concept labels stay quiet unless role weight earns visibility" />
+        <TerminalLine command="colors" text="gold query groups, green evidence files, warm bridge hubs, rose provenance warnings, gray suggested gaps" />
+        <TerminalLine command="limits" text={`${entityCap} visible packet entities; ${chunkCap} evidence chunks carried into synthesis`} />
+      </div>
+      <div className="mt-4 border-t border-white/10 pt-3">
+        <div className="mb-2 text-[9px] uppercase tracking-[0.24em] text-emerald-200/70">files sent to llm</div>
+        {files.length ? (
+          <div className="space-y-1.5">
+            {files.slice(0, 8).map((file, index) => (
+              <div key={`${file.doc_id}:${file.source_label}:${index}`} className="flex items-start justify-between gap-3 text-[10px]">
+                <span className="min-w-0">
+                  <span className="block truncate text-neutral-300">{readableSourceLabel(sourceDisplayLabel(file, index), index)}</span>
+                  {formatSourceMeta(file.source) && <span className="mt-0.5 block truncate text-[9px] text-neutral-600">{formatSourceMeta(file.source)}</span>}
+                </span>
+                <span className="shrink-0 text-neutral-600">{file.chunk_count} chunk{file.chunk_count === 1 ? "" : "s"}{file.has_temporal ? " / ordered" : ""}</span>
+              </div>
+            ))}
+            {files.length > 8 && <div className="text-[10px] text-neutral-700">+{files.length - 8} more files in trace</div>}
+          </div>
+        ) : <div className="text-[10px] text-neutral-700">No file receipt was returned for this packet.</div>}
+      </div>
+      <div className="mt-4 border-t border-white/10 pt-3">
+        <div className="mb-2 text-[9px] uppercase tracking-[0.24em] text-emerald-200/70">packet chunk previews</div>
+        {chunks.length ? (
+          <div className="space-y-2">
+            {chunks.slice(0, 5).map((chunk) => (
+              <div key={`${chunk.doc_id}:${chunk.chunk_id}`} className="rounded border border-white/10 bg-white/[0.025] px-2 py-1.5">
+                <div className="flex items-center justify-between gap-2 text-[9px] uppercase tracking-wider text-neutral-600"><span className="truncate">{sourceDisplayLabel(chunk, 0)}</span><span className="shrink-0">{chunk.chunk_id}</span></div>
+                {formatSourceMeta(chunk.source) && <div className="mt-1 truncate text-[9px] text-neutral-600">{formatSourceMeta(chunk.source)}</div>}
+                <div className="mt-1 text-[10px] leading-relaxed text-neutral-400">{chunk.preview || "No preview text returned."}</div>
+              </div>
+            ))}
+            {chunks.length > 5 && <div className="text-[10px] text-neutral-700">+{chunks.length - 5} more chunks in Evidence / Trace</div>}
+          </div>
+        ) : <div className="text-[10px] text-neutral-700">No chunk previews were exposed by the backend trace.</div>}
+      </div>
+    </section>
+  );
+}
+
+function InsightSection({ id, title, items, empty }: { id: MissionSection; title: string; items: AutoSynthesisItem[]; empty: string }) {
+  return (
+    <section id={`mission-${id}`} className="scroll-mt-20 border-b border-white/10 pb-5">
+      <div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-[11px] font-semibold uppercase tracking-[0.28em] text-neutral-400">{title}</h4><span className="text-[10px] text-neutral-700">{items.length}</span></div>
+      {items.length ? <div className="space-y-4">{items.map((item, index) => <InsightItem key={`${title}:${item.title}:${index}`} item={item} index={index} />)}</div> : <p className="text-[12px] leading-relaxed text-neutral-600">{empty}</p>}
+    </section>
+  );
+}
+
+function InsightItem({ item, index }: { item: AutoSynthesisItem; index: number }) {
+  return (
+    <div>
+      <div className="mb-1 flex items-baseline gap-2"><span className="font-mono text-[10px] text-neutral-700">{String(index + 1).padStart(2, "0")}</span><h5 className="text-[14px] font-semibold leading-snug text-neutral-100">{cleanTitle(item.title)}</h5></div>
+      <div className="space-y-2">{paragraphs(item.body).map((paragraph, i) => <p key={`${item.title}:p:${i}`} className="text-[13px] leading-6 text-neutral-300">{paragraph}</p>)}</div>
+      {item.evidence.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{item.evidence.slice(0, 4).map((evidence, i) => <span key={`${item.title}:ev:${i}`} className="rounded border border-white/10 bg-white/[0.03] px-2 py-0.5 font-mono text-[9px] text-neutral-500">{evidence}</span>)}</div>}
+    </div>
+  );
+}
+
+function NextMoves({ items, onPickQuery }: { items: AutoSynthesisItem[]; onPickQuery: (text: string) => void }) {
+  return (
+    <section id="mission-moves" className="scroll-mt-20 border-b border-white/10 pb-5">
+      <div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-[11px] font-semibold uppercase tracking-[0.28em] text-neutral-400">Next Moves</h4><span className="text-[10px] text-neutral-700">{items.length}</span></div>
+      {items.length ? (
+        <div className="space-y-2">
+          {items.map((item, index) => (
+            <button key={`${item.title}:${index}`} type="button" onClick={() => onPickQuery(item.title)} className="w-full rounded border border-white/10 bg-white/[0.025] px-3 py-2 text-left hover:border-amber-200/25 hover:bg-amber-200/[0.04]">
+              <div className="text-[13px] font-semibold text-neutral-100">{cleanTitle(item.title)}</div>
+              {item.body && <div className="mt-1 text-[12px] leading-relaxed text-neutral-500">{clamp(item.body, 220)}</div>}
+            </button>
+          ))}
+        </div>
+      ) : <p className="text-[12px] leading-relaxed text-neutral-600">No follow-up move was returned.</p>}
+    </section>
+  );
+}
+
+function EvidenceTrace({ response, notes }: { response: GraphDiscoverResponse; notes: AutoSynthesisItem[] }) {
+  const files = receiptFiles(response);
+  const chunks = receiptChunks(response);
+  const context = contextGraphFromDiscoverResponse(response);
+  const llm = response.trace?.llm_context;
+  const collections = Object.entries(llm?.collections || {}).map(([kind, name]) => `${kind} :: ${name}`);
+  const promptRows = llm?.prompt
+    ? [
+        `system :: ${llm.prompt.system_chars ?? 0} chars`,
+        `user :: ${llm.prompt.user_chars ?? 0} chars`,
+        `estimate :: ${llm.prompt.estimated_tokens ?? 0} tokens`,
+        llm.prompt.preview ? `preview :: ${clamp(llm.prompt.preview, 420)}` : "",
+      ].filter(Boolean)
+    : [];
+  return (
+    <section id="mission-trace" className="scroll-mt-20 pb-6">
+      <div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-[11px] font-semibold uppercase tracking-[0.28em] text-neutral-400">Evidence / Trace</h4><span className="text-[10px] text-neutral-700">advanced</span></div>
+      {notes.length > 0 && <div className="mb-3 space-y-2">{notes.map((note, index) => <div key={`${note.title}:${index}`} className="rounded border border-white/10 bg-white/[0.025] px-3 py-2"><div className="text-[12px] font-semibold text-neutral-200">{cleanTitle(note.title)}</div><div className="mt-1 text-[12px] leading-relaxed text-neutral-500">{note.body}</div></div>)}</div>}
+      <details className="rounded border border-white/10 bg-black/20 p-3">
+        <summary className="cursor-pointer text-[10px] uppercase tracking-[0.24em] text-neutral-500">packet internals and raw trace</summary>
+        <div className="mt-3 space-y-4 font-mono text-[10px] leading-relaxed text-neutral-500">
+          {!!response.trace?.stages?.length && <TraceBlock title="ordered stages" rows={response.trace.stages.map((stage) => `${stage.label || stage.stage} :: ${stage.count} :: ${stage.detail}`)} />}
+          <TraceBlock title="collections" rows={collections} />
+          <TraceBlock title="prompt" rows={promptRows} />
+          <TraceBlock title="files" rows={files.map((file, index) => `${sourceDisplayLabel(file, index)} :: ${formatSourceMeta(file.source) || "no source metadata"} :: ${file.chunk_count} chunks :: ${file.doc_id}`)} />
+          <TraceBlock title="chunks" rows={chunks.map((chunk, index) => `${sourceDisplayLabel(chunk, index)} :: ${formatSourceMeta(chunk.source) || "no source metadata"} :: ${chunk.chunk_id} :: ${clamp(chunk.preview, 180)}`)} />
+          <TraceBlock title="weak links" rows={(response.weak_links || []).map((link) => `${link.source_name} -> ${link.target_name} :: ${link.weakness_type} :: ${link.rationale}`)} />
+          <TraceBlock title="suggested gap edges" rows={(context?.links || []).filter((link) => link.suggested).map((link) => `${link.source} -> ${link.target} :: suggested :: ${link.evidence || "no evidence label"}`)} />
+          <pre className="max-h-72 overflow-auto rounded border border-white/10 bg-black/35 p-2 text-[9px] text-neutral-600 custom-scrollbar">{JSON.stringify({ insight_packet_summary: response.insight_packet_summary, trace_counts: response.trace?.llm_context?.counts, visibility: response.trace?.llm_context?.visibility }, null, 2)}</pre>
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function TraceBlock({ title, rows }: { title: string; rows: string[] }) {
+  return <div><div className="mb-1 text-neutral-400">{title}</div>{rows.length ? <div className="space-y-1">{rows.slice(0, 12).map((row, index) => <div key={`${title}:${index}`} className="border-t border-white/5 pt-1">{row}</div>)}{rows.length > 12 && <div className="text-neutral-700">+{rows.length - 12} more</div>}</div> : <div className="text-neutral-700">none returned</div>}</div>;
+}
+
+function EmptyState({ suggestions, onPickSuggestion }: { suggestions: string[]; onPickSuggestion: (text: string) => void }) {
+  return (
+    <div className="flex min-h-full flex-col justify-center py-8">
+      <div className="max-w-xl">
+        <div className="mb-3 text-[10px] uppercase tracking-[0.28em] text-neutral-600">query-first</div>
+        <h3 className="text-2xl font-semibold tracking-tight text-neutral-50">Ask for the structural read, not a dashboard.</h3>
+        <p className="mt-3 text-[13px] leading-6 text-neutral-500">Mission Control now starts by showing how the query forced the corpus to group: scoped concepts, unique evidence files, then the synthesis.</p>
+        {suggestions.length > 0 && <div className="mt-5 space-y-2">{suggestions.map((suggestion) => <button key={suggestion} type="button" onClick={() => onPickSuggestion(suggestion)} className="block w-full rounded border border-white/10 bg-white/[0.025] px-3 py-2 text-left text-[12px] text-neutral-300 hover:border-amber-200/25 hover:text-amber-100">{suggestion}</button>)}</div>}
+      </div>
+    </div>
+  );
+}
+
+function SessionShelf({ sessions, activeSessionId, loadingSessionId, onOpen, onDelete }: { sessions: GraphDiscoverSession[]; activeSessionId: string | null; loadingSessionId: string | null; onOpen: (sessionId: string) => void; onDelete: (sessionId: string) => void }) {
+  return (
+    <div className="max-h-56 overflow-y-auto border-b border-white/10 bg-[#07080b] p-3 custom-scrollbar">
+      {sessions.length ? <div className="space-y-1.5">{sessions.map((session) => <div key={session.session_id} className="flex items-center gap-2 rounded border border-white/10 bg-white/[0.02] px-2 py-1.5"><button type="button" onClick={() => onOpen(session.session_id)} className="min-w-0 flex-1 text-left"><div className={cx("truncate text-[12px]", activeSessionId === session.session_id ? "text-amber-100" : "text-neutral-300")}>{session.title || session.first_query || "Untitled graph read"}</div><div className="mt-0.5 text-[9px] uppercase tracking-wider text-neutral-700">{shortDate(session.updated_at)} / {session.turn_count} turn{session.turn_count === 1 ? "" : "s"}</div></button>{loadingSessionId === session.session_id && <Loader2 className="h-3.5 w-3.5 animate-spin text-neutral-500" />}<button type="button" onClick={() => onDelete(session.session_id)} className="rounded p-1 text-neutral-700 hover:text-red-200" aria-label="Delete graph session"><Trash2 className="h-3.5 w-3.5" /></button></div>)}</div> : <div className="text-[11px] text-neutral-600">No saved graph sessions for this corpus yet.</div>}
+    </div>
+  );
+}
+
+function TerminalStat({ label, value, tone }: { label: string; value: number; tone: "gold" | "neutral" | "muted" }) {
+  return <div className={cx("rounded border bg-black/35 px-2 py-1.5 text-center", tone === "gold" ? "border-amber-300/20" : "border-white/10")}><div className={cx("text-[15px]", tone === "gold" ? "text-amber-200" : tone === "neutral" ? "text-neutral-200" : "text-neutral-400")}>{value}</div><div className="text-[8px] uppercase tracking-widest text-neutral-700">{label}</div></div>;
+}
+
+function TerminalLine({ command, text }: { command: string; text: string }) {
+  return <div><span className="text-emerald-300/70">$ {command}</span> {text}</div>;
+}
+
+function synthesisForResponse(response: GraphDiscoverResponse): AutoSynthesisPayload {
+  if (response.auto_synthesis) return normalizeSynthesis(response.auto_synthesis);
+  const themes = (response.themes || []).map((theme) => ({
+    title: theme.name,
+    body: theme.prose?.join(" ") || `This theme carries ${theme.weight_pct}% of the scoped graph weight across ${theme.size} concepts.`,
+    evidence: theme.top_concepts.slice(0, 4),
+    related_ids: [theme.theme_id],
+  }));
+  const bridges = response.bridges_v2?.length
+    ? response.bridges_v2.map((bridge) => ({
+        title: bridge.subhead,
+        body: bridge.prose?.join(" ") || `Bridge strength ${bridge.betweenness.toFixed(2)} across ${bridge.edge_count} scoped edges.`,
+        evidence: bridge.anchor_concepts.slice(0, 4),
+        related_ids: [bridge.bridge_id, bridge.source_entity_id || "", bridge.target_entity_id || ""].filter(Boolean),
+      }))
+    : response.bridges.map((bridge) => ({
+        title: `${bridge.source_name} to ${bridge.target_name}`,
+        body: bridge.explanation || bridge.evidence || "Legacy bridge returned without a narrative explanation.",
+        evidence: [bridge.evidence || bridge.classification].filter(Boolean),
+        related_ids: [bridge.source, bridge.target],
+      }));
+  const gaps = (response.gaps_v2 || []).map((gap) => ({
+    title: gap.question,
+    body: gap.prose?.join(" ") || `Expected connectivity ${gap.expected_connectivity.toFixed(2)} is higher than actual structural connectivity ${gap.structural_connectivity.toFixed(2)}. Treat this as a candidate gap, not a proven absence.`,
+    evidence: gap.anchor_concepts.slice(0, 4),
+    related_ids: [gap.gap_id, gap.cluster_a, gap.cluster_b],
+  }));
+  const emergingSignals = (response.latent_topics || []).map((topic) => ({
+    title: topic.canonical_name,
+    body: topic.prose?.join(" ") || topic.rationale || `Mentioned in ${topic.doc_count} docs and ${topic.mention_count} chunks, but not yet structurally central.`,
+    evidence: [topic.domain, `${topic.doc_count} docs`, `${topic.mention_count} mentions`],
+    related_ids: [topic.entity_id],
+  }));
+  const nextMoves = (response.questions || []).map((question) => ({
+    title: question.text,
+    body: question.domain_pills.length ? `Useful scope: ${question.domain_pills.join(", ")}.` : "Use this as the next graph query.",
+    evidence: question.domain_pills,
+    related_ids: [],
+  }));
+  const evidenceNotes = (response.weak_links || []).slice(0, 5).map((link) => ({
+    title: `${link.source_name} to ${link.target_name}`,
+    body: `Weak link: ${link.rationale || link.action_question || link.weakness_type}.`,
+    evidence: [link.weakness_type, link.severity].filter(Boolean),
+    related_ids: [link.source, link.target],
+  }));
+  return normalizeSynthesis({
+    headline: response.headline?.headline || response.interpretation || "Structural read from legacy graph response",
+    themes,
+    bridges,
+    gaps,
+    emerging_signals: emergingSignals,
+    next_moves: nextMoves,
+    evidence_notes: evidenceNotes,
+  });
+}
+
+function normalizeSynthesis(payload: AutoSynthesisPayload): AutoSynthesisPayload {
+  return {
+    headline: payload.headline || "Graph synthesis returned without a headline.",
+    themes: normalizeItems(payload.themes),
+    bridges: normalizeItems(payload.bridges),
+    gaps: normalizeItems(payload.gaps),
+    emerging_signals: normalizeItems(payload.emerging_signals),
+    next_moves: normalizeItems(payload.next_moves),
+    evidence_notes: normalizeItems(payload.evidence_notes),
+  };
+}
+
+function normalizeItems(items: AutoSynthesisItem[] | undefined): AutoSynthesisItem[] {
+  return (items || []).map((item) => ({
+    title: cleanTitle(item.title || "Untitled insight"),
+    body: item.body || "No narrative body was returned for this item.",
+    evidence: Array.isArray(item.evidence) ? item.evidence.filter(Boolean).map(String) : [],
+    related_ids: Array.isArray(item.related_ids) ? item.related_ids.filter(Boolean).map(String) : [],
+  }));
+}
+
+function sourceMetaFromRecord(record: Record<string, unknown>): GraphSourceMetadata {
+  const raw = record.source;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as GraphSourceMetadata;
+  }
+  return {};
+}
+
+function sourceDisplayLabel(item: { source_label: string; source?: GraphSourceMetadata }, index: number): string {
+  const source = item.source || {};
+  return String(source.title || source.filename || item.source_label || `Source ${index + 1}`);
+}
+
+function formatSourceMeta(source?: GraphSourceMetadata): string {
+  if (!source) return "";
+  const location = [source.section, source.page_range || source.page ? `p. ${source.page_range || source.page}` : ""].filter(Boolean).join(" / ");
+  const parts = [
+    source.author ? `author: ${source.author}` : "",
+    source.publisher ? `publisher: ${source.publisher}` : "",
+    source.publication_date || source.date ? `date: ${source.publication_date || source.date}` : "",
+    source.source_type || source.type ? `type: ${source.source_type || source.type}` : "",
+    location ? `section: ${location}` : "",
+  ].filter(Boolean);
+  return clamp(parts.join(" | "), 180);
+}
+
+function receiptFiles(response: GraphDiscoverResponse): ReceiptFile[] {
+  const direct = response.trace?.llm_context?.files;
+  if (direct?.length) return uniqueReceiptFiles(direct);
+  return uniqueReceiptFiles((response.trace?.source_docs || []).slice(0, 12).map((doc, index) => {
+    const record = doc as Record<string, unknown>;
+    const source = sourceMetaFromRecord(record);
+    const docId = String(record.doc_id ?? record.id ?? record.document_id ?? `source-${index + 1}`);
+    const chunkIds = Array.isArray(record.chunk_ids) ? record.chunk_ids.map(String) : [];
+    const singleChunkId = record.chunk_id ? String(record.chunk_id) : "";
+    const allChunkIds = [...chunkIds, singleChunkId].filter(Boolean);
+    return {
+      doc_id: docId,
+      source_label: String(record.source_label ?? record.filename ?? source.title ?? source.filename ?? docId),
+      source,
+      chunk_count: Number(record.chunk_count ?? record.chunks ?? allChunkIds.length) || allChunkIds.length,
+      chunk_ids: allChunkIds,
+      has_temporal: Boolean(record.has_temporal ?? record.date ?? source.publication_date ?? source.date),
+    };
+  }));
+}
+
+function uniqueReceiptFiles(files: ReceiptFile[]): ReceiptFile[] {
+  const bySource = new Map<string, ReceiptFile>();
+  for (const file of files) {
+    const key = `${file.doc_id || ""}:${file.source_label || ""}`;
+    const existing = bySource.get(key);
+    if (!existing) {
+      bySource.set(key, {
+        ...file,
+        chunk_ids: [...new Set(file.chunk_ids || [])],
+      });
+      continue;
+    }
+    const chunkIds = [...new Set([...(existing.chunk_ids || []), ...(file.chunk_ids || [])])];
+    existing.chunk_ids = chunkIds;
+    existing.chunk_count = Math.max(existing.chunk_count || 0, file.chunk_count || 0, chunkIds.length);
+    existing.has_temporal = Boolean(existing.has_temporal || file.has_temporal);
+    existing.source = existing.source || file.source;
+  }
+  return [...bySource.values()];
+}
+
+function receiptChunks(response: GraphDiscoverResponse): ReceiptChunk[] {
+  const direct = response.trace?.llm_context?.chunks;
+  if (direct?.length) return direct;
+  return (response.trace?.source_docs || []).slice(0, 10).map((doc, index) => {
+    const record = doc as Record<string, unknown>;
+    const source = sourceMetaFromRecord(record);
+    const docId = String(record.doc_id ?? record.id ?? record.document_id ?? `source-${index + 1}`);
+    return {
+      chunk_id: String(record.chunk_id ?? record.id ?? `chunk-${index + 1}`),
+      doc_id: docId,
+      source_label: String(record.source_label ?? record.filename ?? source.title ?? source.filename ?? docId),
+      source,
+      preview: clamp(String(record.preview ?? record.text ?? record.excerpt ?? record.summary ?? ""), 260),
+      has_temporal: Boolean(record.has_temporal ?? record.date ?? source.publication_date ?? source.date),
+    };
+  });
+}
+
+function paragraphs(text: string): string[] {
+  const clean = text.replace(/\s+\n/g, "\n").trim();
+  if (!clean) return ["No narrative body was returned for this section."];
+  return clean.split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
+}
+
+function cleanTitle(title: string): string {
+  return title.replace(/\s*\/\s*/g, " and ").replace(/\s+/g, " ").trim();
+}
+
+function readableSourceLabel(label: string, index: number): string {
+  const clean = String(label || "").trim();
+  if (/^[a-f0-9]{32,}$/i.test(clean)) return `Source ${index + 1} (${clean.slice(0, 8)})`;
+  if (clean.length > 64) return `${clean.slice(0, 61).trim()}...`;
+  return clean || `Source ${index + 1}`;
+}
+
+function clamp(text: string, limit: number): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (clean.length <= limit) return clean;
+  return `${clean.slice(0, Math.max(0, limit - 3)).trim()}...`;
+}
+
+function sectionForJump(section: string): MissionSection | null {
+  if (section === "themes") return "themes";
+  if (section === "bridges") return "bridges";
+  if (section === "gaps" || section === "tensions") return "gaps";
+  if (section === "trace") return "trace";
+  return null;
+}
+
+function scrollToSection(section: MissionSection) {
+  document.getElementById(`mission-${section}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function shortDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "0.0s";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function cx(...parts: Array<string | false | null | undefined>): string {
+  return parts.filter(Boolean).join(" ");
+}
