@@ -6,6 +6,7 @@ Flow (spec §RETRIEVAL RECIPE):
   [1] embed query
   [2] FUNNEL A (summaries, polymath_hrag) [fair-mode skips for multi-corpus]
     + FUNNEL B (children, polymath_naive)  [per-corpus round-robin: 20 each]
+    + lexical MongoDB recall for hydrated tiers (bounded by speed profile)
   [3] merge & dedupe by parent_id
   [4] Mode A graph expansion (qdrant_mongo_graph tier + NEO4J_ENABLED only)
   [5] rerank ONCE on full pool (ms-marco sidecar, fallback: score sort)
@@ -21,6 +22,7 @@ Cross-corpus constraints (spec §CROSS-CORPUS QUERY CONSTRAINTS):
 """
 import asyncio
 import logging
+from time import perf_counter
 
 from config import get_settings
 from models.schemas import RetrievalResult, RetrievalTier, SourceChunk
@@ -29,6 +31,7 @@ from services.reranker import reranker_service
 from services.retriever.funnel_a import funnel_a
 from services.retriever.funnel_b import funnel_b
 from services.retriever.hydrate import hydrate_chunks
+from services.retriever.lexical import _terms, lexical_retriever
 from services.retriever.merge import merge_pools
 from services.retriever.mode_a import mode_a_expansion
 
@@ -37,6 +40,78 @@ settings = get_settings()
 
 _PER_CORPUS_LIMIT = 20   # spec: 20 per corpus for round-robin
 _SINGLE_CORPUS_LIMIT = 40  # spec §5.9a: retrieve 40 pre-rerank for single-corpus
+_LOW_CONFIDENCE_RERANK_SCORE = -2.5
+
+
+def _lexical_limit_for(
+    effective_tier: RetrievalTier,
+    *,
+    retrieval_k: int,
+    rerank_enabled: bool,
+) -> int:
+    """Map the SPEED selector to a small lexical recall budget.
+
+    Fast profile is intentionally vector-only. Balanced/Thorough get lexical
+    candidates that merge into the same reranker pool as vector/graph results.
+    """
+    if effective_tier == RetrievalTier.qdrant_only:
+        return 0
+    if not rerank_enabled and retrieval_k <= 10:
+        return 0
+    if retrieval_k >= 60:
+        return 18
+    if retrieval_k >= 40:
+        return 12
+    return 6
+
+
+def _has_query_term_overlap(chunks: list[SourceChunk], query: str) -> bool:
+    """True when any meaningful original-query term appears in retrieved text.
+
+    This is a conservative guard against nearest-neighbor junk. Vector search
+    will always return something, but for short lookup queries a result set
+    with no lexical overlap and very poor reranker scores is usually worse
+    than returning no RAG context.
+    """
+    terms = _terms(query)
+    if not terms:
+        return True
+
+    for chunk in chunks:
+        heading = " ".join(chunk.heading_path or [])
+        haystack = " ".join(
+            [
+                chunk.text or "",
+                chunk.summary or "",
+                heading,
+                chunk.doc_name or "",
+                chunk.doc_id or "",
+            ]
+        ).lower()
+        if any(term in haystack for term in terms):
+            return True
+    return False
+
+
+def _should_drop_low_confidence_rerank(
+    ranked: list[SourceChunk],
+    ranking_query: str,
+    *,
+    rerank_enabled: bool,
+) -> bool:
+    """Drop reranked results when the whole pool looks unrelated.
+
+    The ms-marco cross-encoder returns raw logits. Strongly negative top scores
+    are a useful "this is probably irrelevant" signal. We only act on that
+    signal when none of the top candidates contains a meaningful term from the
+    original user query, which preserves exact-match/file-heading retrieval.
+    """
+    if not rerank_enabled or not ranked:
+        return False
+    top_score = ranked[0].score
+    if top_score > _LOW_CONFIDENCE_RERANK_SCORE:
+        return False
+    return not _has_query_term_overlap(ranked[:10], ranking_query)
 
 
 class RetrieverOrchestrator:
@@ -79,6 +154,37 @@ class RetrieverOrchestrator:
         if tier == RetrievalTier.qdrant_mongo_graph:
             b_cols.extend(_col_for_corpus(cid, "graph") for cid in corpus_ids)
         return a_cols, b_cols
+
+    async def _filter_existing_corpora(
+        self, corpus_ids: list[str] | None
+    ) -> tuple[list[str] | None, list[str]]:
+        """Drop corpus_ids not present in MongoDB. Stale IDs (deleted corpora
+        still referenced by frontend settings) would otherwise 404 in Qdrant
+        and silently force tier downgrades. Returns (filtered_ids, dropped_ids).
+        """
+        if not corpus_ids:
+            return corpus_ids, []
+        try:
+            from services.conversation import conversation_service
+
+            db = conversation_service._db
+            if db is None:
+                return corpus_ids, []
+            docs = await db["corpora"].find(
+                {"corpus_id": {"$in": corpus_ids}}, {"corpus_id": 1}
+            ).to_list(length=None)
+            existing = {d["corpus_id"] for d in docs}
+            filtered = [c for c in corpus_ids if c in existing]
+            dropped = [c for c in corpus_ids if c not in existing]
+            if dropped:
+                logger.warning(
+                    "Dropping %d stale corpus_id(s) not in Mongo: %s",
+                    len(dropped), dropped,
+                )
+            return filtered, dropped
+        except Exception as exc:
+            logger.warning("Corpus existence check failed (%s) — keeping all ids", exc)
+            return corpus_ids, []
 
     async def _enforce_strategy_intersection(
         self,
@@ -155,6 +261,16 @@ class RetrieverOrchestrator:
         # When absent, retriever uses server defaults (existing behavior).
         retrieval_k: int | None = None,
         rerank_enabled: bool = True,
+        ranking_query: str | None = None,
+        # Phase 23 — Custom profile knobs. None = use server defaults.
+        top_k_summary: int | None = None,
+        rerank_top_n: int | None = None,
+        similarity_threshold: float | None = None,
+        neo4j_expansion_cap: int | None = None,
+        max_corpora_per_query: int | None = None,
+        # Phase 24 — Final K (chunks fed to LLM after rerank). When None,
+        # falls back to settings.DEFAULT_RETRIEVAL_K (the legacy hardcoded 5).
+        final_top_k: int | None = None,
     ) -> RetrievalResult:
         """
         Execute the full retrieval pipeline.
@@ -173,28 +289,123 @@ class RetrieverOrchestrator:
             if retrieval_k is not None
             else _SINGLE_CORPUS_LIMIT
         )
+        rank_query = ranking_query or query
         logger.info(
-            "Retrieval start: requested_tier=%s corpus_count=%d k=%d rerank=%s",
+            "Retrieval start: requested_tier=%s corpus_count=%d k=%d rerank=%s thresh=%s",
             retrieval_tier,
             len(corpus_ids) if corpus_ids else 0,
             single_limit,
             rerank_enabled,
+            similarity_threshold,
         )
+        retrieval_started = perf_counter()
+        timings: dict[str, float] = {
+            "setup": 0.0,
+            "embed": 0.0,
+            "funnels": 0.0,
+            "merge": 0.0,
+            "graph": 0.0,
+            "rerank": 0.0,
+            "hydrate": 0.0,
+        }
+        counts: dict[str, int] = {}
 
-        # [0] Strategy intersection — downgrade tier if a corpus can't support it
+        def _add_timing(label: str, started: float) -> None:
+            timings[label] = timings.get(label, 0.0) + (perf_counter() - started)
+
+        def _log_timings(status: str, final_count: int) -> None:
+            logger.info(
+                "Retrieval timings status=%s total=%.2fs setup=%.2fs embed=%.2fs "
+                "funnels=%.2fs merge=%.2fs graph=%.2fs rerank=%.2fs hydrate=%.2fs "
+                "counts=%s final=%d",
+                status,
+                perf_counter() - retrieval_started,
+                timings.get("setup", 0.0),
+                timings.get("embed", 0.0),
+                timings.get("funnels", 0.0),
+                timings.get("merge", 0.0),
+                timings.get("graph", 0.0),
+                timings.get("rerank", 0.0),
+                timings.get("hydrate", 0.0),
+                counts,
+                final_count,
+            )
+
+        # [0a] Filter stale corpus_ids (frontend may reference deleted corpora)
+        phase_started = perf_counter()
+        corpus_ids, dropped_ids = await self._filter_existing_corpora(corpus_ids)
+
+        # [0c] Phase 23 — Custom profile `max_corpora_per_query` cap
+        if (
+            max_corpora_per_query is not None
+            and corpus_ids
+            and len(corpus_ids) > max_corpora_per_query
+        ):
+            logger.info(
+                "Truncating corpus_ids %d → %d (max_corpora_per_query)",
+                len(corpus_ids),
+                max_corpora_per_query,
+            )
+            corpus_ids = corpus_ids[:max_corpora_per_query]
+
+        # [0b] Strategy intersection — downgrade tier if a corpus can't support it
         effective_tier, downgrade_reason = await self._enforce_strategy_intersection(
             retrieval_tier, corpus_ids
         )
+        if dropped_ids and not downgrade_reason:
+            downgrade_reason = (
+                f"Skipped {len(dropped_ids)} deleted corpus id(s): {dropped_ids}"
+            )
         if effective_tier != retrieval_tier:
             logger.info(
                 "Retrieval tier downgraded: %s → %s", retrieval_tier, effective_tier
             )
+        _add_timing("setup", phase_started)
 
-        # [1] Embed query — bail gracefully if embedder is down
+        # [1] Embed query. Hydrated tiers can still fall back to lexical
+        # retrieval if the embedder is down; qdrant_only remains pure vector.
+        phase_started = perf_counter()
         try:
             query_vector = await embed_query(query)
+            _add_timing("embed", phase_started)
         except Exception as exc:
+            _add_timing("embed", phase_started)
             logger.warning("Embedder unreachable, skipping retrieval: %s", exc)
+            if effective_tier != RetrievalTier.qdrant_only:
+                lexical_limit = _lexical_limit_for(
+                    effective_tier,
+                    retrieval_k=single_limit,
+                    rerank_enabled=rerank_enabled,
+                )
+                lexical = (
+                    await lexical_retriever.search(
+                        rank_query,
+                        corpus_ids,
+                        top_k=lexical_limit,
+                    )
+                    if lexical_limit > 0
+                    else []
+                )
+                if lexical:
+                    ranked = (
+                        await reranker_service.rerank(rank_query, lexical)
+                        if rerank_enabled
+                        else sorted(lexical, key=lambda x: x.score, reverse=True)
+                    )
+                    effective_final_k = (
+                        final_top_k
+                        if final_top_k is not None
+                        else settings.DEFAULT_RETRIEVAL_K
+                    )
+                    hydrated = await hydrate_chunks(ranked[:effective_final_k], corpus_ids)
+                    _log_timings("embed_failed_lexical_fallback", len(hydrated))
+                    return RetrievalResult(
+                        chunks=hydrated,
+                        requested_tier=retrieval_tier,
+                        effective_tier=effective_tier,
+                        downgrade_reason=downgrade_reason,
+                    )
+            _log_timings("embed_failed_empty", 0)
             return RetrievalResult(
                 chunks=[],
                 requested_tier=retrieval_tier,
@@ -205,9 +416,16 @@ class RetrieverOrchestrator:
         # [2] Determine Qdrant collections for each funnel
         a_cols, b_cols = self._resolve_collections(effective_tier, corpus_ids, collections)
 
-        # [3] Parallel Funnel A + B — per-corpus round-robin for multi-corpus
+        lexical_limit = _lexical_limit_for(
+            effective_tier,
+            retrieval_k=single_limit,
+            rerank_enabled=rerank_enabled,
+        )
+
+        # [3] Parallel Funnel A + B (+ lexical for hybrid/graph tiers)
         multi = corpus_ids is not None and len(corpus_ids) > 1
 
+        phase_started = perf_counter()
         if multi:
             # Phase 7.5 — scope each per-corpus funnel call to its OWN
             # collection family. Prior behavior passed all b_cols to every
@@ -227,14 +445,26 @@ class RetrieverOrchestrator:
                 for cid in corpus_ids  # type: ignore[union-attr]
             ]
             # Fair mode in funnel_a auto-skips summaries for multi-corpus (see funnel_a.py)
-            a_task = funnel_a.search(query_vector, corpus_ids, a_cols)
-            a_results, *per_corpus_b = await asyncio.gather(a_task, *b_tasks)
+            a_kwargs = {"top_k": top_k_summary} if top_k_summary is not None else {}
+            a_task = funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs)
+            lexical_task = lexical_retriever.search(
+                rank_query, corpus_ids, top_k=lexical_limit
+            )
+            a_results, lexical_results, *per_corpus_b = await asyncio.gather(
+                a_task, lexical_task, *b_tasks
+            )
             b_results: list[SourceChunk] = [c for pool in per_corpus_b for c in pool]
         else:
-            a_results, b_results = await asyncio.gather(
-                funnel_a.search(query_vector, corpus_ids, a_cols),
+            a_kwargs = {"top_k": top_k_summary} if top_k_summary is not None else {}
+            a_results, b_results, lexical_results = await asyncio.gather(
+                funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs),
                 funnel_b.search(query_vector, corpus_ids, b_cols, top_k=single_limit),
+                lexical_retriever.search(rank_query, corpus_ids, top_k=lexical_limit),
             )
+        _add_timing("funnels", phase_started)
+        counts["funnel_a"] = len(a_results)
+        counts["funnel_b"] = len(b_results)
+        counts["lexical"] = len(lexical_results)
 
         def _result(chunks: list[SourceChunk]) -> RetrievalResult:
             return RetrievalResult(
@@ -244,43 +474,128 @@ class RetrieverOrchestrator:
                 downgrade_reason=downgrade_reason,
             )
 
-        # [4] Merge + dedupe by parent_id
-        merged = merge_pools(a_results, b_results)
+        # [4] Merge + dedupe by parent_id. Lexical candidates are deliberately
+        # merged before graph expansion, so exact filename/heading hits can seed
+        # Neo4j context when Graph Augmented is active.
+        phase_started = perf_counter()
+        merged = merge_pools(a_results, b_results, lexical_results)
+        counts["merged_initial"] = len(merged)
+        _add_timing("merge", phase_started)
         if not merged:
+            _log_timings("empty_after_merge", 0)
             return _result([])
+
+        # [4a] Phase 23 — Custom profile `similarity_threshold` noise filter.
+        # Drops anything below the cosine score floor. Applied before graph
+        # expansion so weak seeds don't drag expansion into noise.
+        if similarity_threshold is not None and similarity_threshold > 0.0:
+            before = len(merged)
+            merged = [c for c in merged if c.score >= similarity_threshold]
+            logger.info(
+                "similarity_threshold=%.2f filter: %d → %d chunks",
+                similarity_threshold,
+                before,
+                len(merged),
+            )
+            counts["merged_after_threshold"] = len(merged)
+            if not merged:
+                _log_timings("empty_after_threshold", 0)
+                return _result([])
 
         # [5] Mode A graph expansion (graph tier + Neo4j live only)
         if effective_tier == RetrievalTier.qdrant_mongo_graph and settings.NEO4J_ENABLED:
+            phase_started = perf_counter()
             try:
-                expanded = await mode_a_expansion.expand(merged, corpus_ids)
+                # Phase 23 — Custom profile `neo4j_expansion_cap`
+                expand_kwargs = (
+                    {"limit": neo4j_expansion_cap}
+                    if neo4j_expansion_cap is not None
+                    else {}
+                )
+                expanded = await mode_a_expansion.expand(
+                    merged, corpus_ids, **expand_kwargs
+                )
+                counts["graph_expanded"] = len(expanded)
                 if expanded:
                     merged = merge_pools(merged, expanded)
+                    counts["merged_after_graph"] = len(merged)
             except Exception as exc:
                 logger.warning("Mode A expansion failed, continuing: %s", exc)
+            finally:
+                _add_timing("graph", phase_started)
+
+        # [5a] Phase 23 — Custom profile `rerank_top_n` pool cap before reranker
+        if rerank_top_n is not None and len(merged) > rerank_top_n:
+            pre_sorted = sorted(merged, key=lambda x: x.score, reverse=True)
+            merged = pre_sorted[:rerank_top_n]
+            counts["merged_after_rerank_cap"] = len(merged)
+            logger.info(
+                "rerank_top_n=%d cap applied (dropped %d candidates)",
+                rerank_top_n,
+                len(pre_sorted) - rerank_top_n,
+            )
 
         # [6] Rerank ONCE on full pool (Phase 18 — skippable per-request)
         if not rerank_enabled:
             logger.info("Reranker skipped by override — score-sorting directly")
+            phase_started = perf_counter()
             ranked = sorted(merged, key=lambda x: x.score, reverse=True)
+            _add_timing("rerank", phase_started)
         else:
+            phase_started = perf_counter()
             try:
-                ranked = await reranker_service.rerank(query, merged)
+                ranked = await reranker_service.rerank(rank_query, merged)
             except Exception as exc:
                 logger.warning("Reranker failed, score-sorting: %s", exc)
                 ranked = sorted(merged, key=lambda x: x.score, reverse=True)
+            _add_timing("rerank", phase_started)
+        counts["ranked"] = len(ranked)
 
-        candidates = ranked[: settings.DEFAULT_RETRIEVAL_K]
+        if _should_drop_low_confidence_rerank(
+            ranked,
+            rank_query,
+            rerank_enabled=rerank_enabled,
+        ):
+            counts["low_confidence_dropped"] = len(ranked)
+            logger.info(
+                "Low-confidence rerank guard dropped %d candidates "
+                "(top_score=%.3f query='%s')",
+                len(ranked),
+                ranked[0].score if ranked else 0.0,
+                rank_query[:80],
+            )
+            _log_timings("empty_low_confidence_rerank", 0)
+            return _result([])
+
+        # Phase 24 — final_top_k (Custom profile slider) overrides the
+        # legacy DEFAULT_RETRIEVAL_K env cap. Never silently swap models or
+        # tiers; just let the user crank the chunks-to-LLM count.
+        effective_final_k = (
+            final_top_k if final_top_k is not None else settings.DEFAULT_RETRIEVAL_K
+        )
+        candidates = ranked[:effective_final_k]
+        counts["candidates"] = len(candidates)
+        logger.info(
+            "final_top_k=%d (post-rerank cut, %d candidates available)",
+            effective_final_k,
+            len(ranked),
+        )
 
         # [7] Hydrate from MongoDB (parent text + corpus_name + doc_name)
         # hydrate_chunks also: resolves parent_id for Mode A chunks (Pass 0)
         #                      drops empty-text chunks that couldn't be resolved (Pass 3)
         if effective_tier in (RetrievalTier.qdrant_mongo, RetrievalTier.qdrant_mongo_graph):
+            phase_started = perf_counter()
             try:
                 hydrated = await hydrate_chunks(candidates, corpus_ids)
+                _add_timing("hydrate", phase_started)
+                _log_timings("ok_hydrated", len(hydrated))
                 return _result(hydrated)
             except Exception as exc:
+                _add_timing("hydrate", phase_started)
                 logger.warning("Hydration failed, returning unhydrated: %s", exc)
 
+        _log_timings("ok_unhydrated", len(candidates))
         return _result(candidates)
 
 

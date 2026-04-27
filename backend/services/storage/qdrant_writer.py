@@ -21,10 +21,15 @@ use `_col_for_corpus()`.
 
 import hashlib
 import logging
+import re
 
 from config import get_settings
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
+    CreateAlias,
+    CreateAliasOperation,
+    DeleteAlias,
+    DeleteAliasOperation,
     Distance,
     FieldCondition,
     Filter,
@@ -76,6 +81,35 @@ def _col(key: str) -> str | None:
         "schemas": settings.QDRANT_SCHEMAS,
     }
     return mapping.get(key)
+
+
+_ALIAS_PREFIX = "corpus_"  # keeps aliases namespaced away from user-typed strings
+_SLUG_MAX_LEN = 40
+
+
+def _slugify_name(name: str) -> str:
+    """Make a Qdrant-alias-safe slug from a corpus name. Lowercase, alnum+underscore
+    only, collapsed runs, length-capped. Empty / non-ASCII-only names collapse to
+    'unnamed' so we always have a usable slug (uniqueness handled by `[:cid8]`
+    suffix in `_alias_for_corpus`).
+    """
+    if not name:
+        return "unnamed"
+    s = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+    if not s:
+        return "unnamed"
+    return s[:_SLUG_MAX_LEN]
+
+
+def _alias_for_corpus(corpus_id: str, name: str, kind: str) -> str:
+    """Human-readable alias → physical collection. Format:
+        corpus_{slug(name)}_{cid8}_{kind}
+    The cid8 suffix keeps aliases unique even when two corpora share a name.
+    """
+    if kind not in _VALID_KINDS:
+        raise ValueError(f"Invalid Qdrant kind {kind!r}")
+    slug = _slugify_name(name)
+    return f"{_ALIAS_PREFIX}{slug}_{corpus_id[:8]}_{kind}"
 
 
 def _col_for_corpus(corpus_id: str, kind: str) -> str:
@@ -143,13 +177,59 @@ _CHUNK_PAYLOAD_INDEXES: tuple[str, ...] = (
 _SCHEMA_PAYLOAD_INDEXES: tuple[str, ...] = ("corpus_id", "kind", "term")
 
 
+async def _list_aliases_for_collection(
+    client: AsyncQdrantClient, collection_name: str
+) -> list[str]:
+    """Return the alias names pointing at a given physical collection."""
+    try:
+        resp = await client.get_collection_aliases(collection_name=collection_name)
+        return [a.alias_name for a in resp.aliases]
+    except Exception as exc:
+        logger.debug("Alias lookup failed for %s: %s", collection_name, exc)
+        return []
+
+
+async def rename_corpus_aliases(
+    client: AsyncQdrantClient, corpus_id: str, new_name: str
+) -> None:
+    """Re-point human-readable aliases to match the new corpus name. Called by
+    `IngestionService.update_corpus` on rename. Never raises — aliases are a UX
+    affordance, not load-bearing.
+    """
+    ops: list[CreateAliasOperation | DeleteAliasOperation] = []
+    for kind in _VALID_KINDS:
+        physical = _col_for_corpus(corpus_id, kind)
+        new_alias = _alias_for_corpus(corpus_id, new_name, kind)
+        existing_aliases = await _list_aliases_for_collection(client, physical)
+        for a in existing_aliases:
+            if a != new_alias:
+                ops.append(DeleteAliasOperation(delete_alias=DeleteAlias(alias_name=a)))
+        if new_alias not in existing_aliases:
+            ops.append(CreateAliasOperation(create_alias=CreateAlias(
+                collection_name=physical, alias_name=new_alias,
+            )))
+    if not ops:
+        return
+    try:
+        await client.update_collection_aliases(change_aliases_operations=ops)
+        logger.info("Updated Qdrant aliases for corpus %s → %r", corpus_id, new_name)
+    except Exception as exc:
+        logger.warning("Alias update failed for corpus %s: %s", corpus_id, exc)
+
+
 async def ensure_collections_for_corpus(
-    client: AsyncQdrantClient, corpus_id: str, dim: int = 1024
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    dim: int = 1024,
+    *,
+    corpus_name: str | None = None,
 ) -> None:
     """Create the 4 per-corpus collections (naive/hrag/graph/schemas) if they
     do not exist. Idempotent.
 
     Called by `IngestionService.create_corpus` and by the migration script.
+    When `corpus_name` is provided, also creates human-readable Qdrant aliases
+    (`corpus_{slug}_{cid8}_{kind}` → physical collection) for dashboard use.
     """
     chunk_kinds = ("naive", "hrag", "graph")
     for kind in chunk_kinds:
@@ -184,13 +264,17 @@ async def ensure_collections_for_corpus(
             )
         logger.info("Created Qdrant collection: %s (corpus %s)", schemas_name, corpus_id)
 
+    if corpus_name:
+        await rename_corpus_aliases(client, corpus_id, corpus_name)
+
 
 async def drop_collections_for_corpus(
     client: AsyncQdrantClient, corpus_id: str
 ) -> int:
     """Drop the 4 per-corpus collections. O(1) per-collection — replaces the
     old filter-delete cascade. Idempotent: missing collections are silently
-    skipped. Returns the count of collections actually dropped.
+    skipped. Returns the count of collections actually dropped. Qdrant aliases
+    bound to a dropped collection are removed automatically by the server.
     """
     dropped = 0
     for kind in _VALID_KINDS:
@@ -247,6 +331,10 @@ async def upsert_children(
                 "heading_path": c.get("heading_path"),
                 "chunk_text": c["text"][:512],
                 "user_id": c.get("user_id", ""),
+                # Semantic role (body / toc / bibliography / …). Default
+                # retrieval excludes non-body via a `must_not` filter on this
+                # field; missing field treated as body for backwards compat.
+                "chunk_kind": c.get("chunk_kind", "body"),
             },
         )
         for c, v in zip(chunks, vectors)
@@ -295,6 +383,7 @@ async def upsert_summaries(
                 "heading_path": p.get("heading_path"),
                 "chunk_text": p["summary"][:512],
                 "user_id": p.get("user_id", ""),
+                "chunk_kind": p.get("chunk_kind", "body"),
             },
         )
         for p, v in zip(summary_payloads, vectors)
@@ -313,6 +402,53 @@ async def upsert_summaries(
 # are dropped atomically via `drop_collections_for_corpus()`.  The legacy
 # filter-delete is no longer needed because no collection holds points from
 # more than one corpus.
+
+
+async def delete_points_by_doc(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    doc_id: str,
+) -> dict[str, bool]:
+    """Delete all points for a single document across naive / hrag / graph.
+
+    Per-doc delete (Phase 22). Corpus-level drops go through
+    `drop_collections_for_corpus`; this helper is for single-document cascade.
+    Filters on `doc_id` within each per-corpus collection so summary points
+    (which also carry `doc_id` in their payload — see `upsert_summary_points`)
+    are removed alongside child chunks.
+
+    Schemas collection is NOT touched — schema terms are corpus-scoped, not
+    doc-scoped.
+    """
+    results: dict[str, bool] = {}
+    for kind in ("naive", "hrag", "graph"):
+        name = _col_for_corpus(corpus_id, kind)
+        try:
+            if not await client.collection_exists(name):
+                results[kind] = False
+                continue
+            op = await client.delete(
+                collection_name=name,
+                points_selector=Filter(
+                    must=[
+                        FieldCondition(key="corpus_id", match=MatchValue(value=corpus_id)),
+                        FieldCondition(key="doc_id", match=MatchValue(value=doc_id)),
+                    ]
+                ),
+            )
+            results[kind] = getattr(op, "operation_id", None) is not None
+        except Exception as exc:
+            logger.warning(
+                "Qdrant per-doc delete failed for %s (doc=%s): %s", name, doc_id[:12], exc
+            )
+            results[kind] = False
+    logger.info(
+        "Qdrant: deleted points for doc %s in corpus %s → %s",
+        doc_id[:12],
+        corpus_id[:8],
+        results,
+    )
+    return results
 
 
 # ── Phase 14.2 — Schema-Term Embedding (Ontology-Lite) ────────────────────
