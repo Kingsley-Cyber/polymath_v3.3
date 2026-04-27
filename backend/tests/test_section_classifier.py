@@ -17,6 +17,8 @@ from services.ingestion.section_classifier import (
     GHOST_B_SKIP_KINDS,
     NOISY_KINDS,
     ChunkKind,
+    classify_chunk,
+    classify_content,
     classify_heading,
     is_noisy,
     should_skip_ghost_b,
@@ -51,12 +53,18 @@ from services.ingestion.section_classifier import (
         (["Copyright"], ChunkKind.FRONT_MATTER),
         (["Preface"], ChunkKind.FRONT_MATTER),
         (["Foreword"], ChunkKind.FRONT_MATTER),
+        (["Prologue"], ChunkKind.FRONT_MATTER),
         (["Dedication"], ChunkKind.FRONT_MATTER),
         (["Acknowledgments"], ChunkKind.FRONT_MATTER),
         (["Acknowledgements"], ChunkKind.FRONT_MATTER),
         (["About the Author"], ChunkKind.FRONT_MATTER),
         (["About the Authors"], ChunkKind.FRONT_MATTER),
         (["About the Editors"], ChunkKind.FRONT_MATTER),
+        # Critically: "Introduction" stays as BODY — it's the substantive
+        # first section in most papers/books, not preface material.
+        (["Introduction"], ChunkKind.BODY),
+        (["Introduction:"], ChunkKind.BODY),
+        (["Introduction to the SQLite database"], ChunkKind.BODY),
         # Back matter
         (["Glossary"], ChunkKind.BACK_MATTER),
         (["Errata"], ChunkKind.BACK_MATTER),
@@ -154,3 +162,121 @@ def test_is_noisy(kind, expected):
 )
 def test_should_skip_ghost_b(kind, expected):
     assert should_skip_ghost_b(kind) is expected
+
+
+# ─── Content-based classifier (fallback for OCR pages / tier_c) ─────────────
+
+
+def test_classify_content_empty_inputs():
+    assert classify_content(None) == ChunkKind.BODY
+    assert classify_content("") == ChunkKind.BODY
+    assert classify_content("   \n\t  ") == ChunkKind.BODY
+
+
+def test_classify_content_dense_bibliography_page():
+    biblio_text = """
+    Brown, A., & Smith, J. (2018). Foundations of SQLite. Journal of DB, 12(3), 45-67.
+    Carter, P. (2020). iOS persistence patterns. New York: Apress. ISBN 978-1-4842-5111-1
+    Davis, R., et al. (2019). Mobile data layers. doi:10.1145/3356467
+    Evans, M. (2021). pp. 12-34 of "Lightweight DBs" (Vol. 4).
+    Foster, K. (2017). Retrieved from https://example.com/sqlite-paper. [12]
+    Garcia, S. (2015). pp. 88. ISBN: 0-13-110362-8. [42]
+    """.strip()
+    assert classify_content(biblio_text) == ChunkKind.BIBLIOGRAPHY
+
+
+def test_classify_content_normal_chapter_with_one_citation_stays_body():
+    chapter_text = """
+    SQLite is a lightweight, embedded relational database engine that ships
+    with iOS. Unlike client-server databases such as PostgreSQL or MySQL,
+    SQLite runs in-process — there is no separate daemon. This makes it
+    ideal for mobile applications where battery and memory are constrained.
+    Smith (2018) showed that SQLite can outperform Core Data for read-heavy
+    workloads on iPhone hardware.
+
+    The query planner uses cost-based optimization to choose between index
+    scans and full table scans. We will explore each strategy in the
+    following sections.
+    """.strip()
+    assert classify_content(chapter_text) == ChunkKind.BODY
+
+
+def test_classify_content_toc_with_dot_leaders():
+    toc_text = "\n".join([
+        "Chapter 1: Introduction ...................... 1",
+        "Chapter 2: SQLite Internals ................. 12",
+        "Chapter 3: Query Planning ................... 45",
+        "Chapter 4: iOS Integration .................. 78",
+        "Chapter 5: Performance Tuning ............. 112",
+        "Chapter 6: Concurrency Patterns ........... 145",
+    ])
+    assert classify_content(toc_text) == ChunkKind.TOC
+
+
+def test_classify_content_index_with_comma_pages():
+    index_text = "\n".join([
+        "Apple, 23, 45-47",
+        "Backup, 88, 102",
+        "Cursor, 12, 34, 56",
+        "Database file, 4, 19, 200",
+        "Encryption, 67, 89-91",
+        "Foreign keys, 23, 45",
+    ])
+    assert classify_content(index_text) == ChunkKind.INDEX
+
+
+def test_classify_content_short_input_does_not_false_fire():
+    # Three citation-shaped lines isn't enough to flip — we require ≥5 lines
+    # for the line-ratio rules and a density threshold for citations.
+    short = "Smith (2018). Brown (2020)."
+    assert classify_content(short) == ChunkKind.BODY
+
+
+# ─── classify_chunk: heading first, content fallback ────────────────────────
+
+
+def test_classify_chunk_heading_decisive():
+    # Heading wins outright — content sample is irrelevant
+    assert classify_chunk(["References"], "this is body content") == ChunkKind.BIBLIOGRAPHY
+
+
+def test_classify_chunk_no_heading_uses_content():
+    biblio_text = " ".join([
+        "Smith, J. (2018). Foundations. Journal of DB, 12(3), 45-67.",
+        "Brown, A., et al. (2020). Mobile SQLite. doi:10.1145/abc.",
+        "Carter, P. (2019). pp. 12-34. ISBN 978-1-4842-5111-1.",
+        "Davis, R. (2021). Vol. 4, pp. 88. Retrieved from https://example.com.",
+    ])
+    assert classify_chunk(None, biblio_text) == ChunkKind.BIBLIOGRAPHY
+
+
+def test_classify_chunk_pdf_page_heading_uses_content():
+    # OCR PDFs emit ["page_178"] — must fall through to content classifier
+    biblio_text = " ".join([
+        "[1] Smith, J. (2018). Foundations of SQLite. Journal of DB, 12(3), 45-67.",
+        "[2] Brown, A., et al. (2019). Mobile data layers. doi:10.1145/3356467.",
+        "[3] Carter, P. (2020). pp. 12-34. ISBN 978-1-4842-5111-1.",
+        "[4] Davis, R. (2021). Vol. 4, pp. 88. Retrieved from https://example.com.",
+    ])
+    assert classify_chunk(["page_178"], biblio_text) == ChunkKind.BIBLIOGRAPHY
+    assert classify_chunk(["pages_178-180"], biblio_text) == ChunkKind.BIBLIOGRAPHY
+
+
+def test_classify_chunk_pdf_page_with_body_content_stays_body():
+    body_text = (
+        "SQLite uses a B-tree structure to store rows. The cost-based "
+        "query planner evaluates index scans against full table scans. "
+        "On iOS, persistent connections are managed via the FMDB wrapper. "
+        "Each transaction acquires a write lock that blocks concurrent "
+        "writers but allows multiple readers."
+    )
+    assert classify_chunk(["page_42"], body_text) == ChunkKind.BODY
+
+
+def test_classify_chunk_real_heading_does_not_run_content_fallback():
+    # If heading was conclusive (Chapter 5), even citation-heavy content
+    # in that chapter shouldn't reclassify as biblio.
+    citation_heavy = " ".join([
+        "Smith (2018). Brown (2020). Carter (2021). Davis (2019). doi:10.x [1]"
+    ] * 6)
+    assert classify_chunk(["Chapter 5: Citations in academic writing"], citation_heavy) == ChunkKind.BODY

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 from models.schemas import SourceTier
 from services.ingestion.b_plus_normalizer import InjectedHeader  # re-exported for worker
-from services.ingestion.section_classifier import ChunkKind, classify_heading
+from services.ingestion.section_classifier import ChunkKind, classify_chunk
 
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
 PARENT_TARGET_TOKENS = 1200
@@ -464,7 +464,10 @@ def chunk(
         for heading_path, page_text, page_start, page_end in _page_blocks(raw_pages, policy):
             parent_id = f"{doc_id}_parent_{parent_idx:04d}"
             parent_idx += 1
-            kind = classify_heading(heading_path)
+            # OCR pages have heading_path=["page_N"] which is inconclusive —
+            # classify_chunk falls through to content-based detection so
+            # bibliography / index / TOC pages get tagged.
+            kind = classify_chunk(heading_path, page_text)
             p_children, child_idx = _make_children(
                 parent_id,
                 doc_id,
@@ -522,7 +525,10 @@ def chunk(
             else:
                 sub_texts = [section_text]
 
-            kind = classify_heading(heading_path)
+            # Heading-bound tiers normally classify by heading text alone —
+            # passing sub_text lets content-fallback fire when the heading
+            # itself is missing (rare but possible on malformed inputs).
+            kind = classify_chunk(heading_path, " ".join(sub_texts) if sub_texts else None)
             for sub_text in sub_texts:
                 if not sub_text.strip():
                     continue
@@ -565,6 +571,9 @@ def chunk(
                 continue
             parent_id = f"{doc_id}_parent_{parent_idx:04d}"
             parent_idx += 1
+            # tier_c has no headings — classify_chunk routes straight into
+            # content-based detection (citation density, dot-leaders, etc.).
+            kind = classify_chunk(None, pt)
             p_children, child_idx = _make_children(
                 parent_id,
                 doc_id,
@@ -574,6 +583,7 @@ def chunk(
                 tier_value,
                 child_idx,
                 child_target_tokens=policy.child_target_tokens,
+                chunk_kind=kind,
             )
             parents.append(
                 ParentChunk(
@@ -584,6 +594,7 @@ def chunk(
                     heading_path=None,
                     source_tier=tier_value,
                     children=p_children,
+                    chunk_kind=kind,
                 )
             )
             all_children.extend(p_children)

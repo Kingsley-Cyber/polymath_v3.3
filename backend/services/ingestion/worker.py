@@ -401,6 +401,29 @@ async def _run_ghosts_parallel(
     async def _a_branch() -> list[SummaryResult] | None:
         if not need_ghost_a:
             return summaries_from_mongo  # None unless resume-reconstructed
+        # Skip non-body parents (TOC, bibliography, index, appendix, …).
+        # Each summary call is an LLM round-trip and the resulting summary
+        # also gets embedded → skipping noisy parents both saves LLM spend
+        # and reduces GPU pressure on the embed phase. Backwards-compat:
+        # parents without `chunk_kind` (legacy data, or rehydrated from
+        # earlier ingest) are treated as body and flow through unchanged.
+        skipped_kinds_a: dict[str, int] = {}
+        body_parents = []
+        for p in parents:
+            kind = getattr(p, "chunk_kind", None) or ChunkKind.BODY
+            if should_skip_ghost_b(kind):  # same skip set for both ghosts
+                skipped_kinds_a[kind] = skipped_kinds_a.get(kind, 0) + 1
+            else:
+                body_parents.append(p)
+        if skipped_kinds_a:
+            logger.info(
+                "phase=ghost_a_skip_kinds doc=%s corpus=%s skipped=%s body=%d/%d",
+                doc_id[:12],
+                corpus_id[:8],
+                skipped_kinds_a,
+                len(body_parents),
+                len(parents),
+            )
         tasks = [
             SummaryTask(
                 parent_id=p.parent_id,
@@ -409,7 +432,7 @@ async def _run_ghosts_parallel(
                 text=p.text,
                 source_tier=p.source_tier,
             )
-            for p in parents
+            for p in body_parents
         ]
         pool = _build_ghost_pool(config.summary_models)
         logger.info(
@@ -476,12 +499,24 @@ async def _run_ghosts_parallel(
             pool = _build_ghost_pool(config.summary_models)
         else:
             pool = _build_ghost_pool(config.extraction_models)
+        # Exclude noisy parents/children from the schema lens — letting
+        # bibliography page entries (publishers, ISBNs, citation bric-a-brac)
+        # influence which schema terms get retrieved would erode entity
+        # extraction quality on body content.
+        body_parents_for_lens = [
+            p for p in parents
+            if not should_skip_ghost_b(getattr(p, "chunk_kind", None) or ChunkKind.BODY)
+        ]
+        body_children_for_lens = [
+            c for c in children
+            if not should_skip_ghost_b(getattr(c, "chunk_kind", None) or ChunkKind.BODY)
+        ]
         schema_lens = await get_or_create_schema_lens(
             db=db,
             corpus_id=corpus_id,
             filename=filename or (existing_doc or {}).get("filename") or doc_id,
-            parents=parents,
-            children=children,
+            parents=body_parents_for_lens or parents,  # fall back if all noisy
+            children=body_children_for_lens or children,
             entity_schema=config.entity_schema,
             relation_schema=config.relation_schema,
             pool=pool,

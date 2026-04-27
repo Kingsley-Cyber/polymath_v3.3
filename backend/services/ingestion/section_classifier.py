@@ -85,7 +85,11 @@ _RULES: list[tuple[re.Pattern[str], str]] = [
 
     # Front matter
     (re.compile(r"^(copyright|colophon|imprint)\b"), ChunkKind.FRONT_MATTER),
-    (re.compile(r"^(preface|foreword|prologue|introduction\s*[:.\-—]?\s*$)"), ChunkKind.FRONT_MATTER),
+    # NOTE: "introduction" intentionally NOT here — in academic papers and
+    # most books the Introduction is the substantive first section, not
+    # preface material. Without positional context (page < frontmatter cutoff,
+    # or a publisher-specific "front_matter" docling tag) we keep it as body.
+    (re.compile(r"^(preface|foreword|prologue)\b"), ChunkKind.FRONT_MATTER),
     (re.compile(r"^(dedication|epigraph)\b"), ChunkKind.FRONT_MATTER),
     (re.compile(r"^(acknowledg(e)?ments?)\b"), ChunkKind.FRONT_MATTER),
     (re.compile(r"^(about\s+(the\s+)?(authors?|editors?|contributors?))\b"), ChunkKind.FRONT_MATTER),
@@ -144,3 +148,101 @@ def is_noisy(kind: str | None) -> bool:
 def should_skip_ghost_b(kind: str | None) -> bool:
     """True if Ghost B extraction should be skipped on chunks of this kind."""
     return bool(kind) and kind in GHOST_B_SKIP_KINDS
+
+
+# ─── Content-based fallback classifier ──────────────────────────────────────
+# Heading-text rules cover heading-bound docs (tier_a/b/b+). They DON'T cover:
+#   • OCR PDFs, where heading_path looks like ["page_178"] or ["pages_10-12"]
+#   • tier_c (token-window over markdown), where heading_path is None
+#
+# For those cases the bibliography / index / TOC pages of a book look just
+# like body content to a heading-only classifier. The content-based classifier
+# below detects them by structural cues in the chunk text itself: density of
+# citation patterns for biblio, dot-leader page-references for TOC, and
+# short comma-page-list rows for index. It only fires when the heading is
+# inconclusive — body chapters that *quote* a citation or two won't trip it.
+
+_CITATION_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\[\d+\]"),                                # [12], [42]
+    re.compile(r"\(\d{4}[a-z]?\)"),                        # (2018), (2018a)
+    re.compile(r"\b(?:doi|DOI)\s*:?\s*10\.\d+"),           # doi:10.xxx
+    re.compile(r"\bpp?\.\s*\d+"),                          # p.12, pp.12-34
+    re.compile(r"\b(?:vol|Vol|VOL)\.\s*\d+"),              # Vol. 12
+    re.compile(r"\bet\s+al\.?", re.IGNORECASE),            # et al.
+    re.compile(r"\bRetrieved\s+from\b", re.IGNORECASE),    # Retrieved from URL
+    re.compile(r"\bISBN[-:\s]*[\d\-Xx]{9,}"),              # ISBN
+)
+
+# A line that ends in dot-leaders + page number is the canonical TOC shape.
+_TOC_LINE_RE = re.compile(r"\.{3,}\s*\d+\s*$")
+# A line that's a short label followed by comma-separated page numbers is
+# the canonical index shape (e.g. "Apple, 23, 45-47").
+_INDEX_LINE_RE = re.compile(
+    r"^\s*[A-Za-z][A-Za-z\s,'\-&]{1,40},\s*\d+(?:[\s,\-]+\d+)*\s*$"
+)
+
+
+def _heading_is_inconclusive(heading_path: Iterable[str] | None) -> bool:
+    """Heading provides no semantic signal — page-style or empty."""
+    if not heading_path:
+        return True
+    head = next((str(h) for h in heading_path if h), None)
+    if not head:
+        return True
+    head_lc = head.strip().lower()
+    return bool(re.match(r"^pages?_\d", head_lc)) or not head_lc
+
+
+def classify_content(text: str | None) -> str:
+    """Classify a chunk by structural cues in its text. Returns BODY when
+    no confident classification is found.
+
+    Thresholds picked conservatively — body chapters that mention a few
+    citations should NOT trip biblio. We require:
+      • biblio: ≥4 citation-pattern hits per ~1500 chars window
+      • toc:    ≥30% of non-empty lines end in dot-leader + page number AND
+                there are ≥5 such lines
+      • index:  ≥40% of non-empty lines match the comma-page-list shape AND
+                there are ≥5 such lines
+    """
+    if not text:
+        return ChunkKind.BODY
+    sample = text[:2000]
+    if not sample.strip():
+        return ChunkKind.BODY
+
+    # Citation density → bibliography
+    citation_hits = sum(len(p.findall(sample)) for p in _CITATION_PATTERNS)
+    # 4 hits in a 1500-char sample is dense; scale linearly.
+    threshold_biblio = max(3, int(len(sample) / 1500 * 4))
+    if citation_hits >= threshold_biblio:
+        return ChunkKind.BIBLIOGRAPHY
+
+    lines = [ln for ln in sample.split("\n") if ln.strip()]
+    if len(lines) >= 5:
+        toc_hits = sum(1 for ln in lines if _TOC_LINE_RE.search(ln))
+        if toc_hits / len(lines) >= 0.30:
+            return ChunkKind.TOC
+        index_hits = sum(1 for ln in lines if _INDEX_LINE_RE.match(ln))
+        if index_hits / len(lines) >= 0.40:
+            return ChunkKind.INDEX
+
+    return ChunkKind.BODY
+
+
+def classify_chunk(
+    heading_path: Iterable[str] | None,
+    text: str | None = None,
+) -> str:
+    """Combined classifier: heading first, then content fallback when the
+    heading is inconclusive (None, empty, or page-style label like
+    "page_178" / "pages_10-12"). This is the entry point chunker callers
+    should use — `classify_heading` is exposed for tests and explicit
+    heading-only paths.
+    """
+    kind = classify_heading(heading_path)
+    if kind != ChunkKind.BODY:
+        return kind
+    if text and _heading_is_inconclusive(heading_path):
+        return classify_content(text)
+    return ChunkKind.BODY
