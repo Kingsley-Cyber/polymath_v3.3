@@ -98,14 +98,22 @@ class FunnelB:
         Execute search on a specific Qdrant collection.
         """
         try:
-            # qdrant-client 1.10+ renamed `search()` → `query_points()`.
-            resp = await self.client.query_points(
-                collection_name=collection_name,
-                query=query_vector,
-                query_filter=query_filter,
-                limit=limit,
-                with_payload=True,
-            )
+            # New corpora use named vectors {"dense", "sparse"}; legacy
+            # corpora use unnamed dense. Detect layout once per collection
+            # and pick the right call shape — `using="dense"` for named,
+            # default for unnamed.
+            from services.storage.qdrant_writer import _collection_layout
+            has_named, _ = await _collection_layout(self.client, collection_name)
+            kwargs = {
+                "collection_name": collection_name,
+                "query": query_vector,
+                "query_filter": query_filter,
+                "limit": limit,
+                "with_payload": True,
+            }
+            if has_named:
+                kwargs["using"] = "dense"
+            resp = await self.client.query_points(**kwargs)
             hits = resp.points
 
             chunks = []

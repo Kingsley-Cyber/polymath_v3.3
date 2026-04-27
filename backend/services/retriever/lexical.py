@@ -3,10 +3,18 @@ Lexical retriever sidecar for true hybrid search.
 
 Vector retrieval is excellent for semantic recall, but it can miss exact
 anchors such as filenames, headings, function names, product names, and quoted
-phrases. This module adds a bounded MongoDB text-search candidate pool that the
-main retriever can merge with Qdrant results before graph expansion/reranking.
-It is intentionally additive: qdrant_only stays pure vector, while hybrid tiers
-can opt into this exact-match recall path.
+phrases. This module provides the lexical / BM25 half of hybrid retrieval.
+
+Backend selection is per-corpus:
+  • New corpora → Qdrant sparse vectors (BM25 with server-side IDF).
+    Lives in the same engine as dense retrieval, same `chunk_kind` /
+    `corpus_id` filters apply, no cross-engine merge cost.
+  • Legacy corpora → MongoDB `$text` index + regex fallback (the original
+    pre-Phase-22 path), kept intact so existing data keeps working until
+    a backfill migration converts those collections.
+
+The two backends return the same `SourceChunk` shape, so the merge.py /
+rerank pipeline downstream is unchanged.
 """
 
 from __future__ import annotations
@@ -15,11 +23,14 @@ import logging
 import re
 from typing import Any
 
+from config import get_settings
 from models.schemas import SourceChunk
 from pymongo.errors import OperationFailure
+from qdrant_client import AsyncQdrantClient, models as qmodels
 from services.conversation import conversation_service
 
 logger = logging.getLogger(__name__)
+_settings = get_settings()
 
 _STOP_WORDS = frozenset(
     {
@@ -64,7 +75,18 @@ def _regex_score(query: str, terms: list[str], row: dict[str, Any]) -> float:
 
 
 class LexicalRetriever:
-    """Bounded Mongo text search over child chunks."""
+    """BM25 lexical search. Routes to Qdrant sparse for new corpora,
+    Mongo $text for legacy corpora — based on per-collection layout."""
+
+    def __init__(self) -> None:
+        # Lazily initialized. Importing AsyncQdrantClient at module load
+        # works because qdrant_client is already a runtime dep.
+        self._qdrant: AsyncQdrantClient | None = None
+
+    def _client(self) -> AsyncQdrantClient:
+        if self._qdrant is None:
+            self._qdrant = AsyncQdrantClient(url=_settings.QDRANT_URL)
+        return self._qdrant
 
     async def search(
         self,
@@ -73,26 +95,161 @@ class LexicalRetriever:
         *,
         top_k: int = 10,
     ) -> list[SourceChunk]:
-        """Return lexical child-chunk candidates scoped to selected corpora."""
+        """Return lexical child-chunk candidates scoped to selected corpora.
+
+        Per-corpus routing: each corpus is checked once for whether its
+        Qdrant collection carries a "sparse" named vector. New ingests
+        get Qdrant sparse search; legacy collections fall back to the
+        Mongo $text path.
+        """
         if top_k <= 0 or not query.strip() or not corpus_ids:
             return []
 
-        db = conversation_service._db
-        if db is None:
-            logger.warning("Lexical search skipped: MongoDB is not connected")
+        sparse_corpora, legacy_corpora = await self._split_by_layout(corpus_ids)
+        results: list[SourceChunk] = []
+
+        if sparse_corpora:
+            try:
+                results.extend(
+                    await self._qdrant_sparse_search(
+                        query, sparse_corpora, top_k=top_k
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Qdrant sparse lexical search failed (%s) — falling back to Mongo for %d corpora",
+                    exc, len(sparse_corpora),
+                )
+                # On Qdrant failure, fall through to Mongo for these too.
+                legacy_corpora = list(set(legacy_corpora) | set(sparse_corpora))
+
+        if legacy_corpora:
+            db = conversation_service._db
+            if db is None:
+                logger.warning(
+                    "Lexical Mongo fallback skipped for %d corpora: MongoDB not connected",
+                    len(legacy_corpora),
+                )
+            else:
+                try:
+                    results.extend(
+                        await self._text_search(db, query, legacy_corpora, top_k=top_k)
+                    )
+                except OperationFailure as exc:
+                    logger.warning(
+                        "Mongo text search unavailable (%s); falling back to bounded regex",
+                        exc,
+                    )
+                    results.extend(
+                        await self._regex_search(db, query, legacy_corpora, top_k=top_k)
+                    )
+                except Exception as exc:
+                    logger.warning("Mongo lexical search failed (%s)", exc)
+
+        # Dedupe across the two backends by chunk_id and sort by score.
+        seen: set[str] = set()
+        deduped: list[SourceChunk] = []
+        for chunk in sorted(results, key=lambda c: c.score, reverse=True):
+            cid = chunk.chunk_id
+            if cid and cid in seen:
+                continue
+            if cid:
+                seen.add(cid)
+            deduped.append(chunk)
+        return deduped[:top_k]
+
+    async def _split_by_layout(
+        self, corpus_ids: list[str]
+    ) -> tuple[list[str], list[str]]:
+        """Group corpora by whether their `naive` collection has sparse
+        vectors. Sparse corpora go through Qdrant; legacy go through Mongo.
+        Errors / missing collections fall through as legacy (safest)."""
+        from services.storage.qdrant_writer import _col_for_corpus, _collection_layout
+        sparse_corpora: list[str] = []
+        legacy_corpora: list[str] = []
+        client = self._client()
+        for cid in corpus_ids:
+            name = _col_for_corpus(cid, "naive")
+            try:
+                _, has_sparse = await _collection_layout(client, name)
+            except Exception:
+                has_sparse = False
+            if has_sparse:
+                sparse_corpora.append(cid)
+            else:
+                legacy_corpora.append(cid)
+        return sparse_corpora, legacy_corpora
+
+    async def _qdrant_sparse_search(
+        self,
+        query: str,
+        corpus_ids: list[str],
+        *,
+        top_k: int,
+    ) -> list[SourceChunk]:
+        """BM25 search inside Qdrant via the named "sparse" vector. One
+        query per per-corpus collection; results merged by score."""
+        from services.ingestion.section_classifier import NOISY_KINDS
+        from services.storage.qdrant_writer import _col_for_corpus
+        from services.storage.sparse_encoder import encode_query
+
+        sparse_query = encode_query(query)
+        if not sparse_query.indices:
+            # Query had no usable tokens after stopword stripping — skip.
             return []
 
-        try:
-            return await self._text_search(db, query, corpus_ids, top_k=top_k)
-        except OperationFailure as exc:
-            logger.warning(
-                "Mongo text search unavailable (%s); falling back to bounded regex",
-                exc,
-            )
-            return await self._regex_search(db, query, corpus_ids, top_k=top_k)
-        except Exception as exc:
-            logger.warning("Lexical search failed (%s)", exc)
-            return []
+        # Same default-noise filter as funnel_a / funnel_b, so all three
+        # halves of hybrid see the same candidate universe.
+        query_filter = qmodels.Filter(
+            must=[
+                qmodels.FieldCondition(
+                    key="chunk_type",
+                    match=qmodels.MatchValue(value="child"),
+                )
+            ],
+            must_not=[
+                qmodels.FieldCondition(
+                    key="chunk_kind",
+                    match=qmodels.MatchAny(any=list(NOISY_KINDS)),
+                )
+            ],
+        )
+
+        client = self._client()
+        all_hits: list[SourceChunk] = []
+        for cid in corpus_ids:
+            name = _col_for_corpus(cid, "naive")
+            try:
+                resp = await client.query_points(
+                    collection_name=name,
+                    query=sparse_query,
+                    using="sparse",
+                    query_filter=query_filter,
+                    limit=top_k,
+                    with_payload=True,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Qdrant sparse query failed for collection=%s: %s", name, exc,
+                )
+                continue
+            for hit in resp.points or []:
+                payload = hit.payload or {}
+                all_hits.append(
+                    SourceChunk(
+                        chunk_id=str(payload.get("chunk_id") or hit.id),
+                        parent_id=str(payload.get("parent_id") or ""),
+                        doc_id=str(payload.get("doc_id") or ""),
+                        corpus_id=str(payload.get("corpus_id") or ""),
+                        text=str(payload.get("chunk_text") or payload.get("text") or ""),
+                        summary=None,
+                        score=float(hit.score or 0.0),
+                        source_tier=f"{payload.get('source_tier') or 'chunk'}+lexical",
+                        heading_path=payload.get("heading_path") or None,
+                        provenance=[{"retriever": "qdrant_sparse"}],
+                    )
+                )
+        return all_hits
 
     async def _text_search(
         self,

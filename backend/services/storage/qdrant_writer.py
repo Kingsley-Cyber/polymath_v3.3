@@ -34,8 +34,11 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     MatchValue,
+    Modifier,
     PayloadSchemaType,
     PointStruct,
+    SparseVector,
+    SparseVectorParams,
     VectorParams,
 )
 
@@ -238,9 +241,15 @@ async def ensure_collections_for_corpus(
             logger.debug("Qdrant collection exists: %s", name)
             continue
 
+        # Hybrid layout: named "dense" for the Qwen3 embedding + named
+        # "sparse" with server-side IDF for BM25. New corpora always get
+        # both; existing corpora (created before this change) keep their
+        # legacy unnamed-dense layout and the lexical retriever falls
+        # back to Mongo $text for those — see retriever/lexical.py.
         await client.create_collection(
             collection_name=name,
-            vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
+            vectors_config={"dense": VectorParams(size=dim, distance=Distance.COSINE)},
+            sparse_vectors_config={"sparse": SparseVectorParams(modifier=Modifier.IDF)},
         )
         for field_name in _CHUNK_PAYLOAD_INDEXES:
             await client.create_payload_index(
@@ -248,7 +257,7 @@ async def ensure_collections_for_corpus(
                 field_name=field_name,
                 field_schema=PayloadSchemaType.KEYWORD,
             )
-        logger.info("Created Qdrant collection: %s (corpus %s)", name, corpus_id)
+        logger.info("Created Qdrant collection: %s (corpus %s) [hybrid]", name, corpus_id)
 
     schemas_name = _col_for_corpus(corpus_id, "schemas")
     if not await client.collection_exists(schemas_name):
@@ -294,12 +303,60 @@ async def drop_collections_for_corpus(
     return dropped
 
 
+# Per-collection layout cache: (has_named_dense, has_sparse). Populated
+# lazily by `_collection_layout`. Lets us support legacy (unnamed dense)
+# and new (named dense+sparse) collections in the same upsert path
+# without per-call introspection.
+_COLLECTION_LAYOUT_CACHE: dict[str, tuple[bool, bool]] = {}
+
+
+async def _collection_layout(
+    client: AsyncQdrantClient, collection_name: str
+) -> tuple[bool, bool]:
+    """Return (has_named_dense, has_sparse) for a collection. Cached."""
+    cached = _COLLECTION_LAYOUT_CACHE.get(collection_name)
+    if cached is not None:
+        return cached
+    info = await client.get_collection(collection_name)
+    params = info.config.params
+    vec_cfg = getattr(params, "vectors", None)
+    has_named_dense = isinstance(vec_cfg, dict) and "dense" in vec_cfg
+    sparse_cfg = getattr(params, "sparse_vectors", None) or {}
+    has_sparse = bool(sparse_cfg) and "sparse" in sparse_cfg
+    layout = (has_named_dense, has_sparse)
+    _COLLECTION_LAYOUT_CACHE[collection_name] = layout
+    return layout
+
+
+def _build_vector(
+    *,
+    dense: list[float],
+    sparse: SparseVector | None,
+    has_named_dense: bool,
+    has_sparse: bool,
+):
+    """Shape the per-point `vector` field to match the collection layout.
+
+    * Legacy (unnamed dense): return the raw list[float].
+    * New (named dense + sparse): return {"dense": [...], "sparse": SV(...)}.
+      Drop the sparse entry if its indices are empty (Qdrant rejects
+      empty SparseVectors on upsert).
+    """
+    if not has_named_dense:
+        return dense
+    out: dict = {"dense": dense}
+    if has_sparse and sparse is not None and getattr(sparse, "indices", None):
+        out["sparse"] = sparse
+    return out
+
+
 async def upsert_children(
     client: AsyncQdrantClient,
     corpus_id: str,
     chunks: list[dict],
     vectors: list[list[float]],
     target_kinds: list[str],
+    sparse_vectors: list[SparseVector] | None = None,
 ) -> None:
     """
     Upsert child vectors into the per-corpus collections for `corpus_id`.
@@ -309,42 +366,61 @@ async def upsert_children(
         corpus_id: owning corpus — resolves to per-corpus collection names.
         chunks: dicts with chunk_id, parent_id, doc_id, corpus_id,
                 source_tier, heading_path, text, user_id.
-        vectors: 1024-d embeddings, same order as chunks.
+        vectors: 1024-d dense embeddings, same order as chunks.
         target_kinds: subset of ["naive", "hrag", "graph"] — kind selectors,
             NOT collection names. Each is resolved via `_col_for_corpus`.
+        sparse_vectors: optional BM25 sparse vectors (same order as chunks).
+            Written into the "sparse" named slot for collections that have
+            it (new corpora). Silently ignored for legacy unnamed-dense
+            collections — the lexical retriever falls back to Mongo $text
+            for those.
     """
     if not chunks or not vectors:
         return
     assert len(chunks) == len(vectors), "chunks and vectors length mismatch"
+    if sparse_vectors is not None:
+        assert len(sparse_vectors) == len(chunks), "sparse_vectors length mismatch"
+    sv_iter = sparse_vectors or [None] * len(chunks)
 
-    points = [
-        PointStruct(
-            id=_child_point_id(c["chunk_id"]),
-            vector=v,
-            payload={
-                "corpus_id": c["corpus_id"],
-                "doc_id": c["doc_id"],
-                "chunk_id": c["chunk_id"],
-                "parent_id": c["parent_id"],
-                "chunk_type": "child",
-                "source_tier": c["source_tier"],
-                "heading_path": c.get("heading_path"),
-                "chunk_text": c["text"][:512],
-                "user_id": c.get("user_id", ""),
-                # Semantic role (body / toc / bibliography / …). Default
-                # retrieval excludes non-body via a `must_not` filter on this
-                # field; missing field treated as body for backwards compat.
-                "chunk_kind": c.get("chunk_kind", "body"),
-            },
-        )
-        for c, v in zip(chunks, vectors)
+    payloads = [
+        {
+            "corpus_id": c["corpus_id"],
+            "doc_id": c["doc_id"],
+            "chunk_id": c["chunk_id"],
+            "parent_id": c["parent_id"],
+            "chunk_type": "child",
+            "source_tier": c["source_tier"],
+            "heading_path": c.get("heading_path"),
+            "chunk_text": c["text"][:512],
+            "user_id": c.get("user_id", ""),
+            # Semantic role (body / toc / bibliography / …). Default
+            # retrieval excludes non-body via a `must_not` filter on this
+            # field; missing field treated as body for backwards compat.
+            "chunk_kind": c.get("chunk_kind", "body"),
+        }
+        for c in chunks
     ]
 
     for kind in target_kinds:
         name = _col_for_corpus(corpus_id, kind)
         await _assert_collection_owner(client, name, corpus_id)
+        has_named, has_sparse = await _collection_layout(client, name)
+        points = [
+            PointStruct(
+                id=_child_point_id(c["chunk_id"]),
+                vector=_build_vector(
+                    dense=v, sparse=sv,
+                    has_named_dense=has_named, has_sparse=has_sparse,
+                ),
+                payload=payload,
+            )
+            for c, v, sv, payload in zip(chunks, vectors, sv_iter, payloads)
+        ]
         await client.upsert(collection_name=name, points=points)
-        logger.debug("Upserted %d child points → %s", len(points), name)
+        logger.debug(
+            "Upserted %d child points → %s (named=%s sparse=%s)",
+            len(points), name, has_named, has_sparse,
+        )
 
 
 async def upsert_summaries(
@@ -353,6 +429,7 @@ async def upsert_summaries(
     summary_payloads: list[dict],
     vectors: list[list[float]],
     target_kinds: list[str],
+    sparse_vectors: list[SparseVector] | None = None,
 ) -> None:
     """
     Upsert summary vectors into per-corpus collections. Never written to graph.
@@ -364,29 +441,30 @@ async def upsert_summaries(
                           source_tier, summary, heading_path, user_id.
         vectors: 1024-d embeddings.
         target_kinds: subset of ["naive", "hrag"] — "graph" is silently skipped.
+        sparse_vectors: optional BM25 sparse vectors over the summary text.
+            Same backwards-compat handling as `upsert_children`.
     """
     if not summary_payloads or not vectors:
         return
     assert len(summary_payloads) == len(vectors)
+    if sparse_vectors is not None:
+        assert len(sparse_vectors) == len(summary_payloads), "sparse length mismatch"
+    sv_iter = sparse_vectors or [None] * len(summary_payloads)
 
-    points = [
-        PointStruct(
-            id=_summary_point_id(p["corpus_id"], p["parent_id"]),
-            vector=v,
-            payload={
-                "corpus_id": p["corpus_id"],
-                "doc_id": p["doc_id"],
-                "chunk_id": f"{p['parent_id']}_summary",
-                "parent_id": p["parent_id"],
-                "chunk_type": "summary",
-                "source_tier": p["source_tier"],
-                "heading_path": p.get("heading_path"),
-                "chunk_text": p["summary"][:512],
-                "user_id": p.get("user_id", ""),
-                "chunk_kind": p.get("chunk_kind", "body"),
-            },
-        )
-        for p, v in zip(summary_payloads, vectors)
+    payloads = [
+        {
+            "corpus_id": p["corpus_id"],
+            "doc_id": p["doc_id"],
+            "chunk_id": f"{p['parent_id']}_summary",
+            "parent_id": p["parent_id"],
+            "chunk_type": "summary",
+            "source_tier": p["source_tier"],
+            "heading_path": p.get("heading_path"),
+            "chunk_text": p["summary"][:512],
+            "user_id": p.get("user_id", ""),
+            "chunk_kind": p.get("chunk_kind", "body"),
+        }
+        for p in summary_payloads
     ]
 
     for kind in target_kinds:
@@ -394,8 +472,23 @@ async def upsert_summaries(
             continue  # summaries never seed the graph collection
         name = _col_for_corpus(corpus_id, kind)
         await _assert_collection_owner(client, name, corpus_id)
+        has_named, has_sparse = await _collection_layout(client, name)
+        points = [
+            PointStruct(
+                id=_summary_point_id(p["corpus_id"], p["parent_id"]),
+                vector=_build_vector(
+                    dense=v, sparse=sv,
+                    has_named_dense=has_named, has_sparse=has_sparse,
+                ),
+                payload=payload,
+            )
+            for p, v, sv, payload in zip(summary_payloads, vectors, sv_iter, payloads)
+        ]
         await client.upsert(collection_name=name, points=points)
-        logger.debug("Upserted %d summary points → %s", len(points), name)
+        logger.debug(
+            "Upserted %d summary points → %s (named=%s sparse=%s)",
+            len(points), name, has_named, has_sparse,
+        )
 
 
 # `delete_points_by_corpus` was removed in Phase 7.5 — per-corpus collections

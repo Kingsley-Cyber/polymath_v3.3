@@ -112,15 +112,21 @@ class FunnelA:
         """
         try:
             # qdrant-client ≥1.10 renamed `search()` → `query_points()`; the
-            # old name was removed in 1.13+. `query_points` returns a wrapper
-            # with .points containing the scored hits.
-            resp = await self.client.query_points(
-                collection_name=collection_name,
-                query=query_vector,
-                query_filter=query_filter,
-                limit=limit,
-                with_payload=True,
-            )
+            # old name was removed in 1.13+. New corpora use named vectors —
+            # we pass `using="dense"` to disambiguate; legacy corpora keep
+            # the unnamed default.
+            from services.storage.qdrant_writer import _collection_layout
+            has_named, _ = await _collection_layout(self.client, collection_name)
+            kwargs = {
+                "collection_name": collection_name,
+                "query": query_vector,
+                "query_filter": query_filter,
+                "limit": limit,
+                "with_payload": True,
+            }
+            if has_named:
+                kwargs["using"] = "dense"
+            resp = await self.client.query_points(**kwargs)
             hits = resp.points
 
             chunks = []

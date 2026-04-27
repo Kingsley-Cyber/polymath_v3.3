@@ -31,7 +31,7 @@ import re
 import time
 import uuid
 from datetime import datetime
-from typing import Callable
+from typing import Any, Callable
 
 from config import get_settings
 from models.schemas import IngestionConfig, IngestJobResponse, SourceTier, WriteState
@@ -774,6 +774,8 @@ async def _write_qdrant_for_doc(
     summaries: list[SummaryResult] | None,
     summary_vec_map: dict[str, list[float]],
     config: IngestionConfig,
+    child_sparse_map: dict[str, Any] | None = None,
+    summary_sparse_map: dict[str, Any] | None = None,
 ) -> None:
     """Write children + summaries to per-corpus Qdrant collections.
 
@@ -782,8 +784,14 @@ async def _write_qdrant_for_doc(
     existing semantics for corpora that opt out of any kind.
     Summaries: naive + hrag only (qdrant_writer.upsert_summaries also
     enforces this defensively).
+
+    Sparse vectors (BM25) are passed through verbatim. New per-corpus
+    collections store them under a "sparse" named-vector slot; legacy
+    collections silently drop them.
     """
     target_cols = config.target_qdrant_collections
+    child_sparse_map = child_sparse_map or {}
+    summary_sparse_map = summary_sparse_map or {}
 
     def _as_payload(c) -> dict:
         return {
@@ -803,23 +811,29 @@ async def _write_qdrant_for_doc(
     if "naive" in target_cols:
         dicts = [_as_payload(c) for c in children]
         vecs = [vec_map[c.chunk_id] for c in children]
+        sparse = [child_sparse_map.get(c.chunk_id) for c in children]
         await qdrant_writer.upsert_children(
-            qdrant_client, corpus_id, dicts, vecs, ["naive"]
+            qdrant_client, corpus_id, dicts, vecs, ["naive"],
+            sparse_vectors=sparse,
         )
 
     hrag_eligible = [c for c in children if c.source_tier in _HRAG_TIERS]
     if "hrag" in target_cols and hrag_eligible:
         dicts = [_as_payload(c) for c in hrag_eligible]
         vecs = [vec_map[c.chunk_id] for c in hrag_eligible]
+        sparse = [child_sparse_map.get(c.chunk_id) for c in hrag_eligible]
         await qdrant_writer.upsert_children(
-            qdrant_client, corpus_id, dicts, vecs, ["hrag"]
+            qdrant_client, corpus_id, dicts, vecs, ["hrag"],
+            sparse_vectors=sparse,
         )
 
     if "graph" in target_cols:
         dicts = [_as_payload(c) for c in children]
         vecs = [vec_map[c.chunk_id] for c in children]
+        sparse = [child_sparse_map.get(c.chunk_id) for c in children]
         await qdrant_writer.upsert_children(
-            qdrant_client, corpus_id, dicts, vecs, ["graph"]
+            qdrant_client, corpus_id, dicts, vecs, ["graph"],
+            sparse_vectors=sparse,
         )
 
     if summaries:
@@ -839,6 +853,7 @@ async def _write_qdrant_for_doc(
             for s in summaries
         ]
         summary_vecs = [summary_vec_map[s.parent_id] for s in summaries]
+        summary_sparse = [summary_sparse_map.get(s.parent_id) for s in summaries]
         summary_kinds = [k for k in target_cols if k in ("naive", "hrag")]
         await qdrant_writer.upsert_summaries(
             qdrant_client,
@@ -846,6 +861,7 @@ async def _write_qdrant_for_doc(
             summary_payloads,
             summary_vecs,
             summary_kinds,
+            sparse_vectors=summary_sparse,
         )
 
 
@@ -1117,6 +1133,26 @@ async def run_ingest_job(
             len(summary_vec_map),
         )
 
+        # Sparse vectors for Qdrant hybrid search. Pure-Python BM25 with
+        # server-side IDF — no GPU, no model load. New corpora store these
+        # alongside the dense vector under the "sparse" named slot;
+        # legacy corpora's collections silently drop the sparse field at
+        # upsert time and keep the Mongo $text fallback in place.
+        from services.storage.sparse_encoder import encode_text as _bm25_encode
+        t0 = time.monotonic()
+        child_sparse_map = {c.chunk_id: _bm25_encode(c.text) for c in children}
+        summary_sparse_map = {
+            s.parent_id: _bm25_encode(s.summary) for s in (summaries or [])
+        }
+        logger.info(
+            "phase=sparse_encode duration=%.2fs doc=%s corpus=%s children=%d summaries=%d",
+            time.monotonic() - t0,
+            doc_id[:12],
+            cid8,
+            len(child_sparse_map),
+            len(summary_sparse_map),
+        )
+
         t0 = time.monotonic()
         await _write_qdrant_for_doc(
             qdrant_client=qdrant_client,
@@ -1128,6 +1164,8 @@ async def run_ingest_job(
             summaries=summaries,
             summary_vec_map=summary_vec_map,
             config=ingestion_config,
+            child_sparse_map=child_sparse_map,
+            summary_sparse_map=summary_sparse_map,
         )
         await mongo_writer.update_write_state(
             db, doc_id, corpus_id=corpus_id, qdrant_written=True
