@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     QDRANT_URL: str = Field(
         default="http://qdrant:6333", description="Qdrant vector database URL"
     )
+    QDRANT_TIMEOUT_SECONDS: float = Field(
+        default=120.0,
+        description="HTTP timeout for Qdrant operations such as per-corpus collection provisioning",
+    )
     QDRANT_COLLECTION: str = Field(
         default="polymath_chunks", description="Default Qdrant collection name"
     )
@@ -99,6 +103,28 @@ class Settings(BaseSettings):
         default=120.0,
         description="HTTP timeout for SiliconFlow embed calls (no cold-start penalty)",
     )
+    EMBED_ALLOW_LOCAL_FALLBACK: bool = Field(
+        default=False,
+        description=(
+            "When False, cloud/API embedding failures fail closed instead of "
+            "silently falling back to the local GPU embedder."
+        ),
+    )
+    INGEST_MAX_PARSE_JOBS: int = Field(
+        default=2,
+        ge=1,
+        le=16,
+        description="Process-local cap for concurrent parse/chunk phases.",
+    )
+    INGEST_MAX_MODEL_PHASE_DOCS: int = Field(
+        default=1,
+        ge=1,
+        le=8,
+        description=(
+            "Process-local cap for documents concurrently running LLM/embed "
+            "model phases. Per-entry model concurrency still applies inside a slot."
+        ),
+    )
 
     # === LOCAL MODELS DIR ===
     MODELS_DIR: str = Field(
@@ -118,8 +144,17 @@ class Settings(BaseSettings):
     )
 
     # === DEFAULT MODELS ===
+    # Phase 24 — empty by default. CLAUDE.md "never hardcode model names"
+    # rule. The user's per-pool entries (Settings → Models) supply real
+    # values; resolution falls back to the active chat model for HyDE /
+    # Reasoning Cascade and raises a clear error when nothing is configured.
     DEFAULT_COMPLETION_MODEL: str = Field(
-        default="ollama/llama3.2:3b", description="Default model for chat completions"
+        default="",
+        description=(
+            "Last-resort fallback when neither the user's pool entry nor the "
+            "active chat model is set. Leave blank — the resolver should never "
+            "land here unless config is genuinely incomplete."
+        ),
     )
     DEFAULT_EMBEDDING_MODEL: str = Field(
         default="tei/qwen3-embedding",
@@ -191,6 +226,17 @@ class Settings(BaseSettings):
         ),
     )
 
+    # === GHOST B — UNIVERSAL SCHEMA ===
+    FORCE_UNIVERSAL_SCHEMA: bool = Field(
+        default=False,
+        description=(
+            "Lifespan admin lever. When False (default), corpora with a "
+            "null/empty schema are patched to the universal schema; corpora "
+            "with a legacy custom schema are preserved untouched. When True, "
+            "ALL corpora are overwritten with the universal schema on startup."
+        ),
+    )
+
     # === GHOST B — ONTOLOGY-LITE (Phase 14.2) ===
     SCHEMA_INLINE_LIMIT: int = Field(
         default=30,
@@ -202,6 +248,26 @@ class Settings(BaseSettings):
     SCHEMA_RETRIEVAL_TOP_K: int = Field(
         default=10,
         description="Number of schema terms to retrieve per chunk when over SCHEMA_INLINE_LIMIT.",
+    )
+    SCHEMA_LENS_LLM_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "When True, the first Ghost B run for a corpus makes one bounded "
+            "LLM call to profile a soft schema lens. The lens is cached on the "
+            "corpus and still clamps all suggestions to the approved schema."
+        ),
+    )
+    SCHEMA_LENS_SAMPLE_CHUNKS: int = Field(
+        default=8,
+        ge=1,
+        le=32,
+        description="Max child chunks sampled when creating the auto schema lens.",
+    )
+    SCHEMA_LENS_SAMPLE_CHARS: int = Field(
+        default=6000,
+        ge=1000,
+        le=20000,
+        description="Max text characters sent to the schema lens profiler.",
     )
 
     # === MCP — Phase 8 Integration ===
@@ -259,6 +325,24 @@ class Settings(BaseSettings):
         default=1,
         description="Max concurrent LiteLLM calls for entity extraction (GHOST B)",
     )
+    EXTRACTION_MAX_TOKENS: int = Field(
+        default=1536,
+        ge=256,
+        le=8192,
+        description="Maximum completion tokens for each entity extraction call (GHOST B)",
+    )
+    EXTRACTION_MAX_ENTITIES_PER_CHUNK: int = Field(
+        default=14,
+        ge=1,
+        le=64,
+        description="Maximum entities Ghost B should return for a single child chunk",
+    )
+    EXTRACTION_MAX_RELATIONS_PER_CHUNK: int = Field(
+        default=14,
+        ge=0,
+        le=64,
+        description="Maximum relations Ghost B should return for a single child chunk",
+    )
     ENTITY_CONFIDENCE_THRESHOLD: float = Field(
         default=0.5,
         ge=0.0,
@@ -272,14 +356,50 @@ class Settings(BaseSettings):
         description="Global default for agentic mode. When True, queries route through AGENTIC_MODEL and tools can execute. User can override per-request via ModelOverrides.",
     )
     AGENTIC_MODEL: str = Field(
-        default="ollama/llama3.2:3b",
-        description="Model used when agentic mode is on. Must support function-calling (tools).",
+        default="",
+        description=(
+            "Phase 24: empty by default. Use Settings → Models → Tool-Capable "
+            "Fallback to pick an entry. When unset and the active chat model "
+            "can't tool-call, the resolver raises a clear error rather than "
+            "silently degrading to a slow Ollama default."
+        ),
     )
 
     # === HYDE (Phase 17) — dedicated cheap model for hypothetical answer generation ===
     HYDE_MODEL: str = Field(
-        default="ollama/llama3.2:3b",
-        description="Model used when HyDE is enabled per-request. Intentionally cheap — quality of the hypothetical matters less than its shape.",
+        default="",
+        description=(
+            "Phase 24: empty by default. Use Settings → Models → HyDE to pick "
+            "an entry. When unset, HyDE reuses the active chat model rather "
+            "than silently degrading to a hardcoded default."
+        ),
+    )
+    HYDE_TIMEOUT_SECONDS: float = Field(
+        default=8.0,
+        ge=1.0,
+        le=60.0,
+        description=(
+            "Hard wall for the HyDE helper call. Keep bounded so retrieval can "
+            "fall back to the raw query, but allow cloud models like Mistral "
+            "enough room to succeed."
+        ),
+    )
+    HYDE_MAX_TOKENS: int = Field(
+        default=192,
+        ge=32,
+        le=1024,
+        description="Maximum tokens for the short hypothetical answer used by HyDE.",
+    )
+
+    # === REASONING CASCADE (Phase 24) — analyst that digests retrieved chunks ===
+    REASONING_MODEL: str = Field(
+        default="",
+        description=(
+            "Model used for the reasoning cascade (opt-in per-request). "
+            "Should be a strong reasoning/analysis model (DeepSeek R1, o1, "
+            "claude-sonnet, etc). Empty falls back to DEFAULT_COMPLETION_MODEL. "
+            "Cost ~20× of a Balanced query — use sparingly via per-request flag."
+        ),
     )
 
     # === AUTHENTICATION ===

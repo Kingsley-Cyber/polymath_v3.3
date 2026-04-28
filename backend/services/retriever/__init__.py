@@ -23,6 +23,7 @@ Cross-corpus constraints (spec §CROSS-CORPUS QUERY CONSTRAINTS):
 import asyncio
 import logging
 from time import perf_counter
+from typing import Any
 
 from config import get_settings
 from models.schemas import RetrievalResult, RetrievalTier, SourceChunk
@@ -185,6 +186,27 @@ class RetrieverOrchestrator:
         except Exception as exc:
             logger.warning("Corpus existence check failed (%s) — keeping all ids", exc)
             return corpus_ids, []
+
+    async def _embedding_config_for_query(
+        self, corpus_ids: list[str] | None
+    ) -> dict[str, Any] | None:
+        """Use the selected corpus's embedding provider for single-corpus search."""
+        if not corpus_ids or len(corpus_ids) != 1:
+            return None
+        try:
+            from services.conversation import conversation_service
+
+            db = conversation_service._db
+            if db is None:
+                return None
+            doc = await db["corpora"].find_one(
+                {"corpus_id": corpus_ids[0]},
+                {"default_ingestion_config": 1, "_id": 0},
+            )
+            return (doc or {}).get("default_ingestion_config")
+        except Exception as exc:
+            logger.warning("Corpus embedding config lookup failed: %s", exc)
+            return None
 
     async def _enforce_strategy_intersection(
         self,
@@ -366,7 +388,10 @@ class RetrieverOrchestrator:
         # retrieval if the embedder is down; qdrant_only remains pure vector.
         phase_started = perf_counter()
         try:
-            query_vector = await embed_query(query)
+            query_vector = await embed_query(
+                query,
+                await self._embedding_config_for_query(corpus_ids),
+            )
             _add_timing("embed", phase_started)
         except Exception as exc:
             _add_timing("embed", phase_started)

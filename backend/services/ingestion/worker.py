@@ -60,6 +60,8 @@ from services.storage.qdrant_writer import retrieve_schema_for_chunk
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+_PARSE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_PARSE_JOBS))
+_MODEL_PHASE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_MODEL_PHASE_DOCS))
 
 
 class GhostAFailure(RuntimeError):
@@ -102,6 +104,11 @@ _DUPLICATE_STOP_WORDS = {
     "this", "with", "you", "your", "their", "there", "then", "than", "was",
     "were", "will", "would", "could", "should", "about", "which",
 }
+
+
+def _is_vectorized_child(chunk) -> bool:
+    kind = getattr(chunk, "chunk_kind", None) or ChunkKind.BODY
+    return not should_skip_ghost_b(kind)
 
 
 def _merge_warnings(existing: list[str] | None, new: list[str] | None) -> list[str]:
@@ -714,6 +721,48 @@ async def _write_mongo_all(
     await mongo_writer.upsert_chunks(db, child_dicts)
 
 
+async def _ensure_progress_document(
+    *,
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+    user_id: str,
+    file_id: str,
+    filename: str,
+    source_tier: SourceTier,
+    source_mime: str,
+    ingestion_config: IngestionConfig,
+    chunking_config: dict,
+    parents,
+    ws: WriteState,
+) -> None:
+    """Create a minimal document row so SSE has something to poll early."""
+    from services.ingestion_service import freeze_snapshot
+
+    now = datetime.utcnow()
+    await mongo_writer.upsert_document(
+        db,
+        {
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "user_id": user_id,
+            "file_id": file_id,
+            "filename": filename,
+            "source_mime": source_mime,
+            "source_tier": source_tier.value,
+            "ingestion_config": freeze_snapshot(ingestion_config),
+            "chunking_config": chunking_config,
+            "write_state": ws.model_dump(),
+            "parent_chunks": _build_parent_dicts(parents, None),
+            "ghost_b_staging": None,
+            "ghost_b_failures": [],
+            "ghost_b_metrics": {},
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
+
+
 async def _embed_batch_for_doc(
     *,
     children,
@@ -730,7 +779,16 @@ async def _embed_batch_for_doc(
     Returns:
         (child_vectors_by_chunk_id, summary_vectors_by_parent_id)
     """
-    child_texts = [c.text for c in children]
+    vector_children = [c for c in children if _is_vectorized_child(c)]
+    skipped_children = len(children) - len(vector_children)
+    if skipped_children:
+        logger.info(
+            "phase=embed_skip_kinds skipped=%d body=%d/%d",
+            skipped_children,
+            len(vector_children),
+            len(children),
+        )
+    child_texts = [c.text for c in vector_children]
     summary_list = summaries or []
     summary_texts = [s.summary for s in summary_list]
     all_texts = [*child_texts, *summary_texts]
@@ -754,11 +812,12 @@ async def _embed_batch_for_doc(
         api_key=plaintext_key,
         max_concurrent=getattr(config, "embed_max_concurrent", None),
         modal_containers=getattr(config, "modal_containers", None),
+        api_pool=_build_ghost_pool(getattr(config, "embedding_models", None)),
     )
     split = len(child_texts)
     child_vecs = all_vectors[:split]
     summary_vecs = all_vectors[split:]
-    vec_map = {c.chunk_id: v for c, v in zip(children, child_vecs)}
+    vec_map = {c.chunk_id: v for c, v in zip(vector_children, child_vecs)}
     summary_vec_map = {s.parent_id: v for s, v in zip(summary_list, summary_vecs)}
     return vec_map, summary_vec_map
 
@@ -792,6 +851,7 @@ async def _write_qdrant_for_doc(
     target_cols = config.target_qdrant_collections
     child_sparse_map = child_sparse_map or {}
     summary_sparse_map = summary_sparse_map or {}
+    vector_children = [c for c in children if c.chunk_id in vec_map]
 
     def _as_payload(c) -> dict:
         return {
@@ -809,15 +869,15 @@ async def _write_qdrant_for_doc(
         }
 
     if "naive" in target_cols:
-        dicts = [_as_payload(c) for c in children]
-        vecs = [vec_map[c.chunk_id] for c in children]
-        sparse = [child_sparse_map.get(c.chunk_id) for c in children]
+        dicts = [_as_payload(c) for c in vector_children]
+        vecs = [vec_map[c.chunk_id] for c in vector_children]
+        sparse = [child_sparse_map.get(c.chunk_id) for c in vector_children]
         await qdrant_writer.upsert_children(
             qdrant_client, corpus_id, dicts, vecs, ["naive"],
             sparse_vectors=sparse,
         )
 
-    hrag_eligible = [c for c in children if c.source_tier in _HRAG_TIERS]
+    hrag_eligible = [c for c in vector_children if c.source_tier in _HRAG_TIERS]
     if "hrag" in target_cols and hrag_eligible:
         dicts = [_as_payload(c) for c in hrag_eligible]
         vecs = [vec_map[c.chunk_id] for c in hrag_eligible]
@@ -828,9 +888,9 @@ async def _write_qdrant_for_doc(
         )
 
     if "graph" in target_cols:
-        dicts = [_as_payload(c) for c in children]
-        vecs = [vec_map[c.chunk_id] for c in children]
-        sparse = [child_sparse_map.get(c.chunk_id) for c in children]
+        dicts = [_as_payload(c) for c in vector_children]
+        vecs = [vec_map[c.chunk_id] for c in vector_children]
+        sparse = [child_sparse_map.get(c.chunk_id) for c in vector_children]
         await qdrant_writer.upsert_children(
             qdrant_client, corpus_id, dicts, vecs, ["graph"],
             sparse_vectors=sparse,
@@ -947,14 +1007,15 @@ async def run_ingest_job(
     ingestion_config = effective_config
 
     # ── Phase 1: Parse ───────────────────────────────────────────────────
-    t0 = time.monotonic()
-    mime_hint, _ = mimetypes.guess_type(filename)
-    parse_result = await docling_adapter.parse_document(
-        data,
-        filename=filename,
-        mime=mime_hint or "application/octet-stream",
-        do_ocr=getattr(ingestion_config, "docling_ocr_enabled", True),
-    )
+    async with _PARSE_SEMAPHORE:
+        t0 = time.monotonic()
+        mime_hint, _ = mimetypes.guess_type(filename)
+        parse_result = await docling_adapter.parse_document(
+            data,
+            filename=filename,
+            mime=mime_hint or "application/octet-stream",
+            do_ocr=False,
+        )
     _norm = re.sub(
         r"\s+", " ", (parse_result.markdown or parse_result.text or "").strip()
     )
@@ -1018,23 +1079,39 @@ async def run_ingest_job(
         if existing_doc
         else str(uuid.uuid4())
     )
+    if existing_doc is None:
+        await _ensure_progress_document(
+            db=db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            file_id=file_id,
+            filename=filename,
+            source_tier=source_tier,
+            source_mime=source_mime,
+            ingestion_config=ingestion_config,
+            chunking_config=chunking_config,
+            parents=parents,
+            ws=ws,
+        )
 
     # ── Phase 3: Ghosts in parallel ──────────────────────────────────────
-    t0 = time.monotonic()
-    ghost_result = await _run_ghosts_parallel(
-        config=ingestion_config,
-        parents=parents,
-        children=children,
-        doc_id=doc_id,
-        corpus_id=corpus_id,
-        filename=filename,
-        model=model,
-        db=db,
-        qdrant_client=qdrant_client,
-        neo4j_driver=neo4j_driver,
-        existing_doc=existing_doc,
-        ws=ws,
-    )
+    async with _MODEL_PHASE_SEMAPHORE:
+        t0 = time.monotonic()
+        ghost_result = await _run_ghosts_parallel(
+            config=ingestion_config,
+            parents=parents,
+            children=children,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            filename=filename,
+            model=model,
+            db=db,
+            qdrant_client=qdrant_client,
+            neo4j_driver=neo4j_driver,
+            existing_doc=existing_doc,
+            ws=ws,
+        )
     if isinstance(ghost_result, GhostRunResult):
         summaries = ghost_result.summaries
         ghost_b_out = ghost_result.ghost_b_out
@@ -1117,12 +1194,13 @@ async def run_ingest_job(
 
     # ── Phase 5: Embed + Phase 6: Qdrant ─────────────────────────────────
     if not ws.qdrant_written:
-        t0 = time.monotonic()
-        vec_map, summary_vec_map = await _embed_batch_for_doc(
-            children=children,
-            summaries=summaries,
-            config=ingestion_config,
-        )
+        async with _MODEL_PHASE_SEMAPHORE:
+            t0 = time.monotonic()
+            vec_map, summary_vec_map = await _embed_batch_for_doc(
+                children=children,
+                summaries=summaries,
+                config=ingestion_config,
+            )
         logger.info(
             "phase=embed duration=%.2fs doc=%s corpus=%s mode=%s children=%d summaries=%d",
             time.monotonic() - t0,
@@ -1140,7 +1218,11 @@ async def run_ingest_job(
         # upsert time and keep the Mongo $text fallback in place.
         from services.storage.sparse_encoder import encode_text as _bm25_encode
         t0 = time.monotonic()
-        child_sparse_map = {c.chunk_id: _bm25_encode(c.text) for c in children}
+        child_sparse_map = {
+            c.chunk_id: _bm25_encode(c.text)
+            for c in children
+            if c.chunk_id in vec_map
+        }
         summary_sparse_map = {
             s.parent_id: _bm25_encode(s.summary) for s in (summaries or [])
         }

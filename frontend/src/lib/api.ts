@@ -168,7 +168,16 @@ export async function deleteConversation(
 
 // Collections
 export async function getCollections(): Promise<Collection[]> {
-  return fetchJSON("/collections");
+  try {
+    return await fetchJSON("/collections");
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("HTTP 404")) {
+      // v3 corpus-scoped retrieval no longer requires the legacy collections
+      // endpoint. Keep the old selector harmless while the UI migration settles.
+      return [];
+    }
+    throw error;
+  }
 }
 
 // Chat Streaming (SSE)
@@ -1060,3 +1069,250 @@ export const api = {
   testModalEndpoint,
   verifyModalToken,
 };
+
+// ── Mission Control restored additive API helpers ──────────────────────────
+export interface IngestOverrides {
+  use_neo4j?: boolean;
+  chunk_summarization?: boolean;
+  model?: string;
+  embed_mode?: "local" | "api" | "modal";
+  embed_base_url?: string;
+  embed_api_key?: string;
+  embed_max_concurrent?: number;
+  summary_model?: string;
+  summary_base_url?: string;
+  summary_api_key?: string;
+  extraction_model?: string;
+  extraction_base_url?: string;
+  extraction_api_key?: string;
+}
+
+export interface FullGraphNode {
+  id: string;
+  display_name: string;
+  entity_type: string;
+  observed_entity_types?: string[] | null;
+  mention_count: number;
+  object_kind?: string | null;
+  object_kind_parent?: string | null;
+  object_kind_root?: string | null;
+  domain_type?: string | null;
+  domain_type_parent?: string | null;
+  domain_type_root?: string | null;
+  canonical_family?: string | null;
+  ontology_version?: string | null;
+  supernode_type?: "domain" | "concept" | string;
+  primary_domain?: string | null;
+  top_entities?: string[];
+  bridge_count?: number;
+  context_kind?: string;
+  context_role?: string;
+  topic_id?: string | null;
+  evidence_count?: number;
+  context_weight?: number;
+}
+
+export interface FullGraphEdge {
+  source: string;
+  target: string;
+  predicate: string;
+  relation_family?: string | null;
+  confidence: number;
+  weight?: number;
+  role?: string;
+  suggested?: boolean;
+}
+
+export interface FullGraphResponse {
+  view?: "overview" | "full" | string;
+  status?: "ready" | "cache_warming" | string;
+  message?: string;
+  nodes: FullGraphNode[];
+  edges: FullGraphEdge[];
+  truncated: boolean;
+  raw_node_count?: number;
+  raw_edge_count?: number;
+  concept_count?: number;
+  domain_count?: number;
+}
+
+export interface McpInfo {
+  transport: string;
+  url: string;
+  port: number;
+  host: string;
+  require_auth: boolean;
+  has_api_key: boolean;
+  default_top_k: number;
+  tools: Array<{ name: string; description: string }>;
+}
+
+export async function getModelsSettings(): Promise<import("../types").ModelsConfig> {
+  return fetchJSON("/settings/models");
+}
+
+export async function updateModelsSettings(
+  config: import("../types").ModelsConfig,
+): Promise<import("../types").ModelsConfig> {
+  return fetchJSON("/settings/models", { method: "POST", body: JSON.stringify(config) });
+}
+
+export async function deletePoolEntry(entryId: string): Promise<import("../types").ModelsConfig> {
+  return fetchJSON(`/settings/models/pool/${encodeURIComponent(entryId)}`, { method: "DELETE" });
+}
+
+export async function addOllamaToPool(modelNames: string[]): Promise<import("../types").ModelsConfig> {
+  return fetchJSON("/settings/models/ollama/add", {
+    method: "POST",
+    body: JSON.stringify({ model_names: modelNames }),
+  });
+}
+
+export async function listInstalledOllamaModels(): Promise<import("../types").OllamaInstalledModel[]> {
+  const result = await listOllamaInstalled();
+  return result.models || [];
+}
+
+export async function getModalStatus(): Promise<import("../types").ModalStatus> {
+  return fetchJSON("/infrastructure/modal/status");
+}
+
+export async function deployModal(body: Record<string, unknown>): Promise<any> {
+  return fetchJSON("/infrastructure/modal/deploy", {
+    method: "POST",
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export async function destroyModal(): Promise<any> {
+  return fetchJSON("/infrastructure/modal/destroy", { method: "POST", body: JSON.stringify({}) });
+}
+
+async function* streamSse(path: string): AsyncGenerator<any, void, undefined> {
+  const token = getPersistedToken();
+  const resp = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!resp.ok || !resp.body) {
+    const txt = await resp.text().catch(() => "");
+    throw new Error(`HTTP ${resp.status}: ${txt}`);
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const frames = buf.split("\n\n");
+    buf = frames.pop() || "";
+    for (const frame of frames) {
+      const line = frame.split("\n").find((part) => part.startsWith("data:"));
+      if (!line) continue;
+      const raw = line.slice(5).trim();
+      if (!raw || raw === "[DONE]") continue;
+      yield JSON.parse(raw);
+    }
+  }
+}
+
+export function streamModalDeploy(): AsyncGenerator<any, void, undefined> {
+  return streamSse("/infrastructure/modal/deploy/stream");
+}
+
+export function streamIngestionJob(
+  docId: string,
+  corpusId?: string,
+): AsyncGenerator<any, void, undefined> {
+  const query = corpusId ? `?corpus_id=${encodeURIComponent(corpusId)}` : "";
+  return streamSse(`/ingestion/jobs/${encodeURIComponent(docId)}/stream${query}`);
+}
+
+export async function deleteDocument(corpusId: string, docId: string): Promise<{ success?: boolean }> {
+  return fetchJSON(`/corpora/${encodeURIComponent(corpusId)}/documents/${encodeURIComponent(docId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function backfillDocumentGraph(
+  corpusId: string,
+  docId: string,
+): Promise<{ status: string; failed_chunks?: number; [key: string]: unknown }> {
+  return fetchJSON(`/corpora/${encodeURIComponent(corpusId)}/documents/${encodeURIComponent(docId)}/graph-backfill`, {
+    method: "POST",
+  });
+}
+
+export async function warmGraphCache(corpusId: string): Promise<Record<string, unknown>> {
+  return fetchJSON(`/corpora/${encodeURIComponent(corpusId)}/graph-cache/warm`, { method: "POST" });
+}
+
+export async function listSkills(): Promise<import("../types").Skill[]> {
+  return fetchJSON("/skills");
+}
+
+export async function createSkill(body: import("../types").SkillCreate): Promise<import("../types").Skill> {
+  return fetchJSON("/skills", { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function updateSkill(
+  skillId: string,
+  body: import("../types").SkillUpdate,
+): Promise<import("../types").Skill> {
+  return fetchJSON(`/skills/${encodeURIComponent(skillId)}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+export async function deleteSkill(skillId: string): Promise<{ success: boolean }> {
+  return fetchJSON(`/skills/${encodeURIComponent(skillId)}`, { method: "DELETE" });
+}
+
+export async function getMcpInfo(): Promise<McpInfo> {
+  return fetchJSON("/mcp/info");
+}
+
+export async function discoverGraph(
+  body: import("../types").GraphDiscoverRequest,
+): Promise<import("../types").GraphDiscoverResponse> {
+  return fetchJSON("/graph/discover", { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function listGraphSessions(corpusId?: string | null): Promise<import("../types").GraphDiscoverSession[]> {
+  const qs = corpusId ? `?corpus_id=${encodeURIComponent(corpusId)}` : "";
+  return fetchJSON(`/graph/sessions${qs}`);
+}
+
+export async function getGraphSession(sessionId: string): Promise<import("../types").GraphDiscoverSessionDetail> {
+  return fetchJSON(`/graph/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+export async function findGraphResumeCandidate(
+  body: import("../types").GraphResumeCandidateRequest,
+): Promise<import("../types").GraphResumeCandidateResponse> {
+  return fetchJSON("/graph/resume-candidate", { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function getGraphSuggestions(corpusId: string): Promise<import("../types").GraphSuggestionsResponse> {
+  return fetchJSON(`/graph/suggestions?corpus_id=${encodeURIComponent(corpusId)}`);
+}
+
+export async function deleteGraphSession(sessionId: string): Promise<{ success?: boolean }> {
+  return fetchJSON(`/graph/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+}
+
+export async function getGraphOverview(
+  corpusId: string,
+  maxConcepts = 80,
+  maxEdges = 220,
+): Promise<FullGraphResponse> {
+  const qs = new URLSearchParams({ max_concepts: String(maxConcepts), max_edges: String(maxEdges) });
+  return fetchJSON(`/corpora/${encodeURIComponent(corpusId)}/graph/overview?${qs}`);
+}
+
+export async function getFullCorpusGraph(
+  corpusId: string,
+  maxNodes = 20000,
+  maxEdges = 60000,
+): Promise<FullGraphResponse> {
+  const qs = new URLSearchParams({ max_nodes: String(maxNodes), max_edges: String(maxEdges) });
+  return fetchJSON(`/corpora/${encodeURIComponent(corpusId)}/graph/full?${qs}`);
+}
