@@ -1,0 +1,177 @@
+{
+  "physics_simulation": {
+    "members": [
+      "box2d",
+      "pbox2d",
+      "jbox2d",
+      "matter.js",
+      "pymunk",
+      "bullet physics",
+      "toxiclibs physics",
+      "toxiclibs verletphysics",
+      "verletphysics"
+    ],
+    "synonyms": ["physics simulation", "physics engine", "particle physics", "rigid body", "verlet physics"]
+  },
+  "creative_coding": {
+    "members": [
+      "processing",
+      "p5.js",
+      "p5js",
+      "nature of code",
+      "generative design",
+      "creative coding",
+      "processing sketch",
+      "pvector",
+      "mover",
+      "arraylist",
+      "particlesystem",
+      "particle system"
+    ],
+    "synonyms": ["creative coding", "generative art", "processing sketch", "visual programming", "creative coding simulation"]
+  },
+  "cymatics": {
+    "members": ["chladni", "chladni patterns", "cymatics", "nodal pattern"],
+    "synonyms": ["cymatics", "chladni", "vibration pattern", "oscillation", "frequency pattern"]
+  },
+  "generative_ai": {
+    "members": [
+      "generative ai",
+      "gen ai",
+      "genai",
+      "llm",
+      "large language model",
+      "prompting",
+      "diffusion",
+      "openai",
+      "chatgpt",
+      "mistral",
+      "qwen",
+      "deepseek"
+    ],
+    "synonyms": ["generative ai", "large language model", "ai model", "prompt engineering", "neural generation"]
+  },
+  "identity_extraction": {
+    "members": [
+      "identity extraction",
+      "identity extraction app",
+      "user profile",
+      "profile extraction",
+      "pii",
+      "personal information",
+      "user data",
+      "personalization",
+      "module system",
+      "signal extraction pipeline",
+      "user pattern profile",
+      "behavioral signal",
+      "attachment style",
+      "love language",
+      "conflict approach",
+      "dominant pattern"
+    ],
+    "synonyms": ["identity extraction", "user information", "user data", "profile", "privacy", "pii"]
+  },
+  "graph_rag": {
+    "members": [
+      "graphrag",
+      "graph rag",
+      "knowledge graph",
+      "neo4j",
+      "qdrant",
+      "vector search",
+      "retrieval augmented generation",
+      "rag"
+    ],
+    "synonyms": ["graph rag", "knowledge graph", "vector retrieval", "semantic search", "hybrid retrieval"]
+  },
+  "app_architecture": {
+    "members": [
+      "architecture feasibility report",
+      "flutter",
+      "mobile app",
+      "app architecture",
+      "local model",
+      "local models",
+      "react native",
+      "expo",
+      "sqlite",
+      "context injection",
+      "ghost memory architecture",
+      "stateless session"
+    ],
+    "synonyms": ["app architecture", "mobile architecture", "feasibility report", "local ai"]
+  },
+  "council_chat": {
+    "members": [
+      "the council",
+      "council",
+      "gate c",
+      "message limit",
+      "soft banner",
+      "retry button",
+      "begin session",
+      "context injection",
+      "ghost memory architecture"
+    ],
+    "synonyms": ["council chat", "relationship chat", "local council", "message limit", "gate c"]
+  },
+  "book_generation": {
+    "members": [
+      "me book",
+      "prose book",
+      "book json",
+      "personal chaptered book",
+      "claude api",
+      "json snapshot",
+      "annual synthesis",
+      "significant passages",
+      "blind spots",
+      "core dimensions",
+      "chapter spec",
+      "chapter outline",
+      "generated chapter"
+    ],
+    "synonyms": ["book generation", "generated book", "personal book", "annual synthesis", "book json"]
+  },
+  "mobile_ai": {
+    "members": [
+      "on device ai",
+      "local model",
+      "local llm",
+      "gemma 2b",
+      "llama 3.2 3b",
+      "lfm2.5 thinking",
+      "distilbert",
+      "tflite classifier",
+      "executorch"
+    ],
+    "synonyms": ["mobile ai", "on device ai", "local ai", "local llm", "offline ai"]
+  },
+  "prd_architecture": {
+    "members": [
+      "architecture feasibility report",
+      "core stack",
+      "module system",
+      "react native",
+      "expo",
+      "sqlite",
+      "claude api",
+      "local model",
+      "max context payload"
+    ],
+    "synonyms": ["prd architecture", "product architecture", "architecture feasibility", "technical feasibility"]
+  },
+  "source_management": {
+    "members": [
+      "source slot",
+      "source activation",
+      "active chat",
+      "library drawer",
+      "book selection",
+      "kg context",
+      "source router"
+    ],
+    "synonyms": ["source management", "source selection", "active source", "library source"]
+  }
+}

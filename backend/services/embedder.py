@@ -10,21 +10,19 @@ Architecture invariants:
   - ALL providers must serve the corpus's frozen `embedding_model_id` at
     `embedding_dimension`. The dispatcher asserts dim on every response row;
     mismatch raises before any vector lands in Qdrant.
-  - `embed_query` ALWAYS runs local — query latency stays hot-local regardless
-    of the corpus's ingestion embed_mode.
-  - Local embedder must be deployed with the same model weights any corpus's
-    cloud path serves. Deployment-time constraint, enforced by the corpus
-    creation probe (see `probe_endpoint`).
+  - `embed_query` uses the corpus-frozen provider when config is supplied so
+    API-ingested corpora query the same vector space.
+  - Local fallback is opt-in only. API/Modal failures raise by default instead
+    of silently moving a large ingest onto the user's GPU.
 
 Selection:
   worker.py passes `mode=ingestion_config.embed_mode` + `expected_dim` +
   `expected_model_id` into `embed_batch`. On mode-provider availability
-  failure, dispatcher falls back to local_st with a logged warning (never
-  silently — the log is the signal that the cloud path is degraded).
+  failure, dispatcher raises unless EMBED_ALLOW_LOCAL_FALLBACK=true.
 """
 
-import logging
 import asyncio
+import logging
 import time
 from typing import Any
 
@@ -228,6 +226,7 @@ async def _embed_batch_api(
         expected_model_id=expected_model_id,
         timeout=settings.SILICONFLOW_TIMEOUT_SECONDS,
         provider_label="api",
+        request_dimensions=True,
     )
 
 
@@ -276,9 +275,49 @@ async def _embed_batch_api_pool(
         (batch_idx, start, texts[start : start + _BATCH_SIZE])
         for batch_idx, start in enumerate(range(0, len(texts), _BATCH_SIZE))
     ]
+    attempts: dict[int, int] = {batch_idx: 0 for batch_idx, _, _ in batches}
+    disabled_lanes: set[int] = set()
+    max_attempts = max(2, len(pool) + 1)
+    failures: list[str] = []
 
-    async def _run_batch(batch_idx: int, start: int, batch: list[str]):
-        entry_idx = batch_idx % len(pool)
+    def _lane_for(batch_idx: int, attempt: int) -> int | None:
+        for offset in range(len(pool)):
+            entry_idx = (batch_idx + attempt + offset) % len(pool)
+            if entry_idx not in disabled_lanes:
+                return entry_idx
+        return None
+
+    def _error_summary(exc: BaseException) -> str:
+        text = str(exc)
+        if isinstance(exc, httpx.HTTPStatusError):
+            text = f"HTTP {exc.response.status_code}: {exc.response.text[:180]}"
+        return text.replace("\n", " ")[:300]
+
+    def _is_lane_fatal(exc: BaseException) -> bool:
+        text = str(exc).lower()
+        if isinstance(exc, httpx.HTTPStatusError):
+            status = exc.response.status_code
+            if status in {401, 402, 403, 404}:
+                return True
+        fatal_markers = (
+            "invalid api key",
+            "unauthorized",
+            "insufficient balance",
+            "insufficient credits",
+            "not enough balance",
+            "model drift",
+            "dimension mismatch",
+            "model does not exist",
+            "model not found",
+        )
+        return any(marker in text for marker in fatal_markers)
+
+    async def _run_batch(
+        batch_idx: int,
+        start: int,
+        batch: list[str],
+        entry_idx: int,
+    ):
         entry = pool[entry_idx]
         url = entry["base_url"].rstrip("/")
         if not url.endswith("/embeddings"):
@@ -295,12 +334,77 @@ async def _embed_batch_api_pool(
                 expected_model_id=None,
                 timeout=get_settings().SILICONFLOW_TIMEOUT_SECONDS,
                 provider_label=f"embedding_pool:{entry['provider']}",
+                request_dimensions=True,
             )
-            return start, vectors
+            return batch_idx, start, vectors, entry_idx
 
-    results = await asyncio.gather(
-        *(_run_batch(batch_idx, start, batch) for batch_idx, start, batch in batches)
-    )
+    pending = list(batches)
+    results: list[tuple[int, list[list[float]]]] = []
+    while pending:
+        scheduled_meta: list[tuple[int, int, list[str], int]] = []
+        for batch_idx, start, batch in pending:
+            entry_idx = _lane_for(batch_idx, attempts[batch_idx])
+            if entry_idx is None:
+                failures.append(
+                    f"batch {batch_idx}: no healthy embedding API lanes remain"
+                )
+                continue
+            scheduled_meta.append((batch_idx, start, batch, entry_idx))
+        pending = []
+        if not scheduled_meta:
+            break
+
+        pass_results = await asyncio.gather(
+            *(
+                _run_batch(batch_idx, start, batch, entry_idx)
+                for batch_idx, start, batch, entry_idx in scheduled_meta
+            ),
+            return_exceptions=True,
+        )
+        for meta, item in zip(scheduled_meta, pass_results):
+            batch_idx, start, batch, entry_idx = meta
+            if not isinstance(item, BaseException):
+                _batch_idx, result_start, vectors, _entry_idx = item
+                results.append((result_start, vectors))
+                continue
+
+            attempts[batch_idx] += 1
+            entry = pool[entry_idx]
+            summary = _error_summary(item)
+            if _is_lane_fatal(item):
+                disabled_lanes.add(entry_idx)
+                logger.warning(
+                    "Embedding API lane disabled provider=%s model=%s error=%s",
+                    entry["provider"],
+                    entry["model"],
+                    summary,
+                )
+            else:
+                logger.warning(
+                    "Embedding API batch failed provider=%s model=%s attempt=%d/%d error=%s",
+                    entry["provider"],
+                    entry["model"],
+                    attempts[batch_idx],
+                    max_attempts,
+                    summary,
+                )
+
+            if (
+                attempts[batch_idx] < max_attempts
+                and _lane_for(batch_idx, attempts[batch_idx]) is not None
+            ):
+                pending.append((batch_idx, start, batch))
+            else:
+                failures.append(
+                    f"batch {batch_idx} via {entry['provider']}: {summary}"
+                )
+        if pending:
+            await asyncio.sleep(min(0.5 * max(attempts.values()), 3.0))
+
+    if failures:
+        raise RuntimeError(
+            "embedding API pool failed after retries: " + "; ".join(failures[:5])
+        )
     ordered: list[list[float] | None] = [None] * len(texts)
     for start, vectors in results:
         ordered[start : start + len(vectors)] = vectors
@@ -459,6 +563,7 @@ async def _embed_batch_modal(
         expected_model_id=expected_model_id,
         timeout=settings.MODAL_TIMEOUT_SECONDS,
         provider_label="Modal",
+        request_dimensions=False,
     )
 
 
@@ -481,7 +586,14 @@ async def _embed_batch_siliconflow(
         expected_model_id=expected_model_id,
         timeout=settings.SILICONFLOW_TIMEOUT_SECONDS,
         provider_label="SiliconFlow",
+        request_dimensions=True,
     )
+
+
+def _provider_supports_dimensions(model_hint: str) -> bool:
+    """Return true for embedding models where the API accepts dimensions."""
+    model = (model_hint or "").lower()
+    return "qwen3-embedding" in model or "text-embedding-3" in model
 
 
 async def _post_openai_compatible(
@@ -494,6 +606,7 @@ async def _post_openai_compatible(
     expected_model_id: str | None,
     timeout: float,
     provider_label: str,
+    request_dimensions: bool = False,
 ) -> list[list[float]]:
     """
     Shared OpenAI-compatible /embeddings POST helper used by all cloud paths.
@@ -504,10 +617,13 @@ async def _post_openai_compatible(
     async with httpx.AsyncClient(timeout=timeout) as client:
         for i in range(0, len(texts), _BATCH_SIZE):
             batch = texts[i : i + _BATCH_SIZE]
+            payload: dict[str, Any] = {"input": batch, "model": model_hint}
+            if request_dimensions and _provider_supports_dimensions(model_hint):
+                payload["dimensions"] = expected_dim
             resp = await client.post(
                 url,
                 headers=headers,
-                json={"input": batch, "model": model_hint},
+                json=payload,
             )
             resp.raise_for_status()
             data = resp.json()

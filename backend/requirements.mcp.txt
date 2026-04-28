@@ -1,0 +1,45 @@
+# Polymath MCP Sidecar (Phase 8) — Slim Requirements
+#
+# Keeps deps independent from backend/requirements.txt so the MCP SDK's
+# anyio>=4 requirement doesn't conflict with fastapi==0.104.1 (which caps
+# anyio<4). MCP doesn't need FastAPI — the streamable-HTTP server uses
+# Starlette directly. Document parsers, slowapi, transformers, etc. are
+# also excluded (not in any MCP code path).
+
+# === MCP SDK ===
+mcp>=1.2.0
+uvicorn[standard]>=0.27.0
+starlette>=0.36.0
+
+# === Pydantic (loosened above backend's 2.1.0 pin — mcp 1.27 requires
+#     pydantic-settings>=2.5.2; pydantic itself stays compatible). ===
+pydantic>=2.7.0,<3.0.0
+pydantic-settings>=2.5.2
+email-validator>=2.0.0   # services.auth UserPublic uses EmailStr-style fields
+
+# === Datastores (matches backend pins) ===
+motor==3.3.2
+pymongo==4.6.0
+# Bumped above backend's 1.7.0 pin — needs collection_exists() (added in 1.8).
+# Backend image was built before qdrant_writer started using it; MCP image needs it.
+qdrant-client>=1.10.0
+neo4j==5.17.0
+redis==5.0.1
+
+# === HTTP / LLM client (newer httpx — allows anyio>=4) ===
+httpx>=0.27.0
+
+# === Auth — services.auth singleton needs these at module import time ===
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+# passlib 1.7.4 + bcrypt>=4.0 → ValueError on backend detection. Pin to 3.x.
+bcrypt<4.0
+
+# === Token counting (services.context_manager imports tiktoken at module level) ===
+tiktoken==0.5.2
+
+# === Discourse / graph analytics (services.discourse pulls networkx) ===
+networkx==3.2.1
+
+# === Misc dotenv loader (Pydantic Settings reads ../.env) ===
+python-dotenv==1.0.0

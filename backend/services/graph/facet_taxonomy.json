@@ -1,0 +1,103 @@
+{
+  "Artifact": {
+    "Library": {
+      "parent": "CodeArtifact",
+      "synonyms": ["lib", "library", "package", "sdk", "module", "framework", "dll", "so", "jar", "npm", "pypi"],
+      "known": ["box2d", "matterjs", "matter js", "toxiclibs", "p5js", "p5 js", "processing", "threejs", "three js", "react"]
+    },
+    "Tool": {
+      "parent": "CodeArtifact",
+      "synonyms": ["tool", "utility", "cli", "editor", "compiler", "runner"],
+      "known": []
+    },
+    "Snippet": {
+      "parent": "CodeArtifact",
+      "synonyms": ["snippet", "code snippet", "function", "class"],
+      "known": []
+    },
+    "Class": {
+      "parent": "CodeArtifact",
+      "synonyms": ["class", "object class", "code class"],
+      "known": ["pvector", "mover", "arraylist", "particlesystem"]
+    },
+    "Dataset": {
+      "parent": "DataArtifact",
+      "synonyms": ["dataset", "data set", "corpus", "data"],
+      "known": [
+        "raw events",
+        "module data",
+        "signals",
+        "json snapshot",
+        "user pattern profile",
+        "significant passages",
+        "blind spots",
+        "core dimensions",
+        "profile json"
+      ]
+    },
+    "Model": {
+      "parent": "MLArtifact",
+      "synonyms": ["model", "classifier", "embedding", "neural network"],
+      "known": ["llm", "generative ai", "distilbert", "tflite classifier", "lfm2.5 thinking"]
+    }
+  },
+  "Product": {
+    "Library": {
+      "parent": "CodeArtifact",
+      "synonyms": ["lib", "library", "package", "sdk", "module"],
+      "known": ["box2d", "pbox2d", "jbox2d", "toxiclibs", "p5js", "p5 js", "matterjs", "matter js"]
+    },
+    "Framework": {
+      "parent": "Product",
+      "synonyms": ["framework", "engine"],
+      "known": ["flutter", "react", "processing", "react native", "expo", "executorch"]
+    },
+    "App": {
+      "parent": "Product",
+      "synonyms": ["app", "application", "mobile app", "web app"],
+      "known": ["identity extraction app", "the council", "active chat", "library drawer"]
+    },
+    "Service": {
+      "parent": "Product",
+      "synonyms": ["api", "service", "platform", "server"],
+      "known": ["claude api", "openai api", "mistral api"]
+    },
+    "Model": {
+      "parent": "MLArtifact",
+      "synonyms": ["model", "classifier", "llm", "local model"],
+      "known": ["gemma 2b", "llama 3.2 1b", "llama 3.2 3b", "lfm2.5 thinking", "local model"]
+    }
+  },
+  "Document": {
+    "Report": {
+      "parent": "Document",
+      "synonyms": ["report", "feasibility report", "analysis", "assessment"],
+      "known": ["architecture feasibility report"]
+    },
+    "DataObject": {
+      "parent": "DataArtifact",
+      "synonyms": ["json", "schema", "payload", "snapshot"],
+      "known": ["book json", "json snapshot", "chapter spec", "chapter outline"]
+    },
+    "Book": {
+      "parent": "Document",
+      "synonyms": ["book", "textbook", "guide", "handbook"],
+      "known": ["nature of code", "generative design", "me book", "prose book", "personal chaptered book"]
+    },
+    "Paper": {
+      "parent": "Document",
+      "synonyms": ["paper", "whitepaper", "article", "publication"],
+      "known": []
+    },
+    "Tutorial": {
+      "parent": "Document",
+      "synonyms": ["tutorial", "lesson", "walkthrough"],
+      "known": []
+    },
+    "Spec": {
+      "parent": "Document",
+      "synonyms": ["prd", "spec", "product requirements", "requirements document"],
+      "known": []
+    }
+  }
+}

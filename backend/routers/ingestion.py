@@ -13,6 +13,8 @@ Endpoints:
 import asyncio
 import json
 import logging
+import re
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -33,10 +35,41 @@ from utils.streaming import build_sse_done, build_sse_error
 # add_done_callback.
 _INGEST_BG_TASKS: set[asyncio.Task] = set()
 _BACKFILL_BG_TASKS: set[asyncio.Task] = set()
+_SECRET_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b")
 
 # Keep this below frontend/nginx.conf's 300s proxy timeout. OCR is disabled,
 # but layout-heavy documents can still take time before doc_id exists.
 PARSE_DOC_ID_WAIT_SECONDS = 240.0
+
+
+def _safe_ingest_error(exc: Exception) -> str:
+    message = _SECRET_RE.sub("sk-...[redacted]", str(exc))
+    return message[:1000] or exc.__class__.__name__
+
+
+async def _mark_ingest_failed(
+    *,
+    doc_id: str,
+    corpus_id: str,
+    user_id: str,
+    exc: Exception,
+) -> None:
+    db = ingestion_service.db
+    if db is None:
+        return
+    message = _safe_ingest_error(exc)
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id, "user_id": user_id},
+        {
+            "$set": {
+                "error": message,
+                "updated_at": datetime.utcnow(),
+            },
+            "$addToSet": {
+                "write_state.warnings": f"Ingest failed: {message}",
+            },
+        },
+    )
 
 
 class CorpusUpdate(BaseModel):
@@ -483,8 +516,11 @@ async def ingest_document(
     # client opens the progress stream. Text-native files usually resolve in a
     # few seconds, but layout-heavy documents can take longer.
     doc_id_future: asyncio.Future[str] = asyncio.get_event_loop().create_future()
+    resolved_doc_id: str | None = None
 
     def _resolve_doc_id(did: str) -> None:
+        nonlocal resolved_doc_id
+        resolved_doc_id = did
         if not doc_id_future.done():
             doc_id_future.set_result(did)
 
@@ -502,6 +538,21 @@ async def ingest_document(
             )
         except Exception as exc:
             logger.exception("Ingest failed for corpus %s: %s", corpus_id, exc)
+            if resolved_doc_id:
+                try:
+                    await _mark_ingest_failed(
+                        doc_id=resolved_doc_id,
+                        corpus_id=corpus_id,
+                        user_id=current_user["user_id"],
+                        exc=exc,
+                    )
+                except Exception as mark_exc:
+                    logger.warning(
+                        "Failed to persist ingest failure doc=%s corpus=%s: %s",
+                        resolved_doc_id[:12],
+                        corpus_id,
+                        mark_exc,
+                    )
             # Surface the error through the future so the HTTP response
             # doesn't hang if parse itself failed.
             if not doc_id_future.done():

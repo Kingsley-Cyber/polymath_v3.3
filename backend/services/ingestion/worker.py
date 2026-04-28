@@ -3,7 +3,7 @@ Ingestion pipeline worker — locked pipeline order:
 
   1. Parse     → docling_adapter.parse_document
   2. Chunk     → tier_chunker.chunk (parents + children)
-  3. Ghosts ∥  → asyncio.gather(ghost_a, ghost_b)
+  3. Ghosts    → summary then extraction under the model-phase semaphore
                  Ghost A runs iff chunk_summarization=True.
                  Ghost B runs iff use_neo4j=True.
                  Either branch is a no-op (returns None) when its flag is off.
@@ -74,7 +74,7 @@ class GhostBFailure(RuntimeError):
 
 @dataclass
 class GhostRunResult:
-    """Result envelope for the parallel Ghost A/Ghost B phase.
+    """Result envelope for the Ghost A/Ghost B model phase.
 
     Iteration intentionally yields only `(summaries, ghost_b_out)` to preserve
     older tests and callers that unpacked the pre-metrics two-tuple. New code
@@ -592,7 +592,12 @@ async def _run_ghosts_parallel(
             )
         return results
 
-    summaries, ghost_b_out = await asyncio.gather(_a_branch(), _b_branch())
+    # Keep these branches sequential inside a document. User-configured
+    # summary/extraction pool concurrency already fans out within each branch;
+    # running both branches at once doubles provider pressure and makes
+    # high-throughput API settings unsafe during batch ingest.
+    summaries = await _a_branch()
+    ghost_b_out = await _b_branch()
     if ghost_b_metrics is None:
         ghost_b_metrics = _ghost_b_metrics_for_skipped(ghost_b_out)
     return GhostRunResult(
@@ -1030,15 +1035,6 @@ async def run_ingest_job(
         source_tier.value,
     )
 
-    # Phase K — signal the HTTP endpoint that the doc_id is resolved. The
-    # endpoint awaits this to return to the client while the rest of the
-    # pipeline continues in the background.
-    if on_doc_id is not None:
-        try:
-            on_doc_id(doc_id)
-        except Exception as _exc:
-            logger.debug("on_doc_id callback raised: %s", _exc)
-
     # ── Phase 2: Chunk ───────────────────────────────────────────────────
     t0 = time.monotonic()
     parents, children, injected_headers = tier_chunker.chunk(
@@ -1095,7 +1091,15 @@ async def run_ingest_job(
             ws=ws,
         )
 
-    # ── Phase 3: Ghosts in parallel ──────────────────────────────────────
+    # Phase K — signal the HTTP endpoint only after a progress row exists, so
+    # the frontend/SSE never observes a real running job as "not found".
+    if on_doc_id is not None:
+        try:
+            on_doc_id(doc_id)
+        except Exception as _exc:
+            logger.debug("on_doc_id callback raised: %s", _exc)
+
+    # ── Phase 3: Ghost model phases ──────────────────────────────────────
     async with _MODEL_PHASE_SEMAPHORE:
         t0 = time.monotonic()
         ghost_result = await _run_ghosts_parallel(

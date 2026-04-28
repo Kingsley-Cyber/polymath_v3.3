@@ -1,0 +1,205 @@
+{
+  "Module": {
+    "parent": "ProductArchitecture",
+    "root": "PRD",
+    "known": [
+      "module system",
+      "core stack",
+      "signal extraction pipeline",
+      "context router",
+      "identity module",
+      "identity_module",
+      "conflict module",
+      "conflict_module",
+      "module play",
+      "ghost memory architecture",
+      "extraction pipeline",
+      "summarization pipeline",
+      "retrieval pipeline",
+      "synthesis pipeline",
+      "graph query pipeline",
+      "source router"
+    ],
+    "synonyms": ["module", "pipeline", "router", "engine", "layer", "stack", "orchestrator"]
+  },
+  "Feature": {
+    "parent": "ProductBehavior",
+    "root": "PRD",
+    "known": [
+      "the council",
+      "council",
+      "knowledge graph homescreen",
+      "kg homescreen",
+      "retry button",
+      "upsell card",
+      "soft banner",
+      "begin session",
+      "explore modules",
+      "message limit state",
+      "active chat",
+      "source slot",
+      "source activation",
+      "book selection",
+      "library drawer"
+    ],
+    "synonyms": ["feature", "chat feature", "homescreen", "button", "banner", "cta", "entry", "flow", "unlock", "activation"]
+  },
+  "Screen": {
+    "parent": "ProductExperience",
+    "root": "PRD",
+    "known": [
+      "council entry",
+      "message limit state",
+      "me book annual synthesis screen",
+      "library",
+      "homescreen",
+      "active chat screen",
+      "source selection screen",
+      "library drawer"
+    ],
+    "synonyms": ["screen", "view", "state", "modal", "panel", "page"]
+  },
+  "DataObject": {
+    "parent": "ProductData",
+    "root": "PRD",
+    "known": [
+      "book json",
+      "json snapshot",
+      "user pattern profile",
+      "raw events",
+      "module data",
+      "signals",
+      "kg context",
+      "kg_context",
+      "version delta",
+      "version_delta",
+      "significant passages",
+      "blind spots",
+      "core dimensions",
+      "profile json",
+      "source object",
+      "chapter spec",
+      "chapter outline"
+    ],
+    "synonyms": ["json", "profile", "snapshot", "data", "schema", "payload", "events", "signals", "context", "object", "metadata"]
+  },
+  "AIModel": {
+    "parent": "AIArchitecture",
+    "root": "PRD",
+    "known": [
+      "gemma 2b",
+      "llama 3.2 3b",
+      "llama 32 3b",
+      "lfm2.5 thinking",
+      "lfm25 thinking",
+      "lfm 2.5 thinking",
+      "llama 3.2 1b",
+      "llama 32 1b",
+      "local model",
+      "on device ai",
+      "on-device ai",
+      "distilbert",
+      "tflite classifier",
+      "classifier"
+    ],
+    "synonyms": ["model", "classifier", "llm", "local ai", "on device ai", "tflite", "embedding"]
+  },
+  "CloudService": {
+    "parent": "AIArchitecture",
+    "root": "PRD",
+    "known": ["claude api", "openai api", "mistral api"],
+    "synonyms": ["api", "cloud service", "server", "endpoint"]
+  },
+  "Constraint": {
+    "parent": "ProductRule",
+    "root": "PRD",
+    "known": [
+      "gate c",
+      "message limit",
+      "15 messages",
+      "first token latency",
+      "max context payload",
+      "offline capability",
+      "no data sent to server",
+      "minimum device specs",
+      "android 10",
+      "4gb ram",
+      "token budget",
+      "context window",
+      "max prompt budget"
+    ],
+    "synonyms": ["limit", "constraint", "requirement", "latency", "quota", "gate", "guardrail", "offline", "privacy"]
+  },
+  "Risk": {
+    "parent": "DeliveryPlanning",
+    "root": "PRD",
+    "known": ["critical risk", "architecture risk", "feasibility risk"],
+    "synonyms": ["risk", "blocker", "unknown", "bottleneck", "failure mode", "concern"]
+  },
+  "Milestone": {
+    "parent": "DeliveryPlanning",
+    "root": "PRD",
+    "known": ["v1.0", "v1.1", "v1.0 beta", "public launch", "phase 1", "phase 2", "phase 3"],
+    "synonyms": ["phase", "milestone", "launch", "beta", "release"]
+  },
+  "ArchitectureDecision": {
+    "parent": "ProductArchitecture",
+    "root": "PRD",
+    "known": [
+      "react native",
+      "expo",
+      "context injection",
+      "stateless session",
+      "local llm",
+      "sqlite",
+      "on-device first",
+      "react native expo",
+      "local storage",
+      "vector store"
+    ],
+    "synonyms": ["architecture", "decision", "approach", "integration", "storage", "stateless", "native framework"]
+  },
+  "OutputArtifact": {
+    "parent": "ProductOutput",
+    "root": "PRD",
+    "known": [
+      "me book",
+      "prose book",
+      "personal chaptered book",
+      "knowledge graph artifact",
+      "generated chapter",
+      "annual book",
+      "personal book"
+    ],
+    "synonyms": ["output", "artifact", "generated book", "report artifact", "graph artifact"]
+  },
+  "Persona": {
+    "parent": "ProductStrategy",
+    "root": "PRD",
+    "known": ["target audience", "reflective adults", "intellectually curious adults"],
+    "synonyms": ["persona", "audience", "customer", "segment"]
+  },
+  "UserSignal": {
+    "parent": "ProductData",
+    "root": "PRD",
+    "known": [
+      "latency signal",
+      "behavioral signal",
+      "attachment style",
+      "attachment_style",
+      "love language",
+      "love_language",
+      "conflict approach",
+      "conflict_approach",
+      "dominant pattern",
+      "dominant_pattern"
+    ],
+    "synonyms": ["signal", "pattern", "trait", "style", "preference", "behavioral"]
+  },
+  "PricingRule": {
+    "parent": "ProductStrategy",
+    "root": "PRD",
+    "known": ["upsell card", "subscription", "monetization model"],
+    "synonyms": ["pricing", "monetization", "subscription", "upsell", "plan"]
+  }
+}

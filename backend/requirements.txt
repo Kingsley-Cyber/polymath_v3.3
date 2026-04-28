@@ -1,0 +1,82 @@
+# Polymath RAG v3.3 - Backend Dependencies
+# Python 3.11+ required
+
+# === FastAPI Core ===
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# === Pydantic ===
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# === MongoDB ===
+motor==3.3.2
+pymongo==4.6.0
+
+# === Vector Database ===
+# Bumped above 1.7 — qdrant_writer.py uses collection_exists() (added in 1.8).
+# Older 1.7.0 image silently worked because that code path was lazy/never exercised.
+qdrant-client>=1.10.0
+
+# === Graph Database ===
+neo4j==5.17.0
+
+# === LLM/Embedding Clients ===
+litellm==1.31.3
+httpx==0.25.2
+openai==1.6.1
+
+# === Modal CLI (for `modal token info` verify-token endpoint) ===
+# We don't run Modal apps from the backend; we only shell out to the CLI
+# with user-supplied MODAL_TOKEN_ID / MODAL_TOKEN_SECRET to verify creds.
+modal==0.64.170
+
+# === Token Counting ===
+tiktoken==0.5.2
+transformers==4.36.2
+
+# === Document Parsing ===
+pypdf==4.2.0
+beautifulsoup4==4.12.3
+# Universal catch-all via unstructured partitioner (docx, pptx, xlsx, epub, odt, rtf, ...)
+unstructured==0.12.6
+python-docx==1.1.0
+python-pptx==0.6.23
+openpyxl==3.1.2
+ebooklib==0.18
+
+# === Discourse graph (Phase 17.3) ===
+# Networkx powers co-occurrence graph analytics: betweenness centrality,
+# modularity-based clustering, structural-hole detection. No GDS dependency.
+networkx==3.2.1
+
+# === Graph Analysis (Mission Control — P1 domain emergence) ===
+# numpy pinned explicitly; previously pulled in transitively by qdrant-client.
+# scikit-learn ships HDBSCAN natively as of 1.3 (used for domain emergence)
+# plus k-means as the small-corpus fallback. No external hdbscan dep needed —
+# the standalone `hdbscan` package requires a C build that fails in slim.
+numpy>=1.26,<2.0
+scikit-learn==1.3.2
+
+# === Utilities ===
+python-dotenv==1.0.0
+redis==5.0.1
+pydantic[email]==2.5.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+# passlib 1.7.4's internal bcrypt backend detector breaks against bcrypt>=4
+# (pip pulls 4.x on fresh installs). Pin the underlying lib to the 3.x line.
+bcrypt<4.0
+slowapi==0.1.9
+
+# NOTE: MCP SDK lives in backend/requirements.mcp.txt (used only by Dockerfile.mcp).
+# Kept separate because mcp>=1.2 requires anyio>=4, which conflicts with this
+# file's fastapi==0.104.1 (capped at anyio<4). Backend image is unaffected.
+
+# === Development ===
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.11.0
+isort==5.12.0
+mypy==1.7.0

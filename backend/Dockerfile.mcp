@@ -1,0 +1,35 @@
+# backend/Dockerfile.mcp
+# Polymath MCP sidecar (Phase 8). Same base image + same source tree as the
+# FastAPI backend; entrypoint runs the MCP server instead of uvicorn.
+
+FROM python:3.11-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Use the slim MCP-only requirements (avoids fastapi==0.104 anyio<4 cap that
+# conflicts with mcp>=1.2 needing anyio>=4). Backend deps not needed here.
+COPY requirements.mcp.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.mcp.txt
+
+COPY . .
+
+RUN groupadd --gid 1000 appuser && \
+    useradd --uid 1000 --gid appuser --shell /bin/bash --create-home appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
+EXPOSE 8765
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:8765/health || exit 1
+
+CMD ["python", "-m", "polymath_mcp.server"]
