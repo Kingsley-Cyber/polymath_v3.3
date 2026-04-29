@@ -19,6 +19,7 @@ script (`migrations/001_per_corpus_qdrant.py`). All hot-path writers and readers
 use `_col_for_corpus()`.
 """
 
+import asyncio
 import hashlib
 import logging
 import re
@@ -180,6 +181,105 @@ _CHUNK_PAYLOAD_INDEXES: tuple[str, ...] = (
 _SCHEMA_PAYLOAD_INDEXES: tuple[str, ...] = ("corpus_id", "kind", "term")
 
 
+async def _collection_exists_safe(
+    client: AsyncQdrantClient,
+    collection_name: str,
+) -> bool:
+    try:
+        return bool(await client.collection_exists(collection_name))
+    except Exception as exc:
+        logger.debug("Qdrant collection_exists failed for %s: %s", collection_name, exc)
+        return False
+
+
+async def _create_collection_with_retry(
+    client: AsyncQdrantClient,
+    *,
+    collection_name: str,
+    vectors_config,
+    sparse_vectors_config=None,
+    attempts: int = 3,
+) -> None:
+    """Create a collection with timeout tolerance.
+
+    Qdrant can complete the create server-side after the HTTP client times out.
+    On failure we immediately re-check existence and treat that as success.
+    """
+    if await _collection_exists_safe(client, collection_name):
+        logger.debug("Qdrant collection exists: %s", collection_name)
+        return
+
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            kwargs = {
+                "collection_name": collection_name,
+                "vectors_config": vectors_config,
+            }
+            if sparse_vectors_config is not None:
+                kwargs["sparse_vectors_config"] = sparse_vectors_config
+            await client.create_collection(**kwargs)
+            return
+        except Exception as exc:
+            last_exc = exc
+            if await _collection_exists_safe(client, collection_name):
+                logger.warning(
+                    "Qdrant create_collection failed/timed out but %s now exists",
+                    collection_name,
+                )
+                return
+            if attempt >= attempts:
+                break
+            logger.warning(
+                "Qdrant create_collection failed for %s (attempt %d/%d): %s",
+                collection_name,
+                attempt,
+                attempts,
+                exc,
+            )
+            await asyncio.sleep(0.75 * attempt)
+
+    assert last_exc is not None
+    raise last_exc
+
+
+async def _create_payload_index_with_retry(
+    client: AsyncQdrantClient,
+    *,
+    collection_name: str,
+    field_name: str,
+    attempts: int = 3,
+) -> None:
+    for attempt in range(1, attempts + 1):
+        try:
+            await client.create_payload_index(
+                collection_name=collection_name,
+                field_name=field_name,
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
+            return
+        except Exception as exc:
+            message = str(exc).lower()
+            if "already exists" in message:
+                logger.debug(
+                    "Qdrant payload index already exists for %s.%s",
+                    collection_name,
+                    field_name,
+                )
+                return
+            if attempt >= attempts:
+                raise
+            logger.warning(
+                "Qdrant create_payload_index failed for %s.%s (attempt %d/%d): %s",
+                collection_name,
+                field_name,
+                attempt,
+                attempts,
+                exc,
+            )
+            await asyncio.sleep(0.5 * attempt)
+
+
 async def _list_aliases_for_collection(
     client: AsyncQdrantClient, collection_name: str
 ) -> list[str]:
@@ -246,30 +346,32 @@ async def ensure_collections_for_corpus(
         # both; existing corpora (created before this change) keep their
         # legacy unnamed-dense layout and the lexical retriever falls
         # back to Mongo $text for those — see retriever/lexical.py.
-        await client.create_collection(
+        await _create_collection_with_retry(
+            client,
             collection_name=name,
             vectors_config={"dense": VectorParams(size=dim, distance=Distance.COSINE)},
             sparse_vectors_config={"sparse": SparseVectorParams(modifier=Modifier.IDF)},
         )
         for field_name in _CHUNK_PAYLOAD_INDEXES:
-            await client.create_payload_index(
+            await _create_payload_index_with_retry(
+                client,
                 collection_name=name,
                 field_name=field_name,
-                field_schema=PayloadSchemaType.KEYWORD,
             )
         logger.info("Created Qdrant collection: %s (corpus %s) [hybrid]", name, corpus_id)
 
     schemas_name = _col_for_corpus(corpus_id, "schemas")
     if not await client.collection_exists(schemas_name):
-        await client.create_collection(
+        await _create_collection_with_retry(
+            client,
             collection_name=schemas_name,
             vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
         )
         for field_name in _SCHEMA_PAYLOAD_INDEXES:
-            await client.create_payload_index(
+            await _create_payload_index_with_retry(
+                client,
                 collection_name=schemas_name,
                 field_name=field_name,
-                field_schema=PayloadSchemaType.KEYWORD,
             )
         logger.info("Created Qdrant collection: %s (corpus %s)", schemas_name, corpus_id)
 

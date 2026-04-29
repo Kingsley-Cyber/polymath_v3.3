@@ -20,8 +20,6 @@ _CORE_HEALTH_SERVICES = {
     "qdrant",
     "litellm",
     "redis",
-    "embedder",
-    "reranker",
 }
 _OLLAMA_MODEL_FIELDS = (
     "DEFAULT_COMPLETION_MODEL",
@@ -288,9 +286,15 @@ class HealthService:
             "litellm": self.check_litellm(),
             "ollama": self.check_ollama(),
             "redis": self.check_redis(),
-            "embedder": self.check_embedder(),
-            "reranker": self.check_reranker(),
         }
+
+        # Local model sidecars are opt-in Docker profiles. When disabled, skip
+        # their network probes so API-first deployments do not look broken or
+        # spend seconds waiting on DNS names that intentionally do not exist.
+        if settings.LOCAL_EMBEDDER_ENABLED:
+            tasks["embedder"] = self.check_embedder()
+        if settings.LOCAL_RERANKER_ENABLED:
+            tasks["reranker"] = self.check_reranker()
 
         # Add Neo4j only if enabled
         if settings.NEO4J_ENABLED:
@@ -324,6 +328,10 @@ class HealthService:
             required_services.add("siliconflow")
         if _ollama_required():
             required_services.add("ollama")
+        if settings.LOCAL_EMBEDDER_ENABLED:
+            required_services.add("embedder")
+        if settings.LOCAL_RERANKER_ENABLED:
+            required_services.add("reranker")
 
         # Determine overall status from required services only. Optional
         # services remain visible in `services` with their own status.

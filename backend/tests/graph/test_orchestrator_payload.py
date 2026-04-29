@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from models.schemas import SourceChunk
 from services.graph.analytics import CorpusMetrics, DomainCluster, DomainMap
 from services.graph.analytics import QueryAnchor, VectorScopeResult, resolve_query_scope
 from services.graph.overview import build_overview_graph
@@ -19,6 +20,7 @@ from services.graph.orchestrator import (
     _fallback_evidence_note,
     _scrub_synthesis_payload,
     _should_skip_synthesis,
+    _source_docs_from_retrieval_chunks,
 )
 
 
@@ -515,6 +517,21 @@ def test_insight_packet_caps_entities_and_carries_facets():
     assert any(stage["stage"] == "selected_edges" for stage in packet["trace_stages"])
     assert packet["evidence"][0]["source"]["author"] == "Studio Team"
     assert packet["evidence"][0]["source"]["section"] == "Movement Loop"
+    assert packet["graph_hint"]["shape"]["label"] == "focused neighborhood"
+    assert packet["graph_hint"]["gateways"][0]["name"] in {"Roblox obby", "Movement Loop"}
+    assert packet["graph_hint"]["supporting_statements"][0]["evidence_id"] == "e1"
+
+
+def test_compact_packet_uses_gateway_hint_not_strength_report():
+    result = _packet_result_fixture()
+    packet = _build_insight_packet(result, query="How does the obby loop work?", corpus_id="c1")
+    compact = _compact_packet_for_prompt(packet)
+
+    assert "graph_hint" in compact
+    assert "gateway_focus" in compact
+    assert "bridge_focus" not in compact
+    assert all("strength" not in item for item in compact["gateway_focus"])
+    assert "strong" not in str(compact["gateway_focus"]).lower()
 
 
 def test_insight_packet_marks_sparse_when_evidence_missing():
@@ -531,7 +548,7 @@ def test_insight_packet_marks_sparse_when_evidence_missing():
 
 
 def test_curated_evidence_drops_bibliography_without_least_bad_fallback():
-    evidence, rejected, temporal_support = _curated_evidence_rows(
+    evidence, rejected, temporal_support, rejection_reasons = _curated_evidence_rows(
         [
             {
                 "chunk_id": "bib:page178",
@@ -552,6 +569,56 @@ def test_curated_evidence_drops_bibliography_without_least_bad_fallback():
     assert evidence == []
     assert rejected == 1
     assert temporal_support is False
+    assert rejection_reasons["low_value_section"] == 1
+
+
+def test_curated_evidence_drops_negative_single_overlap_fallback():
+    evidence, rejected, _temporal_support, rejection_reasons = _curated_evidence_rows(
+        [
+            {
+                "chunk_id": "chunk:weak",
+                "doc_id": "doc:weak",
+                "text": (
+                    "The Council is a book club where the only member is the user, "
+                    "and the AI has read every book they chose to bring."
+                ),
+                "source_label": "Product_Creation_Document.docx",
+                "score": -2.7,
+            }
+        ],
+        query="explaining journalism in AI",
+    )
+
+    assert evidence == []
+    assert rejected == 1
+    assert rejection_reasons["query_terms"] == 1
+
+
+def test_retrieval_chunks_convert_to_capped_packet_source_docs():
+    chunks = [
+        SourceChunk(
+            chunk_id=f"chunk:{idx}",
+            parent_id=f"parent:{idx}",
+            doc_id="doc:mlkit",
+            corpus_id="c1",
+            text=f"ML Kit evidence child chunk {idx}",
+            summary=None,
+            score=1.0 - (idx * 0.01),
+            source_tier="retriever",
+            doc_name="ML Kit Guide.pdf",
+            heading_path=["Chapter 4", "Object Detection"],
+            provenance=[{"retriever": "test"}],
+        )
+        for idx in range(8)
+    ]
+
+    rows = _source_docs_from_retrieval_chunks(chunks, max_chunks=6)
+
+    assert len(rows) == 6
+    assert rows[0]["retriever"] == "shared_chat_retriever"
+    assert rows[0]["source_label"] == "ML Kit Guide.pdf"
+    assert rows[0]["heading_path"] == ["Chapter 4", "Object Detection"]
+    assert rows[-1]["chunk_id"] == "chunk:5"
 
 
 def test_insight_packet_quality_gate_withholds_bibliography_only_graph_context():
@@ -625,7 +692,9 @@ def test_compact_packet_prompt_includes_source_metadata_without_ingest_dates():
     assert compact["synthesis_priority"]["primary"] == ["bridges", "gaps", "emerging_signals"]
     assert isinstance(compact["gaps"][0], dict)
     assert compact["gaps"][0]["q"].startswith("How does onboarding")
-    assert "docs" in compact["signals"][0]
+    assert "why" in compact["signals"][0]
+    assert "docs" not in compact["signals"][0]
+    assert "mentions" not in compact["signals"][0]
 
 
 def test_scrub_synthesis_payload_drops_slash_titles_and_trends_without_temporal():
@@ -729,6 +798,68 @@ async def test_call_llm_synthesis_calls_model_even_when_packet_is_sparse(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_call_llm_synthesis_resolves_pool_model_credentials(monkeypatch):
+    from services.graph import orchestrator as orch_mod
+    from services import query_model_resolver as resolver_mod
+
+    calls: dict[str, object] = {}
+    valid_json = (
+        '{"headline":"Mistral resolved",'
+        '"themes":[],"bridges":[],"gaps":[],"emerging_signals":[],"next_moves":[],"evidence_notes":[]}'
+    )
+
+    async def _resolve_by_entry_id(user_id, entry_id):
+        calls["resolved"] = (user_id, entry_id)
+        return {
+            "model": "openai/mistral-large-latest",
+            "api_base": "https://api.mistral.ai/v1",
+            "api_key": "test-key",
+            "extra_params": {"custom": "value"},
+        }
+
+    class _StubLLM:
+        async def complete_sync(self, **kwargs):
+            calls["llm_kwargs"] = kwargs
+            return valid_json
+
+    monkeypatch.setattr(resolver_mod, "resolve_by_entry_id", _resolve_by_entry_id)
+    fake_module = SimpleNamespace(llm_service=_StubLLM())
+    monkeypatch.setitem(sys.modules, "services.llm", fake_module)
+
+    payload, reason = await orch_mod._call_llm_synthesis(
+        {
+            "sparse": False,
+            "temporal_support": False,
+            "query": "q",
+            "corpus_id": "c1",
+            "entities": [],
+            "edges": [],
+            "communities": [],
+            "evidence": [],
+            "anchors": [],
+            "trace_stages": [],
+            "gaps": [],
+            "signals": [],
+            "weak_links": [],
+            "interpretation": "",
+            "headline": "",
+        },
+        model_override="pool:mistral-entry",
+        user_id="user-1",
+    )
+
+    assert reason is None
+    assert payload is not None
+    assert calls["resolved"] == ("user-1", "mistral-entry")
+    llm_kwargs = calls["llm_kwargs"]
+    assert llm_kwargs["model"] == "openai/mistral-large-latest"
+    assert llm_kwargs["api_base"] == "https://api.mistral.ai/v1"
+    assert llm_kwargs["api_key"] == "test-key"
+    assert llm_kwargs["extra_params"]["custom"] == "value"
+    assert llm_kwargs["extra_params"]["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.asyncio
 async def test_call_llm_synthesis_falls_back_on_parse_failure(monkeypatch):
     from services.graph import orchestrator as orch_mod
 
@@ -761,6 +892,57 @@ async def test_call_llm_synthesis_falls_back_on_parse_failure(monkeypatch):
     )
     assert payload is None
     assert reason == "json_parse_failure"
+
+
+@pytest.mark.asyncio
+async def test_call_llm_synthesis_retries_compact_json_after_truncation(monkeypatch):
+    from services.graph import orchestrator as orch_mod
+
+    calls: list[dict[str, object]] = []
+    valid_json = (
+        '{"headline":"Compact retry recovered",'
+        '"themes":[{"title":"Recovered","body":"The second pass returned compact JSON.","evidence":["graph"],"related_ids":[]}],'
+        '"bridges":[],"gaps":[],"emerging_signals":[],"next_moves":[],"evidence_notes":[]}'
+    )
+
+    class _StubLLM:
+        async def complete_sync(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                return '{"headline":"cut off","themes":[{"title":"x","body":"unterminated'
+            return valid_json
+
+    fake_module = SimpleNamespace(llm_service=_StubLLM())
+    monkeypatch.setitem(sys.modules, "services.llm", fake_module)
+
+    payload, reason = await orch_mod._call_llm_synthesis(
+        {
+            "sparse": False,
+            "temporal_support": False,
+            "query": "q",
+            "corpus_id": "c1",
+            "entities": [],
+            "edges": [],
+            "communities": [],
+            "evidence": [],
+            "anchors": [],
+            "trace_stages": [],
+            "gaps": [],
+            "signals": [],
+            "weak_links": [],
+            "interpretation": "",
+            "headline": "",
+        },
+        model_override=None,
+    )
+
+    assert reason is None
+    assert payload is not None
+    assert payload["headline"] == "Compact retry recovered"
+    assert len(calls) == 2
+    assert calls[0]["max_tokens"] == orch_mod._SYNTHESIS_MAX_TOKENS
+    assert calls[1]["max_tokens"] == 1200
+    assert calls[1]["temperature"] == 0.1
 
 
 @pytest.mark.asyncio

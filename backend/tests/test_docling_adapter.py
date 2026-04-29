@@ -32,6 +32,99 @@ def adapter():
 
 
 @pytest.mark.asyncio
+async def test_pdf_with_ocr_disabled_uses_fast_text_path(adapter, monkeypatch):
+    """PDF + do_ocr=False bypasses Docling and uses local pypdf extraction."""
+    from services.ingestion import format_router
+
+    called = {}
+
+    def fake_route(data: bytes, filename: str = "", mime_hint: str = ""):
+        called["args"] = (data, filename, mime_hint)
+        return format_router.DecodeResult(
+            text="Page one text.\n\nPage two text.",
+            source_mime="application/pdf",
+            doc_id="fake",
+            pages=["Page one text.", "Page two text."],
+        )
+
+    monkeypatch.setattr(format_router, "route", fake_route)
+
+    result = await adapter.parse_document(
+        raw_bytes=b"%PDF fake",
+        filename="book.pdf",
+        mime="application/pdf",
+        do_ocr=False,
+    )
+
+    assert called["args"] == (b"%PDF fake", "book.pdf", "application/pdf")
+    assert result.source_format == "pypdf_fast_text"
+    assert result.source_tier.value == "ocr_ast"
+    assert result.sections == []
+    assert result.pages == ["Page one text.", "Page two text."]
+
+
+@pytest.mark.asyncio
+async def test_pdf_do_ocr_true_is_ignored_by_policy(adapter, monkeypatch):
+    """OCR is dead-off: even legacy true values stay on the pypdf text path."""
+    from services.ingestion import format_router
+
+    def fake_route(data: bytes, filename: str = "", mime_hint: str = ""):
+        return format_router.DecodeResult(
+            text="Sparse but available text.",
+            source_mime="application/pdf",
+            doc_id="fake",
+            pages=["Sparse but available text."],
+        )
+
+    async def fail_post(*_args, **_kwargs):  # pragma: no cover - should never run
+        raise AssertionError("Docling sidecar should not be called for PDF OCR")
+
+    monkeypatch.setattr(format_router, "route", fake_route)
+    monkeypatch.setattr(adapter.httpx.AsyncClient, "post", fail_post, raising=False)
+
+    result = await adapter.parse_document(
+        raw_bytes=b"%PDF fake",
+        filename="scanned.pdf",
+        mime="application/pdf",
+        do_ocr=True,
+    )
+
+    assert result.source_format == "pypdf_fast_text"
+    assert result.text == "Sparse but available text."
+
+
+def test_fast_pdf_text_gate_accepts_digital_pdf(adapter):
+    text = " ".join(["usable digital pdf text"] * 100)
+    result = adapter.DoclingParseResult(
+        text=text,
+        markdown=text,
+        sections=[],
+        pages=[text[:900], text[900:]],
+        has_structure=False,
+        source_tier=adapter.SourceTier.ocr_ast,
+        num_pages=2,
+        source_format="pypdf_fast_text",
+    )
+
+    assert adapter._fast_pdf_text_is_usable(result)
+
+
+def test_fast_pdf_text_gate_rejects_sparse_scanned_pdf(adapter):
+    result = adapter.DoclingParseResult(
+        text="  page 1  ",
+        markdown="  page 1  ",
+        sections=[],
+        pages=["", "page 1", ""],
+        has_structure=False,
+        source_tier=adapter.SourceTier.ocr_ast,
+        num_pages=3,
+        source_format="pypdf_fast_text",
+    )
+
+    assert not adapter._fast_pdf_text_is_usable(result)
+
+
+@pytest.mark.asyncio
 async def test_markdown_with_headings_is_tier_a(adapter):
     """Native MD headings → tier_a, has_structure True, sections populated."""
     md = (

@@ -17,20 +17,18 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { useChatStore } from "../../stores/chatStore";
-import { useSettingsStore } from "../../stores/settingsStore";
 import * as api from "../../lib/api";
 import type {
   CorpusResponse,
   CorpusCreate,
   IngestionConfig,
   EmbedMode,
-  ChildChunkAlgorithm,
-  SchemaStrictMode,
+  IngestionPreset,
+  ModalStatus,
 } from "../../types";
-import { PRESET_MODES, DEFAULT_INGESTION_CONFIG } from "../../types";
+import { DEFAULT_INGESTION_CONFIG, inferPreset } from "../../types";
 import { CorpusDetail } from "./CorpusDetail";
 import { IngestionModelPool } from "../settings/IngestionModelPool";
-import { ModelsTab } from "../settings/ModelsTab";
 
 interface CorpusManagerProps {
   isOpen: boolean;
@@ -38,6 +36,162 @@ interface CorpusManagerProps {
 }
 
 // DEFAULT_INGESTION_CONFIG imported from ../../types (complete version with all IngestionConfig fields)
+
+// ── Preset selector ───────────────────────────────────────────────────────
+// Four-way radio group. Fast / Balanced / Deep write both the `preset` field
+// AND the underlying toggles so the outbound payload matches what the
+// backend would apply anyway. Custom reveals the use_neo4j +
+// chunk_summarization checkboxes for manual override.
+
+const PRESET_META: {
+  key: IngestionPreset;
+  label: string;
+  tooltip: string;
+}[] = [
+  {
+    key: "fast",
+    label: "Fast",
+    tooltip: "Fastest ingest; vector/hybrid search only, no knowledge graph.",
+  },
+  {
+    key: "balanced",
+    label: "Balanced",
+    tooltip: "Adds knowledge graph. No per-chunk summaries.",
+  },
+  {
+    key: "deep",
+    label: "Deep",
+    tooltip:
+      "Adds chunk summaries for hierarchical retrieval. Slowest, best recall.",
+  },
+  {
+    key: "custom",
+    label: "Custom",
+    tooltip: "Reveal the underlying toggles and set them by hand.",
+  },
+];
+
+function applyPresetToConfig(
+  cfg: IngestionConfig,
+  preset: IngestionPreset,
+): IngestionConfig {
+  if (preset === "custom") {
+    return { ...cfg, preset };
+  }
+  const map = {
+    fast: {
+      use_neo4j: false,
+      chunk_summarization: false,
+      target_qdrant_collections: ["naive", "hrag"],
+    },
+    balanced: {
+      use_neo4j: true,
+      chunk_summarization: false,
+      target_qdrant_collections: ["naive", "hrag", "graph"],
+    },
+    deep: {
+      use_neo4j: true,
+      chunk_summarization: true,
+      target_qdrant_collections: ["naive", "hrag", "graph"],
+    },
+  }[preset];
+  return { ...cfg, preset, ...map };
+}
+
+interface PresetSelectorProps {
+  config: IngestionConfig;
+  onChange: (next: IngestionConfig) => void;
+  idPrefix: string; // unique per form (create vs edit) for radio grouping
+}
+
+function PresetModeSelector({ config, onChange, idPrefix }: PresetSelectorProps) {
+  const current: IngestionPreset = config.preset ?? inferPreset(config);
+  const isCustom = current === "custom";
+  return (
+    <div>
+      <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
+        Preset Mode
+      </div>
+      <div
+        role="radiogroup"
+        aria-label="Ingestion preset"
+        className="grid grid-cols-4 gap-1.5"
+      >
+        {PRESET_META.map((p) => {
+          const checked = current === p.key;
+          const id = `${idPrefix}-preset-${p.key}`;
+          return (
+            <label
+              key={p.key}
+              htmlFor={id}
+              title={p.tooltip}
+              className={`flex items-center justify-center gap-1.5 px-2 py-1.5 text-[9px] font-bold tracking-widest uppercase border cursor-pointer transition-none ${
+                checked
+                  ? "border-accent-main text-accent-main bg-accent-main/10"
+                  : "border-border-minimal text-content-secondary hover:border-accent-main hover:text-accent-main"
+              }`}
+            >
+              <input
+                id={id}
+                type="radio"
+                name={`${idPrefix}-preset`}
+                value={p.key}
+                checked={checked}
+                onChange={() => onChange(applyPresetToConfig(config, p.key))}
+                className="accent-accent-main"
+              />
+              {p.label}
+            </label>
+          );
+        })}
+      </div>
+      <div
+        className="text-[9px] text-content-tertiary/70 leading-relaxed mt-1"
+        data-testid={`${idPrefix}-preset-hint`}
+      >
+        {PRESET_META.find((p) => p.key === current)?.tooltip}
+      </div>
+
+      {isCustom && (
+        <div
+          className="flex flex-wrap gap-3 mt-2"
+          data-testid={`${idPrefix}-custom-toggles`}
+        >
+          <label className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider">
+            <input
+              type="checkbox"
+              checked={config.use_neo4j}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  preset: "custom",
+                  use_neo4j: e.target.checked,
+                })
+              }
+              className="accent-accent-main"
+            />
+            use_neo4j
+          </label>
+          <label className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider">
+            <input
+              type="checkbox"
+              checked={config.chunk_summarization}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  preset: "custom",
+                  chunk_summarization: e.target.checked,
+                })
+              }
+              className="accent-accent-main"
+            />
+            chunk_summarization
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
   const {
@@ -51,8 +205,9 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Tab: "corpora" (list + create) or "models" (Ollama + Modal deploy)
-  const [activeTab, setActiveTab] = useState<"corpora" | "models">("corpora");
+  // Sprint 2B — Modal global status. Fetched once on open; gates the
+  // embed_mode='modal' option in the per-corpus form.
+  const [modalStatus, setModalStatus] = useState<ModalStatus | null>(null);
 
   // Create form state
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -107,6 +262,13 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
   useEffect(() => {
     if (isOpen) {
       loadCorpora();
+      // Modal status is best-effort — backend may not have shipped the
+      // endpoint yet (Terminal 1 in flight). Falsy status = treat as
+      // "not deployed" in the EmbedSection gate.
+      api
+        .getModalStatus()
+        .then(setModalStatus)
+        .catch(() => setModalStatus(null));
     }
   }, [isOpen, loadCorpora]);
 
@@ -188,11 +350,17 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
     setEditName(corpus.name);
     setEditDescription(corpus.description || "");
     // Clone so in-progress edits don't mutate the corpus list state.
-    setEditConfig(
-      corpus.default_ingestion_config
-        ? (JSON.parse(JSON.stringify(corpus.default_ingestion_config)) as IngestionConfig)
-        : null,
-    );
+    // Stamp the inferred preset so the radio group pre-selects correctly:
+    // legacy corpora lack a stored preset, and even stored "balanced"
+    // defaults can disagree with the toggles (pre-feature rows). Trust
+    // the toggles over the Pydantic default.
+    const cloned = corpus.default_ingestion_config
+      ? (JSON.parse(JSON.stringify(corpus.default_ingestion_config)) as IngestionConfig)
+      : null;
+    if (cloned) {
+      cloned.preset = inferPreset(cloned);
+    }
+    setEditConfig(cloned);
     setEditError(null);
     setExpandedId(corpus.corpus_id);
   };
@@ -255,16 +423,14 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
             </span>
           </div>
           <div className="flex items-center gap-2">
-            {activeTab === "corpora" && (
-              <button
-                data-testid="create-corpus-btn"
-                onClick={() => setShowCreateForm(!showCreateForm)}
-                className="flex items-center gap-2 px-3 py-1.5 text-[12px] font-medium text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                <span>New Corpus</span>
-              </button>
-            )}
+            <button
+              data-testid="create-corpus-btn"
+              onClick={() => setShowCreateForm(!showCreateForm)}
+              className="flex items-center gap-2 px-3 py-1.5 text-[12px] font-medium text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span>New Corpus</span>
+            </button>
             <button
               onClick={onClose}
               className="p-1.5 text-gray-400 hover:text-white transition-colors"
@@ -272,28 +438,6 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               <X className="w-5 h-5" />
             </button>
           </div>
-        </div>
-
-        {/* Tab bar */}
-        <div className="flex items-center gap-1 px-4 border-b border-white/5 shrink-0 bg-[#1f1f1f]">
-          {(
-            [
-              { id: "corpora" as const, label: "Corpora" },
-              { id: "models" as const, label: "Models" },
-            ]
-          ).map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setActiveTab(t.id)}
-              className={`px-3 py-2 text-[11px] font-bold tracking-widest uppercase border-b-2 transition-colors ${
-                activeTab === t.id
-                  ? "border-accent-main text-accent-main"
-                  : "border-transparent text-content-tertiary hover:text-content-secondary"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
         </div>
 
         {/* Error Banner */}
@@ -310,18 +454,11 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
           </div>
         )}
 
-        {/* Models tab body — Ollama manager + Modal deploy panel. */}
-        {activeTab === "models" && (
-          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4">
-            <ModelsTab />
-          </div>
-        )}
-
         {/* Create Form — claims the full remaining modal body when open.
             Phase 19.3: the form grew large (IngestionModelsSection + schema
             tooltips) so it takes the whole body via flex-1 and the corpus
             list is hidden to avoid a squished dual-scroll region. */}
-        {activeTab === "corpora" && showCreateForm && (
+        {showCreateForm && (
           <div className="flex-1 min-h-0 px-4 py-3 border-b border-border-minimal bg-bg-surface/50 space-y-3 overflow-y-auto custom-scrollbar">
             <div className="text-[11px] font-bold tracking-widest text-content-secondary uppercase">
               &gt; Create New Corpus
@@ -341,68 +478,21 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               placeholder="description (optional)"
               className="w-full px-2 py-1.5 bg-bg-base border border-border-minimal text-[12px] text-content-primary placeholder:text-content-tertiary focus:outline-none focus:border-accent-main"
             />
-            {/* Ingestion Config Toggles */}
-            <div className="flex flex-wrap gap-3">
-              <label className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider">
-                <input
-                  type="checkbox"
-                  checked={newConfig.use_neo4j}
-                  onChange={(e) =>
-                    setNewConfig({ ...newConfig, use_neo4j: e.target.checked })
-                  }
-                  className="accent-accent-main"
-                />
-                use_neo4j
-              </label>
-              <label className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider">
-                <input
-                  type="checkbox"
-                  checked={newConfig.chunk_summarization}
-                  onChange={(e) =>
-                    setNewConfig({
-                      ...newConfig,
-                      chunk_summarization: e.target.checked,
-                    })
-                  }
-                  className="accent-accent-main"
-                />
-                chunk_summarization
-              </label>
-            </div>
-
-            {/* Embed mode radio (Phase 14.8) — Modal is primary, local is fallback */}
-            <EmbedModeRadio
-              value={newConfig.embed_mode ?? "modal_tei"}
-              onChange={(m) => setNewConfig({ ...newConfig, embed_mode: m })}
+            {/* Preset Mode — radio group. Custom reveals the raw toggles. */}
+            <PresetModeSelector
+              config={newConfig}
+              onChange={setNewConfig}
+              idPrefix="create"
             />
 
-            {/* Preset Modes */}
-            <div>
-              <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
-                Preset Mode
-              </div>
-              <div className="flex gap-1.5">
-                {Object.entries(PRESET_MODES).map(([key, preset]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() =>
-                      setNewConfig((prev) => ({
-                        ...prev,
-                        use_neo4j: preset.use_neo4j,
-                        chunk_summarization: preset.chunk_summarization,
-                        target_qdrant_collections: [
-                          ...preset.target_qdrant_collections,
-                        ],
-                      }))
-                    }
-                    className="flex-1 px-2 py-1.5 text-[9px] font-bold tracking-widest uppercase border border-border-minimal text-content-secondary hover:border-accent-main hover:text-accent-main transition-none"
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* Embed dispatch — three-way selector + per-mode credentials */}
+            <EmbedSection
+              config={newConfig}
+              onPatch={(patch) =>
+                setNewConfig((prev) => ({ ...prev, ...patch }))
+              }
+              modalStatus={modalStatus}
+            />
 
             {/* Token Budget — Parent */}
             <div>
@@ -563,22 +653,17 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               </div>
               <div>
                 <label className="text-[9px] text-content-tertiary tracking-wider">
-                  ALGORITHM
+                  CHUNKING
                 </label>
-                <select
-                  value={newConfig.child_chunk_algorithm}
-                  onChange={(e) =>
-                    setNewConfig((prev) => ({
-                      ...prev,
-                      child_chunk_algorithm: e.target
-                        .value as ChildChunkAlgorithm,
-                    }))
-                  }
-                  className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
+                <div
+                  className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary"
+                  title="Resolved per file after parsing. Children currently use sentence_merge; semantic_split is held back until implemented."
                 >
-                  <option value="sentence_merge">sentence_merge</option>
-                  <option value="semantic_split">semantic_split</option>
-                </select>
+                  AUTO
+                </div>
+                <div className="mt-1 text-[8px] text-content-tertiary leading-tight">
+                  file-type policy · child: sentence_merge
+                </div>
               </div>
               <div>
                 <label className="text-[9px] text-content-tertiary tracking-wider">
@@ -640,104 +725,17 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               </div>
             </div>
 
-            {/* Schema (Ontology-Lite) — Phase 14 */}
+            {/* Universal Extraction Schema — read-only notice.
+                Entity types / relation predicates / strict mode are now
+                baked into ghost_b.UNIVERSAL_*_SCHEMA and applied to every
+                corpus. See GOTCHAS.md §66. */}
             <div>
               <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
-                Schema (Ontology-Lite)
+                Extraction Schema
               </div>
-              <div className="text-[9px] text-content-tertiary/70 mb-1.5 leading-relaxed space-y-1">
-                <p>
-                  Optional. Leave both empty for open extraction. Populate to
-                  constrain GHOST B to your vocabulary (e.g. military units,
-                  legal concepts). LLM creates instances freely under your
-                  types.
-                </p>
-                <p className="text-amber-400/70">
-                  ⓘ{" "}
-                  <span className="font-semibold">'other'</span> /{" "}
-                  <span className="font-semibold">'related_to'</span> are
-                  always implicit fallbacks — cannot be removed.
-                </p>
-                <p className="text-amber-400/70">
-                  ⓘ Schema changes do NOT backfill old documents. Only future
-                  ingests use the new pool. Re-ingest a doc (clear
-                  write_state.neo4j_written) to re-extract.
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                <div>
-                  <label className="text-[9px] text-content-tertiary tracking-wider">
-                    ENTITY TYPES (one per line)
-                  </label>
-                  <textarea
-                    rows={4}
-                    value={(newConfig.entity_schema ?? []).join("\n")}
-                    placeholder={"Person\nUnit\nEquipment"}
-                    onChange={(e) => {
-                      const lines = e.target.value
-                        .split("\n")
-                        .map((s) => s.trim())
-                        .filter(Boolean);
-                      setNewConfig((prev) => ({
-                        ...prev,
-                        entity_schema: lines.length > 0 ? lines : null,
-                      }));
-                    }}
-                    className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary font-mono focus:outline-none focus:border-accent-main resize-y"
-                  />
-                </div>
-                <div>
-                  <label className="text-[9px] text-content-tertiary tracking-wider">
-                    RELATION PREDICATES (one per line)
-                  </label>
-                  <textarea
-                    rows={4}
-                    value={(newConfig.relation_schema ?? []).join("\n")}
-                    placeholder={"enhances\ndepends_on\nassigned_to"}
-                    onChange={(e) => {
-                      const lines = e.target.value
-                        .split("\n")
-                        .map((s) => s.trim())
-                        .filter(Boolean);
-                      setNewConfig((prev) => ({
-                        ...prev,
-                        relation_schema: lines.length > 0 ? lines : null,
-                      }));
-                    }}
-                    className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary font-mono focus:outline-none focus:border-accent-main resize-y"
-                  />
-                </div>
-              </div>
-              <div className="mt-1.5">
-                <label className="text-[9px] text-content-tertiary tracking-wider">
-                  STRICT MODE
-                </label>
-                <select
-                  value={newConfig.schema_strict}
-                  disabled={
-                    !newConfig.entity_schema && !newConfig.relation_schema
-                  }
-                  onChange={(e) =>
-                    setNewConfig((prev) => ({
-                      ...prev,
-                      schema_strict: e.target.value as SchemaStrictMode,
-                    }))
-                  }
-                  className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <option value="off">
-                    off — schema is a hint, no enforcement
-                  </option>
-                  <option value="soft">
-                    soft — remap unknowns to sentinels (recommended)
-                  </option>
-                  <option value="hard">hard — drop unknowns entirely</option>
-                </select>
-                <div className="text-[9px] text-content-tertiary/70 mt-0.5 leading-relaxed">
-                  {!newConfig.entity_schema && !newConfig.relation_schema
-                    ? "Disabled — populate at least one schema above to enable."
-                    : "soft preserves edges (vague but not lost). hard drops them."}
-                </div>
+              <div className="text-[9px] text-content-tertiary/70 leading-relaxed">
+                Extraction uses a universal 12-type / 17-predicate schema
+                (baked backend-side). No per-corpus tuning.
               </div>
             </div>
 
@@ -771,9 +769,9 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
         )}
 
         {/* Corpus List — hidden while the Create form is open so the form
-            can use the full body height. Also hidden on the Models tab. */}
+            can use the full body height. */}
         <div
-          className={`${activeTab !== "corpora" || showCreateForm ? "hidden" : "flex-1"} overflow-y-auto custom-scrollbar`}
+          className={`${showCreateForm ? "hidden" : "flex-1"} overflow-y-auto custom-scrollbar`}
         >
           {isLoading ? (
             <div className="flex items-center justify-center py-12 text-[11px] text-content-tertiary tracking-widest">
@@ -979,110 +977,88 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                           />
                         </div>
 
-                        {/* Ingestion Models pools (Phase 19.3) */}
-                        <IngestionModelsSection
-                          config={editConfig}
-                          onPatch={(patch) =>
-                            setEditConfig((prev) =>
-                              prev ? { ...prev, ...patch } : prev,
-                            )
-                          }
-                          editing={true}
-                        />
+                        {/* ─── LOCKED — Structural ──────────────────────────
+                            Cannot be changed once a corpus exists. Backend
+                            enforces (FROZEN_CONFIG_FIELDS in
+                            services/ingestion_service.py); UI mirrors. */}
+                        <LockedStructuralSection config={editConfig} />
 
-                        {/* Schema (Ontology-Lite) */}
-                        <div>
-                          <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
-                            Schema (Ontology-Lite)
+                        {/* ─── MUTABLE — Provider / Credentials ────────────
+                            Apply to NEW ingests only. Existing docs keep
+                            their snapshotted ingestion_config (GOTCHA #48). */}
+                        <div className="border-t border-accent-main/20 pt-3 space-y-3">
+                          <div className="flex items-center gap-2 text-[10px] font-bold tracking-widest uppercase text-accent-main">
+                            <span className="w-1 h-3 bg-accent-main" />
+                            Mutable — provider / credentials
                           </div>
-                          <div className="grid grid-cols-2 gap-1.5">
+
+                          <EmbedSection
+                            config={editConfig}
+                            onPatch={(patch) =>
+                              setEditConfig((prev) =>
+                                prev ? { ...prev, ...patch } : prev,
+                              )
+                            }
+                            modalStatus={modalStatus}
+                          />
+
+                          <IngestionModelsSection
+                            config={editConfig}
+                            onPatch={(patch) =>
+                              setEditConfig((prev) =>
+                                prev ? { ...prev, ...patch } : prev,
+                              )
+                            }
+                            editing={true}
+                          />
+
+                          <div className="grid grid-cols-3 gap-1.5">
                             <div>
-                              <label className="text-[9px] text-content-tertiary tracking-wider">
-                                ENTITY TYPES (one per line)
+                              <label className="text-[9px] text-content-tertiary tracking-wider uppercase">
+                                Entity confidence
                               </label>
-                              <textarea
-                                rows={4}
-                                value={(editConfig.entity_schema ?? []).join("\n")}
-                                placeholder={"Person\nUnit\nEquipment"}
-                                onChange={(e) => {
-                                  const lines = e.target.value
-                                    .split("\n")
-                                    .map((s) => s.trim())
-                                    .filter(Boolean);
+                              <input
+                                type="number"
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                value={editConfig.entity_confidence_threshold}
+                                onChange={(e) =>
                                   setEditConfig((prev) =>
                                     prev
                                       ? {
                                           ...prev,
-                                          entity_schema:
-                                            lines.length > 0 ? lines : null,
+                                          entity_confidence_threshold:
+                                            parseFloat(e.target.value) || 0.5,
                                         }
                                       : prev,
-                                  );
-                                }}
-                                className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary font-mono focus:outline-none focus:border-accent-main resize-y"
+                                  )
+                                }
+                                className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
                               />
                             </div>
-                            <div>
-                              <label className="text-[9px] text-content-tertiary tracking-wider">
-                                RELATION PREDICATES (one per line)
-                              </label>
-                              <textarea
-                                rows={4}
-                                value={(editConfig.relation_schema ?? []).join("\n")}
-                                placeholder={"enhances\ndepends_on\nassigned_to"}
-                                onChange={(e) => {
-                                  const lines = e.target.value
-                                    .split("\n")
-                                    .map((s) => s.trim())
-                                    .filter(Boolean);
-                                  setEditConfig((prev) =>
-                                    prev
-                                      ? {
-                                          ...prev,
-                                          relation_schema:
-                                            lines.length > 0 ? lines : null,
-                                        }
-                                      : prev,
-                                  );
-                                }}
-                                className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary font-mono focus:outline-none focus:border-accent-main resize-y"
-                              />
+                            <div className="col-span-2 flex items-center text-[9px] text-content-tertiary leading-snug">
+                              Rows below this confidence are dropped before
+                              schema enforcement. 0.5 is a balanced default.
                             </div>
                           </div>
-                          <div className="mt-1.5">
-                            <label className="text-[9px] text-content-tertiary tracking-wider">
-                              STRICT MODE
-                            </label>
-                            <select
-                              value={editConfig.schema_strict}
-                              disabled={
-                                !editConfig.entity_schema &&
-                                !editConfig.relation_schema
-                              }
-                              onChange={(e) =>
-                                setEditConfig((prev) =>
-                                  prev
-                                    ? {
-                                        ...prev,
-                                        schema_strict: e.target
-                                          .value as SchemaStrictMode,
-                                      }
-                                    : prev,
-                                )
-                              }
-                              className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                              <option value="off">
-                                off — schema is a hint, no enforcement
-                              </option>
-                              <option value="soft">
-                                soft — remap unknowns to sentinels (recommended)
-                              </option>
-                              <option value="hard">
-                                hard — drop unknowns entirely
-                              </option>
-                            </select>
-                          </div>
+                        </div>
+
+                        {/* Save / Cancel */}
+                        <div className="flex gap-2 pt-2 border-t border-border-minimal">
+                          <button
+                            onClick={() => handleUpdate(corpus.corpus_id)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold tracking-widest bg-accent-main text-bg-base border border-accent-main hover:bg-accent-hover transition-none uppercase"
+                          >
+                            <Check className="w-3 h-3" />
+                            Save changes
+                          </button>
+                          <button
+                            onClick={cancelEdit}
+                            className="px-3 py-1.5 text-[11px] font-bold tracking-widest text-content-tertiary border border-border-minimal hover:border-content-secondary transition-none uppercase"
+                          >
+                            Cancel
+                          </button>
                         </div>
                       </div>
                     )}
@@ -1188,21 +1164,19 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
           )}
         </div>
 
-        {/* Footer — corpora tab only */}
-        {activeTab === "corpora" && (
-          <div className="flex items-center justify-between px-4 py-2 border-t border-border-minimal bg-bg-surface shrink-0">
-            <div className="text-[9px] text-content-tertiary tracking-widest">
-              {corpora.length} CORPUS // {selectedCorpusIds.length} SELECTED
-            </div>
-            <button
-              onClick={loadCorpora}
-              disabled={isLoading}
-              className="text-[9px] text-content-tertiary hover:text-accent-main tracking-widest uppercase transition-none disabled:opacity-50"
-            >
-              [REFRESH]
-            </button>
+        {/* Footer */}
+        <div className="flex items-center justify-between px-4 py-2 border-t border-border-minimal bg-bg-surface shrink-0">
+          <div className="text-[9px] text-content-tertiary tracking-widest">
+            {corpora.length} CORPUS // {selectedCorpusIds.length} SELECTED
           </div>
-        )}
+          <button
+            onClick={loadCorpora}
+            disabled={isLoading}
+            className="text-[9px] text-content-tertiary hover:text-accent-main tracking-widest uppercase transition-none disabled:opacity-50"
+          >
+            [REFRESH]
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1277,64 +1251,338 @@ function IngestionModelsSection({
 }
 
 // ============================================================================
-// EmbedModeRadio (Phase 14.8)
+// EmbedSection — three-way embed_mode (local | api | modal)
+// Sprint 2B.frontend
 // ============================================================================
+//
+// MUTABLE section. Embedding *identity* (model + dimension) is FROZEN; only
+// the dispatch path (which embedder, with what credentials) is editable.
+//
+// modal mode reads global Modal status to decide whether the radio is
+// available — if Modal is not deployed, picking "modal" reveals a dead-end
+// pointing to Settings → Infrastructure → Modal.
 
-function EmbedModeRadio({
-  value,
-  onChange,
+const EMBED_MODE_OPTIONS: { value: EmbedMode; label: string; hint: string }[] = [
+  { value: "local", label: "Local", hint: "in-cluster sentence-transformers sidecar" },
+  { value: "api", label: "API", hint: "OpenAI-compatible /embeddings endpoint" },
+  { value: "modal", label: "Modal Cloud", hint: "your deployed Modal GPU app" },
+];
+
+const EMBEDDING_PROVIDER_PRESETS = [
+  {
+    id: "openai",
+    name: "OpenAI",
+    base_url: "https://api.openai.com/v1",
+    example_model: "text-embedding-3-large",
+  },
+  {
+    id: "siliconflow",
+    name: "SiliconFlow",
+    base_url: "https://api.siliconflow.com/v1",
+    example_model: "Qwen/Qwen3-Embedding-0.6B",
+  },
+  {
+    id: "together",
+    name: "Together",
+    base_url: "https://api.together.xyz/v1",
+    example_model: "BAAI/bge-large-en-v1.5",
+  },
+  {
+    id: "custom",
+    name: "Custom (OpenAI-compat)",
+    base_url: "",
+    example_model: "",
+  },
+];
+
+function EmbedSection({
+  config,
+  onPatch,
+  modalStatus,
 }: {
-  value: EmbedMode;
-  onChange: (m: EmbedMode) => void;
+  config: IngestionConfig;
+  onPatch: (patch: Partial<IngestionConfig>) => void;
+  modalStatus: ModalStatus | null;
 }) {
-  const modalEnabled = useSettingsStore((s) => s.modalEnabled);
+  const mode = config.embed_mode ?? "local";
+  const modalDeployed = !!modalStatus?.deployed;
+  const modalContainersGlobal = modalStatus?.container_count ?? 10;
+
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
+
+  const testApi = async () => {
+    if (!config.embed_base_url || !config.embed_api_key) {
+      setTestResult({ ok: false, message: "base_url and api_key required" });
+      return;
+    }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      // Probe by hitting `${base_url}/models` — most OpenAI-compatible
+      // providers expose it cheaply. Per CLAUDE.md §13, all HTTP through
+      // api.ts — but this endpoint isn't on our backend; it's a 3rd-party
+      // provider, so a direct fetch is appropriate (and intentional).
+      const url = config.embed_base_url.replace(/\/$/, "") + "/models";
+      const resp = await fetch(url, {
+        headers: { Authorization: `Bearer ${config.embed_api_key}` },
+      });
+      if (resp.ok) {
+        setTestResult({ ok: true, message: `OK — ${resp.status}` });
+      } else {
+        setTestResult({
+          ok: false,
+          message: `${resp.status} ${resp.statusText}`,
+        });
+      }
+    } catch (err) {
+      setTestResult({
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="text-[9px] font-bold tracking-widest uppercase text-content-tertiary">
-        embed_mode
+    <div className="space-y-2">
+      <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase">
+        Embedding
       </div>
-      <div className="flex gap-3">
-        <label
-          className={`flex items-center gap-1.5 text-[11px] tracking-wider cursor-pointer ${
-            !modalEnabled ? "opacity-50 cursor-not-allowed" : ""
-          }`}
-          title={
-            modalEnabled
-              ? "Primary production path — cloud GPU ingestion"
-              : "Modal disabled — set MODAL_ENABLED=true in .env"
-          }
-        >
-          <input
-            type="radio"
-            name="embed_mode"
-            value="modal_tei"
-            checked={value === "modal_tei"}
-            disabled={!modalEnabled}
-            onChange={() => onChange("modal_tei")}
-            className="accent-accent-main"
-          />
-          <span className="text-content-secondary">
-            modal_tei (cloud, primary)
-          </span>
-        </label>
-        <label className="flex items-center gap-1.5 text-[11px] tracking-wider cursor-pointer">
-          <input
-            type="radio"
-            name="embed_mode"
-            value="local_st"
-            checked={value === "local_st"}
-            onChange={() => onChange("local_st")}
-            className="accent-accent-main"
-          />
-          <span className="text-content-secondary">local_st (fallback)</span>
-        </label>
+
+      {/* Model label — locked, identical across all three modes */}
+      <div className="text-[11px] text-content-secondary font-mono bg-bg-base border border-border-minimal px-2 py-1.5">
+        {config.embedding_model} ({config.embedding_dimension}d)
+        <span className="ml-2 text-[9px] text-content-tertiary tracking-widest uppercase">
+          [locked]
+        </span>
       </div>
-      {!modalEnabled && value === "modal_tei" && (
-        <div className="text-[11px] text-amber-400">
-          Modal not configured — ingestion will auto-fallback to local_st.
+
+      {/* Three-way radio */}
+      <div role="radiogroup" aria-label="embed_mode" className="grid grid-cols-3 gap-1.5">
+        {EMBED_MODE_OPTIONS.map((opt) => {
+          const checked = mode === opt.value;
+          return (
+            <label
+              key={opt.value}
+              title={opt.hint}
+              className={`flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-bold tracking-widest uppercase border cursor-pointer transition-none ${
+                checked
+                  ? "border-accent-main text-accent-main bg-accent-main/10"
+                  : "border-border-minimal text-content-secondary hover:border-accent-main hover:text-accent-main"
+              }`}
+            >
+              <input
+                type="radio"
+                name="embed_mode"
+                value={opt.value}
+                checked={checked}
+                onChange={() => onPatch({ embed_mode: opt.value })}
+                className="accent-accent-main"
+              />
+              {opt.label}
+            </label>
+          );
+        })}
+      </div>
+
+      {/* Mode-specific body */}
+      {mode === "local" && (
+        <div className="text-[11px] text-content-tertiary leading-snug px-2 py-1.5 bg-bg-base border border-border-minimal">
+          Uses the local <code className="bg-bg-surface px-1">embedder</code>{" "}
+          sidecar — no cloud cost, GPU-bound.
         </div>
       )}
+
+      {mode === "api" && (
+        <div className="space-y-2">
+          <IngestionModelPool
+            title="Embedding APIs"
+            subtitle="OpenAI-compatible /embeddings · batches round-robined across chips"
+            value={config.embedding_models ?? []}
+            onChange={(next) => onPatch({ embedding_models: next })}
+            editing={true}
+            presets={EMBEDDING_PROVIDER_PRESETS}
+            composeModel={(_presetId, model) => model.trim()}
+            modelPlaceholder="embedding model (required)"
+          />
+          <div className="text-[10px] text-content-tertiary leading-snug px-2 py-1.5 bg-bg-base border border-border-minimal">
+            Add one or more embedding API chips. Each chip carries its own
+            base URL, model, API key, and max in-flight calls. If this pool is
+            empty, backend falls back to the legacy single API/global settings.
+          </div>
+          {config.embed_base_url && (
+            <div className="flex items-center gap-2 px-2 py-1.5 bg-bg-base border border-border-minimal">
+              <button
+                onClick={testApi}
+                disabled={testing || !config.embed_base_url}
+                className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold tracking-widest uppercase border border-accent-main text-accent-main hover:bg-accent-main hover:text-bg-base disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {testing ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Check className="w-3 h-3" />
+                )}
+                Test legacy endpoint
+              </button>
+              {testResult && (
+                <span
+                  className={`text-[10px] font-mono ${testResult.ok ? "text-accent-main" : "text-error"}`}
+                >
+                  {testResult.message}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {mode === "modal" && (
+        <div className="space-y-2 px-2 py-2 bg-bg-base border border-border-minimal">
+          {!modalDeployed ? (
+            <div className="flex items-start gap-2 text-[11px] text-amber-300 leading-snug">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>
+                Modal is not deployed. Configure tokens and deploy under{" "}
+                <strong>Settings → Infrastructure → Modal</strong> first.
+              </span>
+            </div>
+          ) : (
+            <>
+              <div className="text-[10px] text-content-tertiary leading-snug">
+                Routes ingest embeds to your deployed Modal app. GPU tier and
+                fleet size are configured globally under{" "}
+                <strong>Settings → Infrastructure → Modal</strong>.
+              </div>
+              <div>
+                <label className="flex items-center justify-between text-[9px] text-content-tertiary tracking-wider uppercase mb-0.5">
+                  <span>Per-corpus container cap</span>
+                  <span className="font-mono text-accent-main">
+                    {config.modal_containers ?? modalContainersGlobal}
+                  </span>
+                </label>
+                <input
+                  type="range"
+                  min={1}
+                  max={Math.max(1, modalContainersGlobal)}
+                  value={Math.min(
+                    config.modal_containers ?? modalContainersGlobal,
+                    modalContainersGlobal,
+                  )}
+                  onChange={(e) =>
+                    onPatch({ modal_containers: Number(e.target.value) })
+                  }
+                  className="w-full accent-accent-main"
+                />
+                <div className="flex justify-between text-[9px] text-content-tertiary font-mono">
+                  <span>1</span>
+                  <span>global cap: {modalContainersGlobal}</span>
+                </div>
+              </div>
+              <div className="flex items-start gap-2 text-[10px] text-amber-300/80 leading-snug">
+                <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                <span>
+                  Modal embed mode incurs cloud GPU cost. Phase-gate: confirm
+                  your Modal billing limits before enabling for large corpora.
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// LockedStructuralSection — read-only mirror of frozen IngestionConfig fields
+// ============================================================================
+//
+// These fields are FROZEN once a corpus exists (backend
+// services/ingestion_service.FROZEN_CONFIG_FIELDS). Showing them disabled in
+// the edit form prevents the user from filling out a value the API will
+// reject with 409. To change any of these, the user creates a new corpus.
+
+function LockedStructuralSection({ config }: { config: IngestionConfig }) {
+  const preset = config.preset ?? inferPreset(config);
+  const ents = config.entity_schema ?? [];
+  const rels = config.relation_schema ?? [];
+  const isLegacyCustom =
+    (ents.length > 0 && ents.length !== 12) ||
+    (rels.length > 0 && rels.length !== 17);
+
+  const Row = ({ label, value }: { label: string; value: React.ReactNode }) => (
+    <div className="flex items-center justify-between text-[11px] py-0.5">
+      <span className="text-content-tertiary tracking-wider uppercase text-[9px]">
+        {label}
+      </span>
+      <span className="text-content-secondary font-mono">{value}</span>
+    </div>
+  );
+
+  return (
+    <div className="space-y-2 border border-border-minimal bg-bg-base/40 px-3 py-2 opacity-90">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-[10px] font-bold tracking-widest uppercase text-content-tertiary">
+          <span className="w-1 h-3 bg-content-tertiary" />
+          Locked — structural
+        </div>
+        <span className="text-[9px] text-content-tertiary/70 italic">
+          create a new corpus to alter these
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+        <Row label="preset" value={preset} />
+        <Row
+          label="use_neo4j"
+          value={String(config.use_neo4j)}
+        />
+        <Row
+          label="chunk_summarization"
+          value={String(config.chunk_summarization)}
+        />
+        <Row
+          label="qdrant_targets"
+          value={config.target_qdrant_collections.join(", ")}
+        />
+        <Row
+          label="parent_tokens (min/tgt/max)"
+          value={`${config.parent_chunk_tokens.min_tokens} / ${config.parent_chunk_tokens.target_tokens} / ${config.parent_chunk_tokens.max_tokens}`}
+        />
+        <Row
+          label="child_tokens (min/tgt/max)"
+          value={`${config.child_chunk_tokens.min_tokens} / ${config.child_chunk_tokens.target_tokens} / ${config.child_chunk_tokens.max_tokens}`}
+        />
+        <Row label="chunk_overlap" value={config.chunk_overlap} />
+        <Row label="chunking_mode" value="auto per file" />
+        <Row label="child_splitter" value="auto → sentence_merge" />
+        <Row label="max_summary_tokens" value={config.max_summary_tokens} />
+        <Row
+          label="embedding"
+          value={`${config.embedding_model_id} (${config.embedding_dimension}d)`}
+        />
+      </div>
+
+      <div className="pt-1 border-t border-border-minimal/60">
+        <div className="text-[9px] text-content-tertiary tracking-widest uppercase mb-0.5">
+          extraction schema
+        </div>
+        {isLegacyCustom ? (
+          <div className="text-[9px] text-amber-400/80 leading-relaxed">
+            Custom schema in use ({ents.length} entity types, {rels.length}{" "}
+            relations) — contact admin to reset to universal.
+          </div>
+        ) : (
+          <div className="text-[9px] text-content-tertiary/70 leading-relaxed">
+            Universal 12-type / 17-predicate schema (baked backend-side).
+          </div>
+        )}
+      </div>
     </div>
   );
 }

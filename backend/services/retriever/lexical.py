@@ -85,7 +85,10 @@ class LexicalRetriever:
 
     def _client(self) -> AsyncQdrantClient:
         if self._qdrant is None:
-            self._qdrant = AsyncQdrantClient(url=_settings.QDRANT_URL)
+            self._qdrant = AsyncQdrantClient(
+                url=_settings.QDRANT_URL,
+                timeout=_settings.QDRANT_TIMEOUT_SECONDS,
+            )
         return self._qdrant
 
     async def search(

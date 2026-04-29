@@ -308,6 +308,7 @@ def _merge_and_split(
 @router.get("/models", response_model=ModelsResponse)
 async def list_models(
     current_user: dict | None = Depends(_current_user_optional),
+    reachable: bool = True,
 ):
     """
     GET /api/models
@@ -364,6 +365,30 @@ async def list_models(
                 chat_models = [m for m in chat_models if m.id not in excluded]
         except Exception as exc:
             logger.warning("ollama exclusions skipped (%s)", exc)
+
+    # Sprint 3 — ?reachable=true (default): filter the LiteLLM catalog to
+    # providers the caller has at least one pool entry for. Ollama +
+    # embedder paths are always reachable; we only narrow the cloud slice.
+    if reachable and current_user:
+        try:
+            from services.settings import settings_service
+
+            raw = await settings_service.get_models_raw(current_user["user_id"])
+            pool_providers = {
+                (e.get("provider") or "").lower()
+                for e in (raw.get("query_model_pool") or [])
+                if isinstance(e, dict) and e.get("enabled", True)
+            }
+            if pool_providers:
+                def _keep(m: ModelInfo) -> bool:
+                    if m.source != "litellm":
+                        return True  # ollama + local always kept
+                    # LiteLLM model ids are "provider/model" → check the prefix
+                    provider = (m.id.split("/", 1)[0] or "").lower() if "/" in m.id else ""
+                    return provider in pool_providers or m.provider.lower() in pool_providers
+                chat_models = [m for m in chat_models if _keep(m)]
+        except Exception as exc:
+            logger.warning("reachable filter skipped (%s)", exc)
 
     return ModelsResponse(
         chat_models=chat_models,

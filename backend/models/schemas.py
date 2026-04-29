@@ -159,6 +159,156 @@ class CorpusResponse(_legacy.CorpusResponse):
     default_ingestion_config: IngestionConfig
 
 
+class ToolBase(BaseModel):
+    """Source-backed custom tool model.
+
+    The legacy source predates slash-command support. Define the current shape
+    here so clean rebuilds do not depend on an ignored compiled schema module.
+    """
+
+    name: str = Field(..., description="Function name exposed to the LLM")
+    description: str = Field(..., description="Description for the LLM")
+    parameters: dict[str, Any] = Field(..., description="JSON schema parameters")
+    code: str = Field(..., description="Sandboxed Python source")
+    enabled: bool = True
+    slash_command: str | None = None
+
+
+class ToolCreate(ToolBase):
+    pass
+
+
+class ToolUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    parameters: dict[str, Any] | None = None
+    code: str | None = None
+    enabled: bool | None = None
+    slash_command: str | None = None
+
+
+class Tool(ToolBase):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., alias="_id")
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def convert_objectid_to_str(cls, value):
+        return str(value)
+
+
+class SkillBase(BaseModel):
+    """Source-backed custom skill model for Settings → Skills."""
+
+    name: str = Field(..., description="Skill display name")
+    description: str = Field(..., description="Short skill description")
+    instructions: str = Field(..., description="Instructions injected into chat")
+    enabled: bool = True
+    slash_command: str | None = None
+
+
+class SkillCreate(SkillBase):
+    pass
+
+
+class SkillUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    instructions: str | None = None
+    enabled: bool | None = None
+    slash_command: str | None = None
+
+
+class Skill(SkillBase):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., alias="_id")
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def convert_objectid_to_str(cls, value):
+        return str(value)
+
+
+def _utc_iso() -> str:
+    return datetime.utcnow().isoformat()
+
+
+class QueryModelPoolEntry(BaseModel):
+    """Unified chat/analysis model pool entry stored under settings.models."""
+
+    model_config = ConfigDict(extra="allow")
+
+    entry_id: str = ""
+    label: str = ""
+    provider: str = "custom"
+    base_url: str | None = None
+    api_key_ciphertext: str | None = None
+    model_name: str = ""
+    source: Literal["ollama", "cloud"] = "cloud"
+    enabled: bool = True
+    created_at: str = Field(default_factory=_utc_iso)
+
+
+class HydeConfig(BaseModel):
+    default_enabled: bool = False
+    pool_entry_id: str | None = None
+
+
+class AgenticConfig(BaseModel):
+    default_enabled: bool = False
+    pool_entry_id: str | None = None
+
+
+class ReasoningConfig(BaseModel):
+    default_enabled: bool = False
+    pool_entry_id: str | None = None
+
+
+class ModelsConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    query_model_pool: list[QueryModelPoolEntry] = Field(default_factory=list)
+    hyde: HydeConfig = Field(default_factory=HydeConfig)
+    agentic: AgenticConfig = Field(default_factory=AgenticConfig)
+    reasoning: ReasoningConfig = Field(default_factory=ReasoningConfig)
+
+
+class OllamaBulkAddRequest(BaseModel):
+    model_names: list[str] = Field(default_factory=list)
+
+
+class ChatLLMSettings(_legacy.ChatLLMSettings):
+    query_profile: Literal["fast", "balanced", "thorough", "custom"] = "balanced"
+
+
+class RetrievalSettings(_legacy.RetrievalSettings):
+    max_corpora_per_query: int = Field(default=32, ge=1, le=100)
+    final_top_k: int = Field(default=8, ge=1, le=50)
+
+
+class GlobalSettings(BaseModel):
+    infrastructure: _legacy.InfrastructureSettings = Field(
+        default_factory=_legacy.InfrastructureSettings
+    )
+    chat: ChatLLMSettings = Field(default_factory=ChatLLMSettings)
+    retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
+    modal: _legacy.ModalDeploySettings = Field(default_factory=_legacy.ModalDeploySettings)
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
+
+
+class GlobalSettingsResponse(BaseModel):
+    settings: GlobalSettings
+
+
+class GlobalSettingsUpdate(BaseModel):
+    chat: ChatLLMSettings | None = None
+    retrieval: RetrievalSettings | None = None
+    modal: _legacy.ModalDeploySettings | None = None
+    models: ModelsConfig | None = None
+
+
 class AutoSynthesisItem(BaseModel):
     title: str = ""
     body: str = ""
@@ -228,28 +378,137 @@ class DiscoverTraceStage(BaseModel):
     detail: str = ""
 
 
-class DiscoverTracePayload(_legacy.DiscoverTracePayload):
+class DiscoverTracePayload(BaseModel):
+    """Source-backed trace payload for Mission Control discovery.
+
+    The legacy pyc used to carry this shape, but clean Docker/GitHub rebuilds
+    only have tracked source. Keep the model intentionally permissive because
+    the graph orchestrator emits diagnostic dictionaries that evolve faster
+    than the stable API envelope.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    anchor_terms: list[str] = Field(default_factory=list)
+    latent_terms: list[str] = Field(default_factory=list)
+    vector_neighbors: list[dict[str, Any]] = Field(default_factory=list)
+    graph_expansion: dict[str, Any] = Field(default_factory=dict)
+    working_entities: list[dict[str, Any]] = Field(default_factory=list)
+    selected_edges: list[dict[str, Any]] = Field(default_factory=list)
+    source_docs: list[dict[str, Any]] = Field(default_factory=list)
+    evidence_filter: dict[str, Any] | None = None
+    retrieval_evidence: dict[str, Any] | None = None
     stages: list[DiscoverTraceStage] = Field(default_factory=list)
     llm_context: dict[str, Any] = Field(default_factory=dict)
     graph_hint: dict[str, Any] = Field(default_factory=dict)
 
 
-class GraphDiscoverResponse(_legacy.GraphDiscoverResponse):
+class GraphDiscoverRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    corpus_id: str
+    query: str
+    mode: Literal["auto", "connect", "gaps", "themes"] = "auto"
+    session_id: str | None = None
+    model: str | None = None
+    agentic: bool = False
+
+
+class GraphDiscoverResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    session_id: str = ""
+    corpus_id: str = ""
+    query: str = ""
+    mode: str = "auto"
+    interpretation: str = ""
+    frontier: list[dict[str, Any]] = Field(default_factory=list)
+    analogies: list[dict[str, Any]] = Field(default_factory=list)
+    bridges: list[dict[str, Any]] = Field(default_factory=list)
+    weak_links: list[dict[str, Any]] = Field(default_factory=list)
+    transfers: list[dict[str, Any]] = Field(default_factory=list)
+    questions: list[dict[str, Any]] = Field(default_factory=list)
+    strategic_read: dict[str, Any] | None = None
+    intent_profile: dict[str, Any] | None = None
+    atomic_trace: list[dict[str, Any]] = Field(default_factory=list)
+    socratic_prompts: list[dict[str, Any]] = Field(default_factory=list)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    domain_map_summary: list[dict[str, Any]] = Field(default_factory=list)
+    graph: dict[str, Any] = Field(
+        default_factory=lambda: {"nodes": [], "links": []}
+    )
+    anchors: list[dict[str, Any]] = Field(default_factory=list)
+    concept_communities: list[dict[str, Any]] = Field(default_factory=list)
+    entity_concept_map: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    headline: dict[str, Any] | None = None
+    themes: list[dict[str, Any]] = Field(default_factory=list)
+    bridges_v2: list[dict[str, Any]] = Field(default_factory=list)
+    gaps_v2: list[dict[str, Any]] = Field(default_factory=list)
+    latent_topics: list[dict[str, Any]] = Field(default_factory=list)
+    tensions: list[dict[str, Any]] = Field(default_factory=list)
     trace: DiscoverTracePayload = Field(default_factory=DiscoverTracePayload)
     auto_synthesis: AutoSynthesisPayload = Field(default_factory=AutoSynthesisPayload)
     insight_packet_summary: InsightPacketSummary = Field(default_factory=InsightPacketSummary)
     context_graph: ContextGraphPayload = Field(default_factory=ContextGraphPayload)
 
 
+def _utcnow() -> datetime:
+    return datetime.utcnow()
+
+
+class GraphDiscoverSession(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    session_id: str
+    corpus_id: str
+    title: str = ""
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+    turn_count: int = 0
+    first_query: str | None = None
+
+
 class GraphDiscoverTurn(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     query: str
     mode: str = "auto"
-    created_at: datetime
+    created_at: datetime = Field(default_factory=_utcnow)
     response: GraphDiscoverResponse | None = None
 
 
-class GraphDiscoverSessionDetail(_legacy.GraphDiscoverSession):
+class GraphDiscoverSessionDetail(GraphDiscoverSession):
     turns: list[GraphDiscoverTurn] = Field(default_factory=list)
+
+
+class GraphResumeCandidateRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    corpus_id: str
+    query: str
+    threshold: float | None = None
+
+
+class GraphResumeCandidateResponse(BaseModel):
+    session: GraphDiscoverSession | None = None
+    score: float = 0.0
+
+
+class GraphSuggestionItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    text: str = ""
+    kind: str = "query"
+    entities: list[str] = Field(default_factory=list)
+    domains: list[str] = Field(default_factory=list)
+
+
+class GraphSuggestionsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    corpus_id: str
+    domain_map_summary: list[dict[str, Any]] = Field(default_factory=list)
+    suggestions: list[GraphSuggestionItem] = Field(default_factory=list)
 
 
 # ────────────────────────────────────────────────────────────────────────────

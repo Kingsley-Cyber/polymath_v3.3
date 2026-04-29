@@ -1,0 +1,335 @@
+@import "tailwindcss";
+
+@theme {
+    /* Deterministic Protocol Graph Theme Mapping */
+    --color-background-base: var(--bg-base);
+    --color-background-surface: var(--bg-surface);
+    --color-background-raised: var(--bg-raised);
+    --color-content-primary: var(--text-primary);
+    --color-content-secondary: var(--text-secondary);
+    --color-content-tertiary: var(--text-tertiary);
+    --color-accent-main: var(--accent-primary);
+    --color-accent-hover: var(--accent-secondary);
+    --color-accent-secondary: var(--accent-secondary);
+    --color-border-minimal: var(--border-subtle);
+
+    /* Typography - Intentional Minimalism & Terminal Graph Logic */
+    --font-sans: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+    --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+
+    /* Reset Shadows for brutalist/flat/graph design */
+    --shadow-sm: none;
+    --shadow-md: none;
+    --shadow-lg: none;
+    --shadow-xl: none;
+}
+
+@layer base {
+    /* 1. AYU MIRAGE -> Reinterpreted as Obsidian Graph Protocol */
+    :root,
+    .theme-ayu-mirage {
+        --bg-base: #0f0f11;
+        --bg-surface: #141416;
+        --bg-raised: #1c1c1f;
+        --text-primary: #ededee;
+        --text-secondary: #b8b8bd;  /* was #88888b — bumped from ~5.4:1 to ~9:1 contrast */
+        --text-tertiary: #888890;   /* was #4a4a4d — was failing WCAG AA (~2.4:1), now ~5:1 */
+        --accent-primary: #b366ff; /* Obsidian Purple Link */
+        --accent-secondary: #4d94ff; /* Obsidian Blue Node */
+        --border-subtle: #2c2c30;
+
+        background-color: var(--bg-base);
+        color: var(--text-primary);
+    }
+
+    /* 2. GRUVBOX -> Reinterpreted as TrustGraph Ontology */
+    .theme-gruvbox {
+        --bg-base: #111214;
+        --bg-surface: #16181a;
+        --bg-raised: #1e2023;
+        --text-primary: #e2cea8;     /* slightly brighter than #d4be98 */
+        --text-secondary: #c4b08e;   /* was #a89984 */
+        --text-tertiary: #8d7e6a;    /* was #5c5346 — bumped for legibility */
+        --accent-primary: #a9b665; /* VENUE Green */
+        --accent-secondary: #e78a4e; /* NEIGHBORHOOD Orange */
+        --border-subtle: #353740;
+
+        background-color: var(--bg-base);
+        color: var(--text-primary);
+    }
+
+    /* 3. SERENDIPITY -> Reinterpreted as Deterministic System Settings */
+    .theme-serendipity {
+        --bg-base: #000000;
+        --bg-surface: #0a0a0a;
+        --bg-raised: #141414;
+        --text-primary: #ffffff;
+        --text-secondary: #c0c0c0;   /* was #999999 — better readability */
+        --text-tertiary: #808080;    /* was #444444 — was failing WCAG AA, now ~5:1 */
+        --accent-primary: #ff3333; /* Rule Red/Orange Constraint */
+        --accent-secondary: #00ffcc; /* Logic Cyan */
+        --border-subtle: #2a2a2a;
+
+        background-color: var(--bg-base);
+        color: var(--text-primary);
+    }
+
+    /* 4. NORD -> Arctic Ice Graph */
+    .theme-nord {
+        --bg-base: #2e3440;
+        --bg-surface: #3b4252;
+        --bg-raised: #434c5e;
+        --text-primary: #eceff4;
+        --text-secondary: #d8dee9;
+        --text-tertiary: #a1adbf;
+        --accent-primary: #88c0d0;
+        --accent-secondary: #81a1c1;
+        --border-subtle: #4c566a;
+
+        background-color: var(--bg-base);
+        color: var(--text-primary);
+    }
+
+    /* 5. DRACULA -> Neon Spectral */
+    .theme-dracula {
+        --bg-base: #282a36;
+        --bg-surface: #353746;
+        --bg-raised: #44475a;
+        --text-primary: #f8f8f2;
+        --text-secondary: #e0e0d8;
+        --text-tertiary: #a0a090;
+        --accent-primary: #ff79c6;
+        --accent-secondary: #50fa7b;
+        --border-subtle: #6272a4;
+
+        background-color: var(--bg-base);
+        color: var(--text-primary);
+    }
+
+    /* 6. SOLAR -> High-Contrast Focus */
+    .theme-solar {
+        --bg-base: #002b36;
+        --bg-surface: #073642;
+        --bg-raised: #0e4652;
+        --text-primary: #fdf6e3;
+        --text-secondary: #eee8d5;
+        --text-tertiary: #93a1a1;
+        --accent-primary: #b58900;
+        --accent-secondary: #268bd2;
+        --border-subtle: #2c5964;
+
+        background-color: var(--bg-base);
+        color: var(--text-primary);
+    }
+
+    /* 7. CLAUDE -> Warm cream paper, espresso ink, Claude orange (mystery slot) */
+    .theme-claude {
+        --bg-base: #f5f1ea;
+        --bg-surface: #ebe6dd;
+        --bg-raised: #e1dccf;
+        --text-primary: #2d1a0e;
+        --text-secondary: #4a342a;
+        --text-tertiary: #7a6a5a;
+        --accent-primary: #cc7a3b;
+        --accent-secondary: #8b5a2b;
+        --border-subtle: #d0c8b8;
+
+        background-color: var(--bg-base);
+        color: var(--text-primary);
+    }
+
+    body {
+        @apply antialiased transition-colors duration-0;
+        font-family: var(--font-sans);
+        letter-spacing: -0.02em;
+    }
+}
+
+@layer components {
+    /* Global Deterministic UI Protocol Resets */
+    * {
+        @apply rounded-none shadow-none transition-none;
+    }
+
+    /* Avant-Garde Structural Elements - Graph / Terminal Hybrid */
+
+    /* Panels & Containers - Wireframe/Node aesthetic */
+    .glass,
+    .glass-dark {
+        @apply bg-background-surface backdrop-blur-none border border-border-minimal;
+    }
+
+    /* Message Bubbles - Designed like graph nodes/metadata blocks */
+    .message-user {
+        @apply pl-4 py-3 border border-border-minimal border-l-4 border-l-accent-main text-content-primary text-sm tracking-tight bg-background-base mb-4 uppercase;
+    }
+
+    .message-assistant {
+        @apply pl-4 py-3 border border-border-minimal text-content-secondary text-sm bg-background-surface mb-4 font-mono;
+    }
+
+    /* Input Area - Pure, stark terminal lines */
+    .chat-input-container {
+        @apply relative border-t border-border-minimal bg-background-base transition-colors duration-150;
+    }
+
+    .chat-input-container:focus-within {
+        @apply border-accent-main;
+        box-shadow: inset 0 1px 0 var(--accent-primary);
+    }
+
+    /* Pulse Indicator - Refined deterministic version */
+    .pulse-indicator {
+        @apply absolute top-0 left-0 h-[1px];
+        width: 100%;
+        background: var(--accent-primary);
+        animation: scanline 2s linear infinite;
+    }
+
+    @keyframes scanline {
+        0% {
+            transform: scaleX(0);
+            transform-origin: left;
+        }
+        50% {
+            transform: scaleX(1);
+            transform-origin: left;
+        }
+        50.1% {
+            transform: scaleX(1);
+            transform-origin: right;
+        }
+        100% {
+            transform: scaleX(0);
+            transform-origin: right;
+        }
+    }
+
+    /* Buttons - Sharp, structural wireframe styling */
+    .btn-primary {
+        @apply inline-flex items-center justify-center px-4 py-1.5 text-xs uppercase tracking-widest font-bold border border-accent-main text-accent-main hover:bg-accent-main hover:text-background-base cursor-pointer;
+    }
+
+    .btn-secondary {
+        @apply inline-flex items-center justify-center px-4 py-1.5 text-xs uppercase tracking-widest font-bold border border-border-minimal text-content-primary hover:border-content-primary cursor-pointer bg-transparent;
+    }
+
+    .btn-ghost {
+        @apply inline-flex items-center justify-center px-3 py-1 text-xs tracking-widest uppercase text-content-secondary hover:text-accent-main cursor-pointer bg-transparent;
+    }
+
+    /* Toggle Switches - Geometric boolean logic state */
+    .toggle {
+        @apply relative inline-flex h-4 w-8 items-center border border-border-minimal cursor-pointer bg-background-base;
+    }
+
+    .toggle[data-state="checked"],
+    .toggle-active {
+        @apply border-accent-main bg-accent-main/10;
+    }
+
+    .toggle-thumb {
+        @apply inline-block h-3 w-3 transform bg-content-tertiary;
+    }
+
+    .toggle[data-state="checked"] .toggle-thumb,
+    .toggle-active .toggle-thumb {
+        @apply translate-x-4 bg-accent-main;
+    }
+
+    /* Dropdown - Brutalist metadata popover */
+    .dropdown-menu {
+        @apply absolute z-50 mt-1 border border-border-minimal bg-background-surface;
+        @apply min-w-[200px] p-0 shadow-none;
+    }
+
+    /* Scrollbar - Minimal architectural line */
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-track {
+        @apply bg-background-base border-l border-border-minimal;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        @apply bg-border-minimal;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        @apply bg-accent-main;
+    }
+
+    /* Brutalist Form Inputs (for ToolEditor) */
+    .input-label {
+        @apply block text-[10px] font-bold uppercase tracking-widest text-content-secondary mb-1;
+    }
+    .input-brutalist {
+        @apply w-full bg-background-surface border border-border-minimal p-2 text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none focus:border-accent-main;
+    }
+}
+
+@layer utilities {
+    .text-balance {
+        text-wrap: balance;
+    }
+
+    /* Crisp instantaneous transitions matching deterministic behavior */
+    .animate-fade-in {
+        animation: fade-in 0.1s step-end forwards;
+    }
+
+    @keyframes fade-in {
+        from {
+            opacity: 0;
+        }
+        to {
+            opacity: 1;
+        }
+    }
+
+    .animate-slide-up {
+        animation: slide-up 0.1s step-end forwards;
+    }
+
+    @keyframes slide-up {
+        from {
+            transform: translateY(4px);
+            opacity: 0;
+        }
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+
+    /* Modal Smooth Animations (Claude-style) */
+    .animate-overlay-in {
+        animation: overlay-in 0.2s ease-out forwards;
+    }
+
+    @keyframes overlay-in {
+        from {
+            opacity: 0;
+        }
+        to {
+            opacity: 1;
+        }
+    }
+
+    .animate-modal-in {
+        animation: modal-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    @keyframes modal-in {
+        from {
+            opacity: 0;
+            transform: scale(0.97) translateY(16px);
+        }
+        to {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+        }
+    }
+}

@@ -1,0 +1,139 @@
+# LiteLLM Proxy Configuration for Polymath RAG v3.3
+# Uses wildcard patterns as per CLAUDE.md rules
+# NEVER hardcode specific model names here
+
+model_list:
+  # TEI (Text Embeddings Inference) — GPU-accelerated local embedder
+  # Serves Qwen3-Embedding-0.6B via OpenAI-compatible /embeddings endpoint
+  - model_name: "tei/*"
+    litellm_params:
+      model: "huggingface/*"
+      api_base: http://embedder:80
+      api_key: "none"
+
+  # Ollama local models - wildcard pattern
+  # Routes to the HOST's native Ollama (20 pulled models) via Docker Desktop's
+  # host.docker.internal bridge. The compose Ollama container is empty.
+  - model_name: "ollama/*"
+    litellm_params:
+      model: "ollama/*"
+      api_base: http://host.docker.internal:11434
+
+  # OpenAI models - wildcard pattern (requires OPENAI_API_KEY in environment)
+  - model_name: "openai/*"
+    litellm_params:
+      model: "openai/*"
+      api_key: os.environ/OPENAI_API_KEY
+
+  # Anthropic models - wildcard pattern (requires ANTHROPIC_API_KEY in environment)
+  - model_name: "anthropic/*"
+    litellm_params:
+      model: "anthropic/*"
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # DeepSeek models - wildcard pattern (requires DEEPSEEK_API_KEY in environment)
+  - model_name: "deepseek/*"
+    litellm_params:
+      model: "deepseek/*"
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+  # Google models - wildcard pattern (requires GEMINI_API_KEY in environment)
+  - model_name: "gemini/*"
+    litellm_params:
+      model: "gemini/*"
+      api_key: os.environ/GEMINI_API_KEY
+
+  # Mistral La Plateforme — OpenAI-compatible
+  - model_name: "mistral/*"
+    litellm_params:
+      model: "openai/*"
+      api_base: "https://api.mistral.ai/v1"
+      api_key: os.environ/MISTRAL_API_KEY
+
+  # GLM (Zhipu / z.ai) Coding endpoint — OpenAI-compatible
+  # Models: glm-4.6, glm-4.5, glm-4-plus
+  - model_name: "glm-coding/*"
+    litellm_params:
+      model: "openai/*"
+      api_base: "https://api.z.ai/api/coding/paas/v4"
+      api_key: os.environ/Z_AI_API_KEY
+
+  # Kimi / Moonshot — OpenAI-compatible
+  # Models: kimi-k2-0905-preview, moonshot-v1-128k, kimi-latest
+  - model_name: "kimi/*"
+    litellm_params:
+      model: "openai/*"
+      api_base: "https://api.moonshot.ai/v1"
+      api_key: os.environ/MOONSHOT_API_KEY
+
+  # OpenRouter — aggregator for any supported model (openrouter/<provider>/<model>)
+  - model_name: "openrouter/*"
+    litellm_params:
+      model: "openrouter/*"
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  # MiniMax (international) — OpenAI-compatible
+  # Models: MiniMax-M1, MiniMax-Text-01, abab6.5s-chat
+  - model_name: "minimax/*"
+    litellm_params:
+      model: "openai/*"
+      api_base: "https://api.minimaxi.chat/v1"
+      api_key: os.environ/MINIMAX_API_KEY
+
+  # Xiaomi MiMo-v2 (base endpoint) — OpenAI-compatible
+  - model_name: "mimo/*"
+    litellm_params:
+      model: "openai/*"
+      api_base: "https://api.xiaomimimo.com/v1"
+      api_key: os.environ/MIMO_API_KEY
+
+  # Xiaomi MiMo-v2 Coding (SGP token-plan endpoint) — OpenAI-compatible
+  - model_name: "mimo-coding/*"
+    litellm_params:
+      model: "openai/*"
+      api_base: "https://token-plan-sgp.xiaomimimo.com/v1"
+      api_key: os.environ/MIMO_API_KEY
+
+litellm_settings:
+  drop_params: True
+  set_verbose: False
+  num_retries: 3
+  request_timeout: 600
+  cache: True
+  cache_params:
+    type: redis
+    host: redis
+    port: 6379
+    ttl: 3600
+
+general_settings:
+  # Use LiteLLM's supported env indirection instead of committing a concrete
+  # master key. Plain ${LITELLM_MASTER_KEY} YAML env-sub was not expanded here.
+  master_key: os.environ/LITELLM_MASTER_KEY
+  disable_spend_logs: True
+  telemetry: False
+  # Intentionally NO `completion_model` / `embedding_model` here — those keys
+  # coerce every incoming request into that single model group, blocking
+  # per-request routing (sends deepseek/* through ollama/llama3.2:3b).
+
+environment: &default
+  completion_model: "ollama/llama3.2:3b"
+  embedding_model: "tei/qwen3-embedding"
+
+development:
+  <<: *default
+
+production:
+  <<: *default
+
+# Model-specific fallbacks (optional)
+# fallbacks:
+#   - model: "ollama/llama3.2:3b"
+#     fallbacks:
+#       - model: "ollama/mistral:7b"
+#       - model: "openai/gpt-3.5-turbo"
+
+# Rate limiting (optional)
+# rate_limit:
+#   rpm: 60
+#   tpm: 100000

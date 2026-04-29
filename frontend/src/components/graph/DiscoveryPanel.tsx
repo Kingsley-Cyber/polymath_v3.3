@@ -4,7 +4,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import { Loader2, MessageSquare, SendHorizontal, Sparkles, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, MessageSquare, SendHorizontal, Sparkles, Trash2, X } from "lucide-react";
 import {
   deleteGraphSession,
   discoverGraph,
@@ -50,6 +50,9 @@ type ReceiptChunk = {
   preview: string;
   has_temporal?: boolean;
 };
+
+type EvidenceFilterTrace = NonNullable<GraphDiscoverResponse["trace"]>["evidence_filter"];
+type GraphHintTrace = NonNullable<GraphDiscoverResponse["trace"]>["graph_hint"];
 
 const MISSION_CONTEXT_GRAPH_EVENT = "mission-control-context-graph";
 const PANEL_WIDTH_STORAGE_KEY = "mission-control-panel-width";
@@ -297,7 +300,7 @@ export function DiscoveryPanel({ corpusId, onClose }: DiscoveryPanelProps) {
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void runDiscover(query);
+    void runDiscover(query.trim() || latest?.query || suggestions[0] || "");
   };
 
   const openSession = useCallback(async (sessionId: string) => {
@@ -353,18 +356,29 @@ export function DiscoveryPanel({ corpusId, onClose }: DiscoveryPanelProps) {
   }, [latest, onClose, setPendingPrompt]);
 
   const trimmedQuery = query.trim();
-  const submitDisabled = loading || !trimmedQuery;
+  const latestQuery = latest?.query?.trim() || "";
+  const suggestedQuery = suggestions[0]?.trim() || "";
+  const submitQuery = trimmedQuery || latestQuery || suggestedQuery;
+  const submitDisabled = loading || !corpusId || !submitQuery;
   const submitTitle = loading
     ? "Graph synthesis is already running"
-    : !trimmedQuery
-      ? "Type a graph query first"
-      : !corpusId
-        ? "Select a corpus before graph synthesis can run"
-        : "Run graph synthesis";
+    : !corpusId
+      ? "Select a corpus before graph synthesis can run"
+      : trimmedQuery
+        ? "Run graph synthesis"
+        : latestQuery
+          ? "Run the latest graph query again"
+          : suggestedQuery
+            ? "Run the top suggested graph query"
+          : "Type a graph query first";
   const footerStatus = loading
     ? `sent to /api/graph/discover · ${phase === "synthesizing" ? "synthesizing insight" : "curating graph"}`
     : !corpusId
       ? "select a corpus before graph synthesis can run"
+      : !trimmedQuery && latestQuery
+        ? "send reruns the latest graph query"
+      : !trimmedQuery && suggestedQuery
+        ? "send runs the top suggested graph query"
       : !trimmedQuery && lastDurationMs == null
         ? "type a graph question to enable send"
         : lastDurationMs != null
@@ -569,25 +583,25 @@ function RunningQueryBanner({ phase, query, elapsedMs }: { phase: Phase; query: 
 
 function MissionRead({ response, onPickQuery }: { response: GraphDiscoverResponse; onPickQuery: (text: string) => void }) {
   const synthesis = useMemo(() => synthesisForResponse(response), [response]);
-  const sparse = !!response.insight_packet_summary?.sparse;
   const temporal = !!response.insight_packet_summary?.temporal_support;
   return (
     <div className="space-y-5">
       <GroupingBasis response={response} />
       <ContextTerminal response={response} />
+      <GraphHintPanel response={response} />
       <article className="space-y-5 text-[13px] leading-6 text-neutral-300">
         <section id="mission-headline" className="border-b border-white/10 pb-4">
           <div className="mb-2 text-[10px] uppercase tracking-[0.28em] text-neutral-500">Structural Headline</div>
           <h3 className="text-xl font-semibold leading-tight tracking-tight text-neutral-50">{synthesis.headline || "The graph did not have enough evidence for a confident synthesis."}</h3>
           <div className="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-wider">
-            <span className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-neutral-500">{sparse ? "sparse evidence" : "bounded evidence packet"}</span>
-            <span className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-neutral-500">{temporal ? "ordered sources available" : "non-temporal signals"}</span>
+            <span className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-neutral-500">backend response returned</span>
+            <span className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-neutral-500">{temporal ? "source order included" : "source order not included"}</span>
           </div>
         </section>
-        <InsightSection id="themes" title="Themes" items={synthesis.themes} empty="No query-scoped concept neighborhood had enough packet evidence." />
-        <InsightSection id="bridges" title="Bridges" items={synthesis.bridges} empty="No bridge is strong enough to elevate beyond the graph overlay." />
-        <InsightSection id="gaps" title="Gaps" items={synthesis.gaps} empty="No evidence-backed gap hypothesis was returned." />
-        <InsightSection id="signals" title="Emerging Signals" items={synthesis.emerging_signals} empty="No recurring signal stood out in the bounded packet." />
+        <InsightSection id="themes" title="Themes" items={synthesis.themes} empty="No theme narrative was returned for this query." />
+        <InsightSection id="bridges" title="Bridges" items={synthesis.bridges} empty="No bridge narrative was returned for this query." />
+        <InsightSection id="gaps" title="Gaps" items={synthesis.gaps} empty="No gap narrative was returned for this query." />
+        <InsightSection id="signals" title="Emerging Signals" items={synthesis.emerging_signals} empty="No emerging-signal narrative was returned for this query." />
         <NextMoves items={synthesis.next_moves} onPickQuery={onPickQuery} />
         <EvidenceTrace response={response} notes={synthesis.evidence_notes} />
       </article>
@@ -607,7 +621,7 @@ function GroupingBasis({ response }: { response: GraphDiscoverResponse }) {
   );
   return (
     <section className="rounded border border-amber-200/20 bg-amber-200/[0.045] px-3 py-3">
-      <div className="text-[10px] uppercase tracking-[0.28em] text-amber-100/80">how this corpus was forced to group</div>
+      <div className="text-[10px] uppercase tracking-[0.28em] text-amber-100/80">how the backend scoped this query</div>
       <p className="mt-2 text-[13px] leading-6 text-neutral-300">{basis}</p>
       <div className="mt-3 grid grid-cols-3 gap-2 font-mono text-[10px]">
         <div className="rounded border border-white/10 bg-black/25 px-2 py-1.5"><div className="text-neutral-200">{groups.length}</div><div className="uppercase tracking-wider text-neutral-600">query groups</div></div>
@@ -615,79 +629,152 @@ function GroupingBasis({ response }: { response: GraphDiscoverResponse }) {
         <div className="rounded border border-white/10 bg-black/25 px-2 py-1.5"><div className="text-neutral-200">{response.graph.nodes.length}</div><div className="uppercase tracking-wider text-neutral-600">concept nodes</div></div>
       </div>
       <p className="mt-2 text-[11px] leading-relaxed text-neutral-500">
-        If a group appears, it came from the bounded working set for this query. Documents remain individual evidence nodes so the LLM receipt can be audited file by file.
+        This is the backend's scoped working set for the query, not a whole-corpus ranking.
       </p>
+    </section>
+  );
+}
+
+function GraphHintPanel({ response }: { response: GraphDiscoverResponse }) {
+  const hint = graphHintForResponse(response);
+  if (!hint) return null;
+  const shape = hint.shape || {};
+  const gateways = (hint.gateways || []).filter((gateway) => gateway?.name).slice(0, 4);
+  const gaps = (hint.gap_depths || []).filter((gap) => gap?.question).slice(0, 3);
+  const statements = (hint.supporting_statements || []).filter((item) => item?.statement).slice(0, 2);
+
+  return (
+    <section className="rounded border border-white/10 bg-white/[0.025] px-3 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[10px] uppercase tracking-[0.28em] text-neutral-500">structural hint sent to synthesis</div>
+          <div className="mt-1 text-[13px] font-semibold text-neutral-100">{shape.label || "query-scoped read"}</div>
+        </div>
+        <span className="shrink-0 rounded border border-white/10 bg-black/20 px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-neutral-600">graph hint</span>
+      </div>
+      {(hint.context_hint || shape.description) && (
+        <p className="mt-2 text-[12px] leading-relaxed text-neutral-400">{hint.context_hint || shape.description}</p>
+      )}
+      {gateways.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {gateways.map((gateway) => (
+            <span key={gateway.id || gateway.name} className="rounded border border-emerald-300/15 bg-emerald-300/[0.035] px-2 py-1 text-[10px] text-emerald-100/75" title={gateway.reason || gateway.connects?.join(" · ")}>
+              {gateway.name}
+            </span>
+          ))}
+        </div>
+      )}
+      {gaps.length > 0 && (
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          {gaps.map((gap) => (
+            <div key={gap.id || gap.question} className="rounded border border-white/10 bg-black/20 px-2 py-1.5">
+              <div className="text-[9px] uppercase tracking-wider text-neutral-600">{gap.depth || "gap"}</div>
+              <div className="mt-1 text-[10px] leading-snug text-neutral-400">{clamp(gap.question || "", 120)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {statements.length > 0 && (
+        <div className="mt-3 border-t border-white/10 pt-2">
+          <div className="mb-1 text-[9px] uppercase tracking-[0.22em] text-neutral-600">supporting statements</div>
+          <div className="space-y-1">
+            {statements.map((statement) => (
+              <div key={`${statement.evidence_id || statement.source_label}:${statement.statement}`} className="text-[10px] leading-relaxed text-neutral-500">
+                <span className="text-neutral-400">{statement.evidence_id || statement.source_label || "evidence"}</span> {statement.statement}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
 
 function ContextTerminal({ response }: { response: GraphDiscoverResponse }) {
-  const llm = response.trace?.llm_context;
+  const [collapsed, setCollapsed] = useState(true);
   const files = receiptFiles(response);
   const chunks = receiptChunks(response);
-  const context = contextGraphFromDiscoverResponse(response);
-  const groups = context?.nodes.filter((node) => node.kind === "topic").length ?? 0;
-  const documents = context?.nodes.filter((node) => node.kind === "document").length ?? files.length;
-  const concepts = context?.nodes.filter((node) => node.kind !== "topic" && node.kind !== "document").length ?? response.graph.nodes.length;
-  const gaps = context?.links.filter((link) => link.suggested).length ?? response.gaps_v2?.length ?? 0;
-  const counts = llm?.counts ?? response.insight_packet_summary?.counts ?? {};
-  const visibility = llm?.visibility ?? {};
-  const chunkCap = Number(visibility.max_evidence_chunks ?? counts.evidence_chunks ?? chunks.length) || chunks.length;
-  const entityCap = Number(visibility.max_entities ?? counts.entities ?? concepts) || concepts;
+  const filter = response.trace?.evidence_filter;
+  const filterCounts = filter ? evidenceFilterCounts(filter, chunks.length) : null;
+  const receiptSummary = [
+    files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : "no file receipt",
+    `${chunks.length} snippet${chunks.length === 1 ? "" : "s"}`,
+    filterCounts ? `${filterCounts.accepted} of ${filterCounts.raw} accepted` : "",
+  ].filter(Boolean).join(" · ");
+  const requestLines = [
+    `POST /api/graph/discover`,
+    `query="${clamp(response.query, 120)}"`,
+    `corpus_id=${response.corpus_id}`,
+    `mode=${response.mode || "auto"}`,
+    response.session_id ? `session_id=${response.session_id}` : "session_id=new",
+  ];
+
+  useEffect(() => {
+    setCollapsed(true);
+  }, [response]);
 
   return (
     <section className="rounded border border-emerald-300/15 bg-[#030504] p-3 font-mono shadow-[0_0_48px_rgba(0,0,0,0.35)]">
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <button
+        type="button"
+        onClick={() => setCollapsed((value) => !value)}
+        className="mb-3 flex w-full items-center justify-between gap-3 text-left"
+        aria-expanded={!collapsed}
+      >
         <div>
-          <div className="text-[9px] uppercase tracking-[0.3em] text-emerald-200/80">terminal context graph</div>
-          <div className="mt-1 text-[10px] text-neutral-600">$ graph.packet --llm-receipt --obsidian-lens</div>
+          <div className="text-[9px] uppercase tracking-[0.3em] text-emerald-200/80">backend request</div>
+          <div className="mt-1 text-[10px] text-neutral-600">{collapsed ? receiptSummary : "$ graph.discover --request"}</div>
         </div>
-        <div className="text-[9px] uppercase tracking-[0.2em] text-neutral-600">{response.insight_packet_summary?.sparse ? "sparse" : "ready"}</div>
-      </div>
-      <div className="grid grid-cols-4 gap-1.5">
-        <TerminalStat label="groups" value={groups} tone="gold" />
-        <TerminalStat label="concepts" value={concepts} tone="neutral" />
-        <TerminalStat label="files" value={documents} tone="gold" />
-        <TerminalStat label="gaps" value={gaps} tone="muted" />
-      </div>
-      <div className="mt-3 space-y-1 text-[10px] leading-relaxed text-neutral-500">
-        <TerminalLine command="labels" text="query groups + evidence files first; concept labels stay quiet unless role weight earns visibility" />
-        <TerminalLine command="colors" text="gold query groups, green evidence files, warm bridge hubs, rose provenance warnings, gray suggested gaps" />
-        <TerminalLine command="limits" text={`${entityCap} visible packet entities; ${chunkCap} evidence chunks carried into synthesis`} />
-      </div>
-      <div className="mt-4 border-t border-white/10 pt-3">
-        <div className="mb-2 text-[9px] uppercase tracking-[0.24em] text-emerald-200/70">files sent to llm</div>
-        {files.length ? (
-          <div className="space-y-1.5">
-            {files.slice(0, 8).map((file, index) => (
-              <div key={`${file.doc_id}:${file.source_label}:${index}`} className="flex items-start justify-between gap-3 text-[10px]">
-                <span className="min-w-0">
-                  <span className="block truncate text-neutral-300">{readableSourceLabel(sourceDisplayLabel(file, index), index)}</span>
-                  {formatSourceMeta(file.source) && <span className="mt-0.5 block truncate text-[9px] text-neutral-600">{formatSourceMeta(file.source)}</span>}
-                </span>
-                <span className="shrink-0 text-neutral-600">{file.chunk_count} chunk{file.chunk_count === 1 ? "" : "s"}{file.has_temporal ? " / ordered" : ""}</span>
-              </div>
-            ))}
-            {files.length > 8 && <div className="text-[10px] text-neutral-700">+{files.length - 8} more files in trace</div>}
+        <span className="inline-flex items-center gap-1 text-[9px] uppercase tracking-[0.2em] text-neutral-600">
+          {collapsed ? "show" : "hide"}
+          {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        </span>
+      </button>
+      {!collapsed && (
+        <>
+          <div className="space-y-1 text-[10px] leading-relaxed text-neutral-500">
+            <TerminalLine command="endpoint" text={requestLines[0]} />
+            <TerminalLine command="payload" text={requestLines.slice(1, 3).join(" | ")} />
+            <TerminalLine command="options" text={requestLines.slice(3).join(" | ")} />
           </div>
-        ) : <div className="text-[10px] text-neutral-700">No file receipt was returned for this packet.</div>}
-      </div>
-      <div className="mt-4 border-t border-white/10 pt-3">
-        <div className="mb-2 text-[9px] uppercase tracking-[0.24em] text-emerald-200/70">packet chunk previews</div>
-        {chunks.length ? (
-          <div className="space-y-2">
-            {chunks.slice(0, 5).map((chunk) => (
-              <div key={`${chunk.doc_id}:${chunk.chunk_id}`} className="rounded border border-white/10 bg-white/[0.025] px-2 py-1.5">
-                <div className="flex items-center justify-between gap-2 text-[9px] uppercase tracking-wider text-neutral-600"><span className="truncate">{sourceDisplayLabel(chunk, 0)}</span><span className="shrink-0">{chunk.chunk_id}</span></div>
-                {formatSourceMeta(chunk.source) && <div className="mt-1 truncate text-[9px] text-neutral-600">{formatSourceMeta(chunk.source)}</div>}
-                <div className="mt-1 text-[10px] leading-relaxed text-neutral-400">{chunk.preview || "No preview text returned."}</div>
+          <div className="mt-4 border-t border-white/10 pt-3">
+            <div className="mb-2 text-[9px] uppercase tracking-[0.24em] text-emerald-200/70">backend synthesis receipt</div>
+            {files.length ? (
+              <div className="space-y-1.5">
+                {files.slice(0, 8).map((file, index) => (
+                  <div key={`${file.doc_id}:${file.source_label}:${index}`} className="flex items-start justify-between gap-3 text-[10px]">
+                    <span className="min-w-0">
+                      <span className="block truncate text-neutral-300">{readableSourceLabel(sourceDisplayLabel(file, index), index)}</span>
+                      {formatSourceMeta(file.source) && <span className="mt-0.5 block truncate text-[9px] text-neutral-600">{formatSourceMeta(file.source)}</span>}
+                    </span>
+                    <span className="shrink-0 text-neutral-600">{file.has_temporal ? "ordered" : "source"}</span>
+                  </div>
+                ))}
+                {files.length > 8 && <div className="text-[10px] text-neutral-700">+{files.length - 8} more files in trace</div>}
               </div>
-            ))}
-            {chunks.length > 5 && <div className="text-[10px] text-neutral-700">+{chunks.length - 5} more chunks in Evidence / Trace</div>}
+            ) : <div className="text-[10px] text-neutral-700">The browser did not send files in this request, and the backend did not return a file-level synthesis receipt.</div>}
           </div>
-        ) : <div className="text-[10px] text-neutral-700">No chunk previews were exposed by the backend trace.</div>}
-      </div>
+          <div className="mt-4 border-t border-white/10 pt-3">
+            <div className="mb-2 flex items-center justify-between gap-3 text-[9px] uppercase tracking-[0.24em] text-emerald-200/70">
+              <span>source snippets returned by backend</span>
+              {filterCounts && <span className={filter?.all_rejected ? "text-red-200/80" : "text-neutral-600"}>{filterCounts.accepted} of {filterCounts.raw} accepted · {filterCounts.rejected} dropped</span>}
+            </div>
+            {chunks.length ? (
+              <div className="space-y-2">
+                {chunks.slice(0, 5).map((chunk) => (
+                  <div key={`${chunk.doc_id}:${chunk.chunk_id}`} className="rounded border border-white/10 bg-white/[0.025] px-2 py-1.5">
+                    <div className="flex items-center justify-between gap-2 text-[9px] uppercase tracking-wider text-neutral-600"><span className="truncate">{sourceDisplayLabel(chunk, 0)}</span><span className="shrink-0">{chunk.chunk_id}</span></div>
+                    {formatSourceMeta(chunk.source) && <div className="mt-1 truncate text-[9px] text-neutral-600">{formatSourceMeta(chunk.source)}</div>}
+                    <div className="mt-1 text-[10px] leading-relaxed text-neutral-400">{chunk.preview || "No preview text returned."}</div>
+                  </div>
+                ))}
+                {chunks.length > 5 && <div className="text-[10px] text-neutral-700">+{chunks.length - 5} more chunks in Evidence / Trace</div>}
+              </div>
+            ) : <div className="text-[10px] text-neutral-700">The backend did not expose snippet previews in this response trace.</div>}
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -734,6 +821,11 @@ function EvidenceTrace({ response, notes }: { response: GraphDiscoverResponse; n
   const chunks = receiptChunks(response);
   const context = contextGraphFromDiscoverResponse(response);
   const llm = response.trace?.llm_context;
+  const retrieval = response.trace?.retrieval_evidence;
+  const filter = response.trace?.evidence_filter;
+  const filterCounts = filter ? evidenceFilterCounts(filter, chunks.length) : null;
+  const rejectionReasons = Object.entries(filter?.rejection_reasons || {}).filter(([, count]) => Number(count) > 0);
+  const hasRetrievalFilter = Boolean(retrieval || filter);
   const collections = Object.entries(llm?.collections || {}).map(([kind, name]) => `${kind} :: ${name}`);
   const promptRows = llm?.prompt
     ? [
@@ -747,6 +839,34 @@ function EvidenceTrace({ response, notes }: { response: GraphDiscoverResponse; n
     <section id="mission-trace" className="scroll-mt-20 pb-6">
       <div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-[11px] font-semibold uppercase tracking-[0.28em] text-neutral-400">Evidence / Trace</h4><span className="text-[10px] text-neutral-700">advanced</span></div>
       {notes.length > 0 && <div className="mb-3 space-y-2">{notes.map((note, index) => <div key={`${note.title}:${index}`} className="rounded border border-white/10 bg-white/[0.025] px-3 py-2"><div className="text-[12px] font-semibold text-neutral-200">{cleanTitle(note.title)}</div><div className="mt-1 text-[12px] leading-relaxed text-neutral-500">{note.body}</div></div>)}</div>}
+      {hasRetrievalFilter && (
+        <div className="mb-3 rounded border border-white/10 bg-black/20 p-3 font-mono">
+          <div className="mb-2 text-[9px] uppercase tracking-[0.24em] text-neutral-500">retrieval & filter</div>
+          <div className="space-y-1.5">
+            {retrieval && (
+              <div className="flex flex-wrap items-center gap-1.5 rounded border border-white/10 bg-white/[0.025] px-2 py-1.5">
+                <span className="mr-1 text-[9px] uppercase tracking-wider text-neutral-600">retrieval</span>
+                <TraceChip label={`source: ${retrieval.source || "unknown"}`} />
+                <TraceChip label={`effective_tier: ${retrieval.effective_tier || retrieval.requested_tier || "unknown"}`} />
+                {retrieval.final_top_k !== undefined && <TraceChip label={`cap=${retrieval.final_top_k}`} />}
+                {retrieval.hydrated_chunks !== undefined && <TraceChip label={`hydrated=${retrieval.hydrated_chunks}`} />}
+                {retrieval.downgrade_reason && <TraceChip tone="warn" label={`tier downgraded: ${clamp(retrieval.downgrade_reason, 90)}`} />}
+                {retrieval.error && <TraceChip tone="danger" label={`error: ${clamp(retrieval.error, 90)}`} />}
+              </div>
+            )}
+            {filter && filterCounts && (
+              <div className={cx("flex flex-wrap items-center gap-1.5 rounded border px-2 py-1.5", filter.all_rejected ? "border-red-300/25 bg-red-500/[0.06]" : "border-white/10 bg-white/[0.025]")}>
+                <span className="mr-1 text-[9px] uppercase tracking-wider text-neutral-600">filter</span>
+                <span className={cx("text-[10px]", filter.all_rejected ? "text-red-100/80" : "text-neutral-300")}>{filterCounts.accepted} of {filterCounts.raw} passed</span>
+                {filter.all_rejected && <TraceChip tone="danger" label="all rejected" />}
+                {rejectionReasons.map(([reason, count]) => (
+                  <TraceChip key={reason} label={`${reason}:${count}`} tone={filter.all_rejected ? "danger" : "neutral"} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       <details className="rounded border border-white/10 bg-black/20 p-3">
         <summary className="cursor-pointer text-[10px] uppercase tracking-[0.24em] text-neutral-500">packet internals and raw trace</summary>
         <div className="mt-3 space-y-4 font-mono text-[10px] leading-relaxed text-neutral-500">
@@ -755,7 +875,7 @@ function EvidenceTrace({ response, notes }: { response: GraphDiscoverResponse; n
           <TraceBlock title="prompt" rows={promptRows} />
           <TraceBlock title="files" rows={files.map((file, index) => `${sourceDisplayLabel(file, index)} :: ${formatSourceMeta(file.source) || "no source metadata"} :: ${file.chunk_count} chunks :: ${file.doc_id}`)} />
           <TraceBlock title="chunks" rows={chunks.map((chunk, index) => `${sourceDisplayLabel(chunk, index)} :: ${formatSourceMeta(chunk.source) || "no source metadata"} :: ${chunk.chunk_id} :: ${clamp(chunk.preview, 180)}`)} />
-          <TraceBlock title="weak links" rows={(response.weak_links || []).map((link) => `${link.source_name} -> ${link.target_name} :: ${link.weakness_type} :: ${link.rationale}`)} />
+          <TraceBlock title="relationships for review" rows={(response.weak_links || []).map((link) => `${link.source_name} -> ${link.target_name} :: ${link.weakness_type} :: ${link.rationale}`)} />
           <TraceBlock title="suggested gap edges" rows={(context?.links || []).filter((link) => link.suggested).map((link) => `${link.source} -> ${link.target} :: suggested :: ${link.evidence || "no evidence label"}`)} />
           <pre className="max-h-72 overflow-auto rounded border border-white/10 bg-black/35 p-2 text-[9px] text-neutral-600 custom-scrollbar">{JSON.stringify({ insight_packet_summary: response.insight_packet_summary, trace_counts: response.trace?.llm_context?.counts, visibility: response.trace?.llm_context?.visibility }, null, 2)}</pre>
         </div>
@@ -766,6 +886,31 @@ function EvidenceTrace({ response, notes }: { response: GraphDiscoverResponse; n
 
 function TraceBlock({ title, rows }: { title: string; rows: string[] }) {
   return <div><div className="mb-1 text-neutral-400">{title}</div>{rows.length ? <div className="space-y-1">{rows.slice(0, 12).map((row, index) => <div key={`${title}:${index}`} className="border-t border-white/5 pt-1">{row}</div>)}{rows.length > 12 && <div className="text-neutral-700">+{rows.length - 12} more</div>}</div> : <div className="text-neutral-700">none returned</div>}</div>;
+}
+
+function TraceChip({ label, tone = "neutral" }: { label: string; tone?: "neutral" | "warn" | "danger" }) {
+  return (
+    <span className={cx(
+      "rounded border px-1.5 py-0.5 text-[9px]",
+      tone === "warn" && "border-amber-200/25 bg-amber-200/[0.06] text-amber-100/75",
+      tone === "danger" && "border-red-300/30 bg-red-500/[0.08] text-red-100/80",
+      tone === "neutral" && "border-white/10 bg-white/[0.03] text-neutral-500"
+    )}>
+      {label}
+    </span>
+  );
+}
+
+function evidenceFilterCounts(filter: NonNullable<EvidenceFilterTrace>, fallbackAccepted: number) {
+  const explicitRejected = Number.isFinite(filter.rejected) ? Number(filter.rejected) : null;
+  const accepted = Number.isFinite(filter.accepted) ? Number(filter.accepted) : fallbackAccepted;
+  const raw = Number.isFinite(filter.raw) ? Number(filter.raw) : accepted + (explicitRejected ?? 0);
+  const rejected = explicitRejected ?? Math.max(raw - accepted, 0);
+  return {
+    accepted: Math.max(0, accepted),
+    raw: Math.max(0, raw),
+    rejected: Math.max(0, rejected),
+  };
 }
 
 function EmptyState({ suggestions, onPickSuggestion }: { suggestions: string[]; onPickSuggestion: (text: string) => void }) {
@@ -789,10 +934,6 @@ function SessionShelf({ sessions, activeSessionId, loadingSessionId, onOpen, onD
   );
 }
 
-function TerminalStat({ label, value, tone }: { label: string; value: number; tone: "gold" | "neutral" | "muted" }) {
-  return <div className={cx("rounded border bg-black/35 px-2 py-1.5 text-center", tone === "gold" ? "border-amber-300/20" : "border-white/10")}><div className={cx("text-[15px]", tone === "gold" ? "text-amber-200" : tone === "neutral" ? "text-neutral-200" : "text-neutral-400")}>{value}</div><div className="text-[8px] uppercase tracking-widest text-neutral-700">{label}</div></div>;
-}
-
 function TerminalLine({ command, text }: { command: string; text: string }) {
   return <div><span className="text-emerald-300/70">$ {command}</span> {text}</div>;
 }
@@ -801,14 +942,14 @@ function synthesisForResponse(response: GraphDiscoverResponse): AutoSynthesisPay
   if (response.auto_synthesis) return normalizeSynthesis(response.auto_synthesis);
   const themes = (response.themes || []).map((theme) => ({
     title: theme.name,
-    body: theme.prose?.join(" ") || `This theme carries ${theme.weight_pct}% of the scoped graph weight across ${theme.size} concepts.`,
+    body: theme.prose?.join(" ") || "The backend returned this theme without a narrative body.",
     evidence: theme.top_concepts.slice(0, 4),
     related_ids: [theme.theme_id],
   }));
   const bridges = response.bridges_v2?.length
     ? response.bridges_v2.map((bridge) => ({
         title: bridge.subhead,
-        body: bridge.prose?.join(" ") || `Bridge strength ${bridge.betweenness.toFixed(2)} across ${bridge.edge_count} scoped edges.`,
+        body: bridge.prose?.join(" ") || "The backend returned this bridge without a narrative body.",
         evidence: bridge.anchor_concepts.slice(0, 4),
         related_ids: [bridge.bridge_id, bridge.source_entity_id || "", bridge.target_entity_id || ""].filter(Boolean),
       }))
@@ -820,14 +961,14 @@ function synthesisForResponse(response: GraphDiscoverResponse): AutoSynthesisPay
       }));
   const gaps = (response.gaps_v2 || []).map((gap) => ({
     title: gap.question,
-    body: gap.prose?.join(" ") || `Expected connectivity ${gap.expected_connectivity.toFixed(2)} is higher than actual structural connectivity ${gap.structural_connectivity.toFixed(2)}. Treat this as a candidate gap, not a proven absence.`,
+    body: gap.prose?.join(" ") || "The backend returned this gap candidate without a narrative body.",
     evidence: gap.anchor_concepts.slice(0, 4),
     related_ids: [gap.gap_id, gap.cluster_a, gap.cluster_b],
   }));
   const emergingSignals = (response.latent_topics || []).map((topic) => ({
     title: topic.canonical_name,
-    body: topic.prose?.join(" ") || topic.rationale || `Mentioned in ${topic.doc_count} docs and ${topic.mention_count} chunks, but not yet structurally central.`,
-    evidence: [topic.domain, `${topic.doc_count} docs`, `${topic.mention_count} mentions`],
+    body: topic.prose?.join(" ") || topic.rationale || "The backend returned this emerging signal without a narrative body.",
+    evidence: [topic.domain],
     related_ids: [topic.entity_id],
   }));
   const nextMoves = (response.questions || []).map((question) => ({
@@ -838,8 +979,8 @@ function synthesisForResponse(response: GraphDiscoverResponse): AutoSynthesisPay
   }));
   const evidenceNotes = (response.weak_links || []).slice(0, 5).map((link) => ({
     title: `${link.source_name} to ${link.target_name}`,
-    body: `Weak link: ${link.rationale || link.action_question || link.weakness_type}.`,
-    evidence: [link.weakness_type, link.severity].filter(Boolean),
+    body: link.rationale || link.action_question || "The backend marked this relationship for review.",
+    evidence: [],
     related_ids: [link.source, link.target],
   }));
   return normalizeSynthesis({
@@ -872,6 +1013,10 @@ function normalizeItems(items: AutoSynthesisItem[] | undefined): AutoSynthesisIt
     evidence: Array.isArray(item.evidence) ? item.evidence.filter(Boolean).map(String) : [],
     related_ids: Array.isArray(item.related_ids) ? item.related_ids.filter(Boolean).map(String) : [],
   }));
+}
+
+function graphHintForResponse(response: GraphDiscoverResponse): GraphHintTrace | null {
+  return response.trace?.graph_hint || response.trace?.llm_context?.graph_hint || null;
 }
 
 function sourceMetaFromRecord(record: Record<string, unknown>): GraphSourceMetadata {

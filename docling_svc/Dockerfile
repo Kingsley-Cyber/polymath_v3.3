@@ -1,7 +1,6 @@
 # Polymath docling sidecar — wraps IBM Docling behind a thin FastAPI POST /parse.
-# CUDA-enabled PyTorch (cu121). Backend talks to this service over HTTP via
-# services/ingestion/docling_adapter.py. Pinned to GPU 0 (RTX 3090) via
-# device_ids in docker-compose.yml — see GOTCHAS #65.
+# GPU-enabled layout parser. OCR is disabled in the service; compose pins CUDA
+# visibility so this uses the intended desktop GPU without scanning images.
 
 FROM python:3.11-slim AS base
 
@@ -21,23 +20,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# CUDA-enabled torch (cu121 — driver 591 supports CUDA 12.x). The wheel
-# bundles the CUDA runtime libs so we don't need a full nvidia base image.
-RUN pip install --upgrade pip && \
-    pip install --extra-index-url https://download.pytorch.org/whl/cu121 \
+# CUDA-enabled torch (cu121). This lets Docling use the assigned GPU for layout
+# parsing while OCR remains disabled at runtime.
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cu121 \
         "torch>=2.2.2,<3" "torchvision>=0,<1"
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py .
 
-# Pre-fetch the docling layout/OCR model weights at build time so the first
-# /parse call doesn't pay a ~1.5 GB download. Failure is tolerated — runtime
-# fetch will retry. Comment this RUN out if your build network is too slow
-# and you'd rather pay the cost on first use.
-RUN python -c "from docling.utils.model_downloader import download_models; download_models()" || \
-    echo "Model pre-fetch skipped/failed — will download on first /parse"
+# Do not pre-fetch Docling/HF model weights into the image layer. Compose
+# bind-mounts DOCLING_ARTIFACTS_PATH and HF_HOME to host storage under
+# C:/PolymathRuntime by default, so runtime downloads survive rebuilds without
+# bloating image layers or BuildKit cache.
 
 EXPOSE 8500
 

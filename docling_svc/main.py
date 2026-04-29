@@ -2,8 +2,8 @@
 Docling sidecar — wraps IBM Docling behind a single FastAPI POST /parse.
 
 Why a sidecar instead of in-backend:
-  • Docling pulls torch + torchvision + accelerate (~2 GB) and downloads
-    layout/OCR model weights on first run (~1.5 GB more).
+  • Docling pulls torch / transformers dependencies and model artifacts.
+    The sidecar may use GPU for layout parsing, but OCR is disabled by policy.
   • Backend currently has zero ML deps — adding them would ~5x the image
     size and risk httpx version conflicts (docling needs >=0.28, backend
     pinned to 0.25).
@@ -19,34 +19,44 @@ The backend's `services/ingestion/docling_adapter.py` is the only caller.
 
 from __future__ import annotations
 
+import asyncio
+import gc
 import logging
+import os
+import threading
+import time
 from io import BytesIO
 from typing import Any
+
+# Policy: no OCR. GPU is allowed for Docling layout parsing when compose pins
+# this container to the intended card.
+os.environ.setdefault("DOCLING_OCR_ENABLED", "false")
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
+try:
+    from docling.datamodel.accelerator_options import (
+        AcceleratorDevice,
+        AcceleratorOptions,
+    )
+except Exception:  # pragma: no cover - docling version compatibility
+    AcceleratorDevice = None  # type: ignore[assignment]
+    AcceleratorOptions = None  # type: ignore[assignment]
 from docling.document_converter import (
     DocumentConverter,
     DocumentStream,
     PdfFormatOption,
 )
 
-# CUDA pin — explicit beats relying on device='auto'. When CUDA isn't
-# available (e.g. running this image on a CPU-only host for dev), fall
-# back to CPU so the sidecar still boots.
 try:
-    import torch  # noqa: F401  (used by the .is_available() check)
-    from docling.datamodel.accelerator_options import (
-        AcceleratorDevice,
-        AcceleratorOptions,
-    )
+    import torch
+
     _CUDA_OK = torch.cuda.is_available()
 except Exception:  # pragma: no cover - defensive
-    AcceleratorDevice = None  # type: ignore[assignment]
-    AcceleratorOptions = None  # type: ignore[assignment]
+    torch = None  # type: ignore[assignment]
     _CUDA_OK = False
 
 logger = logging.getLogger("docling_svc")
@@ -58,6 +68,7 @@ app = FastAPI(title="Polymath Docling Sidecar", version="1.0.0")
 # the worker on a 500 MB garbage payload. Real-world DOCX/PDF tops out
 # around 100 MB; 150 MB leaves headroom.
 MAX_UPLOAD_BYTES = 150 * 1024 * 1024
+IDLE_UNLOAD_SECONDS = float(os.getenv("DOCLING_IDLE_UNLOAD_SECONDS", "300"))
 
 
 class Section(BaseModel):
@@ -79,37 +90,113 @@ class ParseResponse(BaseModel):
     source_format: str       # docling's detected InputFormat name
 
 
-# ── Single shared converter — instantiating per-request would re-load models.
-# OCR-disabled variant is built lazily on demand.
-_converters: dict[bool, DocumentConverter] = {}
+# ── Lazy shared converter — expensive to instantiate, but released after idle.
+_converter: DocumentConverter | None = None
+_converter_lock = threading.Lock()
+_active_conversions = 0
+_last_used = 0.0
+_unload_task: asyncio.Task | None = None
 
 
-def _get_converter(do_ocr: bool) -> DocumentConverter:
-    if do_ocr in _converters:
-        return _converters[do_ocr]
-    pdf_opts = PdfPipelineOptions()
-    pdf_opts.do_ocr = do_ocr
-    pdf_opts.do_table_structure = True
-    if _CUDA_OK and AcceleratorOptions is not None:
-        pdf_opts.accelerator_options = AcceleratorOptions(
-            device=AcceleratorDevice.CUDA,
-            num_threads=4,
+def _get_converter() -> DocumentConverter:
+    global _converter
+    with _converter_lock:
+        if _converter is not None:
+            return _converter
+        pdf_opts = PdfPipelineOptions()
+        pdf_opts.do_ocr = False
+        pdf_opts.do_table_structure = True
+        device_name = "cpu"
+        if AcceleratorOptions is not None and AcceleratorDevice is not None and _CUDA_OK:
+            pdf_opts.accelerator_options = AcceleratorOptions(
+                device=AcceleratorDevice.CUDA,
+                num_threads=4,
+            )
+            device_name = "cuda"
+        elif AcceleratorOptions is not None and AcceleratorDevice is not None:
+            pdf_opts.accelerator_options = AcceleratorOptions(
+                device=AcceleratorDevice.CPU,
+                num_threads=4,
+            )
+        _converter = DocumentConverter(
+            format_options={
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_opts),
+            }
         )
-    conv = DocumentConverter(
-        format_options={
-            InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_opts),
+        logger.info("DocumentConverter built (do_ocr=false, device=%s)", device_name)
+        return _converter
+
+
+def _gpu_memory() -> dict[str, int | None]:
+    if not _CUDA_OK or torch is None:
+        return {"gpu_free_mb": None, "gpu_total_mb": None}
+    try:
+        free, total = torch.cuda.mem_get_info()
+        return {
+            "gpu_free_mb": int(free // (1024 * 1024)),
+            "gpu_total_mb": int(total // (1024 * 1024)),
         }
-    )
-    _converters[do_ocr] = conv
-    logger.info(
-        "DocumentConverter built (do_ocr=%s, cuda=%s)", do_ocr, _CUDA_OK
-    )
-    return conv
+    except Exception:
+        return {"gpu_free_mb": None, "gpu_total_mb": None}
+
+
+def _release_converter() -> None:
+    global _converter
+    with _converter_lock:
+        _converter = None
+    gc.collect()
+    if torch is not None and _CUDA_OK:
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            logger.debug("torch.cuda.empty_cache failed", exc_info=True)
+    logger.info("DocumentConverter released after idle window")
+
+
+async def _unload_after_idle(expected_last_used: float) -> None:
+    await asyncio.sleep(max(1.0, IDLE_UNLOAD_SECONDS))
+    if _active_conversions == 0 and _last_used <= expected_last_used:
+        _release_converter()
+
+
+def _schedule_idle_unload() -> None:
+    global _unload_task
+    if IDLE_UNLOAD_SECONDS <= 0:
+        return
+    if _unload_task is not None and not _unload_task.done():
+        _unload_task.cancel()
+    _unload_task = asyncio.create_task(_unload_after_idle(_last_used))
+
+
+async def _convert_bytes(raw: bytes, filename: str, do_ocr: bool):
+    global _active_conversions, _last_used
+    if do_ocr:
+        logger.warning("Ignoring do_ocr=true; OCR is disabled by policy")
+    converter = _get_converter()
+    stream = DocumentStream(name=filename or "upload", stream=BytesIO(raw))
+    _active_conversions += 1
+    try:
+        return await asyncio.to_thread(converter.convert, stream)
+    finally:
+        _active_conversions = max(0, _active_conversions - 1)
+        _last_used = time.monotonic()
+        if _active_conversions == 0:
+            _schedule_idle_unload()
 
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    return {"status": "ok", "ocr_default": True, "cuda": _CUDA_OK}
+    return {
+        "status": "ok",
+        "ocr_default": False,
+        "ocr_available": False,
+        "cuda": _CUDA_OK,
+        "device": "cuda" if _CUDA_OK else "cpu",
+        "converter_loaded": _converter is not None,
+        "active_conversions": _active_conversions,
+        "idle_unload_seconds": IDLE_UNLOAD_SECONDS,
+        **_gpu_memory(),
+    }
 
 
 def _walk_sections(doc) -> tuple[list[Section], int, int]:
@@ -196,7 +283,7 @@ def _per_page_markdown(doc) -> list[str] | None:
 @app.post("/parse", response_model=ParseResponse)
 async def parse(
     file: UploadFile = File(...),
-    do_ocr: bool = Form(True),
+    do_ocr: bool = Form(False),
 ) -> ParseResponse:
     raw = await file.read()
     if not raw:
@@ -207,14 +294,17 @@ async def parse(
             detail=f"payload too large: {len(raw)} bytes (max {MAX_UPLOAD_BYTES})",
         )
 
-    converter = _get_converter(do_ocr)
-    stream = DocumentStream(name=file.filename or "upload", stream=BytesIO(raw))
-
     try:
-        result = converter.convert(stream)
+        # Phase K — run the sync converter in a thread so multiple concurrent
+        # /parse requests can progress in parallel. OCR requests are ignored
+        # above, while layout parsing may use the pinned GPU when available.
+        result = await _convert_bytes(raw, file.filename or "upload", False)
     except Exception as exc:
         logger.exception("docling convert failed")
         raise HTTPException(status_code=422, detail=f"docling parse failure: {exc}")
+    except BaseException:
+        logger.exception("docling convert failed")
+        raise
 
     doc = result.document
     try:

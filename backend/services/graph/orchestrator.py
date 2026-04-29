@@ -24,19 +24,33 @@ except ModuleNotFoundError:
     sys.modules["bson"] = _bson_stub
 
 _LEGACY_PYC = Path(__file__).with_name("_orchestrator_legacy.cpython-311.pyc")
-if not _LEGACY_PYC.exists():
-    raise ImportError(f"Missing preserved graph orchestrator module: {_LEGACY_PYC}")
-
-_legacy = importlib.machinery.SourcelessFileLoader(
-    "_polymath_legacy_graph_orchestrator",
-    str(_LEGACY_PYC),
-).load_module()
-
-for _name, _value in vars(_legacy).items():
-    if not _name.startswith("__"):
-        globals()[_name] = _value
-
 logger = logging.getLogger(__name__)
+_LEGACY_MISSING_MESSAGE = (
+    "Graph discovery legacy scope module is unavailable. Reconstruct "
+    "services.graph._orchestrator_legacy as tracked Python source, or restore "
+    "_orchestrator_legacy.cpython-311.pyc for legacy graph discovery."
+)
+
+_legacy = None
+if _LEGACY_PYC.exists():
+    try:
+        _legacy = importlib.machinery.SourcelessFileLoader(
+            "_polymath_legacy_graph_orchestrator",
+            str(_LEGACY_PYC),
+        ).load_module()
+    except Exception as exc:
+        logger.warning(
+            "Legacy graph orchestrator failed to load from %s: %s",
+            _LEGACY_PYC,
+            exc,
+        )
+else:
+    logger.warning("%s Path=%s", _LEGACY_MISSING_MESSAGE, _LEGACY_PYC)
+
+if _legacy is not None:
+    for _name, _value in vars(_legacy).items():
+        if not _name.startswith("__"):
+            globals()[_name] = _value
 
 
 async def _legacy_llm_synthesis_stub(
@@ -80,7 +94,21 @@ async def _legacy_llm_synthesis_stub(
     )
 
 
-_legacy._call_llm = _legacy_llm_synthesis_stub
+if _legacy is not None:
+    _legacy._call_llm = _legacy_llm_synthesis_stub
+
+
+def schedule_graph_discovery_cache_warm(*args: Any, **kwargs: Any) -> None:
+    """Schedule legacy graph cache warm when the legacy scope module exists."""
+
+    if _legacy is None:
+        logger.debug("Skipping graph cache warm: %s", _LEGACY_MISSING_MESSAGE)
+        return None
+    warm = getattr(_legacy, "schedule_graph_discovery_cache_warm", None)
+    if callable(warm):
+        return warm(*args, **kwargs)
+    logger.debug("Skipping graph cache warm: legacy warm function is missing")
+    return None
 
 
 # Hard caps for the LLM input packet. Graph Query should synthesize from a
@@ -93,6 +121,11 @@ _PACKET_MAX_SIGNALS = 4
 _PACKET_MAX_WEAK_LINKS = 3
 _PACKET_MAX_EVIDENCE = 6
 _PACKET_EVIDENCE_TEXT_LIMIT = 260
+_PACKET_RETRIEVER_PRE_RERANK_K = 40
+_PACKET_RETRIEVER_RERANK_POOL = 40
+_PACKET_RETRIEVER_GRAPH_EXPANSION = 20
+_PACKET_MAX_GATEWAYS = 5
+_PACKET_MAX_SUPPORTING_STATEMENTS = 4
 
 # Synthesis-time LLM budget. Keep the call fast; the packet is bounded so the
 # model has plenty of room without burning the whole turn budget. Longer essay
@@ -258,8 +291,8 @@ def _auto_synthesis_from_result(result: Any) -> dict[str, Any]:
             s.get("canonical_name") or f"Emerging signal {idx}",
             " ".join(s.get("prose") or [])
             or (
-                f"Non-temporal signal: {s.get('mention_count', 0)} mentions "
-                f"across {s.get('doc_count', 0)} documents with degree {s.get('degree', 0)}."
+                "Non-temporal signal: this concept acts as an integration point "
+                "inside the scoped packet."
             ),
             [s.get("entity_id") or f"signal:{idx}"],
             [s.get("entity_id") or ""],
@@ -803,31 +836,34 @@ _INDEX_ROW_RE = re.compile(r"\b[A-Za-z][A-Za-z -]{2,},\s*\d{1,4}\b")
 
 
 def _query_terms_for_evidence(query: str) -> set[str]:
+    short_domain_terms = {"ai", "ml", "ui", "ux", "db", "kg"}
+    stopwords = {
+        "the",
+        "and",
+        "for",
+        "with",
+        "that",
+        "this",
+        "how",
+        "what",
+        "why",
+        "into",
+        "onto",
+        "about",
+        "between",
+        "patterns",
+        "pattern",
+    }
     terms = {
         term.lower()
-        for term in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", query or "")
+        for term in re.findall(r"[A-Za-z][A-Za-z0-9_-]{1,}", query or "")
     }
     return {
         term
         for term in terms
         if term
-        not in {
-            "the",
-            "and",
-            "for",
-            "with",
-            "that",
-            "this",
-            "how",
-            "what",
-            "why",
-            "into",
-            "onto",
-            "about",
-            "between",
-            "patterns",
-            "pattern",
-        }
+        and (len(term) >= 3 or term in short_domain_terms)
+        and term not in stopwords
     }
 
 
@@ -1046,10 +1082,11 @@ def _curated_evidence_rows(
     source_docs: list[Any],
     *,
     query: str,
-) -> tuple[list[dict[str, Any]], int, bool]:
+) -> tuple[list[dict[str, Any]], int, bool, dict[str, int]]:
     query_terms = _query_terms_for_evidence(query)
     scored: list[tuple[float, int, dict[str, Any], list[str]]] = []
     temporal_support = False
+    rejection_reasons: dict[str, int] = {}
 
     for idx, raw in enumerate(source_docs):
         if not isinstance(raw, dict):
@@ -1066,7 +1103,7 @@ def _curated_evidence_rows(
         scored.append((score, idx, {**raw, "text": text, "has_temporal": has_temporal}, reasons))
 
     if not scored:
-        return [], 0, temporal_support
+        return [], 0, temporal_support, rejection_reasons
 
     scored.sort(key=lambda row: (row[0], -row[1]), reverse=True)
     accepted = [
@@ -1075,15 +1112,43 @@ def _curated_evidence_rows(
         if score >= 1.0 and not (_LOW_VALUE_EVIDENCE_FLAGS & set(reasons))
     ][: _PACKET_MAX_EVIDENCE]
 
+    def _term_hit_count(reasons: list[str]) -> int:
+        for reason in reasons:
+            text = str(reason)
+            if text.startswith("query_terms:"):
+                try:
+                    return int(text.split(":", 1)[1])
+                except Exception:
+                    return 0
+        return 0
+
+    def _fallback_safe(score: float, reasons: list[str]) -> bool:
+        if _LOW_VALUE_EVIDENCE_FLAGS & set(reasons):
+            return False
+        if score >= 0.0:
+            return True
+        required_hits = min(2, max(1, len(query_terms)))
+        return _term_hit_count(reasons) >= required_hits
+
     # If every topical row is merely thin, keep one so the synthesis can explain
-    # the limits. Explicit bibliography/front-matter/index-like rows stay out:
-    # those pages create citation debris that looks like graph structure.
+    # the limits. Explicit bibliography/front-matter/index-like rows stay out,
+    # and rows with no query-term overlap plus a poor rank score stay out too.
     if not accepted:
         accepted = [
             (score, idx, row, reasons)
             for score, idx, row, reasons in scored
-            if not (_LOW_VALUE_EVIDENCE_FLAGS & set(reasons))
+            if _fallback_safe(score, reasons)
         ][:1]
+
+    accepted_keys = {(idx, str(row.get("chunk_id") or row.get("id") or "")) for _score, idx, row, _reasons in accepted}
+    for _score, idx, row, reasons in scored:
+        key = (idx, str(row.get("chunk_id") or row.get("id") or ""))
+        if key in accepted_keys:
+            continue
+        reason_list = reasons or ["below_quality_floor"]
+        for reason in reason_list:
+            reason_key = str(reason).split(":", 1)[0] or "below_quality_floor"
+            rejection_reasons[reason_key] = rejection_reasons.get(reason_key, 0) + 1
 
     evidence: list[dict[str, Any]] = []
     for evidence_idx, (score, _idx, row, reasons) in enumerate(accepted, start=1):
@@ -1104,7 +1169,122 @@ def _curated_evidence_rows(
             }
         )
 
-    return evidence, max(0, len(scored) - len(evidence)), temporal_support
+    return evidence, max(0, len(scored) - len(evidence)), temporal_support, rejection_reasons
+
+
+def _source_docs_from_retrieval_chunks(
+    chunks: list[Any],
+    *,
+    max_chunks: int = _PACKET_MAX_EVIDENCE,
+) -> list[dict[str, Any]]:
+    """Convert shared chat retriever chunks into graph packet source rows.
+
+    Chat retrieval already handles embedding search, optional lexical recall,
+    summary chunks, graph expansion, reranking, and hydration. Graph synthesis
+    should consume that final evidence pool instead of inventing a separate
+    evidence universe from concept scope alone.
+    """
+
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for rank, chunk in enumerate(chunks or [], start=1):
+        chunk_id = str(getattr(chunk, "chunk_id", "") or "").strip()
+        doc_id = str(getattr(chunk, "doc_id", "") or "").strip()
+        if not chunk_id:
+            continue
+        key = chunk_id or f"{doc_id}:{rank}"
+        if key in seen:
+            continue
+        seen.add(key)
+        text = str(getattr(chunk, "text", "") or getattr(chunk, "summary", "") or "")
+        rows.append(
+            {
+                "chunk_id": chunk_id,
+                "doc_id": doc_id,
+                "parent_id": str(getattr(chunk, "parent_id", "") or ""),
+                "corpus_id": str(getattr(chunk, "corpus_id", "") or ""),
+                "text": text,
+                "summary": getattr(chunk, "summary", None),
+                "source_label": str(getattr(chunk, "doc_name", "") or doc_id or chunk_id),
+                "source_tier": str(getattr(chunk, "source_tier", "") or "retriever"),
+                "heading_path": getattr(chunk, "heading_path", None) or [],
+                "score": float(getattr(chunk, "score", 0.0) or 0.0),
+                "retrieval_rank": rank,
+                "retriever": "shared_chat_retriever",
+                "provenance": getattr(chunk, "provenance", None) or [],
+            }
+        )
+        if len(rows) >= max_chunks:
+            break
+    return rows
+
+
+async def _retrieve_packet_source_docs(
+    db: Any,
+    *,
+    corpus_id: str,
+    query: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Retrieve the evidence packet through the same retriever used by chat."""
+
+    meta: dict[str, Any] = {
+        "source": "shared_chat_retriever",
+        "requested_tier": "qdrant_mongo_graph",
+        "final_top_k": _PACKET_MAX_EVIDENCE,
+        "pre_rerank_k": _PACKET_RETRIEVER_PRE_RERANK_K,
+        "rerank_pool": _PACKET_RETRIEVER_RERANK_POOL,
+        "neo4j_expansion_cap": _PACKET_RETRIEVER_GRAPH_EXPANSION,
+        "chunks": 0,
+    }
+    try:
+        from models.schemas import RetrievalTier
+        from services.retriever import retriever_orchestrator
+
+        retrieval = await retriever_orchestrator.retrieve(
+            query=query,
+            corpus_ids=[corpus_id],
+            retrieval_tier=RetrievalTier.qdrant_mongo_graph,
+            collections=None,
+            retrieval_k=_PACKET_RETRIEVER_PRE_RERANK_K,
+            rerank_enabled=True,
+            ranking_query=query,
+            top_k_summary=20,
+            rerank_top_n=_PACKET_RETRIEVER_RERANK_POOL,
+            similarity_threshold=None,
+            neo4j_expansion_cap=_PACKET_RETRIEVER_GRAPH_EXPANSION,
+            max_corpora_per_query=1,
+            final_top_k=_PACKET_MAX_EVIDENCE,
+        )
+    except Exception as exc:
+        logger.warning("graph packet shared retriever failed: %s", exc)
+        meta.update({"status": "error", "error": str(exc)})
+        return [], meta
+
+    requested = getattr(retrieval, "requested_tier", None)
+    effective = getattr(retrieval, "effective_tier", None)
+    meta.update(
+        {
+            "status": "ok",
+            "requested_tier": getattr(requested, "value", requested) or "qdrant_mongo_graph",
+            "effective_tier": getattr(effective, "value", effective) or "",
+            "downgrade_reason": getattr(retrieval, "downgrade_reason", None) or "",
+        }
+    )
+    rows = _source_docs_from_retrieval_chunks(
+        list(getattr(retrieval, "chunks", []) or []),
+        max_chunks=_PACKET_MAX_EVIDENCE,
+    )
+    meta["chunks"] = len(rows)
+    hydrated_trace = await _hydrate_trace_source_docs(
+        db,
+        {"source_docs": rows},
+        corpus_id=corpus_id,
+    )
+    hydrated_rows = [
+        row for row in (hydrated_trace.get("source_docs") or rows) if isinstance(row, dict)
+    ][:_PACKET_MAX_EVIDENCE]
+    meta["hydrated_chunks"] = len(hydrated_rows)
+    return hydrated_rows, meta
 
 
 async def _hydrate_trace_source_docs(
@@ -1263,6 +1443,183 @@ async def _hydrate_trace_source_docs(
         )
 
     return {**trace, "source_docs": hydrated}
+
+
+def _graph_shape_hint(packet: dict[str, Any]) -> dict[str, str]:
+    groups = [g for g in (packet.get("communities") or []) if isinstance(g, dict)]
+    edges = [e for e in (packet.get("edges") or []) if isinstance(e, dict)]
+    gaps = [g for g in (packet.get("gaps") or []) if isinstance(g, dict)]
+    evidence_filter = packet.get("evidence_filter") if isinstance(packet.get("evidence_filter"), dict) else {}
+    if evidence_filter.get("all_rejected"):
+        return {
+            "label": "evidence withheld",
+            "description": "Candidate chunks were rejected before synthesis, so graph structure is held back for this turn.",
+            "rationale": "all_candidate_chunks_failed_quality_filter",
+        }
+    if not groups and not edges:
+        return {
+            "label": "evidence-first",
+            "description": "The packet is grounded mainly in returned chunks rather than a visible graph neighborhood.",
+            "rationale": "no_scoped_graph_groups",
+        }
+
+    group_sizes = [max(int(g.get("scope_count") or 0), int(g.get("size") or 0), 1) for g in groups]
+    total = sum(group_sizes) or 1
+    top_share = max(group_sizes) / total if group_sizes else 0.0
+    bridge_count = sum(int(g.get("bridge_count") or 0) for g in groups)
+    if len(groups) <= 1 or top_share >= 0.68:
+        return {
+            "label": "focused neighborhood",
+            "description": "Most query concepts sit in one visible neighborhood.",
+            "rationale": "one_query_neighborhood_dominates",
+        }
+    if gaps and len(edges) < max(1, len(groups) - 1):
+        return {
+            "label": "open bridge question",
+            "description": "The packet sees multiple neighborhoods and asks where a relation still needs evidence.",
+            "rationale": "gap_candidates_between_scoped_groups",
+        }
+    if bridge_count or len(edges) >= max(1, len(groups) - 1):
+        return {
+            "label": "bridged neighborhoods",
+            "description": "Several query neighborhoods are connected by named concepts or bounded edges.",
+            "rationale": "scoped_groups_have_gateway_edges",
+        }
+    return {
+        "label": "dispersed neighborhoods",
+        "description": "The query touches several neighborhoods without a single visible connector.",
+        "rationale": "multiple_scoped_groups_few_edges",
+    }
+
+
+def _graph_gateway_hints(packet: dict[str, Any]) -> list[dict[str, Any]]:
+    entities = [e for e in (packet.get("entities") or []) if isinstance(e, dict)]
+    edges = [e for e in (packet.get("edges") or []) if isinstance(e, dict)]
+    if not entities:
+        return []
+
+    names_by_id = {
+        str(e.get("entity_id") or ""): _text(e.get("canonical_name") or e.get("entity_id") or "", 80)
+        for e in entities
+        if e.get("entity_id")
+    }
+    incident: dict[str, list[str]] = {}
+    for edge in edges:
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if not source or not target:
+            continue
+        incident.setdefault(source, []).append(_text(edge.get("target_name") or names_by_id.get(target) or target, 60))
+        incident.setdefault(target, []).append(_text(edge.get("source_name") or names_by_id.get(source) or source, 60))
+
+    def score(entity: dict[str, Any]) -> tuple[float, str]:
+        eid = str(entity.get("entity_id") or "")
+        role = str(entity.get("role") or "")
+        role_score = 0.0
+        if "bridge" in role or "transfer" in role:
+            role_score += 8.0
+        if "frontier" in role:
+            role_score += 4.0
+        return (
+            role_score + (len(incident.get(eid, [])) * 3.0) + float(entity.get("degree") or 0),
+            _text(entity.get("canonical_name") or eid, 80),
+        )
+
+    gateways: list[dict[str, Any]] = []
+    for entity in sorted(entities, key=score, reverse=True):
+        eid = str(entity.get("entity_id") or "")
+        name = _text(entity.get("canonical_name") or eid, 80)
+        if not eid or not name:
+            continue
+        connects = []
+        for other in incident.get(eid, []):
+            if other and other not in connects:
+                connects.append(other)
+        gateways.append(
+            {
+                "id": eid,
+                "name": name,
+                "connects": connects[:4],
+                "reason": "connects packet edges" if connects else "anchors the query working set",
+            }
+        )
+        if len(gateways) >= _PACKET_MAX_GATEWAYS:
+            break
+    return gateways
+
+
+def _graph_gap_depths(packet: dict[str, Any]) -> list[dict[str, Any]]:
+    depths = ("near", "deeper", "lateral")
+    out: list[dict[str, Any]] = []
+    for idx, gap in enumerate([g for g in (packet.get("gaps") or []) if isinstance(g, dict)]):
+        between = [
+            _text(gap.get("cluster_a_label") or gap.get("cluster_a") or "", 70),
+            _text(gap.get("cluster_b_label") or gap.get("cluster_b") or "", 70),
+        ]
+        out.append(
+            {
+                "id": _text(gap.get("gap_id") or f"gap:{idx + 1}", 40),
+                "depth": depths[min(idx, len(depths) - 1)],
+                "between": [value for value in between if value],
+                "question": _text(gap.get("question") or "", 180),
+            }
+        )
+    return out
+
+
+def _supporting_statement_hints(packet: dict[str, Any]) -> list[dict[str, str]]:
+    statements: list[dict[str, str]] = []
+    for idx, item in enumerate([e for e in (packet.get("evidence") or []) if isinstance(e, dict)], start=1):
+        text = _text(item.get("text") or "", 260)
+        if not text:
+            continue
+        sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0]
+        statements.append(
+            {
+                "evidence_id": str(item.get("evidence_id") or f"e{idx}"),
+                "source_label": _text(item.get("source_label") or item.get("doc_id") or "", 80),
+                "statement": _text(sentence or text, 180),
+            }
+        )
+        if len(statements) >= _PACKET_MAX_SUPPORTING_STATEMENTS:
+            break
+    return statements
+
+
+def _graph_hint_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
+    """InfraNodus-style read of the bounded packet without new graph work."""
+
+    shape = _graph_shape_hint(packet)
+    evidence_filter = packet.get("evidence_filter") if isinstance(packet.get("evidence_filter"), dict) else {}
+    if evidence_filter.get("all_rejected"):
+        return {
+            "shape": shape,
+            "gateways": [],
+            "gap_depths": [],
+            "supporting_statements": [],
+            "context_hint": shape.get("description") or "",
+        }
+    gateways = _graph_gateway_hints(packet)
+    gap_depths = _graph_gap_depths(packet)
+    supporting = _supporting_statement_hints(packet)
+    hint_parts = [shape.get("description") or ""]
+    if gateways:
+        names = ", ".join(gateway["name"] for gateway in gateways[:3] if gateway.get("name"))
+        if names:
+            hint_parts.append(f"Follow gateway concepts: {names}.")
+    if gap_depths:
+        hint_parts.append("Treat gap questions as routes to inspect, not as known missing facts.")
+    if supporting:
+        ids = ", ".join(item["evidence_id"] for item in supporting[:3] if item.get("evidence_id"))
+        if ids:
+            hint_parts.append(f"Ground claims in {ids}.")
+    return {
+        "shape": shape,
+        "gateways": gateways,
+        "gap_depths": gap_depths,
+        "supporting_statements": supporting,
+        "context_hint": " ".join(part for part in hint_parts if part).strip(),
+    }
 
 
 def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, Any]:
@@ -1595,7 +1952,7 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
     if not isinstance(source_docs, list):
         source_docs = []
     raw_evidence_count = len([row for row in source_docs if isinstance(row, dict)])
-    evidence, evidence_rejected, temporal_support = _curated_evidence_rows(
+    evidence, evidence_rejected, temporal_support, rejection_reasons = _curated_evidence_rows(
         source_docs,
         query=query,
     )
@@ -1627,12 +1984,13 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
         )
     )
 
-    return {
+    packet = {
         "query": _text(query, 320),
         "corpus_id": corpus_id,
         "collections": _qdrant_collections_for_packet(corpus_id),
         "interpretation": _text(getattr(result, "interpretation", "") or "", 480),
         "headline": _text(headline_text, 240),
+        "retrieval": trace.get("retrieval_evidence") or {},
         "anchors": anchors,
         "entities": entities,
         "communities": communities,
@@ -1645,6 +2003,7 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
             "raw": raw_evidence_count,
             "accepted": len(evidence),
             "rejected": evidence_rejected,
+            "rejection_reasons": rejection_reasons,
             "all_rejected": evidence_all_rejected,
             "gate_reason": (
                 "all_candidate_chunks_failed_quality_filter"
@@ -1657,6 +2016,8 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
         "sparse": sparse,
         "temporal_support": temporal_support,
     }
+    packet["graph_hint"] = _graph_hint_from_packet(packet)
+    return packet
 
 
 def _llm_context_trace_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
@@ -1713,6 +2074,8 @@ def _llm_context_trace_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "packet_version": "graph-insight-v1",
         "query": packet.get("query") or "",
         "collections": packet.get("collections") or {},
+        "retrieval": packet.get("retrieval") or {},
+        "graph_hint": packet.get("graph_hint") or {},
         "files": files,
         "chunks": chunks,
         "prompt": {
@@ -1730,12 +2093,14 @@ def _llm_context_trace_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
             "gaps": len(packet.get("gaps") or []),
             "signals": len(packet.get("signals") or []),
             "weak_links": len(packet.get("weak_links") or []),
+            "gateways": len((packet.get("graph_hint") or {}).get("gateways") or []),
         },
         "visibility": {
             "max_entities": _PACKET_MAX_ENTITIES,
             "max_evidence_chunks": _PACKET_MAX_EVIDENCE,
             "evidence_text_limit": _PACKET_EVIDENCE_TEXT_LIMIT,
             "evidence_filter": packet.get("evidence_filter") or {},
+            "graph_hint": packet.get("graph_hint") or {},
             "temporal_support": bool(packet.get("temporal_support")),
             "sparse": bool(packet.get("sparse")),
         },
@@ -1747,13 +2112,21 @@ _SYNTHESIS_SYSTEM_PROMPT = (
     "Return JSON only with keys: headline, themes, bridges, gaps, "
     "emerging_signals, next_moves, evidence_notes. Each list item is "
     '{"title":str,"body":str,"evidence":[str],"related_ids":[str]}. '
+    "Maximum items: themes 3, bridges 2, gaps 3, emerging_signals 3, "
+    "next_moves 2, evidence_notes 2. Keep headline under 140 characters and "
+    "each body under 320 characters. "
     "Prioritize bridges, gaps, and emerging_signals; themes should frame the "
-    "read, not dominate it. Bodies should be natural 3-5 sentence paragraphs, "
-    "not cards or bullets. For bridges, explain what is being connected, why "
-    "the connection matters, and how strong the evidence is. For gaps, explain "
-    "the missing relation as a testable question and name what evidence would "
-    "resolve it. For emerging_signals, describe corpus recurrence; if web_state "
-    "is absent, do not make current-market or current-web claims. "
+    "read, not dominate it. Bodies should be natural 1-2 sentence notes, not "
+    "cards or bullets. For bridges, explain what is being connected and why "
+    "the connection matters. For gaps, explain the missing relation as a "
+    "testable question and name what evidence would resolve it. For "
+    "emerging_signals, describe the relation pattern visible in the packet; "
+    "if web_state is absent, do not make current-market or current-web claims. "
+    "Do not frame the answer as occurrence counts, a metric report, or "
+    "strong/weak scoring. Avoid occurrence/mention phrasing such as repeated "
+    "mentions, recurring, frequent, weak, or strong unless those words are "
+    "inside quoted source text. Use graph_hint as the reading lens: shape, "
+    "gateway concepts, gap depth, and supporting statements. "
     "Cite supplied evidence ids like [e1] or graph structure as [graph]. "
     "Use source metadata for orientation, but only state author/date/publisher "
     "when supplied in the packet. "
@@ -1765,12 +2138,31 @@ _SYNTHESIS_SYSTEM_PROMPT = (
 )
 
 
+_SYNTHESIS_REPAIR_SYSTEM_PROMPT = (
+    "Return compact valid JSON only. Use exactly these top-level keys: "
+    "headline, themes, bridges, gaps, emerging_signals, next_moves, "
+    "evidence_notes. headline is a string. Other fields are arrays with at "
+    "most 2 items. Each item is {\"title\":str,\"body\":str,\"evidence\":[str],"
+    "\"related_ids\":[str]}. Keep every body under 240 characters. No markdown."
+)
+
+
 def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
     """Render only the curated synthesis brief, not the full trace packet."""
 
     compact = _compact_packet_for_prompt(packet)
     payload = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
     return f"Synthesize this curated graph brief as JSON only:\n{payload}"
+
+
+def _render_packet_repair_prompt(packet: dict[str, Any]) -> str:
+    compact = _compact_packet_for_prompt(packet)
+    payload = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+    return (
+        "The previous graph synthesis response was invalid or truncated. "
+        "Re-synthesize the same brief as smaller valid JSON only:\n"
+        f"{payload}"
+    )
 
 
 def _source_brief_for_prompt(item: dict[str, Any]) -> dict[str, Any]:
@@ -1843,22 +2235,26 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         {
             "id": _text(sig.get("entity_id") or f"s{idx}", 32),
             "name": _text(sig.get("canonical_name") or "", 60),
-            "docs": int(sig.get("doc_count") or 0),
-            "mentions": int(sig.get("mention_count") or 0),
-            "degree": int(sig.get("degree") or 0),
             "why": _text(sig.get("rationale") or "", 120),
         }
         for idx, sig in enumerate((packet.get("signals") or [])[:_PACKET_MAX_SIGNALS], start=1)
         if graph_context_allowed and isinstance(sig, dict)
     ]
-    bridge_focus = [
+    gateway_focus = [
         {
             "edge": f"{edge['s']} -> {edge['p']} -> {edge['t']}",
-            "strength": "strong" if float(edge.get("conf") or 0) >= 0.9 else "inspect",
+            "read_as": "connector to explain",
         }
         for edge in edges[:5]
         if edge.get("s") and edge.get("t")
     ]
+    graph_hint = packet.get("graph_hint") if isinstance(packet.get("graph_hint"), dict) else {}
+    compact_graph_hint = {
+        "shape": graph_hint.get("shape") or {},
+        "gateways": (graph_hint.get("gateways") or [])[:3],
+        "gap_depths": (graph_hint.get("gap_depths") or [])[:3],
+        "context_hint": _text(graph_hint.get("context_hint") or "", 360),
+    }
     warnings = [
         _text(w.get("rationale") or w.get("weakness_type") or "", 120)
         for w in (packet.get("weak_links") or [])[:_PACKET_MAX_WEAK_LINKS]
@@ -1866,6 +2262,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
     ]
     return {
         "q": packet.get("query") or "",
+        "retrieval": packet.get("retrieval") or {},
         "temporal": bool(packet.get("temporal_support")),
         "sparse": bool(packet.get("sparse")),
         "synthesis_priority": {
@@ -1877,7 +2274,8 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         "groups": groups,
         "evidence": evidence,
         "edges": edges,
-        "bridge_focus": bridge_focus,
+        "gateway_focus": gateway_focus,
+        "graph_hint": compact_graph_hint,
         "gaps": gaps,
         "signals": signals,
         "warnings": warnings,
@@ -1900,10 +2298,80 @@ def _strip_code_fences(text: str) -> str:
     return text.strip()
 
 
+async def _resolve_graph_model(
+    user_id: Optional[str],
+    model_override: Optional[str],
+) -> dict[str, Any]:
+    """Resolve the graph synthesis model the same way chat resolves model picks.
+
+    The frontend stores selected pool/profile entries as `pool:<id>` or
+    `profile:<id>`. LiteLLM cannot use those opaque ids directly, so graph
+    synthesis must translate them to concrete model credentials first.
+    """
+
+    model = (model_override or "").strip()
+    if user_id and (model.startswith("pool:") or model.startswith("profile:")):
+        _prefix, _, entry_id = model.partition(":")
+        try:
+            from services.query_model_resolver import resolve_by_entry_id
+
+            resolved = await resolve_by_entry_id(user_id, entry_id)
+        except Exception as exc:
+            logger.warning("Graph synthesis model resolution failed for %s: %s", model, exc)
+            resolved = None
+        if resolved:
+            return {
+                "model": resolved.get("model") or None,
+                "api_base": resolved.get("api_base"),
+                "api_key": resolved.get("api_key"),
+                "extra_params": resolved.get("extra_params") or {},
+                "source": model,
+            }
+        logger.warning(
+            "Graph synthesis model reference %s was not found for user=%s; falling back to default.",
+            model,
+            user_id,
+        )
+        model = ""
+
+    if not model and user_id:
+        try:
+            from services.query_model_resolver import resolve as resolve_query_model
+
+            resolved = await resolve_query_model(user_id, "query")
+        except Exception as exc:
+            logger.debug("Graph synthesis query model preference lookup failed: %s", exc)
+            resolved = None
+        if resolved:
+            return {
+                "model": resolved.get("model") or None,
+                "api_base": resolved.get("api_base"),
+                "api_key": resolved.get("api_key"),
+                "extra_params": resolved.get("extra_params") or {},
+                "source": "query_pref",
+            }
+
+    if model.startswith("pool:") or model.startswith("profile:"):
+        logger.warning(
+            "Graph synthesis received unresolved model reference %s without a user id; falling back to default.",
+            model,
+        )
+        model = ""
+
+    return {
+        "model": model or None,
+        "api_base": None,
+        "api_key": None,
+        "extra_params": {},
+        "source": "override" if model else "default",
+    }
+
+
 async def _call_llm_synthesis(
     packet: dict[str, Any],
     *,
     model_override: Optional[str],
+    user_id: Optional[str] = None,
 ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """Call the synthesis LLM. Returns (payload_dict, fallback_reason).
 
@@ -1923,14 +2391,19 @@ async def _call_llm_synthesis(
         {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
         {"role": "user", "content": _render_packet_user_prompt(packet)},
     ]
-    extra: dict[str, Any] = {"response_format": {"type": "json_object"}}
+    creds = await _resolve_graph_model(user_id, model_override)
+    extra: dict[str, Any] = {
+        **(creds.get("extra_params") or {}),
+        "response_format": {"type": "json_object"},
+    }
     evidence_items = [
         item for item in (packet.get("evidence") or []) if isinstance(item, dict)
     ]
     logger.info(
-        "Graph synthesis LLM call: model=%s sys=%dchars usr=%dchars total≈%dtok "
+        "Graph synthesis LLM call: model=%s source=%s sys=%dchars usr=%dchars total≈%dtok "
         "files=%d chunks=%d collections=%s",
-        model_override or "(selected/default)",
+        creds["model"] or "(selected/default)",
+        creds.get("source") or "",
         len(messages[0]["content"]),
         len(messages[1]["content"]),
         (len(messages[0]["content"]) + len(messages[1]["content"])) // 4,
@@ -1942,9 +2415,11 @@ async def _call_llm_synthesis(
     try:
         raw = await llm_service.complete_sync(
             messages=messages,
-            model=model_override,
+            model=creds["model"],
             temperature=_SYNTHESIS_TEMPERATURE,
             max_tokens=_SYNTHESIS_MAX_TOKENS,
+            api_base=creds.get("api_base"),
+            api_key=creds.get("api_key"),
             timeout=_SYNTHESIS_TIMEOUT_SECONDS,
             extra_params=extra,
         )
@@ -1959,8 +2434,37 @@ async def _call_llm_synthesis(
     try:
         decoded = json.loads(_strip_code_fences(raw))
     except Exception as exc:
-        logger.warning("synthesis JSON decode failed (%s); raw_head=%r", exc, raw[:160])
-        return None, "json_parse_failure"
+        logger.warning(
+            "synthesis JSON decode failed (%s); attempting compact retry; raw_head=%r",
+            exc,
+            raw[:160],
+        )
+        try:
+            raw = await llm_service.complete_sync(
+                messages=[
+                    {"role": "system", "content": _SYNTHESIS_REPAIR_SYSTEM_PROMPT},
+                    {"role": "user", "content": _render_packet_repair_prompt(packet)},
+                ],
+                model=creds["model"],
+                temperature=0.1,
+                max_tokens=min(1200, _SYNTHESIS_MAX_TOKENS),
+                api_base=creds.get("api_base"),
+                api_key=creds.get("api_key"),
+                timeout=_SYNTHESIS_TIMEOUT_SECONDS,
+                extra_params=extra,
+            )
+        except Exception as retry_exc:
+            logger.warning("synthesis JSON compact retry failed: %s", retry_exc)
+            return None, "json_parse_failure"
+        try:
+            decoded = json.loads(_strip_code_fences(raw or ""))
+        except Exception as retry_exc:
+            logger.warning(
+                "synthesis JSON compact retry decode failed (%s); raw_head=%r",
+                retry_exc,
+                (raw or "")[:160],
+            )
+            return None, "json_parse_failure"
 
     if not isinstance(decoded, dict):
         logger.warning("synthesis JSON was not an object: %r", type(decoded).__name__)
@@ -2182,6 +2686,8 @@ async def discover(
     construction. This wrapper makes mode compatibility-only and adds the new
     narrative/context-map contract without touching Chat RAG.
     """
+    if _legacy is None or not hasattr(_legacy, "discover"):
+        raise RuntimeError(_LEGACY_MISSING_MESSAGE)
     started_at = _time.perf_counter()
     result = await _legacy.discover(
         qdrant=qdrant,
@@ -2200,6 +2706,16 @@ async def discover(
     # back, but discover always behaves as auto-synthesis.
     result.mode = mode or "auto"
     result.trace = _trace_with_stages(getattr(result, "trace", {}) or {})
+    legacy_source_docs = list(result.trace.get("source_docs") or []) if isinstance(result.trace, dict) else []
+    retrieved_source_docs, retrieval_meta = await _retrieve_packet_source_docs(
+        db,
+        corpus_id=corpus_id,
+        query=query,
+    )
+    if isinstance(result.trace, dict):
+        result.trace["graph_scope_source_docs"] = legacy_source_docs
+        result.trace["retrieval_evidence"] = retrieval_meta
+        result.trace["source_docs"] = retrieved_source_docs
     result.trace = await _hydrate_trace_source_docs(db, result.trace, corpus_id=corpus_id)
 
     packet = _build_insight_packet(result, query=query, corpus_id=corpus_id)
@@ -2207,13 +2723,14 @@ async def discover(
         result.trace["source_docs_raw"] = result.trace.get("source_docs") or []
         result.trace["source_docs"] = packet.get("evidence") or []
         result.trace["evidence_filter"] = packet.get("evidence_filter") or {}
+        result.trace["graph_hint"] = packet.get("graph_hint") or {}
     result.trace = {
         **(result.trace or {}),
         "llm_context": _llm_context_trace_from_packet(packet),
     }
     packet_done_at = _time.perf_counter()
     llm_payload, fallback_reason = await _call_llm_synthesis(
-        packet, model_override=model_override
+        packet, model_override=model_override, user_id=user_id
     )
     llm_done_at = _time.perf_counter()
 

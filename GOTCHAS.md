@@ -165,8 +165,8 @@ CorpusDetail has a delete button but it's a placeholder (reloads list). Need `DE
 
 ## 🟠 Ingestion Pipeline
 
-### 28. Write Order (Critical)
-MongoDB documents → Qdrant vectors → update write_state flags. Never reverse this order. If Qdrant write fails, the document can be re-ingested (idempotent by doc_id).
+### 28. Write Order (Critical) — *superseded by §67*
+*Historical note (pre-Phase-2-refactor):* MongoDB documents → Qdrant vectors → update write_state flags. The modern locked order is **parse → chunk → [ghost_a ∥ ghost_b] → mongo → embed → qdrant → neo4j**, see §67 for the authoritative contract. Idempotency by content-hashed `doc_id` still applies.
 
 ### 29. parent_chunks Stored Inline
 Parent chunks are stored as an inline array in the document record. If any document approaches the 16MB BSON limit, refactor to a dedicated `parent_chunks` collection.
@@ -241,7 +241,7 @@ Then re-ingest all corpora.
 - **≤ 30 terms** → full sentinel-augmented vocab is inlined into every ghost_b prompt (no Qdrant lookup).
 - **> 30 terms** → ghost_b calls `retrieve_schema_for_chunk()` on `polymath_schemas` per chunk; only top-K (`SCHEMA_RETRIEVAL_TOP_K=10`) terms + sentinel are injected.
 
-**Resume corner case:** when Leg 2 (Qdrant) is already done and only Leg 3 (Neo4j) re-runs, `vec_map` is empty → degraded fallback inlines the first `inline_limit` terms (logged at WARNING). To avoid degraded extraction on resume, wipe `write_state.qdrant_written=false` to force re-embed.
+**Pipeline-order note (post-Phase-2-refactor):** under the new locked order (§67) ghost_b runs BEFORE the embed phase, so `chunk_vectors=None` is the norm on **every fresh ingest** — not just on a resume. `resolve_chunk_vocab` falls back to the first `inline_limit` terms + sentinel whenever `chunk_vectors` is None. With the universal schema (29 terms < 30 inline limit, see §66), the full vocab is inlined and the Qdrant retrieval path is never exercised in practice. The retrieval path is retained for future per-corpus overrides above the 30-term threshold.
 
 ### 43. Corpus Delete Cascade Now Includes `polymath_schemas`
 GOTCHAS #24 cascade order is extended:
@@ -286,8 +286,8 @@ Plus `models_linked: bool` (UI-only flag; worker ignores it).
 Before Phase 19.3, `IngestionConfig.summary_model`, `extraction_model`, `summary_max_concurrent`, and `extraction_max_concurrent` were declared but **never read** — worker passed a single top-level `model` to both ghosts and both ghosts hardcoded `settings.{SUMMARY,EXTRACTION}_MAX_CONCURRENT`.
 
 Now:
-- `worker.py` resolves `ingestion_config.{summary,extraction}_model or <top-level model arg>` per ghost.
-- `ghost_a.py` / `ghost_b.py` accept `max_concurrent` kwarg → `asyncio.Semaphore(max_concurrent or settings.X_MAX_CONCURRENT)`.
+- `worker.py` resolves the pool entries at dispatch time (each `ModelProfileRef` on `summary_models` / `extraction_models` carries its own `model`, `base_url`, `api_key`, `extra_params`, and `max_concurrent`).
+- `ghost_a.py` / `ghost_b.py` accept `pool: list[dict]` and build **one `asyncio.Semaphore(entry.max_concurrent)` per pool entry** (see `ghost_a.summarize_parents:106` / `ghost_b.extract_entities:491`). There is no top-level `max_concurrent` kwarg — the pre-19.3 single-scalar API was removed. Overall throughput = sum of per-entry `max_concurrent`.
 
 If you see old config edited pre-19.3 with these fields — they were no-ops. After upgrade, they take effect on the NEXT ingest. Existing documents' extraction is not retroactively re-run.
 
@@ -360,9 +360,9 @@ The corpus_id payload filter is RETAINED in every search call as defense-in-dept
 ## ⚪ Phase 7.6 — Docling Sidecar Replaces format_router + source_classifier
 
 ### 60. Docling Is the Parser
-The ingestion pipeline no longer uses `format_router` (pypdf / BeautifulSoup / unstructured) or the regex `source_classifier`. Both are replaced by a CPU-only **docling sidecar** at `docling_svc/` (image: `polymath_v33-docling`, internal hostname `http://docling:8500`). The backend talks to it through `services/ingestion/docling_adapter.py` — that adapter is the ONLY caller; nothing else in the codebase imports from `docling` or `docling-core`.
+The ingestion pipeline no longer uses `format_router` (pypdf / BeautifulSoup / unstructured) or the regex `source_classifier`. Both are replaced by a GPU-capable **docling sidecar** at `docling_svc/` (image: `polymath_v33-docling`, internal hostname `http://docling:8500`). The backend talks to it through `services/ingestion/docling_adapter.py` — that adapter is the ONLY caller; nothing else in the codebase imports from `docling` or `docling-core`.
 
-**Why a sidecar instead of in-backend:** docling pulls torch + torchvision + accelerate (~2 GB) and downloads layout/OCR model weights on first run (~1.5 GB more). It also requires `httpx>=0.28` which would force a major bump for the 45 backend httpx call sites. Sidecar keeps backend image small and isolates ML model lifecycle. Mirrors the embedder/reranker pattern.
+**Why a sidecar instead of in-backend:** docling pulls torch / transformers dependencies and layout artifacts. It also requires `httpx>=0.28` which would force a major bump for the 45 backend httpx call sites. Sidecar keeps backend image small and isolates ML model lifecycle. Mirrors the embedder/reranker pattern. GPU layout parsing is allowed; OCR is disabled by policy.
 
 **Pipeline flow now:**
 1. `worker.py` calls `docling_adapter.parse_document(bytes, filename, mime, do_ocr=...)`.
@@ -374,49 +374,136 @@ The ingestion pipeline no longer uses `format_router` (pypdf / BeautifulSoup / u
 ### 61. `inject_synthetic_headers` Is Pre-Parse, Not Post-Parse
 `b_plus_normalizer._likely_structured` and `looks_like_b_plus` are GONE — classification is docling's job now. What survives: `_PATTERNS`, `InjectedHeader`, and `inject_synthetic_headers`. The injector runs INSIDE the adapter, BEFORE the bytes reach docling — so docling sees real `#`/`##` markers and produces proper `section_header` items. The audit list rides through the response into the document record (same shape as before).
 
-### 62. `IngestionConfig.docling_ocr_enabled` Default True
-New per-corpus field controls the docling sidecar's OCR pass on PDFs / images. Default True. Set False for text-only PDFs to cut ingest latency by 50-60%. Other formats ignore the flag — docling's PdfFormatOption is the only place it's wired.
+### 62. OCR Is Disabled
+`IngestionConfig.docling_ocr_enabled` is retained only for legacy row compatibility and now defaults to `False`. The worker and preflight paths pass `do_ocr=False` unconditionally, the adapter ignores `do_ocr=True`, and the docling sidecar forces `PdfPipelineOptions.do_ocr=False`. Scanned PDFs return whatever text the fast local PDF path can extract; they must not silently launch OCR. Docling may still use GPU for non-OCR layout parsing.
 
-### 63. Model Weights Persist via Named Volumes
-`docling_models` and `docling_hf_cache` are named docker volumes mounted into the sidecar (`/app/docling_models` and `/app/hf_cache`). Without these, every `docker compose down` would force a 1.5 GB re-download on next boot. Pre-fetched at image build time via the Dockerfile's `download_models()` step — failure is tolerated and runtime fetch retries.
+### 63. Model Weights Persist via Host Bind Mounts
+Docling artifacts and HuggingFace caches are bind-mounted to host storage under `E:/PolymathRuntime` by default (`/app/docling_models` and `/app/hf_cache`). The Dockerfile must not pre-fetch model weights into image layers. A Docker Desktop VHD wipe should not erase host-mounted Polymath data/caches, and a rebuild should not bake multi-GB model weights into BuildKit cache.
+
+Do **not** set `POLYMATH_DOCKER_DATA_ROOT` inside Docker Desktop's own `DataFolder`. If Docker Desktop stores its VHD at `E:/Docker`, then app data belongs somewhere like `E:/PolymathRuntime`; using `E:/Docker/volumes` for bind mounts can make containers see a tiny Docker-managed device and fail with misleading `No space left on device` errors.
 
 ### 64. Sidecar Auth Surface (Internal-Only Now)
 The docling sidecar uses `expose: - "8500"` (NOT `ports:`) — it is reachable only on the docker network at `http://docling:8500`. There is no auth on `/parse` itself; isolation comes from the network boundary. Don't switch back to `ports:` without thinking about who can hit `/parse` from the host. Also: the sidecar enforces a 150 MB upload cap (HTTP 413) and the backend adapter uses a 600s read timeout — both env-overridable but tuned for typical PDF/DOCX sizes.
 
-### 65. GPU Pinning — docling on RTX 3090, Embedder on RTX 4070
-Both docling and the embedder run on CUDA, on **different** physical GPUs:
+### 65. GPU Policy — Docling GPU Layout, No OCR, Conservative Embedder
+Docling is GPU-enabled for layout parsing and OCR-disabled. Compose pins it to `CUDA_VISIBLE_DEVICES="0"` by default and sets `DOCLING_IDLE_UNLOAD_SECONDS=300`, so the converter is released after five idle minutes and `torch.cuda.empty_cache()` is called.
 
-- `docling`  → RTX 3090 (24 GB) — layout/OCR model holds ~2-4 GB resident
-- `embedder` → RTX 4070 (12 GB) — Qwen3-Embedding-0.6B + bursty batched embeds
+The embedder also maps to the same visible GPU by default. Keep `LOCAL_EMBED_BATCH_SIZE` conservative (`8` by default) so large ingests do not make the desktop unusable. Raise it only while watching `nvidia-smi`.
 
-**The pin lives at the torch layer, not the docker layer.** On Docker Desktop for Windows, both `device_ids: ['0']` and `NVIDIA_VISIBLE_DEVICES=0` in `docker-compose.yml` are silently IGNORED — the container always sees both GPUs via `nvidia-smi`. The load-bearing pin is two env vars on each service:
+**The pin lives at the torch layer, not the docker layer.** On Docker Desktop for Windows, both `device_ids` and `NVIDIA_VISIBLE_DEVICES` can be silently ignored. The load-bearing pin is `CUDA_VISIBLE_DEVICES` on the service:
 
 ```yaml
 docling:
   environment:
-    CUDA_DEVICE_ORDER: PCI_BUS_ID    # deterministic numbering by PCI bus
-    CUDA_VISIBLE_DEVICES: "0"        # torch sees only the 3090
+    CUDA_DEVICE_ORDER: PCI_BUS_ID
+    CUDA_VISIBLE_DEVICES: "0"
+    DOCLING_OCR_ENABLED: "false"
+    DOCLING_IDLE_UNLOAD_SECONDS: ${DOCLING_IDLE_UNLOAD_SECONDS:-300}
 embedder:
   environment:
     CUDA_DEVICE_ORDER: PCI_BUS_ID
-    CUDA_VISIBLE_DEVICES: "1"        # torch sees only the 4070
+    CUDA_VISIBLE_DEVICES: "0"
+    EMBED_BATCH_SIZE: ${LOCAL_EMBED_BATCH_SIZE:-8}
 ```
 
-`CUDA_VISIBLE_DEVICES` filters at torch import time; this is the one that actually works. The compose `deploy.resources.reservations.devices` block + `NVIDIA_VISIBLE_DEVICES` are kept for documentation and for hosts where they DO take effect (Linux Swarm), but on Windows Docker Desktop they're inert.
+`CUDA_VISIBLE_DEVICES` filters at torch import time; this is the one that actually works. Keep a visible `nvidia-smi -l 1` during first large ingest after a rebuild.
 
-**Do NOT use `count: 1`** for either service — even when device_ids isn't honored, `count: 1` would still let docker pick a GPU at random for compute reservation (where applicable), and we want the explicit pin documented in code.
+**Do NOT add OCR back to docling.** If OCR is ever revived, it should be an explicit separate service/profile, not the default parser path.
 
 Verify after any compose edit:
 
 ```bash
-docker exec polymath_v33-docling-1  python -c "import torch; print(torch.cuda.get_device_name(0))"
-# → NVIDIA GeForce RTX 3090
+docker exec polymath_v33-docling-1 curl -s http://localhost:8500/health
 docker exec polymath_v33-embedder-1 python -c "import torch; print(torch.cuda.get_device_name(0))"
-# → NVIDIA GeForce RTX 4070
 ```
 
-`torch.cuda.device_count()` should be **1** in each container. If it's 2, the env var pin didn't take — check for typos in compose.
+`torch.cuda.device_count()` should be **1** in both GPU containers, but `/health` on docling must report `ocr_available: false`. After `DOCLING_IDLE_UNLOAD_SECONDS`, docling `/health` should show `converter_loaded: false`.
 
-If you add a third GPU consumer (vLLM, etc.), pin it to whichever card is least loaded. During an ingest run keep `nvidia-smi -l 1` open and confirm the split: 3090 grows when docling parses; 4070 grows when embedder batches.
+### 65.1 TODO — Embedding VRAM Guardrail
+Partial guard is live: compose defaults `LOCAL_EMBED_BATCH_SIZE` to `8`, and the embedder serializes local `model.encode(...)` calls inside one process while exposing `gpu_free_mb` / `gpu_total_mb` on `/health` and `/info`.
 
-To switch docling back to CPU (CPU-only dev box): change the Dockerfile's `--extra-index-url https://download.pytorch.org/whl/cu121` back to `cpu`, drop the `deploy.resources.reservations` block, rebuild. The sidecar's `_CUDA_OK` runtime check ensures it boots either way (falls back to `AcceleratorDevice.AUTO`).
+Before 500-file ingestion, finish the adaptive guard:
+
+- enforce a low local batch cap when free VRAM drops below a configured threshold
+- prefer API/cloud embedding for large batch ingest when local VRAM is tight
+- surface a UI warning before ingest when local embedding would leave less than ~2 GB free VRAM
+- add backend backpressure so many files cannot enqueue enough embed work to starve the machine
+
+---
+
+## 🟪 Universal Extraction Schema
+
+### 66. Universal schema is baked into `ghost_b.UNIVERSAL_*_SCHEMA`
+GHOST B now runs against a fixed vocabulary: **12 entity types** (Person, Organization, Location, Event, Concept, Method, Product, Document, Rule, Law, Artifact, TimeReference) and **17 relation predicates** (part_of, member_of, located_in, works_for, created_by, uses, references, implements, depends_on, produces, preceded_by, causes, derived_from, contradicts, excepts, overrides, related_to — sentinel must stay last).
+
+`IngestionConfig.entity_schema` / `relation_schema` / `schema_strict` still exist as fields for future per-corpus overrides, but the Corpus Manager UI no longer exposes them. `schema_strict` is narrowed to `Literal["soft"]` — legacy `"off"` / `"hard"` values are coerced to `"soft"` by the pre-validator and permanently rewritten to `"soft"` by the lifespan migration.
+
+**To change the schema:** edit the two constants in `backend/services/ghost_b.py`, then re-ingest affected corpora (wipe `write_state.neo4j_written=false` on each document to force re-extraction — existing entities keep their old types until re-extracted).
+
+**Size rule:** the combined vocab (entities + relations) MUST stay under `SCHEMA_INLINE_LIMIT` (30). Currently 12 + 17 = 29, leaving one slot of headroom. Crossing 30 flips ghost_b into per-chunk Qdrant retrieval mode (GOTCHA #42); under the Phase-20 locked pipeline order that means degraded fallback on fresh ingest because embeddings don't exist yet when ghost_b runs.
+
+**Admin lever — `FORCE_UNIVERSAL_SCHEMA`:** env-driven bool in `config.py`. Default `False` preserves corpora that explicitly customized their schema; `True` overwrites every corpus with the universal vocab on startup. Migration runs unconditionally in lifespan; `force` only changes whether custom schemas survive. The lifespan log records every patched `corpus_id` with the reason (`null_entity_schema`, `legacy_strict=off`, `force`, etc.) so there's a paper trail when someone asks "why did my corpus's schema change?".
+
+**Mixed-vocab post-migration audit.** The migration rewrites `default_ingestion_config` on each corpus, but existing Neo4j entities keep the `entity_type` values the original extraction assigned. A query filtering on `entity_type="Rule"` misses pre-migration entities that were tagged with older/lowercase/custom types. Audit with:
+```cypher
+MATCH (n:Entity) RETURN DISTINCT n.entity_type ORDER BY n.entity_type
+```
+Anything outside the 12-type universal list is pre-migration data — wipe `write_state.neo4j_written=false` on the affected documents and re-ingest to relabel. The `entity_id` slugify is lowercase-first (`neo4j_writer._slugify_type`), so `"Organization"` and `"organization"` collapse to the same `organization:...` node — no duplicate-entity risk from the TitleCase switch, only stale `entity_type` labels on pre-migration rows.
+
+---
+
+## ⚫ Phase 20 — Worker Refactor (Locked Pipeline)
+
+### 67. Locked pipeline order (authoritative)
+`backend/services/ingestion/worker.py` runs every ingest through seven phases, in this order, no exceptions:
+
+```
+parse → chunk → [ghost_a ∥ ghost_b] → mongo → embed → qdrant → neo4j
+```
+
+- **parse** — `docling_adapter.parse_document`
+- **chunk** — `tier_chunker.chunk` → `(parents, children, injected_headers)`
+- **ghosts_parallel** — `asyncio.gather(_a_branch(), _b_branch())` — either branch is a no-op when its feature flag is off
+- **mongo** — ONE `_write_mongo_all` pass (documents + chunks), summaries AND `ghost_b_staging` inline; flips `mongo_written` once
+- **embed** — single `embed_batch` over `[*child_texts, *summary_texts]`
+- **qdrant** — children → naive / hrag (tier-filtered) / graph; summaries → naive + hrag only; flips `qdrant_written`
+- **neo4j** — `write_document_graph(extraction_results)`; flips `neo4j_written`; skipped entirely when `use_neo4j=False`
+
+Every phase emits a structured log line: `phase=<name> duration=<s> doc=<id12> corpus=<cid8> …`. Supersedes §28's historical write-order.
+
+### 68. Ghost failure policy — hard abort
+`summarize_parents` / `extract_entities` filter per-task exceptions and return whatever succeeded. The worker compares `len(results) < len(tasks)` and raises `GhostAFailure` / `GhostBFailure`; `asyncio.gather` cancels the sibling branch. No partial writes are flushed — `mongo_written`, `qdrant_written`, `neo4j_written` stay at their pre-job values. Retry picks up from the same phase next run.
+
+### 69. Ghost A skip-on-retry — Mongo read-back
+When `ws.mongo_written=True` and every `parent_chunks[].summary` is non-empty, `_run_ghosts_parallel` reconstructs the `SummaryResult` list from the stored strings via `_reconstruct_summaries_from_mongo` and skips the LLM call. Partial coverage (any parent with a blank summary) falls back to re-running Ghost A. No separate "summaries done" flag — the inline field is authoritative.
+
+### 70. Ghost B skip-on-retry — `ghost_b_staging`
+`_write_mongo_all` serializes Ghost B output as `documents.ghost_b_staging` (list of `dataclasses.asdict(ExtractionResult)`) in the same atomic write that flips `mongo_written`. On resume the worker calls `mongo_reader.read_ghost_b_staging(db, doc_id, corpus_id)` — if the list is present, `_rehydrate_ghost_b_staging` rebuilds the `ExtractionResult` dataclasses (nested `EntityItem` / `RelationItem` need manual construction, not `**r`) and feeds them straight into `write_document_graph`. The former `_neo4j_has_mentions` probe is gone. Staging is **left as provenance after `neo4j_written` flips**, never cleared.
+
+Three log reasons distinguish the paths — grep for `phase=ghost_b_`:
+
+- `phase=ghost_b_skip reason=staging_found doc=… entries=N` — resume hit staging, LLM not called
+- `phase=ghost_b_run reason=fresh_ingest doc=…` — first ingest
+- `phase=ghost_b_run reason=staging_missing_legacy_doc doc=…` — `qdrant_written=True` but no staging field (pre-feature document); Ghost B re-runs
+
+### 71. Preset modes — Fast / Balanced / Deep / Custom
+`IngestionConfig.preset: Literal["fast","balanced","deep","custom"] = "balanced"`. Backend normalization in `services.ingestion_service.apply_preset()` overwrites `use_neo4j` + `chunk_summarization` + `target_qdrant_collections` to match the preset on create/update. `"custom"` returns config unchanged — toggles flow through verbatim.
+
+| preset | use_neo4j | chunk_summarization | target_qdrant_collections |
+|---|---|---|---|
+| fast | False | False | naive, hrag |
+| balanced | True | False | naive, hrag, graph |
+| deep | True | True | naive, hrag, graph |
+| custom | — caller's values — | — | — |
+
+Frontend (`CorpusManager.tsx → PresetModeSelector`) renders a 4-way radio group; Custom reveals the two raw checkboxes. Open-time `inferPreset` compares stored preset against toggles and falls through to Custom when they disagree — preserves user intent over the Pydantic `"balanced"` default on legacy rows.
+
+### 72. Mixed-vocab Neo4j audit (post-universal-schema)
+Same Cypher as §66's audit block — flagging here for discoverability. After the universal schema lands, run:
+```cypher
+MATCH (n:Entity) RETURN DISTINCT n.entity_type ORDER BY n.entity_type
+```
+Anything outside the 12 Title-Case types is pre-migration data; wipe `write_state.neo4j_written=false` on the affected documents to force re-extraction.
+
+### 73. Deprecated: `format_router.py` and `source_classifier.py`
+Both modules were replaced by the docling sidecar + `docling_adapter` in Phase 7.6 (§60). They remain on disk with **no live importers** — `grep -rn "format_router\|source_classifier\|DecodeResult" backend/` returns only the dead file itself, a comment in `docling_adapter.py`, and a header comment in `worker.py`. Scheduled for removal in a future cleanup sweep. Do not add new callers.

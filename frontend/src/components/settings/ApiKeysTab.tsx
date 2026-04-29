@@ -15,7 +15,6 @@ import {
   Trash2,
 } from "lucide-react";
 import * as api from "../../lib/api";
-import { QueryPrefsSection } from "./QueryPrefsSection";
 
 type ProviderMeta = {
   label: string;
@@ -61,12 +60,9 @@ const PROVIDER_LABELS: Record<string, ProviderMeta> = {
     group: "embedder",
     routing: "direct to SiliconFlow embedder API (bypasses LiteLLM)",
   },
-  modal: {
-    label: "Modal Proxy Token",
-    placeholder: "(only if your deployed Modal endpoint is auth-gated)",
-    group: "embedder",
-    routing: "Bearer token for YOUR own Modal embedder URL — not a Modal account key",
-  },
+  // Modal credentials (token_id, token_secret, proxy bearer) live under
+  // Settings → Infrastructure → Modal as of Sprint 2B — co-located with
+  // the deploy controls.
   // Phase 19.3 — new LiteLLM wildcard providers. Storage keys match the
   // route prefixes in litellm/config.yaml so `_provider_for_model`
   // finds the user's per-user Mongo key at chat time.
@@ -181,8 +177,8 @@ export function ApiKeysTab() {
 
   return (
     <div className="space-y-8">
-      {/* Phase F — Query Model Preferences (mounted at top per spec) */}
-      <QueryPrefsSection />
+      {/* QueryPrefsSection removed in Sprint 4B — HyDE/agentic selection
+          now lives in the Models tab (ModelsTab.tsx). */}
 
       <div>
         <h2 className="text-xl font-semibold text-white mb-2">API Keys</h2>

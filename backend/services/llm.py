@@ -221,6 +221,7 @@ class LLMService:
         api_base: str | None = None,
         api_key: str | None = None,
         extra_params: dict | None = None,
+        timeout: float = 120.0,
     ) -> str:
         """
         Non-streaming single-turn chat completion — for reasoning helpers
@@ -238,9 +239,21 @@ class LLMService:
             extra_params: extra body params merged in. Reserved keys
                 {model, messages, temperature, max_tokens, stream} are NOT
                 clobbered.
+            timeout: hard wall on the call. Phase 24: callers (HyDE,
+                reasoning cascade) pass a tight budget so a reasoning model
+                that accidentally got picked can't burn the whole turn.
+                On timeout, httpx raises ReadTimeout — caller decides how
+                to fall back.
 
         Returns:
             The assistant message content as a plain string.
+
+        Phase 24 — reasoning-content fallback. Some providers (DeepSeek R1,
+        GLM-5.x, OpenAI o-series) return their answer in `reasoning_content`
+        with empty `content` when the response was truncated or the model
+        spent all tokens thinking. We extract the tail of `reasoning_content`
+        as a last-resort answer so the caller never sees a silent empty
+        return. The caller's logging will still flag this as degraded.
         """
         model = model or self._default_model
         url = f"{self._base_url}/chat/completions"
@@ -274,14 +287,34 @@ class LLMService:
             url,
             json=body,
             headers=headers,
-            timeout=httpx.Timeout(120.0, connect=10.0),
+            timeout=httpx.Timeout(timeout, connect=min(10.0, timeout)),
         )
         resp.raise_for_status()
         data = resp.json()
         choices = data.get("choices") or []
         if not choices:
             return ""
-        return choices[0].get("message", {}).get("content", "") or ""
+        message = choices[0].get("message", {})
+        content = message.get("content", "") or ""
+        if content.strip():
+            return content
+        # Phase 24 — reasoning-model fallback. content is empty: try to salvage
+        # the last paragraph of reasoning_content. If the model truncated mid-
+        # think (finish_reason=length), the tail is usually the closest thing
+        # to a final answer.
+        reasoning_content = (message.get("reasoning_content") or "").strip()
+        if reasoning_content:
+            finish = choices[0].get("finish_reason")
+            logger.warning(
+                "complete_sync: model=%s returned empty content; "
+                "extracting tail of reasoning_content (finish_reason=%s, "
+                "reasoning_chars=%d). Pick a non-reasoning model to fix.",
+                model, finish, len(reasoning_content),
+            )
+            # Take the last ~600 chars of reasoning as a fallback answer
+            tail = reasoning_content[-600:]
+            return f"[reasoning-model fallback — finish_reason={finish}]\n{tail}"
+        return ""
 
     async def stream_chat(
         self,

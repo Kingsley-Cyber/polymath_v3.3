@@ -67,6 +67,10 @@ class Settings(BaseSettings):
         default="Qwen3-Embedding-0.6B",
         description="Display name of the loaded embedding model — must match MODEL_NAME env var in embedder container",
     )
+    LOCAL_EMBEDDER_ENABLED: bool = Field(
+        default=False,
+        description="Whether the local Docker embedder profile is expected to be running.",
+    )
 
     # === MODAL CLOUD GPU (primary ingestion embed path) ===
     MODAL_ENABLED: bool = Field(
@@ -125,6 +129,15 @@ class Settings(BaseSettings):
             "model phases. Per-entry model concurrency still applies inside a slot."
         ),
     )
+    INGEST_MAX_ACTIVE_JOBS: int = Field(
+        default=16,
+        ge=1,
+        le=256,
+        description=(
+            "Process-local cap for active background ingest jobs retained in memory. "
+            "Requests over this cap fail fast with 429 instead of holding uploaded bytes."
+        ),
+    )
 
     # === LOCAL MODELS DIR ===
     MODELS_DIR: str = Field(
@@ -136,6 +149,10 @@ class Settings(BaseSettings):
     RERANKER_URL: str = Field(
         default="http://reranker:8080",
         description="Reranker service URL (sentence-transformers cross-encoder)",
+    )
+    LOCAL_RERANKER_ENABLED: bool = Field(
+        default=False,
+        description="Whether the local Docker reranker profile is expected to be running.",
     )
 
     # === AUTOMATION ===

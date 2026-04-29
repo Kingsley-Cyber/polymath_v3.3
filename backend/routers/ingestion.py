@@ -18,6 +18,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from config import get_settings
 from models.schemas import (
     CorpusCreate,
     CorpusResponse,
@@ -36,10 +37,28 @@ from utils.streaming import build_sse_done, build_sse_error
 _INGEST_BG_TASKS: set[asyncio.Task] = set()
 _BACKFILL_BG_TASKS: set[asyncio.Task] = set()
 _SECRET_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b")
+_INGEST_ACTIVE_LIMIT = max(1, int(get_settings().INGEST_MAX_ACTIVE_JOBS))
+_INGEST_ACTIVE_COUNT = 0
+_INGEST_ADMISSION_LOCK = asyncio.Lock()
 
 # Keep this below frontend/nginx.conf's 300s proxy timeout. OCR is disabled,
 # but layout-heavy documents can still take time before doc_id exists.
 PARSE_DOC_ID_WAIT_SECONDS = 240.0
+
+
+async def _try_acquire_ingest_slot() -> bool:
+    global _INGEST_ACTIVE_COUNT
+    async with _INGEST_ADMISSION_LOCK:
+        if _INGEST_ACTIVE_COUNT >= _INGEST_ACTIVE_LIMIT:
+            return False
+        _INGEST_ACTIVE_COUNT += 1
+        return True
+
+
+async def _release_ingest_slot() -> None:
+    global _INGEST_ACTIVE_COUNT
+    async with _INGEST_ADMISSION_LOCK:
+        _INGEST_ACTIVE_COUNT = max(0, _INGEST_ACTIVE_COUNT - 1)
 
 
 def _safe_ingest_error(exc: Exception) -> str:
@@ -511,6 +530,15 @@ async def ingest_document(
             "extra_params": {},
         }]
 
+    if not await _try_acquire_ingest_slot():
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Too many active ingest jobs ({_INGEST_ACTIVE_LIMIT}). "
+                "Wait for current uploads to finish or lower upload concurrency."
+            ),
+        )
+
     # Phase K — Non-blocking ingest. Worker runs in the background; we wait
     # only for docling parse so the content-derived doc_id exists before the
     # client opens the progress stream. Text-native files usually resolve in a
@@ -558,6 +586,8 @@ async def ingest_document(
             if not doc_id_future.done():
                 doc_id_future.set_exception(exc)
             return None
+        finally:
+            await _release_ingest_slot()
 
     task = asyncio.create_task(_run())
     _INGEST_BG_TASKS.add(task)

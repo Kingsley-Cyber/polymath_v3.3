@@ -18,7 +18,10 @@ class FunnelA:
     def __init__(self):
         settings = get_settings()
         # Initialize the async Qdrant client using settings URL
-        self.client = AsyncQdrantClient(url=settings.QDRANT_URL)
+        self.client = AsyncQdrantClient(
+            url=settings.QDRANT_URL,
+            timeout=settings.QDRANT_TIMEOUT_SECONDS,
+        )
 
     async def search(
         self,

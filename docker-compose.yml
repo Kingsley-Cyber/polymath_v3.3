@@ -1,6 +1,24 @@
 # Polymath RAG v3.3 - Docker Compose Configuration
 # All services for the hierarchical RAG system
-# Models mounted from ./download (no runtime downloads)
+# Persistent app data is bind-mounted to the host by default so Docker
+# Desktop's WSL VHDX stays disposable. Keep this OUTSIDE Docker Desktop's own
+# DataFolder. Default uses C:\PolymathRuntime because Docker Desktop can map C:
+# reliably on Windows. If Docker Desktop maps your E: drive correctly, override
+# with POLYMATH_DOCKER_DATA_ROOT=E:/PolymathRuntime.
+#   C:\PolymathRuntime\volumes\{mongodb,qdrant,neo4j,redis,ollama,n8n,docling,hf-cache}
+#   C:\PolymathRuntime\models\{Qwen3-Embedding-0.6B,ms-marco-MiniLM-L6-v2}
+# Override with POLYMATH_DOCKER_DATA_ROOT / POLYMATH_MODELS_ROOT if needed.
+
+# Cap container logs at 30 MB total (3 files × 10 MB) to prevent the WSL2 vhdx
+# from ballooning overnight. Default JSON driver has NO rotation — without this,
+# 15 chatty containers (LiteLLM, embedder, docling, backend) will fill the
+# Docker virtual disk in days. Reference from every service via `<<: *default-logging`.
+x-default-logging: &default-logging
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
 
 services:
   # ============================================================
@@ -8,11 +26,12 @@ services:
   # ============================================================
 
   mongodb:
+    <<: *default-logging
     image: mongo:7
     ports:
       - "27017:27017"
     volumes:
-      - mongodb_data:/data/db
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/mongodb:/data/db"
     environment:
       MONGO_INITDB_DATABASE: polymath
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-polymath}
@@ -26,7 +45,9 @@ services:
     restart: unless-stopped
 
   mongo-express:
+    <<: *default-logging
     image: mongo-express
+    profiles: ["admin"]
     ports:
       - "8083:8081"
     environment:
@@ -40,11 +61,12 @@ services:
     restart: unless-stopped
 
   qdrant:
+    <<: *default-logging
     image: qdrant/qdrant:latest
     ports:
       - "6333:6333"
     volumes:
-      - qdrant_data:/qdrant/storage
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/qdrant:/qdrant/storage"
     healthcheck:
       test:
         [
@@ -60,6 +82,7 @@ services:
     restart: unless-stopped
 
   neo4j:
+    <<: *default-logging
     image: neo4j:5-community
     ports:
       - "7474:7474"
@@ -68,7 +91,9 @@ services:
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
       NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
     volumes:
-      - neo4j_data:/data
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/neo4j/data:/data"
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/neo4j/plugins:/plugins"
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/neo4j/logs:/logs"
     healthcheck:
       test:
         [
@@ -82,11 +107,12 @@ services:
     restart: unless-stopped
 
   redis:
+    <<: *default-logging
     image: redis:7-alpine
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/redis:/data"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -96,7 +122,9 @@ services:
     restart: unless-stopped
 
   redis-commander:
+    <<: *default-logging
     image: rediscommander/redis-commander:latest
+    profiles: ["admin"]
     environment:
       - REDIS_HOSTS=local:redis:6379
     ports:
@@ -111,7 +139,9 @@ services:
   # ============================================================
 
   ollama:
+    <<: *default-logging
     image: ollama/ollama:latest
+    profiles: ["local-llm"]
     # Host port 11434 is kept free for the native Windows Ollama app. The
     # compose Ollama stays reachable on the Docker network at ollama:11434
     # (backend + LiteLLM use the internal hostname). To talk to the compose
@@ -119,8 +149,8 @@ services:
     # ports:
     #   - "11434:11434"
     volumes:
-      - ollama_models:/root/.ollama
-      - ./download:/models:ro
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/ollama:/root/.ollama"
+      - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}:/models:ro"
     deploy:
       resources:
         reservations:
@@ -140,7 +170,7 @@ services:
   # Run manually: docker compose run --rm ollama-pull
   ollama-pull:
     image: ollama/ollama:latest
-    profiles: ["setup"]
+    profiles: ["setup", "local-llm"]
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -151,7 +181,7 @@ services:
         echo "=== Models available ==="
         ollama list
     volumes:
-      - ollama_models:/root/.ollama
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/ollama:/root/.ollama"
     network_mode: "service:ollama"
     depends_on:
       ollama:
@@ -161,11 +191,12 @@ services:
     # Pinned — later LiteLLM tags (including main-stable, main-latest) require
     # a Postgres DB for master_key auth. main-v1.60.0 is pre-regression and
     # works DB-less; bump carefully only after validating master-key path.
+    <<: *default-logging
     image: ghcr.io/berriai/litellm:main-v1.60.0
     ports:
       - "4000:4000"
     volumes:
-      - ./litellm/config.yaml:/app/config.yaml
+      - "${POLYMATH_RUNTIME_BINDS_ROOT:-C:/PolymathRuntime/binds}/litellm/config.yaml:/app/config.yaml:ro"
     command: ["--config", "/app/config.yaml"]
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
@@ -180,8 +211,6 @@ services:
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
       MIMO_API_KEY: ${MIMO_API_KEY:-}
     depends_on:
-      ollama:
-        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
@@ -206,28 +235,35 @@ services:
   #      GET  http://embedder:80/health
   # ============================================================
   embedder:
+    <<: *default-logging
     build: ./embedder
+    profiles: ["local-embed"]
     ports:
       - "8082:80"
     volumes:
-      - ./download/Qwen3-Embedding-0.6B:/model:ro
+      - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}/Qwen3-Embedding-0.6B:/model:ro"
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
     environment:
+      HF_HOME: /root/.cache/huggingface
       MODEL_PATH: /model
       MODEL_NAME: Qwen3-Embedding-0.6B
-      EMBED_BATCH_SIZE: "32"
+      # Keep local embedding conservative so large ingests don't starve the
+      # desktop GPU. Raise LOCAL_EMBED_BATCH_SIZE only after watching nvidia-smi.
+      EMBED_BATCH_SIZE: ${LOCAL_EMBED_BATCH_SIZE:-8}
       EMBED_DEVICE: cuda
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
       # GPU pinning — see docling service for the rationale. CUDA_VISIBLE_DEVICES
       # is the load-bearing filter at the torch layer; PCI_BUS_ID ordering
-      # makes "1" deterministically mean the 4070.
+      # makes "0" deterministically mean the 3090.
       CUDA_DEVICE_ORDER: PCI_BUS_ID
-      CUDA_VISIBLE_DEVICES: "1"            # RTX 4070
-      NVIDIA_VISIBLE_DEVICES: "1"
+      CUDA_VISIBLE_DEVICES: "0"            # RTX 3090
+      NVIDIA_VISIBLE_DEVICES: "0"
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['1']
+              device_ids: ['0']
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
@@ -244,13 +280,17 @@ services:
   # Note: llama.cpp cannot run BERT cross-encoders — custom service required
   # ============================================================
   reranker:
+    <<: *default-logging
     build: ./reranker
+    profiles: ["local-rerank"]
     ports:
       - "8081:8080"
     volumes:
-      - C:/Users/Sammb/Downloads/polymath_rag/models:/models:ro
+      - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}/ms-marco-MiniLM-L6-v2:/model:ro"
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
     environment:
-      MODEL_PATH: /models/ms-marco-MiniLM-L6-v2
+      HF_HOME: /root/.cache/huggingface
+      MODEL_PATH: /model
       RERANKER_DEVICE: cuda
     deploy:
       resources:
@@ -268,34 +308,32 @@ services:
     restart: unless-stopped
 
   # ============================================================
-  # DOCLING SIDECAR — IBM Docling parser as a CPU-only service
+  # DOCLING SIDECAR — IBM Docling parser with GPU layout, OCR disabled
   # API: POST http://docling:8500/parse
-  # First boot downloads ~1.5 GB of layout/OCR model weights to a named
-  # volume so subsequent restarts don't pay the cost again.
+  # First boot downloads Docling/HF weights to host bind mounts under
+  # C:/PolymathRuntime by default, so rebuilds do not bake weights into image layers.
   # ============================================================
   docling:
+    <<: *default-logging
     build: ./docling_svc
+    profiles: ["local-parser"]
     # Internal-only — backend reaches it on the docker network via
     # http://docling:8500. No host port; mirrors embedder/reranker pattern
     # so the parse endpoint + model weights aren't on the host network.
     expose:
       - "8500"
     volumes:
-      - docling_models:/app/docling_models
-      - docling_hf_cache:/app/hf_cache
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/docling/models:/app/docling_models"
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/app/hf_cache"
     environment:
       DOCLING_ARTIFACTS_PATH: /app/docling_models
       HF_HOME: /app/hf_cache
-      # GPU pinning — Docker Desktop on Windows ignores both `device_ids` and
-      # `NVIDIA_VISIBLE_DEVICES` for filtering, so we pin at the TORCH layer
-      # via CUDA_VISIBLE_DEVICES (read at torch import). CUDA_DEVICE_ORDER
-      # forces deterministic device numbering by PCI bus instead of torch's
-      # "fastest first" heuristic. NVIDIA_VISIBLE_DEVICES is kept as a hint
-      # in case Docker improves its honoring; deploy.resources below is the
-      # compose-spec idiom but currently load-bearing only on swarm hosts.
+      DOCLING_OCR_ENABLED: "false"
+      DOCLING_IDLE_UNLOAD_SECONDS: ${DOCLING_IDLE_UNLOAD_SECONDS:-300}
       CUDA_DEVICE_ORDER: PCI_BUS_ID
       CUDA_VISIBLE_DEVICES: "0"            # RTX 3090
       NVIDIA_VISIBLE_DEVICES: "0"
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
     deploy:
       resources:
         reservations:
@@ -316,11 +354,13 @@ services:
   # ============================================================
 
   n8n:
+    <<: *default-logging
     image: n8nio/n8n:latest
+    profiles: ["automation"]
     ports:
       - "5678:5678"
     volumes:
-      - n8n_data:/home/node/.n8n
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/n8n:/home/node/.n8n"
     environment:
       N8N_HOST: "0.0.0.0"
       N8N_PORT: "5678"
@@ -340,11 +380,17 @@ services:
   # ============================================================
 
   backend:
+    <<: *default-logging
     build: ./backend
     ports:
       - "8000:8000"
     volumes:
-      - ./download:/models:ro
+      - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}:/models:ro"
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/home/appuser/.cache/huggingface"
+      # Phase 22 — expose the Modal deploy factory inside the backend
+      # container so /api/infrastructure/modal/deploy can import it.
+      # Read-only bind; file lives at repo root for CLI-deploy compatibility.
+      - "${POLYMATH_RUNTIME_BINDS_ROOT:-C:/PolymathRuntime/binds}/modal_embedder.py:/app/modal_embedder.py:ro"
     environment:
       MONGODB_URI: mongodb://${MONGO_USER:-polymath}:${MONGO_PASSWORD}@mongodb:27017/polymath?authSource=admin
       QDRANT_URL: http://qdrant:6333
@@ -354,11 +400,17 @@ services:
       NEO4J_ENABLED: ${NEO4J_ENABLED:-false}
       LITELLM_URL: http://litellm:4000
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
-      OLLAMA_URL: http://ollama:11434
+      # Use the host's native Ollama (your 20 pulled models) via Docker
+      # Desktop's host.docker.internal bridge. The compose Ollama container
+      # is kept running but empty — it's a fallback only.
+      OLLAMA_URL: http://host.docker.internal:11434
       REDIS_URL: redis://redis:6379
       RERANKER_URL: http://reranker:8080
       EMBEDDER_URL: http://embedder:80
+      LOCAL_EMBEDDER_ENABLED: ${LOCAL_EMBEDDER_ENABLED:-false}
+      LOCAL_RERANKER_ENABLED: ${LOCAL_RERANKER_ENABLED:-false}
       MODELS_DIR: /models
+      HF_HOME: /home/appuser/.cache/huggingface
       N8N_URL: http://n8n:5678
       # Phase 14.3 — Modal cloud GPU (primary ingestion embed path; see .env.example)
       MODAL_ENABLED: ${MODAL_ENABLED:-false}
@@ -370,21 +422,25 @@ services:
       SILICONFLOW_EMBEDDER_URL: ${SILICONFLOW_EMBEDDER_URL:-https://api.siliconflow.com/v1/embeddings}
       SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
       SILICONFLOW_TIMEOUT_SECONDS: ${SILICONFLOW_TIMEOUT_SECONDS:-120.0}
-      # Default chat model — must be installed locally (or a cloud route with
-      # a working api key). Fallback picks an Ollama model that tends to be
-      # pre-pulled on dev rigs; override via DEFAULT_COMPLETION_MODEL in .env.
-      DEFAULT_COMPLETION_MODEL: ${DEFAULT_COMPLETION_MODEL:-ollama/qwen3:1.7b}
-      # Phase 14.1 — Agentic mode defaults (user-overridable at runtime)
+      # Default chat model is resolved from Settings → Models / user pools.
+      # Leave blank so LiteLLM/Mistral can be the active chat path without
+      # making host-native Ollama a required service.
+      DEFAULT_COMPLETION_MODEL: ${DEFAULT_COMPLETION_MODEL:-}
+      # Phase 14.1 — Agentic mode defaults (user-overridable at runtime).
+      # Leave blank unless this deployment intentionally requires Ollama.
       AGENTIC_MODE_ENABLED: ${AGENTIC_MODE_ENABLED:-false}
-      AGENTIC_MODEL: ${AGENTIC_MODEL:-ollama/qwen3:1.7b}
-      # Phase 17 — HyDE dedicated model (cheap/fast hypothetical generator)
-      HYDE_MODEL: ${HYDE_MODEL:-ollama/qwen3:1.7b}
+      AGENTIC_MODEL: ${AGENTIC_MODEL:-}
+      # Phase 17 — HyDE dedicated model (cheap/fast hypothetical generator).
+      HYDE_MODEL: ${HYDE_MODEL:-}
       # Auth secrets — config.py validators reject missing/empty. Set in .env;
       # the backend image built 2026-04-18 enforces these (older images didn't).
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD}
       # Phase 7.6 — Docling sidecar (parser replacement for unstructured/regex)
       DOCLING_URL: http://docling:8500
+      # GHOST B — 0.0 disables self-reported-confidence filter (glosses + schema
+      # are the real quality levers). Raise per-model after eyeballing its distribution.
+      ENTITY_CONFIDENCE_THRESHOLD: ${ENTITY_CONFIDENCE_THRESHOLD:-0.0}
     depends_on:
       mongodb:
         condition: service_healthy
@@ -393,12 +449,6 @@ services:
       redis:
         condition: service_healthy
       litellm:
-        condition: service_healthy
-      reranker:
-        condition: service_healthy
-      embedder:
-        condition: service_healthy
-      docling:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
@@ -418,6 +468,8 @@ services:
   # ============================================================
 
   mcp:
+    <<: *default-logging
+    profiles: ["mcp"]
     build:
       context: ./backend
       dockerfile: Dockerfile.mcp
@@ -433,7 +485,8 @@ services:
       NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       LITELLM_URL: http://litellm:4000
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
-      OLLAMA_URL: http://ollama:11434
+      # Same host-Ollama routing as backend (see comment above).
+      OLLAMA_URL: http://host.docker.internal:11434
       REDIS_URL: redis://redis:6379
       RERANKER_URL: http://reranker:8080
       EMBEDDER_URL: http://embedder:80
@@ -462,8 +515,6 @@ services:
         condition: service_healthy
       litellm:
         condition: service_healthy
-      embedder:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
       interval: 30s
@@ -474,6 +525,7 @@ services:
     stop_grace_period: 30s
 
   frontend:
+    <<: *default-logging
     build: ./frontend
     ports:
       - "3000:80"
@@ -507,17 +559,3 @@ services:
   #       condition: service_healthy
   #     mcp:
   #       condition: service_healthy
-
-# ============================================================
-# VOLUMES
-# ============================================================
-
-volumes:
-  mongodb_data:
-  qdrant_data:
-  neo4j_data:
-  redis_data:
-  ollama_models:
-  n8n_data:
-  docling_models:
-  docling_hf_cache:

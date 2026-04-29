@@ -73,6 +73,15 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     await db["chunks"].create_index("parent_id")
     await db["chunks"].create_index("doc_id")
     await db["chunks"].create_index("user_id")
+    try:
+        await db["chunks"].create_index(
+            [("text", "text"), ("heading_path", "text")],
+            name="chunks_text_search",
+            weights={"heading_path": 5, "text": 1},
+            default_language="english",
+        )
+    except Exception as exc:
+        logger.warning("Could not create chunks text index: %s", exc)
     logger.info("Indexes ensured: chunks")
 
     # --- settings ---
