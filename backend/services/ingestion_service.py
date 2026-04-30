@@ -1267,6 +1267,11 @@ class IngestionService:
                 "ghost_b_staging": 1,
                 "ghost_b_metrics": 1,
                 "write_state": 1,
+                "decision_trace": 1,
+                "decision_trace_summary": 1,
+                "chunking_config": 1,
+                "source_mime": 1,
+                "source_tier": 1,
                 "_id": 0,
             },
         ).to_list(length=None)
@@ -1354,6 +1359,53 @@ class IngestionService:
                 return "schema_review"
             return "ready"
 
+        def _fallback_decision_trace(doc: dict, ws: dict, metrics: dict) -> dict:
+            chunking = doc.get("chunking_config") or {}
+            budgets = chunking.get("token_budgets") or {}
+            vector_ready = bool(
+                ws.get("vector_ready")
+                or (ws.get("mongo_written") and ws.get("qdrant_written"))
+            )
+            graph_status = str(
+                ws.get("graph_status")
+                or ("graph_ready" if ws.get("neo4j_written") else "graph_pending")
+            )
+            skipped = int(metrics.get("skipped_low_value_chunks") or 0)
+            reasons = []
+            parent_strategy = str(chunking.get("parent_strategy") or "unknown")
+            if parent_strategy == "pdf_page_grouped":
+                reasons.append("PDF pages were grouped into token-sized parents.")
+            elif parent_strategy.startswith("heading_bound"):
+                reasons.append("Document headings were preserved as parent boundaries.")
+            elif parent_strategy == "token_window":
+                reasons.append("Weak document structure used token-window chunking.")
+            if skipped:
+                reasons.append(f"{skipped} low-value chunk(s) were skipped for graph extraction.")
+            if vector_ready:
+                reasons.append("Mongo and Qdrant are ready for vector/chat retrieval.")
+            return {
+                "file_profile": str(doc.get("source_mime") or "document"),
+                "source_mime": str(doc.get("source_mime") or ""),
+                "source_tier": str(doc.get("source_tier") or ""),
+                "parser_strategy": "unknown_legacy",
+                "structure_quality": "unknown",
+                "chunking_strategy": parent_strategy,
+                "child_strategy": str(chunking.get("child_strategy") or "unknown"),
+                "parent_count": len(doc.get("parent_chunks") or []),
+                "child_count": int(doc.get("chunk_count") or 0),
+                "parent_target_tokens": int(budgets.get("parent_target") or 0),
+                "child_target_tokens": int(budgets.get("child_target") or 0),
+                "low_value_chunk_count": skipped,
+                "low_value_chunk_kinds": metrics.get("skipped_low_value_by_kind") or {},
+                "vector_ready": vector_ready,
+                "graph_status": graph_status,
+                "graph_strategy": str(metrics.get("extraction_strategy") or "unknown"),
+                "graph_mode": str(metrics.get("extraction_mode") or "unknown"),
+                "graph_completeness": str(metrics.get("graph_completeness") or ""),
+                "reasons": reasons or ["Legacy document; decision trace was derived from stored metadata."],
+                "warnings": ["Derived fallback trace for a document ingested before decision traces existed."],
+            }
+
         for doc in docs:
             ws = doc.get("write_state") or {}
             warnings = ws.get("warnings") or []
@@ -1382,6 +1434,18 @@ class IngestionService:
             doc_relation_count = int(metrics.get("relation_count") or 0)
             doc_predicate_avg = float(metrics.get("predicate_confidence_avg") or 0.0)
             doc_readiness = _doc_readiness(metrics, ws, failures)
+            decision_trace = doc.get("decision_trace") or _fallback_decision_trace(
+                doc, ws, metrics
+            )
+            decision_trace_summary = str(
+                doc.get("decision_trace_summary")
+                or " - ".join(
+                    [
+                        str(decision_trace.get("chunking_strategy") or "auto chunking").replace("_", " "),
+                        str(decision_trace.get("graph_strategy") or "graph policy").replace("_", " "),
+                    ]
+                )
+            )
             graph_completeness = str(
                 metrics.get("graph_completeness")
                 or ("needs-backfill" if failures or doc_failed_chunks else "graph-complete")
@@ -1454,6 +1518,13 @@ class IngestionService:
                     "readiness": doc_readiness,
                     "vector_ready": vector_ready,
                     "graph_status": graph_status,
+                    "decision_trace": decision_trace,
+                    "decision_trace_summary": decision_trace_summary,
+                    "decision_reasons": list(decision_trace.get("reasons") or []),
+                    "chunking_strategy": str(
+                        decision_trace.get("chunking_strategy") or "unknown"
+                    ),
+                    "graph_strategy": str(decision_trace.get("graph_strategy") or "unknown"),
                     "graph_completeness": graph_completeness,
                     "extraction_strategy": str(metrics.get("extraction_strategy") or "unknown"),
                     "skipped_low_value_chunks": int(metrics.get("skipped_low_value_chunks") or 0),

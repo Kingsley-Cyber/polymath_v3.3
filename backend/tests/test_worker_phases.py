@@ -32,6 +32,7 @@ from models.schemas import (
 from services.ghost_a import SummaryResult
 from services.ghost_b import (
     EntityItem,
+    ExtractionBatchReport,
     ExtractionResult,
     RelationItem,
     UNIVERSAL_ENTITY_SCHEMA,
@@ -301,6 +302,9 @@ async def test_phase_order_deep_mode():
             "parse", "chunk", "ghost_a",
             "mongo_write", "embed", "qdrant_write", "ghost_b", "neo4j_write",
         ]
+        trace = m["mongo_write"].await_args.kwargs["decision_trace"]
+        assert trace["chunking_strategy"] == "heading_bound"
+        assert trace["graph_strategy"] == "full_ontology"
     finally:
         m["stop_all"]()
 
@@ -585,6 +589,113 @@ def test_ghost_b_policy_uses_compact_for_large_docs():
     assert policy.skipped_low_value_chunks == 20
 
 
+def test_decision_trace_records_large_doc_compact_policy():
+    cfg = IngestionConfig(
+        use_neo4j=True,
+        large_doc_child_threshold=100,
+        full_extract_max_children=100,
+        compact_mode_max_entities=6,
+        compact_mode_max_relations=5,
+    )
+    parse = _parse_result(SourceTier.ocr_ast)
+    parse.source_format = "pypdf_fast_text"
+    parse.num_pages = 42
+    parse.pages = ["body"] * 42
+    parse.has_structure = False
+    children = [
+        SimpleNamespace(chunk_id=f"c{i}", chunk_kind=worker.ChunkKind.BODY)
+        for i in range(120)
+    ]
+    children.extend(
+        [
+            SimpleNamespace(
+                chunk_id=f"b{i}",
+                chunk_kind=worker.ChunkKind.BIBLIOGRAPHY,
+            )
+            for i in range(3)
+        ]
+    )
+
+    trace = worker._build_decision_trace(
+        parse_result=parse,
+        source_mime="application/pdf",
+        filename="book.pdf",
+        source_tier=SourceTier.ocr_ast,
+        chunking_config={
+            "parent_strategy": "pdf_page_grouped",
+            "child_strategy": "sentence_merge",
+            "requested_child_strategy": "sentence_merge",
+            "token_budgets": {"parent_target": 1200, "child_target": 350},
+            "page_ranges_preserved": True,
+        },
+        parents=[SimpleNamespace(parent_id="p1")],
+        children=children,
+        config=cfg,
+        ws=WriteState(),
+    )
+
+    assert trace["file_profile"] == "digital_pdf"
+    assert trace["chunking_strategy"] == "pdf_page_grouped"
+    assert trace["graph_strategy"] == "compact_large_doc"
+    assert trace["graph_mode"] == "compact"
+    assert trace["low_value_chunk_count"] == 3
+    assert trace["low_value_chunk_kinds"] == {"bibliography": 3}
+    assert any("Large body chunk count" in reason for reason in trace["reasons"])
+
+
+@pytest.mark.asyncio
+async def test_write_mongo_persists_decision_trace():
+    doc_id, corpus_id = "doc-trace", "c" * 36
+    p, c = _parent(doc_id, corpus_id)
+    trace = {
+        "chunking_strategy": "heading_bound",
+        "graph_strategy": "full_ontology",
+        "low_value_chunk_count": 0,
+    }
+    captured: dict[str, Any] = {}
+
+    async def _capture_doc(_db, doc):
+        captured.update(doc)
+
+    with patch.object(
+        worker,
+        "_find_near_duplicate_documents",
+        new_callable=AsyncMock,
+        return_value=[],
+    ), patch.object(
+        worker.mongo_writer,
+        "upsert_document",
+        new=AsyncMock(side_effect=_capture_doc),
+    ), patch.object(
+        worker.mongo_writer,
+        "upsert_chunks",
+        new_callable=AsyncMock,
+    ):
+        await worker._write_mongo_all(
+            db=MagicMock(),
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            user_id="u1",
+            file_id="file1",
+            filename="doc.md",
+            source_tier=SourceTier.tier_a,
+            source_mime="text/markdown",
+            ingestion_config=IngestionConfig(),
+            chunking_config={"parent_strategy": "heading_bound"},
+            parents=[p],
+            children=[c],
+            summaries=None,
+            ghost_b_out=None,
+            ghost_b_failures=[],
+            ghost_b_metrics=None,
+            decision_trace=trace,
+            ws=WriteState(),
+        )
+
+    assert captured["decision_trace"] == trace
+    assert captured["decision_trace_summary"] == "heading bound - full ontology"
+
+
 def test_high_signal_selector_prefers_entity_and_relation_dense_chunks():
     low = SimpleNamespace(
         chunk_id="low",
@@ -686,6 +797,152 @@ async def test_auto_backfill_called_when_ghost_b_failures_exist():
 
     assert backfill_mock.await_count == 1
     assert result.neo4j_written is True
+
+
+@pytest.mark.asyncio
+async def test_graph_status_update_does_not_blank_existing_trace_strategy():
+    docs = MagicMock()
+    docs.update_one = AsyncMock()
+    db = MagicMock()
+    db.__getitem__.return_value = docs
+    ws = WriteState(
+        mongo_written=True,
+        qdrant_written=True,
+        vector_ready=True,
+        graph_extraction_strategy=None,
+        graph_completeness=None,
+    )
+
+    with patch.object(worker.mongo_writer, "update_write_state", new_callable=AsyncMock):
+        await worker._update_graph_write_state(
+            db=db,
+            doc_id="doc1",
+            corpus_id="corp1",
+            ws=ws,
+            status=worker.GRAPH_EXTRACTING,
+        )
+
+    update_doc = docs.update_one.await_args.args[1]["$set"]
+    assert update_doc["decision_trace.graph_status"] == worker.GRAPH_EXTRACTING
+    assert update_doc["decision_trace.vector_ready"] is True
+    assert "decision_trace.graph_strategy" not in update_doc
+    assert "decision_trace.graph_completeness" not in update_doc
+
+
+@pytest.mark.asyncio
+async def test_graph_backfill_refreshes_decision_trace_graph_fields():
+    from services.ingestion import graph_backfill
+
+    class _Cursor:
+        def __init__(self, rows):
+            self._rows = list(rows)
+
+        async def to_list(self, length=None):
+            return list(self._rows)
+
+        def __aiter__(self):
+            self._iter = iter(self._rows)
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self._iter)
+            except StopIteration as exc:
+                raise StopAsyncIteration from exc
+
+    doc_id = "doc1"
+    corpus_id = "corp1"
+    staged_result = _fake_extraction_result("c-ok", doc_id, corpus_id)
+    recovered_result = _fake_extraction_result("c-retry", doc_id, corpus_id)
+    doc = {
+        "doc_id": doc_id,
+        "corpus_id": corpus_id,
+        "file_id": "file1",
+        "chunk_count": 2,
+        "ingestion_config": IngestionConfig(use_neo4j=True).model_dump(),
+        "ghost_b_staging": [asdict(staged_result)],
+        "ghost_b_failures": [
+            {
+                "chunk_id": "c-retry",
+                "doc_id": doc_id,
+                "corpus_id": corpus_id,
+                "model": "m",
+                "lane": 0,
+                "attempts": 1,
+                "error_type": "parse_error",
+                "error_message": "bad json",
+            }
+        ],
+        "ghost_b_metrics": {
+            "requested_chunks": 2,
+            "body_children": 2,
+            "extraction_strategy": "compact_large_doc",
+            "graph_completeness": "needs-backfill",
+        },
+        "write_state": {
+            "warnings": ["Ghost B graph extraction partial: old warning"],
+            "graph_status": worker.GRAPH_NEEDS_BACKFILL,
+        },
+        "decision_trace": {
+            "graph_status": worker.GRAPH_NEEDS_BACKFILL,
+            "graph_strategy": "compact_large_doc",
+            "graph_completeness": "needs-backfill",
+        },
+    }
+
+    documents = MagicMock()
+    documents.find_one = AsyncMock(return_value=doc)
+    documents.update_one = AsyncMock()
+    corpora = MagicMock()
+    corpora.find_one = AsyncMock(return_value={"default_ingestion_config": {}})
+    chunks = MagicMock()
+
+    def _find_chunks(query, projection):
+        if isinstance(query.get("chunk_id"), dict):
+            return _Cursor([{"chunk_id": "c-retry", "text": "Retry text"}])
+        return _Cursor([{"chunk_id": "c-ok"}, {"chunk_id": "c-retry"}])
+
+    chunks.find.side_effect = _find_chunks
+    db = MagicMock()
+    db.__getitem__.side_effect = {
+        "documents": documents,
+        "chunks": chunks,
+        "corpora": corpora,
+    }.__getitem__
+    report = ExtractionBatchReport(
+        results=[recovered_result],
+        failures=[],
+        metrics={
+            "requested_chunks": 1,
+            "extracted_chunks": 1,
+            "extraction_strategy": "compact_large_doc_backfill",
+            "extraction_mode": "compact",
+            "graph_completeness": "graph-complete",
+            "prompt_tokens": 100,
+            "attempt_count": 1,
+        },
+    )
+
+    with patch.object(graph_backfill, "extract_entities", new_callable=AsyncMock, return_value=report), \
+         patch.object(graph_backfill, "write_document_graph", new_callable=AsyncMock):
+        result = await graph_backfill.backfill_failed_graph_chunks(
+            db=db,
+            qdrant_client=MagicMock(),
+            neo4j_driver=object(),
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+            user_id="u1",
+        )
+
+    assert result["remaining_failed_chunks"] == 0
+    update_doc = documents.update_one.await_args.args[1]["$set"]
+    assert update_doc["write_state.graph_status"] == worker.GRAPH_READY
+    assert update_doc["decision_trace.graph_status"] == worker.GRAPH_READY
+    assert update_doc["decision_trace.graph_failed_chunks"] == 0
+    assert update_doc["decision_trace.graph_requested_chunks"] == 2
+    assert update_doc["decision_trace.graph_strategy"] == "compact_large_doc_backfill"
+    assert update_doc["decision_trace.graph_mode"] == "compact"
+    assert update_doc["decision_trace.graph_completeness"] == "graph-complete"
 
 
 # ── Universal schema sanity on a Balanced config ────────────────────────────

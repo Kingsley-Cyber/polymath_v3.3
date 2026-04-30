@@ -190,6 +190,198 @@ def _refresh_derived_write_state(ws: WriteState, *, config: IngestionConfig) -> 
     return ws
 
 
+def _chunk_kind_counts(chunks: list) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for chunk in chunks:
+        kind = str(getattr(chunk, "chunk_kind", None) or ChunkKind.BODY)
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
+def _low_value_chunk_summary(chunks: list) -> tuple[int, dict[str, int]]:
+    skipped: dict[str, int] = {}
+    body_count = 0
+    for chunk in chunks:
+        kind = str(getattr(chunk, "chunk_kind", None) or ChunkKind.BODY)
+        if should_skip_ghost_b(kind):
+            skipped[kind] = skipped.get(kind, 0) + 1
+        else:
+            body_count += 1
+    return body_count, skipped
+
+
+def _file_profile(parse_result, source_mime: str, filename: str) -> str:
+    source_format = str(getattr(parse_result, "source_format", "") or "")
+    mime = (source_mime or "").lower()
+    name = (filename or "").lower()
+    if "pdf" in mime or name.endswith(".pdf") or source_format == "pypdf_fast_text":
+        if source_format == "pypdf_fast_text":
+            return "digital_pdf"
+        return "pdf"
+    if source_format.startswith("local_markdown") or name.endswith((".md", ".markdown")):
+        return "markdown"
+    if source_format.startswith("local_text") or name.endswith((".txt", ".text")):
+        return "plain_text"
+    if source_format.startswith("local_html") or name.endswith((".html", ".htm")):
+        return "html"
+    return source_format or "document"
+
+
+def _structure_quality(parse_result) -> str:
+    if getattr(parse_result, "has_structure", False):
+        heading_count = int(getattr(parse_result, "h1_count", 0) or 0) + int(
+            getattr(parse_result, "h2_count", 0) or 0
+        )
+        if heading_count >= 3 or getattr(parse_result, "sections", None):
+            return "high"
+        return "medium"
+    if getattr(parse_result, "pages", None):
+        return "page_text"
+    return "low"
+
+
+def _trace_reasons(
+    *,
+    parse_result,
+    chunking_config: dict,
+    policy: "GhostBExtractionPolicy | None",
+    low_value_count: int,
+    config: IngestionConfig,
+    ws: WriteState,
+) -> list[str]:
+    reasons: list[str] = []
+    parent_strategy = str(chunking_config.get("parent_strategy") or "")
+    if parent_strategy == "pdf_page_grouped":
+        reasons.append("PDF pages were grouped into token-sized parents with page ranges preserved.")
+    elif parent_strategy.startswith("heading_bound"):
+        reasons.append("Document headings were preserved as parent chunk boundaries.")
+    elif parent_strategy == "token_window":
+        reasons.append("Weak document structure triggered token-window parent chunking.")
+    if chunking_config.get("requested_child_strategy") != chunking_config.get("child_strategy"):
+        reasons.append("Requested child splitting was resolved to the safest implemented strategy.")
+    if low_value_count:
+        reasons.append(f"{low_value_count} low-value chunk(s) were skipped for graph extraction.")
+    if not config.use_neo4j:
+        reasons.append("Graph extraction is disabled for this ingest configuration.")
+    elif policy is not None and policy.extraction_strategy == "compact_large_doc":
+        reasons.append("Large body chunk count triggered compact graph extraction.")
+    elif policy is not None and policy.extraction_strategy == "full_ontology":
+        reasons.append("Document stayed within the full ontology extraction budget.")
+    if ws.vector_ready:
+        reasons.append("Mongo and Qdrant are ready for vector/chat retrieval.")
+    if not reasons:
+        reasons.append("Default auto ingestion policy was applied.")
+    return reasons
+
+
+def _build_decision_trace(
+    *,
+    parse_result,
+    source_mime: str,
+    filename: str,
+    source_tier: SourceTier,
+    chunking_config: dict,
+    parents: list,
+    children: list,
+    config: IngestionConfig,
+    ws: WriteState,
+    ghost_b_metrics: dict | None = None,
+) -> dict[str, Any]:
+    body_children, low_value_kinds = _low_value_chunk_summary(children)
+    policy: GhostBExtractionPolicy | None = None
+    if config.use_neo4j and settings.NEO4J_ENABLED:
+        policy = _select_ghost_b_extraction_policy(
+            config,
+            total_children=len(children),
+            body_children=body_children,
+            skipped_low_value_by_kind=low_value_kinds,
+        )
+    budgets = chunking_config.get("token_budgets") or {}
+    metrics = ghost_b_metrics or {}
+    graph_strategy = (
+        str(metrics.get("extraction_strategy") or "")
+        or (policy.extraction_strategy if policy else "graph_disabled")
+    )
+    graph_mode = (
+        str(metrics.get("extraction_mode") or "")
+        or (policy.extraction_mode if policy else "none")
+    )
+    graph_completeness = (
+        str(metrics.get("graph_completeness") or "")
+        or (policy.graph_completeness if policy else "graph-skipped")
+    )
+    warnings: list[str] = []
+    if chunking_config.get("semantic_split_reason"):
+        warnings.append(str(chunking_config["semantic_split_reason"]))
+    if _structure_quality(parse_result) == "low":
+        warnings.append("Parser found weak structure; chunking used fallback boundaries.")
+
+    trace = {
+        "file_profile": _file_profile(parse_result, source_mime, filename),
+        "source_mime": source_mime,
+        "source_tier": source_tier.value,
+        "parser_strategy": str(getattr(parse_result, "source_format", "") or "docling_sidecar"),
+        "structure_quality": _structure_quality(parse_result),
+        "page_count": int(getattr(parse_result, "num_pages", 1) or 1),
+        "has_structure": bool(getattr(parse_result, "has_structure", False)),
+        "chunking_strategy": str(chunking_config.get("parent_strategy") or "unknown"),
+        "child_strategy": str(chunking_config.get("child_strategy") or "unknown"),
+        "requested_child_strategy": str(
+            chunking_config.get("requested_child_strategy") or "unknown"
+        ),
+        "parent_count": len(parents),
+        "child_count": len(children),
+        "parent_target_tokens": int(budgets.get("parent_target") or 0),
+        "child_target_tokens": int(budgets.get("child_target") or 0),
+        "chunk_overlap": int(chunking_config.get("chunk_overlap") or 0),
+        "page_ranges_preserved": bool(chunking_config.get("page_ranges_preserved")),
+        "low_value_chunk_count": sum(low_value_kinds.values()),
+        "low_value_chunk_kinds": low_value_kinds,
+        "chunk_kind_counts": _chunk_kind_counts(children),
+        "vector_strategy": "dense_sparse:" + ",".join(config.target_qdrant_collections),
+        "vector_ready": bool(ws.vector_ready),
+        "graph_status": ws.graph_status,
+        "graph_strategy": graph_strategy,
+        "graph_mode": graph_mode,
+        "graph_completeness": graph_completeness,
+        "graph_requested_chunks": int(metrics.get("requested_chunks") or body_children),
+        "graph_extracted_chunks": int(metrics.get("extracted_chunks") or 0),
+        "graph_failed_chunks": int(
+            metrics.get("failed_chunk_count") or metrics.get("failed_chunks") or 0
+        ),
+        "reasons": _trace_reasons(
+            parse_result=parse_result,
+            chunking_config=chunking_config,
+            policy=policy,
+            low_value_count=sum(low_value_kinds.values()),
+            config=config,
+            ws=ws,
+        ),
+        "warnings": warnings,
+    }
+    return trace
+
+
+def _decision_trace_summary(trace: dict | None) -> str:
+    if not trace:
+        return "auto ingestion policy"
+    chunking = str(trace.get("chunking_strategy") or "auto chunking").replace("_", " ")
+    graph = str(trace.get("graph_strategy") or "graph policy").replace("_", " ")
+    skipped = int(trace.get("low_value_chunk_count") or 0)
+    parts = [chunking, graph]
+    if skipped:
+        parts.append(f"{skipped} low-value chunks skipped")
+    return " - ".join(parts)
+
+
+def _set_if_present(updates: dict[str, Any], key: str, value: Any) -> None:
+    if value is None:
+        return
+    if isinstance(value, str) and not value.strip():
+        return
+    updates[key] = value
+
+
 async def _update_graph_write_state(
     *,
     db: AsyncIOMotorDatabase,
@@ -241,6 +433,27 @@ async def _update_graph_write_state(
         corpus_id=corpus_id,
         **flags,
     )
+    trace_updates: dict[str, Any] = {
+        "decision_trace.graph_status": ws.graph_status,
+        "decision_trace.graph_extracted_chunks": ws.graph_extracted_chunk_count,
+        "decision_trace.graph_failed_chunks": ws.graph_failed_chunk_count,
+        "decision_trace.vector_ready": ws.vector_ready,
+        "updated_at": datetime.utcnow(),
+    }
+    _set_if_present(
+        trace_updates,
+        "decision_trace.graph_strategy",
+        ws.graph_extraction_strategy,
+    )
+    _set_if_present(
+        trace_updates,
+        "decision_trace.graph_completeness",
+        ws.graph_completeness,
+    )
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {"$set": trace_updates},
+    )
 
 
 async def _persist_graph_extraction(
@@ -253,18 +466,30 @@ async def _persist_graph_extraction(
     ghost_b_metrics: dict | None,
     warnings: list[str],
 ) -> None:
+    trace_updates: dict[str, Any] = {
+        "write_state.warnings": warnings,
+        "ghost_b_staging": [asdict(r) for r in (ghost_b_out or [])],
+        "ghost_b_failures": [asdict(f) for f in (ghost_b_failures or [])],
+        "ghost_b_metrics": ghost_b_metrics or {},
+        "schema_lens": (ghost_b_metrics or {}).get("schema_lens"),
+        "decision_trace.graph_failed_chunks": (
+            (ghost_b_metrics or {}).get("failed_chunk_count")
+            or (ghost_b_metrics or {}).get("failed_chunks")
+            or len(ghost_b_failures or [])
+        ),
+        "updated_at": datetime.utcnow(),
+    }
+    for field_name, metric_name in (
+        ("decision_trace.graph_strategy", "extraction_strategy"),
+        ("decision_trace.graph_mode", "extraction_mode"),
+        ("decision_trace.graph_completeness", "graph_completeness"),
+        ("decision_trace.graph_requested_chunks", "requested_chunks"),
+        ("decision_trace.graph_extracted_chunks", "extracted_chunks"),
+    ):
+        _set_if_present(trace_updates, field_name, (ghost_b_metrics or {}).get(metric_name))
     await db["documents"].update_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
-        {
-            "$set": {
-                "write_state.warnings": warnings,
-                "ghost_b_staging": [asdict(r) for r in (ghost_b_out or [])],
-                "ghost_b_failures": [asdict(f) for f in (ghost_b_failures or [])],
-                "ghost_b_metrics": ghost_b_metrics or {},
-                "schema_lens": (ghost_b_metrics or {}).get("schema_lens"),
-                "updated_at": datetime.utcnow(),
-            }
-        },
+        {"$set": trace_updates},
     )
 
 
@@ -1151,6 +1376,7 @@ async def _write_mongo_all(
     ghost_b_out: list[ExtractionResult] | None,
     ghost_b_failures: list[ExtractionFailureItem] | None,
     ghost_b_metrics: dict | None,
+    decision_trace: dict | None,
     ws: WriteState,
 ) -> None:
     """Single Mongo write pass: documents + chunks. Summaries go INLINE on
@@ -1210,6 +1436,8 @@ async def _write_mongo_all(
         "ghost_b_staging": ghost_b_staging,
         "ghost_b_failures": ghost_b_failure_rows,
         "ghost_b_metrics": ghost_b_metrics or {},
+        "decision_trace": decision_trace or {},
+        "decision_trace_summary": _decision_trace_summary(decision_trace),
         "schema_lens": (ghost_b_metrics or {}).get("schema_lens"),
         "is_near_duplicate": bool(duplicate_candidates),
         "near_duplicate_candidates": duplicate_candidates,
@@ -1241,6 +1469,7 @@ async def _ensure_progress_document(
     ingestion_config: IngestionConfig,
     chunking_config: dict,
     parents,
+    decision_trace: dict | None,
     ws: WriteState,
 ) -> None:
     """Create a minimal document row so SSE has something to poll early."""
@@ -1261,6 +1490,8 @@ async def _ensure_progress_document(
             "chunking_config": chunking_config,
             "write_state": ws.model_dump(),
             "parent_chunks": _build_parent_dicts(parents, None),
+            "decision_trace": decision_trace or {},
+            "decision_trace_summary": _decision_trace_summary(decision_trace),
             "ghost_b_staging": None,
             "ghost_b_failures": [],
             "ghost_b_metrics": {},
@@ -1656,6 +1887,18 @@ async def run_ingest_job(
     else:
         ws = WriteState()
     ws = _refresh_derived_write_state(ws, config=ingestion_config)
+    decision_trace = _build_decision_trace(
+        parse_result=parse_result,
+        source_mime=source_mime,
+        filename=filename,
+        source_tier=source_tier,
+        chunking_config=chunking_config,
+        parents=parents,
+        children=children,
+        config=ingestion_config,
+        ws=ws,
+        ghost_b_metrics=(existing_doc or {}).get("ghost_b_metrics") if existing_doc else None,
+    )
     file_id = (
         existing_doc.get("file_id", str(uuid.uuid4()))
         if existing_doc
@@ -1674,7 +1917,19 @@ async def run_ingest_job(
             ingestion_config=ingestion_config,
             chunking_config=chunking_config,
             parents=parents,
+            decision_trace=decision_trace,
             ws=ws,
+        )
+    elif not existing_doc.get("decision_trace"):
+        await db["documents"].update_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {
+                "$set": {
+                    "decision_trace": decision_trace,
+                    "decision_trace_summary": _decision_trace_summary(decision_trace),
+                    "updated_at": datetime.utcnow(),
+                }
+            },
         )
 
     # Phase K — signal the HTTP endpoint only after a progress row exists, so
@@ -1748,6 +2003,7 @@ async def run_ingest_job(
             ghost_b_out=ghost_b_out,
             ghost_b_failures=ghost_b_failures,
             ghost_b_metrics=ghost_b_metrics,
+            decision_trace=decision_trace,
             ws=ws,
         )
         await mongo_writer.update_write_state(
@@ -1840,6 +2096,16 @@ async def run_ingest_job(
         )
         await mongo_writer.update_write_state(
             db, doc_id, corpus_id=corpus_id, qdrant_written=True, vector_ready=True
+        )
+        await db["documents"].update_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {
+                "$set": {
+                    "decision_trace.vector_ready": True,
+                    "decision_trace.graph_status": ws.graph_status,
+                    "updated_at": datetime.utcnow(),
+                }
+            },
         )
         ws.qdrant_written = True
         ws.vector_ready = True

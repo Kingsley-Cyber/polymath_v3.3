@@ -44,6 +44,14 @@ _BACKFILL_PREFIX = "Ghost B backfill"
 _AUTO_BACKFILL_FAILED_PREFIX = "Ghost B auto-backfill failed:"
 
 
+def _set_if_present(updates: dict[str, Any], key: str, value: Any) -> None:
+    if value is None:
+        return
+    if isinstance(value, str) and not value.strip():
+        return
+    updates[key] = value
+
+
 def _failure_from_dict(row: dict[str, Any]) -> ExtractionFailureItem:
     return ExtractionFailureItem(
         chunk_id=str(row.get("chunk_id") or ""),
@@ -119,6 +127,7 @@ def _merge_metrics(
     )
     for key in (
         "extraction_strategy",
+        "extraction_mode",
         "graph_completeness",
         "large_doc_child_threshold",
         "full_extract_max_children",
@@ -313,26 +322,45 @@ async def backfill_failed_graph_chunks(
         if remaining_failures
         else str(metrics.get("graph_completeness") or "graph-complete")
     )
+    now = datetime.utcnow()
+    update_fields: dict[str, Any] = {
+        "ghost_b_staging": [asdict(result) for result in staged_results],
+        "ghost_b_failures": [asdict(failure) for failure in remaining_failures],
+        "ghost_b_metrics": metrics,
+        "write_state.warnings": warnings,
+        "write_state.graph_status": graph_status,
+        "write_state.graph_extracted_chunk_count": len(staged_results),
+        "write_state.graph_failed_chunk_count": len(remaining_failures),
+        "write_state.graph_completeness": graph_completeness,
+        "write_state.graph_extraction_finished_at": now,
+        "decision_trace.graph_status": graph_status,
+        "decision_trace.graph_extracted_chunks": len(staged_results),
+        "decision_trace.graph_failed_chunks": len(remaining_failures),
+        "decision_trace.graph_requested_chunks": len(all_chunk_ids),
+        "decision_trace.graph_completeness": graph_completeness,
+        "decision_trace.vector_ready": True,
+        "updated_at": now,
+    }
+    extraction_strategy = metrics.get("extraction_strategy")
+    _set_if_present(
+        update_fields,
+        "write_state.graph_extraction_strategy",
+        str(extraction_strategy) if extraction_strategy is not None else None,
+    )
+    _set_if_present(
+        update_fields,
+        "decision_trace.graph_strategy",
+        str(extraction_strategy) if extraction_strategy is not None else None,
+    )
+    _set_if_present(
+        update_fields,
+        "decision_trace.graph_mode",
+        metrics.get("extraction_mode"),
+    )
 
     await db["documents"].update_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
-        {
-            "$set": {
-                "ghost_b_staging": [asdict(result) for result in staged_results],
-                "ghost_b_failures": [asdict(failure) for failure in remaining_failures],
-                "ghost_b_metrics": metrics,
-                "write_state.warnings": warnings,
-                "write_state.graph_status": graph_status,
-                "write_state.graph_extracted_chunk_count": len(staged_results),
-                "write_state.graph_failed_chunk_count": len(remaining_failures),
-                "write_state.graph_extraction_strategy": str(
-                    metrics.get("extraction_strategy") or ""
-                ),
-                "write_state.graph_completeness": graph_completeness,
-                "write_state.graph_extraction_finished_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
-            }
-        },
+        {"$set": update_fields},
     )
     logger.info(
         "phase=ghost_b_backfill doc=%s corpus=%s retried=%d recovered=%d remaining=%d",

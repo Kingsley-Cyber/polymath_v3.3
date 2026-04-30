@@ -46,6 +46,23 @@ function getWriteStateMessages(
   return [...(state.warnings ?? []), ...(state.verify_errors ?? [])].filter(Boolean);
 }
 
+function humanizeStrategy(value?: string | null) {
+  return (value || "auto").replace(/_/g, " ");
+}
+
+function getDecisionSummary(doc: DocumentResponse) {
+  if (doc.decision_trace_summary) return doc.decision_trace_summary;
+  const trace = doc.decision_trace;
+  if (!trace) return "auto ingestion policy";
+  const parts = [
+    humanizeStrategy(trace.chunking_strategy),
+    humanizeStrategy(trace.graph_strategy),
+  ];
+  const skipped = trace.low_value_chunk_count ?? 0;
+  if (skipped > 0) parts.push(`${skipped} low-value chunks skipped`);
+  return parts.join(" - ");
+}
+
 export function CorpusDetail({
   corpus,
   onBack,
@@ -456,6 +473,8 @@ export function CorpusDetail({
               const isExpanded = expandedDocId === doc.doc_id;
               const isPendingDelete = deleteConfirmId === doc.doc_id;
               const stateMessages = getWriteStateMessages(doc.write_state);
+              const decisionTrace = doc.decision_trace;
+              const decisionSummary = getDecisionSummary(doc);
 
               return (
                 <div
@@ -620,6 +639,59 @@ export function CorpusDetail({
                             </span>
                           </span>
                         </div>
+                      </div>
+
+                      {/* Write State */}
+                      <div className="text-[10px] space-y-1 border border-border-minimal bg-bg-base/50 px-2 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-content-tertiary tracking-wider uppercase font-bold">
+                            ingestion decision:
+                          </div>
+                          <span className="text-[9px] text-content-tertiary">
+                            {decisionTrace?.structure_quality || "auto"}
+                          </span>
+                        </div>
+                        <div className="text-content-secondary leading-snug">
+                          {decisionSummary}
+                        </div>
+                        {decisionTrace && (
+                          <div className="grid grid-cols-2 gap-1 pt-1 text-content-tertiary">
+                            <span>
+                              parser:{" "}
+                              <span className="text-content-secondary">
+                                {humanizeStrategy(decisionTrace.parser_strategy)}
+                              </span>
+                            </span>
+                            <span>
+                              chunks:{" "}
+                              <span className="text-content-secondary">
+                                {decisionTrace.child_count ?? doc.chunk_count ?? 0}c /{" "}
+                                {decisionTrace.parent_count ?? doc.parent_chunks?.length ?? 0}p
+                              </span>
+                            </span>
+                            <span>
+                              child:{" "}
+                              <span className="text-content-secondary">
+                                {humanizeStrategy(decisionTrace.child_strategy)}
+                              </span>
+                            </span>
+                            <span>
+                              graph:{" "}
+                              <span className="text-content-secondary">
+                                {humanizeStrategy(decisionTrace.graph_mode)}
+                              </span>
+                            </span>
+                          </div>
+                        )}
+                        {(decisionTrace?.reasons?.length ?? 0) > 0 && (
+                          <div className="pt-1 space-y-0.5 text-[9px] text-content-tertiary">
+                            {decisionTrace?.reasons?.slice(0, 3).map((reason, idx) => (
+                              <div key={`${doc.doc_id}-decision-${idx}`}>
+                                - {reason}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       {/* Write State */}

@@ -40,13 +40,24 @@ async def _audit_for(doc, chunk_count=10):
     return await service.get_ingestion_audit("corp1")
 
 
-def _doc(metrics, *, failures=None, verified=True, graph_status="graph_ready"):
+def _doc(
+    metrics,
+    *,
+    failures=None,
+    verified=True,
+    graph_status="graph_ready",
+    decision_trace=None,
+):
     return {
         "doc_id": "doc1",
         "filename": "doc.md",
         "ghost_b_failures": failures or [],
         "ghost_b_staging": [{}] * int(metrics.get("extracted_chunks") or 0),
         "ghost_b_metrics": metrics,
+        "decision_trace": decision_trace,
+        "decision_trace_summary": (
+            "heading bound - full ontology" if decision_trace else None
+        ),
         "write_state": {
             "mongo_written": True,
             "qdrant_written": True,
@@ -184,6 +195,34 @@ async def test_ingestion_audit_reports_vector_ready_graph_pending():
     assert audit["totals"]["graph_pending_docs"] == 1
     assert doc["vector_ready"] is True
     assert doc["graph_status"] == "graph_pending"
+
+
+@pytest.mark.asyncio
+async def test_ingestion_audit_exposes_decision_trace_when_present():
+    trace = {
+        "chunking_strategy": "pdf_page_grouped",
+        "graph_strategy": "compact_large_doc",
+        "reasons": ["Large body chunk count triggered compact graph extraction."],
+    }
+    audit = await _audit_for(
+        _doc(
+            {
+                "requested_chunks": 120,
+                "extracted_chunks": 120,
+                "failed_chunk_count": 0,
+                "relation_count": 20,
+                "related_to_ratio": 0.05,
+                "predicate_confidence_avg": 0.9,
+            },
+            decision_trace=trace,
+        )
+    )
+
+    doc = audit["document_metrics"][0]
+    assert doc["decision_trace"] == trace
+    assert doc["chunking_strategy"] == "pdf_page_grouped"
+    assert doc["graph_strategy"] == "compact_large_doc"
+    assert doc["decision_reasons"] == trace["reasons"]
 
 
 @pytest.mark.asyncio

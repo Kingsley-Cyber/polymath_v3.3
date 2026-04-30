@@ -5,10 +5,71 @@ All queries scope by corpus_id to prevent cross-corpus bleed.
 """
 
 import logging
+from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 logger = logging.getLogger(__name__)
+
+
+def _fallback_decision_trace(doc: dict[str, Any]) -> dict[str, Any]:
+    ws = doc.get("write_state") or {}
+    metrics = doc.get("ghost_b_metrics") or {}
+    chunking = doc.get("chunking_config") or {}
+    budgets = chunking.get("token_budgets") or {}
+    vector_ready = bool(
+        ws.get("vector_ready") or (ws.get("mongo_written") and ws.get("qdrant_written"))
+    )
+    graph_status = str(
+        ws.get("graph_status")
+        or ("graph_ready" if ws.get("neo4j_written") else "graph_pending")
+    )
+    parent_strategy = str(chunking.get("parent_strategy") or "unknown")
+    graph_strategy = str(metrics.get("extraction_strategy") or "unknown")
+    skipped = int(metrics.get("skipped_low_value_chunks") or 0)
+    reasons: list[str] = []
+    if parent_strategy == "pdf_page_grouped":
+        reasons.append("PDF pages were grouped into token-sized parents.")
+    elif parent_strategy.startswith("heading_bound"):
+        reasons.append("Document headings were preserved as parent boundaries.")
+    elif parent_strategy == "token_window":
+        reasons.append("Weak document structure used token-window chunking.")
+    if skipped:
+        reasons.append(f"{skipped} low-value chunk(s) were skipped for graph extraction.")
+    if vector_ready:
+        reasons.append("Mongo and Qdrant are ready for vector/chat retrieval.")
+    return {
+        "file_profile": str(doc.get("source_mime") or "document"),
+        "source_mime": str(doc.get("source_mime") or ""),
+        "source_tier": str(doc.get("source_tier") or ""),
+        "parser_strategy": "unknown_legacy",
+        "structure_quality": "unknown",
+        "chunking_strategy": parent_strategy,
+        "child_strategy": str(chunking.get("child_strategy") or "unknown"),
+        "parent_count": len(doc.get("parent_chunks") or []),
+        "child_count": int(doc.get("chunk_count") or 0),
+        "parent_target_tokens": int(budgets.get("parent_target") or 0),
+        "child_target_tokens": int(budgets.get("child_target") or 0),
+        "low_value_chunk_count": skipped,
+        "low_value_chunk_kinds": metrics.get("skipped_low_value_by_kind") or {},
+        "vector_ready": vector_ready,
+        "graph_status": graph_status,
+        "graph_strategy": graph_strategy,
+        "graph_mode": str(metrics.get("extraction_mode") or "unknown"),
+        "graph_completeness": str(metrics.get("graph_completeness") or ""),
+        "reasons": reasons or ["Legacy document; decision trace was derived from stored metadata."],
+        "warnings": ["Derived fallback trace for a document ingested before decision traces existed."],
+    }
+
+
+def _decision_trace_summary(trace: dict[str, Any]) -> str:
+    chunking = str(trace.get("chunking_strategy") or "auto chunking").replace("_", " ")
+    graph = str(trace.get("graph_strategy") or "graph policy").replace("_", " ")
+    skipped = int(trace.get("low_value_chunk_count") or 0)
+    parts = [chunking, graph]
+    if skipped:
+        parts.append(f"{skipped} low-value chunks skipped")
+    return " - ".join(parts)
 
 
 async def get_corpus(db: AsyncIOMotorDatabase, corpus_id: str) -> dict | None:
@@ -160,4 +221,8 @@ async def list_documents(
         counts = {row["_id"]: row["count"] async for row in db["chunks"].aggregate(pipeline)}
         for d in docs:
             d["chunk_count"] = counts.get(d["doc_id"], 0)
+            if not d.get("decision_trace"):
+                trace = _fallback_decision_trace(d)
+                d["decision_trace"] = trace
+                d["decision_trace_summary"] = _decision_trace_summary(trace)
     return docs
