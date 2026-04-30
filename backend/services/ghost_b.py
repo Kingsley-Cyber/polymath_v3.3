@@ -30,6 +30,15 @@ from services.llm_lane_pool import (
     provider_error_tier,
     provider_error_summary,
 )
+from services.ontology import (
+    entity_gloss_map,
+    entity_type_names,
+    relation_alias_tuple_map,
+    relation_domain_range_map,
+    relation_gloss_map,
+    relation_type_names,
+    render_relation_decision_block,
+)
 
 # Phase 14.2 — pluggable schema retriever. Worker injects a closure over qdrant_client +
 # corpus_id so this module stays independent of the Qdrant SDK.
@@ -40,10 +49,26 @@ SchemaResolver = Callable[[str, list[float], int], Awaitable[list[str]]]
 logger = logging.getLogger(__name__)
 
 _SYSTEM = (
-    "You are a precise entity and relation extractor. "
-    "Output ONLY valid JSON. Extract only what is explicitly stated in the text. "
-    "Do not hallucinate entities or relations."
+    "You are GHOST B, a schema-bound entity and relation extractor running in "
+    "strict JSON contract mode. Output exactly one complete JSON object and "
+    "nothing else. Do not use markdown, comments, apologies, explanations, or "
+    "text outside the JSON object. The object must follow the user-provided "
+    "schema keys exactly. Extract only what is explicitly stated in the text; "
+    "do not hallucinate entities or relations. If evidence is sparse, return "
+    "empty arrays. Prefer fewer high-confidence items over long output. Before "
+    "finalizing, silently verify that every string, array, and object is closed "
+    "and that the output can be parsed by json.loads."
 )
+
+_JSON_RECOVERY_SUFFIX = (
+    "\n\nRECOVERY MODE: the previous extraction attempt for this chunk did not "
+    "parse as JSON. Re-run the extraction from scratch using the same schema. "
+    "Return fewer entities and relations if needed, but the response must be a "
+    "single complete JSON object that parses cleanly."
+)
+
+PREDICATE_CONFIDENCE_DEMOTE_THRESHOLD = 0.60
+HIGH_VALUE_EXTRACTION_CONFIDENCE_THRESHOLD = 0.75
 
 # Default open-vocabulary enums when no schema is provided.
 _DEFAULT_ENTITY_TYPES = ["person", "org", "concept", "other"]
@@ -335,7 +360,7 @@ EVIDENCE_CUE_RULES: list[tuple[re.Pattern[str], str, bool]] = [
     (re.compile(r"\b(stored|saved|persisted|kept)\s+(in|inside|to)\b"), "stores", True),
     (re.compile(r"\b(pre-?load(?:ing)?|loads?)\b.*\b(into|in)\b"), "stores", True),
     # UI/product containment is structural, not geographic.
-    (re.compile(r"\b(placed|shown|visible|appears?)\s+(inside|in|within)\b|\binside the\b"), "part_of", False),
+    (re.compile(r"\b(placed|visible|appears?)\s+(inside|in|within)\b|\bshown\s+(inside|within)\b|\binside the\b"), "part_of", False),
     # Explicit textual/citation cues.
     (re.compile(r"\b(quote|quotes|quoted|references?|mentions?|surfaces?)\b"), "references", False),
     # Runtime/deployment cues.
@@ -347,7 +372,45 @@ EVIDENCE_CUE_RULES: list[tuple[re.Pattern[str], str, bool]] = [
     # Extraction/detection/dataflow cues.
     (re.compile(r"\b(extracts?|captures?|pulls?)\b"), "extracts", False),
     (re.compile(r"\b(detects?|recognizes?|identifies?)\b"), "detects", False),
+    # Academic/statistical/book cues.
+    (re.compile(r"\bmeasured\s+by\b"), "measures", True),
+    (re.compile(r"\b(evaluates?|scores?|estimates?)\b.*\b(traits?|values?|scores?|quantit(?:y|ies)|metrics?|ratings?|measures?|estimates?|latent\s+traits?)\b"), "measures", False),
+    (re.compile(r"\b(measures?|quantifies?)\b"), "measures", False),
+    (re.compile(r"\b(evaluates?|checks?)\b.*\b(conditions?|assumptions?|hypotheses|hypothesis|constraints?|qualities|whether|model\s+fit|invariance)\b"), "tests", False),
+    (re.compile(r"\b(tests?|validates?|falsifies?)\b"), "tests", False),
+    (re.compile(r"\b(applied|applies|performed)\s+(to|on)\b"), "applied_to", False),
+    (re.compile(r"\b(defined|specified|introduced|stated)\s+in\b"), "defined_in", False),
+    (re.compile(r"\b(depicted|shown|illustrated|demonstrated)\s+(in|by)\b"), "illustrated_in", False),
+    (re.compile(r"\b(follows?|is\s+drawn\s+from|distributed\s+as)\b.*\b(distribution|curve|law|pattern)\b"), "follows_distribution", False),
+    (re.compile(r"\b(parameter|threshold|setting|variable)s?\s+(of|for)\b"), "parameter_of", False),
+    (re.compile(r"\b(equivalent\s+to|same\s+as|also\s+called|referred\s+to\s+as)\b"), "equivalent_to", False),
+    # Interpretive/self-growth/narrative cues.
+    (re.compile(r"\b(embodies?|personif(?:y|ies)|expresses?)\b"), "embodies", False),
+    (re.compile(r"\b(symboli[sz]es?|stands?\s+for|signifies?)\b"), "symbolizes", False),
+    (re.compile(r"\b(influences?|shapes?|affects?|pressures?)\b"), "influences", False),
+    (re.compile(r"\b(driven\s+by|motivated\s+by)\b"), "motivates", True),
+    (re.compile(r"\b(motivates?|drives?)\b"), "motivates", False),
+    (re.compile(r"\b(struggles?\s+with|wrestles?\s+with|conflicted\s+by)\b"), "struggles_with", False),
+    (re.compile(r"\b(reinforces?|strengthens?|normalizes?|intensifies?)\b"), "reinforces", False),
+    (re.compile(r"\b(undermines?|weakens?|erodes?|destabilizes?|subverts?)\b"), "undermines", False),
+    (re.compile(r"\b(frames?\s+as|presents?\s+as|casts?\s+as|positions?\s+as)\b"), "frames_as", False),
+    (re.compile(r"\b(conceals?|hides?|masks?|disguises?|withholds?)\b"), "conceals", False),
+    (re.compile(r"\b(leverages?|exploits?|uses?\s+strategically)\b"), "leverages", False),
 ]
+
+# Runtime ontology contract. The legacy literals above are kept as readable
+# fallback documentation, but Ghost B uses the shared ontology file below so
+# prompt vocab, aliases, and validators cannot drift apart.
+UNIVERSAL_ENTITY_SCHEMA = entity_type_names()
+UNIVERSAL_RELATION_SCHEMA = relation_type_names()
+UNIVERSAL_ENTITY_GLOSSES = entity_gloss_map()
+UNIVERSAL_RELATION_GLOSSES = relation_gloss_map()
+DOMAIN_RANGE_MAP = relation_domain_range_map()
+RELATION_ALIAS_MAP = relation_alias_tuple_map()
+_RELATION_TYPE_BY_KEY = {
+    re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_"): name
+    for name in [*UNIVERSAL_RELATION_SCHEMA, "related_to"]
+}
 
 
 def normalize_relation_predicate_alias(predicate: str | None) -> tuple[str, bool]:
@@ -361,6 +424,8 @@ def normalize_relation_predicate_alias(predicate: str | None) -> tuple[str, bool
     if not raw:
         return raw, False
     key = re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
+    if key in _RELATION_TYPE_BY_KEY:
+        return _RELATION_TYPE_BY_KEY[key], False
     return RELATION_ALIAS_MAP.get(key, (raw, False))
 
 
@@ -680,6 +745,7 @@ def build_user_prompt(
                 "Never invent a new predicate."
             )
     vocab_block = "\n".join(vocab_block_lines)
+    decision_block = render_relation_decision_block(relation_vocab_for_block)
     lens_block = _render_schema_lens_block(schema_lens)
     entity_cap = max_entities or get_settings().EXTRACTION_MAX_ENTITIES_PER_CHUNK
     relation_cap = max_relations or get_settings().EXTRACTION_MAX_RELATIONS_PER_CHUNK
@@ -701,6 +767,20 @@ def build_user_prompt(
         '      "confidence": 0.0\n'
         "    }\n"
         "  ],\n"
+        '  "candidate_facts": [\n'
+        "    {\n"
+        '      "atomic_fact": "one short evidence-backed fact sentence",\n'
+        '      "candidate_subject": "canonical_name of subject entity",\n'
+        f'      "candidate_predicate": "{predicate_desc}",\n'
+        '      "candidate_object": "canonical_name or literal string",\n'
+        '      "object_kind": "entity | literal",\n'
+        '      "predicate_confidence": 0.0,\n'
+        '      "extraction_confidence": 0.0,\n'
+        '      "alternative_predicates_considered": ["predicate you rejected"],\n'
+        '      "rejection_reasoning": "one short reason the chosen predicate fits best",\n'
+        '      "evidence_phrase": "short source phrase that proves the fact"\n'
+        "    }\n"
+        "  ],\n"
         '  "relations": [\n'
         "    {\n"
         '      "subject": "canonical_name of subject entity",\n'
@@ -708,6 +788,10 @@ def build_user_prompt(
         '      "object": "canonical_name or literal string",\n'
         '      "object_kind": "entity | literal",\n'
         '      "confidence": 0.0,\n'
+        '      "predicate_confidence": 0.0,\n'
+        '      "extraction_confidence": 0.0,\n'
+        '      "alternative_predicates_considered": ["predicate you rejected"],\n'
+        '      "rejection_reasoning": "one short reason the chosen predicate fits best",\n'
         '      "evidence_phrase": "short source phrase that proves the predicate"\n'
         "    }\n"
         "  ]\n"
@@ -718,6 +802,11 @@ def build_user_prompt(
         "- Prefer high-confidence named entities and structurally useful relations; do not enumerate every proper noun, citation, example, list item, or generic noun\n"
         "- Keep JSON compact; no prose, markdown, comments, or duplicate entries\n"
         "- confidence: float 0.0–1.0; omit entries below threshold\n"
+        "- candidate_facts is the atomic proposal layer. For backward compatibility, "
+        "also include each accepted candidate fact as a matching relation in relations.\n"
+        "- atomic_fact should be a compact source-backed sentence, not a summary or inference.\n"
+        "- candidate_subject/candidate_predicate/candidate_object are the proposed triple; "
+        "the compiler will decide final graph semantics after JSON parsing.\n"
         "- canonical_name: lowercase, strip punctuation, collapse whitespace\n"
         "- entity_type is the entity's observed role in this chunk, not global identity\n"
         "- entity_type stays broad: Product for software/apps/libraries/services, "
@@ -725,6 +814,11 @@ def build_user_prompt(
         "Method for procedures/algorithms, Concept for abstract ideas\n"
         "- evidence_phrase must be a short exact or near-exact phrase from the text that explains the relation; "
         "leave it empty only when the relation is obvious from nearby syntax\n"
+        "- predicate_confidence scores whether the predicate label is the narrowest correct label; "
+        "extraction_confidence scores whether the subject/object relation itself exists. "
+        "If predicate_confidence is below 0.60, use related_to and put the rejected guess in alternative_predicates_considered.\n"
+        "- alternative_predicates_considered and rejection_reasoning are required for close choices such as "
+        "uses vs depends_on vs runs_on vs supports, or produces vs stores vs extracts.\n"
         '- relation object_kind "entity" only when the object is itself a named entity in the text\n'
         "- For product specs / PRDs: use 'produces' when a module/API/model outputs an artifact; "
         "use 'uses' when a feature/module consumes a model/API/database/data object; "
@@ -734,19 +828,30 @@ def build_user_prompt(
         f"over '{SchemaContext.RELATION_SENTINEL}' when the text gives enough evidence.\n"
         "- Relation intent families: part_of/member_of are structural; "
         "uses/calls/implements/depends_on/produces/stores/extracts/detects/classifies/runs_on/trained_on/supports are operational; "
-        "references/derived_from/represents/maps_to are referential; causes/preceded_by are causal; "
-        "contradicts/excepts/overrides are conflict. Choose the narrowest predicate "
+        "references/derived_from/represents/maps_to/defined_in/illustrated_in/equivalent_to are referential; "
+        "measures/follows_distribution/tests/applied_to are analytical; parameter_of is structural; "
+        "causes/preceded_by/influences/motivates/reinforces/undermines are causal; "
+        "embodies/symbolizes/frames_as are interpretive; struggles_with is psychosocial; "
+        "conceals/leverages are strategic; contradicts/excepts/overrides are conflict. Choose the narrowest predicate "
         f"inside the right family; use '{SchemaContext.RELATION_SENTINEL}' only when the family is genuinely unclear.\n"
+        "- Governance scopes: measures/defined_in/follows_distribution/tests/applied_to/illustrated_in/parameter_of/equivalent_to are evidence-backed repair predicates for patterns seen in current related_to samples. "
+        "embodies/symbolizes/influences/motivates/struggles_with/reinforces/undermines/frames_as/conceals/leverages are future expansion predicates for literature, self-growth, power, and social-dynamics corpora; use them only when the text explicitly states that meaning, force, motive, conflict, concealment, or strategy. "
+        f"'{SchemaContext.RELATION_SENTINEL}' is a valid diagnostic fallback, not a failure.\n"
         "- Prefer 'runs_on' for model/app/device/platform execution, 'trained_on' for model-dataset training, "
         "'stores' for database/persistence relations, 'extracts' for entity/feature/data extraction, "
         "'detects' for finding objects/signals/events, 'classifies' for assigning categories, "
         "'calls' for API/function/service invocation, 'represents' for modeling/encoding, "
-        "'maps_to' for transformations, and 'supports' for explicit capabilities.\n"
+        "'maps_to' for transformations, 'supports' for explicit capabilities, "
+        "'defined_in' for equation/figure/section/document/spec definitions, 'follows_distribution' for distributional claims, "
+        "'equivalent_to' for aliases, 'embodies'/'symbolizes' for literary meaning, and "
+        "'motivates'/'struggles_with'/'reinforces'/'undermines' for self-growth or emotional dynamics.\n"
         "- Every relation subject/object with object_kind='entity' MUST also appear in entities, even if it is a generic endpoint like app, model, user, event, screen, or API.\n"
-        f"- Use '{SchemaContext.RELATION_SENTINEL}' only when no explicit verb, containment cue, dependency cue, reference cue, runtime cue, or data-flow cue is present.\n"
-        "- do NOT output ontology facet fields such as object_kind, domain_type, "
-        "canonical_family, ontology_tags, or ontology_version; those are assigned deterministically after extraction\n"
+        f"- Keep '{SchemaContext.RELATION_SENTINEL}' for co-occurrence, see-also links, vague similarity/comparison, low predicate confidence, or interpretive claims without explicit evidence. Use it when no explicit verb, containment cue, dependency cue, reference cue, runtime cue, data-flow cue, or governed repair cue is present.\n"
+        "- relation object_kind must only be 'entity' or 'literal'; do NOT put ontology facet values such as Model, API, or Dataset there\n"
+        "- do NOT output ontology facet fields such as domain_type, canonical_family, "
+        "ontology_tags, or ontology_version; those are assigned deterministically after extraction\n"
         f"{vocab_block}\n"
+        f"{decision_block}\n"
         f"{lens_block}\n"
         "\n"
         "TEXT:\n"
@@ -781,6 +886,30 @@ class RelationItem:
     relation_cue: str = ""
     source_predicate: str | None = None
     validation_status: str | None = None
+    predicate_confidence: float | None = None
+    extraction_confidence: float | None = None
+    alternative_predicates_considered: list[str] = field(default_factory=list)
+    rejection_reasoning: str = ""
+    atomic_fact: str = ""
+    candidate_subject: str | None = None
+    candidate_predicate: str | None = None
+    candidate_object: str | None = None
+    review_status: str | None = None
+
+
+@dataclass
+class CandidateFactItem:
+    atomic_fact: str
+    candidate_subject: str
+    candidate_predicate: str
+    candidate_object: str
+    predicate_confidence: float
+    extraction_confidence: float
+    alternative_predicates_considered: list[str] = field(default_factory=list)
+    rejection_reasoning: str = ""
+    evidence_phrase: str = ""
+    object_kind: str = "entity"
+    relation_cue: str = ""
 
 
 @dataclass
@@ -790,6 +919,7 @@ class ExtractionResult:
     doc_id: str
     corpus_id: str
     entities: list[EntityItem] = field(default_factory=list)
+    candidate_facts: list[CandidateFactItem] = field(default_factory=list)
     relations: list[RelationItem] = field(default_factory=list)
 
     # Phase 14 observability counters (per-chunk; aggregated at corpus level later).
@@ -801,6 +931,7 @@ class ExtractionResult:
     domain_range_warn_count: int = 0  # soft domain/range mismatch kept with warning
     endpoint_completion_count: int = 0  # missing relation endpoints added as entities
     evidence_cue_repair_count: int = 0  # evidence phrase repaired predicate/direction
+    direction_repair_count: int = 0  # alias/evidence repair reversed relation direction
     schema_lens_id: str | None = None
 
 
@@ -843,6 +974,13 @@ def summarize_extraction_batch(
         for rel in r.relations
         if rel.predicate == "related_to"
     )
+    predicate_confidences = [
+        float(rel.predicate_confidence)
+        for r in results
+        for rel in r.relations
+        if rel.predicate_confidence is not None
+    ]
+    success_rate = round(len(results) / total_chunks, 4) if total_chunks else 1.0
     lens_ids = sorted({r.schema_lens_id for r in results if r.schema_lens_id})
     error_counts: dict[str, int] = {}
     for failure in failures:
@@ -851,8 +989,11 @@ def summarize_extraction_batch(
         "requested_chunks": total_chunks,
         "extracted_chunks": len(results),
         "failed_chunks": len(failures),
-        "success_rate": round(len(results) / total_chunks, 4) if total_chunks else 1.0,
+        "failed_chunk_count": len(failures),
+        "success_rate": success_rate,
+        "ghost_b_success_rate": success_rate,
         "attempt_count": len(call_metrics),
+        "json_recovery_count": sum(1 for m in call_metrics if m.get("recovery_mode")),
         "models": models,
         "total_tokens": total_tokens,
         "prompt_tokens": prompt_tokens,
@@ -860,14 +1001,28 @@ def summarize_extraction_batch(
         "total_duration_seconds": round(total_duration, 3),
         "entity_count": sum(len(r.entities) for r in results),
         "relation_count": relation_count,
+        "candidate_fact_count": sum(len(r.candidate_facts) for r in results),
         "related_to_count": related_to_count,
         "related_to_ratio": round(related_to_count / relation_count, 4) if relation_count else 0.0,
+        "predicate_confidence_avg": (
+            round(sum(predicate_confidences) / len(predicate_confidences), 4)
+            if predicate_confidences
+            else 0.0
+        ),
         "entity_remap_count": sum(r.entity_remap_count for r in results),
         "relation_remap_count": sum(r.relation_remap_count for r in results),
         "domain_range_remap_count": sum(r.domain_range_remap_count for r in results),
         "domain_range_warn_count": sum(r.domain_range_warn_count for r in results),
         "endpoint_completion_count": sum(r.endpoint_completion_count for r in results),
         "evidence_cue_repair_count": sum(r.evidence_cue_repair_count for r in results),
+        "direction_repair_count": sum(r.direction_repair_count for r in results),
+        "review_relation_count": sum(
+            1
+            for r in results
+            for rel in r.relations
+            if rel.review_status
+            or "review_required" in str(rel.validation_status or "")
+        ),
         "entity_drop_count": sum(r.entity_drop_count for r in results),
         "relation_drop_count": sum(r.relation_drop_count for r in results),
         "schema_lens_ids": lens_ids,
@@ -886,6 +1041,197 @@ def _append_validation_status(existing: str | None, status: str) -> str:
     if status not in parts:
         parts.append(status)
     return "+".join(parts)
+
+
+def _relation_confidence_kwargs(relation: RelationItem) -> dict:
+    return {
+        "predicate_confidence": relation.predicate_confidence,
+        "extraction_confidence": relation.extraction_confidence,
+        "alternative_predicates_considered": list(
+            relation.alternative_predicates_considered or []
+        ),
+        "rejection_reasoning": relation.rejection_reasoning,
+        "atomic_fact": relation.atomic_fact,
+        "candidate_subject": relation.candidate_subject,
+        "candidate_predicate": relation.candidate_predicate,
+        "candidate_object": relation.candidate_object,
+        "review_status": relation.review_status,
+    }
+
+
+def _normalize_string_list(value) -> list[str]:
+    """Normalize optional LLM list fields without splitting strings into chars."""
+    if value is None:
+        raw_values = []
+    elif isinstance(value, str):
+        raw_values = [value]
+    elif isinstance(value, (list, tuple, set)):
+        raw_values = list(value)
+    else:
+        raw_values = [value]
+    return [str(item).strip() for item in raw_values if str(item).strip()]
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_confidence(value, default: float = 0.0) -> float:
+    """Parse LLM confidence values defensively and clamp them to [0, 1]."""
+    try:
+        if isinstance(value, str):
+            text = value.strip()
+            is_percent = text.endswith("%")
+            if is_percent:
+                text = text[:-1].strip()
+            parsed = float(text)
+            if is_percent or parsed > 1.0:
+                parsed = parsed / 100.0
+        else:
+            parsed = float(value)
+            if parsed > 1.0:
+                parsed = parsed / 100.0
+    except (TypeError, ValueError):
+        parsed = default
+    if parsed != parsed:  # NaN
+        parsed = default
+    return min(max(float(parsed), 0.0), 1.0)
+
+
+def _canonical_vocab_value(value: str | None, vocab: list[str]) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return raw
+    by_key = {
+        re.sub(r"[^a-z0-9]+", "_", str(item).lower()).strip("_"): str(item)
+        for item in vocab
+    }
+    key = re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
+    return by_key.get(key, raw)
+
+
+def _normalize_relation_object_kind(value, *, default_object_kind: str = "entity") -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return default_object_kind
+    key = re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
+    if key in {"literal", "value", "scalar", "string", "number", "date", "literal_value"}:
+        return "literal"
+    if key in {"entity", "node", "named_entity", "canonical_entity"}:
+        return "entity"
+    # If the model leaked an ontology facet such as Model/API/Dataset into
+    # relation.object_kind, the object is still an entity endpoint.
+    return "entity"
+
+
+def _candidate_fact_from_mapping(
+    row: dict,
+    *,
+    default_object_kind: str = "entity",
+) -> CandidateFactItem | None:
+    """Parse the explicit candidate-fact layer, accepting legacy relation keys."""
+    if not isinstance(row, dict):
+        return None
+    subject = str(row.get("candidate_subject") or row.get("subject") or "").strip()
+    predicate = str(row.get("candidate_predicate") or row.get("predicate") or "").strip()
+    obj = str(row.get("candidate_object") or row.get("object") or "").strip()
+    if not subject or not predicate or not obj:
+        return None
+    confidence = _coerce_confidence(
+        row.get("confidence", row.get("extraction_confidence")),
+        0.0,
+    )
+    predicate_confidence = _coerce_confidence(row.get("predicate_confidence"), confidence)
+    extraction_confidence = _coerce_confidence(row.get("extraction_confidence"), confidence)
+    atomic_fact = str(row.get("atomic_fact") or "").strip()
+    if not atomic_fact:
+        atomic_fact = f"{subject} {predicate} {obj}"
+    return CandidateFactItem(
+        atomic_fact=atomic_fact[:500],
+        candidate_subject=subject,
+        candidate_predicate=predicate,
+        candidate_object=obj,
+        predicate_confidence=predicate_confidence,
+        extraction_confidence=extraction_confidence,
+        alternative_predicates_considered=_normalize_string_list(
+            row.get("alternative_predicates_considered")
+        )[:5],
+        rejection_reasoning=str(row.get("rejection_reasoning") or "")[:300],
+        evidence_phrase=str(row.get("evidence_phrase") or row.get("evidence") or "")[:500],
+        object_kind=_normalize_relation_object_kind(
+            row.get("object_kind"), default_object_kind=default_object_kind
+        ),
+        relation_cue=str(row.get("relation_cue") or "")[:120],
+    )
+
+
+def _relation_key(
+    subject: str,
+    predicate: str,
+    obj: str,
+    *,
+    source_predicate: str | None = None,
+) -> tuple[str, str, str]:
+    return (
+        _entity_key(subject),
+        str(source_predicate or predicate or "").strip().lower(),
+        _entity_key(obj),
+    )
+
+
+def _relation_from_candidate_fact(
+    candidate: CandidateFactItem,
+    *,
+    threshold: float,
+    row_confidence,
+) -> RelationItem | None:
+    confidence = _coerce_confidence(row_confidence, candidate.extraction_confidence)
+    extraction_confidence = candidate.extraction_confidence
+    if confidence < threshold or extraction_confidence < threshold:
+        return None
+
+    predicate = candidate.candidate_predicate
+    source_predicate = None
+    validation_status = None
+    review_status = None
+    if (
+        candidate.predicate_confidence < PREDICATE_CONFIDENCE_DEMOTE_THRESHOLD
+        and predicate != SchemaContext.RELATION_SENTINEL
+    ):
+        source_predicate = predicate
+        predicate = SchemaContext.RELATION_SENTINEL
+        validation_status = "low_predicate_confidence"
+        if extraction_confidence >= HIGH_VALUE_EXTRACTION_CONFIDENCE_THRESHOLD:
+            validation_status = _append_validation_status(
+                validation_status, "review_required"
+            )
+            review_status = "needs_backfill"
+
+    return RelationItem(
+        subject=candidate.candidate_subject,
+        predicate=predicate,
+        object=candidate.candidate_object,
+        object_kind=candidate.object_kind,
+        confidence=confidence,
+        evidence_phrase=candidate.evidence_phrase,
+        relation_cue=candidate.relation_cue,
+        source_predicate=source_predicate,
+        validation_status=validation_status,
+        predicate_confidence=candidate.predicate_confidence,
+        extraction_confidence=extraction_confidence,
+        alternative_predicates_considered=list(
+            candidate.alternative_predicates_considered or []
+        ),
+        rejection_reasoning=candidate.rejection_reasoning,
+        atomic_fact=candidate.atomic_fact,
+        candidate_subject=candidate.candidate_subject,
+        candidate_predicate=candidate.candidate_predicate,
+        candidate_object=candidate.candidate_object,
+        review_status=review_status,
+    )
 
 
 def _infer_endpoint_entity_type(name: str, relation: RelationItem, *, role: str) -> str:
@@ -908,7 +1254,10 @@ def _infer_endpoint_entity_type(name: str, relation: RelationItem, *, role: str)
         return "Organization"
     if any(term in text for term in ("limit", "rule", "constraint", "gate", "policy", "requirement")):
         return "Rule"
-    if any(term in text for term in ("report", "book", "document", "whitepaper", "guide")):
+    if any(term in text for term in (
+        "report", "book", "document", "whitepaper", "guide", "equation",
+        "figure", "table", "section", "appendix",
+    )):
         return "Document"
     if any(term in text for term in ("sprint", "milestone", "phase", "session", "event")):
         return "Event"
@@ -922,6 +1271,7 @@ def _infer_endpoint_entity_type(name: str, relation: RelationItem, *, role: str)
     if any(term in text for term in (
         "pipeline", "flow", "process", "extraction", "generation", "training",
         "classification", "detection", "inference", "router", "architecture",
+        "test", "estimation", "modeling", "scoring",
     )):
         return "Method"
     if any(term in text for term in (
@@ -930,14 +1280,29 @@ def _infer_endpoint_entity_type(name: str, relation: RelationItem, *, role: str)
         "file", "chunk", "module", "stack", "dataset", "data", "gguf",
     )):
         return "Artifact"
+    if any(term in text for term in (
+        "distribution", "parameter", "trait", "ability", "attitude", "identity",
+        "motivation", "fear", "agency", "authority", "status", "power",
+        "masculinity", "vulnerability", "trust", "shame", "theme", "symbol",
+        "archetype", "habit", "belief",
+    )):
+        return "Concept"
 
     if role == "subject" and predicate in {
         "uses", "calls", "stores", "extracts", "detects", "classifies", "supports",
+        "measures", "tests", "applied_to",
     }:
         return "Method"
     if role == "object" and predicate in {"uses", "calls", "runs_on", "stores"}:
         return "Product"
-    if predicate in {"part_of", "references", "depends_on", "represents", "maps_to"}:
+    if role == "object" and predicate in {"defined_in", "illustrated_in"}:
+        return "Document"
+    if predicate in {
+        "part_of", "references", "depends_on", "represents", "maps_to",
+        "follows_distribution", "parameter_of", "equivalent_to", "embodies",
+        "symbolizes", "influences", "motivates", "struggles_with",
+        "reinforces", "undermines", "frames_as", "conceals", "leverages",
+    }:
         return "Concept"
     return "Concept"
 
@@ -1036,7 +1401,10 @@ def _relation_with_remap(
         evidence_phrase=relation.evidence_phrase,
         relation_cue=relation.relation_cue,
         source_predicate=relation.source_predicate or relation.predicate,
-        validation_status=validation_status,
+        validation_status=_append_validation_status(
+            relation.validation_status, validation_status
+        ),
+        **_relation_confidence_kwargs(relation),
     )
 
 
@@ -1058,8 +1426,56 @@ def _relation_with_predicate(
         evidence_phrase=relation.evidence_phrase,
         relation_cue=relation.relation_cue,
         source_predicate=relation.source_predicate or relation.predicate,
-        validation_status=validation_status or relation.validation_status,
+        validation_status=(
+            _append_validation_status(relation.validation_status, validation_status)
+            if validation_status
+            else relation.validation_status
+        ),
+        **_relation_confidence_kwargs(relation),
     )
+
+
+def _relation_with_object_kind(
+    relation: RelationItem,
+    object_kind: str,
+) -> RelationItem:
+    if relation.object_kind == object_kind:
+        return relation
+    return RelationItem(
+        subject=relation.subject,
+        predicate=relation.predicate,
+        object=relation.object,
+        object_kind=object_kind,
+        confidence=relation.confidence,
+        evidence_phrase=relation.evidence_phrase,
+        relation_cue=relation.relation_cue,
+        source_predicate=relation.source_predicate,
+        validation_status=relation.validation_status,
+        **_relation_confidence_kwargs(relation),
+    )
+
+
+_VAGUE_RELATION_EVIDENCE_RE = re.compile(
+    r"\b("
+    r"co-?occurs?|co-?occurrence|see\s+also|related\s+to|associated\s+with|"
+    r"similar(?:ity)?|comparable|comparison|compared\s+to|like|resembles?|"
+    r"analog(?:y|ous)|parallel(?:s)?"
+    r")\b"
+)
+
+
+def _relation_has_low_predicate_confidence(relation: RelationItem) -> bool:
+    if relation.predicate_confidence is not None:
+        try:
+            if float(relation.predicate_confidence) < PREDICATE_CONFIDENCE_DEMOTE_THRESHOLD:
+                return True
+        except (TypeError, ValueError):
+            pass
+    return "low_predicate_confidence" in str(relation.validation_status or "")
+
+
+def _evidence_is_vague_association(evidence: str) -> bool:
+    return bool(_VAGUE_RELATION_EVIDENCE_RE.search(evidence.lower()))
 
 
 def _repair_relation_from_evidence(
@@ -1068,8 +1484,12 @@ def _repair_relation_from_evidence(
 ) -> RelationItem:
     if relation.object_kind != "entity":
         return relation
+    if _relation_has_low_predicate_confidence(relation):
+        return relation
     evidence = f"{relation.evidence_phrase} {relation.relation_cue}".lower()
     if not evidence.strip():
+        return relation
+    if _evidence_is_vague_association(evidence):
         return relation
     for pattern, predicate, reverse in EVIDENCE_CUE_RULES:
         if not pattern.search(evidence):
@@ -1081,13 +1501,13 @@ def _repair_relation_from_evidence(
         if predicate == relation.predicate and not reverse:
             return relation
         counters["evidence_cue_repair_count"] += 1
+        if reverse:
+            counters["direction_repair_count"] += 1
         return _relation_with_predicate(
             relation,
             predicate,
             reverse=reverse,
-            validation_status=_append_validation_status(
-                relation.validation_status, "evidence_cue_repair"
-            ),
+            validation_status="evidence_cue_repair",
         )
     return relation
 
@@ -1105,6 +1525,7 @@ def _relation_with_domain_warning(relation: RelationItem) -> RelationItem:
         validation_status=_append_validation_status(
             relation.validation_status, "domain_range_warn"
         ),
+        **_relation_confidence_kwargs(relation),
     )
 
 
@@ -1120,6 +1541,10 @@ def _should_warn_domain_range(relation: RelationItem) -> bool:
     if relation.object_kind != "entity":
         return False
     if not str(relation.evidence_phrase or "").strip():
+        return False
+    if _relation_has_low_predicate_confidence(relation):
+        return False
+    if _evidence_is_vague_association(relation.evidence_phrase):
         return False
     return relation.confidence >= 0.55
 
@@ -1178,7 +1603,18 @@ def _apply_schema(
         "domain_range_warn_count": 0,
         "endpoint_completion_count": 0,
         "evidence_cue_repair_count": 0,
+        "direction_repair_count": 0,
     }
+
+    relations = [
+        _relation_with_object_kind(
+            relation,
+            _normalize_relation_object_kind(
+                relation.object_kind, default_object_kind="literal"
+            ),
+        )
+        for relation in relations
+    ]
 
     # No schema or strict='off' → pass-through
     if schema is None or schema.strict == "off":
@@ -1191,8 +1627,16 @@ def _apply_schema(
     if schema.has_entity_schema:
         allowed = set(schema.entity_vocab)
         for e in entities:
-            if e.entity_type in allowed:
-                out_entities.append(e)
+            entity_type = _canonical_vocab_value(e.entity_type, schema.entity_vocab)
+            if entity_type in allowed:
+                out_entities.append(
+                    EntityItem(
+                        canonical_name=e.canonical_name,
+                        surface_form=e.surface_form,
+                        entity_type=entity_type,
+                        confidence=e.confidence,
+                    )
+                )
             elif schema.strict == "soft":
                 out_entities.append(
                     EntityItem(
@@ -1225,6 +1669,9 @@ def _apply_schema(
         allowed = set(schema.relation_vocab)
         for r in relations:
             normalized_predicate, reverse = normalize_relation_predicate_alias(r.predicate)
+            normalized_predicate = _canonical_vocab_value(
+                normalized_predicate, schema.relation_vocab
+            )
             candidate = (
                 _relation_with_predicate(
                     r,
@@ -1235,10 +1682,17 @@ def _apply_schema(
                 if normalized_predicate != r.predicate or reverse
                 else r
             )
+            if reverse:
+                counters["direction_repair_count"] += 1
             if candidate.predicate in allowed:
                 out_relations.append(candidate)
             elif schema.strict == "soft":
-                out_relations.append(_relation_with_remap(r, validation_status="schema_predicate_remap"))
+                out_relations.append(
+                    _relation_with_remap(
+                        candidate,
+                        validation_status="schema_predicate_remap",
+                    )
+                )
                 counters["relation_remap_count"] += 1
                 logger.debug(
                     "GHOST B remap predicate %r -> %r (subject=%r object=%r)",
@@ -1269,6 +1723,21 @@ def _apply_schema(
     return out_entities, out_relations, counters
 
 
+def compile_extraction_candidates(
+    entities: list[EntityItem],
+    relations: list[RelationItem],
+    schema: SchemaContext | None,
+) -> tuple[list[EntityItem], list[RelationItem], dict[str, int]]:
+    """Deterministic ontology compiler for Ghost B's proposed graph facts.
+
+    The LLM proposes candidate facts and backward-compatible relation rows;
+    this compiler owns final predicate aliases, direction repairs, domain/range
+    compatibility, confidence demotion, and validation flags before Neo4j sees
+    the output.
+    """
+    return _apply_schema(entities, relations, schema)
+
+
 def _parse(
     raw: str,
     task: ExtractionTask,
@@ -1284,7 +1753,10 @@ def _parse(
 
     entities: list[EntityItem] = []
     for e in data.get("entities", []):
-        if e.get("confidence", 0.0) < threshold:
+        if not isinstance(e, dict):
+            continue
+        confidence = _coerce_confidence(e.get("confidence"), 0.0)
+        if confidence < threshold:
             continue
         try:
             entities.append(
@@ -1292,32 +1764,83 @@ def _parse(
                     canonical_name=e["canonical_name"],
                     surface_form=e.get("surface_form", e["canonical_name"]),
                     entity_type=e.get("entity_type", "other"),
-                    confidence=float(e["confidence"]),
+                    confidence=confidence,
                 )
             )
         except (KeyError, TypeError, ValueError):
             continue
+
+    candidate_facts: list[CandidateFactItem] = []
+    seen_candidate_keys: set[tuple[str, str, str]] = set()
+    for row in data.get("candidate_facts", []):
+        candidate = _candidate_fact_from_mapping(row)
+        if candidate is None:
+            continue
+        key = _relation_key(
+            candidate.candidate_subject,
+            candidate.candidate_predicate,
+            candidate.candidate_object,
+        )
+        if key in seen_candidate_keys:
+            continue
+        seen_candidate_keys.add(key)
+        candidate_facts.append(candidate)
 
     relations: list[RelationItem] = []
-    for r in data.get("relations", []):
-        if r.get("confidence", 0.0) < threshold:
+    relation_keys: set[tuple[str, str, str]] = set()
+    relation_rows = data.get("relations", [])
+    for r in relation_rows:
+        candidate = _candidate_fact_from_mapping(r, default_object_kind="literal")
+        if candidate is None:
             continue
-        try:
-            relations.append(
-                RelationItem(
-                    subject=r["subject"],
-                    predicate=r["predicate"],
-                    object=r["object"],
-                    object_kind=r.get("object_kind", "literal"),
-                    confidence=float(r["confidence"]),
-                    evidence_phrase=str(r.get("evidence_phrase") or r.get("evidence") or "")[:500],
-                    relation_cue=str(r.get("relation_cue") or "")[:120],
-                )
-            )
-        except (KeyError, TypeError, ValueError):
+        key = _relation_key(
+            candidate.candidate_subject,
+            candidate.candidate_predicate,
+            candidate.candidate_object,
+        )
+        if key not in seen_candidate_keys:
+            seen_candidate_keys.add(key)
+            candidate_facts.append(candidate)
+        relation = _relation_from_candidate_fact(
+            candidate,
+            threshold=threshold,
+            row_confidence=r.get("confidence"),
+        )
+        if relation is None:
             continue
+        relation_key = _relation_key(
+            relation.subject,
+            relation.predicate,
+            relation.object,
+            source_predicate=relation.source_predicate,
+        )
+        if relation_key in relation_keys:
+            continue
+        relation_keys.add(relation_key)
+        relations.append(relation)
 
-    entities, relations, counters = _apply_schema(entities, relations, schema)
+    for candidate in candidate_facts:
+        relation = _relation_from_candidate_fact(
+            candidate,
+            threshold=threshold,
+            row_confidence=candidate.extraction_confidence,
+        )
+        if relation is None:
+            continue
+        relation_key = _relation_key(
+            relation.subject,
+            relation.predicate,
+            relation.object,
+            source_predicate=relation.source_predicate,
+        )
+        if relation_key in relation_keys:
+            continue
+        relation_keys.add(relation_key)
+        relations.append(relation)
+
+    entities, relations, counters = compile_extraction_candidates(
+        entities, relations, schema
+    )
     lens = (
         schema_lens
         if isinstance(schema_lens, SchemaLens)
@@ -1330,6 +1853,7 @@ def _parse(
         doc_id=task.doc_id,
         corpus_id=task.corpus_id,
         entities=entities,
+        candidate_facts=candidate_facts,
         relations=relations,
         entity_remap_count=counters["entity_remap_count"],
         entity_drop_count=counters["entity_drop_count"],
@@ -1339,6 +1863,7 @@ def _parse(
         domain_range_warn_count=counters["domain_range_warn_count"],
         endpoint_completion_count=counters["endpoint_completion_count"],
         evidence_cue_repair_count=counters["evidence_cue_repair_count"],
+        direction_repair_count=counters["direction_repair_count"],
         schema_lens_id=lens.lens_id if lens else None,
     )
 
@@ -1478,38 +2003,6 @@ async def extract_entities(
             inline_limit=inline_limit,
             top_k=top_k,
         )
-        payload: dict = {
-            "model": entry["model"],
-            "messages": [
-                {"role": "system", "content": _SYSTEM},
-                {
-                    "role": "user",
-                    "content": build_user_prompt(
-                        chunk_id=task.chunk_id,
-                        doc_id=task.doc_id,
-                        corpus_id=task.corpus_id,
-                        text=task.text,
-                        max_entities=max_entities,
-                        max_relations=max_relations,
-                        schema=schema,
-                        effective_entity_vocab=eff_entity,
-                        effective_relation_vocab=eff_relation,
-                        schema_lens=schema_lens,
-                    ),
-                },
-            ],
-            "temperature": 0,
-            "response_format": {"type": "json_object"},
-            "max_tokens": max_completion_tokens,
-        }
-        if entry.get("base_url"):
-            payload["api_base"] = entry["base_url"]
-        if entry.get("api_key"):
-            payload["api_key"] = entry["api_key"]
-        for _k, _v in (entry.get("extra_params") or {}).items():
-            if _k not in ("model", "messages", "response_format"):
-                payload[_k] = _v
-
         # 2-attempt retry on the same lane. Work-stealing handles
         # cross-lane rebalancing naturally, so there's no need to jump
         # lanes on retry — most transient failures (rate-limit, 5xx,
@@ -1517,6 +2010,41 @@ async def extract_entities(
         last_exc: Exception | None = None
         last_error_type = "unknown"
         for attempt in range(2):
+            recovery_mode = attempt > 0 and last_error_type == "parse_error"
+            attempt_max_entities = min(max_entities, 8) if recovery_mode else max_entities
+            attempt_max_relations = min(max_relations, 8) if recovery_mode else max_relations
+            system_content = _SYSTEM + (_JSON_RECOVERY_SUFFIX if recovery_mode else "")
+            payload: dict = {
+                "model": entry["model"],
+                "messages": [
+                    {"role": "system", "content": system_content},
+                    {
+                        "role": "user",
+                        "content": build_user_prompt(
+                            chunk_id=task.chunk_id,
+                            doc_id=task.doc_id,
+                            corpus_id=task.corpus_id,
+                            text=task.text,
+                            max_entities=attempt_max_entities,
+                            max_relations=attempt_max_relations,
+                            schema=schema,
+                            effective_entity_vocab=eff_entity,
+                            effective_relation_vocab=eff_relation,
+                            schema_lens=schema_lens,
+                        ),
+                    },
+                ],
+                "temperature": 0,
+                "response_format": {"type": "json_object"},
+                "max_tokens": max_completion_tokens,
+            }
+            if entry.get("base_url"):
+                payload["api_base"] = entry["base_url"]
+            if entry.get("api_key"):
+                payload["api_key"] = entry["api_key"]
+            for _k, _v in (entry.get("extra_params") or {}).items():
+                if _k not in ("model", "messages", "response_format"):
+                    payload[_k] = _v
             started = time.perf_counter()
             try:
                 async with httpx.AsyncClient(timeout=120.0) as client:
@@ -1556,6 +2084,7 @@ async def extract_entities(
                             "completion_tokens": usage.get("completion_tokens"),
                             "success": bool(result),
                             "error_type": None if result else "parse_error",
+                            "recovery_mode": recovery_mode,
                         }
                     )
                     if result:
@@ -1592,6 +2121,7 @@ async def extract_entities(
                             if fatal_lane
                             else last_error_type
                         ),
+                        "recovery_mode": recovery_mode,
                     }
                 )
                 if fatal_lane:

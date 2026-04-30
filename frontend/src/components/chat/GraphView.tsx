@@ -82,8 +82,15 @@ const DIMMED_NODE_COLOR = "rgba(55, 60, 68, 0.45)";
 const DIMMED_EDGE_COLOR = "rgba(30, 34, 42, 0.12)";
 const RELATION_FAMILY_EDGE_COLOR: Record<string, string> = {
   Structural: "rgba(255, 255, 255, 0.42)",
+  Spatial: "rgba(134, 239, 172, 0.34)",
+  Affiliation: "rgba(96, 165, 250, 0.36)",
+  Provenance: "rgba(250, 250, 170, 0.34)",
   Operational: "rgba(125, 211, 252, 0.44)",
   Referential: "rgba(167, 139, 250, 0.36)",
+  Analytical: "rgba(45, 212, 191, 0.42)",
+  Interpretive: "rgba(244, 114, 182, 0.38)",
+  Psychosocial: "rgba(196, 181, 253, 0.40)",
+  Strategic: "rgba(250, 204, 21, 0.40)",
   Causal: "rgba(251, 191, 36, 0.48)",
   Conflict: "rgba(251, 113, 133, 0.58)",
   WeakAssociation: "rgba(148, 163, 184, 0.18)",

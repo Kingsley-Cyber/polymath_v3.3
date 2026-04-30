@@ -30,6 +30,11 @@ from services.ghost_b import (
     UNIVERSAL_RELATION_SCHEMA,
     normalize_relation_predicate_alias,
 )
+from services.ontology import (
+    object_kind_compatible,
+    ontology_version,
+    relation_family_map,
+)
 
 logger = logging.getLogger(__name__)
 ALIAS_MAP_PATH = Path(__file__).with_name("entity_aliases.json")
@@ -37,7 +42,7 @@ FACET_TAXONOMY_PATH = Path(__file__).with_name("facet_taxonomy.json")
 DOMAIN_TAXONOMY_PATH = Path(__file__).with_name("domain_taxonomy.json")
 CANONICAL_FAMILIES_PATH = Path(__file__).with_name("canonical_families.json")
 ENTITY_TYPE_OVERRIDES_PATH = Path(__file__).with_name("entity_type_overrides.json")
-ONTOLOGY_VERSION = "2026-04-25-v3"
+ONTOLOGY_VERSION = ontology_version()
 ENTITY_ID_PREFIX = "entity"
 ENTITY_TYPE_PRIORITY = [
     "Person",
@@ -54,37 +59,7 @@ ENTITY_TYPE_PRIORITY = [
     "TimeReference",
     SchemaContext.ENTITY_SENTINEL,
 ]
-RELATION_FAMILY_MAP = {
-    # Families are a retrieval/synthesis lens over the raw Ghost B predicate.
-    # They make edge strength legible without replacing the evidence label.
-    "part_of": "Structural",
-    "member_of": "Structural",
-    "uses": "Operational",
-    "implements": "Operational",
-    "depends_on": "Operational",
-    "produces": "Operational",
-    "references": "Referential",
-    "derived_from": "Referential",
-    "causes": "Causal",
-    "preceded_by": "Causal",
-    "contradicts": "Conflict",
-    "excepts": "Conflict",
-    "overrides": "Conflict",
-    "created_by": "Provenance",
-    "works_for": "Affiliation",
-    "located_in": "Spatial",
-    "calls": "Operational",
-    "stores": "Operational",
-    "extracts": "Operational",
-    "detects": "Operational",
-    "classifies": "Operational",
-    "runs_on": "Operational",
-    "trained_on": "Operational",
-    "supports": "Operational",
-    "represents": "Referential",
-    "maps_to": "Referential",
-    "related_to": "WeakAssociation",
-}
+RELATION_FAMILY_MAP = relation_family_map()
 _APPROVED_SPECIFIC_RELATIONS = {
     value for value in UNIVERSAL_RELATION_SCHEMA if value != SchemaContext.RELATION_SENTINEL
 }
@@ -147,9 +122,27 @@ _RELATION_CUE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("produces", ("produces", "generates", "outputs", "emits", "returns", "creates")),
     ("depends_on", ("depends on", "requires", "prerequisite", "constraint", "needs")),
     ("uses", ("uses", "using", "utilizes", "consumes", "powered by")),
-    ("implements", ("implements", "realizes", "embodies", "concrete form")),
+    ("implements", ("implements", "realizes", "concrete form")),
     ("references", ("references", "cites", "mentions", "according to", "described in")),
     ("derived_from", ("derived from", "based on", "adapted from", "inspired by", "built on")),
+    ("measures", ("measures", "measured by", "quantifies")),
+    ("tests", ("tests", "validates", "falsifies")),
+    ("applied_to", ("applied to", "applies to", "performed on")),
+    ("defined_in", ("defined in", "specified in", "introduced in")),
+    ("illustrated_in", ("illustrated in", "depicted in", "shown in", "demonstrated in")),
+    ("follows_distribution", ("follows a", "drawn from", "distributed as", "distributed according to")),
+    ("parameter_of", ("parameter of", "parameters of", "threshold of", "setting of")),
+    ("equivalent_to", ("equivalent to", "same as", "also called", "referred to as")),
+    ("embodies", ("embodies", "personifies", "expresses")),
+    ("symbolizes", ("symbolizes", "symbolises", "stands for", "signifies")),
+    ("influences", ("influences", "shapes", "affects", "pressures")),
+    ("motivates", ("motivates", "motivated by", "drives", "driven by")),
+    ("struggles_with", ("struggles with", "wrestles with", "conflicted by")),
+    ("reinforces", ("reinforces", "strengthens", "normalizes", "intensifies")),
+    ("undermines", ("undermines", "weakens", "erodes", "destabilizes", "subverts")),
+    ("frames_as", ("frames as", "presents as", "casts as", "positions as")),
+    ("conceals", ("conceals", "hides", "masks", "disguises", "withholds")),
+    ("leverages", ("leverages", "exploits", "uses strategically")),
     ("causes", ("causes", "leads to", "results in", "because of")),
     ("preceded_by", ("preceded by", "after", "followed by")),
     ("contradicts", ("contradicts", "conflicts with", "inconsistent with", "opposes")),
@@ -174,6 +167,24 @@ _RECOVERABLE_SOURCE_PREDICATES = {
     "supports",
     "represents",
     "maps_to",
+    "measures",
+    "defined_in",
+    "follows_distribution",
+    "tests",
+    "applied_to",
+    "illustrated_in",
+    "parameter_of",
+    "equivalent_to",
+    "embodies",
+    "symbolizes",
+    "influences",
+    "motivates",
+    "struggles_with",
+    "reinforces",
+    "undermines",
+    "frames_as",
+    "conceals",
+    "leverages",
     "preceded_by",
     "causes",
     "derived_from",
@@ -181,6 +192,29 @@ _RECOVERABLE_SOURCE_PREDICATES = {
     "excepts",
     "overrides",
 }
+
+_VAGUE_RELATION_EVIDENCE_RE = re.compile(
+    r"\b("
+    r"co-?occurs?|co-?occurrence|see\s+also|related\s+to|associated\s+with|"
+    r"similar(?:ity)?|comparable|comparison|compared\s+to|like|resembles?|"
+    r"analog(?:y|ous)|parallel(?:s)?"
+    r")\b"
+)
+_MEASURE_EVALUATION_RE = re.compile(
+    r"\b(evaluates?|scores?|estimates?)\b.*\b("
+    r"traits?|values?|scores?|quantit(?:y|ies)|metrics?|ratings?|measures?|"
+    r"estimates?|parameters?|coefficients?|probabilit(?:y|ies)|latent\s+traits?"
+    r")\b"
+)
+_TEST_EVALUATION_RE = re.compile(
+    r"\b(evaluates?|checks?)\b.*\b("
+    r"conditions?|assumptions?|hypotheses|hypothesis|constraints?|qualities|"
+    r"whether|model\s+fit|invariance"
+    r")\b"
+)
+_DEFINED_IN_EVIDENCE_RE = re.compile(
+    r"\b(defined|specified|introduced|stated)\s+in\b"
+)
 
 
 def relation_family_for_predicate(predicate: str | None) -> str:
@@ -218,10 +252,36 @@ def _predicate_from_evidence(*parts: str | None) -> str | None:
     text = " ".join(str(part or "").lower() for part in parts if part)
     if not text:
         return None
+    if _evidence_is_vague_association(text):
+        return None
+    if _TEST_EVALUATION_RE.search(text):
+        return "tests"
+    if _MEASURE_EVALUATION_RE.search(text):
+        return "measures"
+    if _DEFINED_IN_EVIDENCE_RE.search(text):
+        return "defined_in"
     for predicate, cues in _RELATION_CUE_PATTERNS:
         if any(cue in text for cue in cues):
             return predicate
     return None
+
+
+def _evidence_is_vague_association(evidence: str | None) -> bool:
+    return bool(_VAGUE_RELATION_EVIDENCE_RE.search(str(evidence or "").lower()))
+
+
+def _is_low_predicate_confidence(
+    validation_status: str | None,
+    predicate_confidence: float | None,
+) -> bool:
+    if "low_predicate_confidence" in str(validation_status or ""):
+        return True
+    if predicate_confidence is None:
+        return False
+    try:
+        return float(predicate_confidence) < 0.60
+    except (TypeError, ValueError):
+        return False
 
 
 def _identity_domain_kind_type(identity: dict | None) -> tuple[str, str, str]:
@@ -250,6 +310,11 @@ def _relation_compatible_with_facets(
     if predicate not in _APPROVED_SPECIFIC_RELATIONS:
         return False
     if not subject_identity or not object_identity:
+        return False
+    object_kind_rule = object_kind_compatible(
+        predicate, subject_identity, object_identity
+    )
+    if object_kind_rule is False:
         return False
 
     subject_domain, subject_kind, subject_type = _identity_domain_kind_type(subject_identity)
@@ -307,6 +372,33 @@ def _relation_compatible_with_facets(
             "Artifact", "Concept", "Document", "Event", "Method",
             "Organization", "Person", "Product", "Rule", "Law",
         }
+    if predicate in {"measures", "tests", "applied_to", "follows_distribution"}:
+        return subject_type in {
+            "Artifact", "Concept", "Document", "Method", "Product",
+        } and object_type in {
+            "Artifact", "Concept", "Document", "Event", "Law", "Method",
+            "Organization", "Person", "Product", "Rule",
+        }
+    if predicate in {"defined_in", "illustrated_in", "equivalent_to"}:
+        return object_type in {
+            "Artifact", "Concept", "Document", "Event", "Law", "Method",
+            "Organization", "Person", "Product", "Rule",
+        }
+    if predicate == "parameter_of":
+        return subject_type in {"Artifact", "Concept", "Rule"} and object_type in {
+            "Artifact", "Concept", "Method", "Product",
+        }
+    if predicate in {
+        "embodies", "symbolizes", "influences", "motivates", "struggles_with",
+        "reinforces", "undermines", "frames_as", "conceals", "leverages",
+    }:
+        return subject_type in {
+            "Artifact", "Concept", "Document", "Event", "Law", "Method",
+            "Organization", "Person", "Product", "Rule",
+        } and object_type in {
+            "Artifact", "Concept", "Document", "Event", "Law", "Method",
+            "Organization", "Person", "Product", "Rule",
+        }
     if predicate in {"part_of", "member_of", "created_by", "works_for", "located_in"}:
         return True
     if predicate in {"causes", "preceded_by", "contradicts", "excepts", "overrides"}:
@@ -332,7 +424,12 @@ def _recover_source_predicate_with_evidence(
         return False
     if not subject_identity or not object_identity:
         return False
-    if not str(evidence_phrase or "").strip():
+    evidence = str(evidence_phrase or "").strip()
+    if not evidence:
+        return False
+    if _evidence_is_vague_association(evidence):
+        return False
+    if _predicate_from_evidence(evidence) != predicate:
         return False
     return True
 
@@ -345,22 +442,33 @@ def refine_related_to_predicate(
     source_predicate: str | None = None,
     evidence_phrase: str | None = None,
     relation_cue: str | None = None,
+    validation_status: str | None = None,
+    predicate_confidence: float | None = None,
 ) -> str:
     """Conservatively refine a weak `related_to` edge using ontology facets.
 
     Category B justification: Ghost B is intentionally recall-friendly and
-    domain/range validation remaps uncertain relations to `related_to`. At
-    ingestion time we now have deterministic facets (`domain_type`,
-    `object_kind`, `canonical_family`) that can recover a small number of
-    obvious relations without another LLM call. If the facets do not make the
-    edge plain, the weak association is preserved.
+    domain/range validation remaps uncertain relations to `related_to`. The
+    writer may recover a narrower predicate only when the evidence phrase or
+    relation cue explicitly supports it and deterministic facets do not
+    contradict it. Facets alone are not enough to promote a weak association.
     """
     if predicate != SchemaContext.RELATION_SENTINEL:
         return predicate
     if not subject_identity or not object_identity:
         return predicate
+    if _is_low_predicate_confidence(validation_status, predicate_confidence):
+        return predicate
 
-    evidence_predicate = _predicate_from_evidence(evidence_phrase, relation_cue)
+    evidence = " ".join(
+        str(part or "").strip()
+        for part in (evidence_phrase, relation_cue)
+        if str(part or "").strip()
+    )
+    if not evidence or _evidence_is_vague_association(evidence):
+        return predicate
+
+    evidence_predicate = _predicate_from_evidence(evidence)
     if evidence_predicate and _relation_compatible_with_facets(
         evidence_predicate, subject_identity, object_identity
     ):
@@ -371,69 +479,16 @@ def refine_related_to_predicate(
     if (
         original_predicate in _APPROVED_SPECIFIC_RELATIONS
         and _relation_compatible_with_facets(original_predicate, subject_identity, object_identity)
+        and _predicate_from_evidence(evidence) == original_predicate
     ):
         return original_predicate
     if _recover_source_predicate_with_evidence(
         original_predicate,
         subject_identity,
         object_identity,
-        evidence_phrase,
+        evidence,
     ):
         return original_predicate
-
-    subject_domain = _identity_value(subject_identity, "domain_type")
-    object_domain = _identity_value(object_identity, "domain_type")
-    subject_type = _identity_value(subject_identity, "primary_entity_type")
-    object_type = _identity_value(object_identity, "primary_entity_type")
-    object_kind = _identity_value(object_identity, "object_kind")
-    subject_text = _identity_text(subject_identity)
-
-    if object_domain in _CONSTRAINT_OBJECT_DOMAINS or object_type in {"Rule", "Law"}:
-        return "depends_on"
-
-    if object_domain in _OUTPUT_OBJECT_DOMAINS or object_kind in _OUTPUT_OBJECT_KINDS:
-        if subject_domain in _OPERATIONAL_SUBJECT_DOMAINS or subject_type in {
-            "Method",
-            "Product",
-            "Artifact",
-            "Organization",
-        }:
-            return "produces"
-
-    if (
-        object_domain == "DataObject"
-        and any(hint in subject_text for hint in _PRODUCTION_HINTS)
-        and subject_domain in _OPERATIONAL_SUBJECT_DOMAINS | {"OutputArtifact"}
-    ):
-        return "produces"
-
-    if (
-        object_domain in _OPERATIONAL_OBJECT_DOMAINS
-        or object_kind in _OPERATIONAL_OBJECT_KINDS
-    ) and (
-        subject_domain in _OPERATIONAL_SUBJECT_DOMAINS
-        or subject_type in {"Person", "Organization", "Method", "Product", "Artifact"}
-    ):
-        return "uses"
-
-    if subject_domain in {"Module", "Screen", "Feature", "ArchitectureDecision"}:
-        if object_type in {"Concept", "Method"} and object_domain not in {
-            "Constraint",
-            "Risk",
-            "DataObject",
-        }:
-            return "implements"
-
-    if subject_type == "Document" and object_type in {
-        "Document",
-        "Concept",
-        "Method",
-        "Person",
-        "Organization",
-        "Rule",
-        "Law",
-    }:
-        return "references"
 
     return predicate
 
@@ -449,6 +504,8 @@ def relation_edge_strength(
     status = str(validation_status or "")
     if predicate == SchemaContext.RELATION_SENTINEL:
         return "weak"
+    if "review_required" in status:
+        return "thin"
     if "domain_range_warn" in status:
         return "thin"
     if predicate_refined:
@@ -460,6 +517,15 @@ def relation_edge_strength(
     if confidence < 0.6:
         return "thin"
     return "strong"
+
+
+def _append_status(existing: str | None, status: str) -> str:
+    if not existing:
+        return status
+    parts = [part for part in str(existing).split("+") if part]
+    if status not in parts:
+        parts.append(status)
+    return "+".join(parts)
 
 
 def relation_eligible_for_synthesis(
@@ -1101,6 +1167,8 @@ async def write_document_graph(
                 source_predicate=normalized_source_predicate,
                 evidence_phrase=relation.evidence_phrase,
                 relation_cue=relation.relation_cue,
+                validation_status=relation.validation_status,
+                predicate_confidence=relation.predicate_confidence,
             )
             if refined_predicate != relation.predicate:
                 related_to_refinement_count += 1
@@ -1109,11 +1177,33 @@ async def write_document_graph(
                 "repaired_from_related_to" if predicate_refined else None
             )
             if reverse_relation:
-                validation_status = (
-                    f"{validation_status}+direction_repair"
-                    if validation_status
-                    else "direction_repair"
+                validation_status = _append_status(validation_status, "direction_repair")
+            facet_evidence_available = bool(
+                subject_identity
+                and object_identity
+                and (
+                    subject_identity.get("object_kind")
+                    or object_identity.get("object_kind")
+                    or subject_identity.get("domain_type")
+                    or object_identity.get("domain_type")
+                    or subject_identity.get("canonical_family")
+                    or object_identity.get("canonical_family")
                 )
+            )
+            if (
+                refined_predicate != SchemaContext.RELATION_SENTINEL
+                and facet_evidence_available
+                and object_kind_compatible(
+                    refined_predicate, subject_identity, object_identity
+                )
+                is False
+            ):
+                validation_status = _append_status(
+                    validation_status, "object_kind_mismatch"
+                )
+                normalized_source_predicate = refined_predicate
+                refined_predicate = SchemaContext.RELATION_SENTINEL
+                predicate_refined = True
             edge_strength = relation_edge_strength(
                 refined_predicate,
                 relation.confidence,
@@ -1139,7 +1229,16 @@ async def write_document_graph(
                 "validation_status": validation_status,
                 "evidence_phrase": relation.evidence_phrase,
                 "relation_cue": relation.relation_cue,
+                "atomic_fact": relation.atomic_fact,
+                "candidate_subject": relation.candidate_subject or relation.subject,
+                "candidate_predicate": relation.candidate_predicate or source_predicate_raw,
+                "candidate_object": relation.candidate_object or relation.object,
+                "review_status": relation.review_status,
                 "confidence": relation.confidence,
+                "predicate_confidence": relation.predicate_confidence,
+                "extraction_confidence": relation.extraction_confidence,
+                "alternative_predicates_considered": relation.alternative_predicates_considered or [],
+                "rejection_reasoning": relation.rejection_reasoning,
                 "chunk_id": r.chunk_id,
             })
 
@@ -1252,6 +1351,16 @@ async def write_document_graph(
                         ELSE coalesce(r.edge_strength, row.edge_strength)
                     END,
                     r.eligible_for_synthesis = coalesce(r.eligible_for_synthesis, false) OR row.eligible_for_synthesis
+                SET r.predicate_confidence = CASE
+                    WHEN row.predicate_confidence IS NULL THEN r.predicate_confidence
+                    WHEN r.predicate_confidence IS NULL OR row.predicate_confidence > r.predicate_confidence THEN row.predicate_confidence
+                    ELSE r.predicate_confidence
+                END,
+                    r.extraction_confidence = CASE
+                    WHEN row.extraction_confidence IS NULL THEN r.extraction_confidence
+                    WHEN r.extraction_confidence IS NULL OR row.extraction_confidence > r.extraction_confidence THEN row.extraction_confidence
+                    ELSE r.extraction_confidence
+                END
                 SET r.evidence_chunk_ids = CASE
                     WHEN r.evidence_chunk_ids IS NULL THEN [row.chunk_id]
                     WHEN row.chunk_id IN r.evidence_chunk_ids THEN r.evidence_chunk_ids
@@ -1262,6 +1371,12 @@ async def write_document_graph(
                     WHEN r.evidence_phrases IS NULL THEN [row.evidence_phrase]
                     WHEN row.evidence_phrase IN r.evidence_phrases THEN r.evidence_phrases
                     ELSE r.evidence_phrases + [row.evidence_phrase]
+                END
+                SET r.atomic_facts = CASE
+                    WHEN row.atomic_fact IS NULL OR row.atomic_fact = '' THEN coalesce(r.atomic_facts, [])
+                    WHEN r.atomic_facts IS NULL THEN [row.atomic_fact]
+                    WHEN row.atomic_fact IN r.atomic_facts THEN r.atomic_facts
+                    ELSE r.atomic_facts + [row.atomic_fact]
                 END
                 SET r.relation_cues = CASE
                     WHEN row.relation_cue IS NULL OR row.relation_cue = '' THEN coalesce(r.relation_cues, [])
@@ -1279,6 +1394,41 @@ async def write_document_graph(
                     WHEN r.validation_statuses IS NULL THEN [row.validation_status]
                     WHEN row.validation_status IN r.validation_statuses THEN r.validation_statuses
                     ELSE r.validation_statuses + [row.validation_status]
+                END
+                SET r.review_statuses = CASE
+                    WHEN row.review_status IS NULL OR row.review_status = '' THEN coalesce(r.review_statuses, [])
+                    WHEN r.review_statuses IS NULL THEN [row.review_status]
+                    WHEN row.review_status IN r.review_statuses THEN r.review_statuses
+                    ELSE r.review_statuses + [row.review_status]
+                END
+                SET r.candidate_subjects = CASE
+                    WHEN row.candidate_subject IS NULL OR row.candidate_subject = '' THEN coalesce(r.candidate_subjects, [])
+                    WHEN r.candidate_subjects IS NULL THEN [row.candidate_subject]
+                    WHEN row.candidate_subject IN r.candidate_subjects THEN r.candidate_subjects
+                    ELSE r.candidate_subjects + [row.candidate_subject]
+                END
+                SET r.candidate_predicates = CASE
+                    WHEN row.candidate_predicate IS NULL OR row.candidate_predicate = '' THEN coalesce(r.candidate_predicates, [])
+                    WHEN r.candidate_predicates IS NULL THEN [row.candidate_predicate]
+                    WHEN row.candidate_predicate IN r.candidate_predicates THEN r.candidate_predicates
+                    ELSE r.candidate_predicates + [row.candidate_predicate]
+                END
+                SET r.candidate_objects = CASE
+                    WHEN row.candidate_object IS NULL OR row.candidate_object = '' THEN coalesce(r.candidate_objects, [])
+                    WHEN r.candidate_objects IS NULL THEN [row.candidate_object]
+                    WHEN row.candidate_object IN r.candidate_objects THEN r.candidate_objects
+                    ELSE r.candidate_objects + [row.candidate_object]
+                END
+                SET r.alternative_predicates_considered = reduce(
+                    preds = coalesce(r.alternative_predicates_considered, []),
+                    p IN coalesce(row.alternative_predicates_considered, []) |
+                    CASE WHEN p IN preds THEN preds ELSE preds + [p] END
+                )
+                SET r.rejection_reasonings = CASE
+                    WHEN row.rejection_reasoning IS NULL OR row.rejection_reasoning = '' THEN coalesce(r.rejection_reasonings, [])
+                    WHEN r.rejection_reasonings IS NULL THEN [row.rejection_reasoning]
+                    WHEN row.rejection_reasoning IN r.rejection_reasonings THEN r.rejection_reasonings
+                    ELSE r.rejection_reasonings + [row.rejection_reasoning]
                 END
                 SET r.corpus_ids = CASE
                     WHEN r.corpus_ids IS NULL THEN [$corpus_id]
