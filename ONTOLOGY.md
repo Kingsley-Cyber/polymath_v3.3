@@ -42,13 +42,14 @@ Fallback sentinel: `other`
 - Operational: `uses`, `calls`, `implements`, `depends_on`, `produces`,
   `stores`, `extracts`, `detects`, `classifies`, `runs_on`, `trained_on`,
   `supports`
-- Analytical: `measures`, `follows_distribution`, `tests`, `applied_to`
+- Analytical: `measures`, `follows_distribution`, `tests`, `applied_to`,
+  `studies`
 - Referential: `references`, `derived_from`, `represents`, `maps_to`,
   `defined_in`, `illustrated_in`, `equivalent_to`
 - Interpretive: `embodies`, `symbolizes`, `frames_as`
-- Causal: `causes`, `preceded_by`, `influences`, `motivates`, `reinforces`,
-  `undermines`
-- Psychosocial: `struggles_with`
+- Causal: `causes`, `preceded_by`, `activates`, `influences`, `motivates`,
+  `reinforces`, `undermines`
+- Psychosocial: `experiences`, `imagines`, `struggles_with`
 - Strategic: `conceals`, `leverages`
 - Conflict: `contradicts`, `excepts`, `overrides`
 - Provenance/Affiliation/Spatial: `created_by`, `works_for`, `located_in`
@@ -81,6 +82,10 @@ Current `related_to_repair` predicates:
 - `illustrated_in`
 - `parameter_of`
 - `equivalent_to`
+- `activates`
+- `experiences`
+- `imagines`
+- `studies`
 
 Current `ontology_expansion` predicates:
 
@@ -125,8 +130,9 @@ referential role:
 - `represents`: models or encodes
 - `maps_to`: converts/transforms into
 
-`measures`, `tests`, `applied_to`, and `follows_distribution` cover academic,
-statistical, scientific, and evaluation-heavy books without becoming stats-only:
+`measures`, `tests`, `applied_to`, `follows_distribution`, and `studies` cover
+academic, statistical, scientific, and evaluation-heavy books without becoming
+stats-only:
 
 - `measures`: quantifies, observes, scores, estimates, or evaluates a target
 - `tests`: checks whether a condition, assumption, hypothesis, or constraint holds
@@ -134,6 +140,8 @@ statistical, scientific, and evaluation-heavy books without becoming stats-only:
   problem, or situation
 - `follows_distribution`: follows a named distribution, law, pattern, curve, or
   expected form
+- `studies`: researcher/study/method systematically examines a topic,
+  phenomenon, group, case, or evidence
 
 `defined_in`, `illustrated_in`, `parameter_of`, and `equivalent_to` preserve
 textbook structure:
@@ -146,10 +154,17 @@ textbook structure:
 - `equivalent_to`: aliases, alternate names, or mathematically/conceptually
   interchangeable forms
 
-`embodies`, `symbolizes`, `influences`, `motivates`, `struggles_with`,
-`reinforces`, `undermines`, `frames_as`, `conceals`, and `leverages` cover
-self-growth, power, emotional, literary, and social-dynamics books:
+`activates`, `experiences`, `imagines`, `embodies`, `symbolizes`, `influences`,
+`motivates`, `struggles_with`, `reinforces`, `undermines`, `frames_as`,
+`conceals`, and `leverages` cover self-growth, memory, power, emotional,
+literary, and social-dynamics books:
 
+- `activates`: stimulus/process triggers or turns on a system, region, or
+  process
+- `experiences`: person/group/narrative subject feels or undergoes a state,
+  event, condition, or emotion
+- `imagines`: person/group/narrative subject mentally visualizes or constructs a
+  scene, event, person, possibility, or outcome
 - `embodies`: concrete actor/object/event personifies a theme, trait, archetype,
   law, or pattern
 - `symbolizes`: source stands for a deeper theme, emotional force, value, or

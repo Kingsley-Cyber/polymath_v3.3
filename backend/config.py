@@ -256,7 +256,7 @@ class Settings(BaseSettings):
 
     # === GHOST B — ONTOLOGY-LITE (Phase 14.2) ===
     SCHEMA_INLINE_LIMIT: int = Field(
-        default=30,
+        default=64,
         description=(
             "Threshold above which the ghost_b prompt switches from inlining "
             "the full schema to retrieving top-K terms per chunk via Qdrant."
@@ -343,7 +343,7 @@ class Settings(BaseSettings):
         description="Max concurrent LiteLLM calls for entity extraction (GHOST B)",
     )
     EXTRACTION_MAX_TOKENS: int = Field(
-        default=1536,
+        default=4096,
         ge=256,
         le=8192,
         description="Maximum completion tokens for each entity extraction call (GHOST B)",

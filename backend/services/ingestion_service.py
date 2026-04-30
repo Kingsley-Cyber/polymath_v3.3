@@ -71,6 +71,12 @@ MUTABLE_CONFIG_FIELDS: frozenset[str] = frozenset({
     "extraction_models",
     "entity_confidence_threshold",
     "models_linked",
+    "large_doc_child_threshold",
+    "full_extract_max_children",
+    "compact_mode_max_entities",
+    "compact_mode_max_relations",
+    "deep_pass_enabled",
+    "deep_pass_max_chunks",
 })
 
 
@@ -1272,51 +1278,173 @@ class IngestionService:
             "verify_failed_docs": 0,
             "graph_partial_docs": 0,
             "ghost_b_failed_chunks": 0,
+            "failed_chunk_count": 0,
+            "ghost_b_requested_chunks": 0,
             "ghost_b_extracted_chunks": 0,
             "ghost_b_tokens": 0,
             "ghost_b_attempts": 0,
+            "json_recovery_count": 0,
+            "estimated_cost_tokens": 0,
+            "prompt_tokens": 0,
+            "compact_extraction_chunks": 0,
+            "deep_extraction_chunks": 0,
+            "full_extraction_chunks": 0,
+            "skipped_low_value_chunks": 0,
             "relations": 0,
             "related_to": 0,
             "domain_range_remaps": 0,
+            "domain_range_remap_count": 0,
             "domain_range_warns": 0,
+            "domain_range_warn_count": 0,
             "endpoint_completions": 0,
             "evidence_cue_repairs": 0,
+            "evidence_cue_repair_count": 0,
+            "direction_repair_count": 0,
+            "predicate_confidence_avg": 0.0,
+            "avg_prompt_tokens_per_chunk": 0.0,
+            "json_recovery_rate": 0.0,
         }
         partial_docs: list[dict] = []
+        document_metrics: list[dict] = []
+        predicate_confidence_weighted_sum = 0.0
+        predicate_confidence_weight = 0
+
+        def _doc_readiness(metrics: dict, ws: dict, failures: list) -> str:
+            relation_count = int(metrics.get("relation_count") or 0)
+            success_rate = float(
+                metrics.get("ghost_b_success_rate", metrics.get("success_rate", 1.0))
+                or 0.0
+            )
+            failed_chunks = int(
+                metrics.get("failed_chunk_count")
+                or metrics.get("failed_chunks")
+                or 0
+            )
+            related_ratio = float(metrics.get("related_to_ratio") or 0.0)
+            predicate_avg = float(metrics.get("predicate_confidence_avg") or 0.0)
+            remaps = int(metrics.get("domain_range_remap_count") or 0)
+            warns = int(metrics.get("domain_range_warn_count") or 0)
+            recoveries = int(metrics.get("json_recovery_count") or 0)
+            attempts = int(metrics.get("attempt_count") or 0)
+            if failures or failed_chunks or ws.get("verified") is False:
+                return "needs_backfill"
+            if success_rate < 0.95 or (
+                recoveries and attempts and recoveries / max(attempts, 1) > 0.20
+            ):
+                return "extraction_unstable"
+            if (
+                related_ratio > 0.35
+                or (relation_count and remaps > relation_count * 0.20)
+                or (relation_count and warns > relation_count * 0.30)
+                or (relation_count and predicate_avg and predicate_avg < 0.70)
+            ):
+                return "schema_review"
+            return "ready"
+
         for doc in docs:
             ws = doc.get("write_state") or {}
             warnings = ws.get("warnings") or []
             failures = doc.get("ghost_b_failures") or []
             staged = doc.get("ghost_b_staging") or []
             metrics = doc.get("ghost_b_metrics") or {}
+            doc_failed_chunks = int(
+                metrics.get("failed_chunk_count")
+                or metrics.get("failed_chunks")
+                or len(failures)
+            )
+            doc_extracted_chunks = int(metrics.get("extracted_chunks") or len(staged))
+            doc_requested_chunks = int(
+                metrics.get("requested_chunks")
+                or (doc_extracted_chunks + doc_failed_chunks)
+            )
+            doc_relation_count = int(metrics.get("relation_count") or 0)
+            doc_predicate_avg = float(metrics.get("predicate_confidence_avg") or 0.0)
+            doc_readiness = _doc_readiness(metrics, ws, failures)
+            graph_completeness = str(
+                metrics.get("graph_completeness")
+                or ("needs-backfill" if failures or doc_failed_chunks else "graph-complete")
+            )
             if warnings:
                 totals["warning_docs"] += 1
             if ws.get("verified") is False:
                 totals["verify_failed_docs"] += 1
-            if failures:
+            if failures or doc_failed_chunks:
                 totals["graph_partial_docs"] += 1
                 partial_docs.append(
                     {
                         "doc_id": doc.get("doc_id"),
                         "filename": doc.get("filename"),
-                        "failed_chunks": len(failures),
+                        "failed_chunks": doc_failed_chunks,
+                        "readiness": doc_readiness,
                     }
                 )
-            totals["ghost_b_failed_chunks"] += len(failures)
-            totals["ghost_b_extracted_chunks"] += int(
-                metrics.get("extracted_chunks") or len(staged)
-            )
+            totals["ghost_b_failed_chunks"] += doc_failed_chunks
+            totals["failed_chunk_count"] += doc_failed_chunks
+            totals["ghost_b_requested_chunks"] += doc_requested_chunks
+            totals["ghost_b_extracted_chunks"] += doc_extracted_chunks
             totals["ghost_b_tokens"] += int(metrics.get("total_tokens") or 0)
+            totals["estimated_cost_tokens"] += int(
+                metrics.get("estimated_cost_tokens") or metrics.get("total_tokens") or 0
+            )
+            totals["prompt_tokens"] += int(metrics.get("prompt_tokens") or 0)
             totals["ghost_b_attempts"] += int(metrics.get("attempt_count") or 0)
-            totals["relations"] += int(metrics.get("relation_count") or 0)
+            totals["json_recovery_count"] += int(metrics.get("json_recovery_count") or 0)
+            totals["compact_extraction_chunks"] += int(metrics.get("compact_extraction_chunks") or 0)
+            totals["deep_extraction_chunks"] += int(metrics.get("deep_extraction_chunks") or 0)
+            totals["full_extraction_chunks"] += int(metrics.get("full_extraction_chunks") or 0)
+            totals["skipped_low_value_chunks"] += int(metrics.get("skipped_low_value_chunks") or 0)
+            totals["relations"] += doc_relation_count
             totals["related_to"] += int(metrics.get("related_to_count") or 0)
-            totals["domain_range_remaps"] += int(metrics.get("domain_range_remap_count") or 0)
-            totals["domain_range_warns"] += int(metrics.get("domain_range_warn_count") or 0)
+            remaps = int(metrics.get("domain_range_remap_count") or 0)
+            warns = int(metrics.get("domain_range_warn_count") or 0)
+            evidence_repairs = int(metrics.get("evidence_cue_repair_count") or 0)
+            direction_repairs = int(metrics.get("direction_repair_count") or 0)
+            totals["domain_range_remaps"] += remaps
+            totals["domain_range_remap_count"] += remaps
+            totals["domain_range_warns"] += warns
+            totals["domain_range_warn_count"] += warns
             totals["endpoint_completions"] += int(metrics.get("endpoint_completion_count") or 0)
-            totals["evidence_cue_repairs"] += int(metrics.get("evidence_cue_repair_count") or 0)
+            totals["evidence_cue_repairs"] += evidence_repairs
+            totals["evidence_cue_repair_count"] += evidence_repairs
+            totals["direction_repair_count"] += direction_repairs
+            if doc_relation_count and doc_predicate_avg:
+                predicate_confidence_weighted_sum += doc_predicate_avg * doc_relation_count
+                predicate_confidence_weight += doc_relation_count
+            document_metrics.append(
+                {
+                    "doc_id": doc.get("doc_id"),
+                    "filename": doc.get("filename"),
+                    "readiness": doc_readiness,
+                    "graph_completeness": graph_completeness,
+                    "extraction_strategy": str(metrics.get("extraction_strategy") or "unknown"),
+                    "skipped_low_value_chunks": int(metrics.get("skipped_low_value_chunks") or 0),
+                    "compact_extraction_chunks": int(metrics.get("compact_extraction_chunks") or 0),
+                    "deep_extraction_chunks": int(metrics.get("deep_extraction_chunks") or 0),
+                    "full_extraction_chunks": int(metrics.get("full_extraction_chunks") or 0),
+                    "avg_prompt_tokens_per_chunk": float(metrics.get("avg_prompt_tokens_per_chunk") or 0.0),
+                    "ghost_b_success_rate": float(
+                        metrics.get("ghost_b_success_rate", metrics.get("success_rate", 1.0))
+                        or 0.0
+                    ),
+                    "failed_chunk_count": doc_failed_chunks,
+                    "related_to_ratio": float(metrics.get("related_to_ratio") or 0.0),
+                    "predicate_confidence_avg": doc_predicate_avg,
+                    "domain_range_remap_count": remaps,
+                    "domain_range_warn_count": warns,
+                    "direction_repair_count": direction_repairs,
+                    "evidence_cue_repair_count": evidence_repairs,
+                    "json_recovery_count": int(metrics.get("json_recovery_count") or 0),
+                }
+            )
 
         totals["ghost_b_success_rate"] = (
-            round(totals["ghost_b_extracted_chunks"] / total_chunks, 4)
+            round(
+                totals["ghost_b_extracted_chunks"]
+                / totals["ghost_b_requested_chunks"],
+                4,
+            )
+            if totals["ghost_b_requested_chunks"]
+            else round(totals["ghost_b_extracted_chunks"] / total_chunks, 4)
             if total_chunks
             else 1.0
         )
@@ -1325,20 +1453,47 @@ class IngestionService:
             if totals["relations"]
             else 0.0
         )
-        readiness = "ready"
-        if totals["verify_failed_docs"] or totals["ghost_b_failed_chunks"]:
+        totals["predicate_confidence_avg"] = (
+            round(predicate_confidence_weighted_sum / predicate_confidence_weight, 4)
+            if predicate_confidence_weight
+            else 0.0
+        )
+        totals["avg_prompt_tokens_per_chunk"] = (
+            round(totals["prompt_tokens"] / totals["ghost_b_requested_chunks"], 2)
+            if totals["ghost_b_requested_chunks"]
+            else 0.0
+        )
+        totals["json_recovery_rate"] = (
+            round(totals["json_recovery_count"] / totals["ghost_b_requested_chunks"], 4)
+            if totals["ghost_b_requested_chunks"]
+            else 0.0
+        )
+        readinesses = {doc.get("readiness") for doc in document_metrics}
+        if totals["verify_failed_docs"] or totals["failed_chunk_count"] or "needs_backfill" in readinesses:
             readiness = "needs_backfill"
-        if totals["related_to_ratio"] > 0.35 or totals["domain_range_remaps"] > totals["relations"] * 0.2:
+        elif "extraction_unstable" in readinesses:
+            readiness = "extraction_unstable"
+        elif (
+            "schema_review" in readinesses
+            or totals["related_to_ratio"] > 0.35
+            or totals["domain_range_remap_count"] > totals["relations"] * 0.2
+        ):
             readiness = "schema_review"
+        else:
+            readiness = "ready"
         return {
             "corpus_id": corpus_id,
             "readiness": readiness,
             "totals": totals,
-            "partial_docs": partial_docs[:50],
+            "partial_docs": partial_docs,
+            "document_metrics": document_metrics,
             "recommendations": [
                 "Run graph backfill for partial docs before large-batch graph analysis."
-                if totals["ghost_b_failed_chunks"]
+                if totals["failed_chunk_count"]
                 else "No graph backfill needed.",
+                "Inspect Ghost B model/prompt stability; JSON recovery or chunk success rate is outside target."
+                if readiness == "extraction_unstable"
+                else "Extraction stability is within the current target band.",
                 "Review relation schema if related_to ratio stays above 35%."
                 if totals["related_to_ratio"] > 0.35
                 else "Relation specificity is within the current target band.",

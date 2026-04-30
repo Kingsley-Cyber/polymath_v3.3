@@ -45,9 +45,9 @@ def test_entity_schema_shape():
 
 
 def test_relation_schema_shape():
-    assert len(UNIVERSAL_RELATION_SCHEMA) == 45
+    assert len(UNIVERSAL_RELATION_SCHEMA) == 49
     assert all(isinstance(p, str) and p.strip() for p in UNIVERSAL_RELATION_SCHEMA)
-    assert len(set(UNIVERSAL_RELATION_SCHEMA)) == 45, "relation schema has duplicates"
+    assert len(set(UNIVERSAL_RELATION_SCHEMA)) == 49, "relation schema has duplicates"
     assert UNIVERSAL_RELATION_SCHEMA[-1] == "related_to", (
         "related_to sentinel MUST be last"
     )
@@ -56,6 +56,7 @@ def test_relation_schema_shape():
     for required in (
         "measures", "defined_in", "follows_distribution", "tests",
         "applied_to", "illustrated_in", "parameter_of", "equivalent_to",
+        "activates", "experiences", "imagines", "studies",
         "embodies", "symbolizes", "motivates", "struggles_with",
         "reinforces", "undermines", "frames_as", "conceals", "leverages",
     ):
@@ -846,6 +847,85 @@ def test_related_to_refinement_embodies_does_not_become_implements():
             evidence_phrase="daily practice embodies self-discipline",
         )
         == "embodies"
+    )
+
+
+def test_related_to_refinement_experiences_emotion_not_embodies():
+    carl = {
+        "canonical_name": "Carl",
+        "primary_entity_type": "Person",
+    }
+    relief = {
+        "canonical_name": "relief and freedom",
+        "primary_entity_type": "Concept",
+    }
+
+    assert (
+        refine_related_to_predicate(
+            "related_to",
+            carl,
+            relief,
+            evidence_phrase="Carl expressed relief and freedom after the memory exercise.",
+        )
+        == "experiences"
+    )
+
+
+def test_related_to_refinement_memory_specific_predicates():
+    method = {
+        "canonical_name": "re-creating a memory",
+        "primary_entity_type": "Method",
+    }
+    cortex = {
+        "canonical_name": "prefrontal cortex",
+        "primary_entity_type": "Concept",
+    }
+    patient = {
+        "canonical_name": "patient",
+        "primary_entity_type": "Person",
+    }
+    email = {
+        "canonical_name": "e-mail",
+        "primary_entity_type": "Artifact",
+    }
+    researcher = {
+        "canonical_name": "McAdams",
+        "primary_entity_type": "Person",
+    }
+    topic = {
+        "canonical_name": "redemption and contamination",
+        "primary_entity_type": "Concept",
+    }
+
+    assert (
+        refine_related_to_predicate(
+            "related_to",
+            method,
+            cortex,
+            source_predicate="activates",
+            evidence_phrase="re-creating a memory activates the prefrontal cortex.",
+        )
+        == "activates"
+    )
+    assert (
+        refine_related_to_predicate(
+            "related_to",
+            patient,
+            email,
+            source_predicate="imagines",
+            evidence_phrase="the patient imagines the e-mail arriving.",
+        )
+        == "imagines"
+    )
+    assert (
+        refine_related_to_predicate(
+            "related_to",
+            researcher,
+            topic,
+            source_predicate="studies",
+            evidence_phrase="McAdams studies redemption and contamination.",
+        )
+        == "studies"
     )
 
 

@@ -42,6 +42,8 @@ from services.ingestion.worker import (
     GhostAFailure,
     GhostBFailure,
     _build_ghost_pool,
+    _select_ghost_b_extraction_policy,
+    _select_high_signal_children,
 )
 
 
@@ -199,6 +201,7 @@ def _install_mocks(
         "default_ingestion_config": {},
     })
     update_state_mock = AsyncMock()
+    upsert_progress_doc_mock = AsyncMock()
     mongo_db = MagicMock()
     # For the corpora counter update path in run_ingest_job
     mongo_db.__getitem__.return_value.update_one = AsyncMock()
@@ -214,6 +217,7 @@ def _install_mocks(
         patch.object(worker.mongo_reader, "get_document", get_doc_mock),
         patch.object(worker.mongo_reader, "get_corpus", get_corpus_mock),
         patch.object(worker.mongo_writer, "update_write_state", update_state_mock),
+        patch.object(worker.mongo_writer, "upsert_document", upsert_progress_doc_mock),
         patch.object(worker.settings, "NEO4J_ENABLED", True),
     ]
     for p in patches:
@@ -234,6 +238,7 @@ def _install_mocks(
         "neo4j": neo4j_mock,
         "get_doc": get_doc_mock,
         "update_state": update_state_mock,
+        "upsert_progress_doc": upsert_progress_doc_mock,
         "db": mongo_db,
         "stop_all": _stop_all,
     }
@@ -507,6 +512,158 @@ def test_build_ghost_pool_defaults_to_one_when_missing():
     never expands beyond what the user asked for."""
     pool = _build_ghost_pool([{"model": "x"}, {"model": "y", "max_concurrent": 0}])
     assert [e["max_concurrent"] for e in pool] == [1, 1]
+
+
+def test_ghost_b_policy_uses_full_for_small_docs():
+    cfg = IngestionConfig(
+        large_doc_child_threshold=100,
+        full_extract_max_children=100,
+        compact_mode_max_entities=6,
+        compact_mode_max_relations=6,
+    )
+
+    policy = _select_ghost_b_extraction_policy(
+        cfg,
+        total_children=12,
+        body_children=10,
+        skipped_low_value_by_kind={"toc": 2},
+    )
+
+    assert policy.extraction_strategy == "full_ontology"
+    assert policy.extraction_mode == "full"
+    assert policy.graph_completeness == "graph-complete"
+    assert policy.full_extraction_chunks == 10
+    assert policy.compact_extraction_chunks == 0
+    assert policy.skipped_low_value_chunks == 2
+
+
+def test_ghost_b_policy_uses_compact_for_large_docs():
+    cfg = IngestionConfig(
+        large_doc_child_threshold=100,
+        full_extract_max_children=100,
+        compact_mode_max_entities=6,
+        compact_mode_max_relations=5,
+    )
+
+    policy = _select_ghost_b_extraction_policy(
+        cfg,
+        total_children=140,
+        body_children=120,
+        skipped_low_value_by_kind={"bibliography": 20},
+    )
+
+    assert policy.extraction_strategy == "compact_large_doc"
+    assert policy.extraction_mode == "compact"
+    assert policy.graph_completeness == "graph-compact"
+    assert policy.compact_extraction_chunks == 120
+    assert policy.full_extraction_chunks == 0
+    assert policy.max_entities_per_chunk == 6
+    assert policy.max_relations_per_chunk == 5
+    assert policy.max_completion_tokens <= 2048
+    assert policy.skipped_low_value_chunks == 20
+
+
+def test_high_signal_selector_prefers_entity_and_relation_dense_chunks():
+    low = SimpleNamespace(
+        chunk_id="low",
+        text="This page has ordinary prose without much graph structure.",
+        heading_path=["pages_10"],
+        token_count=120,
+    )
+    high = SimpleNamespace(
+        chunk_id="high",
+        text=(
+            "TensorFlow Lite runs on Android. ML Kit uses CameraX and "
+            "classifies ImageProxy frames."
+        ),
+        heading_path=["Android deployment"],
+        token_count=420,
+    )
+
+    selected = _select_high_signal_children([low, high], limit=1)
+
+    assert [item.chunk_id for item in selected] == ["high"]
+
+
+def test_rehydrate_ghost_b_staging_ignores_stale_extra_keys():
+    staged = [
+        {
+            "schema_version": "polymath.extract.v1",
+            "chunk_id": "c1",
+            "doc_id": "d1",
+            "corpus_id": "corp1",
+            "extra_result_key": "legacy",
+            "entities": [
+                {
+                    "canonical_name": "app",
+                    "surface_form": "app",
+                    "entity_type": "Product",
+                    "confidence": 0.9,
+                    "legacy_entity_key": "ignored",
+                }
+            ],
+            "relations": [
+                {
+                    "subject": "app",
+                    "predicate": "uses",
+                    "object": "api",
+                    "object_kind": "API",
+                    "confidence": 0.8,
+                    "legacy_relation_key": "ignored",
+                }
+            ],
+        }
+    ]
+
+    result = worker._rehydrate_ghost_b_staging(staged)
+
+    assert len(result) == 1
+    assert result[0].entities[0].canonical_name == "app"
+    assert result[0].relations[0].predicate == "uses"
+    assert result[0].relations[0].object_kind == "entity"
+
+
+@pytest.mark.asyncio
+async def test_auto_backfill_called_when_ghost_b_failures_exist():
+    ws = WriteState(mongo_written=True, qdrant_written=True, neo4j_written=True)
+    failed_doc = {
+        "ghost_b_failures": [{"chunk_id": "c1", "error_type": "parse_error"}],
+        "write_state": ws.model_dump(),
+    }
+    recovered_doc = {
+        "ghost_b_failures": [],
+        "write_state": ws.model_dump(),
+    }
+
+    from services.ingestion import graph_backfill
+
+    with patch.object(
+        worker.mongo_reader,
+        "get_document",
+        new_callable=AsyncMock,
+        side_effect=[failed_doc, failed_doc, recovered_doc],
+    ), patch.object(
+        graph_backfill,
+        "backfill_failed_graph_chunks",
+        new_callable=AsyncMock,
+        return_value={
+            "retried_chunks": 1,
+            "recovered_chunks": 1,
+            "remaining_failed_chunks": 0,
+        },
+    ) as backfill_mock:
+        result = await worker._auto_backfill_graph_failures_once(
+            db=MagicMock(),
+            qdrant_client=MagicMock(),
+            neo4j_driver=object(),
+            doc_id="doc1",
+            corpus_id="corp1",
+            user_id="u1",
+            ws=ws,
+        )
+
+    assert backfill_mock.await_count == 1
+    assert result.neo4j_written is True
 
 
 # ── Universal schema sanity on a Balanced config ────────────────────────────

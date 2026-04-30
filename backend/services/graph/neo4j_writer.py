@@ -133,7 +133,11 @@ _RELATION_CUE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("follows_distribution", ("follows a", "drawn from", "distributed as", "distributed according to")),
     ("parameter_of", ("parameter of", "parameters of", "threshold of", "setting of")),
     ("equivalent_to", ("equivalent to", "same as", "also called", "referred to as")),
-    ("embodies", ("embodies", "personifies", "expresses")),
+    ("activates", ("activates", "activated", "stimulates", "stimulated")),
+    ("experiences", ("experiences", "experienced", "undergoes", "feels", "felt")),
+    ("imagines", ("imagines", "imagined", "visualizes", "visualises", "pictures", "envisions", "anticipates")),
+    ("studies", ("studies", "researches", "investigates", "examines")),
+    ("embodies", ("embodies", "personifies")),
     ("symbolizes", ("symbolizes", "symbolises", "stands for", "signifies")),
     ("influences", ("influences", "shapes", "affects", "pressures")),
     ("motivates", ("motivates", "motivated by", "drives", "driven by")),
@@ -175,6 +179,10 @@ _RECOVERABLE_SOURCE_PREDICATES = {
     "illustrated_in",
     "parameter_of",
     "equivalent_to",
+    "activates",
+    "experiences",
+    "imagines",
+    "studies",
     "embodies",
     "symbolizes",
     "influences",
@@ -214,6 +222,12 @@ _TEST_EVALUATION_RE = re.compile(
 )
 _DEFINED_IN_EVIDENCE_RE = re.compile(
     r"\b(defined|specified|introduced|stated)\s+in\b"
+)
+_EXPERIENCE_EVIDENCE_RE = re.compile(
+    r"\bexpress(?:es|ed|ing)?\s+("
+    r"relief|freedom|fear|joy|shame|guilt|anger|sadness|grief|pain|"
+    r"anxiety|emotion|feeling|loss|love"
+    r")\b"
 )
 
 
@@ -260,6 +274,8 @@ def _predicate_from_evidence(*parts: str | None) -> str | None:
         return "measures"
     if _DEFINED_IN_EVIDENCE_RE.search(text):
         return "defined_in"
+    if _EXPERIENCE_EVIDENCE_RE.search(text):
+        return "experiences"
     for predicate, cues in _RELATION_CUE_PATTERNS:
         if any(cue in text for cue in cues):
             return predicate
@@ -372,9 +388,9 @@ def _relation_compatible_with_facets(
             "Artifact", "Concept", "Document", "Event", "Method",
             "Organization", "Person", "Product", "Rule", "Law",
         }
-    if predicate in {"measures", "tests", "applied_to", "follows_distribution"}:
+    if predicate in {"measures", "tests", "applied_to", "follows_distribution", "studies"}:
         return subject_type in {
-            "Artifact", "Concept", "Document", "Method", "Product",
+            "Artifact", "Concept", "Document", "Method", "Organization", "Person", "Product",
         } and object_type in {
             "Artifact", "Concept", "Document", "Event", "Law", "Method",
             "Organization", "Person", "Product", "Rule",
@@ -389,8 +405,9 @@ def _relation_compatible_with_facets(
             "Artifact", "Concept", "Method", "Product",
         }
     if predicate in {
-        "embodies", "symbolizes", "influences", "motivates", "struggles_with",
-        "reinforces", "undermines", "frames_as", "conceals", "leverages",
+        "activates", "embodies", "experiences", "imagines", "symbolizes",
+        "influences", "motivates", "struggles_with", "reinforces",
+        "undermines", "frames_as", "conceals", "leverages",
     }:
         return subject_type in {
             "Artifact", "Concept", "Document", "Event", "Law", "Method",

@@ -36,6 +36,10 @@ REPAIR_PREDICATES = {
     "illustrated_in",
     "parameter_of",
     "equivalent_to",
+    "activates",
+    "experiences",
+    "imagines",
+    "studies",
 }
 EXPANSION_PREDICATES = {
     "embodies",
@@ -106,6 +110,9 @@ def test_ontology_domain_range_and_families_are_machine_readable():
     assert families["related_to"] == "WeakAssociation"
     assert relation_family_for_predicate("supports") == "Operational"
     assert relation_family_for_predicate("measures") == "Analytical"
+    assert relation_family_for_predicate("activates") == "Causal"
+    assert relation_family_for_predicate("experiences") == "Psychosocial"
+    assert relation_family_for_predicate("studies") == "Analytical"
     assert relation_family_for_predicate("embodies") == "Interpretive"
 
 
@@ -130,6 +137,76 @@ def test_prompt_includes_predicate_decision_rules():
     assert "predicate_confidence" in prompt
 
 
+def test_prompt_includes_compact_json_budget_rules():
+    ctx = SchemaContext(
+        entity_schema=UNIVERSAL_ENTITY_SCHEMA,
+        relation_schema=UNIVERSAL_RELATION_SCHEMA,
+        strict="soft",
+    )
+    prompt = build_user_prompt(
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        text="TensorFlow Lite runs on Android and uses ML Kit.",
+        schema=ctx,
+    )
+
+    assert "COMPACT OUTPUT BUDGET" in prompt
+    assert "valid JSON beats exhaustive extraction" in prompt
+    assert "evidence_phrase <= 25 words" in prompt
+    assert "atomic_fact <= 25 words" in prompt
+    assert "rejection_reasoning <= 10 words" in prompt
+    assert "alternative_predicates_considered: max 2" in prompt
+
+
+def test_recovery_prompt_tightens_output_budget():
+    ctx = SchemaContext(
+        entity_schema=UNIVERSAL_ENTITY_SCHEMA,
+        relation_schema=UNIVERSAL_RELATION_SCHEMA,
+        strict="soft",
+    )
+    prompt = build_user_prompt(
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        text="TensorFlow Lite runs on Android and uses ML Kit.",
+        max_entities=5,
+        max_relations=5,
+        schema=ctx,
+        recovery_mode=True,
+    )
+
+    assert "HARD LIMIT: output at most 5 entities and at most 5 relations" in prompt
+    assert "RECOVERY MODE OUTPUT: return minimal valid JSON only" in prompt
+    assert "RECOVERY MODE OUTPUT: evidence_phrase <= 12 words" in prompt
+    assert "candidate_facts must not exceed accepted relations" in prompt
+
+
+def test_large_doc_compact_prompt_preserves_ontology_rules():
+    ctx = SchemaContext(
+        entity_schema=UNIVERSAL_ENTITY_SCHEMA,
+        relation_schema=UNIVERSAL_RELATION_SCHEMA,
+        strict="soft",
+    )
+    prompt = build_user_prompt(
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        text="TensorFlow Lite runs on Android and uses ML Kit.",
+        max_entities=8,
+        max_relations=8,
+        schema=ctx,
+        compact_mode=True,
+    )
+
+    assert "LARGE-DOC COMPACT MODE" in prompt
+    assert "Extract only the strongest graph-useful entities" in prompt
+    assert "HARD LIMIT: output at most 8 entities and at most 8 relations" in prompt
+    assert "Predicate decision rules:" in prompt
+    assert "depends_on: The source requires the target to function" in prompt
+    assert "related_to' is a valid diagnostic fallback" in prompt
+
+
 def test_relation_aliases_load_from_ontology_contract():
     assert normalize_relation_predicate_alias("stored_in") == ("stores", True)
     assert normalize_relation_predicate_alias("powered_by") == ("runs_on", False)
@@ -141,6 +218,12 @@ def test_relation_aliases_load_from_ontology_contract():
     assert normalize_relation_predicate_alias("same_as") == ("equivalent_to", False)
     assert normalize_relation_predicate_alias("motivated_by") == ("motivates", True)
     assert normalize_relation_predicate_alias("uses strategically") == ("leverages", False)
+    assert normalize_relation_predicate_alias("activated_by") == ("activates", True)
+    assert normalize_relation_predicate_alias("undergoes") == ("experiences", False)
+    assert normalize_relation_predicate_alias("imagined") == ("imagines", False)
+    assert normalize_relation_predicate_alias("studied_by") == ("studies", True)
+    assert normalize_relation_predicate_alias("struggled_with") == ("struggles_with", False)
+    assert normalize_relation_predicate_alias("expresses") == ("expresses", False)
     assert normalize_relation_predicate_alias("evaluates") == ("evaluates", False)
     assert normalize_relation_predicate_alias("defined_by") == ("defined_by", False)
     assert normalize_relation_predicate_alias("checks") == ("checks", False)

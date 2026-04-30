@@ -55,16 +55,20 @@ _SYSTEM = (
     "text outside the JSON object. The object must follow the user-provided "
     "schema keys exactly. Extract only what is explicitly stated in the text; "
     "do not hallucinate entities or relations. If evidence is sparse, return "
-    "empty arrays. Prefer fewer high-confidence items over long output. Before "
-    "finalizing, silently verify that every string, array, and object is closed "
-    "and that the output can be parsed by json.loads."
+    "empty arrays. Prefer fewer high-confidence items over long output. Keep "
+    "evidence, alternatives, and reasoning fields compact; valid JSON is more "
+    "important than exhaustive extraction. Before finalizing, silently verify "
+    "that every string, array, and object is closed and that the output can be "
+    "parsed by json.loads."
 )
 
 _JSON_RECOVERY_SUFFIX = (
     "\n\nRECOVERY MODE: the previous extraction attempt for this chunk did not "
     "parse as JSON. Re-run the extraction from scratch using the same schema. "
-    "Return fewer entities and relations if needed, but the response must be a "
-    "single complete JSON object that parses cleanly."
+    "Return a minimal valid JSON object, with fewer entities and relations if "
+    "needed. Keep evidence phrases under 12 words, rejection_reasoning under "
+    "8 words, and alternative_predicates_considered to at most 2 items. The "
+    "response must be a single complete JSON object that parses cleanly."
 )
 
 PREDICATE_CONFIDENCE_DEMOTE_THRESHOLD = 0.60
@@ -385,7 +389,12 @@ EVIDENCE_CUE_RULES: list[tuple[re.Pattern[str], str, bool]] = [
     (re.compile(r"\b(parameter|threshold|setting|variable)s?\s+(of|for)\b"), "parameter_of", False),
     (re.compile(r"\b(equivalent\s+to|same\s+as|also\s+called|referred\s+to\s+as)\b"), "equivalent_to", False),
     # Interpretive/self-growth/narrative cues.
-    (re.compile(r"\b(embodies?|personif(?:y|ies)|expresses?)\b"), "embodies", False),
+    (re.compile(r"\b(activates?|activated|stimulates?|stimulated)\b"), "activates", False),
+    (re.compile(r"\b(experiences?|experienced|undergoes?|feels?|felt)\b"), "experiences", False),
+    (re.compile(r"\bexpress(?:es|ed|ing)?\s+(relief|freedom|fear|joy|shame|guilt|anger|sadness|grief|pain|anxiety|emotion|feeling|loss|love)\b"), "experiences", False),
+    (re.compile(r"\b(imagines?|imagined|visuali[sz]es?|pictured?|envisions?|anticipates?)\b"), "imagines", False),
+    (re.compile(r"\b(studies|studied|researches?|investigates?|examines?)\b(?!\s+in\b)"), "studies", False),
+    (re.compile(r"\b(embodies?|personif(?:y|ies))\b"), "embodies", False),
     (re.compile(r"\b(symboli[sz]es?|stands?\s+for|signifies?)\b"), "symbolizes", False),
     (re.compile(r"\b(influences?|shapes?|affects?|pressures?)\b"), "influences", False),
     (re.compile(r"\b(driven\s+by|motivated\s+by)\b"), "motivates", True),
@@ -496,6 +505,47 @@ def _render_schema_lens_block(schema_lens: SchemaLens | dict | None) -> str:
         "Never output the lens fields themselves."
     )
     return "\n".join(lines)
+
+
+def _render_compact_output_rules(*, recovery_mode: bool = False) -> str:
+    """Render output-budget rules that preserve ontology guidance while limiting JSON size."""
+    lines = [
+        "- COMPACT OUTPUT BUDGET: valid JSON beats exhaustive extraction; prefer fewer high-confidence triples over a response that risks truncation",
+        "- evidence_phrase <= 25 words; quote only the shortest phrase that proves the relation",
+        "- atomic_fact <= 25 words and must be one self-contained sentence",
+        "- rejection_reasoning <= 10 words; use a boundary test, not a paragraph",
+        "- alternative_predicates_considered: max 2 predicates; use [] when the predicate choice is obvious",
+        "- Do not repeat long evidence in both candidate_facts and relations; keep the relation evidence shortest",
+    ]
+    if recovery_mode:
+        lines.extend(
+            [
+                "- RECOVERY MODE OUTPUT: return minimal valid JSON only; omit borderline facts and low-value examples",
+                "- RECOVERY MODE OUTPUT: evidence_phrase <= 12 words and rejection_reasoning <= 8 words",
+                "- RECOVERY MODE OUTPUT: candidate_facts must not exceed accepted relations",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _render_large_doc_compact_rules() -> str:
+    """Rules for long-book first-pass extraction.
+
+    This intentionally keeps the full ontology decision block elsewhere in the
+    prompt. The compact mode only changes how much the model is allowed to
+    return for a chunk; it does not loosen schema governance or hide
+    related_to as a diagnostic fallback.
+    """
+    return "\n".join(
+        [
+            "- LARGE-DOC COMPACT MODE: this is a first-pass graph extraction for a long document",
+            "- Extract only the strongest graph-useful entities and relations in this chunk",
+            "- Prefer durable concepts, named systems, methods, documents, people, organizations, datasets, models, and explicit claims",
+            "- Skip repeated headers/footers, citation boilerplate, publisher/copyright lines, long lists, glossary-only rows, and weak examples",
+            "- Prefer one narrow predicate with short evidence over several speculative alternatives",
+            "- Keep related_to only for genuinely unclear or low-confidence predicate choices",
+        ]
+    )
 
 
 @dataclass
@@ -681,6 +731,8 @@ def build_user_prompt(
     effective_entity_vocab: list[str] | None = None,
     effective_relation_vocab: list[str] | None = None,
     schema_lens: SchemaLens | dict | None = None,
+    compact_mode: bool = False,
+    recovery_mode: bool = False,
 ) -> str:
     """Render the per-chunk extraction user prompt, with optional schema constraints.
 
@@ -747,6 +799,8 @@ def build_user_prompt(
     vocab_block = "\n".join(vocab_block_lines)
     decision_block = render_relation_decision_block(relation_vocab_for_block)
     lens_block = _render_schema_lens_block(schema_lens)
+    compact_rules = _render_compact_output_rules(recovery_mode=recovery_mode)
+    large_doc_rules = _render_large_doc_compact_rules() if compact_mode else ""
     entity_cap = max_entities or get_settings().EXTRACTION_MAX_ENTITIES_PER_CHUNK
     relation_cap = max_relations or get_settings().EXTRACTION_MAX_RELATIONS_PER_CHUNK
 
@@ -799,6 +853,8 @@ def build_user_prompt(
         "\n"
         "Rules:\n"
         f"- HARD LIMIT: output at most {entity_cap} entities and at most {relation_cap} relations for this chunk\n"
+        f"{compact_rules}\n"
+        f"{large_doc_rules}\n"
         "- Prefer high-confidence named entities and structurally useful relations; do not enumerate every proper noun, citation, example, list item, or generic noun\n"
         "- Keep JSON compact; no prose, markdown, comments, or duplicate entries\n"
         "- confidence: float 0.0–1.0; omit entries below threshold\n"
@@ -829,12 +885,12 @@ def build_user_prompt(
         "- Relation intent families: part_of/member_of are structural; "
         "uses/calls/implements/depends_on/produces/stores/extracts/detects/classifies/runs_on/trained_on/supports are operational; "
         "references/derived_from/represents/maps_to/defined_in/illustrated_in/equivalent_to are referential; "
-        "measures/follows_distribution/tests/applied_to are analytical; parameter_of is structural; "
-        "causes/preceded_by/influences/motivates/reinforces/undermines are causal; "
-        "embodies/symbolizes/frames_as are interpretive; struggles_with is psychosocial; "
+        "measures/follows_distribution/tests/applied_to/studies are analytical; parameter_of is structural; "
+        "causes/preceded_by/activates/influences/motivates/reinforces/undermines are causal; "
+        "embodies/symbolizes/frames_as are interpretive; experiences/imagines/struggles_with are psychosocial; "
         "conceals/leverages are strategic; contradicts/excepts/overrides are conflict. Choose the narrowest predicate "
         f"inside the right family; use '{SchemaContext.RELATION_SENTINEL}' only when the family is genuinely unclear.\n"
-        "- Governance scopes: measures/defined_in/follows_distribution/tests/applied_to/illustrated_in/parameter_of/equivalent_to are evidence-backed repair predicates for patterns seen in current related_to samples. "
+        "- Governance scopes: measures/defined_in/follows_distribution/tests/applied_to/illustrated_in/parameter_of/equivalent_to/activates/experiences/imagines/studies are evidence-backed repair predicates for patterns seen in current related_to samples. "
         "embodies/symbolizes/influences/motivates/struggles_with/reinforces/undermines/frames_as/conceals/leverages are future expansion predicates for literature, self-growth, power, and social-dynamics corpora; use them only when the text explicitly states that meaning, force, motive, conflict, concealment, or strategy. "
         f"'{SchemaContext.RELATION_SENTINEL}' is a valid diagnostic fallback, not a failure.\n"
         "- Prefer 'runs_on' for model/app/device/platform execution, 'trained_on' for model-dataset training, "
@@ -843,6 +899,8 @@ def build_user_prompt(
         "'calls' for API/function/service invocation, 'represents' for modeling/encoding, "
         "'maps_to' for transformations, 'supports' for explicit capabilities, "
         "'defined_in' for equation/figure/section/document/spec definitions, 'follows_distribution' for distributional claims, "
+        "'activates' for explicit trigger/activation evidence, 'experiences' for felt/undergone states, "
+        "'imagines' for mental visualization, 'studies' for systematic inquiry, "
         "'equivalent_to' for aliases, 'embodies'/'symbolizes' for literary meaning, and "
         "'motivates'/'struggles_with'/'reinforces'/'undermines' for self-growth or emotional dynamics.\n"
         "- Every relation subject/object with object_kind='entity' MUST also appear in entities, even if it is a generic endpoint like app, model, user, event, screen, or API.\n"
@@ -961,12 +1019,15 @@ def summarize_extraction_batch(
     failures: list[ExtractionFailureItem],
     call_metrics: list[dict],
     models: list[str],
+    metrics_context: dict | None = None,
 ) -> dict:
     """Return compact extraction metrics suitable for Mongo/audit surfaces."""
     total_tokens = sum(int(m.get("total_tokens") or 0) for m in call_metrics)
     prompt_tokens = sum(int(m.get("prompt_tokens") or 0) for m in call_metrics)
     completion_tokens = sum(int(m.get("completion_tokens") or 0) for m in call_metrics)
     total_duration = sum(float(m.get("duration_seconds") or 0.0) for m in call_metrics)
+    attempt_count = len(call_metrics)
+    json_recovery_count = sum(1 for m in call_metrics if m.get("recovery_mode"))
     relation_count = sum(len(r.relations) for r in results)
     related_to_count = sum(
         1
@@ -985,19 +1046,29 @@ def summarize_extraction_batch(
     error_counts: dict[str, int] = {}
     for failure in failures:
         error_counts[failure.error_type] = error_counts.get(failure.error_type, 0) + 1
-    return {
+    metrics = {
         "requested_chunks": total_chunks,
         "extracted_chunks": len(results),
         "failed_chunks": len(failures),
         "failed_chunk_count": len(failures),
         "success_rate": success_rate,
         "ghost_b_success_rate": success_rate,
-        "attempt_count": len(call_metrics),
-        "json_recovery_count": sum(1 for m in call_metrics if m.get("recovery_mode")),
+        "attempt_count": attempt_count,
+        "json_recovery_count": json_recovery_count,
+        "json_recovery_rate": (
+            round(json_recovery_count / total_chunks, 4) if total_chunks else 0.0
+        ),
+        "json_recovery_attempt_rate": (
+            round(json_recovery_count / attempt_count, 4) if attempt_count else 0.0
+        ),
         "models": models,
         "total_tokens": total_tokens,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
+        "estimated_cost_tokens": total_tokens,
+        "avg_prompt_tokens_per_chunk": (
+            round(prompt_tokens / total_chunks, 2) if total_chunks else 0.0
+        ),
         "total_duration_seconds": round(total_duration, 3),
         "entity_count": sum(len(r.entities) for r in results),
         "relation_count": relation_count,
@@ -1028,6 +1099,9 @@ def summarize_extraction_batch(
         "schema_lens_ids": lens_ids,
         "error_counts": error_counts,
     }
+    if metrics_context:
+        metrics.update(metrics_context)
+    return metrics
 
 
 def _entity_key(name: str) -> str:
@@ -1878,6 +1952,11 @@ async def extract_entities(
     *,
     pool: list[dict] | None = None,
     return_report: bool = False,
+    extraction_mode: Literal["full", "compact"] = "full",
+    max_entities_per_chunk: int | None = None,
+    max_relations_per_chunk: int | None = None,
+    max_completion_tokens_override: int | None = None,
+    metrics_context: dict | None = None,
 ) -> list[ExtractionResult] | ExtractionBatchReport:
     """
     Extract entities from child chunks in parallel, bounded by EXTRACTION_MAX_CONCURRENT.
@@ -1914,9 +1993,24 @@ async def extract_entities(
     threshold = settings.ENTITY_CONFIDENCE_THRESHOLD
     inline_limit = settings.SCHEMA_INLINE_LIMIT
     top_k = settings.SCHEMA_RETRIEVAL_TOP_K
-    max_completion_tokens = settings.EXTRACTION_MAX_TOKENS
-    max_entities = settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK
-    max_relations = settings.EXTRACTION_MAX_RELATIONS_PER_CHUNK
+    max_completion_tokens = (
+        int(max_completion_tokens_override)
+        if max_completion_tokens_override is not None
+        else settings.EXTRACTION_MAX_TOKENS
+    )
+    max_entities = (
+        int(max_entities_per_chunk)
+        if max_entities_per_chunk is not None
+        else settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK
+    )
+    max_relations = (
+        int(max_relations_per_chunk)
+        if max_relations_per_chunk is not None
+        else settings.EXTRACTION_MAX_RELATIONS_PER_CHUNK
+    )
+    max_completion_tokens = max(256, min(max_completion_tokens, settings.EXTRACTION_MAX_TOKENS))
+    max_entities = max(1, min(max_entities, settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK))
+    max_relations = max(0, min(max_relations, settings.EXTRACTION_MAX_RELATIONS_PER_CHUNK))
     headers = {
         "Authorization": f"Bearer {settings.LITELLM_MASTER_KEY}",
         "Content-Type": "application/json",
@@ -2003,16 +2097,22 @@ async def extract_entities(
             inline_limit=inline_limit,
             top_k=top_k,
         )
-        # 2-attempt retry on the same lane. Work-stealing handles
-        # cross-lane rebalancing naturally, so there's no need to jump
-        # lanes on retry — most transient failures (rate-limit, 5xx,
-        # JSON parse) recover on a fresh connection.
+        # At most two attempts on the same lane. The second attempt is reserved
+        # strictly for malformed model JSON from the first attempt. Provider /
+        # transport failures are recorded once (or escalated through the lane
+        # circuit breaker when fatal) so one bad chunk does not quietly create
+        # extra paid calls.
         last_exc: Exception | None = None
         last_error_type = "unknown"
+        attempts_used = 0
         for attempt in range(2):
+            attempts_used = attempt + 1
             recovery_mode = attempt > 0 and last_error_type == "parse_error"
-            attempt_max_entities = min(max_entities, 8) if recovery_mode else max_entities
-            attempt_max_relations = min(max_relations, 8) if recovery_mode else max_relations
+            attempt_max_entities = min(max_entities, 5) if recovery_mode else max_entities
+            attempt_max_relations = min(max_relations, 5) if recovery_mode else max_relations
+            attempt_max_tokens = (
+                min(max_completion_tokens, 2048) if recovery_mode else max_completion_tokens
+            )
             system_content = _SYSTEM + (_JSON_RECOVERY_SUFFIX if recovery_mode else "")
             payload: dict = {
                 "model": entry["model"],
@@ -2031,12 +2131,14 @@ async def extract_entities(
                             effective_entity_vocab=eff_entity,
                             effective_relation_vocab=eff_relation,
                             schema_lens=schema_lens,
+                            compact_mode=extraction_mode == "compact",
+                            recovery_mode=recovery_mode,
                         ),
                     },
                 ],
                 "temperature": 0,
                 "response_format": {"type": "json_object"},
-                "max_tokens": max_completion_tokens,
+                "max_tokens": attempt_max_tokens,
             }
             if entry.get("base_url"):
                 payload["api_base"] = entry["base_url"]
@@ -2085,6 +2187,7 @@ async def extract_entities(
                             "success": bool(result),
                             "error_type": None if result else "parse_error",
                             "recovery_mode": recovery_mode,
+                            "max_tokens": attempt_max_tokens,
                         }
                     )
                     if result:
@@ -2122,16 +2225,16 @@ async def extract_entities(
                             else last_error_type
                         ),
                         "recovery_mode": recovery_mode,
+                        "max_tokens": attempt_max_tokens,
                     }
                 )
                 if fatal_lane:
                     raise FatalLaneError(exc) from exc
-                if attempt == 0:
-                    logger.warning(
-                        "GHOST B lane %d failed chunk_id=%s attempt=%d: %s — retrying",
-                        pool_idx, task.chunk_id, attempt + 1, exc,
-                    )
-                continue
+                logger.warning(
+                    "GHOST B lane %d failed chunk_id=%s attempt=%d: %s — no retry for non-parse error",
+                    pool_idx, task.chunk_id, attempt + 1, exc,
+                )
+                break
         logger.error(
             "GHOST B failed chunk_id=%s lane=%d after 2 attempts: %s",
             task.chunk_id, pool_idx, last_exc,
@@ -2143,7 +2246,7 @@ async def extract_entities(
                 corpus_id=task.corpus_id,
                 model=str(entry["model"]),
                 lane=pool_idx,
-                attempts=2,
+                attempts=attempts_used,
                 error_type=last_error_type,
                 error_message=str(last_exc)[:1000],
             )
@@ -2304,6 +2407,7 @@ async def extract_entities(
                 failures=failures_list,
                 call_metrics=call_metrics,
                 models=[str(e["model"]) for e in pool],
+                metrics_context=metrics_context,
             ),
         )
     return results

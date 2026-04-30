@@ -264,6 +264,33 @@ class VectorScopeResult:
 
 # ── Pipeline primitives ────────────────────────────────────────────────────
 
+
+def _dense_vector_from_qdrant(vector: Any) -> list[float] | None:
+    """Return the dense list from legacy or named Qdrant vector payloads.
+
+    Older corpora store point.vector as a raw list. New hybrid lexical+dense
+    corpora store named vectors such as {"dense": [...], "sparse": ...}. Graph
+    analytics only needs the dense vector for document fingerprints.
+    """
+    if isinstance(vector, list):
+        return vector
+    if not isinstance(vector, dict):
+        return None
+
+    preferred = vector.get("dense") or vector.get("default") or vector.get("vector")
+    if isinstance(preferred, list):
+        return preferred
+    if isinstance(preferred, dict) and isinstance(preferred.get("vector"), list):
+        return preferred["vector"]
+
+    for value in vector.values():
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict) and isinstance(value.get("vector"), list):
+            return value["vector"]
+    return None
+
+
 async def get_doc_fingerprints(qdrant, corpus_id: str) -> dict[str, list[float]]:
     """Scroll the per-corpus naive Qdrant collection and mean-aggregate child
     chunk vectors into a per-document fingerprint.
@@ -293,7 +320,10 @@ async def get_doc_fingerprints(qdrant, corpus_id: str) -> dict[str, list[float]]
             doc_id = payload.get("doc_id")
             if not doc_id or r.vector is None:
                 continue
-            doc_vectors[doc_id].append(r.vector)
+            dense_vector = _dense_vector_from_qdrant(r.vector)
+            if dense_vector is None:
+                continue
+            doc_vectors[doc_id].append(dense_vector)
         if offset is None:
             break
 

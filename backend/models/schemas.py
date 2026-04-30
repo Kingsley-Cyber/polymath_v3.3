@@ -34,6 +34,18 @@ for _name, _value in vars(_legacy).items():
         globals()[_name] = _value
 
 
+def _default_entity_schema() -> list[str]:
+    from services.ontology import entity_type_names
+
+    return entity_type_names()
+
+
+def _default_relation_schema() -> list[str]:
+    from services.ontology import relation_type_names
+
+    return relation_type_names()
+
+
 class IngestionConfig(BaseModel):
     """Source-backed ingestion config for the current pipeline."""
 
@@ -79,8 +91,19 @@ class IngestionConfig(BaseModel):
     entity_confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     models_linked: bool = True
 
-    entity_schema: list[str] | None = None
-    relation_schema: list[str] | None = None
+    # Ghost B production policy. Small/normal docs use the full ontology
+    # extraction budget. Large books switch to a compact first-pass graph
+    # extraction so every body chunk still gets graph coverage without asking
+    # the model for a huge JSON object on every page-like child.
+    large_doc_child_threshold: int = Field(default=600, ge=1, le=20000)
+    full_extract_max_children: int = Field(default=600, ge=1, le=20000)
+    compact_mode_max_entities: int = Field(default=8, ge=1, le=64)
+    compact_mode_max_relations: int = Field(default=8, ge=0, le=64)
+    deep_pass_enabled: bool = False
+    deep_pass_max_chunks: int = Field(default=80, ge=0, le=20000)
+
+    entity_schema: list[str] | None = Field(default_factory=_default_entity_schema)
+    relation_schema: list[str] | None = Field(default_factory=_default_relation_schema)
     schema_strict: Literal["off", "soft", "hard"] = "soft"
 
     use_neo4j: bool = True
@@ -149,6 +172,27 @@ class WriteState(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     verified: bool | None = None
     verify_errors: list[str] = Field(default_factory=list)
+
+
+class IngestJobResponse(BaseModel):
+    """Response from POST /api/corpora/{corpus_id}/ingest.
+
+    Keep this local instead of inheriting the legacy model because this module
+    extends WriteState with warnings/verification fields. The legacy response
+    points at the legacy WriteState class, which makes FastAPI response
+    validation reject an otherwise valid current WriteState instance.
+    """
+
+    job_id: str
+    doc_id: str
+    corpus_id: str
+    filename: str
+    source_tier: str | None = None
+    status: str = Field(..., description="queued | processing | done | failed")
+    write_state: WriteState = Field(default_factory=WriteState)
+    chunk_count: int = 0
+    parent_count: int = 0
+    error: str | None = None
 
 
 class CorpusCreate(_legacy.CorpusCreate):

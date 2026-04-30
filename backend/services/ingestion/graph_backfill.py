@@ -30,6 +30,7 @@ from services.ingestion.worker import (
     _build_ghost_pool,
     _ghost_b_partial_warning,
     _rehydrate_ghost_b_staging,
+    _select_ghost_b_extraction_policy,
 )
 from services.storage.qdrant_writer import retrieve_schema_for_chunk
 
@@ -38,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 _PARTIAL_PREFIX = "Ghost B graph extraction partial:"
 _BACKFILL_PREFIX = "Ghost B backfill"
+_AUTO_BACKFILL_FAILED_PREFIX = "Ghost B auto-backfill failed:"
 
 
 def _failure_from_dict(row: dict[str, Any]) -> ExtractionFailureItem:
@@ -59,6 +61,7 @@ def _clean_graph_warnings(warnings: list[str]) -> list[str]:
         for warning in warnings
         if not warning.startswith(_PARTIAL_PREFIX)
         and not warning.startswith(_BACKFILL_PREFIX)
+        and not warning.startswith(_AUTO_BACKFILL_FAILED_PREFIX)
     ]
 
 
@@ -84,10 +87,48 @@ def _merge_metrics(
             )
         ),
     )
-    for key in ("total_tokens", "prompt_tokens", "completion_tokens", "attempt_count"):
+    for key in (
+        "total_tokens",
+        "prompt_tokens",
+        "completion_tokens",
+        "attempt_count",
+        "json_recovery_count",
+        "estimated_cost_tokens",
+        "compact_extraction_chunks",
+        "deep_extraction_chunks",
+        "full_extraction_chunks",
+        "skipped_low_value_chunks",
+    ):
         merged[key] = int(previous_metrics.get(key) or 0) + int(
             retry_metrics.get(key) or 0
         )
+    requested = int(merged.get("requested_chunks") or total_chunks or 0)
+    attempts = int(merged.get("attempt_count") or 0)
+    recoveries = int(merged.get("json_recovery_count") or 0)
+    prompt_tokens = int(merged.get("prompt_tokens") or 0)
+    merged["avg_prompt_tokens_per_chunk"] = (
+        round(prompt_tokens / requested, 2) if requested else 0.0
+    )
+    merged["json_recovery_rate"] = (
+        round(recoveries / requested, 4) if requested else 0.0
+    )
+    merged["json_recovery_attempt_rate"] = (
+        round(recoveries / attempts, 4) if attempts else 0.0
+    )
+    for key in (
+        "extraction_strategy",
+        "graph_completeness",
+        "large_doc_child_threshold",
+        "full_extract_max_children",
+        "max_entities_per_chunk",
+        "max_relations_per_chunk",
+        "max_completion_tokens",
+        "skipped_low_value_by_kind",
+    ):
+        if retry_metrics.get(key) is not None:
+            merged[key] = retry_metrics.get(key)
+        elif previous_metrics.get(key) is not None:
+            merged[key] = previous_metrics.get(key)
     merged["total_duration_seconds"] = round(
         float(previous_metrics.get("total_duration_seconds") or 0.0)
         + float(retry_metrics.get("total_duration_seconds") or 0.0),
@@ -165,6 +206,13 @@ async def backfill_failed_graph_chunks(
         live_corpus=live_cfg,
         ingest_overrides=None,
     )
+    previous_metrics = doc.get("ghost_b_metrics") or {}
+    policy = _select_ghost_b_extraction_policy(
+        config,
+        total_children=int(doc.get("chunk_count") or previous_metrics.get("total_children") or len(tasks)),
+        body_children=int(previous_metrics.get("body_children") or previous_metrics.get("requested_chunks") or len(tasks)),
+        skipped_low_value_by_kind=previous_metrics.get("skipped_low_value_by_kind") or {},
+    )
     schema_ctx = SchemaContext(
         entity_schema=config.entity_schema,
         relation_schema=config.relation_schema,
@@ -182,11 +230,21 @@ async def backfill_failed_graph_chunks(
     report = await extract_entities(
         tasks,
         schema=schema_ctx,
+        schema_lens=doc.get("schema_lens")
+        or (doc.get("ghost_b_metrics") or {}).get("schema_lens"),
         chunk_vectors=None,
         schema_resolver=_schema_resolver,
         pool=pool,
         model=None,
         return_report=True,
+        extraction_mode=policy.extraction_mode,  # type: ignore[arg-type]
+        max_entities_per_chunk=policy.max_entities_per_chunk,
+        max_relations_per_chunk=policy.max_relations_per_chunk,
+        max_completion_tokens_override=policy.max_completion_tokens,
+        metrics_context={
+            **policy.metrics(),
+            "extraction_strategy": f"{policy.extraction_strategy}_backfill",
+        },
     )
     if not isinstance(report, ExtractionBatchReport):
         raise RuntimeError("Ghost B did not return a batch report")
@@ -244,7 +302,7 @@ async def backfill_failed_graph_chunks(
         total_chunks=len(all_chunk_ids),
         staged_results=staged_results,
         remaining_failures=remaining_failures,
-        previous_metrics=doc.get("ghost_b_metrics") or {},
+        previous_metrics=previous_metrics,
         retry_metrics=report.metrics,
     )
 

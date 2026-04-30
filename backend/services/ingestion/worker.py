@@ -38,10 +38,11 @@ from models.schemas import IngestionConfig, IngestJobResponse, SourceTier, Write
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from qdrant_client import AsyncQdrantClient
 from services.embedder import embed_batch
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields as dataclass_fields
 
 from services.ghost_a import SummaryResult, SummaryTask, summarize_parents
 from services.ghost_b import (
+    CandidateFactItem,
     EntityItem,
     ExtractionBatchReport,
     ExtractionFailureItem,
@@ -62,6 +63,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 _PARSE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_PARSE_JOBS))
 _MODEL_PHASE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_MODEL_PHASE_DOCS))
+_AUTO_BACKFILL_SEMAPHORE = asyncio.Semaphore(1)
 
 
 class GhostAFailure(RuntimeError):
@@ -144,33 +146,231 @@ def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict
         for rel in r.relations
         if rel.predicate == "related_to"
     )
+    predicate_confidences = [
+        float(rel.predicate_confidence)
+        for r in results
+        for rel in r.relations
+        if rel.predicate_confidence is not None
+    ]
     lens_ids = sorted({r.schema_lens_id for r in results if r.schema_lens_id})
     return {
         "requested_chunks": len(results),
         "extracted_chunks": len(results),
         "failed_chunks": 0,
+        "failed_chunk_count": 0,
         "success_rate": 1.0,
+        "ghost_b_success_rate": 1.0,
         "attempt_count": 0,
+        "json_recovery_count": 0,
+        "json_recovery_rate": 0.0,
+        "json_recovery_attempt_rate": 0.0,
         "models": [],
         "total_tokens": 0,
         "prompt_tokens": 0,
         "completion_tokens": 0,
+        "estimated_cost_tokens": 0,
+        "avg_prompt_tokens_per_chunk": 0.0,
         "total_duration_seconds": 0.0,
         "entity_count": sum(len(r.entities) for r in results),
         "relation_count": relation_count,
+        "candidate_fact_count": sum(len(r.candidate_facts) for r in results),
         "related_to_count": related_to_count,
         "related_to_ratio": round(related_to_count / relation_count, 4) if relation_count else 0.0,
+        "predicate_confidence_avg": (
+            round(sum(predicate_confidences) / len(predicate_confidences), 4)
+            if predicate_confidences
+            else 0.0
+        ),
         "entity_remap_count": sum(r.entity_remap_count for r in results),
         "relation_remap_count": sum(r.relation_remap_count for r in results),
         "domain_range_remap_count": sum(r.domain_range_remap_count for r in results),
         "domain_range_warn_count": sum(r.domain_range_warn_count for r in results),
         "endpoint_completion_count": sum(r.endpoint_completion_count for r in results),
         "evidence_cue_repair_count": sum(r.evidence_cue_repair_count for r in results),
+        "direction_repair_count": sum(r.direction_repair_count for r in results),
+        "review_relation_count": sum(
+            1
+            for r in results
+            for rel in r.relations
+            if rel.review_status
+            or "review_required" in str(rel.validation_status or "")
+        ),
         "entity_drop_count": sum(r.entity_drop_count for r in results),
         "relation_drop_count": sum(r.relation_drop_count for r in results),
         "schema_lens_ids": lens_ids,
         "error_counts": {},
+        "extraction_strategy": "staging_reused",
+        "graph_completeness": "graph-complete",
+        "skipped_low_value_chunks": 0,
+        "compact_extraction_chunks": 0,
+        "deep_extraction_chunks": 0,
+        "full_extraction_chunks": len(results),
     }
+
+
+@dataclass(frozen=True)
+class GhostBExtractionPolicy:
+    """Per-document Ghost B extraction budget.
+
+    The policy is deliberately a budget selector, not a schema selector. Full
+    and compact modes both keep the same ontology and deterministic compiler;
+    compact mode only lowers JSON output pressure for huge documents.
+    """
+
+    extraction_strategy: str
+    extraction_mode: str
+    graph_completeness: str
+    reason: str
+    total_children: int
+    body_children: int
+    skipped_low_value_chunks: int
+    skipped_low_value_by_kind: dict[str, int]
+    full_extraction_chunks: int
+    compact_extraction_chunks: int
+    deep_extraction_chunks: int
+    max_entities_per_chunk: int
+    max_relations_per_chunk: int
+    max_completion_tokens: int
+    large_doc_child_threshold: int
+    full_extract_max_children: int
+    deep_pass_enabled: bool
+    deep_pass_max_chunks: int
+
+    def metrics(self) -> dict:
+        return asdict(self)
+
+
+def _config_int(config: IngestionConfig, name: str, default: int) -> int:
+    try:
+        return int(getattr(config, name, default))
+    except Exception:
+        return default
+
+
+def _select_ghost_b_extraction_policy(
+    config: IngestionConfig,
+    *,
+    total_children: int,
+    body_children: int,
+    skipped_low_value_by_kind: dict[str, int] | None = None,
+) -> GhostBExtractionPolicy:
+    """Choose full vs compact Ghost B extraction for this document."""
+    large_threshold = max(1, _config_int(config, "large_doc_child_threshold", 600))
+    full_cap = max(1, _config_int(config, "full_extract_max_children", large_threshold))
+    compact_entities = max(1, min(_config_int(config, "compact_mode_max_entities", 8), settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK))
+    compact_relations = max(0, min(_config_int(config, "compact_mode_max_relations", 8), settings.EXTRACTION_MAX_RELATIONS_PER_CHUNK))
+    deep_enabled = bool(getattr(config, "deep_pass_enabled", False))
+    deep_max = max(0, _config_int(config, "deep_pass_max_chunks", 80))
+    skipped_by_kind = dict(skipped_low_value_by_kind or {})
+    skipped_total = sum(int(v or 0) for v in skipped_by_kind.values())
+
+    is_large = body_children >= large_threshold or body_children > full_cap
+    if is_large:
+        return GhostBExtractionPolicy(
+            extraction_strategy="compact_large_doc",
+            extraction_mode="compact",
+            graph_completeness="graph-compact",
+            reason=(
+                f"body_children={body_children} exceeds large_doc_child_threshold="
+                f"{large_threshold} or full_extract_max_children={full_cap}"
+            ),
+            total_children=total_children,
+            body_children=body_children,
+            skipped_low_value_chunks=skipped_total,
+            skipped_low_value_by_kind=skipped_by_kind,
+            full_extraction_chunks=0,
+            compact_extraction_chunks=body_children,
+            deep_extraction_chunks=0,
+            max_entities_per_chunk=compact_entities,
+            max_relations_per_chunk=compact_relations,
+            max_completion_tokens=min(settings.EXTRACTION_MAX_TOKENS, 2048),
+            large_doc_child_threshold=large_threshold,
+            full_extract_max_children=full_cap,
+            deep_pass_enabled=deep_enabled,
+            deep_pass_max_chunks=deep_max,
+        )
+
+    return GhostBExtractionPolicy(
+        extraction_strategy="full_ontology",
+        extraction_mode="full",
+        graph_completeness="graph-complete",
+        reason="body_children within full extraction budget",
+        total_children=total_children,
+        body_children=body_children,
+        skipped_low_value_chunks=skipped_total,
+        skipped_low_value_by_kind=skipped_by_kind,
+        full_extraction_chunks=body_children,
+        compact_extraction_chunks=0,
+        deep_extraction_chunks=0,
+        max_entities_per_chunk=settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK,
+        max_relations_per_chunk=settings.EXTRACTION_MAX_RELATIONS_PER_CHUNK,
+        max_completion_tokens=settings.EXTRACTION_MAX_TOKENS,
+        large_doc_child_threshold=large_threshold,
+        full_extract_max_children=full_cap,
+        deep_pass_enabled=deep_enabled,
+        deep_pass_max_chunks=deep_max,
+    )
+
+
+_HIGH_SIGNAL_ENTITY_RE = re.compile(r"\b(?:[A-Z][A-Za-z0-9_./+-]{2,}|[A-Z]{2,})\b")
+_HIGH_SIGNAL_RELATION_RE = re.compile(
+    r"\b("
+    r"uses?|depends?|requires?|implements?|produces?|stores?|extracts?|detects?|"
+    r"classifies?|runs?\s+on|trained\s+on|supports?|references?|defines?|measures?|"
+    r"tests?|applied\s+to|causes?|motivates?|reinforces?|undermines?"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _high_signal_score(chunk, schema_lens: Any | None = None) -> float:
+    """Cheap signal score for optional deep extraction.
+
+    It is intentionally lexical and bounded. No embeddings or graph analytics
+    run here, so query-time and ingest-time costs stay predictable.
+    """
+    text = str(getattr(chunk, "text", "") or "")
+    if not text.strip():
+        return 0.0
+    sample = text[:2400]
+    score = 0.0
+    token_count = int(getattr(chunk, "token_count", 0) or 0)
+    if token_count >= 250:
+        score += 0.75
+    heading_path = getattr(chunk, "heading_path", None) or []
+    if heading_path and not re.match(r"^pages?_\d", str(heading_path[0]).lower()):
+        score += 1.0
+    entity_hits = len(_HIGH_SIGNAL_ENTITY_RE.findall(sample))
+    relation_hits = len(_HIGH_SIGNAL_RELATION_RE.findall(sample))
+    score += min(entity_hits, 12) * 0.18
+    score += min(relation_hits, 8) * 0.35
+    lens = schema_lens if hasattr(schema_lens, "preferred_relations") else None
+    if lens:
+        lower = sample.lower()
+        score += sum(0.4 for term in lens.preferred_relations[:10] if term.replace("_", " ") in lower)
+        score += sum(0.25 for term in lens.object_kinds[:10] if str(term).lower() in lower)
+        score += sum(0.25 for term in lens.canonical_families[:10] if str(term).replace("_", " ").lower() in lower)
+    return score
+
+
+def _select_high_signal_children(
+    children: list,
+    *,
+    schema_lens: Any | None = None,
+    limit: int,
+) -> list:
+    if limit <= 0:
+        return []
+    scored = [
+        (_high_signal_score(child, schema_lens=schema_lens), str(getattr(child, "chunk_id", "")), child)
+        for child in children
+    ]
+    selected = [
+        child
+        for score, _chunk_id, child in sorted(scored, key=lambda item: (-item[0], item[1]))
+        if score >= 2.0
+    ]
+    return selected[:limit]
 
 
 def _build_ghost_pool(refs) -> list[dict]:
@@ -200,34 +400,78 @@ def _build_ghost_pool(refs) -> list[dict]:
     return out
 
 
-def _rehydrate_ghost_b_staging(staged: list[dict]) -> list[ExtractionResult]:
-    """Reconstruct ExtractionResult dataclasses from a Mongo-stored staging list.
+def _dataclass_from_staged(cls, row: dict, *, context: str):
+    """Rehydrate persisted staging rows while ignoring stale/extra keys."""
+    if not isinstance(row, dict):
+        return None
+    allowed = {item.name for item in dataclass_fields(cls)}
+    try:
+        return cls(**{key: value for key, value in row.items() if key in allowed})
+    except (TypeError, ValueError) as exc:
+        logger.warning("phase=ghost_b_rehydrate_skip context=%s error=%s", context, exc)
+        return None
 
-    Dataclasses aren't Pydantic, so `**r` unpack won't work directly — the
-    nested `entities` / `relations` arrays need their own EntityItem /
-    RelationItem construction.
-    """
+
+def _normalize_staged_relation_object_kind(value: str) -> str:
+    key = re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
+    if key in {"literal", "value", "scalar", "string", "number", "date", "literal_value"}:
+        return "literal"
+    if key in {"", "entity", "node", "named_entity", "canonical_entity"}:
+        return "entity"
+    return "entity"
+
+
+def _rehydrate_ghost_b_staging(staged: list[dict]) -> list[ExtractionResult]:
+    """Reconstruct ExtractionResult dataclasses from Mongo-stored staging rows."""
     out: list[ExtractionResult] = []
     for r in staged:
-        out.append(
-            ExtractionResult(
-                schema_version=r.get("schema_version", "polymath.extract.v1"),
-                chunk_id=r["chunk_id"],
-                doc_id=r["doc_id"],
-                corpus_id=r["corpus_id"],
-                entities=[EntityItem(**e) for e in r.get("entities", [])],
-                relations=[RelationItem(**x) for x in r.get("relations", [])],
-                entity_remap_count=r.get("entity_remap_count", 0),
-                entity_drop_count=r.get("entity_drop_count", 0),
-                relation_remap_count=r.get("relation_remap_count", 0),
-                relation_drop_count=r.get("relation_drop_count", 0),
-                domain_range_remap_count=r.get("domain_range_remap_count", 0),
-                domain_range_warn_count=r.get("domain_range_warn_count", 0),
-                endpoint_completion_count=r.get("endpoint_completion_count", 0),
-                evidence_cue_repair_count=r.get("evidence_cue_repair_count", 0),
-                schema_lens_id=r.get("schema_lens_id"),
+        if not isinstance(r, dict):
+            continue
+        entities = [
+            item
+            for item in (
+                _dataclass_from_staged(EntityItem, e, context="entity")
+                for e in r.get("entities", [])
             )
+            if item is not None
+        ]
+        candidate_facts = [
+            item
+            for item in (
+                _dataclass_from_staged(CandidateFactItem, f, context="candidate_fact")
+                for f in r.get("candidate_facts", [])
+            )
+            if item is not None
+        ]
+        relations = []
+        for x in r.get("relations", []):
+            item = _dataclass_from_staged(RelationItem, x, context="relation")
+            if item is None:
+                continue
+            item.object_kind = _normalize_staged_relation_object_kind(item.object_kind)
+            relations.append(item)
+        result = _dataclass_from_staged(
+            ExtractionResult,
+            {
+                **r,
+                "schema_version": r.get("schema_version", "polymath.extract.v1"),
+                "entities": entities,
+                "candidate_facts": candidate_facts,
+                "relations": relations,
+                "entity_remap_count": r.get("entity_remap_count", 0),
+                "entity_drop_count": r.get("entity_drop_count", 0),
+                "relation_remap_count": r.get("relation_remap_count", 0),
+                "relation_drop_count": r.get("relation_drop_count", 0),
+                "domain_range_remap_count": r.get("domain_range_remap_count", 0),
+                "domain_range_warn_count": r.get("domain_range_warn_count", 0),
+                "endpoint_completion_count": r.get("endpoint_completion_count", 0),
+                "evidence_cue_repair_count": r.get("evidence_cue_repair_count", 0),
+                "direction_repair_count": r.get("direction_repair_count", 0),
+            },
+            context="result",
         )
+        if result is not None:
+            out.append(result)
     return out
 
 
@@ -462,6 +706,7 @@ async def _run_ghosts_parallel(
         return results
 
     async def _b_branch() -> list[ExtractionResult] | None:
+        nonlocal ghost_b_metrics
         if not need_ghost_b:
             # Either Ghost B is disabled / already done, or staging already
             # rehydrated the previous run's output. Return staging (None
@@ -488,6 +733,12 @@ async def _run_ghosts_parallel(
                 len(body_children),
                 len(children),
             )
+        policy = _select_ghost_b_extraction_policy(
+            config,
+            total_children=len(children),
+            body_children=len(body_children),
+            skipped_low_value_by_kind=skipped_kinds,
+        )
         tasks = [
             ExtractionTask(
                 chunk_id=c.chunk_id,
@@ -544,14 +795,25 @@ async def _run_ghosts_parallel(
         # terms — this is the documented degraded mode (GOTCHA #42).
         reason = "fresh_ingest" if not ws.mongo_written else "staging_missing_legacy_doc"
         logger.info(
-            "phase=ghost_b_run reason=%s doc=%s corpus=%s children=%d pool=%d strict=%s",
+            "phase=ghost_b_run reason=%s doc=%s corpus=%s children=%d pool=%d strict=%s strategy=%s mode=%s max_entities=%d max_relations=%d max_tokens=%d",
             reason,
             doc_id[:12],
             corpus_id[:8],
             len(tasks),
             len(pool) or 1,
             schema_ctx.strict,
+            policy.extraction_strategy,
+            policy.extraction_mode,
+            policy.max_entities_per_chunk,
+            policy.max_relations_per_chunk,
+            policy.max_completion_tokens,
         )
+        if not tasks:
+            metrics = dict(_ghost_b_metrics_for_skipped([]) or {})
+            metrics.update(policy.metrics())
+            metrics["schema_lens"] = schema_lens.to_dict()
+            ghost_b_metrics = metrics
+            return []
         report = await extract_entities(
             tasks,
             schema=schema_ctx,
@@ -561,6 +823,11 @@ async def _run_ghosts_parallel(
             pool=pool,
             model=model,
             return_report=True,
+            extraction_mode=policy.extraction_mode,  # type: ignore[arg-type]
+            max_entities_per_chunk=policy.max_entities_per_chunk,
+            max_relations_per_chunk=policy.max_relations_per_chunk,
+            max_completion_tokens_override=policy.max_completion_tokens,
+            metrics_context=policy.metrics(),
         )
         if not isinstance(report, ExtractionBatchReport):
             results = report
@@ -571,9 +838,91 @@ async def _run_ghosts_parallel(
             failures = report.failures
             metrics = report.metrics
         metrics = dict(metrics or {})
+        if (
+            policy.extraction_mode == "compact"
+            and policy.deep_pass_enabled
+            and policy.deep_pass_max_chunks > 0
+            and results
+        ):
+            deep_children = _select_high_signal_children(
+                body_children,
+                schema_lens=schema_lens,
+                limit=policy.deep_pass_max_chunks,
+            )
+            already_failed = {failure.chunk_id for failure in failures}
+            deep_tasks = [
+                ExtractionTask(
+                    chunk_id=c.chunk_id,
+                    doc_id=c.doc_id,
+                    corpus_id=c.corpus_id,
+                    text=c.text,
+                )
+                for c in deep_children
+                if c.chunk_id not in already_failed
+            ]
+            if deep_tasks:
+                logger.info(
+                    "phase=ghost_b_deep_pass doc=%s corpus=%s selected=%d limit=%d",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    len(deep_tasks),
+                    policy.deep_pass_max_chunks,
+                )
+                deep_report = await extract_entities(
+                    deep_tasks,
+                    schema=schema_ctx,
+                    schema_lens=schema_lens,
+                    chunk_vectors=None,
+                    schema_resolver=_schema_resolver,
+                    pool=pool,
+                    model=model,
+                    return_report=True,
+                    extraction_mode="full",
+                    metrics_context={
+                        "extraction_strategy": "deep_pass_high_signal",
+                        "graph_completeness": "graph-compact",
+                    },
+                )
+                if isinstance(deep_report, ExtractionBatchReport):
+                    deep_results = deep_report.results
+                    result_by_chunk = {r.chunk_id: r for r in results}
+                    for item in deep_results:
+                        result_by_chunk[item.chunk_id] = item
+                    results = list(result_by_chunk.values())
+                    deep_metrics = deep_report.metrics
+                    metrics["deep_extraction_chunks"] = len(deep_tasks)
+                    metrics["deep_extracted_chunks"] = len(deep_results)
+                    metrics["deep_failed_chunks"] = len(deep_report.failures)
+                    metrics["deep_total_tokens"] = int(deep_metrics.get("total_tokens") or 0)
+                    metrics["deep_prompt_tokens"] = int(deep_metrics.get("prompt_tokens") or 0)
+                    metrics["deep_completion_tokens"] = int(deep_metrics.get("completion_tokens") or 0)
+                    metrics["total_tokens"] = int(metrics.get("total_tokens") or 0) + metrics["deep_total_tokens"]
+                    metrics["prompt_tokens"] = int(metrics.get("prompt_tokens") or 0) + metrics["deep_prompt_tokens"]
+                    metrics["completion_tokens"] = int(metrics.get("completion_tokens") or 0) + metrics["deep_completion_tokens"]
+                    metrics["estimated_cost_tokens"] = int(metrics.get("total_tokens") or 0)
+                    metrics["attempt_count"] = int(metrics.get("attempt_count") or 0) + int(deep_metrics.get("attempt_count") or 0)
+                    metrics["json_recovery_count"] = int(metrics.get("json_recovery_count") or 0) + int(deep_metrics.get("json_recovery_count") or 0)
+                    metrics["graph_completeness"] = "graph-compact"
+                    metrics["extraction_strategy"] = "compact_large_doc_with_deep_pass"
+                    metrics["entity_count"] = sum(len(r.entities) for r in results)
+                    metrics["relation_count"] = sum(len(r.relations) for r in results)
+                    metrics["candidate_fact_count"] = sum(len(r.candidate_facts) for r in results)
+                    metrics["related_to_count"] = sum(
+                        1 for r in results for rel in r.relations if rel.predicate == "related_to"
+                    )
+                    relation_count = int(metrics.get("relation_count") or 0)
+                    metrics["related_to_ratio"] = (
+                        round(int(metrics.get("related_to_count") or 0) / relation_count, 4)
+                        if relation_count
+                        else 0.0
+                    )
+                    requested = int(metrics.get("requested_chunks") or len(tasks))
+                    attempts = int(metrics.get("attempt_count") or 0)
+                    recoveries = int(metrics.get("json_recovery_count") or 0)
+                    metrics["json_recovery_rate"] = round(recoveries / requested, 4) if requested else 0.0
+                    metrics["json_recovery_attempt_rate"] = round(recoveries / attempts, 4) if attempts else 0.0
         metrics["schema_lens"] = schema_lens.to_dict()
         ghost_b_failures.extend(failures)
-        nonlocal ghost_b_metrics
         ghost_b_metrics = metrics
         if len(results) < len(tasks):
             missing_ids = sorted({t.chunk_id for t in tasks} - {r.chunk_id for r in results})
@@ -954,6 +1303,87 @@ async def _write_neo4j_for_doc(
     )
 
 
+async def _auto_backfill_graph_failures_once(
+    *,
+    db: AsyncIOMotorDatabase,
+    qdrant_client: AsyncQdrantClient,
+    neo4j_driver,
+    doc_id: str,
+    corpus_id: str,
+    user_id: str,
+    ws: WriteState,
+) -> WriteState:
+    """Run one controlled Ghost B backfill pass before the ingest job completes.
+
+    `partial` is a valid internal recovery state, but production ingestion
+    should not make the user manually schedule retry work. This uses the
+    existing persisted `ghost_b_failures` list, retries only those chunks, and
+    patches Neo4j incrementally. Remaining failures stay visible for audit.
+    """
+    if neo4j_driver is None:
+        return ws
+
+    doc = await mongo_reader.get_document(db, doc_id, corpus_id=corpus_id)
+    failures = (doc or {}).get("ghost_b_failures") or []
+    if not failures:
+        return ws
+
+    async with _AUTO_BACKFILL_SEMAPHORE:
+        # Another job or manual endpoint may have recovered this document while
+        # we waited for the global backfill lane.
+        latest = await mongo_reader.get_document(db, doc_id, corpus_id=corpus_id)
+        if not ((latest or {}).get("ghost_b_failures") or []):
+            if latest and latest.get("write_state"):
+                return WriteState(**latest["write_state"])
+            return ws
+
+        from services.ingestion.graph_backfill import backfill_failed_graph_chunks
+
+        t0 = time.monotonic()
+        try:
+            result = await backfill_failed_graph_chunks(
+                db=db,
+                qdrant_client=qdrant_client,
+                neo4j_driver=neo4j_driver,
+                corpus_id=corpus_id,
+                doc_id=doc_id,
+                user_id=user_id,
+            )
+            logger.info(
+                "phase=ghost_b_auto_backfill duration=%.2fs doc=%s corpus=%s retried=%d recovered=%d remaining=%d",
+                time.monotonic() - t0,
+                doc_id[:12],
+                corpus_id[:8],
+                int(result.get("retried_chunks") or 0),
+                int(result.get("recovered_chunks") or 0),
+                int(result.get("remaining_failed_chunks") or 0),
+            )
+        except Exception as exc:
+            logger.exception(
+                "phase=ghost_b_auto_backfill_failed doc=%s corpus=%s: %s",
+                doc_id[:12],
+                corpus_id[:8],
+                exc,
+            )
+            warnings = _merge_warnings(
+                list(ws.warnings or []),
+                [f"Ghost B auto-backfill failed: {str(exc)[:500]}"],
+            )
+            await mongo_writer.update_write_state(
+                db,
+                doc_id,
+                corpus_id=corpus_id,
+                warnings=warnings,
+            )
+            ws.warnings = warnings
+            return ws
+
+        refreshed = await mongo_reader.get_document(db, doc_id, corpus_id=corpus_id)
+        if refreshed and refreshed.get("write_state"):
+            return WriteState(**refreshed["write_state"])
+    return ws
+
+
 async def run_ingest_job(
     job_id: str,
     data: bytes,
@@ -1308,6 +1738,23 @@ async def run_ingest_job(
                 cid8,
                 len(ghost_b_out),
             )
+
+    if (
+        ingestion_config.use_neo4j
+        and settings.NEO4J_ENABLED
+        and ws.mongo_written
+        and ws.qdrant_written
+        and ws.neo4j_written
+    ):
+        ws = await _auto_backfill_graph_failures_once(
+            db=db,
+            qdrant_client=qdrant_client,
+            neo4j_driver=neo4j_driver,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            ws=ws,
+        )
 
     # Corpus counters — only increment on a genuinely fresh ingest.
     if ws.mongo_written and not existing_doc:

@@ -20,6 +20,7 @@ from services.graph.analytics import (
     DomainMap,
     cluster_docs,
     compute_corpus_change_signature,
+    _dense_vector_from_qdrant,
     _deserialize_domain_map,
     label_clusters,
     top_entities_per_cluster,
@@ -30,6 +31,14 @@ from services.graph.analytics import (
 
 def test_cluster_docs_empty_returns_empty():
     assert cluster_docs({}) == {}
+
+
+def test_dense_vector_from_qdrant_supports_named_vectors():
+    assert _dense_vector_from_qdrant([0.1, 0.2]) == [0.1, 0.2]
+    assert _dense_vector_from_qdrant({"dense": [0.1, 0.2], "sparse": {"indices": [1]}}) == [0.1, 0.2]
+    assert _dense_vector_from_qdrant({"dense": {"vector": [0.5, 0.6]}}) == [0.5, 0.6]
+    assert _dense_vector_from_qdrant({"default": {"vector": [0.3, 0.4]}}) == [0.3, 0.4]
+    assert _dense_vector_from_qdrant({"sparse": {"indices": [1], "values": [1.0]}}) is None
 
 
 def test_cluster_docs_tiny_corpus_single_bucket():
