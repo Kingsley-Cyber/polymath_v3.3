@@ -1,24 +1,26 @@
 """
-Ingestion pipeline worker — locked pipeline order:
+Ingestion pipeline worker — staged production pipeline:
 
   1. Parse     → docling_adapter.parse_document
   2. Chunk     → tier_chunker.chunk (parents + children)
-  3. Ghosts    → summary then extraction under the model-phase semaphore
-                 Ghost A runs iff chunk_summarization=True.
-                 Ghost B runs iff use_neo4j=True.
-                 Either branch is a no-op (returns None) when its flag is off.
+  3. Ghost A   → parent summaries under the model-phase semaphore.
+                 Required summaries still run before Mongo because they are
+                 embedded into parent chunks.
   4. Mongo     → ONE write pass: documents (summaries INLINE on parent_chunks)
                  + chunks. Flip mongo_written.
   5. Embed     → one embed_batch call over children+summary texts.
                  mode / dim / model-id come from ingestion_config.
   6. Qdrant    → children → naive / hrag (tier-filtered) / graph,
-                 summaries → naive + hrag only. Flip qdrant_written.
-  7. Neo4j     → write_document_graph. Flip neo4j_written.
+                 summaries → naive + hrag only. Flip qdrant_written and
+                 vector_ready.
+  7. Ghost B   → async-style graph enrichment lane after vector readiness.
+  8. Neo4j     → write_document_graph incrementally. Flip neo4j_written.
                  Skipped entirely when use_neo4j=False.
 
 Ghost A failure is a hard abort because parent summaries feed retrieval.
-Ghost B partial extraction is a soft warning: Mongo/Qdrant still commit, Neo4j
-keeps full chunk coverage, and only entity/relation extraction is partial.
+Ghost B failure/partial extraction is a graph-status warning after vector_ready:
+Mongo/Qdrant stay usable, Neo4j keeps full chunk coverage when it can write, and
+failed graph chunks are recoverable through backfill.
 Resume logic (Decision D) reuses existing Mongo summaries and probes Neo4j for
 MENTIONS so we never pay the LLM twice for work already persisted.
 """
@@ -64,6 +66,12 @@ settings = get_settings()
 _PARSE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_PARSE_JOBS))
 _MODEL_PHASE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_MODEL_PHASE_DOCS))
 _AUTO_BACKFILL_SEMAPHORE = asyncio.Semaphore(1)
+GRAPH_PENDING = "graph_pending"
+GRAPH_EXTRACTING = "graph_extracting"
+GRAPH_PARTIAL = "graph_partial"
+GRAPH_READY = "graph_ready"
+GRAPH_NEEDS_BACKFILL = "needs_backfill"
+GRAPH_SKIPPED = "graph_skipped"
 
 
 class GhostAFailure(RuntimeError):
@@ -121,6 +129,143 @@ def _merge_warnings(existing: list[str] | None, new: list[str] | None) -> list[s
         if text and text not in merged:
             merged.append(text)
     return merged
+
+
+def _graph_enabled(config: IngestionConfig) -> bool:
+    return bool(config.use_neo4j and settings.NEO4J_ENABLED)
+
+
+def _graph_counts(
+    *,
+    ghost_b_out: list[ExtractionResult] | None = None,
+    ghost_b_failures: list[ExtractionFailureItem] | None = None,
+    ghost_b_metrics: dict | None = None,
+) -> tuple[int, int]:
+    metrics = ghost_b_metrics or {}
+    extracted = int(metrics.get("extracted_chunks") or len(ghost_b_out or []))
+    failed = int(
+        metrics.get("failed_chunk_count")
+        or metrics.get("failed_chunks")
+        or len(ghost_b_failures or [])
+    )
+    return extracted, failed
+
+
+def _graph_status_after_extraction(
+    *,
+    ghost_b_out: list[ExtractionResult] | None,
+    ghost_b_failures: list[ExtractionFailureItem] | None,
+    ghost_b_metrics: dict | None,
+) -> str:
+    metrics = ghost_b_metrics or {}
+    extracted, failed = _graph_counts(
+        ghost_b_out=ghost_b_out,
+        ghost_b_failures=ghost_b_failures,
+        ghost_b_metrics=metrics,
+    )
+    requested = int(metrics.get("requested_chunks") or (extracted + failed))
+    if failed:
+        return GRAPH_PARTIAL
+    if requested and extracted < requested:
+        return GRAPH_PARTIAL
+    return GRAPH_READY
+
+
+def _refresh_derived_write_state(ws: WriteState, *, config: IngestionConfig) -> WriteState:
+    """Fill new staged-ingest status fields for legacy documents."""
+    ws.vector_ready = bool(ws.vector_ready or (ws.mongo_written and ws.qdrant_written))
+    if not _graph_enabled(config):
+        ws.graph_status = ws.graph_status or GRAPH_SKIPPED
+        ws.graph_completeness = ws.graph_completeness or "graph-skipped"
+    elif ws.neo4j_written:
+        ws.graph_status = ws.graph_status or GRAPH_READY
+        ws.graph_completeness = ws.graph_completeness or "graph-complete"
+    elif ws.mongo_written and ws.qdrant_written:
+        # A crashed extraction can leave an old "extracting" marker. On resume,
+        # make it pending so the worker can safely pick the graph lane back up.
+        if ws.graph_status in (None, GRAPH_EXTRACTING):
+            ws.graph_status = GRAPH_PENDING
+    else:
+        ws.graph_status = ws.graph_status or GRAPH_PENDING
+    return ws
+
+
+async def _update_graph_write_state(
+    *,
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+    ws: WriteState,
+    status: str,
+    ghost_b_out: list[ExtractionResult] | None = None,
+    ghost_b_failures: list[ExtractionFailureItem] | None = None,
+    ghost_b_metrics: dict | None = None,
+    started_at: datetime | None | bool = False,
+    finished_at: datetime | None | bool = False,
+) -> None:
+    extracted, failed = _graph_counts(
+        ghost_b_out=ghost_b_out,
+        ghost_b_failures=ghost_b_failures,
+        ghost_b_metrics=ghost_b_metrics,
+    )
+    metrics = ghost_b_metrics or {}
+    ws.graph_status = status
+    ws.graph_extracted_chunk_count = extracted
+    ws.graph_failed_chunk_count = failed
+    if metrics.get("extraction_strategy"):
+        ws.graph_extraction_strategy = str(metrics.get("extraction_strategy"))
+    if metrics.get("graph_completeness"):
+        ws.graph_completeness = str(metrics.get("graph_completeness"))
+    elif status == GRAPH_SKIPPED:
+        ws.graph_completeness = "graph-skipped"
+    elif status in (GRAPH_PARTIAL, GRAPH_NEEDS_BACKFILL):
+        ws.graph_completeness = "needs-backfill"
+    elif status == GRAPH_READY:
+        ws.graph_completeness = ws.graph_completeness or "graph-complete"
+    flags: dict[str, Any] = {
+        "graph_status": ws.graph_status,
+        "graph_extracted_chunk_count": ws.graph_extracted_chunk_count,
+        "graph_failed_chunk_count": ws.graph_failed_chunk_count,
+        "graph_extraction_strategy": ws.graph_extraction_strategy,
+        "graph_completeness": ws.graph_completeness,
+    }
+    if started_at is not False:
+        ws.graph_extraction_started_at = started_at
+        flags["graph_extraction_started_at"] = started_at
+    if finished_at is not False:
+        ws.graph_extraction_finished_at = finished_at
+        flags["graph_extraction_finished_at"] = finished_at
+    await mongo_writer.update_write_state(
+        db,
+        doc_id,
+        corpus_id=corpus_id,
+        **flags,
+    )
+
+
+async def _persist_graph_extraction(
+    *,
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+    ghost_b_out: list[ExtractionResult] | None,
+    ghost_b_failures: list[ExtractionFailureItem] | None,
+    ghost_b_metrics: dict | None,
+    warnings: list[str],
+) -> None:
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {
+            "$set": {
+                "write_state.warnings": warnings,
+                "ghost_b_staging": [asdict(r) for r in (ghost_b_out or [])],
+                "ghost_b_failures": [asdict(f) for f in (ghost_b_failures or [])],
+                "ghost_b_metrics": ghost_b_metrics or {},
+                "schema_lens": (ghost_b_metrics or {}).get("schema_lens"),
+                "updated_at": datetime.utcnow(),
+            }
+        },
+    )
 
 
 def _ghost_b_partial_warning(
@@ -581,8 +726,10 @@ async def _run_ghosts_parallel(
     neo4j_driver,
     existing_doc: dict | None,
     ws: WriteState,
+    include_ghost_a: bool = True,
+    include_ghost_b: bool = True,
 ) -> GhostRunResult:
-    """Fan out GHOST A + GHOST B in parallel. Either branch may be disabled
+    """Run GHOST A and/or GHOST B. Either branch may be disabled
     by config OR skipped via resume gates (Decision D).
 
     Hard-abort semantics: Ghost A still raises on partial summaries. Ghost B
@@ -597,7 +744,7 @@ async def _run_ghosts_parallel(
         (existing_doc or {}).get("parent_chunks") or []
     )
     summaries_from_mongo: list[SummaryResult] | None = None
-    need_ghost_a = config.chunk_summarization
+    need_ghost_a = bool(include_ghost_a and config.chunk_summarization)
 
     if need_ghost_a and ws.qdrant_written:
         # Summaries already embedded into Qdrant on a prior run; nothing to do.
@@ -623,7 +770,10 @@ async def _run_ghosts_parallel(
 
     # ── GHOST B path decisions ────────────────────────────────────────────
     need_ghost_b = (
-        config.use_neo4j and settings.NEO4J_ENABLED and not ws.neo4j_written
+        include_ghost_b
+        and config.use_neo4j
+        and settings.NEO4J_ENABLED
+        and not ws.neo4j_written
     )
     ghost_b_from_staging: list[ExtractionResult] | None = None
     if need_ghost_b and neo4j_driver is None:
@@ -793,7 +943,10 @@ async def _run_ghosts_parallel(
         # (no resolver call). For larger vocabs the resolver cannot use real
         # chunk vectors and resolve_chunk_vocab falls back to the first N
         # terms — this is the documented degraded mode (GOTCHA #42).
-        reason = "fresh_ingest" if not ws.mongo_written else "staging_missing_legacy_doc"
+        if ws.vector_ready and ws.graph_status == GRAPH_EXTRACTING:
+            reason = "graph_enrichment"
+        else:
+            reason = "fresh_ingest" if not ws.mongo_written else "staging_missing_legacy_doc"
         logger.info(
             "phase=ghost_b_run reason=%s doc=%s corpus=%s children=%d pool=%d strict=%s strategy=%s mode=%s max_entities=%d max_relations=%d max_tokens=%d",
             reason,
@@ -1374,8 +1527,10 @@ async def _auto_backfill_graph_failures_once(
                 doc_id,
                 corpus_id=corpus_id,
                 warnings=warnings,
+                graph_status=GRAPH_NEEDS_BACKFILL,
             )
             ws.warnings = warnings
+            ws.graph_status = GRAPH_NEEDS_BACKFILL
             return ws
 
         refreshed = await mongo_reader.get_document(db, doc_id, corpus_id=corpus_id)
@@ -1500,6 +1655,7 @@ async def run_ingest_job(
         ws = WriteState(**existing_doc["write_state"])
     else:
         ws = WriteState()
+    ws = _refresh_derived_write_state(ws, config=ingestion_config)
     file_id = (
         existing_doc.get("file_id", str(uuid.uuid4()))
         if existing_doc
@@ -1529,7 +1685,9 @@ async def run_ingest_job(
         except Exception as _exc:
             logger.debug("on_doc_id callback raised: %s", _exc)
 
-    # ── Phase 3: Ghost model phases ──────────────────────────────────────
+    # ── Phase 3: Ghost A summary lane ───────────────────────────────────
+    # Ghost B intentionally does not run here. Mongo/Qdrant must become
+    # usable for vector RAG before graph enrichment starts.
     async with _MODEL_PHASE_SEMAPHORE:
         t0 = time.monotonic()
         ghost_result = await _run_ghosts_parallel(
@@ -1545,32 +1703,29 @@ async def run_ingest_job(
             neo4j_driver=neo4j_driver,
             existing_doc=existing_doc,
             ws=ws,
+            include_ghost_a=True,
+            include_ghost_b=False,
         )
     if isinstance(ghost_result, GhostRunResult):
         summaries = ghost_result.summaries
-        ghost_b_out = ghost_result.ghost_b_out
         ingest_warnings = ghost_result.warnings
-        ghost_b_failures = ghost_result.ghost_b_failures
-        ghost_b_metrics = ghost_result.ghost_b_metrics
     else:
         # Backward-compatible path for older tests/mocks that still return the
         # pre-metrics two-tuple.
         ghost_tuple = tuple(ghost_result)
         summaries = ghost_tuple[0] if len(ghost_tuple) > 0 else None
-        ghost_b_out = ghost_tuple[1] if len(ghost_tuple) > 1 else None
         ingest_warnings = ghost_tuple[2] if len(ghost_tuple) > 2 else []
-        ghost_b_failures = ghost_tuple[3] if len(ghost_tuple) > 3 else []
-        ghost_b_metrics = ghost_tuple[4] if len(ghost_tuple) > 4 else _ghost_b_metrics_for_skipped(ghost_b_out)
+    ghost_b_out: list[ExtractionResult] | None = None
+    ghost_b_failures: list[ExtractionFailureItem] = []
+    ghost_b_metrics: dict | None = None
     ws.warnings = _merge_warnings(ws.warnings, ingest_warnings)
     logger.info(
-        "phase=ghosts duration=%.2fs doc=%s corpus=%s ghost_a=%s ghost_b=%s warnings=%d failed_chunks=%d",
+        "phase=ghost_a duration=%.2fs doc=%s corpus=%s status=%s warnings=%d",
         time.monotonic() - t0,
         doc_id[:12],
         cid8,
         "ok" if summaries is not None else "skipped",
-        "partial" if ingest_warnings and ghost_b_out is not None else ("ok" if ghost_b_out is not None else "skipped"),
         len(ingest_warnings),
-        len(ghost_b_failures),
     )
 
     # ── Phase 4: Mongo (ONE write pass, inline summaries) ────────────────
@@ -1684,9 +1839,10 @@ async def run_ingest_job(
             summary_sparse_map=summary_sparse_map,
         )
         await mongo_writer.update_write_state(
-            db, doc_id, corpus_id=corpus_id, qdrant_written=True
+            db, doc_id, corpus_id=corpus_id, qdrant_written=True, vector_ready=True
         )
         ws.qdrant_written = True
+        ws.vector_ready = True
         logger.info(
             "phase=qdrant duration=%.2fs doc=%s corpus=%s targets=%s",
             time.monotonic() - t0,
@@ -1694,54 +1850,168 @@ async def run_ingest_job(
             cid8,
             ",".join(ingestion_config.target_qdrant_collections),
         )
+    else:
+        ws.vector_ready = bool(ws.vector_ready or (ws.mongo_written and ws.qdrant_written))
 
-    # ── Phase 7: Neo4j (optional) ────────────────────────────────────────
-    if (
-        ingestion_config.use_neo4j
-        and settings.NEO4J_ENABLED
-        and not ws.neo4j_written
-    ):
-        if neo4j_driver is None:
-            logger.warning(
-                "Neo4j enabled in config but driver not initialized; skipping phase=neo4j doc=%s",
-                doc_id[:12],
+    # ── Phase 7: Graph enrichment lane (optional) ────────────────────────
+    if not _graph_enabled(ingestion_config):
+        if ws.graph_status != GRAPH_SKIPPED:
+            await _update_graph_write_state(
+                db=db,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                ws=ws,
+                status=GRAPH_SKIPPED,
+                finished_at=datetime.utcnow(),
             )
-        elif ghost_b_out is None:
-            # Defensive: under the staging-backed flow, ghost_b_out is either
-            # a fresh LLM run or a rehydrated staging list — never None at
-            # this point when use_neo4j is True. Log and skip without
-            # flipping the flag so the next retry still has a chance to fix.
+    elif not ws.neo4j_written:
+        if neo4j_driver is None:
+            ws.warnings = _merge_warnings(
+                ws.warnings,
+                ["Neo4j enabled but graph driver is unavailable; graph extraction is pending."],
+            )
+            await mongo_writer.update_write_state(
+                db,
+                doc_id,
+                corpus_id=corpus_id,
+                warnings=ws.warnings,
+                graph_status=GRAPH_PENDING,
+            )
+            ws.graph_status = GRAPH_PENDING
             logger.warning(
-                "phase=neo4j doc=%s corpus=%s status=ghost_b_out_missing — staging absent and ghost B did not run; skipping write",
+                "phase=graph_enrichment doc=%s corpus=%s status=driver_missing",
                 doc_id[:12],
                 cid8,
             )
         else:
-            t0 = time.monotonic()
-            await _write_neo4j_for_doc(
-                neo4j_driver=neo4j_driver,
+            started = datetime.utcnow()
+            await _update_graph_write_state(
+                db=db,
                 doc_id=doc_id,
                 corpus_id=corpus_id,
-                user_id=user_id,
-                file_id=file_id,
-                children=children,
-                ghost_b_out=ghost_b_out,
+                ws=ws,
+                status=GRAPH_EXTRACTING,
+                started_at=started,
             )
-            await mongo_writer.update_write_state(
-                db, doc_id, corpus_id=corpus_id, neo4j_written=True
-            )
-            ws.neo4j_written = True
-            logger.info(
-                "phase=neo4j duration=%.2fs doc=%s corpus=%s extractions=%d",
-                time.monotonic() - t0,
-                doc_id[:12],
-                cid8,
-                len(ghost_b_out),
-            )
+            try:
+                async with _MODEL_PHASE_SEMAPHORE:
+                    t0 = time.monotonic()
+                    graph_result = await _run_ghosts_parallel(
+                        config=ingestion_config,
+                        parents=parents,
+                        children=children,
+                        doc_id=doc_id,
+                        corpus_id=corpus_id,
+                        filename=filename,
+                        model=model,
+                        db=db,
+                        qdrant_client=qdrant_client,
+                        neo4j_driver=neo4j_driver,
+                        existing_doc=existing_doc,
+                        ws=ws,
+                        include_ghost_a=False,
+                        include_ghost_b=True,
+                    )
+                if isinstance(graph_result, GhostRunResult):
+                    ghost_b_out = graph_result.ghost_b_out
+                    graph_warnings = graph_result.warnings
+                    ghost_b_failures = graph_result.ghost_b_failures
+                    ghost_b_metrics = graph_result.ghost_b_metrics
+                else:
+                    graph_tuple = tuple(graph_result)
+                    ghost_b_out = graph_tuple[1] if len(graph_tuple) > 1 else None
+                    graph_warnings = graph_tuple[2] if len(graph_tuple) > 2 else []
+                    ghost_b_failures = graph_tuple[3] if len(graph_tuple) > 3 else []
+                    ghost_b_metrics = (
+                        graph_tuple[4]
+                        if len(graph_tuple) > 4
+                        else _ghost_b_metrics_for_skipped(ghost_b_out)
+                    )
+                ws.warnings = _merge_warnings(ws.warnings, graph_warnings)
+                await _persist_graph_extraction(
+                    db=db,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    ghost_b_out=ghost_b_out,
+                    ghost_b_failures=ghost_b_failures,
+                    ghost_b_metrics=ghost_b_metrics,
+                    warnings=ws.warnings,
+                )
+                if ghost_b_out is None:
+                    raise GhostBFailure("Ghost B graph enrichment returned no extraction output")
+
+                await _write_neo4j_for_doc(
+                    neo4j_driver=neo4j_driver,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    user_id=user_id,
+                    file_id=file_id,
+                    children=children,
+                    ghost_b_out=ghost_b_out,
+                )
+                graph_status = _graph_status_after_extraction(
+                    ghost_b_out=ghost_b_out,
+                    ghost_b_failures=ghost_b_failures,
+                    ghost_b_metrics=ghost_b_metrics,
+                )
+                await mongo_writer.update_write_state(
+                    db, doc_id, corpus_id=corpus_id, neo4j_written=True
+                )
+                ws.neo4j_written = True
+                await _update_graph_write_state(
+                    db=db,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    ws=ws,
+                    status=graph_status,
+                    ghost_b_out=ghost_b_out,
+                    ghost_b_failures=ghost_b_failures,
+                    ghost_b_metrics=ghost_b_metrics,
+                    finished_at=datetime.utcnow(),
+                )
+                logger.info(
+                    "phase=graph_enrichment duration=%.2fs doc=%s corpus=%s status=%s extractions=%d failures=%d",
+                    time.monotonic() - t0,
+                    doc_id[:12],
+                    cid8,
+                    graph_status,
+                    len(ghost_b_out),
+                    len(ghost_b_failures),
+                )
+            except Exception as exc:
+                ws.warnings = _merge_warnings(
+                    ws.warnings,
+                    [f"Ghost B graph enrichment failed after vector_ready: {str(exc)[:500]}"],
+                )
+                await _persist_graph_extraction(
+                    db=db,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    ghost_b_out=ghost_b_out,
+                    ghost_b_failures=ghost_b_failures,
+                    ghost_b_metrics=ghost_b_metrics,
+                    warnings=ws.warnings,
+                )
+                await _update_graph_write_state(
+                    db=db,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    ws=ws,
+                    status=GRAPH_NEEDS_BACKFILL,
+                    ghost_b_out=ghost_b_out,
+                    ghost_b_failures=ghost_b_failures,
+                    ghost_b_metrics=ghost_b_metrics,
+                    finished_at=datetime.utcnow(),
+                )
+                logger.exception(
+                    "phase=graph_enrichment_failed doc=%s corpus=%s: %s",
+                    doc_id[:12],
+                    cid8,
+                    exc,
+                )
 
     if (
-        ingestion_config.use_neo4j
-        and settings.NEO4J_ENABLED
+        _graph_enabled(ingestion_config)
         and ws.mongo_written
         and ws.qdrant_written
         and ws.neo4j_written
@@ -1780,7 +2050,7 @@ async def run_ingest_job(
             doc_id=doc_id,
             corpus_id=corpus_id,
             target_qdrant_collections=ingestion_config.target_qdrant_collections,
-            use_neo4j=bool(ingestion_config.use_neo4j and settings.NEO4J_ENABLED),
+            use_neo4j=bool(_graph_enabled(ingestion_config) and ws.neo4j_written),
         )
         await mongo_writer.update_write_state(
             db,

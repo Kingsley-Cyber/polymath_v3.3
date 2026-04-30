@@ -40,14 +40,22 @@ async def _audit_for(doc, chunk_count=10):
     return await service.get_ingestion_audit("corp1")
 
 
-def _doc(metrics, *, failures=None, verified=True):
+def _doc(metrics, *, failures=None, verified=True, graph_status="graph_ready"):
     return {
         "doc_id": "doc1",
         "filename": "doc.md",
         "ghost_b_failures": failures or [],
         "ghost_b_staging": [{}] * int(metrics.get("extracted_chunks") or 0),
         "ghost_b_metrics": metrics,
-        "write_state": {"verified": verified, "warnings": []},
+        "write_state": {
+            "mongo_written": True,
+            "qdrant_written": True,
+            "neo4j_written": graph_status == "graph_ready",
+            "vector_ready": True,
+            "graph_status": graph_status,
+            "verified": verified,
+            "warnings": [],
+        },
     }
 
 
@@ -153,6 +161,29 @@ async def test_ingestion_audit_uses_requested_chunks_for_ghost_b_success_rate():
     assert audit["readiness"] == "ready"
     assert audit["totals"]["ghost_b_requested_chunks"] == 8
     assert audit["totals"]["ghost_b_success_rate"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_ingestion_audit_reports_vector_ready_graph_pending():
+    audit = await _audit_for(
+        _doc(
+            {
+                "requested_chunks": 0,
+                "extracted_chunks": 0,
+                "failed_chunk_count": 0,
+                "relation_count": 0,
+            },
+            graph_status="graph_pending",
+        ),
+        chunk_count=10,
+    )
+
+    doc = audit["document_metrics"][0]
+    assert audit["readiness"] == "graph_enrichment_pending"
+    assert audit["totals"]["vector_ready_docs"] == 1
+    assert audit["totals"]["graph_pending_docs"] == 1
+    assert doc["vector_ready"] is True
+    assert doc["graph_status"] == "graph_pending"
 
 
 @pytest.mark.asyncio

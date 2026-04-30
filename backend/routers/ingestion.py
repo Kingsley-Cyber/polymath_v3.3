@@ -648,7 +648,12 @@ async def get_job_status(
         corpus_id=doc["corpus_id"],
         filename=doc.get("filename", ""),
         source_tier=doc.get("source_tier"),
-        status="done" if ws_raw.get("mongo_written") else "processing",
+        status=(
+            "done"
+            if ws_raw.get("vector_ready")
+            or (ws_raw.get("mongo_written") and ws_raw.get("qdrant_written"))
+            else "processing"
+        ),
         write_state=WriteState(**ws_raw) if ws_raw else WriteState(),
         chunk_count=doc.get("chunk_count", 0),
         parent_count=len(doc.get("parent_chunks", [])),

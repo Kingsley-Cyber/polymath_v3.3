@@ -27,6 +27,8 @@ from services.ghost_b import (
 )
 from services.graph.neo4j_writer import write_document_graph
 from services.ingestion.worker import (
+    GRAPH_NEEDS_BACKFILL,
+    GRAPH_READY,
     _build_ghost_pool,
     _ghost_b_partial_warning,
     _rehydrate_ghost_b_staging,
@@ -305,6 +307,12 @@ async def backfill_failed_graph_chunks(
         previous_metrics=previous_metrics,
         retry_metrics=report.metrics,
     )
+    graph_status = GRAPH_NEEDS_BACKFILL if remaining_failures else GRAPH_READY
+    graph_completeness = (
+        "needs-backfill"
+        if remaining_failures
+        else str(metrics.get("graph_completeness") or "graph-complete")
+    )
 
     await db["documents"].update_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
@@ -314,6 +322,14 @@ async def backfill_failed_graph_chunks(
                 "ghost_b_failures": [asdict(failure) for failure in remaining_failures],
                 "ghost_b_metrics": metrics,
                 "write_state.warnings": warnings,
+                "write_state.graph_status": graph_status,
+                "write_state.graph_extracted_chunk_count": len(staged_results),
+                "write_state.graph_failed_chunk_count": len(remaining_failures),
+                "write_state.graph_extraction_strategy": str(
+                    metrics.get("extraction_strategy") or ""
+                ),
+                "write_state.graph_completeness": graph_completeness,
+                "write_state.graph_extraction_finished_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow(),
             }
         },

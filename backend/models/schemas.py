@@ -169,6 +169,14 @@ class WriteState(BaseModel):
     mongo_written: bool = False
     qdrant_written: bool = False
     neo4j_written: bool = False
+    vector_ready: bool = False
+    graph_status: str | None = None
+    graph_extraction_started_at: datetime | None = None
+    graph_extraction_finished_at: datetime | None = None
+    graph_failed_chunk_count: int = 0
+    graph_extracted_chunk_count: int = 0
+    graph_extraction_strategy: str | None = None
+    graph_completeness: str | None = None
     warnings: list[str] = Field(default_factory=list)
     verified: bool | None = None
     verify_errors: list[str] = Field(default_factory=list)

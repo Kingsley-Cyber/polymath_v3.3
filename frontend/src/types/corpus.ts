@@ -148,6 +148,22 @@ export interface WriteState {
   mongo_written: boolean;
   qdrant_written: boolean;
   neo4j_written: boolean;
+  vector_ready?: boolean;
+  graph_status?:
+    | "graph_pending"
+    | "graph_extracting"
+    | "graph_partial"
+    | "graph_ready"
+    | "needs_backfill"
+    | "graph_skipped"
+    | string
+    | null;
+  graph_extraction_started_at?: string | null;
+  graph_extraction_finished_at?: string | null;
+  graph_failed_chunk_count?: number;
+  graph_extracted_chunk_count?: number;
+  graph_extraction_strategy?: string | null;
+  graph_completeness?: string | null;
   warnings?: string[];
   // Phase E — post-write verification result (null = not yet run)
   verified?: boolean | null;

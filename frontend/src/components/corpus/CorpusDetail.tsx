@@ -263,10 +263,12 @@ export function CorpusDetail({
 
   const getWriteStateColor = (state: WriteState) => {
     if (state.verified === false) return "text-error";
+    if (state.graph_status === "needs_backfill" || state.graph_status === "graph_partial")
+      return "text-amber-300";
     if (getWriteStateMessages(state).length > 0) return "text-amber-300";
     if (state.mongo_written && state.qdrant_written && state.neo4j_written)
       return "text-accent-main";
-    if (state.mongo_written && state.qdrant_written)
+    if (state.vector_ready || (state.mongo_written && state.qdrant_written))
       return "text-accent-secondary";
     if (state.mongo_written) return "text-content-secondary";
     return "text-error";
@@ -274,10 +276,15 @@ export function CorpusDetail({
 
   const getWriteStateLabel = (state: WriteState) => {
     const hasWarnings = getWriteStateMessages(state).length > 0;
+    const vectorReady = state.vector_ready || (state.mongo_written && state.qdrant_written);
     if (state.verified === false) return "VERIFY_FAIL";
+    if (state.graph_status === "needs_backfill") return "NEEDS_BACKFILL";
+    if (state.graph_status === "graph_partial") return "GRAPH_PARTIAL";
+    if (state.graph_status === "graph_extracting") return "GRAPH_EXTRACTING";
+    if (state.graph_status === "graph_pending" && vectorReady) return "GRAPH_PENDING";
     if (state.mongo_written && state.qdrant_written && state.neo4j_written)
-      return hasWarnings ? "COMPLETE_WARN" : "COMPLETE";
-    if (state.mongo_written && state.qdrant_written) return "PARTIAL";
+      return hasWarnings ? "COMPLETE_WARN" : "COMPLETE_GRAPH";
+    if (vectorReady) return "COMPLETE_VECTOR";
     if (state.mongo_written) return "MONGO_ONLY";
     return "PENDING";
   };
@@ -907,7 +914,7 @@ function IngestionProgressBar({
 //
 // Classification is pure frontend — no new backend flag. Uses the same
 // write_state signals the left list reads:
-//   COMPLETED = mongo_written && qdrant_written && neo4j_written
+//   COMPLETED = vector-ready for chat/RAG; graph readiness is shown separately
 //   FAILED    = verified === false  OR  (partial state AND stale > STALE_MS)
 // Anything else (fresh, actively ingesting) is hidden here; the left list
 // shows it as PARTIAL / MONGO_ONLY / PENDING while it's still moving.
@@ -919,7 +926,7 @@ type DocStatus = "completed" | "failed" | "in_progress";
 function classifyDoc(doc: DocumentResponse): DocStatus {
   const ws = doc.write_state;
   if (ws.verified === false) return "failed";
-  if (ws.mongo_written && ws.qdrant_written && ws.neo4j_written) {
+  if (ws.vector_ready || (ws.mongo_written && ws.qdrant_written)) {
     return "completed";
   }
   const ts = doc.updated_at || doc.created_at || doc.ingested_at;
@@ -1240,6 +1247,10 @@ function deriveFailedStage(doc: DocumentResponse): string {
   if (ws.verified === false) return "verify";
   if (!ws.mongo_written) return "parse/ghosts";
   if (!ws.qdrant_written) return "embed/qdrant";
+  if (ws.graph_status === "graph_pending") return "graph pending";
+  if (ws.graph_status === "graph_extracting") return "graph extracting";
+  if (ws.graph_status === "graph_partial") return "graph partial";
+  if (ws.graph_status === "needs_backfill") return "graph backfill";
   if (!ws.neo4j_written) return "neo4j";
   return "verify";
 }

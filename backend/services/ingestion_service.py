@@ -1276,7 +1276,13 @@ class IngestionService:
             "chunks": total_chunks,
             "warning_docs": 0,
             "verify_failed_docs": 0,
+            "vector_ready_docs": 0,
+            "graph_pending_docs": 0,
+            "graph_extracting_docs": 0,
             "graph_partial_docs": 0,
+            "graph_ready_docs": 0,
+            "needs_backfill_docs": 0,
+            "graph_skipped_docs": 0,
             "ghost_b_failed_chunks": 0,
             "failed_chunk_count": 0,
             "ghost_b_requested_chunks": 0,
@@ -1310,6 +1316,13 @@ class IngestionService:
         predicate_confidence_weight = 0
 
         def _doc_readiness(metrics: dict, ws: dict, failures: list) -> str:
+            graph_status = str(ws.get("graph_status") or "")
+            if graph_status == "needs_backfill":
+                return "needs_backfill"
+            if graph_status == "graph_partial":
+                return "needs_backfill"
+            if graph_status in {"graph_pending", "graph_extracting"}:
+                return graph_status
             relation_count = int(metrics.get("relation_count") or 0)
             success_rate = float(
                 metrics.get("ghost_b_success_rate", metrics.get("success_rate", 1.0))
@@ -1347,6 +1360,15 @@ class IngestionService:
             failures = doc.get("ghost_b_failures") or []
             staged = doc.get("ghost_b_staging") or []
             metrics = doc.get("ghost_b_metrics") or {}
+            vector_ready = bool(ws.get("vector_ready") or (ws.get("mongo_written") and ws.get("qdrant_written")))
+            graph_status = str(ws.get("graph_status") or "")
+            if not graph_status:
+                if ws.get("neo4j_written"):
+                    graph_status = "graph_ready"
+                elif vector_ready:
+                    graph_status = "graph_pending"
+                else:
+                    graph_status = "graph_pending"
             doc_failed_chunks = int(
                 metrics.get("failed_chunk_count")
                 or metrics.get("failed_chunks")
@@ -1368,8 +1390,23 @@ class IngestionService:
                 totals["warning_docs"] += 1
             if ws.get("verified") is False:
                 totals["verify_failed_docs"] += 1
-            if failures or doc_failed_chunks:
+            if vector_ready:
+                totals["vector_ready_docs"] += 1
+            if graph_status == "graph_pending":
+                totals["graph_pending_docs"] += 1
+            elif graph_status == "graph_extracting":
+                totals["graph_extracting_docs"] += 1
+            elif graph_status == "graph_partial":
                 totals["graph_partial_docs"] += 1
+            elif graph_status == "graph_ready":
+                totals["graph_ready_docs"] += 1
+            elif graph_status == "needs_backfill":
+                totals["needs_backfill_docs"] += 1
+            elif graph_status == "graph_skipped":
+                totals["graph_skipped_docs"] += 1
+            if failures or doc_failed_chunks:
+                if graph_status != "graph_partial":
+                    totals["graph_partial_docs"] += 1
                 partial_docs.append(
                     {
                         "doc_id": doc.get("doc_id"),
@@ -1415,6 +1452,8 @@ class IngestionService:
                     "doc_id": doc.get("doc_id"),
                     "filename": doc.get("filename"),
                     "readiness": doc_readiness,
+                    "vector_ready": vector_ready,
+                    "graph_status": graph_status,
                     "graph_completeness": graph_completeness,
                     "extraction_strategy": str(metrics.get("extraction_strategy") or "unknown"),
                     "skipped_low_value_chunks": int(metrics.get("skipped_low_value_chunks") or 0),
@@ -1471,6 +1510,8 @@ class IngestionService:
         readinesses = {doc.get("readiness") for doc in document_metrics}
         if totals["verify_failed_docs"] or totals["failed_chunk_count"] or "needs_backfill" in readinesses:
             readiness = "needs_backfill"
+        elif "graph_extracting" in readinesses or "graph_pending" in readinesses:
+            readiness = "graph_enrichment_pending"
         elif "extraction_unstable" in readinesses:
             readiness = "extraction_unstable"
         elif (

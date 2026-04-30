@@ -162,8 +162,25 @@ def _install_mocks(
     )
 
     async def _ghosts_side_effect(**kwargs):
+        if kwargs.get("include_ghost_b") is False:
+            recorder.events.append("ghost_a")
+            return worker.GhostRunResult(
+                summaries=summaries,
+                ghost_b_out=None,
+            )
+        if kwargs.get("include_ghost_a") is False:
+            recorder.events.append("ghost_b")
+            return worker.GhostRunResult(
+                summaries=None,
+                ghost_b_out=ghost_b_out,
+                ghost_b_metrics=worker._ghost_b_metrics_for_skipped(ghost_b_out),
+            )
         recorder.events.append("ghosts_parallel")
-        return summaries, ghost_b_out
+        return worker.GhostRunResult(
+            summaries=summaries,
+            ghost_b_out=ghost_b_out,
+            ghost_b_metrics=worker._ghost_b_metrics_for_skipped(ghost_b_out),
+        )
 
     run_ghosts_mock = AsyncMock(side_effect=_ghosts_side_effect)
 
@@ -281,8 +298,8 @@ async def test_phase_order_deep_mode():
         result = await _run_job(m, cfg)
         assert result.status == "done"
         assert rec.events == [
-            "parse", "chunk", "ghosts_parallel",
-            "mongo_write", "embed", "qdrant_write", "neo4j_write",
+            "parse", "chunk", "ghost_a",
+            "mongo_write", "embed", "qdrant_write", "ghost_b", "neo4j_write",
         ]
     finally:
         m["stop_all"]()
@@ -293,8 +310,8 @@ async def test_phase_order_fast_mode():
     """Fast mode: both ghosts disabled, Neo4j branch skipped entirely."""
     rec = PhaseRecorder()
     p, c = _parent("stub-doc", "c" * 36)
-    # _run_ghosts_parallel still runs (it's the branching function), but both
-    # branches return None. The Neo4j phase should NOT call write_document_graph.
+    # The Ghost A wrapper still runs, but both branches are effectively no-ops.
+    # The Neo4j phase should NOT call write_document_graph.
     m = _install_mocks(rec, parents=[p], children=[c],
                        summaries=None, ghost_b_out=None)
     try:
@@ -305,9 +322,9 @@ async def test_phase_order_fast_mode():
         result = await _run_job(m, cfg)
         assert result.status == "done"
         assert "neo4j_write" not in rec.events
-        # Mongo + Qdrant still run; ghosts_parallel still called (returns None/None)
+        # Mongo + Qdrant still run; graph enrichment is skipped.
         assert rec.events == [
-            "parse", "chunk", "ghosts_parallel",
+            "parse", "chunk", "ghost_a",
             "mongo_write", "embed", "qdrant_write",
         ]
     finally:
@@ -332,13 +349,13 @@ async def test_phase_order_balanced_mode():
         )
         await _run_job(m, cfg)
         assert rec.events == [
-            "parse", "chunk", "ghosts_parallel",
-            "mongo_write", "embed", "qdrant_write", "neo4j_write",
+            "parse", "chunk", "ghost_a",
+            "mongo_write", "embed", "qdrant_write", "ghost_b", "neo4j_write",
         ]
         # Ghost A off, Ghost B on — summaries arg to the mongo write was None.
         kwargs = m["mongo_write"].await_args.kwargs
         assert kwargs["summaries"] is None
-        assert kwargs["ghost_b_out"] == ghost_b_out
+        assert kwargs["ghost_b_out"] is None
     finally:
         m["stop_all"]()
 
@@ -464,26 +481,31 @@ async def test_ghost_a_hard_abort_raises_and_skips_writes():
 
 
 @pytest.mark.asyncio
-async def test_ghost_b_hard_abort_raises_and_skips_writes():
-    """Ghost B partial → GhostBFailure on fresh ingest. Under the refactored
-    locked order, ghosts run BEFORE Mongo write, so mongo_written stays False.
-    (The prompt spec's 'mongo_written stays true' note predates the reorder.)"""
+async def test_ghost_b_failure_after_vector_ready_marks_backfill_needed():
+    """Ghost B failure after vector readiness is a graph warning, not a vector
+    ingest failure."""
     rec = PhaseRecorder()
     p, c = _parent("stub-doc", "c" * 36)
     m = _install_mocks(rec, parents=[p], children=[c],
                        summaries=None, ghost_b_out=None)
     async def _raise(**kw):
-        rec.events.append("ghosts_parallel")
+        if kw.get("include_ghost_b") is False:
+            rec.events.append("ghost_a")
+            return worker.GhostRunResult(summaries=None, ghost_b_out=None)
+        rec.events.append("ghost_b")
         raise GhostBFailure("Ghost B partial: 0/1")
     worker._run_ghosts_parallel = _raise  # type: ignore[assignment]
     try:
         cfg = IngestionConfig(use_neo4j=True, chunk_summarization=False,
                               target_qdrant_collections=["naive", "hrag", "graph"])
-        with pytest.raises(GhostBFailure):
-            await _run_job(m, cfg)
-        for phase in ("mongo_write", "embed", "qdrant_write", "neo4j_write"):
-            assert phase not in rec.events
-        assert m["update_state"].await_count == 0
+        result = await _run_job(m, cfg)
+        assert result.status == "done"
+        assert result.write_state.vector_ready is True
+        assert result.write_state.graph_status == worker.GRAPH_NEEDS_BACKFILL
+        assert "mongo_write" in rec.events
+        assert "embed" in rec.events
+        assert "qdrant_write" in rec.events
+        assert "neo4j_write" not in rec.events
     finally:
         m["stop_all"]()
 
@@ -720,8 +742,11 @@ async def test_full_deep_ingest_small_doc():
         )
         assert result.status == "done"
         ws = result.write_state.model_dump()
-        assert ws == {"mongo_written": True, "qdrant_written": True,
-                      "neo4j_written": True}
+        assert ws["mongo_written"] is True
+        assert ws["qdrant_written"] is True
+        assert ws["neo4j_written"] is True
+        assert ws["vector_ready"] is True
+        assert ws["graph_status"] == worker.GRAPH_READY
 
         doc = await db["documents"].find_one(
             {"doc_id": result.doc_id, "corpus_id": cid}
