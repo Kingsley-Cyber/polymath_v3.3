@@ -1255,6 +1255,24 @@ class IngestionService:
             user_id=user_id,
         )
 
+    async def recover_document_vectors(
+        self,
+        *,
+        corpus_id: str,
+        doc_id: str,
+        user_id: str,
+    ) -> dict:
+        """Finish Qdrant/vector readiness for a Mongo-only document."""
+        from services.ingestion.worker import recover_vector_from_mongo
+
+        return await recover_vector_from_mongo(
+            db=self._db,
+            qdrant_client=self._qdrant,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+            user_id=user_id,
+        )
+
     async def get_ingestion_audit(self, corpus_id: str) -> dict:
         """Aggregate corpus ingestion health for large-batch readiness."""
         docs = await self._db["documents"].find(
@@ -1276,6 +1294,32 @@ class IngestionService:
             },
         ).to_list(length=None)
         total_chunks = await self._db["chunks"].count_documents({"corpus_id": corpus_id})
+        try:
+            graph_cache_doc = await self._db["graph_metrics_cache"].find_one(
+                {"corpus_id": corpus_id},
+                {
+                    "schema_version": 1,
+                    "computed_at": 1,
+                    "last_graph_refresh_at": 1,
+                    "graph_cache_stale": 1,
+                    "stale_reason": 1,
+                    "stale_at": 1,
+                    "entity_quality_version": 1,
+                    "entity_quality_counts": 1,
+                    "_id": 0,
+                },
+            )
+        except Exception:
+            graph_cache_doc = None
+        try:
+            from services.graph.entity_quality import (
+                ENTITY_QUALITY_VERSION,
+                entity_quality_stats,
+            )
+
+            quality_audit = await entity_quality_stats(self._neo4j, corpus_id)
+        except Exception:
+            quality_audit = {}
         totals = {
             "docs": len(docs),
             "chunks": total_chunks,
@@ -1285,11 +1329,20 @@ class IngestionService:
             "graph_pending_docs": 0,
             "graph_extracting_docs": 0,
             "graph_partial_docs": 0,
+            "graph_retry_scheduled_docs": 0,
             "graph_ready_docs": 0,
             "needs_backfill_docs": 0,
             "graph_skipped_docs": 0,
+            "vector_recovery_available_docs": 0,
             "ghost_b_failed_chunks": 0,
             "failed_chunk_count": 0,
+            "graph_retryable_failed_chunks": 0,
+            "retry_budget_exhausted_count": 0,
+            "all_lanes_exhausted_count": 0,
+            "lane_cooling_down_count": 0,
+            "provider_error_count": 0,
+            "rate_limited_count": 0,
+            "timeout_count": 0,
             "ghost_b_requested_chunks": 0,
             "ghost_b_extracted_chunks": 0,
             "ghost_b_tokens": 0,
@@ -1314,6 +1367,26 @@ class IngestionService:
             "predicate_confidence_avg": 0.0,
             "avg_prompt_tokens_per_chunk": 0.0,
             "json_recovery_rate": 0.0,
+            "entity_quality": quality_audit,
+            "entity_quality_total": int((quality_audit or {}).get("total_entities") or 0),
+            "noisy_entity_count": int((quality_audit or {}).get("noisy_entity_count") or 0),
+            "claim_like_count": int((quality_audit or {}).get("claim_like_count") or 0),
+            "generic_role_count": int((quality_audit or {}).get("generic_role_count") or 0),
+            "joined_list_count": int((quality_audit or {}).get("joined_list_count") or 0),
+            "topic_label_eligible_pct": float((quality_audit or {}).get("topic_eligible_pct") or 0.0),
+            "synthesis_eligible_pct": float((quality_audit or {}).get("synthesis_eligible_pct") or 0.0),
+            "graph_cache": {
+                "stale": bool((graph_cache_doc or {}).get("graph_cache_stale")),
+                "stale_reason": (graph_cache_doc or {}).get("stale_reason"),
+                "stale_at": (graph_cache_doc or {}).get("stale_at"),
+                "last_graph_refresh_at": (
+                    (graph_cache_doc or {}).get("last_graph_refresh_at")
+                    or (graph_cache_doc or {}).get("computed_at")
+                ),
+                "entity_quality_version": (graph_cache_doc or {}).get("entity_quality_version")
+                or (quality_audit or {}).get("entity_quality_version")
+                or (ENTITY_QUALITY_VERSION if "ENTITY_QUALITY_VERSION" in locals() else ""),
+            },
         }
         partial_docs: list[dict] = []
         document_metrics: list[dict] = []
@@ -1324,6 +1397,8 @@ class IngestionService:
             graph_status = str(ws.get("graph_status") or "")
             if graph_status == "needs_backfill":
                 return "needs_backfill"
+            if graph_status == "graph_retry_scheduled":
+                return "graph_retry_scheduled"
             if graph_status == "graph_partial":
                 return "needs_backfill"
             if graph_status in {"graph_pending", "graph_extracting"}:
@@ -1456,12 +1531,16 @@ class IngestionService:
                 totals["verify_failed_docs"] += 1
             if vector_ready:
                 totals["vector_ready_docs"] += 1
+            if ws.get("mongo_written") and not ws.get("qdrant_written"):
+                totals["vector_recovery_available_docs"] += 1
             if graph_status == "graph_pending":
                 totals["graph_pending_docs"] += 1
             elif graph_status == "graph_extracting":
                 totals["graph_extracting_docs"] += 1
             elif graph_status == "graph_partial":
                 totals["graph_partial_docs"] += 1
+            elif graph_status == "graph_retry_scheduled":
+                totals["graph_retry_scheduled_docs"] += 1
             elif graph_status == "graph_ready":
                 totals["graph_ready_docs"] += 1
             elif graph_status == "needs_backfill":
@@ -1469,7 +1548,7 @@ class IngestionService:
             elif graph_status == "graph_skipped":
                 totals["graph_skipped_docs"] += 1
             if failures or doc_failed_chunks:
-                if graph_status != "graph_partial":
+                if graph_status not in {"graph_partial", "graph_retry_scheduled"}:
                     totals["graph_partial_docs"] += 1
                 partial_docs.append(
                     {
@@ -1481,6 +1560,13 @@ class IngestionService:
                 )
             totals["ghost_b_failed_chunks"] += doc_failed_chunks
             totals["failed_chunk_count"] += doc_failed_chunks
+            totals["graph_retryable_failed_chunks"] += int(metrics.get("retryable_failed_chunks") or 0)
+            totals["retry_budget_exhausted_count"] += int(metrics.get("retry_budget_exhausted_count") or 0)
+            totals["all_lanes_exhausted_count"] += int(metrics.get("all_lanes_exhausted_count") or 0)
+            totals["lane_cooling_down_count"] += int(metrics.get("lane_cooling_down_count") or 0)
+            totals["provider_error_count"] += int(metrics.get("provider_error_count") or 0)
+            totals["rate_limited_count"] += int(metrics.get("rate_limited_count") or 0)
+            totals["timeout_count"] += int(metrics.get("timeout_count") or 0)
             totals["ghost_b_requested_chunks"] += doc_requested_chunks
             totals["ghost_b_extracted_chunks"] += doc_extracted_chunks
             totals["ghost_b_tokens"] += int(metrics.get("total_tokens") or 0)
@@ -1526,6 +1612,10 @@ class IngestionService:
                     ),
                     "graph_strategy": str(decision_trace.get("graph_strategy") or "unknown"),
                     "graph_completeness": graph_completeness,
+                    "graph_retry_after": ws.get("graph_retry_after") or metrics.get("graph_retry_after"),
+                    "graph_backfill_attempt_count": int(ws.get("graph_backfill_attempt_count") or 0),
+                    "graph_retryable_failed_chunks": int(metrics.get("retryable_failed_chunks") or 0),
+                    "vector_recovery_available": bool(ws.get("mongo_written") and not ws.get("qdrant_written")),
                     "extraction_strategy": str(metrics.get("extraction_strategy") or "unknown"),
                     "skipped_low_value_chunks": int(metrics.get("skipped_low_value_chunks") or 0),
                     "compact_extraction_chunks": int(metrics.get("compact_extraction_chunks") or 0),
@@ -1579,7 +1669,9 @@ class IngestionService:
             else 0.0
         )
         readinesses = {doc.get("readiness") for doc in document_metrics}
-        if totals["verify_failed_docs"] or totals["failed_chunk_count"] or "needs_backfill" in readinesses:
+        if "graph_retry_scheduled" in readinesses:
+            readiness = "graph_retry_scheduled"
+        elif totals["verify_failed_docs"] or totals["failed_chunk_count"] or "needs_backfill" in readinesses:
             readiness = "needs_backfill"
         elif "graph_extracting" in readinesses or "graph_pending" in readinesses:
             readiness = "graph_enrichment_pending"
@@ -1677,6 +1769,35 @@ class IngestionService:
             user_id=user_id,
         )
         return {"status": "queued", "corpus_id": corpus_id}
+
+    async def backfill_entity_quality(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str,
+        batch_size: int = 500,
+        force: bool = False,
+    ) -> dict:
+        """Classify existing Neo4j entity labels without deleting graph data."""
+        from services.graph.entity_quality import backfill_entity_quality
+        from services.graph.orchestrator import schedule_graph_discovery_cache_warm
+
+        result = await backfill_entity_quality(
+            self._neo4j,
+            self._db,
+            corpus_id=corpus_id,
+            batch_size=batch_size,
+            force=force,
+        )
+        schedule_graph_discovery_cache_warm(
+            qdrant=self._qdrant,
+            neo4j_driver=self._neo4j,
+            db=self._db,
+            corpus_id=corpus_id,
+            user_id=user_id,
+        )
+        result["graph_cache_warm"] = "queued"
+        return result
 
 
 ingestion_service = IngestionService()

@@ -71,6 +71,7 @@ GRAPH_EXTRACTING = "graph_extracting"
 GRAPH_PARTIAL = "graph_partial"
 GRAPH_READY = "graph_ready"
 GRAPH_NEEDS_BACKFILL = "needs_backfill"
+GRAPH_RETRY_SCHEDULED = "graph_retry_scheduled"
 GRAPH_SKIPPED = "graph_skipped"
 
 
@@ -165,6 +166,8 @@ def _graph_status_after_extraction(
     )
     requested = int(metrics.get("requested_chunks") or (extracted + failed))
     if failed:
+        if metrics.get("graph_retry_after"):
+            return GRAPH_RETRY_SCHEDULED
         return GRAPH_PARTIAL
     if requested and extracted < requested:
         return GRAPH_PARTIAL
@@ -410,16 +413,32 @@ async def _update_graph_write_state(
         ws.graph_completeness = str(metrics.get("graph_completeness"))
     elif status == GRAPH_SKIPPED:
         ws.graph_completeness = "graph-skipped"
-    elif status in (GRAPH_PARTIAL, GRAPH_NEEDS_BACKFILL):
+    elif status in (GRAPH_PARTIAL, GRAPH_NEEDS_BACKFILL, GRAPH_RETRY_SCHEDULED):
         ws.graph_completeness = "needs-backfill"
     elif status == GRAPH_READY:
         ws.graph_completeness = ws.graph_completeness or "graph-complete"
+    retry_after_raw = metrics.get("graph_retry_after")
+    retry_after = None
+    if retry_after_raw:
+        if isinstance(retry_after_raw, datetime):
+            retry_after = retry_after_raw
+        else:
+            try:
+                retry_after = datetime.fromisoformat(str(retry_after_raw))
+            except Exception:
+                retry_after = None
+    ws.graph_retry_after = retry_after
+    ws.graph_retryable_failed_chunk_count = int(
+        metrics.get("retryable_failed_chunks") or 0
+    )
     flags: dict[str, Any] = {
         "graph_status": ws.graph_status,
         "graph_extracted_chunk_count": ws.graph_extracted_chunk_count,
         "graph_failed_chunk_count": ws.graph_failed_chunk_count,
         "graph_extraction_strategy": ws.graph_extraction_strategy,
         "graph_completeness": ws.graph_completeness,
+        "graph_retry_after": ws.graph_retry_after,
+        "graph_retryable_failed_chunk_count": ws.graph_retryable_failed_chunk_count,
     }
     if started_at is not False:
         ws.graph_extraction_started_at = started_at
@@ -437,6 +456,8 @@ async def _update_graph_write_state(
         "decision_trace.graph_status": ws.graph_status,
         "decision_trace.graph_extracted_chunks": ws.graph_extracted_chunk_count,
         "decision_trace.graph_failed_chunks": ws.graph_failed_chunk_count,
+        "decision_trace.graph_retry_after": ws.graph_retry_after,
+        "decision_trace.graph_retryable_failed_chunks": ws.graph_retryable_failed_chunk_count,
         "decision_trace.vector_ready": ws.vector_ready,
         "updated_at": datetime.utcnow(),
     }
@@ -1205,6 +1226,16 @@ async def _run_ghosts_parallel(
             max_entities_per_chunk=policy.max_entities_per_chunk,
             max_relations_per_chunk=policy.max_relations_per_chunk,
             max_completion_tokens_override=policy.max_completion_tokens,
+            per_chunk_max_attempts=getattr(config, "graph_per_chunk_max_attempts", 2),
+            per_doc_max_failed_chunks_before_pause=getattr(
+                config, "graph_per_doc_max_failed_chunks_before_pause", 50
+            ),
+            per_lane_max_consecutive_failures=getattr(
+                config, "graph_per_lane_max_consecutive_failures", 2
+            ),
+            per_lane_cooldown_seconds=getattr(
+                config, "graph_per_lane_cooldown_seconds", 300
+            ),
             metrics_context=policy.metrics(),
         )
         if not isinstance(report, ExtractionBatchReport):
@@ -1256,6 +1287,16 @@ async def _run_ghosts_parallel(
                     model=model,
                     return_report=True,
                     extraction_mode="full",
+                    per_chunk_max_attempts=getattr(config, "graph_per_chunk_max_attempts", 2),
+                    per_doc_max_failed_chunks_before_pause=getattr(
+                        config, "graph_per_doc_max_failed_chunks_before_pause", 50
+                    ),
+                    per_lane_max_consecutive_failures=getattr(
+                        config, "graph_per_lane_max_consecutive_failures", 2
+                    ),
+                    per_lane_cooldown_seconds=getattr(
+                        config, "graph_per_lane_cooldown_seconds", 300
+                    ),
                     metrics_context={
                         "extraction_strategy": "deep_pass_high_signal",
                         "graph_completeness": "graph-compact",
@@ -1687,6 +1728,154 @@ async def _write_neo4j_for_doc(
     )
 
 
+async def recover_vector_from_mongo(
+    *,
+    db: AsyncIOMotorDatabase,
+    qdrant_client: AsyncQdrantClient,
+    corpus_id: str,
+    doc_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    """Finish Qdrant/vector readiness for a document already stored in Mongo.
+
+    This is the MONGO_ONLY recovery lane: no parse, no rechunk, no Ghost B,
+    and no semantic retries. It reuses stored chunks/parents and idempotently
+    upserts vectors into Qdrant.
+    """
+    doc = await mongo_reader.get_document(db, doc_id, corpus_id=corpus_id)
+    if not doc:
+        raise ValueError("Document not found")
+    ws = WriteState(**(doc.get("write_state") or {}))
+    if not ws.mongo_written:
+        raise RuntimeError("Document is not Mongo-ready; cannot recover vectors")
+    if ws.qdrant_written or ws.vector_ready:
+        return {
+            "status": "noop",
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "vector_ready": True,
+            "qdrant_written": True,
+        }
+
+    from services.ingestion_service import build_effective_config
+    from services.ingestion.tier_chunker import ChildChunk, ParentChunk
+
+    corpus = await mongo_reader.get_corpus(db, corpus_id)
+    live_cfg = (corpus or {}).get("default_ingestion_config") or {}
+    config = build_effective_config(
+        frozen_base=doc.get("ingestion_config") or live_cfg,
+        live_corpus=live_cfg,
+        ingest_overrides=None,
+    )
+    parent_rows = doc.get("parent_chunks") or []
+    chunk_rows = await db["chunks"].find(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {"_id": 0},
+    ).to_list(length=None)
+    if not chunk_rows:
+        raise RuntimeError("No stored child chunks found for vector recovery")
+
+    children = [
+        ChildChunk(
+            chunk_id=str(row.get("chunk_id") or ""),
+            parent_id=str(row.get("parent_id") or ""),
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            text=str(row.get("text") or ""),
+            heading_path=row.get("heading_path"),
+            source_tier=str(row.get("source_tier") or SourceTier.TIER_C.value),
+            token_count=int(row.get("token_count") or 0),
+            page_start=row.get("page_start"),
+            page_end=row.get("page_end"),
+            chunk_kind=str(row.get("chunk_kind") or ChunkKind.BODY),
+        )
+        for row in chunk_rows
+        if row.get("chunk_id")
+    ]
+    child_by_parent: dict[str, list[ChildChunk]] = {}
+    for child in children:
+        child_by_parent.setdefault(child.parent_id, []).append(child)
+    parents = [
+        ParentChunk(
+            parent_id=str(row.get("parent_id") or ""),
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            text=str(row.get("text") or ""),
+            heading_path=row.get("heading_path"),
+            source_tier=str(row.get("source_tier") or SourceTier.TIER_C.value),
+            children=child_by_parent.get(str(row.get("parent_id") or ""), []),
+            page_start=row.get("page_start"),
+            page_end=row.get("page_end"),
+            chunk_kind=str(row.get("chunk_kind") or ChunkKind.BODY),
+        )
+        for row in parent_rows
+        if row.get("parent_id")
+    ]
+    summaries = _reconstruct_summaries_from_mongo(parents, parent_rows)
+
+    async with _MODEL_PHASE_SEMAPHORE:
+        vec_map, summary_vec_map = await _embed_batch_for_doc(
+            children=children,
+            summaries=summaries,
+            config=config,
+        )
+
+    from services.storage.sparse_encoder import encode_text as _bm25_encode
+
+    child_sparse_map = {
+        child.chunk_id: _bm25_encode(child.text)
+        for child in children
+        if child.chunk_id in vec_map
+    }
+    summary_sparse_map = {
+        summary.parent_id: _bm25_encode(summary.summary)
+        for summary in summaries
+    }
+    await _write_qdrant_for_doc(
+        qdrant_client=qdrant_client,
+        corpus_id=corpus_id,
+        user_id=user_id,
+        parents=parents,
+        children=children,
+        vec_map=vec_map,
+        summaries=summaries,
+        summary_vec_map=summary_vec_map,
+        config=config,
+        child_sparse_map=child_sparse_map,
+        summary_sparse_map=summary_sparse_map,
+    )
+    now = datetime.utcnow()
+    await mongo_writer.update_write_state(
+        db,
+        doc_id,
+        corpus_id=corpus_id,
+        qdrant_written=True,
+        vector_ready=True,
+    )
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {
+            "$set": {
+                "decision_trace.vector_ready": True,
+                "decision_trace.vector_recovered_at": now,
+                "updated_at": now,
+            },
+            "$addToSet": {
+                "write_state.warnings": "Vector recovery completed from stored Mongo chunks without reparsing."
+            },
+        },
+    )
+    return {
+        "status": "done",
+        "doc_id": doc_id,
+        "corpus_id": corpus_id,
+        "vector_ready": True,
+        "qdrant_written": True,
+        "children_vectorized": len(vec_map),
+        "summaries_vectorized": len(summary_vec_map),
+    }
+
+
 async def _auto_backfill_graph_failures_once(
     *,
     db: AsyncIOMotorDatabase,
@@ -1711,6 +1900,38 @@ async def _auto_backfill_graph_failures_once(
     failures = (doc or {}).get("ghost_b_failures") or []
     if not failures:
         return ws
+    retry_after_values: list[datetime] = []
+    for row in failures:
+        raw = row.get("retry_after") if isinstance(row, dict) else None
+        if isinstance(raw, datetime):
+            retry_after_values.append(raw)
+        elif raw:
+            try:
+                retry_after_values.append(datetime.fromisoformat(str(raw)))
+            except Exception:
+                pass
+    if retry_after_values:
+        retry_after = min(retry_after_values)
+        if retry_after > datetime.utcnow():
+            await mongo_writer.update_write_state(
+                db,
+                doc_id,
+                corpus_id=corpus_id,
+                graph_status=GRAPH_RETRY_SCHEDULED,
+                graph_retry_after=retry_after,
+                graph_retryable_failed_chunk_count=len(failures),
+            )
+            ws.graph_status = GRAPH_RETRY_SCHEDULED
+            ws.graph_retry_after = retry_after
+            ws.graph_retryable_failed_chunk_count = len(failures)
+            logger.info(
+                "phase=ghost_b_auto_backfill_skip reason=retry_after doc=%s corpus=%s retry_after=%s failures=%d",
+                doc_id[:12],
+                corpus_id[:8],
+                retry_after.isoformat(),
+                len(failures),
+            )
+            return ws
 
     async with _AUTO_BACKFILL_SEMAPHORE:
         # Another job or manual endpoint may have recovered this document while
@@ -2215,6 +2436,21 @@ async def run_ingest_job(
                     children=children,
                     ghost_b_out=ghost_b_out,
                 )
+                try:
+                    from services.graph.entity_quality import mark_graph_metrics_stale
+
+                    await mark_graph_metrics_stale(
+                        db,
+                        corpus_id,
+                        reason="graph_enrichment_write",
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "phase=graph_cache_stale doc=%s corpus=%s failed: %s",
+                        doc_id[:12],
+                        cid8,
+                        exc,
+                    )
                 graph_status = _graph_status_after_extraction(
                     ghost_b_out=ghost_b_out,
                     ghost_b_failures=ghost_b_failures,

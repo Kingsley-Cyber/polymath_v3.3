@@ -336,6 +336,35 @@ async def backfill_document_graph(
     }
 
 
+@router.post("/corpora/{corpus_id}/documents/{doc_id}/vector-recovery")
+async def recover_document_vectors(
+    corpus_id: str,
+    doc_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Recover Qdrant/vector readiness for a document that already reached Mongo."""
+    corpus = await ingestion_service.get_corpus(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    doc = await ingestion_service.db["documents"].find_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {"write_state": 1, "_id": 0},
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    ws = doc.get("write_state") or {}
+    if not ws.get("mongo_written"):
+        raise HTTPException(
+            status_code=409,
+            detail="Document is not Mongo-ready; vector recovery cannot run.",
+        )
+    return await ingestion_service.recover_document_vectors(
+        corpus_id=corpus_id,
+        doc_id=doc_id,
+        user_id=current_user["user_id"],
+    )
+
+
 @router.get("/corpora/{corpus_id}/ingestion-audit")
 async def ingestion_audit(
     corpus_id: str,
@@ -360,6 +389,25 @@ async def warm_graph_cache(
     return await ingestion_service.warm_graph_cache(
         corpus_id=corpus_id,
         user_id=current_user["user_id"],
+    )
+
+
+@router.post("/corpora/{corpus_id}/entity-quality/backfill")
+async def backfill_entity_quality(
+    corpus_id: str,
+    batch_size: int = 500,
+    force: bool = False,
+    current_user: dict = Depends(get_current_user),
+):
+    """Classify existing Neo4j Entity labels without deleting graph data."""
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    return await ingestion_service.backfill_entity_quality(
+        corpus_id=corpus_id,
+        user_id=current_user["user_id"],
+        batch_size=batch_size,
+        force=force,
     )
 
 

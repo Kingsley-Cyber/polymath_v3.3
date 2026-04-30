@@ -18,6 +18,13 @@ from typing import Any, Iterable, Optional
 
 import numpy as np
 
+from services.graph.entity_quality import (
+    ENTITY_QUALITY_VERSION,
+    INELIGIBLE_SYNTHESIS_QUALITIES,
+    INELIGIBLE_TOPIC_LABEL_QUALITIES,
+    classify_entity_label,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +41,7 @@ LABELER_TEMPERATURE = 0.2
 QDRANT_SCROLL_BATCH = 256
 
 # P2 metrics tuning
-METRICS_CACHE_SCHEMA_VERSION = 11
+METRICS_CACHE_SCHEMA_VERSION = 12
 FRONTIER_DEGREE_MAX = 5
 ANALOGY_TOPOLOGY_SIM_MIN = 0.85
 QUERY_SCOPE_TOP_K = 60  # chunks to pull from Qdrant for query-scoped analysis
@@ -603,7 +610,12 @@ async def get_cached_metrics(
             "corpus_change_signature": corpus_change_signature,
         }
     )
-    if not cached or cached.get("schema_version") != METRICS_CACHE_SCHEMA_VERSION:
+    if (
+        not cached
+        or cached.get("schema_version") != METRICS_CACHE_SCHEMA_VERSION
+        or cached.get("graph_cache_stale")
+        or cached.get("entity_quality_version") != ENTITY_QUALITY_VERSION
+    ):
         return None
     return _deserialize_metrics(cached)
 
@@ -1598,6 +1610,9 @@ class CorpusMetrics:
     cluster_pair_gaps: list[dict[str, Any]] = field(default_factory=list)
     latent_topics: list[dict[str, Any]] = field(default_factory=list)
     metrics_engine: str = "networkx"
+    entity_quality_version: str = ENTITY_QUALITY_VERSION
+    entity_quality_counts: dict[str, int] = field(default_factory=dict)
+    graph_cache_stale: bool = False
 
 
 # ── Graph construction from Neo4j ───────────────────────────────────────────
@@ -1618,6 +1633,11 @@ RETURN e.entity_id AS entity_id,
        e.canonical_family AS canonical_family,
        e.observed_entity_types AS observed_entity_types,
        e.ontology_version AS ontology_version,
+       e.label_quality AS label_quality,
+       e.eligible_for_topic_label AS eligible_for_topic_label,
+       e.eligible_for_synthesis AS eligible_for_synthesis,
+       e.quality_reasons AS quality_reasons,
+       e.entity_quality_version AS entity_quality_version,
        doc_id, mentions
 """
 
@@ -1674,7 +1694,24 @@ async def _load_entities_with_mentions(
             slug = eid.split(":", 1)[-1] if ":" in eid else eid
             name = slug.replace("-", " ").replace("_", " ").strip() or eid
         entity_to_name[eid] = name
-        entity_to_type[eid] = rec.get("entity_type") or "other"
+        entity_type = rec.get("entity_type") or "other"
+        entity_to_type[eid] = entity_type
+        quality = rec.get("label_quality")
+        eligible_topic = rec.get("eligible_for_topic_label")
+        eligible_synthesis = rec.get("eligible_for_synthesis")
+        quality_reasons = rec.get("quality_reasons")
+        entity_quality_version = rec.get("entity_quality_version")
+        if not quality:
+            inferred = classify_entity_label(
+                name,
+                entity_type,
+                observed_entity_types=rec.get("observed_entity_types") or [],
+            )
+            quality = inferred.label_quality
+            eligible_topic = inferred.eligible_for_topic_label
+            eligible_synthesis = inferred.eligible_for_synthesis
+            quality_reasons = inferred.quality_reasons
+            entity_quality_version = inferred.entity_quality_version
         facets = {
             "object_kind": rec.get("object_kind"),
             "object_kind_parent": rec.get("object_kind_parent"),
@@ -1685,8 +1722,13 @@ async def _load_entities_with_mentions(
             "canonical_family": rec.get("canonical_family"),
             "observed_entity_types": rec.get("observed_entity_types"),
             "ontology_version": rec.get("ontology_version"),
+            "label_quality": quality,
+            "eligible_for_topic_label": eligible_topic,
+            "eligible_for_synthesis": eligible_synthesis,
+            "quality_reasons": quality_reasons,
+            "entity_quality_version": entity_quality_version,
         }
-        entity_to_facets[eid] = {k: v for k, v in facets.items() if v}
+        entity_to_facets[eid] = {k: v for k, v in facets.items() if v is not None and v != ""}
         doc_id = rec["doc_id"]
         mentions = int(rec.get("mentions", 1) or 1)
         entity_mention_counts[eid] += mentions
@@ -1952,6 +1994,12 @@ def _is_numeric_or_date_label(value: str) -> bool:
 
 def is_noise_entity_node(G, node: str) -> bool:
     """Nodes useful for provenance but harmful as insight candidates."""
+    attrs = G.nodes[node] if node in G else {}
+    label_quality = str(attrs.get("label_quality") or "").strip()
+    if label_quality in INELIGIBLE_SYNTHESIS_QUALITIES:
+        return True
+    if attrs.get("eligible_for_synthesis") is False:
+        return True
     entity_type = _node_entity_type(G, node)
     if entity_type in NOISE_ENTITY_TYPES:
         return True
@@ -1977,6 +2025,12 @@ def _concept_label_from_nodes(G, ranked_nodes: list[str]) -> str:
     parts: list[str] = []
     seen: set[str] = set()
     for node in ranked_nodes:
+        attrs = G.nodes[node] if node in G else {}
+        label_quality = str(attrs.get("label_quality") or "").strip()
+        if label_quality in INELIGIBLE_TOPIC_LABEL_QUALITIES:
+            continue
+        if attrs.get("eligible_for_topic_label") is False:
+            continue
         label = re.sub(r"\s+", " ", _node_name(G, node)).strip(" -:;,.")
         label = re.sub(r"\.(docx?|pdf|md|txt|html?)$", "", label, flags=re.I)
         if not label or _is_numeric_or_date_label(label):
@@ -2472,12 +2526,18 @@ def build_entity_facet_map(G) -> dict[str, dict[str, Any]]:
             "domain_type_root": attrs.get("domain_type_root"),
             "canonical_family": attrs.get("canonical_family"),
             "ontology_version": attrs.get("ontology_version"),
+            "label_quality": attrs.get("label_quality"),
+            "eligible_for_topic_label": attrs.get("eligible_for_topic_label"),
+            "eligible_for_synthesis": attrs.get("eligible_for_synthesis"),
+            "quality_reasons": attrs.get("quality_reasons"),
+            "entity_quality_version": attrs.get("entity_quality_version"),
         }
-        compact = {k: v for k, v in facets.items() if v}
+        compact = {k: v for k, v in facets.items() if v is not None and v != ""}
         if (
             compact.get("object_kind")
             or compact.get("domain_type")
             or compact.get("canonical_family")
+            or compact.get("label_quality")
         ):
             out[eid] = compact
     return out
@@ -3021,7 +3081,12 @@ async def compute_all_metrics(
         cached = await db["graph_metrics_cache"].find_one(
             {"corpus_id": corpus_id, "corpus_change_signature": signature}
         )
-        if cached and cached.get("schema_version") == METRICS_CACHE_SCHEMA_VERSION:
+        if (
+            cached
+            and cached.get("schema_version") == METRICS_CACHE_SCHEMA_VERSION
+            and not cached.get("graph_cache_stale")
+            and cached.get("entity_quality_version") == ENTITY_QUALITY_VERSION
+        ):
             logger.info("Metrics cache HIT corpus=%s sig=%s", corpus_id, signature[:8])
             return _deserialize_metrics(cached)
         if cached:
@@ -3074,6 +3139,8 @@ async def compute_all_metrics(
             cluster_pair_gaps=[],
             latent_topics=[],
             metrics_engine="networkx",
+            entity_quality_version=ENTITY_QUALITY_VERSION,
+            entity_quality_counts={},
         )
         await _cache_metrics(db, metrics)
         return metrics
@@ -3084,6 +3151,14 @@ async def compute_all_metrics(
     cd_pagerank = compute_cd_pagerank(pagerank, node_touched)
     concept_communities, entity_concept_map = compute_concept_communities(G, pagerank)
     entity_facet_map = build_entity_facet_map(G)
+    entity_quality_counts = dict(
+        sorted(
+            Counter(
+                str(attrs.get("label_quality") or "unknown")
+                for _, attrs in G.nodes(data=True)
+            ).items()
+        )
+    )
     entity_name_map = {
         n: str(G.nodes[n].get("canonical_name") or n)
         for n in G.nodes
@@ -3182,6 +3257,9 @@ async def compute_all_metrics(
         cluster_pair_gaps=cluster_pair_gaps,
         latent_topics=latent_topics,
         metrics_engine="networkx",
+        entity_quality_version=ENTITY_QUALITY_VERSION,
+        entity_quality_counts=entity_quality_counts,
+        graph_cache_stale=False,
     )
 
     await _cache_metrics(db, metrics)
@@ -3237,6 +3315,10 @@ def _serialize_metrics(m: CorpusMetrics) -> dict:
         "cluster_pair_gaps": m.cluster_pair_gaps,
         "latent_topics": m.latent_topics,
         "metrics_engine": m.metrics_engine,
+        "entity_quality_version": m.entity_quality_version,
+        "entity_quality_counts": m.entity_quality_counts,
+        "graph_cache_stale": m.graph_cache_stale,
+        "last_graph_refresh_at": m.computed_at,
     }
 
 
@@ -3271,4 +3353,7 @@ def _deserialize_metrics(doc: dict) -> CorpusMetrics:
         cluster_pair_gaps=doc.get("cluster_pair_gaps", []),
         latent_topics=doc.get("latent_topics", []),
         metrics_engine=doc.get("metrics_engine", "networkx"),
+        entity_quality_version=doc.get("entity_quality_version", ""),
+        entity_quality_counts=doc.get("entity_quality_counts", {}),
+        graph_cache_stale=bool(doc.get("graph_cache_stale", False)),
     )

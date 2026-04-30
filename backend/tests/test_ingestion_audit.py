@@ -47,6 +47,8 @@ def _doc(
     verified=True,
     graph_status="graph_ready",
     decision_trace=None,
+    mongo_written=True,
+    qdrant_written=True,
 ):
     return {
         "doc_id": "doc1",
@@ -59,10 +61,10 @@ def _doc(
             "heading bound - full ontology" if decision_trace else None
         ),
         "write_state": {
-            "mongo_written": True,
-            "qdrant_written": True,
+            "mongo_written": mongo_written,
+            "qdrant_written": qdrant_written,
             "neo4j_written": graph_status == "graph_ready",
-            "vector_ready": True,
+            "vector_ready": bool(mongo_written and qdrant_written),
             "graph_status": graph_status,
             "verified": verified,
             "warnings": [],
@@ -195,6 +197,54 @@ async def test_ingestion_audit_reports_vector_ready_graph_pending():
     assert audit["totals"]["graph_pending_docs"] == 1
     assert doc["vector_ready"] is True
     assert doc["graph_status"] == "graph_pending"
+
+
+@pytest.mark.asyncio
+async def test_ingestion_audit_reports_graph_retry_scheduled():
+    audit = await _audit_for(
+        _doc(
+            {
+                "requested_chunks": 10,
+                "extracted_chunks": 5,
+                "failed_chunk_count": 5,
+                "retryable_failed_chunks": 5,
+                "all_lanes_exhausted_count": 5,
+                "graph_retry_after": "2099-01-01T00:00:00",
+                "relation_count": 0,
+            },
+            failures=[{"chunk_id": "c-failed", "retryable": True}],
+            graph_status="graph_retry_scheduled",
+        )
+    )
+
+    doc = audit["document_metrics"][0]
+    assert audit["readiness"] == "graph_retry_scheduled"
+    assert audit["totals"]["graph_retry_scheduled_docs"] == 1
+    assert audit["totals"]["graph_retryable_failed_chunks"] == 5
+    assert audit["totals"]["all_lanes_exhausted_count"] == 5
+    assert doc["graph_retry_after"] == "2099-01-01T00:00:00"
+
+
+@pytest.mark.asyncio
+async def test_ingestion_audit_reports_mongo_only_vector_recovery_available():
+    audit = await _audit_for(
+        _doc(
+            {
+                "requested_chunks": 0,
+                "extracted_chunks": 0,
+                "failed_chunk_count": 0,
+                "relation_count": 0,
+            },
+            graph_status="graph_pending",
+            mongo_written=True,
+            qdrant_written=False,
+        ),
+        chunk_count=10,
+    )
+
+    doc = audit["document_metrics"][0]
+    assert audit["totals"]["vector_recovery_available_docs"] == 1
+    assert doc["vector_recovery_available"] is True
 
 
 @pytest.mark.asyncio

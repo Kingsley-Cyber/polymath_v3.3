@@ -101,6 +101,12 @@ class IngestionConfig(BaseModel):
     compact_mode_max_relations: int = Field(default=8, ge=0, le=64)
     deep_pass_enabled: bool = False
     deep_pass_max_chunks: int = Field(default=80, ge=0, le=20000)
+    graph_per_chunk_max_attempts: int = Field(default=2, ge=1, le=5)
+    graph_per_doc_max_failed_chunks_before_pause: int = Field(default=50, ge=1, le=10000)
+    graph_per_lane_max_consecutive_failures: int = Field(default=2, ge=1, le=10)
+    graph_per_lane_cooldown_seconds: int = Field(default=300, ge=0, le=86400)
+    graph_backfill_max_chunks: int = Field(default=100, ge=1, le=10000)
+    graph_backfill_max_attempts_per_chunk: int = Field(default=2, ge=1, le=10)
 
     entity_schema: list[str] | None = Field(default_factory=_default_entity_schema)
     relation_schema: list[str] | None = Field(default_factory=_default_relation_schema)
@@ -177,6 +183,10 @@ class WriteState(BaseModel):
     graph_extracted_chunk_count: int = 0
     graph_extraction_strategy: str | None = None
     graph_completeness: str | None = None
+    graph_retry_after: datetime | None = None
+    graph_backfill_attempt_count: int = 0
+    graph_last_backfill_error: str | None = None
+    graph_retryable_failed_chunk_count: int = 0
     warnings: list[str] = Field(default_factory=list)
     verified: bool | None = None
     verify_errors: list[str] = Field(default_factory=list)

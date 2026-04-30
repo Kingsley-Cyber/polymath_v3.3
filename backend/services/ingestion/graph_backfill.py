@@ -25,9 +25,11 @@ from services.ghost_b import (
     extract_entities,
     summarize_extraction_batch,
 )
+from services.graph.entity_quality import mark_graph_metrics_stale
 from services.graph.neo4j_writer import write_document_graph
 from services.ingestion.worker import (
     GRAPH_NEEDS_BACKFILL,
+    GRAPH_RETRY_SCHEDULED,
     GRAPH_READY,
     _build_ghost_pool,
     _ghost_b_partial_warning,
@@ -53,6 +55,12 @@ def _set_if_present(updates: dict[str, Any], key: str, value: Any) -> None:
 
 
 def _failure_from_dict(row: dict[str, Any]) -> ExtractionFailureItem:
+    retry_after = row.get("retry_after")
+    if retry_after and not isinstance(retry_after, datetime):
+        try:
+            retry_after = datetime.fromisoformat(str(retry_after))
+        except Exception:
+            retry_after = None
     return ExtractionFailureItem(
         chunk_id=str(row.get("chunk_id") or ""),
         doc_id=str(row.get("doc_id") or ""),
@@ -62,6 +70,10 @@ def _failure_from_dict(row: dict[str, Any]) -> ExtractionFailureItem:
         attempts=int(row.get("attempts") or 0),
         error_type=str(row.get("error_type") or "unknown"),
         error_message=str(row.get("error_message") or "")[:1000],
+        retryable=bool(row.get("retryable", True)),
+        retry_after=retry_after,
+        backfill_attempt_count=int(row.get("backfill_attempt_count") or 0),
+        lane_state=row.get("lane_state"),
     )
 
 
@@ -108,6 +120,13 @@ def _merge_metrics(
         "deep_extraction_chunks",
         "full_extraction_chunks",
         "skipped_low_value_chunks",
+        "retryable_failed_chunks",
+        "retry_budget_exhausted_count",
+        "all_lanes_exhausted_count",
+        "lane_cooling_down_count",
+        "provider_error_count",
+        "rate_limited_count",
+        "timeout_count",
     ):
         merged[key] = int(previous_metrics.get(key) or 0) + int(
             retry_metrics.get(key) or 0
@@ -135,6 +154,10 @@ def _merge_metrics(
         "max_relations_per_chunk",
         "max_completion_tokens",
         "skipped_low_value_by_kind",
+        "graph_retry_after",
+        "lane_state_counts",
+        "disabled_lane_count",
+        "retry_policy",
     ):
         if retry_metrics.get(key) is not None:
             merged[key] = retry_metrics.get(key)
@@ -185,7 +208,80 @@ async def backfill_failed_graph_chunks(
             "remaining_failed_chunks": 0,
         }
 
-    failed_ids = list(dict.fromkeys(f.chunk_id for f in failures if f.chunk_id))
+    now = datetime.utcnow()
+    not_ready = [
+        failure
+        for failure in failures
+        if failure.retry_after is not None and failure.retry_after > now
+    ]
+    if not_ready:
+        retry_after = min(f.retry_after for f in not_ready if f.retry_after is not None)
+        await db["documents"].update_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {
+                "$set": {
+                    "write_state.graph_status": GRAPH_RETRY_SCHEDULED,
+                    "write_state.graph_retry_after": retry_after,
+                    "write_state.graph_retryable_failed_chunk_count": len(failures),
+                    "decision_trace.graph_status": GRAPH_RETRY_SCHEDULED,
+                    "decision_trace.graph_retry_after": retry_after,
+                    "updated_at": now,
+                }
+            },
+        )
+        return {
+            "status": "retry_scheduled",
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "retried_chunks": 0,
+            "recovered_chunks": 0,
+            "remaining_failed_chunks": len(failures),
+            "retry_after": retry_after.isoformat(),
+        }
+
+    corpus = await db["corpora"].find_one({"corpus_id": corpus_id})
+    live_cfg = (corpus or {}).get("default_ingestion_config") or {}
+    from services.ingestion_service import build_effective_config
+
+    config = build_effective_config(
+        frozen_base=doc.get("ingestion_config") or live_cfg,
+        live_corpus=live_cfg,
+        ingest_overrides=None,
+    )
+    max_chunks = max(1, int(getattr(config, "graph_backfill_max_chunks", 100) or 100))
+    max_attempts = max(
+        1, int(getattr(config, "graph_backfill_max_attempts_per_chunk", 2) or 2)
+    )
+    eligible_failures = [
+        failure
+        for failure in failures
+        if failure.retryable and failure.backfill_attempt_count < max_attempts
+    ][:max_chunks]
+    if not eligible_failures:
+        retry_after = None
+        await db["documents"].update_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {
+                "$set": {
+                    "write_state.graph_status": GRAPH_NEEDS_BACKFILL,
+                    "write_state.graph_retryable_failed_chunk_count": 0,
+                    "write_state.graph_last_backfill_error": "No retryable failed chunks remain within backfill attempt budget.",
+                    "decision_trace.graph_status": GRAPH_NEEDS_BACKFILL,
+                    "updated_at": now,
+                }
+            },
+        )
+        return {
+            "status": "retry_budget_exhausted",
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "retried_chunks": 0,
+            "recovered_chunks": 0,
+            "remaining_failed_chunks": len(failures),
+            "retry_after": retry_after,
+        }
+
+    failed_ids = list(dict.fromkeys(f.chunk_id for f in eligible_failures if f.chunk_id))
     chunk_rows = await db["chunks"].find(
         {
             "doc_id": doc_id,
@@ -208,15 +304,6 @@ async def backfill_failed_graph_chunks(
     if not tasks:
         raise RuntimeError("Failed chunk records exist, but no matching chunks were found")
 
-    corpus = await db["corpora"].find_one({"corpus_id": corpus_id})
-    live_cfg = (corpus or {}).get("default_ingestion_config") or {}
-    from services.ingestion_service import build_effective_config
-
-    config = build_effective_config(
-        frozen_base=doc.get("ingestion_config") or live_cfg,
-        live_corpus=live_cfg,
-        ingest_overrides=None,
-    )
     previous_metrics = doc.get("ghost_b_metrics") or {}
     policy = _select_ghost_b_extraction_policy(
         config,
@@ -252,6 +339,14 @@ async def backfill_failed_graph_chunks(
         max_entities_per_chunk=policy.max_entities_per_chunk,
         max_relations_per_chunk=policy.max_relations_per_chunk,
         max_completion_tokens_override=policy.max_completion_tokens,
+        per_chunk_max_attempts=getattr(config, "graph_backfill_max_attempts_per_chunk", 2),
+        per_doc_max_failed_chunks_before_pause=max_chunks,
+        per_lane_max_consecutive_failures=getattr(
+            config, "graph_per_lane_max_consecutive_failures", 2
+        ),
+        per_lane_cooldown_seconds=getattr(
+            config, "graph_per_lane_cooldown_seconds", 300
+        ),
         metrics_context={
             **policy.metrics(),
             "extraction_strategy": f"{policy.extraction_strategy}_backfill",
@@ -262,11 +357,24 @@ async def backfill_failed_graph_chunks(
 
     recovered_ids = {result.chunk_id for result in report.results}
     retry_failure_by_id = {failure.chunk_id: failure for failure in report.failures}
+    attempted_ids = {failure.chunk_id for failure in eligible_failures}
     remaining_failures = [
-        retry_failure_by_id.get(failure.chunk_id, failure)
+        retry_failure_by_id.get(
+            failure.chunk_id,
+            ExtractionFailureItem(
+                **{
+                    **asdict(failure),
+                    "backfill_attempt_count": int(failure.backfill_attempt_count or 0)
+                    + (1 if failure.chunk_id in attempted_ids else 0),
+                }
+            ),
+        )
         for failure in failures
         if failure.chunk_id not in recovered_ids
     ]
+    for failure in remaining_failures:
+        if failure.chunk_id in attempted_ids and failure.chunk_id in retry_failure_by_id:
+            failure.backfill_attempt_count = int(failure.backfill_attempt_count or 0) + 1
 
     staged_results = _rehydrate_ghost_b_staging(doc.get("ghost_b_staging") or [])
     staged_by_chunk = {result.chunk_id: result for result in staged_results}
@@ -290,6 +398,11 @@ async def backfill_failed_graph_chunks(
             user_id=user_id,
             file_id=doc.get("file_id"),
             all_chunk_ids=all_chunk_ids,
+        )
+        await mark_graph_metrics_stale(
+            db,
+            corpus_id,
+            reason="graph_backfill_write",
         )
 
     warnings = _clean_graph_warnings((doc.get("write_state") or {}).get("warnings") or [])
@@ -316,7 +429,19 @@ async def backfill_failed_graph_chunks(
         previous_metrics=previous_metrics,
         retry_metrics=report.metrics,
     )
-    graph_status = GRAPH_NEEDS_BACKFILL if remaining_failures else GRAPH_READY
+    retry_after_values = [
+        failure.retry_after
+        for failure in remaining_failures
+        if failure.retry_after is not None and failure.retry_after > datetime.utcnow()
+    ]
+    next_retry_after = min(retry_after_values) if retry_after_values else None
+    graph_status = (
+        GRAPH_RETRY_SCHEDULED
+        if remaining_failures and next_retry_after
+        else GRAPH_NEEDS_BACKFILL
+        if remaining_failures
+        else GRAPH_READY
+    )
     graph_completeness = (
         "needs-backfill"
         if remaining_failures
@@ -333,11 +458,23 @@ async def backfill_failed_graph_chunks(
         "write_state.graph_failed_chunk_count": len(remaining_failures),
         "write_state.graph_completeness": graph_completeness,
         "write_state.graph_extraction_finished_at": now,
+        "write_state.graph_retry_after": next_retry_after,
+        "write_state.graph_backfill_attempt_count": int(
+            ((doc.get("write_state") or {}).get("graph_backfill_attempt_count") or 0)
+        )
+        + 1,
+        "write_state.graph_last_backfill_error": (
+            None if not remaining_failures else "Some failed graph chunks remain after bounded backfill."
+        ),
+        "write_state.graph_retryable_failed_chunk_count": sum(
+            1 for failure in remaining_failures if failure.retryable
+        ),
         "decision_trace.graph_status": graph_status,
         "decision_trace.graph_extracted_chunks": len(staged_results),
         "decision_trace.graph_failed_chunks": len(remaining_failures),
         "decision_trace.graph_requested_chunks": len(all_chunk_ids),
         "decision_trace.graph_completeness": graph_completeness,
+        "decision_trace.graph_retry_after": next_retry_after,
         "decision_trace.vector_ready": True,
         "updated_at": now,
     }
@@ -377,4 +514,5 @@ async def backfill_failed_graph_chunks(
         "retried_chunks": len(tasks),
         "recovered_chunks": len(recovered_ids),
         "remaining_failed_chunks": len(remaining_failures),
+        "retry_after": next_retry_after.isoformat() if next_retry_after else None,
     }

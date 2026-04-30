@@ -10,6 +10,8 @@ import types
 from pathlib import Path
 from typing import Any, Optional
 
+from services.graph.entity_quality import classify_entity_label
+
 try:
     import bson as _bson  # noqa: F401
 except ModuleNotFoundError:
@@ -155,6 +157,25 @@ _GRAPH_RELEVANCE_STOPWORDS = {
 def _text(value: Any, limit: int = 700) -> str:
     text = re.sub(r"\s+", " ", str(value or "").strip())
     return text[:limit]
+
+
+def _context_label_is_safe(label: str, entity_type: str | None = None) -> bool:
+    return classify_entity_label(label, entity_type).eligible_for_topic_label
+
+
+def _safe_context_topic_label(
+    label: str,
+    *,
+    entity_type: str | None = None,
+    fallback: str = "Query neighborhood",
+) -> str:
+    text = _text(label, 80).strip()
+    if text and _context_label_is_safe(text, entity_type):
+        return text
+    clean_fallback = _text(fallback, 80).strip() or "Query neighborhood"
+    if clean_fallback != text and _context_label_is_safe(clean_fallback, None):
+        return clean_fallback
+    return "Query neighborhood"
 
 
 def _ids(values: list[Any] | tuple[Any, ...]) -> list[str]:
@@ -528,6 +549,13 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
     def _group_for_entity(eid: str, raw: dict[str, Any]) -> tuple[str, str, str | None]:
         concept = entity_concept_map.get(eid, {}) or {}
         cid = str(concept.get("concept_id") or "").strip()
+        fallback_label = str(
+            raw.get("canonical_family")
+            or raw.get("domain_type")
+            or raw.get("domain")
+            or raw.get("object_kind")
+            or "Query neighborhood"
+        ).strip()
         label = str(
             (themes_by_id.get(cid) or {}).get("name")
             or concept.get("label")
@@ -539,6 +567,11 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
             or raw.get("label")
             or "Query neighborhood"
         ).strip()
+        label = _safe_context_topic_label(
+            label,
+            entity_type=str(raw.get("entity_type") or raw.get("type") or ""),
+            fallback=fallback_label,
+        )
         if cid:
             return f"concept:{cid}", label, cid
         key_seed = label.lower().replace(" ", "-")[:80] or eid
@@ -566,7 +599,11 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
             },
         )
         label = str(raw.get("label") or eid)
-        if label not in group["entities"]:
+        label_quality = classify_entity_label(
+            label,
+            str(raw.get("entity_type") or raw.get("type") or ""),
+        )
+        if label_quality.eligible_for_topic_label and label not in group["entities"]:
             group["entities"].append(label)
         group["degree"] += float(raw.get("degree") or 0)
         if str(raw.get("emphasis") or "") in {"bridge", "bridge_anchor", "frontier", "transfer_hub"} or eid in bridge_entities:

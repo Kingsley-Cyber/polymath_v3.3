@@ -19,6 +19,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Awaitable, Callable, ClassVar, Literal
 
 import httpx
@@ -1003,6 +1004,10 @@ class ExtractionFailureItem:
     attempts: int
     error_type: str
     error_message: str
+    retryable: bool = True
+    retry_after: datetime | None = None
+    backfill_attempt_count: int = 0
+    lane_state: str | None = None
 
 
 @dataclass
@@ -1010,6 +1015,27 @@ class ExtractionBatchReport:
     results: list[ExtractionResult]
     failures: list[ExtractionFailureItem]
     metrics: dict
+
+
+def _provider_error_kind(exc: Exception) -> str:
+    if isinstance(exc, httpx.TimeoutException):
+        return "timeout"
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status == 429:
+            return "rate_limited"
+        return "provider_error"
+    if isinstance(exc, httpx.RequestError):
+        return "provider_error"
+    return exc.__class__.__name__
+
+
+def _retryable_infrastructure_error(exc: Exception) -> bool:
+    if isinstance(exc, httpx.TimeoutException):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in {408, 409, 425, 429, 500, 502, 503, 504}
+    return isinstance(exc, httpx.RequestError)
 
 
 def summarize_extraction_batch(
@@ -1046,6 +1072,13 @@ def summarize_extraction_batch(
     error_counts: dict[str, int] = {}
     for failure in failures:
         error_counts[failure.error_type] = error_counts.get(failure.error_type, 0) + 1
+    retryable_failures = sum(1 for failure in failures if failure.retryable)
+    retry_after_values = [
+        failure.retry_after
+        for failure in failures
+        if failure.retry_after is not None
+    ]
+    retry_after = min(retry_after_values).isoformat() if retry_after_values else None
     metrics = {
         "requested_chunks": total_chunks,
         "extracted_chunks": len(results),
@@ -1098,6 +1131,14 @@ def summarize_extraction_batch(
         "relation_drop_count": sum(r.relation_drop_count for r in results),
         "schema_lens_ids": lens_ids,
         "error_counts": error_counts,
+        "retryable_failed_chunks": retryable_failures,
+        "retry_budget_exhausted_count": int(error_counts.get("retry_budget_exhausted") or 0),
+        "all_lanes_exhausted_count": int(error_counts.get("all_lanes_exhausted") or 0),
+        "lane_cooling_down_count": int(error_counts.get("lane_cooling_down") or 0),
+        "provider_error_count": int(error_counts.get("provider_error") or 0),
+        "rate_limited_count": int(error_counts.get("rate_limited") or 0),
+        "timeout_count": int(error_counts.get("timeout") or 0),
+        "graph_retry_after": retry_after,
     }
     if metrics_context:
         metrics.update(metrics_context)
@@ -1956,6 +1997,10 @@ async def extract_entities(
     max_entities_per_chunk: int | None = None,
     max_relations_per_chunk: int | None = None,
     max_completion_tokens_override: int | None = None,
+    per_chunk_max_attempts: int = 2,
+    per_doc_max_failed_chunks_before_pause: int = 50,
+    per_lane_max_consecutive_failures: int = SOFT_FATAL_DISABLE_STRIKES,
+    per_lane_cooldown_seconds: int = 300,
     metrics_context: dict | None = None,
 ) -> list[ExtractionResult] | ExtractionBatchReport:
     """
@@ -2011,6 +2056,14 @@ async def extract_entities(
     max_completion_tokens = max(256, min(max_completion_tokens, settings.EXTRACTION_MAX_TOKENS))
     max_entities = max(1, min(max_entities, settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK))
     max_relations = max(0, min(max_relations, settings.EXTRACTION_MAX_RELATIONS_PER_CHUNK))
+    per_chunk_max_attempts = max(1, min(int(per_chunk_max_attempts or 2), 5))
+    per_doc_max_failed_chunks_before_pause = max(
+        1, int(per_doc_max_failed_chunks_before_pause or 50)
+    )
+    per_lane_max_consecutive_failures = max(
+        1, int(per_lane_max_consecutive_failures or SOFT_FATAL_DISABLE_STRIKES)
+    )
+    per_lane_cooldown_seconds = max(0, int(per_lane_cooldown_seconds or 0))
     headers = {
         "Authorization": f"Bearer {settings.LITELLM_MASTER_KEY}",
         "Content-Type": "application/json",
@@ -2042,9 +2095,12 @@ async def extract_entities(
     failures_list: list[ExtractionFailureItem] = []
     call_metrics: list[dict] = []
     failed_count = 0
+    paused_due_doc_budget = False
     _list_lock = asyncio.Lock()
     disabled_lanes: set[int] = set()
     lane_fatal_strikes: dict[int, int] = {}
+    lane_states: dict[int, str] = {idx: "healthy" for idx in range(len(pool))}
+    chunk_attempts: dict[str, int] = {}
     _disabled_lock = asyncio.Lock()
 
     async def _lane_disable_ready(pool_idx: int, exc: Exception) -> bool:
@@ -2057,7 +2113,7 @@ async def extract_entities(
             strikes = lane_fatal_strikes.get(pool_idx, 0) + 1
             lane_fatal_strikes[pool_idx] = strikes
         entry = pool[pool_idx]
-        if strikes >= SOFT_FATAL_DISABLE_STRIKES:
+        if strikes >= per_lane_max_consecutive_failures:
             return True
         logger.warning(
             "GHOST B saw soft fatal provider signal for lane=%d model=%s "
@@ -2065,7 +2121,7 @@ async def extract_entities(
             pool_idx,
             entry["model"],
             strikes,
-            SOFT_FATAL_DISABLE_STRIKES,
+            per_lane_max_consecutive_failures,
             provider_error_summary(exc),
         )
         return False
@@ -2079,6 +2135,10 @@ async def extract_entities(
             if pool_idx in disabled_lanes:
                 return
             disabled_lanes.add(pool_idx)
+            tier = provider_error_tier(exc)
+            lane_states[pool_idx] = (
+                "exhausted_for_document" if tier == "hard" else "cooling_down"
+            )
         entry = pool[pool_idx]
         logger.error(
             "GHOST B disabled extraction lane=%d model=%s after fatal provider error: %s",
@@ -2086,6 +2146,15 @@ async def extract_entities(
             entry["model"],
             provider_error_summary(exc),
         )
+
+    async def _reserve_chunk_attempt(chunk_id: str) -> int | None:
+        async with _list_lock:
+            current = int(chunk_attempts.get(chunk_id) or 0)
+            if current >= per_chunk_max_attempts:
+                return None
+            current += 1
+            chunk_attempts[chunk_id] = current
+            return current
 
     async def _process_one(task: ExtractionTask, pool_idx: int) -> ExtractionResult | None:
         entry = pool[pool_idx]
@@ -2097,17 +2166,26 @@ async def extract_entities(
             inline_limit=inline_limit,
             top_k=top_k,
         )
-        # At most two attempts on the same lane. The second attempt is reserved
-        # strictly for malformed model JSON from the first attempt. Provider /
-        # transport failures are recorded once (or escalated through the lane
-        # circuit breaker when fatal) so one bad chunk does not quietly create
-        # extra paid calls.
+        # Attempt budget is explicit and infrastructure-only. A valid JSON
+        # response never retries for weak semantics, low predicate confidence,
+        # or related_to. Parse errors get compact recovery; provider/transport
+        # errors only retry inside the bounded infrastructure budget.
         last_exc: Exception | None = None
         last_error_type = "unknown"
         attempts_used = 0
-        for attempt in range(2):
-            attempts_used = attempt + 1
-            recovery_mode = attempt > 0 and last_error_type == "parse_error"
+        parse_recovery_used = False
+        while True:
+            reserved_attempt = await _reserve_chunk_attempt(task.chunk_id)
+            if reserved_attempt is None:
+                last_error_type = "retry_budget_exhausted"
+                last_exc = RuntimeError("Ghost B per-chunk retry budget exhausted")
+                break
+            attempts_used = reserved_attempt
+            recovery_mode = (
+                last_error_type == "parse_error" and not parse_recovery_used
+            )
+            if recovery_mode:
+                parse_recovery_used = True
             attempt_max_entities = min(max_entities, 5) if recovery_mode else max_entities
             attempt_max_relations = min(max_relations, 5) if recovery_mode else max_relations
             attempt_max_tokens = (
@@ -2170,7 +2248,7 @@ async def extract_entities(
                         usage.get("prompt_tokens"),
                         usage.get("completion_tokens"),
                         pool_idx,
-                        attempt + 1,
+                        reserved_attempt,
                     )
                     raw = body["choices"][0]["message"]["content"]
                     result = _parse(raw, task, threshold, schema=schema, schema_lens=schema_lens)
@@ -2179,7 +2257,7 @@ async def extract_entities(
                             "chunk_id": task.chunk_id,
                             "model": entry["model"],
                             "lane": pool_idx,
-                            "attempt": attempt + 1,
+                            "attempt": reserved_attempt,
                             "duration_seconds": round(duration, 3),
                             "total_tokens": usage.get("total_tokens"),
                             "prompt_tokens": usage.get("prompt_tokens"),
@@ -2197,15 +2275,18 @@ async def extract_entities(
                             task.chunk_id,
                             len(result.entities),
                             len(result.relations),
-                            attempt + 1,
+                            reserved_attempt,
                             pool_idx,
                         )
                         return result
                     last_error_type = "parse_error"
                     last_exc = RuntimeError("parse returned None")
+                    if attempts_used < per_chunk_max_attempts and not parse_recovery_used:
+                        continue
+                    break
             except Exception as exc:
                 last_exc = exc
-                last_error_type = exc.__class__.__name__
+                last_error_type = _provider_error_kind(exc)
                 fatal_tier = provider_error_tier(exc)
                 fatal_lane = fatal_tier is not None
                 call_metrics.append(
@@ -2213,7 +2294,7 @@ async def extract_entities(
                         "chunk_id": task.chunk_id,
                         "model": entry["model"],
                         "lane": pool_idx,
-                        "attempt": attempt + 1,
+                        "attempt": reserved_attempt,
                         "duration_seconds": round(time.perf_counter() - started, 3),
                         "total_tokens": 0,
                         "prompt_tokens": 0,
@@ -2230,14 +2311,40 @@ async def extract_entities(
                 )
                 if fatal_lane:
                     raise FatalLaneError(exc) from exc
+                if (
+                    _retryable_infrastructure_error(exc)
+                    and attempts_used < per_chunk_max_attempts
+                ):
+                    logger.warning(
+                        "GHOST B lane %d infrastructure retry chunk_id=%s attempt=%d/%d error_type=%s: %s",
+                        pool_idx,
+                        task.chunk_id,
+                        attempts_used,
+                        per_chunk_max_attempts,
+                        last_error_type,
+                        provider_error_summary(exc),
+                    )
+                    await asyncio.sleep(min(2.0, 0.25 * attempts_used))
+                    continue
                 logger.warning(
-                    "GHOST B lane %d failed chunk_id=%s attempt=%d: %s — no retry for non-parse error",
-                    pool_idx, task.chunk_id, attempt + 1, exc,
+                    "GHOST B lane %d failed chunk_id=%s attempt=%d error_type=%s: %s",
+                    pool_idx, task.chunk_id, attempts_used, last_error_type, exc,
                 )
                 break
         logger.error(
-            "GHOST B failed chunk_id=%s lane=%d after 2 attempts: %s",
-            task.chunk_id, pool_idx, last_exc,
+            "GHOST B failed chunk_id=%s lane=%d after %d/%d attempts: %s",
+            task.chunk_id, pool_idx, attempts_used, per_chunk_max_attempts, last_exc,
+        )
+        retryable = last_error_type in {
+            "retry_budget_exhausted",
+            "provider_error",
+            "rate_limited",
+            "timeout",
+        }
+        retry_after = (
+            datetime.utcnow() + timedelta(seconds=per_lane_cooldown_seconds)
+            if retryable and per_lane_cooldown_seconds
+            else None
         )
         failures_list.append(
             ExtractionFailureItem(
@@ -2249,15 +2356,18 @@ async def extract_entities(
                 attempts=attempts_used,
                 error_type=last_error_type,
                 error_message=str(last_exc)[:1000],
+                retryable=retryable,
+                retry_after=retry_after,
+                lane_state=lane_states.get(pool_idx, "healthy"),
             )
         )
         return None
 
     async def _lane_worker(pool_idx: int) -> None:
         """One coroutine per lane slot. Drains the shared queue until empty."""
-        nonlocal failed_count
+        nonlocal failed_count, paused_due_doc_budget
         while True:
-            if pool_idx in disabled_lanes:
+            if paused_due_doc_budget or pool_idx in disabled_lanes:
                 return
             try:
                 task = task_queue.get_nowait()
@@ -2291,6 +2401,14 @@ async def extract_entities(
                         results_list.append(result)
                     else:
                         failed_count += 1
+                        if failed_count >= per_doc_max_failed_chunks_before_pause:
+                            paused_due_doc_budget = True
+                            logger.warning(
+                                "GHOST B pausing document after %d failed chunks reached budget=%d",
+                                failed_count,
+                                per_doc_max_failed_chunks_before_pause,
+                            )
+                            return
             finally:
                 task_queue.task_done()
 
@@ -2308,6 +2426,12 @@ async def extract_entities(
 
     await _run_enabled_workers()
     while not task_queue.empty():
+        if paused_due_doc_budget:
+            logger.warning(
+                "GHOST B stopped with %d chunks queued because document failure budget was reached",
+                task_queue.qsize(),
+            )
+            break
         enabled_count = sum(
             1 for pool_idx in range(len(pool)) if pool_idx not in disabled_lanes
         )
@@ -2341,15 +2465,27 @@ async def extract_entities(
     }
     unprocessed_tasks = [t for t in tasks if t.chunk_id not in accounted_chunk_ids]
     if unprocessed_tasks:
-        reason = (
-            "all_enabled_lanes_exhausted_after_circuit_breaker"
-            if disabled_lanes
-            else "not_processed"
+        if paused_due_doc_budget:
+            reason = "retry_budget_exhausted"
+            message = "Document graph extraction paused after failure retry budget was reached."
+        elif disabled_lanes:
+            reason = "all_lanes_exhausted"
+            message = "No healthy extraction lane remained to process this chunk."
+        else:
+            reason = "not_processed"
+            message = "Extraction worker exited before processing this chunk."
+        retry_after = (
+            datetime.utcnow() + timedelta(seconds=per_lane_cooldown_seconds)
+            if reason in {"retry_budget_exhausted", "all_lanes_exhausted"}
+            and per_lane_cooldown_seconds
+            else None
         )
-        message = (
-            "No healthy extraction lane remained to process this chunk."
-            if disabled_lanes
-            else "Extraction worker exited before processing this chunk."
+        lane_state = (
+            "exhausted_for_document"
+            if reason == "retry_budget_exhausted"
+            else "cooling_down"
+            if reason == "all_lanes_exhausted"
+            else None
         )
         for task in unprocessed_tasks:
             failures_list.append(
@@ -2359,12 +2495,30 @@ async def extract_entities(
                     corpus_id=task.corpus_id,
                     model="pool",
                     lane=-1,
-                    attempts=0,
+                    attempts=int(chunk_attempts.get(task.chunk_id) or 0),
                     error_type=reason,
                     error_message=message,
+                    retryable=reason in {"retry_budget_exhausted", "all_lanes_exhausted"},
+                    retry_after=retry_after,
+                    lane_state=lane_state,
                 )
             )
         failed_count += len(unprocessed_tasks)
+
+    lane_state_counts: dict[str, int] = {}
+    for state in lane_states.values():
+        lane_state_counts[state] = lane_state_counts.get(state, 0) + 1
+    metrics_context = {
+        **(metrics_context or {}),
+        "lane_state_counts": lane_state_counts,
+        "disabled_lane_count": len(disabled_lanes),
+        "retry_policy": {
+            "per_chunk_max_attempts": per_chunk_max_attempts,
+            "per_doc_max_failed_chunks_before_pause": per_doc_max_failed_chunks_before_pause,
+            "per_lane_max_consecutive_failures": per_lane_max_consecutive_failures,
+            "per_lane_cooldown_seconds": per_lane_cooldown_seconds,
+        },
+    }
 
     # Failure reporting
     if failed_count > 0:

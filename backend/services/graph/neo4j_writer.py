@@ -30,6 +30,7 @@ from services.ghost_b import (
     UNIVERSAL_RELATION_SCHEMA,
     normalize_relation_predicate_alias,
 )
+from services.graph.entity_quality import quality_payload
 from services.ontology import (
     object_kind_compatible,
     ontology_version,
@@ -929,6 +930,11 @@ async def _upsert_entity_and_mention(
     primary_type = resolve_primary_entity_type(canonical, [entity.entity_type])
     eid = entity_id_from_name(canonical, primary_type)
     ontology = resolve_ontology_metadata(canonical, primary_type)
+    quality = quality_payload(
+        entity.surface_form or entity.canonical_name or canonical,
+        primary_type,
+        observed_entity_types=[entity.entity_type],
+    )
     async with driver.session() as session:
         await session.run(
             """
@@ -950,7 +956,12 @@ async def _upsert_entity_and_mention(
                 e.domain_type_parent = $domain_type_parent,
                 e.domain_type_root = $domain_type_root,
                 e.canonical_family = $canonical_family,
-                e.ontology_version = $ontology_version
+                e.ontology_version = $ontology_version,
+                e.label_quality = $label_quality,
+                e.eligible_for_topic_label = $eligible_for_topic_label,
+                e.eligible_for_synthesis = $eligible_for_synthesis,
+                e.quality_reasons = $quality_reasons,
+                e.entity_quality_version = $entity_quality_version
             WITH e
             SET e.observed_entity_types = CASE
                 WHEN e.observed_entity_types IS NULL THEN [$extracted_type]
@@ -989,6 +1000,11 @@ async def _upsert_entity_and_mention(
             domain_type_root=ontology.get("domain_type_root"),
             canonical_family=ontology.get("canonical_family"),
             ontology_version=ontology.get("ontology_version"),
+            label_quality=quality["label_quality"],
+            eligible_for_topic_label=quality["eligible_for_topic_label"],
+            eligible_for_synthesis=quality["eligible_for_synthesis"],
+            quality_reasons=quality["quality_reasons"],
+            entity_quality_version=quality["entity_quality_version"],
             chunk_id=chunk_id,
             corpus_id=corpus_id,
         )
@@ -1102,6 +1118,11 @@ async def write_document_graph(
         observed_types = list(group["observed_entity_types"])
         primary_type = resolve_primary_entity_type(canonical, observed_types)
         ontology = resolve_ontology_metadata(canonical, primary_type)
+        quality = quality_payload(
+            group["display_name"] or canonical,
+            primary_type,
+            observed_entity_types=observed_types,
+        )
         entity_identity[canonical] = {
             "entity_id": entity_id_from_name(canonical, primary_type),
             "canonical_name": canonical,
@@ -1117,6 +1138,11 @@ async def write_document_graph(
             "domain_type_root": ontology.get("domain_type_root"),
             "canonical_family": ontology.get("canonical_family"),
             "ontology_version": ontology.get("ontology_version"),
+            "label_quality": quality["label_quality"],
+            "eligible_for_topic_label": quality["eligible_for_topic_label"],
+            "eligible_for_synthesis": quality["eligible_for_synthesis"],
+            "quality_reasons": quality["quality_reasons"],
+            "entity_quality_version": quality["entity_quality_version"],
         }
 
     mention_rows: list[dict] = []
@@ -1159,6 +1185,11 @@ async def write_document_graph(
                 "domain_type_root": identity.get("domain_type_root"),
                 "canonical_family": identity.get("canonical_family"),
                 "ontology_version": identity.get("ontology_version"),
+                "label_quality": identity.get("label_quality"),
+                "eligible_for_topic_label": identity.get("eligible_for_topic_label"),
+                "eligible_for_synthesis": identity.get("eligible_for_synthesis"),
+                "quality_reasons": identity.get("quality_reasons"),
+                "entity_quality_version": identity.get("entity_quality_version"),
             })
 
     relation_rows: list[dict] = []
@@ -1318,7 +1349,12 @@ async def write_document_graph(
                     e.domain_type_parent = row.domain_type_parent,
                     e.domain_type_root = row.domain_type_root,
                     e.canonical_family = row.canonical_family,
-                    e.ontology_version = row.ontology_version
+                    e.ontology_version = row.ontology_version,
+                    e.label_quality = row.label_quality,
+                    e.eligible_for_topic_label = row.eligible_for_topic_label,
+                    e.eligible_for_synthesis = row.eligible_for_synthesis,
+                    e.quality_reasons = row.quality_reasons,
+                    e.entity_quality_version = row.entity_quality_version
                 WITH e, row
                 SET e.observed_entity_types = reduce(
                     types = coalesce(e.observed_entity_types, []),
