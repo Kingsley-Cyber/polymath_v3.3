@@ -1,0 +1,10 @@
+# Optional local GraphRAG extraction lane.
+#
+# This file is intentionally not installed by the default backend Dockerfile.
+# Install it only on machines that should run local GPU extraction:
+#   pip install -r requirements.local-graph.txt
+#
+# The backend imports these lazily, so API LLM Ghost B and app startup still
+# work when this file has not been installed.
+gliner
+torch

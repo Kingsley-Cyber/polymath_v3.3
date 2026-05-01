@@ -22,6 +22,7 @@ export type ChildChunkAlgorithm = "sentence_merge" | "semantic_split";
 //   "soft" — remap unknowns to sentinels ('other' / 'related_to'); preserves edge/node
 //   "hard" — drop unknowns entirely (precision-critical mode)
 export type SchemaStrictMode = "off" | "soft" | "hard";
+export type GraphExtractionEngine = "llm" | "local_gliner" | "hybrid_local_first";
 
 export interface TokenBudget {
   min_tokens: number;
@@ -47,6 +48,13 @@ export interface ModelProfileRef {
   api_key: string | null;
   max_concurrent: number;
   extra_params: Record<string, unknown>;
+}
+
+export interface LocalGraphWorkerConfig {
+  device: string;
+  name: string;
+  batch_size: number;
+  weight: number;
 }
 
 export interface IngestionConfig {
@@ -95,6 +103,18 @@ export interface IngestionConfig {
    * combined chip pool. When false: extraction_models is an independent pool.
    */
   models_linked: boolean;
+
+  // Local-first graph extraction. Optional so older corpora deserialize.
+  graph_extraction_engine?: GraphExtractionEngine;
+  local_graph_extraction_enabled?: boolean;
+  local_extractor_model?: string;
+  local_workers?: LocalGraphWorkerConfig[];
+  max_chunk_tokens_for_local_extractor?: number;
+  max_chunks_in_memory?: number;
+  oom_retry_enabled?: boolean;
+  llm_fallback_enabled?: boolean;
+  llm_fallback_max_percent?: number;
+  glirel_enabled?: boolean;
 
   // GHOST B — Universal schema (baked backend-side, see ghost_b.UNIVERSAL_*_SCHEMA).
   // The create/edit UI no longer exposes these. Fields retained on the
@@ -224,6 +244,19 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
   extraction_models: [],
   entity_confidence_threshold: 0.5,
   models_linked: true,
+  graph_extraction_engine: "hybrid_local_first",
+  local_graph_extraction_enabled: true,
+  local_extractor_model: "knowledgator/gliner-relex-large-v0.5",
+  local_workers: [
+    { device: "cuda:0", name: "rtx_3090", batch_size: 16, weight: 2 },
+    { device: "cuda:1", name: "rtx_4070", batch_size: 8, weight: 1 },
+  ],
+  max_chunk_tokens_for_local_extractor: 768,
+  max_chunks_in_memory: 100,
+  oom_retry_enabled: true,
+  llm_fallback_enabled: true,
+  llm_fallback_max_percent: 0.05,
+  glirel_enabled: false,
   // entity_schema / relation_schema / schema_strict intentionally omitted —
   // backend fills them from the universal schema on POST.
   use_neo4j: true,

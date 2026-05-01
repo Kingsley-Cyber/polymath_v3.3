@@ -266,10 +266,15 @@ def _trace_reasons(
         reasons.append(f"{low_value_count} low-value chunk(s) were skipped for graph extraction.")
     if not config.use_neo4j:
         reasons.append("Graph extraction is disabled for this ingest configuration.")
-    elif policy is not None and policy.extraction_strategy == "compact_large_doc":
-        reasons.append("Large body chunk count triggered compact graph extraction.")
-    elif policy is not None and policy.extraction_strategy == "full_ontology":
-        reasons.append("Document stayed within the full ontology extraction budget.")
+    else:
+        if _graph_extraction_engine(config) == "hybrid_local_first":
+            reasons.append("Graph extraction will try local GLiNER first, then bounded LLM fallback.")
+        elif _graph_extraction_engine(config) == "local_gliner":
+            reasons.append("Graph extraction is configured for local GLiNER only.")
+        if policy is not None and policy.extraction_strategy == "compact_large_doc":
+            reasons.append("Large body chunk count triggered compact graph extraction.")
+        elif policy is not None and policy.extraction_strategy == "full_ontology":
+            reasons.append("Document stayed within the full ontology extraction budget.")
     if ws.vector_ready:
         reasons.append("Mongo and Qdrant are ready for vector/chat retrieval.")
     if not reasons:
@@ -313,6 +318,11 @@ def _build_decision_trace(
         str(metrics.get("graph_completeness") or "")
         or (policy.graph_completeness if policy else "graph-skipped")
     )
+    graph_engine = str(
+        metrics.get("graph_extraction_engine_used")
+        or _graph_extraction_engine(config)
+        or "llm"
+    )
     warnings: list[str] = []
     if chunking_config.get("semantic_split_reason"):
         warnings.append(str(chunking_config["semantic_split_reason"]))
@@ -346,6 +356,7 @@ def _build_decision_trace(
         "graph_status": ws.graph_status,
         "graph_strategy": graph_strategy,
         "graph_mode": graph_mode,
+        "graph_extraction_engine": graph_engine,
         "graph_completeness": graph_completeness,
         "graph_requested_chunks": int(metrics.get("requested_chunks") or body_children),
         "graph_extracted_chunks": int(metrics.get("extracted_chunks") or 0),
@@ -471,6 +482,11 @@ async def _update_graph_write_state(
         "decision_trace.graph_completeness",
         ws.graph_completeness,
     )
+    _set_if_present(
+        trace_updates,
+        "decision_trace.graph_extraction_engine",
+        metrics.get("graph_extraction_engine_used"),
+    )
     await db["documents"].update_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
         {"$set": trace_updates},
@@ -503,6 +519,7 @@ async def _persist_graph_extraction(
     for field_name, metric_name in (
         ("decision_trace.graph_strategy", "extraction_strategy"),
         ("decision_trace.graph_mode", "extraction_mode"),
+        ("decision_trace.graph_extraction_engine", "graph_extraction_engine_used"),
         ("decision_trace.graph_completeness", "graph_completeness"),
         ("decision_trace.graph_requested_chunks", "requested_chunks"),
         ("decision_trace.graph_extracted_chunks", "extracted_chunks"),
@@ -701,6 +718,15 @@ def _select_ghost_b_extraction_policy(
         deep_pass_enabled=deep_enabled,
         deep_pass_max_chunks=deep_max,
     )
+
+
+def _graph_extraction_engine(config: IngestionConfig) -> str:
+    engine = str(getattr(config, "graph_extraction_engine", "llm") or "llm").strip()
+    if engine not in {"llm", "local_gliner", "hybrid_local_first"}:
+        return "llm"
+    if not bool(getattr(config, "local_graph_extraction_enabled", True)):
+        return "llm"
+    return engine
 
 
 _HIGH_SIGNAL_ENTITY_RE = re.compile(r"\b(?:[A-Z][A-Za-z0-9_./+-]{2,}|[A-Z]{2,})\b")
@@ -1213,31 +1239,47 @@ async def _run_ghosts_parallel(
             metrics["schema_lens"] = schema_lens.to_dict()
             ghost_b_metrics = metrics
             return []
-        report = await extract_entities(
-            tasks,
-            schema=schema_ctx,
-            schema_lens=schema_lens,
-            chunk_vectors=None,
-            schema_resolver=_schema_resolver,
-            pool=pool,
-            model=model,
-            return_report=True,
-            extraction_mode=policy.extraction_mode,  # type: ignore[arg-type]
-            max_entities_per_chunk=policy.max_entities_per_chunk,
-            max_relations_per_chunk=policy.max_relations_per_chunk,
-            max_completion_tokens_override=policy.max_completion_tokens,
-            per_chunk_max_attempts=getattr(config, "graph_per_chunk_max_attempts", 2),
-            per_doc_max_failed_chunks_before_pause=getattr(
+        llm_kwargs = {
+            "schema": schema_ctx,
+            "schema_lens": schema_lens,
+            "chunk_vectors": None,
+            "schema_resolver": _schema_resolver,
+            "pool": pool,
+            "model": model,
+            "return_report": True,
+            "extraction_mode": policy.extraction_mode,
+            "max_entities_per_chunk": policy.max_entities_per_chunk,
+            "max_relations_per_chunk": policy.max_relations_per_chunk,
+            "max_completion_tokens_override": policy.max_completion_tokens,
+            "per_chunk_max_attempts": getattr(config, "graph_per_chunk_max_attempts", 2),
+            "per_doc_max_failed_chunks_before_pause": getattr(
                 config, "graph_per_doc_max_failed_chunks_before_pause", 50
             ),
-            per_lane_max_consecutive_failures=getattr(
+            "per_lane_max_consecutive_failures": getattr(
                 config, "graph_per_lane_max_consecutive_failures", 2
             ),
-            per_lane_cooldown_seconds=getattr(
+            "per_lane_cooldown_seconds": getattr(
                 config, "graph_per_lane_cooldown_seconds", 300
             ),
-            metrics_context=policy.metrics(),
-        )
+            "metrics_context": {
+                **policy.metrics(),
+                "graph_extraction_engine_requested": _graph_extraction_engine(config),
+            },
+        }
+        if _graph_extraction_engine(config) in {"local_gliner", "hybrid_local_first"}:
+            from services.local_graph_extractor import extract_entities_local_first
+
+            report = await extract_entities_local_first(
+                tasks,
+                config=config,
+                schema=schema_ctx,
+                schema_lens=schema_lens,
+                llm_extract_func=extract_entities,
+                llm_kwargs=llm_kwargs,
+                return_report=True,
+            )
+        else:
+            report = await extract_entities(tasks, **llm_kwargs)
         if not isinstance(report, ExtractionBatchReport):
             results = report
             failures: list[ExtractionFailureItem] = []

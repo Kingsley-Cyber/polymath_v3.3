@@ -1350,6 +1350,12 @@ class IngestionService:
             "json_recovery_count": 0,
             "estimated_cost_tokens": 0,
             "prompt_tokens": 0,
+            "local_graph_chunks_processed": 0,
+            "local_graph_chunks_failed": 0,
+            "llm_fallback_chunks": 0,
+            "llm_fallback_tokens": 0,
+            "per_gpu_chunks_processed": {},
+            "per_gpu_oom_count": {},
             "compact_extraction_chunks": 0,
             "deep_extraction_chunks": 0,
             "full_extraction_chunks": 0,
@@ -1476,6 +1482,9 @@ class IngestionService:
                 "graph_status": graph_status,
                 "graph_strategy": str(metrics.get("extraction_strategy") or "unknown"),
                 "graph_mode": str(metrics.get("extraction_mode") or "unknown"),
+                "graph_extraction_engine": str(
+                    metrics.get("graph_extraction_engine_used") or "unknown"
+                ),
                 "graph_completeness": str(metrics.get("graph_completeness") or ""),
                 "reasons": reasons or ["Legacy document; decision trace was derived from stored metadata."],
                 "warnings": ["Derived fallback trace for a document ingested before decision traces existed."],
@@ -1574,6 +1583,24 @@ class IngestionService:
                 metrics.get("estimated_cost_tokens") or metrics.get("total_tokens") or 0
             )
             totals["prompt_tokens"] += int(metrics.get("prompt_tokens") or 0)
+            totals["local_graph_chunks_processed"] += int(
+                metrics.get("local_graph_chunks_processed") or 0
+            )
+            totals["local_graph_chunks_failed"] += int(
+                metrics.get("local_graph_chunks_failed") or 0
+            )
+            totals["llm_fallback_chunks"] += int(metrics.get("llm_fallback_chunks") or 0)
+            totals["llm_fallback_tokens"] += int(metrics.get("llm_fallback_tokens") or 0)
+            for gpu_name, count in (metrics.get("per_gpu_chunks_processed") or {}).items():
+                totals["per_gpu_chunks_processed"][gpu_name] = (
+                    int(totals["per_gpu_chunks_processed"].get(gpu_name) or 0)
+                    + int(count or 0)
+                )
+            for gpu_name, count in (metrics.get("per_gpu_oom_count") or {}).items():
+                totals["per_gpu_oom_count"][gpu_name] = (
+                    int(totals["per_gpu_oom_count"].get(gpu_name) or 0)
+                    + int(count or 0)
+                )
             totals["ghost_b_attempts"] += int(metrics.get("attempt_count") or 0)
             totals["json_recovery_count"] += int(metrics.get("json_recovery_count") or 0)
             totals["compact_extraction_chunks"] += int(metrics.get("compact_extraction_chunks") or 0)
@@ -1611,6 +1638,11 @@ class IngestionService:
                         decision_trace.get("chunking_strategy") or "unknown"
                     ),
                     "graph_strategy": str(decision_trace.get("graph_strategy") or "unknown"),
+                    "graph_extraction_engine": str(
+                        metrics.get("graph_extraction_engine_used")
+                        or decision_trace.get("graph_extraction_engine")
+                        or "unknown"
+                    ),
                     "graph_completeness": graph_completeness,
                     "graph_retry_after": ws.get("graph_retry_after") or metrics.get("graph_retry_after"),
                     "graph_backfill_attempt_count": int(ws.get("graph_backfill_attempt_count") or 0),
@@ -1634,6 +1666,14 @@ class IngestionService:
                     "direction_repair_count": direction_repairs,
                     "evidence_cue_repair_count": evidence_repairs,
                     "json_recovery_count": int(metrics.get("json_recovery_count") or 0),
+                    "local_graph_chunks_processed": int(
+                        metrics.get("local_graph_chunks_processed") or 0
+                    ),
+                    "local_graph_chunks_failed": int(
+                        metrics.get("local_graph_chunks_failed") or 0
+                    ),
+                    "llm_fallback_chunks": int(metrics.get("llm_fallback_chunks") or 0),
+                    "per_gpu_graph_metrics": metrics.get("per_gpu_graph_metrics") or {},
                 }
             )
 

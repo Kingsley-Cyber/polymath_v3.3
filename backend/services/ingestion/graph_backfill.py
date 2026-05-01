@@ -32,6 +32,7 @@ from services.ingestion.worker import (
     GRAPH_RETRY_SCHEDULED,
     GRAPH_READY,
     _build_ghost_pool,
+    _graph_extraction_engine,
     _ghost_b_partial_warning,
     _rehydrate_ghost_b_staging,
     _select_ghost_b_extraction_policy,
@@ -325,33 +326,47 @@ async def backfill_failed_graph_chunks(
     async def _schema_resolver(kind: str, query_vec: list[float], top_k: int) -> list[str]:
         return await retrieve_schema_for_chunk(qdrant_client, corpus_id, kind, query_vec, top_k)
 
-    report = await extract_entities(
-        tasks,
-        schema=schema_ctx,
-        schema_lens=doc.get("schema_lens")
-        or (doc.get("ghost_b_metrics") or {}).get("schema_lens"),
-        chunk_vectors=None,
-        schema_resolver=_schema_resolver,
-        pool=pool,
-        model=None,
-        return_report=True,
-        extraction_mode=policy.extraction_mode,  # type: ignore[arg-type]
-        max_entities_per_chunk=policy.max_entities_per_chunk,
-        max_relations_per_chunk=policy.max_relations_per_chunk,
-        max_completion_tokens_override=policy.max_completion_tokens,
-        per_chunk_max_attempts=getattr(config, "graph_backfill_max_attempts_per_chunk", 2),
-        per_doc_max_failed_chunks_before_pause=max_chunks,
-        per_lane_max_consecutive_failures=getattr(
+    schema_lens = doc.get("schema_lens") or (doc.get("ghost_b_metrics") or {}).get("schema_lens")
+    llm_kwargs = {
+        "schema": schema_ctx,
+        "schema_lens": schema_lens,
+        "chunk_vectors": None,
+        "schema_resolver": _schema_resolver,
+        "pool": pool,
+        "model": None,
+        "return_report": True,
+        "extraction_mode": policy.extraction_mode,
+        "max_entities_per_chunk": policy.max_entities_per_chunk,
+        "max_relations_per_chunk": policy.max_relations_per_chunk,
+        "max_completion_tokens_override": policy.max_completion_tokens,
+        "per_chunk_max_attempts": getattr(config, "graph_backfill_max_attempts_per_chunk", 2),
+        "per_doc_max_failed_chunks_before_pause": max_chunks,
+        "per_lane_max_consecutive_failures": getattr(
             config, "graph_per_lane_max_consecutive_failures", 2
         ),
-        per_lane_cooldown_seconds=getattr(
+        "per_lane_cooldown_seconds": getattr(
             config, "graph_per_lane_cooldown_seconds", 300
         ),
-        metrics_context={
+        "metrics_context": {
             **policy.metrics(),
             "extraction_strategy": f"{policy.extraction_strategy}_backfill",
+            "graph_extraction_engine_requested": _graph_extraction_engine(config),
         },
-    )
+    }
+    if _graph_extraction_engine(config) in {"local_gliner", "hybrid_local_first"}:
+        from services.local_graph_extractor import extract_entities_local_first
+
+        report = await extract_entities_local_first(
+            tasks,
+            config=config,
+            schema=schema_ctx,
+            schema_lens=schema_lens,
+            llm_extract_func=extract_entities,
+            llm_kwargs=llm_kwargs,
+            return_report=True,
+        )
+    else:
+        report = await extract_entities(tasks, **llm_kwargs)
     if not isinstance(report, ExtractionBatchReport):
         raise RuntimeError("Ghost B did not return a batch report")
 
