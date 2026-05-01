@@ -138,6 +138,32 @@ class Settings(BaseSettings):
             "Requests over this cap fail fast with 429 instead of holding uploaded bytes."
         ),
     )
+    INGEST_SPOOL_DIR: str = Field(
+        default="/app/ingest-spool",
+        description=(
+            "Durable directory for multi-file batch upload spooling. Files are "
+            "streamed here before queued ingestion so 500-file uploads do not "
+            "live in process RAM."
+        ),
+    )
+    INGEST_MAX_SPOOLED_BYTES: int = Field(
+        default=250 * 1024 * 1024 * 1024,
+        ge=1,
+        description="Admission cap for queued batch-upload bytes on disk.",
+    )
+    INGEST_BATCH_POLL_SECONDS: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=30.0,
+        description="Scheduler polling cadence for durable batch ingestion.",
+    )
+    INGEST_BATCH_RETAIN_SPOOL_ON_FAILURE: bool = Field(
+        default=True,
+        description=(
+            "Keep spooled files when a queued document fails so retry-failed "
+            "can run without the user re-uploading."
+        ),
+    )
 
     # === LOCAL MODELS DIR ===
     MODELS_DIR: str = Field(

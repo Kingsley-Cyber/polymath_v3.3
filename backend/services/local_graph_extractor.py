@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -33,6 +34,11 @@ from services.ghost_b import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+_LOCAL_RELATION_THRESHOLD = 0.5
+_LOCAL_ENTITY_THRESHOLD = 0.35
+_MAX_LOCAL_RELATION_SOURCE_ENTITIES = 10
 
 
 class LocalGraphDependencyError(RuntimeError):
@@ -118,6 +124,51 @@ class GlinerRelexAdapter:
                     continue
             return _split_batch_raw(raw, len(texts))
 
+        # GLiNER's multitask relation helper is implemented as two model.run()
+        # passes: entities first, then "source <> relation" labels. Reimplement
+        # the tiny inference path here so the production backend does not need
+        # the optional datasets dependency imported by gliner.multitask.
+        run = getattr(model, "run", None)
+        if callable(run):
+            try:
+                entity_predictions = run(
+                    texts,
+                    entity_labels,
+                    threshold=_LOCAL_ENTITY_THRESHOLD,
+                    batch_size=max(1, min(len(texts), 8)),
+                )
+                entity_items = _split_batch_raw(entity_predictions, len(texts))
+                source_relation_labels = _source_relation_labels(
+                    entity_items,
+                    relation_labels,
+                )
+                relation_prompts = [
+                    f"Extract relationships between entities from the text:\n{text}"
+                    for text in texts
+                ]
+                relation_predictions = run(
+                    relation_prompts,
+                    source_relation_labels,
+                    threshold=_LOCAL_RELATION_THRESHOLD,
+                    batch_size=max(1, min(len(texts), 8)),
+                )
+                relation_items = _relations_from_gliner_run_predictions(
+                    _split_batch_raw(relation_predictions, len(texts))
+                )
+                return [
+                    {
+                        "entities": entity_items[i] if i < len(entity_items) else [],
+                        "relations": relation_items[i] if i < len(relation_items) else [],
+                    }
+                    for i in range(len(texts))
+                ]
+            except Exception as exc:
+                logger.info(
+                    "phase=local_graph_relation_run_unavailable model=%s error=%s",
+                    self.model_name,
+                    exc,
+                )
+
         # Entity-only GLiNER variants can still improve node coverage. The
         # relation compiler will preserve graph truthfulness by not inventing
         # edges when the local model did not produce one.
@@ -184,6 +235,77 @@ def _split_batch_raw(raw: Any, expected: int) -> list[Any]:
     return [raw for _ in range(expected)]
 
 
+def _entity_text_from_prediction(row: Any) -> str:
+    if not isinstance(row, dict):
+        return str(row or "").strip()
+    return str(
+        row.get("text")
+        or row.get("canonical_name")
+        or row.get("name")
+        or row.get("entity")
+        or row.get("span")
+        or ""
+    ).strip()
+
+
+def _source_relation_labels(
+    entity_predictions: list[Any],
+    relation_labels: list[str],
+) -> list[list[str]]:
+    out: list[list[str]] = []
+    for raw_entities in entity_predictions:
+        rows = raw_entities if isinstance(raw_entities, list) else []
+        ranked = sorted(
+            [row for row in rows if _entity_text_from_prediction(row)],
+            key=lambda row: _coerce_confidence(row.get("score") if isinstance(row, dict) else None, 0.5),
+            reverse=True,
+        )
+        seen: set[str] = set()
+        sources: list[str] = []
+        for row in ranked:
+            text = _entity_text_from_prediction(row)
+            key = text.lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            sources.append(text)
+            if len(sources) >= _MAX_LOCAL_RELATION_SOURCE_ENTITIES:
+                break
+        labels: list[str] = []
+        for source in sources:
+            for relation in relation_labels:
+                labels.append(f"{source} <> {relation}")
+        out.append(labels)
+    return out
+
+
+def _relations_from_gliner_run_predictions(predictions: list[Any]) -> list[list[dict[str, Any]]]:
+    out: list[list[dict[str, Any]]] = []
+    for raw_prediction in predictions:
+        rows = raw_prediction if isinstance(raw_prediction, list) else []
+        relations: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            target = str(row.get("text") or row.get("target") or "").strip()
+            label = str(row.get("label") or "").strip()
+            if "<>" not in label or not target:
+                continue
+            source, relation = [part.strip() for part in label.split("<>", 1)]
+            if not source or not relation or source.lower() == target.lower():
+                continue
+            relations.append(
+                {
+                    "source": source,
+                    "relation": relation,
+                    "target": target,
+                    "score": _coerce_confidence(row.get("score"), 0.72),
+                }
+            )
+        out.append(relations)
+    return out
+
+
 def _worker_specs(config: IngestionConfig) -> list[LocalWorkerSpec]:
     specs: list[LocalWorkerSpec] = []
     for row in getattr(config, "local_workers", None) or []:
@@ -208,8 +330,40 @@ def _cuda_device_count() -> int | None:
         return None
 
 
+def _cuda_device_names() -> list[str] | None:
+    try:
+        import torch  # type: ignore
+
+        if not torch.cuda.is_available():
+            return []
+        return [str(torch.cuda.get_device_name(i)) for i in range(torch.cuda.device_count())]
+    except Exception:
+        return None
+
+
+def _tune_worker_for_detected_gpu(spec: LocalWorkerSpec, device_name: str | None) -> LocalWorkerSpec:
+    """Prefer actual GPU capacity over possibly stale UI labels."""
+    label = str(device_name or "").lower()
+    if "3090" in label:
+        return LocalWorkerSpec(
+            device=spec.device,
+            name="rtx_3090",
+            batch_size=max(16, spec.batch_size),
+            weight=max(2, spec.weight),
+        )
+    if "4070" in label:
+        return LocalWorkerSpec(
+            device=spec.device,
+            name="rtx_4070",
+            batch_size=min(spec.batch_size, 8),
+            weight=min(spec.weight, 1),
+        )
+    return spec
+
+
 def _available_worker_specs(specs: list[LocalWorkerSpec]) -> list[LocalWorkerSpec]:
     cuda_count = _cuda_device_count()
+    cuda_names = _cuda_device_names()
     if cuda_count is None:
         return specs
     available: list[LocalWorkerSpec] = []
@@ -221,15 +375,29 @@ def _available_worker_specs(specs: list[LocalWorkerSpec]) -> list[LocalWorkerSpe
             index = int(spec.device.split(":", 1)[1])
         except Exception:
             index = 0
-        if cuda_count > index:
-            available.append(spec)
-        else:
+        if cuda_count <= index:
             logger.warning(
                 "phase=local_graph_worker_skip reason=cuda_device_missing worker=%s device=%s detected=%s",
                 spec.name,
                 spec.device,
                 cuda_count,
             )
+            continue
+        detected_name = cuda_names[index] if cuda_names and index < len(cuda_names) else None
+        tuned = _tune_worker_for_detected_gpu(spec, detected_name)
+        if tuned != spec:
+            logger.info(
+                "phase=local_graph_worker_tuned device=%s detected=%s old=%s/%s/%s new=%s/%s/%s",
+                spec.device,
+                detected_name,
+                spec.name,
+                spec.batch_size,
+                spec.weight,
+                tuned.name,
+                tuned.batch_size,
+                tuned.weight,
+            )
+        available.append(tuned)
     if available:
         return available
     return [LocalWorkerSpec(device="cpu", name="cpu", batch_size=2, weight=1)]
@@ -244,6 +412,75 @@ def _trim_to_budget(text: str, max_tokens: int) -> str:
     if len(words) <= max_tokens:
         return str(text or "")
     return " ".join(words[:max_tokens])
+
+
+_CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$")
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+_CLAUSE_SPLIT_RE = re.compile(r"\s+(?:and|but|while|whereas)\s+|[;:]")
+_EXPLICIT_RELATION_CUES: list[tuple[str, tuple[str, ...]]] = [
+    ("depends_on", (r"\bdepends?\s+on\b", r"\brequires?\b", r"\brelies?\s+on\b")),
+    ("runs_on", (r"\bruns?\s+on\b", r"\brunning\s+on\b", r"\bdeployed\s+on\b", r"\boperates?\s+on\b")),
+    ("uses", (r"\buses?\b", r"\busing\b")),
+    ("stores", (r"\bstores?\b", r"\bstored\s+in\b", r"\bsaves?\b")),
+    ("produces", (r"\bproduces?\b", r"\bgenerates?\b", r"\bcreates?\b")),
+    ("calls", (r"\bcalls?\b", r"\binvokes?\b")),
+    ("extracts", (r"\bextracts?\b", r"\breads?\s+from\b")),
+    ("detects", (r"\bdetects?\b", r"\bidentifies?\b")),
+    ("classifies", (r"\bclassifies?\b",)),
+    ("measures", (r"\bmeasures?\b", r"\bevaluates?\b", r"\bquantifies?\b")),
+    ("tests", (r"\btests?\b", r"\bvalidates?\b", r"\bchecks?\b")),
+    ("references", (r"\breferences?\b", r"\bcites?\b")),
+    ("supports", (r"\bsupports?\b", r"\benables?\b", r"\bprovides?\b")),
+    ("defined_in", (r"\bdefined\s+in\b", r"\bspecified\s+in\b")),
+    ("applied_to", (r"\bapplied\s+to\b", r"\bused\s+on\b")),
+]
+
+
+def _clean_markdown_for_local_extraction(text: str) -> str:
+    """Remove markdown structures that tend to become noisy entity labels."""
+    cleaned = _HTML_COMMENT_RE.sub(" ", str(text or ""))
+    cleaned = _CODE_FENCE_RE.sub(" ", cleaned)
+    lines: list[str] = []
+    for raw in cleaned.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if _TABLE_SEPARATOR_RE.match(line):
+            continue
+        # Keep short prose-like table rows, but drop wide data tables that
+        # GLiNER often turns into pasted list entities.
+        if line.count("|") >= 4:
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def format_task_text_for_local_model(task: ExtractionTask, *, max_tokens: int) -> str:
+    """Wrap child text with compact document/section context for GLiNER.
+
+    The model sees the local markdown section boundary, but never the parent
+    text or any giant document preamble. This keeps extraction grounded while
+    preserving the app's parent/child chunking economics.
+    """
+    title = str(getattr(task, "document_title", None) or "").strip()
+    heading_path = [
+        str(item).strip()
+        for item in (getattr(task, "heading_path", None) or [])
+        if str(item).strip()
+    ]
+    chunk_kind = str(getattr(task, "chunk_kind", None) or "").strip()
+    body = _clean_markdown_for_local_extraction(task.text)
+    parts: list[str] = []
+    if title:
+        parts.append(f"Document: {title}")
+    if heading_path:
+        parts.append(f"Section: {' > '.join(heading_path[:6])}")
+    if chunk_kind:
+        parts.append(f"Chunk kind: {chunk_kind}")
+    parts.append(f"Text:\n{body}")
+    return _trim_to_budget("\n".join(parts), max_tokens)
 
 
 def _relation_labels(schema: SchemaContext | None) -> list[str]:
@@ -286,7 +523,76 @@ def _short_evidence(text: str, words: int = 24) -> str:
     return " ".join(str(text or "").split()[:words])
 
 
-def _entities_from_raw(raw: Any) -> list[EntityItem]:
+_CONTEXT_ONLY_TERMS = {
+    "document",
+    "section",
+    "chunk",
+    "chunk kind",
+    "kind",
+    "text",
+    "body",
+}
+_ENTITY_STOPWORDS = {
+    "use",
+    "uses",
+    "using",
+    "store",
+    "stores",
+    "stored",
+    "run",
+    "runs",
+    "support",
+    "supports",
+    "detect",
+    "detects",
+    "classify",
+    "classifies",
+    "measure",
+    "measures",
+    "test",
+    "tests",
+}
+
+
+def _norm_label(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _metadata_fragments(task: ExtractionTask | None) -> list[str]:
+    if task is None:
+        return []
+    fragments = [str(getattr(task, "document_title", None) or "")]
+    fragments.extend(str(item) for item in (getattr(task, "heading_path", None) or []))
+    fragments.append(str(getattr(task, "chunk_kind", None) or ""))
+    return [_norm_label(item) for item in fragments if _norm_label(item)]
+
+
+def _is_metadata_only_candidate(
+    value: str,
+    task: ExtractionTask | None,
+    *,
+    entity_type: str | None = None,
+) -> bool:
+    candidate = _norm_label(value)
+    if not candidate:
+        return True
+    if candidate in _CONTEXT_ONLY_TERMS:
+        return True
+    if candidate in _ENTITY_STOPWORDS:
+        return True
+    if task is None:
+        return False
+    body = _norm_label(task.text)
+    if candidate and candidate in body:
+        return False
+    label = _norm_label(entity_type or "")
+    for fragment in _metadata_fragments(task):
+        if candidate == fragment or candidate in fragment:
+            return label in {"", "document", "other", "unknown"}
+    return False
+
+
+def _entities_from_raw(raw: Any, *, task: ExtractionTask | None = None) -> list[EntityItem]:
     rows: list[Any]
     if isinstance(raw, dict):
         rows = raw.get("entities") or raw.get("entity") or []
@@ -312,6 +618,8 @@ def _entities_from_raw(raw: Any) -> list[EntityItem]:
             score = _coerce_confidence(row.get("confidence", row.get("score")), 0.75)
         if not text:
             continue
+        if _is_metadata_only_candidate(text, task, entity_type=label):
+            continue
         key = text.lower()
         if key in seen:
             continue
@@ -327,7 +635,12 @@ def _entities_from_raw(raw: Any) -> list[EntityItem]:
     return out
 
 
-def _relations_from_raw(raw: Any, text: str) -> list[RelationItem]:
+def _relations_from_raw(
+    raw: Any,
+    text: str,
+    *,
+    task: ExtractionTask | None = None,
+) -> list[RelationItem]:
     if isinstance(raw, dict):
         rows = raw.get("relations") or raw.get("relationships") or raw.get("triples") or []
     else:
@@ -356,6 +669,8 @@ def _relations_from_raw(raw: Any, text: str) -> list[RelationItem]:
             or "related_to"
         ).strip()
         if not subject or not obj or not predicate:
+            continue
+        if _is_metadata_only_candidate(subject, task) or _is_metadata_only_candidate(obj, task):
             continue
         score = _coerce_confidence(row.get("confidence", row.get("score")), 0.72)
         evidence = str(row.get("evidence") or row.get("evidence_phrase") or _short_evidence(text))
@@ -389,6 +704,92 @@ def _relations_from_raw(raw: Any, text: str) -> list[RelationItem]:
                 candidate_object=obj,
             )
         )
+    return out
+
+
+def _explicit_cue_relations_from_text(
+    entities: list[EntityItem],
+    text: str,
+    existing: list[RelationItem],
+) -> list[RelationItem]:
+    """Create conservative local relation candidates from explicit lexical cues.
+
+    This is not semantic guessing. It only fires when two extracted entities
+    occur in the same sentence and a cross-domain ontology cue appears between
+    them, then the existing compiler still handles aliases, direction, and
+    domain/range validation.
+    """
+    if len(entities) < 2:
+        return []
+    existing_keys = {
+        (
+            str(relation.subject or "").lower(),
+            str(relation.predicate or "").lower(),
+            str(relation.object or "").lower(),
+        )
+        for relation in existing
+    }
+    out: list[RelationItem] = []
+    for sentence in _SENTENCE_SPLIT_RE.split(str(text or "")):
+        clauses = [clause for clause in _CLAUSE_SPLIT_RE.split(sentence) if clause.strip()]
+        for clause in clauses:
+            sentence = " ".join(clause.split())
+            if not sentence:
+                continue
+            lowered = sentence.lower()
+            mentions: list[tuple[int, int, EntityItem]] = []
+            for entity in entities:
+                name = str(entity.canonical_name or "").strip()
+                if not name or len(name) < 2:
+                    continue
+                idx = lowered.find(name.lower())
+                if idx < 0:
+                    continue
+                mentions.append((idx, idx + len(name), entity))
+            mentions.sort(key=lambda item: item[0])
+            for i, (src_start, src_end, source) in enumerate(mentions):
+                for obj_start, _obj_end, target in mentions[i + 1 :]:
+                    if source.canonical_name.lower() == target.canonical_name.lower():
+                        continue
+                    between = lowered[src_end:obj_start]
+                    predicate = ""
+                    for candidate, patterns in _EXPLICIT_RELATION_CUES:
+                        if any(re.search(pattern, between) for pattern in patterns):
+                            predicate = candidate
+                            break
+                    if not predicate:
+                        continue
+                    key = (
+                        source.canonical_name.lower(),
+                        predicate.lower(),
+                        target.canonical_name.lower(),
+                    )
+                    if key in existing_keys:
+                        continue
+                    existing_keys.add(key)
+                    out.append(
+                        RelationItem(
+                            subject=source.canonical_name,
+                            predicate=predicate,
+                            object=target.canonical_name,
+                            object_kind="entity",
+                            confidence=0.72,
+                            evidence_phrase=_short_evidence(sentence),
+                            relation_cue=predicate,
+                            source_predicate=predicate,
+                            predicate_confidence=0.72,
+                            extraction_confidence=min(
+                                0.8,
+                                max(0.55, (float(source.confidence) + float(target.confidence)) / 2),
+                            ),
+                            alternative_predicates_considered=[],
+                            rejection_reasoning="Explicit cue between entities.",
+                            atomic_fact=f"{source.canonical_name} {predicate} {target.canonical_name}.",
+                            candidate_subject=source.canonical_name,
+                            candidate_predicate=predicate,
+                            candidate_object=target.canonical_name,
+                        )
+                    )
     return out
 
 
@@ -435,8 +836,9 @@ def _result_from_local_raw(
     schema_lens: SchemaLens | dict | None,
     text: str,
 ) -> ExtractionResult:
-    entities = _entities_from_raw(raw)
-    relations = _relations_from_raw(raw, text)
+    entities = _entities_from_raw(raw, task=task)
+    relations = _relations_from_raw(raw, text, task=task)
+    relations.extend(_explicit_cue_relations_from_text(entities, task.text, relations))
     entities = _complete_endpoint_entities(entities, relations)
     entities, relations, counters = compile_extraction_candidates(entities, relations, schema)
     lens = (
@@ -610,7 +1012,10 @@ async def _extract_worker(
         active_batch = batch
         retried_oom = False
         while active_batch:
-            texts = [_trim_to_budget(task.text, max_chunk_tokens) for task in active_batch]
+            texts = [
+                format_task_text_for_local_model(task, max_tokens=max_chunk_tokens)
+                for task in active_batch
+            ]
             started = time.perf_counter()
             try:
                 raw_items = await asyncio.to_thread(
@@ -763,7 +1168,13 @@ async def extract_entities_local_first(
             failures=[],
             call_metrics=[],
             models=[],
-            metrics_context={"graph_extraction_engine_used": "local_gliner"},
+            metrics_context={
+                "graph_extraction_engine_used": "local_gliner",
+                "local_graph_dependency_status": "not_needed",
+                "local_graph_model_loaded": False,
+                "llm_graph_calls": 0,
+                "summary_llm_calls": 0,
+            },
         )
         return ExtractionBatchReport([], [], empty_metrics) if return_report else []
 
@@ -820,8 +1231,11 @@ async def extract_entities_local_first(
                 report.metrics = {
                     **report.metrics,
                     "graph_extraction_engine_used": "llm_fallback_local_unavailable",
+                    "local_graph_dependency_status": "unavailable",
+                    "local_graph_model_loaded": False,
                     "local_graph_dependency_error": str(exc),
                     "local_extractor_model": model_name,
+                    "llm_graph_calls": len(tasks),
                 }
             return report
         failures = [
@@ -848,10 +1262,16 @@ async def extract_entities_local_first(
             models=[model_name],
             metrics_context={
                 "graph_extraction_engine_used": "local_gliner_unavailable",
+                "local_graph_dependency_status": "unavailable",
+                "local_graph_model_loaded": False,
                 "local_extractor_model": model_name,
                 "local_graph_dependency_error": str(exc),
                 "local_graph_chunks_processed": 0,
                 "local_graph_chunks_failed": len(failures),
+                "local_graph_entity_only_chunks": 0,
+                "local_graph_relation_chunks": 0,
+                "llm_graph_calls": 0,
+                "summary_llm_calls": 0,
             },
         )
         return ExtractionBatchReport([], failures, metrics) if return_report else []
@@ -908,6 +1328,10 @@ async def extract_entities_local_first(
             llm_fallback_results = len(fallback_report)
 
     final_results = list(result_by_chunk.values())
+    relation_chunks = sum(1 for result in final_results if result.relations)
+    entity_only_chunks = sum(
+        1 for result in final_results if result.entities and not result.relations
+    )
     stats_by_name: dict[str, LocalWorkerStats] = {}
     for stats in worker_stats:
         bucket = stats_by_name.get(stats.name)
@@ -944,10 +1368,16 @@ async def extract_entities_local_first(
     }
     context = {
         "graph_extraction_engine_used": "hybrid_local_first" if engine == "hybrid_local_first" else "local_gliner",
+        "local_graph_dependency_status": "ok",
+        "local_graph_model_loaded": bool(worker_stats),
         "local_extractor_model": model_name,
         "local_graph_chunks_processed": sum(stats.chunks_processed for stats in stats_by_name.values()),
         "local_graph_chunks_failed": sum(stats.chunks_failed for stats in stats_by_name.values()),
+        "local_graph_entity_only_chunks": entity_only_chunks,
+        "local_graph_relation_chunks": relation_chunks,
         "llm_fallback_chunks": len(fallback_tasks),
+        "llm_graph_calls": len(fallback_tasks),
+        "summary_llm_calls": 0,
         "llm_fallback_extracted_chunks": llm_fallback_results,
         "llm_fallback_failed_chunks": llm_fallback_failures,
         "llm_fallback_max_percent": float(getattr(config, "llm_fallback_max_percent", 0.05) or 0.0),

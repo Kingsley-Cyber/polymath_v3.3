@@ -55,7 +55,7 @@ from services.ghost_b import (
     extract_entities,
 )
 from services.ingestion import docling_adapter, tier_chunker
-from services.ingestion.schema_lens import get_or_create_schema_lens
+from services.ingestion.schema_lens import build_deterministic_schema_lens, get_or_create_schema_lens
 from services.ingestion.section_classifier import ChunkKind, should_skip_ghost_b
 from services.secrets import decrypt as _decrypt_api_key
 from services.storage import mongo_reader, mongo_writer, qdrant_writer
@@ -1011,6 +1011,7 @@ async def _run_ghosts_parallel(
     warnings: list[str] = []
     ghost_b_failures: list[ExtractionFailureItem] = []
     ghost_b_metrics: dict | None = None
+    summary_llm_calls = 0
     # ── GHOST A path decisions ────────────────────────────────────────────
     existing_parent_chunks: list[dict] = (
         (existing_doc or {}).get("parent_chunks") or []
@@ -1072,6 +1073,7 @@ async def _run_ghosts_parallel(
 
     # ── Branch coroutines ────────────────────────────────────────────────
     async def _a_branch() -> list[SummaryResult] | None:
+        nonlocal summary_llm_calls
         if not need_ghost_a:
             return summaries_from_mongo  # None unless resume-reconstructed
         # Skip non-body parents (TOC, bibliography, index, appendix, …).
@@ -1121,6 +1123,7 @@ async def _run_ghosts_parallel(
             pool=pool,
             model=model,
         )
+        summary_llm_calls = len(tasks)
         if len(results) < len(tasks):
             raise GhostAFailure(
                 f"Ghost A partial: {len(results)}/{len(tasks)} parents summarized"
@@ -1167,6 +1170,9 @@ async def _run_ghosts_parallel(
                 doc_id=c.doc_id,
                 corpus_id=c.corpus_id,
                 text=c.text,
+                document_title=filename or (existing_doc or {}).get("filename") or doc_id,
+                heading_path=getattr(c, "heading_path", None),
+                chunk_kind=getattr(c, "chunk_kind", ChunkKind.BODY),
             )
             for c in body_children
         ]
@@ -1175,7 +1181,10 @@ async def _run_ghosts_parallel(
             relation_schema=config.relation_schema,
             strict=config.schema_strict,
         )
-        if config.models_linked or not config.extraction_models:
+        graph_engine = _graph_extraction_engine(config)
+        if graph_engine == "local_gliner":
+            pool = []
+        elif config.models_linked or not config.extraction_models:
             pool = _build_ghost_pool(config.summary_models)
         else:
             pool = _build_ghost_pool(config.extraction_models)
@@ -1191,17 +1200,27 @@ async def _run_ghosts_parallel(
             c for c in children
             if not should_skip_ghost_b(getattr(c, "chunk_kind", None) or ChunkKind.BODY)
         ]
-        schema_lens = await get_or_create_schema_lens(
-            db=db,
-            corpus_id=corpus_id,
-            filename=filename or (existing_doc or {}).get("filename") or doc_id,
-            parents=body_parents_for_lens or parents,  # fall back if all noisy
-            children=body_children_for_lens or children,
-            entity_schema=config.entity_schema,
-            relation_schema=config.relation_schema,
-            pool=pool,
-            model=model,
-        )
+        if graph_engine == "local_gliner":
+            schema_lens = build_deterministic_schema_lens(
+                corpus_id=corpus_id,
+                filename=filename or (existing_doc or {}).get("filename") or doc_id,
+                parents=body_parents_for_lens or parents,  # fall back if all noisy
+                children=body_children_for_lens or children,
+                entity_schema=config.entity_schema,
+                relation_schema=config.relation_schema,
+            )
+        else:
+            schema_lens = await get_or_create_schema_lens(
+                db=db,
+                corpus_id=corpus_id,
+                filename=filename or (existing_doc or {}).get("filename") or doc_id,
+                parents=body_parents_for_lens or parents,  # fall back if all noisy
+                children=body_children_for_lens or children,
+                entity_schema=config.entity_schema,
+                relation_schema=config.relation_schema,
+                pool=pool,
+                model=model,
+            )
 
         async def _schema_resolver(
             kind: str, query_vec: list[float], top_k: int
@@ -1266,7 +1285,7 @@ async def _run_ghosts_parallel(
                 "graph_extraction_engine_requested": _graph_extraction_engine(config),
             },
         }
-        if _graph_extraction_engine(config) in {"local_gliner", "hybrid_local_first"}:
+        if graph_engine in {"local_gliner", "hybrid_local_first"}:
             from services.local_graph_extractor import extract_entities_local_first
 
             report = await extract_entities_local_first(
@@ -1291,6 +1310,7 @@ async def _run_ghosts_parallel(
         metrics = dict(metrics or {})
         if (
             policy.extraction_mode == "compact"
+            and graph_engine != "local_gliner"
             and policy.deep_pass_enabled
             and policy.deep_pass_max_chunks > 0
             and results
@@ -1307,6 +1327,9 @@ async def _run_ghosts_parallel(
                     doc_id=c.doc_id,
                     corpus_id=c.corpus_id,
                     text=c.text,
+                    document_title=filename or (existing_doc or {}).get("filename") or doc_id,
+                    heading_path=getattr(c, "heading_path", None),
+                    chunk_kind=getattr(c, "chunk_kind", ChunkKind.BODY),
                 )
                 for c in deep_children
                 if c.chunk_id not in already_failed
@@ -1410,6 +1433,9 @@ async def _run_ghosts_parallel(
     ghost_b_out = await _b_branch()
     if ghost_b_metrics is None:
         ghost_b_metrics = _ghost_b_metrics_for_skipped(ghost_b_out)
+    ghost_b_metrics = dict(ghost_b_metrics or {})
+    ghost_b_metrics.setdefault("summary_llm_calls", summary_llm_calls)
+    ghost_b_metrics.setdefault("llm_graph_calls", 0)
     return GhostRunResult(
         summaries=summaries,
         ghost_b_out=ghost_b_out,

@@ -102,3 +102,14 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     # --- user_query_preferences (Phase F — per-user role→pool mappings + ollama exclusions) ---
     await db["user_query_preferences"].create_index("user_id", unique=True)
     logger.info("Indexes ensured: user_query_preferences (unique user_id)")
+
+    # --- ingestion_batches / ingestion_batch_items ---
+    await db["ingestion_batches"].create_index("batch_id", unique=True)
+    await db["ingestion_batches"].create_index("corpus_id")
+    await db["ingestion_batches"].create_index("user_id")
+    await db["ingestion_batches"].create_index([("status", 1), ("updated_at", 1)])
+    await db["ingestion_batch_items"].create_index("upload_id", unique=True)
+    await db["ingestion_batch_items"].create_index("batch_id")
+    await db["ingestion_batch_items"].create_index([("batch_id", 1), ("status", 1)])
+    await db["ingestion_batch_items"].create_index([("corpus_id", 1), ("content_hash", 1)])
+    logger.info("Indexes ensured: ingestion batches")

@@ -1,0 +1,11 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      args:
+        INSTALL_LOCAL_GRAPH: "true"
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "${LOCAL_GRAPH_NVIDIA_VISIBLE_DEVICES:-0,1}"
+      NVIDIA_DRIVER_CAPABILITIES: "${LOCAL_GRAPH_NVIDIA_DRIVER_CAPABILITIES:-compute,utility}"
+      HF_HOME: /home/appuser/.cache/huggingface
+    gpus: all

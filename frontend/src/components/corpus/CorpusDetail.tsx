@@ -158,10 +158,20 @@ export function CorpusDetail({
 
     try {
       const fileList = Array.from(files);
-      if (fileList.length > INGEST_BATCH_SIZE) {
-        setRetryHint(
-          `Large batch detected. Upload will run sequentially in ${INGEST_BATCH_SIZE}-document checkpoints and warm the graph cache after each checkpoint.`,
+      if (fileList.length > 1) {
+        setUploadProgress(`Spooling ${fileList.length} files to durable batch queue...`);
+        const batch = await api.batchUploadDocumentsToCorpus(
+          corpus.corpus_id,
+          fileList,
+          Object.keys(overrides).length > 0 ? overrides : undefined,
         );
+        setRetryHint(
+          `Batch ${batch.batch_id.slice(0, 8)} queued · ${batch.total_files} files · vector RAG becomes available per document before graph completion.`,
+        );
+        await loadDocuments();
+        const updated = await api.getCorpus(corpus.corpus_id);
+        onCorpusUpdated(updated);
+        return;
       }
       for (let idx = 0; idx < fileList.length; idx += 1) {
         const file = fileList[idx];

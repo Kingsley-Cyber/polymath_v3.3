@@ -924,6 +924,9 @@ class ExtractionTask:
     doc_id: str
     corpus_id: str
     text: str  # child chunk text only
+    document_title: str | None = None
+    heading_path: list[str] | None = None
+    chunk_kind: str | None = None
 
 
 @dataclass

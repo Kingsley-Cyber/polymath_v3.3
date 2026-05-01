@@ -77,6 +77,22 @@ MUTABLE_CONFIG_FIELDS: frozenset[str] = frozenset({
     "compact_mode_max_relations",
     "deep_pass_enabled",
     "deep_pass_max_chunks",
+    "graph_per_chunk_max_attempts",
+    "graph_per_doc_max_failed_chunks_before_pause",
+    "graph_per_lane_max_consecutive_failures",
+    "graph_per_lane_cooldown_seconds",
+    "graph_backfill_max_chunks",
+    "graph_backfill_max_attempts_per_chunk",
+    "graph_extraction_engine",
+    "local_graph_extraction_enabled",
+    "local_extractor_model",
+    "local_workers",
+    "max_chunk_tokens_for_local_extractor",
+    "max_chunks_in_memory",
+    "oom_retry_enabled",
+    "llm_fallback_enabled",
+    "llm_fallback_max_percent",
+    "glirel_enabled",
 })
 
 
@@ -132,6 +148,12 @@ def build_effective_config(
     merged: dict = {}
     # Start with frozen structural baseline
     for k in FROZEN_CONFIG_FIELDS:
+        if k in frozen_base:
+            merged[k] = frozen_base[k]
+    # Older document snapshots may contain a full IngestionConfig, not just
+    # frozen fields. Keep those mutable values as a compatibility fallback,
+    # then let the live corpus record override them below.
+    for k in MUTABLE_CONFIG_FIELDS:
         if k in frozen_base:
             merged[k] = frozen_base[k]
     # Overlay mutable fields from the live corpus
@@ -201,6 +223,7 @@ class IngestionService:
         self._qdrant: Optional[AsyncQdrantClient] = None
         self._neo4j = None  # neo4j.AsyncDriver when NEO4J_ENABLED
         self._settings = get_settings()
+        self._batch_manager = None
 
     async def connect(self, db: AsyncIOMotorDatabase) -> None:
         """Called from lifespan startup. Receives the shared MongoDB db instance.
@@ -256,6 +279,20 @@ class IngestionService:
             await initialize_schema(self._neo4j)
             logger.info("IngestionService: Neo4j connected + schema initialized")
 
+        try:
+            from services.ingestion.batch_queue import batch_ingestion_manager
+
+            self._batch_manager = batch_ingestion_manager
+            self._batch_manager.attach(
+                db=db,
+                ingest_callable=self.ingest,
+                warm_graph_cache_callable=self.warm_graph_cache,
+            )
+            await self._batch_manager.start_resume()
+            logger.info("IngestionService: batch ingestion manager attached")
+        except Exception as exc:
+            logger.warning("Batch ingestion manager did not start: %s", exc)
+
     @property
     def neo4j_driver(self):
         """Expose Neo4j async driver for graph router."""
@@ -274,6 +311,8 @@ class IngestionService:
         return self._db
 
     async def disconnect(self) -> None:
+        if self._batch_manager:
+            await self._batch_manager.disconnect()
         if self._qdrant:
             await self._qdrant.close()
         if self._neo4j:
@@ -630,6 +669,61 @@ class IngestionService:
             ingest_overrides=ingest_overrides,
             on_doc_id=on_doc_id,
         )
+
+    async def create_batch_ingest(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str,
+        uploads: list,
+        ingestion_config: IngestionConfig,
+        model: str = "",
+        ingest_overrides: dict | None = None,
+    ) -> dict:
+        if self._batch_manager is None:
+            raise RuntimeError("Batch ingestion manager is unavailable")
+        return await self._batch_manager.create_batch(
+            corpus_id=corpus_id,
+            user_id=user_id,
+            uploads=uploads,
+            ingestion_config=ingestion_config,
+            model=model,
+            ingest_overrides=ingest_overrides,
+        )
+
+    async def get_ingestion_batch(self, batch_id: str, *, user_id: str) -> dict | None:
+        if self._batch_manager is None:
+            return None
+        return await self._batch_manager.get_batch(batch_id, user_id=user_id)
+
+    async def pause_ingestion_batch(self, batch_id: str, *, user_id: str) -> dict:
+        if self._batch_manager is None:
+            raise RuntimeError("Batch ingestion manager is unavailable")
+        return await self._batch_manager.pause(batch_id, user_id=user_id)
+
+    async def resume_ingestion_batch(self, batch_id: str, *, user_id: str) -> dict:
+        if self._batch_manager is None:
+            raise RuntimeError("Batch ingestion manager is unavailable")
+        return await self._batch_manager.resume(batch_id, user_id=user_id)
+
+    async def cancel_ingestion_batch(self, batch_id: str, *, user_id: str) -> dict:
+        if self._batch_manager is None:
+            raise RuntimeError("Batch ingestion manager is unavailable")
+        return await self._batch_manager.cancel(batch_id, user_id=user_id)
+
+    async def retry_failed_ingestion_batch(self, batch_id: str, *, user_id: str) -> dict:
+        if self._batch_manager is None:
+            raise RuntimeError("Batch ingestion manager is unavailable")
+        return await self._batch_manager.retry_failed(batch_id, user_id=user_id)
+
+    async def get_ingestion_resource_profile(self) -> dict:
+        if self._batch_manager is None:
+            from services.ingestion.batch_queue import detect_resource_profile
+
+            return detect_resource_profile(self._settings.INGEST_SPOOL_DIR)
+        profile = self._batch_manager.resource_profile()
+        profile["queue_metrics"] = await self._batch_manager.queue_metrics()
+        return profile
 
     async def _embed_and_upsert_schema_terms(
         self,
@@ -1352,6 +1446,10 @@ class IngestionService:
             "prompt_tokens": 0,
             "local_graph_chunks_processed": 0,
             "local_graph_chunks_failed": 0,
+            "local_graph_entity_only_chunks": 0,
+            "local_graph_relation_chunks": 0,
+            "llm_graph_calls": 0,
+            "summary_llm_calls": 0,
             "llm_fallback_chunks": 0,
             "llm_fallback_tokens": 0,
             "per_gpu_chunks_processed": {},
@@ -1589,6 +1687,14 @@ class IngestionService:
             totals["local_graph_chunks_failed"] += int(
                 metrics.get("local_graph_chunks_failed") or 0
             )
+            totals["local_graph_entity_only_chunks"] += int(
+                metrics.get("local_graph_entity_only_chunks") or 0
+            )
+            totals["local_graph_relation_chunks"] += int(
+                metrics.get("local_graph_relation_chunks") or 0
+            )
+            totals["llm_graph_calls"] += int(metrics.get("llm_graph_calls") or 0)
+            totals["summary_llm_calls"] += int(metrics.get("summary_llm_calls") or 0)
             totals["llm_fallback_chunks"] += int(metrics.get("llm_fallback_chunks") or 0)
             totals["llm_fallback_tokens"] += int(metrics.get("llm_fallback_tokens") or 0)
             for gpu_name, count in (metrics.get("per_gpu_chunks_processed") or {}).items():
@@ -1672,6 +1778,23 @@ class IngestionService:
                     "local_graph_chunks_failed": int(
                         metrics.get("local_graph_chunks_failed") or 0
                     ),
+                    "local_graph_dependency_status": str(
+                        metrics.get("local_graph_dependency_status") or "unknown"
+                    ),
+                    "local_graph_model_loaded": bool(
+                        metrics.get("local_graph_model_loaded")
+                    ),
+                    "local_graph_model_name": str(
+                        metrics.get("local_extractor_model") or ""
+                    ),
+                    "local_graph_entity_only_chunks": int(
+                        metrics.get("local_graph_entity_only_chunks") or 0
+                    ),
+                    "local_graph_relation_chunks": int(
+                        metrics.get("local_graph_relation_chunks") or 0
+                    ),
+                    "llm_graph_calls": int(metrics.get("llm_graph_calls") or 0),
+                    "summary_llm_calls": int(metrics.get("summary_llm_calls") or 0),
                     "llm_fallback_chunks": int(metrics.get("llm_fallback_chunks") or 0),
                     "per_gpu_graph_metrics": metrics.get("per_gpu_graph_metrics") or {},
                 }

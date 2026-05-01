@@ -859,7 +859,10 @@ async def test_graph_backfill_refreshes_decision_trace_graph_fields():
         "corpus_id": corpus_id,
         "file_id": "file1",
         "chunk_count": 2,
-        "ingestion_config": IngestionConfig(use_neo4j=True).model_dump(),
+        "ingestion_config": IngestionConfig(
+            use_neo4j=True,
+            graph_extraction_engine="llm",
+        ).model_dump(),
         "ghost_b_staging": [asdict(staged_result)],
         "ghost_b_failures": [
             {

@@ -190,6 +190,83 @@ export interface WriteState {
   verify_errors?: string[];
 }
 
+export interface IngestionResourceProfile {
+  cpu_count: number;
+  ram_total_gb: number;
+  ram_available_gb: number;
+  disk_free_gb: number;
+  disk_total_gb: number;
+  spool_dir: string;
+  cuda_available: boolean;
+  gpu_count: number;
+  gpu_devices: Array<{
+    index: number;
+    device: string;
+    name: string;
+    vram_total_gb?: number;
+    memory_allocated_gb?: number;
+    memory_reserved_gb?: number;
+  }>;
+  recommended_parse_concurrency: number;
+  recommended_vector_concurrency: number;
+  recommended_graph_concurrency: number;
+  recommended_local_worker_batch_sizes: Record<string, number>;
+  max_active_docs: number;
+  max_spooled_bytes: number;
+  active_batch_workers?: number;
+  active_doc_jobs?: number;
+  queue_metrics?: Record<string, number>;
+}
+
+export interface IngestionBatchItem {
+  upload_id: string;
+  batch_id: string;
+  doc_id?: string | null;
+  filename: string;
+  corpus_id: string;
+  size_bytes: number;
+  mime?: string;
+  content_hash?: string;
+  status: string;
+  attempts?: number;
+  error?: string | null;
+  chunk_count?: number;
+  parent_count?: number;
+  source_tier?: string | null;
+  write_state?: WriteState;
+  duration_seconds?: number;
+  created_at?: string;
+  updated_at?: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
+export interface IngestionBatchResponse {
+  batch_id: string;
+  corpus_id: string;
+  user_id?: string;
+  status: string;
+  total_files: number;
+  queued_count: number;
+  processing_count: number;
+  vector_ready_count: number;
+  graph_ready_count: number;
+  graph_partial_count: number;
+  needs_backfill_count?: number;
+  failed_count: number;
+  cancelled_count: number;
+  current_phase?: string;
+  warnings?: string[];
+  batch_total_bytes?: number;
+  created_at?: string;
+  updated_at?: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  items?: IngestionBatchItem[];
+  resource_profile?: IngestionResourceProfile;
+  queue_metrics?: Record<string, number>;
+}
+
 export interface PresetMode {
   label: string;
   use_neo4j: boolean;
@@ -244,7 +321,7 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
   extraction_models: [],
   entity_confidence_threshold: 0.5,
   models_linked: true,
-  graph_extraction_engine: "hybrid_local_first",
+  graph_extraction_engine: "local_gliner",
   local_graph_extraction_enabled: true,
   local_extractor_model: "knowledgator/gliner-relex-large-v0.5",
   local_workers: [
@@ -254,8 +331,8 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
   max_chunk_tokens_for_local_extractor: 768,
   max_chunks_in_memory: 100,
   oom_retry_enabled: true,
-  llm_fallback_enabled: true,
-  llm_fallback_max_percent: 0.05,
+  llm_fallback_enabled: false,
+  llm_fallback_max_percent: 0,
   glirel_enabled: false,
   // entity_schema / relation_schema / schema_strict intentionally omitted —
   // backend fills them from the universal schema on POST.

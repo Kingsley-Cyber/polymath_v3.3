@@ -289,7 +289,7 @@ async def backfill_failed_graph_chunks(
             "corpus_id": corpus_id,
             "chunk_id": {"$in": failed_ids},
         },
-        {"chunk_id": 1, "text": 1, "_id": 0},
+        {"chunk_id": 1, "text": 1, "heading_path": 1, "chunk_kind": 1, "_id": 0},
     ).to_list(length=None)
     chunk_by_id = {row["chunk_id"]: row for row in chunk_rows}
     tasks = [
@@ -298,6 +298,9 @@ async def backfill_failed_graph_chunks(
             doc_id=doc_id,
             corpus_id=corpus_id,
             text=str(chunk_by_id[chunk_id].get("text") or ""),
+            document_title=str(doc.get("filename") or doc_id),
+            heading_path=chunk_by_id[chunk_id].get("heading_path"),
+            chunk_kind=str(chunk_by_id[chunk_id].get("chunk_kind") or "body"),
         )
         for chunk_id in failed_ids
         if chunk_id in chunk_by_id

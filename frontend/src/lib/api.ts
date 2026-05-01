@@ -23,6 +23,8 @@ import type {
   CorpusDeleteResponse,
   DocumentResponse,
   IngestJobResponse,
+  IngestionBatchResponse,
+  IngestionResourceProfile,
   EntityResult,
   RelationEdge,
   ChunkExtractionResponse,
@@ -514,6 +516,95 @@ export async function uploadDocumentToCorpus(
   }
 
   return response.json();
+}
+
+/**
+ * POST /api/corpora/{corpus_id}/batch-ingest
+ * Spool many files and enqueue durable background ingestion.
+ */
+export async function batchUploadDocumentsToCorpus(
+  corpusId: string,
+  files: File[],
+  options?: {
+    use_neo4j?: boolean;
+    chunk_summarization?: boolean;
+    model?: string;
+  },
+): Promise<IngestionBatchResponse> {
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append("files", file);
+  }
+  if (options?.use_neo4j !== undefined)
+    formData.append("use_neo4j", String(options.use_neo4j));
+  if (options?.chunk_summarization !== undefined)
+    formData.append("chunk_summarization", String(options.chunk_summarization));
+  if (options?.model) formData.append("model", options.model);
+
+  const token = getPersistedToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const response = await fetch(`${API_BASE}/corpora/${corpusId}/batch-ingest`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      const { useAuthStore } = await import("../stores/authStore");
+      useAuthStore.getState().clearAuth();
+      throw new Error("Session expired. Please log in again.");
+    }
+    const error = await response.text();
+    throw new Error(`HTTP ${response.status}: ${error}`);
+  }
+
+  return response.json();
+}
+
+export async function getIngestionBatch(
+  batchId: string,
+): Promise<IngestionBatchResponse> {
+  return fetchJSON(`/ingestion/batches/${encodeURIComponent(batchId)}`);
+}
+
+export async function pauseIngestionBatch(
+  batchId: string,
+): Promise<IngestionBatchResponse> {
+  return fetchJSON(`/ingestion/batches/${encodeURIComponent(batchId)}/pause`, {
+    method: "POST",
+  });
+}
+
+export async function resumeIngestionBatch(
+  batchId: string,
+): Promise<IngestionBatchResponse> {
+  return fetchJSON(`/ingestion/batches/${encodeURIComponent(batchId)}/resume`, {
+    method: "POST",
+  });
+}
+
+export async function cancelIngestionBatch(
+  batchId: string,
+): Promise<IngestionBatchResponse> {
+  return fetchJSON(`/ingestion/batches/${encodeURIComponent(batchId)}/cancel`, {
+    method: "POST",
+  });
+}
+
+export async function retryFailedIngestionBatch(
+  batchId: string,
+): Promise<IngestionBatchResponse> {
+  return fetchJSON(
+    `/ingestion/batches/${encodeURIComponent(batchId)}/retry-failed`,
+    { method: "POST" },
+  );
+}
+
+export async function getIngestionResourceProfile(): Promise<IngestionResourceProfile> {
+  return fetchJSON("/ingestion/resource-profile");
 }
 
 // ============================================================================

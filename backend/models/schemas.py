@@ -109,7 +109,7 @@ class IngestionConfig(BaseModel):
     graph_backfill_max_attempts_per_chunk: int = Field(default=2, ge=1, le=10)
 
     graph_extraction_engine: Literal["llm", "local_gliner", "hybrid_local_first"] = Field(
-        default="hybrid_local_first"
+        default="local_gliner"
     )
     local_graph_extraction_enabled: bool = True
     local_extractor_model: str = Field(default="knowledgator/gliner-relex-large-v0.5")
@@ -122,8 +122,8 @@ class IngestionConfig(BaseModel):
     max_chunk_tokens_for_local_extractor: int = Field(default=768, ge=128, le=4096)
     max_chunks_in_memory: int = Field(default=100, ge=1, le=10000)
     oom_retry_enabled: bool = True
-    llm_fallback_enabled: bool = True
-    llm_fallback_max_percent: float = Field(default=0.05, ge=0.0, le=1.0)
+    llm_fallback_enabled: bool = False
+    llm_fallback_max_percent: float = Field(default=0.0, ge=0.0, le=1.0)
     glirel_enabled: bool = False
 
     entity_schema: list[str] | None = Field(default_factory=_default_entity_schema)

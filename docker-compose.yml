@@ -387,6 +387,7 @@ services:
     volumes:
       - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}:/models:ro"
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/home/appuser/.cache/huggingface"
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/ingest-spool:/app/ingest-spool"
       # Phase 22 — expose the Modal deploy factory inside the backend
       # container so /api/infrastructure/modal/deploy can import it.
       # Read-only bind; file lives at repo root for CLI-deploy compatibility.
@@ -411,6 +412,7 @@ services:
       LOCAL_RERANKER_ENABLED: ${LOCAL_RERANKER_ENABLED:-false}
       MODELS_DIR: /models
       HF_HOME: /home/appuser/.cache/huggingface
+      INGEST_SPOOL_DIR: /app/ingest-spool
       N8N_URL: http://n8n:5678
       # Phase 14.3 — Modal cloud GPU (primary ingestion embed path; see .env.example)
       MODAL_ENABLED: ${MODAL_ENABLED:-false}

@@ -99,6 +99,60 @@ class CorpusUpdate(BaseModel):
     default_ingestion_config: IngestionConfig | None = None
 
 
+def _build_ephemeral_ingest_config(
+    *,
+    corpus: dict,
+    use_neo4j: bool | None,
+    chunk_summarization: bool | None,
+    embed_mode: str | None,
+    embed_base_url: str | None,
+    embed_api_key: str | None,
+    embed_max_concurrent: int | None,
+    summary_model: str | None,
+    summary_base_url: str | None,
+    summary_api_key: str | None,
+    extraction_model: str | None,
+    extraction_base_url: str | None,
+    extraction_api_key: str | None,
+) -> tuple[IngestionConfig, dict]:
+    """Build the one-request config/overrides without persisting them."""
+    base_cfg_dict = dict(corpus.get("default_ingestion_config") or {})
+    if use_neo4j is not None:
+        base_cfg_dict["use_neo4j"] = use_neo4j
+    if chunk_summarization is not None:
+        base_cfg_dict["chunk_summarization"] = chunk_summarization
+    cfg = IngestionConfig(**base_cfg_dict)
+
+    overrides: dict = {}
+    for name, val in (
+        ("embed_mode", embed_mode),
+        ("embed_base_url", embed_base_url),
+        ("embed_api_key", embed_api_key),
+        ("embed_max_concurrent", embed_max_concurrent),
+    ):
+        if val is not None:
+            overrides[name] = val
+    if any(v is not None for v in (summary_model, summary_base_url, summary_api_key)):
+        overrides["summary_models"] = [{
+            "provider_preset": "",
+            "model": summary_model or "",
+            "base_url": summary_base_url,
+            "api_key": summary_api_key,
+            "max_concurrent": 1,
+            "extra_params": {},
+        }]
+    if any(v is not None for v in (extraction_model, extraction_base_url, extraction_api_key)):
+        overrides["extraction_models"] = [{
+            "provider_preset": "",
+            "model": extraction_model or "",
+            "base_url": extraction_base_url,
+            "api_key": extraction_api_key,
+            "max_concurrent": 1,
+            "extra_params": {},
+        }]
+    return cfg, overrides
+
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["ingestion"])
 
@@ -486,6 +540,194 @@ async def list_documents(
         offset=offset,
     )
     return docs
+
+
+@router.post("/corpora/{corpus_id}/batch-ingest")
+async def batch_ingest_documents(
+    corpus_id: str,
+    files: list[UploadFile] = File(...),
+    use_neo4j: bool | None = Form(default=None),
+    chunk_summarization: bool | None = Form(default=None),
+    model: str = Form(default=""),
+    embed_mode: str | None = Form(default=None),
+    embed_base_url: str | None = Form(default=None),
+    embed_api_key: str | None = Form(default=None),
+    embed_max_concurrent: int | None = Form(default=None),
+    summary_model: str | None = Form(default=None),
+    summary_base_url: str | None = Form(default=None),
+    summary_api_key: str | None = Form(default=None),
+    extraction_model: str | None = Form(default=None),
+    extraction_base_url: str | None = Form(default=None),
+    extraction_api_key: str | None = Form(default=None),
+    current_user: dict = Depends(get_current_user),
+):
+    """Spool many files to disk and enqueue durable background ingestion."""
+    corpus = await ingestion_service._get_corpus_raw(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    if not files:
+        raise HTTPException(status_code=400, detail="No files supplied")
+    cfg, overrides = _build_ephemeral_ingest_config(
+        corpus=corpus,
+        use_neo4j=use_neo4j,
+        chunk_summarization=chunk_summarization,
+        embed_mode=embed_mode,
+        embed_base_url=embed_base_url,
+        embed_api_key=embed_api_key,
+        embed_max_concurrent=embed_max_concurrent,
+        summary_model=summary_model,
+        summary_base_url=summary_base_url,
+        summary_api_key=summary_api_key,
+        extraction_model=extraction_model,
+        extraction_base_url=extraction_base_url,
+        extraction_api_key=extraction_api_key,
+    )
+    try:
+        return await ingestion_service.create_batch_ingest(
+            corpus_id=corpus_id,
+            user_id=current_user["user_id"],
+            uploads=files,
+            ingestion_config=cfg,
+            model=model,
+            ingest_overrides=overrides or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/ingestion/resource-profile")
+async def ingestion_resource_profile(
+    current_user: dict = Depends(get_current_user),
+):
+    """Detected CPU/RAM/GPU profile plus active batch queue metrics."""
+    return await ingestion_service.get_ingestion_resource_profile()
+
+
+@router.get("/ingestion/batches/{batch_id}")
+async def get_ingestion_batch(
+    batch_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    batch = await ingestion_service.get_ingestion_batch(
+        batch_id,
+        user_id=current_user["user_id"],
+    )
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    return batch
+
+
+@router.get("/ingestion/batches/{batch_id}/stream")
+async def stream_ingestion_batch(
+    batch_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """SSE stream for durable batch ingestion progress."""
+
+    async def event_generator():
+        last_payload: str | None = None
+        while True:
+            batch = await ingestion_service.get_ingestion_batch(
+                batch_id,
+                user_id=current_user["user_id"],
+            )
+            if not batch:
+                yield build_sse_error("Batch not found")
+                return
+            payload = json.dumps(
+                {
+                    "type": "batch_progress",
+                    "batch_id": batch_id,
+                    "status": batch.get("status"),
+                    "current_phase": batch.get("current_phase"),
+                    "total_files": batch.get("total_files", 0),
+                    "queued_count": batch.get("queued_count", 0),
+                    "processing_count": batch.get("processing_count", 0),
+                    "vector_ready_count": batch.get("vector_ready_count", 0),
+                    "graph_ready_count": batch.get("graph_ready_count", 0),
+                    "graph_partial_count": batch.get("graph_partial_count", 0),
+                    "needs_backfill_count": batch.get("needs_backfill_count", 0),
+                    "failed_count": batch.get("failed_count", 0),
+                    "cancelled_count": batch.get("cancelled_count", 0),
+                    "queue_metrics": batch.get("queue_metrics", {}),
+                },
+                default=str,
+            )
+            if payload != last_payload:
+                yield f"data: {payload}\n\n"
+                last_payload = payload
+            if batch.get("status") in {"completed", "failed", "cancelled"}:
+                yield build_sse_done()
+                return
+            await asyncio.sleep(1.0)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/ingestion/batches/{batch_id}/pause")
+async def pause_ingestion_batch(
+    batch_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        return await ingestion_service.pause_ingestion_batch(
+            batch_id,
+            user_id=current_user["user_id"],
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Batch not found") from exc
+
+
+@router.post("/ingestion/batches/{batch_id}/resume")
+async def resume_ingestion_batch(
+    batch_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        return await ingestion_service.resume_ingestion_batch(
+            batch_id,
+            user_id=current_user["user_id"],
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Batch not found") from exc
+
+
+@router.post("/ingestion/batches/{batch_id}/cancel")
+async def cancel_ingestion_batch(
+    batch_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        return await ingestion_service.cancel_ingestion_batch(
+            batch_id,
+            user_id=current_user["user_id"],
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Batch not found") from exc
+
+
+@router.post("/ingestion/batches/{batch_id}/retry-failed")
+async def retry_failed_ingestion_batch(
+    batch_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        return await ingestion_service.retry_failed_ingestion_batch(
+            batch_id,
+            user_id=current_user["user_id"],
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Batch not found") from exc
 
 
 @router.post("/corpora/{corpus_id}/ingest", response_model=IngestJobResponse)
