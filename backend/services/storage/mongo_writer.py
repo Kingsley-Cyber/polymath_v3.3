@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo import ReplaceOne
+from pymongo import DeleteOne, ReplaceOne
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,120 @@ async def upsert_chunks(db: AsyncIOMotorDatabase, chunks: list[dict]) -> None:
         for c in chunks
     ]
     await db["chunks"].bulk_write(ops, ordered=False)
+
+
+async def dedupe_exact_chunk_rows(
+    db: AsyncIOMotorDatabase,
+    *,
+    corpus_id: str | None = None,
+    doc_id: str | None = None,
+    dry_run: bool = False,
+    limit_groups: int | None = None,
+) -> dict[str, int]:
+    """Remove byte-identical duplicate chunk rows by (corpus_id, chunk_id).
+
+    This is intentionally conservative: if duplicate rows for a key disagree
+    on text/doc/parent/token fields, it leaves them alone and reports the
+    group as unsafe. The startup index path can call this before enforcing the
+    unique compound index, and admin/backfill code can call it for a corpus.
+    """
+    match: dict[str, Any] = {}
+    if corpus_id:
+        match["corpus_id"] = corpus_id
+    if doc_id:
+        match["doc_id"] = doc_id
+    pipeline: list[dict[str, Any]] = []
+    if match:
+        pipeline.append({"$match": match})
+    pipeline.extend(
+        [
+            {
+                "$group": {
+                    "_id": {"corpus_id": "$corpus_id", "chunk_id": "$chunk_id"},
+                    "ids": {"$push": "$_id"},
+                    "count": {"$sum": 1},
+                }
+            },
+            {"$match": {"count": {"$gt": 1}}},
+        ]
+    )
+    if limit_groups:
+        pipeline.append({"$limit": int(limit_groups)})
+
+    duplicate_groups = 0
+    unsafe_groups = 0
+    deleted = 0
+    delete_ops: list[DeleteOne] = []
+    async for group in db["chunks"].aggregate(pipeline, allowDiskUse=True):
+        ids = group.get("ids") or []
+        if len(ids) <= 1:
+            continue
+        duplicate_groups += 1
+        rows = [
+            row
+            async for row in db["chunks"].find(
+                {"_id": {"$in": ids}},
+                {
+                    "text": 1,
+                    "corpus_id": 1,
+                    "doc_id": 1,
+                    "chunk_id": 1,
+                    "parent_id": 1,
+                    "token_count": 1,
+                    "heading_path": 1,
+                    "chunk_kind": 1,
+                },
+            ).sort("_id", 1)
+        ]
+        if len(rows) <= 1:
+            continue
+        first = rows[0]
+        comparable = {
+            key: first.get(key)
+            for key in (
+                "text",
+                "corpus_id",
+                "doc_id",
+                "chunk_id",
+                "parent_id",
+                "token_count",
+                "heading_path",
+                "chunk_kind",
+            )
+        }
+        if any(
+            {
+                key: row.get(key)
+                for key in comparable
+            }
+            != comparable
+            for row in rows[1:]
+        ):
+            unsafe_groups += 1
+            continue
+        for row in rows[1:]:
+            delete_ops.append(DeleteOne({"_id": row["_id"]}))
+            deleted += 1
+            if len(delete_ops) >= 500 and not dry_run:
+                await db["chunks"].bulk_write(delete_ops, ordered=False)
+                delete_ops = []
+    if delete_ops and not dry_run:
+        await db["chunks"].bulk_write(delete_ops, ordered=False)
+    if duplicate_groups:
+        logger.info(
+            "phase=chunk_dedupe groups=%d deleted=%d unsafe_groups=%d dry_run=%s corpus=%s doc=%s",
+            duplicate_groups,
+            0 if dry_run else deleted,
+            unsafe_groups,
+            dry_run,
+            corpus_id,
+            doc_id,
+        )
+    return {
+        "duplicate_groups": duplicate_groups,
+        "deleted_rows": 0 if dry_run else deleted,
+        "unsafe_groups": unsafe_groups,
+    }
 
 
 async def update_write_state(

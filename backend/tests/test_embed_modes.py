@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from services import embedder
@@ -236,3 +237,33 @@ async def test_legacy_mode_values_coerced_in_dispatcher():
         local_mock.return_value = [[0.0] * 1024]
         await embedder.embed_batch(["x"], mode="local_st", expected_dim=1024)
     local_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_local_embedder_5xx_batch_failure_splits_and_retries(monkeypatch):
+    calls: list[int] = []
+
+    async def fake_post(*, client, url, batch, expected_dim):
+        calls.append(len(batch))
+        if len(batch) > 1:
+            request = httpx.Request("POST", url)
+            response = httpx.Response(
+                503,
+                request=request,
+                text="cuda_out_of_memory; retry with a smaller embedding batch",
+            )
+            raise httpx.HTTPStatusError("local embedder overloaded", request=request, response=response)
+        return [[0.01] * expected_dim for _ in batch]
+
+    monkeypatch.setattr(embedder, "_post_local_embedding_batch", fake_post)
+
+    vectors = await embedder._embed_local_batch_with_split(
+        client=MagicMock(),
+        url="http://embedder/embeddings",
+        batch=["a", "b", "c", "d"],
+        expected_dim=4,
+    )
+
+    assert len(vectors) == 4
+    assert calls[0] == 4
+    assert calls.count(1) == 4

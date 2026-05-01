@@ -108,20 +108,40 @@ class IngestionConfig(BaseModel):
     graph_backfill_max_chunks: int = Field(default=100, ge=1, le=10000)
     graph_backfill_max_attempts_per_chunk: int = Field(default=2, ge=1, le=10)
 
-    graph_extraction_engine: Literal["llm", "local_gliner", "hybrid_local_first"] = Field(
+    graph_extraction_engine: Literal[
+        "llm",
+        "local_gliner",
+        "local_gliner_relex",
+        "local_gliner2",
+        "local_glirel_optional",
+        "hybrid_local_first",
+    ] = Field(
         default="local_gliner"
     )
     local_graph_extraction_enabled: bool = True
     local_extractor_model: str = Field(default="knowledgator/gliner-relex-large-v0.5")
+    local_gliner2_model: str = Field(default="fastino/gliner2-base-v1")
     local_workers: list[dict[str, Any]] = Field(
         default_factory=lambda: [
-            {"device": "cuda:0", "name": "rtx_3090", "batch_size": 16, "weight": 2},
-            {"device": "cuda:1", "name": "rtx_4070", "batch_size": 8, "weight": 1},
+            {"device": "cuda:0", "name": "rtx_3090", "batch_size": 8, "weight": 2},
+            {"device": "cuda:1", "name": "rtx_4070", "batch_size": 4, "weight": 1},
         ]
     )
-    max_chunk_tokens_for_local_extractor: int = Field(default=768, ge=128, le=4096)
+    max_chunk_tokens_for_local_extractor: int = Field(default=512, ge=128, le=4096)
+    local_gliner_max_input_chars: int = Field(default=3500, ge=512, le=20000)
+    local_model_max_tokens: int = Field(default=384, ge=128, le=2048)
+    local_relation_max_labels: int = Field(default=12, ge=1, le=48)
+    local_relation_hard_max_labels: int = Field(default=16, ge=1, le=64)
+    local_relation_max_source_entities: int = Field(default=4, ge=1, le=16)
+    local_relation_oom_disable_after: int = Field(default=1, ge=1, le=10)
+    local_entity_only_on_relation_oom: bool = True
     max_chunks_in_memory: int = Field(default=100, ge=1, le=10000)
     oom_retry_enabled: bool = True
+    local_cuda_fatal_cooldown_seconds: int = Field(default=900, ge=60, le=86400)
+    local_graph_diagnostics_enabled: bool = False
+    local_graph_diagnostics_dir: str = Field(default="local_graph_diagnostics")
+    local_graph_debug_log_text: bool = False
+    local_graph_debug_text_limit: int = Field(default=3, ge=0, le=50)
     llm_fallback_enabled: bool = False
     llm_fallback_max_percent: float = Field(default=0.0, ge=0.0, le=1.0)
     glirel_enabled: bool = False

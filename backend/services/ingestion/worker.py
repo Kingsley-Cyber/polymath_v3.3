@@ -267,10 +267,11 @@ def _trace_reasons(
     if not config.use_neo4j:
         reasons.append("Graph extraction is disabled for this ingest configuration.")
     else:
-        if _graph_extraction_engine(config) == "hybrid_local_first":
+        graph_engine = _graph_extraction_engine(config)
+        if graph_engine == "hybrid_local_first":
             reasons.append("Graph extraction will try local GLiNER first, then bounded LLM fallback.")
-        elif _graph_extraction_engine(config) == "local_gliner":
-            reasons.append("Graph extraction is configured for local GLiNER only.")
+        elif graph_engine in {"local_gliner", "local_gliner_relex", "local_gliner2", "local_glirel_optional"}:
+            reasons.append(f"Graph extraction is configured for {graph_engine} only.")
         if policy is not None and policy.extraction_strategy == "compact_large_doc":
             reasons.append("Large body chunk count triggered compact graph extraction.")
         elif policy is not None and policy.extraction_strategy == "full_ontology":
@@ -346,6 +347,11 @@ def _build_decision_trace(
         "child_count": len(children),
         "parent_target_tokens": int(budgets.get("parent_target") or 0),
         "child_target_tokens": int(budgets.get("child_target") or 0),
+        "max_child_tokens": max([int(getattr(c, "token_count", 0) or 0) for c in children] or [0]),
+        "max_parent_tokens": max(
+            [tier_chunker._count_tokens(str(getattr(p, "text", "") or "")) for p in parents] or [0]
+        ),
+        "hard_token_split_enabled": True,
         "chunk_overlap": int(chunking_config.get("chunk_overlap") or 0),
         "page_ranges_preserved": bool(chunking_config.get("page_ranges_preserved")),
         "low_value_chunk_count": sum(low_value_kinds.values()),
@@ -722,7 +728,14 @@ def _select_ghost_b_extraction_policy(
 
 def _graph_extraction_engine(config: IngestionConfig) -> str:
     engine = str(getattr(config, "graph_extraction_engine", "llm") or "llm").strip()
-    if engine not in {"llm", "local_gliner", "hybrid_local_first"}:
+    if engine not in {
+        "llm",
+        "local_gliner",
+        "local_gliner_relex",
+        "local_gliner2",
+        "local_glirel_optional",
+        "hybrid_local_first",
+    }:
         return "llm"
     if not bool(getattr(config, "local_graph_extraction_enabled", True)):
         return "llm"
@@ -1182,7 +1195,8 @@ async def _run_ghosts_parallel(
             strict=config.schema_strict,
         )
         graph_engine = _graph_extraction_engine(config)
-        if graph_engine == "local_gliner":
+        local_engines = {"local_gliner", "local_gliner_relex", "local_gliner2", "local_glirel_optional"}
+        if graph_engine in local_engines:
             pool = []
         elif config.models_linked or not config.extraction_models:
             pool = _build_ghost_pool(config.summary_models)
@@ -1200,7 +1214,7 @@ async def _run_ghosts_parallel(
             c for c in children
             if not should_skip_ghost_b(getattr(c, "chunk_kind", None) or ChunkKind.BODY)
         ]
-        if graph_engine == "local_gliner":
+        if graph_engine in local_engines:
             schema_lens = build_deterministic_schema_lens(
                 corpus_id=corpus_id,
                 filename=filename or (existing_doc or {}).get("filename") or doc_id,
@@ -1285,7 +1299,7 @@ async def _run_ghosts_parallel(
                 "graph_extraction_engine_requested": _graph_extraction_engine(config),
             },
         }
-        if graph_engine in {"local_gliner", "hybrid_local_first"}:
+        if graph_engine in {*local_engines, "hybrid_local_first"}:
             from services.local_graph_extractor import extract_entities_local_first
 
             report = await extract_entities_local_first(
@@ -1310,7 +1324,7 @@ async def _run_ghosts_parallel(
         metrics = dict(metrics or {})
         if (
             policy.extraction_mode == "compact"
-            and graph_engine != "local_gliner"
+            and graph_engine not in local_engines
             and policy.deep_pass_enabled
             and policy.deep_pass_max_chunks > 0
             and results

@@ -1334,6 +1334,15 @@ export async function backfillDocumentGraph(
   });
 }
 
+export async function recoverDocumentVectors(
+  corpusId: string,
+  docId: string,
+): Promise<{ status: string; vector_ready?: boolean; qdrant_written?: boolean; [key: string]: unknown }> {
+  return fetchJSON(`/corpora/${encodeURIComponent(corpusId)}/documents/${encodeURIComponent(docId)}/vector-recovery`, {
+    method: "POST",
+  });
+}
+
 export async function warmGraphCache(corpusId: string): Promise<Record<string, unknown>> {
   return fetchJSON(`/corpora/${encodeURIComponent(corpusId)}/graph-cache/warm`, { method: "POST" });
 }

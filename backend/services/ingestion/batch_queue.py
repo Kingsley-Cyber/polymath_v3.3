@@ -283,6 +283,8 @@ class BatchIngestionManager:
         ingestion_config: IngestionConfig,
         model: str = "",
         ingest_overrides: dict | None = None,
+        warnings: list[str] | None = None,
+        preflight: dict | None = None,
     ) -> dict[str, Any]:
         if self._db is None:
             raise RuntimeError("BatchIngestionManager is not attached")
@@ -309,7 +311,8 @@ class BatchIngestionManager:
             "estimated_chunks": 0,
             "estimated_runtime": None,
             "current_phase": "spooling",
-            "warnings": [],
+            "warnings": list(warnings or []),
+            "preflight": preflight or {},
             "ingestion_config": ingestion_config.model_dump(),
             "ingest_overrides": ingest_overrides or {},
             "model": model or "",

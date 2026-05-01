@@ -5,6 +5,9 @@
 import logging
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.errors import DuplicateKeyError, OperationFailure
+
+from services.storage.mongo_writer import dedupe_exact_chunk_rows
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +69,18 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
         await db["chunks"].drop_index("chunk_id_1")
     except Exception:
         pass
-    await db["chunks"].create_index(
-        [("corpus_id", 1), ("chunk_id", 1)], unique=True, name="corpus_chunk_unique"
-    )
+    try:
+        await db["chunks"].create_index(
+            [("corpus_id", 1), ("chunk_id", 1)], unique=True, name="corpus_chunk_unique"
+        )
+    except (DuplicateKeyError, OperationFailure) as exc:
+        if "duplicate" not in str(exc).lower() and "e11000" not in str(exc).lower():
+            raise
+        logger.warning("Duplicate chunk rows blocked corpus_chunk_unique; running exact dedupe.")
+        await dedupe_exact_chunk_rows(db)
+        await db["chunks"].create_index(
+            [("corpus_id", 1), ("chunk_id", 1)], unique=True, name="corpus_chunk_unique"
+        )
     await db["chunks"].create_index("chunk_id")  # non-unique cross-corpus lookup
     await db["chunks"].create_index("parent_id")
     await db["chunks"].create_index("doc_id")

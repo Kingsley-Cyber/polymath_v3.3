@@ -582,6 +582,23 @@ async def batch_ingest_documents(
         extraction_base_url=extraction_base_url,
         extraction_api_key=extraction_api_key,
     )
+    admission_warnings: list[str] = []
+    preflight = await ingestion_service.preflight_ingest(
+        corpus=corpus,
+        corpus_id=corpus_id,
+        ingestion_config=cfg,
+        ingest_overrides=overrides or None,
+    )
+    if not preflight.get("ok"):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Ingest preflight failed. No files were queued.",
+                "errors": preflight.get("errors", []),
+                "preflight": preflight,
+            },
+        )
+    admission_warnings.extend(preflight.get("warnings") or [])
     try:
         return await ingestion_service.create_batch_ingest(
             corpus_id=corpus_id,
@@ -590,6 +607,8 @@ async def batch_ingest_documents(
             ingestion_config=cfg,
             model=model,
             ingest_overrides=overrides or None,
+            warnings=admission_warnings,
+            preflight=preflight,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -819,6 +838,22 @@ async def ingest_document(
             "max_concurrent": 1,
             "extra_params": {},
         }]
+
+    preflight = await ingestion_service.preflight_ingest(
+        corpus=corpus,
+        corpus_id=corpus_id,
+        ingestion_config=cfg,
+        ingest_overrides=overrides or None,
+    )
+    if not preflight.get("ok"):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Ingest preflight failed. No parse, summary, embedding, or graph work was started.",
+                "errors": preflight.get("errors", []),
+                "preflight": preflight,
+            },
+        )
 
     if not await _try_acquire_ingest_slot():
         raise HTTPException(

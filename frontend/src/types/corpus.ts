@@ -110,6 +110,12 @@ export interface IngestionConfig {
   local_extractor_model?: string;
   local_workers?: LocalGraphWorkerConfig[];
   max_chunk_tokens_for_local_extractor?: number;
+  local_gliner_max_input_chars?: number;
+  local_relation_max_labels?: number;
+  local_relation_hard_max_labels?: number;
+  local_relation_max_source_entities?: number;
+  local_relation_oom_disable_after?: number;
+  local_entity_only_on_relation_oom?: boolean;
   max_chunks_in_memory?: number;
   oom_retry_enabled?: boolean;
   llm_fallback_enabled?: boolean;
@@ -257,6 +263,7 @@ export interface IngestionBatchResponse {
   cancelled_count: number;
   current_phase?: string;
   warnings?: string[];
+  preflight?: Record<string, unknown>;
   batch_total_bytes?: number;
   created_at?: string;
   updated_at?: string;
@@ -325,10 +332,16 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
   local_graph_extraction_enabled: true,
   local_extractor_model: "knowledgator/gliner-relex-large-v0.5",
   local_workers: [
-    { device: "cuda:0", name: "rtx_3090", batch_size: 16, weight: 2 },
-    { device: "cuda:1", name: "rtx_4070", batch_size: 8, weight: 1 },
+    { device: "cuda:0", name: "rtx_3090", batch_size: 8, weight: 2 },
+    { device: "cuda:1", name: "rtx_4070", batch_size: 4, weight: 1 },
   ],
-  max_chunk_tokens_for_local_extractor: 768,
+  max_chunk_tokens_for_local_extractor: 512,
+  local_gliner_max_input_chars: 3500,
+  local_relation_max_labels: 12,
+  local_relation_hard_max_labels: 16,
+  local_relation_max_source_entities: 4,
+  local_relation_oom_disable_after: 1,
+  local_entity_only_on_relation_oom: true,
   max_chunks_in_memory: 100,
   oom_retry_enabled: true,
   llm_fallback_enabled: false,

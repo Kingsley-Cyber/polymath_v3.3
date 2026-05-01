@@ -57,4 +57,53 @@ def test_chunking_config_reports_auto_policy_and_semantic_split_as_hint():
     assert config["requested_child_strategy"] == "semantic_split"
     assert config["child_strategy"] == "sentence_merge"
     assert config["semantic_split_enabled"] is False
+    assert config["hard_token_split_enabled"] is True
     assert config["page_ranges_preserved"] is True
+
+
+def test_giant_single_paragraph_is_hard_split_to_child_budget():
+    giant = " ".join(f"token{i}" for i in range(2500))
+    cfg = IngestionConfig(
+        parent_chunk_tokens={
+            "min_tokens": 100,
+            "target_tokens": 300,
+            "max_tokens": 500,
+        },
+        child_chunk_tokens={
+            "min_tokens": 100,
+            "target_tokens": 220,
+            "max_tokens": 500,
+        },
+        chunk_overlap=40,
+    )
+
+    parents, children, _ = tier_chunker.chunk(
+        _parse_result(source_tier=SourceTier.tier_c, text=giant),
+        doc_id="doc",
+        corpus_id="corpus",
+        config=cfg,
+    )
+
+    assert len(parents) > 1
+    assert len(children) > 3
+    assert max(tier_chunker._count_tokens(parent.text) for parent in parents) <= 500
+    assert max(child.token_count for child in children) <= 500
+
+
+def test_overlap_does_not_recreate_oversized_children():
+    text = "\n\n".join([" ".join(["alpha"] * 130) for _ in range(12)])
+    cfg = IngestionConfig(
+        parent_chunk_tokens={"min_tokens": 100, "target_tokens": 300, "max_tokens": 500},
+        child_chunk_tokens={"min_tokens": 100, "target_tokens": 220, "max_tokens": 500},
+        chunk_overlap=100,
+    )
+
+    _parents, children, _ = tier_chunker.chunk(
+        _parse_result(source_tier=SourceTier.tier_c, text=text),
+        doc_id="doc",
+        corpus_id="corpus",
+        config=cfg,
+    )
+
+    assert children
+    assert max(child.token_count for child in children) <= 500

@@ -23,6 +23,7 @@ Selection:
 
 import asyncio
 import logging
+import os
 import time
 from typing import Any
 
@@ -32,7 +33,10 @@ from config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_BATCH_SIZE = 32
+_API_BATCH_SIZE = 32
+_LOCAL_REQUEST_BATCH_SIZE = max(
+    1, int(os.getenv("LOCAL_EMBED_REQUEST_BATCH_SIZE", "16") or "16")
+)
 _LOCAL_TIMEOUT = 600.0
 _DEFAULT_DIM = 1024  # fallback when caller doesn't specify (e.g. query path on Qwen3-0.6B)
 
@@ -272,8 +276,8 @@ async def _embed_batch_api_pool(
 
     semaphores = [asyncio.Semaphore(entry["max_concurrent"]) for entry in pool]
     batches = [
-        (batch_idx, start, texts[start : start + _BATCH_SIZE])
-        for batch_idx, start in enumerate(range(0, len(texts), _BATCH_SIZE))
+        (batch_idx, start, texts[start : start + _API_BATCH_SIZE])
+        for batch_idx, start in enumerate(range(0, len(texts), _API_BATCH_SIZE))
     ]
     attempts: dict[int, int] = {batch_idx: 0 for batch_idx, _, _ in batches}
     disabled_lanes: set[int] = set()
@@ -450,8 +454,8 @@ async def _embed_batch_local(
     vectors: list[list[float]] = []
 
     async with httpx.AsyncClient(timeout=_LOCAL_TIMEOUT) as client:
-        for i in range(0, len(texts), _BATCH_SIZE):
-            batch = texts[i : i + _BATCH_SIZE]
+        for i in range(0, len(texts), _LOCAL_REQUEST_BATCH_SIZE):
+            batch = texts[i : i + _LOCAL_REQUEST_BATCH_SIZE]
             batch_vectors = await _embed_local_batch_with_split(
                 client=client,
                 url=url,
@@ -470,7 +474,7 @@ async def _embed_local_batch_with_split(
     batch: list[str],
     expected_dim: int,
 ) -> list[list[float]]:
-    """Embed a local batch, splitting it when a large PDF batch times out."""
+    """Embed a local batch, splitting it when a large request overloads the GPU."""
     try:
         return await _post_local_embedding_batch(
             client=client,
@@ -478,19 +482,25 @@ async def _embed_local_batch_with_split(
             batch=batch,
             expected_dim=expected_dim,
         )
-    except httpx.TimeoutException:
+    except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+        should_split = isinstance(exc, httpx.TimeoutException) or _is_local_embedder_retryable_status(exc)
+        if not should_split:
+            raise
+
         if len(batch) <= 1:
-            logger.exception(
-                "Local embedder timed out for a singleton text; cannot split further"
+            logger.warning(
+                "Local embedder failed for a singleton text; cannot split further: %s",
+                _summarize_httpx_error(exc),
             )
             raise
 
         midpoint = max(1, len(batch) // 2)
         logger.warning(
-            "Local embedder timed out for batch_size=%d; retrying as %d/%d",
+            "Local embedder overloaded for batch_size=%d; retrying as %d/%d: %s",
             len(batch),
             midpoint,
             len(batch) - midpoint,
+            _summarize_httpx_error(exc),
         )
         left = await _embed_local_batch_with_split(
             client=client,
@@ -505,6 +515,25 @@ async def _embed_local_batch_with_split(
             expected_dim=expected_dim,
         )
         return left + right
+
+
+def _is_local_embedder_retryable_status(exc: httpx.HTTPStatusError) -> bool:
+    status = exc.response.status_code
+    if status in {429, 500, 502, 503, 504}:
+        return True
+    body = exc.response.text.lower()
+    return "out of memory" in body or "cuda" in body or "oom" in body
+
+
+def _summarize_httpx_error(exc: Exception) -> str:
+    if isinstance(exc, httpx.TimeoutException):
+        return "timeout"
+    if isinstance(exc, httpx.HTTPStatusError):
+        body = (exc.response.text or "").strip().replace("\n", " ")
+        if len(body) > 220:
+            body = body[:220] + "..."
+        return f"status={exc.response.status_code} body={body}"
+    return str(exc)
 
 
 async def _post_local_embedding_batch(
@@ -615,8 +644,8 @@ async def _post_openai_compatible(
     vectors: list[list[float]] = []
 
     async with httpx.AsyncClient(timeout=timeout) as client:
-        for i in range(0, len(texts), _BATCH_SIZE):
-            batch = texts[i : i + _BATCH_SIZE]
+        for i in range(0, len(texts), _API_BATCH_SIZE):
+            batch = texts[i : i + _API_BATCH_SIZE]
             payload: dict[str, Any] = {"input": batch, "model": model_hint}
             if request_dimensions and _provider_supports_dimensions(model_hint):
                 payload["dimensions"] = expected_dim

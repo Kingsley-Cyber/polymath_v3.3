@@ -5,7 +5,15 @@ services:
       args:
         INSTALL_LOCAL_GRAPH: "true"
     environment:
+      LOCAL_EMBEDDER_ENABLED: "true"
       NVIDIA_VISIBLE_DEVICES: "${LOCAL_GRAPH_NVIDIA_VISIBLE_DEVICES:-0,1}"
       NVIDIA_DRIVER_CAPABILITIES: "${LOCAL_GRAPH_NVIDIA_DRIVER_CAPABILITIES:-compute,utility}"
       HF_HOME: /home/appuser/.cache/huggingface
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+      TQDM_DISABLE: "1"
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
     gpus: all
+    depends_on:
+      embedder:
+        condition: service_healthy

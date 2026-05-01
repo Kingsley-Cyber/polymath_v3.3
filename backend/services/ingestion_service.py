@@ -86,10 +86,23 @@ MUTABLE_CONFIG_FIELDS: frozenset[str] = frozenset({
     "graph_extraction_engine",
     "local_graph_extraction_enabled",
     "local_extractor_model",
+    "local_gliner2_model",
     "local_workers",
     "max_chunk_tokens_for_local_extractor",
+    "local_gliner_max_input_chars",
+    "local_model_max_tokens",
+    "local_relation_max_labels",
+    "local_relation_hard_max_labels",
+    "local_relation_max_source_entities",
+    "local_relation_oom_disable_after",
+    "local_entity_only_on_relation_oom",
     "max_chunks_in_memory",
     "oom_retry_enabled",
+    "local_cuda_fatal_cooldown_seconds",
+    "local_graph_diagnostics_enabled",
+    "local_graph_diagnostics_dir",
+    "local_graph_debug_log_text",
+    "local_graph_debug_text_limit",
     "llm_fallback_enabled",
     "llm_fallback_max_percent",
     "glirel_enabled",
@@ -679,6 +692,8 @@ class IngestionService:
         ingestion_config: IngestionConfig,
         model: str = "",
         ingest_overrides: dict | None = None,
+        warnings: list[str] | None = None,
+        preflight: dict | None = None,
     ) -> dict:
         if self._batch_manager is None:
             raise RuntimeError("Batch ingestion manager is unavailable")
@@ -689,6 +704,33 @@ class IngestionService:
             ingestion_config=ingestion_config,
             model=model,
             ingest_overrides=ingest_overrides,
+            warnings=warnings,
+            preflight=preflight,
+        )
+
+    async def preflight_ingest(
+        self,
+        *,
+        corpus: dict | None,
+        corpus_id: str,
+        ingestion_config: IngestionConfig,
+        ingest_overrides: dict | None = None,
+    ) -> dict:
+        """Check vector/graph dependencies before costly parse or summary work."""
+        from services.ingestion.preflight import run_ingest_preflight
+
+        live_corpus_cfg = (corpus or {}).get("default_ingestion_config")
+        if live_corpus_cfg is None:
+            loaded = await self._get_corpus_raw(corpus_id)
+            live_corpus_cfg = (loaded or {}).get("default_ingestion_config") or {}
+        effective_config = build_effective_config(
+            frozen_base=ingestion_config.model_dump(),
+            live_corpus=live_corpus_cfg or {},
+            ingest_overrides=ingest_overrides,
+        )
+        return await run_ingest_preflight(
+            config=effective_config,
+            qdrant_client=self._qdrant,
         )
 
     async def get_ingestion_batch(self, batch_id: str, *, user_id: str) -> dict | None:

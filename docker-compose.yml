@@ -237,7 +237,6 @@ services:
   embedder:
     <<: *default-logging
     build: ./embedder
-    profiles: ["local-embed"]
     ports:
       - "8082:80"
     volumes:
@@ -246,10 +245,13 @@ services:
     environment:
       HF_HOME: /root/.cache/huggingface
       MODEL_PATH: /model
+      MODEL_ID: ${LOCAL_EMBED_MODEL_ID:-Qwen/Qwen3-Embedding-0.6B}
       MODEL_NAME: Qwen3-Embedding-0.6B
       # Keep local embedding conservative so large ingests don't starve the
       # desktop GPU. Raise LOCAL_EMBED_BATCH_SIZE only after watching nvidia-smi.
       EMBED_BATCH_SIZE: ${LOCAL_EMBED_BATCH_SIZE:-8}
+      EMBED_MAX_SEQ_LENGTH: ${LOCAL_EMBED_MAX_SEQ_LENGTH:-1024}
+      EMBED_MAX_INPUT_CHARS: ${LOCAL_EMBED_MAX_INPUT_CHARS:-6000}
       EMBED_DEVICE: cuda
       PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
       # GPU pinning — see docling service for the rationale. CUDA_VISIBLE_DEVICES
@@ -270,7 +272,7 @@ services:
       interval: 15s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 300s
     restart: unless-stopped
 
   # ============================================================
@@ -408,7 +410,7 @@ services:
       REDIS_URL: redis://redis:6379
       RERANKER_URL: http://reranker:8080
       EMBEDDER_URL: http://embedder:80
-      LOCAL_EMBEDDER_ENABLED: ${LOCAL_EMBEDDER_ENABLED:-false}
+      LOCAL_EMBEDDER_ENABLED: ${LOCAL_EMBEDDER_ENABLED:-true}
       LOCAL_RERANKER_ENABLED: ${LOCAL_RERANKER_ENABLED:-false}
       MODELS_DIR: /models
       HF_HOME: /home/appuser/.cache/huggingface

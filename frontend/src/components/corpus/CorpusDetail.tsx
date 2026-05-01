@@ -104,6 +104,7 @@ export function CorpusDetail({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [retryHint, setRetryHint] = useState<string | null>(null);
   const [backfillingDocs, setBackfillingDocs] = useState<Set<string>>(new Set());
+  const [recoveringVectors, setRecoveringVectors] = useState<Set<string>>(new Set());
 
   // Splitter between the left (doc list) and right (library) panels.
   // leftPct is the left side's width as a % of the flex row container;
@@ -268,6 +269,25 @@ export function CorpusDetail({
       setError(err instanceof Error ? err.message : "Failed to queue graph backfill");
     } finally {
       setBackfillingDocs((prev) => {
+        const next = new Set(prev);
+        next.delete(doc.doc_id);
+        return next;
+      });
+    }
+  };
+
+  const handleVectorRecovery = async (doc: DocumentResponse) => {
+    setError(null);
+    setRecoveringVectors((prev) => new Set(prev).add(doc.doc_id));
+    try {
+      await api.recoverDocumentVectors(corpus.corpus_id, doc.doc_id);
+      await loadDocuments();
+      const updated = await api.getCorpus(corpus.corpus_id);
+      onCorpusUpdated(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Vector recovery failed");
+    } finally {
+      setRecoveringVectors((prev) => {
         const next = new Set(prev);
         next.delete(doc.doc_id);
         return next;
@@ -776,6 +796,25 @@ export function CorpusDetail({
                                 <RotateCcw className="w-3 h-3" />
                               )}
                               Backfill
+                            </button>
+                          </div>
+                        )}
+                        {doc.write_state?.mongo_written && !doc.write_state?.qdrant_written && (
+                          <div className="pl-2 flex items-center justify-between gap-2 border border-cyan-400/30 bg-cyan-400/5 px-2 py-1.5">
+                            <div className="text-cyan-300 leading-snug">
+                              Mongo-ready only. Recover vectors without reparsing or rerunning summaries.
+                            </div>
+                            <button
+                              onClick={() => handleVectorRecovery(doc)}
+                              disabled={recoveringVectors.has(doc.doc_id)}
+                              className="flex items-center gap-1 px-2 py-1 text-[9px] font-bold tracking-widest text-cyan-300 border border-cyan-400/50 hover:bg-cyan-400 hover:text-bg-base transition-none uppercase disabled:opacity-50"
+                            >
+                              {recoveringVectors.has(doc.doc_id) ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <RotateCcw className="w-3 h-3" />
+                              )}
+                              Recover Vectors
                             </button>
                           </div>
                         )}

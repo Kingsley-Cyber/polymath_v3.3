@@ -175,6 +175,17 @@ _CITATION_PATTERNS: tuple[re.Pattern[str], ...] = (
 
 # A line that ends in dot-leaders + page number is the canonical TOC shape.
 _TOC_LINE_RE = re.compile(r"\.{3,}\s*\d+\s*$")
+_MARKDOWN_LINK_RE = re.compile(r"\[[^\]]{1,160}\]\([^)]+\)|\[[^\]]{1,160}\]\{#[^}]+\}|\[\]\{#[^}]+\}")
+_TOC_ANCHOR_RE = re.compile(
+    r"(?:\{#toc|#toc\b|contents?|table\s+of\s+contents|ch(?:apter)?\d+|"
+    r"chapter[_\s-]*\d+|part[_\s-]*\d+|level\d+|lvl\d+|\.x?html)",
+    re.IGNORECASE,
+)
+_INDEX_CROSSREF_RE = re.compile(
+    r"\b(?:see|see\s+also|class|method|function|member|operator|namespace|"
+    r"struct|typedef|macro|enum|figure|table)\b|(?:#|_p)\d{2,}|\{#[^}]+\}",
+    re.IGNORECASE,
+)
 # A line that's a short label followed by comma-separated page numbers is
 # the canonical index shape (e.g. "Apple, 23, 45-47").
 _INDEX_LINE_RE = re.compile(
@@ -226,6 +237,25 @@ def classify_content(text: str | None) -> str:
         index_hits = sum(1 for ln in lines if _INDEX_LINE_RE.match(ln))
         if index_hits / len(lines) >= 0.40:
             return ChunkKind.INDEX
+
+        link_hits = len(_MARKDOWN_LINK_RE.findall(sample))
+        toc_anchor_hits = len(_TOC_ANCHOR_RE.findall(sample))
+        crossref_hits = len(_INDEX_CROSSREF_RE.findall(sample))
+        link_density = link_hits / max(1, len(lines))
+
+        # Technical indexes/cross-reference tables often look like dense link
+        # blocks rather than "term, 12, 45" print indexes. They are bad graph
+        # extraction candidates and should stay searchable only as opt-in
+        # provenance.
+        if link_hits >= 6 and link_density >= 0.35 and crossref_hits >= 8:
+            return ChunkKind.INDEX
+
+        # Docling/HTML markdown exports can flatten a whole TOC into one
+        # enormous link list with anchors instead of dot leaders. This catches
+        # those artifacts without reclassifying normal prose that merely has a
+        # few citations or links.
+        if link_hits >= 6 and link_density >= 0.35 and toc_anchor_hits >= 5:
+            return ChunkKind.TOC
 
     return ChunkKind.BODY
 

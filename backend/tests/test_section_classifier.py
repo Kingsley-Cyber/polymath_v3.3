@@ -225,6 +225,40 @@ def test_classify_content_index_with_comma_pages():
     assert classify_content(index_text) == ChunkKind.INDEX
 
 
+def test_classify_content_pbr_style_toc_anchor_list():
+    toc_text = "\n".join(
+        [
+            "[]{#toc}",
+            "[Chapter 1 The Radiometry Pipeline](chapter01.xhtml#ch01)",
+            "[Chapter 2 Reflection Models](chapter02.xhtml#ch02)",
+            "[Chapter 3 Surface Scattering](chapter03.xhtml#ch03)",
+            "[Chapter 4 Textures](chapter04.xhtml#ch04)",
+            "[Chapter 5 Camera Models](chapter05.xhtml#ch05)",
+            "[Chapter 6 Light Transport](chapter06.xhtml#ch06)",
+            "[Appendix A Symbols](appendix.xhtml#appa)",
+        ]
+    )
+
+    assert classify_content(toc_text) == ChunkKind.TOC
+
+
+def test_classify_content_technical_cross_reference_index():
+    index_text = "\n".join(
+        [
+            "[Texture::Evaluate](api.xhtml#_p1234) See also [Spectrum](api.xhtml#_p1235)",
+            "[BSDF::Sample_f](api.xhtml#_p2234) method See [BxDF](api.xhtml#_p2235)",
+            "[Integrator::Li](api.xhtml#_p3234) class method reference",
+            "[Shape::Intersect](api.xhtml#_p4234) member function reference",
+            "[Sampler::Get1D](api.xhtml#_p5234) method See also Random",
+            "[Camera::GenerateRay](api.xhtml#_p6234) class method reference",
+            "[Medium::Tr](api.xhtml#_p7234) operator reference table",
+            "[Film::AddSample](api.xhtml#_p8234) member reference",
+        ]
+    )
+
+    assert classify_content(index_text) == ChunkKind.INDEX
+
+
 def test_classify_content_short_input_does_not_false_fire():
     # Three citation-shaped lines isn't enough to flip — we require ≥5 lines
     # for the line-ratio rules and a density threshold for citations.

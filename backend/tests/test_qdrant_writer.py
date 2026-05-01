@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from qdrant_client.models import PointStruct
 
 from services.storage import qdrant_writer
 
@@ -29,6 +30,17 @@ class _PayloadIndexClient:
 
     async def create_payload_index(self, **kwargs) -> None:
         self.create_calls += 1
+        if self.failures:
+            raise self.failures.pop(0)
+
+
+class _UpsertClient:
+    def __init__(self, failures: list[Exception] | None = None) -> None:
+        self.failures = failures or []
+        self.calls: list[tuple[str, int]] = []
+
+    async def upsert(self, *, collection_name: str, points: list[PointStruct]) -> None:
+        self.calls.append((collection_name, len(points)))
         if self.failures:
             raise self.failures.pop(0)
 
@@ -85,3 +97,40 @@ async def test_payload_index_retries_transient_failure(monkeypatch):
     )
 
     assert client.create_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_upsert_points_chunked_bounds_large_writes(monkeypatch):
+    monkeypatch.setattr(qdrant_writer, "_QDRANT_UPSERT_BATCH_SIZE", 2)
+    client = _UpsertClient()
+    points = [
+        PointStruct(id=str(i), vector=[0.1, 0.2], payload={"i": i})
+        for i in range(5)
+    ]
+
+    await qdrant_writer._upsert_points_chunked(
+        client, collection_name="corpus_abcd_naive", points=points
+    )
+
+    assert client.calls == [
+        ("corpus_abcd_naive", 2),
+        ("corpus_abcd_naive", 2),
+        ("corpus_abcd_naive", 1),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_upsert_points_chunked_retries_transient_failure(monkeypatch):
+    monkeypatch.setattr(qdrant_writer, "_QDRANT_UPSERT_BATCH_SIZE", 2)
+    monkeypatch.setattr(qdrant_writer.asyncio, "sleep", AsyncMock())
+    client = _UpsertClient([TimeoutError("read timed out")])
+    points = [
+        PointStruct(id=str(i), vector=[0.1, 0.2], payload={"i": i})
+        for i in range(2)
+    ]
+
+    await qdrant_writer._upsert_points_chunked(
+        client, collection_name="corpus_abcd_naive", points=points
+    )
+
+    assert client.calls == [("corpus_abcd_naive", 2), ("corpus_abcd_naive", 2)]

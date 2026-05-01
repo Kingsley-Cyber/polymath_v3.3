@@ -22,6 +22,7 @@ use `_col_for_corpus()`.
 import asyncio
 import hashlib
 import logging
+import os
 import re
 
 from config import get_settings
@@ -45,6 +46,8 @@ from qdrant_client.models import (
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+_QDRANT_UPSERT_BATCH_SIZE = max(1, int(os.getenv("QDRANT_UPSERT_BATCH_SIZE", "128") or "128"))
+_QDRANT_UPSERT_MAX_ATTEMPTS = max(1, int(os.getenv("QDRANT_UPSERT_MAX_ATTEMPTS", "3") or "3"))
 
 
 def _uuid_from_str(s: str) -> str:
@@ -71,6 +74,49 @@ def _schema_point_id(corpus_id: str, kind: str, term: str) -> str:
 
 
 _VALID_KINDS = ("naive", "hrag", "graph", "schemas")
+
+
+async def _upsert_points_chunked(
+    client: AsyncQdrantClient,
+    *,
+    collection_name: str,
+    points: list[PointStruct],
+) -> None:
+    """Write Qdrant points in bounded chunks.
+
+    Large book ingests can produce thousands of 1024-d vectors. Sending those
+    as one request is fragile: Qdrant may accept the connection and then drop
+    the response under load, which surfaces as an httpx ReadError. Chunking
+    keeps memory and request bodies bounded while preserving idempotent upsert
+    semantics.
+    """
+    for start in range(0, len(points), _QDRANT_UPSERT_BATCH_SIZE):
+        batch = points[start : start + _QDRANT_UPSERT_BATCH_SIZE]
+        for attempt in range(1, _QDRANT_UPSERT_MAX_ATTEMPTS + 1):
+            try:
+                await client.upsert(collection_name=collection_name, points=batch)
+                break
+            except Exception as exc:
+                if attempt >= _QDRANT_UPSERT_MAX_ATTEMPTS:
+                    logger.exception(
+                        "Qdrant upsert failed collection=%s start=%d size=%d attempts=%d",
+                        collection_name,
+                        start,
+                        len(batch),
+                        attempt,
+                    )
+                    raise
+                delay = min(3.0, 0.25 * attempt)
+                logger.warning(
+                    "Qdrant upsert retry collection=%s start=%d size=%d attempt=%d/%d error=%s",
+                    collection_name,
+                    start,
+                    len(batch),
+                    attempt,
+                    _QDRANT_UPSERT_MAX_ATTEMPTS,
+                    exc,
+                )
+                await asyncio.sleep(delay)
 
 
 def _col(key: str) -> str | None:
@@ -518,7 +564,7 @@ async def upsert_children(
             )
             for c, v, sv, payload in zip(chunks, vectors, sv_iter, payloads)
         ]
-        await client.upsert(collection_name=name, points=points)
+        await _upsert_points_chunked(client, collection_name=name, points=points)
         logger.debug(
             "Upserted %d child points → %s (named=%s sparse=%s)",
             len(points), name, has_named, has_sparse,
@@ -586,7 +632,7 @@ async def upsert_summaries(
             )
             for p, v, sv, payload in zip(summary_payloads, vectors, sv_iter, payloads)
         ]
-        await client.upsert(collection_name=name, points=points)
+        await _upsert_points_chunked(client, collection_name=name, points=points)
         logger.debug(
             "Upserted %d summary points → %s (named=%s sparse=%s)",
             len(points), name, has_named, has_sparse,
@@ -691,7 +737,7 @@ async def upsert_schema_terms(
         )
         for term, v in zip(terms, vectors)
     ]
-    await client.upsert(collection_name=name, points=points)
+    await _upsert_points_chunked(client, collection_name=name, points=points)
     logger.debug(
         "Upserted %d schema terms (kind=%s) for corpus %s", len(points), kind, corpus_id
     )

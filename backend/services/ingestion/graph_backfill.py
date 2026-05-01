@@ -356,7 +356,13 @@ async def backfill_failed_graph_chunks(
             "graph_extraction_engine_requested": _graph_extraction_engine(config),
         },
     }
-    if _graph_extraction_engine(config) in {"local_gliner", "hybrid_local_first"}:
+    if _graph_extraction_engine(config) in {
+        "local_gliner",
+        "local_gliner_relex",
+        "local_gliner2",
+        "local_glirel_optional",
+        "hybrid_local_first",
+    }:
         from services.local_graph_extractor import extract_entities_local_first
 
         report = await extract_entities_local_first(

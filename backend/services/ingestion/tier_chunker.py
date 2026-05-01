@@ -88,6 +88,71 @@ def _count_tokens(text: str) -> int:
     return len(_TOKENIZER.encode(text, disallowed_special=()))
 
 
+def _decode_tokens(tokens: list[int]) -> str:
+    if not tokens:
+        return ""
+    return _TOKENIZER.decode(tokens).strip()
+
+
+def _hard_token_windows(
+    text: str,
+    max_tokens: int,
+    *,
+    overlap_tokens: int = 0,
+) -> list[str]:
+    """Final safety splitter for pathological paragraphs/tables.
+
+    Paragraph and sentence boundaries are preferred everywhere else in this
+    module. This function exists for the cases that caused production pain:
+    one huge bibliography/index/table/TOC block with no useful sentence
+    breaks. It guarantees the returned windows do not exceed `max_tokens`
+    before downstream model calls see them.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    max_tokens = max(1, int(max_tokens or 1))
+    overlap_tokens = max(0, min(int(overlap_tokens or 0), max_tokens // 4))
+    tokens = _TOKENIZER.encode(raw, disallowed_special=())
+    if len(tokens) <= max_tokens:
+        return [raw]
+    step = max(1, max_tokens - overlap_tokens)
+    windows: list[str] = []
+    for start in range(0, len(tokens), step):
+        window = _decode_tokens(tokens[start : start + max_tokens])
+        if window:
+            windows.append(window)
+        if start + max_tokens >= len(tokens):
+            break
+    return windows
+
+
+def _enforce_token_ceiling(
+    chunks: list[str],
+    max_tokens: int,
+    *,
+    overlap_tokens: int = 0,
+) -> list[str]:
+    """Split any oversized chunk produced by a softer boundary pass."""
+    out: list[str] = []
+    max_tokens = max(1, int(max_tokens or 1))
+    for chunk in chunks:
+        text = str(chunk or "").strip()
+        if not text:
+            continue
+        if _count_tokens(text) <= max_tokens:
+            out.append(text)
+            continue
+        out.extend(
+            _hard_token_windows(
+                text,
+                max_tokens,
+                overlap_tokens=overlap_tokens,
+            )
+        )
+    return out
+
+
 def _budget_value(budget, field_name: str, default: int) -> int:
     if budget is None:
         return default
@@ -160,15 +225,21 @@ def _apply_overlap(chunks: list[str], overlap_tokens: int) -> list[str]:
 
 
 def _split_at_boundary(
-    text: str, target_tokens: int, *, overlap_tokens: int = 0
+    text: str,
+    target_tokens: int,
+    *,
+    overlap_tokens: int = 0,
+    hard_max_tokens: int | None = None,
 ) -> list[str]:
     """
     Split text into ~target_tokens chunks at paragraph boundaries.
     Falls back to sentence splitting when a paragraph alone exceeds 1.5x budget.
+    Falls back again to hard token windows when a single sentence/table is huge.
     """
+    hard_max = max(1, int(hard_max_tokens or target_tokens))
     paragraphs = [p.strip() for p in re.split(r"\n\n+", text) if p.strip()]
     if not paragraphs:
-        return [text.strip()] if text.strip() else []
+        return _hard_token_windows(text, hard_max, overlap_tokens=0)
 
     chunks: list[str] = []
     buf: list[str] = []
@@ -207,7 +278,11 @@ def _split_at_boundary(
         chunks.append("\n\n".join(buf))
 
     chunks = [c for c in chunks if c.strip()]
-    return _apply_overlap(chunks, overlap_tokens)
+    chunks = _enforce_token_ceiling(chunks, hard_max, overlap_tokens=0)
+    chunks = _apply_overlap(chunks, overlap_tokens)
+    # Overlap can push a previously safe chunk back over budget; enforce once
+    # more with no overlap so the hard ceiling is actually hard.
+    return _enforce_token_ceiling(chunks, hard_max, overlap_tokens=0)
 
 
 def _coalesce_small_blocks(
@@ -303,8 +378,14 @@ def _make_children(
     page_start: int | None = None,
     page_end: int | None = None,
     chunk_kind: str = ChunkKind.BODY,
+    child_max_tokens: int | None = None,
 ) -> tuple[list[ChildChunk], int]:
-    texts = _split_at_boundary(parent_text, child_target_tokens) or [parent_text.strip()]
+    hard_child_max = max(child_target_tokens, int(child_max_tokens or child_target_tokens))
+    texts = _split_at_boundary(
+        parent_text,
+        child_target_tokens,
+        hard_max_tokens=hard_child_max,
+    ) or [parent_text.strip()]
     children: list[ChildChunk] = []
     for ct in texts:
         if not ct.strip():
@@ -371,6 +452,7 @@ def _page_blocks(
                 text,
                 policy.parent_target_tokens,
                 overlap_tokens=policy.parent_overlap_tokens,
+                hard_max_tokens=policy.parent_max_tokens,
             ):
                 if sub_text.strip():
                     blocks.append(([f"page_{page_no}"], sub_text, page_no, page_no))
@@ -412,6 +494,7 @@ def describe_chunking(parse_result, config=None) -> dict:
         "child_strategy": policy.resolved_child_strategy,
         "requested_child_strategy": policy.requested_child_strategy,
         "semantic_split_enabled": False,
+        "hard_token_split_enabled": True,
         "semantic_split_reason": (
             "semantic_split is treated as a policy hint until the splitter is implemented"
             if policy.requested_child_strategy == "semantic_split"
@@ -477,6 +560,7 @@ def chunk(
                 tier_value,
                 child_idx,
                 child_target_tokens=policy.child_target_tokens,
+                child_max_tokens=policy.child_max_tokens,
                 page_start=page_start,
                 page_end=page_end,
                 chunk_kind=kind,
@@ -521,6 +605,7 @@ def chunk(
                     section_text,
                     policy.parent_target_tokens,
                     overlap_tokens=policy.parent_overlap_tokens,
+                    hard_max_tokens=policy.parent_max_tokens,
                 )
             else:
                 sub_texts = [section_text]
@@ -543,6 +628,7 @@ def chunk(
                     tier_value,
                     child_idx,
                     child_target_tokens=policy.child_target_tokens,
+                    child_max_tokens=policy.child_max_tokens,
                     chunk_kind=kind,
                 )
                 parents.append(
@@ -565,6 +651,7 @@ def chunk(
             text,
             policy.parent_target_tokens,
             overlap_tokens=policy.parent_overlap_tokens,
+            hard_max_tokens=policy.parent_max_tokens,
         )
         for pt in parent_texts:
             if not pt.strip():
@@ -583,6 +670,7 @@ def chunk(
                 tier_value,
                 child_idx,
                 child_target_tokens=policy.child_target_tokens,
+                child_max_tokens=policy.child_max_tokens,
                 chunk_kind=kind,
             )
             parents.append(
