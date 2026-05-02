@@ -1204,6 +1204,17 @@ function IngestionModelsSection({
   const linked = config.models_linked !== false;
   const summaryPool = config.summary_models ?? [];
   const extractionPool = linked ? summaryPool : (config.extraction_models ?? []);
+  const repairPool = config.extraction_repair_models ?? [];
+
+  const applyLocalIngestionStack = () => {
+    onPatch({
+      models_linked: false,
+      graph_extraction_engine: "llm",
+      summary_models: DEFAULT_INGESTION_CONFIG.summary_models,
+      extraction_models: DEFAULT_INGESTION_CONFIG.extraction_models,
+      extraction_repair_models: DEFAULT_INGESTION_CONFIG.extraction_repair_models,
+    });
+  };
 
   return (
     <div className="space-y-2">
@@ -1211,18 +1222,29 @@ function IngestionModelsSection({
         <div className="text-[12px] font-bold tracking-widest text-content-tertiary uppercase">
           Ingestion Models
         </div>
-        <label
-          className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider cursor-pointer"
-          title="ON = Extraction reuses the Summary pool. OFF = two independent pools."
-        >
-          <input
-            type="checkbox"
-            checked={linked}
-            onChange={(e) => onPatch({ models_linked: e.target.checked })}
-            className="accent-accent-main"
-          />
-          Reuse Summary pool for Extraction
-        </label>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={applyLocalIngestionStack}
+            disabled={!editing}
+            className="text-[10px] px-2 py-1 rounded border border-accent-main/50 text-accent-main hover:bg-accent-main/10 disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Use local vLLM LFM2 extraction, LFM2-RAG document summaries, and Gemma repair."
+          >
+            Local LFM Stack
+          </button>
+          <label
+            className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider cursor-pointer"
+            title="ON = Extraction reuses the Summary pool. OFF = two independent pools."
+          >
+            <input
+              type="checkbox"
+              checked={linked}
+              onChange={(e) => onPatch({ models_linked: e.target.checked })}
+              className="accent-accent-main"
+            />
+            Reuse Summary pool for Extraction
+          </label>
+        </div>
       </div>
 
       <IngestionModelPool
@@ -1245,6 +1267,14 @@ function IngestionModelsSection({
         editing={editing}
         readOnly={linked}
         readOnlyHint="Uncheck 'Reuse Summary pool' to configure Extraction independently."
+      />
+
+      <IngestionModelPool
+        title="Repair Models (GHOST B)"
+        subtitle="JSON/schema recovery only · never used for primary extraction fan-out"
+        value={repairPool}
+        onChange={(next) => onPatch({ extraction_repair_models: next })}
+        editing={editing}
       />
     </div>
   );

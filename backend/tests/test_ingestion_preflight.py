@@ -114,17 +114,15 @@ async def test_preflight_does_not_paid_probe_api_embeddings(monkeypatch):
     client_mock.assert_not_called()
 
 
-def test_local_graph_preflight_keeps_llm_graph_disabled(monkeypatch):
-    monkeypatch.setattr(preflight.importlib.util, "find_spec", lambda _name: object())
-
+def test_graph_preflight_is_noop_for_llm_only_graph():
     result = preflight.check_local_graph_preflight(
         IngestionConfig(
             use_neo4j=True,
-            graph_extraction_engine="local_gliner",
             llm_fallback_enabled=False,
         )
     )
 
     assert result["ok"] is True
-    assert result["engine"] == "local_gliner"
-    assert result["llm_graph_calls_enabled"] is False
+    assert result["engine"] == "llm"
+    assert result["local_graph_required"] is False
+    assert result["llm_graph_calls_enabled"] is True

@@ -325,6 +325,9 @@ async def backfill_failed_graph_chunks(
         if config.models_linked or not config.extraction_models
         else _build_ghost_pool(config.extraction_models)
     )
+    repair_pool = _build_ghost_pool(
+        getattr(config, "extraction_repair_models", None) or []
+    )
 
     async def _schema_resolver(kind: str, query_vec: list[float], top_k: int) -> list[str]:
         return await retrieve_schema_for_chunk(qdrant_client, corpus_id, kind, query_vec, top_k)
@@ -336,6 +339,7 @@ async def backfill_failed_graph_chunks(
         "chunk_vectors": None,
         "schema_resolver": _schema_resolver,
         "pool": pool,
+        "repair_pool": repair_pool,
         "model": None,
         "return_report": True,
         "extraction_mode": policy.extraction_mode,
@@ -356,26 +360,7 @@ async def backfill_failed_graph_chunks(
             "graph_extraction_engine_requested": _graph_extraction_engine(config),
         },
     }
-    if _graph_extraction_engine(config) in {
-        "local_gliner",
-        "local_gliner_relex",
-        "local_gliner2",
-        "local_glirel_optional",
-        "hybrid_local_first",
-    }:
-        from services.local_graph_extractor import extract_entities_local_first
-
-        report = await extract_entities_local_first(
-            tasks,
-            config=config,
-            schema=schema_ctx,
-            schema_lens=schema_lens,
-            llm_extract_func=extract_entities,
-            llm_kwargs=llm_kwargs,
-            return_report=True,
-        )
-    else:
-        report = await extract_entities(tasks, **llm_kwargs)
+    report = await extract_entities(tasks, **llm_kwargs)
     if not isinstance(report, ExtractionBatchReport):
         raise RuntimeError("Ghost B did not return a batch report")
 

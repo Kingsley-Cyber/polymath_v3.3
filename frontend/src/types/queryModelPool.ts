@@ -167,6 +167,13 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
     example_model: "qwen2.5:1.5b-instruct",
   },
   {
+    id: "vllm-local",
+    name: "vLLM (local)",
+    litellm_provider: "openai",
+    base_url: "http://vllm-summary:8000/v1",
+    example_model: "lfm2-rag",
+  },
+  {
     id: "custom",
     name: "Custom (OpenAI-compat)",
     litellm_provider: "openai",

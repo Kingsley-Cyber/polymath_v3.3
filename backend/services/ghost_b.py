@@ -918,6 +918,19 @@ def build_user_prompt(
     )
 
 
+def _split_extraction_contract(prompt: str) -> tuple[str, str]:
+    """Move the JSON/schema contract into the system message for LFM2-Extract.
+
+    Liquid's Extract checkpoints are tuned for a ChatML shape where the schema
+    lives in the system role and the source document lives in the user role.
+    """
+    marker = "\n\nTEXT:\n"
+    contract, found, source_text = prompt.partition(marker)
+    if not found:
+        return prompt, ""
+    return contract, f"TEXT:\n{source_text}"
+
+
 @dataclass
 class ExtractionTask:
     chunk_id: str
@@ -1057,6 +1070,7 @@ def summarize_extraction_batch(
     total_duration = sum(float(m.get("duration_seconds") or 0.0) for m in call_metrics)
     attempt_count = len(call_metrics)
     json_recovery_count = sum(1 for m in call_metrics if m.get("recovery_mode"))
+    repair_model_count = sum(1 for m in call_metrics if m.get("repair_model"))
     relation_count = sum(len(r.relations) for r in results)
     related_to_count = sum(
         1
@@ -1096,6 +1110,10 @@ def summarize_extraction_batch(
         ),
         "json_recovery_attempt_rate": (
             round(json_recovery_count / attempt_count, 4) if attempt_count else 0.0
+        ),
+        "repair_model_count": repair_model_count,
+        "repair_model_rate": (
+            round(repair_model_count / attempt_count, 4) if attempt_count else 0.0
         ),
         "models": models,
         "total_tokens": total_tokens,
@@ -1995,6 +2013,7 @@ async def extract_entities(
     schema_resolver: SchemaResolver | None = None,
     *,
     pool: list[dict] | None = None,
+    repair_pool: list[dict] | None = None,
     return_report: bool = False,
     extraction_mode: Literal["full", "compact"] = "full",
     max_entities_per_chunk: int | None = None,
@@ -2082,6 +2101,7 @@ async def extract_entities(
                 "extra_params": {},
             }
         ]
+    repair_pool = repair_pool or []
 
     # Phase K — WORK-STEALING POOL. Instead of round-robin assignment
     # (task i → pool[i%N]), we spawn one worker coroutine PER lane slot
@@ -2189,43 +2209,52 @@ async def extract_entities(
             )
             if recovery_mode:
                 parse_recovery_used = True
+            attempt_entry = entry
+            repair_model_used = False
+            if recovery_mode and repair_pool:
+                attempt_entry = repair_pool[(reserved_attempt - 1) % len(repair_pool)]
+                repair_model_used = True
             attempt_max_entities = min(max_entities, 5) if recovery_mode else max_entities
             attempt_max_relations = min(max_relations, 5) if recovery_mode else max_relations
             attempt_max_tokens = (
                 min(max_completion_tokens, 2048) if recovery_mode else max_completion_tokens
             )
-            system_content = _SYSTEM + (_JSON_RECOVERY_SUFFIX if recovery_mode else "")
+            full_prompt = build_user_prompt(
+                chunk_id=task.chunk_id,
+                doc_id=task.doc_id,
+                corpus_id=task.corpus_id,
+                text=task.text,
+                max_entities=attempt_max_entities,
+                max_relations=attempt_max_relations,
+                schema=schema,
+                effective_entity_vocab=eff_entity,
+                effective_relation_vocab=eff_relation,
+                schema_lens=schema_lens,
+                compact_mode=extraction_mode == "compact",
+                recovery_mode=recovery_mode,
+            )
+            extraction_contract, source_prompt = _split_extraction_contract(full_prompt)
+            system_content = (
+                _SYSTEM
+                + (_JSON_RECOVERY_SUFFIX if recovery_mode else "")
+                + "\n\n"
+                + extraction_contract
+            )
             payload: dict = {
-                "model": entry["model"],
+                "model": attempt_entry["model"],
                 "messages": [
                     {"role": "system", "content": system_content},
-                    {
-                        "role": "user",
-                        "content": build_user_prompt(
-                            chunk_id=task.chunk_id,
-                            doc_id=task.doc_id,
-                            corpus_id=task.corpus_id,
-                            text=task.text,
-                            max_entities=attempt_max_entities,
-                            max_relations=attempt_max_relations,
-                            schema=schema,
-                            effective_entity_vocab=eff_entity,
-                            effective_relation_vocab=eff_relation,
-                            schema_lens=schema_lens,
-                            compact_mode=extraction_mode == "compact",
-                            recovery_mode=recovery_mode,
-                        ),
-                    },
+                    {"role": "user", "content": source_prompt or f"TEXT:\n{task.text}"},
                 ],
                 "temperature": 0,
                 "response_format": {"type": "json_object"},
                 "max_tokens": attempt_max_tokens,
             }
-            if entry.get("base_url"):
-                payload["api_base"] = entry["base_url"]
-            if entry.get("api_key"):
-                payload["api_key"] = entry["api_key"]
-            for _k, _v in (entry.get("extra_params") or {}).items():
+            if attempt_entry.get("base_url"):
+                payload["api_base"] = attempt_entry["base_url"]
+            if attempt_entry.get("api_key"):
+                payload["api_key"] = attempt_entry["api_key"]
+            for _k, _v in (attempt_entry.get("extra_params") or {}).items():
                 if _k not in ("model", "messages", "response_format"):
                     payload[_k] = _v
             started = time.perf_counter()
@@ -2245,7 +2274,7 @@ async def extract_entities(
                         "duration=%.2fs total_tokens=%s prompt_tokens=%s "
                         "completion_tokens=%s lane=%d attempt=%d",
                         task.chunk_id,
-                        entry["model"],
+                        attempt_entry["model"],
                         duration,
                         usage.get("total_tokens"),
                         usage.get("prompt_tokens"),
@@ -2258,7 +2287,7 @@ async def extract_entities(
                     call_metrics.append(
                         {
                             "chunk_id": task.chunk_id,
-                            "model": entry["model"],
+                            "model": attempt_entry["model"],
                             "lane": pool_idx,
                             "attempt": reserved_attempt,
                             "duration_seconds": round(duration, 3),
@@ -2268,6 +2297,7 @@ async def extract_entities(
                             "success": bool(result),
                             "error_type": None if result else "parse_error",
                             "recovery_mode": recovery_mode,
+                            "repair_model": repair_model_used,
                             "max_tokens": attempt_max_tokens,
                         }
                     )
@@ -2295,7 +2325,7 @@ async def extract_entities(
                 call_metrics.append(
                     {
                         "chunk_id": task.chunk_id,
-                        "model": entry["model"],
+                        "model": attempt_entry["model"],
                         "lane": pool_idx,
                         "attempt": reserved_attempt,
                         "duration_seconds": round(time.perf_counter() - started, 3),
@@ -2309,6 +2339,7 @@ async def extract_entities(
                             else last_error_type
                         ),
                         "recovery_mode": recovery_mode,
+                        "repair_model": repair_model_used,
                         "max_tokens": attempt_max_tokens,
                     }
                 )
@@ -2515,6 +2546,7 @@ async def extract_entities(
         **(metrics_context or {}),
         "lane_state_counts": lane_state_counts,
         "disabled_lane_count": len(disabled_lanes),
+        "repair_models": [str(e["model"]) for e in repair_pool],
         "retry_policy": {
             "per_chunk_max_attempts": per_chunk_max_attempts,
             "per_doc_max_failed_chunks_before_pause": per_doc_max_failed_chunks_before_pause,

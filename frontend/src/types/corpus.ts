@@ -22,7 +22,7 @@ export type ChildChunkAlgorithm = "sentence_merge" | "semantic_split";
 //   "soft" — remap unknowns to sentinels ('other' / 'related_to'); preserves edge/node
 //   "hard" — drop unknowns entirely (precision-critical mode)
 export type SchemaStrictMode = "off" | "soft" | "hard";
-export type GraphExtractionEngine = "llm" | "local_gliner" | "hybrid_local_first";
+export type GraphExtractionEngine = "llm";
 
 export interface TokenBudget {
   min_tokens: number;
@@ -48,13 +48,6 @@ export interface ModelProfileRef {
   api_key: string | null;
   max_concurrent: number;
   extra_params: Record<string, unknown>;
-}
-
-export interface LocalGraphWorkerConfig {
-  device: string;
-  name: string;
-  batch_size: number;
-  weight: number;
 }
 
 export interface IngestionConfig {
@@ -96,6 +89,8 @@ export interface IngestionConfig {
   // GHOST B — Extraction Model Pool (round-robin dispatch)
   // Empty when models_linked === true (worker reuses summary_models).
   extraction_models: ModelProfileRef[];
+  // GHOST B repair-only pool. Used for JSON/schema recovery, never primary fan-out.
+  extraction_repair_models: ModelProfileRef[];
   entity_confidence_threshold: number;
 
   /**
@@ -104,23 +99,10 @@ export interface IngestionConfig {
    */
   models_linked: boolean;
 
-  // Local-first graph extraction. Optional so older corpora deserialize.
+  // LLM/vLLM graph extraction. Optional so older corpora deserialize.
   graph_extraction_engine?: GraphExtractionEngine;
-  local_graph_extraction_enabled?: boolean;
-  local_extractor_model?: string;
-  local_workers?: LocalGraphWorkerConfig[];
-  max_chunk_tokens_for_local_extractor?: number;
-  local_gliner_max_input_chars?: number;
-  local_relation_max_labels?: number;
-  local_relation_hard_max_labels?: number;
-  local_relation_max_source_entities?: number;
-  local_relation_oom_disable_after?: number;
-  local_entity_only_on_relation_oom?: boolean;
-  max_chunks_in_memory?: number;
-  oom_retry_enabled?: boolean;
   llm_fallback_enabled?: boolean;
   llm_fallback_max_percent?: number;
-  glirel_enabled?: boolean;
 
   // GHOST B — Universal schema (baked backend-side, see ghost_b.UNIVERSAL_*_SCHEMA).
   // The create/edit UI no longer exposes these. Fields retained on the
@@ -321,32 +303,41 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
   chunk_overlap: 200,
   max_summary_tokens: 175,
   child_chunk_algorithm: "sentence_merge",
-  // Phase 24 — empty by default. The corpus editor populates real entries
-  // from the user's pool (Settings → Models). Hardcoding ollama/llama3.2:3b
-  // silently bound new corpora to a model the user may not have pulled.
-  summary_models: [],
-  extraction_models: [],
-  entity_confidence_threshold: 0.5,
-  models_linked: true,
-  graph_extraction_engine: "local_gliner",
-  local_graph_extraction_enabled: true,
-  local_extractor_model: "knowledgator/gliner-relex-large-v0.5",
-  local_workers: [
-    { device: "cuda:0", name: "rtx_3090", batch_size: 8, weight: 2 },
-    { device: "cuda:1", name: "rtx_4070", batch_size: 4, weight: 1 },
+  summary_models: [
+    {
+      provider_preset: "vllm-local",
+      model: "openai/lfm2-rag",
+      base_url: "http://vllm-summary:8000/v1",
+      api_key: "local",
+      max_concurrent: 12,
+      extra_params: { temperature: 0 },
+    },
   ],
-  max_chunk_tokens_for_local_extractor: 512,
-  local_gliner_max_input_chars: 3500,
-  local_relation_max_labels: 12,
-  local_relation_hard_max_labels: 16,
-  local_relation_max_source_entities: 4,
-  local_relation_oom_disable_after: 1,
-  local_entity_only_on_relation_oom: true,
-  max_chunks_in_memory: 100,
-  oom_retry_enabled: true,
+  extraction_models: [
+    {
+      provider_preset: "vllm-local",
+      model: "openai/lfm2-extract",
+      base_url: "http://vllm-extract:8000/v1",
+      api_key: "local",
+      max_concurrent: 24,
+      extra_params: { temperature: 0 },
+    },
+  ],
+  extraction_repair_models: [
+    {
+      provider_preset: "vllm-local",
+      model: "openai/gemma4-e4b",
+      base_url: "http://vllm-repair:8000/v1",
+      api_key: "local",
+      max_concurrent: 4,
+      extra_params: { temperature: 0, max_tokens: 2048 },
+    },
+  ],
+  entity_confidence_threshold: 0.5,
+  models_linked: false,
+  graph_extraction_engine: "llm",
   llm_fallback_enabled: false,
   llm_fallback_max_percent: 0,
-  glirel_enabled: false,
   // entity_schema / relation_schema / schema_strict intentionally omitted —
   // backend fills them from the universal schema on POST.
   use_neo4j: true,

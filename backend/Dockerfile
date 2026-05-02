@@ -17,13 +17,8 @@ WORKDIR /app
 
 # Install Python dependencies first (layer caching)
 COPY requirements.txt .
-COPY requirements.local-graph.txt .
-ARG INSTALL_LOCAL_GRAPH=false
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt && \
-    if [ "$INSTALL_LOCAL_GRAPH" = "true" ]; then \
-        pip install --no-cache-dir -r requirements.local-graph.txt; \
-    fi
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .

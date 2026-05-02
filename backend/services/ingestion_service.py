@@ -69,6 +69,7 @@ MUTABLE_CONFIG_FIELDS: frozenset[str] = frozenset({
     "modal_containers",
     "summary_models",
     "extraction_models",
+    "extraction_repair_models",
     "entity_confidence_threshold",
     "models_linked",
     "large_doc_child_threshold",
@@ -84,28 +85,8 @@ MUTABLE_CONFIG_FIELDS: frozenset[str] = frozenset({
     "graph_backfill_max_chunks",
     "graph_backfill_max_attempts_per_chunk",
     "graph_extraction_engine",
-    "local_graph_extraction_enabled",
-    "local_extractor_model",
-    "local_gliner2_model",
-    "local_workers",
-    "max_chunk_tokens_for_local_extractor",
-    "local_gliner_max_input_chars",
-    "local_model_max_tokens",
-    "local_relation_max_labels",
-    "local_relation_hard_max_labels",
-    "local_relation_max_source_entities",
-    "local_relation_oom_disable_after",
-    "local_entity_only_on_relation_oom",
-    "max_chunks_in_memory",
-    "oom_retry_enabled",
-    "local_cuda_fatal_cooldown_seconds",
-    "local_graph_diagnostics_enabled",
-    "local_graph_diagnostics_dir",
-    "local_graph_debug_log_text",
-    "local_graph_debug_text_limit",
     "llm_fallback_enabled",
     "llm_fallback_max_percent",
-    "glirel_enabled",
 })
 
 
@@ -451,7 +432,7 @@ class IngestionService:
         ingest through such a corpus.
 
         Scope:
-          • `corpora.default_ingestion_config.{summary_models,extraction_models}`
+          • `corpora.default_ingestion_config.{summary_models,extraction_models,extraction_repair_models}`
             (per-corpus ingestion pools — `ModelProfileRef` with `provider_preset`).
           • `settings.models.query_model_pool` (per-user unified chat pool —
             `QueryModelPoolEntry` with `provider` + `model_name`).
@@ -504,6 +485,7 @@ class IngestionService:
                 "name": 1,
                 "default_ingestion_config.summary_models": 1,
                 "default_ingestion_config.extraction_models": 1,
+                "default_ingestion_config.extraction_repair_models": 1,
             },
         )
         async for doc in cursor:
@@ -511,6 +493,7 @@ class IngestionService:
             rewrites_for_doc: list[tuple[str, int, str, str]] = []
             new_summary = cfg.get("summary_models") or []
             new_extraction = cfg.get("extraction_models") or []
+            new_repair = cfg.get("extraction_repair_models") or []
 
             for idx, entry in enumerate(new_summary):
                 if not isinstance(entry, dict):
@@ -534,6 +517,17 @@ class IngestionService:
                 )
                 entry["model"] = rewritten
 
+            for idx, entry in enumerate(new_repair):
+                if not isinstance(entry, dict):
+                    continue
+                rewritten = _needs_rewrite(entry.get("provider_preset"), entry.get("model"))
+                if rewritten is None:
+                    continue
+                rewrites_for_doc.append(
+                    ("extraction_repair_models", idx, entry["model"], rewritten)
+                )
+                entry["model"] = rewritten
+
             if not rewrites_for_doc:
                 continue
 
@@ -543,6 +537,7 @@ class IngestionService:
                     "$set": {
                         "default_ingestion_config.summary_models": new_summary,
                         "default_ingestion_config.extraction_models": new_extraction,
+                        "default_ingestion_config.extraction_repair_models": new_repair,
                         "updated_at": datetime.utcnow(),
                     }
                 },
@@ -1016,7 +1011,7 @@ class IngestionService:
         if not config_dict:
             return
 
-        for pool_field in ("summary_models", "extraction_models", "embedding_models"):
+        for pool_field in ("summary_models", "extraction_models", "extraction_repair_models", "embedding_models"):
             pool = config_dict.get(pool_field)
             if not pool:
                 continue
@@ -1096,7 +1091,7 @@ class IngestionService:
                 return new_val
             return encrypt(new_val)
 
-        for pool_field in ("summary_models", "extraction_models", "embedding_models"):
+        for pool_field in ("summary_models", "extraction_models", "extraction_repair_models", "embedding_models"):
             new_pool = config_dict.get(pool_field) or []
             existing_pool = (existing_config or {}).get(pool_field) or [] if existing_config else []
             for idx, entry in enumerate(new_pool):
@@ -1486,10 +1481,6 @@ class IngestionService:
             "json_recovery_count": 0,
             "estimated_cost_tokens": 0,
             "prompt_tokens": 0,
-            "local_graph_chunks_processed": 0,
-            "local_graph_chunks_failed": 0,
-            "local_graph_entity_only_chunks": 0,
-            "local_graph_relation_chunks": 0,
             "llm_graph_calls": 0,
             "summary_llm_calls": 0,
             "llm_fallback_chunks": 0,
@@ -1723,18 +1714,6 @@ class IngestionService:
                 metrics.get("estimated_cost_tokens") or metrics.get("total_tokens") or 0
             )
             totals["prompt_tokens"] += int(metrics.get("prompt_tokens") or 0)
-            totals["local_graph_chunks_processed"] += int(
-                metrics.get("local_graph_chunks_processed") or 0
-            )
-            totals["local_graph_chunks_failed"] += int(
-                metrics.get("local_graph_chunks_failed") or 0
-            )
-            totals["local_graph_entity_only_chunks"] += int(
-                metrics.get("local_graph_entity_only_chunks") or 0
-            )
-            totals["local_graph_relation_chunks"] += int(
-                metrics.get("local_graph_relation_chunks") or 0
-            )
             totals["llm_graph_calls"] += int(metrics.get("llm_graph_calls") or 0)
             totals["summary_llm_calls"] += int(metrics.get("summary_llm_calls") or 0)
             totals["llm_fallback_chunks"] += int(metrics.get("llm_fallback_chunks") or 0)
@@ -1814,27 +1793,6 @@ class IngestionService:
                     "direction_repair_count": direction_repairs,
                     "evidence_cue_repair_count": evidence_repairs,
                     "json_recovery_count": int(metrics.get("json_recovery_count") or 0),
-                    "local_graph_chunks_processed": int(
-                        metrics.get("local_graph_chunks_processed") or 0
-                    ),
-                    "local_graph_chunks_failed": int(
-                        metrics.get("local_graph_chunks_failed") or 0
-                    ),
-                    "local_graph_dependency_status": str(
-                        metrics.get("local_graph_dependency_status") or "unknown"
-                    ),
-                    "local_graph_model_loaded": bool(
-                        metrics.get("local_graph_model_loaded")
-                    ),
-                    "local_graph_model_name": str(
-                        metrics.get("local_extractor_model") or ""
-                    ),
-                    "local_graph_entity_only_chunks": int(
-                        metrics.get("local_graph_entity_only_chunks") or 0
-                    ),
-                    "local_graph_relation_chunks": int(
-                        metrics.get("local_graph_relation_chunks") or 0
-                    ),
                     "llm_graph_calls": int(metrics.get("llm_graph_calls") or 0),
                     "summary_llm_calls": int(metrics.get("summary_llm_calls") or 0),
                     "llm_fallback_chunks": int(metrics.get("llm_fallback_chunks") or 0),

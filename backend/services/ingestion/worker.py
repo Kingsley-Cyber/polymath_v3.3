@@ -55,7 +55,7 @@ from services.ghost_b import (
     extract_entities,
 )
 from services.ingestion import docling_adapter, tier_chunker
-from services.ingestion.schema_lens import build_deterministic_schema_lens, get_or_create_schema_lens
+from services.ingestion.schema_lens import get_or_create_schema_lens
 from services.ingestion.section_classifier import ChunkKind, should_skip_ghost_b
 from services.secrets import decrypt as _decrypt_api_key
 from services.storage import mongo_reader, mongo_writer, qdrant_writer
@@ -267,11 +267,6 @@ def _trace_reasons(
     if not config.use_neo4j:
         reasons.append("Graph extraction is disabled for this ingest configuration.")
     else:
-        graph_engine = _graph_extraction_engine(config)
-        if graph_engine == "hybrid_local_first":
-            reasons.append("Graph extraction will try local GLiNER first, then bounded LLM fallback.")
-        elif graph_engine in {"local_gliner", "local_gliner_relex", "local_gliner2", "local_glirel_optional"}:
-            reasons.append(f"Graph extraction is configured for {graph_engine} only.")
         if policy is not None and policy.extraction_strategy == "compact_large_doc":
             reasons.append("Large body chunk count triggered compact graph extraction.")
         elif policy is not None and policy.extraction_strategy == "full_ontology":
@@ -728,18 +723,7 @@ def _select_ghost_b_extraction_policy(
 
 def _graph_extraction_engine(config: IngestionConfig) -> str:
     engine = str(getattr(config, "graph_extraction_engine", "llm") or "llm").strip()
-    if engine not in {
-        "llm",
-        "local_gliner",
-        "local_gliner_relex",
-        "local_gliner2",
-        "local_glirel_optional",
-        "hybrid_local_first",
-    }:
-        return "llm"
-    if not bool(getattr(config, "local_graph_extraction_enabled", True)):
-        return "llm"
-    return engine
+    return "llm" if engine != "llm" else engine
 
 
 _HIGH_SIGNAL_ENTITY_RE = re.compile(r"\b(?:[A-Z][A-Za-z0-9_./+-]{2,}|[A-Z]{2,})\b")
@@ -1194,14 +1178,13 @@ async def _run_ghosts_parallel(
             relation_schema=config.relation_schema,
             strict=config.schema_strict,
         )
-        graph_engine = _graph_extraction_engine(config)
-        local_engines = {"local_gliner", "local_gliner_relex", "local_gliner2", "local_glirel_optional"}
-        if graph_engine in local_engines:
-            pool = []
-        elif config.models_linked or not config.extraction_models:
+        if config.models_linked or not config.extraction_models:
             pool = _build_ghost_pool(config.summary_models)
         else:
             pool = _build_ghost_pool(config.extraction_models)
+        repair_pool = _build_ghost_pool(
+            getattr(config, "extraction_repair_models", None) or []
+        )
         # Exclude noisy parents/children from the schema lens — letting
         # bibliography page entries (publishers, ISBNs, citation bric-a-brac)
         # influence which schema terms get retrieved would erode entity
@@ -1214,27 +1197,17 @@ async def _run_ghosts_parallel(
             c for c in children
             if not should_skip_ghost_b(getattr(c, "chunk_kind", None) or ChunkKind.BODY)
         ]
-        if graph_engine in local_engines:
-            schema_lens = build_deterministic_schema_lens(
-                corpus_id=corpus_id,
-                filename=filename or (existing_doc or {}).get("filename") or doc_id,
-                parents=body_parents_for_lens or parents,  # fall back if all noisy
-                children=body_children_for_lens or children,
-                entity_schema=config.entity_schema,
-                relation_schema=config.relation_schema,
-            )
-        else:
-            schema_lens = await get_or_create_schema_lens(
-                db=db,
-                corpus_id=corpus_id,
-                filename=filename or (existing_doc or {}).get("filename") or doc_id,
-                parents=body_parents_for_lens or parents,  # fall back if all noisy
-                children=body_children_for_lens or children,
-                entity_schema=config.entity_schema,
-                relation_schema=config.relation_schema,
-                pool=pool,
-                model=model,
-            )
+        schema_lens = await get_or_create_schema_lens(
+            db=db,
+            corpus_id=corpus_id,
+            filename=filename or (existing_doc or {}).get("filename") or doc_id,
+            parents=body_parents_for_lens or parents,  # fall back if all noisy
+            children=body_children_for_lens or children,
+            entity_schema=config.entity_schema,
+            relation_schema=config.relation_schema,
+            pool=pool,
+            model=model,
+        )
 
         async def _schema_resolver(
             kind: str, query_vec: list[float], top_k: int
@@ -1278,6 +1251,7 @@ async def _run_ghosts_parallel(
             "chunk_vectors": None,
             "schema_resolver": _schema_resolver,
             "pool": pool,
+            "repair_pool": repair_pool,
             "model": model,
             "return_report": True,
             "extraction_mode": policy.extraction_mode,
@@ -1299,20 +1273,7 @@ async def _run_ghosts_parallel(
                 "graph_extraction_engine_requested": _graph_extraction_engine(config),
             },
         }
-        if graph_engine in {*local_engines, "hybrid_local_first"}:
-            from services.local_graph_extractor import extract_entities_local_first
-
-            report = await extract_entities_local_first(
-                tasks,
-                config=config,
-                schema=schema_ctx,
-                schema_lens=schema_lens,
-                llm_extract_func=extract_entities,
-                llm_kwargs=llm_kwargs,
-                return_report=True,
-            )
-        else:
-            report = await extract_entities(tasks, **llm_kwargs)
+        report = await extract_entities(tasks, **llm_kwargs)
         if not isinstance(report, ExtractionBatchReport):
             results = report
             failures: list[ExtractionFailureItem] = []
@@ -1324,7 +1285,6 @@ async def _run_ghosts_parallel(
         metrics = dict(metrics or {})
         if (
             policy.extraction_mode == "compact"
-            and graph_engine not in local_engines
             and policy.deep_pass_enabled
             and policy.deep_pass_max_chunks > 0
             and results
@@ -1363,6 +1323,7 @@ async def _run_ghosts_parallel(
                     chunk_vectors=None,
                     schema_resolver=_schema_resolver,
                     pool=pool,
+                    repair_pool=repair_pool,
                     model=model,
                     return_report=True,
                     extraction_mode="full",

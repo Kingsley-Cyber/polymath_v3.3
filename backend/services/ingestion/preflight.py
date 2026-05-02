@@ -9,7 +9,6 @@ health-probed on the Docker network.
 
 from __future__ import annotations
 
-import importlib.util
 import time
 from typing import Any
 
@@ -36,6 +35,18 @@ def _profile_value(entry: Any, key: str) -> Any:
     if isinstance(entry, dict):
         return entry.get(key)
     return getattr(entry, key, None)
+
+
+def _profile_api_key(entry: Any) -> str:
+    raw = str(_profile_value(entry, "api_key") or "").strip()
+    if not raw or raw == "[set]":
+        return raw
+    try:
+        from services.secrets import decrypt
+
+        return decrypt(raw) or raw
+    except Exception:
+        return raw
 
 
 def _has_complete_embedding_pool(config: IngestionConfig) -> bool:
@@ -154,6 +165,111 @@ async def check_embedding_preflight(config: IngestionConfig) -> dict[str, Any]:
     return result
 
 
+async def _check_model_entry(entry: Any) -> dict[str, Any]:
+    model = str(_profile_value(entry, "model") or "").strip()
+    base_url = str(_profile_value(entry, "base_url") or "").strip().rstrip("/")
+    api_key = _profile_api_key(entry)
+    result = {
+        "ok": bool(model),
+        "model": model,
+        "base_url": base_url or None,
+        "live_probe": False,
+        "error": None if model else "Model entry is missing a model name.",
+    }
+    if not model or not base_url:
+        return result
+    start = time.perf_counter()
+    try:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{base_url}/models", headers=headers)
+            response.raise_for_status()
+        result.update(
+            {
+                "ok": True,
+                "live_probe": True,
+                "latency_ms": round((time.perf_counter() - start) * 1000.0, 2),
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        result.update(
+            {
+                "ok": False,
+                "live_probe": True,
+                "latency_ms": round((time.perf_counter() - start) * 1000.0, 2),
+                "error": str(exc),
+            }
+        )
+    return result
+
+
+async def check_llm_model_preflight(config: IngestionConfig) -> dict[str, Any]:
+    engine = str(getattr(config, "graph_extraction_engine", "llm") or "llm")
+    needs_summary = bool(getattr(config, "chunk_summarization", False))
+    needs_extraction = bool(getattr(config, "use_neo4j", True) and engine == "llm")
+    checks: dict[str, Any] = {}
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    async def _check_pool(role: str, entries: list[Any], *, required: bool) -> None:
+        if not required:
+            checks[role] = {
+                "ok": True,
+                "entries": [
+                    {
+                        "model": str(_profile_value(entry, "model") or "").strip(),
+                        "base_url": str(_profile_value(entry, "base_url") or "").strip() or None,
+                    }
+                    for entry in entries
+                ],
+                "skipped": True,
+                "error": None,
+            }
+            return
+        if not entries:
+            checks[role] = {"ok": not required, "entries": [], "error": None}
+            checks[role]["error"] = f"{role} model pool is empty."
+            errors.append(checks[role]["error"])
+            return
+        entry_results = [await _check_model_entry(entry) for entry in entries]
+        ok = any(item.get("ok") for item in entry_results)
+        checks[role] = {"ok": ok, "entries": entry_results, "error": None if ok else f"{role} model pool has no reachable entries."}
+        if not ok:
+            if required:
+                errors.append(checks[role]["error"])
+            else:
+                warnings.append(checks[role]["error"])
+
+    await _check_pool(
+        "summary",
+        list(getattr(config, "summary_models", None) or []),
+        required=needs_summary,
+    )
+    extraction_entries = (
+        list(getattr(config, "summary_models", None) or [])
+        if getattr(config, "models_linked", False)
+        else list(getattr(config, "extraction_models", None) or [])
+    )
+    await _check_pool("extraction", extraction_entries, required=needs_extraction)
+    await _check_pool(
+        "repair",
+        list(getattr(config, "extraction_repair_models", None) or []),
+        required=False,
+    )
+
+    return {
+        "ok": not errors,
+        "required": {
+            "summary": needs_summary,
+            "extraction": needs_extraction,
+        },
+        "checks": checks,
+        "warnings": warnings,
+        "errors": errors,
+    }
+
+
 async def check_qdrant_preflight(qdrant_client: Any) -> dict[str, Any]:
     start = time.perf_counter()
     try:
@@ -172,68 +288,12 @@ async def check_qdrant_preflight(qdrant_client: Any) -> dict[str, Any]:
 
 
 def check_local_graph_preflight(config: IngestionConfig) -> dict[str, Any]:
-    engine = str(getattr(config, "graph_extraction_engine", "local_gliner") or "local_gliner")
-    if engine == "local_gliner":
-        engine = "local_gliner_relex"
-    graph_enabled = bool(getattr(config, "use_neo4j", True))
-    if not graph_enabled or engine == "llm":
-        return {
-            "ok": True,
-            "engine": engine,
-            "local_graph_required": False,
-            "llm_graph_calls_enabled": bool(engine == "llm"),
-            "error": None,
-        }
-    if not bool(getattr(config, "local_graph_extraction_enabled", True)):
-        return {
-            "ok": False,
-            "engine": engine,
-            "local_graph_required": True,
-            "llm_graph_calls_enabled": bool(getattr(config, "llm_fallback_enabled", False)),
-            "error": "Graph extraction is enabled but local_graph_extraction_enabled=false.",
-        }
-    if engine == "local_glirel_optional":
-        return {
-            "ok": False,
-            "engine": engine,
-            "local_graph_required": True,
-            "model": None,
-            "llm_graph_calls_enabled": bool(getattr(config, "llm_fallback_enabled", False)),
-            "error": "GLiREL is evaluation-only and not implemented as a default production lane.",
-        }
-    dependency_name = "gliner2" if engine == "local_gliner2" else "gliner"
-    model_name = (
-        getattr(config, "local_gliner2_model", None)
-        if engine == "local_gliner2"
-        else getattr(config, "local_extractor_model", None)
-    )
-    if importlib.util.find_spec(dependency_name) is None:
-        return {
-            "ok": False,
-            "engine": engine,
-            "local_graph_required": True,
-            "model": model_name,
-            "llm_graph_calls_enabled": bool(getattr(config, "llm_fallback_enabled", False)),
-            "error": f"{dependency_name} dependency is not installed in the backend runtime.",
-        }
-    warnings: list[str] = []
-    cuda_available = None
-    try:
-        import torch  # type: ignore
-
-        cuda_available = bool(torch.cuda.is_available())
-        if not cuda_available:
-            warnings.append("CUDA is unavailable; local GLiNER will use CPU and be much slower.")
-    except Exception as exc:
-        warnings.append(f"Could not inspect CUDA availability: {exc}")
     return {
         "ok": True,
-        "engine": engine,
-        "local_graph_required": True,
-        "model": model_name,
-        "cuda_available": cuda_available,
-        "llm_graph_calls_enabled": bool(getattr(config, "llm_fallback_enabled", False)),
-        "warnings": warnings,
+        "engine": "llm" if getattr(config, "use_neo4j", True) else "disabled",
+        "local_graph_required": False,
+        "llm_graph_calls_enabled": bool(getattr(config, "use_neo4j", True)),
+        "warnings": [],
         "error": None,
     }
 
@@ -246,16 +306,20 @@ async def run_ingest_preflight(
     embedding = await check_embedding_preflight(config)
     qdrant = await check_qdrant_preflight(qdrant_client)
     graph = check_local_graph_preflight(config)
+    llm_models = await check_llm_model_preflight(config)
     warnings = list(graph.get("warnings") or [])
+    warnings.extend(llm_models.get("warnings") or [])
     if bool(graph.get("llm_graph_calls_enabled")):
-        warnings.append("Graph LLM fallback is enabled for this config.")
+        warnings.append("Graph extraction is routed through the configured LLM extraction pool.")
     errors: list[str] = []
     if not embedding.get("ok"):
         errors.append(f"embedding unavailable: {embedding.get('error')}")
     if not qdrant.get("ok"):
         errors.append(f"qdrant unavailable: {qdrant.get('error')}")
     if not graph.get("ok"):
-        errors.append(f"local graph unavailable: {graph.get('error')}")
+        errors.append(f"graph extraction unavailable: {graph.get('error')}")
+    if not llm_models.get("ok"):
+        errors.extend(f"llm model unavailable: {error}" for error in llm_models.get("errors", []))
     return {
         "ok": not errors,
         "errors": errors,
@@ -263,6 +327,7 @@ async def run_ingest_preflight(
         "embedding": embedding,
         "qdrant": qdrant,
         "graph": graph,
+        "llm_models": llm_models,
         "summary_llm_enabled": bool(getattr(config, "chunk_summarization", False)),
         "llm_graph_calls_enabled": bool(graph.get("llm_graph_calls_enabled")),
     }

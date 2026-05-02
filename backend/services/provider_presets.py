@@ -31,6 +31,7 @@ PROVIDER_PRESET_PREFIX: dict[str, str] = {
     "zai": "openai",
     "openrouter": "openrouter",
     "ollama": "ollama",
+    "vllm-local": "openai",
     "custom": "openai",
 }
 

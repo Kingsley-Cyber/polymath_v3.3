@@ -46,6 +46,61 @@ def _default_relation_schema() -> list[str]:
     return relation_type_names()
 
 
+def _local_vllm_model_ref(
+    *,
+    model: str,
+    base_url: str,
+    max_concurrent: int,
+    temperature: float,
+    max_tokens: int | None = None,
+) -> _legacy.ModelProfileRef:
+    extra_params: dict[str, Any] = {"temperature": temperature}
+    if max_tokens is not None:
+        extra_params["max_tokens"] = max_tokens
+    return _legacy.ModelProfileRef(
+        provider_preset="vllm-local",
+        model=f"openai/{model}",
+        base_url=base_url,
+        api_key="local",
+        max_concurrent=max_concurrent,
+        extra_params=extra_params,
+    )
+
+
+def _default_summary_models() -> list[_legacy.ModelProfileRef]:
+    return [
+        _local_vllm_model_ref(
+            model="lfm2-rag",
+            base_url="http://vllm-summary:8000/v1",
+            max_concurrent=12,
+            temperature=0.0,
+        )
+    ]
+
+
+def _default_extraction_models() -> list[_legacy.ModelProfileRef]:
+    return [
+        _local_vllm_model_ref(
+            model="lfm2-extract",
+            base_url="http://vllm-extract:8000/v1",
+            max_concurrent=24,
+            temperature=0.0,
+        )
+    ]
+
+
+def _default_extraction_repair_models() -> list[_legacy.ModelProfileRef]:
+    return [
+        _local_vllm_model_ref(
+            model="gemma4-e4b",
+            base_url="http://vllm-repair:8000/v1",
+            max_concurrent=4,
+            temperature=0.0,
+            max_tokens=2048,
+        )
+    ]
+
+
 class IngestionConfig(BaseModel):
     """Source-backed ingestion config for the current pipeline."""
 
@@ -86,10 +141,13 @@ class IngestionConfig(BaseModel):
     )
     semantic_split_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
 
-    summary_models: list[_legacy.ModelProfileRef] = Field(default_factory=list)
-    extraction_models: list[_legacy.ModelProfileRef] = Field(default_factory=list)
+    summary_models: list[_legacy.ModelProfileRef] = Field(default_factory=_default_summary_models)
+    extraction_models: list[_legacy.ModelProfileRef] = Field(default_factory=_default_extraction_models)
+    extraction_repair_models: list[_legacy.ModelProfileRef] = Field(
+        default_factory=_default_extraction_repair_models
+    )
     entity_confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-    models_linked: bool = True
+    models_linked: bool = False
 
     # Ghost B production policy. Small/normal docs use the full ontology
     # extraction budget. Large books switch to a compact first-pass graph
@@ -108,43 +166,9 @@ class IngestionConfig(BaseModel):
     graph_backfill_max_chunks: int = Field(default=100, ge=1, le=10000)
     graph_backfill_max_attempts_per_chunk: int = Field(default=2, ge=1, le=10)
 
-    graph_extraction_engine: Literal[
-        "llm",
-        "local_gliner",
-        "local_gliner_relex",
-        "local_gliner2",
-        "local_glirel_optional",
-        "hybrid_local_first",
-    ] = Field(
-        default="local_gliner"
-    )
-    local_graph_extraction_enabled: bool = True
-    local_extractor_model: str = Field(default="knowledgator/gliner-relex-large-v0.5")
-    local_gliner2_model: str = Field(default="fastino/gliner2-base-v1")
-    local_workers: list[dict[str, Any]] = Field(
-        default_factory=lambda: [
-            {"device": "cuda:0", "name": "rtx_3090", "batch_size": 8, "weight": 2},
-            {"device": "cuda:1", "name": "rtx_4070", "batch_size": 4, "weight": 1},
-        ]
-    )
-    max_chunk_tokens_for_local_extractor: int = Field(default=512, ge=128, le=4096)
-    local_gliner_max_input_chars: int = Field(default=3500, ge=512, le=20000)
-    local_model_max_tokens: int = Field(default=384, ge=128, le=2048)
-    local_relation_max_labels: int = Field(default=12, ge=1, le=48)
-    local_relation_hard_max_labels: int = Field(default=16, ge=1, le=64)
-    local_relation_max_source_entities: int = Field(default=4, ge=1, le=16)
-    local_relation_oom_disable_after: int = Field(default=1, ge=1, le=10)
-    local_entity_only_on_relation_oom: bool = True
-    max_chunks_in_memory: int = Field(default=100, ge=1, le=10000)
-    oom_retry_enabled: bool = True
-    local_cuda_fatal_cooldown_seconds: int = Field(default=900, ge=60, le=86400)
-    local_graph_diagnostics_enabled: bool = False
-    local_graph_diagnostics_dir: str = Field(default="local_graph_diagnostics")
-    local_graph_debug_log_text: bool = False
-    local_graph_debug_text_limit: int = Field(default=3, ge=0, le=50)
+    graph_extraction_engine: Literal["llm"] = Field(default="llm")
     llm_fallback_enabled: bool = False
     llm_fallback_max_percent: float = Field(default=0.0, ge=0.0, le=1.0)
-    glirel_enabled: bool = False
 
     entity_schema: list[str] | None = Field(default_factory=_default_entity_schema)
     relation_schema: list[str] | None = Field(default_factory=_default_relation_schema)
@@ -176,6 +200,8 @@ class IngestionConfig(BaseModel):
     def upgrade_legacy_single_models(cls, data):
         if not isinstance(data, dict):
             return data
+        if data.get("graph_extraction_engine") != "llm":
+            data["graph_extraction_engine"] = "llm"
 
         def _build_entry(prefix: str) -> dict | None:
             model = data.get(f"{prefix}_model")
@@ -194,12 +220,18 @@ class IngestionConfig(BaseModel):
             entry = _build_entry("summary")
             if entry is not None:
                 data["summary_models"] = [entry]
-        if data.get("extraction_models") is None:
+        if "extraction_models" in data and data.get("extraction_models") is None:
             data["extraction_models"] = []
-        if not data.get("extraction_models"):
+        if "extraction_models" in data and not data.get("extraction_models"):
             entry = _build_entry("extraction")
             if entry is not None:
                 data["extraction_models"] = [entry]
+        if "extraction_models" not in data:
+            entry = _build_entry("extraction")
+            if entry is not None:
+                data["extraction_models"] = [entry]
+        if "extraction_repair_models" in data and data.get("extraction_repair_models") is None:
+            data["extraction_repair_models"] = []
 
         for prefix in ("summary", "extraction"):
             for suffix in ("model", "base_url", "api_key", "extra_params", "max_concurrent"):

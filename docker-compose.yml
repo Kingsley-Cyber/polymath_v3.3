@@ -227,6 +227,218 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  vllm-extract:
+    <<: *default-logging
+    image: vllm/vllm-openai:latest
+    profiles: ["local-ingest-llm"]
+    ports:
+      - "8011:8000"
+    volumes:
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+      HF_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+      LOCAL_VLLM_API_KEY: ${LOCAL_VLLM_API_KEY:-local}
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      NVIDIA_VISIBLE_DEVICES: "${LOCAL_LLM_NVIDIA_VISIBLE_DEVICES:-0}"
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --model
+      - ${VLLM_EXTRACT_MODEL:-LiquidAI/LFM2-1.2B-Extract}
+      - --served-model-name
+      - ${VLLM_EXTRACT_SERVED_NAME:-lfm2-extract}
+      - --dtype
+      - bfloat16
+      - --trust-remote-code
+      - --api-key
+      - ${LOCAL_VLLM_API_KEY:-local}
+      - --gpu-memory-utilization
+      - ${VLLM_EXTRACT_GPU_MEMORY_UTILIZATION:-0.18}
+      - --max-model-len
+      - ${VLLM_EXTRACT_MAX_MODEL_LEN:-8192}
+      - --max-num-seqs
+      - ${VLLM_EXTRACT_MAX_NUM_SEQS:-64}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${LOCAL_LLM_NVIDIA_DEVICE_ID:-0}"]
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import os, urllib.request; req = urllib.request.Request('http://localhost:8000/v1/models', headers={'Authorization': 'Bearer ' + os.environ.get('LOCAL_VLLM_API_KEY', 'local')}); urllib.request.urlopen(req, timeout=5).read()\"",
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+      start_period: 300s
+    restart: unless-stopped
+
+  vllm-summary:
+    <<: *default-logging
+    image: vllm/vllm-openai:latest
+    profiles: ["local-ingest-llm"]
+    ports:
+      - "8012:8000"
+    volumes:
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+      HF_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+      LOCAL_VLLM_API_KEY: ${LOCAL_VLLM_API_KEY:-local}
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      NVIDIA_VISIBLE_DEVICES: "${LOCAL_LLM_NVIDIA_VISIBLE_DEVICES:-0}"
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --model
+      - ${VLLM_SUMMARY_MODEL:-LiquidAI/LFM2-1.2B-RAG}
+      - --served-model-name
+      - ${VLLM_SUMMARY_SERVED_NAME:-lfm2-rag}
+      - --dtype
+      - bfloat16
+      - --trust-remote-code
+      - --api-key
+      - ${LOCAL_VLLM_API_KEY:-local}
+      - --gpu-memory-utilization
+      - ${VLLM_SUMMARY_GPU_MEMORY_UTILIZATION:-0.24}
+      - --max-model-len
+      - ${VLLM_SUMMARY_MAX_MODEL_LEN:-12288}
+      - --max-num-seqs
+      - ${VLLM_SUMMARY_MAX_NUM_SEQS:-32}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${LOCAL_LLM_NVIDIA_DEVICE_ID:-0}"]
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import os, urllib.request; req = urllib.request.Request('http://localhost:8000/v1/models', headers={'Authorization': 'Bearer ' + os.environ.get('LOCAL_VLLM_API_KEY', 'local')}); urllib.request.urlopen(req, timeout=5).read()\"",
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+      start_period: 300s
+    restart: unless-stopped
+
+  vllm-transcript:
+    <<: *default-logging
+    image: vllm/vllm-openai:latest
+    profiles: ["local-ingest-transcript"]
+    ports:
+      - "8014:8000"
+    volumes:
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+      HF_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+      LOCAL_VLLM_API_KEY: ${LOCAL_VLLM_API_KEY:-local}
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      NVIDIA_VISIBLE_DEVICES: "${LOCAL_LLM_NVIDIA_VISIBLE_DEVICES:-0}"
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --model
+      - ${VLLM_TRANSCRIPT_MODEL:-LiquidAI/LFM2-2.6B-Transcript}
+      - --served-model-name
+      - ${VLLM_TRANSCRIPT_SERVED_NAME:-lfm2-transcript}
+      - --dtype
+      - bfloat16
+      - --trust-remote-code
+      - --api-key
+      - ${LOCAL_VLLM_API_KEY:-local}
+      - --gpu-memory-utilization
+      - ${VLLM_TRANSCRIPT_GPU_MEMORY_UTILIZATION:-0.24}
+      - --max-model-len
+      - ${VLLM_TRANSCRIPT_MAX_MODEL_LEN:-12288}
+      - --max-num-seqs
+      - ${VLLM_TRANSCRIPT_MAX_NUM_SEQS:-32}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${LOCAL_LLM_NVIDIA_DEVICE_ID:-0}"]
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import os, urllib.request; req = urllib.request.Request('http://localhost:8000/v1/models', headers={'Authorization': 'Bearer ' + os.environ.get('LOCAL_VLLM_API_KEY', 'local')}); urllib.request.urlopen(req, timeout=5).read()\"",
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+      start_period: 300s
+    restart: unless-stopped
+
+  vllm-repair:
+    <<: *default-logging
+    image: vllm/vllm-openai:latest
+    profiles: ["local-ingest-llm"]
+    ports:
+      - "8013:8000"
+    volumes:
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+      HF_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+      LOCAL_VLLM_API_KEY: ${LOCAL_VLLM_API_KEY:-local}
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      NVIDIA_VISIBLE_DEVICES: "${LOCAL_LLM_NVIDIA_VISIBLE_DEVICES:-0}"
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --model
+      - ${VLLM_REPAIR_MODEL:-google/gemma-4-E4B}
+      - --served-model-name
+      - ${VLLM_REPAIR_SERVED_NAME:-gemma4-e4b}
+      - --dtype
+      - bfloat16
+      - --trust-remote-code
+      - --api-key
+      - ${LOCAL_VLLM_API_KEY:-local}
+      - --gpu-memory-utilization
+      - ${VLLM_REPAIR_GPU_MEMORY_UTILIZATION:-0.30}
+      - --max-model-len
+      - ${VLLM_REPAIR_MAX_MODEL_LEN:-8192}
+      - --max-num-seqs
+      - ${VLLM_REPAIR_MAX_NUM_SEQS:-16}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${LOCAL_LLM_NVIDIA_DEVICE_ID:-0}"]
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import os, urllib.request; req = urllib.request.Request('http://localhost:8000/v1/models', headers={'Authorization': 'Bearer ' + os.environ.get('LOCAL_VLLM_API_KEY', 'local')}); urllib.request.urlopen(req, timeout=5).read()\"",
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+      start_period: 300s
+    restart: unless-stopped
+
   # ============================================================
   # EMBEDDER — sentence-transformers GPU service
   # Loads any HF safetensors model from MODEL_PATH — no hardcoding
@@ -247,18 +459,19 @@ services:
       MODEL_PATH: /model
       MODEL_ID: ${LOCAL_EMBED_MODEL_ID:-Qwen/Qwen3-Embedding-0.6B}
       MODEL_NAME: Qwen3-Embedding-0.6B
-      # Keep local embedding conservative so large ingests don't starve the
-      # desktop GPU. Raise LOCAL_EMBED_BATCH_SIZE only after watching nvidia-smi.
-      EMBED_BATCH_SIZE: ${LOCAL_EMBED_BATCH_SIZE:-8}
+      # RTX PRO 6000-class local boxes can keep the embedder fed without
+      # starving the graph extractor. Lower LOCAL_EMBED_BATCH_SIZE if another
+      # workload is sharing the card.
+      EMBED_BATCH_SIZE: ${LOCAL_EMBED_BATCH_SIZE:-32}
       EMBED_MAX_SEQ_LENGTH: ${LOCAL_EMBED_MAX_SEQ_LENGTH:-1024}
       EMBED_MAX_INPUT_CHARS: ${LOCAL_EMBED_MAX_INPUT_CHARS:-6000}
       EMBED_DEVICE: cuda
       PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
       # GPU pinning — see docling service for the rationale. CUDA_VISIBLE_DEVICES
       # is the load-bearing filter at the torch layer; PCI_BUS_ID ordering
-      # makes "0" deterministically mean the 3090.
+      # makes "0" deterministically mean the primary local GPU.
       CUDA_DEVICE_ORDER: PCI_BUS_ID
-      CUDA_VISIBLE_DEVICES: "0"            # RTX 3090
+      CUDA_VISIBLE_DEVICES: "0"
       NVIDIA_VISIBLE_DEVICES: "0"
     deploy:
       resources:
@@ -333,7 +546,7 @@ services:
       DOCLING_OCR_ENABLED: "false"
       DOCLING_IDLE_UNLOAD_SECONDS: ${DOCLING_IDLE_UNLOAD_SECONDS:-300}
       CUDA_DEVICE_ORDER: PCI_BUS_ID
-      CUDA_VISIBLE_DEVICES: "0"            # RTX 3090
+      CUDA_VISIBLE_DEVICES: "0"
       NVIDIA_VISIBLE_DEVICES: "0"
       PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
     deploy:
