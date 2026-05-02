@@ -36,6 +36,7 @@ from services.ontology import (
     ontology_version,
     relation_family_map,
 )
+from services.storage.qdrant_writer import entity_embedding_id, relation_embedding_id
 
 logger = logging.getLogger(__name__)
 ALIAS_MAP_PATH = Path(__file__).with_name("entity_aliases.json")
@@ -877,6 +878,10 @@ def entity_id_from_name(canonical_name: str, entity_type: str | None = None) -> 
     return f"{ENTITY_ID_PREFIX}:{_slugify_name(canonical_name)}"
 
 
+def summary_id_for_parent(corpus_id: str, parent_id: str) -> str:
+    return f"summary:{corpus_id}:{parent_id}"
+
+
 async def _upsert_document(
     driver: AsyncDriver,
     doc_id: str,
@@ -1070,6 +1075,7 @@ async def write_document_graph(
     user_id: str | None = None,
     file_id: str | None = None,
     all_chunk_ids: list[str] | None = None,
+    summaries: list | None = None,
 ) -> None:
     """
     Write the full graph for one document after GHOST B completes.
@@ -1080,8 +1086,8 @@ async def write_document_graph(
     (Document, Chunks, Entities+Mentions, Relations) regardless of size,
     reducing Neo4j round-trips by ~1000x on busy docs.
 
-    Creates/updates: Document node, Chunk nodes, HAS_CHUNK edges,
-    Entity nodes, MENTIONS edges, RELATES_TO edges (entity→entity only).
+    Creates/updates: Document node, child Chunk nodes, parent Summary nodes,
+    Entity nodes, MENTIONS/MENTIONED_IN edges, RELATES_TO edges (entity→entity only).
     all_chunk_ids lets ingestion preserve complete document/chunk coverage in
     Neo4j even when Ghost B only returned partial entity/relation extraction.
     """
@@ -1091,6 +1097,27 @@ async def write_document_graph(
     # 2. Build batched payloads from the extraction results.
     chunk_ids = list(dict.fromkeys([*(all_chunk_ids or []), *[r.chunk_id for r in extraction_results]]))
     chunk_rows: list[dict] = [{"chunk_id": chunk_id} for chunk_id in chunk_ids]
+    summary_rows: list[dict] = []
+    seen_summary_ids: set[str] = set()
+    for summary in summaries or []:
+        parent_id = str(getattr(summary, "parent_id", "") or "").strip()
+        summary_text = str(getattr(summary, "summary", "") or "").strip()
+        if not parent_id or not summary_text:
+            continue
+        summary_id = summary_id_for_parent(corpus_id, parent_id)
+        if summary_id in seen_summary_ids:
+            continue
+        seen_summary_ids.add(summary_id)
+        summary_rows.append(
+            {
+                "summary_id": summary_id,
+                "parent_id": parent_id,
+                "doc_id": str(getattr(summary, "doc_id", "") or doc_id),
+                "corpus_id": str(getattr(summary, "corpus_id", "") or corpus_id),
+                "source_tier": str(getattr(summary, "source_tier", "") or ""),
+                "summary": summary_text,
+            }
+        )
 
     entity_groups: dict[str, dict] = {}
     for result in extraction_results:
@@ -1104,11 +1131,26 @@ async def write_document_graph(
                     "canonical_name": canonical,
                     "display_name": entity.surface_form or entity.canonical_name,
                     "observed_entity_types": [],
+                    "aliases": [],
+                    "descriptions": [],
+                    "doc_ids": [],
+                    "chunk_ids": [],
                     "confidence": 0.0,
                 },
             )
             if entity.entity_type not in group["observed_entity_types"]:
                 group["observed_entity_types"].append(entity.entity_type)
+            for alias in getattr(entity, "aliases", []) or []:
+                alias_text = str(alias or "").strip()
+                if alias_text and alias_text not in group["aliases"]:
+                    group["aliases"].append(alias_text)
+            description = str(getattr(entity, "description", "") or "").strip()
+            if description and description not in group["descriptions"]:
+                group["descriptions"].append(description)
+            if result.doc_id and result.doc_id not in group["doc_ids"]:
+                group["doc_ids"].append(result.doc_id)
+            if result.chunk_id and result.chunk_id not in group["chunk_ids"]:
+                group["chunk_ids"].append(result.chunk_id)
             if entity.confidence > group["confidence"]:
                 group["confidence"] = entity.confidence
                 group["display_name"] = entity.surface_form or entity.canonical_name
@@ -1129,6 +1171,11 @@ async def write_document_graph(
             "display_name": group["display_name"],
             "primary_entity_type": primary_type,
             "observed_entity_types": observed_types,
+            "aliases": group["aliases"],
+            "description": max(group["descriptions"], key=len) if group["descriptions"] else "",
+            "embedding_id": entity_embedding_id(corpus_id, canonical),
+            "doc_ids": group["doc_ids"],
+            "chunk_ids": group["chunk_ids"],
             "confidence": group["confidence"],
             "object_kind": ontology.get("object_kind"),
             "object_kind_parent": ontology.get("object_kind_parent"),
@@ -1174,6 +1221,12 @@ async def write_document_graph(
                 "surface_form": entity.surface_form or entity.canonical_name,
                 "primary_entity_type": identity["primary_entity_type"],
                 "entity_type": identity["primary_entity_type"],
+                "type": identity["primary_entity_type"],
+                "aliases": identity.get("aliases") or [],
+                "description": identity.get("description") or "",
+                "embedding_id": identity.get("embedding_id"),
+                "doc_ids": identity.get("doc_ids") or [],
+                "chunk_ids": identity.get("chunk_ids") or [],
                 "extracted_type": entity.entity_type,
                 "observed_entity_types": identity["observed_entity_types"],
                 "confidence": entity.confidence,
@@ -1258,6 +1311,25 @@ async def write_document_graph(
                 validation_status,
                 predicate_refined=predicate_refined,
             )
+            predicate_family = (
+                getattr(relation, "predicate_family", None)
+                or relation_family_for_predicate(refined_predicate)
+            )
+            source_sentence = (
+                getattr(relation, "source_sentence", "")
+                or relation.evidence_phrase
+                or relation.atomic_fact
+                or ""
+            )
+            embedding_predicate = normalized_source_predicate or refined_predicate
+            embedding_id = relation_embedding_id(
+                corpus_id,
+                r.doc_id,
+                r.chunk_id,
+                subject_canonical,
+                embedding_predicate,
+                object_canonical,
+            )
             relation_rows.append({
                 "subject_id": (subject_identity or {}).get(
                     "entity_id", entity_id_from_name(subject_canonical)
@@ -1265,9 +1337,20 @@ async def write_document_graph(
                 "object_id": (object_identity or {}).get(
                     "entity_id", entity_id_from_name(object_canonical)
                 ),
+                "subject": subject_canonical,
+                "object": object_canonical,
                 "predicate": refined_predicate,
                 "source_predicate": source_predicate_raw,
-                "relation_family": relation_family_for_predicate(refined_predicate),
+                "predicate_family": predicate_family,
+                "relation_family": predicate_family,
+                "qualifier": getattr(relation, "qualifier", "") or "",
+                "source_sentence": source_sentence,
+                "doc_id": r.doc_id,
+                "chunk_id": r.chunk_id,
+                "embedding_id": embedding_id,
+                "relation_id": embedding_id,
+                "extraction_model": getattr(relation, "extraction_model", "") or "",
+                "repaired": bool(getattr(relation, "repaired", False)),
                 "predicate_refined": predicate_refined,
                 "direction_repaired": reverse_relation,
                 "edge_strength": edge_strength,
@@ -1287,7 +1370,6 @@ async def write_document_graph(
                 "extraction_confidence": relation.extraction_confidence,
                 "alternative_predicates_considered": relation.alternative_predicates_considered or [],
                 "rejection_reasoning": relation.rejection_reasoning,
-                "chunk_id": r.chunk_id,
             })
 
     if alias_resolution_count:
@@ -1316,7 +1398,9 @@ async def write_document_graph(
                 """
                 UNWIND $rows AS row
                 MERGE (c:Chunk {chunk_id: row.chunk_id})
-                SET c.doc_id = $doc_id, c.corpus_id = $corpus_id
+                SET c.doc_id = $doc_id,
+                    c.corpus_id = $corpus_id,
+                    c.chunk_type = coalesce(c.chunk_type, 'child')
                 WITH c
                 MATCH (d:Document {doc_id: $doc_id, corpus_id: $corpus_id})
                 MERGE (d)-[:HAS_CHUNK]->(c)
@@ -1324,6 +1408,30 @@ async def write_document_graph(
                 rows=chunk_rows,
                 doc_id=doc_id,
                 corpus_id=corpus_id,
+            )
+
+        # Parent summaries. Parent Chunk nodes are kept out of HAS_CHUNK to
+        # avoid changing existing child-chunk reader semantics.
+        if summary_rows:
+            await session.run(
+                """
+                UNWIND $rows AS row
+                MERGE (c:Chunk {chunk_id: row.parent_id})
+                SET c.doc_id = row.doc_id,
+                    c.corpus_id = row.corpus_id,
+                    c.chunk_type = 'parent',
+                    c.source_tier = row.source_tier
+                MERGE (s:Summary {summary_id: row.summary_id})
+                SET s.summary_id = row.summary_id,
+                    s.parent_id = row.parent_id,
+                    s.doc_id = row.doc_id,
+                    s.corpus_id = row.corpus_id,
+                    s.source_tier = row.source_tier,
+                    s.text = row.summary,
+                    s.summary = row.summary
+                MERGE (c)-[:HAS_SUMMARY]->(s)
+                """,
+                rows=summary_rows,
             )
 
         # Entities + MENTIONS edges.
@@ -1338,6 +1446,10 @@ async def write_document_graph(
                     e.display_name = row.display_name,
                     e.primary_entity_type = row.primary_entity_type,
                     e.entity_type = row.primary_entity_type,
+                    e.type = row.type,
+                    e.aliases = row.aliases,
+                    e.description = row.description,
+                    e.embedding_id = row.embedding_id,
                     e.confidence = CASE
                         WHEN e.confidence IS NULL OR row.confidence > e.confidence THEN row.confidence
                         ELSE e.confidence
@@ -1362,6 +1474,17 @@ async def write_document_graph(
                     CASE WHEN t IN types THEN types ELSE types + [t] END
                 )
                 WITH e, row
+                SET e.doc_ids = reduce(
+                    ids = coalesce(e.doc_ids, []),
+                    id IN row.doc_ids |
+                    CASE WHEN id IN ids THEN ids ELSE ids + [id] END
+                ),
+                    e.chunk_ids = reduce(
+                    ids = coalesce(e.chunk_ids, []),
+                    id IN row.chunk_ids |
+                    CASE WHEN id IN ids THEN ids ELSE ids + [id] END
+                )
+                WITH e, row
                 MATCH (c:Chunk {chunk_id: row.chunk_id, corpus_id: $corpus_id})
                 MERGE (c)-[m:MENTIONS]->(e)
                 SET m.confidence = CASE
@@ -1376,6 +1499,20 @@ async def write_document_graph(
                     WHEN m.extracted_types IS NULL THEN [row.extracted_type]
                     WHEN row.extracted_type IN m.extracted_types THEN m.extracted_types
                     ELSE m.extracted_types + [row.extracted_type]
+                END
+                MERGE (e)-[mi:MENTIONED_IN]->(c)
+                SET mi.confidence = CASE
+                        WHEN mi.confidence IS NULL OR row.confidence > mi.confidence THEN row.confidence
+                        ELSE mi.confidence
+                    END,
+                    mi.extracted_type = row.extracted_type,
+                    mi.surface_form = row.surface_form,
+                    mi.extractor = 'ghost_b',
+                    mi.ontology_version = row.ontology_version
+                SET mi.extracted_types = CASE
+                    WHEN mi.extracted_types IS NULL THEN [row.extracted_type]
+                    WHEN row.extracted_type IN mi.extracted_types THEN mi.extracted_types
+                    ELSE mi.extracted_types + [row.extracted_type]
                 END
                 """,
                 rows=mention_rows,
@@ -1394,7 +1531,26 @@ async def write_document_graph(
                         WHEN r.confidence IS NULL OR row.confidence > r.confidence THEN row.confidence
                         ELSE r.confidence
                     END,
+                    r.predicate = row.predicate,
+                    r.predicate_family = row.predicate_family,
                     r.relation_family = row.relation_family,
+                    r.qualifier = CASE
+                        WHEN row.qualifier IS NULL OR row.qualifier = '' THEN r.qualifier
+                        ELSE row.qualifier
+                    END,
+                    r.source_sentence = CASE
+                        WHEN row.source_sentence IS NULL OR row.source_sentence = '' THEN r.source_sentence
+                        ELSE row.source_sentence
+                    END,
+                    r.chunk_id = row.chunk_id,
+                    r.doc_id = row.doc_id,
+                    r.embedding_id = row.embedding_id,
+                    r.relation_id = row.relation_id,
+                    r.extraction_model = CASE
+                        WHEN row.extraction_model IS NULL OR row.extraction_model = '' THEN r.extraction_model
+                        ELSE row.extraction_model
+                    END,
+                    r.repaired = coalesce(r.repaired, false) OR row.repaired,
                     r.predicate_refined = coalesce(r.predicate_refined, false) OR row.predicate_refined,
                     r.direction_repaired = coalesce(r.direction_repaired, false) OR row.direction_repaired,
                     r.edge_strength = CASE
@@ -1419,6 +1575,11 @@ async def write_document_graph(
                     WHEN row.chunk_id IN r.evidence_chunk_ids THEN r.evidence_chunk_ids
                     ELSE r.evidence_chunk_ids + [row.chunk_id]
                 END
+                SET r.evidence_doc_ids = CASE
+                    WHEN r.evidence_doc_ids IS NULL THEN [row.doc_id]
+                    WHEN row.doc_id IN r.evidence_doc_ids THEN r.evidence_doc_ids
+                    ELSE r.evidence_doc_ids + [row.doc_id]
+                END
                 SET r.evidence_phrases = CASE
                     WHEN row.evidence_phrase IS NULL OR row.evidence_phrase = '' THEN coalesce(r.evidence_phrases, [])
                     WHEN r.evidence_phrases IS NULL THEN [row.evidence_phrase]
@@ -1436,6 +1597,12 @@ async def write_document_graph(
                     WHEN r.relation_cues IS NULL THEN [row.relation_cue]
                     WHEN row.relation_cue IN r.relation_cues THEN r.relation_cues
                     ELSE r.relation_cues + [row.relation_cue]
+                END
+                SET r.source_sentences = CASE
+                    WHEN row.source_sentence IS NULL OR row.source_sentence = '' THEN coalesce(r.source_sentences, [])
+                    WHEN r.source_sentences IS NULL THEN [row.source_sentence]
+                    WHEN row.source_sentence IN r.source_sentences THEN r.source_sentences
+                    ELSE r.source_sentences + [row.source_sentence]
                 END
                 SET r.source_predicates = CASE
                     WHEN r.source_predicates IS NULL THEN [row.source_predicate]

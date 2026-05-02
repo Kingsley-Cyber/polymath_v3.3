@@ -119,6 +119,9 @@ def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
     paragraph: list[str] = []
     h1_count = 0
     h2_count = 0
+    in_code_block = False
+    code_fence_char: str | None = None
+    code_fence_len = 0
 
     def flush_paragraph() -> None:
         nonlocal paragraph
@@ -134,7 +137,28 @@ def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
         paragraph = []
 
     for line in markdown.splitlines():
-        match = re.match(r"^(#{1,6})\s+(.+?)\s*#*\s*$", line.strip())
+        stripped = line.strip()
+        fence = re.match(r"^(`{3,}|~{3,})", stripped)
+        if in_code_block:
+            paragraph.append(line)
+            if (
+                code_fence_char
+                and stripped.startswith(code_fence_char * code_fence_len)
+                and re.match(rf"^{re.escape(code_fence_char)}{{{code_fence_len},}}\s*$", stripped)
+            ):
+                in_code_block = False
+                code_fence_char = None
+                code_fence_len = 0
+            continue
+        if fence:
+            fence_text = fence.group(1)
+            in_code_block = True
+            code_fence_char = fence_text[0]
+            code_fence_len = len(fence_text)
+            paragraph.append(line)
+            continue
+
+        match = re.match(r"^(#{1,6})\s+(.+?)\s*#*\s*$", stripped)
         if not match:
             paragraph.append(line)
             continue

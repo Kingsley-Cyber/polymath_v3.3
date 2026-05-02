@@ -68,11 +68,13 @@ def _local_vllm_model_ref(
 
 
 def _default_summary_models() -> list[_legacy.ModelProfileRef]:
+    # These defaults feed the local vLLM services. Raising vLLM
+    # max-num-seqs alone does not help if the app pool stays too narrow.
     return [
         _local_vllm_model_ref(
             model="lfm2-rag",
             base_url="http://vllm-summary:8000/v1",
-            max_concurrent=12,
+            max_concurrent=24,
             temperature=0.0,
         )
     ]
@@ -83,7 +85,7 @@ def _default_extraction_models() -> list[_legacy.ModelProfileRef]:
         _local_vllm_model_ref(
             model="lfm2-extract",
             base_url="http://vllm-extract:8000/v1",
-            max_concurrent=24,
+            max_concurrent=64,
             temperature=0.0,
         )
     ]

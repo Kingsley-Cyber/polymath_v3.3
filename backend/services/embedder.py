@@ -39,6 +39,10 @@ _LOCAL_REQUEST_BATCH_SIZE = max(
 )
 _LOCAL_TIMEOUT = 600.0
 _DEFAULT_DIM = 1024  # fallback when caller doesn't specify (e.g. query path on Qwen3-0.6B)
+_QWEN3_QUERY_INSTRUCTION = (
+    "Given a user question, retrieve relevant document passages, summaries, "
+    "entities, and relations that answer it"
+)
 
 
 _LEGACY_MODE_ALIASES = {
@@ -67,6 +71,20 @@ def _plaintext_embedding_pool(api_pool: list[dict[str, Any]] | None) -> list[dic
             data["api_key"] = _decrypt_api_key(data.get("api_key"))
         out.append(data)
     return out
+
+
+def _is_qwen3_embedding_model(model_id: str | None) -> bool:
+    model = (model_id or "").lower()
+    return "qwen3" in model and "embedding" in model
+
+
+def _format_query_embedding_text(text: str, model_id: str | None) -> str:
+    """Apply the Qwen3 instruction prefix to query embeddings only."""
+    if not _is_qwen3_embedding_model(model_id):
+        return text
+    if text.lstrip().startswith("Instruct:"):
+        return text
+    return f"Instruct: {_QWEN3_QUERY_INSTRUCTION}\nQuery: {text}"
 
 
 async def _local_fallback_or_raise(
@@ -428,8 +446,10 @@ async def embed_query(text: str, config: dict[str, Any] | None = None) -> list[f
     if config:
         raw_key = config.get("embed_api_key")
         api_pool = _plaintext_embedding_pool(config.get("embedding_models"))
+        model_id = config.get("embedding_model_id") or get_settings().EMBEDDER_MODEL_NAME
+        query_text = _format_query_embedding_text(text, model_id)
         results = await embed_batch(
-            [text],
+            [query_text],
             mode=config.get("embed_mode") or "local",
             expected_dim=config.get("embedding_dimension") or _DEFAULT_DIM,
             expected_model_id=config.get("embedding_model_id"),
@@ -440,7 +460,9 @@ async def embed_query(text: str, config: dict[str, Any] | None = None) -> list[f
             api_pool=api_pool,
         )
         return results[0]
-    results = await _embed_batch_local([text], _DEFAULT_DIM)
+    model_id = get_settings().EMBEDDER_MODEL_NAME
+    query_text = _format_query_embedding_text(text, model_id)
+    results = await _embed_batch_local([query_text], _DEFAULT_DIM)
     return results[0]
 
 

@@ -1,0 +1,219 @@
+import pytest
+
+from services import ghost_b
+from services.ghost_b import (
+    PRIMARY_EXTRACTION_MODEL,
+    REPAIR_EXTRACTION_MODEL,
+    ExtractionTask,
+    SchemaContext,
+    TARGET_SCHEMA_VERSION,
+    UNIVERSAL_ENTITY_SCHEMA,
+    UNIVERSAL_RELATION_SCHEMA,
+    _parse,
+    _parse_with_repair_items,
+    extract_entities,
+)
+
+
+def _schema() -> SchemaContext:
+    return SchemaContext(
+        entity_schema=UNIVERSAL_ENTITY_SCHEMA,
+        relation_schema=UNIVERSAL_RELATION_SCHEMA,
+        strict="soft",
+    )
+
+
+def _target_payload(*, confidence=0.92, family="Operational", include_object=True):
+    entities = [
+        {
+            "name": "app",
+            "type": "Product",
+            "aliases": [],
+            "description": "The app described in the sentence.",
+        }
+    ]
+    if include_object:
+        entities.append(
+            {
+                "name": "ML Kit",
+                "type": "Product",
+                "aliases": [],
+                "description": "The kit used by the app.",
+            }
+        )
+    return ghost_b.json.dumps(
+        {
+            "schema_version": TARGET_SCHEMA_VERSION,
+            "chunk_id": "c1",
+            "doc_id": "d1",
+            "corpus_id": "corp1",
+            "entities": entities,
+            "relations": [
+                {
+                    "subject": "app",
+                    "predicate": "uses",
+                    "predicate_family": family,
+                    "object": "ML Kit",
+                    "qualifier": "",
+                    "confidence": confidence,
+                    "source_sentence": "The app uses ML Kit.",
+                }
+            ],
+            "objects": [],
+        }
+    )
+
+
+def test_target_schema_parses_to_legacy_graph_structs():
+    parsed = _parse(
+        _target_payload(),
+        ExtractionTask("c1", "d1", "corp1", "The app uses ML Kit."),
+        threshold=0.5,
+        schema=_schema(),
+    )
+
+    assert parsed is not None
+    assert parsed.schema_version == TARGET_SCHEMA_VERSION
+    assert [entity.canonical_name for entity in parsed.entities] == ["app", "ml kit"]
+    assert parsed.entities[1].surface_form == "ML Kit"
+    assert parsed.entities[1].description == "The kit used by the app."
+    relation = parsed.relations[0]
+    assert relation.subject == "app"
+    assert relation.object == "ml kit"
+    assert relation.predicate == "uses"
+    assert relation.predicate_family == "Operational"
+    assert relation.source_sentence == "The app uses ML Kit."
+    assert relation.evidence_phrase == "The app uses ML Kit."
+    assert relation.extraction_model == PRIMARY_EXTRACTION_MODEL
+    assert relation.repaired is False
+
+
+def test_target_schema_validation_flags_repair_triggers_without_inference():
+    parsed, repairs = _parse_with_repair_items(
+        _target_payload(confidence=0.42, family="WeakAssociation", include_object=False),
+        ExtractionTask("c1", "d1", "corp1", "The app uses ML Kit."),
+        threshold=0.5,
+        schema=_schema(),
+    )
+
+    assert parsed is not None
+    assert [entity.canonical_name for entity in parsed.entities] == ["app"]
+    assert "ml kit" not in {entity.canonical_name for entity in parsed.entities}
+    assert len(repairs) == 1
+    assert set(repairs[0].reasons) >= {
+        "confidence_below_0.70",
+        "predicate_family_WeakAssociation",
+        "object_missing_from_entities",
+    }
+    assert "object_missing_from_entities" in (
+        parsed.relations[0].validation_status or ""
+    )
+
+
+class _Response:
+    def __init__(self, content: str):
+        self._content = content
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {
+            "choices": [{"message": {"content": self._content}}],
+            "usage": {
+                "total_tokens": 10,
+                "prompt_tokens": 8,
+                "completion_tokens": 2,
+            },
+        }
+
+
+class _FakeAsyncClient:
+    calls = []
+    responses = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def post(self, url, json, headers):
+        self.__class__.calls.append(json)
+        item = self.__class__.responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+@pytest.mark.asyncio
+async def test_gemma_triple_repair_gets_failed_triple_not_full_chunk(monkeypatch):
+    full_chunk = "SECRET FULL CHUNK SHOULD NOT APPEAR. The app uses ML Kit."
+    repaired = ghost_b.json.dumps(
+        {
+            "relation": {
+                "subject": "app",
+                "predicate": "uses",
+                "predicate_family": "Operational",
+                "object": "ML Kit",
+                "qualifier": "",
+                "confidence": 0.93,
+                "source_sentence": "The app uses ML Kit.",
+            }
+        }
+    )
+    _FakeAsyncClient.calls = []
+    _FakeAsyncClient.responses = [
+        _Response(_target_payload(confidence=0.41)),
+        _Response(repaired),
+    ]
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", _FakeAsyncClient)
+
+    report = await extract_entities(
+        [ExtractionTask("c1", "d1", "corp1", full_chunk)],
+        schema=_schema(),
+        pool=[{"model": "lfm2-extract", "max_concurrent": 1, "extra_params": {}}],
+        repair_pool=[{"model": "gemma4-e4b", "max_concurrent": 1, "extra_params": {}}],
+        return_report=True,
+        per_chunk_max_attempts=1,
+    )
+
+    assert len(report.results) == 1
+    relation = report.results[0].relations[0]
+    assert relation.repaired is True
+    assert relation.extraction_model == REPAIR_EXTRACTION_MODEL
+    assert relation.confidence == 0.93
+
+    assert len(_FakeAsyncClient.calls) == 2
+    repair_call = _FakeAsyncClient.calls[1]
+    repair_user = repair_call["messages"][1]["content"]
+    assert "failed_triple" in repair_user
+    assert "The app uses ML Kit." in repair_user
+    assert "SECRET FULL CHUNK SHOULD NOT APPEAR" not in repair_user
+    assert "polymath.extract.v2" in repair_call["messages"][0]["content"]
+    assert repair_call["temperature"] == 0
+
+
+@pytest.mark.asyncio
+async def test_parse_recovery_with_repair_pool_marks_gemma_relations(monkeypatch):
+    _FakeAsyncClient.calls = []
+    _FakeAsyncClient.responses = [_Response("{"), _Response(_target_payload())]
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", _FakeAsyncClient)
+
+    report = await extract_entities(
+        [ExtractionTask("c1", "d1", "corp1", "The app uses ML Kit.")],
+        schema=_schema(),
+        pool=[{"model": "lfm2-extract", "max_concurrent": 1, "extra_params": {}}],
+        repair_pool=[{"model": "gemma4-e4b", "max_concurrent": 1, "extra_params": {}}],
+        return_report=True,
+        per_chunk_max_attempts=2,
+    )
+
+    assert len(report.results) == 1
+    relation = report.results[0].relations[0]
+    assert relation.repaired is True
+    assert relation.extraction_model == REPAIR_EXTRACTION_MODEL
+    assert report.metrics["json_recovery_count"] == 1

@@ -253,6 +253,7 @@ services:
       - --dtype
       - bfloat16
       - --trust-remote-code
+      - ${VLLM_EXTRACT_PREFIX_CACHING_ARG:---enable-prefix-caching}
       - --api-key
       - ${LOCAL_VLLM_API_KEY:-local}
       - --gpu-memory-utilization
@@ -260,7 +261,9 @@ services:
       - --max-model-len
       - ${VLLM_EXTRACT_MAX_MODEL_LEN:-8192}
       - --max-num-seqs
-      - ${VLLM_EXTRACT_MAX_NUM_SEQS:-64}
+      - ${VLLM_EXTRACT_MAX_NUM_SEQS:-128}
+      - --max-num-batched-tokens
+      - ${VLLM_EXTRACT_MAX_NUM_BATCHED_TOKENS:-65536}
     deploy:
       resources:
         reservations:
@@ -306,6 +309,7 @@ services:
       - --dtype
       - bfloat16
       - --trust-remote-code
+      - ${VLLM_SUMMARY_PREFIX_CACHING_ARG:---enable-prefix-caching}
       - --api-key
       - ${LOCAL_VLLM_API_KEY:-local}
       - --gpu-memory-utilization
@@ -313,7 +317,9 @@ services:
       - --max-model-len
       - ${VLLM_SUMMARY_MAX_MODEL_LEN:-12288}
       - --max-num-seqs
-      - ${VLLM_SUMMARY_MAX_NUM_SEQS:-32}
+      - ${VLLM_SUMMARY_MAX_NUM_SEQS:-64}
+      - --max-num-batched-tokens
+      - ${VLLM_SUMMARY_MAX_NUM_BATCHED_TOKENS:-32768}
     deploy:
       resources:
         reservations:
@@ -359,6 +365,7 @@ services:
       - --dtype
       - bfloat16
       - --trust-remote-code
+      - ${VLLM_TRANSCRIPT_PREFIX_CACHING_ARG:---enable-prefix-caching}
       - --api-key
       - ${LOCAL_VLLM_API_KEY:-local}
       - --gpu-memory-utilization
@@ -367,6 +374,8 @@ services:
       - ${VLLM_TRANSCRIPT_MAX_MODEL_LEN:-12288}
       - --max-num-seqs
       - ${VLLM_TRANSCRIPT_MAX_NUM_SEQS:-32}
+      - --max-num-batched-tokens
+      - ${VLLM_TRANSCRIPT_MAX_NUM_BATCHED_TOKENS:-32768}
     deploy:
       resources:
         reservations:
@@ -412,6 +421,7 @@ services:
       - --dtype
       - bfloat16
       - --trust-remote-code
+      - ${VLLM_REPAIR_PREFIX_CACHING_ARG:---enable-prefix-caching}
       - --api-key
       - ${LOCAL_VLLM_API_KEY:-local}
       - --gpu-memory-utilization
@@ -420,6 +430,8 @@ services:
       - ${VLLM_REPAIR_MAX_MODEL_LEN:-8192}
       - --max-num-seqs
       - ${VLLM_REPAIR_MAX_NUM_SEQS:-16}
+      - --max-num-batched-tokens
+      - ${VLLM_REPAIR_MAX_NUM_BATCHED_TOKENS:-16384}
     deploy:
       resources:
         reservations:
@@ -628,6 +640,9 @@ services:
       MODELS_DIR: /models
       HF_HOME: /home/appuser/.cache/huggingface
       INGEST_SPOOL_DIR: /app/ingest-spool
+      # Local vLLM boxes can keep multiple documents in model phases at once.
+      # Lower this for external API pools with stricter rate limits.
+      INGEST_MAX_MODEL_PHASE_DOCS: ${INGEST_MAX_MODEL_PHASE_DOCS:-2}
       N8N_URL: http://n8n:5678
       # Phase 14.3 — Modal cloud GPU (primary ingestion embed path; see .env.example)
       MODAL_ENABLED: ${MODAL_ENABLED:-false}

@@ -39,7 +39,63 @@ async def test_local_mode_hits_local_sidecar():
         local_mock.return_value = [[0.0] * 1024]
         vecs = await embedder.embed_batch(["hello"], mode="local", expected_dim=1024)
     local_mock.assert_awaited_once()
+    local_mock.assert_awaited_once_with(["hello"], 1024)
     assert len(vecs) == 1 and len(vecs[0]) == 1024
+
+
+@pytest.mark.asyncio
+async def test_embed_query_prefixes_qwen3_queries_with_instruction():
+    captured: dict = {}
+
+    async def fake_embed_batch(texts, **kwargs):
+        captured["texts"] = texts
+        captured["kwargs"] = kwargs
+        return [[0.0] * 4]
+
+    with patch.object(embedder, "embed_batch", side_effect=fake_embed_batch) as batch_mock:
+        vec = await embedder.embed_query(
+            "Which sections discuss GraphRAG?",
+            config={
+                "embed_mode": "api",
+                "embedding_dimension": 4,
+                "embedding_model_id": "Qwen/Qwen3-Embedding-0.6B",
+                "embed_base_url": "https://example.com/v1",
+                "embed_api_key": "sk-test",
+            },
+        )
+
+    batch_mock.assert_awaited_once()
+    assert vec == [0.0] * 4
+    assert captured["texts"] == [
+        "Instruct: "
+        "Given a user question, retrieve relevant document passages, summaries, "
+        "entities, and relations that answer it\n"
+        "Query: Which sections discuss GraphRAG?"
+    ]
+    assert captured["kwargs"]["expected_model_id"] == "Qwen/Qwen3-Embedding-0.6B"
+
+
+@pytest.mark.asyncio
+async def test_embed_query_leaves_non_qwen3_queries_plain():
+    captured: dict = {}
+
+    async def fake_embed_batch(texts, **kwargs):
+        captured["texts"] = texts
+        return [[0.0] * 3]
+
+    with patch.object(embedder, "embed_batch", side_effect=fake_embed_batch):
+        await embedder.embed_query(
+            "plain query",
+            config={
+                "embed_mode": "api",
+                "embedding_dimension": 3,
+                "embedding_model_id": "BAAI/bge-base-en-v1.5",
+                "embed_base_url": "https://example.com/v1",
+                "embed_api_key": "sk-test",
+            },
+        )
+
+    assert captured["texts"] == ["plain query"]
 
 
 @pytest.mark.asyncio

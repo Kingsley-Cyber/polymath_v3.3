@@ -24,6 +24,7 @@ import hashlib
 import logging
 import os
 import re
+import unicodedata
 
 from config import get_settings
 from qdrant_client import AsyncQdrantClient
@@ -71,6 +72,66 @@ def _schema_point_id(corpus_id: str, kind: str, term: str) -> str:
     overwrites cleanly and never duplicates.
     """
     return _uuid_from_str(f"schema:{corpus_id}:{kind}:{term}")
+
+
+def _graph_key(value: str | None) -> str:
+    text = unicodedata.normalize("NFKD", str(value or "")).lower().strip()
+    text = text.replace("_", " ")
+    text = re.sub(r"[^a-z0-9_]+", "-", text)
+    return text.strip("-") or "unknown"
+
+
+def entity_embedding_id(corpus_id: str, canonical_name: str) -> str:
+    """Stable Qdrant/Neo4j bridge ID for one corpus-scoped entity vector."""
+    return f"entity:{_graph_key(corpus_id)}:{_graph_key(canonical_name)}"
+
+
+def relation_embedding_id(
+    corpus_id: str,
+    doc_id: str,
+    chunk_id: str,
+    subject: str,
+    predicate: str,
+    object_name: str,
+) -> str:
+    """Stable Qdrant/Neo4j bridge ID for one sourced relation vector."""
+    return (
+        f"relation:{_graph_key(corpus_id)}:{_graph_key(doc_id)}:{_graph_key(chunk_id)}:"
+        f"{_graph_key(subject)}:{_graph_key(predicate)}:{_graph_key(object_name)}"
+    )
+
+
+def build_entity_vector_text(entity_payload: dict) -> str:
+    """Plain document-side text used for entity embeddings."""
+    aliases = entity_payload.get("aliases") or []
+    if isinstance(aliases, str):
+        aliases = [aliases]
+    aliases_text = ", ".join(str(a).strip() for a in aliases if str(a).strip())
+    parts = [
+        f"Entity: {entity_payload.get('display_name') or entity_payload.get('canonical_name') or ''}",
+        f"Canonical name: {entity_payload.get('canonical_name') or ''}",
+        f"Type: {entity_payload.get('type') or entity_payload.get('entity_type') or ''}",
+    ]
+    if aliases_text:
+        parts.append(f"Aliases: {aliases_text}")
+    description = str(entity_payload.get("description") or "").strip()
+    if description:
+        parts.append(f"Description: {description}")
+    return "\n".join(part for part in parts if part.split(":", 1)[-1].strip())
+
+
+def build_relation_vector_text(relation_payload: dict) -> str:
+    """Plain document-side text used for relation embeddings."""
+    parts = [
+        f"Subject: {relation_payload.get('subject') or ''}",
+        f"Predicate: {relation_payload.get('predicate') or ''}",
+        f"Object: {relation_payload.get('object') or ''}",
+        f"Predicate family: {relation_payload.get('predicate_family') or relation_payload.get('relation_family') or ''}",
+    ]
+    source_sentence = str(relation_payload.get("source_sentence") or "").strip()
+    if source_sentence:
+        parts.append(f"Source sentence: {source_sentence}")
+    return "\n".join(part for part in parts if part.split(":", 1)[-1].strip())
 
 
 _VALID_KINDS = ("naive", "hrag", "graph", "schemas")
@@ -637,6 +698,112 @@ async def upsert_summaries(
             "Upserted %d summary points → %s (named=%s sparse=%s)",
             len(points), name, has_named, has_sparse,
         )
+
+
+def _first_string(values) -> str:
+    if isinstance(values, str):
+        return values
+    if isinstance(values, list):
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text
+    return ""
+
+
+async def upsert_graph_entities(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    entity_payloads: list[dict],
+    vectors: list[list[float]],
+) -> int:
+    """Upsert entity vectors into the per-corpus graph collection."""
+    if not entity_payloads or not vectors:
+        return 0
+    assert len(entity_payloads) == len(vectors), "entity payload/vector length mismatch"
+
+    name = _col_for_corpus(corpus_id, "graph")
+    await _assert_collection_owner(client, name, corpus_id)
+    has_named, has_sparse = await _collection_layout(client, name)
+
+    points: list[PointStruct] = []
+    for payload, vector in zip(entity_payloads, vectors):
+        out = dict(payload)
+        canonical = str(out.get("canonical_name") or out.get("display_name") or "").strip()
+        out["embedding_id"] = out.get("embedding_id") or entity_embedding_id(
+            corpus_id, canonical
+        )
+        out["graph_kind"] = "entity"
+        out["chunk_type"] = "entity"
+        out["corpus_id"] = corpus_id
+        out["doc_id"] = out.get("doc_id") or _first_string(out.get("doc_ids"))
+        out["chunk_id"] = out.get("chunk_id") or _first_string(out.get("chunk_ids")) or out["embedding_id"]
+        out["chunk_text"] = build_entity_vector_text(out)[:512]
+        points.append(
+            PointStruct(
+                id=_uuid_from_str(out["embedding_id"]),
+                vector=_build_vector(
+                    dense=vector,
+                    sparse=None,
+                    has_named_dense=has_named,
+                    has_sparse=has_sparse,
+                ),
+                payload=out,
+            )
+        )
+
+    await _upsert_points_chunked(client, collection_name=name, points=points)
+    logger.debug("Upserted %d graph entity points → %s", len(points), name)
+    return len(points)
+
+
+async def upsert_graph_relations(
+    client: AsyncQdrantClient,
+    corpus_id: str,
+    relation_payloads: list[dict],
+    vectors: list[list[float]],
+) -> int:
+    """Upsert relation vectors into the per-corpus graph collection."""
+    if not relation_payloads or not vectors:
+        return 0
+    assert len(relation_payloads) == len(vectors), "relation payload/vector length mismatch"
+
+    name = _col_for_corpus(corpus_id, "graph")
+    await _assert_collection_owner(client, name, corpus_id)
+    has_named, has_sparse = await _collection_layout(client, name)
+
+    points: list[PointStruct] = []
+    for payload, vector in zip(relation_payloads, vectors):
+        out = dict(payload)
+        out["embedding_id"] = out.get("embedding_id") or relation_embedding_id(
+            corpus_id,
+            str(out.get("doc_id") or ""),
+            str(out.get("chunk_id") or ""),
+            str(out.get("subject") or ""),
+            str(out.get("predicate") or ""),
+            str(out.get("object") or ""),
+        )
+        out["relation_id"] = out.get("relation_id") or out["embedding_id"]
+        out["graph_kind"] = "relation"
+        out["chunk_type"] = "relation"
+        out["corpus_id"] = corpus_id
+        out["chunk_text"] = build_relation_vector_text(out)[:512]
+        points.append(
+            PointStruct(
+                id=_uuid_from_str(out["embedding_id"]),
+                vector=_build_vector(
+                    dense=vector,
+                    sparse=None,
+                    has_named_dense=has_named,
+                    has_sparse=has_sparse,
+                ),
+                payload=out,
+            )
+        )
+
+    await _upsert_points_chunked(client, collection_name=name, points=points)
+    logger.debug("Upserted %d graph relation points → %s", len(points), name)
+    return len(points)
 
 
 # `delete_points_by_corpus` was removed in Phase 7.5 — per-corpus collections

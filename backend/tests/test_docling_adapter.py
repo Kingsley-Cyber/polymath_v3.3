@@ -124,6 +124,50 @@ def test_fast_pdf_text_gate_rejects_sparse_scanned_pdf(adapter):
     assert not adapter._fast_pdf_text_is_usable(result)
 
 
+def test_markdown_sections_ignore_headings_inside_fenced_code(adapter):
+    md = (
+        "# Real Section\n\n"
+        "Intro paragraph.\n\n"
+        "```python\n"
+        "# not a real heading\n"
+        "class MyModel:\n"
+        "    pass\n"
+        "```\n\n"
+        "~~~bash\n"
+        "## also not a real heading\n"
+        "echo hello\n"
+        "~~~~\n\n"
+        "## Real Child Section\n\n"
+        "Body paragraph.\n"
+    )
+
+    sections, h1_count, h2_count = adapter._markdown_sections(md)
+
+    headings = [s.text for s in sections if s.element_type == "section_heading"]
+    paragraphs = [s.text for s in sections if s.element_type == "paragraph"]
+    assert headings == ["Real Section", "Real Child Section"]
+    assert h1_count == 1
+    assert h2_count == 1
+    assert any("```python" in p and "# not a real heading" in p for p in paragraphs)
+    assert any("~~~bash" in p and "## also not a real heading" in p for p in paragraphs)
+
+
+def test_markdown_sections_unclosed_fence_does_not_leak_between_documents(adapter):
+    first_sections, first_h1, first_h2 = adapter._markdown_sections(
+        "```python\n# not a heading\n"
+    )
+    second_sections, second_h1, second_h2 = adapter._markdown_sections("# Real Heading\n")
+
+    assert [s.text for s in first_sections if s.element_type == "section_heading"] == []
+    assert first_h1 == 0
+    assert first_h2 == 0
+    assert [s.text for s in second_sections if s.element_type == "section_heading"] == [
+        "Real Heading"
+    ]
+    assert second_h1 == 1
+    assert second_h2 == 0
+
+
 @pytest.mark.asyncio
 async def test_markdown_with_headings_is_tier_a(adapter):
     """Native MD headings → tier_a, has_structure True, sections populated."""

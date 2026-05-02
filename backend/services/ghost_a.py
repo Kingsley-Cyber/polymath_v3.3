@@ -32,14 +32,20 @@ from services.llm_lane_pool import (
 logger = logging.getLogger(__name__)
 
 _SYSTEM = (
-    "You are a precise document summarizer. Produce a factual, dense summary "
-    "that preserves key terms, proper nouns, and technical language. "
-    "Do not add information not present in the passage."
+    "You create retrieval summaries for book, article, and markdown parent "
+    "chunks. Produce dense factual summaries that preserve key terms, proper "
+    "nouns, technical language, dates, claims, and section context. Do not "
+    "frame the content as a meeting or transcript. Do not add information not "
+    "present in the context."
 )
 
 _USER = (
-    "Summarize the following passage in {max_tokens} tokens or fewer.\n\n"
-    "PASSAGE:\n{text}\n\nSUMMARY:"
+    "Use the following context to produce a dense factual parent-chunk summary "
+    "for retrieval. The context is from a book, article, or markdown document "
+    "parent chunk, not a meeting transcript. Keep it in {max_tokens} tokens "
+    "or fewer. Focus on facts, entities, relationships, dates, claims, "
+    "definitions, and terminology that would help answer later questions.\n\n"
+    "CONTEXT:\n{text}\n\nDENSE FACTUAL SUMMARY:"
 )
 
 

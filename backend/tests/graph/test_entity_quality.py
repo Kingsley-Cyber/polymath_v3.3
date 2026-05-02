@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from services.ghost_b import EntityItem, ExtractionResult
+from services.ghost_a import SummaryResult
+from services.ghost_b import EntityItem, ExtractionResult, RelationItem
 from services.graph import analytics
 from services.graph.entity_quality import (
     ENTITY_QUALITY_VERSION,
@@ -130,6 +131,113 @@ async def test_neo4j_writer_persists_entity_quality_fields():
     assert row["eligible_for_topic_label"] is False
     assert row["eligible_for_synthesis"] is False
     assert row["entity_quality_version"] == ENTITY_QUALITY_VERSION
+
+
+@pytest.mark.asyncio
+async def test_neo4j_writer_persists_graphrag_bridge_fields():
+    class _Session:
+        def __init__(self):
+            self.calls = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def run(self, query, **kwargs):
+            self.calls.append((query, kwargs))
+            return MagicMock()
+
+    class _Driver:
+        def __init__(self, session):
+            self._session = session
+
+        def session(self):
+            return self._session
+
+    session = _Session()
+    result = ExtractionResult(
+        schema_version="polymath.extract.v2",
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        entities=[
+            EntityItem(
+                canonical_name="OpenAI",
+                surface_form="OpenAI",
+                entity_type="Organization",
+                confidence=0.95,
+                aliases=["Open AI"],
+                description="AI research organization.",
+            ),
+            EntityItem(
+                canonical_name="Sam Altman",
+                surface_form="Sam Altman",
+                entity_type="Person",
+                confidence=0.9,
+            ),
+        ],
+        relations=[
+            RelationItem(
+                subject="OpenAI",
+                predicate="created_by",
+                object="Sam Altman",
+                object_kind="entity",
+                confidence=0.88,
+                predicate_family="Provenance",
+                qualifier="co-founder",
+                source_sentence="OpenAI was co-founded by Sam Altman.",
+                extraction_model="LFM2-1.2B-Extract",
+                repaired=False,
+            )
+        ],
+    )
+
+    await write_document_graph(
+        driver=_Driver(session),
+        doc_id="d1",
+        corpus_id="corp1",
+        extraction_results=[result],
+        all_chunk_ids=["c1"],
+        summaries=[
+            SummaryResult(
+                parent_id="p1",
+                doc_id="d1",
+                corpus_id="corp1",
+                source_tier="tier_a",
+                summary="Dense parent summary.",
+            )
+        ],
+    )
+
+    assert any("HAS_SUMMARY" in query for query, _ in session.calls)
+    entity_call = next(
+        kwargs
+        for query, kwargs in session.calls
+        if "MENTIONED_IN" in query and kwargs.get("rows")
+    )
+    openai_row = next(row for row in entity_call["rows"] if row["canonical_name"] == "openai")
+    assert openai_row["aliases"] == ["Open AI"]
+    assert openai_row["description"] == "AI research organization."
+    assert openai_row["embedding_id"].startswith("entity:corp1:openai")
+    assert openai_row["doc_ids"] == ["d1"]
+    assert openai_row["chunk_ids"] == ["c1"]
+
+    relation_call = next(
+        kwargs
+        for query, kwargs in session.calls
+        if "RELATES_TO" in query and "predicate_family" in query and kwargs.get("rows")
+    )
+    relation_row = relation_call["rows"][0]
+    assert relation_row["predicate_family"] == "Provenance"
+    assert relation_row["qualifier"] == "co-founder"
+    assert relation_row["source_sentence"] == "OpenAI was co-founded by Sam Altman."
+    assert relation_row["chunk_id"] == "c1"
+    assert relation_row["doc_id"] == "d1"
+    assert relation_row["extraction_model"] == "LFM2-1.2B-Extract"
+    assert relation_row["repaired"] is False
+    assert relation_row["embedding_id"].startswith("relation:corp1:d1:c1:")
 
 
 def test_concept_community_label_ignores_ineligible_noisy_node():

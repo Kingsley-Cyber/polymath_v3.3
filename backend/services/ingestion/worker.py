@@ -1617,21 +1617,13 @@ async def _embed_batch_for_doc(
     if not all_texts:
         return {}, {}
 
-    # Decrypt embed_api_key once per ingest; embed_batch sees plaintext only.
-    raw_key = getattr(config, "embed_api_key", None)
-    plaintext_key = _decrypt_api_key(raw_key) if raw_key else None
-    if raw_key and plaintext_key is None:
-        # Value stored but couldn't decrypt — most likely plaintext passed
-        # through a migration shim. Pass as-is rather than failing the embed.
-        plaintext_key = raw_key
-
     all_vectors = await embed_batch(
         all_texts,
         mode=getattr(config, "embed_mode", "local"),
         expected_dim=getattr(config, "embedding_dimension", 1024),
         expected_model_id=getattr(config, "embedding_model_id", None),
         base_url=getattr(config, "embed_base_url", None),
-        api_key=plaintext_key,
+        api_key=_plaintext_embed_api_key(config),
         max_concurrent=getattr(config, "embed_max_concurrent", None),
         modal_containers=getattr(config, "modal_containers", None),
         api_pool=_build_ghost_pool(getattr(config, "embedding_models", None)),
@@ -1642,6 +1634,206 @@ async def _embed_batch_for_doc(
     vec_map = {c.chunk_id: v for c, v in zip(vector_children, child_vecs)}
     summary_vec_map = {s.parent_id: v for s, v in zip(summary_list, summary_vecs)}
     return vec_map, summary_vec_map
+
+
+def _plaintext_embed_api_key(config: IngestionConfig) -> str | None:
+    # Decrypt embed_api_key once per ingest; embed_batch sees plaintext only.
+    raw_key = getattr(config, "embed_api_key", None)
+    plaintext_key = _decrypt_api_key(raw_key) if raw_key else None
+    if raw_key and plaintext_key is None:
+        # Value stored but couldn't decrypt — most likely plaintext passed
+        # through a migration shim. Pass as-is rather than failing the embed.
+        plaintext_key = raw_key
+    return plaintext_key
+
+
+def _append_unique(items: list, value) -> None:
+    if value is None:
+        return
+    text = str(value).strip()
+    if text and text not in items:
+        items.append(text)
+
+
+def _build_graph_vector_payloads(
+    *,
+    corpus_id: str,
+    ghost_b_out: list[ExtractionResult] | None,
+) -> tuple[list[dict], list[dict]]:
+    """Build Qdrant graph-vector payloads from the same extraction structs Neo4j uses."""
+    if not ghost_b_out:
+        return [], []
+
+    from services.ghost_b import normalize_relation_predicate_alias
+    from services.graph.neo4j_writer import (
+        canonicalize_entity_name,
+        entity_id_from_name,
+        relation_family_for_predicate,
+        resolve_primary_entity_type,
+    )
+
+    entity_groups: dict[str, dict] = {}
+    for result in ghost_b_out:
+        for entity in result.entities:
+            canonical = canonicalize_entity_name(entity.canonical_name)
+            if not canonical:
+                continue
+            group = entity_groups.setdefault(
+                canonical,
+                {
+                    "canonical_name": canonical,
+                    "display_name": entity.surface_form or entity.canonical_name,
+                    "observed_entity_types": [],
+                    "aliases": [],
+                    "descriptions": [],
+                    "doc_ids": [],
+                    "chunk_ids": [],
+                    "confidence": 0.0,
+                },
+            )
+            _append_unique(group["observed_entity_types"], entity.entity_type)
+            for alias in getattr(entity, "aliases", []) or []:
+                _append_unique(group["aliases"], alias)
+            _append_unique(group["descriptions"], getattr(entity, "description", ""))
+            _append_unique(group["doc_ids"], result.doc_id)
+            _append_unique(group["chunk_ids"], result.chunk_id)
+            confidence = float(getattr(entity, "confidence", 0.0) or 0.0)
+            if confidence > float(group["confidence"] or 0.0):
+                group["confidence"] = confidence
+                group["display_name"] = entity.surface_form or entity.canonical_name
+
+    entity_payloads: list[dict] = []
+    for canonical, group in entity_groups.items():
+        observed_types = list(group["observed_entity_types"])
+        primary_type = resolve_primary_entity_type(canonical, observed_types)
+        embedding_id = qdrant_writer.entity_embedding_id(corpus_id, canonical)
+        entity_payloads.append(
+            {
+                "embedding_id": embedding_id,
+                "entity_id": entity_id_from_name(canonical, primary_type),
+                "canonical_name": canonical,
+                "display_name": group["display_name"],
+                "type": primary_type,
+                "entity_type": primary_type,
+                "aliases": group["aliases"],
+                "description": max(group["descriptions"], key=len)
+                if group["descriptions"]
+                else "",
+                "doc_ids": group["doc_ids"],
+                "chunk_ids": group["chunk_ids"],
+                "confidence": group["confidence"],
+            }
+        )
+
+    relation_payloads: list[dict] = []
+    for result in ghost_b_out:
+        for relation in result.relations:
+            if relation.object_kind != "entity":
+                continue
+            source_predicate = relation.source_predicate or relation.predicate
+            normalized_source_predicate, reverse_relation = normalize_relation_predicate_alias(
+                source_predicate
+            )
+            subject_name = relation.object if reverse_relation else relation.subject
+            object_name = relation.subject if reverse_relation else relation.object
+            subject_canonical = canonicalize_entity_name(subject_name)
+            object_canonical = canonicalize_entity_name(object_name)
+            if not subject_canonical or not object_canonical:
+                continue
+            predicate = relation.predicate
+            predicate_family = (
+                getattr(relation, "predicate_family", None)
+                or relation_family_for_predicate(predicate)
+            )
+            source_sentence = (
+                getattr(relation, "source_sentence", "")
+                or relation.evidence_phrase
+                or relation.atomic_fact
+                or ""
+            )
+            embedding_predicate = normalized_source_predicate or predicate
+            embedding_id = qdrant_writer.relation_embedding_id(
+                corpus_id,
+                result.doc_id,
+                result.chunk_id,
+                subject_canonical,
+                embedding_predicate,
+                object_canonical,
+            )
+            relation_payloads.append(
+                {
+                    "embedding_id": embedding_id,
+                    "relation_id": embedding_id,
+                    "subject": subject_canonical,
+                    "predicate": predicate,
+                    "predicate_family": predicate_family,
+                    "object": object_canonical,
+                    "qualifier": getattr(relation, "qualifier", "") or "",
+                    "confidence": float(getattr(relation, "confidence", 0.0) or 0.0),
+                    "source_sentence": source_sentence,
+                    "chunk_id": result.chunk_id,
+                    "doc_id": result.doc_id,
+                    "extraction_model": getattr(relation, "extraction_model", "") or "",
+                    "repaired": bool(getattr(relation, "repaired", False)),
+                }
+            )
+
+    return entity_payloads, relation_payloads
+
+
+async def _write_graph_vectors_for_doc(
+    *,
+    qdrant_client: AsyncQdrantClient,
+    corpus_id: str,
+    ghost_b_out: list[ExtractionResult] | None,
+    config: IngestionConfig,
+) -> None:
+    """Embed and write entity/relation vectors into the graph collection."""
+    if "graph" not in config.target_qdrant_collections:
+        return
+    entity_payloads, relation_payloads = _build_graph_vector_payloads(
+        corpus_id=corpus_id,
+        ghost_b_out=ghost_b_out,
+    )
+    texts = [
+        *[qdrant_writer.build_entity_vector_text(payload) for payload in entity_payloads],
+        *[qdrant_writer.build_relation_vector_text(payload) for payload in relation_payloads],
+    ]
+    if not texts:
+        return
+
+    vectors = await embed_batch(
+        texts,
+        mode=getattr(config, "embed_mode", "local"),
+        expected_dim=getattr(config, "embedding_dimension", 1024),
+        expected_model_id=getattr(config, "embedding_model_id", None),
+        base_url=getattr(config, "embed_base_url", None),
+        api_key=_plaintext_embed_api_key(config),
+        max_concurrent=getattr(config, "embed_max_concurrent", None),
+        modal_containers=getattr(config, "modal_containers", None),
+        api_pool=_build_ghost_pool(getattr(config, "embedding_models", None)),
+    )
+    split = len(entity_payloads)
+    entity_vectors = vectors[:split]
+    relation_vectors = vectors[split:]
+    entity_count = await qdrant_writer.upsert_graph_entities(
+        qdrant_client,
+        corpus_id,
+        entity_payloads,
+        entity_vectors,
+    )
+    relation_count = await qdrant_writer.upsert_graph_relations(
+        qdrant_client,
+        corpus_id,
+        relation_payloads,
+        relation_vectors,
+    )
+    logger.info(
+        "phase=graph_vectors corpus=%s entities=%d relations=%d",
+        corpus_id[:8],
+        entity_count,
+        relation_count,
+    )
 
 
 async def _write_qdrant_for_doc(
@@ -1756,6 +1948,7 @@ async def _write_neo4j_for_doc(
     file_id: str,
     children,
     ghost_b_out: list[ExtractionResult] | None,
+    summaries: list[SummaryResult] | None = None,
 ) -> None:
     """Delegate to neo4j_writer.write_document_graph with Ghost B output."""
     from services.graph.neo4j_writer import write_document_graph
@@ -1768,6 +1961,7 @@ async def _write_neo4j_for_doc(
         user_id=user_id,
         file_id=file_id,
         all_chunk_ids=[c.chunk_id for c in children],
+        summaries=summaries,
     )
 
 
@@ -2470,6 +2664,12 @@ async def run_ingest_job(
                 if ghost_b_out is None:
                     raise GhostBFailure("Ghost B graph enrichment returned no extraction output")
 
+                await _write_graph_vectors_for_doc(
+                    qdrant_client=qdrant_client,
+                    corpus_id=corpus_id,
+                    ghost_b_out=ghost_b_out,
+                    config=ingestion_config,
+                )
                 await _write_neo4j_for_doc(
                     neo4j_driver=neo4j_driver,
                     doc_id=doc_id,
@@ -2478,6 +2678,7 @@ async def run_ingest_job(
                     file_id=file_id,
                     children=children,
                     ghost_b_out=ghost_b_out,
+                    summaries=summaries,
                 )
                 try:
                     from services.graph.entity_quality import mark_graph_metrics_stale
