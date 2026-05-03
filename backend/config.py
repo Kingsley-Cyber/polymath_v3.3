@@ -391,7 +391,7 @@ class Settings(BaseSettings):
         description="Max concurrent LiteLLM calls for entity extraction (GHOST B)",
     )
     EXTRACTION_MAX_TOKENS: int = Field(
-        default=4096,
+        default=8192,
         ge=256,
         le=8192,
         description="Maximum completion tokens for each entity extraction call (GHOST B)",

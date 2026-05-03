@@ -25,13 +25,15 @@ from typing import Any, Awaitable, Callable
 from config import get_settings
 from models.schemas import IngestionConfig, IngestJobResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from services.ingestion.file_intake import normalize_upload_filename
 
 logger = logging.getLogger(__name__)
 
-TERMINAL_BATCH_STATUSES = {"completed", "failed", "cancelled"}
+TERMINAL_BATCH_STATUSES = {"completed", "completed_with_errors", "failed", "cancelled"}
 TERMINAL_ITEM_STATUSES = {
     "graph_ready",
     "graph_partial",
+    "graph_failed_token_budget",
     "needs_backfill",
     "vector_ready",
     "failed",
@@ -170,11 +172,55 @@ def item_status_from_write_state(write_state: Any) -> str:
         return "graph_ready"
     if graph_status == "graph_partial":
         return "graph_partial"
+    if graph_status == "graph_failed_token_budget":
+        return "graph_failed_token_budget"
     if graph_status in {"needs_backfill", "graph_retry_scheduled"}:
         return "needs_backfill"
     if getattr(write_state, "vector_ready", False) or getattr(write_state, "qdrant_written", False):
         return "vector_ready"
     return "failed"
+
+
+def _vector_ready_query(batch_id: str) -> dict[str, Any]:
+    return {
+        "batch_id": batch_id,
+        "$or": [
+            {"write_state.vector_ready": True},
+            {"write_state.qdrant_written": True},
+            {"status": "vector_ready"},
+            {"status": "graph_ready"},
+            {"status": "graph_partial"},
+            {"status": "needs_backfill"},
+            {"status": "graph_failed_token_budget"},
+        ],
+    }
+
+
+def _terminal_batch_status(
+    *, total_files: int, failed: int, needs_backfill: int, graph_partial: int, graph_failed: int = 0
+) -> str:
+    if failed and failed == total_files:
+        return "failed"
+    if failed or needs_backfill or graph_partial or graph_failed:
+        return "completed_with_errors"
+    return "completed"
+
+
+def _batch_count_fields(counts: Counter, *, vector_ready: int) -> dict[str, int]:
+    total = sum(counts.values())
+    processing = sum(counts.get(status, 0) for status in RUNNING_ITEM_STATUSES)
+    return {
+        "total_files": total,
+        "queued_count": counts.get("queued", 0),
+        "processing_count": processing,
+        "vector_ready_count": vector_ready,
+        "graph_ready_count": counts.get("graph_ready", 0),
+        "graph_partial_count": counts.get("graph_partial", 0),
+        "failed_count": counts.get("failed", 0),
+        "cancelled_count": counts.get("cancelled", 0),
+        "needs_backfill_count": counts.get("needs_backfill", 0),
+        "graph_failed_count": counts.get("graph_failed_token_budget", 0),
+    }
 
 
 class BatchIngestionManager:
@@ -379,7 +425,9 @@ class BatchIngestionManager:
         corpus_id: str,
         user_id: str,
     ) -> dict[str, Any]:
-        filename = _safe_filename(getattr(upload, "filename", None) or "upload")
+        mime = getattr(upload, "content_type", None) or ""
+        intake = normalize_upload_filename(getattr(upload, "filename", None) or "upload", mime)
+        filename = _safe_filename(intake.filename)
         upload_id = str(uuid.uuid4())
         tmp_path = batch_dir / f"{upload_id}.tmp"
         hasher = hashlib.sha256()
@@ -409,10 +457,12 @@ class BatchIngestionManager:
             "corpus_id": corpus_id,
             "user_id": user_id,
             "size_bytes": size,
-            "mime": getattr(upload, "content_type", None) or "",
+            "mime": intake.mime or mime,
             "content_hash": content_hash,
             "spool_path": str(final_path.resolve()),
             "status": "queued",
+            "intake_normalized": intake.normalized,
+            "intake_warning": intake.warning,
             "attempts": 0,
             "error": None,
             "created_at": _now(),
@@ -567,17 +617,20 @@ class BatchIngestionManager:
             )
             if claimed.modified_count != 1:
                 return
+            await self._refresh_batch_counts(str(batch["batch_id"]))
             if not path.exists():
                 raise FileNotFoundError(f"Spooled file missing: {path}")
             data = await asyncio.to_thread(path.read_bytes)
 
-            def _on_doc_id(doc_id: str) -> None:
-                asyncio.create_task(
-                    self._db["ingestion_batch_items"].update_one(
-                        {"upload_id": upload_id},
-                        {"$set": {"doc_id": doc_id, "status": "vectorizing", "updated_at": _now()}},
-                    )
+            async def _mark_vectorizing(doc_id: str) -> None:
+                await self._db["ingestion_batch_items"].update_one(
+                    {"upload_id": upload_id},
+                    {"$set": {"doc_id": doc_id, "status": "vectorizing", "updated_at": _now()}},
                 )
+                await self._refresh_batch_counts(str(batch["batch_id"]))
+
+            def _on_doc_id(doc_id: str) -> None:
+                asyncio.create_task(_mark_vectorizing(doc_id))
 
             result = await self._ingest(
                 data=data,
@@ -625,6 +678,7 @@ class BatchIngestionManager:
             )
         finally:
             self._active_items.discard(upload_id)
+            await self._refresh_batch_counts(str(batch["batch_id"]))
 
     def _safe_cleanup_spool(self, path: Path) -> None:
         try:
@@ -646,12 +700,22 @@ class BatchIngestionManager:
         if not batch:
             return
         failed = await self._db["ingestion_batch_items"].count_documents({"batch_id": batch_id, "status": "failed"})
-        terminal = "failed" if failed and failed == int(batch.get("total_files") or 0) else "completed"
+        needs_backfill = await self._db["ingestion_batch_items"].count_documents({"batch_id": batch_id, "status": "needs_backfill"})
+        graph_partial = await self._db["ingestion_batch_items"].count_documents({"batch_id": batch_id, "status": "graph_partial"})
+        graph_failed = await self._db["ingestion_batch_items"].count_documents({"batch_id": batch_id, "status": "graph_failed_token_budget"})
+        total_files = int(batch.get("total_files") or 0)
+        terminal = _terminal_batch_status(
+            total_files=total_files,
+            failed=failed,
+            needs_backfill=needs_backfill,
+            graph_partial=graph_partial,
+            graph_failed=graph_failed,
+        )
         await self._db["ingestion_batches"].update_one(
             {"batch_id": batch_id},
             {"$set": {"status": terminal, "current_phase": terminal, "finished_at": _now(), "updated_at": _now()}},
         )
-        if self._warm_graph_cache is not None and terminal == "completed":
+        if self._warm_graph_cache is not None and terminal in {"completed", "completed_with_errors"}:
             try:
                 await self._warm_graph_cache(corpus_id=batch["corpus_id"], user_id=batch["user_id"])
             except Exception as exc:
@@ -668,21 +732,15 @@ class BatchIngestionManager:
             ]
         ):
             counts[str(row["_id"])] = int(row["count"])
-        total = sum(counts.values())
-        processing = sum(counts.get(status, 0) for status in RUNNING_ITEM_STATUSES)
+        vector_ready = await self._db["ingestion_batch_items"].count_documents(
+            _vector_ready_query(batch_id)
+        )
+        fields = _batch_count_fields(counts, vector_ready=vector_ready)
         await self._db["ingestion_batches"].update_one(
             {"batch_id": batch_id},
             {
                 "$set": {
-                    "total_files": total,
-                    "queued_count": counts.get("queued", 0),
-                    "processing_count": processing,
-                    "vector_ready_count": counts.get("vector_ready", 0),
-                    "graph_ready_count": counts.get("graph_ready", 0),
-                    "graph_partial_count": counts.get("graph_partial", 0),
-                    "failed_count": counts.get("failed", 0),
-                    "cancelled_count": counts.get("cancelled", 0),
-                    "needs_backfill_count": counts.get("needs_backfill", 0),
+                    **fields,
                     "updated_at": _now(),
                 }
             },

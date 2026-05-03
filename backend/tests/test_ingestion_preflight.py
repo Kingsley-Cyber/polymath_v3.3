@@ -20,6 +20,15 @@ class _Response:
     def raise_for_status(self):
         return None
 
+    def json(self):
+        return {
+            "data": [
+                {"id": "lfm2-extract"},
+                {"id": "lfm2-rag"},
+                {"id": "gemma4-e4b"},
+            ]
+        }
+
 
 class _LocalClientOk:
     def __init__(self, *args, **kwargs):
@@ -31,7 +40,7 @@ class _LocalClientOk:
     async def __aexit__(self, *args):
         return False
 
-    async def get(self, _url):
+    async def get(self, _url, **_kwargs):
         return _Response()
 
 
@@ -126,3 +135,67 @@ def test_graph_preflight_is_noop_for_llm_only_graph():
     assert result["engine"] == "llm"
     assert result["local_graph_required"] is False
     assert result["llm_graph_calls_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_preflight_rejects_bare_local_vllm_ingestion_model(monkeypatch):
+    monkeypatch.setattr(
+        preflight,
+        "get_settings",
+        lambda: SimpleNamespace(
+            LOCAL_EMBEDDER_ENABLED=True,
+            EMBEDDER_URL="http://embedder:80",
+            SILICONFLOW_EMBEDDER_URL="",
+            SILICONFLOW_API_KEY="",
+            MODAL_ENABLED=False,
+            MODAL_EMBEDDER_URL="",
+        ),
+    )
+    monkeypatch.setattr(preflight.httpx, "AsyncClient", _LocalClientOk)
+
+    result = await preflight.run_ingest_preflight(
+        config=IngestionConfig(
+            embed_mode="local",
+            use_neo4j=True,
+            models_linked=False,
+            extraction_models=[
+                {
+                    "provider_preset": "vllm-local",
+                    "model": "lfm2-extract",
+                    "base_url": "http://vllm-extract:8000/v1",
+                    "api_key": "local",
+                    "max_concurrent": 1,
+                    "extra_params": {},
+                }
+            ],
+        ),
+        qdrant_client=_QdrantOk(),
+    )
+
+    assert result["ok"] is False
+    assert "must include the LiteLLM provider prefix" in result["errors"][0]
+
+
+@pytest.mark.asyncio
+async def test_preflight_accepts_prefixed_local_vllm_ingestion_model(monkeypatch):
+    monkeypatch.setattr(
+        preflight,
+        "get_settings",
+        lambda: SimpleNamespace(
+            LOCAL_EMBEDDER_ENABLED=True,
+            EMBEDDER_URL="http://embedder:80",
+            SILICONFLOW_EMBEDDER_URL="",
+            SILICONFLOW_API_KEY="",
+            MODAL_ENABLED=False,
+            MODAL_EMBEDDER_URL="",
+        ),
+    )
+    monkeypatch.setattr(preflight.httpx, "AsyncClient", _LocalClientOk)
+
+    result = await preflight.run_ingest_preflight(
+        config=IngestionConfig(embed_mode="local", use_neo4j=True),
+        qdrant_client=_QdrantOk(),
+    )
+
+    assert result["ok"] is True
+    assert result["llm_models"]["checks"]["extraction"]["ok"] is True

@@ -161,11 +161,16 @@ async def enqueue_relation_repairs(
     ops = []
     for doc in docs:
         repair_id = doc["repair_id"]
+        insert_doc = {
+            key: value
+            for key, value in doc.items()
+            if key not in {"max_attempts", "updated_at"}
+        }
         ops.append(
             UpdateOne(
                 {"repair_id": repair_id},
                 {
-                    "$setOnInsert": doc,
+                    "$setOnInsert": insert_doc,
                     "$set": {
                         "updated_at": now,
                         "max_attempts": doc["max_attempts"],

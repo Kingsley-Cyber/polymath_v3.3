@@ -98,6 +98,70 @@ function applyPresetToConfig(
   return { ...cfg, preset, ...map };
 }
 
+function localPipelinePatch(includeStructural: boolean): Partial<IngestionConfig> {
+  return {
+    embedding_model: DEFAULT_INGESTION_CONFIG.embedding_model,
+    embedding_dimension: DEFAULT_INGESTION_CONFIG.embedding_dimension,
+    embedding_model_id: DEFAULT_INGESTION_CONFIG.embedding_model_id,
+    embed_mode: "local",
+    embed_base_url: null,
+    embed_api_key: null,
+    embed_max_concurrent: null,
+    embedding_models: DEFAULT_INGESTION_CONFIG.embedding_models,
+    modal_containers: null,
+    models_linked: false,
+    graph_extraction_engine: "llm",
+    llm_fallback_enabled: false,
+    llm_fallback_max_percent: 0,
+    summary_models: DEFAULT_INGESTION_CONFIG.summary_models,
+    extraction_models: DEFAULT_INGESTION_CONFIG.extraction_models,
+    extraction_repair_models: DEFAULT_INGESTION_CONFIG.extraction_repair_models,
+    entity_confidence_threshold:
+      DEFAULT_INGESTION_CONFIG.entity_confidence_threshold,
+    deferred_graph_repair_enabled:
+      DEFAULT_INGESTION_CONFIG.deferred_graph_repair_enabled,
+    graph_repair_max_attempts:
+      DEFAULT_INGESTION_CONFIG.graph_repair_max_attempts,
+    ...(includeStructural
+      ? {
+          preset: DEFAULT_INGESTION_CONFIG.preset,
+          use_neo4j: DEFAULT_INGESTION_CONFIG.use_neo4j,
+          chunk_summarization: DEFAULT_INGESTION_CONFIG.chunk_summarization,
+          target_qdrant_collections:
+            DEFAULT_INGESTION_CONFIG.target_qdrant_collections,
+        }
+      : {}),
+  };
+}
+
+function isLocalPipelineSelected(
+  config: IngestionConfig,
+  includeStructural: boolean,
+) {
+  const summaryModel = config.summary_models?.[0]?.model;
+  const extractionModel = config.extraction_models?.[0]?.model;
+  const repairModel = config.extraction_repair_models?.[0]?.model;
+  const structuralMatches =
+    !includeStructural ||
+    (config.use_neo4j === DEFAULT_INGESTION_CONFIG.use_neo4j &&
+      config.chunk_summarization ===
+        DEFAULT_INGESTION_CONFIG.chunk_summarization &&
+      config.target_qdrant_collections.join(",") ===
+        DEFAULT_INGESTION_CONFIG.target_qdrant_collections.join(","));
+
+  return (
+    structuralMatches &&
+    (config.embed_mode ?? "local") === "local" &&
+    config.models_linked === false &&
+    (config.graph_extraction_engine ?? "llm") === "llm" &&
+    summaryModel === DEFAULT_INGESTION_CONFIG.summary_models[0]?.model &&
+    extractionModel === DEFAULT_INGESTION_CONFIG.extraction_models[0]?.model &&
+    repairModel === DEFAULT_INGESTION_CONFIG.extraction_repair_models[0]?.model &&
+    (config.deferred_graph_repair_enabled ?? true) ===
+      DEFAULT_INGESTION_CONFIG.deferred_graph_repair_enabled
+  );
+}
+
 interface PresetSelectorProps {
   config: IngestionConfig;
   onChange: (next: IngestionConfig) => void;
@@ -691,6 +755,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                 setNewConfig((prev) => ({ ...prev, ...patch }))
               }
               editing={true}
+              includeStructuralLocalDefaults={true}
             />
 
             {/* Confidence threshold sits on its own because it's GHOST-B-specific
@@ -1010,6 +1075,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                               )
                             }
                             editing={true}
+                            includeStructuralLocalDefaults={false}
                           />
 
                           <div className="grid grid-cols-3 gap-1.5">
@@ -1146,6 +1212,29 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                               </span>
                             </span>
                             <span className="text-content-secondary">
+                              deferred_repair:{" "}
+                              <span
+                                className={
+                                  (corpus.default_ingestion_config
+                                    .deferred_graph_repair_enabled ?? true)
+                                    ? "text-accent-main"
+                                    : "text-content-tertiary"
+                                }
+                              >
+                                {String(
+                                  corpus.default_ingestion_config
+                                    .deferred_graph_repair_enabled ?? true,
+                                )}
+                              </span>
+                            </span>
+                            <span className="text-content-secondary">
+                              repair_attempts:{" "}
+                              <span className="text-accent-secondary">
+                                {corpus.default_ingestion_config
+                                  .graph_repair_max_attempts ?? 3}
+                              </span>
+                            </span>
+                            <span className="text-content-secondary">
                               targets:{" "}
                               <span className="text-accent-secondary">
                                 {corpus.default_ingestion_config.target_qdrant_collections.join(
@@ -1183,99 +1272,70 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
 }
 
 // ============================================================================
-// IngestionModelsSection — multi-model chip pools for GHOST A / GHOST B
+// IngestionModelsSection — simple pipeline selector for corpus-level defaults
 // ============================================================================
-//
-// Renders two IngestionModelPool blocks (Summary / Extraction). Each chip is
-// a ModelProfileRef with its own base_url / api_key / max_concurrent. When
-// `models_linked` is true, the Extraction pool is rendered read-only and
-// mirrors the Summary pool's chips (since the worker reuses summary_models
-// for GHOST B in that mode).
 
 function IngestionModelsSection({
   config,
   onPatch,
   editing,
+  includeStructuralLocalDefaults = false,
 }: {
   config: IngestionConfig;
   onPatch: (patch: Partial<IngestionConfig>) => void;
   editing: boolean;
+  includeStructuralLocalDefaults?: boolean;
 }) {
-  const linked = config.models_linked !== false;
-  const summaryPool = config.summary_models ?? [];
-  const extractionPool = linked ? summaryPool : (config.extraction_models ?? []);
-  const repairPool = config.extraction_repair_models ?? [];
+  const selected = isLocalPipelineSelected(
+    config,
+    includeStructuralLocalDefaults,
+  );
 
   const applyLocalIngestionStack = () => {
-    onPatch({
-      models_linked: false,
-      graph_extraction_engine: "llm",
-      summary_models: DEFAULT_INGESTION_CONFIG.summary_models,
-      extraction_models: DEFAULT_INGESTION_CONFIG.extraction_models,
-      extraction_repair_models: DEFAULT_INGESTION_CONFIG.extraction_repair_models,
-    });
+    onPatch(localPipelinePatch(includeStructuralLocalDefaults));
   };
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
+      <div>
         <div className="text-[12px] font-bold tracking-widest text-content-tertiary uppercase">
-          Ingestion Models
+          Ingestion Pipeline
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={applyLocalIngestionStack}
-            disabled={!editing}
-            className="text-[10px] px-2 py-1 rounded border border-accent-main/50 text-accent-main hover:bg-accent-main/10 disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Use local vLLM LFM2 extraction, LFM2-RAG document summaries, and Gemma repair."
-          >
-            Local LFM Stack
-          </button>
-          <label
-            className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider cursor-pointer"
-            title="ON = Extraction reuses the Summary pool. OFF = two independent pools."
-          >
-            <input
-              type="checkbox"
-              checked={linked}
-              onChange={(e) => onPatch({ models_linked: e.target.checked })}
-              className="accent-accent-main"
-            />
-            Reuse Summary pool for Extraction
-          </label>
+        <div className="text-[9px] text-content-tertiary/70 leading-relaxed">
+          Pick the pipeline; model details are configured by the app.
         </div>
       </div>
 
-      <IngestionModelPool
-        title="Summary Models (GHOST A)"
-        subtitle="Parent-chunk summarization · tasks round-robined across chips"
-        value={summaryPool}
-        onChange={(next) => onPatch({ summary_models: next })}
-        editing={editing}
-      />
-
-      <IngestionModelPool
-        title="Extraction Models (GHOST B)"
-        subtitle={
-          linked
-            ? "Using Summary pool (link toggle above)"
-            : "Entity + relation extraction · tasks round-robined across chips"
-        }
-        value={extractionPool}
-        onChange={(next) => onPatch({ extraction_models: next })}
-        editing={editing}
-        readOnly={linked}
-        readOnlyHint="Uncheck 'Reuse Summary pool' to configure Extraction independently."
-      />
-
-      <IngestionModelPool
-        title="Repair Models (GHOST B)"
-        subtitle="JSON/schema recovery only · never used for primary extraction fan-out"
-        value={repairPool}
-        onChange={(next) => onPatch({ extraction_repair_models: next })}
-        editing={editing}
-      />
+      <button
+        type="button"
+        onClick={applyLocalIngestionStack}
+        disabled={!editing}
+        className={`w-full flex items-start gap-3 px-3 py-2 border text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+          selected
+            ? "border-accent-main bg-accent-main/10"
+            : "border-border-minimal bg-bg-base/35 hover:border-accent-main/60"
+        }`}
+        title="Use the full local RTX ingestion pipeline."
+      >
+        <span
+          className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center border ${
+            selected
+              ? "border-accent-main bg-accent-main text-bg-base"
+              : "border-content-tertiary text-transparent"
+          }`}
+        >
+          <Check className="h-3 w-3" />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-[11px] font-bold tracking-widest uppercase text-content-primary">
+            Local RTX Pipeline
+          </span>
+          <span className="block text-[9px] text-content-tertiary leading-relaxed">
+            Qwen embeddings, LFM2-RAG summaries, LFM2 extraction, Gemma repair
+            queue, Qdrant vectors, and Neo4j graph writes.
+          </span>
+        </span>
+      </button>
     </div>
   );
 }

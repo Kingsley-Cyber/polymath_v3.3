@@ -23,6 +23,7 @@ import * as api from "../../lib/api";
 import type {
   CorpusResponse,
   DocumentResponse,
+  IngestionBatchResponse,
   IngestJobResponse,
   ModalStatus,
   WriteState,
@@ -39,6 +40,43 @@ interface CorpusDetailProps {
 }
 
 const INGEST_BATCH_SIZE = 25;
+
+function describeBatchQueued(batch: IngestionBatchResponse) {
+  const status =
+    batch.status === "completed_with_errors"
+      ? "completed with errors"
+      : batch.status.replace(/_/g, " ");
+  const vectorReady = batch.vector_ready_count || 0;
+  const graphReady = batch.graph_ready_count || 0;
+  const graphFailed = batch.graph_failed_count || 0;
+  const backfill = batch.needs_backfill_count || 0;
+  const failed = batch.failed_count || 0;
+  const parts = [
+    `Batch ${batch.batch_id.slice(0, 8)} ${status}`,
+    `${batch.total_files} files`,
+    `${vectorReady} vector-ready`,
+    `${graphReady} graph-ready`,
+  ];
+  if (backfill) parts.push(`${backfill} graph backfill`);
+  if (graphFailed) parts.push(`${graphFailed} graph token-budget failed`);
+  if (failed) parts.push(`${failed} failed`);
+  return parts.join(" · ");
+}
+
+function batchStatusSignature(batch: IngestionBatchResponse) {
+  return [
+    batch.status,
+    batch.queued_count,
+    batch.processing_count,
+    batch.vector_ready_count,
+    batch.graph_ready_count,
+    batch.graph_partial_count,
+    batch.needs_backfill_count || 0,
+    batch.graph_failed_count || 0,
+    batch.failed_count,
+    batch.cancelled_count,
+  ].join("|");
+}
 
 function getWriteStateMessages(
   state: Pick<WriteState, "warnings" | "verify_errors">,
@@ -103,6 +141,8 @@ export function CorpusDetail({
   // browser file picker.
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [retryHint, setRetryHint] = useState<string | null>(null);
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+  const batchStatusRef = useRef<string>("");
   const [backfillingDocs, setBackfillingDocs] = useState<Set<string>>(new Set());
   const [recoveringVectors, setRecoveringVectors] = useState<Set<string>>(new Set());
 
@@ -150,6 +190,52 @@ export function CorpusDetail({
     loadDocuments();
   }, [loadDocuments]);
 
+  useEffect(() => {
+    if (!activeBatchId) return;
+    let cancelled = false;
+    const terminal = new Set([
+      "completed",
+      "completed_with_errors",
+      "failed",
+      "cancelled",
+    ]);
+
+    const pollBatch = async () => {
+      try {
+        const batch = await api.getIngestionBatch(activeBatchId);
+        if (cancelled) return;
+        const signature = batchStatusSignature(batch);
+        setRetryHint(
+          `${describeBatchQueued(batch)} · vector RAG becomes available per document before graph completion.`,
+        );
+        if (signature !== batchStatusRef.current) {
+          batchStatusRef.current = signature;
+          await loadDocuments();
+          const updated = await api.getCorpus(corpus.corpus_id);
+          if (!cancelled) onCorpusUpdated(updated);
+        }
+        if (terminal.has(batch.status)) {
+          setActiveBatchId(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setRetryHint(
+            `Batch ${activeBatchId.slice(0, 8)} status unavailable: ${
+              err instanceof Error ? err.message : "unknown error"
+            }`,
+          );
+        }
+      }
+    };
+
+    pollBatch();
+    const timer = window.setInterval(pollBatch, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeBatchId, corpus.corpus_id, loadDocuments, onCorpusUpdated]);
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -166,9 +252,9 @@ export function CorpusDetail({
           fileList,
           Object.keys(overrides).length > 0 ? overrides : undefined,
         );
-        setRetryHint(
-          `Batch ${batch.batch_id.slice(0, 8)} queued · ${batch.total_files} files · vector RAG becomes available per document before graph completion.`,
-        );
+        batchStatusRef.current = batchStatusSignature(batch);
+        setActiveBatchId(batch.batch_id);
+        setRetryHint(`${describeBatchQueued(batch)} · vector RAG becomes available per document before graph completion.`);
         await loadDocuments();
         const updated = await api.getCorpus(corpus.corpus_id);
         onCorpusUpdated(updated);
@@ -310,7 +396,11 @@ export function CorpusDetail({
 
   const getWriteStateColor = (state: WriteState) => {
     if (state.verified === false) return "text-error";
-    if (state.graph_status === "needs_backfill" || state.graph_status === "graph_partial")
+    if (
+      state.graph_status === "needs_backfill" ||
+      state.graph_status === "graph_partial" ||
+      state.graph_status === "graph_failed_token_budget"
+    )
       return "text-amber-300";
     if (getWriteStateMessages(state).length > 0) return "text-amber-300";
     if (state.mongo_written && state.qdrant_written && state.neo4j_written)
@@ -325,6 +415,7 @@ export function CorpusDetail({
     const hasWarnings = getWriteStateMessages(state).length > 0;
     const vectorReady = state.vector_ready || (state.mongo_written && state.qdrant_written);
     if (state.verified === false) return "VERIFY_FAIL";
+    if (state.graph_status === "graph_failed_token_budget") return "GRAPH_TOKEN_BUDGET";
     if (state.graph_status === "needs_backfill") return "NEEDS_BACKFILL";
     if (state.graph_status === "graph_partial") return "GRAPH_PARTIAL";
     if (state.graph_status === "graph_extracting") return "GRAPH_EXTRACTING";

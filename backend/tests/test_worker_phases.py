@@ -116,6 +116,23 @@ def _fake_summary_result(parent_id: str, doc_id: str, corpus_id: str) -> Summary
     )
 
 
+def test_graph_status_token_budget_failure_is_not_retry_backfill():
+    assert (
+        worker._graph_status_after_extraction(
+            ghost_b_out=[],
+            ghost_b_failures=[],
+            ghost_b_metrics={
+                "requested_chunks": 2,
+                "extracted_chunks": 0,
+                "failed_chunk_count": 2,
+                "retryable_failed_chunks": 0,
+                "error_counts": {"token_budget": 2},
+            },
+        )
+        == worker.GRAPH_FAILED_TOKEN_BUDGET
+    )
+
+
 # ── Mock harness ────────────────────────────────────────────────────────────
 
 
@@ -204,6 +221,7 @@ def _install_mocks(
         recorder.events.append("qdrant_write")
 
     qdrant_mock = AsyncMock(side_effect=_qdrant_side_effect)
+    graph_vectors_mock = AsyncMock()
 
     async def _neo4j_side_effect(**kwargs):
         recorder.events.append("neo4j_write")
@@ -231,6 +249,7 @@ def _install_mocks(
         patch.object(worker, "_write_mongo_all", mongo_write_mock),
         patch.object(worker, "_embed_batch_for_doc", embed_mock),
         patch.object(worker, "_write_qdrant_for_doc", qdrant_mock),
+        patch.object(worker, "_write_graph_vectors_for_doc", graph_vectors_mock),
         patch.object(worker, "_write_neo4j_for_doc", neo4j_mock),
         patch.object(worker.mongo_reader, "get_document", get_doc_mock),
         patch.object(worker.mongo_reader, "get_corpus", get_corpus_mock),
@@ -253,6 +272,7 @@ def _install_mocks(
         "mongo_write": mongo_write_mock,
         "embed": embed_mock,
         "qdrant": qdrant_mock,
+        "graph_vectors": graph_vectors_mock,
         "neo4j": neo4j_mock,
         "get_doc": get_doc_mock,
         "update_state": update_state_mock,
@@ -872,8 +892,9 @@ async def test_graph_backfill_refreshes_decision_trace_graph_fields():
                 "model": "m",
                 "lane": 0,
                 "attempts": 1,
-                "error_type": "parse_error",
-                "error_message": "bad json",
+                "error_type": "bad_request",
+                "error_message": "provider rejected old payload",
+                "retryable": False,
             }
         ],
         "ghost_b_metrics": {

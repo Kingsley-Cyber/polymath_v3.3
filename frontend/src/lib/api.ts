@@ -53,6 +53,28 @@ import type {
 
 const API_BASE = "/api";
 
+async function formatHttpError(response: Response): Promise<string> {
+  const text = await response.text();
+  try {
+    const parsed = JSON.parse(text);
+    const detail = parsed?.detail;
+    if (typeof detail === "string") return detail;
+    if (detail?.message && Array.isArray(detail.errors)) {
+      const errors = detail.errors
+        .map((item: any) =>
+          typeof item === "string"
+            ? item
+            : `${item.filename || "file"}: ${item.error || JSON.stringify(item)}`,
+        )
+        .join("; ");
+      return `${detail.message}${errors ? ` ${errors}` : ""}`;
+    }
+  } catch {
+    // fall through to raw text
+  }
+  return text;
+}
+
 // Helper to read persisted auth token from localStorage
 function getPersistedToken(): string | null {
   try {
@@ -90,7 +112,7 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
       useAuthStore.getState().clearAuth();
       throw new Error("Session expired. Please log in again.");
     }
-    const error = await response.text();
+    const error = await formatHttpError(response);
     throw new Error(`HTTP ${response.status}: ${error}`);
   }
 
@@ -215,7 +237,7 @@ export async function streamChat(
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      throw new Error(`HTTP ${response.status}: ${await formatHttpError(response)}`);
     }
 
     if (!response.body) {
@@ -277,7 +299,7 @@ export async function uploadFile(
   });
 
   if (!response.ok) {
-    const error = await response.text();
+    const error = await formatHttpError(response);
     throw new Error(`HTTP ${response.status}: ${error}`);
   }
 
@@ -372,7 +394,7 @@ export async function login(request: LoginRequest): Promise<LoginResponse> {
   });
 
   if (!response.ok) {
-    const error = await response.text();
+    const error = await formatHttpError(response);
     throw new Error(`HTTP ${response.status}: ${error}`);
   }
 
@@ -474,6 +496,33 @@ export async function listDocuments(
   );
 }
 
+function appendIngestOverrideFields(
+  formData: FormData,
+  options?: IngestOverrides,
+) {
+  const appendIfSet = (key: keyof IngestOverrides) => {
+    const value = options?.[key];
+    if (value === undefined || value === null || value === "") return;
+    formData.append(key, String(value));
+  };
+
+  [
+    "use_neo4j",
+    "chunk_summarization",
+    "model",
+    "embed_mode",
+    "embed_base_url",
+    "embed_api_key",
+    "embed_max_concurrent",
+    "summary_model",
+    "summary_base_url",
+    "summary_api_key",
+    "extraction_model",
+    "extraction_base_url",
+    "extraction_api_key",
+  ].forEach((key) => appendIfSet(key as keyof IngestOverrides));
+}
+
 /**
  * POST /api/corpora/{corpus_id}/ingest
  * Upload and ingest a document into a corpus.
@@ -481,19 +530,11 @@ export async function listDocuments(
 export async function uploadDocumentToCorpus(
   corpusId: string,
   file: File,
-  options?: {
-    use_neo4j?: boolean;
-    chunk_summarization?: boolean;
-    model?: string;
-  },
+  options?: IngestOverrides,
 ): Promise<IngestJobResponse> {
   const formData = new FormData();
   formData.append("file", file);
-  if (options?.use_neo4j !== undefined)
-    formData.append("use_neo4j", String(options.use_neo4j));
-  if (options?.chunk_summarization !== undefined)
-    formData.append("chunk_summarization", String(options.chunk_summarization));
-  if (options?.model) formData.append("model", options.model);
+  appendIngestOverrideFields(formData, options);
 
   const token = getPersistedToken();
   const headers: Record<string, string> = {};
@@ -511,7 +552,7 @@ export async function uploadDocumentToCorpus(
       useAuthStore.getState().clearAuth();
       throw new Error("Session expired. Please log in again.");
     }
-    const error = await response.text();
+    const error = await formatHttpError(response);
     throw new Error(`HTTP ${response.status}: ${error}`);
   }
 
@@ -525,21 +566,13 @@ export async function uploadDocumentToCorpus(
 export async function batchUploadDocumentsToCorpus(
   corpusId: string,
   files: File[],
-  options?: {
-    use_neo4j?: boolean;
-    chunk_summarization?: boolean;
-    model?: string;
-  },
+  options?: IngestOverrides,
 ): Promise<IngestionBatchResponse> {
   const formData = new FormData();
   for (const file of files) {
     formData.append("files", file);
   }
-  if (options?.use_neo4j !== undefined)
-    formData.append("use_neo4j", String(options.use_neo4j));
-  if (options?.chunk_summarization !== undefined)
-    formData.append("chunk_summarization", String(options.chunk_summarization));
-  if (options?.model) formData.append("model", options.model);
+  appendIngestOverrideFields(formData, options);
 
   const token = getPersistedToken();
   const headers: Record<string, string> = {};
@@ -557,7 +590,7 @@ export async function batchUploadDocumentsToCorpus(
       useAuthStore.getState().clearAuth();
       throw new Error("Session expired. Please log in again.");
     }
-    const error = await response.text();
+    const error = await formatHttpError(response);
     throw new Error(`HTTP ${response.status}: ${error}`);
   }
 

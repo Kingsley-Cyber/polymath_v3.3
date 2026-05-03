@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 _PARTIAL_PREFIX = "Ghost B graph extraction partial:"
 _BACKFILL_PREFIX = "Ghost B backfill"
 _AUTO_BACKFILL_FAILED_PREFIX = "Ghost B auto-backfill failed:"
+_REPLAYABLE_PROVIDER_ERRORS = {"bad_request", "unprocessable_entity"}
 
 
 def _set_if_present(updates: dict[str, Any], key: str, value: Any) -> None:
@@ -76,6 +77,17 @@ def _failure_from_dict(row: dict[str, Any]) -> ExtractionFailureItem:
         backfill_attempt_count=int(row.get("backfill_attempt_count") or 0),
         lane_state=row.get("lane_state"),
     )
+
+
+def _eligible_for_backfill(failure: ExtractionFailureItem, *, max_attempts: int) -> bool:
+    if failure.backfill_attempt_count >= max_attempts:
+        return False
+    if failure.retryable:
+        return True
+    # Historical provider/client 4xx rows can become recoverable after a
+    # routing, schema, or model-server deployment fix. Keep this bounded by the
+    # normal backfill attempt budget so truly bad prompts age out cleanly.
+    return failure.error_type in _REPLAYABLE_PROVIDER_ERRORS
 
 
 def _clean_graph_warnings(warnings: list[str]) -> list[str]:
@@ -256,7 +268,7 @@ async def backfill_failed_graph_chunks(
     eligible_failures = [
         failure
         for failure in failures
-        if failure.retryable and failure.backfill_attempt_count < max_attempts
+        if _eligible_for_backfill(failure, max_attempts=max_attempts)
     ][:max_chunks]
     if not eligible_failures:
         retry_after = None

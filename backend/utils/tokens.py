@@ -254,17 +254,24 @@ def get_model_context_limit(model: str) -> int:
         "qwen2.5:7b": 131072,
         "mistral:7b": 32768,
         "gemma:2b": 8192,
+        "lfm2-extract": 8192,
+        "lfm2-rag": 8192,
+        "gemma4-e4b": 8192,
         # Embedding models (typically not used for chat)
         "nomic-embed-text": 8192,
     }
 
+    # LiteLLM provider prefixes (for example openai/lfm2-extract) are routing
+    # hints, not model context identifiers.
+    normalized_model_name = model_name.split("/", 1)[1] if "/" in model_name else model_name
+
     # Try exact match first
-    if model_name in CONTEXT_LIMITS:
-        return CONTEXT_LIMITS[model_name]
+    if normalized_model_name in CONTEXT_LIMITS:
+        return CONTEXT_LIMITS[normalized_model_name]
 
     # Try prefix match
     for known_model, limit in CONTEXT_LIMITS.items():
-        if model_name.startswith(known_model.split(":")[0]):
+        if normalized_model_name.startswith(known_model.split(":")[0]):
             return limit
 
     # Default fallback

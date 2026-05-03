@@ -41,6 +41,7 @@ from services.ontology import (
     relation_type_names,
     render_relation_decision_block,
 )
+from utils.tokens import count_tokens_messages, get_model_context_limit
 
 # Phase 14.2 — pluggable schema retriever. Worker injects a closure over qdrant_client +
 # corpus_id so this module stays independent of the Qdrant SDK.
@@ -56,6 +57,30 @@ TARGET_SCHEMA_VERSION = "polymath.extract.v2"
 TRIPLE_REPAIR_CONFIDENCE_THRESHOLD = 0.70
 
 _TARGET_RELATION_FAMILY_MAP = relation_family_map()
+_RELATION_FAMILIES = sorted(set(_TARGET_RELATION_FAMILY_MAP.values()) | {"WeakAssociation"})
+_EXTRACTION_CONTEXT_SAFETY_MARGIN = 64
+_MIN_EXTRACTION_OUTPUT_TOKENS = 256
+_DETERMINISTIC_ERROR_TYPES = {
+    "token_budget",
+    "bad_request",
+    "unprocessable_entity",
+}
+_GEMMA_REPAIR_MODEL_HINTS = ("gemma4-e4b", "gemma-4-e4b")
+_GEMMA_REPAIR_TEMPERATURE = 1.0
+_GEMMA_REPAIR_TOP_P = 0.95
+_GEMMA_REPAIR_TOP_K = 64
+_GEMMA_REPAIR_CHAT_TEMPLATE = (
+    "{% for message in messages %}"
+    "{% if message['role'] == 'system' %}"
+    "<start_of_turn>system\n{{ message['content'] }}<end_of_turn>\n"
+    "{% elif message['role'] == 'user' %}"
+    "<start_of_turn>user\n{{ message['content'] }}<end_of_turn>\n"
+    "{% elif message['role'] == 'assistant' %}"
+    "<start_of_turn>model\n{{ message['content'] }}<end_of_turn>\n"
+    "{% endif %}"
+    "{% endfor %}"
+    "{% if add_generation_prompt %}<start_of_turn>model\n{% endif %}"
+)
 
 _TARGET_EXTRACTION_SCHEMA = (
     "Return data as a JSON object with this exact schema:\n"
@@ -120,6 +145,202 @@ HIGH_VALUE_EXTRACTION_CONFIDENCE_THRESHOLD = 0.75
 
 # Default open-vocabulary enums when no schema is provided.
 _DEFAULT_ENTITY_TYPES = ["person", "org", "concept", "other"]
+
+
+def build_target_extraction_json_schema(
+    *,
+    chunk_id: str,
+    doc_id: str,
+    corpus_id: str,
+    entity_vocab: list[str] | None = None,
+    relation_vocab: list[str] | None = None,
+    max_entities: int = 14,
+    max_relations: int = 14,
+) -> dict:
+    """Strict JSON Schema enforced by vLLM through response_format."""
+
+    entity_type_schema: dict = {"type": "string", "maxLength": 120}
+    if entity_vocab:
+        entity_type_schema["enum"] = list(dict.fromkeys(entity_vocab))
+    predicate_schema: dict = {"type": "string", "maxLength": 200}
+    if relation_vocab:
+        predicate_schema["enum"] = list(dict.fromkeys(relation_vocab))
+    short_string = {"type": "string", "maxLength": 200}
+    medium_string = {"type": "string", "maxLength": 500}
+    sentence_string = {"type": "string", "maxLength": 800}
+
+    return {
+        "type": "object",
+        "properties": {
+            "schema_version": {"type": "string", "enum": [TARGET_SCHEMA_VERSION]},
+            "chunk_id": {"type": "string", "enum": [chunk_id]},
+            "doc_id": {"type": "string", "enum": [doc_id]},
+            "corpus_id": {"type": "string", "enum": [corpus_id]},
+            "entities": {
+                "type": "array",
+                "maxItems": max(0, max_entities),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": short_string,
+                        "type": entity_type_schema,
+                        "aliases": {
+                            "type": "array",
+                            "maxItems": 8,
+                            "items": short_string,
+                        },
+                        "description": medium_string,
+                    },
+                    "required": ["name", "type", "aliases", "description"],
+                    "additionalProperties": False,
+                },
+            },
+            "relations": {
+                "type": "array",
+                "maxItems": max(0, max_relations),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "subject": short_string,
+                        "predicate": predicate_schema,
+                        "predicate_family": {
+                            "type": "string",
+                            "enum": _RELATION_FAMILIES,
+                        },
+                        "object": short_string,
+                        "qualifier": medium_string,
+                        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                        "source_sentence": sentence_string,
+                    },
+                    "required": [
+                        "subject",
+                        "predicate",
+                        "predicate_family",
+                        "object",
+                        "qualifier",
+                        "confidence",
+                        "source_sentence",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+            "objects": {
+                "type": "array",
+                "maxItems": 0,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": short_string,
+                        "type": short_string,
+                        "attributes": {
+                            "type": "object",
+                            "maxProperties": 20,
+                            "additionalProperties": medium_string,
+                        },
+                    },
+                    "required": ["name", "type", "attributes"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": [
+            "schema_version",
+            "chunk_id",
+            "doc_id",
+            "corpus_id",
+            "entities",
+            "relations",
+            "objects",
+        ],
+        "additionalProperties": False,
+    }
+
+
+def _json_schema_response_format(schema: dict) -> dict:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "extraction",
+            "schema": schema,
+            "strict": True,
+        },
+    }
+
+
+def _compact_system_prompt(*, recovery_mode: bool) -> str:
+    base = (
+        "You are GHOST B, an entity and relation extractor. Extract only facts "
+        "explicitly stated in the text. Prefer fewer high-confidence entities "
+        "and relations. Relation endpoints must be named entities in the output. "
+        "Use related_to only for vague association or low predicate confidence. "
+        "Emit compact minified JSON; do not indent or pad with whitespace."
+    )
+    if recovery_mode:
+        return base + " Return the smallest valid extraction that preserves stated facts."
+    return base
+
+
+def _compact_user_prompt(
+    *,
+    task: "ExtractionTask",
+    max_entities: int,
+    max_relations: int,
+    compact_mode: bool,
+    schema_lens: "SchemaLens | dict | None",
+) -> str:
+    lens = _render_schema_lens_block(schema_lens)
+    compact_note = (
+        "Large-document compact mode: extract only central named entities and "
+        "the strongest explicit relations."
+        if compact_mode
+        else "Extract central named entities and explicit relations."
+    )
+    return (
+        f"chunk_id: {task.chunk_id}\n"
+        f"doc_id: {task.doc_id}\n"
+        f"corpus_id: {task.corpus_id}\n"
+        f"Limits: at most {max_entities} entities and {max_relations} relations.\n"
+        f"{compact_note}\n"
+        "For each relation, source_sentence must be the shortest sentence that proves it.\n"
+        "Set objects to an empty array.\n"
+        f"{lens}\n\n"
+        "TEXT:\n"
+        f"{task.text}"
+    )
+
+
+def _safe_completion_budget(
+    *,
+    messages: list[dict[str, str]],
+    model: str,
+    requested_tokens: int,
+) -> tuple[int | None, dict[str, int]]:
+    context_limit = get_model_context_limit(model)
+    prompt_tokens = count_tokens_messages(messages, model)
+    available = context_limit - prompt_tokens - _EXTRACTION_CONTEXT_SAFETY_MARGIN
+    budget = {
+        "context_limit": context_limit,
+        "prompt_tokens_estimate": prompt_tokens,
+        "available_completion_tokens": available,
+        "requested_completion_tokens": requested_tokens,
+        "safety_margin_tokens": _EXTRACTION_CONTEXT_SAFETY_MARGIN,
+    }
+    if available < _MIN_EXTRACTION_OUTPUT_TOKENS:
+        return None, budget
+    return min(requested_tokens, available), budget
+
+
+def _entry_is_local_vllm(entry: dict) -> bool:
+    base_url = str(entry.get("base_url") or "")
+    model = str(entry.get("model") or "")
+    return "vllm-" in base_url or model.startswith("openai/lfm2-") or model.startswith("lfm2-")
+
+
+def _entry_concurrency_slots(entry: dict, *, extraction_mode: str) -> int:
+    requested = max(1, int(entry.get("max_concurrent") or 1))
+    if not _entry_is_local_vllm(entry):
+        return requested
+    return min(requested, 8 if extraction_mode == "compact" else 16)
 
 
 # ── Universal schema (baked, replaces per-corpus tuning) ───────────────────
@@ -1102,16 +1323,29 @@ def _provider_error_kind(exc: Exception) -> str:
         status = exc.response.status_code
         if status == 429:
             return "rate_limited"
+        text = provider_error_summary(exc).lower()
+        if "context length" in text or "input_tokens" in text or "maximum context" in text:
+            return "token_budget"
+        if status == 400:
+            return "bad_request"
+        if status == 422:
+            return "unprocessable_entity"
         return "provider_error"
     if isinstance(exc, httpx.RequestError):
         return "provider_error"
     return exc.__class__.__name__
 
 
+def _is_deterministic_provider_error(exc: Exception) -> bool:
+    return _provider_error_kind(exc) in _DETERMINISTIC_ERROR_TYPES
+
+
 def _retryable_infrastructure_error(exc: Exception) -> bool:
     if isinstance(exc, httpx.TimeoutException):
         return True
     if isinstance(exc, httpx.HTTPStatusError):
+        if _is_deterministic_provider_error(exc):
+            return False
         return exc.response.status_code in {408, 409, 425, 429, 500, 502, 503, 504}
     return isinstance(exc, httpx.RequestError)
 
@@ -2241,8 +2475,21 @@ def _parse_with_repair_items(
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
-        logger.error("GHOST B JSON parse failed chunk_id=%s: %s", task.chunk_id, exc)
-        return None, []
+        repaired_raw = _close_truncated_json_prefix(raw)
+        if repaired_raw:
+            try:
+                data = json.loads(repaired_raw)
+                logger.warning(
+                    "GHOST B JSON parse recovered truncated prefix chunk_id=%s: %s",
+                    task.chunk_id,
+                    exc,
+                )
+            except json.JSONDecodeError:
+                logger.error("GHOST B JSON parse failed chunk_id=%s: %s", task.chunk_id, exc)
+                return None, []
+        else:
+            logger.error("GHOST B JSON parse failed chunk_id=%s: %s", task.chunk_id, exc)
+            return None, []
 
     if not isinstance(data, dict):
         logger.error("GHOST B JSON root is not object chunk_id=%s", task.chunk_id)
@@ -2389,13 +2636,70 @@ def _parse_with_repair_items(
     )
 
 
+def _close_truncated_json_prefix(raw: str) -> str | None:
+    """Close a valid JSON prefix that was cut after whitespace.
+
+    vLLM structured decoding can legally emit whitespace forever before a
+    closing delimiter. If max_tokens cuts the response there, json.loads sees an
+    invalid document even though the emitted prefix is usable. This repair only
+    appends missing closing delimiters when the prefix is outside a string.
+    """
+
+    text = raw.rstrip()
+    if not text:
+        return None
+    if len(text) < 64 or TARGET_SCHEMA_VERSION not in text:
+        return None
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    for char in text:
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            stack.append("}")
+        elif char == "[":
+            stack.append("]")
+        elif char in "}]":
+            if not stack or stack[-1] != char:
+                return None
+            stack.pop()
+    if in_string or not stack:
+        return None
+    while text.endswith(","):
+        text = text[:-1].rstrip()
+    return text + "".join(reversed(stack))
+
+
 def _relation_repair_key(relation: RelationItem) -> tuple[str, str, str]:
     return _relation_key(relation.subject, relation.predicate, relation.object)
 
 
-def _target_schema_repair_contract(schema: SchemaContext | None) -> str:
+def _target_schema_repair_contract(
+    schema: SchemaContext | None,
+    *,
+    enable_thinking: bool = False,
+) -> str:
     lines = [
-        "Repair exactly one relation triple. Return JSON only.",
+        (
+            "<|think|>\n"
+            if enable_thinking
+            else ""
+        )
+        + (
+            "You are a relation repair specialist. Given entity names, a "
+            "candidate relation, and the source sentence, determine whether "
+            "the relation is correct. Return a JSON object with the repaired "
+            "relation or a rejection."
+        ),
         _TARGET_EXTRACTION_SCHEMA,
         "Rules:",
         "- Use only the supplied source_sentence; do not infer beyond it.",
@@ -2409,6 +2713,47 @@ def _target_schema_repair_contract(schema: SchemaContext | None) -> str:
     if schema and schema.has_relation_schema:
         lines.append("- approved predicates: " + ", ".join(schema.relation_vocab))
     return "\n".join(lines)
+
+
+def _is_gemma_repair_entry(repair_entry: dict) -> bool:
+    model = str(repair_entry.get("model") or "").lower()
+    base_url = str(repair_entry.get("base_url") or "").lower()
+    return any(hint in model or hint in base_url for hint in _GEMMA_REPAIR_MODEL_HINTS)
+
+
+def _repair_extra_params(repair_entry: dict) -> dict:
+    extra = dict(repair_entry.get("extra_params") or {})
+    if not _is_gemma_repair_entry(repair_entry):
+        return extra
+    try:
+        temperature = float(extra.get("temperature", 0))
+    except (TypeError, ValueError):
+        temperature = 0
+    if temperature <= 0:
+        extra["temperature"] = _GEMMA_REPAIR_TEMPERATURE
+    extra.setdefault("top_p", _GEMMA_REPAIR_TOP_P)
+    extra.setdefault("top_k", _GEMMA_REPAIR_TOP_K)
+    extra_body = dict(extra.get("extra_body") or {})
+    extra_body.setdefault("chat_template", _GEMMA_REPAIR_CHAT_TEMPLATE)
+    extra["extra_body"] = extra_body
+    return extra
+
+
+def _repair_json_payload(raw: str) -> str:
+    text = str(raw or "").strip()
+    if "<channel|>" in text:
+        text = text.rsplit("<channel|>", 1)[-1].strip()
+    if text.startswith("```"):
+        text = text.strip("`").strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    if text.startswith("{"):
+        return text
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        return text[start : end + 1]
+    return text
 
 
 def _relation_repair_payload(relation: RelationItem, reasons: list[str]) -> dict:
@@ -2494,7 +2839,7 @@ def _parse_repaired_relation(
     schema: SchemaContext | None,
 ) -> RelationItem | None:
     try:
-        data = json.loads(raw)
+        data = json.loads(_repair_json_payload(raw))
     except json.JSONDecodeError:
         return None
     row = _extract_repaired_relation_row(data)
@@ -2556,10 +2901,15 @@ async def _repair_target_relation_with_gemma(
     headers: dict[str, str],
 ) -> RelationItem | None:
     source_sentence = relation.source_sentence or relation.evidence_phrase
-    system_content = _target_schema_repair_contract(schema)
+    extra_params = _repair_extra_params(repair_entry)
+    system_content = _target_schema_repair_contract(
+        schema,
+        enable_thinking=_is_gemma_repair_entry(repair_entry),
+    )
     user_content = json.dumps(
         {
             "source_sentence": source_sentence,
+            "entity_names": sorted(entity_names),
             "failed_triple": _relation_repair_payload(relation, reasons),
         },
         ensure_ascii=True,
@@ -2570,10 +2920,10 @@ async def _repair_target_relation_with_gemma(
             {"role": "system", "content": system_content},
             {"role": "user", "content": user_content},
         ],
-        "temperature": 0,
+        "temperature": extra_params.get("temperature", 0),
         "response_format": {"type": "json_object"},
         "max_tokens": min(
-            int((repair_entry.get("extra_params") or {}).get("max_tokens") or 1024),
+            int(extra_params.get("max_tokens") or 1024),
             2048,
         ),
     }
@@ -2581,7 +2931,7 @@ async def _repair_target_relation_with_gemma(
         payload["api_base"] = repair_entry["base_url"]
     if repair_entry.get("api_key"):
         payload["api_key"] = repair_entry["api_key"]
-    for key, value in (repair_entry.get("extra_params") or {}).items():
+    for key, value in extra_params.items():
         if key not in {"model", "messages", "response_format", "max_tokens"}:
             payload[key] = value
 
@@ -2805,6 +3155,7 @@ async def extract_entities(
     call_metrics: list[dict] = []
     failed_count = 0
     paused_due_doc_budget = False
+    deterministic_doc_error: str | None = None
     _list_lock = asyncio.Lock()
     disabled_lanes: set[int] = set()
     lane_fatal_strikes: dict[int, int] = {}
@@ -2865,7 +3216,15 @@ async def extract_entities(
             chunk_attempts[chunk_id] = current
             return current
 
+    async def _open_document_circuit(reason: str) -> None:
+        nonlocal paused_due_doc_budget, deterministic_doc_error
+        async with _list_lock:
+            paused_due_doc_budget = True
+            deterministic_doc_error = reason
+
     async def _process_one(task: ExtractionTask, pool_idx: int) -> ExtractionResult | None:
+        if paused_due_doc_budget:
+            return None
         entry = pool[pool_idx]
         chunk_vec = chunk_vectors.get(task.chunk_id) if chunk_vectors else None
         eff_entity, eff_relation = await resolve_chunk_vocab(
@@ -2905,43 +3264,77 @@ async def extract_entities(
             attempt_max_tokens = (
                 min(max_completion_tokens, 2048) if recovery_mode else max_completion_tokens
             )
-            full_prompt = build_user_prompt(
+            target_schema = build_target_extraction_json_schema(
                 chunk_id=task.chunk_id,
                 doc_id=task.doc_id,
                 corpus_id=task.corpus_id,
-                text=task.text,
+                entity_vocab=eff_entity
+                or (schema.entity_vocab if schema and schema.has_entity_schema else None),
+                relation_vocab=eff_relation
+                or (schema.relation_vocab if schema and schema.has_relation_schema else None),
                 max_entities=attempt_max_entities,
                 max_relations=attempt_max_relations,
-                schema=schema,
-                effective_entity_vocab=eff_entity,
-                effective_relation_vocab=eff_relation,
-                schema_lens=schema_lens,
-                compact_mode=extraction_mode == "compact",
-                recovery_mode=recovery_mode,
             )
-            extraction_contract, source_prompt = _split_extraction_contract(full_prompt)
-            system_content = (
-                _SYSTEM
-                + (_JSON_RECOVERY_SUFFIX if recovery_mode else "")
-                + "\n\n"
-                + extraction_contract
+            messages = [
+                {
+                    "role": "system",
+                    "content": _compact_system_prompt(recovery_mode=recovery_mode),
+                },
+                {
+                    "role": "user",
+                    "content": _compact_user_prompt(
+                        task=task,
+                        max_entities=attempt_max_entities,
+                        max_relations=attempt_max_relations,
+                        compact_mode=extraction_mode == "compact",
+                        schema_lens=schema_lens,
+                    ),
+                },
+            ]
+            safe_max_tokens, token_budget = _safe_completion_budget(
+                messages=messages,
+                model=str(attempt_entry["model"]),
+                requested_tokens=attempt_max_tokens,
             )
+            if safe_max_tokens is None:
+                last_error_type = "token_budget"
+                last_exc = RuntimeError(
+                    "Ghost B token budget infeasible before provider call: "
+                    f"{token_budget}"
+                )
+                call_metrics.append(
+                    {
+                        "chunk_id": task.chunk_id,
+                        "model": attempt_entry["model"],
+                        "lane": pool_idx,
+                        "attempt": reserved_attempt,
+                        "duration_seconds": 0,
+                        "total_tokens": 0,
+                        "prompt_tokens": token_budget["prompt_tokens_estimate"],
+                        "completion_tokens": 0,
+                        "success": False,
+                        "error_type": last_error_type,
+                        "recovery_mode": recovery_mode,
+                        "repair_model": repair_model_used,
+                        "max_tokens": 0,
+                        "token_budget": token_budget,
+                    }
+                )
+                await _open_document_circuit(last_error_type)
+                break
             payload: dict = {
                 "model": attempt_entry["model"],
-                "messages": [
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": source_prompt or f"TEXT:\n{task.text}"},
-                ],
+                "messages": messages,
                 "temperature": 0,
-                "response_format": {"type": "json_object"},
-                "max_tokens": attempt_max_tokens,
+                "response_format": _json_schema_response_format(target_schema),
+                "max_tokens": safe_max_tokens,
             }
             if attempt_entry.get("base_url"):
                 payload["api_base"] = attempt_entry["base_url"]
             if attempt_entry.get("api_key"):
                 payload["api_key"] = attempt_entry["api_key"]
             for _k, _v in (attempt_entry.get("extra_params") or {}).items():
-                if _k not in ("model", "messages", "response_format"):
+                if _k not in ("model", "messages", "response_format", "max_tokens"):
                     payload[_k] = _v
             started = time.perf_counter()
             try:
@@ -3023,7 +3416,8 @@ async def extract_entities(
                             "recovery_mode": recovery_mode,
                             "repair_model": repair_model_used,
                             "triple_repair_requested": len(repair_items),
-                            "max_tokens": attempt_max_tokens,
+                            "max_tokens": safe_max_tokens,
+                            "token_budget": token_budget,
                         }
                     )
                     if result:
@@ -3065,11 +3459,14 @@ async def extract_entities(
                         ),
                         "recovery_mode": recovery_mode,
                         "repair_model": repair_model_used,
-                        "max_tokens": attempt_max_tokens,
+                        "max_tokens": safe_max_tokens,
+                        "token_budget": token_budget,
                     }
                 )
                 if fatal_lane:
                     raise FatalLaneError(exc) from exc
+                if _is_deterministic_provider_error(exc):
+                    await _open_document_circuit(last_error_type)
                 if (
                     _retryable_infrastructure_error(exc)
                     and attempts_used < per_chunk_max_attempts
@@ -3114,7 +3511,7 @@ async def extract_entities(
                 lane=pool_idx,
                 attempts=attempts_used,
                 error_type=last_error_type,
-                error_message=str(last_exc)[:1000],
+                error_message=provider_error_summary(last_exc, max_chars=1000),
                 retryable=retryable,
                 retry_after=retry_after,
                 lane_state=lane_states.get(pool_idx, "healthy"),
@@ -3177,7 +3574,7 @@ async def extract_entities(
         for pool_idx, entry in enumerate(pool):
             if pool_idx in disabled_lanes:
                 continue
-            slots = int(entry.get("max_concurrent") or 1) or 1
+            slots = _entry_concurrency_slots(entry, extraction_mode=extraction_mode)
             for _ in range(slots):
                 workers.append(asyncio.create_task(_lane_worker(pool_idx)))
         if workers:
@@ -3224,7 +3621,10 @@ async def extract_entities(
     }
     unprocessed_tasks = [t for t in tasks if t.chunk_id not in accounted_chunk_ids]
     if unprocessed_tasks:
-        if paused_due_doc_budget:
+        if deterministic_doc_error:
+            reason = deterministic_doc_error
+            message = "Document graph extraction circuit opened after a deterministic request error."
+        elif paused_due_doc_budget:
             reason = "retry_budget_exhausted"
             message = "Document graph extraction paused after failure retry budget was reached."
         elif disabled_lanes:

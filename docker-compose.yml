@@ -415,7 +415,7 @@ services:
       - --port
       - "8000"
       - --model
-      - ${VLLM_REPAIR_MODEL:-google/gemma-4-E4B}
+      - ${VLLM_REPAIR_MODEL:-google/gemma-4-E4B-it}
       - --served-model-name
       - ${VLLM_REPAIR_SERVED_NAME:-gemma4-e4b}
       - --dtype
@@ -478,7 +478,8 @@ services:
       EMBED_MAX_SEQ_LENGTH: ${LOCAL_EMBED_MAX_SEQ_LENGTH:-1024}
       EMBED_MAX_INPUT_CHARS: ${LOCAL_EMBED_MAX_INPUT_CHARS:-6000}
       EMBED_DEVICE: cuda
-      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
+      EMBED_CPU_FALLBACK_ON_CUDA_ERROR: "false"
+      PYTORCH_CUDA_ALLOC_CONF: max_split_size_mb:128
       # GPU pinning — see docling service for the rationale. CUDA_VISIBLE_DEVICES
       # is the load-bearing filter at the torch layer; PCI_BUS_ID ordering
       # makes "0" deterministically mean the primary local GPU.
@@ -560,7 +561,7 @@ services:
       CUDA_DEVICE_ORDER: PCI_BUS_ID
       CUDA_VISIBLE_DEVICES: "0"
       NVIDIA_VISIBLE_DEVICES: "0"
-      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
+      PYTORCH_CUDA_ALLOC_CONF: max_split_size_mb:128
     deploy:
       resources:
         reservations:

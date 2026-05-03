@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from collections import Counter
 from types import SimpleNamespace
 
+import pytest
+
 from services.ingestion import batch_queue
+from services.ingestion.file_intake import IntakeValidationError, normalize_upload_filename
 
 
 class _DiskUsage:
@@ -14,6 +18,17 @@ class _DiskUsage:
 def test_safe_filename_strips_paths_and_weird_chars():
     assert batch_queue._safe_filename("/tmp/bad<>name?.md") == "bad_name_.md"
     assert batch_queue._safe_filename("   ") == "upload"
+
+
+def test_no_extension_markdown_filename_is_normalized_before_queueing():
+    intake = normalize_upload_filename("Comprehensive Handbook", "text/markdown")
+    assert intake.filename == "Comprehensive Handbook.md"
+    assert intake.normalized is True
+
+
+def test_unknown_no_extension_file_is_rejected_before_parser_work():
+    with pytest.raises(IntakeValidationError):
+        normalize_upload_filename("mystery_upload", "application/octet-stream")
 
 
 def test_resource_profile_lowers_active_docs_under_low_ram(tmp_path, monkeypatch):
@@ -103,3 +118,28 @@ def test_item_status_maps_partial_and_backfill_honestly():
         )
         == "needs_backfill"
     )
+
+
+def test_terminal_batch_status_reports_partial_errors():
+    assert (
+        batch_queue._terminal_batch_status(
+            total_files=4, failed=2, needs_backfill=2, graph_partial=0
+        )
+        == "completed_with_errors"
+    )
+    assert (
+        batch_queue._terminal_batch_status(
+            total_files=2, failed=2, needs_backfill=0, graph_partial=0
+        )
+        == "failed"
+    )
+
+
+def test_batch_count_fields_counts_vector_ready_independently():
+    fields = batch_queue._batch_count_fields(
+        Counter({"needs_backfill": 2, "failed": 2}),
+        vector_ready=2,
+    )
+    assert fields["vector_ready_count"] == 2
+    assert fields["needs_backfill_count"] == 2
+    assert fields["failed_count"] == 2

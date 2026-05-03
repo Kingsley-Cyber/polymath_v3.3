@@ -92,15 +92,20 @@ def _default_extraction_models() -> list[_legacy.ModelProfileRef]:
 
 
 def _default_extraction_repair_models() -> list[_legacy.ModelProfileRef]:
-    return [
-        _local_vllm_model_ref(
-            model="gemma4-e4b",
-            base_url="http://vllm-repair:8000/v1",
-            max_concurrent=4,
-            temperature=0.0,
-            max_tokens=2048,
-        )
-    ]
+    ref = _local_vllm_model_ref(
+        model="gemma4-e4b",
+        base_url="http://vllm-repair:8000/v1",
+        max_concurrent=4,
+        temperature=1.0,
+        max_tokens=2048,
+    )
+    ref.extra_params.update(
+        {
+            "top_p": 0.95,
+            "top_k": 64,
+        }
+    )
+    return [ref]
 
 
 class IngestionConfig(BaseModel):

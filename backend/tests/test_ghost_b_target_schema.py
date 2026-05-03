@@ -83,6 +83,22 @@ def test_target_schema_parses_to_legacy_graph_structs():
     assert relation.predicate == "uses"
     assert relation.predicate_family == "Operational"
     assert relation.source_sentence == "The app uses ML Kit."
+
+
+def test_target_schema_recovers_truncated_json_prefix():
+    raw = _target_payload().rsplit("]", 1)[0] + "]   "
+
+    parsed = _parse(
+        raw,
+        ExtractionTask("c1", "d1", "corp1", "The app uses ML Kit."),
+        threshold=0.5,
+        schema=_schema(),
+    )
+
+    assert parsed is not None
+    assert parsed.schema_version == TARGET_SCHEMA_VERSION
+    assert parsed.entities
+    relation = parsed.relations[0]
     assert relation.evidence_phrase == "The app uses ML Kit."
     assert relation.extraction_model == PRIMARY_EXTRACTION_MODEL
     assert relation.repaired is False
@@ -189,12 +205,59 @@ async def test_gemma_triple_repair_gets_failed_triple_not_full_chunk(monkeypatch
 
     assert len(_FakeAsyncClient.calls) == 2
     repair_call = _FakeAsyncClient.calls[1]
+    repair_system = repair_call["messages"][0]["content"]
     repair_user = repair_call["messages"][1]["content"]
     assert "failed_triple" in repair_user
+    assert "entity_names" in repair_user
     assert "The app uses ML Kit." in repair_user
     assert "SECRET FULL CHUNK SHOULD NOT APPEAR" not in repair_user
-    assert "polymath.extract.v2" in repair_call["messages"][0]["content"]
-    assert repair_call["temperature"] == 0
+    assert "relation repair specialist" in repair_system
+    assert "LFM2-1.2B-Extract" not in repair_system
+    assert repair_system.startswith("<|think|>")
+    assert "polymath.extract.v2" in repair_system
+    assert repair_call["temperature"] == 1.0
+    assert repair_call["top_p"] == 0.95
+    assert repair_call["top_k"] == 64
+    assert repair_call["extra_body"]["chat_template"]
+
+
+def test_gemma_repair_parser_ignores_thought_channel():
+    original = ghost_b.RelationItem(
+        subject="app",
+        predicate="uses",
+        object="ML Kit",
+        object_kind="entity",
+        confidence=0.41,
+        source_sentence="The app uses ML Kit.",
+    )
+    raw = (
+        "<|channel>thought\nThe candidate is directly supported.<channel|>\n"
+        + ghost_b.json.dumps(
+            {
+                "relation": {
+                    "subject": "app",
+                    "predicate": "uses",
+                    "predicate_family": "Operational",
+                    "object": "ML Kit",
+                    "qualifier": "",
+                    "confidence": 0.93,
+                    "source_sentence": "The app uses ML Kit.",
+                }
+            }
+        )
+    )
+
+    repaired = ghost_b._parse_repaired_relation(
+        raw,
+        original=original,
+        entity_names={"app", "ml kit"},
+        schema=_schema(),
+    )
+
+    assert repaired is not None
+    assert repaired.repaired is True
+    assert repaired.extraction_model == REPAIR_EXTRACTION_MODEL
+    assert repaired.confidence == 0.93
 
 
 @pytest.mark.asyncio
@@ -224,6 +287,30 @@ async def test_deferred_triple_repair_queues_candidate_without_gemma(monkeypatch
     assert "app" in candidate.entity_names
     assert "ml kit" in candidate.entity_names
     assert report.metrics["relation_repair_queued_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_primary_extraction_uses_strict_json_schema_response_format(monkeypatch):
+    _FakeAsyncClient.calls = []
+    _FakeAsyncClient.responses = [_Response(_target_payload())]
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", _FakeAsyncClient)
+
+    report = await extract_entities(
+        [ExtractionTask("c1", "d1", "corp1", "The app uses ML Kit.")],
+        schema=_schema(),
+        pool=[{"model": "lfm2-extract", "max_concurrent": 1, "extra_params": {}}],
+        return_report=True,
+        per_chunk_max_attempts=1,
+    )
+
+    assert len(report.results) == 1
+    call = _FakeAsyncClient.calls[0]
+    assert call["response_format"]["type"] == "json_schema"
+    assert call["response_format"]["json_schema"]["strict"] is True
+    schema = call["response_format"]["json_schema"]["schema"]
+    assert schema["properties"]["schema_version"]["enum"] == [TARGET_SCHEMA_VERSION]
+    assert schema["additionalProperties"] is False
+    assert "Return data as a JSON object with this exact schema" not in call["messages"][0]["content"]
 
 
 @pytest.mark.asyncio

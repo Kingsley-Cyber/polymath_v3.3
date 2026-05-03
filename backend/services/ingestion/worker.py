@@ -75,6 +75,7 @@ GRAPH_READY = "graph_ready"
 GRAPH_NEEDS_BACKFILL = "needs_backfill"
 GRAPH_RETRY_SCHEDULED = "graph_retry_scheduled"
 GRAPH_SKIPPED = "graph_skipped"
+GRAPH_FAILED_TOKEN_BUDGET = "graph_failed_token_budget"
 
 
 class GhostAFailure(RuntimeError):
@@ -118,6 +119,25 @@ _DUPLICATE_STOP_WORDS = {
     "this", "with", "you", "your", "their", "there", "then", "than", "was",
     "were", "will", "would", "could", "should", "about", "which",
 }
+
+
+def _normalize_document_text_for_id(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip())
+
+
+def _chunk_parse_result(
+    *,
+    parse_result: docling_adapter.DoclingParseResult,
+    doc_id: str,
+    corpus_id: str,
+    config: IngestionConfig,
+):
+    return tier_chunker.chunk(
+        parse_result=parse_result,
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        config=config,
+    )
 
 
 def _is_vectorized_child(chunk) -> bool:
@@ -169,6 +189,13 @@ def _graph_status_after_extraction(
     )
     requested = int(metrics.get("requested_chunks") or (extracted + failed))
     if failed:
+        error_counts = metrics.get("error_counts") or {}
+        deterministic_failures = sum(
+            int(error_counts.get(key) or 0)
+            for key in ("token_budget", "bad_request", "unprocessable_entity")
+        )
+        if deterministic_failures and not int(metrics.get("retryable_failed_chunks") or 0):
+            return GRAPH_FAILED_TOKEN_BUDGET
         if metrics.get("graph_retry_after"):
             return GRAPH_RETRY_SCHEDULED
         return GRAPH_PARTIAL
@@ -430,6 +457,8 @@ async def _update_graph_write_state(
         ws.graph_completeness = str(metrics.get("graph_completeness"))
     elif status == GRAPH_SKIPPED:
         ws.graph_completeness = "graph-skipped"
+    elif status == GRAPH_FAILED_TOKEN_BUDGET:
+        ws.graph_completeness = "graph-token-budget-failed"
     elif status in (GRAPH_PARTIAL, GRAPH_NEEDS_BACKFILL, GRAPH_RETRY_SCHEDULED):
         ws.graph_completeness = "needs-backfill"
     elif status == GRAPH_READY:
@@ -545,12 +574,22 @@ async def _enqueue_relation_repairs_for_doc(
     candidates: list[RelationRepairCandidate],
     config: IngestionConfig,
 ) -> dict[str, Any]:
-    if candidates:
-        await repair_queue.enqueue_relation_repairs(
-            db,
-            candidates,
-            max_attempts=getattr(config, "graph_repair_max_attempts", 3),
-        )
+    if not candidates:
+        return {
+            "status": "not_needed",
+            "counts": {
+                "total": 0,
+                "pending": 0,
+                "succeeded": 0,
+                "discarded": 0,
+                "terminal_failed": 0,
+            },
+        }
+    await repair_queue.enqueue_relation_repairs(
+        db,
+        candidates,
+        max_attempts=getattr(config, "graph_repair_max_attempts", 3),
+    )
     return await repair_queue.refresh_document_repair_state(
         db,
         corpus_id=corpus_id,
@@ -2335,8 +2374,9 @@ async def run_ingest_job(
             mime=mime_hint or "application/octet-stream",
             do_ocr=False,
         )
-    _norm = re.sub(
-        r"\s+", " ", (parse_result.markdown or parse_result.text or "").strip()
+    _norm = await asyncio.to_thread(
+        _normalize_document_text_for_id,
+        parse_result.markdown or parse_result.text or "",
     )
     doc_id = hashlib.sha256(_norm.encode("utf-8")).hexdigest()
     source_tier = parse_result.source_tier
@@ -2351,7 +2391,8 @@ async def run_ingest_job(
 
     # ── Phase 2: Chunk ───────────────────────────────────────────────────
     t0 = time.monotonic()
-    parents, children, injected_headers = tier_chunker.chunk(
+    parents, children, injected_headers = await asyncio.to_thread(
+        _chunk_parse_result,
         parse_result=parse_result,
         doc_id=doc_id,
         corpus_id=corpus_id,

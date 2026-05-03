@@ -26,20 +26,26 @@ MODEL_PATH = os.getenv("MODEL_PATH", "/model")
 MODEL_ID = os.getenv("MODEL_ID", "")
 MODEL_NAME = os.getenv("MODEL_NAME", MODEL_ID or Path(MODEL_PATH).name)
 BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "32"))
-DEVICE = os.getenv("EMBED_DEVICE", "cuda")  # cuda | cpu — override via env
+REQUESTED_DEVICE = os.getenv("EMBED_DEVICE", "cuda")  # cuda | cpu — override via env
+CPU_FALLBACK_ON_CUDA_ERROR = os.getenv(
+    "EMBED_CPU_FALLBACK_ON_CUDA_ERROR", "false"
+).lower() not in {"0", "false", "no", "off"}
 MAX_SEQ_LENGTH = int(os.getenv("EMBED_MAX_SEQ_LENGTH", "1024"))
 MAX_INPUT_CHARS = int(os.getenv("EMBED_MAX_INPUT_CHARS", "6000"))
+ATTN_IMPLEMENTATION = os.getenv("EMBED_ATTN_IMPLEMENTATION", "flash_attention_2").strip()
+TOKENIZER_PADDING_SIDE = os.getenv("EMBED_TOKENIZER_PADDING_SIDE", "left").strip()
 
 # ── Runtime state ──────────────────────────────────────────────────────────────
 model: SentenceTransformer = None
 embedding_dim: int = None
 model_name: str = None
 model_source: str = None
+runtime_device: str = REQUESTED_DEVICE
 encode_lock = threading.Lock()
 
 
 def _gpu_memory() -> dict[str, int | None]:
-    if DEVICE != "cuda":
+    if runtime_device != "cuda":
         return {"gpu_free_mb": None, "gpu_total_mb": None}
     try:
         import torch
@@ -71,8 +77,42 @@ def _model_source() -> str:
     return MODEL_ID or MODEL_NAME or MODEL_PATH
 
 
-def _load_sentence_model(source: str) -> SentenceTransformer:
-    loaded = SentenceTransformer(source, device=DEVICE)
+def _sentence_transformer_kwargs(device: str | None = None) -> dict:
+    kwargs = {"device": device or runtime_device}
+    if ATTN_IMPLEMENTATION:
+        kwargs["model_kwargs"] = {"attn_implementation": ATTN_IMPLEMENTATION}
+    if TOKENIZER_PADDING_SIDE:
+        kwargs["tokenizer_kwargs"] = {"padding_side": TOKENIZER_PADDING_SIDE}
+    return kwargs
+
+
+def _load_sentence_model(source: str, device: str | None = None) -> SentenceTransformer:
+    kwargs = _sentence_transformer_kwargs(device)
+    try:
+        loaded = SentenceTransformer(source, **kwargs)
+    except TypeError as exc:
+        if "unexpected keyword" not in str(exc):
+            raise
+        logger.warning(
+            "SentenceTransformer does not support model/tokenizer kwargs in this version; "
+            "retrying with device only: %s",
+            exc,
+        )
+        loaded = SentenceTransformer(source, device=device or runtime_device)
+    except Exception as exc:
+        message = str(exc).lower()
+        if ATTN_IMPLEMENTATION != "flash_attention_2" or (
+            "flash_attn" not in message and "flash_attention" not in message
+        ):
+            raise
+        logger.warning(
+            "flash_attention_2 unavailable for embedder model load; retrying without "
+            "attn_implementation: %s",
+            exc,
+        )
+        fallback_kwargs = dict(kwargs)
+        fallback_kwargs.pop("model_kwargs", None)
+        loaded = SentenceTransformer(source, **fallback_kwargs)
     if MAX_SEQ_LENGTH > 0 and hasattr(loaded, "max_seq_length"):
         loaded.max_seq_length = MAX_SEQ_LENGTH
         logger.info("Model max_seq_length set to %d", MAX_SEQ_LENGTH)
@@ -105,8 +145,8 @@ def _clear_cuda_cache():
         logger.exception("Failed to clear CUDA cache after embedder CUDA error")
 
 
-def _reset_model_after_cuda_error():
-    global model, embedding_dim, model_name, model_source
+def _reset_model_after_cuda_error(*, fallback_to_cpu: bool = False):
+    global model, embedding_dim, model_name, model_source, runtime_device
 
     old_model = model
     model = None
@@ -114,29 +154,46 @@ def _reset_model_after_cuda_error():
     gc.collect()
     _clear_cuda_cache()
 
+    if fallback_to_cpu:
+        runtime_device = "cpu"
+
     source = model_source or _model_source()
-    logger.warning("Reloading embedder model after CUDA runtime error")
-    model = _load_sentence_model(source)
+    logger.warning(
+        "Reloading embedder model after CUDA runtime error on device=%s",
+        runtime_device,
+    )
+    model = _load_sentence_model(source, runtime_device)
     embedding_dim = model.get_sentence_embedding_dimension()
     model_name = MODEL_NAME
 
 
+def _encode_texts(texts: list[str]):
+    with encode_lock:
+        return model.encode(
+            texts,
+            batch_size=BATCH_SIZE,
+            normalize_embeddings=True,  # cosine similarity ready
+            show_progress_bar=False,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global model, embedding_dim, model_name, model_source
+    global model, embedding_dim, model_name, model_source, runtime_device
 
     model_source = _model_source()
-    logger.info(f"Loading model from {model_source} on device={DEVICE}")
+    runtime_device = REQUESTED_DEVICE
+    logger.info(f"Loading model from {model_source} on device={runtime_device}")
     start = time.time()
 
-    model = _load_sentence_model(model_source)
+    model = _load_sentence_model(model_source, runtime_device)
 
     # Introspect dimension — works for any sentence-transformers model
     embedding_dim = model.get_sentence_embedding_dimension()
     model_name = MODEL_NAME
 
     elapsed = time.time() - start
-    logger.info(f"Model loaded: name={model_name} source={model_source} dim={embedding_dim} device={DEVICE} in {elapsed:.1f}s")
+    logger.info(f"Model loaded: name={model_name} source={model_source} dim={embedding_dim} device={runtime_device} in {elapsed:.1f}s")
 
     yield
 
@@ -192,7 +249,7 @@ def health():
         "status": "ok",
         "model": model_name,
         "dimension": embedding_dim,
-        "device": DEVICE,
+        "device": runtime_device,
         "batch_size": BATCH_SIZE,
         **_gpu_memory(),
     }
@@ -207,7 +264,7 @@ def info():
         model_name=model_name,
         model_path=MODEL_PATH,
         dimension=embedding_dim,
-        device=DEVICE,
+        device=runtime_device,
         batch_size=BATCH_SIZE,
         **_gpu_memory(),
     )
@@ -235,30 +292,43 @@ def embed(req: EmbeddingRequest):
     # already split by BATCH_SIZE; concurrent encode calls are what can spike
     # VRAM and make the user's desktop unusable.
     try:
-        with encode_lock:
-            vectors = model.encode(
-                texts,
-                batch_size=BATCH_SIZE,
-                normalize_embeddings=True,  # cosine similarity ready
-                show_progress_bar=False,
-            )
+        vectors = _encode_texts(texts)
     except RuntimeError as exc:
         message = str(exc)
         if _is_cuda_runtime_error(message):
-            try:
-                _reset_model_after_cuda_error()
-            except Exception:
-                logger.exception("Failed to reload embedder model after CUDA runtime error")
             logger.warning(
-                "Embedder CUDA runtime error for request_size=%d batch_size=%d; caller should retry smaller",
+                "Embedder CUDA runtime error for request_size=%d batch_size=%d device=%s: %s",
                 len(texts),
                 BATCH_SIZE,
+                runtime_device,
+                message,
             )
-            raise HTTPException(
-                status_code=503,
-                detail="cuda_runtime_error; retry with a smaller embedding batch",
-            ) from exc
-        raise
+            if CPU_FALLBACK_ON_CUDA_ERROR and runtime_device == "cuda":
+                try:
+                    _reset_model_after_cuda_error(fallback_to_cpu=True)
+                    vectors = _encode_texts(texts)
+                except Exception as retry_exc:
+                    logger.exception(
+                        "CPU fallback failed after embedder CUDA runtime error"
+                    )
+                    raise HTTPException(
+                        status_code=503,
+                        detail=(
+                            "cuda_runtime_error; CPU fallback failed: "
+                            f"{retry_exc}"
+                        ),
+                    ) from retry_exc
+            else:
+                try:
+                    _reset_model_after_cuda_error()
+                except Exception:
+                    logger.exception("Failed to reload embedder model after CUDA runtime error")
+                raise HTTPException(
+                    status_code=503,
+                    detail="cuda_runtime_error; retry with a smaller embedding batch",
+                ) from exc
+        else:
+            raise
 
     data = [
         EmbeddingObject(index=i, embedding=vec.tolist())

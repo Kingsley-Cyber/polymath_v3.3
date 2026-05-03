@@ -212,3 +212,37 @@ async def test_all_lanes_exhausted_marks_pending_chunks_retryable(monkeypatch):
     assert all(failure.retryable for failure in report.failures)
     assert all(failure.retry_after is not None for failure in report.failures)
     assert report.metrics["all_lanes_exhausted_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_context_length_400_opens_doc_circuit_without_retry(monkeypatch):
+    _FakeAsyncClient.calls = []
+    _FakeAsyncClient.responses = [
+        _http_error(
+            400,
+            "This model's maximum context length is 8192 tokens. "
+            "However, you requested 2048 output tokens and your prompt contains input_tokens.",
+        )
+    ]
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", _FakeAsyncClient)
+
+    tasks = [
+        ExtractionTask("c1", "d1", "corp1", "text one"),
+        ExtractionTask("c2", "d1", "corp1", "text two"),
+        ExtractionTask("c3", "d1", "corp1", "text three"),
+    ]
+    report = await extract_entities(
+        tasks,
+        schema=_schema(),
+        pool=[{"model": "lfm2-extract", "max_concurrent": 1, "extra_params": {}}],
+        return_report=True,
+        per_chunk_max_attempts=2,
+        per_lane_cooldown_seconds=60,
+    )
+
+    assert len(_FakeAsyncClient.calls) == 1
+    assert len(report.results) == 0
+    assert len(report.failures) == 3
+    assert {failure.error_type for failure in report.failures} == {"token_budget"}
+    assert all(not failure.retryable for failure in report.failures)
+    assert all(failure.retry_after is None for failure in report.failures)

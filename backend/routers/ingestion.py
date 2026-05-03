@@ -28,6 +28,7 @@ from models.schemas import (
 )
 from pydantic import BaseModel, Field
 from routers.auth import get_current_user
+from services.ingestion.file_intake import IntakeValidationError, normalize_upload_filename
 from services.ingestion_service import FrozenFieldError, ingestion_service
 from utils.streaming import build_sse_done, build_sse_error
 
@@ -154,6 +155,37 @@ def _build_ephemeral_ingest_config(
 
 
 logger = logging.getLogger(__name__)
+
+
+def _intake_for_upload(upload: UploadFile):
+    return normalize_upload_filename(upload.filename or "upload", upload.content_type or "")
+
+
+def _reject_invalid_uploads(files: list[UploadFile]) -> list[str]:
+    warnings: list[str] = []
+    errors: list[dict[str, str]] = []
+    for upload in files:
+        try:
+            intake = _intake_for_upload(upload)
+            if intake.warning:
+                warnings.append(intake.warning)
+        except IntakeValidationError as exc:
+            errors.append(
+                {
+                    "filename": upload.filename or "upload",
+                    "mime": upload.content_type or "",
+                    "error": str(exc),
+                }
+            )
+    if errors:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "File intake validation failed. No files were queued.",
+                "errors": errors,
+            },
+        )
+    return warnings
 router = APIRouter(prefix="/api", tags=["ingestion"])
 
 
@@ -535,11 +567,22 @@ async def preflight_documents(
     cfg = IngestionConfig(**(corpus.get("default_ingestion_config") or {}))
     results = []
     for upload in files:
+        try:
+            intake = _intake_for_upload(upload)
+        except IntakeValidationError as exc:
+            results.append(
+                {
+                    "filename": upload.filename or "upload",
+                    "mime": upload.content_type or "",
+                    "error": str(exc),
+                }
+            )
+            continue
         data = await upload.read()
         if not data:
             results.append(
                 {
-                    "filename": upload.filename or "upload",
+                    "filename": intake.filename,
                     "error": "Uploaded file is empty",
                 }
             )
@@ -548,7 +591,7 @@ async def preflight_documents(
             results.append(
                 await ingestion_service.preflight_document(
                     data=data,
-                    filename=upload.filename or "upload",
+                    filename=intake.filename,
                     corpus_id=corpus_id,
                     ingestion_config=cfg,
                 )
@@ -624,6 +667,7 @@ async def batch_ingest_documents(
         raise HTTPException(status_code=404, detail="Corpus not found")
     if not files:
         raise HTTPException(status_code=400, detail="No files supplied")
+    admission_warnings = _reject_invalid_uploads(files)
     cfg, overrides = _build_ephemeral_ingest_config(
         corpus=corpus,
         use_neo4j=use_neo4j,
@@ -639,7 +683,6 @@ async def batch_ingest_documents(
         extraction_base_url=extraction_base_url,
         extraction_api_key=extraction_api_key,
     )
-    admission_warnings: list[str] = []
     preflight = await ingestion_service.preflight_ingest(
         corpus=corpus,
         corpus_id=corpus_id,
@@ -724,6 +767,7 @@ async def stream_ingestion_batch(
                     "vector_ready_count": batch.get("vector_ready_count", 0),
                     "graph_ready_count": batch.get("graph_ready_count", 0),
                     "graph_partial_count": batch.get("graph_partial_count", 0),
+                    "graph_failed_count": batch.get("graph_failed_count", 0),
                     "needs_backfill_count": batch.get("needs_backfill_count", 0),
                     "failed_count": batch.get("failed_count", 0),
                     "cancelled_count": batch.get("cancelled_count", 0),
@@ -734,7 +778,7 @@ async def stream_ingestion_batch(
             if payload != last_payload:
                 yield f"data: {payload}\n\n"
                 last_payload = payload
-            if batch.get("status") in {"completed", "failed", "cancelled"}:
+            if batch.get("status") in {"completed", "completed_with_errors", "failed", "cancelled"}:
                 yield build_sse_done()
                 return
             await asyncio.sleep(1.0)
@@ -855,6 +899,22 @@ async def ingest_document(
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    try:
+        intake = _intake_for_upload(file)
+    except IntakeValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "File intake validation failed. No parse, embedding, or graph work was started.",
+                "errors": [
+                    {
+                        "filename": file.filename or "upload",
+                        "mime": file.content_type or "",
+                        "error": str(exc),
+                    }
+                ],
+            },
+        ) from exc
 
     base_cfg_dict = corpus.get("default_ingestion_config") or {}
     if use_neo4j is not None:
@@ -938,7 +998,7 @@ async def ingest_document(
         try:
             return await ingestion_service.ingest(
                 data=data,
-                filename=file.filename or "upload",
+                filename=intake.filename,
                 corpus_id=corpus_id,
                 user_id=current_user["user_id"],
                 ingestion_config=cfg,
@@ -999,7 +1059,7 @@ async def ingest_document(
         job_id=doc_id,
         doc_id=doc_id,
         corpus_id=corpus_id,
-        filename=file.filename or "upload",
+        filename=intake.filename,
         source_tier=None,
         status="processing",
         write_state=WriteState(),

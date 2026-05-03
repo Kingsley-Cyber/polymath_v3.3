@@ -165,6 +165,8 @@ export interface WriteState {
     | "graph_partial"
     | "graph_ready"
     | "needs_backfill"
+    | "graph_retry_scheduled"
+    | "graph_failed_token_budget"
     | "graph_skipped"
     | string
     | null;
@@ -249,6 +251,7 @@ export interface IngestionBatchResponse {
   vector_ready_count: number;
   graph_ready_count: number;
   graph_partial_count: number;
+  graph_failed_count?: number;
   needs_backfill_count?: number;
   failed_count: number;
   cancelled_count: number;

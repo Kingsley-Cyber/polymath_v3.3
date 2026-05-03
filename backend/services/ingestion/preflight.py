@@ -39,7 +39,7 @@ def _profile_value(entry: Any, key: str) -> Any:
 
 def _profile_api_key(entry: Any) -> str:
     raw = str(_profile_value(entry, "api_key") or "").strip()
-    if not raw or raw == "[set]":
+    if not raw or raw in {"[set]", "local"}:
         return raw
     try:
         from services.secrets import decrypt
@@ -47,6 +47,15 @@ def _profile_api_key(entry: Any) -> str:
         return decrypt(raw) or raw
     except Exception:
         return raw
+
+
+def _vllm_served_model_name(model: str) -> str:
+    return model.split("/", 1)[1] if "/" in model else model
+
+
+def _is_local_vllm_entry(entry: Any, base_url: str) -> bool:
+    preset = str(_profile_value(entry, "provider_preset") or "").strip()
+    return preset == "vllm-local" or "vllm-" in base_url
 
 
 def _has_complete_embedding_pool(config: IngestionConfig) -> bool:
@@ -178,12 +187,45 @@ async def _check_model_entry(entry: Any) -> dict[str, Any]:
     }
     if not model or not base_url:
         return result
+    if _is_local_vllm_entry(entry, base_url) and "/" not in model:
+        result["ok"] = False
+        result["error"] = (
+            f"vllm-local model {model!r} must include the LiteLLM provider "
+            f"prefix, e.g. 'openai/{model}'."
+        )
+        return result
     start = time.perf_counter()
     try:
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(f"{base_url}/models", headers=headers)
             response.raise_for_status()
+        if _is_local_vllm_entry(entry, base_url):
+            served_model = _vllm_served_model_name(model)
+            try:
+                payload = response.json()
+                model_ids = {
+                    str(item.get("id") or "")
+                    for item in payload.get("data", [])
+                    if isinstance(item, dict)
+                }
+            except Exception:
+                model_ids = set()
+            if model_ids and served_model not in model_ids:
+                result.update(
+                    {
+                        "ok": False,
+                        "live_probe": True,
+                        "latency_ms": round(
+                            (time.perf_counter() - start) * 1000.0, 2
+                        ),
+                        "error": (
+                            f"vllm-local model {model!r} resolves to served name "
+                            f"{served_model!r}, but /models returned {sorted(model_ids)!r}."
+                        ),
+                    }
+                )
+                return result
         result.update(
             {
                 "ok": True,
@@ -234,7 +276,18 @@ async def check_llm_model_preflight(config: IngestionConfig) -> dict[str, Any]:
             return
         entry_results = [await _check_model_entry(entry) for entry in entries]
         ok = any(item.get("ok") for item in entry_results)
-        checks[role] = {"ok": ok, "entries": entry_results, "error": None if ok else f"{role} model pool has no reachable entries."}
+        pool_error = None
+        if not ok:
+            entry_errors = [
+                f"{item.get('model') or '<missing model>'}: {item.get('error')}"
+                for item in entry_results
+                if item.get("error")
+            ]
+            detail = "; ".join(entry_errors)
+            pool_error = f"{role} model pool has no reachable entries."
+            if detail:
+                pool_error = f"{pool_error} {detail}"
+        checks[role] = {"ok": ok, "entries": entry_results, "error": pool_error}
         if not ok:
             if required:
                 errors.append(checks[role]["error"])
