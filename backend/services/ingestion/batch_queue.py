@@ -27,6 +27,7 @@ from config import get_settings
 from models.schemas import IngestionConfig, IngestJobResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
+from services.ingestion.cancellation import IngestCancelled
 from services.ingestion.file_intake import normalize_upload_filename
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ RUNNING_ITEM_STATUSES = {
     "graph_pending",
     "graph_extracting",
 }
+NON_TERMINAL_ITEM_STATUSES = RUNNING_ITEM_STATUSES | {"queued"}
 RETRYABLE_ITEM_STATUSES = {"queued", "failed", "needs_backfill"}
 
 
@@ -65,10 +67,46 @@ def _ws_get(write_state: Any, key: str, default: Any = None) -> Any:
     return getattr(write_state, key, default)
 
 
-def _safe_filename(filename: str) -> str:
+def _safe_filename(filename: str, max_len: int = 180) -> str:
     name = Path(filename or "upload").name
     name = re.sub(r"[^a-zA-Z0-9._ -]+", "_", name).strip(" .")
-    return name[:180] or "upload"
+    if not name:
+        return "upload"
+    if len(name) <= max_len:
+        return name
+    suffix = Path(name).suffix
+    if suffix and len(suffix) < max_len:
+        stem_len = max_len - len(suffix)
+        stem = name[: -len(suffix)].rstrip(" .")[:stem_len].rstrip(" .")
+        return f"{stem or 'upload'}{suffix}"
+    return name[:max_len].rstrip(" .") or "upload"
+
+
+def _resume_partition_by_corpus(rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    """Keep only the newest queued/running batch per corpus on backend restart."""
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            row.get("created_at") or datetime.min,
+            row.get("updated_at") or datetime.min,
+            str(row.get("batch_id") or ""),
+        ),
+        reverse=True,
+    )
+    seen: set[str] = set()
+    resume: list[str] = []
+    superseded: list[str] = []
+    for row in ordered:
+        batch_id = str(row.get("batch_id") or "")
+        if not batch_id:
+            continue
+        key = str(row.get("corpus_id") or batch_id)
+        if key in seen:
+            superseded.append(batch_id)
+            continue
+        seen.add(key)
+        resume.append(batch_id)
+    return resume, superseded
 
 
 def _sys_memory() -> tuple[float, float]:
@@ -134,16 +172,35 @@ def detect_resource_profile(spool_dir: str | None = None) -> dict[str, Any]:
         logger.debug("CUDA resource detection unavailable: %s", exc)
 
     if available_ram and available_ram < 4:
-        max_active_docs = 1
+        pre_vector_doc_slots = 1
     elif available_ram and available_ram < 12:
-        max_active_docs = 2
+        pre_vector_doc_slots = 2
     else:
-        max_active_docs = min(4, max(1, cpu_count // 4))
+        pre_vector_doc_slots = min(4, max(1, cpu_count // 4))
     if gpu_devices:
-        max_active_docs = min(max_active_docs, max(1, len(gpu_devices) + 1))
+        pre_vector_doc_slots = min(
+            pre_vector_doc_slots,
+            max(1, len(gpu_devices) + 1),
+        )
+
+    # Deep ingestion keeps vector RAG usable before graph completion. Give the
+    # batch scheduler graph headroom so graph_extracting items do not consume
+    # every document worker and starve queued docs from reaching Qdrant.
+    graph_doc_headroom = 0
+    if not (available_ram and available_ram < 4):
+        graph_doc_headroom = max(1, min(int(settings.INGEST_MAX_GRAPH_MODEL_PHASE_DOCS), 4))
+    max_active_docs = pre_vector_doc_slots + graph_doc_headroom
+    if settings.INGEST_BATCH_MAX_ACTIVE_DOCS:
+        max_active_docs = max(1, int(settings.INGEST_BATCH_MAX_ACTIVE_DOCS))
     recommended_parse = min(max_active_docs, 2)
-    recommended_vector = max(1, min(max_active_docs, 2))
-    recommended_graph = max(1, min(len(gpu_devices) or 1, max_active_docs))
+    recommended_vector = max(1, min(pre_vector_doc_slots, 2))
+    recommended_graph = max(
+        1,
+        min(
+            int(settings.INGEST_MAX_GRAPH_MODEL_PHASE_DOCS),
+            max(1, graph_doc_headroom or len(gpu_devices) or 1),
+        ),
+    )
     worker_batches: dict[str, int] = {}
     for gpu in gpu_devices:
         label = str(gpu.get("name") or "").lower()
@@ -169,6 +226,8 @@ def detect_resource_profile(spool_dir: str | None = None) -> dict[str, Any]:
         "recommended_vector_concurrency": recommended_vector,
         "recommended_graph_concurrency": recommended_graph,
         "recommended_local_worker_batch_sizes": worker_batches,
+        "pre_vector_doc_slots": pre_vector_doc_slots,
+        "graph_doc_headroom": graph_doc_headroom,
         "max_active_docs": max_active_docs,
         "max_spooled_bytes": int(settings.INGEST_MAX_SPOOLED_BYTES),
     }
@@ -236,11 +295,19 @@ def _vector_ready_query(batch_id: str) -> dict[str, Any]:
 
 
 def _terminal_batch_status(
-    *, total_files: int, failed: int, needs_backfill: int, graph_partial: int, graph_failed: int = 0
+    *,
+    total_files: int,
+    failed: int,
+    needs_backfill: int,
+    graph_partial: int,
+    graph_failed: int = 0,
+    cancelled: int = 0,
 ) -> str:
+    if cancelled and cancelled == total_files:
+        return "cancelled"
     if failed and failed == total_files:
         return "failed"
-    if failed or needs_backfill or graph_partial or graph_failed:
+    if failed or cancelled or needs_backfill or graph_partial or graph_failed:
         return "completed_with_errors"
     return "completed"
 
@@ -272,6 +339,7 @@ class BatchIngestionManager:
         self._warm_graph_cache: WarmCallable | None = None
         self._tasks: dict[str, asyncio.Task] = {}
         self._active_items: set[str] = set()
+        self._cancelled_upload_ids: set[str] = set()
         self._lock = asyncio.Lock()
 
     def attach(
@@ -288,26 +356,53 @@ class BatchIngestionManager:
     async def start_resume(self) -> None:
         if self._db is None:
             return
-        await self._db["ingestion_batch_items"].update_many(
-            {"status": {"$in": list(RUNNING_ITEM_STATUSES)}},
-            {
-                "$set": {
-                    "status": "queued",
-                    "updated_at": _now(),
-                    "resume_reason": "backend_restart",
-                }
-            },
-        )
-        await self._db["ingestion_batches"].update_many(
-            {"status": {"$in": ["running", "queued"]}},
-            {"$set": {"status": "queued", "updated_at": _now()}},
-        )
-        cursor = self._db["ingestion_batches"].find(
+        rows = await self._db["ingestion_batches"].find(
             {"status": {"$in": ["queued", "running"]}},
-            {"batch_id": 1, "_id": 0},
-        )
-        async for row in cursor:
-            self.ensure_running(str(row.get("batch_id")))
+            {"batch_id": 1, "corpus_id": 1, "created_at": 1, "updated_at": 1, "_id": 0},
+        ).to_list(length=None)
+        resume_ids, superseded_ids = _resume_partition_by_corpus(rows)
+        if superseded_ids:
+            reason = "superseded_by_newer_batch_after_backend_restart"
+            await self._cancel_items(
+                {
+                    "batch_id": {"$in": superseded_ids},
+                    "status": {"$in": list(NON_TERMINAL_ITEM_STATUSES)},
+                },
+                reason=reason,
+                cleanup_spool=True,
+            )
+            await self._db["ingestion_batches"].update_many(
+                {"batch_id": {"$in": superseded_ids}, "status": {"$in": ["queued", "running"]}},
+                {
+                    "$set": {
+                        "status": "cancelled",
+                        "current_phase": "cancelled",
+                        "updated_at": _now(),
+                        "finished_at": _now(),
+                    },
+                    "$addToSet": {"warnings": reason},
+                },
+            )
+        if resume_ids:
+            await self._db["ingestion_batch_items"].update_many(
+                {
+                    "batch_id": {"$in": resume_ids},
+                    "status": {"$in": list(RUNNING_ITEM_STATUSES)},
+                },
+                {
+                    "$set": {
+                        "status": "queued",
+                        "updated_at": _now(),
+                        "resume_reason": "backend_restart",
+                    }
+                },
+            )
+            await self._db["ingestion_batches"].update_many(
+                {"batch_id": {"$in": resume_ids}, "status": {"$in": ["running", "queued"]}},
+                {"$set": {"status": "queued", "updated_at": _now()}},
+            )
+        for batch_id in resume_ids:
+            self.ensure_running(batch_id)
 
     async def disconnect(self) -> None:
         for task in list(self._tasks.values()):
@@ -360,6 +455,91 @@ class BatchIngestionManager:
         task = asyncio.create_task(self._run_batch(batch_id))
         self._tasks[batch_id] = task
         task.add_done_callback(lambda _task: self._tasks.pop(batch_id, None))
+
+    async def _cancel_items(
+        self,
+        query: dict[str, Any],
+        *,
+        reason: str,
+        cleanup_spool: bool = False,
+    ) -> dict[str, Any]:
+        if self._db is None:
+            return {"cancelled_items": 0, "batch_ids": []}
+        rows = await self._db["ingestion_batch_items"].find(
+            query,
+            {"_id": 0, "upload_id": 1, "batch_id": 1, "spool_path": 1},
+        ).to_list(length=None)
+        if not rows:
+            return {"cancelled_items": 0, "batch_ids": []}
+        upload_ids = [str(row.get("upload_id")) for row in rows if row.get("upload_id")]
+        batch_ids = sorted({str(row.get("batch_id")) for row in rows if row.get("batch_id")})
+        self._cancelled_upload_ids.update(upload_ids)
+        now = _now()
+        await self._db["ingestion_batch_items"].update_many(
+            {"upload_id": {"$in": upload_ids}},
+            {
+                "$set": {
+                    "status": "cancelled",
+                    "current_phase": "cancelled",
+                    "cancel_reason": reason,
+                    "error": reason,
+                    "finished_at": now,
+                    "updated_at": now,
+                }
+            },
+        )
+        if cleanup_spool:
+            for row in rows:
+                path = row.get("spool_path")
+                if path:
+                    await asyncio.to_thread(self._safe_cleanup_spool, Path(str(path)))
+        for batch_id in batch_ids:
+            await self._refresh_batch_counts(batch_id)
+            await self._finish_if_done(batch_id)
+        return {"cancelled_items": len(upload_ids), "batch_ids": batch_ids}
+
+    async def cancel_document_work(
+        self,
+        *,
+        corpus_id: str,
+        doc_id: str | None = None,
+        content_hash: str | None = None,
+        user_id: str | None = None,
+        reason: str = "document_deleted",
+    ) -> dict[str, Any]:
+        selectors: list[dict[str, Any]] = []
+        if doc_id:
+            selectors.append({"doc_id": doc_id})
+        if content_hash:
+            selectors.append({"content_hash": content_hash})
+        if not selectors:
+            return {"cancelled_items": 0, "batch_ids": []}
+        query: dict[str, Any] = {
+            "corpus_id": corpus_id,
+            "status": {"$in": list(NON_TERMINAL_ITEM_STATUSES)},
+        }
+        if user_id:
+            query["user_id"] = user_id
+        if len(selectors) == 1:
+            query.update(selectors[0])
+        else:
+            query["$or"] = selectors
+        return await self._cancel_items(query, reason=reason, cleanup_spool=True)
+
+    async def cancel_corpus_work(
+        self,
+        *,
+        corpus_id: str,
+        user_id: str | None = None,
+        reason: str = "corpus_deleted",
+    ) -> dict[str, Any]:
+        query: dict[str, Any] = {
+            "corpus_id": corpus_id,
+            "status": {"$in": list(NON_TERMINAL_ITEM_STATUSES)},
+        }
+        if user_id:
+            query["user_id"] = user_id
+        return await self._cancel_items(query, reason=reason, cleanup_spool=True)
 
     async def create_batch(
         self,
@@ -439,6 +619,31 @@ class BatchIngestionManager:
                 {"$set": {"status": "failed", "current_phase": "spool_failed", "updated_at": _now()}},
             )
             raise
+        content_hashes = sorted({str(item.get("content_hash")) for item in item_docs if item.get("content_hash")})
+        if content_hashes:
+            result = await self._cancel_items(
+                {
+                    "corpus_id": corpus_id,
+                    "user_id": user_id,
+                    "content_hash": {"$in": content_hashes},
+                    "status": {"$in": list(NON_TERMINAL_ITEM_STATUSES)},
+                    "batch_id": {"$ne": batch_id},
+                },
+                reason="superseded_by_new_upload_of_same_content",
+                cleanup_spool=True,
+            )
+            if result.get("cancelled_items"):
+                await self._db["ingestion_batches"].update_one(
+                    {"batch_id": batch_id},
+                    {
+                        "$addToSet": {
+                            "warnings": (
+                                "Cancelled older queued/running ingest work for "
+                                "duplicate content in this corpus."
+                            )
+                        }
+                    },
+                )
         if item_docs:
             await self._db["ingestion_batch_items"].insert_many(item_docs, ordered=False)
         await self._db["ingestion_batches"].update_one(
@@ -560,13 +765,18 @@ class BatchIngestionManager:
 
     async def cancel(self, batch_id: str, *, user_id: str) -> dict[str, Any]:
         await self._require_batch(batch_id, user_id)
+        await self._cancel_items(
+            {
+                "batch_id": batch_id,
+                "user_id": user_id,
+                "status": {"$in": list(NON_TERMINAL_ITEM_STATUSES | {"failed"})},
+            },
+            reason="batch_cancelled_by_user",
+            cleanup_spool=True,
+        )
         await self._db["ingestion_batches"].update_one(
             {"batch_id": batch_id, "user_id": user_id},
             {"$set": {"status": "cancelled", "current_phase": "cancelled", "finished_at": _now(), "updated_at": _now()}},
-        )
-        await self._db["ingestion_batch_items"].update_many(
-            {"batch_id": batch_id, "status": {"$in": ["queued", "failed"]}},
-            {"$set": {"status": "cancelled", "updated_at": _now()}},
         )
         await self._refresh_batch_counts(batch_id)
         return await self.get_batch(batch_id, user_id=user_id) or {"batch_id": batch_id}
@@ -709,6 +919,15 @@ class BatchIngestionManager:
                 raise FileNotFoundError(f"Spooled file missing: {path}")
             data = await asyncio.to_thread(path.read_bytes)
 
+            async def _cancel_check() -> bool:
+                if upload_id in self._cancelled_upload_ids:
+                    return True
+                row = await self._db["ingestion_batch_items"].find_one(
+                    {"upload_id": upload_id},
+                    {"_id": 0, "status": 1},
+                )
+                return str((row or {}).get("status") or "") == "cancelled"
+
             async def _mark_vectorizing(doc_id: str) -> None:
                 nonlocal progress_task
                 await self._db["ingestion_batch_items"].update_one(
@@ -747,10 +966,20 @@ class BatchIngestionManager:
                 ingestion_config=IngestionConfig(**(batch.get("ingestion_config") or {})),
                 model=str(batch.get("model") or ""),
                 ingest_overrides=batch.get("ingest_overrides") or None,
+                source_mime=str(item.get("mime") or ""),
+                cancel_check=_cancel_check,
                 on_doc_id=_on_doc_id,
             )
             ws = result.write_state
             status = item_status_from_write_state(ws)
+            latest = await self._db["ingestion_batch_items"].find_one(
+                {"upload_id": upload_id},
+                {"_id": 0, "status": 1},
+            )
+            if str((latest or {}).get("status") or "") == "cancelled":
+                if getattr(ws, "mongo_written", False):
+                    await asyncio.to_thread(self._safe_cleanup_spool, path)
+                return
             await self._db["ingestion_batch_items"].update_one(
                 {"upload_id": upload_id},
                 {
@@ -769,6 +998,21 @@ class BatchIngestionManager:
             )
             if getattr(ws, "mongo_written", False):
                 await asyncio.to_thread(self._safe_cleanup_spool, path)
+        except IngestCancelled as exc:
+            await self._db["ingestion_batch_items"].update_one(
+                {"upload_id": upload_id},
+                {
+                    "$set": {
+                        "status": "cancelled",
+                        "current_phase": "cancelled",
+                        "cancel_reason": str(exc)[:1000],
+                        "error": str(exc)[:1000],
+                        "duration_seconds": round(time.monotonic() - started, 3),
+                        "finished_at": _now(),
+                        "updated_at": _now(),
+                    }
+                },
+            )
         except Exception as exc:
             logger.exception("phase=batch_item_failed upload=%s batch=%s: %s", upload_id, batch["batch_id"], exc)
             await self._db["ingestion_batch_items"].update_one(
@@ -832,6 +1076,11 @@ class BatchIngestionManager:
         )
         if not doc:
             return
+        item = await self._db["ingestion_batch_items"].find_one(
+            {"batch_id": batch_id, "upload_id": upload_id},
+            {"_id": 0, "status": 1},
+        )
+        item_status = str((item or {}).get("status") or "")
         write_state = doc.get("write_state") or {}
         status = _live_running_status_from_write_state(write_state)
         current_phase = status
@@ -846,6 +1095,8 @@ class BatchIngestionManager:
             update_doc["current_phase"] = current_phase
         if status:
             update_doc["status"] = status
+        elif item_status in {"parsing", "chunked"}:
+            update_doc["status"] = "vectorizing"
         chunk_count = doc.get("chunk_count")
         if chunk_count is None:
             chunk_count = (doc.get("decision_trace") or {}).get("child_count")
@@ -890,10 +1141,12 @@ class BatchIngestionManager:
         needs_backfill = await self._db["ingestion_batch_items"].count_documents({"batch_id": batch_id, "status": "needs_backfill"})
         graph_partial = await self._db["ingestion_batch_items"].count_documents({"batch_id": batch_id, "status": "graph_partial"})
         graph_failed = await self._db["ingestion_batch_items"].count_documents({"batch_id": batch_id, "status": "graph_failed_token_budget"})
+        cancelled = await self._db["ingestion_batch_items"].count_documents({"batch_id": batch_id, "status": "cancelled"})
         total_files = int(batch.get("total_files") or 0)
         terminal = _terminal_batch_status(
             total_files=total_files,
             failed=failed,
+            cancelled=cancelled,
             needs_backfill=needs_backfill,
             graph_partial=graph_partial,
             graph_failed=graph_failed,

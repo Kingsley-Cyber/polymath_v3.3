@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +19,14 @@ class _DiskUsage:
 def test_safe_filename_strips_paths_and_weird_chars():
     assert batch_queue._safe_filename("/tmp/bad<>name?.md") == "bad_name_.md"
     assert batch_queue._safe_filename("   ") == "upload"
+
+
+def test_safe_filename_preserves_extension_when_truncated():
+    filename = f"{'Anna Archive EPUB ' * 20}.epub"
+    safe = batch_queue._safe_filename(filename, max_len=80)
+
+    assert len(safe) <= 80
+    assert safe.endswith(".epub")
 
 
 def test_no_extension_markdown_filename_is_normalized_before_queueing():
@@ -50,6 +59,30 @@ def test_resource_profile_lowers_active_docs_under_low_ram(tmp_path, monkeypatch
     assert profile["recommended_parse_concurrency"] == 1
     assert profile["recommended_vector_concurrency"] == 1
     assert profile["recommended_graph_concurrency"] == 1
+    assert profile["pre_vector_doc_slots"] == 1
+    assert profile["graph_doc_headroom"] == 0
+
+
+def test_resource_profile_adds_graph_headroom_to_keep_vector_lane_moving(tmp_path, monkeypatch):
+    monkeypatch.setattr(batch_queue, "_sys_memory", lambda: (32.0, 8.0))
+    monkeypatch.setattr(batch_queue.os, "cpu_count", lambda: 28)
+    monkeypatch.setattr(batch_queue.shutil, "disk_usage", lambda _path: _DiskUsage())
+
+    class _Torch:
+        class cuda:
+            @staticmethod
+            def is_available():
+                return False
+
+    monkeypatch.setitem(__import__("sys").modules, "torch", _Torch)
+
+    profile = batch_queue.detect_resource_profile(str(tmp_path))
+
+    assert profile["pre_vector_doc_slots"] == 2
+    assert profile["graph_doc_headroom"] == 2
+    assert profile["max_active_docs"] == 4
+    assert profile["recommended_vector_concurrency"] == 2
+    assert profile["recommended_graph_concurrency"] == 2
 
 
 def test_resource_profile_sets_known_gpu_batch_sizes(tmp_path, monkeypatch):
@@ -133,6 +166,50 @@ def test_terminal_batch_status_reports_partial_errors():
         )
         == "failed"
     )
+
+
+def test_terminal_batch_status_reports_cancelled_work_honestly():
+    assert (
+        batch_queue._terminal_batch_status(
+            total_files=3, failed=0, cancelled=3, needs_backfill=0, graph_partial=0
+        )
+        == "cancelled"
+    )
+    assert (
+        batch_queue._terminal_batch_status(
+            total_files=3, failed=0, cancelled=1, needs_backfill=0, graph_partial=0
+        )
+        == "completed_with_errors"
+    )
+
+
+def test_resume_partition_keeps_newest_batch_per_corpus():
+    base = datetime(2026, 1, 1, 12, 0, 0)
+    rows = [
+        {
+            "batch_id": "old-a",
+            "corpus_id": "corpus-a",
+            "created_at": base,
+            "updated_at": base,
+        },
+        {
+            "batch_id": "new-a",
+            "corpus_id": "corpus-a",
+            "created_at": base + timedelta(minutes=5),
+            "updated_at": base + timedelta(minutes=5),
+        },
+        {
+            "batch_id": "only-b",
+            "corpus_id": "corpus-b",
+            "created_at": base + timedelta(minutes=1),
+            "updated_at": base + timedelta(minutes=1),
+        },
+    ]
+
+    resume, superseded = batch_queue._resume_partition_by_corpus(rows)
+
+    assert resume == ["new-a", "only-b"]
+    assert superseded == ["old-a"]
 
 
 def test_batch_count_fields_counts_vector_ready_independently():

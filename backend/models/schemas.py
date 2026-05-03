@@ -52,6 +52,7 @@ def _local_vllm_model_ref(
     base_url: str,
     max_concurrent: int,
     temperature: float,
+    context_length: int,
     max_tokens: int | None = None,
 ) -> _legacy.ModelProfileRef:
     extra_params: dict[str, Any] = {"temperature": temperature}
@@ -64,6 +65,7 @@ def _local_vllm_model_ref(
         api_key="local",
         max_concurrent=max_concurrent,
         extra_params=extra_params,
+        context_length=context_length,
     )
 
 
@@ -76,6 +78,7 @@ def _default_summary_models() -> list[_legacy.ModelProfileRef]:
             base_url="http://vllm-summary:8000/v1",
             max_concurrent=24,
             temperature=0.0,
+            context_length=12288,
         )
     ]
 
@@ -87,6 +90,7 @@ def _default_extraction_models() -> list[_legacy.ModelProfileRef]:
             base_url="http://vllm-extract:8000/v1",
             max_concurrent=64,
             temperature=0.0,
+            context_length=8192,
         )
     ]
 
@@ -97,6 +101,7 @@ def _default_extraction_repair_models() -> list[_legacy.ModelProfileRef]:
         base_url="http://vllm-repair:8000/v1",
         max_concurrent=4,
         temperature=1.0,
+        context_length=8192,
         max_tokens=2048,
     )
     ref.extra_params.update(

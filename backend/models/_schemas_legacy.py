@@ -534,6 +534,16 @@ class ModelProfileRef(BaseModel):
         default_factory=dict,
         description="Extra LiteLLM body params merged in. 'model', 'messages', 'response_format' reserved.",
     )
+    context_length: int | None = Field(
+        default=None,
+        description=(
+            "Authoritative context window in tokens for this lane. When set, "
+            "Ghost A / Ghost B size their token budget against this value "
+            "instead of the static utils.tokens registry. Required for "
+            "non-default local fine-tunes (lfm2-summary @ 12288, etc.) where "
+            "the registry default of 4096 is wrong."
+        ),
+    )
 
 
 class IngestionConfig(BaseModel):

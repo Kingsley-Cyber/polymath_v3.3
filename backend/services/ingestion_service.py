@@ -167,7 +167,48 @@ def build_effective_config(
             if v is None:
                 continue
             merged[k] = v
-    return IngestionConfig(**merged)
+    return isolate_local_model_routing(IngestionConfig(**merged))
+
+
+def _canonical_embed_mode(value: object) -> str:
+    aliases = {
+        "local_st": "local",
+        "modal_tei": "modal",
+        "siliconflow": "api",
+    }
+    key = str(value or "local")
+    return aliases.get(key, key)
+
+
+def isolate_local_model_routing(config: IngestionConfig) -> IngestionConfig:
+    """Keep local ingestion runs pinned to local model pools.
+
+    Cloud/API summary or extraction pool edits are valid for cloud-routed
+    corpora, but they must not bleed into a corpus whose embed route is local.
+    The worker and preflight both pass through this helper via
+    build_effective_config(); create/update use it before persisting configs.
+    """
+    if _canonical_embed_mode(getattr(config, "embed_mode", "local")) != "local":
+        return config
+
+    defaults = IngestionConfig()
+    return config.model_copy(
+        update={
+            "embed_mode": "local",
+            "embed_base_url": None,
+            "embed_api_key": None,
+            "embed_max_concurrent": None,
+            "embedding_models": [],
+            "modal_containers": None,
+            "models_linked": False,
+            "summary_models": defaults.summary_models,
+            "extraction_models": defaults.extraction_models,
+            "extraction_repair_models": defaults.extraction_repair_models,
+            "graph_extraction_engine": "llm",
+            "llm_fallback_enabled": False,
+            "llm_fallback_max_percent": 0,
+        }
+    )
 
 
 # ── Preset normalization ───────────────────────────────────────────────────
@@ -711,6 +752,8 @@ class IngestionService:
         ingestion_config: IngestionConfig,
         model: str,
         ingest_overrides: dict | None = None,
+        source_mime: str | None = None,
+        cancel_check: "Any | None" = None,
         on_doc_id: "Any | None" = None,
     ) -> IngestJobResponse:
         """Run the full ingestion pipeline for one document.
@@ -737,6 +780,8 @@ class IngestionService:
             neo4j_driver=self._neo4j,
             model=model,
             ingest_overrides=ingest_overrides,
+            source_mime=source_mime,
+            cancel_check=cancel_check,
             on_doc_id=on_doc_id,
         )
 
@@ -896,6 +941,7 @@ class IngestionService:
             ingestion_config = ingestion_config.model_copy(
                 update={"embed_mode": "local_st"}
             )
+        ingestion_config = isolate_local_model_routing(ingestion_config)
 
         # Belt-and-suspenders: an old client may POST entity_schema=null /
         # relation_schema=null. Pydantic default_factory runs only on
@@ -1268,6 +1314,18 @@ class IngestionService:
                     exc,
                 )
 
+        if new_config is not None:
+            try:
+                isolated = isolate_local_model_routing(IngestionConfig(**new_config))
+                new_config.update(isolated.model_dump())
+                updates["default_ingestion_config"] = new_config
+            except Exception as exc:
+                logger.warning(
+                    "local model routing isolation failed on update for corpus %s: %s",
+                    corpus_id,
+                    exc,
+                )
+
         # Phase 14.2 — schema diff and Qdrant sync. Done BEFORE Mongo write so a
         # Qdrant failure aborts the whole update (caller sees the failure).
         if new_config is not None:
@@ -1354,6 +1412,15 @@ class IngestionService:
         )
         from services.storage.qdrant_writer import drop_collections_for_corpus
 
+        if self._batch_manager is not None:
+            try:
+                await self._batch_manager.cancel_corpus_work(
+                    corpus_id=corpus_id,
+                    reason="corpus_deleted_from_corpus_manager",
+                )
+            except Exception:
+                logger.warning("Failed to cancel active ingest work for corpus %s", corpus_id)
+
         # Phase 7.5 — atomically drop all 4 per-corpus collections (naive,
         # hrag, graph, schemas). Replaces the old filter-delete cascade.
         try:
@@ -1412,6 +1479,26 @@ class IngestionService:
             delete_document,
         )
         from services.storage.qdrant_writer import delete_points_by_doc
+
+        doc = await self._db["documents"].find_one(
+            {"corpus_id": corpus_id, "doc_id": doc_id},
+            {"_id": 0, "content_hash": 1, "user_id": 1},
+        )
+        if self._batch_manager is not None:
+            try:
+                await self._batch_manager.cancel_document_work(
+                    corpus_id=corpus_id,
+                    doc_id=doc_id,
+                    content_hash=(doc or {}).get("content_hash"),
+                    user_id=(doc or {}).get("user_id"),
+                    reason="document_deleted_from_corpus_manager",
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to cancel active ingest work for doc %s in corpus %s",
+                    doc_id[:12],
+                    corpus_id[:8],
+                )
 
         # 1. Qdrant points across naive / hrag / graph (doc_id filter).
         try:

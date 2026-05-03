@@ -27,6 +27,7 @@ MENTIONS so we never pay the LLM twice for work already persisted.
 
 import asyncio
 import hashlib
+import inspect
 import logging
 import mimetypes
 import re
@@ -55,6 +56,7 @@ from services.ghost_b import (
     SchemaContext,
     extract_entities,
 )
+from services.ingestion.cancellation import IngestCancelled
 from services.ingestion import docling_adapter, repair_queue, tier_chunker
 from services.ingestion.schema_lens import get_or_create_schema_lens
 from services.ingestion.section_classifier import ChunkKind, should_skip_ghost_b
@@ -65,7 +67,15 @@ from services.storage.qdrant_writer import retrieve_schema_for_chunk
 logger = logging.getLogger(__name__)
 settings = get_settings()
 _PARSE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_PARSE_JOBS))
-_MODEL_PHASE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_MODEL_PHASE_DOCS))
+_LOCAL_MODEL_PHASE_SEMAPHORE = asyncio.Semaphore(
+    max(1, settings.INGEST_MAX_MODEL_PHASE_DOCS)
+)
+_CLOUD_MODEL_PHASE_SEMAPHORE = asyncio.Semaphore(
+    max(1, settings.INGEST_MAX_CLOUD_MODEL_PHASE_DOCS)
+)
+_GRAPH_MODEL_PHASE_SEMAPHORE = asyncio.Semaphore(
+    max(1, settings.INGEST_MAX_GRAPH_MODEL_PHASE_DOCS)
+)
 _AUTO_BACKFILL_SEMAPHORE = asyncio.Semaphore(1)
 GRAPH_PENDING = "graph_pending"
 GRAPH_EXTRACTING = "graph_extracting"
@@ -75,6 +85,34 @@ GRAPH_NEEDS_BACKFILL = "needs_backfill"
 GRAPH_RETRY_SCHEDULED = "graph_retry_scheduled"
 GRAPH_SKIPPED = "graph_skipped"
 GRAPH_FAILED_TOKEN_BUDGET = "graph_failed_token_budget"
+
+
+def _canonical_embed_mode(value: object) -> str:
+    aliases = {
+        "local_st": "local",
+        "modal_tei": "modal",
+        "siliconflow": "api",
+    }
+    key = str(value or "local")
+    return aliases.get(key, key)
+
+
+def _pre_vector_model_semaphore(config: IngestionConfig) -> asyncio.Semaphore:
+    """Route local and cloud pre-vector model phases through separate caps."""
+    if _canonical_embed_mode(getattr(config, "embed_mode", "local")) == "local":
+        return _LOCAL_MODEL_PHASE_SEMAPHORE
+    return _CLOUD_MODEL_PHASE_SEMAPHORE
+
+
+async def _raise_if_cancelled(cancel_check, *, doc_id: str | None = None) -> None:
+    if cancel_check is None:
+        return
+    result = cancel_check()
+    if inspect.isawaitable(result):
+        result = await result
+    if result:
+        suffix = f" for doc {doc_id[:12]}" if doc_id else ""
+        raise IngestCancelled(f"Ingest cancelled{suffix}")
 
 
 class GhostAFailure(RuntimeError):
@@ -673,6 +711,26 @@ def _ghost_b_partial_warning(
     )
 
 
+def _ghost_a_partial_warning(
+    *,
+    summarized: int,
+    total: int,
+) -> str:
+    """Surface partial-coverage from Ghost A in the document UI without
+    aborting the doc. Parents that fail Ghost A keep their inline parent text
+    in Mongo; only the synthetic parent-summary embedding is missing for
+    those parents. Vector + naive RAG are unaffected for those chunks.
+    """
+    skipped = max(total - summarized, 0)
+    return (
+        f"Ghost A parent summarization partial: {summarized}/{total} parents "
+        f"summarized; {skipped} parents skipped (most often: parent text "
+        "exceeded the summary model's context window). Affected parents are "
+        "still indexed for vector RAG via their child chunks; only the "
+        "parent-summary tier is missing for those parents."
+    )
+
+
 def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict | None:
     if results is None:
         return None
@@ -953,6 +1011,12 @@ def _build_ghost_pool(refs) -> list[dict]:
     Turn a list[ModelProfileRef] (Pydantic) or list[dict] into the plain-dict
     pool that ghost_a / ghost_b accept. Decrypts each entry's api_key exactly
     once here so the ghost layers stay ignorant of the secret format.
+
+    `context_length` is passed through verbatim. When None, the ghost helpers
+    fall back to `utils.tokens.get_model_context_limit` — that registry only
+    knows public/cloud models, so local fine-tunes default to 4096 (a
+    conservative under-estimate) and large parents will be skipped with a
+    warning rather than killing the document.
     """
     if not refs:
         return []
@@ -963,6 +1027,11 @@ def _build_ghost_pool(refs) -> list[dict]:
         if ct:
             pt = _decrypt_api_key(ct)
             data["api_key"] = pt if pt is not None else ct
+        ctx_len = data.get("context_length")
+        try:
+            ctx_len_int = int(ctx_len) if ctx_len is not None else None
+        except (TypeError, ValueError):
+            ctx_len_int = None
         out.append(
             {
                 "model": data.get("model"),
@@ -970,6 +1039,7 @@ def _build_ghost_pool(refs) -> list[dict]:
                 "api_key": data.get("api_key") or None,
                 "max_concurrent": int(data.get("max_concurrent") or 1) or 1,
                 "extra_params": data.get("extra_params") or {},
+                "context_length": ctx_len_int,
             }
         )
     return out
@@ -1170,9 +1240,13 @@ async def _run_ghosts_parallel(
     """Run GHOST A and/or GHOST B. Either branch may be disabled
     by config OR skipped via resume gates (Decision D).
 
-    Hard-abort semantics: Ghost A still raises on partial summaries. Ghost B
-    partials return usable extraction results plus warnings so the document can
-    commit to Mongo/Qdrant and surface graph coverage honestly in the UI.
+    Failure semantics (post-context-budget-guard):
+      • Ghost A: per-parent skips (token-budget infeasible OR provider
+        context-overflow 400) are surfaced as a partial warning; the doc
+        commits with whichever summaries succeeded. Total outage (zero
+        summaries with non-zero tasks) still raises GhostAFailure.
+      • Ghost B: partials surface as a warning; the doc commits with whichever
+        chunks produced extraction.
     """
     warnings: list[str] = []
     ghost_b_failures: list[ExtractionFailureItem] = []
@@ -1188,6 +1262,12 @@ async def _run_ghosts_parallel(
         # Summaries already embedded into Qdrant on a prior run; nothing to do.
         need_ghost_a = False
     elif need_ghost_a and ws.mongo_written and existing_parent_chunks:
+        # TODO(ghost-a-skip-marker): when a parent was attempted-and-skipped on
+        # the previous run (token-budget infeasible), we currently retry it
+        # because there's no skip marker — the resume gate just sees
+        # `summary` as None/empty and re-runs. Adding a parent_chunks[].
+        # summary_status field would let resume distinguish "never attempted"
+        # from "attempted, infeasible" and avoid the wasted LLM calls.
         all_filled = all(
             (p.get("summary") or "").strip() for p in existing_parent_chunks
         )
@@ -1289,9 +1369,33 @@ async def _run_ghosts_parallel(
             model=model,
         )
         summary_llm_calls = len(tasks)
-        if len(results) < len(tasks):
+        # Hard-fail only on total outage. With the token-budget guard in
+        # ghost_a._safe_summary_budget, partials now mean a few oversized
+        # parents got skipped — not that the lane is broken. Mirror Ghost B's
+        # soft-warning policy (#1649) so one oversized parent doesn't kill
+        # the whole document. Vector RAG still works via the child chunks of
+        # skipped parents; only the parent-summary embedding is missing.
+        if not results and tasks:
             raise GhostAFailure(
-                f"Ghost A partial: {len(results)}/{len(tasks)} parents summarized"
+                f"Ghost A produced 0/{len(tasks)} summaries — "
+                "treating as provider outage and aborting document."
+            )
+        if len(results) < len(tasks):
+            done_ids = {r.parent_id for r in results}
+            missing_ids = sorted(t.parent_id for t in tasks if t.parent_id not in done_ids)
+            warnings.append(
+                _ghost_a_partial_warning(
+                    summarized=len(results),
+                    total=len(tasks),
+                )
+            )
+            logger.warning(
+                "phase=ghost_a_partial doc=%s corpus=%s summarized=%d total=%d missing_sample=%s",
+                doc_id[:12],
+                corpus_id[:8],
+                len(results),
+                len(tasks),
+                missing_ids[:5],
             )
         return results
 
@@ -1690,6 +1794,7 @@ async def _write_mongo_all(
     ghost_b_metrics: dict | None,
     decision_trace: dict | None,
     ws: WriteState,
+    content_hash: str | None = None,
 ) -> None:
     """Single Mongo write pass: documents + chunks. Summaries go INLINE on
     parent_chunks[].summary and Ghost B output goes INLINE on
@@ -1737,6 +1842,7 @@ async def _write_mongo_all(
         "user_id": user_id,
         "file_id": file_id,
         "filename": filename,
+        "content_hash": content_hash,
         "source_mime": source_mime,
         "source_tier": source_tier.value,
         "ingestion_config": freeze_snapshot(ingestion_config),
@@ -1783,6 +1889,7 @@ async def _ensure_progress_document(
     parents,
     decision_trace: dict | None,
     ws: WriteState,
+    content_hash: str | None = None,
 ) -> None:
     """Create a minimal document row so SSE has something to poll early."""
     from services.ingestion_service import freeze_snapshot
@@ -1796,6 +1903,7 @@ async def _ensure_progress_document(
             "user_id": user_id,
             "file_id": file_id,
             "filename": filename,
+            "content_hash": content_hash,
             "source_mime": source_mime,
             "source_tier": source_tier.value,
             "ingestion_config": freeze_snapshot(ingestion_config),
@@ -2303,7 +2411,7 @@ async def recover_vector_from_mongo(
     ]
     summaries = _reconstruct_summaries_from_mongo(parents, parent_rows)
 
-    async with _MODEL_PHASE_SEMAPHORE:
+    async with _pre_vector_model_semaphore(config):
         vec_map, summary_vec_map = await _embed_batch_for_doc(
             children=children,
             summaries=summaries,
@@ -2492,6 +2600,8 @@ async def run_ingest_job(
     neo4j_driver,
     model: str,
     ingest_overrides: dict | None = None,
+    source_mime: str | None = None,
+    cancel_check=None,
     # Phase K — called with the resolved doc_id as soon as docling parse
     # completes, BEFORE the expensive ghost + embed + write phases run.
     # The HTTP endpoint uses this to return {doc_id, status: "queued"} in
@@ -2514,6 +2624,7 @@ async def run_ingest_job(
     """
 
     cid8 = corpus_id[:8]
+    content_hash = hashlib.sha256(data).hexdigest()
 
     # Load live corpus + build effective config (Phase 21). The `corpus` doc
     # carries unmasked ciphertext for embed_api_key / pool api_keys; worker
@@ -2538,9 +2649,12 @@ async def run_ingest_job(
     ingestion_config = effective_config
 
     # ── Phase 1: Parse ───────────────────────────────────────────────────
+    await _raise_if_cancelled(cancel_check)
     async with _PARSE_SEMAPHORE:
         t0 = time.monotonic()
-        mime_hint, _ = mimetypes.guess_type(filename)
+        mime_hint = str(source_mime or "").split(";", 1)[0].strip().lower()
+        if not mime_hint:
+            mime_hint, _ = mimetypes.guess_type(filename)
         parse_result = await docling_adapter.parse_document(
             data,
             filename=filename,
@@ -2552,6 +2666,7 @@ async def run_ingest_job(
         parse_result.markdown or parse_result.text or "",
     )
     doc_id = hashlib.sha256(_norm.encode("utf-8")).hexdigest()
+    await _raise_if_cancelled(cancel_check, doc_id=doc_id)
     source_tier = parse_result.source_tier
     source_mime = mime_hint or "application/octet-stream"
     logger.info(
@@ -2626,6 +2741,7 @@ async def run_ingest_job(
             user_id=user_id,
             file_id=file_id,
             filename=filename,
+            content_hash=content_hash,
             source_tier=source_tier,
             source_mime=source_mime,
             ingestion_config=ingestion_config,
@@ -2641,6 +2757,7 @@ async def run_ingest_job(
                 "$set": {
                     "decision_trace": decision_trace,
                     "decision_trace_summary": _decision_trace_summary(decision_trace),
+                    "content_hash": existing_doc.get("content_hash") or content_hash,
                     "updated_at": datetime.utcnow(),
                 }
             },
@@ -2658,7 +2775,7 @@ async def run_ingest_job(
     # Ghost B intentionally does not run here. Mongo/Qdrant must become
     # usable for vector RAG before graph enrichment starts.
     try:
-        async with _MODEL_PHASE_SEMAPHORE:
+        async with _pre_vector_model_semaphore(ingestion_config):
             t0 = time.monotonic()
             ghost_result = await _run_ghosts_parallel(
                 config=ingestion_config,
@@ -2720,6 +2837,7 @@ async def run_ingest_job(
     )
 
     # ── Phase 4: Mongo (ONE write pass, inline summaries) ────────────────
+    await _raise_if_cancelled(cancel_check, doc_id=doc_id)
     if not ws.mongo_written:
         t0 = time.monotonic()
         await _write_mongo_all(
@@ -2729,6 +2847,7 @@ async def run_ingest_job(
             user_id=user_id,
             file_id=file_id,
             filename=filename,
+            content_hash=content_hash,
             source_tier=source_tier,
             source_mime=source_mime,
             ingestion_config=ingestion_config,
@@ -2774,8 +2893,9 @@ async def run_ingest_job(
         )
 
     # ── Phase 5: Embed + Phase 6: Qdrant ─────────────────────────────────
+    await _raise_if_cancelled(cancel_check, doc_id=doc_id)
     if not ws.qdrant_written:
-        async with _MODEL_PHASE_SEMAPHORE:
+        async with _pre_vector_model_semaphore(ingestion_config):
             t0 = time.monotonic()
             vec_map, summary_vec_map = await _embed_batch_for_doc(
                 children=children,
@@ -2829,6 +2949,11 @@ async def run_ingest_job(
             child_sparse_map=child_sparse_map,
             summary_sparse_map=summary_sparse_map,
         )
+        try:
+            await _raise_if_cancelled(cancel_check, doc_id=doc_id)
+        except IngestCancelled:
+            await qdrant_writer.delete_points_by_doc(qdrant_client, corpus_id, doc_id)
+            raise
         await mongo_writer.update_write_state(
             db, doc_id, corpus_id=corpus_id, qdrant_written=True, vector_ready=True
         )
@@ -2857,6 +2982,7 @@ async def run_ingest_job(
         )
 
     # ── Phase 7: Graph enrichment lane (optional) ────────────────────────
+    await _raise_if_cancelled(cancel_check, doc_id=doc_id)
     if not _graph_enabled(ingestion_config):
         if ws.graph_status != GRAPH_SKIPPED:
             await _update_graph_write_state(
@@ -2899,7 +3025,7 @@ async def run_ingest_job(
                 started_at=started,
             )
             try:
-                async with _MODEL_PHASE_SEMAPHORE:
+                async with _GRAPH_MODEL_PHASE_SEMAPHORE:
                     t0 = time.monotonic()
                     graph_result = await _run_ghosts_parallel(
                         config=ingestion_config,
@@ -2934,6 +3060,7 @@ async def run_ingest_job(
                         else _ghost_b_metrics_for_skipped(ghost_b_out)
                     )
                     relation_repair_candidates = []
+                await _raise_if_cancelled(cancel_check, doc_id=doc_id)
                 ws.warnings = _merge_warnings(ws.warnings, graph_warnings)
                 await _persist_graph_extraction(
                     db=db,
@@ -2948,6 +3075,7 @@ async def run_ingest_job(
                     raise GhostBFailure(
                         "Ghost B graph enrichment returned no extraction output"
                     )
+                await _raise_if_cancelled(cancel_check, doc_id=doc_id)
 
                 repair_state = await _enqueue_relation_repairs_for_doc(
                     db=db,
@@ -2975,6 +3103,20 @@ async def run_ingest_job(
                     ghost_b_out=ghost_b_out,
                     config=ingestion_config,
                 )
+                try:
+                    await _raise_if_cancelled(cancel_check, doc_id=doc_id)
+                except IngestCancelled:
+                    await qdrant_writer.delete_points_by_doc(
+                        qdrant_client, corpus_id, doc_id
+                    )
+                    raise
+                try:
+                    await _raise_if_cancelled(cancel_check, doc_id=doc_id)
+                except IngestCancelled:
+                    await qdrant_writer.delete_points_by_doc(
+                        qdrant_client, corpus_id, doc_id
+                    )
+                    raise
                 await _write_neo4j_for_doc(
                     neo4j_driver=neo4j_driver,
                     doc_id=doc_id,
@@ -2985,6 +3127,17 @@ async def run_ingest_job(
                     ghost_b_out=ghost_b_out,
                     summaries=summaries,
                 )
+                try:
+                    await _raise_if_cancelled(cancel_check, doc_id=doc_id)
+                except IngestCancelled:
+                    async with neo4j_driver.session() as session:
+                        await session.run(
+                            "MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id}) "
+                            "DETACH DELETE n",
+                            doc_id=doc_id,
+                            corpus_id=corpus_id,
+                        )
+                    raise
                 try:
                     from services.graph.entity_quality import mark_graph_metrics_stale
 
@@ -3029,6 +3182,8 @@ async def run_ingest_job(
                     len(ghost_b_out),
                     len(ghost_b_failures),
                 )
+            except IngestCancelled:
+                raise
             except Exception as exc:
                 ws.warnings = _merge_warnings(
                     ws.warnings,
@@ -3063,6 +3218,7 @@ async def run_ingest_job(
                     exc,
                 )
 
+    await _raise_if_cancelled(cancel_check, doc_id=doc_id)
     if (
         _graph_enabled(ingestion_config)
         and ws.mongo_written

@@ -301,8 +301,17 @@ def _safe_completion_budget(
     messages: list[dict[str, str]],
     model: str,
     requested_tokens: int,
+    context_limit_override: int | None = None,
 ) -> tuple[int | None, dict[str, int]]:
-    context_limit = get_model_context_limit(model)
+    """Pre-flight token budget for an extraction call.
+
+    `context_limit_override` lets callers pass the lane's authoritative context
+    window (from ModelProfileRef.context_length). The static
+    get_model_context_limit registry only knows public models — local
+    fine-tunes like lfm2-extract @ 12288 would otherwise default to 4096 and
+    starve the budget against their own legitimate context.
+    """
+    context_limit = context_limit_override or get_model_context_limit(model)
     prompt_tokens = count_tokens_messages(messages, model)
     available = context_limit - prompt_tokens - _EXTRACTION_CONTEXT_SAFETY_MARGIN
     budget = {
@@ -3289,6 +3298,7 @@ async def extract_entities(
                 messages=messages,
                 model=str(attempt_entry["model"]),
                 requested_tokens=attempt_max_tokens,
+                context_limit_override=attempt_entry.get("context_length"),
             )
             if safe_max_tokens is None:
                 last_error_type = "token_budget"

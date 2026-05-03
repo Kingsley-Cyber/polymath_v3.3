@@ -28,8 +28,29 @@ from services.llm_lane_pool import (
     provider_error_tier,
     provider_error_summary,
 )
+from utils.tokens import count_tokens_messages, get_model_context_limit
 
 logger = logging.getLogger(__name__)
+
+# Reserve a small headroom under the model's reported context so off-by-one
+# tokenizer estimates (we use tiktoken for cloud, char/4 fallback for local)
+# don't push the request 1–2 tokens past the limit and trip a 400.
+_SUMMARY_CONTEXT_SAFETY_MARGIN = 64
+# Floor for the completion budget. If we can't get at least this many output
+# tokens for the summary, the prompt is too large to summarize meaningfully —
+# skip with a warning instead of sending a request that will either 400 or
+# return a 1-token fragment.
+_MIN_SUMMARY_OUTPUT_TOKENS = 32
+# Substrings that indicate the provider rejected us for context-window reasons.
+# Match against the lowercased response body so we can degrade gracefully on
+# the first call and skip the parent rather than burning lane retries.
+_CONTEXT_OVERFLOW_HINTS = (
+    "context length",
+    "maximum context",
+    "input_tokens",
+    "exceed",
+    "too long",
+)
 
 _SYSTEM = (
     "You create retrieval summaries for book, article, and markdown parent "
@@ -65,6 +86,54 @@ class SummaryResult:
     corpus_id: str
     source_tier: str
     summary: str
+
+
+def _safe_summary_budget(
+    *,
+    messages: list[dict[str, str]],
+    model: str,
+    requested_tokens: int,
+    context_limit_override: int | None = None,
+) -> tuple[int | None, dict[str, int]]:
+    """Compute the safe `max_tokens` for a summary call.
+
+    Returns `(safe_max_tokens, budget)`. `safe_max_tokens is None` means the
+    prompt is too large to leave room for a meaningful completion — caller
+    should skip the parent with a warning rather than send a request that the
+    provider will reject (or worse, that will succeed but truncate the output
+    silently). `budget` is a structured dict for logging / metrics.
+
+    `context_limit_override` lets callers pass the lane's authoritative context
+    window (from the model_pool registration) instead of the
+    `get_model_context_limit` registry guess. Local fine-tunes like
+    `lfm2-summary` running at 12,288 are not in the registry and would
+    otherwise default to 4,096.
+    """
+    context_limit = context_limit_override or get_model_context_limit(model)
+    prompt_tokens = count_tokens_messages(messages, model)
+    available = context_limit - prompt_tokens - _SUMMARY_CONTEXT_SAFETY_MARGIN
+    budget = {
+        "context_limit": context_limit,
+        "prompt_tokens_estimate": prompt_tokens,
+        "available_completion_tokens": available,
+        "requested_completion_tokens": requested_tokens,
+        "safety_margin_tokens": _SUMMARY_CONTEXT_SAFETY_MARGIN,
+    }
+    if available < _MIN_SUMMARY_OUTPUT_TOKENS:
+        return None, budget
+    return min(requested_tokens, available), budget
+
+
+def _is_context_overflow_error(exc: Exception) -> bool:
+    """Recognize provider 400s caused by exceeding the context window so we
+    can demote them from fatal-lane signals to per-parent skips.
+    """
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return False
+    if exc.response.status_code != 400:
+        return False
+    text = provider_error_summary(exc).lower()
+    return any(hint in text for hint in _CONTEXT_OVERFLOW_HINTS)
 
 
 async def summarize_parents(
@@ -170,21 +239,43 @@ async def summarize_parents(
 
     async def _process_one(task: SummaryTask, pool_idx: int) -> SummaryResult | None:
         entry = pool[pool_idx]
+        messages = [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": _USER.format(max_tokens=cap, text=task.text)},
+        ]
+        # Pre-flight token budget. The chunker honors the user-configured
+        # parent_chunk_tokens range, which can exceed the summary model's
+        # context window; without this guard the provider returns a 400 that
+        # gets silently swallowed and the doc fails downstream.
+        safe_max, budget = _safe_summary_budget(
+            messages=messages,
+            model=str(entry["model"]),
+            requested_tokens=cap,
+            context_limit_override=entry.get("context_length"),
+        )
+        if safe_max is None:
+            logger.warning(
+                "GHOST A skip parent_id=%s reason=token_budget model=%s "
+                "prompt_tokens=%d context_limit=%d available=%d",
+                task.parent_id,
+                entry["model"],
+                budget["prompt_tokens_estimate"],
+                budget["context_limit"],
+                budget["available_completion_tokens"],
+            )
+            return None
         payload: dict = {
             "model": entry["model"],
-            "messages": [
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": _USER.format(max_tokens=cap, text=task.text)},
-            ],
+            "messages": messages,
             "temperature": 0,
-            "max_tokens": cap,
+            "max_tokens": safe_max,
         }
         if entry.get("base_url"):
             payload["api_base"] = entry["base_url"]
         if entry.get("api_key"):
             payload["api_key"] = entry["api_key"]
         for _k, _v in (entry.get("extra_params") or {}).items():
-            if _k not in ("model", "messages"):
+            if _k not in ("model", "messages", "max_tokens"):
                 payload[_k] = _v
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
@@ -203,6 +294,25 @@ async def summarize_parents(
                     summary=summary,
                 )
         except Exception as exc:
+            # Provider rejected the request because our token estimate was
+            # off (tokenizer mismatch, prompt template overhead). Demote to a
+            # per-parent skip — the lane is healthy, this single parent is
+            # just too big to fit. Without this branch a single oversized
+            # parent would trip SOFT_FATAL_DISABLE_STRIKES and disable the
+            # whole lane mid-ingest.
+            if _is_context_overflow_error(exc):
+                logger.warning(
+                    "GHOST A skip parent_id=%s reason=context_overflow_400 "
+                    "model=%s prompt_tokens_estimate=%d context_limit=%d "
+                    "safe_max=%d: %s",
+                    task.parent_id,
+                    entry["model"],
+                    budget["prompt_tokens_estimate"],
+                    budget["context_limit"],
+                    safe_max,
+                    provider_error_summary(exc),
+                )
+                return None
             if is_fatal_provider_error(exc):
                 raise FatalLaneError(exc) from exc
             logger.error(

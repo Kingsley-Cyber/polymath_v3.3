@@ -641,9 +641,12 @@ services:
       MODELS_DIR: /models
       HF_HOME: /home/appuser/.cache/huggingface
       INGEST_SPOOL_DIR: /app/ingest-spool
-      # Local vLLM boxes can keep multiple documents in model phases at once.
-      # Lower this for external API pools with stricter rate limits.
+      # Local, cloud, and graph phases are isolated so cloud/extraction load
+      # cannot hold local vector readiness hostage.
       INGEST_MAX_MODEL_PHASE_DOCS: ${INGEST_MAX_MODEL_PHASE_DOCS:-2}
+      INGEST_MAX_CLOUD_MODEL_PHASE_DOCS: ${INGEST_MAX_CLOUD_MODEL_PHASE_DOCS:-2}
+      INGEST_MAX_GRAPH_MODEL_PHASE_DOCS: ${INGEST_MAX_GRAPH_MODEL_PHASE_DOCS:-2}
+      INGEST_BATCH_MAX_ACTIVE_DOCS: ${INGEST_BATCH_MAX_ACTIVE_DOCS:-0}
       GRAPH_REPAIR_WORKER_ENABLED: ${GRAPH_REPAIR_WORKER_ENABLED:-true}
       GRAPH_REPAIR_WORKER_CONCURRENCY: ${GRAPH_REPAIR_WORKER_CONCURRENCY:-2}
       GRAPH_REPAIR_WORKER_POLL_SECONDS: ${GRAPH_REPAIR_WORKER_POLL_SECONDS:-2.0}

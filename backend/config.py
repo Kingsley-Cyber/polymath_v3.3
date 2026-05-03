@@ -125,8 +125,27 @@ class Settings(BaseSettings):
         ge=1,
         le=8,
         description=(
-            "Process-local cap for documents concurrently running LLM/embed "
-            "model phases. Per-entry model concurrency still applies inside a slot."
+            "Process-local cap for local documents concurrently running "
+            "pre-vector model phases. Per-entry model concurrency still "
+            "applies inside a slot."
+        ),
+    )
+    INGEST_MAX_CLOUD_MODEL_PHASE_DOCS: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        description=(
+            "Process-local cap for cloud/API documents concurrently running "
+            "pre-vector model phases. Kept separate from local routing."
+        ),
+    )
+    INGEST_MAX_GRAPH_MODEL_PHASE_DOCS: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        description=(
+            "Process-local cap for graph extraction model phases. Graph work "
+            "must not block vector readiness for new local documents."
         ),
     )
     INGEST_MAX_ACTIVE_JOBS: int = Field(
@@ -156,6 +175,15 @@ class Settings(BaseSettings):
         ge=0.1,
         le=30.0,
         description="Scheduler polling cadence for durable batch ingestion.",
+    )
+    INGEST_BATCH_MAX_ACTIVE_DOCS: int = Field(
+        default=0,
+        ge=0,
+        le=32,
+        description=(
+            "Optional hard override for active batch document workers. "
+            "0 lets the scheduler size pre-vector plus graph headroom automatically."
+        ),
     )
     INGEST_BATCH_RETAIN_SPOOL_ON_FAILURE: bool = Field(
         default=True,

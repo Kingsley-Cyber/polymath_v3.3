@@ -17,6 +17,7 @@ from services.ingestion_service import (
     MUTABLE_CONFIG_FIELDS,
     build_effective_config,
     freeze_snapshot,
+    isolate_local_model_routing,
 )
 
 
@@ -98,6 +99,115 @@ def test_build_effective_config_drops_none_overrides():
         ingest_overrides={"embed_mode": None, "embed_base_url": None},
     )
     assert eff.embed_mode == "modal"  # override was None → live corpus wins
+
+
+def test_local_effective_config_ignores_cloud_model_pools():
+    """Local embed routing must pin GHOST A/B to local vLLM pools.
+
+    This prevents cloud/API summary or extraction pool concurrency from
+    leaking into local RTX ingestion through live corpus config or per-batch
+    overrides.
+    """
+    cloud_pool = [
+        {
+            "provider_preset": "openai",
+            "model": "openai/gpt-4o-mini",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "cloud-key",
+            "max_concurrent": 64,
+            "extra_params": {"temperature": 0},
+        }
+    ]
+    eff = build_effective_config(
+        frozen_base=IngestionConfig(embed_mode="local").model_dump(),
+        live_corpus=IngestionConfig(
+            embed_mode="local",
+            summary_models=cloud_pool,
+            extraction_models=cloud_pool,
+            extraction_repair_models=cloud_pool,
+            embedding_models=cloud_pool,
+            embed_base_url="https://api.example.com/v1",
+            embed_api_key="cloud-embed-key",
+            embed_max_concurrent=32,
+            modal_containers=8,
+            models_linked=True,
+        ).model_dump(),
+        ingest_overrides={
+            "summary_models": cloud_pool,
+            "extraction_models": cloud_pool,
+            "embed_mode": "local",
+        },
+    )
+
+    assert eff.embed_mode == "local"
+    assert eff.embed_base_url is None
+    assert eff.embed_api_key is None
+    assert eff.embed_max_concurrent is None
+    assert eff.embedding_models == []
+    assert eff.modal_containers is None
+    assert eff.models_linked is False
+    assert eff.summary_models[0].provider_preset == "vllm-local"
+    assert eff.summary_models[0].base_url == "http://vllm-summary:8000/v1"
+    assert eff.summary_models[0].max_concurrent == 24
+    assert eff.summary_models[0].context_length == 12288
+    assert eff.extraction_models[0].provider_preset == "vllm-local"
+    assert eff.extraction_models[0].base_url == "http://vllm-extract:8000/v1"
+    assert eff.extraction_models[0].max_concurrent == 64
+    assert eff.extraction_models[0].context_length == 8192
+    assert eff.extraction_repair_models[0].provider_preset == "vllm-local"
+    assert eff.extraction_repair_models[0].context_length == 8192
+
+
+def test_cloud_effective_config_keeps_cloud_model_pools():
+    cloud_pool = [
+        {
+            "provider_preset": "openai",
+            "model": "openai/gpt-4o-mini",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "cloud-key",
+            "max_concurrent": 7,
+            "extra_params": {"temperature": 0},
+        }
+    ]
+    eff = build_effective_config(
+        frozen_base=IngestionConfig(embed_mode="local").model_dump(),
+        live_corpus=IngestionConfig(
+            embed_mode="api",
+            summary_models=cloud_pool,
+            extraction_models=cloud_pool,
+        ).model_dump(),
+    )
+
+    assert eff.embed_mode == "api"
+    assert eff.summary_models[0].provider_preset == "openai"
+    assert eff.summary_models[0].max_concurrent == 7
+    assert eff.extraction_models[0].provider_preset == "openai"
+
+
+def test_local_routing_isolation_normalizes_legacy_local_alias():
+    cloud_pool = [
+        {
+            "provider_preset": "anthropic",
+            "model": "anthropic/claude-sonnet-4-6",
+            "base_url": "https://api.anthropic.com/v1",
+            "api_key": "cloud-key",
+            "max_concurrent": 9,
+            "extra_params": {},
+        }
+    ]
+    cfg = isolate_local_model_routing(
+        IngestionConfig.model_validate(
+            {
+                "embed_mode": "local_st",
+                "summary_models": cloud_pool,
+                "extraction_models": cloud_pool,
+            }
+        )
+    )
+
+    assert cfg.embed_mode == "local"
+    assert cfg.summary_models[0].provider_preset == "vllm-local"
+    assert cfg.extraction_models[0].provider_preset == "vllm-local"
 
 
 def test_frozen_field_error_structured():

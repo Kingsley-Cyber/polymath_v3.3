@@ -98,7 +98,7 @@ function applyPresetToConfig(
   return { ...cfg, preset, ...map };
 }
 
-function localPipelinePatch(includeStructural: boolean): Partial<IngestionConfig> {
+function localPipelinePatch(): Partial<IngestionConfig> {
   return {
     embedding_model: DEFAULT_INGESTION_CONFIG.embedding_model,
     embedding_dimension: DEFAULT_INGESTION_CONFIG.embedding_dimension,
@@ -122,35 +122,15 @@ function localPipelinePatch(includeStructural: boolean): Partial<IngestionConfig
       DEFAULT_INGESTION_CONFIG.deferred_graph_repair_enabled,
     graph_repair_max_attempts:
       DEFAULT_INGESTION_CONFIG.graph_repair_max_attempts,
-    ...(includeStructural
-      ? {
-          preset: DEFAULT_INGESTION_CONFIG.preset,
-          use_neo4j: DEFAULT_INGESTION_CONFIG.use_neo4j,
-          chunk_summarization: DEFAULT_INGESTION_CONFIG.chunk_summarization,
-          target_qdrant_collections:
-            DEFAULT_INGESTION_CONFIG.target_qdrant_collections,
-        }
-      : {}),
   };
 }
 
-function isLocalPipelineSelected(
-  config: IngestionConfig,
-  includeStructural: boolean,
-) {
+function isLocalPipelineSelected(config: IngestionConfig) {
   const summaryModel = config.summary_models?.[0]?.model;
   const extractionModel = config.extraction_models?.[0]?.model;
   const repairModel = config.extraction_repair_models?.[0]?.model;
-  const structuralMatches =
-    !includeStructural ||
-    (config.use_neo4j === DEFAULT_INGESTION_CONFIG.use_neo4j &&
-      config.chunk_summarization ===
-        DEFAULT_INGESTION_CONFIG.chunk_summarization &&
-      config.target_qdrant_collections.join(",") ===
-        DEFAULT_INGESTION_CONFIG.target_qdrant_collections.join(","));
 
   return (
-    structuralMatches &&
     (config.embed_mode ?? "local") === "local" &&
     config.models_linked === false &&
     (config.graph_extraction_engine ?? "llm") === "llm" &&
@@ -755,7 +735,6 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                 setNewConfig((prev) => ({ ...prev, ...patch }))
               }
               editing={true}
-              includeStructuralLocalDefaults={true}
             />
 
             {/* Confidence threshold sits on its own because it's GHOST-B-specific
@@ -1042,11 +1021,25 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                           />
                         </div>
 
-                        {/* ─── LOCKED — Structural ──────────────────────────
-                            Cannot be changed once a corpus exists. Backend
-                            enforces (FROZEN_CONFIG_FIELDS in
-                            services/ingestion_service.py); UI mirrors. */}
-                        <LockedStructuralSection config={editConfig} />
+                        {/* ─── Structural ───────────────────────────────────
+                            Backend freezes these only once doc_count > 0.
+                            Empty corpora can still change preset before the
+                            first ingest. */}
+                        {corpus.doc_count === 0 ? (
+                          <div className="space-y-2 border border-accent-main/20 bg-bg-base/40 px-3 py-2">
+                            <div className="flex items-center gap-2 text-[10px] font-bold tracking-widest uppercase text-accent-main">
+                              <span className="w-1 h-3 bg-accent-main" />
+                              Structural — editable until first ingest
+                            </div>
+                            <PresetModeSelector
+                              config={editConfig}
+                              onChange={(next) => setEditConfig(next)}
+                              idPrefix={`edit-${corpus.corpus_id}`}
+                            />
+                          </div>
+                        ) : (
+                          <LockedStructuralSection config={editConfig} />
+                        )}
 
                         {/* ─── MUTABLE — Provider / Credentials ────────────
                             Apply to NEW ingests only. Existing docs keep
@@ -1075,7 +1068,6 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                               )
                             }
                             editing={true}
-                            includeStructuralLocalDefaults={false}
                           />
 
                           <div className="grid grid-cols-3 gap-1.5">
@@ -1279,20 +1271,15 @@ function IngestionModelsSection({
   config,
   onPatch,
   editing,
-  includeStructuralLocalDefaults = false,
 }: {
   config: IngestionConfig;
   onPatch: (patch: Partial<IngestionConfig>) => void;
   editing: boolean;
-  includeStructuralLocalDefaults?: boolean;
 }) {
-  const selected = isLocalPipelineSelected(
-    config,
-    includeStructuralLocalDefaults,
-  );
+  const selected = isLocalPipelineSelected(config);
 
   const applyLocalIngestionStack = () => {
-    onPatch(localPipelinePatch(includeStructuralLocalDefaults));
+    onPatch(localPipelinePatch());
   };
 
   return (

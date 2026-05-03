@@ -478,10 +478,14 @@ async def test_ghost_a_partial_reconstruct_falls_back_to_llm():
 
 
 @pytest.mark.asyncio
-async def test_ghost_a_hard_abort_raises_and_skips_writes():
-    """summarize_parents returning fewer than len(tasks) → GhostAFailure.
-    run_ingest_job must not write to Mongo / Qdrant / Neo4j, and
-    write_state flags must remain at their pre-job values."""
+async def test_ghost_a_total_outage_raises_and_skips_writes():
+    """Ghost A returning ZERO summaries on a non-empty task list → GhostAFailure.
+    This is the "provider outage" path: every lane is broken, no parent could
+    be summarized at all. run_ingest_job must not write to Mongo / Qdrant /
+    Neo4j, and write_state flags must remain at their pre-job values.
+
+    Partial coverage (some parents skipped due to token budget) does NOT take
+    this path — see test_ghost_a_partial_soft_warning_doc_proceeds."""
     rec = PhaseRecorder()
     p, c = _parent("stub-doc", "c" * 36)
     m = _install_mocks(rec, parents=[p], children=[c],
@@ -489,7 +493,7 @@ async def test_ghost_a_hard_abort_raises_and_skips_writes():
     # Replace the mocked _run_ghosts_parallel with one that raises.
     async def _raise(**kw):
         rec.events.append("ghosts_parallel")
-        raise GhostAFailure("Ghost A partial: 0/1")
+        raise GhostAFailure("Ghost A produced 0/1 summaries")
     worker._run_ghosts_parallel = _raise  # type: ignore[assignment]
     try:
         cfg = IngestionConfig(use_neo4j=False, chunk_summarization=True)
@@ -505,6 +509,68 @@ async def test_ghost_a_hard_abort_raises_and_skips_writes():
         assert kwargs["warnings"][0].startswith("Ghost A summarization failed:")
     finally:
         m["stop_all"]()
+
+
+@pytest.mark.asyncio
+async def test_ghost_a_partial_soft_warning_doc_proceeds():
+    """Partial Ghost A coverage (e.g. 1 of 2 parents summarized because the
+    other was skipped by the token-budget guard) is a warning, not a failure.
+
+    Document must commit to Mongo + Qdrant with whichever summaries succeeded.
+    The partial warning surfaces on write_state.warnings so the UI shows it,
+    but vector_ready=True (the doc is queryable). Mirrors Ghost B's existing
+    soft-fail behavior — a few oversized parents must not kill an ingest of
+    a 160-parent book."""
+    rec = PhaseRecorder()
+    p1, c1 = _parent("stub-doc", "c" * 36, pid="p0", child_id="c0")
+    p2, c2 = _parent("stub-doc", "c" * 36, pid="p1", child_id="c1")
+    # Only one summary returned for two parents — the other was skipped by
+    # ghost_a's _safe_summary_budget guard (oversized parent text).
+    summaries = [_fake_summary_result("p0", "stub-doc", "c" * 36)]
+    m = _install_mocks(rec, parents=[p1, p2], children=[c1, c2],
+                       summaries=summaries, ghost_b_out=None)
+    # Override the mocked ghost runner to also surface the partial warning,
+    # exactly like the real _a_branch does after my soft-fail edit.
+    async def _ghosts_with_partial_warning(**kw):
+        rec.events.append("ghosts_parallel")
+        return worker.GhostRunResult(
+            summaries=summaries,
+            ghost_b_out=None,
+            warnings=[
+                worker._ghost_a_partial_warning(summarized=1, total=2),
+            ],
+        )
+    worker._run_ghosts_parallel = _ghosts_with_partial_warning  # type: ignore[assignment]
+    try:
+        cfg = IngestionConfig(
+            use_neo4j=False, chunk_summarization=True,
+            target_qdrant_collections=["naive", "hrag"],
+        )
+        result = await _run_job(m, cfg)
+        # Doc commits successfully despite Ghost A partial.
+        assert result.status == "done"
+        assert result.write_state.vector_ready is True
+        # All post-ghost phases ran.
+        for phase in ("mongo_write", "embed", "qdrant_write"):
+            assert phase in rec.events
+        # Warning is preserved on the document so the UI can display it.
+        assert any(
+            "Ghost A parent summarization partial" in w
+            for w in (result.write_state.warnings or [])
+        ), result.write_state.warnings
+    finally:
+        m["stop_all"]()
+
+
+def test_ghost_a_partial_warning_message_format():
+    """The partial-warning helper must produce a string that downstream UI
+    can recognize and that includes the coverage ratio."""
+    msg = worker._ghost_a_partial_warning(summarized=126, total=160)
+    assert "126/160" in msg
+    assert "partial" in msg.lower()
+    # Must explicitly call out that vector RAG is unaffected — this is what
+    # tells the user the ingest is still useful even with skipped parents.
+    assert "vector RAG" in msg or "vector rag" in msg.lower()
 
 
 @pytest.mark.asyncio
@@ -561,6 +627,17 @@ def test_build_ghost_pool_defaults_to_one_when_missing():
     never expands beyond what the user asked for."""
     pool = _build_ghost_pool([{"model": "x"}, {"model": "y", "max_concurrent": 0}])
     assert [e["max_concurrent"] for e in pool] == [1, 1]
+
+
+def test_pre_vector_model_semaphore_isolates_local_from_cloud():
+    local_sem = worker._pre_vector_model_semaphore(IngestionConfig(embed_mode="local"))
+    cloud_sem = worker._pre_vector_model_semaphore(IngestionConfig(embed_mode="api"))
+    modal_sem = worker._pre_vector_model_semaphore(IngestionConfig(embed_mode="modal"))
+
+    assert local_sem is worker._LOCAL_MODEL_PHASE_SEMAPHORE
+    assert cloud_sem is worker._CLOUD_MODEL_PHASE_SEMAPHORE
+    assert modal_sem is worker._CLOUD_MODEL_PHASE_SEMAPHORE
+    assert local_sem is not cloud_sem
 
 
 def test_ghost_b_policy_uses_full_for_small_docs():
