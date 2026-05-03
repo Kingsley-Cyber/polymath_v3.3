@@ -16,6 +16,10 @@ from services.conversation import conversation_service
 from services.ghost_b import EntityItem, ExtractionResult, RelationItem
 from services.storage import mongo_reader, mongo_writer
 
+# Live Mongo required (see module docstring). Skipped in default runs;
+# opt in with `pytest -m integration` after `docker compose up -d mongodb`.
+pytestmark = pytest.mark.integration
+
 
 def _sample_result(chunk_id: str) -> ExtractionResult:
     return ExtractionResult(

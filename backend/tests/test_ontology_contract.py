@@ -133,8 +133,16 @@ def test_prompt_includes_predicate_decision_rules():
     assert "Predicate decision rules:" in prompt
     assert "depends_on: The source requires the target to function" in prompt
     assert "If X can still work without Y but currently consumes it, use uses" in prompt
+    # `alternative_predicates_considered` is only mentioned in the legacy
+    # parser note now (the LFM2-Extract v2 schema dropped the field) — but
+    # the note still has to be present so the parser keeps accepting old rows.
     assert "alternative_predicates_considered" in prompt
-    assert "predicate_confidence" in prompt
+    # NOTE: pre-v2 prompts emitted a top-level `predicate_confidence` field.
+    # The v2 schema collapses it into a single `confidence` field (see
+    # build_user_prompt JSON example) and the parser still reads the legacy
+    # name. The prompt should NOT mention `predicate_confidence` — adding it
+    # back would re-bloat tokens against the budget-hardening commits.
+    assert "predicate_confidence" not in prompt
 
 
 def test_prompt_includes_compact_json_budget_rules():
@@ -178,7 +186,16 @@ def test_recovery_prompt_tightens_output_budget():
 
     assert "HARD LIMIT: output at most 5 entities and at most 5 relations" in prompt
     assert "RECOVERY MODE OUTPUT: return minimal valid JSON only" in prompt
-    assert "RECOVERY MODE OUTPUT: evidence_phrase <= 12 words" in prompt
+    # The token-budget hardening renamed the v2 evidence field from
+    # `evidence_phrase` to `source_sentence` + `qualifier`. The legacy
+    # `evidence_phrase` cap (12 words) survives only as a parser-side
+    # accommodation for old rows; the modern recovery cap is on the
+    # source_sentence (25 words) and qualifier (8 words) pair.
+    assert (
+        "RECOVERY MODE OUTPUT: source_sentence <= 25 words and qualifier <= 8 words"
+        in prompt
+    )
+    assert "legacy evidence_phrase <= 12 words accepted by parser only" in prompt
     assert "candidate_facts must not exceed accepted relations" in prompt
 
 

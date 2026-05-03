@@ -28,6 +28,11 @@ from services.conversation import conversation_service
 from services.secrets import decrypt
 from services.settings import settings_service
 
+# Every test in this module hits the live Mongo in the docker-compose stack
+# (see module docstring). Default `pytest` runs skip these — opt in with
+# `pytest -m integration` once `docker compose up -d mongodb` is healthy.
+pytestmark = pytest.mark.integration
+
 
 def _u() -> str:
     """Unique throwaway user id per test."""

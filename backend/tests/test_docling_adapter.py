@@ -224,11 +224,17 @@ async def test_plaintext_caps_lines_promote_to_tier_b_plus(adapter):
         "expected at least one paragraph with a heading_path"
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_docx_with_headings_classifies_with_structure(adapter):
     """A DOCX built with proper heading styles should classify as tier_a or
     tier_b_plus and yield non-empty sections. We synthesize a tiny .docx
     inline rather than shipping a binary fixture.
+
+    Marked integration: DOCX parsing is delegated to the docling sidecar
+    (`http://docling:8500`) — there's no local Python path for .docx in this
+    build. Run with `docker compose --profile local-parser up -d docling`
+    then `pytest -m integration tests/test_docling_adapter.py`.
     """
     pytest.importorskip("docx")  # python-docx
     from docx import Document
