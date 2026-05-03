@@ -234,7 +234,7 @@ services:
     ports:
       - "8011:8000"
     volumes:
-      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
+      - "${POLYMATH_CACHE_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
     environment:
       HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
       HF_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
@@ -290,7 +290,7 @@ services:
     ports:
       - "8012:8000"
     volumes:
-      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
+      - "${POLYMATH_CACHE_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
     environment:
       HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
       HF_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
@@ -346,7 +346,7 @@ services:
     ports:
       - "8014:8000"
     volumes:
-      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
+      - "${POLYMATH_CACHE_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
     environment:
       HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
       HF_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
@@ -402,7 +402,7 @@ services:
     ports:
       - "8013:8000"
     volumes:
-      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
+      - "${POLYMATH_CACHE_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
     environment:
       HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
       HF_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
@@ -465,7 +465,7 @@ services:
       - "8082:80"
     volumes:
       - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}/Qwen3-Embedding-0.6B:/model:ro"
-      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
+      - "${POLYMATH_CACHE_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
     environment:
       HF_HOME: /root/.cache/huggingface
       MODEL_PATH: /model
@@ -515,7 +515,7 @@ services:
       - "8081:8080"
     volumes:
       - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}/ms-marco-MiniLM-L6-v2:/model:ro"
-      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
+      - "${POLYMATH_CACHE_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
     environment:
       HF_HOME: /root/.cache/huggingface
       MODEL_PATH: /model
@@ -551,8 +551,8 @@ services:
     expose:
       - "8500"
     volumes:
-      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/docling/models:/app/docling_models"
-      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/app/hf_cache"
+      - "${POLYMATH_CACHE_ROOT:-C:/PolymathRuntime}/volumes/docling/models:/app/docling_models"
+      - "${POLYMATH_CACHE_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/app/hf_cache"
     environment:
       DOCLING_ARTIFACTS_PATH: /app/docling_models
       HF_HOME: /app/hf_cache
@@ -614,7 +614,7 @@ services:
       - "8000:8000"
     volumes:
       - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}:/models:ro"
-      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/home/appuser/.cache/huggingface"
+      - "${POLYMATH_CACHE_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/home/appuser/.cache/huggingface"
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/ingest-spool:/app/ingest-spool"
       # Phase 22 — expose the Modal deploy factory inside the backend
       # container so /api/infrastructure/modal/deploy can import it.
