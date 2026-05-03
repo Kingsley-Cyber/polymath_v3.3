@@ -164,6 +164,28 @@ class Settings(BaseSettings):
             "can run without the user re-uploading."
         ),
     )
+    GRAPH_REPAIR_WORKER_ENABLED: bool = Field(
+        default=True,
+        description="Run the durable Gemma graph repair queue worker when Neo4j is enabled.",
+    )
+    GRAPH_REPAIR_WORKER_CONCURRENCY: int = Field(
+        default=2,
+        ge=1,
+        le=16,
+        description="Maximum concurrent durable graph repair jobs.",
+    )
+    GRAPH_REPAIR_WORKER_POLL_SECONDS: float = Field(
+        default=2.0,
+        ge=0.1,
+        le=60.0,
+        description="Polling cadence for the durable graph repair worker.",
+    )
+    GRAPH_REPAIR_LEASE_SECONDS: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        description="Visibility timeout for leased graph repair jobs.",
+    )
 
     # === LOCAL MODELS DIR ===
     MODELS_DIR: str = Field(

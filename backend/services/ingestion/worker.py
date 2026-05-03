@@ -50,11 +50,13 @@ from services.ghost_b import (
     ExtractionFailureItem,
     ExtractionResult,
     ExtractionTask,
+    RelationRepairCandidate,
     RelationItem,
     SchemaContext,
     extract_entities,
 )
 from services.ingestion import docling_adapter, tier_chunker
+from services.ingestion import repair_queue
 from services.ingestion.schema_lens import get_or_create_schema_lens
 from services.ingestion.section_classifier import ChunkKind, should_skip_ghost_b
 from services.secrets import decrypt as _decrypt_api_key
@@ -97,6 +99,7 @@ class GhostRunResult:
     warnings: list[str] = field(default_factory=list)
     ghost_b_failures: list[ExtractionFailureItem] = field(default_factory=list)
     ghost_b_metrics: dict | None = None
+    relation_repair_candidates: list[RelationRepairCandidate] = field(default_factory=list)
 
     def __iter__(self):
         yield self.summaries
@@ -168,6 +171,8 @@ def _graph_status_after_extraction(
     if failed:
         if metrics.get("graph_retry_after"):
             return GRAPH_RETRY_SCHEDULED
+        return GRAPH_PARTIAL
+    if int(metrics.get("relation_repair_pending_count") or metrics.get("relation_repair_queued_count") or 0):
         return GRAPH_PARTIAL
     if requested and extracted < requested:
         return GRAPH_PARTIAL
@@ -529,6 +534,27 @@ async def _persist_graph_extraction(
     await db["documents"].update_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
         {"$set": trace_updates},
+    )
+
+
+async def _enqueue_relation_repairs_for_doc(
+    *,
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+    candidates: list[RelationRepairCandidate],
+    config: IngestionConfig,
+) -> dict[str, Any]:
+    if candidates:
+        await repair_queue.enqueue_relation_repairs(
+            db,
+            candidates,
+            max_attempts=getattr(config, "graph_repair_max_attempts", 3),
+        )
+    return await repair_queue.refresh_document_repair_state(
+        db,
+        corpus_id=corpus_id,
+        doc_id=doc_id,
     )
 
 
@@ -1008,6 +1034,7 @@ async def _run_ghosts_parallel(
     warnings: list[str] = []
     ghost_b_failures: list[ExtractionFailureItem] = []
     ghost_b_metrics: dict | None = None
+    relation_repair_candidates: list[RelationRepairCandidate] = []
     summary_llm_calls = 0
     # ── GHOST A path decisions ────────────────────────────────────────────
     existing_parent_chunks: list[dict] = (
@@ -1272,6 +1299,9 @@ async def _run_ghosts_parallel(
                 **policy.metrics(),
                 "graph_extraction_engine_requested": _graph_extraction_engine(config),
             },
+            "defer_triple_repair": bool(
+                getattr(config, "deferred_graph_repair_enabled", True)
+            ),
         }
         report = await extract_entities(tasks, **llm_kwargs)
         if not isinstance(report, ExtractionBatchReport):
@@ -1282,6 +1312,7 @@ async def _run_ghosts_parallel(
             results = report.results
             failures = report.failures
             metrics = report.metrics
+            relation_repair_candidates.extend(report.relation_repairs or [])
         metrics = dict(metrics or {})
         if (
             policy.extraction_mode == "compact"
@@ -1337,6 +1368,9 @@ async def _run_ghosts_parallel(
                     per_lane_cooldown_seconds=getattr(
                         config, "graph_per_lane_cooldown_seconds", 300
                     ),
+                    defer_triple_repair=bool(
+                        getattr(config, "deferred_graph_repair_enabled", True)
+                    ),
                     metrics_context={
                         "extraction_strategy": "deep_pass_high_signal",
                         "graph_completeness": "graph-compact",
@@ -1344,6 +1378,9 @@ async def _run_ghosts_parallel(
                 )
                 if isinstance(deep_report, ExtractionBatchReport):
                     deep_results = deep_report.results
+                    relation_repair_candidates.extend(
+                        deep_report.relation_repairs or []
+                    )
                     result_by_chunk = {r.chunk_id: r for r in results}
                     for item in deep_results:
                         result_by_chunk[item.chunk_id] = item
@@ -1381,6 +1418,8 @@ async def _run_ghosts_parallel(
                     metrics["json_recovery_rate"] = round(recoveries / requested, 4) if requested else 0.0
                     metrics["json_recovery_attempt_rate"] = round(recoveries / attempts, 4) if attempts else 0.0
         metrics["schema_lens"] = schema_lens.to_dict()
+        metrics["relation_repair_queued_count"] = len(relation_repair_candidates)
+        metrics["relation_repair_pending_count"] = len(relation_repair_candidates)
         ghost_b_failures.extend(failures)
         ghost_b_metrics = metrics
         if len(results) < len(tasks):
@@ -1417,6 +1456,7 @@ async def _run_ghosts_parallel(
         warnings=warnings,
         ghost_b_failures=ghost_b_failures,
         ghost_b_metrics=ghost_b_metrics,
+        relation_repair_candidates=relation_repair_candidates,
     )
 
 
@@ -2431,6 +2471,7 @@ async def run_ingest_job(
     ghost_b_out: list[ExtractionResult] | None = None
     ghost_b_failures: list[ExtractionFailureItem] = []
     ghost_b_metrics: dict | None = None
+    relation_repair_candidates: list[RelationRepairCandidate] = []
     ws.warnings = _merge_warnings(ws.warnings, ingest_warnings)
     logger.info(
         "phase=ghost_a duration=%.2fs doc=%s corpus=%s status=%s warnings=%d",
@@ -2641,6 +2682,7 @@ async def run_ingest_job(
                     graph_warnings = graph_result.warnings
                     ghost_b_failures = graph_result.ghost_b_failures
                     ghost_b_metrics = graph_result.ghost_b_metrics
+                    relation_repair_candidates = graph_result.relation_repair_candidates
                 else:
                     graph_tuple = tuple(graph_result)
                     ghost_b_out = graph_tuple[1] if len(graph_tuple) > 1 else None
@@ -2651,6 +2693,7 @@ async def run_ingest_job(
                         if len(graph_tuple) > 4
                         else _ghost_b_metrics_for_skipped(ghost_b_out)
                     )
+                    relation_repair_candidates = []
                 ws.warnings = _merge_warnings(ws.warnings, graph_warnings)
                 await _persist_graph_extraction(
                     db=db,
@@ -2663,6 +2706,26 @@ async def run_ingest_job(
                 )
                 if ghost_b_out is None:
                     raise GhostBFailure("Ghost B graph enrichment returned no extraction output")
+
+                repair_state = await _enqueue_relation_repairs_for_doc(
+                    db=db,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    candidates=relation_repair_candidates,
+                    config=ingestion_config,
+                )
+                counts = repair_state.get("counts") or {}
+                ws.repair_status = repair_state.get("status")
+                ws.repair_total = int(counts.get("total") or 0)
+                ws.repair_pending = int(counts.get("pending") or 0)
+                ws.repair_succeeded = int(counts.get("succeeded") or 0)
+                ws.repair_discarded = int(counts.get("discarded") or 0)
+                ws.repair_failed = int(counts.get("terminal_failed") or 0)
+                if ghost_b_metrics is None:
+                    ghost_b_metrics = {}
+                ghost_b_metrics = dict(ghost_b_metrics)
+                ghost_b_metrics["relation_repair_pending_count"] = ws.repair_pending
+                ghost_b_metrics["relation_repair_total_count"] = ws.repair_total
 
                 await _write_graph_vectors_for_doc(
                     qdrant_client=qdrant_client,

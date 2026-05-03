@@ -103,6 +103,8 @@ export interface IngestionConfig {
   graph_extraction_engine?: GraphExtractionEngine;
   llm_fallback_enabled?: boolean;
   llm_fallback_max_percent?: number;
+  deferred_graph_repair_enabled?: boolean;
+  graph_repair_max_attempts?: number;
 
   // GHOST B — Universal schema (baked backend-side, see ghost_b.UNIVERSAL_*_SCHEMA).
   // The create/edit UI no longer exposes these. Fields retained on the
@@ -172,6 +174,13 @@ export interface WriteState {
   graph_extracted_chunk_count?: number;
   graph_extraction_strategy?: string | null;
   graph_completeness?: string | null;
+  repair_status?: "not_required" | "queued" | "processing" | "complete" | "partial" | "failed" | string | null;
+  repair_total?: number;
+  repair_pending?: number;
+  repair_succeeded?: number;
+  repair_discarded?: number;
+  repair_failed?: number;
+  repair_last_error?: string | null;
   warnings?: string[];
   // Phase E — post-write verification result (null = not yet run)
   verified?: boolean | null;
@@ -338,6 +347,8 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
   graph_extraction_engine: "llm",
   llm_fallback_enabled: false,
   llm_fallback_max_percent: 0,
+  deferred_graph_repair_enabled: true,
+  graph_repair_max_attempts: 3,
   // entity_schema / relation_schema / schema_strict intentionally omitted —
   // backend fills them from the universal schema on POST.
   use_neo4j: true,

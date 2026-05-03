@@ -1334,6 +1334,16 @@ export async function backfillDocumentGraph(
   });
 }
 
+export async function drainDocumentGraphRepairs(
+  corpusId: string,
+  docId: string,
+  limit = 32,
+): Promise<{ status: string; processed?: number; terminal?: number; failed?: number; [key: string]: unknown }> {
+  return fetchJSON(`/corpora/${encodeURIComponent(corpusId)}/documents/${encodeURIComponent(docId)}/graph-repairs/drain?limit=${encodeURIComponent(String(limit))}`, {
+    method: "POST",
+  });
+}
+
 export async function recoverDocumentVectors(
   corpusId: string,
   docId: string,

@@ -84,6 +84,8 @@ MUTABLE_CONFIG_FIELDS: frozenset[str] = frozenset({
     "graph_per_lane_cooldown_seconds",
     "graph_backfill_max_chunks",
     "graph_backfill_max_attempts_per_chunk",
+    "deferred_graph_repair_enabled",
+    "graph_repair_max_attempts",
     "graph_extraction_engine",
     "llm_fallback_enabled",
     "llm_fallback_max_percent",
@@ -218,6 +220,7 @@ class IngestionService:
         self._neo4j = None  # neo4j.AsyncDriver when NEO4J_ENABLED
         self._settings = get_settings()
         self._batch_manager = None
+        self._repair_worker = None
 
     async def connect(self, db: AsyncIOMotorDatabase) -> None:
         """Called from lifespan startup. Receives the shared MongoDB db instance.
@@ -287,6 +290,20 @@ class IngestionService:
         except Exception as exc:
             logger.warning("Batch ingestion manager did not start: %s", exc)
 
+        if self._settings.GRAPH_REPAIR_WORKER_ENABLED and self._neo4j is not None:
+            try:
+                from services.ingestion.repair_worker import GraphRepairWorker
+
+                self._repair_worker = GraphRepairWorker(
+                    db=db,
+                    qdrant_client=self._qdrant,
+                    neo4j_driver=self._neo4j,
+                )
+                self._repair_worker.start()
+                logger.info("IngestionService: graph repair worker started")
+            except Exception as exc:
+                logger.warning("Graph repair worker did not start: %s", exc)
+
     @property
     def neo4j_driver(self):
         """Expose Neo4j async driver for graph router."""
@@ -305,6 +322,8 @@ class IngestionService:
         return self._db
 
     async def disconnect(self) -> None:
+        if self._repair_worker:
+            await self._repair_worker.stop()
         if self._batch_manager:
             await self._batch_manager.disconnect()
         if self._qdrant:
@@ -1296,7 +1315,10 @@ class IngestionService:
         # 4. Delete documents
         await delete_documents_by_corpus(self._db, corpus_id)
 
-        # 5. Delete corpus record
+        # 5. Delete durable relation repair jobs
+        await self._db["graph_repair_queue"].delete_many({"corpus_id": corpus_id})
+
+        # 6. Delete corpus record
         return await delete_corpus(self._db, corpus_id)
 
     async def list_documents(
@@ -1354,7 +1376,12 @@ class IngestionService:
         # 3. Mongo chunks.
         await delete_chunks_by_doc(self._db, corpus_id, doc_id)
 
-        # 4. Mongo document record.
+        # 4. Durable relation repair jobs for this document.
+        await self._db["graph_repair_queue"].delete_many(
+            {"corpus_id": corpus_id, "doc_id": doc_id}
+        )
+
+        # 5. Mongo document record.
         return await delete_document(self._db, corpus_id, doc_id)
 
     async def list_all_user_documents(
@@ -1384,6 +1411,25 @@ class IngestionService:
             corpus_id=corpus_id,
             doc_id=doc_id,
             user_id=user_id,
+        )
+
+    async def drain_graph_repairs(
+        self,
+        *,
+        corpus_id: str,
+        doc_id: str | None = None,
+        limit: int = 32,
+    ) -> dict:
+        """Drain durable relation-level repair jobs for a corpus/document."""
+        from services.ingestion.repair_worker import drain_repair_queue_once
+
+        return await drain_repair_queue_once(
+            db=self._db,
+            qdrant_client=self._qdrant,
+            neo4j_driver=self._neo4j,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+            limit=limit,
         )
 
     async def recover_document_vectors(
@@ -1468,6 +1514,10 @@ class IngestionService:
             "ghost_b_failed_chunks": 0,
             "failed_chunk_count": 0,
             "graph_retryable_failed_chunks": 0,
+            "relation_repair_jobs": 0,
+            "relation_repair_pending": 0,
+            "relation_repair_failed": 0,
+            "relation_repair_succeeded": 0,
             "retry_budget_exhausted_count": 0,
             "all_lanes_exhausted_count": 0,
             "lane_cooling_down_count": 0,
@@ -1698,6 +1748,10 @@ class IngestionService:
                         "readiness": doc_readiness,
                     }
                 )
+            totals["relation_repair_jobs"] += int(ws.get("repair_total") or 0)
+            totals["relation_repair_pending"] += int(ws.get("repair_pending") or 0)
+            totals["relation_repair_failed"] += int(ws.get("repair_failed") or 0)
+            totals["relation_repair_succeeded"] += int(ws.get("repair_succeeded") or 0)
             totals["ghost_b_failed_chunks"] += doc_failed_chunks
             totals["failed_chunk_count"] += doc_failed_chunks
             totals["graph_retryable_failed_chunks"] += int(metrics.get("retryable_failed_chunks") or 0)
@@ -1774,6 +1828,10 @@ class IngestionService:
                     "graph_retry_after": ws.get("graph_retry_after") or metrics.get("graph_retry_after"),
                     "graph_backfill_attempt_count": int(ws.get("graph_backfill_attempt_count") or 0),
                     "graph_retryable_failed_chunks": int(metrics.get("retryable_failed_chunks") or 0),
+                    "repair_status": ws.get("repair_status"),
+                    "repair_total": int(ws.get("repair_total") or 0),
+                    "repair_pending": int(ws.get("repair_pending") or 0),
+                    "repair_failed": int(ws.get("repair_failed") or 0),
                     "vector_recovery_available": bool(ws.get("mongo_written") and not ws.get("qdrant_written")),
                     "extraction_strategy": str(metrics.get("extraction_strategy") or "unknown"),
                     "skipped_low_value_chunks": int(metrics.get("skipped_low_value_chunks") or 0),
@@ -1855,6 +1913,9 @@ class IngestionService:
             "partial_docs": partial_docs,
             "document_metrics": document_metrics,
             "recommendations": [
+                "Durable relation repairs are queued; vector RAG is usable while Gemma backfills the graph."
+                if totals["relation_repair_pending"]
+                else "No queued relation repairs.",
                 "Run graph backfill for partial docs before large-batch graph analysis."
                 if totals["failed_chunk_count"]
                 else "No graph backfill needed.",

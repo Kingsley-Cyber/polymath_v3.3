@@ -125,3 +125,19 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     await db["ingestion_batch_items"].create_index([("batch_id", 1), ("status", 1)])
     await db["ingestion_batch_items"].create_index([("corpus_id", 1), ("content_hash", 1)])
     logger.info("Indexes ensured: ingestion batches")
+
+    # --- graph_repair_queue ---
+    await db["graph_repair_queue"].create_index("repair_id", unique=True)
+    await db["graph_repair_queue"].create_index(
+        [("corpus_id", 1), ("doc_id", 1), ("status", 1)],
+        name="graph_repair_doc_status",
+    )
+    await db["graph_repair_queue"].create_index(
+        [("status", 1), ("next_attempt_at", 1), ("lease_until", 1)],
+        name="graph_repair_claim",
+    )
+    await db["graph_repair_queue"].create_index(
+        [("corpus_id", 1), ("doc_id", 1), ("chunk_id", 1)],
+        name="graph_repair_chunk_lookup",
+    )
+    logger.info("Indexes ensured: graph_repair_queue")

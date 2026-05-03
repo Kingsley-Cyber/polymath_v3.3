@@ -198,6 +198,35 @@ async def test_gemma_triple_repair_gets_failed_triple_not_full_chunk(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_deferred_triple_repair_queues_candidate_without_gemma(monkeypatch):
+    full_chunk = "SECRET FULL CHUNK SHOULD NOT APPEAR. The app uses ML Kit."
+    _FakeAsyncClient.calls = []
+    _FakeAsyncClient.responses = [_Response(_target_payload(confidence=0.41))]
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", _FakeAsyncClient)
+
+    report = await extract_entities(
+        [ExtractionTask("c1", "d1", "corp1", full_chunk)],
+        schema=_schema(),
+        pool=[{"model": "lfm2-extract", "max_concurrent": 1, "extra_params": {}}],
+        repair_pool=[{"model": "gemma4-e4b", "max_concurrent": 1, "extra_params": {}}],
+        return_report=True,
+        per_chunk_max_attempts=1,
+        defer_triple_repair=True,
+    )
+
+    assert len(_FakeAsyncClient.calls) == 1
+    assert len(report.results) == 1
+    assert report.results[0].relations == []
+    assert len(report.relation_repairs) == 1
+    candidate = report.relation_repairs[0]
+    assert candidate.source_sentence == "The app uses ML Kit."
+    assert "confidence_below_0.70" in candidate.reasons
+    assert "app" in candidate.entity_names
+    assert "ml kit" in candidate.entity_names
+    assert report.metrics["relation_repair_queued_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_parse_recovery_with_repair_pool_marks_gemma_relations(monkeypatch):
     _FakeAsyncClient.calls = []
     _FakeAsyncClient.responses = [_Response("{"), _Response(_target_payload())]

@@ -390,6 +390,63 @@ async def backfill_document_graph(
     }
 
 
+@router.get("/corpora/{corpus_id}/documents/{doc_id}/graph-repairs")
+async def get_document_graph_repairs(
+    corpus_id: str,
+    doc_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return durable relation-level repair queue counters for a document."""
+    corpus = await ingestion_service.get_corpus(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    from services.ingestion import repair_queue
+
+    state = await repair_queue.refresh_document_repair_state(
+        ingestion_service.db,
+        corpus_id=corpus_id,
+        doc_id=doc_id,
+    )
+    return {
+        "doc_id": doc_id,
+        "corpus_id": corpus_id,
+        "repair_status": state["status"],
+        "counts": state["counts"],
+        "graph_status": state.get("graph_status"),
+    }
+
+
+@router.post("/corpora/{corpus_id}/documents/{doc_id}/graph-repairs/drain")
+async def drain_document_graph_repairs(
+    corpus_id: str,
+    doc_id: str,
+    limit: int = 32,
+    current_user: dict = Depends(get_current_user),
+):
+    """Manually kick the durable relation-level Gemma repair queue."""
+    corpus = await ingestion_service.get_corpus(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    doc = await ingestion_service.db["documents"].find_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {"_id": 0, "doc_id": 1},
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    result = await ingestion_service.drain_graph_repairs(
+        corpus_id=corpus_id,
+        doc_id=doc_id,
+        limit=max(1, min(int(limit or 32), 256)),
+    )
+    return {
+        "status": "drained" if result.get("processed") else "noop",
+        "doc_id": doc_id,
+        "corpus_id": corpus_id,
+        **result,
+    }
+
+
 @router.post("/corpora/{corpus_id}/documents/{doc_id}/vector-recovery")
 async def recover_document_vectors(
     corpus_id: str,

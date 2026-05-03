@@ -1071,12 +1071,28 @@ class ExtractionBatchReport:
     results: list[ExtractionResult]
     failures: list[ExtractionFailureItem]
     metrics: dict
+    relation_repairs: list["RelationRepairCandidate"] = field(default_factory=list)
 
 
 @dataclass
 class RelationRepairItem:
     relation: RelationItem
     reasons: list[str]
+
+
+@dataclass
+class RelationRepairCandidate:
+    chunk_id: str
+    doc_id: str
+    corpus_id: str
+    schema_version: str
+    relation: RelationItem
+    reasons: list[str]
+    source_sentence: str
+    entity_names: list[str]
+    entity_snapshot: list[EntityItem] = field(default_factory=list)
+    schema_snapshot: dict = field(default_factory=dict)
+    schema_lens_id: str | None = None
 
 
 def _provider_error_kind(exc: Exception) -> str:
@@ -2408,6 +2424,54 @@ def _relation_repair_payload(relation: RelationItem, reasons: list[str]) -> dict
     }
 
 
+def _schema_snapshot(schema: SchemaContext | None) -> dict:
+    if schema is None:
+        return {}
+    return {
+        "entity_schema": list(schema.entity_schema or []),
+        "relation_schema": list(schema.relation_schema or []),
+        "strict": schema.strict,
+    }
+
+
+def _relation_repair_candidate(
+    *,
+    result: ExtractionResult,
+    item: RelationRepairItem,
+    schema: SchemaContext | None,
+) -> RelationRepairCandidate:
+    relation = item.relation
+    source_sentence = relation.source_sentence or relation.evidence_phrase
+    return RelationRepairCandidate(
+        chunk_id=result.chunk_id,
+        doc_id=result.doc_id,
+        corpus_id=result.corpus_id,
+        schema_version=result.schema_version,
+        relation=relation,
+        reasons=list(item.reasons),
+        source_sentence=source_sentence,
+        entity_names=sorted({_entity_key(entity.canonical_name) for entity in result.entities}),
+        entity_snapshot=list(result.entities),
+        schema_snapshot=_schema_snapshot(schema),
+        schema_lens_id=result.schema_lens_id,
+    )
+
+
+def _drop_deferred_repair_relations(
+    result: ExtractionResult,
+    repair_items: list[RelationRepairItem],
+) -> ExtractionResult:
+    repair_keys = {_relation_repair_key(item.relation) for item in repair_items}
+    if not repair_keys:
+        return result
+    result.relations = [
+        relation
+        for relation in result.relations
+        if _relation_repair_key(relation) not in repair_keys
+    ]
+    return result
+
+
 def _extract_repaired_relation_row(data: dict) -> dict | None:
     if not isinstance(data, dict):
         return None
@@ -2643,6 +2707,7 @@ async def extract_entities(
     per_doc_max_failed_chunks_before_pause: int = 50,
     per_lane_max_consecutive_failures: int = SOFT_FATAL_DISABLE_STRIKES,
     per_lane_cooldown_seconds: int = 300,
+    defer_triple_repair: bool = False,
     metrics_context: dict | None = None,
 ) -> list[ExtractionResult] | ExtractionBatchReport:
     """
@@ -2736,6 +2801,7 @@ async def extract_entities(
 
     results_list: list[ExtractionResult] = []
     failures_list: list[ExtractionFailureItem] = []
+    relation_repair_candidates: list[RelationRepairCandidate] = []
     call_metrics: list[dict] = []
     failed_count = 0
     paused_due_doc_budget = False
@@ -2918,16 +2984,30 @@ async def extract_entities(
                         repaired=repair_model_used,
                     )
                     if result and repair_items and not repair_model_used:
-                        result = await _repair_target_relations(
-                            result=result,
-                            repair_items=repair_items,
-                            task=task,
-                            repair_pool=repair_pool,
-                            schema=schema,
-                            settings=settings,
-                            headers=headers,
-                            call_metrics=call_metrics,
-                        )
+                        if defer_triple_repair:
+                            relation_repair_candidates.extend(
+                                _relation_repair_candidate(
+                                    result=result,
+                                    item=item,
+                                    schema=schema,
+                                )
+                                for item in repair_items
+                            )
+                            result = _drop_deferred_repair_relations(
+                                result,
+                                repair_items,
+                            )
+                        else:
+                            result = await _repair_target_relations(
+                                result=result,
+                                repair_items=repair_items,
+                                task=task,
+                                repair_pool=repair_pool,
+                                schema=schema,
+                                settings=settings,
+                                headers=headers,
+                                call_metrics=call_metrics,
+                            )
                     call_metrics.append(
                         {
                             "chunk_id": task.chunk_id,
@@ -3192,6 +3272,7 @@ async def extract_entities(
         "lane_state_counts": lane_state_counts,
         "disabled_lane_count": len(disabled_lanes),
         "repair_models": [str(e["model"]) for e in repair_pool],
+        "defer_triple_repair": bool(defer_triple_repair),
         "retry_policy": {
             "per_chunk_max_attempts": per_chunk_max_attempts,
             "per_doc_max_failed_chunks_before_pause": per_doc_max_failed_chunks_before_pause,
@@ -3241,7 +3322,11 @@ async def extract_entities(
                 failures=failures_list,
                 call_metrics=call_metrics,
                 models=[str(e["model"]) for e in pool],
-                metrics_context=metrics_context,
+                metrics_context={
+                    **metrics_context,
+                    "relation_repair_queued_count": len(relation_repair_candidates),
+                },
             ),
+            relation_repairs=relation_repair_candidates,
         )
     return results

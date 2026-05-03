@@ -167,6 +167,8 @@ class IngestionConfig(BaseModel):
     graph_per_lane_cooldown_seconds: int = Field(default=300, ge=0, le=86400)
     graph_backfill_max_chunks: int = Field(default=100, ge=1, le=10000)
     graph_backfill_max_attempts_per_chunk: int = Field(default=2, ge=1, le=10)
+    deferred_graph_repair_enabled: bool = True
+    graph_repair_max_attempts: int = Field(default=3, ge=1, le=10)
 
     graph_extraction_engine: Literal["llm"] = Field(default="llm")
     llm_fallback_enabled: bool = False
@@ -259,6 +261,13 @@ class WriteState(BaseModel):
     graph_backfill_attempt_count: int = 0
     graph_last_backfill_error: str | None = None
     graph_retryable_failed_chunk_count: int = 0
+    repair_status: str | None = None
+    repair_total: int = 0
+    repair_pending: int = 0
+    repair_succeeded: int = 0
+    repair_discarded: int = 0
+    repair_failed: int = 0
+    repair_last_error: str | None = None
     warnings: list[str] = Field(default_factory=list)
     verified: bool | None = None
     verify_errors: list[str] = Field(default_factory=list)

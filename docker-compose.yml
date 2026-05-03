@@ -643,6 +643,10 @@ services:
       # Local vLLM boxes can keep multiple documents in model phases at once.
       # Lower this for external API pools with stricter rate limits.
       INGEST_MAX_MODEL_PHASE_DOCS: ${INGEST_MAX_MODEL_PHASE_DOCS:-2}
+      GRAPH_REPAIR_WORKER_ENABLED: ${GRAPH_REPAIR_WORKER_ENABLED:-true}
+      GRAPH_REPAIR_WORKER_CONCURRENCY: ${GRAPH_REPAIR_WORKER_CONCURRENCY:-2}
+      GRAPH_REPAIR_WORKER_POLL_SECONDS: ${GRAPH_REPAIR_WORKER_POLL_SECONDS:-2.0}
+      GRAPH_REPAIR_LEASE_SECONDS: ${GRAPH_REPAIR_LEASE_SECONDS:-300}
       N8N_URL: http://n8n:5678
       # Phase 14.3 — Modal cloud GPU (primary ingestion embed path; see .env.example)
       MODAL_ENABLED: ${MODAL_ENABLED:-false}
