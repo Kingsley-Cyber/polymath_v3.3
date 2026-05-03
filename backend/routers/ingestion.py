@@ -28,6 +28,7 @@ from models.schemas import (
 )
 from pydantic import BaseModel, Field
 from routers.auth import get_current_user
+from services.ingestion.batch_queue import DiskFloorExceeded
 from services.ingestion.file_intake import IntakeValidationError, normalize_upload_filename
 from services.ingestion_service import FrozenFieldError, ingestion_service
 from utils.streaming import build_sse_done, build_sse_error
@@ -712,6 +713,19 @@ async def batch_ingest_documents(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except DiskFloorExceeded as exc:
+        # 507 Insufficient Storage — distinct from generic 503 so the UI can
+        # render a "free up disk" guidance card instead of a vague backend-down
+        # banner. The exception detail carries free_gb / required_gb / spool_dir.
+        raise HTTPException(
+            status_code=507,
+            detail={
+                "message": "Spool drive below free-disk floor; batch refused.",
+                "free_gb": exc.free_gb,
+                "required_gb": exc.required_gb,
+                "spool_dir": exc.spool_dir,
+            },
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -736,6 +750,24 @@ async def get_ingestion_batch(
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")
     return batch
+
+
+@router.get("/ingestion/batches/{batch_id}/summary")
+async def get_ingestion_batch_summary(
+    batch_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Aggregate summary for a finished batch — counts by status and dominant
+    error_kind buckets. Frontend renders a summary card when the batch
+    reaches a terminal state. Distinct from /batches/{id} which returns the
+    full record (heavy when there are 500 items)."""
+    summary = await ingestion_service.get_ingestion_batch_summary(
+        batch_id,
+        user_id=current_user["user_id"],
+    )
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    return summary
 
 
 @router.get("/ingestion/batches/{batch_id}/stream")

@@ -539,73 +539,123 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
             />
 
             {/* Token Budget — Parent */}
-            <div>
-              <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
-                Parent Chunk Tokens
-              </div>
-              <div className="grid grid-cols-3 gap-1.5">
+            {(() => {
+              // Effective ceiling = smallest summary-model context − reserve.
+              // Reserve = max_summary_tokens (output) + 256 (system + user prompt
+              // wrapper) + 64 (tokenizer mismatch margin). Below this, Ghost A
+              // pre-flight will skip the parent (token_budget_infeasible).
+              // We surface this as a "max parents shouldn't exceed N tokens"
+              // hint and clamp on commit.
+              const ctxLengths = (newConfig.summary_models || [])
+                .map((m) => m.context_length)
+                .filter((c): c is number => typeof c === "number" && c > 0);
+              const minCtx = ctxLengths.length > 0 ? Math.min(...ctxLengths) : null;
+              const reserve =
+                (newConfig.max_summary_tokens || 175) + 256 + 64;
+              const effectiveCeiling =
+                minCtx !== null ? Math.max(500, minCtx - reserve) : null;
+              const exceeds =
+                effectiveCeiling !== null &&
+                newConfig.parent_chunk_tokens.max_tokens > effectiveCeiling;
+              return (
                 <div>
-                  <label className="text-[9px] text-content-tertiary tracking-wider">
-                    MIN
-                  </label>
-                  <input
-                    type="number"
-                    min={100}
-                    value={newConfig.parent_chunk_tokens.min_tokens}
-                    onChange={(e) =>
-                      setNewConfig((prev) => ({
-                        ...prev,
-                        parent_chunk_tokens: {
-                          ...prev.parent_chunk_tokens,
-                          min_tokens: parseInt(e.target.value) || 500,
-                        },
-                      }))
-                    }
-                    className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
-                  />
+                  <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5 flex items-center justify-between">
+                    <span>Parent Chunk Tokens</span>
+                    {effectiveCeiling !== null && (
+                      <span
+                        className={`text-[9px] font-normal ${
+                          exceeds ? "text-amber-500" : "text-content-tertiary"
+                        }`}
+                        title={`Smallest summary-model context = ${minCtx} tokens. Reserve = ${reserve} (output + prompt + safety). Parents above the ceiling will be skipped by Ghost A token-budget guard.`}
+                      >
+                        ceiling: {effectiveCeiling.toLocaleString()} tokens
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <div>
+                      <label className="text-[9px] text-content-tertiary tracking-wider">
+                        MIN
+                      </label>
+                      <input
+                        type="number"
+                        min={100}
+                        value={newConfig.parent_chunk_tokens.min_tokens}
+                        onChange={(e) =>
+                          setNewConfig((prev) => ({
+                            ...prev,
+                            parent_chunk_tokens: {
+                              ...prev.parent_chunk_tokens,
+                              min_tokens: parseInt(e.target.value) || 500,
+                            },
+                          }))
+                        }
+                        className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-content-tertiary tracking-wider">
+                        TARGET
+                      </label>
+                      <input
+                        type="number"
+                        min={200}
+                        value={newConfig.parent_chunk_tokens.target_tokens}
+                        onChange={(e) =>
+                          setNewConfig((prev) => ({
+                            ...prev,
+                            parent_chunk_tokens: {
+                              ...prev.parent_chunk_tokens,
+                              target_tokens: parseInt(e.target.value) || 1200,
+                            },
+                          }))
+                        }
+                        className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-content-tertiary tracking-wider">
+                        MAX
+                      </label>
+                      <input
+                        type="number"
+                        min={500}
+                        max={effectiveCeiling ?? undefined}
+                        value={newConfig.parent_chunk_tokens.max_tokens}
+                        onChange={(e) => {
+                          const raw = parseInt(e.target.value) || 2000;
+                          // Clamp on input so the user can't accidentally save
+                          // a value that will deterministically skip parents.
+                          // Effective ceiling unknown (no summary model
+                          // context_length yet) → don't clamp; backend guard
+                          // handles it as a soft skip.
+                          const clamped =
+                            effectiveCeiling !== null
+                              ? Math.min(raw, effectiveCeiling)
+                              : raw;
+                          setNewConfig((prev) => ({
+                            ...prev,
+                            parent_chunk_tokens: {
+                              ...prev.parent_chunk_tokens,
+                              max_tokens: clamped,
+                            },
+                          }));
+                        }}
+                        className={`w-full px-2 py-1 bg-bg-base border text-[12px] text-content-primary focus:outline-none focus:border-accent-main ${
+                          exceeds ? "border-amber-500" : "border-border-minimal"
+                        }`}
+                      />
+                    </div>
+                  </div>
+                  {exceeds && (
+                    <div className="text-[9px] text-amber-500 mt-1">
+                      Max exceeds ceiling — parents above {effectiveCeiling!.toLocaleString()} tokens
+                      will be skipped by Ghost A token-budget guard.
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <label className="text-[9px] text-content-tertiary tracking-wider">
-                    TARGET
-                  </label>
-                  <input
-                    type="number"
-                    min={200}
-                    value={newConfig.parent_chunk_tokens.target_tokens}
-                    onChange={(e) =>
-                      setNewConfig((prev) => ({
-                        ...prev,
-                        parent_chunk_tokens: {
-                          ...prev.parent_chunk_tokens,
-                          target_tokens: parseInt(e.target.value) || 1200,
-                        },
-                      }))
-                    }
-                    className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
-                  />
-                </div>
-                <div>
-                  <label className="text-[9px] text-content-tertiary tracking-wider">
-                    MAX
-                  </label>
-                  <input
-                    type="number"
-                    min={500}
-                    value={newConfig.parent_chunk_tokens.max_tokens}
-                    onChange={(e) =>
-                      setNewConfig((prev) => ({
-                        ...prev,
-                        parent_chunk_tokens: {
-                          ...prev.parent_chunk_tokens,
-                          max_tokens: parseInt(e.target.value) || 2000,
-                        },
-                      }))
-                    }
-                    className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
-                  />
-                </div>
-              </div>
-            </div>
+              );
+            })()}
 
             {/* Token Budget — Child */}
             <div>

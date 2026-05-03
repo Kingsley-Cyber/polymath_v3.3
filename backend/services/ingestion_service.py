@@ -840,6 +840,13 @@ class IngestionService:
             return None
         return await self._batch_manager.get_batch(batch_id, user_id=user_id)
 
+    async def get_ingestion_batch_summary(
+        self, batch_id: str, *, user_id: str
+    ) -> dict | None:
+        if self._batch_manager is None:
+            return None
+        return await self._batch_manager.get_batch_summary(batch_id, user_id=user_id)
+
     async def pause_ingestion_batch(self, batch_id: str, *, user_id: str) -> dict:
         if self._batch_manager is None:
             raise RuntimeError("Batch ingestion manager is unavailable")
@@ -970,6 +977,14 @@ class IngestionService:
 
         # Phase 19.3 — encrypt per-ghost api keys before they land in Mongo.
         self._encrypt_ingestion_keys_in_place(corpus_doc["default_ingestion_config"])
+
+        # Phase 21 — freeze each pool entry's context_length from the user's
+        # model_pool so the Ghost A/B token-budget guards can size against
+        # the real local-model context window (lfm2-summary 12288, etc.)
+        # instead of the static registry default of 4096.
+        await self._resolve_pool_context_lengths(
+            corpus_doc["default_ingestion_config"], user_id
+        )
 
         await upsert_corpus(self._db, corpus_doc)
 
@@ -1177,6 +1192,77 @@ class IngestionService:
         "extraction_api_key",
     )
 
+    async def _resolve_pool_context_lengths(
+        self, config_dict: dict, user_id: str
+    ) -> None:
+        """Look up each ghost-pool entry's authoritative context_length from
+        the user's model_pool collection and freeze it onto the corpus's
+        ingestion config. Without this, ModelProfileRef.context_length stays
+        None and the Ghost A/B token-budget guards fall back to the static
+        utils.tokens registry — which only knows public/cloud models.
+
+        Local fine-tunes (lfm2-summary @ 12288, lfm2-extract @ 12288, etc.)
+        get a 4096 default from the registry, which is wrong, and the
+        budget guard ends up skipping more parents than necessary because
+        it thinks the model is smaller than it is.
+
+        Match strategy: strip the LiteLLM provider prefix (`openai/`, etc.)
+        from the corpus entry's `model` field and compare against
+        `model_pool.model_name`. If multiple pool entries match the same
+        bare name (rare — different providers, same fine-tune name), prefer
+        the one whose base_url matches the corpus entry's base_url.
+
+        Idempotent: when the corpus entry already has an explicit
+        `context_length`, leave it alone (user intent wins).
+        """
+        from services.model_pool import model_pool_service
+
+        if not user_id:
+            return
+        pool_entries: list[dict] | None = None  # lazy fetched on first hit
+
+        def _bare_name(litellm_model: str) -> str:
+            return litellm_model.split("/", 1)[1] if "/" in litellm_model else litellm_model
+
+        for pool_field in ("summary_models", "extraction_models", "extraction_repair_models"):
+            pool = config_dict.get(pool_field) or []
+            for entry in pool:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("context_length") is not None:
+                    continue
+                entry_model = str(entry.get("model") or "").strip()
+                if not entry_model:
+                    continue
+                if pool_entries is None:
+                    pool_entries = await model_pool_service.list_for_user(user_id)
+                bare = _bare_name(entry_model)
+                entry_base = (entry.get("base_url") or "").rstrip("/").lower()
+                matches = [
+                    p for p in pool_entries
+                    if str(p.get("model_name") or "").strip() == bare
+                ]
+                if not matches:
+                    continue
+                if len(matches) > 1 and entry_base:
+                    base_match = [
+                        p for p in matches
+                        if (p.get("base_url") or "").rstrip("/").lower() == entry_base
+                    ]
+                    if base_match:
+                        matches = base_match
+                ctx_len = matches[0].get("context_length")
+                if ctx_len:
+                    try:
+                        entry["context_length"] = int(ctx_len)
+                        logger.info(
+                            "Resolved context_length=%d for corpus pool entry "
+                            "model=%s (pool_field=%s)",
+                            int(ctx_len), entry_model, pool_field,
+                        )
+                    except (TypeError, ValueError):
+                        pass
+
     @staticmethod
     def _encrypt_ingestion_keys_in_place(
         config_dict: dict, existing_config: dict | None = None
@@ -1379,6 +1465,14 @@ class IngestionService:
                 new_config,
                 existing_config=existing_config,
             )
+
+            # Phase 21 — refresh frozen context_length on each pool entry from
+            # the corpus owner's model_pool. Re-runs on every update so the
+            # value tracks model_pool changes (user reconfigured a local model
+            # to a higher context window → next corpus update propagates it).
+            owner_id = (existing or {}).get("user_id") if existing else None
+            if owner_id:
+                await self._resolve_pool_context_lengths(new_config, owner_id)
 
         updated = await update_corpus(self._db, corpus_id, updates)
         # Mask api_keys in the returned doc so the PUT response matches GET.

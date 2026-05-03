@@ -33,6 +33,92 @@ from services.ingestion.file_intake import normalize_upload_filename
 logger = logging.getLogger(__name__)
 
 TERMINAL_BATCH_STATUSES = {"completed", "completed_with_errors", "failed", "cancelled"}
+
+
+class DiskFloorExceeded(RuntimeError):
+    """Raised when admission is refused because spool free disk is below
+    INGEST_MIN_FREE_DISK_GB. Surfaces as 507 (Insufficient Storage) at the
+    router so the user gets a clear "free up disk before retrying" signal
+    rather than an opaque write failure deep in the worker.
+    """
+
+    def __init__(self, *, free_gb: float, required_gb: float, spool_dir: str) -> None:
+        self.free_gb = free_gb
+        self.required_gb = required_gb
+        self.spool_dir = spool_dir
+        super().__init__(
+            f"Spool drive ({spool_dir}) has {free_gb:.2f} GB free but "
+            f"INGEST_MIN_FREE_DISK_GB={required_gb:.2f} GB. "
+            "Free up space (or migrate the volume root to a bigger drive) "
+            "before queuing more files."
+        )
+
+
+def _spool_free_gb(spool_dir: str | os.PathLike[str]) -> float:
+    """Best-effort free-space lookup. Returns 0.0 if the path doesn't exist
+    yet — callers treat 0.0 as "starved" and refuse admission, so we never
+    silently admit work onto a non-existent spool."""
+    try:
+        Path(spool_dir).mkdir(parents=True, exist_ok=True)
+        return shutil.disk_usage(spool_dir).free / (1024**3)
+    except Exception as exc:
+        logger.warning("Failed to probe spool free disk for %s: %s", spool_dir, exc)
+        return 0.0
+
+
+_FAILURE_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("token_budget", "context length"),
+    ("token_budget", "maximum context"),
+    ("token_budget", "input_tokens"),
+    ("ghost_a_outage", "Ghost A produced 0/"),
+    ("lane_disabled", "all summary lanes were disabled"),
+    ("lane_disabled", "all extraction lanes were disabled"),
+    ("mongo_bson_overflow", "BSONObjectTooLarge"),
+    ("mongo_bson_overflow", "exceeds 16MB"),
+    ("disk_full", "No space left on device"),
+    ("disk_full", "ENOSPC"),
+    ("vram_starved", "vram_floor_exceeded"),
+    ("provider_timeout", "ReadTimeout"),
+    ("provider_timeout", "ConnectTimeout"),
+    ("provider_unreachable", "Connection refused"),
+)
+
+
+def _classify_failure(exc: Exception) -> str:
+    """Bucket failures by recurrence-relevant error kind so the circuit
+    breaker can detect "every doc is failing with the same config error"
+    and pause the batch.
+
+    Conservative: returns "unknown" when no pattern matches. Better to
+    let the circuit breaker stay quiet than to misfire on a one-off."""
+    text = str(exc) or exc.__class__.__name__
+    text_lower = text.lower()
+    for kind, hint in _FAILURE_PATTERNS:
+        if hint.lower() in text_lower:
+            return kind
+    return "unknown"
+
+
+async def _embedder_free_vram_mb(health_url: str) -> int | None:
+    """Probe the embedder /health for current GPU free VRAM.
+
+    Returns None on probe failure — callers treat None as "fail open" so
+    the scheduler keeps moving when the probe itself is broken. The point
+    of this probe is to back off when VRAM is GENUINELY tight, not to
+    block the queue every time the embedder restarts.
+    """
+    try:
+        import httpx  # local import keeps batch_queue importable in non-runtime tests
+        async with httpx.AsyncClient(timeout=2.5) as client:
+            resp = await client.get(health_url)
+            resp.raise_for_status()
+            payload = resp.json() or {}
+            free_mb = payload.get("gpu_free_mb")
+            return int(free_mb) if free_mb is not None else None
+    except Exception as exc:
+        logger.debug("Embedder health probe failed (%s): %s", health_url, exc)
+        return None
+
 TERMINAL_ITEM_STATUSES = {
     "graph_ready",
     "graph_partial",
@@ -557,6 +643,17 @@ class BatchIngestionManager:
             raise RuntimeError("BatchIngestionManager is not attached")
         if not uploads:
             raise ValueError("No files supplied")
+        # Refuse to admit a new batch when the spool drive is below the disk
+        # floor — protects against queue-builds-up scenarios where ENOSPC
+        # would otherwise corrupt mid-flight writes (mongo journals, qdrant
+        # write-ahead logs, neo4j store) several minutes into ingestion.
+        free_gb = _spool_free_gb(self.settings.INGEST_SPOOL_DIR)
+        if free_gb < float(self.settings.INGEST_MIN_FREE_DISK_GB):
+            raise DiskFloorExceeded(
+                free_gb=free_gb,
+                required_gb=float(self.settings.INGEST_MIN_FREE_DISK_GB),
+                spool_dir=str(self.settings.INGEST_SPOOL_DIR),
+            )
         profile = self.resource_profile()
         batch_id = str(uuid.uuid4())
         now = _now()
@@ -717,6 +814,77 @@ class BatchIngestionManager:
             "finished_at": None,
         }
 
+    async def get_batch_summary(
+        self, batch_id: str, *, user_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """Aggregate counts + dominant error_kind buckets for a batch.
+
+        Cheap: never returns the full items list (which can be 500 rows
+        with embedded warnings). Frontend uses this for the end-of-batch
+        summary card. The /batches/{id} endpoint is for the live
+        per-item view.
+        """
+        if self._db is None:
+            return None
+        query: dict[str, Any] = {"batch_id": batch_id}
+        if user_id:
+            query["user_id"] = user_id
+        batch = await self._db["ingestion_batches"].find_one(
+            query,
+            {
+                "_id": 0,
+                "batch_id": 1,
+                "status": 1,
+                "current_phase": 1,
+                "total_files": 1,
+                "queued_count": 1,
+                "processing_count": 1,
+                "vector_ready_count": 1,
+                "graph_ready_count": 1,
+                "graph_partial_count": 1,
+                "graph_failed_count": 1,
+                "needs_backfill_count": 1,
+                "failed_count": 1,
+                "cancelled_count": 1,
+                "warnings": 1,
+                "paused_reason": 1,
+                "created_at": 1,
+                "started_at": 1,
+                "finished_at": 1,
+            },
+        )
+        if not batch:
+            return None
+        # error_kind histogram from the items collection — cheap aggregate.
+        error_pipeline = [
+            {"$match": {"batch_id": batch_id, "status": "failed"}},
+            {"$group": {
+                "_id": {"$ifNull": ["$error_kind", "unknown"]},
+                "count": {"$sum": 1},
+                "sample_filename": {"$first": "$filename"},
+                "sample_error": {"$first": "$error"},
+            }},
+            {"$sort": {"count": -1}},
+            {"$limit": 8},
+        ]
+        error_buckets = []
+        async for row in self._db["ingestion_batch_items"].aggregate(error_pipeline):
+            error_buckets.append({
+                "error_kind": row["_id"],
+                "count": row["count"],
+                "sample_filename": row.get("sample_filename"),
+                "sample_error": (row.get("sample_error") or "")[:200],
+            })
+        batch["error_buckets"] = error_buckets
+        # Convenience: total successful = vector_ready + graph_ready + graph_partial
+        # so the UI doesn't have to add three fields to render "X of Y succeeded".
+        batch["successful_count"] = (
+            int(batch.get("vector_ready_count") or 0)
+            + int(batch.get("graph_ready_count") or 0)
+            + int(batch.get("graph_partial_count") or 0)
+        )
+        return batch
+
     async def get_batch(self, batch_id: str, *, user_id: str | None = None) -> dict[str, Any] | None:
         if self._db is None:
             return None
@@ -845,12 +1013,78 @@ class BatchIngestionManager:
         if self._db is None:
             return
         poll_seconds = float(self.settings.INGEST_BATCH_POLL_SECONDS)
+        floor_gb = float(self.settings.INGEST_MIN_FREE_DISK_GB)
+        vram_floor_mb = int(self.settings.INGEST_MIN_FREE_VRAM_MB)
+        embedder_health_url = str(self.settings.EMBEDDER_HEALTH_URL)
+        last_floor_warn_at = 0.0
+        last_vram_warn_at = 0.0
         while True:
             batch = await self._db["ingestion_batches"].find_one({"batch_id": batch_id})
             if not batch or batch.get("status") in TERMINAL_BATCH_STATUSES:
                 return
             if batch.get("status") == "paused":
                 await asyncio.sleep(poll_seconds)
+                continue
+
+            # VRAM backpressure: refuse to claim new items when the embedder
+            # is under its VRAM floor. Falls open if the probe fails (we'd
+            # rather keep ingesting than stall on a broken health check).
+            # Closes GOTCHAS §65.1 — without this the embedder, vllm-summary,
+            # and vllm-extract on the same GPU can OOM-kill each other.
+            if vram_floor_mb > 0:
+                free_vram = await _embedder_free_vram_mb(embedder_health_url)
+                if free_vram is not None and free_vram < vram_floor_mb:
+                    now_t = time.monotonic()
+                    if now_t - last_vram_warn_at > 60:
+                        logger.warning(
+                            "phase=batch_worker_vram_floor batch=%s worker=%d "
+                            "free_mb=%d floor_mb=%d — pausing claims",
+                            batch_id, worker_idx, free_vram, vram_floor_mb,
+                        )
+                        last_vram_warn_at = now_t
+                    await self._db["ingestion_batches"].update_one(
+                        {"batch_id": batch_id},
+                        {
+                            "$addToSet": {
+                                "warnings": (
+                                    f"Embedder VRAM floor reached: {free_vram} MB "
+                                    f"free < {vram_floor_mb} MB required. New "
+                                    "items paused until in-flight work drains."
+                                )
+                            }
+                        },
+                    )
+                    await asyncio.sleep(max(poll_seconds, 5.0))
+                    continue
+
+            # Defense in depth: even when admission gated against the floor at
+            # batch creation, a long-running ingest can drive disk down (qdrant
+            # WAL, mongo journals, intermediate parses). When we drop under
+            # the floor, hold off on claiming new items so the in-flight ones
+            # can drain instead of all racing into ENOSPC together.
+            free_gb = _spool_free_gb(self.settings.INGEST_SPOOL_DIR)
+            if free_gb < floor_gb:
+                now_t = time.monotonic()
+                if now_t - last_floor_warn_at > 60:
+                    logger.warning(
+                        "phase=batch_worker_disk_floor batch=%s worker=%d "
+                        "free_gb=%.2f floor_gb=%.2f — pausing claims",
+                        batch_id, worker_idx, free_gb, floor_gb,
+                    )
+                    last_floor_warn_at = now_t
+                await self._db["ingestion_batches"].update_one(
+                    {"batch_id": batch_id},
+                    {
+                        "$addToSet": {
+                            "warnings": (
+                                f"Disk floor reached: {free_gb:.2f} GB free < "
+                                f"{floor_gb:.2f} GB required. New items paused "
+                                "until disk is reclaimed."
+                            )
+                        }
+                    },
+                )
+                await asyncio.sleep(max(poll_seconds, 5.0))
                 continue
 
             item = await self._claim_next_item(batch_id)
@@ -1013,19 +1247,33 @@ class BatchIngestionManager:
                     }
                 },
             )
+            # The mid-pipeline cancel handler is the only safe place to release
+            # this item's spool file. cancel() at the batch level also cleans
+            # spools but only for items it sweeps — an item that was already
+            # claimed and running races into THIS branch instead of the batch
+            # cancel path. Without this cleanup, every cancelled in-flight
+            # item leaks a spool file (50MB+ for big PDFs).
+            with suppress(Exception):
+                await asyncio.to_thread(self._safe_cleanup_spool, path)
         except Exception as exc:
             logger.exception("phase=batch_item_failed upload=%s batch=%s: %s", upload_id, batch["batch_id"], exc)
+            error_kind = _classify_failure(exc)
             await self._db["ingestion_batch_items"].update_one(
                 {"upload_id": upload_id},
                 {
                     "$set": {
                         "status": "failed",
                         "error": str(exc)[:1000],
+                        "error_kind": error_kind,
                         "duration_seconds": round(time.monotonic() - started, 3),
                         "finished_at": _now(),
                         "updated_at": _now(),
                     }
                 },
+            )
+            await self._maybe_trip_circuit_breaker(
+                batch_id=str(batch["batch_id"]),
+                latest_error_kind=error_kind,
             )
         finally:
             if progress_task is not None:
@@ -1160,6 +1408,77 @@ class BatchIngestionManager:
                 await self._warm_graph_cache(corpus_id=batch["corpus_id"], user_id=batch["user_id"])
             except Exception as exc:
                 logger.warning("Batch graph cache warm failed batch=%s: %s", batch_id, exc)
+
+    async def _maybe_trip_circuit_breaker(
+        self, *, batch_id: str, latest_error_kind: str
+    ) -> None:
+        """Pause the batch when the last N items all failed with the same
+        error_kind. Prevents a misconfigured corpus / failed lane from
+        burning through 500 docs while the operator is afk.
+
+        Operator unpauses by calling POST /api/ingestion/batches/{id}/resume
+        after fixing the underlying config. The circuit breaker only
+        TRIPS once per batch — once paused, stays paused until manual
+        resume — so we don't flap.
+        """
+        if self._db is None:
+            return
+        if latest_error_kind in {"unknown"}:
+            return
+        threshold = int(self.settings.INGEST_CIRCUIT_BREAKER_CONSECUTIVE_FAILS)
+        if threshold < 2:
+            return
+        recent = await (
+            self._db["ingestion_batch_items"]
+            .find(
+                {"batch_id": batch_id, "status": {"$in": ["failed", "graph_ready", "vector_ready", "graph_partial"]}},
+                {"_id": 0, "status": 1, "error_kind": 1, "finished_at": 1},
+            )
+            .sort("finished_at", -1)
+            .limit(threshold)
+            .to_list(length=threshold)
+        )
+        if len(recent) < threshold:
+            return
+        # Only failures count — a vector_ready item interleaved with failures
+        # resets the streak. The check below requires every item in the last
+        # `threshold` window to be a failure of the same kind.
+        if not all(
+            (r.get("status") == "failed" and r.get("error_kind") == latest_error_kind)
+            for r in recent
+        ):
+            return
+        # Already paused? don't double-trip.
+        batch = await self._db["ingestion_batches"].find_one(
+            {"batch_id": batch_id, "status": {"$ne": "paused"}}
+        )
+        if not batch:
+            return
+        logger.error(
+            "phase=batch_circuit_breaker_tripped batch=%s error_kind=%s "
+            "threshold=%d — pausing batch",
+            batch_id, latest_error_kind, threshold,
+        )
+        await self._db["ingestion_batches"].update_one(
+            {"batch_id": batch_id},
+            {
+                "$set": {
+                    "status": "paused",
+                    "paused_at": _now(),
+                    "paused_reason": f"circuit_breaker:{latest_error_kind}",
+                    "current_phase": "paused_by_circuit_breaker",
+                    "updated_at": _now(),
+                },
+                "$addToSet": {
+                    "warnings": (
+                        f"Circuit breaker: {threshold} consecutive items failed "
+                        f"with error_kind={latest_error_kind}. Batch paused. "
+                        "Fix the underlying configuration (model lane, disk, "
+                        "VRAM, BSON limit, etc.) and POST /resume to continue."
+                    )
+                },
+            },
+        )
 
     async def _refresh_batch_counts(self, batch_id: str) -> None:
         if self._db is None:

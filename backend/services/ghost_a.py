@@ -86,6 +86,14 @@ class SummaryResult:
     corpus_id: str
     source_tier: str
     summary: str
+    # Phase 21 — distinguishes "Ghost A succeeded" from "Ghost A attempted but
+    # this parent was infeasible (token-budget skip / context-overflow 400)".
+    # The worker writes status="skipped" entries into parent_chunks[].
+    # summary_status so the resume gate knows not to retry parents that are
+    # deterministically too large for the configured summary model.
+    # Default "ok" preserves existing call sites.
+    status: str = "ok"
+    skip_reason: str | None = None
 
 
 def _safe_summary_budget(
@@ -263,7 +271,20 @@ async def summarize_parents(
                 budget["context_limit"],
                 budget["available_completion_tokens"],
             )
-            return None
+            # Return a marker entry instead of None so the worker can persist
+            # `summary_status="skipped"` on the parent and skip the retry on
+            # next ingest. Without this, the resume gate sees an empty
+            # `summary` field and re-runs Ghost A on the same parent —
+            # which deterministically fails with the same token-budget skip.
+            return SummaryResult(
+                parent_id=task.parent_id,
+                doc_id=task.doc_id,
+                corpus_id=task.corpus_id,
+                source_tier=task.source_tier,
+                summary="",
+                status="skipped",
+                skip_reason="token_budget_infeasible",
+            )
         payload: dict = {
             "model": entry["model"],
             "messages": messages,
@@ -312,7 +333,19 @@ async def summarize_parents(
                     safe_max,
                     provider_error_summary(exc),
                 )
-                return None
+                # Same skip-marker rationale as the pre-flight branch: the
+                # token estimate was off but the parent is still infeasible
+                # against this lane. Persist the marker so resume doesn't
+                # retry deterministically.
+                return SummaryResult(
+                    parent_id=task.parent_id,
+                    doc_id=task.doc_id,
+                    corpus_id=task.corpus_id,
+                    source_tier=task.source_tier,
+                    summary="",
+                    status="skipped",
+                    skip_reason="context_overflow_400",
+                )
             if is_fatal_provider_error(exc):
                 raise FatalLaneError(exc) from exc
             logger.error(

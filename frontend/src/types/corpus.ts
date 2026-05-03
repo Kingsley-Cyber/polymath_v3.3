@@ -48,6 +48,14 @@ export interface ModelProfileRef {
   api_key: string | null;
   max_concurrent: number;
   extra_params: Record<string, unknown>;
+  /**
+   * Authoritative context window in tokens. Filled at corpus-save time from
+   * the user's model_pool. When null the Ghost A/B token-budget guards fall
+   * back to the static utils.tokens registry (4096 for unknown local
+   * fine-tunes). Used by the UI to compute the effective parent_chunk_tokens
+   * ceiling and clamp the Max input.
+   */
+  context_length: number | null;
 }
 
 export interface IngestionConfig {
@@ -323,6 +331,7 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
       api_key: "local",
       max_concurrent: 24,
       extra_params: { temperature: 0 },
+      context_length: null,
     },
   ],
   extraction_models: [
@@ -333,6 +342,7 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
       api_key: "local",
       max_concurrent: 64,
       extra_params: { temperature: 0 },
+      context_length: null,
     },
   ],
   extraction_repair_models: [
@@ -343,6 +353,7 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
       api_key: "local",
       max_concurrent: 4,
       extra_params: { temperature: 0, max_tokens: 2048 },
+      context_length: null,
     },
   ],
   entity_confidence_threshold: 0.5,

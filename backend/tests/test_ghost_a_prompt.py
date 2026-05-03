@@ -152,8 +152,15 @@ async def test_ghost_a_skips_oversized_parent_without_calling_provider():
             ],
         )
 
-    assert results == [], "Oversized parent must be skipped, not summarized"
+    # Phase 21 contract: oversized parents return a skip-marker SummaryResult
+    # (not None / empty list) so the worker can persist summary_status="skipped"
+    # on parent_chunks[] and avoid wasted retries on resume.
     assert call_count["n"] == 0, "Provider must not have been called"
+    assert len(results) == 1
+    assert results[0].status == "skipped"
+    assert results[0].skip_reason == "token_budget_infeasible"
+    assert results[0].summary == ""
+    assert results[0].parent_id == "p-huge"
 
 
 @pytest.mark.asyncio

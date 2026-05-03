@@ -170,6 +170,51 @@ class Settings(BaseSettings):
         ge=1,
         description="Admission cap for queued batch-upload bytes on disk.",
     )
+    INGEST_MIN_FREE_DISK_GB: float = Field(
+        default=20.0,
+        ge=1.0,
+        description=(
+            "Minimum free disk on the spool volume before a new batch is "
+            "admitted. Below this floor the batch endpoint returns 507 "
+            "(Insufficient Storage) and the worker refuses to claim new "
+            "items until the operator clears space. Independent from the "
+            "spool byte cap — this guards against catastrophic ENOSPC "
+            "during long ingest runs where intermediate writes "
+            "(qdrant, mongo, neo4j journals) can swallow free disk faster "
+            "than the spool itself."
+        ),
+    )
+    INGEST_MIN_FREE_VRAM_MB: int = Field(
+        default=1024,
+        ge=0,
+        description=(
+            "Backend scheduler floor for embedder GPU free VRAM. Below this "
+            "the queue refuses to claim new items. Closes GOTCHAS §65.1 — "
+            "during a 500-file ingest the embedder, vllm-summary, and "
+            "vllm-extract share one GPU; without backpressure the embedder "
+            "OOM-kills mid-batch. Set to 0 to disable (not recommended)."
+        ),
+    )
+    EMBEDDER_HEALTH_URL: str = Field(
+        default="http://embedder:80/health",
+        description=(
+            "URL the scheduler probes for adaptive backpressure. Returns "
+            "{gpu_free_mb, gpu_total_mb}. Failure to reach falls open "
+            "(no backpressure) so a flaky probe doesn't stall the queue."
+        ),
+    )
+    INGEST_CIRCUIT_BREAKER_CONSECUTIVE_FAILS: int = Field(
+        default=5,
+        ge=2,
+        le=100,
+        description=(
+            "Pause the batch when N consecutive items fail with the same "
+            "error_kind (token_budget, lane_disabled, mongo_overflow, "
+            "etc.). Prevents a 500-file batch from chewing through "
+            "every doc with the same configuration error before anyone "
+            "notices. Operator un-pauses after fixing config."
+        ),
+    )
     INGEST_BATCH_POLL_SECONDS: float = Field(
         default=1.0,
         ge=0.1,

@@ -26,6 +26,14 @@ MODEL_PATH = os.getenv("MODEL_PATH", "/model")
 MODEL_ID = os.getenv("MODEL_ID", "")
 MODEL_NAME = os.getenv("MODEL_NAME", MODEL_ID or Path(MODEL_PATH).name)
 BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "32"))
+# Adaptive VRAM guard. When GPU free memory drops below VRAM_LOW_THRESHOLD_MB,
+# the encoder shrinks its batch to LOW_VRAM_BATCH_FLOOR. Below
+# VRAM_REFUSE_THRESHOLD_MB the encoder refuses and returns 503 so the
+# scheduler can backpressure (preferable to OOM-killing the container
+# mid-batch). See GOTCHAS §65.1.
+LOW_VRAM_BATCH_FLOOR = int(os.getenv("EMBED_LOW_VRAM_BATCH_FLOOR", "4"))
+VRAM_LOW_THRESHOLD_MB = int(os.getenv("EMBED_VRAM_LOW_MB", "2048"))
+VRAM_REFUSE_THRESHOLD_MB = int(os.getenv("EMBED_VRAM_REFUSE_MB", "768"))
 REQUESTED_DEVICE = os.getenv("EMBED_DEVICE", "cuda")  # cuda | cpu — override via env
 CPU_FALLBACK_ON_CUDA_ERROR = os.getenv(
     "EMBED_CPU_FALLBACK_ON_CUDA_ERROR", "false"
@@ -167,11 +175,59 @@ def _reset_model_after_cuda_error(*, fallback_to_cpu: bool = False):
     model_name = MODEL_NAME
 
 
+def _adaptive_batch_size() -> int:
+    """Pick a safe batch size for the current free-VRAM situation.
+
+    Bigger batches encode faster but spike VRAM. With multiple ingest workers
+    sharing one GPU (vllm-summary, vllm-extract, embedder), the embedder
+    needs to back off when free VRAM drops or risk OOM-killing one of the
+    other model containers.
+
+    Returns the configured BATCH_SIZE when VRAM is comfortable;
+    LOW_VRAM_BATCH_FLOOR when free VRAM falls under VRAM_LOW_THRESHOLD_MB;
+    and -1 when VRAM is below VRAM_REFUSE_THRESHOLD_MB (caller raises 503).
+    """
+    mem = _gpu_memory()
+    free_mb = mem.get("gpu_free_mb")
+    if free_mb is None:
+        return BATCH_SIZE
+    if free_mb < VRAM_REFUSE_THRESHOLD_MB:
+        return -1
+    if free_mb < VRAM_LOW_THRESHOLD_MB:
+        return min(BATCH_SIZE, LOW_VRAM_BATCH_FLOOR)
+    return BATCH_SIZE
+
+
 def _encode_texts(texts: list[str]):
     with encode_lock:
+        adaptive_bs = _adaptive_batch_size()
+        if adaptive_bs == -1:
+            mem = _gpu_memory()
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "vram_floor_exceeded",
+                    "free_mb": mem.get("gpu_free_mb"),
+                    "refuse_threshold_mb": VRAM_REFUSE_THRESHOLD_MB,
+                    "message": (
+                        "Embedder refused encode; GPU free VRAM under floor. "
+                        "Backend scheduler should back off; in-flight work "
+                        "must complete or be cancelled before retry."
+                    ),
+                },
+            )
+        if adaptive_bs < BATCH_SIZE:
+            mem = _gpu_memory()
+            logger.warning(
+                "embed adaptive batch shrink: free_mb=%s threshold_mb=%d batch=%d (default=%d)",
+                mem.get("gpu_free_mb"),
+                VRAM_LOW_THRESHOLD_MB,
+                adaptive_bs,
+                BATCH_SIZE,
+            )
         return model.encode(
             texts,
-            batch_size=BATCH_SIZE,
+            batch_size=adaptive_bs,
             normalize_embeddings=True,  # cosine similarity ready
             show_progress_bar=False,
         )

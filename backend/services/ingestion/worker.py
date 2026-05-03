@@ -1131,11 +1131,16 @@ def _rehydrate_ghost_b_staging(staged: list[dict]) -> list[ExtractionResult]:
 def _reconstruct_summaries_from_mongo(
     parents, existing_parent_chunks: list[dict]
 ) -> list[SummaryResult]:
-    """Rebuild SummaryResult list from Mongo-stored parent_chunks[].summary.
+    """Rebuild SummaryResult list from Mongo-stored parent_chunks[].
 
-    Only called on the D.2 resume path when every existing parent has a
-    non-empty summary. The parent_id set is stable across runs (deterministic
-    from content-hashed doc_id), so we zip by parent_id map.
+    Resume path: every parent must have either a non-empty summary or a
+    `summary_status="skipped"` marker; the resume gate enforces that
+    invariant before calling this function.
+
+    Skipped parents are reconstructed with summary="" and status="skipped"
+    so they propagate through the embed/qdrant phases without the embedder
+    seeing an empty string (the embedder filters by status downstream when
+    summary_texts are built — see _embed_batch_for_doc).
     """
     by_id = {ep["parent_id"]: ep for ep in existing_parent_chunks}
     out: list[SummaryResult] = []
@@ -1144,7 +1149,10 @@ def _reconstruct_summaries_from_mongo(
         if not ep:
             continue
         summary = (ep.get("summary") or "").strip()
-        if not summary:
+        status = ep.get("summary_status") or ("ok" if summary else None)
+        if status is None:
+            # Genuinely unattempted parent — exclude from the resume list so
+            # the caller treats coverage as partial and re-runs Ghost A.
             continue
         out.append(
             SummaryResult(
@@ -1153,6 +1161,8 @@ def _reconstruct_summaries_from_mongo(
                 corpus_id=p.corpus_id,
                 source_tier=p.source_tier,
                 summary=summary,
+                status=status,
+                skip_reason=ep.get("summary_skip_reason"),
             )
         )
     return out
@@ -1262,15 +1272,18 @@ async def _run_ghosts_parallel(
         # Summaries already embedded into Qdrant on a prior run; nothing to do.
         need_ghost_a = False
     elif need_ghost_a and ws.mongo_written and existing_parent_chunks:
-        # TODO(ghost-a-skip-marker): when a parent was attempted-and-skipped on
-        # the previous run (token-budget infeasible), we currently retry it
-        # because there's no skip marker — the resume gate just sees
-        # `summary` as None/empty and re-runs. Adding a parent_chunks[].
-        # summary_status field would let resume distinguish "never attempted"
-        # from "attempted, infeasible" and avoid the wasted LLM calls.
-        all_filled = all(
-            (p.get("summary") or "").strip() for p in existing_parent_chunks
-        )
+        # Resume gate: a parent counts as "Ghost A attempted" when it has
+        # EITHER a non-empty `summary` (success) OR `summary_status="skipped"`
+        # (Ghost A pre-flight ruled the parent infeasible against the
+        # configured summary model — token-budget overflow). Skipped parents
+        # must not be retried because they fail deterministically. Without
+        # this marker, the resume gate retried them and wasted LLM calls.
+        def _attempted(pc: dict) -> bool:
+            if (pc.get("summary") or "").strip():
+                return True
+            return pc.get("summary_status") == "skipped"
+
+        all_filled = all(_attempted(p) for p in existing_parent_chunks)
         if all_filled:
             summaries_from_mongo = _reconstruct_summaries_from_mongo(
                 parents, existing_parent_chunks
@@ -1369,33 +1382,42 @@ async def _run_ghosts_parallel(
             model=model,
         )
         summary_llm_calls = len(tasks)
-        # Hard-fail only on total outage. With the token-budget guard in
-        # ghost_a._safe_summary_budget, partials now mean a few oversized
-        # parents got skipped — not that the lane is broken. Mirror Ghost B's
-        # soft-warning policy (#1649) so one oversized parent doesn't kill
-        # the whole document. Vector RAG still works via the child chunks of
-        # skipped parents; only the parent-summary embedding is missing.
+        # With Phase 21 skip-markers, ghost_a returns one entry per task —
+        # success entries have status="ok", infeasible parents have
+        # status="skipped". Total outage = nothing returned at all (every
+        # task hit a fatal lane error before producing even a marker).
+        # Partial coverage = at least one "skipped" entry. Mirror Ghost B's
+        # soft-warning policy so a few oversized parents don't kill the
+        # document — vector RAG still works via the child chunks of skipped
+        # parents; only the parent-summary embedding is missing.
+        ok_results = [r for r in results if getattr(r, "status", "ok") == "ok"]
+        skipped_results = [r for r in results if getattr(r, "status", None) == "skipped"]
         if not results and tasks:
             raise GhostAFailure(
                 f"Ghost A produced 0/{len(tasks)} summaries — "
                 "treating as provider outage and aborting document."
             )
-        if len(results) < len(tasks):
-            done_ids = {r.parent_id for r in results}
-            missing_ids = sorted(t.parent_id for t in tasks if t.parent_id not in done_ids)
+        partial_total = len(ok_results)
+        if partial_total < len(tasks):
+            skip_reason_counts: dict[str, int] = {}
+            for r in skipped_results:
+                key = r.skip_reason or "unknown"
+                skip_reason_counts[key] = skip_reason_counts.get(key, 0) + 1
             warnings.append(
                 _ghost_a_partial_warning(
-                    summarized=len(results),
+                    summarized=partial_total,
                     total=len(tasks),
                 )
             )
             logger.warning(
-                "phase=ghost_a_partial doc=%s corpus=%s summarized=%d total=%d missing_sample=%s",
+                "phase=ghost_a_partial doc=%s corpus=%s summarized=%d total=%d "
+                "skipped=%d skip_reasons=%s",
                 doc_id[:12],
                 corpus_id[:8],
-                len(results),
+                partial_total,
                 len(tasks),
-                missing_ids[:5],
+                len(skipped_results),
+                skip_reason_counts,
             )
         return results
 
@@ -1753,25 +1775,53 @@ async def _run_ghosts_parallel(
 
 
 def _build_parent_dicts(parents, summaries: list[SummaryResult] | None) -> list[dict]:
-    """Assemble the parent_chunks[] array for the Mongo document record,
-    populating `summary` inline from Ghost A output when available.
+    """Assemble the parent_chunks[] array for the Mongo document record.
+
+    Each parent dict carries:
+      - `summary` — the Ghost A output text, or None if Ghost A wasn't run
+        for this parent
+      - `summary_status` — one of "ok" | "skipped" | None
+          * None     → Ghost A was never attempted for this parent (e.g. Ghost
+                       A globally disabled, or the worker pre-empted before
+                       this parent)
+          * "ok"     → Ghost A succeeded; `summary` holds real text
+          * "skipped" → Ghost A attempted, parent infeasible (token-budget /
+                        context overflow). On resume we DO NOT retry these.
+                        `summary` is empty string, `summary_skip_reason` says
+                        why.
     """
-    summary_by_parent = {s.parent_id: s.summary for s in (summaries or [])}
-    return [
-        {
-            "parent_id": p.parent_id,
-            "doc_id": p.doc_id,
-            "corpus_id": p.corpus_id,
-            "text": p.text,
-            "heading_path": p.heading_path,
-            "source_tier": p.source_tier,
-            "page_start": getattr(p, "page_start", None),
-            "page_end": getattr(p, "page_end", None),
-            "summary": summary_by_parent.get(p.parent_id),
-            "child_ids": [c.chunk_id for c in p.children],
-        }
-        for p in parents
-    ]
+    by_parent = {s.parent_id: s for s in (summaries or [])}
+    out: list[dict] = []
+    for p in parents:
+        s = by_parent.get(p.parent_id)
+        if s is None:
+            summary_text: str | None = None
+            summary_status: str | None = None
+            skip_reason: str | None = None
+        else:
+            summary_status = getattr(s, "status", "ok")
+            skip_reason = getattr(s, "skip_reason", None)
+            # Persist empty string for skipped parents so resume can tell
+            # "attempted-and-skipped" (status="skipped", summary="") apart
+            # from "never-attempted" (status=None, summary=None).
+            summary_text = s.summary
+        out.append(
+            {
+                "parent_id": p.parent_id,
+                "doc_id": p.doc_id,
+                "corpus_id": p.corpus_id,
+                "text": p.text,
+                "heading_path": p.heading_path,
+                "source_tier": p.source_tier,
+                "page_start": getattr(p, "page_start", None),
+                "page_end": getattr(p, "page_end", None),
+                "summary": summary_text,
+                "summary_status": summary_status,
+                "summary_skip_reason": skip_reason,
+                "child_ids": [c.chunk_id for c in p.children],
+            }
+        )
+    return out
 
 
 async def _write_mongo_all(
@@ -1870,8 +1920,81 @@ async def _write_mongo_all(
             filename,
             duplicate_candidates,
         )
+    # BSON pre-flight. Mongo's hard limit is 16 MB per document; we get a
+    # confusing pymongo error several layers deep if we ship over it. The
+    # culprit is virtually always parent_chunks[].text on book-sized docs
+    # (the 6700-chunk PBR ingest hits this). At 12 MB we warn; at 15 MB we
+    # demote heavy fields to per-chunk Mongo writes and trim the inline copy
+    # so the doc record fits.
+    BSON_SOFT_LIMIT = 12 * 1024 * 1024
+    BSON_HARD_LIMIT = 15 * 1024 * 1024
+    estimated_size = _estimate_bson_size(doc_record)
+    if estimated_size > BSON_HARD_LIMIT:
+        logger.error(
+            "phase=mongo_bson_overflow doc=%s corpus=%s estimated_bytes=%d "
+            "parent_count=%d chunk_count=%d filename=%s — trimming inline "
+            "parent_chunks[].text to keep doc under 16MB; full text still "
+            "available via the chunks collection.",
+            doc_id[:12], corpus_id[:8], estimated_size,
+            len(parent_dicts), len(child_dicts), filename,
+        )
+        for parent in parent_dicts:
+            parent["text_truncated"] = True
+            parent["text_byte_count"] = len(str(parent.get("text") or "").encode("utf-8"))
+            parent["text"] = (str(parent.get("text") or "")[:1000] or "")
+        ws.warnings = _merge_warnings(
+            ws.warnings,
+            [
+                f"Mongo BSON overflow: parent_chunks[].text trimmed to keep "
+                f"document under 16MB. Full child-chunk text remains in the "
+                f"chunks collection (estimated_bytes={estimated_size})."
+            ],
+        )
+        doc_record["write_state"] = ws.model_dump()
+    elif estimated_size > BSON_SOFT_LIMIT:
+        logger.warning(
+            "phase=mongo_bson_warn doc=%s corpus=%s estimated_bytes=%d "
+            "parent_count=%d — approaching 16MB BSON limit",
+            doc_id[:12], corpus_id[:8], estimated_size, len(parent_dicts),
+        )
     await mongo_writer.upsert_document(db, doc_record)
     await mongo_writer.upsert_chunks(db, child_dicts)
+
+
+def _estimate_bson_size(doc: dict) -> int:
+    """Cheap upper-bound estimate for how big a Mongo document will be on disk.
+
+    Pymongo encodes each Python value to a BSON byte sequence on insert; the
+    full encode is O(N) but allocates and stalls. For pre-flight we only need
+    a fast estimate that's never under-counts. Strategy: walk the dict, sum
+    UTF-8 byte length of every string + 8 bytes per scalar slot for keys and
+    type bytes. Lists / dicts add a small constant per entry.
+
+    Always over-estimates — that's the right direction for a "refuse if over
+    threshold" gate.
+    """
+    if doc is None:
+        return 0
+    if isinstance(doc, str):
+        return len(doc.encode("utf-8")) + 6
+    if isinstance(doc, (int, float, bool)):
+        return 9
+    if isinstance(doc, dict):
+        total = 5
+        for k, v in doc.items():
+            total += len(str(k).encode("utf-8")) + 2
+            total += _estimate_bson_size(v)
+        return total
+    if isinstance(doc, (list, tuple)):
+        total = 5
+        for v in doc:
+            total += _estimate_bson_size(v) + 4
+        return total
+    if isinstance(doc, (bytes, bytearray)):
+        return len(doc) + 6
+    if isinstance(doc, datetime):
+        return 9
+    return len(str(doc).encode("utf-8")) + 6
 
 
 async def _ensure_progress_document(
@@ -1950,7 +2073,14 @@ async def _embed_batch_for_doc(
         )
     child_texts = [c.text for c in vector_children]
     summary_list = summaries or []
-    summary_texts = [s.summary for s in summary_list]
+    # Filter out skipped parents (empty summary by design — they failed Ghost A
+    # for token-budget reasons). Embedding empty strings either raises in some
+    # backends or produces a degenerate vector that pollutes recall.
+    embedded_summaries = [
+        s for s in summary_list
+        if getattr(s, "status", "ok") == "ok" and (s.summary or "").strip()
+    ]
+    summary_texts = [s.summary for s in embedded_summaries]
     all_texts = [*child_texts, *summary_texts]
     if not all_texts:
         return {}, {}
@@ -1970,7 +2100,7 @@ async def _embed_batch_for_doc(
     child_vecs = all_vectors[:split]
     summary_vecs = all_vectors[split:]
     vec_map = {c.chunk_id: v for c, v in zip(vector_children, child_vecs)}
-    summary_vec_map = {s.parent_id: v for s, v in zip(summary_list, summary_vecs)}
+    summary_vec_map = {s.parent_id: v for s, v in zip(embedded_summaries, summary_vecs)}
     return vec_map, summary_vec_map
 
 
