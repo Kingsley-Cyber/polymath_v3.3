@@ -115,13 +115,13 @@ class Settings(BaseSettings):
         ),
     )
     INGEST_MAX_PARSE_JOBS: int = Field(
-        default=2,
+        default=4,
         ge=1,
         le=16,
         description="Process-local cap for concurrent parse/chunk phases.",
     )
     INGEST_MAX_MODEL_PHASE_DOCS: int = Field(
-        default=1,
+        default=3,
         ge=1,
         le=8,
         description=(
@@ -387,7 +387,7 @@ class Settings(BaseSettings):
 
     # === GHOST B — ENTITY EXTRACTION ===
     EXTRACTION_MAX_CONCURRENT: int = Field(
-        default=1,
+        default=2,
         description="Max concurrent LiteLLM calls for entity extraction (GHOST B)",
     )
     EXTRACTION_MAX_TOKENS: int = Field(
@@ -519,7 +519,7 @@ class Settings(BaseSettings):
         if v.strip() == "polymath-dev-secret-key-change-in-production":
             raise ValueError(
                 "AUTH_SECRET_KEY is still the legacy dev sentinel. Generate a "
-                "secure random key (e.g. `python -c \"import secrets; print(secrets.token_urlsafe(64))\"`) "
+                'secure random key (e.g. `python -c "import secrets; print(secrets.token_urlsafe(64))"`) '
                 "and set it in .env before starting."
             )
         return v

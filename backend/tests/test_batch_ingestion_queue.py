@@ -100,9 +100,9 @@ def test_resource_profile_sets_known_gpu_batch_sizes(tmp_path, monkeypatch):
     assert profile["recommended_graph_concurrency"] == 2
 
 
-def test_item_status_preserves_vector_ready_before_graph_completion():
+def test_item_status_shows_graph_extracting_during_graph_phase():
     ws = SimpleNamespace(vector_ready=True, qdrant_written=True, graph_status="graph_extracting")
-    assert batch_queue.item_status_from_write_state(ws) == "vector_ready"
+    assert batch_queue.item_status_from_write_state(ws) == "graph_extracting"
 
 
 def test_item_status_maps_partial_and_backfill_honestly():

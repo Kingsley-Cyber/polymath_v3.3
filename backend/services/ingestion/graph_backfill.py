@@ -12,10 +12,9 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Any
 
+from models.schemas import IngestionConfig
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from qdrant_client import AsyncQdrantClient
-
-from models.schemas import IngestionConfig
 from services.ghost_b import (
     ExtractionBatchReport,
     ExtractionFailureItem,
@@ -29,11 +28,11 @@ from services.graph.entity_quality import mark_graph_metrics_stale
 from services.graph.neo4j_writer import write_document_graph
 from services.ingestion.worker import (
     GRAPH_NEEDS_BACKFILL,
-    GRAPH_RETRY_SCHEDULED,
     GRAPH_READY,
+    GRAPH_RETRY_SCHEDULED,
     _build_ghost_pool,
-    _graph_extraction_engine,
     _ghost_b_partial_warning,
+    _graph_extraction_engine,
     _rehydrate_ghost_b_staging,
     _select_ghost_b_extraction_policy,
 )
@@ -79,7 +78,9 @@ def _failure_from_dict(row: dict[str, Any]) -> ExtractionFailureItem:
     )
 
 
-def _eligible_for_backfill(failure: ExtractionFailureItem, *, max_attempts: int) -> bool:
+def _eligible_for_backfill(
+    failure: ExtractionFailureItem, *, max_attempts: int
+) -> bool:
     if failure.backfill_attempt_count >= max_attempts:
         return False
     if failure.retryable:
@@ -140,6 +141,10 @@ def _merge_metrics(
         "provider_error_count",
         "rate_limited_count",
         "timeout_count",
+        # Top-level health aliases — survive merges so the document's
+        # targeted $set keys reflect cumulative coverage after backfill.
+        "ghost_b_truncated_count",
+        "ghost_b_recovered_count",
     ):
         merged[key] = int(previous_metrics.get(key) or 0) + int(
             retry_metrics.get(key) or 0
@@ -212,6 +217,139 @@ async def backfill_failed_graph_chunks(
         if row.get("chunk_id")
     ]
     if not failures:
+        # ── Staging fallback ────────────────────────────────────────────
+        # Ghost B extraction succeeded for all chunks, but a post-extraction
+        # step (repair enqueue, graph vectors, or Neo4j write) crashed.
+        # The extraction data is stored in ghost_b_staging — rehydrate it
+        # and re-drive the remaining writes without re-extracting.
+        staging = doc.get("ghost_b_staging") or []
+        ws = doc.get("write_state") or {}
+        if staging and ws.get("graph_status") in (
+            GRAPH_NEEDS_BACKFILL,
+            "needs_backfill",
+        ):
+            staged_results = _rehydrate_ghost_b_staging(staging)
+            if not staged_results:
+                return {
+                    "status": "noop",
+                    "doc_id": doc_id,
+                    "corpus_id": corpus_id,
+                    "retried_chunks": 0,
+                    "recovered_chunks": 0,
+                    "remaining_failed_chunks": 0,
+                }
+
+            # Build effective config (same as normal backfill path)
+            from services.ingestion_service import build_effective_config
+
+            corpus = await db["corpora"].find_one({"corpus_id": corpus_id})
+            live_cfg = (corpus or {}).get("default_ingestion_config") or {}
+            config = build_effective_config(
+                frozen_base=doc.get("ingestion_config") or live_cfg,
+                live_corpus=live_cfg,
+                ingest_overrides=None,
+            )
+
+            # 1. Write graph vectors to Qdrant (entities + relations)
+            from services.ingestion.worker import (
+                _enqueue_relation_repairs_for_doc,
+                _write_graph_vectors_for_doc,
+            )
+
+            try:
+                await _write_graph_vectors_for_doc(
+                    qdrant_client=qdrant_client,
+                    corpus_id=corpus_id,
+                    ghost_b_out=staged_results,
+                    config=config,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "phase=staging_fallback_graph_vectors doc=%s corpus=%s: %s",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    exc,
+                )
+
+            # 2. Enqueue relation repairs
+            try:
+                await _enqueue_relation_repairs_for_doc(
+                    db=db,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    candidates=[],
+                    config=config,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "phase=staging_fallback_repair_enqueue doc=%s corpus=%s: %s",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    exc,
+                )
+
+            # 3. Write to Neo4j
+            all_chunk_ids = [
+                row["chunk_id"]
+                async for row in db["chunks"].find(
+                    {"doc_id": doc_id, "corpus_id": corpus_id},
+                    {"chunk_id": 1, "_id": 0},
+                )
+            ]
+            await write_document_graph(
+                driver=neo4j_driver,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                extraction_results=staged_results,
+                user_id=user_id,
+                file_id=doc.get("file_id"),
+                all_chunk_ids=all_chunk_ids,
+            )
+            await mark_graph_metrics_stale(
+                db, corpus_id, reason="staging_fallback_write"
+            )
+
+            # 4. Mark graph_ready
+            now_staging = datetime.utcnow()
+            await db["documents"].update_one(
+                {"doc_id": doc_id, "corpus_id": corpus_id},
+                {
+                    "$set": {
+                        "write_state.neo4j_written": True,
+                        "write_state.graph_status": GRAPH_READY,
+                        "write_state.graph_completeness": "graph-complete",
+                        "write_state.graph_extracted_chunk_count": len(staged_results),
+                        "write_state.graph_failed_chunk_count": 0,
+                        "write_state.graph_extraction_finished_at": now_staging,
+                        "write_state.graph_backfill_attempt_count": int(
+                            (ws.get("graph_backfill_attempt_count") or 0)
+                        )
+                        + 1,
+                        "write_state.warnings": list(ws.get("warnings") or []),
+                        "decision_trace.graph_status": GRAPH_READY,
+                        "decision_trace.graph_completeness": "graph-complete",
+                        "decision_trace.graph_extracted_chunks": len(staged_results),
+                        "decision_trace.graph_failed_chunks": 0,
+                        "updated_at": now_staging,
+                    }
+                },
+            )
+            logger.info(
+                "phase=staging_fallback doc=%s corpus=%s recovered=%d",
+                doc_id[:12],
+                corpus_id[:8],
+                len(staged_results),
+            )
+            return {
+                "status": "recovered_from_staging",
+                "doc_id": doc_id,
+                "corpus_id": corpus_id,
+                "retried_chunks": 0,
+                "recovered_chunks": len(staged_results),
+                "remaining_failed_chunks": 0,
+            }
+
+        # Original noop — no staging, no failures, nothing to do
         return {
             "status": "noop",
             "doc_id": doc_id,
@@ -294,15 +432,21 @@ async def backfill_failed_graph_chunks(
             "retry_after": retry_after,
         }
 
-    failed_ids = list(dict.fromkeys(f.chunk_id for f in eligible_failures if f.chunk_id))
-    chunk_rows = await db["chunks"].find(
-        {
-            "doc_id": doc_id,
-            "corpus_id": corpus_id,
-            "chunk_id": {"$in": failed_ids},
-        },
-        {"chunk_id": 1, "text": 1, "heading_path": 1, "chunk_kind": 1, "_id": 0},
-    ).to_list(length=None)
+    failed_ids = list(
+        dict.fromkeys(f.chunk_id for f in eligible_failures if f.chunk_id)
+    )
+    chunk_rows = (
+        await db["chunks"]
+        .find(
+            {
+                "doc_id": doc_id,
+                "corpus_id": corpus_id,
+                "chunk_id": {"$in": failed_ids},
+            },
+            {"chunk_id": 1, "text": 1, "heading_path": 1, "chunk_kind": 1, "_id": 0},
+        )
+        .to_list(length=None)
+    )
     chunk_by_id = {row["chunk_id"]: row for row in chunk_rows}
     tasks = [
         ExtractionTask(
@@ -318,14 +462,25 @@ async def backfill_failed_graph_chunks(
         if chunk_id in chunk_by_id
     ]
     if not tasks:
-        raise RuntimeError("Failed chunk records exist, but no matching chunks were found")
+        raise RuntimeError(
+            "Failed chunk records exist, but no matching chunks were found"
+        )
 
     previous_metrics = doc.get("ghost_b_metrics") or {}
     policy = _select_ghost_b_extraction_policy(
         config,
-        total_children=int(doc.get("chunk_count") or previous_metrics.get("total_children") or len(tasks)),
-        body_children=int(previous_metrics.get("body_children") or previous_metrics.get("requested_chunks") or len(tasks)),
-        skipped_low_value_by_kind=previous_metrics.get("skipped_low_value_by_kind") or {},
+        total_children=int(
+            doc.get("chunk_count")
+            or previous_metrics.get("total_children")
+            or len(tasks)
+        ),
+        body_children=int(
+            previous_metrics.get("body_children")
+            or previous_metrics.get("requested_chunks")
+            or len(tasks)
+        ),
+        skipped_low_value_by_kind=previous_metrics.get("skipped_low_value_by_kind")
+        or {},
     )
     schema_ctx = SchemaContext(
         entity_schema=config.entity_schema,
@@ -341,10 +496,16 @@ async def backfill_failed_graph_chunks(
         getattr(config, "extraction_repair_models", None) or []
     )
 
-    async def _schema_resolver(kind: str, query_vec: list[float], top_k: int) -> list[str]:
-        return await retrieve_schema_for_chunk(qdrant_client, corpus_id, kind, query_vec, top_k)
+    async def _schema_resolver(
+        kind: str, query_vec: list[float], top_k: int
+    ) -> list[str]:
+        return await retrieve_schema_for_chunk(
+            qdrant_client, corpus_id, kind, query_vec, top_k
+        )
 
-    schema_lens = doc.get("schema_lens") or (doc.get("ghost_b_metrics") or {}).get("schema_lens")
+    schema_lens = doc.get("schema_lens") or (doc.get("ghost_b_metrics") or {}).get(
+        "schema_lens"
+    )
     llm_kwargs = {
         "schema": schema_ctx,
         "schema_lens": schema_lens,
@@ -358,7 +519,9 @@ async def backfill_failed_graph_chunks(
         "max_entities_per_chunk": policy.max_entities_per_chunk,
         "max_relations_per_chunk": policy.max_relations_per_chunk,
         "max_completion_tokens_override": policy.max_completion_tokens,
-        "per_chunk_max_attempts": getattr(config, "graph_backfill_max_attempts_per_chunk", 2),
+        "per_chunk_max_attempts": getattr(
+            config, "graph_backfill_max_attempts_per_chunk", 2
+        ),
         "per_doc_max_failed_chunks_before_pause": max_chunks,
         "per_lane_max_consecutive_failures": getattr(
             config, "graph_per_lane_max_consecutive_failures", 2
@@ -394,8 +557,13 @@ async def backfill_failed_graph_chunks(
         if failure.chunk_id not in recovered_ids
     ]
     for failure in remaining_failures:
-        if failure.chunk_id in attempted_ids and failure.chunk_id in retry_failure_by_id:
-            failure.backfill_attempt_count = int(failure.backfill_attempt_count or 0) + 1
+        if (
+            failure.chunk_id in attempted_ids
+            and failure.chunk_id in retry_failure_by_id
+        ):
+            failure.backfill_attempt_count = (
+                int(failure.backfill_attempt_count or 0) + 1
+            )
 
     staged_results = _rehydrate_ghost_b_staging(doc.get("ghost_b_staging") or [])
     staged_by_chunk = {result.chunk_id: result for result in staged_results}
@@ -426,7 +594,9 @@ async def backfill_failed_graph_chunks(
             reason="graph_backfill_write",
         )
 
-    warnings = _clean_graph_warnings((doc.get("write_state") or {}).get("warnings") or [])
+    warnings = _clean_graph_warnings(
+        (doc.get("write_state") or {}).get("warnings") or []
+    )
     if remaining_failures:
         warnings.append(
             _ghost_b_partial_warning(
@@ -485,7 +655,9 @@ async def backfill_failed_graph_chunks(
         )
         + 1,
         "write_state.graph_last_backfill_error": (
-            None if not remaining_failures else "Some failed graph chunks remain after bounded backfill."
+            None
+            if not remaining_failures
+            else "Some failed graph chunks remain after bounded backfill."
         ),
         "write_state.graph_retryable_failed_chunk_count": sum(
             1 for failure in remaining_failures if failure.retryable

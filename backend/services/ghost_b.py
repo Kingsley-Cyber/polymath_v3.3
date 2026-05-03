@@ -69,19 +69,6 @@ _GEMMA_REPAIR_MODEL_HINTS = ("gemma4-e4b", "gemma-4-e4b")
 _GEMMA_REPAIR_TEMPERATURE = 1.0
 _GEMMA_REPAIR_TOP_P = 0.95
 _GEMMA_REPAIR_TOP_K = 64
-_GEMMA_REPAIR_CHAT_TEMPLATE = (
-    "{% for message in messages %}"
-    "{% if message['role'] == 'system' %}"
-    "<start_of_turn>system\n{{ message['content'] }}<end_of_turn>\n"
-    "{% elif message['role'] == 'user' %}"
-    "<start_of_turn>user\n{{ message['content'] }}<end_of_turn>\n"
-    "{% elif message['role'] == 'assistant' %}"
-    "<start_of_turn>model\n{{ message['content'] }}<end_of_turn>\n"
-    "{% endif %}"
-    "{% endfor %}"
-    "{% if add_generation_prompt %}<start_of_turn>model\n{% endif %}"
-)
-
 _TARGET_EXTRACTION_SCHEMA = (
     "Return data as a JSON object with this exact schema:\n"
     "{\n"
@@ -1366,6 +1353,7 @@ def summarize_extraction_batch(
     total_duration = sum(float(m.get("duration_seconds") or 0.0) for m in call_metrics)
     attempt_count = len(call_metrics)
     json_recovery_count = sum(1 for m in call_metrics if m.get("recovery_mode"))
+    truncated_call_count = sum(1 for m in call_metrics if m.get("truncated"))
     repair_model_count = sum(1 for m in call_metrics if m.get("repair_model"))
     relation_count = sum(len(r.relations) for r in results)
     related_to_count = sum(
@@ -1392,6 +1380,7 @@ def summarize_extraction_batch(
         if failure.retry_after is not None
     ]
     retry_after = min(retry_after_values).isoformat() if retry_after_values else None
+    skipped_low_value = int((metrics_context or {}).get("skipped_low_value_chunks") or 0)
     metrics = {
         "requested_chunks": total_chunks,
         "extracted_chunks": len(results),
@@ -1407,6 +1396,14 @@ def summarize_extraction_batch(
         "json_recovery_attempt_rate": (
             round(json_recovery_count / attempt_count, 4) if attempt_count else 0.0
         ),
+        "ghost_b_total_chunks": total_chunks + skipped_low_value,
+        "ghost_b_skipped_chunks": skipped_low_value,
+        "ghost_b_truncated_count": truncated_call_count,
+        "ghost_b_truncated_rate": (
+            round(truncated_call_count / attempt_count, 4) if attempt_count else 0.0
+        ),
+        "ghost_b_recovered_count": json_recovery_count,
+        "ghost_b_failed_count": len(failures),
         "repair_model_count": repair_model_count,
         "repair_model_rate": (
             round(repair_model_count / attempt_count, 4) if attempt_count else 0.0
@@ -2733,9 +2730,6 @@ def _repair_extra_params(repair_entry: dict) -> dict:
         extra["temperature"] = _GEMMA_REPAIR_TEMPERATURE
     extra.setdefault("top_p", _GEMMA_REPAIR_TOP_P)
     extra.setdefault("top_k", _GEMMA_REPAIR_TOP_K)
-    extra_body = dict(extra.get("extra_body") or {})
-    extra_body.setdefault("chat_template", _GEMMA_REPAIR_CHAT_TEMPLATE)
-    extra["extra_body"] = extra_body
     return extra
 
 
@@ -3401,6 +3395,15 @@ async def extract_entities(
                                 headers=headers,
                                 call_metrics=call_metrics,
                             )
+                    completion_used = int(usage.get("completion_tokens") or 0)
+                    # Truncation flag: provider hit (or sat at) the requested
+                    # output cap. Use a small margin because some providers
+                    # report completion_tokens slightly under the cap when the
+                    # final token is a stop sequence rather than a hard cut.
+                    truncated_call = bool(
+                        safe_max_tokens
+                        and completion_used >= max(1, int(safe_max_tokens * 0.98))
+                    )
                     call_metrics.append(
                         {
                             "chunk_id": task.chunk_id,
@@ -3418,6 +3421,7 @@ async def extract_entities(
                             "triple_repair_requested": len(repair_items),
                             "max_tokens": safe_max_tokens,
                             "token_budget": token_budget,
+                            "truncated": truncated_call,
                         }
                     )
                     if result:

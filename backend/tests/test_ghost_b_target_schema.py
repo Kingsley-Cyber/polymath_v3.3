@@ -218,7 +218,7 @@ async def test_gemma_triple_repair_gets_failed_triple_not_full_chunk(monkeypatch
     assert repair_call["temperature"] == 1.0
     assert repair_call["top_p"] == 0.95
     assert repair_call["top_k"] == 64
-    assert repair_call["extra_body"]["chat_template"]
+    assert "extra_body" not in repair_call
 
 
 def test_gemma_repair_parser_ignores_thought_channel():

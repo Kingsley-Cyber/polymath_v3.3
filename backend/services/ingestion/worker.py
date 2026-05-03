@@ -32,6 +32,8 @@ import mimetypes
 import re
 import time
 import uuid
+from dataclasses import asdict, dataclass, field
+from dataclasses import fields as dataclass_fields
 from datetime import datetime
 from typing import Any, Callable
 
@@ -40,8 +42,6 @@ from models.schemas import IngestionConfig, IngestJobResponse, SourceTier, Write
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from qdrant_client import AsyncQdrantClient
 from services.embedder import embed_batch
-from dataclasses import asdict, dataclass, field, fields as dataclass_fields
-
 from services.ghost_a import SummaryResult, SummaryTask, summarize_parents
 from services.ghost_b import (
     CandidateFactItem,
@@ -50,13 +50,12 @@ from services.ghost_b import (
     ExtractionFailureItem,
     ExtractionResult,
     ExtractionTask,
-    RelationRepairCandidate,
     RelationItem,
+    RelationRepairCandidate,
     SchemaContext,
     extract_entities,
 )
-from services.ingestion import docling_adapter, tier_chunker
-from services.ingestion import repair_queue
+from services.ingestion import docling_adapter, repair_queue, tier_chunker
 from services.ingestion.schema_lens import get_or_create_schema_lens
 from services.ingestion.section_classifier import ChunkKind, should_skip_ghost_b
 from services.secrets import decrypt as _decrypt_api_key
@@ -100,7 +99,9 @@ class GhostRunResult:
     warnings: list[str] = field(default_factory=list)
     ghost_b_failures: list[ExtractionFailureItem] = field(default_factory=list)
     ghost_b_metrics: dict | None = None
-    relation_repair_candidates: list[RelationRepairCandidate] = field(default_factory=list)
+    relation_repair_candidates: list[RelationRepairCandidate] = field(
+        default_factory=list
+    )
 
     def __iter__(self):
         yield self.summaries
@@ -115,9 +116,32 @@ _HRAG_TIERS = (
 _DUPLICATE_DOC_THRESHOLD = 0.90
 _DUPLICATE_TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9_'-]{2,}")
 _DUPLICATE_STOP_WORDS = {
-    "and", "are", "but", "for", "from", "have", "into", "not", "the", "that",
-    "this", "with", "you", "your", "their", "there", "then", "than", "was",
-    "were", "will", "would", "could", "should", "about", "which",
+    "and",
+    "are",
+    "but",
+    "for",
+    "from",
+    "have",
+    "into",
+    "not",
+    "the",
+    "that",
+    "this",
+    "with",
+    "you",
+    "your",
+    "their",
+    "there",
+    "then",
+    "than",
+    "was",
+    "were",
+    "will",
+    "would",
+    "could",
+    "should",
+    "about",
+    "which",
 }
 
 
@@ -194,19 +218,27 @@ def _graph_status_after_extraction(
             int(error_counts.get(key) or 0)
             for key in ("token_budget", "bad_request", "unprocessable_entity")
         )
-        if deterministic_failures and not int(metrics.get("retryable_failed_chunks") or 0):
+        if deterministic_failures and not int(
+            metrics.get("retryable_failed_chunks") or 0
+        ):
             return GRAPH_FAILED_TOKEN_BUDGET
         if metrics.get("graph_retry_after"):
             return GRAPH_RETRY_SCHEDULED
         return GRAPH_PARTIAL
-    if int(metrics.get("relation_repair_pending_count") or metrics.get("relation_repair_queued_count") or 0):
+    if int(
+        metrics.get("relation_repair_pending_count")
+        or metrics.get("relation_repair_queued_count")
+        or 0
+    ):
         return GRAPH_PARTIAL
     if requested and extracted < requested:
         return GRAPH_PARTIAL
     return GRAPH_READY
 
 
-def _refresh_derived_write_state(ws: WriteState, *, config: IngestionConfig) -> WriteState:
+def _refresh_derived_write_state(
+    ws: WriteState, *, config: IngestionConfig
+) -> WriteState:
     """Fill new staged-ingest status fields for legacy documents."""
     ws.vector_ready = bool(ws.vector_ready or (ws.mongo_written and ws.qdrant_written))
     if not _graph_enabled(config):
@@ -253,7 +285,9 @@ def _file_profile(parse_result, source_mime: str, filename: str) -> str:
         if source_format == "pypdf_fast_text":
             return "digital_pdf"
         return "pdf"
-    if source_format.startswith("local_markdown") or name.endswith((".md", ".markdown")):
+    if source_format.startswith("local_markdown") or name.endswith(
+        (".md", ".markdown")
+    ):
         return "markdown"
     if source_format.startswith("local_text") or name.endswith((".txt", ".text")):
         return "plain_text"
@@ -287,22 +321,34 @@ def _trace_reasons(
     reasons: list[str] = []
     parent_strategy = str(chunking_config.get("parent_strategy") or "")
     if parent_strategy == "pdf_page_grouped":
-        reasons.append("PDF pages were grouped into token-sized parents with page ranges preserved.")
+        reasons.append(
+            "PDF pages were grouped into token-sized parents with page ranges preserved."
+        )
     elif parent_strategy.startswith("heading_bound"):
         reasons.append("Document headings were preserved as parent chunk boundaries.")
     elif parent_strategy == "token_window":
-        reasons.append("Weak document structure triggered token-window parent chunking.")
-    if chunking_config.get("requested_child_strategy") != chunking_config.get("child_strategy"):
-        reasons.append("Requested child splitting was resolved to the safest implemented strategy.")
+        reasons.append(
+            "Weak document structure triggered token-window parent chunking."
+        )
+    if chunking_config.get("requested_child_strategy") != chunking_config.get(
+        "child_strategy"
+    ):
+        reasons.append(
+            "Requested child splitting was resolved to the safest implemented strategy."
+        )
     if low_value_count:
-        reasons.append(f"{low_value_count} low-value chunk(s) were skipped for graph extraction.")
+        reasons.append(
+            f"{low_value_count} low-value chunk(s) were skipped for graph extraction."
+        )
     if not config.use_neo4j:
         reasons.append("Graph extraction is disabled for this ingest configuration.")
     else:
         if policy is not None and policy.extraction_strategy == "compact_large_doc":
             reasons.append("Large body chunk count triggered compact graph extraction.")
         elif policy is not None and policy.extraction_strategy == "full_ontology":
-            reasons.append("Document stayed within the full ontology extraction budget.")
+            reasons.append(
+                "Document stayed within the full ontology extraction budget."
+            )
     if ws.vector_ready:
         reasons.append("Mongo and Qdrant are ready for vector/chat retrieval.")
     if not reasons:
@@ -334,17 +380,14 @@ def _build_decision_trace(
         )
     budgets = chunking_config.get("token_budgets") or {}
     metrics = ghost_b_metrics or {}
-    graph_strategy = (
-        str(metrics.get("extraction_strategy") or "")
-        or (policy.extraction_strategy if policy else "graph_disabled")
+    graph_strategy = str(metrics.get("extraction_strategy") or "") or (
+        policy.extraction_strategy if policy else "graph_disabled"
     )
-    graph_mode = (
-        str(metrics.get("extraction_mode") or "")
-        or (policy.extraction_mode if policy else "none")
+    graph_mode = str(metrics.get("extraction_mode") or "") or (
+        policy.extraction_mode if policy else "none"
     )
-    graph_completeness = (
-        str(metrics.get("graph_completeness") or "")
-        or (policy.graph_completeness if policy else "graph-skipped")
+    graph_completeness = str(metrics.get("graph_completeness") or "") or (
+        policy.graph_completeness if policy else "graph-skipped"
     )
     graph_engine = str(
         metrics.get("graph_extraction_engine_used")
@@ -355,13 +398,17 @@ def _build_decision_trace(
     if chunking_config.get("semantic_split_reason"):
         warnings.append(str(chunking_config["semantic_split_reason"]))
     if _structure_quality(parse_result) == "low":
-        warnings.append("Parser found weak structure; chunking used fallback boundaries.")
+        warnings.append(
+            "Parser found weak structure; chunking used fallback boundaries."
+        )
 
     trace = {
         "file_profile": _file_profile(parse_result, source_mime, filename),
         "source_mime": source_mime,
         "source_tier": source_tier.value,
-        "parser_strategy": str(getattr(parse_result, "source_format", "") or "docling_sidecar"),
+        "parser_strategy": str(
+            getattr(parse_result, "source_format", "") or "docling_sidecar"
+        ),
         "structure_quality": _structure_quality(parse_result),
         "page_count": int(getattr(parse_result, "num_pages", 1) or 1),
         "has_structure": bool(getattr(parse_result, "has_structure", False)),
@@ -374,9 +421,15 @@ def _build_decision_trace(
         "child_count": len(children),
         "parent_target_tokens": int(budgets.get("parent_target") or 0),
         "child_target_tokens": int(budgets.get("child_target") or 0),
-        "max_child_tokens": max([int(getattr(c, "token_count", 0) or 0) for c in children] or [0]),
+        "max_child_tokens": max(
+            [int(getattr(c, "token_count", 0) or 0) for c in children] or [0]
+        ),
         "max_parent_tokens": max(
-            [tier_chunker._count_tokens(str(getattr(p, "text", "") or "")) for p in parents] or [0]
+            [
+                tier_chunker._count_tokens(str(getattr(p, "text", "") or ""))
+                for p in parents
+            ]
+            or [0]
         ),
         "hard_token_split_enabled": True,
         "chunk_overlap": int(chunking_config.get("chunk_overlap") or 0),
@@ -558,8 +611,18 @@ async def _persist_graph_extraction(
         ("decision_trace.graph_completeness", "graph_completeness"),
         ("decision_trace.graph_requested_chunks", "requested_chunks"),
         ("decision_trace.graph_extracted_chunks", "extracted_chunks"),
+        # Top-level health metrics. Surface these as targeted $set keys so
+        # the UI / aggregations don't have to walk the nested ghost_b_metrics
+        # blob, while keeping the full audit blob intact above.
+        ("ghost_b_total_chunks", "ghost_b_total_chunks"),
+        ("ghost_b_skipped_chunks", "ghost_b_skipped_chunks"),
+        ("ghost_b_truncated_count", "ghost_b_truncated_count"),
+        ("ghost_b_recovered_count", "ghost_b_recovered_count"),
+        ("ghost_b_failed_count", "ghost_b_failed_count"),
     ):
-        _set_if_present(trace_updates, field_name, (ghost_b_metrics or {}).get(metric_name))
+        _set_if_present(
+            trace_updates, field_name, (ghost_b_metrics or {}).get(metric_name)
+        )
     await db["documents"].update_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
         {"$set": trace_updates},
@@ -615,10 +678,7 @@ def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict
         return None
     relation_count = sum(len(r.relations) for r in results)
     related_to_count = sum(
-        1
-        for r in results
-        for rel in r.relations
-        if rel.predicate == "related_to"
+        1 for r in results for rel in r.relations if rel.predicate == "related_to"
     )
     predicate_confidences = [
         float(rel.predicate_confidence)
@@ -638,6 +698,12 @@ def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict
         "json_recovery_count": 0,
         "json_recovery_rate": 0.0,
         "json_recovery_attempt_rate": 0.0,
+        "ghost_b_total_chunks": len(results),
+        "ghost_b_skipped_chunks": 0,
+        "ghost_b_truncated_count": 0,
+        "ghost_b_truncated_rate": 0.0,
+        "ghost_b_recovered_count": 0,
+        "ghost_b_failed_count": 0,
         "models": [],
         "total_tokens": 0,
         "prompt_tokens": 0,
@@ -649,7 +715,9 @@ def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict
         "relation_count": relation_count,
         "candidate_fact_count": sum(len(r.candidate_facts) for r in results),
         "related_to_count": related_to_count,
-        "related_to_ratio": round(related_to_count / relation_count, 4) if relation_count else 0.0,
+        "related_to_ratio": round(related_to_count / relation_count, 4)
+        if relation_count
+        else 0.0,
         "predicate_confidence_avg": (
             round(sum(predicate_confidences) / len(predicate_confidences), 4)
             if predicate_confidences
@@ -731,8 +799,20 @@ def _select_ghost_b_extraction_policy(
     """Choose full vs compact Ghost B extraction for this document."""
     large_threshold = max(1, _config_int(config, "large_doc_child_threshold", 600))
     full_cap = max(1, _config_int(config, "full_extract_max_children", large_threshold))
-    compact_entities = max(1, min(_config_int(config, "compact_mode_max_entities", 8), settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK))
-    compact_relations = max(0, min(_config_int(config, "compact_mode_max_relations", 8), settings.EXTRACTION_MAX_RELATIONS_PER_CHUNK))
+    compact_entities = max(
+        1,
+        min(
+            _config_int(config, "compact_mode_max_entities", 8),
+            settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK,
+        ),
+    )
+    compact_relations = max(
+        0,
+        min(
+            _config_int(config, "compact_mode_max_relations", 8),
+            settings.EXTRACTION_MAX_RELATIONS_PER_CHUNK,
+        ),
+    )
     deep_enabled = bool(getattr(config, "deep_pass_enabled", False))
     deep_max = max(0, _config_int(config, "deep_pass_max_chunks", 80))
     skipped_by_kind = dict(skipped_low_value_by_kind or {})
@@ -826,9 +906,19 @@ def _high_signal_score(chunk, schema_lens: Any | None = None) -> float:
     lens = schema_lens if hasattr(schema_lens, "preferred_relations") else None
     if lens:
         lower = sample.lower()
-        score += sum(0.4 for term in lens.preferred_relations[:10] if term.replace("_", " ") in lower)
-        score += sum(0.25 for term in lens.object_kinds[:10] if str(term).lower() in lower)
-        score += sum(0.25 for term in lens.canonical_families[:10] if str(term).replace("_", " ").lower() in lower)
+        score += sum(
+            0.4
+            for term in lens.preferred_relations[:10]
+            if term.replace("_", " ") in lower
+        )
+        score += sum(
+            0.25 for term in lens.object_kinds[:10] if str(term).lower() in lower
+        )
+        score += sum(
+            0.25
+            for term in lens.canonical_families[:10]
+            if str(term).replace("_", " ").lower() in lower
+        )
     return score
 
 
@@ -841,12 +931,18 @@ def _select_high_signal_children(
     if limit <= 0:
         return []
     scored = [
-        (_high_signal_score(child, schema_lens=schema_lens), str(getattr(child, "chunk_id", "")), child)
+        (
+            _high_signal_score(child, schema_lens=schema_lens),
+            str(getattr(child, "chunk_id", "")),
+            child,
+        )
         for child in children
     ]
     selected = [
         child
-        for score, _chunk_id, child in sorted(scored, key=lambda item: (-item[0], item[1]))
+        for score, _chunk_id, child in sorted(
+            scored, key=lambda item: (-item[0], item[1])
+        )
         if score >= 2.0
     ]
     return selected[:limit]
@@ -893,7 +989,15 @@ def _dataclass_from_staged(cls, row: dict, *, context: str):
 
 def _normalize_staged_relation_object_kind(value: str) -> str:
     key = re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
-    if key in {"literal", "value", "scalar", "string", "number", "date", "literal_value"}:
+    if key in {
+        "literal",
+        "value",
+        "scalar",
+        "string",
+        "number",
+        "date",
+        "literal_value",
+    }:
         return "literal"
     if key in {"", "entity", "node", "named_entity", "canonical_entity"}:
         return "entity"
@@ -1076,9 +1180,7 @@ async def _run_ghosts_parallel(
     relation_repair_candidates: list[RelationRepairCandidate] = []
     summary_llm_calls = 0
     # ── GHOST A path decisions ────────────────────────────────────────────
-    existing_parent_chunks: list[dict] = (
-        (existing_doc or {}).get("parent_chunks") or []
-    )
+    existing_parent_chunks: list[dict] = (existing_doc or {}).get("parent_chunks") or []
     summaries_from_mongo: list[SummaryResult] | None = None
     need_ghost_a = bool(include_ghost_a and config.chunk_summarization)
 
@@ -1233,7 +1335,9 @@ async def _run_ghosts_parallel(
                 doc_id=c.doc_id,
                 corpus_id=c.corpus_id,
                 text=c.text,
-                document_title=filename or (existing_doc or {}).get("filename") or doc_id,
+                document_title=filename
+                or (existing_doc or {}).get("filename")
+                or doc_id,
                 heading_path=getattr(c, "heading_path", None),
                 chunk_kind=getattr(c, "chunk_kind", ChunkKind.BODY),
             )
@@ -1256,11 +1360,13 @@ async def _run_ghosts_parallel(
         # influence which schema terms get retrieved would erode entity
         # extraction quality on body content.
         body_parents_for_lens = [
-            p for p in parents
+            p
+            for p in parents
             if not should_skip_ghost_b(getattr(p, "chunk_kind", None) or ChunkKind.BODY)
         ]
         body_children_for_lens = [
-            c for c in children
+            c
+            for c in children
             if not should_skip_ghost_b(getattr(c, "chunk_kind", None) or ChunkKind.BODY)
         ]
         schema_lens = await get_or_create_schema_lens(
@@ -1290,7 +1396,9 @@ async def _run_ghosts_parallel(
         if ws.vector_ready and ws.graph_status == GRAPH_EXTRACTING:
             reason = "graph_enrichment"
         else:
-            reason = "fresh_ingest" if not ws.mongo_written else "staging_missing_legacy_doc"
+            reason = (
+                "fresh_ingest" if not ws.mongo_written else "staging_missing_legacy_doc"
+            )
         logger.info(
             "phase=ghost_b_run reason=%s doc=%s corpus=%s children=%d pool=%d strict=%s strategy=%s mode=%s max_entities=%d max_relations=%d max_tokens=%d",
             reason,
@@ -1324,7 +1432,9 @@ async def _run_ghosts_parallel(
             "max_entities_per_chunk": policy.max_entities_per_chunk,
             "max_relations_per_chunk": policy.max_relations_per_chunk,
             "max_completion_tokens_override": policy.max_completion_tokens,
-            "per_chunk_max_attempts": getattr(config, "graph_per_chunk_max_attempts", 2),
+            "per_chunk_max_attempts": getattr(
+                config, "graph_per_chunk_max_attempts", 2
+            ),
             "per_doc_max_failed_chunks_before_pause": getattr(
                 config, "graph_per_doc_max_failed_chunks_before_pause", 50
             ),
@@ -1371,7 +1481,9 @@ async def _run_ghosts_parallel(
                     doc_id=c.doc_id,
                     corpus_id=c.corpus_id,
                     text=c.text,
-                    document_title=filename or (existing_doc or {}).get("filename") or doc_id,
+                    document_title=filename
+                    or (existing_doc or {}).get("filename")
+                    or doc_id,
                     heading_path=getattr(c, "heading_path", None),
                     chunk_kind=getattr(c, "chunk_kind", ChunkKind.BODY),
                 )
@@ -1397,7 +1509,9 @@ async def _run_ghosts_parallel(
                     model=model,
                     return_report=True,
                     extraction_mode="full",
-                    per_chunk_max_attempts=getattr(config, "graph_per_chunk_max_attempts", 2),
+                    per_chunk_max_attempts=getattr(
+                        config, "graph_per_chunk_max_attempts", 2
+                    ),
                     per_doc_max_failed_chunks_before_pause=getattr(
                         config, "graph_per_doc_max_failed_chunks_before_pause", 50
                     ),
@@ -1428,41 +1542,76 @@ async def _run_ghosts_parallel(
                     metrics["deep_extraction_chunks"] = len(deep_tasks)
                     metrics["deep_extracted_chunks"] = len(deep_results)
                     metrics["deep_failed_chunks"] = len(deep_report.failures)
-                    metrics["deep_total_tokens"] = int(deep_metrics.get("total_tokens") or 0)
-                    metrics["deep_prompt_tokens"] = int(deep_metrics.get("prompt_tokens") or 0)
-                    metrics["deep_completion_tokens"] = int(deep_metrics.get("completion_tokens") or 0)
-                    metrics["total_tokens"] = int(metrics.get("total_tokens") or 0) + metrics["deep_total_tokens"]
-                    metrics["prompt_tokens"] = int(metrics.get("prompt_tokens") or 0) + metrics["deep_prompt_tokens"]
-                    metrics["completion_tokens"] = int(metrics.get("completion_tokens") or 0) + metrics["deep_completion_tokens"]
-                    metrics["estimated_cost_tokens"] = int(metrics.get("total_tokens") or 0)
-                    metrics["attempt_count"] = int(metrics.get("attempt_count") or 0) + int(deep_metrics.get("attempt_count") or 0)
-                    metrics["json_recovery_count"] = int(metrics.get("json_recovery_count") or 0) + int(deep_metrics.get("json_recovery_count") or 0)
+                    metrics["deep_total_tokens"] = int(
+                        deep_metrics.get("total_tokens") or 0
+                    )
+                    metrics["deep_prompt_tokens"] = int(
+                        deep_metrics.get("prompt_tokens") or 0
+                    )
+                    metrics["deep_completion_tokens"] = int(
+                        deep_metrics.get("completion_tokens") or 0
+                    )
+                    metrics["total_tokens"] = (
+                        int(metrics.get("total_tokens") or 0)
+                        + metrics["deep_total_tokens"]
+                    )
+                    metrics["prompt_tokens"] = (
+                        int(metrics.get("prompt_tokens") or 0)
+                        + metrics["deep_prompt_tokens"]
+                    )
+                    metrics["completion_tokens"] = (
+                        int(metrics.get("completion_tokens") or 0)
+                        + metrics["deep_completion_tokens"]
+                    )
+                    metrics["estimated_cost_tokens"] = int(
+                        metrics.get("total_tokens") or 0
+                    )
+                    metrics["attempt_count"] = int(
+                        metrics.get("attempt_count") or 0
+                    ) + int(deep_metrics.get("attempt_count") or 0)
+                    metrics["json_recovery_count"] = int(
+                        metrics.get("json_recovery_count") or 0
+                    ) + int(deep_metrics.get("json_recovery_count") or 0)
                     metrics["graph_completeness"] = "graph-compact"
                     metrics["extraction_strategy"] = "compact_large_doc_with_deep_pass"
                     metrics["entity_count"] = sum(len(r.entities) for r in results)
                     metrics["relation_count"] = sum(len(r.relations) for r in results)
-                    metrics["candidate_fact_count"] = sum(len(r.candidate_facts) for r in results)
+                    metrics["candidate_fact_count"] = sum(
+                        len(r.candidate_facts) for r in results
+                    )
                     metrics["related_to_count"] = sum(
-                        1 for r in results for rel in r.relations if rel.predicate == "related_to"
+                        1
+                        for r in results
+                        for rel in r.relations
+                        if rel.predicate == "related_to"
                     )
                     relation_count = int(metrics.get("relation_count") or 0)
                     metrics["related_to_ratio"] = (
-                        round(int(metrics.get("related_to_count") or 0) / relation_count, 4)
+                        round(
+                            int(metrics.get("related_to_count") or 0) / relation_count,
+                            4,
+                        )
                         if relation_count
                         else 0.0
                     )
                     requested = int(metrics.get("requested_chunks") or len(tasks))
                     attempts = int(metrics.get("attempt_count") or 0)
                     recoveries = int(metrics.get("json_recovery_count") or 0)
-                    metrics["json_recovery_rate"] = round(recoveries / requested, 4) if requested else 0.0
-                    metrics["json_recovery_attempt_rate"] = round(recoveries / attempts, 4) if attempts else 0.0
+                    metrics["json_recovery_rate"] = (
+                        round(recoveries / requested, 4) if requested else 0.0
+                    )
+                    metrics["json_recovery_attempt_rate"] = (
+                        round(recoveries / attempts, 4) if attempts else 0.0
+                    )
         metrics["schema_lens"] = schema_lens.to_dict()
         metrics["relation_repair_queued_count"] = len(relation_repair_candidates)
         metrics["relation_repair_pending_count"] = len(relation_repair_candidates)
         ghost_b_failures.extend(failures)
         ghost_b_metrics = metrics
         if len(results) < len(tasks):
-            missing_ids = sorted({t.chunk_id for t in tasks} - {r.chunk_id for r in results})
+            missing_ids = sorted(
+                {t.chunk_id for t in tasks} - {r.chunk_id for r in results}
+            )
             warning = _ghost_b_partial_warning(
                 extracted=len(results),
                 total=len(tasks),
@@ -1572,9 +1721,7 @@ async def _write_mongo_all(
         }
         for c in children
     ]
-    ghost_b_staging = (
-        [asdict(r) for r in ghost_b_out] if ghost_b_out else None
-    )
+    ghost_b_staging = [asdict(r) for r in ghost_b_out] if ghost_b_out else None
     ghost_b_failure_rows = (
         [asdict(f) for f in ghost_b_failures] if ghost_b_failures else []
     )
@@ -1595,6 +1742,8 @@ async def _write_mongo_all(
         "ingestion_config": freeze_snapshot(ingestion_config),
         "chunking_config": chunking_config,
         "write_state": ws.model_dump(),
+        "chunk_count": len(children),
+        "parent_count": len(parents),
         "parent_chunks": parent_dicts,
         "ghost_b_staging": ghost_b_staging,
         "ghost_b_failures": ghost_b_failure_rows,
@@ -1652,6 +1801,8 @@ async def _ensure_progress_document(
             "ingestion_config": freeze_snapshot(ingestion_config),
             "chunking_config": chunking_config,
             "write_state": ws.model_dump(),
+            "chunk_count": int((decision_trace or {}).get("child_count") or 0),
+            "parent_count": len(parents),
             "parent_chunks": _build_parent_dicts(parents, None),
             "decision_trace": decision_trace or {},
             "decision_trace_summary": _decision_trace_summary(decision_trace),
@@ -1810,8 +1961,8 @@ def _build_graph_vector_payloads(
             if relation.object_kind != "entity":
                 continue
             source_predicate = relation.source_predicate or relation.predicate
-            normalized_source_predicate, reverse_relation = normalize_relation_predicate_alias(
-                source_predicate
+            normalized_source_predicate, reverse_relation = (
+                normalize_relation_predicate_alias(source_predicate)
             )
             subject_name = relation.object if reverse_relation else relation.subject
             object_name = relation.subject if reverse_relation else relation.object
@@ -1820,10 +1971,9 @@ def _build_graph_vector_payloads(
             if not subject_canonical or not object_canonical:
                 continue
             predicate = relation.predicate
-            predicate_family = (
-                getattr(relation, "predicate_family", None)
-                or relation_family_for_predicate(predicate)
-            )
+            predicate_family = getattr(
+                relation, "predicate_family", None
+            ) or relation_family_for_predicate(predicate)
             source_sentence = (
                 getattr(relation, "source_sentence", "")
                 or relation.evidence_phrase
@@ -1875,8 +2025,14 @@ async def _write_graph_vectors_for_doc(
         ghost_b_out=ghost_b_out,
     )
     texts = [
-        *[qdrant_writer.build_entity_vector_text(payload) for payload in entity_payloads],
-        *[qdrant_writer.build_relation_vector_text(payload) for payload in relation_payloads],
+        *[
+            qdrant_writer.build_entity_vector_text(payload)
+            for payload in entity_payloads
+        ],
+        *[
+            qdrant_writer.build_relation_vector_text(payload)
+            for payload in relation_payloads
+        ],
     ]
     if not texts:
         return
@@ -1966,7 +2122,11 @@ async def _write_qdrant_for_doc(
         vecs = [vec_map[c.chunk_id] for c in vector_children]
         sparse = [child_sparse_map.get(c.chunk_id) for c in vector_children]
         await qdrant_writer.upsert_children(
-            qdrant_client, corpus_id, dicts, vecs, ["naive"],
+            qdrant_client,
+            corpus_id,
+            dicts,
+            vecs,
+            ["naive"],
             sparse_vectors=sparse,
         )
 
@@ -1976,7 +2136,11 @@ async def _write_qdrant_for_doc(
         vecs = [vec_map[c.chunk_id] for c in hrag_eligible]
         sparse = [child_sparse_map.get(c.chunk_id) for c in hrag_eligible]
         await qdrant_writer.upsert_children(
-            qdrant_client, corpus_id, dicts, vecs, ["hrag"],
+            qdrant_client,
+            corpus_id,
+            dicts,
+            vecs,
+            ["hrag"],
             sparse_vectors=sparse,
         )
 
@@ -1985,13 +2149,19 @@ async def _write_qdrant_for_doc(
         vecs = [vec_map[c.chunk_id] for c in vector_children]
         sparse = [child_sparse_map.get(c.chunk_id) for c in vector_children]
         await qdrant_writer.upsert_children(
-            qdrant_client, corpus_id, dicts, vecs, ["graph"],
+            qdrant_client,
+            corpus_id,
+            dicts,
+            vecs,
+            ["graph"],
             sparse_vectors=sparse,
         )
 
     if summaries:
         hp_map = {p.parent_id: p.heading_path for p in parents}
-        kind_map = {p.parent_id: getattr(p, "chunk_kind", ChunkKind.BODY) for p in parents}
+        kind_map = {
+            p.parent_id: getattr(p, "chunk_kind", ChunkKind.BODY) for p in parents
+        }
         summary_payloads = [
             {
                 "parent_id": s.parent_id,
@@ -2073,8 +2243,8 @@ async def recover_vector_from_mongo(
             "qdrant_written": True,
         }
 
-    from services.ingestion_service import build_effective_config
     from services.ingestion.tier_chunker import ChildChunk, ParentChunk
+    from services.ingestion_service import build_effective_config
 
     corpus = await mongo_reader.get_corpus(db, corpus_id)
     live_cfg = (corpus or {}).get("default_ingestion_config") or {}
@@ -2084,10 +2254,14 @@ async def recover_vector_from_mongo(
         ingest_overrides=None,
     )
     parent_rows = doc.get("parent_chunks") or []
-    chunk_rows = await db["chunks"].find(
-        {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"_id": 0},
-    ).to_list(length=None)
+    chunk_rows = (
+        await db["chunks"]
+        .find(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {"_id": 0},
+        )
+        .to_list(length=None)
+    )
     if not chunk_rows:
         raise RuntimeError("No stored child chunks found for vector recovery")
 
@@ -2144,8 +2318,7 @@ async def recover_vector_from_mongo(
         if child.chunk_id in vec_map
     }
     summary_sparse_map = {
-        summary.parent_id: _bm25_encode(summary.summary)
-        for summary in summaries
+        summary.parent_id: _bm25_encode(summary.summary) for summary in summaries
     }
     await _write_qdrant_for_doc(
         qdrant_client=qdrant_client,
@@ -2436,7 +2609,9 @@ async def run_ingest_job(
         children=children,
         config=ingestion_config,
         ws=ws,
-        ghost_b_metrics=(existing_doc or {}).get("ghost_b_metrics") if existing_doc else None,
+        ghost_b_metrics=(existing_doc or {}).get("ghost_b_metrics")
+        if existing_doc
+        else None,
     )
     file_id = (
         existing_doc.get("file_id", str(uuid.uuid4()))
@@ -2482,33 +2657,54 @@ async def run_ingest_job(
     # ── Phase 3: Ghost A summary lane ───────────────────────────────────
     # Ghost B intentionally does not run here. Mongo/Qdrant must become
     # usable for vector RAG before graph enrichment starts.
-    async with _MODEL_PHASE_SEMAPHORE:
-        t0 = time.monotonic()
-        ghost_result = await _run_ghosts_parallel(
-            config=ingestion_config,
-            parents=parents,
-            children=children,
-            doc_id=doc_id,
-            corpus_id=corpus_id,
-            filename=filename,
-            model=model,
-            db=db,
-            qdrant_client=qdrant_client,
-            neo4j_driver=neo4j_driver,
-            existing_doc=existing_doc,
-            ws=ws,
-            include_ghost_a=True,
-            include_ghost_b=False,
+    try:
+        async with _MODEL_PHASE_SEMAPHORE:
+            t0 = time.monotonic()
+            ghost_result = await _run_ghosts_parallel(
+                config=ingestion_config,
+                parents=parents,
+                children=children,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                filename=filename,
+                model=model,
+                db=db,
+                qdrant_client=qdrant_client,
+                neo4j_driver=neo4j_driver,
+                existing_doc=existing_doc,
+                ws=ws,
+                include_ghost_a=True,
+                include_ghost_b=False,
+            )
+        if isinstance(ghost_result, GhostRunResult):
+            summaries = ghost_result.summaries
+            ingest_warnings = ghost_result.warnings
+        else:
+            # Backward-compatible path for older tests/mocks that still return
+            # the pre-metrics two-tuple.
+            ghost_tuple = tuple(ghost_result)
+            summaries = ghost_tuple[0] if len(ghost_tuple) > 0 else None
+            ingest_warnings = ghost_tuple[2] if len(ghost_tuple) > 2 else []
+    except GhostAFailure as exc:
+        # Document record exists from _ensure_progress_document above.
+        # Save the warning so the UI shows why this doc failed, then
+        # re-raise so the batch queue marks the item as failed.
+        ws.warnings = _merge_warnings(
+            ws.warnings,
+            [f"Ghost A summarization failed: {str(exc)[:500]}"],
         )
-    if isinstance(ghost_result, GhostRunResult):
-        summaries = ghost_result.summaries
-        ingest_warnings = ghost_result.warnings
-    else:
-        # Backward-compatible path for older tests/mocks that still return the
-        # pre-metrics two-tuple.
-        ghost_tuple = tuple(ghost_result)
-        summaries = ghost_tuple[0] if len(ghost_tuple) > 0 else None
-        ingest_warnings = ghost_tuple[2] if len(ghost_tuple) > 2 else []
+        await mongo_writer.update_write_state(
+            db,
+            doc_id,
+            corpus_id=corpus_id,
+            warnings=ws.warnings,
+        )
+        logger.exception(
+            "phase=ghost_a_failed doc=%s corpus=%s",
+            doc_id[:12],
+            cid8,
+        )
+        raise
     ghost_b_out: list[ExtractionResult] | None = None
     ghost_b_failures: list[ExtractionFailureItem] = []
     ghost_b_metrics: dict | None = None
@@ -2602,11 +2798,10 @@ async def run_ingest_job(
         # legacy corpora's collections silently drop the sparse field at
         # upsert time and keep the Mongo $text fallback in place.
         from services.storage.sparse_encoder import encode_text as _bm25_encode
+
         t0 = time.monotonic()
         child_sparse_map = {
-            c.chunk_id: _bm25_encode(c.text)
-            for c in children
-            if c.chunk_id in vec_map
+            c.chunk_id: _bm25_encode(c.text) for c in children if c.chunk_id in vec_map
         }
         summary_sparse_map = {
             s.parent_id: _bm25_encode(s.summary) for s in (summaries or [])
@@ -2657,7 +2852,9 @@ async def run_ingest_job(
             ",".join(ingestion_config.target_qdrant_collections),
         )
     else:
-        ws.vector_ready = bool(ws.vector_ready or (ws.mongo_written and ws.qdrant_written))
+        ws.vector_ready = bool(
+            ws.vector_ready or (ws.mongo_written and ws.qdrant_written)
+        )
 
     # ── Phase 7: Graph enrichment lane (optional) ────────────────────────
     if not _graph_enabled(ingestion_config):
@@ -2674,7 +2871,9 @@ async def run_ingest_job(
         if neo4j_driver is None:
             ws.warnings = _merge_warnings(
                 ws.warnings,
-                ["Neo4j enabled but graph driver is unavailable; graph extraction is pending."],
+                [
+                    "Neo4j enabled but graph driver is unavailable; graph extraction is pending."
+                ],
             )
             await mongo_writer.update_write_state(
                 db,
@@ -2746,7 +2945,9 @@ async def run_ingest_job(
                     warnings=ws.warnings,
                 )
                 if ghost_b_out is None:
-                    raise GhostBFailure("Ghost B graph enrichment returned no extraction output")
+                    raise GhostBFailure(
+                        "Ghost B graph enrichment returned no extraction output"
+                    )
 
                 repair_state = await _enqueue_relation_repairs_for_doc(
                     db=db,
@@ -2831,7 +3032,9 @@ async def run_ingest_job(
             except Exception as exc:
                 ws.warnings = _merge_warnings(
                     ws.warnings,
-                    [f"Ghost B graph enrichment failed after vector_ready: {str(exc)[:500]}"],
+                    [
+                        f"Ghost B graph enrichment failed after vector_ready: {str(exc)[:500]}"
+                    ],
                 )
                 await _persist_graph_extraction(
                     db=db,

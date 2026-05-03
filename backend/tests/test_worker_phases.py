@@ -498,8 +498,11 @@ async def test_ghost_a_hard_abort_raises_and_skips_writes():
         # No post-ghost phase fired
         for phase in ("mongo_write", "embed", "qdrant_write", "neo4j_write"):
             assert phase not in rec.events
-        # No write_state flag flip
-        assert m["update_state"].await_count == 0
+        # No write_state flag flips; only the retry-visible Ghost A warning is
+        # persisted on the progress document before the hard abort propagates.
+        assert m["update_state"].await_count == 1
+        _, kwargs = m["update_state"].await_args
+        assert kwargs["warnings"][0].startswith("Ghost A summarization failed:")
     finally:
         m["stop_all"]()
 

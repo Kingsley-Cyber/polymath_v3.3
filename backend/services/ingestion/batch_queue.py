@@ -18,6 +18,7 @@ import shutil
 import time
 import uuid
 from collections import Counter
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -25,6 +26,7 @@ from typing import Any, Awaitable, Callable
 from config import get_settings
 from models.schemas import IngestionConfig, IngestJobResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo import ReturnDocument
 from services.ingestion.file_intake import normalize_upload_filename
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,12 @@ WarmCallable = Callable[..., Awaitable[dict]]
 
 def _now() -> datetime:
     return datetime.utcnow()
+
+
+def _ws_get(write_state: Any, key: str, default: Any = None) -> Any:
+    if isinstance(write_state, dict):
+        return write_state.get(key, default)
+    return getattr(write_state, key, default)
 
 
 def _safe_filename(filename: str) -> str:
@@ -167,7 +175,7 @@ def detect_resource_profile(spool_dir: str | None = None) -> dict[str, Any]:
 
 
 def item_status_from_write_state(write_state: Any) -> str:
-    graph_status = getattr(write_state, "graph_status", None) or ""
+    graph_status = _ws_get(write_state, "graph_status") or ""
     if graph_status == "graph_ready":
         return "graph_ready"
     if graph_status == "graph_partial":
@@ -176,9 +184,40 @@ def item_status_from_write_state(write_state: Any) -> str:
         return "graph_failed_token_budget"
     if graph_status in {"needs_backfill", "graph_retry_scheduled"}:
         return "needs_backfill"
-    if getattr(write_state, "vector_ready", False) or getattr(write_state, "qdrant_written", False):
+    if graph_status == "graph_extracting":
+        return "graph_extracting"
+    if _ws_get(write_state, "vector_ready", False) or _ws_get(write_state, "qdrant_written", False):
         return "vector_ready"
     return "failed"
+
+
+def _write_state_vector_ready(write_state: Any) -> bool:
+    return bool(
+        _ws_get(write_state, "vector_ready", False)
+        or _ws_get(write_state, "qdrant_written", False)
+    )
+
+
+def _write_state_graph_ready(write_state: Any) -> bool:
+    graph_status = str(_ws_get(write_state, "graph_status") or "")
+    if graph_status == "graph_ready":
+        return True
+    if graph_status in {
+        "graph_partial",
+        "needs_backfill",
+        "graph_retry_scheduled",
+        "graph_failed_token_budget",
+        "graph_extracting",
+    }:
+        return False
+    return bool(_ws_get(write_state, "neo4j_written", False))
+
+
+def _live_running_status_from_write_state(write_state: Any) -> str | None:
+    graph_status = str(_ws_get(write_state, "graph_status") or "")
+    if graph_status == "graph_extracting":
+        return "graph_extracting"
+    return None
 
 
 def _vector_ready_query(batch_id: str) -> dict[str, Any]:
@@ -206,7 +245,9 @@ def _terminal_batch_status(
     return "completed"
 
 
-def _batch_count_fields(counts: Counter, *, vector_ready: int) -> dict[str, int]:
+def _batch_count_fields(
+    counts: Counter, *, vector_ready: int, graph_ready: int | None = None
+) -> dict[str, int]:
     total = sum(counts.values())
     processing = sum(counts.get(status, 0) for status in RUNNING_ITEM_STATUSES)
     return {
@@ -214,7 +255,7 @@ def _batch_count_fields(counts: Counter, *, vector_ready: int) -> dict[str, int]
         "queued_count": counts.get("queued", 0),
         "processing_count": processing,
         "vector_ready_count": vector_ready,
-        "graph_ready_count": counts.get("graph_ready", 0),
+        "graph_ready_count": counts.get("graph_ready", 0) if graph_ready is None else graph_ready,
         "graph_partial_count": counts.get("graph_partial", 0),
         "failed_count": counts.get("failed", 0),
         "cancelled_count": counts.get("cancelled", 0),
@@ -560,33 +601,27 @@ class BatchIngestionManager:
             {"batch_id": batch_id},
             {"$set": {"status": "running", "started_at": _now(), "current_phase": "running", "updated_at": _now()}},
         )
+        workers: list[asyncio.Task] = []
         try:
-            while True:
-                batch = await self._db["ingestion_batches"].find_one({"batch_id": batch_id})
-                if not batch or batch.get("status") in TERMINAL_BATCH_STATUSES:
-                    return
-                if batch.get("status") == "paused":
-                    await asyncio.sleep(float(self.settings.INGEST_BATCH_POLL_SECONDS))
-                    continue
-                profile = self.resource_profile()
-                concurrency = max(1, int(profile.get("max_active_docs") or 1))
-                queued = await self._db["ingestion_batch_items"].find(
-                    {"batch_id": batch_id, "status": "queued"}
-                ).sort([("size_bytes", 1), ("created_at", 1)]).to_list(length=concurrency)
-                if not queued:
-                    await self._finish_if_done(batch_id)
-                    return
-                sem = asyncio.Semaphore(concurrency)
-
-                async def _run_item(item: dict[str, Any]) -> None:
-                    async with sem:
-                        await self._process_item(batch, item)
-
-                await asyncio.gather(*[_run_item(item) for item in queued], return_exceptions=False)
-                await self._refresh_batch_counts(batch_id)
+            profile = self.resource_profile()
+            concurrency = max(1, int(profile.get("max_active_docs") or 1))
+            workers = [
+                asyncio.create_task(self._run_batch_worker(batch_id, worker_idx))
+                for worker_idx in range(concurrency)
+            ]
+            await asyncio.gather(*workers, return_exceptions=False)
+            await self._finish_if_done(batch_id)
         except asyncio.CancelledError:
+            for worker in workers:
+                worker.cancel()
+            if workers:
+                await asyncio.gather(*workers, return_exceptions=True)
             raise
         except Exception as exc:
+            for worker in workers:
+                worker.cancel()
+            if workers:
+                await asyncio.gather(*workers, return_exceptions=True)
             logger.exception("phase=batch_scheduler_failed batch=%s: %s", batch_id, exc)
             await self._db["ingestion_batches"].update_one(
                 {"batch_id": batch_id},
@@ -596,38 +631,110 @@ class BatchIngestionManager:
                 },
             )
 
-    async def _process_item(self, batch: dict[str, Any], item: dict[str, Any]) -> None:
+    async def _run_batch_worker(self, batch_id: str, worker_idx: int) -> None:
+        if self._db is None:
+            return
+        poll_seconds = float(self.settings.INGEST_BATCH_POLL_SECONDS)
+        while True:
+            batch = await self._db["ingestion_batches"].find_one({"batch_id": batch_id})
+            if not batch or batch.get("status") in TERMINAL_BATCH_STATUSES:
+                return
+            if batch.get("status") == "paused":
+                await asyncio.sleep(poll_seconds)
+                continue
+
+            item = await self._claim_next_item(batch_id)
+            if item is None:
+                await self._finish_if_done(batch_id)
+                return
+
+            logger.debug(
+                "phase=batch_worker_claim batch=%s worker=%d upload=%s",
+                batch_id,
+                worker_idx,
+                item.get("upload_id"),
+            )
+            await self._refresh_batch_counts(batch_id)
+            await self._process_item(batch, item, already_claimed=True)
+            await self._refresh_batch_counts(batch_id)
+
+    async def _claim_next_item(self, batch_id: str) -> dict[str, Any] | None:
+        if self._db is None:
+            return None
+        return await self._db["ingestion_batch_items"].find_one_and_update(
+            {"batch_id": batch_id, "status": "queued"},
+            {
+                "$set": {
+                    "status": "parsing",
+                    "started_at": _now(),
+                    "updated_at": _now(),
+                },
+                "$inc": {"attempts": 1},
+            },
+            sort=[("size_bytes", 1), ("created_at", 1)],
+            return_document=ReturnDocument.AFTER,
+        )
+
+    async def _process_item(
+        self,
+        batch: dict[str, Any],
+        item: dict[str, Any],
+        *,
+        already_claimed: bool = False,
+    ) -> None:
         if self._db is None or self._ingest is None:
             return
         upload_id = str(item["upload_id"])
         self._active_items.add(upload_id)
         started = time.monotonic()
         path = Path(str(item["spool_path"]))
+        progress_task: asyncio.Task | None = None
         try:
-            claimed = await self._db["ingestion_batch_items"].update_one(
-                {"upload_id": upload_id, "status": "queued"},
-                {
-                    "$set": {
-                        "status": "parsing",
-                        "started_at": item.get("started_at") or _now(),
-                        "updated_at": _now(),
+            if not already_claimed:
+                claimed = await self._db["ingestion_batch_items"].update_one(
+                    {"upload_id": upload_id, "status": "queued"},
+                    {
+                        "$set": {
+                            "status": "parsing",
+                            "started_at": item.get("started_at") or _now(),
+                            "updated_at": _now(),
+                        },
+                        "$inc": {"attempts": 1},
                     },
-                    "$inc": {"attempts": 1},
-                },
-            )
-            if claimed.modified_count != 1:
-                return
-            await self._refresh_batch_counts(str(batch["batch_id"]))
+                )
+                if claimed.modified_count != 1:
+                    return
+                await self._refresh_batch_counts(str(batch["batch_id"]))
             if not path.exists():
                 raise FileNotFoundError(f"Spooled file missing: {path}")
             data = await asyncio.to_thread(path.read_bytes)
 
             async def _mark_vectorizing(doc_id: str) -> None:
+                nonlocal progress_task
                 await self._db["ingestion_batch_items"].update_one(
-                    {"upload_id": upload_id},
-                    {"$set": {"doc_id": doc_id, "status": "vectorizing", "updated_at": _now()}},
+                    {
+                        "upload_id": upload_id,
+                        "status": {"$nin": list(TERMINAL_ITEM_STATUSES)},
+                    },
+                    {
+                        "$set": {
+                            "doc_id": doc_id,
+                            "status": "vectorizing",
+                            "current_phase": "vectorizing",
+                            "updated_at": _now(),
+                        }
+                    },
                 )
                 await self._refresh_batch_counts(str(batch["batch_id"]))
+                if progress_task is None or progress_task.done():
+                    progress_task = asyncio.create_task(
+                        self._track_item_progress(
+                            batch_id=str(batch["batch_id"]),
+                            upload_id=upload_id,
+                            doc_id=doc_id,
+                            corpus_id=str(batch["corpus_id"]),
+                        )
+                    )
 
             def _on_doc_id(doc_id: str) -> None:
                 asyncio.create_task(_mark_vectorizing(doc_id))
@@ -677,8 +784,88 @@ class BatchIngestionManager:
                 },
             )
         finally:
+            if progress_task is not None:
+                progress_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await progress_task
             self._active_items.discard(upload_id)
             await self._refresh_batch_counts(str(batch["batch_id"]))
+
+    async def _track_item_progress(
+        self,
+        *,
+        batch_id: str,
+        upload_id: str,
+        doc_id: str,
+        corpus_id: str,
+    ) -> None:
+        poll_seconds = max(1.0, float(self.settings.INGEST_BATCH_POLL_SECONDS))
+        while True:
+            await asyncio.sleep(poll_seconds)
+            await self._sync_item_progress_from_document(
+                batch_id=batch_id,
+                upload_id=upload_id,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+            )
+
+    async def _sync_item_progress_from_document(
+        self,
+        *,
+        batch_id: str,
+        upload_id: str,
+        doc_id: str,
+        corpus_id: str,
+    ) -> None:
+        if self._db is None:
+            return
+        doc = await self._db["documents"].find_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {
+                "_id": 0,
+                "write_state": 1,
+                "chunk_count": 1,
+                "parent_count": 1,
+                "decision_trace.child_count": 1,
+                "decision_trace.parent_count": 1,
+            },
+        )
+        if not doc:
+            return
+        write_state = doc.get("write_state") or {}
+        status = _live_running_status_from_write_state(write_state)
+        current_phase = status
+        if current_phase is None and _write_state_vector_ready(write_state):
+            current_phase = "vector_ready"
+
+        update_doc: dict[str, Any] = {
+            "write_state": write_state,
+            "updated_at": _now(),
+        }
+        if current_phase:
+            update_doc["current_phase"] = current_phase
+        if status:
+            update_doc["status"] = status
+        chunk_count = doc.get("chunk_count")
+        if chunk_count is None:
+            chunk_count = (doc.get("decision_trace") or {}).get("child_count")
+        parent_count = doc.get("parent_count")
+        if parent_count is None:
+            parent_count = (doc.get("decision_trace") or {}).get("parent_count")
+        if chunk_count is not None:
+            update_doc["chunk_count"] = int(chunk_count or 0)
+        if parent_count is not None:
+            update_doc["parent_count"] = int(parent_count or 0)
+
+        await self._db["ingestion_batch_items"].update_one(
+            {
+                "batch_id": batch_id,
+                "upload_id": upload_id,
+                "status": {"$nin": list(TERMINAL_ITEM_STATUSES)},
+            },
+            {"$set": update_doc},
+        )
+        await self._refresh_batch_counts(batch_id)
 
     def _safe_cleanup_spool(self, path: Path) -> None:
         try:
@@ -725,17 +912,58 @@ class BatchIngestionManager:
         if self._db is None:
             return
         counts = Counter()
-        async for row in self._db["ingestion_batch_items"].aggregate(
-            [
-                {"$match": {"batch_id": batch_id}},
-                {"$group": {"_id": "$status", "count": {"$sum": 1}}},
-            ]
-        ):
-            counts[str(row["_id"])] = int(row["count"])
-        vector_ready = await self._db["ingestion_batch_items"].count_documents(
-            _vector_ready_query(batch_id)
+        items = await self._db["ingestion_batch_items"].find(
+            {"batch_id": batch_id},
+            {
+                "_id": 0,
+                "status": 1,
+                "doc_id": 1,
+                "corpus_id": 1,
+                "write_state": 1,
+            },
+        ).to_list(length=None)
+        for item in items:
+            counts[str(item.get("status") or "unknown")] += 1
+
+        doc_ids = sorted({str(item.get("doc_id")) for item in items if item.get("doc_id")})
+        corpus_id = next((str(item.get("corpus_id")) for item in items if item.get("corpus_id")), None)
+        docs_by_id: dict[str, dict[str, Any]] = {}
+        if doc_ids and corpus_id:
+            cursor = self._db["documents"].find(
+                {"corpus_id": corpus_id, "doc_id": {"$in": doc_ids}},
+                {"_id": 0, "doc_id": 1, "write_state": 1},
+            )
+            async for doc in cursor:
+                docs_by_id[str(doc.get("doc_id"))] = doc
+
+        vector_ready = 0
+        graph_ready = 0
+        vector_statuses = {
+            "vector_ready",
+            "graph_extracting",
+            "graph_ready",
+            "graph_partial",
+            "needs_backfill",
+            "graph_failed_token_budget",
+        }
+        for item in items:
+            status = str(item.get("status") or "")
+            item_ws = item.get("write_state") or {}
+            doc_ws = (docs_by_id.get(str(item.get("doc_id"))) or {}).get("write_state") or {}
+            if (
+                status in vector_statuses
+                or _write_state_vector_ready(item_ws)
+                or _write_state_vector_ready(doc_ws)
+            ):
+                vector_ready += 1
+            if status == "graph_ready" or _write_state_graph_ready(item_ws) or _write_state_graph_ready(doc_ws):
+                graph_ready += 1
+
+        fields = _batch_count_fields(
+            counts,
+            vector_ready=vector_ready,
+            graph_ready=graph_ready,
         )
-        fields = _batch_count_fields(counts, vector_ready=vector_ready)
         await self._db["ingestion_batches"].update_one(
             {"batch_id": batch_id},
             {

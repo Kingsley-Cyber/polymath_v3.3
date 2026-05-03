@@ -13,8 +13,8 @@ Usage in main.py lifespan:
     await ingestion_service.disconnect()
 """
 
-import logging
 import hashlib
+import logging
 import mimetypes
 import uuid
 from datetime import datetime
@@ -40,56 +40,60 @@ logger = logging.getLogger(__name__)
 #   - FROZEN.isdisjoint(MUTABLE)
 #   - FROZEN | MUTABLE == set(IngestionConfig.model_fields)
 
-FROZEN_CONFIG_FIELDS: frozenset[str] = frozenset({
-    "embedding_model",
-    "embedding_dimension",
-    "embedding_model_id",
-    "parent_chunk_tokens",
-    "child_chunk_tokens",
-    "chunk_overlap",
-    "child_chunk_algorithm",
-    "semantic_split_threshold",
-    "max_summary_tokens",
-    "use_neo4j",
-    "chunk_summarization",
-    "target_qdrant_collections",
-    "entity_schema",
-    "relation_schema",
-    "schema_strict",
-    "docling_ocr_enabled",
-    "preset",
-})
+FROZEN_CONFIG_FIELDS: frozenset[str] = frozenset(
+    {
+        "embedding_model",
+        "embedding_dimension",
+        "embedding_model_id",
+        "parent_chunk_tokens",
+        "child_chunk_tokens",
+        "chunk_overlap",
+        "child_chunk_algorithm",
+        "semantic_split_threshold",
+        "max_summary_tokens",
+        "use_neo4j",
+        "chunk_summarization",
+        "target_qdrant_collections",
+        "entity_schema",
+        "relation_schema",
+        "schema_strict",
+        "docling_ocr_enabled",
+        "preset",
+    }
+)
 
-MUTABLE_CONFIG_FIELDS: frozenset[str] = frozenset({
-    "embed_mode",
-    "embed_base_url",
-    "embed_api_key",
-    "embed_max_concurrent",
-    "embedding_models",
-    "modal_containers",
-    "summary_models",
-    "extraction_models",
-    "extraction_repair_models",
-    "entity_confidence_threshold",
-    "models_linked",
-    "large_doc_child_threshold",
-    "full_extract_max_children",
-    "compact_mode_max_entities",
-    "compact_mode_max_relations",
-    "deep_pass_enabled",
-    "deep_pass_max_chunks",
-    "graph_per_chunk_max_attempts",
-    "graph_per_doc_max_failed_chunks_before_pause",
-    "graph_per_lane_max_consecutive_failures",
-    "graph_per_lane_cooldown_seconds",
-    "graph_backfill_max_chunks",
-    "graph_backfill_max_attempts_per_chunk",
-    "deferred_graph_repair_enabled",
-    "graph_repair_max_attempts",
-    "graph_extraction_engine",
-    "llm_fallback_enabled",
-    "llm_fallback_max_percent",
-})
+MUTABLE_CONFIG_FIELDS: frozenset[str] = frozenset(
+    {
+        "embed_mode",
+        "embed_base_url",
+        "embed_api_key",
+        "embed_max_concurrent",
+        "embedding_models",
+        "modal_containers",
+        "summary_models",
+        "extraction_models",
+        "extraction_repair_models",
+        "entity_confidence_threshold",
+        "models_linked",
+        "large_doc_child_threshold",
+        "full_extract_max_children",
+        "compact_mode_max_entities",
+        "compact_mode_max_relations",
+        "deep_pass_enabled",
+        "deep_pass_max_chunks",
+        "graph_per_chunk_max_attempts",
+        "graph_per_doc_max_failed_chunks_before_pause",
+        "graph_per_lane_max_consecutive_failures",
+        "graph_per_lane_cooldown_seconds",
+        "graph_backfill_max_chunks",
+        "graph_backfill_max_attempts_per_chunk",
+        "deferred_graph_repair_enabled",
+        "graph_repair_max_attempts",
+        "graph_extraction_engine",
+        "llm_fallback_enabled",
+        "llm_fallback_max_percent",
+    }
+)
 
 
 class FrozenFieldError(ValueError):
@@ -221,6 +225,7 @@ class IngestionService:
         self._settings = get_settings()
         self._batch_manager = None
         self._repair_worker = None
+        self._backfill_worker = None
 
     async def connect(self, db: AsyncIOMotorDatabase) -> None:
         """Called from lifespan startup. Receives the shared MongoDB db instance.
@@ -304,6 +309,21 @@ class IngestionService:
             except Exception as exc:
                 logger.warning("Graph repair worker did not start: %s", exc)
 
+            try:
+                from services.ingestion.needs_backfill_worker import (
+                    NeedsBackfillWorker,
+                )
+
+                self._backfill_worker = NeedsBackfillWorker(
+                    db=db,
+                    qdrant_client=self._qdrant,
+                    neo4j_driver=self._neo4j,
+                )
+                self._backfill_worker.start()
+                logger.info("IngestionService: needs-backfill worker started")
+            except Exception as exc:
+                logger.warning("Needs-backfill worker did not start: %s", exc)
+
     @property
     def neo4j_driver(self):
         """Expose Neo4j async driver for graph router."""
@@ -322,6 +342,8 @@ class IngestionService:
         return self._db
 
     async def disconnect(self) -> None:
+        if self._backfill_worker:
+            await self._backfill_worker.stop()
         if self._repair_worker:
             await self._repair_worker.stop()
         if self._batch_manager:
@@ -395,13 +417,21 @@ class IngestionService:
                     reasons.append("null_relation_schema")
                 elif all(rel in universal_relations for rel in existing_relations):
                     missing_relations = [
-                        rel for rel in universal_relations if rel not in existing_relations
+                        rel
+                        for rel in universal_relations
+                        if rel not in existing_relations
                     ]
                     if missing_relations:
-                        body = [rel for rel in existing_relations if rel != "related_to"]
-                        additions = [rel for rel in missing_relations if rel != "related_to"]
+                        body = [
+                            rel for rel in existing_relations if rel != "related_to"
+                        ]
+                        additions = [
+                            rel for rel in missing_relations if rel != "related_to"
+                        ]
                         new_relations = [*body, *additions, "related_to"]
-                        reasons.append(f"missing_universal_relations={len(missing_relations)}")
+                        reasons.append(
+                            f"missing_universal_relations={len(missing_relations)}"
+                        )
                 if existing_strict in ("off", "hard"):
                     reasons.append(f"legacy_strict={existing_strict}")
 
@@ -472,9 +502,7 @@ class IngestionService:
         from services.provider_presets import litellm_provider_for
 
         if self._db is None:
-            logger.warning(
-                "migrate_bare_model_names: DB not connected — skipping"
-            )
+            logger.warning("migrate_bare_model_names: DB not connected — skipping")
             return {
                 "corpora_patched": 0,
                 "pool_entries_patched": 0,
@@ -517,7 +545,9 @@ class IngestionService:
             for idx, entry in enumerate(new_summary):
                 if not isinstance(entry, dict):
                     continue
-                rewritten = _needs_rewrite(entry.get("provider_preset"), entry.get("model"))
+                rewritten = _needs_rewrite(
+                    entry.get("provider_preset"), entry.get("model")
+                )
                 if rewritten is None:
                     continue
                 rewrites_for_doc.append(
@@ -528,7 +558,9 @@ class IngestionService:
             for idx, entry in enumerate(new_extraction):
                 if not isinstance(entry, dict):
                     continue
-                rewritten = _needs_rewrite(entry.get("provider_preset"), entry.get("model"))
+                rewritten = _needs_rewrite(
+                    entry.get("provider_preset"), entry.get("model")
+                )
                 if rewritten is None:
                     continue
                 rewrites_for_doc.append(
@@ -539,7 +571,9 @@ class IngestionService:
             for idx, entry in enumerate(new_repair):
                 if not isinstance(entry, dict):
                     continue
-                rewritten = _needs_rewrite(entry.get("provider_preset"), entry.get("model"))
+                rewritten = _needs_rewrite(
+                    entry.get("provider_preset"), entry.get("model")
+                )
                 if rewritten is None:
                     continue
                 rewrites_for_doc.append(
@@ -565,9 +599,12 @@ class IngestionService:
             pool_entries_patched += len(rewrites_for_doc)
             for field, idx, old_model, new_model in rewrites_for_doc:
                 logger.info(
-                    "migrate_bare_model_names: corpus=%s field=%s idx=%d "
-                    "old=%r new=%r",
-                    doc["corpus_id"], field, idx, old_model, new_model,
+                    "migrate_bare_model_names: corpus=%s field=%s idx=%d old=%r new=%r",
+                    doc["corpus_id"],
+                    field,
+                    idx,
+                    old_model,
+                    new_model,
                 )
 
         # ── 2. Per-user settings.models.query_model_pool.
@@ -602,21 +639,27 @@ class IngestionService:
             settings_users_patched += 1
             for idx, old_model, new_model in rewrites:
                 logger.info(
-                    "migrate_bare_model_names: settings user=%s idx=%d "
-                    "old=%r new=%r",
-                    sdoc.get("user_id", "?"), idx, old_model, new_model,
+                    "migrate_bare_model_names: settings user=%s idx=%d old=%r new=%r",
+                    sdoc.get("user_id", "?"),
+                    idx,
+                    old_model,
+                    new_model,
                 )
 
         # ── 3. model_pool collection (Phase E unified pool).
         model_pool_entries_patched = 0
         try:
             mpcursor = self._db["model_pool"].find(
-                {}, projection={"entry_id": 1, "user_id": 1, "provider": 1, "model_name": 1}
+                {},
+                projection={
+                    "entry_id": 1,
+                    "user_id": 1,
+                    "provider": 1,
+                    "model_name": 1,
+                },
             )
             async for mdoc in mpcursor:
-                rewritten = _needs_rewrite(
-                    mdoc.get("provider"), mdoc.get("model_name")
-                )
+                rewritten = _needs_rewrite(mdoc.get("provider"), mdoc.get("model_name"))
                 if rewritten is None:
                     continue
                 await self._db["model_pool"].update_one(
@@ -632,14 +675,14 @@ class IngestionService:
                 logger.info(
                     "migrate_bare_model_names: model_pool entry=%s user=%s "
                     "old=%r new=%r",
-                    mdoc.get("entry_id", "?"), mdoc.get("user_id", "?"),
-                    mdoc.get("model_name"), rewritten,
+                    mdoc.get("entry_id", "?"),
+                    mdoc.get("user_id", "?"),
+                    mdoc.get("model_name"),
+                    rewritten,
                 )
         except Exception as exc:
             # model_pool collection may not exist on fresh installs.
-            logger.debug(
-                "migrate_bare_model_names: model_pool scan skipped: %s", exc
-            )
+            logger.debug("migrate_bare_model_names: model_pool scan skipped: %s", exc)
 
         result = {
             "corpora_patched": len(corpus_ids),
@@ -767,7 +810,9 @@ class IngestionService:
             raise RuntimeError("Batch ingestion manager is unavailable")
         return await self._batch_manager.cancel(batch_id, user_id=user_id)
 
-    async def retry_failed_ingestion_batch(self, batch_id: str, *, user_id: str) -> dict:
+    async def retry_failed_ingestion_batch(
+        self, batch_id: str, *, user_id: str
+    ) -> dict:
         if self._batch_manager is None:
             raise RuntimeError("Batch ingestion manager is unavailable")
         return await self._batch_manager.retry_failed(batch_id, user_id=user_id)
@@ -805,9 +850,7 @@ class IngestionService:
                 getattr(ingestion_config, "embedding_models", None)
             ),
         )
-        return await upsert_schema_terms(
-            self._qdrant, corpus_id, terms, kind, vectors
-        )
+        return await upsert_schema_terms(self._qdrant, corpus_id, terms, kind, vectors)
 
     @staticmethod
     def _plaintext_model_pool(refs) -> list[dict]:
@@ -990,7 +1033,10 @@ class IngestionService:
                 continue
             actual_docs = doc_counts.get(cid, 0)
             actual_chunks = chunk_counts.get(cid, 0)
-            if doc.get("doc_count", 0) != actual_docs or doc.get("chunk_count", 0) != actual_chunks:
+            if (
+                doc.get("doc_count", 0) != actual_docs
+                or doc.get("chunk_count", 0) != actual_chunks
+            ):
                 await self._db["corpora"].update_one(
                     {"corpus_id": cid},
                     {"$set": {"doc_count": actual_docs, "chunk_count": actual_chunks}},
@@ -1030,7 +1076,12 @@ class IngestionService:
         if not config_dict:
             return
 
-        for pool_field in ("summary_models", "extraction_models", "extraction_repair_models", "embedding_models"):
+        for pool_field in (
+            "summary_models",
+            "extraction_models",
+            "extraction_repair_models",
+            "embedding_models",
+        ):
             pool = config_dict.get(pool_field)
             if not pool:
                 continue
@@ -1110,9 +1161,16 @@ class IngestionService:
                 return new_val
             return encrypt(new_val)
 
-        for pool_field in ("summary_models", "extraction_models", "extraction_repair_models", "embedding_models"):
+        for pool_field in (
+            "summary_models",
+            "extraction_models",
+            "extraction_repair_models",
+            "embedding_models",
+        ):
             new_pool = config_dict.get(pool_field) or []
-            existing_pool = (existing_config or {}).get(pool_field) or [] if existing_config else []
+            existing_pool = (
+                (existing_config or {}).get(pool_field) or [] if existing_config else []
+            )
             for idx, entry in enumerate(new_pool):
                 if not isinstance(entry, dict):
                     continue
@@ -1121,7 +1179,9 @@ class IngestionService:
                     if idx < len(existing_pool) and isinstance(existing_pool[idx], dict)
                     else {}
                 )
-                entry["api_key"] = _enc(entry.get("api_key"), existing_entry.get("api_key"))
+                entry["api_key"] = _enc(
+                    entry.get("api_key"), existing_entry.get("api_key")
+                )
 
         # Top-level embed_api_key — same "[set]" preserve + encrypt-plaintext
         # semantics as the per-entry pool keys.
@@ -1136,7 +1196,9 @@ class IngestionService:
         for field in IngestionService._LEGACY_KEY_FIELDS:
             if field not in config_dict:
                 continue
-            existing_val = (existing_config or {}).get(field) if existing_config else None
+            existing_val = (
+                (existing_config or {}).get(field) if existing_config else None
+            )
             config_dict[field] = _enc(config_dict.get(field), existing_val)
 
     async def update_corpus(self, corpus_id: str, updates: dict) -> Optional[dict]:
@@ -1269,8 +1331,11 @@ class IngestionService:
             # Best-effort; failures are logged inside rename_corpus_aliases.
             if "name" in updates and updates["name"]:
                 from services.storage.qdrant_writer import rename_corpus_aliases
+
                 try:
-                    await rename_corpus_aliases(self._qdrant, corpus_id, updates["name"])
+                    await rename_corpus_aliases(
+                        self._qdrant, corpus_id, updates["name"]
+                    )
                 except Exception as exc:
                     logger.warning(
                         "rename_corpus_aliases failed for %s: %s", corpus_id, exc
@@ -1369,9 +1434,7 @@ class IngestionService:
                         corpus_id=corpus_id,
                     )
             except Exception:
-                logger.warning(
-                    "Neo4j per-doc delete failed for doc %s", doc_id[:12]
-                )
+                logger.warning("Neo4j per-doc delete failed for doc %s", doc_id[:12])
 
         # 3. Mongo chunks.
         await delete_chunks_by_doc(self._db, corpus_id, doc_id)
@@ -1452,25 +1515,31 @@ class IngestionService:
 
     async def get_ingestion_audit(self, corpus_id: str) -> dict:
         """Aggregate corpus ingestion health for large-batch readiness."""
-        docs = await self._db["documents"].find(
-            {"corpus_id": corpus_id},
-            {
-                "doc_id": 1,
-                "filename": 1,
-                "chunk_count": 1,
-                "ghost_b_failures": 1,
-                "ghost_b_staging": 1,
-                "ghost_b_metrics": 1,
-                "write_state": 1,
-                "decision_trace": 1,
-                "decision_trace_summary": 1,
-                "chunking_config": 1,
-                "source_mime": 1,
-                "source_tier": 1,
-                "_id": 0,
-            },
-        ).to_list(length=None)
-        total_chunks = await self._db["chunks"].count_documents({"corpus_id": corpus_id})
+        docs = (
+            await self._db["documents"]
+            .find(
+                {"corpus_id": corpus_id},
+                {
+                    "doc_id": 1,
+                    "filename": 1,
+                    "chunk_count": 1,
+                    "ghost_b_failures": 1,
+                    "ghost_b_staging": 1,
+                    "ghost_b_metrics": 1,
+                    "write_state": 1,
+                    "decision_trace": 1,
+                    "decision_trace_summary": 1,
+                    "chunking_config": 1,
+                    "source_mime": 1,
+                    "source_tier": 1,
+                    "_id": 0,
+                },
+            )
+            .to_list(length=None)
+        )
+        total_chunks = await self._db["chunks"].count_documents(
+            {"corpus_id": corpus_id}
+        )
         try:
             graph_cache_doc = await self._db["graph_metrics_cache"].find_one(
                 {"corpus_id": corpus_id},
@@ -1555,13 +1624,25 @@ class IngestionService:
             "avg_prompt_tokens_per_chunk": 0.0,
             "json_recovery_rate": 0.0,
             "entity_quality": quality_audit,
-            "entity_quality_total": int((quality_audit or {}).get("total_entities") or 0),
-            "noisy_entity_count": int((quality_audit or {}).get("noisy_entity_count") or 0),
+            "entity_quality_total": int(
+                (quality_audit or {}).get("total_entities") or 0
+            ),
+            "noisy_entity_count": int(
+                (quality_audit or {}).get("noisy_entity_count") or 0
+            ),
             "claim_like_count": int((quality_audit or {}).get("claim_like_count") or 0),
-            "generic_role_count": int((quality_audit or {}).get("generic_role_count") or 0),
-            "joined_list_count": int((quality_audit or {}).get("joined_list_count") or 0),
-            "topic_label_eligible_pct": float((quality_audit or {}).get("topic_eligible_pct") or 0.0),
-            "synthesis_eligible_pct": float((quality_audit or {}).get("synthesis_eligible_pct") or 0.0),
+            "generic_role_count": int(
+                (quality_audit or {}).get("generic_role_count") or 0
+            ),
+            "joined_list_count": int(
+                (quality_audit or {}).get("joined_list_count") or 0
+            ),
+            "topic_label_eligible_pct": float(
+                (quality_audit or {}).get("topic_eligible_pct") or 0.0
+            ),
+            "synthesis_eligible_pct": float(
+                (quality_audit or {}).get("synthesis_eligible_pct") or 0.0
+            ),
             "graph_cache": {
                 "stale": bool((graph_cache_doc or {}).get("graph_cache_stale")),
                 "stale_reason": (graph_cache_doc or {}).get("stale_reason"),
@@ -1570,9 +1651,15 @@ class IngestionService:
                     (graph_cache_doc or {}).get("last_graph_refresh_at")
                     or (graph_cache_doc or {}).get("computed_at")
                 ),
-                "entity_quality_version": (graph_cache_doc or {}).get("entity_quality_version")
+                "entity_quality_version": (graph_cache_doc or {}).get(
+                    "entity_quality_version"
+                )
                 or (quality_audit or {}).get("entity_quality_version")
-                or (ENTITY_QUALITY_VERSION if "ENTITY_QUALITY_VERSION" in locals() else ""),
+                or (
+                    ENTITY_QUALITY_VERSION
+                    if "ENTITY_QUALITY_VERSION" in locals()
+                    else ""
+                ),
             },
         }
         partial_docs: list[dict] = []
@@ -1596,9 +1683,7 @@ class IngestionService:
                 or 0.0
             )
             failed_chunks = int(
-                metrics.get("failed_chunk_count")
-                or metrics.get("failed_chunks")
-                or 0
+                metrics.get("failed_chunk_count") or metrics.get("failed_chunks") or 0
             )
             related_ratio = float(metrics.get("related_to_ratio") or 0.0)
             predicate_avg = float(metrics.get("predicate_confidence_avg") or 0.0)
@@ -1642,7 +1727,9 @@ class IngestionService:
             elif parent_strategy == "token_window":
                 reasons.append("Weak document structure used token-window chunking.")
             if skipped:
-                reasons.append(f"{skipped} low-value chunk(s) were skipped for graph extraction.")
+                reasons.append(
+                    f"{skipped} low-value chunk(s) were skipped for graph extraction."
+                )
             if vector_ready:
                 reasons.append("Mongo and Qdrant are ready for vector/chat retrieval.")
             return {
@@ -1667,8 +1754,13 @@ class IngestionService:
                     metrics.get("graph_extraction_engine_used") or "unknown"
                 ),
                 "graph_completeness": str(metrics.get("graph_completeness") or ""),
-                "reasons": reasons or ["Legacy document; decision trace was derived from stored metadata."],
-                "warnings": ["Derived fallback trace for a document ingested before decision traces existed."],
+                "reasons": reasons
+                or [
+                    "Legacy document; decision trace was derived from stored metadata."
+                ],
+                "warnings": [
+                    "Derived fallback trace for a document ingested before decision traces existed."
+                ],
             }
 
         for doc in docs:
@@ -1677,7 +1769,10 @@ class IngestionService:
             failures = doc.get("ghost_b_failures") or []
             staged = doc.get("ghost_b_staging") or []
             metrics = doc.get("ghost_b_metrics") or {}
-            vector_ready = bool(ws.get("vector_ready") or (ws.get("mongo_written") and ws.get("qdrant_written")))
+            vector_ready = bool(
+                ws.get("vector_ready")
+                or (ws.get("mongo_written") and ws.get("qdrant_written"))
+            )
             graph_status = str(ws.get("graph_status") or "")
             if not graph_status:
                 if ws.get("neo4j_written"):
@@ -1706,14 +1801,22 @@ class IngestionService:
                 doc.get("decision_trace_summary")
                 or " - ".join(
                     [
-                        str(decision_trace.get("chunking_strategy") or "auto chunking").replace("_", " "),
-                        str(decision_trace.get("graph_strategy") or "graph policy").replace("_", " "),
+                        str(
+                            decision_trace.get("chunking_strategy") or "auto chunking"
+                        ).replace("_", " "),
+                        str(
+                            decision_trace.get("graph_strategy") or "graph policy"
+                        ).replace("_", " "),
                     ]
                 )
             )
             graph_completeness = str(
                 metrics.get("graph_completeness")
-                or ("needs-backfill" if failures or doc_failed_chunks else "graph-complete")
+                or (
+                    "needs-backfill"
+                    if failures or doc_failed_chunks
+                    else "graph-complete"
+                )
             )
             if warnings:
                 totals["warning_docs"] += 1
@@ -1754,11 +1857,21 @@ class IngestionService:
             totals["relation_repair_succeeded"] += int(ws.get("repair_succeeded") or 0)
             totals["ghost_b_failed_chunks"] += doc_failed_chunks
             totals["failed_chunk_count"] += doc_failed_chunks
-            totals["graph_retryable_failed_chunks"] += int(metrics.get("retryable_failed_chunks") or 0)
-            totals["retry_budget_exhausted_count"] += int(metrics.get("retry_budget_exhausted_count") or 0)
-            totals["all_lanes_exhausted_count"] += int(metrics.get("all_lanes_exhausted_count") or 0)
-            totals["lane_cooling_down_count"] += int(metrics.get("lane_cooling_down_count") or 0)
-            totals["provider_error_count"] += int(metrics.get("provider_error_count") or 0)
+            totals["graph_retryable_failed_chunks"] += int(
+                metrics.get("retryable_failed_chunks") or 0
+            )
+            totals["retry_budget_exhausted_count"] += int(
+                metrics.get("retry_budget_exhausted_count") or 0
+            )
+            totals["all_lanes_exhausted_count"] += int(
+                metrics.get("all_lanes_exhausted_count") or 0
+            )
+            totals["lane_cooling_down_count"] += int(
+                metrics.get("lane_cooling_down_count") or 0
+            )
+            totals["provider_error_count"] += int(
+                metrics.get("provider_error_count") or 0
+            )
             totals["rate_limited_count"] += int(metrics.get("rate_limited_count") or 0)
             totals["timeout_count"] += int(metrics.get("timeout_count") or 0)
             totals["ghost_b_requested_chunks"] += doc_requested_chunks
@@ -1770,24 +1883,38 @@ class IngestionService:
             totals["prompt_tokens"] += int(metrics.get("prompt_tokens") or 0)
             totals["llm_graph_calls"] += int(metrics.get("llm_graph_calls") or 0)
             totals["summary_llm_calls"] += int(metrics.get("summary_llm_calls") or 0)
-            totals["llm_fallback_chunks"] += int(metrics.get("llm_fallback_chunks") or 0)
-            totals["llm_fallback_tokens"] += int(metrics.get("llm_fallback_tokens") or 0)
-            for gpu_name, count in (metrics.get("per_gpu_chunks_processed") or {}).items():
-                totals["per_gpu_chunks_processed"][gpu_name] = (
-                    int(totals["per_gpu_chunks_processed"].get(gpu_name) or 0)
-                    + int(count or 0)
-                )
+            totals["llm_fallback_chunks"] += int(
+                metrics.get("llm_fallback_chunks") or 0
+            )
+            totals["llm_fallback_tokens"] += int(
+                metrics.get("llm_fallback_tokens") or 0
+            )
+            for gpu_name, count in (
+                metrics.get("per_gpu_chunks_processed") or {}
+            ).items():
+                totals["per_gpu_chunks_processed"][gpu_name] = int(
+                    totals["per_gpu_chunks_processed"].get(gpu_name) or 0
+                ) + int(count or 0)
             for gpu_name, count in (metrics.get("per_gpu_oom_count") or {}).items():
-                totals["per_gpu_oom_count"][gpu_name] = (
-                    int(totals["per_gpu_oom_count"].get(gpu_name) or 0)
-                    + int(count or 0)
-                )
+                totals["per_gpu_oom_count"][gpu_name] = int(
+                    totals["per_gpu_oom_count"].get(gpu_name) or 0
+                ) + int(count or 0)
             totals["ghost_b_attempts"] += int(metrics.get("attempt_count") or 0)
-            totals["json_recovery_count"] += int(metrics.get("json_recovery_count") or 0)
-            totals["compact_extraction_chunks"] += int(metrics.get("compact_extraction_chunks") or 0)
-            totals["deep_extraction_chunks"] += int(metrics.get("deep_extraction_chunks") or 0)
-            totals["full_extraction_chunks"] += int(metrics.get("full_extraction_chunks") or 0)
-            totals["skipped_low_value_chunks"] += int(metrics.get("skipped_low_value_chunks") or 0)
+            totals["json_recovery_count"] += int(
+                metrics.get("json_recovery_count") or 0
+            )
+            totals["compact_extraction_chunks"] += int(
+                metrics.get("compact_extraction_chunks") or 0
+            )
+            totals["deep_extraction_chunks"] += int(
+                metrics.get("deep_extraction_chunks") or 0
+            )
+            totals["full_extraction_chunks"] += int(
+                metrics.get("full_extraction_chunks") or 0
+            )
+            totals["skipped_low_value_chunks"] += int(
+                metrics.get("skipped_low_value_chunks") or 0
+            )
             totals["relations"] += doc_relation_count
             totals["related_to"] += int(metrics.get("related_to_count") or 0)
             remaps = int(metrics.get("domain_range_remap_count") or 0)
@@ -1798,12 +1925,16 @@ class IngestionService:
             totals["domain_range_remap_count"] += remaps
             totals["domain_range_warns"] += warns
             totals["domain_range_warn_count"] += warns
-            totals["endpoint_completions"] += int(metrics.get("endpoint_completion_count") or 0)
+            totals["endpoint_completions"] += int(
+                metrics.get("endpoint_completion_count") or 0
+            )
             totals["evidence_cue_repairs"] += evidence_repairs
             totals["evidence_cue_repair_count"] += evidence_repairs
             totals["direction_repair_count"] += direction_repairs
             if doc_relation_count and doc_predicate_avg:
-                predicate_confidence_weighted_sum += doc_predicate_avg * doc_relation_count
+                predicate_confidence_weighted_sum += (
+                    doc_predicate_avg * doc_relation_count
+                )
                 predicate_confidence_weight += doc_relation_count
             document_metrics.append(
                 {
@@ -1818,29 +1949,52 @@ class IngestionService:
                     "chunking_strategy": str(
                         decision_trace.get("chunking_strategy") or "unknown"
                     ),
-                    "graph_strategy": str(decision_trace.get("graph_strategy") or "unknown"),
+                    "graph_strategy": str(
+                        decision_trace.get("graph_strategy") or "unknown"
+                    ),
                     "graph_extraction_engine": str(
                         metrics.get("graph_extraction_engine_used")
                         or decision_trace.get("graph_extraction_engine")
                         or "unknown"
                     ),
                     "graph_completeness": graph_completeness,
-                    "graph_retry_after": ws.get("graph_retry_after") or metrics.get("graph_retry_after"),
-                    "graph_backfill_attempt_count": int(ws.get("graph_backfill_attempt_count") or 0),
-                    "graph_retryable_failed_chunks": int(metrics.get("retryable_failed_chunks") or 0),
+                    "graph_retry_after": ws.get("graph_retry_after")
+                    or metrics.get("graph_retry_after"),
+                    "graph_backfill_attempt_count": int(
+                        ws.get("graph_backfill_attempt_count") or 0
+                    ),
+                    "graph_retryable_failed_chunks": int(
+                        metrics.get("retryable_failed_chunks") or 0
+                    ),
                     "repair_status": ws.get("repair_status"),
                     "repair_total": int(ws.get("repair_total") or 0),
                     "repair_pending": int(ws.get("repair_pending") or 0),
                     "repair_failed": int(ws.get("repair_failed") or 0),
-                    "vector_recovery_available": bool(ws.get("mongo_written") and not ws.get("qdrant_written")),
-                    "extraction_strategy": str(metrics.get("extraction_strategy") or "unknown"),
-                    "skipped_low_value_chunks": int(metrics.get("skipped_low_value_chunks") or 0),
-                    "compact_extraction_chunks": int(metrics.get("compact_extraction_chunks") or 0),
-                    "deep_extraction_chunks": int(metrics.get("deep_extraction_chunks") or 0),
-                    "full_extraction_chunks": int(metrics.get("full_extraction_chunks") or 0),
-                    "avg_prompt_tokens_per_chunk": float(metrics.get("avg_prompt_tokens_per_chunk") or 0.0),
+                    "vector_recovery_available": bool(
+                        ws.get("mongo_written") and not ws.get("qdrant_written")
+                    ),
+                    "extraction_strategy": str(
+                        metrics.get("extraction_strategy") or "unknown"
+                    ),
+                    "skipped_low_value_chunks": int(
+                        metrics.get("skipped_low_value_chunks") or 0
+                    ),
+                    "compact_extraction_chunks": int(
+                        metrics.get("compact_extraction_chunks") or 0
+                    ),
+                    "deep_extraction_chunks": int(
+                        metrics.get("deep_extraction_chunks") or 0
+                    ),
+                    "full_extraction_chunks": int(
+                        metrics.get("full_extraction_chunks") or 0
+                    ),
+                    "avg_prompt_tokens_per_chunk": float(
+                        metrics.get("avg_prompt_tokens_per_chunk") or 0.0
+                    ),
                     "ghost_b_success_rate": float(
-                        metrics.get("ghost_b_success_rate", metrics.get("success_rate", 1.0))
+                        metrics.get(
+                            "ghost_b_success_rate", metrics.get("success_rate", 1.0)
+                        )
                         or 0.0
                     ),
                     "failed_chunk_count": doc_failed_chunks,
@@ -1860,8 +2014,7 @@ class IngestionService:
 
         totals["ghost_b_success_rate"] = (
             round(
-                totals["ghost_b_extracted_chunks"]
-                / totals["ghost_b_requested_chunks"],
+                totals["ghost_b_extracted_chunks"] / totals["ghost_b_requested_chunks"],
                 4,
             )
             if totals["ghost_b_requested_chunks"]
@@ -1892,7 +2045,11 @@ class IngestionService:
         readinesses = {doc.get("readiness") for doc in document_metrics}
         if "graph_retry_scheduled" in readinesses:
             readiness = "graph_retry_scheduled"
-        elif totals["verify_failed_docs"] or totals["failed_chunk_count"] or "needs_backfill" in readinesses:
+        elif (
+            totals["verify_failed_docs"]
+            or totals["failed_chunk_count"]
+            or "needs_backfill" in readinesses
+        ):
             readiness = "needs_backfill"
         elif "graph_extracting" in readinesses or "graph_pending" in readinesses:
             readiness = "graph_enrichment_pending"
@@ -1959,9 +2116,13 @@ class IngestionService:
         summary_calls = len(parents) if ingestion_config.chunk_summarization else 0
         warnings: list[str] = []
         if len(children) > 500:
-            warnings.append("High child-chunk count; ingest this file in a controlled batch.")
+            warnings.append(
+                "High child-chunk count; ingest this file in a controlled batch."
+            )
         if child_tokens and max(child_tokens) > 900:
-            warnings.append("At least one child chunk is unusually large and may stress extraction.")
+            warnings.append(
+                "At least one child chunk is unusually large and may stress extraction."
+            )
         return {
             "filename": filename,
             "doc_id": doc_id,
@@ -1970,13 +2131,17 @@ class IngestionService:
             "parent_count": len(parents),
             "child_count": len(children),
             "total_child_tokens": total_tokens,
-            "avg_child_tokens": round(total_tokens / len(children), 1) if children else 0,
+            "avg_child_tokens": round(total_tokens / len(children), 1)
+            if children
+            else 0,
             "max_child_tokens": max(child_tokens) if child_tokens else 0,
             "ghost_b_calls": graph_calls,
             "summary_calls": summary_calls,
             "estimated_llm_calls": graph_calls + summary_calls,
             "injected_headers": len(injected_headers),
-            "chunking_config": tier_chunker.describe_chunking(parse_result, ingestion_config),
+            "chunking_config": tier_chunker.describe_chunking(
+                parse_result, ingestion_config
+            ),
             "recommended_batch_size": 25 if len(children) < 500 else 10,
             "warnings": warnings,
         }
