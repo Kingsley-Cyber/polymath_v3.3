@@ -76,6 +76,9 @@ export function IngestionModelPool({
       api_key: draft.api_key ? draft.api_key : null,
       max_concurrent: Math.max(1, Math.min(64, Number(draft.max_concurrent) || 1)),
       extra_params: extraParams,
+      // Filled at corpus-save time by ingestion_service._resolve_pool_context_lengths
+      // (looks up the user's model_pool by model name and freezes the value).
+      context_length: null,
     };
     onChange([...value, next]);
     const fid = `${Date.now()}-${value.length}`;
