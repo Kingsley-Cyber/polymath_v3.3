@@ -580,7 +580,12 @@ class IngestionConfig(BaseModel):
     )
     child_chunk_tokens: TokenBudget = Field(
         default_factory=lambda: TokenBudget(
-            min_tokens=128, target_tokens=350, max_tokens=512
+            # Phase 24 — bumped from 128/350/512 to 200/450/650. Bigger
+            # children = fewer Ghost B calls (~30% reduction at 8-book
+            # worst case). Stays inside Qwen3-Embedding-0.6B's 512-token
+            # native window for retrieval quality. min raised because
+            # chunks under 128 tokens have no entity density.
+            min_tokens=200, target_tokens=450, max_tokens=650
         ),
         description="Child chunk token range",
     )

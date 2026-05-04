@@ -319,7 +319,7 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
     target_tokens: 1200,
     max_tokens: 2000,
   },
-  child_chunk_tokens: { min_tokens: 128, target_tokens: 350, max_tokens: 512 },
+  child_chunk_tokens: { min_tokens: 200, target_tokens: 450, max_tokens: 650 },
   chunk_overlap: 200,
   max_summary_tokens: 175,
   child_chunk_algorithm: "sentence_merge",
