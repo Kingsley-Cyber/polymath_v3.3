@@ -102,6 +102,18 @@ export interface IngestionConfig {
   entity_confidence_threshold: number;
 
   /**
+   * Phase 25 — Mistral Batch API offload toggle per phase.
+   * "off"     → live work-stealing pool dispatches per chunk (default).
+   * "mistral" → worker submits a single batch job to Mistral per doc
+   *             (or coalesced bucket) and polls until SUCCESS. Trades
+   *             real-time latency for 50% pricing + server-side fleet
+   *             parallelism. Requires a Mistral lane in the pool with
+   *             a valid api_key.
+   */
+  summary_batch_mode?: "off" | "mistral";
+  extraction_batch_mode?: "off" | "mistral";
+
+  /**
    * When true: worker reuses summary_models for GHOST B; UI renders one
    * combined chip pool. When false: extraction_models is an independent pool.
    */
@@ -357,6 +369,8 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
     },
   ],
   entity_confidence_threshold: 0.5,
+  summary_batch_mode: "off",
+  extraction_batch_mode: "off",
   models_linked: false,
   graph_extraction_engine: "llm",
   llm_fallback_enabled: false,

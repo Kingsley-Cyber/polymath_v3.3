@@ -1303,6 +1303,51 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
 }
 
 // ============================================================================
+// BatchModeToggle — small inline toggle for summary_batch_mode /
+// extraction_batch_mode. Disabled (with tooltip) when no Mistral lane is
+// configured for the phase, since Mistral batch mode requires a Mistral
+// chip in the pool to inherit the model + api_key from at submit time.
+// ============================================================================
+
+function BatchModeToggle({
+  label,
+  value,
+  onChange,
+  hasMistralLane,
+  tooltip,
+}: {
+  label: string;
+  value: "off" | "mistral";
+  onChange: (next: "off" | "mistral") => void;
+  hasMistralLane: boolean;
+  tooltip: string;
+}) {
+  const enabled = value === "mistral";
+  const disabled = !hasMistralLane && !enabled;
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onChange(enabled ? "off" : "mistral")}
+      title={
+        disabled
+          ? "Add a Mistral lane below first (chip dropdown → Mistral)"
+          : tooltip
+      }
+      className={`text-[9px] tracking-widest uppercase px-1.5 py-0.5 border transition-colors ${
+        enabled
+          ? "border-amber-400 bg-amber-400/15 text-amber-300"
+          : disabled
+            ? "border-border-minimal text-content-tertiary/40 cursor-not-allowed"
+            : "border-border-minimal text-content-tertiary hover:border-amber-400 hover:text-amber-300"
+      }`}
+    >
+      {enabled ? "● " : "○ "}{label}
+    </button>
+  );
+}
+
+// ============================================================================
 // CloudOverflowLanesSection — multi-lane chips for summary_models and
 // extraction_models. Backend's work-stealing pool dispatches across all lanes
 // configured per phase, so adding a cloud lane = parallel throughput on top
@@ -1426,16 +1471,27 @@ function IngestionLanesSection({
               {summaryCloudCount} cloud
             </span>
           </div>
-          {!summaryHasLocal && (
-            <button
-              type="button"
-              onClick={restoreLocalSummary}
-              className="text-[9px] tracking-widest uppercase px-1.5 py-0.5 border border-accent-main/60 text-accent-main hover:bg-accent-main/10"
-              title="Restore the local vllm-summary lane to this pool"
-            >
-              + restore local
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <BatchModeToggle
+              label="Mistral batch"
+              value={config.summary_batch_mode ?? "off"}
+              onChange={(next) => onPatch({ summary_batch_mode: next })}
+              hasMistralLane={summaryLanes.some(
+                (m) => m.provider_preset === "mistral",
+              )}
+              tooltip="Submit Ghost A summaries as one Mistral batch job per doc — 50% off sync price, async, requires a Mistral lane below."
+            />
+            {!summaryHasLocal && (
+              <button
+                type="button"
+                onClick={restoreLocalSummary}
+                className="text-[9px] tracking-widest uppercase px-1.5 py-0.5 border border-accent-main/60 text-accent-main hover:bg-accent-main/10"
+                title="Restore the local vllm-summary lane to this pool"
+              >
+                + restore local
+              </button>
+            )}
+          </div>
         </div>
         <IngestionModelPool
           title=""
@@ -1458,16 +1514,27 @@ function IngestionLanesSection({
               {extractionCloudCount} cloud
             </span>
           </div>
-          {!extractionHasLocal && (
-            <button
-              type="button"
-              onClick={restoreLocalExtraction}
-              className="text-[9px] tracking-widest uppercase px-1.5 py-0.5 border border-accent-main/60 text-accent-main hover:bg-accent-main/10"
-              title="Restore the local vllm-extract lane to this pool"
-            >
-              + restore local
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <BatchModeToggle
+              label="Mistral batch"
+              value={config.extraction_batch_mode ?? "off"}
+              onChange={(next) => onPatch({ extraction_batch_mode: next })}
+              hasMistralLane={extractionLanes.some(
+                (m) => m.provider_preset === "mistral",
+              )}
+              tooltip="Submit Ghost B extractions as one Mistral batch job — biggest cost+speed win because Ghost B has 5-10x more calls than Ghost A."
+            />
+            {!extractionHasLocal && (
+              <button
+                type="button"
+                onClick={restoreLocalExtraction}
+                className="text-[9px] tracking-widest uppercase px-1.5 py-0.5 border border-accent-main/60 text-accent-main hover:bg-accent-main/10"
+                title="Restore the local vllm-extract lane to this pool"
+              >
+                + restore local
+              </button>
+            )}
+          </div>
         </div>
         <IngestionModelPool
           title=""

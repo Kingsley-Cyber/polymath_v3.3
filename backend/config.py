@@ -543,6 +543,31 @@ class Settings(BaseSettings):
             "reasoning as LOCAL_VLLM_COMPACT_MAX_CONCURRENT."
         ),
     )
+    # ── Mistral Batch API (Phase 25) ──────────────────────────────────
+    MISTRAL_BATCH_BASE_URL: str = Field(
+        default="https://api.mistral.ai/v1",
+        description="Mistral REST root for batch + files endpoints.",
+    )
+    MISTRAL_BATCH_POLL_SECONDS: int = Field(
+        default=30,
+        ge=5,
+        le=600,
+        description=(
+            "Seconds between GET /v1/batch/jobs/{id} polls. Mistral "
+            "discourages tight polling; 30-60s is fine for batches "
+            "that take minutes-to-hours."
+        ),
+    )
+    MISTRAL_BATCH_DEADLINE_HOURS: int = Field(
+        default=24,
+        ge=1,
+        le=168,
+        description=(
+            "Wall-clock deadline before the worker abandons a batch and "
+            "falls back to graph_repair queue. Mistral's own timeout is "
+            "24h (TIMEOUT_EXCEEDED status); this gates the poller."
+        ),
+    )
     INGEST_PRE_VECTOR_DOC_CAP: int = Field(
         default=4,
         ge=1,

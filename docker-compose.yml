@@ -703,6 +703,10 @@ services:
       LOCAL_VLLM_NORMAL_MAX_CONCURRENT: ${LOCAL_VLLM_NORMAL_MAX_CONCURRENT:-128}
       INGEST_PRE_VECTOR_DOC_CAP: ${INGEST_PRE_VECTOR_DOC_CAP:-4}
       INGEST_GRAPH_DOC_CAP: ${INGEST_GRAPH_DOC_CAP:-4}
+      # Phase 25 — Mistral Batch API (foundation; worker integration arrives next)
+      MISTRAL_BATCH_BASE_URL: ${MISTRAL_BATCH_BASE_URL:-https://api.mistral.ai/v1}
+      MISTRAL_BATCH_POLL_SECONDS: ${MISTRAL_BATCH_POLL_SECONDS:-30}
+      MISTRAL_BATCH_DEADLINE_HOURS: ${MISTRAL_BATCH_DEADLINE_HOURS:-24}
       # VRAM idle offload (Phase 23). Default-on so a fresh checkout gets the
       # behavior; set ENABLED=false to disable without changing other vars.
       VLLM_IDLE_UNLOAD_ENABLED: ${VLLM_IDLE_UNLOAD_ENABLED:-true}
