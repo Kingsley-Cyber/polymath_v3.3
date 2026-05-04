@@ -2396,6 +2396,17 @@ async def _write_qdrant_for_doc(
         )
 
     if summaries:
+        # Phase 21 — skip-marker contract. Skipped parents (token-budget
+        # infeasible) carry status="skipped" + empty summary and are NOT
+        # embedded by _embed_batch_for_doc → not in summary_vec_map. We
+        # MUST filter them out here before keying into the vec map, or the
+        # zip-by-index list comprehension below KeyErrors on the first
+        # skipped parent and kills the document mid-write.
+        summaries = [
+            s for s in summaries
+            if getattr(s, "status", "ok") == "ok" and (s.summary or "").strip()
+        ]
+    if summaries:
         hp_map = {p.parent_id: p.heading_path for p in parents}
         kind_map = {
             p.parent_id: getattr(p, "chunk_kind", ChunkKind.BODY) for p in parents

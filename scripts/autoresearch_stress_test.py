@@ -149,38 +149,56 @@ def upload_batch(token: str, corpus_id: str, files: list[Path]) -> str:
 
 
 def poll_batch(token: str, batch_id: str, deadline: float) -> dict:
-    last_phase = ""
+    """Poll the batch until terminal. Logs every change to per-doc phase
+    counts so we can see WHEN the bottleneck transition happens (vector_ready
+    plateau is the Ghost B graph-extraction phase).
+    """
+    started = time.time()
+    last_signature = ""
+    last_log_ts = 0.0
     while time.time() < deadline:
-        resp = requests.get(
-            f"{API}/api/ingestion/batches/{batch_id}",
-            headers=H(token),
-            timeout=20,
-        )
+        try:
+            # Poll the lighter /summary endpoint for per-status counts.
+            # The full /batches/{id} response includes every item with
+            # warnings inlined and gets slow at 100+ items. /summary skips
+            # the items array and aggregates counts + top error_buckets.
+            resp = requests.get(
+                f"{API}/api/ingestion/batches/{batch_id}/summary",
+                headers=H(token),
+                timeout=60,
+            )
+        except requests.exceptions.RequestException as exc:
+            log(f"batch poll exception (will retry): {exc}")
+            time.sleep(10)
+            continue
         if not resp.ok:
             log(f"batch fetch failed: {resp.status_code}")
             time.sleep(5)
             continue
         b = resp.json()
-        phase = b.get("current_phase") or b.get("status")
-        if phase != last_phase:
-            log(
-                f"batch phase={phase} status={b.get('status')} "
-                f"queued={b.get('queued_count', 0)} "
-                f"processing={b.get('processing_count', 0)} "
-                f"vector_ready={b.get('vector_ready_count', 0)} "
-                f"graph_ready={b.get('graph_ready_count', 0)} "
-                f"graph_partial={b.get('graph_partial_count', 0)} "
-                f"failed={b.get('failed_count', 0)} "
-                f"cancelled={b.get('cancelled_count', 0)}"
-            )
-            last_phase = phase
+        signature = (
+            f"{b.get('status')}/{b.get('current_phase')}|"
+            f"q={b.get('queued_count', 0)}|"
+            f"p={b.get('processing_count', 0)}|"
+            f"vr={b.get('vector_ready_count', 0)}|"
+            f"gr={b.get('graph_ready_count', 0)}|"
+            f"gp={b.get('graph_partial_count', 0)}|"
+            f"f={b.get('failed_count', 0)}"
+        )
+        now = time.time()
+        # Log on signature change OR every 60s heartbeat so we know it's alive.
+        if signature != last_signature or (now - last_log_ts) > 60:
+            elapsed = int(now - started)
+            log(f"+{elapsed:4d}s {signature}")
+            last_signature = signature
+            last_log_ts = now
             warnings = b.get("warnings") or []
             if warnings:
-                for w in warnings[-3:]:
-                    log(f"  warn: {w}")
+                for w in warnings[-2:]:
+                    log(f"   warn: {w}")
         if b.get("status") in {"completed", "completed_with_errors", "failed", "cancelled", "paused"}:
             return b
-        time.sleep(8)
+        time.sleep(5)
     raise SystemExit(f"deadline exceeded for batch {batch_id}")
 
 
@@ -280,6 +298,10 @@ def main():
         log(f"BATCH PAUSED — reason={final.get('paused_reason')}")
         log("Inspect /api/ingestion/batches/{}/summary for error_buckets".format(batch_id))
         return 3
+
+    if final.get("status") == "cancelled":
+        log("BATCH CANCELLED — partial state, treat as failure")
+        return 6
 
     if final.get("failed_count", 0) > 0:
         log(f"BATCH HAD FAILURES — {final.get('failed_count')} failed")
