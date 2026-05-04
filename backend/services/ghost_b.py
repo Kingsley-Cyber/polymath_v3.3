@@ -156,13 +156,21 @@ def build_target_extraction_json_schema(
     medium_string = {"type": "string", "maxLength": 500}
     sentence_string = {"type": "string", "maxLength": 800}
 
+    # Note: chunk_id / doc_id / corpus_id are NOT pinned to enum here. The
+    # earlier version (`enum: [chunk_id]`) baked these unique values into the
+    # JSON Schema, which forced vllm to compile a fresh structured-output FSM
+    # per call. That defeated prefix caching at the schema level (run logs
+    # showed `Prefix cache hit rate: 0.0%`). Validating these on the backend
+    # after parse keeps the schema deterministic across calls so vllm can
+    # reuse the FSM and prefill cache.
+    _ = (chunk_id, doc_id, corpus_id)
     return {
         "type": "object",
         "properties": {
             "schema_version": {"type": "string", "enum": [TARGET_SCHEMA_VERSION]},
-            "chunk_id": {"type": "string", "enum": [chunk_id]},
-            "doc_id": {"type": "string", "enum": [doc_id]},
-            "corpus_id": {"type": "string", "enum": [corpus_id]},
+            "chunk_id": {"type": "string", "maxLength": 200},
+            "doc_id": {"type": "string", "maxLength": 200},
+            "corpus_id": {"type": "string", "maxLength": 200},
             "entities": {
                 "type": "array",
                 "maxItems": max(0, max_entities),

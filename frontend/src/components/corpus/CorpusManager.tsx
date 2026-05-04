@@ -787,6 +787,19 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               editing={true}
             />
 
+            {/* Cloud overflow lanes — opt-in multi-lane Ghost A / Ghost B.
+                When configured, Ghost A and Ghost B work-stealing pools dispatch
+                across BOTH the local lane (vllm-summary / vllm-extract) AND the
+                cloud lanes added here. Local stays GPU-bound; cloud absorbs
+                overflow so the pipeline scales beyond the 6500 tok/s ceiling
+                of a single local model. */}
+            <CloudOverflowLanesSection
+              config={newConfig}
+              onPatch={(patch) =>
+                setNewConfig((prev) => ({ ...prev, ...patch }))
+              }
+            />
+
             {/* Confidence threshold sits on its own because it's GHOST-B-specific
                 and orthogonal to the model identity. */}
             <div className="grid grid-cols-3 gap-1.5">
@@ -1309,6 +1322,146 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// CloudOverflowLanesSection — multi-lane chips for summary_models and
+// extraction_models. Backend's work-stealing pool dispatches across all lanes
+// configured per phase, so adding a cloud lane = parallel throughput on top
+// of the local GPU lane.
+// ============================================================================
+
+const SUMMARY_PROVIDER_PRESETS = [
+  // Local first so the empty-state default is the GPU lane.
+  {
+    id: "vllm-summary",
+    name: "vLLM Summary (local)",
+    base_url: "http://vllm-summary:8000/v1",
+    example_model: "lfm2-rag",
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    base_url: "https://api.deepseek.com/v1",
+    example_model: "deepseek-chat",
+  },
+  {
+    id: "moonshot",
+    name: "Moonshot (Kimi)",
+    base_url: "https://api.moonshot.ai/v1",
+    example_model: "kimi-k2-0711-preview",
+  },
+  {
+    id: "openai",
+    name: "OpenAI",
+    base_url: "https://api.openai.com/v1",
+    example_model: "gpt-4o-mini",
+  },
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    base_url: "https://openrouter.ai/api/v1",
+    example_model: "anthropic/claude-haiku-4-5",
+  },
+  {
+    id: "siliconflow",
+    name: "SiliconFlow",
+    base_url: "https://api.siliconflow.com/v1",
+    example_model: "deepseek-ai/DeepSeek-V3.2",
+  },
+  {
+    id: "custom",
+    name: "Custom (OpenAI-compat)",
+    base_url: "",
+    example_model: "",
+  },
+];
+
+const EXTRACTION_PROVIDER_PRESETS = [
+  {
+    id: "vllm-extract",
+    name: "vLLM Extract (local)",
+    base_url: "http://vllm-extract:8000/v1",
+    example_model: "lfm2-extract",
+  },
+  ...SUMMARY_PROVIDER_PRESETS.slice(1), // share cloud presets, drop the vllm-summary entry
+];
+
+function CloudOverflowLanesSection({
+  config,
+  onPatch,
+}: {
+  config: IngestionConfig;
+  onPatch: (patch: Partial<IngestionConfig>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const summaryCount = (config.summary_models || []).length;
+  const extractionCount = (config.extraction_models || []).length;
+  const hasCloud =
+    (config.summary_models || []).some((m) => !m.base_url?.includes("vllm-")) ||
+    (config.extraction_models || []).some((m) => !m.base_url?.includes("vllm-"));
+
+  return (
+    <div className="border border-border-minimal bg-bg-base/35">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-bg-base/55 transition-colors"
+      >
+        <div className="flex items-center gap-2 text-left">
+          <span className="text-[12px] font-bold tracking-widest text-content-tertiary uppercase">
+            Cloud Overflow Lanes
+          </span>
+          {hasCloud && (
+            <span className="text-[9px] font-bold tracking-widest uppercase px-1.5 py-0.5 bg-accent-main/15 text-accent-main">
+              ACTIVE
+            </span>
+          )}
+          <span className="text-[9px] text-content-tertiary/70">
+            {summaryCount} summary · {extractionCount} extraction
+          </span>
+        </div>
+        <span className="text-[10px] text-content-tertiary tracking-widest">
+          {open ? "−" : "+"}
+        </span>
+      </button>
+      {open && (
+        <div className="px-2 py-2 space-y-3 border-t border-border-minimal">
+          <div className="text-[10px] text-content-tertiary leading-snug">
+            Add cloud lanes to share Ghost A / Ghost B work with the local
+            GPU. Each lane has its own model, base URL, API key, and max
+            in-flight calls. Backend's work-stealing pool dispatches across
+            all lanes — fast lanes naturally pull more chunks. Local stays
+            the default; cloud is opt-in overflow.
+          </div>
+          <IngestionModelPool
+            title="Ghost A — Summary lanes"
+            subtitle="parent-chunk summarization. Add cloud lanes to bypass single-GPU bandwidth ceiling (~6500 tok/s on lfm2-1.2B)."
+            value={config.summary_models ?? []}
+            onChange={(next) => onPatch({ summary_models: next })}
+            editing={true}
+            presets={SUMMARY_PROVIDER_PRESETS}
+            modelPlaceholder="model name (e.g. deepseek-chat)"
+          />
+          <IngestionModelPool
+            title="Ghost B — Extraction lanes"
+            subtitle="entity / relation extraction. This is the slowest phase; cloud overflow gives the biggest speedup here."
+            value={config.extraction_models ?? []}
+            onChange={(next) => onPatch({ extraction_models: next })}
+            editing={true}
+            presets={EXTRACTION_PROVIDER_PRESETS}
+            modelPlaceholder="model name (e.g. deepseek-chat)"
+          />
+          <div className="text-[9px] text-content-tertiary/70 leading-snug px-1.5 py-1 border border-border-minimal/50 bg-bg-base/45">
+            Concurrency tip: total in-flight calls across all lanes shouldn't
+            exceed sum of per-provider rate limits. DeepSeek 40, OpenAI tier-3
+            ~250, Moonshot 50 are safe starting points. Local lane caps at
+            LOCAL_VLLM_COMPACT_MAX_CONCURRENT (default 32 — set in env).
+          </div>
+        </div>
+      )}
     </div>
   );
 }
