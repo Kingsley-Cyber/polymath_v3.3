@@ -125,22 +125,10 @@ function localPipelinePatch(): Partial<IngestionConfig> {
   };
 }
 
-function isLocalPipelineSelected(config: IngestionConfig) {
-  const summaryModel = config.summary_models?.[0]?.model;
-  const extractionModel = config.extraction_models?.[0]?.model;
-  const repairModel = config.extraction_repair_models?.[0]?.model;
-
-  return (
-    (config.embed_mode ?? "local") === "local" &&
-    config.models_linked === false &&
-    (config.graph_extraction_engine ?? "llm") === "llm" &&
-    summaryModel === DEFAULT_INGESTION_CONFIG.summary_models[0]?.model &&
-    extractionModel === DEFAULT_INGESTION_CONFIG.extraction_models[0]?.model &&
-    repairModel === DEFAULT_INGESTION_CONFIG.extraction_repair_models[0]?.model &&
-    (config.deferred_graph_repair_enabled ?? true) ===
-      DEFAULT_INGESTION_CONFIG.deferred_graph_repair_enabled
-  );
-}
+// (Removed isLocalPipelineSelected — was tied to the old single-radio
+// IngestionModelsSection. The new IngestionLanesSection treats local as
+// just one of N possible chips per phase, so a "is the whole stack pure
+// local?" predicate no longer makes sense as a UI state.)
 
 interface PresetSelectorProps {
   config: IngestionConfig;
@@ -778,22 +766,11 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               </div>
             </div>
 
-            {/* GHOST A + GHOST B Model Profiles (Phase 19.3) */}
-            <IngestionModelsSection
-              config={newConfig}
-              onPatch={(patch) =>
-                setNewConfig((prev) => ({ ...prev, ...patch }))
-              }
-              editing={true}
-            />
-
-            {/* Cloud overflow lanes — opt-in multi-lane Ghost A / Ghost B.
-                When configured, Ghost A and Ghost B work-stealing pools dispatch
-                across BOTH the local lane (vllm-summary / vllm-extract) AND the
-                cloud lanes added here. Local stays GPU-bound; cloud absorbs
-                overflow so the pipeline scales beyond the 6500 tok/s ceiling
-                of a single local model. */}
-            <CloudOverflowLanesSection
+            {/* Unified Ghost A / Ghost B lane editor. Local RTX lane is just
+                a default chip — operator can keep it, remove it, or stack
+                cloud lanes alongside it. Backend's work-stealing pool
+                dispatches across all lanes per phase. */}
+            <IngestionLanesSection
               config={newConfig}
               onPatch={(patch) =>
                 setNewConfig((prev) => ({ ...prev, ...patch }))
@@ -1123,14 +1100,13 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                             modalStatus={modalStatus}
                           />
 
-                          <IngestionModelsSection
+                          <IngestionLanesSection
                             config={editConfig}
                             onPatch={(patch) =>
                               setEditConfig((prev) =>
                                 prev ? { ...prev, ...patch } : prev,
                               )
                             }
-                            editing={true}
                           />
 
                           <div className="grid grid-cols-3 gap-1.5">
@@ -1389,143 +1365,121 @@ const EXTRACTION_PROVIDER_PRESETS = [
   ...SUMMARY_PROVIDER_PRESETS.slice(1), // share cloud presets, drop the vllm-summary entry
 ];
 
-function CloudOverflowLanesSection({
+function IngestionLanesSection({
   config,
   onPatch,
 }: {
   config: IngestionConfig;
   onPatch: (patch: Partial<IngestionConfig>) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const summaryCount = (config.summary_models || []).length;
-  const extractionCount = (config.extraction_models || []).length;
-  const hasCloud =
-    (config.summary_models || []).some((m) => !m.base_url?.includes("vllm-")) ||
-    (config.extraction_models || []).some((m) => !m.base_url?.includes("vllm-"));
+  const summaryLanes = config.summary_models ?? [];
+  const extractionLanes = config.extraction_models ?? [];
+  const localPatch = localPipelinePatch();
 
-  return (
-    <div className="border border-border-minimal bg-bg-base/35">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-bg-base/55 transition-colors"
-      >
-        <div className="flex items-center gap-2 text-left">
-          <span className="text-[12px] font-bold tracking-widest text-content-tertiary uppercase">
-            Cloud Overflow Lanes
-          </span>
-          {hasCloud && (
-            <span className="text-[9px] font-bold tracking-widest uppercase px-1.5 py-0.5 bg-accent-main/15 text-accent-main">
-              ACTIVE
-            </span>
-          )}
-          <span className="text-[9px] text-content-tertiary/70">
-            {summaryCount} summary · {extractionCount} extraction
-          </span>
-        </div>
-        <span className="text-[10px] text-content-tertiary tracking-widest">
-          {open ? "−" : "+"}
-        </span>
-      </button>
-      {open && (
-        <div className="px-2 py-2 space-y-3 border-t border-border-minimal">
-          <div className="text-[10px] text-content-tertiary leading-snug">
-            Add cloud lanes to share Ghost A / Ghost B work with the local
-            GPU. Each lane has its own model, base URL, API key, and max
-            in-flight calls. Backend's work-stealing pool dispatches across
-            all lanes — fast lanes naturally pull more chunks. Local stays
-            the default; cloud is opt-in overflow.
-          </div>
-          <IngestionModelPool
-            title="Ghost A — Summary lanes"
-            subtitle="parent-chunk summarization. Add cloud lanes to bypass single-GPU bandwidth ceiling (~6500 tok/s on lfm2-1.2B)."
-            value={config.summary_models ?? []}
-            onChange={(next) => onPatch({ summary_models: next })}
-            editing={true}
-            presets={SUMMARY_PROVIDER_PRESETS}
-            modelPlaceholder="model name (e.g. deepseek-chat)"
-          />
-          <IngestionModelPool
-            title="Ghost B — Extraction lanes"
-            subtitle="entity / relation extraction. This is the slowest phase; cloud overflow gives the biggest speedup here."
-            value={config.extraction_models ?? []}
-            onChange={(next) => onPatch({ extraction_models: next })}
-            editing={true}
-            presets={EXTRACTION_PROVIDER_PRESETS}
-            modelPlaceholder="model name (e.g. deepseek-chat)"
-          />
-          <div className="text-[9px] text-content-tertiary/70 leading-snug px-1.5 py-1 border border-border-minimal/50 bg-bg-base/45">
-            Concurrency tip: total in-flight calls across all lanes shouldn't
-            exceed sum of per-provider rate limits. DeepSeek 40, OpenAI tier-3
-            ~250, Moonshot 50 are safe starting points. Local lane caps at
-            LOCAL_VLLM_COMPACT_MAX_CONCURRENT (default 32 — set in env).
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+  // Lane classification helpers — used to render different chip badges
+  // for local vs cloud and to drive the "reset to local default" buttons.
+  const isLocal = (m: { base_url?: string | null }) =>
+    !!(m.base_url && m.base_url.startsWith("http://vllm-"));
+  const summaryHasLocal = summaryLanes.some(isLocal);
+  const extractionHasLocal = extractionLanes.some(isLocal);
+  const summaryCloudCount = summaryLanes.filter((m) => !isLocal(m)).length;
+  const extractionCloudCount = extractionLanes.filter((m) => !isLocal(m)).length;
 
-// ============================================================================
-// IngestionModelsSection — simple pipeline selector for corpus-level defaults
-// ============================================================================
-
-function IngestionModelsSection({
-  config,
-  onPatch,
-  editing,
-}: {
-  config: IngestionConfig;
-  onPatch: (patch: Partial<IngestionConfig>) => void;
-  editing: boolean;
-}) {
-  const selected = isLocalPipelineSelected(config);
-
-  const applyLocalIngestionStack = () => {
-    onPatch(localPipelinePatch());
+  const restoreLocalSummary = () => {
+    if (summaryHasLocal) return;
+    const localSummary = localPatch.summary_models ?? [];
+    onPatch({ summary_models: [...localSummary, ...summaryLanes] });
+  };
+  const restoreLocalExtraction = () => {
+    if (extractionHasLocal) return;
+    const localExtraction = localPatch.extraction_models ?? [];
+    onPatch({ extraction_models: [...localExtraction, ...extractionLanes] });
   };
 
   return (
     <div className="space-y-2">
       <div>
         <div className="text-[12px] font-bold tracking-widest text-content-tertiary uppercase">
-          Ingestion Pipeline
+          Ingestion Models
         </div>
         <div className="text-[9px] text-content-tertiary/70 leading-relaxed">
-          Pick the pipeline; model details are configured by the app.
+          Each phase runs a work-stealing pool across all configured lanes.
+          The default local-RTX lane is included automatically; add cloud
+          lanes alongside it to scale past the single-GPU ceiling, or remove
+          it entirely for cloud-only routing.
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={applyLocalIngestionStack}
-        disabled={!editing}
-        className={`w-full flex items-start gap-3 px-3 py-2 border text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-          selected
-            ? "border-accent-main bg-accent-main/10"
-            : "border-border-minimal bg-bg-base/35 hover:border-accent-main/60"
-        }`}
-        title="Use the full local RTX ingestion pipeline."
-      >
-        <span
-          className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center border ${
-            selected
-              ? "border-accent-main bg-accent-main text-bg-base"
-              : "border-content-tertiary text-transparent"
-          }`}
-        >
-          <Check className="h-3 w-3" />
-        </span>
-        <span className="min-w-0">
-          <span className="block text-[11px] font-bold tracking-widest uppercase text-content-primary">
-            Local RTX Pipeline
-          </span>
-          <span className="block text-[9px] text-content-tertiary leading-relaxed">
-            Qwen embeddings, LFM2-RAG summaries, LFM2 extraction, Gemma repair
-            queue, Qdrant vectors, and Neo4j graph writes.
-          </span>
-        </span>
-      </button>
+      {/* Ghost A summary pool */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <div className="text-[10px] font-bold tracking-widest uppercase text-content-secondary">
+            Ghost A · Summary
+            <span className="ml-2 text-[9px] font-normal text-content-tertiary">
+              {summaryHasLocal ? "1 local · " : "0 local · "}
+              {summaryCloudCount} cloud
+            </span>
+          </div>
+          {!summaryHasLocal && (
+            <button
+              type="button"
+              onClick={restoreLocalSummary}
+              className="text-[9px] tracking-widest uppercase px-1.5 py-0.5 border border-accent-main/60 text-accent-main hover:bg-accent-main/10"
+              title="Restore the local vllm-summary lane to this pool"
+            >
+              + restore local
+            </button>
+          )}
+        </div>
+        <IngestionModelPool
+          title=""
+          subtitle="parent-chunk summarization"
+          value={summaryLanes}
+          onChange={(next) => onPatch({ summary_models: next })}
+          editing={true}
+          presets={SUMMARY_PROVIDER_PRESETS}
+          modelPlaceholder="model (e.g. deepseek-chat)"
+        />
+      </div>
+
+      {/* Ghost B extraction pool */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <div className="text-[10px] font-bold tracking-widest uppercase text-content-secondary">
+            Ghost B · Extraction
+            <span className="ml-2 text-[9px] font-normal text-content-tertiary">
+              {extractionHasLocal ? "1 local · " : "0 local · "}
+              {extractionCloudCount} cloud
+            </span>
+          </div>
+          {!extractionHasLocal && (
+            <button
+              type="button"
+              onClick={restoreLocalExtraction}
+              className="text-[9px] tracking-widest uppercase px-1.5 py-0.5 border border-accent-main/60 text-accent-main hover:bg-accent-main/10"
+              title="Restore the local vllm-extract lane to this pool"
+            >
+              + restore local
+            </button>
+          )}
+        </div>
+        <IngestionModelPool
+          title=""
+          subtitle="entity / relation extraction (slowest phase — biggest speedup from cloud overflow)"
+          value={extractionLanes}
+          onChange={(next) => onPatch({ extraction_models: next })}
+          editing={true}
+          presets={EXTRACTION_PROVIDER_PRESETS}
+          modelPlaceholder="model (e.g. deepseek-chat)"
+        />
+      </div>
+
+      <div className="text-[9px] text-content-tertiary/70 leading-snug px-1.5 py-1 border border-border-minimal/50 bg-bg-base/45">
+        Tip: total in-flight per phase = sum of every chip's max_concurrent.
+        Stay under each provider's rate limit. Defaults: DeepSeek ~40,
+        OpenAI tier-3 ~250, Moonshot ~50, vLLM local capped by
+        LOCAL_VLLM_COMPACT_MAX_CONCURRENT (env, default 32).
+      </div>
     </div>
   );
 }
