@@ -174,6 +174,20 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
     example_model: "lfm2-rag",
   },
   {
+    id: "vllm-summary",
+    name: "vLLM Summary (local)",
+    litellm_provider: "openai",
+    base_url: "http://vllm-summary:8000/v1",
+    example_model: "lfm2-rag",
+  },
+  {
+    id: "vllm-extract",
+    name: "vLLM Extract (local)",
+    litellm_provider: "openai",
+    base_url: "http://vllm-extract:8000/v1",
+    example_model: "lfm2-extract",
+  },
+  {
     id: "custom",
     name: "Custom (OpenAI-compat)",
     litellm_provider: "openai",

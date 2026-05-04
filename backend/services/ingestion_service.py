@@ -181,17 +181,20 @@ def _canonical_embed_mode(value: object) -> str:
 
 
 def isolate_local_model_routing(config: IngestionConfig) -> IngestionConfig:
-    """Keep local ingestion runs pinned to local model pools.
+    """Keep local-EMBEDDING ingestion runs pinned to local embedder dispatch.
 
-    Cloud/API summary or extraction pool edits are valid for cloud-routed
-    corpora, but they must not bleed into a corpus whose embed route is local.
-    The worker and preflight both pass through this helper via
-    build_effective_config(); create/update use it before persisting configs.
+    Embedder routing (`embed_mode`, `embed_*_url`, `embedding_models`,
+    `modal_containers`) is a separate concern from Ghost A / Ghost B
+    extraction routing (`summary_models`, `extraction_models`,
+    `extraction_repair_models`). The legacy version of this helper reset
+    BOTH on local-embed corpora, which silently dropped any cloud overflow
+    lanes the user added to Ghost A/B. Now we only normalize the embedder
+    fields — Ghost pools are untouched so a corpus can run local
+    embeddings + cloud-overflow extraction simultaneously.
     """
     if _canonical_embed_mode(getattr(config, "embed_mode", "local")) != "local":
         return config
 
-    defaults = IngestionConfig()
     return config.model_copy(
         update={
             "embed_mode": "local",
@@ -200,13 +203,6 @@ def isolate_local_model_routing(config: IngestionConfig) -> IngestionConfig:
             "embed_max_concurrent": None,
             "embedding_models": [],
             "modal_containers": None,
-            "models_linked": False,
-            "summary_models": defaults.summary_models,
-            "extraction_models": defaults.extraction_models,
-            "extraction_repair_models": defaults.extraction_repair_models,
-            "graph_extraction_engine": "llm",
-            "llm_fallback_enabled": False,
-            "llm_fallback_max_percent": 0,
         }
     )
 
