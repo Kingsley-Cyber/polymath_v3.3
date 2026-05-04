@@ -528,7 +528,13 @@ class ModelProfileRef(BaseModel):
         description="Per-entry api_key (Fernet ciphertext at rest; masked as '[set]' on GET).",
     )
     max_concurrent: int = Field(
-        default=1, ge=1, le=64, description="Max in-flight calls against this entry."
+        default=1, ge=1, le=512,
+        description=(
+            "Max in-flight calls against this entry. Bumped from 64 to 512 "
+            "for high-throughput local vllm setups (RTX Pro 6000 Blackwell "
+            "+ vllm max_num_seqs=256 needs ~192-256 concurrent client calls "
+            "to saturate)."
+        ),
     )
     extra_params: dict = Field(
         default_factory=dict,

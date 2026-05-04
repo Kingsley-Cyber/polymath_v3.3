@@ -101,7 +101,10 @@ def create_corpus(token: str, name: str) -> str:
                     "model": "openai/lfm2-extract",
                     "base_url": "http://vllm-extract:8000/v1",
                     "api_key": "local",
-                    "max_concurrent": 64,
+                    # Saturate vllm-extract: it's configured with
+                    # max_num_seqs=256, so push 192 concurrent (leaves
+                    # headroom for prompt prefill bursts).
+                    "max_concurrent": 192,
                     "extra_params": {"temperature": 0.0},
                     "context_length": 12288,
                 }

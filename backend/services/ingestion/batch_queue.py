@@ -257,29 +257,45 @@ def detect_resource_profile(spool_dir: str | None = None) -> dict[str, Any]:
     except Exception as exc:
         logger.debug("CUDA resource detection unavailable: %s", exc)
 
+    # Doc-worker auto-sizing. The legacy caps (min(4, …) on pre-vector,
+    # min(…, 4) on graph headroom, min(…, 2) on recommended_parse / vector)
+    # were tuned for a 24 GB consumer card. On an RTX Pro 6000 Blackwell
+    # (97 GB) or H100, those caps leave ~75% of vllm idle during graph
+    # extraction. Two new env knobs let high-VRAM operators raise the
+    # ceilings without abandoning the safety floor for low-RAM laptops.
+    pre_vector_cap = max(
+        1, int(getattr(settings, "INGEST_PRE_VECTOR_DOC_CAP", 4))
+    )
+    graph_cap = max(
+        1, int(getattr(settings, "INGEST_GRAPH_DOC_CAP", 4))
+    )
     if available_ram and available_ram < 4:
         pre_vector_doc_slots = 1
     elif available_ram and available_ram < 12:
         pre_vector_doc_slots = 2
     else:
-        pre_vector_doc_slots = min(4, max(1, cpu_count // 4))
+        pre_vector_doc_slots = min(pre_vector_cap, max(1, cpu_count // 4))
     if gpu_devices:
-        pre_vector_doc_slots = min(
-            pre_vector_doc_slots,
-            max(1, len(gpu_devices) + 1),
-        )
+        # Was: cap at gpu_count + 1 (forces 2 on a single-GPU box). Now: only
+        # cap below the GPU count when VRAM is genuinely tight; otherwise
+        # respect pre_vector_cap.
+        gpu_floor = max(1, len(gpu_devices) + 1)
+        if pre_vector_cap > gpu_floor:
+            pre_vector_doc_slots = min(pre_vector_doc_slots, pre_vector_cap)
+        else:
+            pre_vector_doc_slots = min(pre_vector_doc_slots, gpu_floor)
 
     # Deep ingestion keeps vector RAG usable before graph completion. Give the
     # batch scheduler graph headroom so graph_extracting items do not consume
     # every document worker and starve queued docs from reaching Qdrant.
     graph_doc_headroom = 0
     if not (available_ram and available_ram < 4):
-        graph_doc_headroom = max(1, min(int(settings.INGEST_MAX_GRAPH_MODEL_PHASE_DOCS), 4))
+        graph_doc_headroom = max(1, min(int(settings.INGEST_MAX_GRAPH_MODEL_PHASE_DOCS), graph_cap))
     max_active_docs = pre_vector_doc_slots + graph_doc_headroom
     if settings.INGEST_BATCH_MAX_ACTIVE_DOCS:
         max_active_docs = max(1, int(settings.INGEST_BATCH_MAX_ACTIVE_DOCS))
-    recommended_parse = min(max_active_docs, 2)
-    recommended_vector = max(1, min(pre_vector_doc_slots, 2))
+    recommended_parse = min(max_active_docs, pre_vector_cap)
+    recommended_vector = max(1, min(pre_vector_doc_slots, pre_vector_cap))
     recommended_graph = max(
         1,
         min(

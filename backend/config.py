@@ -117,35 +117,44 @@ class Settings(BaseSettings):
     INGEST_MAX_PARSE_JOBS: int = Field(
         default=4,
         ge=1,
-        le=16,
-        description="Process-local cap for concurrent parse/chunk phases.",
+        le=64,
+        description=(
+            "Process-local cap for concurrent parse/chunk phases. le bumped "
+            "from 16 to 64 — high-VRAM rigs (RTX Pro 6000 / H100) need to "
+            "feed graph extraction faster than 16 parses/window."
+        ),
     )
     INGEST_MAX_MODEL_PHASE_DOCS: int = Field(
         default=3,
         ge=1,
-        le=8,
+        le=64,
         description=(
             "Process-local cap for local documents concurrently running "
             "pre-vector model phases. Per-entry model concurrency still "
-            "applies inside a slot."
+            "applies inside a slot. le bumped from 8 to 64 for high-VRAM "
+            "rigs that can saturate vllm with more parallel docs."
         ),
     )
     INGEST_MAX_CLOUD_MODEL_PHASE_DOCS: int = Field(
         default=2,
         ge=1,
-        le=8,
+        le=64,
         description=(
             "Process-local cap for cloud/API documents concurrently running "
-            "pre-vector model phases. Kept separate from local routing."
+            "pre-vector model phases. Kept separate from local routing. "
+            "le bumped to 64 to match local cap."
         ),
     )
     INGEST_MAX_GRAPH_MODEL_PHASE_DOCS: int = Field(
         default=2,
         ge=1,
-        le=8,
+        le=64,
         description=(
             "Process-local cap for graph extraction model phases. Graph work "
-            "must not block vector readiness for new local documents."
+            "must not block vector readiness for new local documents. "
+            "le bumped from 8 to 64 — at the legacy 8 cap a 6-book batch "
+            "could only graph_extract 2 in parallel, leaving vllm at <20%% "
+            "utilization on 97 GB cards."
         ),
     )
     INGEST_MAX_ACTIVE_JOBS: int = Field(
@@ -468,6 +477,51 @@ class Settings(BaseSettings):
         ge=256,
         le=8192,
         description="Maximum completion tokens for each entity extraction call (GHOST B)",
+    )
+    LOCAL_VLLM_COMPACT_MAX_CONCURRENT: int = Field(
+        default=64,
+        ge=1,
+        le=512,
+        description=(
+            "Per-document concurrency cap for local vllm extraction lanes "
+            "in compact mode. Bumped from the legacy 8 to 64 — the legacy "
+            "value starved high-VRAM GPUs (RTX Pro 6000, H100) where vllm "
+            "schedules max_num_seqs=256 natively. Lower if you see OOM on "
+            "an under-provisioned GPU."
+        ),
+    )
+    LOCAL_VLLM_NORMAL_MAX_CONCURRENT: int = Field(
+        default=128,
+        ge=1,
+        le=512,
+        description=(
+            "Per-document concurrency cap for local vllm extraction lanes "
+            "in normal (non-compact) mode. Bumped from the legacy 16 — same "
+            "reasoning as LOCAL_VLLM_COMPACT_MAX_CONCURRENT."
+        ),
+    )
+    INGEST_PRE_VECTOR_DOC_CAP: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description=(
+            "Max concurrent doc workers in the pre-vector phase (parse + "
+            "chunk + ghost_a + mongo + embed + qdrant). Legacy hard cap was "
+            "4. On a 97 GB GPU + 64 GB RAM rig this can safely go to 8-16 "
+            "to feed graph extraction without idle slots. Lower if you OOM "
+            "the WSL VM or see Mongo connection-pool exhaustion."
+        ),
+    )
+    INGEST_GRAPH_DOC_CAP: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description=(
+            "Max concurrent doc workers in the graph_extracting phase. "
+            "Legacy hard cap was 4. Combined with INGEST_MAX_GRAPH_MODEL_"
+            "PHASE_DOCS as the floor; this is the ceiling. On high-VRAM "
+            "boxes raise to 6-8 to fully saturate vllm-extract."
+        ),
     )
     EXTRACTION_MAX_ENTITIES_PER_CHUNK: int = Field(
         default=14,

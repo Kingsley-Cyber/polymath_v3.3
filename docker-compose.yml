@@ -643,6 +643,7 @@ services:
       INGEST_SPOOL_DIR: /app/ingest-spool
       # Local, cloud, and graph phases are isolated so cloud/extraction load
       # cannot hold local vector readiness hostage.
+      INGEST_MAX_PARSE_JOBS: ${INGEST_MAX_PARSE_JOBS:-4}
       INGEST_MAX_MODEL_PHASE_DOCS: ${INGEST_MAX_MODEL_PHASE_DOCS:-2}
       INGEST_MAX_CLOUD_MODEL_PHASE_DOCS: ${INGEST_MAX_CLOUD_MODEL_PHASE_DOCS:-2}
       INGEST_MAX_GRAPH_MODEL_PHASE_DOCS: ${INGEST_MAX_GRAPH_MODEL_PHASE_DOCS:-2}
@@ -681,6 +682,13 @@ services:
       # GHOST B — 0.0 disables self-reported-confidence filter (glosses + schema
       # are the real quality levers). Raise per-model after eyeballing its distribution.
       ENTITY_CONFIDENCE_THRESHOLD: ${ENTITY_CONFIDENCE_THRESHOLD:-0.0}
+      # Speed-tuning knobs for Ghost B on high-VRAM GPUs (RTX Pro 6000, H100).
+      # See .env / config.py for explanations and safe defaults.
+      EXTRACTION_MAX_TOKENS: ${EXTRACTION_MAX_TOKENS:-1024}
+      LOCAL_VLLM_COMPACT_MAX_CONCURRENT: ${LOCAL_VLLM_COMPACT_MAX_CONCURRENT:-64}
+      LOCAL_VLLM_NORMAL_MAX_CONCURRENT: ${LOCAL_VLLM_NORMAL_MAX_CONCURRENT:-128}
+      INGEST_PRE_VECTOR_DOC_CAP: ${INGEST_PRE_VECTOR_DOC_CAP:-4}
+      INGEST_GRAPH_DOC_CAP: ${INGEST_GRAPH_DOC_CAP:-4}
     depends_on:
       mongodb:
         condition: service_healthy

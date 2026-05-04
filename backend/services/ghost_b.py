@@ -333,10 +333,30 @@ def _entry_is_local_vllm(entry: dict) -> bool:
 
 
 def _entry_concurrency_slots(entry: dict, *, extraction_mode: str) -> int:
+    """Resolve the effective per-doc concurrency for one extraction lane.
+
+    Local vLLM lanes used to be capped at 8 / 16 (compact / normal) to
+    protect small GPUs from over-committing. On high-VRAM cards (RTX Pro
+    6000 Blackwell with 97 GB, H100 NVL, etc.) those caps starve vllm —
+    which schedules `max_num_seqs=256` natively — and Ghost B grinds at
+    ~10% throughput. Two settings now override the legacy caps:
+
+      LOCAL_VLLM_COMPACT_MAX_CONCURRENT  default 64  (was 8)
+      LOCAL_VLLM_NORMAL_MAX_CONCURRENT   default 128 (was 16)
+
+    The corpus's `max_concurrent` is the ceiling; this function clamps
+    against the env-configured local-vllm safety cap. Cloud lanes are
+    unaffected — they use the corpus value directly.
+    """
     requested = max(1, int(entry.get("max_concurrent") or 1))
     if not _entry_is_local_vllm(entry):
         return requested
-    return min(requested, 8 if extraction_mode == "compact" else 16)
+    settings = get_settings()
+    if extraction_mode == "compact":
+        cap = int(getattr(settings, "LOCAL_VLLM_COMPACT_MAX_CONCURRENT", 64))
+    else:
+        cap = int(getattr(settings, "LOCAL_VLLM_NORMAL_MAX_CONCURRENT", 128))
+    return min(requested, max(1, cap))
 
 
 # ── Universal schema (baked, replaces per-corpus tuning) ───────────────────
@@ -2938,7 +2958,7 @@ async def _repair_target_relation_with_gemma(
         if key not in {"model", "messages", "response_format", "max_tokens"}:
             payload[key] = value
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=300.0) as client:
         resp = await client.post(
             f"{settings.LITELLM_URL}/chat/completions",
             json=payload,
@@ -3342,7 +3362,7 @@ async def extract_entities(
                     payload[_k] = _v
             started = time.perf_counter()
             try:
-                async with httpx.AsyncClient(timeout=120.0) as client:
+                async with httpx.AsyncClient(timeout=300.0) as client:
                     resp = await client.post(
                         f"{settings.LITELLM_URL}/chat/completions",
                         json=payload,
