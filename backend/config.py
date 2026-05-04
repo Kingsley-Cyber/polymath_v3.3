@@ -212,6 +212,49 @@ class Settings(BaseSettings):
             "(no backpressure) so a flaky probe doesn't stall the queue."
         ),
     )
+    # ── VRAM idle offload (vllm_idle_watcher) ─────────────────────────
+    VLLM_IDLE_UNLOAD_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "When enabled, a backend coroutine periodically checks the "
+            "ingest batch queue. After VLLM_IDLE_UNLOAD_SECONDS of no "
+            "non-terminal batches, the configured vllm containers are "
+            "stopped via the Docker socket — frees ~45 GB VRAM on a "
+            "97 GB card. Next batch enqueue restarts them and waits for "
+            "/health before claiming items."
+        ),
+    )
+    VLLM_IDLE_UNLOAD_SECONDS: int = Field(
+        default=300,
+        ge=30,
+        le=86400,
+        description="Idle-window before stopping vllm containers.",
+    )
+    VLLM_IDLE_POLL_SECONDS: int = Field(
+        default=30,
+        ge=5,
+        le=600,
+        description="How often the watcher re-checks the batch queue.",
+    )
+    VLLM_IDLE_HEALTHY_TIMEOUT: int = Field(
+        default=180,
+        ge=30,
+        le=900,
+        description=(
+            "Max seconds to wait after start for /health to flip "
+            "healthy. lfm2-1.2B reload is typically 30-60s; pad for "
+            "first-boot model download."
+        ),
+    )
+    VLLM_IDLE_CONTAINERS: str = Field(
+        default="polymath_v33-vllm-summary-1,polymath_v33-vllm-extract-1",
+        description=(
+            "Comma-separated docker container names the watcher manages. "
+            "Empty disables the watcher even if VLLM_IDLE_UNLOAD_ENABLED "
+            "is true. vllm-repair is intentionally excluded — that "
+            "service is opt-in via its own profile."
+        ),
+    )
     INGEST_CIRCUIT_BREAKER_CONSECUTIVE_FAILS: int = Field(
         default=5,
         ge=2,

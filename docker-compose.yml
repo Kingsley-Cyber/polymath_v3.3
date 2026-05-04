@@ -612,6 +612,14 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
+    # Phase 23 — VRAM idle watcher needs read access to /var/run/docker.sock.
+    # The socket is owned root:root 0660; appuser (uid 1000) needs gid 0 in
+    # its supplementary group set to read it. Doesn't make appuser root —
+    # only grants access to root-group-readable files (which is just the
+    # docker socket here). Disable the watcher (VLLM_IDLE_UNLOAD_ENABLED=
+    # false) if you don't want this privilege.
+    group_add:
+      - "0"
     volumes:
       - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}:/models:ro"
       - "${POLYMATH_CACHE_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/home/appuser/.cache/huggingface"
@@ -620,6 +628,12 @@ services:
       # container so /api/infrastructure/modal/deploy can import it.
       # Read-only bind; file lives at repo root for CLI-deploy compatibility.
       - "${POLYMATH_RUNTIME_BINDS_ROOT:-C:/PolymathRuntime/binds}/modal_embedder.py:/app/modal_embedder.py:ro"
+      # Phase 23 — Docker socket for the VRAM idle watcher to start/stop
+      # vllm containers via the daemon API. WSL2 path: the host's named-pipe
+      # docker socket is exposed at /var/run/docker.sock inside containers.
+      # Disable the watcher (VLLM_IDLE_UNLOAD_ENABLED=false) if you don't
+      # want the backend to have container-control privilege.
+      - "/var/run/docker.sock:/var/run/docker.sock"
     environment:
       MONGODB_URI: mongodb://${MONGO_USER:-polymath}:${MONGO_PASSWORD}@mongodb:27017/polymath?authSource=admin
       QDRANT_URL: http://qdrant:6333
@@ -689,6 +703,13 @@ services:
       LOCAL_VLLM_NORMAL_MAX_CONCURRENT: ${LOCAL_VLLM_NORMAL_MAX_CONCURRENT:-128}
       INGEST_PRE_VECTOR_DOC_CAP: ${INGEST_PRE_VECTOR_DOC_CAP:-4}
       INGEST_GRAPH_DOC_CAP: ${INGEST_GRAPH_DOC_CAP:-4}
+      # VRAM idle offload (Phase 23). Default-on so a fresh checkout gets the
+      # behavior; set ENABLED=false to disable without changing other vars.
+      VLLM_IDLE_UNLOAD_ENABLED: ${VLLM_IDLE_UNLOAD_ENABLED:-true}
+      VLLM_IDLE_UNLOAD_SECONDS: ${VLLM_IDLE_UNLOAD_SECONDS:-300}
+      VLLM_IDLE_POLL_SECONDS: ${VLLM_IDLE_POLL_SECONDS:-30}
+      VLLM_IDLE_HEALTHY_TIMEOUT: ${VLLM_IDLE_HEALTHY_TIMEOUT:-180}
+      VLLM_IDLE_CONTAINERS: ${VLLM_IDLE_CONTAINERS:-polymath_v33-vllm-summary-1,polymath_v33-vllm-extract-1}
     depends_on:
       mongodb:
         condition: service_healthy

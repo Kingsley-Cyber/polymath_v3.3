@@ -139,6 +139,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error(f"Failed to initialize ingestion service: {e}")
         raise
 
+    # VRAM idle watcher — auto-stops vllm containers after VLLM_IDLE_UNLOAD_SECONDS
+    # of no non-terminal batches; auto-starts them on next batch enqueue. Frees
+    # ~45 GB VRAM during idle periods. Falls open (no watcher started) if the
+    # docker socket isn't mounted, so the backend still works on hosts where
+    # the operator opted out of the auto-offload privilege.
+    try:
+        from services.ingestion.vllm_idle_watcher import init_watcher
+        watcher = init_watcher(conversation_service._db)
+        if watcher.enabled:
+            watcher.start()
+            logger.info(
+                "VRAM idle watcher started: containers=%s threshold=%ds",
+                watcher.container_names,
+                int(settings.VLLM_IDLE_UNLOAD_SECONDS),
+            )
+        else:
+            logger.info("VRAM idle watcher disabled by config")
+    except Exception as e:
+        logger.warning(
+            "VRAM idle watcher failed to start (non-fatal): %s. "
+            "Containers will not auto-offload — stop them manually if needed.",
+            e,
+        )
+
     # Universal-schema migration: patch null/empty schemas (and coerce legacy
     # off/hard strict values) to the baked universal vocabulary. Idempotent.
     # FORCE_UNIVERSAL_SCHEMA=true overwrites every corpus.
@@ -250,6 +274,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown
     logger.info("Shutting down Polymath RAG API")
+    try:
+        from services.ingestion.vllm_idle_watcher import get_watcher
+        w = get_watcher()
+        if w is not None:
+            await w.stop()
+    except Exception as exc:
+        logger.warning("VRAM idle watcher shutdown raised: %s", exc)
     await auth_service.disconnect()
     await ingestion_service.disconnect()
     await conversation_service.disconnect()

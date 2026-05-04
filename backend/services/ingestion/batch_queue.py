@@ -29,6 +29,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 from services.ingestion.cancellation import IngestCancelled
 from services.ingestion.file_intake import normalize_upload_filename
+from services.ingestion.vllm_idle_watcher import get_watcher as _get_vllm_watcher
 
 logger = logging.getLogger(__name__)
 
@@ -659,6 +660,20 @@ class BatchIngestionManager:
             raise RuntimeError("BatchIngestionManager is not attached")
         if not uploads:
             raise ValueError("No files supplied")
+        # Wake vllm containers if the idle watcher had stopped them. Blocks
+        # until /health is healthy; keeps batch admission from racing into
+        # a half-loaded model. No-op when the watcher is disabled.
+        watcher = _get_vllm_watcher()
+        if watcher is not None:
+            try:
+                await watcher.ensure_started()
+            except Exception as exc:
+                logger.warning(
+                    "create_batch: vllm idle watcher could not start "
+                    "containers (%s) — proceeding; the next ingest may "
+                    "fail health checks until the operator brings them up.",
+                    exc,
+                )
         # Refuse to admit a new batch when the spool drive is below the disk
         # floor — protects against queue-builds-up scenarios where ENOSPC
         # would otherwise corrupt mid-flight writes (mongo journals, qdrant
