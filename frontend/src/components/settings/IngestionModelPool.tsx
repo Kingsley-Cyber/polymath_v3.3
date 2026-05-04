@@ -5,9 +5,10 @@
 // chips only (used on the "mirrored" extraction card when models_linked).
 
 import { useState, useRef, useEffect } from "react";
-import { Plus, X, KeyRound, Cpu } from "lucide-react";
+import { Plus, X, KeyRound, Cpu, Check, Loader2, AlertCircle } from "lucide-react";
 import type { ModelProfileRef } from "../../types";
 import { PROVIDER_PRESETS, composeModelString } from "../../types";
+import * as api from "../../lib/api";
 
 type PoolPreset = {
   id: string;
@@ -58,6 +59,12 @@ export function IngestionModelPool({
 }: Props) {
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [flashId, setFlashId] = useState<string | null>(null);
+  // Per-chip test state. Keyed by index so we can show spinner+result inline
+  // while keeping the chip layout stable. Result auto-clears after 8s so a
+  // failed test doesn't sit there forever.
+  const [testState, setTestState] = useState<
+    Record<number, { kind: "loading" | "ok" | "err"; latency_ms?: number; error?: string }>
+  >({});
   const modelInputRef = useRef<HTMLInputElement>(null);
 
   const canAdd = draft.model.trim().length > 0;
@@ -102,6 +109,44 @@ export function IngestionModelPool({
   const remove = (idx: number) => {
     if (rowDisabled) return;
     onChange(value.filter((_, i) => i !== idx));
+  };
+
+  const testChip = async (idx: number) => {
+    const m = value[idx];
+    if (!m) return;
+    setTestState((prev) => ({ ...prev, [idx]: { kind: "loading" } }));
+    try {
+      // "[set]" comes back from GET as a sentinel for "ciphertext at rest" —
+      // we can't actually use it to ping the provider, so the inline-test
+      // path needs a real key. Skip the test in that case and tell the user
+      // to re-enter the key once if they want to verify connectivity.
+      const apiKey = m.api_key === "[set]" ? null : m.api_key;
+      const result = await api.testInlineLane({
+        model: m.model,
+        base_url: m.base_url,
+        api_key: apiKey,
+        kind: "chat",
+      });
+      setTestState((prev) => ({
+        ...prev,
+        [idx]: result.ok
+          ? { kind: "ok", latency_ms: result.latency_ms }
+          : { kind: "err", error: result.error || `HTTP ${result.status}` },
+      }));
+      setTimeout(() => {
+        setTestState((prev) => {
+          const next = { ...prev };
+          delete next[idx];
+          return next;
+        });
+      }, 8000);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setTestState((prev) => ({
+        ...prev,
+        [idx]: { kind: "err", error: msg.slice(0, 120) },
+      }));
+    }
   };
 
   const applyPreset = (presetId: string) => {
@@ -183,13 +228,56 @@ export function IngestionModelPool({
                 />
               )}
               {!readOnly && editing && (
-                <button
-                  onClick={() => remove(idx)}
-                  className="ml-0.5 text-content-tertiary hover:text-red-400"
-                  title="Remove"
-                >
-                  <X className="w-2.5 h-2.5" />
-                </button>
+                <>
+                  {(() => {
+                    const ts = testState[idx];
+                    if (ts?.kind === "loading") {
+                      return (
+                        <Loader2
+                          className="ml-0.5 w-2.5 h-2.5 text-amber-300 animate-spin"
+                          aria-label="testing connection"
+                        />
+                      );
+                    }
+                    if (ts?.kind === "ok") {
+                      return (
+                        <span
+                          className="ml-0.5 flex items-center gap-0.5 text-emerald-400 text-[8px]"
+                          title={`Connected (${ts.latency_ms}ms)`}
+                        >
+                          <Check className="w-2.5 h-2.5" />
+                          {ts.latency_ms}ms
+                        </span>
+                      );
+                    }
+                    if (ts?.kind === "err") {
+                      return (
+                        <span
+                          className="ml-0.5 flex items-center text-red-400"
+                          title={ts.error}
+                        >
+                          <AlertCircle className="w-2.5 h-2.5" />
+                        </span>
+                      );
+                    }
+                    return (
+                      <button
+                        onClick={() => testChip(idx)}
+                        className="ml-0.5 text-content-tertiary hover:text-emerald-400 text-[8px] tracking-widest uppercase"
+                        title="Ping the provider with a 1-token chat completion"
+                      >
+                        test
+                      </button>
+                    );
+                  })()}
+                  <button
+                    onClick={() => remove(idx)}
+                    className="ml-0.5 text-content-tertiary hover:text-red-400"
+                    title="Remove"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </>
               )}
             </div>
           );

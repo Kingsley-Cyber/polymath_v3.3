@@ -1330,6 +1330,12 @@ const SUMMARY_PROVIDER_PRESETS = [
     example_model: "kimi-k2-0711-preview",
   },
   {
+    id: "mistral",
+    name: "Mistral",
+    base_url: "https://api.mistral.ai/v1",
+    example_model: "mistral-small-latest",
+  },
+  {
     id: "openai",
     name: "OpenAI",
     base_url: "https://api.openai.com/v1",

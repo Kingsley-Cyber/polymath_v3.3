@@ -62,7 +62,7 @@ services:
 
   qdrant:
     <<: *default-logging
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.13.0  # was :latest — pinned 2026-05-04 for reproducible deploys
     ports:
       - "6333:6333"
     volumes:
@@ -229,7 +229,7 @@ services:
 
   vllm-extract:
     <<: *default-logging
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.20.0  # was :latest — pinned 2026-05-04 for reproducible deploys
     profiles: ["local-ingest-llm"]
     ports:
       - "8011:8000"
@@ -285,7 +285,7 @@ services:
 
   vllm-summary:
     <<: *default-logging
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.20.0  # was :latest — pinned 2026-05-04 for reproducible deploys
     profiles: ["local-ingest-llm"]
     ports:
       - "8012:8000"
@@ -341,7 +341,7 @@ services:
 
   vllm-transcript:
     <<: *default-logging
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.20.0  # was :latest — pinned 2026-05-04 for reproducible deploys
     profiles: ["local-ingest-transcript"]
     ports:
       - "8014:8000"
@@ -397,7 +397,7 @@ services:
 
   vllm-repair:
     <<: *default-logging
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.20.0  # was :latest — pinned 2026-05-04 for reproducible deploys
     profiles: ["local-ingest-llm"]
     ports:
       - "8013:8000"

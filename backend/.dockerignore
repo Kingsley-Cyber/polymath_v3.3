@@ -33,5 +33,7 @@ scripts/__pycache__
 
 recovered_*.py
 recovered_*.txt
-*.md
+# Note: do NOT exclude *.md — backend code may copy README into the image
+# for /api/docs endpoints, etc. (Per .Agent/Reviewer/docker-best-practices.)
+# If a specific .md ever needs excluding, list it explicitly.
 !requirements*.txt

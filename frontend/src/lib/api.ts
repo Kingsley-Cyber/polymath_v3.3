@@ -1114,6 +1114,18 @@ export async function testModelPoolEntry(
   return fetchJSON(`/model-pool/${entryId}/test`, { method: "POST" });
 }
 
+export async function testInlineLane(payload: {
+  model: string;
+  base_url?: string | null;
+  api_key?: string | null;
+  kind?: "chat" | "rerank" | "embed";
+}): Promise<ModelPoolTestResult> {
+  return fetchJSON("/model-pool/test-inline", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Phase F — Query Preferences (per-user role→pool mappings + ollama exclusions)
 // ─────────────────────────────────────────────────────────────────────────
@@ -1142,6 +1154,7 @@ export const api = {
   updateModelPoolEntry,
   deleteModelPoolEntry,
   testModelPoolEntry,
+  testInlineLane,
   getQueryPrefs,
   updateQueryPrefs,
   listModelProfiles,
