@@ -633,31 +633,6 @@ class IngestionConfig(BaseModel):
         le=1.0,
         description="Min confidence to keep extracted entity/relation",
     )
-    # Phase 25 — Mistral Batch API offload. Trades real-time-per-doc
-    # latency for server-side parallelism + 50% sync-rate price. Each
-    # mode is independent so a corpus can batch one phase and stay sync
-    # for the other (e.g., batch Ghost B but keep Ghost A streaming).
-    summary_batch_mode: Literal["off", "mistral"] = Field(
-        default="off",
-        description=(
-            "When 'mistral', Ghost A summaries for each doc are submitted "
-            "as a single Mistral batch job per doc (or grouped per "
-            "MISTRAL_BATCH_POLL_SECONDS coalescing window) instead of "
-            "the live work-stealing pool. Requires a Mistral lane in "
-            "summary_models[] with a valid api_key."
-        ),
-    )
-    extraction_batch_mode: Literal["off", "mistral"] = Field(
-        default="off",
-        description=(
-            "When 'mistral', Ghost B extractions are submitted as a "
-            "single Mistral batch job per doc (or coalesced batch). "
-            "This is the higher-impact toggle — Ghost B has 5-10x more "
-            "calls than Ghost A, so the server-side parallelism win is "
-            "decisive for large corpora. Requires a Mistral lane in "
-            "extraction_models[] with a valid api_key."
-        ),
-    )
 
     # GHOST B — Ontology-Lite (Phase 14)
     entity_schema: list[str] | None = Field(
