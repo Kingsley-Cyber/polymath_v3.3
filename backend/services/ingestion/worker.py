@@ -58,12 +58,6 @@ from services.ghost_b import (
 )
 from services.ingestion.cancellation import IngestCancelled
 from services.ingestion import docling_adapter, repair_queue, tier_chunker
-from services.ingestion.mistral_batch_runner import (
-    MistralBatchUnavailable,
-    resolve_mistral_lane,
-    run_extraction_via_mistral_batch,
-    run_summary_via_mistral_batch,
-)
 from services.ingestion.schema_lens import get_or_create_schema_lens
 from services.ingestion.section_classifier import ChunkKind, should_skip_ghost_b
 from services.secrets import decrypt as _decrypt_api_key
@@ -1381,35 +1375,12 @@ async def _run_ghosts_parallel(
             len(tasks),
             len(pool) or 1,
         )
-        # Phase 25 — Mistral batch path. Falls through to sync if toggle off
-        # or if no Mistral lane is found in the pool. Same SummaryResult
-        # shape comes back so partial-warning + skip-marker logic works
-        # identically downstream.
-        batch_mode = getattr(config, "summary_batch_mode", "off")
-        mistral_lane = (
-            resolve_mistral_lane(pool) if batch_mode == "mistral" else None
+        results = await summarize_parents(
+            tasks,
+            max_summary_tokens=config.max_summary_tokens,
+            pool=pool,
+            model=model,
         )
-        if batch_mode == "mistral" and mistral_lane is None:
-            logger.warning(
-                "phase=ghost_a_batch_skip doc=%s corpus=%s reason=no_mistral_lane "
-                "configured — falling back to sync work-stealing pool",
-                doc_id[:12], corpus_id[:8],
-            )
-        if mistral_lane is not None:
-            results = await run_summary_via_mistral_batch(
-                tasks,
-                lane=mistral_lane,
-                max_summary_tokens=config.max_summary_tokens,
-                doc_id=doc_id,
-                corpus_id=corpus_id,
-            )
-        else:
-            results = await summarize_parents(
-                tasks,
-                max_summary_tokens=config.max_summary_tokens,
-                pool=pool,
-                model=model,
-            )
         summary_llm_calls = len(tasks)
         # With Phase 21 skip-markers, ghost_a returns one entry per task —
         # success entries have status="ok", infeasible parents have
@@ -1607,47 +1578,16 @@ async def _run_ghosts_parallel(
                 getattr(config, "deferred_graph_repair_enabled", True)
             ),
         }
-        # Phase 25 — Mistral batch path. Same fall-through rules as Ghost A:
-        # active only when the corpus toggled extraction_batch_mode=mistral
-        # AND the pool has a Mistral lane with an api_key. Returns plain
-        # list[ExtractionResult] so we wrap it into a synthetic report dict
-        # for downstream metrics consumers.
-        batch_mode_b = getattr(config, "extraction_batch_mode", "off")
-        mistral_lane_b = (
-            resolve_mistral_lane(pool) if batch_mode_b == "mistral" else None
-        )
-        if batch_mode_b == "mistral" and mistral_lane_b is None:
-            logger.warning(
-                "phase=ghost_b_batch_skip doc=%s corpus=%s reason=no_mistral_lane",
-                doc_id[:12], corpus_id[:8],
-            )
-        if mistral_lane_b is not None:
-            results = await run_extraction_via_mistral_batch(
-                tasks,
-                lane=mistral_lane_b,
-                schema=schema_ctx,
-                schema_lens=schema_lens,
-                max_entities=policy.max_entities_per_chunk,
-                max_relations=policy.max_relations_per_chunk,
-                max_completion_tokens=policy.max_completion_tokens,
-                extraction_mode=policy.extraction_mode,
-                doc_id=doc_id,
-                corpus_id=corpus_id,
-            )
-            failures = []  # batch errors are per-line; surface as graph_partial
-            metrics = _ghost_b_metrics_for_skipped(results) or {}
-            metrics["dispatch_mode"] = "mistral_batch"
+        report = await extract_entities(tasks, **llm_kwargs)
+        if not isinstance(report, ExtractionBatchReport):
+            results = report
+            failures: list[ExtractionFailureItem] = []
+            metrics = _ghost_b_metrics_for_skipped(results)
         else:
-            report = await extract_entities(tasks, **llm_kwargs)
-            if not isinstance(report, ExtractionBatchReport):
-                results = report
-                failures = []
-                metrics = _ghost_b_metrics_for_skipped(results)
-            else:
-                results = report.results
-                failures = report.failures
-                metrics = report.metrics
-                relation_repair_candidates.extend(report.relation_repairs or [])
+            results = report.results
+            failures = report.failures
+            metrics = report.metrics
+            relation_repair_candidates.extend(report.relation_repairs or [])
         metrics = dict(metrics or {})
         if (
             policy.extraction_mode == "compact"
