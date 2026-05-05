@@ -23,4 +23,9 @@ export type ModelPoolEntry = import("./queryModelPool").QueryModelPoolEntry;
 export type ModelPoolEntryCreate = Partial<import("./queryModelPool").QueryModelPoolEntry> & Record<string, unknown>;
 export type ModelPoolEntryUpdate = Partial<import("./queryModelPool").QueryModelPoolEntry> & Record<string, unknown>;
 export interface ModelPoolListResponse { entries: ModelPoolEntry[]; }
-export type ModelPoolTestResult = Record<string, unknown>;
+export interface ModelPoolTestResult {
+  ok: boolean;
+  status?: number | null;
+  latency_ms?: number | null;
+  error?: string | null;
+}

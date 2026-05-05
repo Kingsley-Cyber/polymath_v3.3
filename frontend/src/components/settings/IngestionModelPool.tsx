@@ -39,10 +39,6 @@ const EMPTY_DRAFT = {
   base_url: "",
   api_key: "",
   max_concurrent: 1,
-  // 0 means "auto-detect from model_pool / utils.tokens registry". User
-  // can override (e.g. 12288 for lfm2 fine-tunes whose context isn't in
-  // the registry).
-  context_length: 0,
 };
 
 export function IngestionModelPool({
@@ -88,10 +84,10 @@ export function IngestionModelPool({
       // Schema cap is 512; clamp UI input to that range. Was 64 historically.
       max_concurrent: Math.max(1, Math.min(512, Number(draft.max_concurrent) || 1)),
       extra_params: extraParams,
-      // 0 → fall back to model_pool / registry resolution at corpus save.
-      // Non-zero → user-supplied authoritative context window for this lane.
-      context_length:
-        Number(draft.context_length) > 0 ? Number(draft.context_length) : null,
+      // Always null from the UI — backend auto-detects via utils.tokens
+      // registry (CONTEXT_LIMITS) so users don't have to track per-provider
+      // context windows. Local lfm2 fine-tunes are registered at 12288.
+      context_length: null,
     };
     onChange([...value, next]);
     const fid = `${Date.now()}-${value.length}`;
@@ -130,7 +126,7 @@ export function IngestionModelPool({
       setTestState((prev) => ({
         ...prev,
         [idx]: result.ok
-          ? { kind: "ok", latency_ms: result.latency_ms }
+          ? { kind: "ok", latency_ms: result.latency_ms ?? undefined }
           : { kind: "err", error: result.error || `HTTP ${result.status}` },
       }));
       setTimeout(() => {
@@ -340,19 +336,6 @@ export function IngestionModelPool({
             }
             title="Max in-flight calls for this entry (1 — 512)"
             className="w-14 bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono text-center"
-          />
-          <input
-            type="number"
-            min={0}
-            max={1048576}
-            step={1024}
-            value={draft.context_length}
-            onChange={(e) =>
-              setDraft({ ...draft, context_length: Number(e.target.value) || 0 })
-            }
-            placeholder="ctx"
-            title="Context window in tokens (0 = auto-detect from model_pool / registry)"
-            className="w-16 bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono text-center placeholder:text-content-tertiary"
           />
           <input
             type="password"

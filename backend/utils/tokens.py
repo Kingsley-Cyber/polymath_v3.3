@@ -254,8 +254,14 @@ def get_model_context_limit(model: str) -> int:
         "qwen2.5:7b": 131072,
         "mistral:7b": 32768,
         "gemma:2b": 8192,
-        "lfm2-extract": 8192,
-        "lfm2-rag": 8192,
+        # Local LFM2 fine-tunes served by vLLM at 12288 tokens (matches the
+        # --max-model-len Polymath ships in compose). Frontend chip-add no
+        # longer asks for ctx — auto-detection from this registry handles it.
+        "lfm2-extract": 12288,
+        "lfm2-rag": 12288,
+        "lfm2-1.2B-Extract": 12288,
+        "lfm2-1.2B-RAG": 12288,
+        "lfm2-1.2B-Instruct": 12288,
         "gemma4-e4b": 8192,
         # Embedding models (typically not used for chat)
         "nomic-embed-text": 8192,
