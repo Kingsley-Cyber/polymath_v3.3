@@ -183,16 +183,41 @@ export function IngestionModelCard(props: IngestionModelCardProps) {
         <label className="text-[11px] text-content-tertiary tracking-wider block mb-0.5">
           Model
         </label>
-        <input
-          type="text"
-          value={value.model}
-          placeholder="deepseek-chat"
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          onChange={(e) => onChange({ model: e.target.value })}
-          className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary font-mono focus:outline-none focus:border-accent-main"
-        />
+        {/* Datalist suggestions are derived from the matching preset's
+            `example_models`. The model string is stored prefixed with the
+            provider id (e.g. "deepseek/deepseek-v4-flash"), so we strip the
+            prefix before lookup and re-attach it on suggestion. The input
+            itself remains free-text — typing a custom model is still allowed. */}
+        {(() => {
+          const providerId = (value.model || "").split("/", 1)[0];
+          const matched = PROVIDER_PRESETS.find((p) => p.id === providerId);
+          const suggestions = matched?.example_models ?? [];
+          return (
+            <>
+              <input
+                type="text"
+                list={suggestions.length ? `models-${title.toLowerCase()}` : undefined}
+                value={value.model}
+                placeholder="deepseek-chat"
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+                onChange={(e) => onChange({ model: e.target.value })}
+                className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary font-mono focus:outline-none focus:border-accent-main"
+              />
+              {suggestions.length > 0 && (
+                <datalist id={`models-${title.toLowerCase()}`}>
+                  {suggestions.map((m) => (
+                    <option
+                      key={m}
+                      value={composeModelString(providerId, m)}
+                    />
+                  ))}
+                </datalist>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* API key */}

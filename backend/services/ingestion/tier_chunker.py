@@ -136,6 +136,92 @@ def _build_policy(config=None) -> ChunkingPolicy:
     )
 
 
+# Markup-noise patterns. Run BEFORE chunking so the cleaned text drives both
+# token budgeting and embedding noise reduction. Each pattern strips markup
+# but preserves readable text — pandoc div fences, EPUB pagebreak anchors,
+# image markdown, and ornamental HTML tags become embedding noise otherwise
+# (cover images, page numbers, figure scaffolding). Ordered: most specific
+# patterns first so they don't get consumed by broader cleanups.
+_MARKUP_NOISE_PATTERNS: tuple[tuple["re.Pattern[str]", str], ...] = (
+    # Pandoc fenced div open: `::: {.section …}` (eats the trailing whitespace
+    # so the fence doesn't leave a blank line behind).
+    (re.compile(r":::\s*\{[^\n}]*\}\s*"), ""),
+    # Pandoc fenced div close: a line containing only `:::` (one or more).
+    (re.compile(r"^\s*:::+\s*$", re.MULTILINE), ""),
+    # Pandoc bracketed anchors / pagebreak markers:
+    #   []{#anchor .class aria-label="…" role="…"}
+    (re.compile(r"\[\]\{[^\n}]*\}"), ""),
+    # Heading / section anchors: `# Title {#anchor}` or `# {#anchor}`.
+    (re.compile(r"\s*\{#[^\n}]*\}"), ""),
+    # Image markdown — drop entirely. Includes the alt-text, which is rarely
+    # useful for retrieval (usually a filename or short caption).
+    (re.compile(r"!\[[^\]]*\]\([^)]+\)"), ""),
+    # HTML self-closing / void scaffolding tags. <img>, <br>, <hr>, <svg>.
+    (re.compile(r"<(?:img|br|hr|svg|path|g|polygon|line|circle|rect)\b[^>]*/?>", re.IGNORECASE), ""),
+    # Open/close pairs we strip without preserving inner text — those tags
+    # carry layout, not content (figure/figcaption are usually image captions).
+    (re.compile(r"</?(?:figure|figcaption|aside|nav|svg|style|script)(?:\s[^>]*)?>", re.IGNORECASE), ""),
+    # Span / anchor tags that wrap text — strip the tag, keep the inner content.
+    (re.compile(r"<(?:span|a)\b[^>]*>"), ""),
+    (re.compile(r"</(?:span|a)>"), ""),
+)
+
+
+def _scrub_markup_noise(text: str) -> str:
+    """Strip HTML/EPUB scaffolding before chunking.
+
+    Preserves readable text; removes pandoc divs, bracketed anchors, image
+    markdown, EPUB pagebreak markers, and ornamental tags that would
+    otherwise become embedding noise (e.g. the cover-image XHTML soup that
+    used to land in chunk_0000 of every EPUB-derived markdown). Idempotent.
+    Collapses runs of 3+ blank lines so paragraph-boundary chunking still
+    works on the post-scrub text.
+    """
+    if not text:
+        return text
+    cleaned = text
+    for pat, repl in _MARKUP_NOISE_PATTERNS:
+        cleaned = pat.sub(repl, cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _hard_split_oversize(chunks: list[str], max_tokens: int) -> list[str]:
+    """Last-line-of-defense split for chunks that exceed `max_tokens`.
+
+    `_split_at_boundary` prefers paragraph / sentence boundaries, but
+    pathological inputs (long unbroken code blocks, single-line walls of
+    text, large tables stringified) can still produce oversized chunks.
+    Without this guard those chunks silently truncate at the embedder's
+    1024-token ceiling, dropping the tail content.
+
+    The split lands at exact token boundaries via re-encoding through the
+    cl100k_base tokenizer. Boundaries can land mid-word — that's still
+    better than letting the embedder truncate randomly, since both halves
+    of the split survive in Qdrant with their full text in Mongo.
+    """
+    if max_tokens <= 0:
+        return chunks
+    out: list[str] = []
+    over_count = 0
+    for c in chunks:
+        toks = _TOKENIZER.encode(c, disallowed_special=())
+        if len(toks) <= max_tokens:
+            out.append(c)
+            continue
+        over_count += 1
+        for i in range(0, len(toks), max_tokens):
+            sub = _TOKENIZER.decode(toks[i:i + max_tokens]).strip()
+            if sub:
+                out.append(sub)
+    if over_count:
+        logger.info(
+            "tier_chunker hard-split: %d/%d chunks force-broken at max_tokens=%d",
+            over_count, len(chunks), max_tokens,
+        )
+    return out
+
+
 def _split_at_sentences(text: str) -> list[str]:
     return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
 
@@ -300,11 +386,17 @@ def _make_children(
     child_index: int,
     *,
     child_target_tokens: int,
+    child_max_tokens: int = 700,
     page_start: int | None = None,
     page_end: int | None = None,
     chunk_kind: str = ChunkKind.BODY,
 ) -> tuple[list[ChildChunk], int]:
     texts = _split_at_boundary(parent_text, child_target_tokens) or [parent_text.strip()]
+    # Hard cap: any child still over `child_max_tokens` after the boundary
+    # splitter (rare but happens on long unbroken code blocks / tables) gets
+    # force-broken at exact token boundaries so the embedder doesn't silently
+    # truncate at its 1024 ceiling.
+    texts = _hard_split_oversize(texts, child_max_tokens)
     children: list[ChildChunk] = []
     for ct in texts:
         if not ct.strip():
@@ -460,7 +552,16 @@ def chunk(
     tier_value = source_tier.value
 
     if source_tier == SourceTier.ocr_ast:
-        raw_pages = parse_result.pages or ([parse_result.markdown or parse_result.text] if (parse_result.markdown or parse_result.text) else [])
+        # Scrub markup noise (pandoc divs, bracketed anchors, image markdown,
+        # ornamental HTML) per page before page-block grouping. Catches the
+        # EPUB cover image and pagebreak scaffolding that used to leak into
+        # body chunk_0000 and become embedding noise.
+        raw_pages_in = parse_result.pages or (
+            [parse_result.markdown or parse_result.text]
+            if (parse_result.markdown or parse_result.text)
+            else []
+        )
+        raw_pages = [_scrub_markup_noise(p or "") for p in raw_pages_in]
         for heading_path, page_text, page_start, page_end in _page_blocks(raw_pages, policy):
             parent_id = f"{doc_id}_parent_{parent_idx:04d}"
             parent_idx += 1
@@ -477,6 +578,7 @@ def chunk(
                 tier_value,
                 child_idx,
                 child_target_tokens=policy.child_target_tokens,
+                child_max_tokens=policy.child_max_tokens,
                 page_start=page_start,
                 page_end=page_end,
                 chunk_kind=kind,
@@ -504,6 +606,11 @@ def chunk(
         if not blocks and (parse_result.markdown or parse_result.text):
             md = parse_result.markdown or parse_result.text
             blocks = [(None, md.strip())]
+        # Scrub markup noise per section so EPUB pandoc divs, bracketed
+        # pagebreak anchors, image markdown, and ornamental HTML tags don't
+        # land in body chunks. Heading paths are preserved as-is.
+        blocks = [(hp, _scrub_markup_noise(t)) for hp, t in blocks if t]
+        blocks = [(hp, t) for hp, t in blocks if t]
 
         # Phase K — adaptive coalesce: merge consecutive small sections so
         # heading-heavy docs don't explode into hundreds of tiny parents.
@@ -560,7 +667,10 @@ def chunk(
                 all_children.extend(p_children)
 
     else:  # tier_c — pure token budget over the docling text/markdown fallback
-        text = parse_result.text or parse_result.markdown or ""
+        # Scrub markup noise on the markdown blob before token-budget splitting.
+        # Plain-text uploads (which classify as tier_c) sometimes carry pandoc
+        # / EPUB residue when they were generated from converted ebooks.
+        text = _scrub_markup_noise(parse_result.text or parse_result.markdown or "")
         parent_texts = _split_at_boundary(
             text,
             policy.parent_target_tokens,
@@ -583,6 +693,7 @@ def chunk(
                 tier_value,
                 child_idx,
                 child_target_tokens=policy.child_target_tokens,
+                child_max_tokens=policy.child_max_tokens,
                 chunk_kind=kind,
             )
             parents.append(

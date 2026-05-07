@@ -61,7 +61,16 @@ export interface PoolProviderPreset {
   name: string;
   litellm_provider: string;
   base_url: string;
+  /** Default model used when the user picks this preset for the first time. */
   example_model: string;
+  /**
+   * Optional list of recommended model names for this provider. The model
+   * field renders as a free-text input with these as `<datalist>` suggestions
+   * so users can either pick a curated option or type a custom one. Leave
+   * undefined when the provider doesn't publish a stable shortlist (e.g.
+   * OpenRouter's hundreds of models).
+   */
+  example_models?: string[];
   kwargs?: Record<string, unknown>;
 }
 
@@ -86,6 +95,13 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
     litellm_provider: "deepseek",
     base_url: "https://api.deepseek.com/v1",
     example_model: "deepseek-chat",
+    example_models: [
+      "deepseek-chat",
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "deepseek-coder-v2",
+      "deepseek-reasoner",
+    ],
   },
   {
     id: "google",

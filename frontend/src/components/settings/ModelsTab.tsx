@@ -197,6 +197,11 @@ function PoolSection() {
           <input
             ref={modelInputRef}
             type="text"
+            list={
+              POOL_PROVIDER_PRESETS.find((p) => p.id === provider)?.example_models
+                ? `models-${provider}`
+                : undefined
+            }
             value={modelName}
             onChange={(e) => setModelName(e.target.value)}
             onKeyDown={(e) => {
@@ -208,6 +213,18 @@ function PoolSection() {
             placeholder="model name"
             className="flex-1 min-w-[160px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600"
           />
+          {/* Datalist suggestions surface every preset's example_models so a
+              provider switch immediately offers the curated shortlist. The
+              input itself stays free-text — typing a custom model still works. */}
+          {POOL_PROVIDER_PRESETS.map((p) =>
+            p.example_models && p.example_models.length > 0 ? (
+              <datalist key={p.id} id={`models-${p.id}`}>
+                {p.example_models.map((m) => (
+                  <option key={m} value={composeModelString(p.id, m)} />
+                ))}
+              </datalist>
+            ) : null
+          )}
           <input
             type="password"
             value={apiKey}
