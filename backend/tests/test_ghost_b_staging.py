@@ -18,6 +18,7 @@ from services.ghost_b import (
     EntityItem,
     ExtractionFailureItem,
     ExtractionResult,
+    FactItem,
     RelationItem,
 )
 from services.storage import mongo_reader, mongo_writer
@@ -44,6 +45,18 @@ def _sample_result(chunk_id: str) -> ExtractionResult:
                 object="steve jobs",
                 object_kind="entity",
                 confidence=0.9,
+            )
+        ],
+        facts=[
+            FactItem(
+                subject="apple inc",
+                fact_type="status",
+                property_name="listing_status",
+                value="public",
+                unit=None,
+                condition=None,
+                confidence=0.8,
+                evidence_phrase="Apple Inc. is public",
             )
         ],
         entity_remap_count=0,
@@ -138,8 +151,7 @@ async def test_read_returns_none_when_field_absent():
 
 
 def test_rehydrate_ghost_b_staging_builds_nested_dataclasses():
-    """Worker's rehydration helper must produce real EntityItem / RelationItem
-    instances on the nested arrays, not leave them as dicts."""
+    """Worker's rehydration helper must produce real nested dataclasses."""
     from services.ingestion.worker import _rehydrate_ghost_b_staging
 
     raw = [
@@ -165,13 +177,47 @@ def test_rehydrate_ghost_b_staging_builds_nested_dataclasses():
                     "confidence": 0.7,
                 }
             ],
+            "facts": [
+                {
+                    "subject": "x",
+                    "fact_type": "category",
+                    "property_name": "topic",
+                    "value": "systems",
+                    "unit": None,
+                    "condition": None,
+                    "confidence": 0.8,
+                    "evidence_phrase": "X is a systems topic",
+                }
+            ],
         }
     ]
     rehydrated = _rehydrate_ghost_b_staging(raw)
     assert len(rehydrated) == 1
     assert isinstance(rehydrated[0].entities[0], EntityItem)
     assert isinstance(rehydrated[0].relations[0], RelationItem)
+    assert isinstance(rehydrated[0].facts[0], FactItem)
     assert rehydrated[0].entities[0].entity_type == "Concept"
+    assert rehydrated[0].facts[0].property_name == "topic"
+
+
+def test_rehydrate_ghost_b_staging_accepts_legacy_without_facts():
+    from services.ingestion.worker import _rehydrate_ghost_b_staging
+
+    raw = [
+        {
+            "schema_version": "polymath.extract.v1",
+            "chunk_id": "c1",
+            "doc_id": "d1",
+            "corpus_id": "corp1",
+            "entities": [],
+            "relations": [],
+        }
+    ]
+
+    rehydrated = _rehydrate_ghost_b_staging(raw)
+
+    assert len(rehydrated) == 1
+    assert rehydrated[0].facts == []
 
 
 @pytest.mark.asyncio
@@ -190,6 +236,7 @@ async def test_resume_skip_reads_staging_not_llm():
                 "entity_type": "Person", "confidence": 0.9,
             }],
             "relations": [],
+            "facts": [],
         }],
     }
     ws = WriteState(mongo_written=True, qdrant_written=True, neo4j_written=False)
@@ -253,6 +300,7 @@ async def test_resume_skip_keeps_ghost_b_partial_metrics():
                     "confidence": 0.9,
                 }],
                 "relations": [],
+                "facts": [],
             }
         ],
         "ghost_b_failures": [asdict(failure)],

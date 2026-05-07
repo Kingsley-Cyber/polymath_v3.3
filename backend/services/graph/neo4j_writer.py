@@ -13,6 +13,7 @@ the node, `extracted_type` on MENTIONS) instead of fragmenting identity.
 Entry point: write_document_graph() — call after GHOST B returns ExtractionResult list.
 """
 
+import hashlib
 import logging
 import json
 import re
@@ -25,6 +26,7 @@ from neo4j import AsyncDriver
 from services.ghost_b import (
     EntityItem,
     ExtractionResult,
+    FactItem,
     RelationItem,
     SchemaContext,
     UNIVERSAL_RELATION_SCHEMA,
@@ -815,6 +817,27 @@ def entity_id_from_name(canonical_name: str, entity_type: str | None = None) -> 
     return f"{ENTITY_ID_PREFIX}:{_slugify_name(canonical_name)}"
 
 
+def fact_id_from_parts(
+    *,
+    doc_id: str,
+    chunk_id: str,
+    subject: str,
+    property_name: str,
+    value: str,
+) -> str:
+    """Deterministic fact ID scoped to source chunk and fact payload."""
+    raw = "\x1f".join(
+        [
+            str(doc_id or ""),
+            str(chunk_id or ""),
+            canonicalize_entity_name(subject),
+            str(property_name or "").strip().lower(),
+            str(value or "").strip().lower(),
+        ]
+    )
+    return f"fact:{hashlib.sha256(raw.encode('utf-8')).hexdigest()}"
+
+
 async def _upsert_document(
     driver: AsyncDriver,
     doc_id: str,
@@ -1004,7 +1027,8 @@ async def write_document_graph(
     reducing Neo4j round-trips by ~1000x on busy docs.
 
     Creates/updates: Document node, Chunk nodes, HAS_CHUNK edges,
-    Entity nodes, MENTIONS edges, RELATES_TO edges (entity→entity only).
+    Entity nodes, MENTIONS edges, RELATES_TO edges (entity→entity only),
+    plus optional Fact nodes linked by HAS_FACT and SUPPORTS_FACT.
     all_chunk_ids lets ingestion preserve complete document/chunk coverage in
     Neo4j even when Ghost B only returned partial entity/relation extraction.
     """
@@ -1163,6 +1187,34 @@ async def write_document_graph(
                 "relation_cue": relation.relation_cue,
                 "confidence": relation.confidence,
                 "chunk_id": r.chunk_id,
+            })
+
+    fact_rows: list[dict] = []
+    for r in extraction_results:
+        for fact in getattr(r, "facts", []) or []:
+            subject_canonical = canonicalize_entity_name(fact.subject)
+            subject_identity = entity_identity.get(subject_canonical)
+            if not subject_identity:
+                continue
+            fact_rows.append({
+                "fact_id": fact_id_from_parts(
+                    doc_id=doc_id,
+                    chunk_id=r.chunk_id,
+                    subject=fact.subject,
+                    property_name=fact.property_name,
+                    value=fact.value,
+                ),
+                "subject_entity_id": subject_identity["entity_id"],
+                "subject": subject_identity["canonical_name"],
+                "doc_id": doc_id,
+                "chunk_id": r.chunk_id,
+                "fact_type": fact.fact_type,
+                "property_name": fact.property_name,
+                "value": fact.value,
+                "unit": fact.unit,
+                "condition": fact.condition,
+                "confidence": fact.confidence,
+                "evidence_phrase": fact.evidence_phrase,
             })
 
     if alias_resolution_count:
@@ -1324,13 +1376,46 @@ async def write_document_graph(
                 rows=relation_rows,
             )
 
+        # Structured facts/properties stay separate from entity-to-entity edges.
+        if fact_rows:
+            await session.run(
+                """
+                UNWIND $rows AS row
+                MATCH (e:Entity {entity_id: row.subject_entity_id})
+                MATCH (c:Chunk {chunk_id: row.chunk_id, corpus_id: $corpus_id})
+                MERGE (f:Fact {fact_id: row.fact_id})
+                SET f.corpus_id = $corpus_id,
+                    f.doc_id = row.doc_id,
+                    f.chunk_id = row.chunk_id,
+                    f.subject = row.subject,
+                    f.fact_type = row.fact_type,
+                    f.property_name = row.property_name,
+                    f.value = row.value,
+                    f.unit = row.unit,
+                    f.condition = row.condition,
+                    f.confidence = CASE
+                        WHEN f.confidence IS NULL OR row.confidence > f.confidence THEN row.confidence
+                        ELSE f.confidence
+                    END,
+                    f.evidence_phrase = row.evidence_phrase,
+                    f.extractor = 'ghost_b',
+                    f.updated_at = timestamp()
+                MERGE (e)-[:HAS_FACT]->(f)
+                MERGE (c)-[:SUPPORTS_FACT]->(f)
+                """,
+                rows=fact_rows,
+                corpus_id=corpus_id,
+            )
+
     entity_count = sum(len(r.entities) for r in extraction_results)
     relation_count = sum(len(r.relations) for r in extraction_results)
+    fact_count = sum(len(getattr(r, "facts", []) or []) for r in extraction_results)
     logger.info(
-        "Neo4j write complete (batched): doc=%s corpus=%s chunks=%d entities=%d relations=%d",
+        "Neo4j write complete (batched): doc=%s corpus=%s chunks=%d entities=%d relations=%d facts=%d",
         doc_id,
         corpus_id,
         len(chunk_rows),
         entity_count,
         relation_count,
+        fact_count,
     )

@@ -50,6 +50,7 @@ from services.ghost_b import (
     ExtractionFailureItem,
     ExtractionResult,
     ExtractionTask,
+    FactItem,
     RelationItem,
     SchemaContext,
     extract_entities,
@@ -182,6 +183,7 @@ def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict
         "total_duration_seconds": 0.0,
         "entity_count": sum(len(r.entities) for r in results),
         "relation_count": relation_count,
+        "fact_count": sum(len(getattr(r, "facts", []) or []) for r in results),
         "related_to_count": related_to_count,
         "related_to_ratio": round(related_to_count / relation_count, 4) if relation_count else 0.0,
         "entity_remap_count": sum(r.entity_remap_count for r in results),
@@ -192,6 +194,7 @@ def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict
         "evidence_cue_repair_count": sum(r.evidence_cue_repair_count for r in results),
         "entity_drop_count": sum(r.entity_drop_count for r in results),
         "relation_drop_count": sum(r.relation_drop_count for r in results),
+        "fact_drop_count": sum(getattr(r, "fact_drop_count", 0) for r in results),
         "schema_lens_ids": lens_ids,
         "error_counts": {},
     }
@@ -283,6 +286,7 @@ def _rehydrate_ghost_b_staging(staged: list[dict]) -> list[ExtractionResult]:
                 corpus_id=r["corpus_id"],
                 entities=[EntityItem(**e) for e in r.get("entities", [])],
                 relations=[RelationItem(**x) for x in r.get("relations", [])],
+                facts=[FactItem(**f) for f in r.get("facts", [])],
                 entity_remap_count=r.get("entity_remap_count", 0),
                 entity_drop_count=r.get("entity_drop_count", 0),
                 relation_remap_count=r.get("relation_remap_count", 0),
@@ -291,6 +295,8 @@ def _rehydrate_ghost_b_staging(staged: list[dict]) -> list[ExtractionResult]:
                 domain_range_warn_count=r.get("domain_range_warn_count", 0),
                 endpoint_completion_count=r.get("endpoint_completion_count", 0),
                 evidence_cue_repair_count=r.get("evidence_cue_repair_count", 0),
+                evidence_drop_count=r.get("evidence_drop_count", 0),
+                fact_drop_count=r.get("fact_drop_count", 0),
                 schema_lens_id=r.get("schema_lens_id"),
             )
         )

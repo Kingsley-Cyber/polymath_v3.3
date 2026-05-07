@@ -7,15 +7,20 @@ reordering them breaks cross-corpus queries and (when either vocabulary list
 crosses SCHEMA_INLINE_LIMIT) flips ghost_b into degraded retrieval mode.
 """
 
+import json
+
 from config import get_settings
 from models.schemas import IngestionConfig
 from services.ghost_b import (
     EntityItem,
+    ExtractionTask,
+    FactItem,
     RelationItem,
     UNIVERSAL_ENTITY_SCHEMA,
     UNIVERSAL_RELATION_SCHEMA,
     SchemaContext,
     _apply_schema,
+    _parse,
     _validate_evidence,
     build_user_prompt,
     normalize_relation_predicate_alias,
@@ -135,6 +140,126 @@ def test_prompt_renders_universal_vocab():
     assert "|calls|" not in prompt
     # Ontology facet exclusion still enforced
     assert "ontology" in prompt
+
+
+def test_prompt_renders_optional_fact_shape_when_enabled():
+    prompt = build_user_prompt(
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        text="Orders over $500 require manager approval.",
+        enable_facts=True,
+        max_facts=5,
+    )
+
+    assert '"facts":[{' in prompt
+    assert '"fact_type":"property|status|timestamp|threshold|category|tag|rule_condition|rule_action"' in prompt
+    assert "max 5 facts" in prompt
+    assert "fact subject must match an entity canonical_name" in prompt
+
+
+def test_parse_facts_is_backward_compatible_when_missing():
+    task = ExtractionTask(
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        text="The cache timeout is 30 seconds.",
+    )
+    raw = json.dumps({
+        "schema_version": "polymath.extract.v1",
+        "chunk_id": "c1",
+        "doc_id": "d1",
+        "corpus_id": "corp1",
+        "entities": [
+            {
+                "canonical_name": "cache timeout",
+                "surface_form": "cache timeout",
+                "entity_type": "Concept",
+                "confidence": 0.9,
+            }
+        ],
+        "relations": [],
+    })
+
+    result = _parse(raw, task, 0.0, enable_facts=True, max_facts=5)
+
+    assert result is not None
+    assert result.facts == []
+    assert result.fact_drop_count == 0
+
+
+def test_parse_facts_keeps_valid_and_drops_invalid_without_failing_chunk():
+    task = ExtractionTask(
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        text="Orders over $500 require manager approval. Status is active.",
+    )
+    raw = json.dumps({
+        "schema_version": "polymath.extract.v1",
+        "chunk_id": "c1",
+        "doc_id": "d1",
+        "corpus_id": "corp1",
+        "entities": [
+            {
+                "canonical_name": "orders",
+                "surface_form": "Orders",
+                "entity_type": "Concept",
+                "confidence": 0.9,
+            },
+            {
+                "canonical_name": "manager approval",
+                "surface_form": "manager approval",
+                "entity_type": "Rule",
+                "confidence": 0.9,
+            },
+        ],
+        "relations": [],
+        "facts": [
+            {
+                "subject": "orders",
+                "fact_type": "threshold",
+                "property_name": "approval_threshold",
+                "value": "500",
+                "unit": "USD",
+                "condition": "order total exceeds 500",
+                "confidence": 0.95,
+                "evidence_phrase": "Orders over $500 require manager approval",
+            },
+            {
+                "subject": "not in entities",
+                "fact_type": "status",
+                "property_name": "status",
+                "value": "active",
+                "confidence": 0.9,
+                "evidence_phrase": "Status is active",
+            },
+            {
+                "subject": "orders",
+                "fact_type": "threshold",
+                "property_name": "approval_threshold",
+                "value": "750",
+                "confidence": 0.9,
+                "evidence_phrase": "not actually in source",
+            },
+        ],
+    })
+
+    result = _parse(raw, task, 0.0, enable_facts=True, max_facts=5)
+
+    assert result is not None
+    assert len(result.facts) == 1
+    assert result.facts[0] == FactItem(
+        subject="orders",
+        fact_type="threshold",
+        property_name="approval_threshold",
+        value="500",
+        unit="USD",
+        condition="order total exceeds 500",
+        confidence=0.95,
+        evidence_phrase="Orders over $500 require manager approval",
+    )
+    assert result.fact_drop_count == 2
 
 
 def test_schema_strict_legacy_values_deserialize():

@@ -15,6 +15,7 @@ _CONSTRAINTS = [
     "CREATE CONSTRAINT IF NOT EXISTS FOR (d:Document) REQUIRE d.doc_id IS UNIQUE",
     "CREATE CONSTRAINT IF NOT EXISTS FOR (c:Chunk) REQUIRE c.chunk_id IS UNIQUE",
     "CREATE CONSTRAINT IF NOT EXISTS FOR (e:Entity) REQUIRE e.entity_id IS UNIQUE",
+    "CREATE CONSTRAINT IF NOT EXISTS FOR (f:Fact) REQUIRE f.fact_id IS UNIQUE",
 ]
 
 _INDEXES = [
@@ -37,6 +38,10 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.predicate)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.edge_strength)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.eligible_for_synthesis)",
+    "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.corpus_id)",
+    "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.doc_id)",
+    "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.fact_type)",
+    "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.property_name)",
 ]
 
 

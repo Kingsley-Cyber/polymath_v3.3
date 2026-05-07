@@ -19,7 +19,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, ClassVar, Literal
+from typing import Any, Awaitable, Callable, ClassVar, Literal
 
 import httpx
 
@@ -40,13 +40,23 @@ SchemaResolver = Callable[[str, list[float], int], Awaitable[list[str]]]
 logger = logging.getLogger(__name__)
 
 _SYSTEM = (
-    "You are a precise entity and relation extractor. "
+    "You are a precise entity, relation, and fact extractor. "
     "Output ONLY valid JSON. Extract only what is explicitly stated in the text. "
-    "Do not hallucinate entities or relations."
+    "Do not hallucinate entities, relations, or facts."
 )
 
 # Default open-vocabulary enums when no schema is provided.
 _DEFAULT_ENTITY_TYPES = ["person", "org", "concept", "other"]
+FACT_TYPES: tuple[str, ...] = (
+    "property",
+    "status",
+    "timestamp",
+    "threshold",
+    "category",
+    "tag",
+    "rule_condition",
+    "rule_action",
+)
 
 
 # ── Universal schema (baked, replaces per-corpus tuning) ───────────────────
@@ -760,6 +770,8 @@ def build_user_prompt(
     effective_entity_vocab: list[str] | None = None,
     effective_relation_vocab: list[str] | None = None,
     schema_lens: SchemaLens | dict | None = None,
+    enable_facts: bool | None = None,
+    max_facts: int | None = None,
 ) -> str:
     """Render the per-chunk extraction user prompt, with optional schema constraints.
 
@@ -819,11 +831,40 @@ def build_user_prompt(
             )
     vocab_block = "\n".join(vocab_block_lines)
     lens_block = _render_schema_lens_block(schema_lens)
-    entity_cap = max_entities or get_settings().EXTRACTION_MAX_ENTITIES_PER_CHUNK
-    relation_cap = max_relations or get_settings().EXTRACTION_MAX_RELATIONS_PER_CHUNK
+    settings = get_settings()
+    entity_cap = max_entities or settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK
+    relation_cap = max_relations or settings.EXTRACTION_MAX_RELATIONS_PER_CHUNK
+    facts_enabled = settings.EXTRACTION_ENABLE_FACTS if enable_facts is None else enable_facts
+    fact_cap = (
+        settings.EXTRACTION_MAX_FACTS_PER_CHUNK
+        if max_facts is None
+        else max(0, int(max_facts))
+    )
+    fact_json = ""
+    fact_rules = ""
+    if facts_enabled and fact_cap > 0:
+        fact_types = "|".join(FACT_TYPES)
+        fact_json = (
+            ',\n'
+            '  "facts":[{"subject":"canonical_name from entities",'
+            f'"fact_type":"{fact_types}","property_name":"snake_case",'
+            '"value":"verbatim or normalized","unit":null,'
+            '"condition":null,"confidence":0.0,'
+            '"evidence_phrase":"short source phrase"}]\n'
+        )
+        fact_rules = (
+            f"- max {fact_cap} facts; facts are optional\n"
+            "- facts capture high-value status, timestamps, thresholds, categories, tags, rule conditions/actions, or property values\n"
+            "- fact subject must match an entity canonical_name already listed in entities\n"
+            "- fact evidence_phrase must be a short exact phrase from text\n"
+            "- drop vague or low-value facts\n"
+        )
+    else:
+        fact_json = "\n"
 
+    target = "entities, relations, and facts" if facts_enabled and fact_cap > 0 else "entities and relations"
     return (
-        "Extract entities and relations. Return JSON only:\n"
+        f"Extract {target}. Return JSON only:\n"
         "{\n"
         '  "schema_version":"polymath.extract.v1",\n'
         f'  "chunk_id":"{chunk_id}",\n'
@@ -833,10 +874,12 @@ def build_user_prompt(
         f'"entity_type":"{entity_type_enum}","confidence":0.0}}],\n'
         '  "relations":[{"subject":"canonical_name","predicate":'
         f'"{predicate_desc}","object":"canonical_name or literal",'
-        '"object_kind":"entity|literal","confidence":0.0,"evidence_phrase":"short source phrase"}]\n'
+        '"object_kind":"entity|literal","confidence":0.0,"evidence_phrase":"short source phrase"}]'
+        f"{fact_json}"
         "}\n"
         "Rules:\n"
         f"- max {entity_cap} entities, max {relation_cap} relations\n"
+        f"{fact_rules}"
         "- compact JSON, no prose/markdown/duplicates\n"
         "- canonical_name: lowercase, strip punctuation\n"
         "- confidence in [0,1]; drop low-confidence entries\n"
@@ -881,6 +924,30 @@ class RelationItem:
     validation_status: str | None = None
 
 
+FactType = Literal[
+    "property",
+    "status",
+    "timestamp",
+    "threshold",
+    "category",
+    "tag",
+    "rule_condition",
+    "rule_action",
+]
+
+
+@dataclass
+class FactItem:
+    subject: str
+    fact_type: FactType
+    property_name: str
+    value: str
+    unit: str | None
+    condition: str | None
+    confidence: float
+    evidence_phrase: str
+
+
 @dataclass
 class ExtractionResult:
     schema_version: str
@@ -889,6 +956,7 @@ class ExtractionResult:
     corpus_id: str
     entities: list[EntityItem] = field(default_factory=list)
     relations: list[RelationItem] = field(default_factory=list)
+    facts: list[FactItem] = field(default_factory=list)
 
     # Phase 14 observability counters (per-chunk; aggregated at corpus level later).
     entity_remap_count: int = 0   # soft mode: entity_type → 'other'
@@ -906,6 +974,7 @@ class ExtractionResult:
     # see how often the model invents a phrase for an otherwise-valid
     # relation.
     evidence_drop_count: int = 0
+    fact_drop_count: int = 0
     schema_lens_id: str | None = None
 
 
@@ -965,6 +1034,7 @@ def summarize_extraction_batch(
         "total_duration_seconds": round(total_duration, 3),
         "entity_count": sum(len(r.entities) for r in results),
         "relation_count": relation_count,
+        "fact_count": sum(len(getattr(r, "facts", []) or []) for r in results),
         "related_to_count": related_to_count,
         "related_to_ratio": round(related_to_count / relation_count, 4) if relation_count else 0.0,
         "entity_remap_count": sum(r.entity_remap_count for r in results),
@@ -974,6 +1044,7 @@ def summarize_extraction_batch(
         "endpoint_completion_count": sum(r.endpoint_completion_count for r in results),
         "evidence_cue_repair_count": sum(r.evidence_cue_repair_count for r in results),
         "evidence_drop_count": sum(r.evidence_drop_count for r in results),
+        "fact_drop_count": sum(getattr(r, "fact_drop_count", 0) for r in results),
         "entity_drop_count": sum(r.entity_drop_count for r in results),
         "relation_drop_count": sum(r.relation_drop_count for r in results),
         "schema_lens_ids": lens_ids,
@@ -1375,12 +1446,89 @@ def _apply_schema(
     return out_entities, out_relations, counters
 
 
+def _parse_facts(
+    raw_facts: Any,
+    *,
+    task: ExtractionTask,
+    threshold: float,
+    entity_names: set[str],
+    max_facts: int,
+) -> tuple[list[FactItem], int]:
+    """Validate optional structured facts without risking the chunk result."""
+    if max_facts <= 0:
+        return [], 0
+    if raw_facts in (None, ""):
+        return [], 0
+    if not isinstance(raw_facts, list):
+        return [], 1
+
+    facts: list[FactItem] = []
+    dropped = 0
+    allowed_types = set(FACT_TYPES)
+    for item in raw_facts:
+        if len(facts) >= max_facts:
+            break
+        if not isinstance(item, dict):
+            dropped += 1
+            continue
+        try:
+            confidence = float(item.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            dropped += 1
+            continue
+        if confidence < threshold:
+            dropped += 1
+            continue
+
+        subject = _entity_key(item.get("subject") or "")
+        fact_type = str(item.get("fact_type") or "").strip()
+        property_name = _entity_key(item.get("property_name") or "").replace(" ", "_")
+        value = str(item.get("value") or "").strip()
+        evidence_phrase = str(
+            item.get("evidence_phrase") or item.get("evidence") or ""
+        ).strip()[:500]
+
+        if (
+            not subject
+            or subject not in entity_names
+            or fact_type not in allowed_types
+            or not property_name
+            or not value
+            or not _validate_evidence(evidence_phrase, task.text)
+        ):
+            dropped += 1
+            continue
+
+        unit_raw = item.get("unit")
+        condition_raw = item.get("condition")
+        facts.append(
+            FactItem(
+                subject=subject,
+                fact_type=fact_type,  # type: ignore[arg-type]
+                property_name=property_name[:120],
+                value=value[:500],
+                unit=str(unit_raw).strip()[:80] if unit_raw not in (None, "") else None,
+                condition=(
+                    str(condition_raw).strip()[:300]
+                    if condition_raw not in (None, "")
+                    else None
+                ),
+                confidence=confidence,
+                evidence_phrase=evidence_phrase,
+            )
+        )
+    return facts, dropped
+
+
 def _parse(
     raw: str,
     task: ExtractionTask,
     threshold: float,
     schema: SchemaContext | None = None,
     schema_lens: SchemaLens | dict | None = None,
+    *,
+    enable_facts: bool | None = None,
+    max_facts: int | None = None,
 ) -> ExtractionResult | None:
     try:
         data = json.loads(raw)
@@ -1454,6 +1602,23 @@ def _parse(
             continue
         kept_relations.append(r)
     relations = kept_relations
+    settings = get_settings()
+    facts_enabled = settings.EXTRACTION_ENABLE_FACTS if enable_facts is None else enable_facts
+    fact_cap = (
+        settings.EXTRACTION_MAX_FACTS_PER_CHUNK
+        if max_facts is None
+        else max(0, int(max_facts))
+    )
+    facts: list[FactItem] = []
+    fact_drop_count = 0
+    if facts_enabled:
+        facts, fact_drop_count = _parse_facts(
+            data.get("facts", []),
+            task=task,
+            threshold=threshold,
+            entity_names={_entity_key(e.canonical_name) for e in entities},
+            max_facts=fact_cap,
+        )
 
     lens = (
         schema_lens
@@ -1468,6 +1633,7 @@ def _parse(
         corpus_id=task.corpus_id,
         entities=entities,
         relations=relations,
+        facts=facts,
         entity_remap_count=counters["entity_remap_count"],
         entity_drop_count=counters["entity_drop_count"],
         relation_remap_count=counters["relation_remap_count"],
@@ -1477,6 +1643,7 @@ def _parse(
         endpoint_completion_count=counters["endpoint_completion_count"],
         evidence_cue_repair_count=counters["evidence_cue_repair_count"],
         evidence_drop_count=evidence_drop_count,
+        fact_drop_count=fact_drop_count,
         schema_lens_id=lens.lens_id if lens else None,
     )
 
@@ -1528,6 +1695,10 @@ async def extract_entities(
     inline_limit = settings.SCHEMA_INLINE_LIMIT
     top_k = settings.SCHEMA_RETRIEVAL_TOP_K
     max_completion_tokens = settings.EXTRACTION_MAX_TOKENS
+    facts_enabled = settings.EXTRACTION_ENABLE_FACTS
+    max_facts = settings.EXTRACTION_MAX_FACTS_PER_CHUNK
+    if facts_enabled and max_facts > 0:
+        max_completion_tokens = min(8192, max(max_completion_tokens, 3200))
     truncation_retry_tokens = min(
         8192,
         max(max_completion_tokens * 2, max_completion_tokens + 1600),
@@ -1637,6 +1808,8 @@ async def extract_entities(
                         effective_entity_vocab=eff_entity,
                         effective_relation_vocab=eff_relation,
                         schema_lens=schema_lens,
+                        enable_facts=facts_enabled,
+                        max_facts=max_facts,
                     ),
                 },
             ],
@@ -1732,7 +1905,15 @@ async def extract_entities(
                         attempt + 1,
                     )
                     raw = choice.get("message", {}).get("content", "")
-                    result = _parse(raw, task, threshold, schema=schema, schema_lens=schema_lens)
+                    result = _parse(
+                        raw,
+                        task,
+                        threshold,
+                        schema=schema,
+                        schema_lens=schema_lens,
+                        enable_facts=facts_enabled,
+                        max_facts=max_facts,
+                    )
                     call_metrics.append(
                         {
                             "chunk_id": task.chunk_id,

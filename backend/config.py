@@ -383,6 +383,23 @@ class Settings(BaseSettings):
             "canonicalization predicates out of this count."
         ),
     )
+    EXTRACTION_ENABLE_FACTS: bool = Field(
+        default=False,
+        description=(
+            "When true, Ghost B also extracts capped structured facts/properties "
+            "alongside entities and relations. Defaults off so existing ingests "
+            "and staging records stay backward-compatible."
+        ),
+    )
+    EXTRACTION_MAX_FACTS_PER_CHUNK: int = Field(
+        default=5,
+        ge=0,
+        le=20,
+        description=(
+            "Maximum structured facts Ghost B should return for one child chunk "
+            "when EXTRACTION_ENABLE_FACTS is true."
+        ),
+    )
     ENTITY_CONFIDENCE_THRESHOLD: float = Field(
         default=0.5,
         ge=0.0,
