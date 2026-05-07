@@ -161,7 +161,9 @@ async def verify_ingest(
             errors.append(f"probe.scroll({probe_col}): {exc}")
 
     # 5. Neo4j chunk count (only when use_neo4j and driver available).
-    if use_neo4j and neo4j_driver is not None:
+    if use_neo4j and neo4j_driver is None:
+        errors.append("neo4j: required but driver is unavailable")
+    elif use_neo4j and neo4j_driver is not None:
         try:
             cypher = (
                 "MATCH (d:Document {doc_id: $doc_id, corpus_id: $corpus_id})"

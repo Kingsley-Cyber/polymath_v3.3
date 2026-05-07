@@ -16,7 +16,9 @@ Ingestion pipeline worker — locked pipeline order:
   7. Neo4j     → write_document_graph. Flip neo4j_written.
                  Skipped entirely when use_neo4j=False.
 
-Ghost A failure is a hard abort because parent summaries feed retrieval.
+Ghost A total failure is a hard abort because parent summaries feed retrieval;
+partial summary coverage continues as a warning so later storage/graph phases
+still commit.
 Ghost B partial extraction is a soft warning: Mongo/Qdrant still commit, Neo4j
 keeps full chunk coverage, and only entity/relation extraction is partial.
 Resume logic (Decision D) reuses existing Mongo summaries and probes Neo4j for
@@ -24,6 +26,7 @@ MENTIONS so we never pay the LLM twice for work already persisted.
 """
 
 import asyncio
+from collections import Counter
 import hashlib
 import logging
 import mimetypes
@@ -65,7 +68,7 @@ _MODEL_PHASE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_MODEL_PHAS
 
 
 class GhostAFailure(RuntimeError):
-    """Ghost A produced fewer results than tasks — abort the document."""
+    """Ghost A produced no usable summaries, so the document must abort."""
 
 
 class GhostBFailure(RuntimeError):
@@ -134,6 +137,27 @@ def _ghost_b_partial_warning(
     )
 
 
+def _ghost_b_total_failure_warning(*, total: int) -> str:
+    return (
+        f"Ghost B graph extraction produced 0/{total} chunk results; treating "
+        "as an extraction provider outage. Mongo/Qdrant can continue, but Neo4j "
+        "will remain pending for retry/backfill."
+    )
+
+
+def _ghost_a_partial_warning(
+    *,
+    summarized: int,
+    total: int,
+) -> str:
+    skipped = max(total - summarized, 0)
+    return (
+        f"Ghost A parent summarization partial: {summarized}/{total} parents "
+        f"summarized; {skipped} parent summaries are missing, but child chunks "
+        "remain available for vector RAG and graph extraction."
+    )
+
+
 def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict | None:
     if results is None:
         return None
@@ -171,6 +195,48 @@ def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict
         "schema_lens_ids": lens_ids,
         "error_counts": {},
     }
+
+
+def _ghost_b_metrics_with_failures(
+    results: list[ExtractionResult] | None,
+    failures: list[ExtractionFailureItem] | None,
+    base_metrics: dict | None = None,
+) -> dict | None:
+    """Preserve Ghost B partial coverage when a retry reuses staged output."""
+    if results is None:
+        return dict(base_metrics) if isinstance(base_metrics, dict) else None
+
+    metrics = (
+        dict(base_metrics)
+        if isinstance(base_metrics, dict)
+        else (_ghost_b_metrics_for_skipped(results) or {})
+    )
+    extracted = len(results)
+    failed_from_rows = len(failures or [])
+
+    def _as_int(value: Any) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    failed = max(_as_int(metrics.get("failed_chunks")), failed_from_rows)
+    requested = max(_as_int(metrics.get("requested_chunks")), extracted + failed)
+
+    metrics["requested_chunks"] = requested
+    metrics["extracted_chunks"] = extracted
+    metrics["failed_chunks"] = failed
+    metrics["success_rate"] = round(extracted / requested, 4) if requested else 1.0
+
+    if failed_from_rows:
+        error_counts = metrics.get("error_counts")
+        counted = Counter(f.error_type or "unknown" for f in failures or [])
+        if not isinstance(error_counts, dict) or sum(
+            _as_int(v) for v in error_counts.values()
+        ) < failed_from_rows:
+            metrics["error_counts"] = dict(counted)
+
+    return metrics
 
 
 def _build_ghost_pool(refs) -> list[dict]:
@@ -236,13 +302,17 @@ def _reconstruct_summaries_from_mongo(
 ) -> list[SummaryResult]:
     """Rebuild SummaryResult list from Mongo-stored parent_chunks[].summary.
 
-    Only called on the D.2 resume path when every existing parent has a
-    non-empty summary. The parent_id set is stable across runs (deterministic
-    from content-hashed doc_id), so we zip by parent_id map.
+    Only called on the D.2 resume path when every summarizable parent has a
+    non-empty summary. Non-body parents are intentionally skipped by Ghost A,
+    so they are not required for resume. The parent_id set is stable across
+    runs (deterministic from content-hashed doc_id), so we zip by parent_id map.
     """
     by_id = {ep["parent_id"]: ep for ep in existing_parent_chunks}
     out: list[SummaryResult] = []
     for p in parents:
+        kind = getattr(p, "chunk_kind", None) or ChunkKind.BODY
+        if should_skip_ghost_b(kind):
+            continue
         ep = by_id.get(p.parent_id)
         if not ep:
             continue
@@ -259,6 +329,27 @@ def _reconstruct_summaries_from_mongo(
             )
         )
     return out
+
+
+def _rehydrate_ghost_b_failures(rows: list[dict]) -> list[ExtractionFailureItem]:
+    out: list[ExtractionFailureItem] = []
+    for row in rows or []:
+        try:
+            out.append(
+                ExtractionFailureItem(
+                    chunk_id=str(row.get("chunk_id") or ""),
+                    doc_id=str(row.get("doc_id") or ""),
+                    corpus_id=str(row.get("corpus_id") or ""),
+                    model=str(row.get("model") or ""),
+                    lane=int(row.get("lane") or 0),
+                    attempts=int(row.get("attempts") or 0),
+                    error_type=str(row.get("error_type") or "unknown"),
+                    error_message=str(row.get("error_message") or ""),
+                )
+            )
+        except Exception:
+            continue
+    return [failure for failure in out if failure.chunk_id]
 
 
 def _doc_token_set(texts: list[str]) -> set[str]:
@@ -341,9 +432,10 @@ async def _run_ghosts_parallel(
     """Fan out GHOST A + GHOST B in parallel. Either branch may be disabled
     by config OR skipped via resume gates (Decision D).
 
-    Hard-abort semantics: Ghost A still raises on partial summaries. Ghost B
-    partials return usable extraction results plus warnings so the document can
-    commit to Mongo/Qdrant and surface graph coverage honestly in the UI.
+    Hard-abort semantics: Ghost A raises only when it produces zero summaries
+    for requested work. Partial Ghost A and Ghost B results return usable output
+    plus warnings so the document can commit to Mongo/Qdrant/Neo4j and surface
+    coverage honestly in the UI.
     """
     warnings: list[str] = []
     ghost_b_failures: list[ExtractionFailureItem] = []
@@ -359,20 +451,30 @@ async def _run_ghosts_parallel(
         # Summaries already embedded into Qdrant on a prior run; nothing to do.
         need_ghost_a = False
     elif need_ghost_a and ws.mongo_written and existing_parent_chunks:
+        existing_by_parent_id = {p.get("parent_id"): p for p in existing_parent_chunks}
+        summarizable_parents = [
+            p
+            for p in parents
+            if not should_skip_ghost_b(getattr(p, "chunk_kind", None) or ChunkKind.BODY)
+        ]
         all_filled = all(
-            (p.get("summary") or "").strip() for p in existing_parent_chunks
+            (
+                existing_by_parent_id.get(p.parent_id, {}).get("summary")
+                or ""
+            ).strip()
+            for p in summarizable_parents
         )
         if all_filled:
             summaries_from_mongo = _reconstruct_summaries_from_mongo(
                 parents, existing_parent_chunks
             )
-            if len(summaries_from_mongo) == len(parents):
+            if len(summaries_from_mongo) == len(summarizable_parents):
                 need_ghost_a = False
                 logger.info(
                     "Ghost A skipped (resume) doc=%s corpus=%s parents=%d",
                     doc_id[:12],
                     corpus_id[:8],
-                    len(parents),
+                    len(summaries_from_mongo),
                 )
             else:
                 summaries_from_mongo = None  # partial reconstruct → rerun
@@ -388,12 +490,23 @@ async def _run_ghosts_parallel(
         staged = await mongo_reader.read_ghost_b_staging(db, doc_id, corpus_id)
         if staged:
             ghost_b_from_staging = _rehydrate_ghost_b_staging(staged)
+            ghost_b_failures.extend(
+                _rehydrate_ghost_b_failures(
+                    (existing_doc or {}).get("ghost_b_failures") or []
+                )
+            )
+            ghost_b_metrics = _ghost_b_metrics_with_failures(
+                ghost_b_from_staging,
+                ghost_b_failures,
+                (existing_doc or {}).get("ghost_b_metrics"),
+            )
             need_ghost_b = False
             logger.info(
-                "phase=ghost_b_skip reason=staging_found doc=%s corpus=%s entries=%d",
+                "phase=ghost_b_skip reason=staging_found doc=%s corpus=%s entries=%d failures=%d",
                 doc_id[:12],
                 corpus_id[:8],
                 len(ghost_b_from_staging),
+                len(ghost_b_failures),
             )
         elif ws.qdrant_written:
             # Pre-feature document: Qdrant done, Neo4j not, no staging on
@@ -456,8 +569,25 @@ async def _run_ghosts_parallel(
             model=model,
         )
         if len(results) < len(tasks):
-            raise GhostAFailure(
-                f"Ghost A partial: {len(results)}/{len(tasks)} parents summarized"
+            if not results and tasks:
+                raise GhostAFailure(
+                    f"Ghost A produced 0/{len(tasks)} summaries; treating as provider outage"
+                )
+            missing_ids = sorted(
+                {t.parent_id for t in tasks} - {r.parent_id for r in results}
+            )
+            warning = _ghost_a_partial_warning(
+                summarized=len(results),
+                total=len(tasks),
+            )
+            warnings.append(warning)
+            logger.warning(
+                "phase=ghost_a_partial doc=%s corpus=%s summarized=%d total=%d missing_sample=%s",
+                doc_id[:12],
+                corpus_id[:8],
+                len(results),
+                len(tasks),
+                missing_ids[:5],
             )
         return results
 
@@ -576,6 +706,18 @@ async def _run_ghosts_parallel(
         nonlocal ghost_b_metrics
         ghost_b_metrics = metrics
         if len(results) < len(tasks):
+            if not results and tasks:
+                warning = _ghost_b_total_failure_warning(total=len(tasks))
+                warnings.append(warning)
+                logger.error(
+                    "phase=ghost_b_total_failure doc=%s corpus=%s total=%d failures=%d error_counts=%s",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    len(tasks),
+                    len(failures),
+                    metrics.get("error_counts") if isinstance(metrics, dict) else None,
+                )
+                return None
             missing_ids = sorted({t.chunk_id for t in tasks} - {r.chunk_id for r in results})
             warning = _ghost_b_partial_warning(
                 extracted=len(results),
@@ -600,6 +742,11 @@ async def _run_ghosts_parallel(
     ghost_b_out = await _b_branch()
     if ghost_b_metrics is None:
         ghost_b_metrics = _ghost_b_metrics_for_skipped(ghost_b_out)
+    ghost_b_metrics = _ghost_b_metrics_with_failures(
+        ghost_b_out,
+        ghost_b_failures,
+        ghost_b_metrics,
+    )
     return GhostRunResult(
         summaries=summaries,
         ghost_b_out=ghost_b_out,
@@ -1130,15 +1277,28 @@ async def run_ingest_job(
         ghost_b_out = ghost_tuple[1] if len(ghost_tuple) > 1 else None
         ingest_warnings = ghost_tuple[2] if len(ghost_tuple) > 2 else []
         ghost_b_failures = ghost_tuple[3] if len(ghost_tuple) > 3 else []
-        ghost_b_metrics = ghost_tuple[4] if len(ghost_tuple) > 4 else _ghost_b_metrics_for_skipped(ghost_b_out)
+        ghost_b_metrics = (
+            ghost_tuple[4]
+            if len(ghost_tuple) > 4
+            else _ghost_b_metrics_for_skipped(ghost_b_out)
+        )
+    ghost_b_metrics = _ghost_b_metrics_with_failures(
+        ghost_b_out,
+        ghost_b_failures,
+        ghost_b_metrics,
+    )
     ws.warnings = _merge_warnings(ws.warnings, ingest_warnings)
+    ghost_a_partial = any(w.startswith("Ghost A ") for w in ingest_warnings)
+    ghost_b_partial = any(w.startswith("Ghost B ") for w in ingest_warnings)
+    ghost_a_status = "partial" if ghost_a_partial else ("ok" if summaries is not None else "skipped")
+    ghost_b_status = "partial" if ghost_b_partial else ("ok" if ghost_b_out is not None else "skipped")
     logger.info(
         "phase=ghosts duration=%.2fs doc=%s corpus=%s ghost_a=%s ghost_b=%s warnings=%d failed_chunks=%d",
         time.monotonic() - t0,
         doc_id[:12],
         cid8,
-        "ok" if summaries is not None else "skipped",
-        "partial" if ingest_warnings and ghost_b_out is not None else ("ok" if ghost_b_out is not None else "skipped"),
+        ghost_a_status,
+        ghost_b_status,
         len(ingest_warnings),
         len(ghost_b_failures),
     )
@@ -1371,14 +1531,39 @@ async def run_ingest_job(
                 exc,
             )
 
+    final_status = "failed" if ws.verified is False else "done"
+    final_error = None
+    if ws.verified is False and ws.verify_errors:
+        final_error = "; ".join(ws.verify_errors)
+    if ws.verified is True:
+        # A resumed ingest can repair an earlier phase failure. Clear the
+        # stale top-level error and remove only the synthetic failure warning;
+        # genuine coverage warnings such as Ghost B partial extraction remain.
+        repaired_warnings = [
+            w for w in (ws.warnings or []) if not str(w).startswith("Ingest failed:")
+        ]
+        if repaired_warnings != ws.warnings:
+            ws.warnings = repaired_warnings
+        await db["documents"].update_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {
+                "$set": {
+                    "write_state.warnings": ws.warnings,
+                    "updated_at": datetime.utcnow(),
+                },
+                "$unset": {"error": ""},
+            },
+        )
+
     return IngestJobResponse(
         job_id=job_id,
         doc_id=doc_id,
         corpus_id=corpus_id,
         filename=filename,
         source_tier=source_tier.value,
-        status="done",
+        status=final_status,
         write_state=ws,
         chunk_count=len(children),
         parent_count=len(parents),
+        error=final_error,
     )

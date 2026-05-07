@@ -264,6 +264,17 @@ class VectorScopeResult:
 
 # ── Pipeline primitives ────────────────────────────────────────────────────
 
+def _dense_vector_from_qdrant(value) -> list[float] | None:
+    """Normalize Qdrant vector payloads across legacy and named-vector layouts."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        value = value.get("dense")
+    if not isinstance(value, list) or not value:
+        return None
+    return value
+
+
 async def get_doc_fingerprints(qdrant, corpus_id: str) -> dict[str, list[float]]:
     """Scroll the per-corpus naive Qdrant collection and mean-aggregate child
     chunk vectors into a per-document fingerprint.
@@ -291,9 +302,10 @@ async def get_doc_fingerprints(qdrant, corpus_id: str) -> dict[str, list[float]]
         for r in records:
             payload = r.payload or {}
             doc_id = payload.get("doc_id")
-            if not doc_id or r.vector is None:
+            vector = _dense_vector_from_qdrant(r.vector)
+            if not doc_id or vector is None:
                 continue
-            doc_vectors[doc_id].append(r.vector)
+            doc_vectors[doc_id].append(vector)
         if offset is None:
             break
 

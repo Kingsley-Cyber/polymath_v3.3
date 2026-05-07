@@ -8,12 +8,18 @@ live LLM. Mongo is still hit against the running test container.
 """
 
 import asyncio
+from dataclasses import asdict
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from services.conversation import conversation_service
-from services.ghost_b import EntityItem, ExtractionResult, RelationItem
+from services.ghost_b import (
+    EntityItem,
+    ExtractionFailureItem,
+    ExtractionResult,
+    RelationItem,
+)
 from services.storage import mongo_reader, mongo_writer
 
 
@@ -213,3 +219,81 @@ async def test_resume_skip_reads_staging_not_llm():
     assert ghost_b_out is not None and len(ghost_b_out) == 1
     assert isinstance(ghost_b_out[0], ExtractionResult)
     assert ghost_b_out[0].entities[0].entity_type == "Person"
+
+
+@pytest.mark.asyncio
+async def test_resume_skip_keeps_ghost_b_partial_metrics():
+    """Reusing staged Ghost B output must not turn partial coverage into 100%."""
+    from models.schemas import IngestionConfig, WriteState
+    from services.ingestion import worker
+
+    failure = ExtractionFailureItem(
+        chunk_id="c-missing",
+        doc_id="d-resume",
+        corpus_id="c-resume",
+        model="m",
+        lane=0,
+        attempts=3,
+        error_type="parse_error",
+        error_message="unterminated json",
+    )
+    existing_doc = {
+        "doc_id": "d-resume",
+        "corpus_id": "c-resume",
+        "parent_chunks": [],
+        "ghost_b_staging": [
+            _sample_result("c-good").__dict__ | {
+                "chunk_id": "c-good",
+                "doc_id": "d-resume",
+                "corpus_id": "c-resume",
+                "entities": [{
+                    "canonical_name": "x",
+                    "surface_form": "X",
+                    "entity_type": "Person",
+                    "confidence": 0.9,
+                }],
+                "relations": [],
+            }
+        ],
+        "ghost_b_failures": [asdict(failure)],
+        # Simulates older/stale resume bookkeeping that only counted staged rows.
+        "ghost_b_metrics": {
+            "requested_chunks": 1,
+            "extracted_chunks": 1,
+            "failed_chunks": 0,
+            "success_rate": 1.0,
+            "error_counts": {},
+        },
+    }
+    ws = WriteState(mongo_written=True, qdrant_written=True, neo4j_written=False)
+
+    async def _read_stub(db, doc_id, corpus_id):
+        return existing_doc["ghost_b_staging"]
+
+    with patch.object(
+        worker.mongo_reader, "read_ghost_b_staging", side_effect=_read_stub
+    ), patch.object(
+        worker, "extract_entities", new_callable=AsyncMock
+    ) as extract_mock, patch.object(worker.settings, "NEO4J_ENABLED", True):
+        result = await worker._run_ghosts_parallel(
+            config=IngestionConfig(use_neo4j=True, chunk_summarization=False),
+            parents=[],
+            children=[],
+            doc_id="d-resume",
+            corpus_id="c-resume",
+            model="ollama/llama3.2:3b",
+            db=AsyncMock(),
+            qdrant_client=None,
+            neo4j_driver=object(),
+            existing_doc=existing_doc,
+            ws=ws,
+        )
+
+    assert extract_mock.await_count == 0
+    assert result.ghost_b_failures == [failure]
+    assert result.ghost_b_metrics is not None
+    assert result.ghost_b_metrics["requested_chunks"] == 2
+    assert result.ghost_b_metrics["extracted_chunks"] == 1
+    assert result.ghost_b_metrics["failed_chunks"] == 1
+    assert result.ghost_b_metrics["success_rate"] == 0.5
+    assert result.ghost_b_metrics["error_counts"] == {"parse_error": 1}

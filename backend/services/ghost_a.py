@@ -30,6 +30,8 @@ from services.llm_lane_pool import (
 )
 
 logger = logging.getLogger(__name__)
+_SUMMARY_RETRY_ATTEMPTS = 2
+_SUMMARY_RETRY_BACKOFF_SECONDS = 1.5
 
 _SYSTEM = (
     "You are a precise document summarizer. Produce a factual, dense summary "
@@ -112,12 +114,13 @@ async def summarize_parents(
     # Phase K — WORK-STEALING POOL. See ghost_b.py for full rationale.
     # Shared task queue; one worker per lane slot; workers pull as fast
     # as they can → slow lanes don't bottleneck fast lanes' throughput.
+    task_by_parent_id = {t.parent_id: t for t in tasks}
     task_queue: "asyncio.Queue[SummaryTask]" = asyncio.Queue()
     for t in tasks:
         task_queue.put_nowait(t)
 
-    results_list: list[SummaryResult] = []
-    _list_lock = asyncio.Lock()
+    results_by_parent_id: dict[str, SummaryResult] = {}
+    _results_lock = asyncio.Lock()
     disabled_lanes: set[int] = set()
     lane_fatal_strikes: dict[int, int] = {}
     _disabled_lock = asyncio.Lock()
@@ -237,8 +240,8 @@ async def summarize_parents(
                     return
                 if result is not None:
                     await _clear_lane_strikes(pool_idx)
-                    async with _list_lock:
-                        results_list.append(result)
+                    async with _results_lock:
+                        results_by_parent_id[result.parent_id] = result
             finally:
                 task_queue.task_done()
 
@@ -253,28 +256,80 @@ async def summarize_parents(
         if workers:
             await asyncio.gather(*workers, return_exceptions=False)
 
-    await _run_enabled_workers()
-    while not task_queue.empty():
-        enabled_count = sum(
+    def _enabled_lane_count() -> int:
+        return sum(
             1 for pool_idx in range(len(pool)) if pool_idx not in disabled_lanes
         )
-        if enabled_count <= 0:
-            logger.error(
-                "GHOST A stopped with %d parents still queued because all summary lanes were disabled",
-                task_queue.qsize(),
-            )
-            break
-        pending_before = task_queue.qsize()
-        disabled_before = len(disabled_lanes)
-        await _run_enabled_workers()
-        if task_queue.qsize() >= pending_before and len(disabled_lanes) == disabled_before:
-            logger.warning(
-                "GHOST A stopped with %d parents still queued after retry drain made no progress",
-                task_queue.qsize(),
-            )
-            break
 
-    results = results_list
+    async def _drain_pending_queue() -> None:
+        while not task_queue.empty():
+            enabled_count = _enabled_lane_count()
+            if enabled_count <= 0:
+                logger.error(
+                    "GHOST A stopped with %d parents still queued because all summary lanes were disabled",
+                    task_queue.qsize(),
+                )
+                break
+            pending_before = task_queue.qsize()
+            disabled_before = len(disabled_lanes)
+            await _run_enabled_workers()
+            if task_queue.qsize() >= pending_before and len(disabled_lanes) == disabled_before:
+                logger.warning(
+                    "GHOST A stopped with %d parents still queued after retry drain made no progress",
+                    task_queue.qsize(),
+                )
+                break
+
+    def _clear_pending_queue() -> None:
+        while not task_queue.empty():
+            try:
+                task_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            task_queue.task_done()
+
+    def _missing_tasks() -> list[SummaryTask]:
+        return [
+            task_by_parent_id[parent_id]
+            for parent_id in task_by_parent_id
+            if parent_id not in results_by_parent_id
+        ]
+
+    await _run_enabled_workers()
+    await _drain_pending_queue()
+
+    for attempt in range(1, _SUMMARY_RETRY_ATTEMPTS + 1):
+        missing = _missing_tasks()
+        if not missing:
+            break
+        if _enabled_lane_count() <= 0:
+            logger.error(
+                "GHOST A cannot retry %d missing parents because all summary lanes are disabled",
+                len(missing),
+            )
+            break
+        _clear_pending_queue()
+        if _SUMMARY_RETRY_BACKOFF_SECONDS > 0:
+            await asyncio.sleep(_SUMMARY_RETRY_BACKOFF_SECONDS * attempt)
+        logger.warning(
+            "GHOST A retry %d/%d for %d missing parent summaries",
+            attempt,
+            _SUMMARY_RETRY_ATTEMPTS,
+            len(missing),
+        )
+        for task in missing:
+            task_queue.put_nowait(task)
+        await _run_enabled_workers()
+        await _drain_pending_queue()
+
+    if not task_queue.empty():
+        _clear_pending_queue()
+
+    results = [
+        results_by_parent_id[t.parent_id]
+        for t in tasks
+        if t.parent_id in results_by_parent_id
+    ]
     if disabled_lanes:
         logger.warning(
             "GHOST A completed with disabled lanes: %s",

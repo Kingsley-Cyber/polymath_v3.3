@@ -47,6 +47,41 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def _upsert_batch_size() -> int:
+    try:
+        return max(1, int(settings.QDRANT_UPSERT_BATCH_SIZE))
+    except Exception:
+        return 256
+
+
+async def _upsert_points_batched(
+    client: AsyncQdrantClient,
+    *,
+    collection_name: str,
+    points: list[PointStruct],
+    point_label: str,
+) -> None:
+    if not points:
+        return
+    batch_size = _upsert_batch_size()
+    for start in range(0, len(points), batch_size):
+        batch = points[start : start + batch_size]
+        try:
+            await client.upsert(collection_name=collection_name, points=batch)
+        except Exception:
+            logger.exception(
+                "Qdrant upsert failed collection=%s label=%s batch=%d-%d "
+                "batch_size=%d total=%d",
+                collection_name,
+                point_label,
+                start,
+                start + len(batch) - 1,
+                len(batch),
+                len(points),
+            )
+            raise
+
+
 def _uuid_from_str(s: str) -> str:
     digest = hashlib.md5(s.encode()).hexdigest()
     return (
@@ -518,7 +553,12 @@ async def upsert_children(
             )
             for c, v, sv, payload in zip(chunks, vectors, sv_iter, payloads)
         ]
-        await client.upsert(collection_name=name, points=points)
+        await _upsert_points_batched(
+            client,
+            collection_name=name,
+            points=points,
+            point_label="child",
+        )
         logger.debug(
             "Upserted %d child points → %s (named=%s sparse=%s)",
             len(points), name, has_named, has_sparse,
@@ -586,7 +626,12 @@ async def upsert_summaries(
             )
             for p, v, sv, payload in zip(summary_payloads, vectors, sv_iter, payloads)
         ]
-        await client.upsert(collection_name=name, points=points)
+        await _upsert_points_batched(
+            client,
+            collection_name=name,
+            points=points,
+            point_label="summary",
+        )
         logger.debug(
             "Upserted %d summary points → %s (named=%s sparse=%s)",
             len(points), name, has_named, has_sparse,
@@ -691,7 +736,12 @@ async def upsert_schema_terms(
         )
         for term, v in zip(terms, vectors)
     ]
-    await client.upsert(collection_name=name, points=points)
+    await _upsert_points_batched(
+        client,
+        collection_name=name,
+        points=points,
+        point_label=f"schema:{kind}",
+    )
     logger.debug(
         "Upserted %d schema terms (kind=%s) for corpus %s", len(points), kind, corpus_id
     )

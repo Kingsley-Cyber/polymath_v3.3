@@ -5,7 +5,7 @@ Companion to test_ghost_b_staging.py — that file owns the Ghost B staging
 round-trip and resume skip path. Here we exercise:
   - phase ordering across Deep / Balanced / Fast modes
   - Ghost A resume-from-Mongo skip path
-  - hard-abort behavior on Ghost A / Ghost B partial failures
+  - hard-abort behavior on Ghost A total failures / Ghost B catastrophic failures
   - per-corpus concurrency preservation (no env fallback on the hot path)
   - universal schema still applies on a Balanced-flag IngestionConfig
 
@@ -32,6 +32,8 @@ from models.schemas import (
 from services.ghost_a import SummaryResult
 from services.ghost_b import (
     EntityItem,
+    ExtractionBatchReport,
+    ExtractionFailureItem,
     ExtractionResult,
     RelationItem,
     UNIVERSAL_ENTITY_SCHEMA,
@@ -198,6 +200,7 @@ def _install_mocks(
         "corpus_id": "c" * 36,
         "default_ingestion_config": {},
     })
+    ensure_progress_mock = AsyncMock()
     update_state_mock = AsyncMock()
     mongo_db = MagicMock()
     # For the corpora counter update path in run_ingest_job
@@ -213,6 +216,7 @@ def _install_mocks(
         patch.object(worker, "_write_neo4j_for_doc", neo4j_mock),
         patch.object(worker.mongo_reader, "get_document", get_doc_mock),
         patch.object(worker.mongo_reader, "get_corpus", get_corpus_mock),
+        patch.object(worker, "_ensure_progress_document", ensure_progress_mock),
         patch.object(worker.mongo_writer, "update_write_state", update_state_mock),
         patch.object(worker.settings, "NEO4J_ENABLED", True),
     ]
@@ -233,6 +237,7 @@ def _install_mocks(
         "qdrant": qdrant_mock,
         "neo4j": neo4j_mock,
         "get_doc": get_doc_mock,
+        "ensure_progress": ensure_progress_mock,
         "update_state": update_state_mock,
         "db": mongo_db,
         "stop_all": _stop_all,
@@ -428,12 +433,148 @@ async def test_ghost_a_partial_reconstruct_falls_back_to_llm():
     assert len(summaries) == 2
 
 
+@pytest.mark.asyncio
+async def test_ghost_a_partial_summarization_warns_and_continues():
+    """A nonzero Ghost A partial should keep usable summaries and warn.
+
+    Mongo/Qdrant/Neo4j still need a chance to run so deep ingest can retain
+    search and graph coverage even if some parent summaries are absent.
+    """
+    doc_id, corpus_id = "doc-ghost-a-partial", "c" * 36
+    p1, c1 = _parent(doc_id, corpus_id, pid="p0", child_id="c0")
+    p2, c2 = _parent(doc_id, corpus_id, pid="p1", child_id="c1")
+    parents = [p1, p2]
+    children = [c1, c2]
+    ws = WriteState()
+    cfg = IngestionConfig(
+        use_neo4j=False,
+        chunk_summarization=True,
+        target_qdrant_collections=["naive", "hrag"],
+    )
+
+    async def _partial_summarize(tasks, **kwargs):
+        return [_fake_summary_result(tasks[0].parent_id, doc_id, corpus_id)]
+
+    summarize_mock = AsyncMock(side_effect=_partial_summarize)
+    with patch.object(worker, "summarize_parents", summarize_mock), \
+         patch.object(worker.settings, "NEO4J_ENABLED", True):
+        result = await worker._run_ghosts_parallel(
+            config=cfg, parents=parents, children=children,
+            doc_id=doc_id, corpus_id=corpus_id,
+            model="m",
+            db=MagicMock(), qdrant_client=MagicMock(),
+            neo4j_driver=MagicMock(),
+            existing_doc=None, ws=ws,
+        )
+
+    assert summarize_mock.await_count == 1
+    assert result.summaries is not None
+    assert len(result.summaries) == 1
+    assert result.ghost_b_out is None
+    assert result.warnings
+    assert result.warnings[0].startswith("Ghost A parent summarization partial: 1/2")
+
+
+@pytest.mark.asyncio
+async def test_ghost_a_zero_summaries_still_hard_aborts():
+    """Zero Ghost A output is treated as provider outage and aborts the doc."""
+    doc_id, corpus_id = "doc-ghost-a-zero", "c" * 36
+    p1, c1 = _parent(doc_id, corpus_id, pid="p0", child_id="c0")
+    p2, c2 = _parent(doc_id, corpus_id, pid="p1", child_id="c1")
+    parents = [p1, p2]
+    children = [c1, c2]
+    ws = WriteState()
+    cfg = IngestionConfig(
+        use_neo4j=False,
+        chunk_summarization=True,
+        target_qdrant_collections=["naive", "hrag"],
+    )
+
+    summarize_mock = AsyncMock(return_value=[])
+    with patch.object(worker, "summarize_parents", summarize_mock), \
+         patch.object(worker.settings, "NEO4J_ENABLED", True), \
+         pytest.raises(GhostAFailure, match="Ghost A produced 0/2 summaries"):
+        await worker._run_ghosts_parallel(
+            config=cfg, parents=parents, children=children,
+            doc_id=doc_id, corpus_id=corpus_id,
+            model="m",
+            db=MagicMock(), qdrant_client=MagicMock(),
+            neo4j_driver=MagicMock(),
+            existing_doc=None, ws=ws,
+        )
+
+
+@pytest.mark.asyncio
+async def test_ghost_b_zero_extractions_leaves_neo4j_pending():
+    """A total Ghost B outage should not produce a chunk-only Neo4j success.
+
+    Mongo/Qdrant can still proceed after the ghost phase, but returning
+    ghost_b_out=None prevents the Neo4j writer from flipping neo4j_written
+    when no entity/relation extraction was produced.
+    """
+    doc_id, corpus_id = "doc-ghost-b-zero", "c" * 36
+    p1, c1 = _parent(doc_id, corpus_id, pid="p0", child_id="c0")
+    p2, c2 = _parent(doc_id, corpus_id, pid="p1", child_id="c1")
+    parents = [p1, p2]
+    children = [c1, c2]
+    ws = WriteState()
+    cfg = IngestionConfig(
+        use_neo4j=True,
+        chunk_summarization=False,
+        target_qdrant_collections=["naive", "hrag", "graph"],
+    )
+    failure = ExtractionFailureItem(
+        chunk_id="c0",
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        model="m",
+        lane=0,
+        attempts=2,
+        error_type="parse_error",
+        error_message="parse returned None",
+    )
+    report = ExtractionBatchReport(
+        results=[],
+        failures=[failure],
+        metrics={
+            "requested_chunks": 2,
+            "extracted_chunks": 0,
+            "failed_chunks": 1,
+            "success_rate": 0.0,
+            "error_counts": {"parse_error": 1},
+        },
+    )
+
+    extract_mock = AsyncMock(return_value=report)
+    lens = SimpleNamespace(to_dict=lambda: {"lens_id": "test-lens"})
+    with patch.object(worker, "extract_entities", extract_mock), \
+         patch.object(worker, "get_or_create_schema_lens", AsyncMock(return_value=lens)), \
+         patch.object(worker.settings, "NEO4J_ENABLED", True):
+        result = await worker._run_ghosts_parallel(
+            config=cfg, parents=parents, children=children,
+            doc_id=doc_id, corpus_id=corpus_id,
+            model="m",
+            db=MagicMock(), qdrant_client=MagicMock(),
+            neo4j_driver=MagicMock(),
+            existing_doc=None, ws=ws,
+        )
+
+    assert extract_mock.await_count == 1
+    assert result.ghost_b_out is None
+    assert result.ghost_b_failures == [failure]
+    assert result.ghost_b_metrics is not None
+    assert result.ghost_b_metrics["extracted_chunks"] == 0
+    assert result.warnings
+    assert result.warnings[0].startswith("Ghost B graph extraction produced 0/2")
+
+
 # ── Hard-abort tests ────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_ghost_a_hard_abort_raises_and_skips_writes():
-    """summarize_parents returning fewer than len(tasks) → GhostAFailure.
+    """A catastrophic/zero Ghost A failure raises GhostAFailure.
+
     run_ingest_job must not write to Mongo / Qdrant / Neo4j, and
     write_state flags must remain at their pre-job values."""
     rec = PhaseRecorder()
@@ -443,7 +584,7 @@ async def test_ghost_a_hard_abort_raises_and_skips_writes():
     # Replace the mocked _run_ghosts_parallel with one that raises.
     async def _raise(**kw):
         rec.events.append("ghosts_parallel")
-        raise GhostAFailure("Ghost A partial: 0/1")
+        raise GhostAFailure("Ghost A produced 0/1 summaries; treating as provider outage")
     worker._run_ghosts_parallel = _raise  # type: ignore[assignment]
     try:
         cfg = IngestionConfig(use_neo4j=False, chunk_summarization=True)

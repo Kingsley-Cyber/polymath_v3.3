@@ -1528,6 +1528,10 @@ async def extract_entities(
     inline_limit = settings.SCHEMA_INLINE_LIMIT
     top_k = settings.SCHEMA_RETRIEVAL_TOP_K
     max_completion_tokens = settings.EXTRACTION_MAX_TOKENS
+    truncation_retry_tokens = min(
+        8192,
+        max(max_completion_tokens * 2, max_completion_tokens + 1600),
+    )
     max_entities = settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK
     max_relations = settings.EXTRACTION_MAX_RELATIONS_PER_CHUNK
     headers = {
@@ -1648,10 +1652,13 @@ async def extract_entities(
             if _k not in ("model", "messages", "response_format"):
                 payload[_k] = _v
 
-        # 2-attempt retry on the same lane. Work-stealing handles
+        # Retry on the same lane. Work-stealing handles
         # cross-lane rebalancing naturally, so there's no need to jump
         # lanes on retry — most transient failures (rate-limit, 5xx,
-        # JSON parse) recover on a fresh connection.
+        # JSON parse) recover on a fresh connection. When JSON parsing fails
+        # because the provider stopped at max_tokens, the next attempt gets a
+        # larger output budget; retrying the same capped request just repeats
+        # the truncation.
         #
         # JSON-mode fallback: a few providers (notably SiliconFlow's
         # Hy3-preview, error code 20024) reject `response_format=json_object`
@@ -1662,9 +1669,19 @@ async def extract_entities(
         json_mode_supported = True
         last_exc: Exception | None = None
         last_error_type = "unknown"
-        for attempt in range(2):
+        retry_with_more_tokens = False
+        parse_failures = 0
+        exception_failures = 0
+        max_attempts = 3
+        for attempt in range(max_attempts):
             started = time.perf_counter()
             attempt_payload = dict(payload)
+            attempt_max_tokens = (
+                truncation_retry_tokens
+                if retry_with_more_tokens
+                else max_completion_tokens
+            )
+            attempt_payload["max_tokens"] = attempt_max_tokens
             if not json_mode_supported:
                 attempt_payload.pop("response_format", None)
             try:
@@ -1695,20 +1712,26 @@ async def extract_entities(
                     resp.raise_for_status()
                     body = resp.json()
                     usage = body.get("usage") or {}
+                    choices = body.get("choices") or []
+                    choice = choices[0] if choices else {}
+                    finish_reason = choice.get("finish_reason")
                     logger.info(
                         "GHOST B extraction call: chunk_id=%s model=%s "
                         "duration=%.2fs total_tokens=%s prompt_tokens=%s "
-                        "completion_tokens=%s lane=%d attempt=%d",
+                        "completion_tokens=%s finish_reason=%s max_tokens=%s "
+                        "lane=%d attempt=%d",
                         task.chunk_id,
                         entry["model"],
                         duration,
                         usage.get("total_tokens"),
                         usage.get("prompt_tokens"),
                         usage.get("completion_tokens"),
+                        finish_reason,
+                        attempt_max_tokens,
                         pool_idx,
                         attempt + 1,
                     )
-                    raw = body["choices"][0]["message"]["content"]
+                    raw = choice.get("message", {}).get("content", "")
                     result = _parse(raw, task, threshold, schema=schema, schema_lens=schema_lens)
                     call_metrics.append(
                         {
@@ -1720,6 +1743,8 @@ async def extract_entities(
                             "total_tokens": usage.get("total_tokens"),
                             "prompt_tokens": usage.get("prompt_tokens"),
                             "completion_tokens": usage.get("completion_tokens"),
+                            "finish_reason": finish_reason,
+                            "max_tokens": attempt_max_tokens,
                             "success": bool(result),
                             "error_type": None if result else "parse_error",
                         }
@@ -1735,11 +1760,48 @@ async def extract_entities(
                             pool_idx,
                         )
                         return result
+                    parse_failures += 1
+                    completion_tokens_raw = usage.get("completion_tokens")
+                    try:
+                        completion_tokens = int(completion_tokens_raw)
+                    except (TypeError, ValueError):
+                        completion_tokens = None
+                    hit_output_cap = (
+                        finish_reason == "length"
+                        or (
+                            completion_tokens is not None
+                            and completion_tokens >= attempt_max_tokens
+                        )
+                    )
+                    if (
+                        hit_output_cap
+                        and attempt_max_tokens < truncation_retry_tokens
+                        and attempt + 1 < max_attempts
+                    ):
+                        retry_with_more_tokens = True
+                        last_error_type = "truncated_json"
+                        last_exc = RuntimeError(
+                            f"parse returned None after hitting max_tokens={attempt_max_tokens}"
+                        )
+                        logger.warning(
+                            "GHOST B JSON parse failed after output cap "
+                            "chunk_id=%s lane=%d completion_tokens=%s "
+                            "max_tokens=%s; retrying with max_tokens=%s",
+                            task.chunk_id,
+                            pool_idx,
+                            completion_tokens_raw,
+                            attempt_max_tokens,
+                            truncation_retry_tokens,
+                        )
+                        continue
                     last_error_type = "parse_error"
                     last_exc = RuntimeError("parse returned None")
+                    if parse_failures >= 2:
+                        break
             except Exception as exc:
                 last_exc = exc
                 last_error_type = exc.__class__.__name__
+                exception_failures += 1
                 fatal_tier = provider_error_tier(exc)
                 fatal_lane = fatal_tier is not None
                 call_metrics.append(
@@ -1752,6 +1814,8 @@ async def extract_entities(
                         "total_tokens": 0,
                         "prompt_tokens": 0,
                         "completion_tokens": 0,
+                        "finish_reason": None,
+                        "max_tokens": attempt_payload.get("max_tokens"),
                         "success": False,
                         "error_type": (
                             f"{fatal_tier}_fatal_lane_error"
@@ -1767,10 +1831,15 @@ async def extract_entities(
                         "GHOST B lane %d failed chunk_id=%s attempt=%d: %s — retrying",
                         pool_idx, task.chunk_id, attempt + 1, exc,
                     )
+                if exception_failures >= 2:
+                    break
                 continue
         logger.error(
-            "GHOST B failed chunk_id=%s lane=%d after 2 attempts: %s",
-            task.chunk_id, pool_idx, last_exc,
+            "GHOST B failed chunk_id=%s lane=%d after %d attempts: %s",
+            task.chunk_id,
+            pool_idx,
+            parse_failures + exception_failures,
+            last_exc,
         )
         failures_list.append(
             ExtractionFailureItem(
@@ -1779,7 +1848,7 @@ async def extract_entities(
                 corpus_id=task.corpus_id,
                 model=str(entry["model"]),
                 lane=pool_idx,
-                attempts=2,
+                attempts=parse_failures + exception_failures,
                 error_type=last_error_type,
                 error_message=str(last_exc)[:1000],
             )

@@ -103,6 +103,80 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["ingestion"])
 
 
+def _resolve_ingest_progress(
+    doc: dict,
+    *,
+    neo4j_enabled: bool | None = None,
+) -> dict:
+    """Return the externally visible ingest status/stage from write_state."""
+    ws_raw = doc.get("write_state") or {}
+    cfg = doc.get("ingestion_config") or {}
+    target_qdrant_collections = cfg.get("target_qdrant_collections") or []
+    qdrant_required = bool(target_qdrant_collections)
+    if neo4j_enabled is None:
+        neo4j_enabled = bool(get_settings().NEO4J_ENABLED)
+    neo4j_required = bool(cfg.get("use_neo4j")) and neo4j_enabled
+
+    mongo_done = bool(ws_raw.get("mongo_written", False))
+    qdrant_done = bool(ws_raw.get("qdrant_written", False))
+    neo4j_done = bool(ws_raw.get("neo4j_written", False))
+    verified = ws_raw.get("verified")
+    verify_errors = ws_raw.get("verify_errors", []) or []
+    warnings = ws_raw.get("warnings", []) or []
+    error = doc.get("error")
+
+    required_qdrant_done = (not qdrant_required) or qdrant_done
+    required_neo4j_done = (not neo4j_required) or neo4j_done
+
+    if error:
+        status = "failed"
+    elif verified is False:
+        status = "failed"
+    elif (
+        mongo_done
+        and required_qdrant_done
+        and required_neo4j_done
+        and verified is True
+    ):
+        status = "done"
+    else:
+        status = "processing"
+
+    if error:
+        stage = "failed"
+    elif verified is False:
+        stage = "verify_failed"
+    elif status == "done":
+        stage = "verified"
+    elif mongo_done and required_qdrant_done and required_neo4j_done:
+        stage = "verifying"
+    elif (
+        neo4j_required
+        and mongo_done
+        and required_qdrant_done
+        and not neo4j_done
+    ):
+        stage = "graph_extracting"
+    elif qdrant_required and mongo_done and not qdrant_done:
+        stage = "embedding"
+    elif mongo_done:
+        stage = "verifying"
+    else:
+        stage = "ingesting"
+
+    return {
+        "status": status,
+        "stage": stage,
+        "mongo_done": mongo_done,
+        "qdrant_done": qdrant_done,
+        "neo4j_done": neo4j_done,
+        "verified": verified,
+        "verify_errors": verify_errors,
+        "warnings": warnings,
+        "error": error,
+    }
+
+
 @router.post("/corpora", response_model=CorpusResponse, status_code=201)
 async def create_corpus(
     body: CorpusCreate,
@@ -642,16 +716,18 @@ async def get_job_status(
         raise HTTPException(status_code=404, detail="Job not found")
 
     ws_raw = doc.get("write_state", {})
+    progress = _resolve_ingest_progress(doc)
     return IngestJobResponse(
         job_id=doc.get("file_id", doc_id),
         doc_id=doc["doc_id"],
         corpus_id=doc["corpus_id"],
         filename=doc.get("filename", ""),
         source_tier=doc.get("source_tier"),
-        status="done" if ws_raw.get("mongo_written") else "processing",
+        status=progress["status"],
         write_state=WriteState(**ws_raw) if ws_raw else WriteState(),
         chunk_count=doc.get("chunk_count", 0),
         parent_count=len(doc.get("parent_chunks", [])),
+        error=progress["error"],
     )
 
 
@@ -681,37 +757,7 @@ async def stream_job_progress(
                 return
 
             ws_raw = doc.get("write_state", {})
-            mongo_done = ws_raw.get("mongo_written", False)
-            qdrant_done = ws_raw.get("qdrant_written", False)
-            neo4j_done = ws_raw.get("neo4j_written", False)
-            verified = ws_raw.get("verified")  # None until verify runs
-            verify_errors = ws_raw.get("verify_errors", []) or []
-            warnings = ws_raw.get("warnings", []) or []
-            error = doc.get("error")
-
-            if error:
-                status = "failed"
-            elif mongo_done and qdrant_done and verified is not None:
-                # Only emit "done" once verification has completed.
-                status = "done"
-            else:
-                status = "processing"
-
-            # Determine current pipeline stage
-            if error:
-                stage = "failed"
-            elif verified is False:
-                stage = "verify_failed"
-            elif verified is True:
-                stage = "verified"
-            elif neo4j_done and qdrant_done and mongo_done:
-                stage = "verifying"
-            elif qdrant_done and mongo_done:
-                stage = "graph_extracting" if not neo4j_done else "verifying"
-            elif mongo_done:
-                stage = "embedding"
-            else:
-                stage = "ingesting"
+            progress = _resolve_ingest_progress(doc)
 
             payload = json.dumps(
                 {
@@ -719,20 +765,20 @@ async def stream_job_progress(
                     "doc_id": doc["doc_id"],
                     "corpus_id": doc["corpus_id"],
                     "filename": doc.get("filename", ""),
-                    "status": status,
-                    "stage": stage,
+                    "status": progress["status"],
+                    "stage": progress["stage"],
                     "source_tier": doc.get("source_tier"),
                     "chunk_count": doc.get("chunk_count", 0),
                     "parent_count": len(doc.get("parent_chunks", [])),
                     "write_state": {
-                        "mongo_written": mongo_done,
-                        "qdrant_written": qdrant_done,
-                        "neo4j_written": neo4j_done,
-                        "warnings": warnings,
-                        "verified": verified,
-                        "verify_errors": verify_errors,
+                        "mongo_written": progress["mongo_done"],
+                        "qdrant_written": progress["qdrant_done"],
+                        "neo4j_written": progress["neo4j_done"],
+                        "warnings": progress["warnings"],
+                        "verified": progress["verified"],
+                        "verify_errors": progress["verify_errors"],
                     },
-                    "error": error,
+                    "error": progress["error"],
                 }
             )
 
@@ -741,7 +787,7 @@ async def stream_job_progress(
                 yield f"data: {payload}\n\n"
                 last_status = payload
 
-            if status in ("done", "failed"):
+            if progress["status"] in ("done", "failed"):
                 yield build_sse_done()
                 return
 

@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     QDRANT_COLLECTION: str = Field(
         default="polymath_chunks", description="Default Qdrant collection name"
     )
+    QDRANT_UPSERT_BATCH_SIZE: int = Field(
+        default=256,
+        ge=1,
+        le=2048,
+        description=(
+            "Maximum points per Qdrant upsert request. Large deep-ingest "
+            "documents can produce thousands of dense+sparse points, and one "
+            "huge HTTP payload is brittle under load."
+        ),
+    )
 
     # === GRAPH DATABASE ===
     NEO4J_ENABLED: bool = Field(
