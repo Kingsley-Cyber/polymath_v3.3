@@ -343,10 +343,16 @@ class Settings(BaseSettings):
         description="Max concurrent LiteLLM calls for entity extraction (GHOST B)",
     )
     EXTRACTION_MAX_TOKENS: int = Field(
-        default=1536,
+        default=2400,
         ge=256,
         le=8192,
-        description="Maximum completion tokens for each entity extraction call (GHOST B)",
+        description=(
+            "Maximum completion tokens for each entity extraction call (GHOST B). "
+            "Bumped from 1536 → 2400 alongside the relations cap bump (14 → 20) "
+            "and the schema additions (synonym_of, instance_of, owns, etc.). "
+            "1536 was already tight at cap=14; growing the cap without growing "
+            "the budget caused mid-string JSON truncation."
+        ),
     )
     EXTRACTION_MAX_ENTITIES_PER_CHUNK: int = Field(
         default=14,
@@ -355,10 +361,17 @@ class Settings(BaseSettings):
         description="Maximum entities Ghost B should return for a single child chunk",
     )
     EXTRACTION_MAX_RELATIONS_PER_CHUNK: int = Field(
-        default=14,
+        default=20,
         ge=0,
         le=64,
-        description="Maximum relations Ghost B should return for a single child chunk",
+        description=(
+            "Maximum relations Ghost B should return for a single child chunk. "
+            "Bumped from 14 → 20 when canonicalization predicates "
+            "(synonym_of, instance_of) joined the universal schema — those "
+            "self-edges shouldn't crowd out real operational relations. If "
+            "the cap ever squeezes out content, the next refactor should tier "
+            "canonicalization predicates out of this count."
+        ),
     )
     ENTITY_CONFIDENCE_THRESHOLD: float = Field(
         default=0.5,

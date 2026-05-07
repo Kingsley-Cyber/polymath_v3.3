@@ -34,6 +34,20 @@ for _name, _value in vars(_legacy).items():
         globals()[_name] = _value
 
 
+def _universal_entity_schema() -> list[str]:
+    """Lazy accessor for ghost_b.UNIVERSAL_ENTITY_SCHEMA. Importing ghost_b
+    eagerly at module load would create a services↔models cycle, so the
+    import lives inside the call site and the function is only invoked from
+    the IngestionConfig field defaults at instantiation time."""
+    from services.ghost_b import UNIVERSAL_ENTITY_SCHEMA
+    return UNIVERSAL_ENTITY_SCHEMA
+
+
+def _universal_relation_schema() -> list[str]:
+    from services.ghost_b import UNIVERSAL_RELATION_SCHEMA
+    return UNIVERSAL_RELATION_SCHEMA
+
+
 class IngestionConfig(BaseModel):
     """Source-backed ingestion config for the current pipeline."""
 
@@ -64,7 +78,7 @@ class IngestionConfig(BaseModel):
     )
     child_chunk_tokens: _legacy.TokenBudget = Field(
         default_factory=lambda: _legacy.TokenBudget(
-            min_tokens=128, target_tokens=350, max_tokens=512
+            min_tokens=128, target_tokens=500, max_tokens=700
         )
     )
     chunk_overlap: int = Field(default=200)
@@ -79,8 +93,17 @@ class IngestionConfig(BaseModel):
     entity_confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     models_linked: bool = True
 
-    entity_schema: list[str] | None = None
-    relation_schema: list[str] | None = None
+    # Default to the universal vocab so freshly-instantiated configs match
+    # what the lifespan migration patches existing corpora to. Ghost B's
+    # UNIVERSAL_*_SCHEMA constants are imported lazily to avoid a circular
+    # services↔models import at module load. `default_factory` clones the
+    # list so per-corpus mutations never mutate the module-level vocab.
+    entity_schema: list[str] | None = Field(
+        default_factory=lambda: list(_universal_entity_schema())
+    )
+    relation_schema: list[str] | None = Field(
+        default_factory=lambda: list(_universal_relation_schema())
+    )
     schema_strict: Literal["off", "soft", "hard"] = "soft"
 
     use_neo4j: bool = True
@@ -149,6 +172,16 @@ class WriteState(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     verified: bool | None = None
     verify_errors: list[str] = Field(default_factory=list)
+
+
+class IngestJobResponse(_legacy.IngestJobResponse):
+    """Override the legacy class so the `write_state` annotation binds to the
+    extended `WriteState` defined above (warnings / verified / verify_errors).
+    Without this override, routers passing a new-style WriteState instance hit
+    a Pydantic ValidationError because the legacy field expects the 3-field
+    legacy WriteState class."""
+
+    write_state: WriteState = Field(default_factory=WriteState)
 
 
 class CorpusCreate(_legacy.CorpusCreate):

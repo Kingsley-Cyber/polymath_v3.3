@@ -70,34 +70,52 @@ UNIVERSAL_ENTITY_SCHEMA: list[str] = [
 ]
 
 UNIVERSAL_RELATION_SCHEMA: list[str] = [
+    # Structural
     "part_of",
     "member_of",
     "located_in",
     "works_for",
     "created_by",
-    "uses",
-    "calls",
+    "owns",
+    "affiliated_with",
+    # Canonicalization (entity-merging predicates — let the LLM emit synonyms
+    # and instance-of edges so the graph can collapse surface variants and
+    # build type hierarchies. Tracked separately from operational relations
+    # in case future versions tier them out of EXTRACTION_MAX_RELATIONS_PER_CHUNK.)
+    "synonym_of",
+    "instance_of",
+    # Operational
+    "uses",          # absorbs the previous `calls` predicate (X invokes Y is a kind of X uses Y)
     "references",
     "implements",
     "depends_on",
     "produces",
     "stores",
-    "extracts",
-    "detects",
+    "detects",       # absorbs the previous `extracts` predicate
     "classifies",
     "runs_on",
     "trained_on",
     "supports",
+    # Referential / transformation
     "represents",
     "maps_to",
+    # Temporal
     "preceded_by",
     "causes",
+    "overlaps",      # temporal co-occurrence (Event/TimeReference overlap)
+    # Provenance / conflict
     "derived_from",
     "contradicts",
     "excepts",
     "overrides",
-    "related_to",  # sentinel — MUST stay last
+    # Sentinel — MUST stay last; rendered with a [FALLBACK] tag in the prompt.
+    "related_to",
 ]
+# Total = 30 predicates including sentinel. Stays at SCHEMA_INLINE_LIMIT (30).
+# resolve_chunk_vocab inlines the full list when len <= limit; bumping the
+# count above 30 flips ghost_b into per-chunk Qdrant retrieval mode (see
+# GOTCHAS §42), which degrades on fresh ingest where chunk vectors don't
+# yet exist when ghost_b runs.
 
 # Phase I — Claude-authored disambiguating glosses injected into the extraction
 # prompt's vocabulary constraint block. Each ≤ 8 words, designed to separate
@@ -106,49 +124,57 @@ UNIVERSAL_RELATION_SCHEMA: list[str] = [
 # Not consumed by any migration / comparison / storage code — purely an
 # LLM-facing prompt augmentation.
 UNIVERSAL_ENTITY_GLOSSES: dict[str, str] = {
-    "Person":        "named human individual",
-    "Organization":  "named formal group (company, team, unit)",
-    "Location":      "named physical place",
-    "Event":         "named bounded occurrence",
-    "Concept":       "abstract idea, not a procedure",
-    "Method":        "executable procedure or named technique",
-    "Product":       "built offering with users",
-    "Document":      "authored written artifact",
-    "Rule":          "non-legal prescriptive guideline",
-    "Law":           "legally binding statute or regulation",
-    "Artifact":      "tangible object, not a Product",
-    "TimeReference": "specific date, period, or duration",
-    "other":         "nothing above fits",
+    # Glosses are intentionally short and free of commas / nested parens.
+    # The constraint block renders these as `Name=gloss` with `|` separators
+    # (no spaces). LLMs occasionally treat embedded commas inside parens as
+    # separator boundaries; ultra-tight glosses sidestep that failure mode
+    # and shrink the per-chunk extraction prompt by ~75%.
+    "Person":        "human individual",
+    "Organization":  "formal group",
+    "Location":      "physical place",
+    "Event":         "bounded occurrence",
+    "Concept":       "abstract idea not a procedure",
+    "Method":        "executable procedure",
+    "Product":       "built offering",
+    "Document":      "authored writing",
+    "Rule":          "non-legal guideline",
+    "Law":           "binding statute",
+    "Artifact":      "tangible object not a Product",
+    "TimeReference": "specific date or duration",
+    "other":         "fallback",
 }
 
 UNIVERSAL_RELATION_GLOSSES: dict[str, str] = {
-    "part_of":      "X is a structural subcomponent of Y",
-    "member_of":    "X is in group Y",
-    "located_in":   "X is inside place Y",
-    "works_for":    "Person X employed by Org Y",
-    "created_by":   "Y authored or built X",
-    "uses":         "X operationally consumes Y",
-    "calls":        "X invokes API/function/service Y",
-    "references":   "X cites or mentions Y",
-    "implements":   "X is concrete form of abstract Y",
-    "depends_on":   "X requires Y to function",
-    "produces":     "X outputs Y",
-    "stores":       "X persists Y in storage",
-    "extracts":     "X pulls Y from source data",
-    "detects":      "X identifies Y in input",
-    "classifies":   "X assigns Y as a category",
-    "runs_on":      "X executes on platform Y",
-    "trained_on":   "X learns from dataset Y",
-    "supports":     "X enables capability Y",
-    "represents":   "X models or encodes Y",
-    "maps_to":      "X transforms into Y",
-    "preceded_by":  "X happened after Y",
-    "causes":       "X leads to effect Y",
-    "derived_from": "X evolved out of Y",
-    "contradicts":  "X conflicts with Y",
-    "excepts":      "X is carveout from Y",
-    "overrides":    "X supersedes Y on conflict",
-    "related_to":   "fallback catchall",
+    "part_of":         "X subcomponent of Y",
+    "member_of":       "X in group Y",
+    "located_in":      "X inside place Y",
+    "works_for":       "X employed by Y",
+    "created_by":      "Y authored X",
+    "owns":            "X owns/holds title to Y",
+    "affiliated_with": "X loosely tied to Y not member",
+    "synonym_of":      "X same entity as Y",
+    "instance_of":     "X is a Y subclass or kind",
+    "uses":            "X consumes or invokes Y",
+    "references":      "X cites Y",
+    "implements":      "X concrete form of Y",
+    "depends_on":      "X needs Y",
+    "produces":        "X outputs Y",
+    "stores":          "X persists Y",
+    "detects":         "X identifies or pulls Y from data",
+    "classifies":      "X categorizes Y",
+    "runs_on":         "X executes on Y",
+    "trained_on":      "X learned from Y",
+    "supports":        "X enables Y",
+    "represents":      "X models Y",
+    "maps_to":         "X transforms to Y",
+    "preceded_by":     "X follows Y in time",
+    "causes":          "X leads to Y",
+    "overlaps":        "X co-occurs in time with Y",
+    "derived_from":    "X evolved from Y",
+    "contradicts":     "X conflicts with Y",
+    "excepts":         "X carveout from Y",
+    "overrides":       "X supersedes Y",
+    "related_to":      "use only when no specific predicate fits",
 }
 
 DOMAIN_RANGE_MAP: dict[str, dict[str, list[str]]] = {
@@ -172,13 +198,44 @@ DOMAIN_RANGE_MAP: dict[str, dict[str, list[str]]] = {
         "subject_types": ["Artifact", "Concept", "Document", "Method", "Product", "Rule", "Law"],
         "object_types": ["Person", "Organization"],
     },
-    "uses": {
-        "subject_types": ["Person", "Organization", "Method", "Product", "Artifact"],
-        "object_types": ["Artifact", "Product", "Method", "Concept", "Document"],
+    "owns": {
+        "subject_types": ["Person", "Organization"],
+        "object_types": ["Artifact", "Document", "Organization", "Product", "Location"],
     },
-    "calls": {
-        "subject_types": ["Artifact", "Method", "Product", "Organization"],
-        "object_types": ["Artifact", "Method", "Product", "Organization"],
+    "affiliated_with": {
+        "subject_types": ["Person", "Organization"],
+        "object_types": ["Organization", "Event", "Concept", "Product"],
+    },
+    "synonym_of": {
+        # Canonicalization edge — same surface variant of any entity. Allowed
+        # over every entity type so the LLM can merge "OpenAI" / "openai inc"
+        # or "PyTorch" / "torch" regardless of typing.
+        "subject_types": [
+            "Person", "Organization", "Location", "Event", "Concept", "Method",
+            "Product", "Document", "Rule", "Law", "Artifact", "TimeReference",
+        ],
+        "object_types": [
+            "Person", "Organization", "Location", "Event", "Concept", "Method",
+            "Product", "Document", "Rule", "Law", "Artifact", "TimeReference",
+        ],
+    },
+    "instance_of": {
+        # X is a kind/subtype of Y. Restricted to the type-hierarchy axes
+        # that come up in practice (concept/method/product taxonomies, etc.).
+        "subject_types": [
+            "Concept", "Method", "Product", "Artifact", "Document",
+            "Rule", "Law", "Organization", "Event",
+        ],
+        "object_types": [
+            "Concept", "Method", "Product", "Artifact", "Document",
+            "Rule", "Law", "Organization", "Event",
+        ],
+    },
+    "uses": {
+        # Absorbs the previous `calls` predicate; subject set widened to
+        # include the API-invocation actors that used to live under `calls`.
+        "subject_types": ["Person", "Organization", "Method", "Product", "Artifact"],
+        "object_types": ["Artifact", "Product", "Method", "Concept", "Document", "Organization"],
     },
     "references": {
         "subject_types": ["Concept", "Document", "Method", "Product", "Rule", "Law"],
@@ -200,11 +257,11 @@ DOMAIN_RANGE_MAP: dict[str, dict[str, list[str]]] = {
         "subject_types": ["Artifact", "Method", "Organization", "Product"],
         "object_types": ["Artifact", "Concept", "Document", "Product"],
     },
-    "extracts": {
-        "subject_types": ["Artifact", "Method", "Organization", "Product"],
-        "object_types": ["Artifact", "Concept", "Document", "Event", "Location", "Organization", "Person", "Product"],
-    },
     "detects": {
+        # Absorbs the previous `extracts` predicate — both have identical
+        # subject/object ranges in practice (an algorithm/method/system pulling
+        # or recognizing a target), and keeping them separate produced
+        # inconsistent labels for the same edge across chunks.
         "subject_types": ["Artifact", "Method", "Organization", "Product"],
         "object_types": ["Artifact", "Concept", "Document", "Event", "Location", "Organization", "Person", "Product"],
     },
@@ -233,12 +290,20 @@ DOMAIN_RANGE_MAP: dict[str, dict[str, list[str]]] = {
         "object_types": ["Artifact", "Concept", "Document", "Method", "Product"],
     },
     "preceded_by": {
-        "subject_types": ["Event", "TimeReference", "Document", "Concept", "Method"],
-        "object_types": ["Event", "TimeReference", "Document", "Concept", "Method"],
+        "subject_types": ["Event", "TimeReference", "Document", "Concept", "Method", "Person", "Organization"],
+        "object_types": ["Event", "TimeReference", "Document", "Concept", "Method", "Person", "Organization"],
     },
     "causes": {
-        "subject_types": ["Event", "Concept", "Method", "Rule", "Law"],
-        "object_types": ["Event", "Concept", "Method", "Rule", "Law"],
+        # TimeReference added so dated triggers ("the 2020 ruling caused …")
+        # can sit on either side; without it, every temporally-qualified
+        # cause/effect was forced into the related_to sentinel.
+        "subject_types": ["Event", "Concept", "Method", "Rule", "Law", "TimeReference"],
+        "object_types": ["Event", "Concept", "Method", "Rule", "Law", "TimeReference"],
+    },
+    "overlaps": {
+        # Temporal co-occurrence between events / dates / periods.
+        "subject_types": ["Event", "TimeReference", "Concept"],
+        "object_types": ["Event", "TimeReference", "Concept"],
     },
     "derived_from": {
         "subject_types": ["Artifact", "Concept", "Document", "Method", "Product", "Rule", "Law"],
@@ -282,10 +347,12 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
     "stored_in": ("stores", True),
     "saved_in": ("stores", True),
     "persisted_in": ("stores", True),
-    "calls": ("calls", False),
-    "invokes": ("calls", False),
-    "queries": ("calls", False),
-    "called_by": ("calls", True),
+    # `calls` was collapsed into `uses` — these aliases route to the surviving
+    # predicate so legacy LLM emissions still normalize cleanly.
+    "calls": ("uses", False),
+    "invokes": ("uses", False),
+    "queries": ("uses", False),
+    "called_by": ("uses", True),
     "requires": ("depends_on", False),
     "needs": ("depends_on", False),
     "depends": ("depends_on", False),
@@ -304,9 +371,35 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
     "deployed_on": ("runs_on", False),
     "executes_on": ("runs_on", False),
     "trained_with": ("trained_on", False),
-    "extract": ("extracts", False),
+    # `extracts` was merged into `detects`; both legacy aliases route to the
+    # survivor so old prompts and historical snapshots still normalize.
+    "extract": ("detects", False),
+    "extracts": ("detects", False),
+    "extracted_from": ("detects", False),
+    "pulls": ("detects", False),
     "identifies": ("detects", False),
     "recognizes": ("detects", False),
+    # New canonicalization / typing predicates — common LLM verbs map in.
+    "is_a": ("instance_of", False),
+    "is_an": ("instance_of", False),
+    "kind_of": ("instance_of", False),
+    "type_of": ("instance_of", False),
+    "subclass_of": ("instance_of", False),
+    "subtype_of": ("instance_of", False),
+    "same_as": ("synonym_of", False),
+    "alias_of": ("synonym_of", False),
+    "aka": ("synonym_of", False),
+    "also_known_as": ("synonym_of", False),
+    "owns": ("owns", False),
+    "owned_by": ("owns", True),
+    "holds": ("owns", False),
+    "affiliated": ("affiliated_with", False),
+    "associated_with": ("affiliated_with", False),
+    "partner_of": ("affiliated_with", False),
+    "sponsored_by": ("affiliated_with", False),
+    "co_occurs_with": ("overlaps", False),
+    "concurrent_with": ("overlaps", False),
+    "during": ("overlaps", False),
     "predicts": ("classifies", False),
     "labels": ("classifies", False),
     "models": ("represents", False),
@@ -329,6 +422,40 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
     "supersedes": ("overrides", False),
 }
 
+# Whitespace collapse for the Phase B evidence gate. Both the chunk text and
+# the model-supplied evidence_phrase are normalized through this regex before
+# the substring check so a paraphrase like "trained on  the corpus\n" still
+# matches "trained on the corpus".
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _normalize_evidence(text: str) -> str:
+    """Lowercase + whitespace-collapse for the Phase B comparison.
+
+    Both the chunk text and the model-supplied evidence_phrase pass through
+    this normalizer before the substring check so trivial formatting
+    differences (extra spaces, line breaks, mixed case) don't cause false
+    rejections. Centralized so the unit tests can exercise the same code
+    path the runtime uses.
+    """
+    return _WHITESPACE_RE.sub(" ", (text or "")).lower().strip()
+
+
+def _validate_evidence(evidence_phrase: str | None, chunk_text: str) -> bool:
+    """Phase B evidence gate — return True iff `evidence_phrase` is a
+    substring of `chunk_text` after lowercase + whitespace-collapse.
+
+    An empty / missing phrase fails the check. The function is intentionally
+    side-effect-free so callers can decide what to do with the result
+    (drop the relation, log a warning, increment a counter). Unit-tested
+    in `tests/test_universal_schema.py::test_validate_evidence_*`.
+    """
+    norm_phrase = _normalize_evidence(evidence_phrase or "")
+    if not norm_phrase:
+        return False
+    return norm_phrase in _normalize_evidence(chunk_text)
+
+
 EVIDENCE_CUE_RULES: list[tuple[re.Pattern[str], str, bool]] = [
     # Data/container direction repairs: "events stored in SQLite" means
     # SQLite stores events, even if the LLM emitted events -> stores -> SQLite.
@@ -344,9 +471,9 @@ EVIDENCE_CUE_RULES: list[tuple[re.Pattern[str], str, bool]] = [
     (re.compile(r"\btrained\s+on\b|\btraining\s+data\b|\bdataset\b"), "trained_on", False),
     # Output/artifact creation cues.
     (re.compile(r"\b(export|outputs?|generates?|returns?|creates?)\b"), "produces", False),
-    # Extraction/detection/dataflow cues.
-    (re.compile(r"\b(extracts?|captures?|pulls?)\b"), "extracts", False),
-    (re.compile(r"\b(detects?|recognizes?|identifies?)\b"), "detects", False),
+    # Extraction / detection / dataflow cues — `extracts` was merged into
+    # `detects`, so both surface verb classes route to the same predicate.
+    (re.compile(r"\b(extracts?|captures?|pulls?|detects?|recognizes?|identifies?)\b"), "detects", False),
 ]
 
 
@@ -364,22 +491,39 @@ def normalize_relation_predicate_alias(predicate: str | None) -> tuple[str, bool
     return RELATION_ALIAS_MAP.get(key, (raw, False))
 
 
-def _render_vocab_line(name: str, glosses: dict[str, str]) -> str:
-    """Render a single vocab item as 'Name (gloss)' when a gloss is known, else
+def _render_vocab_line(
+    name: str, glosses: dict[str, str], *, sentinel: str | None = None
+) -> str:
+    """Render a single vocab item as 'Name=gloss' when a gloss is known, else
     just 'Name'. Custom per-corpus entity/relation names keep working — they
-    simply render without a gloss.
+    simply render without a gloss. The `=` separator avoids the nested-paren
+    failure mode where some LLMs treat ',' inside `(…)` as a list boundary.
+
+    When `sentinel` is supplied and matches `name`, the rendered line is
+    suffixed with `[FALLBACK]` so the model sees an explicit "use only when
+    nothing else fits" tag inline with the option itself. Sentinel placement
+    stays at the end of the list (the LLM-bias mitigation), but the tag is
+    what actually reduces lazy fallbacks.
     """
     g = glosses.get(name)
-    return f"{name} ({g})" if g else name
+    base = f"{name}={g}" if g else name
+    if sentinel is not None and name == sentinel:
+        return f"{base} [FALLBACK]"
+    return base
 
 
 def _render_vocab_constraint(
     vocab: list[str], glosses: dict[str, str], sentinel: str
 ) -> str:
-    """Render the full vocab list with glosses, followed by the sentinel
-    fallback instruction. Used by the extraction prompt builder.
+    """Render the vocab list as `Name=gloss|Name=gloss|…` — pipe with no
+    surrounding whitespace. The dense form removes ~3 chars per separator
+    (38 separators × 3 = ~120 chars saved per call) and removes the
+    space-comma confusion that previously confused some smaller models.
+    The sentinel item gets an explicit `[FALLBACK]` tag inline.
     """
-    return " | ".join(_render_vocab_line(v, glosses) for v in vocab)
+    return "|".join(
+        _render_vocab_line(v, glosses, sentinel=sentinel) for v in vocab
+    )
 
 
 def _render_schema_lens_block(schema_lens: SchemaLens | dict | None) -> str:
@@ -626,44 +770,42 @@ def build_user_prompt(
     rendered for this specific chunk (e.g. retrieved top-K instead of full schema).
     When None, the full sentinel-augmented vocab from `schema` is used.
     """
-    # Decide entity_type enum for the JSON schema example
+    # Decide entity_type enum for the JSON schema example. Use `|` (no
+    # surrounding whitespace) for symmetry with the predicate enum and
+    # vocab block — every separator saves two characters per call.
     if schema and schema.has_entity_schema:
         vocab = effective_entity_vocab or schema.entity_vocab
-        entity_type_enum = " | ".join(vocab)
+        entity_type_enum = "|".join(vocab)
         entity_vocab_for_block = vocab
     else:
-        entity_type_enum = " | ".join(_DEFAULT_ENTITY_TYPES)
+        entity_type_enum = "|".join(_DEFAULT_ENTITY_TYPES)
         entity_vocab_for_block = None
 
     # Decide predicate description
     if schema and schema.has_relation_schema:
         vocab = effective_relation_vocab or schema.relation_vocab
-        predicate_desc = " | ".join(vocab)
+        predicate_desc = "|".join(vocab)
         relation_vocab_for_block = vocab
     else:
         predicate_desc = "short verb phrase label"
         relation_vocab_for_block = None
 
-    # Build optional vocabulary constraint block. When a vocab name has a
-    # known gloss in UNIVERSAL_*_GLOSSES it renders as `Name (gloss)`, which
-    # gives the LLM the disambiguating signal it otherwise lacks. Names not
-    # in the gloss dict (custom per-corpus schemas) render bare.
+    # Build the vocabulary constraint block. Glosses render as `Name=gloss`
+    # joined by `|` (no surrounding whitespace). Each block has exactly one
+    # short fallback line — the verbose paragraphs were redundant with the
+    # glosses themselves and inflated every per-chunk extraction prompt.
     vocab_block_lines: list[str] = []
     if entity_vocab_for_block or relation_vocab_for_block:
-        vocab_block_lines.append("\nVocabulary constraints:")
+        vocab_block_lines.append("\nVocab:")
         if entity_vocab_for_block:
             rendered = _render_vocab_constraint(
                 entity_vocab_for_block,
                 UNIVERSAL_ENTITY_GLOSSES,
                 SchemaContext.ENTITY_SENTINEL,
             )
+            vocab_block_lines.append(f"entity_type one of: {rendered}")
             vocab_block_lines.append(
-                f"- entity_type MUST be one of: {rendered}"
-            )
-            vocab_block_lines.append(
-                f"  Use the parenthetical gloss to disambiguate sibling types. "
-                f"If no listed type fits, use '{SchemaContext.ENTITY_SENTINEL}'. "
-                "Never invent a new type."
+                f"If none fit use '{SchemaContext.ENTITY_SENTINEL}'. Never invent."
             )
         if relation_vocab_for_block:
             rendered = _render_vocab_constraint(
@@ -671,13 +813,9 @@ def build_user_prompt(
                 UNIVERSAL_RELATION_GLOSSES,
                 SchemaContext.RELATION_SENTINEL,
             )
+            vocab_block_lines.append(f"predicate one of: {rendered}")
             vocab_block_lines.append(
-                f"- predicate MUST be one of: {rendered}"
-            )
-            vocab_block_lines.append(
-                f"  Use the parenthetical gloss to pick the narrowest fitting predicate. "
-                f"If no listed predicate fits, use '{SchemaContext.RELATION_SENTINEL}'. "
-                "Never invent a new predicate."
+                f"If none fit use '{SchemaContext.RELATION_SENTINEL}'. Never invent."
             )
     vocab_block = "\n".join(vocab_block_lines)
     lens_block = _render_schema_lens_block(schema_lens)
@@ -685,67 +823,27 @@ def build_user_prompt(
     relation_cap = max_relations or get_settings().EXTRACTION_MAX_RELATIONS_PER_CHUNK
 
     return (
-        "Extract named entities and relations from the text below.\n"
-        "Return a JSON object matching this schema exactly:\n"
-        "\n"
+        "Extract entities and relations. Return JSON only:\n"
         "{\n"
-        '  "schema_version": "polymath.extract.v1",\n'
-        f'  "chunk_id": "{chunk_id}",\n'
-        f'  "doc_id": "{doc_id}",\n'
-        f'  "corpus_id": "{corpus_id}",\n'
-        '  "entities": [\n'
-        "    {\n"
-        '      "canonical_name": "lowercase normalized key (no punctuation, spaces collapsed)",\n'
-        '      "surface_form": "verbatim text as it appears",\n'
-        f'      "entity_type": "{entity_type_enum}",\n'
-        '      "confidence": 0.0\n'
-        "    }\n"
-        "  ],\n"
-        '  "relations": [\n'
-        "    {\n"
-        '      "subject": "canonical_name of subject entity",\n'
-        f'      "predicate": "{predicate_desc}",\n'
-        '      "object": "canonical_name or literal string",\n'
-        '      "object_kind": "entity | literal",\n'
-        '      "confidence": 0.0,\n'
-        '      "evidence_phrase": "short source phrase that proves the predicate"\n'
-        "    }\n"
-        "  ]\n"
+        '  "schema_version":"polymath.extract.v1",\n'
+        f'  "chunk_id":"{chunk_id}",\n'
+        f'  "doc_id":"{doc_id}",\n'
+        f'  "corpus_id":"{corpus_id}",\n'
+        '  "entities":[{"canonical_name":"lowercase no-punct","surface_form":"verbatim",'
+        f'"entity_type":"{entity_type_enum}","confidence":0.0}}],\n'
+        '  "relations":[{"subject":"canonical_name","predicate":'
+        f'"{predicate_desc}","object":"canonical_name or literal",'
+        '"object_kind":"entity|literal","confidence":0.0,"evidence_phrase":"short source phrase"}]\n'
         "}\n"
-        "\n"
         "Rules:\n"
-        f"- HARD LIMIT: output at most {entity_cap} entities and at most {relation_cap} relations for this chunk\n"
-        "- Prefer high-confidence named entities and structurally useful relations; do not enumerate every proper noun, citation, example, list item, or generic noun\n"
-        "- Keep JSON compact; no prose, markdown, comments, or duplicate entries\n"
-        "- confidence: float 0.0–1.0; omit entries below threshold\n"
-        "- canonical_name: lowercase, strip punctuation, collapse whitespace\n"
-        "- entity_type is the entity's observed role in this chunk, not global identity\n"
-        "- entity_type stays broad: Product for software/apps/libraries/services, "
-        "Document for reports/books/papers, Artifact for tangible/code artifacts, "
-        "Method for procedures/algorithms, Concept for abstract ideas\n"
-        "- evidence_phrase must be a short exact or near-exact phrase from the text that explains the relation; "
-        "leave it empty only when the relation is obvious from nearby syntax\n"
-        '- relation object_kind "entity" only when the object is itself a named entity in the text\n'
-        "- For product specs / PRDs: use 'produces' when a module/API/model outputs an artifact; "
-        "use 'uses' when a feature/module consumes a model/API/database/data object; "
-        "use 'depends_on' for hard prerequisites, limits, or constraints; "
-        "use 'implements' when a concrete module/screen realizes an abstract concept; "
-        "use 'part_of' for feature/module/screen containment. Prefer a specific predicate "
-        f"over '{SchemaContext.RELATION_SENTINEL}' when the text gives enough evidence.\n"
-        "- Relation intent families: part_of/member_of are structural; "
-        "uses/calls/implements/depends_on/produces/stores/extracts/detects/classifies/runs_on/trained_on/supports are operational; "
-        "references/derived_from/represents/maps_to are referential; causes/preceded_by are causal; "
-        "contradicts/excepts/overrides are conflict. Choose the narrowest predicate "
-        f"inside the right family; use '{SchemaContext.RELATION_SENTINEL}' only when the family is genuinely unclear.\n"
-        "- Prefer 'runs_on' for model/app/device/platform execution, 'trained_on' for model-dataset training, "
-        "'stores' for database/persistence relations, 'extracts' for entity/feature/data extraction, "
-        "'detects' for finding objects/signals/events, 'classifies' for assigning categories, "
-        "'calls' for API/function/service invocation, 'represents' for modeling/encoding, "
-        "'maps_to' for transformations, and 'supports' for explicit capabilities.\n"
-        "- Every relation subject/object with object_kind='entity' MUST also appear in entities, even if it is a generic endpoint like app, model, user, event, screen, or API.\n"
-        f"- Use '{SchemaContext.RELATION_SENTINEL}' only when no explicit verb, containment cue, dependency cue, reference cue, runtime cue, or data-flow cue is present.\n"
-        "- do NOT output ontology facet fields such as object_kind, domain_type, "
-        "canonical_family, ontology_tags, or ontology_version; those are assigned deterministically after extraction\n"
+        f"- max {entity_cap} entities, max {relation_cap} relations\n"
+        "- compact JSON, no prose/markdown/duplicates\n"
+        "- canonical_name: lowercase, strip punctuation\n"
+        "- confidence in [0,1]; drop low-confidence entries\n"
+        "- evidence_phrase: short exact phrase from text\n"
+        "- object_kind=entity only if object is a named entity in text and also listed in entities\n"
+        f"- pick the narrowest predicate; use '{SchemaContext.RELATION_SENTINEL}' only when no specific predicate fits\n"
+        "- omit ontology fields (domain_type, canonical_family, ontology_tags, ontology_version)\n"
         f"{vocab_block}\n"
         f"{lens_block}\n"
         "\n"
@@ -801,6 +899,13 @@ class ExtractionResult:
     domain_range_warn_count: int = 0  # soft domain/range mismatch kept with warning
     endpoint_completion_count: int = 0  # missing relation endpoints added as entities
     evidence_cue_repair_count: int = 0  # evidence phrase repaired predicate/direction
+    # Phase B evidence gate — relations whose evidence_phrase is empty,
+    # missing, or not a substring of the chunk text get dropped before
+    # they reach Mongo / Neo4j. The counter exposes the rejection rate at
+    # `ghost_b_metrics.evidence_drop_count` (corpus-level sum) so we can
+    # see how often the model invents a phrase for an otherwise-valid
+    # relation.
+    evidence_drop_count: int = 0
     schema_lens_id: str | None = None
 
 
@@ -868,6 +973,7 @@ def summarize_extraction_batch(
         "domain_range_warn_count": sum(r.domain_range_warn_count for r in results),
         "endpoint_completion_count": sum(r.endpoint_completion_count for r in results),
         "evidence_cue_repair_count": sum(r.evidence_cue_repair_count for r in results),
+        "evidence_drop_count": sum(r.evidence_drop_count for r in results),
         "entity_drop_count": sum(r.entity_drop_count for r in results),
         "relation_drop_count": sum(r.relation_drop_count for r in results),
         "schema_lens_ids": lens_ids,
@@ -932,10 +1038,10 @@ def _infer_endpoint_entity_type(name: str, relation: RelationItem, *, role: str)
         return "Artifact"
 
     if role == "subject" and predicate in {
-        "uses", "calls", "stores", "extracts", "detects", "classifies", "supports",
+        "uses", "stores", "detects", "classifies", "supports",
     }:
         return "Method"
-    if role == "object" and predicate in {"uses", "calls", "runs_on", "stores"}:
+    if role == "object" and predicate in {"uses", "runs_on", "stores"}:
         return "Product"
     if predicate in {"part_of", "references", "depends_on", "represents", "maps_to"}:
         return "Concept"
@@ -1318,6 +1424,37 @@ def _parse(
             continue
 
     entities, relations, counters = _apply_schema(entities, relations, schema)
+
+    # Phase B evidence-validation gate. Drop any relation whose evidence_phrase
+    # is empty / missing OR is not a substring of the chunk text after a
+    # case-insensitive whitespace-collapsed comparison. The check is cheap
+    # (one regex sub + `in`) and immediately filters the most common failure
+    # mode of frontier extractors: hallucinating a paraphrase that sounds
+    # plausible but doesn't appear in the source. synonym_of / instance_of
+    # self-edges are exempt because canonicalization edges don't always have
+    # a textual cue (e.g. "OpenAI" / "openai inc" can be merged on
+    # surface-form similarity alone).
+    kept_relations: list[RelationItem] = []
+    evidence_drop_count = 0
+    for r in relations:
+        if r.predicate in {"synonym_of", "instance_of"}:
+            kept_relations.append(r)
+            continue
+        if not _validate_evidence(r.evidence_phrase, task.text):
+            evidence_drop_count += 1
+            logger.warning(
+                "GHOST B evidence gate dropped relation chunk_id=%s "
+                "predicate=%s subject=%r object=%r evidence=%r",
+                task.chunk_id,
+                r.predicate,
+                r.subject[:40],
+                r.object[:40],
+                (r.evidence_phrase or "")[:60],
+            )
+            continue
+        kept_relations.append(r)
+    relations = kept_relations
+
     lens = (
         schema_lens
         if isinstance(schema_lens, SchemaLens)
@@ -1339,6 +1476,7 @@ def _parse(
         domain_range_warn_count=counters["domain_range_warn_count"],
         endpoint_completion_count=counters["endpoint_completion_count"],
         evidence_cue_repair_count=counters["evidence_cue_repair_count"],
+        evidence_drop_count=evidence_drop_count,
         schema_lens_id=lens.lens_id if lens else None,
     )
 
@@ -1514,18 +1652,46 @@ async def extract_entities(
         # cross-lane rebalancing naturally, so there's no need to jump
         # lanes on retry — most transient failures (rate-limit, 5xx,
         # JSON parse) recover on a fresh connection.
+        #
+        # JSON-mode fallback: a few providers (notably SiliconFlow's
+        # Hy3-preview, error code 20024) reject `response_format=json_object`
+        # with HTTP 400. The chunk prompt already instructs JSON-only output,
+        # so the second attempt drops the field and relies on the prompt
+        # alone. Once we observe the rejection on this lane we drop the field
+        # for the remainder of the call to avoid burning a retry repeating it.
+        json_mode_supported = True
         last_exc: Exception | None = None
         last_error_type = "unknown"
         for attempt in range(2):
             started = time.perf_counter()
+            attempt_payload = dict(payload)
+            if not json_mode_supported:
+                attempt_payload.pop("response_format", None)
             try:
                 async with httpx.AsyncClient(timeout=120.0) as client:
                     resp = await client.post(
                         f"{settings.LITELLM_URL}/chat/completions",
-                        json=payload,
+                        json=attempt_payload,
                         headers=headers,
                     )
                     duration = time.perf_counter() - started
+                    if resp.status_code == 400 and json_mode_supported:
+                        # Cheap detection: the error body either contains the
+                        # SiliconFlow code or the literal phrase. Either signal
+                        # is enough to flip the lane into prompt-only JSON mode
+                        # and retry on the next attempt.
+                        body_text = resp.text or ""
+                        if "Json mode is not supported" in body_text or '"code": 20024' in body_text:
+                            logger.warning(
+                                "GHOST B JSON-mode unsupported on model=%s lane=%d; "
+                                "dropping response_format and retrying",
+                                entry["model"],
+                                pool_idx,
+                            )
+                            json_mode_supported = False
+                            last_exc = RuntimeError("json_mode_unsupported")
+                            last_error_type = "json_mode_unsupported"
+                            continue
                     resp.raise_for_status()
                     body = resp.json()
                     usage = body.get("usage") or {}

@@ -67,15 +67,18 @@ RELATION_FAMILY_MAP = {
     "derived_from": "Referential",
     "causes": "Causal",
     "preceded_by": "Causal",
+    "overlaps": "Causal",
     "contradicts": "Conflict",
     "excepts": "Conflict",
     "overrides": "Conflict",
     "created_by": "Provenance",
     "works_for": "Affiliation",
+    "owns": "Affiliation",
+    "affiliated_with": "Affiliation",
     "located_in": "Spatial",
-    "calls": "Operational",
+    "synonym_of": "Canonicalization",
+    "instance_of": "Canonicalization",
     "stores": "Operational",
-    "extracts": "Operational",
     "detects": "Operational",
     "classifies": "Operational",
     "runs_on": "Operational",
@@ -137,16 +140,32 @@ _RELATION_CUE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("trained_on", ("trained on", "trained with", "training data", "training set", "learns from")),
     ("runs_on", ("runs on", "run on", "executes on", "deployed on", "on-device", "on device")),
     ("stores", ("stores", "stored in", "persists", "persisted in", "saves to", "saved to")),
-    ("extracts", ("extracts", "extract ", "extracted from", "feature extraction", "entity extraction", "pulls from")),
-    ("detects", ("detects", "identifies", "recognizes", "finds", "object detection")),
+    # `extracts` was merged into `detects`; both verb classes route here so
+    # cue-based predicate inference produces a single canonical edge label.
+    ("detects", (
+        "detects", "identifies", "recognizes", "finds", "object detection",
+        "extracts", "extract ", "extracted from", "feature extraction",
+        "entity extraction", "pulls from",
+    )),
     ("classifies", ("classifies", "classification", "predicts", "assigns category", "labels as")),
-    ("calls", ("calls", "invokes", "requests", "queries", "api call", "endpoint")),
+    # `calls` was merged into `uses`; the API-invocation cues route to `uses`.
+    ("uses", (
+        "uses", "using", "utilizes", "consumes", "powered by",
+        "calls", "invokes", "requests", "queries", "api call", "endpoint",
+    )),
+    # New canonicalization / typing / affiliation cues.
+    ("synonym_of", ("aka", "also known as", "same as", "alias", "synonym")),
+    ("instance_of", ("is a kind of", "is a type of", "is an instance of", "subclass of")),
+    ("owns", ("owns", "owned by", "holds title to")),
+    ("affiliated_with", ("affiliated with", "associated with", "partner of", "sponsored by")),
+    ("overlaps", ("overlaps with", "concurrent with", "co-occurs with", "during")),
     ("maps_to", ("maps to", "maps onto", "converts", "transforms", "translates")),
     ("represents", ("represents", "models", "modeled as", "encodes")),
     ("supports", ("supports", "enables", "allows", "provides", "facilitates")),
     ("produces", ("produces", "generates", "outputs", "emits", "returns", "creates")),
     ("depends_on", ("depends on", "requires", "prerequisite", "constraint", "needs")),
-    ("uses", ("uses", "using", "utilizes", "consumes", "powered by")),
+    # `uses` cue tuple is defined above (absorbing the legacy `calls` cues);
+    # the duplicate plain-`uses` entry that lived here has been removed.
     ("implements", ("implements", "realizes", "embodies", "concrete form")),
     ("references", ("references", "cites", "mentions", "according to", "described in")),
     ("derived_from", ("derived from", "based on", "adapted from", "inspired by", "built on")),
@@ -159,15 +178,17 @@ _RELATION_CUE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
 _RECOVERABLE_SOURCE_PREDICATES = {
     "part_of",
     "member_of",
-    "uses",
-    "calls",
+    "owns",
+    "affiliated_with",
+    "synonym_of",
+    "instance_of",
+    "uses",          # absorbs legacy `calls`
     "references",
     "implements",
     "depends_on",
     "produces",
     "stores",
-    "extracts",
-    "detects",
+    "detects",       # absorbs legacy `extracts`
     "classifies",
     "runs_on",
     "trained_on",
@@ -176,6 +197,7 @@ _RECOVERABLE_SOURCE_PREDICATES = {
     "maps_to",
     "preceded_by",
     "causes",
+    "overlaps",
     "derived_from",
     "contradicts",
     "excepts",
@@ -265,7 +287,7 @@ def _relation_compatible_with_facets(
         or object_type in {"Artifact", "Method", "Product"}
     )
 
-    if predicate in {"uses", "calls", "supports"}:
+    if predicate in {"uses", "supports"}:
         return operational_subject and operational_object
     if predicate == "runs_on":
         return operational_subject and (
@@ -285,7 +307,7 @@ def _relation_compatible_with_facets(
             or object_kind in {"DataObject", "Dataset", "Document", "Report", "Spec"}
             or object_type in {"Artifact", "Concept", "Document", "Product"}
         )
-    if predicate in {"extracts", "detects", "classifies"}:
+    if predicate in {"detects", "classifies"}:
         return operational_subject and object_type in {
             "Artifact", "Concept", "Document", "Event", "Location",
             "Organization", "Person", "Product",

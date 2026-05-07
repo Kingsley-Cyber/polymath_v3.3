@@ -16,6 +16,7 @@ from services.ghost_b import (
     UNIVERSAL_RELATION_SCHEMA,
     SchemaContext,
     _apply_schema,
+    _validate_evidence,
     build_user_prompt,
     normalize_relation_predicate_alias,
 )
@@ -42,14 +43,25 @@ def test_entity_schema_shape():
 
 
 def test_relation_schema_shape():
-    assert len(UNIVERSAL_RELATION_SCHEMA) == 27
+    # 30 entries: 12 universal entity types do not gate this; the relation
+    # list got the canonicalization + missing-affiliation/ownership additions
+    # while shedding `calls` (collapsed into `uses`) and `extracts` (merged
+    # into `detects`). Net +3 brings the list to the SCHEMA_INLINE_LIMIT.
+    assert len(UNIVERSAL_RELATION_SCHEMA) == 30
     assert all(isinstance(p, str) and p.strip() for p in UNIVERSAL_RELATION_SCHEMA)
-    assert len(set(UNIVERSAL_RELATION_SCHEMA)) == 27, "relation schema has duplicates"
+    assert len(set(UNIVERSAL_RELATION_SCHEMA)) == 30, "relation schema has duplicates"
     assert UNIVERSAL_RELATION_SCHEMA[-1] == "related_to", (
         "related_to sentinel MUST be last"
     )
-    for required in ("excepts", "overrides", "runs_on", "trained_on", "extracts"):
+    for required in (
+        "excepts", "overrides", "runs_on", "trained_on",
+        "synonym_of", "instance_of", "owns", "affiliated_with", "overlaps",
+        "detects",
+    ):
         assert required in UNIVERSAL_RELATION_SCHEMA
+    # Predicates that were collapsed must NOT reappear in the universal list.
+    for removed in ("calls", "extracts"):
+        assert removed not in UNIVERSAL_RELATION_SCHEMA
 
 
 def test_each_vocab_stays_inline():
@@ -91,23 +103,38 @@ def test_prompt_renders_universal_vocab():
         text="sample",
         schema=ctx,
     )
-    # Exact phrasing comes from ghost_b.build_user_prompt
+    # Tightened format: `Name=gloss|Name=gloss|…` with no spaces around `|`.
+    # The verbose paragraphs of the old prompt were dropped to halve the
+    # per-chunk extraction prompt; only essential rules remain.
     assert (
-        "entity_type MUST be one of: Person (named human individual) | "
-        "Organization (named formal group"
+        "entity_type one of: Person=human individual|Organization=formal group"
     ) in prompt
     assert (
-        "predicate MUST be one of: part_of (X is a structural subcomponent of Y) | "
-        "member_of (X is in group Y)"
+        "predicate one of: part_of=X subcomponent of Y|member_of=X in group Y"
     ) in prompt
-    # Sentinels surface as explicit fallbacks
+    # Sentinels surface as explicit fallbacks (with [FALLBACK] tag inline)
     assert "'other'" in prompt
     assert "'related_to'" in prompt
-    assert "For product specs / PRDs" in prompt
+    assert "other=fallback [FALLBACK]" in prompt
+    assert "related_to=use only when no specific predicate fits [FALLBACK]" in prompt
     assert "evidence_phrase" in prompt
+    # Universal predicates still listed in the JSON-example enum
     assert "runs_on" in prompt
     assert "trained_on" in prompt
-    assert "do NOT output ontology facet fields such as object_kind, domain_type" in prompt
+    # Canonicalization + missing-relation predicates added in the schema patch
+    assert "synonym_of" in prompt
+    assert "instance_of" in prompt
+    assert "owns" in prompt
+    assert "affiliated_with" in prompt
+    assert "overlaps" in prompt
+    # Removed predicates should no longer be advertised in the vocab block
+    assert "extracts=" not in prompt
+    # `calls` was collapsed into `uses` — ensure neither the vocab line nor
+    # the JSON-example enum still advertises it.
+    assert "calls=" not in prompt
+    assert "|calls|" not in prompt
+    # Ontology facet exclusion still enforced
+    assert "ontology" in prompt
 
 
 def test_schema_strict_legacy_values_deserialize():
@@ -469,3 +496,58 @@ def test_ontology_metadata_combines_facets_family_and_version():
         "canonical_family": "council_chat",
         "ontology_version": ONTOLOGY_VERSION,
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase B — evidence-phrase validation gate
+#
+# `_validate_evidence(phrase, chunk_text)` powers the Phase B drop logic in
+# `_parse`. The runtime path is integration-tested via a real ingest, but
+# the cheap surface tests below pin the normalization rules so a future
+# change to the regex / casefold / strip behavior surfaces here first.
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_validate_evidence_exact_substring():
+    chunk = "OpenAI is affiliated with Microsoft. GPT-4 runs on Microsoft Azure."
+    assert _validate_evidence("GPT-4 runs on Microsoft Azure", chunk) is True
+
+
+def test_validate_evidence_lowercase_match():
+    chunk = "OpenAI is affiliated with Microsoft."
+    assert _validate_evidence("openai is AFFILIATED with microsoft", chunk) is True
+
+
+def test_validate_evidence_collapsed_whitespace():
+    chunk = "GPT-4   runs\non\tMicrosoft  Azure"
+    assert _validate_evidence("GPT-4 runs on Microsoft Azure", chunk) is True
+
+
+def test_validate_evidence_phrase_with_extra_whitespace():
+    chunk = "ChatGPT depends on GPT-4 for its responses."
+    assert _validate_evidence("  ChatGPT  depends   on   GPT-4  ", chunk) is True
+
+
+def test_validate_evidence_paraphrase_rejected():
+    chunk = "OpenAI was founded in San Francisco in December 2015."
+    # Same idea, different words → must be rejected.
+    assert _validate_evidence("OpenAI started in SF in late 2015", chunk) is False
+
+
+def test_validate_evidence_empty_phrase_rejected():
+    chunk = "Sam Altman works for OpenAI as CEO."
+    assert _validate_evidence("", chunk) is False
+    assert _validate_evidence(None, chunk) is False
+    assert _validate_evidence("   \n\t  ", chunk) is False
+
+
+def test_validate_evidence_substring_not_found_rejected():
+    chunk = "Microsoft owns a substantial stake in OpenAI."
+    # The phrase is plausible English but doesn't appear in the chunk.
+    assert _validate_evidence("Microsoft acquired OpenAI", chunk) is False
+
+
+def test_validate_evidence_chunk_text_empty_rejected():
+    # Without source text we can't verify anything — fail closed.
+    assert _validate_evidence("anything", "") is False
+    assert _validate_evidence("anything", None or "") is False

@@ -245,18 +245,29 @@ services:
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
     environment:
       HF_HOME: /root/.cache/huggingface
-      MODEL_PATH: /model
+      # MODEL_PATH points at the HF Hub identifier — the on-disk embedder code
+      # calls SentenceTransformer(MODEL_PATH) directly and the model is already
+      # cached under HF_HOME from a prior session. The bind-mounted /model
+      # directory is empty on this host, so passing it would fail with
+      # "Unrecognized model in /model". Hitting the HF cache by identifier is
+      # the working path.
+      MODEL_PATH: Qwen/Qwen3-Embedding-0.6B
       MODEL_NAME: Qwen3-Embedding-0.6B
       # Keep local embedding conservative so large ingests don't starve the
       # desktop GPU. Raise LOCAL_EMBED_BATCH_SIZE only after watching nvidia-smi.
       EMBED_BATCH_SIZE: ${LOCAL_EMBED_BATCH_SIZE:-8}
       EMBED_DEVICE: cuda
-      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
+      # PYTORCH_CUDA_ALLOC_CONF deliberately unset. The previous value
+      # (expandable_segments:True,max_split_size_mb:128) crashed the embedder
+      # on RTX PRO 6000 Blackwell (sm_120) with "CUDA driver error: unknown
+      # error" inside model.to('cuda') under torch 2.11+cu128. The default
+      # allocator works fine on this card; only re-enable if you've validated
+      # the flags against the installed cuda runtime.
       # GPU pinning — see docling service for the rationale. CUDA_VISIBLE_DEVICES
       # is the load-bearing filter at the torch layer; PCI_BUS_ID ordering
-      # makes "0" deterministically mean the 3090.
+      # makes "0" deterministically mean GPU 0.
       CUDA_DEVICE_ORDER: PCI_BUS_ID
-      CUDA_VISIBLE_DEVICES: "0"            # RTX 3090
+      CUDA_VISIBLE_DEVICES: "0"
       NVIDIA_VISIBLE_DEVICES: "0"
     deploy:
       resources:
@@ -441,6 +452,13 @@ services:
       # GHOST B — 0.0 disables self-reported-confidence filter (glosses + schema
       # are the real quality levers). Raise per-model after eyeballing its distribution.
       ENTITY_CONFIDENCE_THRESHOLD: ${ENTITY_CONFIDENCE_THRESHOLD:-0.0}
+      # Phase 20 ingest concurrency caps. Without these the worker falls back
+      # to Pydantic defaults (1 doc through the model phase) and serializes
+      # 5+ uploads even when cloud Ghost pools have headroom for parallel
+      # processing. Default 8 allows the typical batch upload to fan out.
+      INGEST_MAX_PARSE_JOBS: ${INGEST_MAX_PARSE_JOBS:-8}
+      INGEST_MAX_MODEL_PHASE_DOCS: ${INGEST_MAX_MODEL_PHASE_DOCS:-8}
+      INGEST_MAX_ACTIVE_JOBS: ${INGEST_MAX_ACTIVE_JOBS:-16}
     depends_on:
       mongodb:
         condition: service_healthy

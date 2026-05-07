@@ -564,9 +564,13 @@ class IngestionConfig(BaseModel):
     )
     child_chunk_tokens: TokenBudget = Field(
         default_factory=lambda: TokenBudget(
-            min_tokens=128, target_tokens=350, max_tokens=512
+            min_tokens=128, target_tokens=500, max_tokens=700
         ),
-        description="Child chunk token range",
+        description=(
+            "Child chunk token range. Cap at 700 to keep extraction prompts "
+            "small and stay well under the Qwen3-Embedding-0.6B 1024-token "
+            "ceiling. Raising max_tokens above 900 risks silent truncation."
+        ),
     )
     chunk_overlap: int = Field(default=200, description="Overlap between parent chunks")
     max_summary_tokens: int = Field(
