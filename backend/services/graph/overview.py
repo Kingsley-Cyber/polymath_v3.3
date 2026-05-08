@@ -127,7 +127,11 @@ def build_overview_graph(
             for eid in members
             if metrics.node_domain_map.get(eid)
         )
-        primary_domain = domains.most_common(1)[0][0] if domains else "unknown"
+        primary_domain = (
+            domains.most_common(1)[0][0]
+            if domains
+            else str(concept.get("primary_domain") or "unknown")
+        )
         node_id = f"concept:{concept_id}"
         nodes.append({
             "id": node_id,

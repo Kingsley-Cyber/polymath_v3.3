@@ -18,9 +18,11 @@ from services.graph.orchestrator import (
     _context_graph_from_result,
     _curated_evidence_rows,
     _fallback_evidence_note,
+    _llm_context_trace_from_packet,
     _scrub_synthesis_payload,
     _should_skip_synthesis,
     _source_docs_from_retrieval_chunks,
+    _source_label_from_row,
 )
 
 
@@ -619,6 +621,60 @@ def test_retrieval_chunks_convert_to_capped_packet_source_docs():
     assert rows[0]["source_label"] == "ML Kit Guide.pdf"
     assert rows[0]["heading_path"] == ["Chapter 4", "Object Detection"]
     assert rows[-1]["chunk_id"] == "chunk:5"
+
+
+def test_graph_receipts_prefer_filename_when_source_label_is_doc_hash():
+    doc_id = "4497907efa2abcfd610d29e2c2f2ff9588a44a6a0c594d831d8646528ce26383"
+    filename = "Designing Data-Intensive Applications - Martin Kleppmann.md"
+    source_row = {
+        "chunk_id": "chunk:linearizability",
+        "doc_id": doc_id,
+        "source_label": doc_id,
+        "source": {"filename": filename, "title": doc_id},
+        "text": "Linearizability makes a database appear as if there is only a single copy of the data.",
+    }
+
+    assert _source_label_from_row(source_row, doc={"filename": filename}, doc_id=doc_id) == filename
+
+    packet = {
+        "query": "database linearizability client",
+        "collections": {},
+        "retrieval": {},
+        "graph_hint": {},
+        "entities": [],
+        "communities": [],
+        "edges": [],
+        "gaps": [],
+        "signals": [],
+        "weak_links": [],
+        "evidence": [source_row],
+        "evidence_filter": {},
+        "temporal_support": False,
+        "sparse": False,
+    }
+    receipt = _llm_context_trace_from_packet(packet)
+
+    assert receipt["files"][0]["source_label"] == filename
+    assert receipt["chunks"][0]["source_label"] == filename
+    assert filename in receipt["prompt"]["preview"]
+    assert doc_id not in receipt["prompt"]["preview"]
+
+    result = SimpleNamespace(
+        query="database linearizability client",
+        trace={"source_docs": [source_row]},
+        graph={"nodes": [], "links": []},
+        entity_concept_map={},
+        themes=[],
+        bridges_v2=[],
+        gaps_v2=[],
+        weak_links=[],
+    )
+    context = _context_graph_from_result(result)
+
+    assert any(
+        node["kind"] == "document" and node["label"] == filename
+        for node in context["nodes"]
+    )
 
 
 def test_insight_packet_quality_gate_withholds_bibliography_only_graph_context():

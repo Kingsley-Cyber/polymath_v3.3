@@ -683,8 +683,8 @@ def _context_graph_from_result(result: Any) -> dict[str, Any]:
         if not isinstance(raw, dict):
             continue
         doc_id = str(raw.get("doc_id") or raw.get("document_id") or raw.get("id") or "unknown-doc").strip()
-        source_label = str(raw.get("source_label") or raw.get("doc_title") or raw.get("filename") or doc_id)
         chunk_id = str(raw.get("chunk_id") or raw.get("id") or "").strip()
+        source_label = _source_label_from_row(raw, doc_id=doc_id, chunk_id=chunk_id)
         row = files_by_id.setdefault(
             doc_id,
             {
@@ -929,6 +929,30 @@ def _first_metadata_text(*values: Any, limit: int = 140) -> str:
     return ""
 
 
+def _basename_metadata_text(value: Any, limit: int = 160) -> str:
+    text = _first_metadata_text(value, limit=limit)
+    if not text:
+        return ""
+    return _text(text.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1], limit)
+
+
+def _looks_like_internal_doc_label(value: Any, *ids: Any) -> bool:
+    label = _first_metadata_text(value, limit=240)
+    if not label:
+        return True
+    normalized_ids = {
+        _first_metadata_text(v, limit=240)
+        for v in ids
+        if _first_metadata_text(v, limit=240)
+    }
+    if label in normalized_ids:
+        return True
+    if label.startswith("doc:") and label[4:] in normalized_ids:
+        return True
+    bare = label[4:] if label.startswith("doc:") else label
+    return bool(re.fullmatch(r"[0-9a-fA-F]{8,}", bare))
+
+
 def _metadata_value(metadata: dict[str, Any], *keys: str, limit: int = 140) -> str:
     for key in keys:
         if key in metadata:
@@ -964,6 +988,57 @@ def _merged_document_metadata(doc: dict[str, Any]) -> dict[str, Any]:
         if key in doc:
             merged.setdefault(key, doc.get(key))
     return merged
+
+
+def _source_label_from_row(
+    row: dict[str, Any],
+    *,
+    doc: dict[str, Any] | None = None,
+    doc_id: str = "",
+    chunk_id: str = "",
+) -> str:
+    """Choose a human source label, treating doc-id/hash labels as internal."""
+
+    doc = doc or {}
+    source = row.get("source") if isinstance(row.get("source"), dict) else {}
+    source_meta = row.get("source_meta") if isinstance(row.get("source_meta"), dict) else {}
+    identity_values = (
+        doc_id,
+        row.get("doc_id"),
+        row.get("document_id"),
+        row.get("id"),
+        chunk_id,
+    )
+    existing = _first_metadata_text(
+        row.get("source_label"),
+        row.get("doc_title"),
+        row.get("filename"),
+        limit=160,
+    )
+    if existing and not _looks_like_internal_doc_label(existing, *identity_values):
+        return existing
+
+    metadata = _merged_document_metadata(doc) if doc else {}
+    candidates = [
+        doc.get("filename"),
+        source.get("filename"),
+        source_meta.get("filename"),
+        row.get("filename"),
+        _basename_metadata_text(doc.get("source_path")),
+        _basename_metadata_text(source.get("source_path")),
+        _basename_metadata_text(source_meta.get("source_path")),
+        doc.get("title"),
+        _metadata_value(metadata, "title", "dc:title", limit=160) if metadata else "",
+        source.get("title"),
+        source_meta.get("title"),
+        row.get("doc_title"),
+        existing,
+    ]
+    for candidate in candidates:
+        label = _first_metadata_text(candidate, limit=160)
+        if label and not _looks_like_internal_doc_label(label, *identity_values):
+            return label
+    return existing or _first_metadata_text(doc_id, chunk_id, "unknown-doc", limit=160)
 
 
 def _source_type(filename: str, source_mime: str) -> str:
@@ -1158,8 +1233,10 @@ def _curated_evidence_rows(
                 "chunk_id": str(row.get("chunk_id") or row.get("id") or ""),
                 "doc_id": str(row.get("doc_id") or ""),
                 "text": _text(row.get("text") or "", _PACKET_EVIDENCE_TEXT_LIMIT),
-                "source_label": str(
-                    row.get("source_label") or row.get("doc_title") or row.get("doc_id") or ""
+                "source_label": _source_label_from_row(
+                    row,
+                    doc_id=str(row.get("doc_id") or ""),
+                    chunk_id=str(row.get("chunk_id") or row.get("id") or ""),
                 ),
                 "source": row.get("source") or row.get("source_meta") or {},
                 "heading_path": row.get("heading_path") or [],
@@ -1389,13 +1466,11 @@ async def _hydrate_trace_source_docs(
         doc = doc_meta.get(doc_id, {})
         parent_id = str(chunk.get("parent_id") or _parent_id_from_summary_chunk(chunk_id))
         parent = parent_by_doc.get(doc_id, {}).get(parent_id, {})
-        source_label = str(
-            row.get("source_label")
-            or row.get("doc_title")
-            or doc.get("filename")
-            or doc.get("title")
-            or doc.get("source_path")
-            or doc_id
+        source_label = _source_label_from_row(
+            row,
+            doc=doc,
+            doc_id=doc_id,
+            chunk_id=chunk_id,
         )
         text = (
             chunk.get("text")
@@ -1577,7 +1652,14 @@ def _supporting_statement_hints(packet: dict[str, Any]) -> list[dict[str, str]]:
         statements.append(
             {
                 "evidence_id": str(item.get("evidence_id") or f"e{idx}"),
-                "source_label": _text(item.get("source_label") or item.get("doc_id") or "", 80),
+                "source_label": _text(
+                    _source_label_from_row(
+                        item,
+                        doc_id=str(item.get("doc_id") or ""),
+                        chunk_id=str(item.get("chunk_id") or item.get("id") or ""),
+                    ),
+                    80,
+                ),
                 "statement": _text(sentence or text, 180),
             }
         )
@@ -2030,7 +2112,7 @@ def _llm_context_trace_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
             continue
         chunk_id = str(item.get("chunk_id") or "").strip()
         doc_id = str(item.get("doc_id") or "").strip() or "unknown-doc"
-        source_label = str(item.get("source_label") or doc_id)
+        source_label = _source_label_from_row(item, doc_id=doc_id, chunk_id=chunk_id)
         source = item.get("source") if isinstance(item.get("source"), dict) else {}
         if doc_id not in files_by_id:
             files_by_id[doc_id] = {
@@ -2167,8 +2249,13 @@ def _render_packet_repair_prompt(packet: dict[str, Any]) -> str:
 
 def _source_brief_for_prompt(item: dict[str, Any]) -> dict[str, Any]:
     source = item.get("source") if isinstance(item.get("source"), dict) else {}
+    source_label = _source_label_from_row(
+        item,
+        doc_id=str(item.get("doc_id") or ""),
+        chunk_id=str(item.get("chunk_id") or item.get("id") or ""),
+    )
     brief = {
-        "title": _text(source.get("title") or item.get("source_label") or "", 80),
+        "title": _text(source_label, 80),
         "type": _text(source.get("source_type") or "", 24),
         "section": _text(source.get("section") or "", 70),
         "page": _text(source.get("page_range") or "", 24),

@@ -54,6 +54,11 @@ TRANSFER_CD_PR_PERCENTILE = 90
 INSIGHT_TOP_K = 10  # cap each detector's output for downstream LLM prompt
 CONCEPT_COMMUNITY_TOP_ENTITIES = 8
 CONCEPT_COMMUNITY_RESPONSE_LIMIT = 8
+METRICS_CACHE_CONCEPT_LIMIT = 500
+METRICS_CACHE_CONCEPT_MEMBER_LIMIT = 120
+METRICS_CACHE_MAP_ENTITY_LIMIT = 5000
+METRICS_CACHE_BETWEENNESS_LIMIT = 1000
+METRICS_CACHE_LARGE_LIST_LIMIT = 500
 CONCEPT_SCOPE_ENTITY_CAP = 90
 CONCEPT_PEERS_PER_COMMUNITY = 18
 NOISE_ENTITY_TYPES = {"document", "timereference", "time_reference", "date"}
@@ -3187,7 +3192,115 @@ async def _cache_metrics(db, m: CorpusMetrics) -> None:
     )
 
 
+def _ordered_unique(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        text = str(value or "")
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+def _trim_metric_items(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    return [dict(item) for item in (items or [])[:limit]]
+
+
+def _compact_concept_communities(
+    m: CorpusMetrics,
+) -> tuple[list[dict[str, Any]], set[str]]:
+    concepts = list(m.concept_communities or [])[:METRICS_CACHE_CONCEPT_LIMIT]
+    kept_entities: set[str] = set()
+    compact: list[dict[str, Any]] = []
+    for concept in concepts:
+        row = dict(concept)
+        members = _ordered_unique(row.get("member_ids") or [])
+        top_ids = _ordered_unique(row.get("top_entity_ids") or [])
+        kept = _ordered_unique([*top_ids, *members])[:METRICS_CACHE_CONCEPT_MEMBER_LIMIT]
+        kept_entities.update(kept)
+        domains = Counter(
+            m.node_domain_map.get(eid, "unknown")
+            for eid in kept
+            if m.node_domain_map.get(eid)
+        )
+        row["member_ids"] = kept
+        row["top_entity_ids"] = top_ids[:CONCEPT_COMMUNITY_TOP_ENTITIES]
+        row["primary_domain"] = (
+            row.get("primary_domain")
+            or (domains.most_common(1)[0][0] if domains else "unknown")
+        )
+        compact.append(row)
+    return compact, kept_entities
+
+
+def _metric_edge_entities(m: CorpusMetrics) -> set[str]:
+    out: set[str] = set()
+    for collection in (
+        m.fragile_bridges,
+        m.terminological_gaps,
+        m.structural_analogies,
+        m.transfer_candidates,
+        m.cluster_pair_gaps,
+    ):
+        for item in collection or []:
+            for key in ("source", "target", "entity_id", "bridge"):
+                if item.get(key):
+                    out.add(str(item[key]))
+            for key in ("entities", "entity_ids", "member_ids"):
+                out.update(str(v) for v in (item.get(key) or []) if v)
+    for item in (m.top_pagerank or []) + (m.top_cross_domain_pagerank or []) + (m.latent_topics or []):
+        if item.get("entity_id"):
+            out.add(str(item["entity_id"]))
+    return out
+
+
 def _serialize_metrics(m: CorpusMetrics) -> dict:
+    concept_communities, concept_entities = _compact_concept_communities(m)
+    keep_entities = _ordered_unique([
+        *concept_entities,
+        *_metric_edge_entities(m),
+    ])[:METRICS_CACHE_MAP_ENTITY_LIMIT]
+    keep_set = set(keep_entities)
+    entity_concept_map = {
+        eid: m.entity_concept_map[eid]
+        for eid in keep_entities
+        if eid in m.entity_concept_map
+    }
+    node_domain_map = {
+        eid: m.node_domain_map[eid]
+        for eid in keep_entities
+        if eid in m.node_domain_map
+    }
+    node_domains_touched = {
+        eid: m.node_domains_touched[eid]
+        for eid in keep_entities
+        if eid in m.node_domains_touched
+    }
+    entity_name_map = {
+        eid: m.entity_name_map[eid]
+        for eid in keep_entities
+        if eid in m.entity_name_map
+    }
+    entity_facet_map = {
+        eid: m.entity_facet_map[eid]
+        for eid in keep_entities
+        if eid in m.entity_facet_map
+    }
+    entity_betweenness = {
+        eid: m.entity_betweenness[eid]
+        for eid in keep_entities[:METRICS_CACHE_BETWEENNESS_LIMIT]
+        if eid in m.entity_betweenness
+    }
+    logger.info(
+        "Metrics cache serialize compact: corpus=%s concepts=%d/%d map_entities=%d/%d",
+        m.corpus_id,
+        len(concept_communities),
+        len(m.concept_communities or []),
+        len(keep_set),
+        len(m.node_domain_map or {}),
+    )
     return {
         "schema_version": METRICS_CACHE_SCHEMA_VERSION,
         "corpus_id": m.corpus_id,
@@ -3203,22 +3316,24 @@ def _serialize_metrics(m: CorpusMetrics) -> dict:
         "relation_family_counts": m.relation_family_counts,
         "top_pagerank": m.top_pagerank,
         "top_cross_domain_pagerank": m.top_cross_domain_pagerank,
-        "node_domain_map": m.node_domain_map,
-        "node_domains_touched": m.node_domains_touched,
-        "entity_name_map": m.entity_name_map,
-        "frontier_candidates": m.frontier_candidates,
-        "fragile_bridges": m.fragile_bridges,
-        "terminological_gaps": m.terminological_gaps,
-        "structural_analogies": m.structural_analogies,
-        "transfer_candidates": m.transfer_candidates,
-        "concept_communities": m.concept_communities,
-        "entity_concept_map": m.entity_concept_map,
-        "entity_facet_map": m.entity_facet_map,
+        "node_domain_map": node_domain_map,
+        "node_domains_touched": node_domains_touched,
+        "entity_name_map": entity_name_map,
+        "frontier_candidates": _trim_metric_items(m.frontier_candidates, METRICS_CACHE_LARGE_LIST_LIMIT),
+        "fragile_bridges": _trim_metric_items(m.fragile_bridges, METRICS_CACHE_LARGE_LIST_LIMIT),
+        "terminological_gaps": _trim_metric_items(m.terminological_gaps, METRICS_CACHE_LARGE_LIST_LIMIT),
+        "structural_analogies": _trim_metric_items(m.structural_analogies, METRICS_CACHE_LARGE_LIST_LIMIT),
+        "transfer_candidates": _trim_metric_items(m.transfer_candidates, METRICS_CACHE_LARGE_LIST_LIMIT),
+        "concept_communities": concept_communities,
+        "entity_concept_map": entity_concept_map,
+        "entity_facet_map": entity_facet_map,
         "ontology_version": m.ontology_version,
-        "entity_betweenness": m.entity_betweenness,
-        "cluster_pair_gaps": m.cluster_pair_gaps,
-        "latent_topics": m.latent_topics,
+        "entity_betweenness": entity_betweenness,
+        "cluster_pair_gaps": _trim_metric_items(m.cluster_pair_gaps, METRICS_CACHE_LARGE_LIST_LIMIT),
+        "latent_topics": _trim_metric_items(m.latent_topics, METRICS_CACHE_LARGE_LIST_LIMIT),
         "metrics_engine": m.metrics_engine,
+        "cache_mode": "compact",
+        "cache_entity_count": len(keep_set),
     }
 
 
