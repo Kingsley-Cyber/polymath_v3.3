@@ -2865,6 +2865,20 @@ def _scrub_synthesis_payload(
     return cleaned
 
 
+def _sync_headline_from_auto_synthesis(result: Any) -> None:
+    payload = getattr(result, "auto_synthesis", {}) or {}
+    if not isinstance(payload, dict):
+        return
+    headline = _text(payload.get("headline") or "", 220)
+    if not headline:
+        return
+    existing = getattr(result, "headline", {}) or {}
+    if isinstance(existing, dict):
+        result.headline = {**existing, "headline": headline}
+    else:
+        result.headline = {"headline": headline}
+
+
 def _fallback_evidence_note(reason: str) -> dict[str, Any]:
     if reason == "sparse_evidence":
         body = (
@@ -2997,7 +3011,7 @@ async def discover(
         result.auto_synthesis = llm_payload
         synthesis_source = "llm"
     else:
-        deterministic = _auto_synthesis_from_result(result)
+        deterministic = _scrub_synthesis_payload(_auto_synthesis_from_result(result), packet)
         # Make the fallback reason explicit at the top of the evidence notes so
         # the reader knows the LLM didn't write the prose.
         evidence_notes = list(deterministic.get("evidence_notes") or [])
@@ -3005,6 +3019,7 @@ async def discover(
         deterministic["evidence_notes"] = evidence_notes[:6]
         result.auto_synthesis = deterministic
         synthesis_source = f"fallback:{fallback_reason or 'unknown'}"
+    _sync_headline_from_auto_synthesis(result)
 
     result.insight_packet_summary = _insight_packet_summary_from_result(result)
     if fallback_reason:

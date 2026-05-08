@@ -23,6 +23,7 @@ from services.graph.orchestrator import (
     _should_skip_synthesis,
     _source_docs_from_retrieval_chunks,
     _source_label_from_row,
+    _sync_headline_from_auto_synthesis,
 )
 
 
@@ -1371,3 +1372,14 @@ def test_synthesis_scrub_replaces_metric_headline():
     assert "%" not in scrubbed["headline"]
     assert "edge" not in scrubbed["headline"].lower()
     assert "database linearizability client" in scrubbed["headline"]
+
+
+def test_auto_synthesis_headline_sync_replaces_legacy_metric_headline():
+    result = SimpleNamespace(
+        headline={"headline": "database linearizability client: 0.0% cross-domain edges"},
+        auto_synthesis={"headline": "database linearizability client: research read across Riak"},
+    )
+
+    _sync_headline_from_auto_synthesis(result)
+
+    assert result.headline["headline"] == "database linearizability client: research read across Riak"
