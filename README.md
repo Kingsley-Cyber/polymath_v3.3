@@ -138,26 +138,40 @@ ChatGPT-style reading flow.
 git clone https://github.com/Kingsley-Cyber/polymath_v3.3.git
 cd polymath_v3.3
 
-# 2. Configure
-cp .env.example .env
-# edit .env — set MONGO_PASSWORD, NEO4J_PASSWORD, AUTH_SECRET_KEY,
-# and at least one LLM key (OPENAI_API_KEY / ANTHROPIC_API_KEY /
-# DEEPSEEK_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY)
+# 2. Bootstrap runtime folders, .env, secrets, and bind-mounted config
+# Windows PowerShell:
+.\scripts\bootstrap-runtime.ps1 -GenerateSecrets -StageModels
 
-# 3. Pre-stage local models (one-time, ~3 GB)
-mkdir -p $POLYMATH_MODELS_ROOT
-huggingface-cli download Qwen/Qwen3-Embedding-0.6B \
-  --local-dir $POLYMATH_MODELS_ROOT/Qwen3-Embedding-0.6B
-huggingface-cli download cross-encoder/ms-marco-MiniLM-L6-v2 \
-  --local-dir $POLYMATH_MODELS_ROOT/ms-marco-MiniLM-L6-v2
+# Linux/macOS:
+bash scripts/bootstrap-runtime.sh --generate-secrets --stage-models
 
-# 4. Bring it up
+# 3. Edit .env and add at least one synthesis provider key, or configure Ollama.
+# OPENAI_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY /
+# GEMINI_API_KEY / OPENROUTER_API_KEY are all supported.
+
+# 4. Verify install shape before starting containers
+.\scripts\check-install.ps1      # Windows
+bash scripts/check-install.sh    # Linux/macOS
+
+# 5. Bring it up
 docker compose up -d --build
-docker compose ps     # all 11 services should show (healthy)
+docker compose ps
 
-# 5. Open the app
-open http://localhost:3000     # or your browser
+# 6. Probe running services and open the app
+.\scripts\check-install.ps1 -CheckRunning      # Windows
+bash scripts/check-install.sh --check-running  # Linux/macOS
+open http://localhost:3000
 ```
+
+The bootstrap scripts do the production-critical setup that Docker Compose
+cannot safely infer on its own:
+
+- create `POLYMATH_DOCKER_DATA_ROOT`
+- seed `POLYMATH_RUNTIME_BINDS_ROOT/litellm/config.yaml`
+- seed `POLYMATH_RUNTIME_BINDS_ROOT/modal_embedder.py`
+- generate strong local secrets when requested
+- enable the local embedder, reranker, parser, and MCP profiles by default
+- optionally download the two reference local models
 
 **First-run signals you want to see:**
 
@@ -172,7 +186,7 @@ litellm    Up 50 seconds (healthy)
 embedder   Up 40 seconds (healthy)   ← model loaded on GPU
 reranker   Up 35 seconds (healthy)   ← model loaded on GPU
 docling    Up 25 seconds (healthy)
-ollama     Up 1 minute (healthy)
+mcp        Up 20 seconds (healthy)
 ```
 
 If `embedder` or `reranker` is restarting → 99% of the time it's the model
@@ -240,6 +254,37 @@ pip install mlx-embeddings sentence-transformers
 
 MLX is significantly faster than CPU on Apple Silicon for both embedding and
 reranking. A small adapter is the right amount of work for the win.
+
+**Mac mini / Claude handoff prompt:**
+
+If you give this repo to Claude or another coding agent for a Mac mini setup,
+do not let it blindly run the default NVIDIA workstation path. Paste this:
+
+```text
+Set up this Polymath repo on an Apple Silicon Mac mini. Do not use NVIDIA/CUDA
+profiles. Run the core services in Docker: MongoDB, Qdrant, Neo4j, Redis,
+LiteLLM, backend, frontend, and MCP. Use host Ollama or cloud providers for
+LLMs. If local embedding/reranking is required, use a Mac-compatible host
+adapter such as Ollama or MLX and point the backend at host.docker.internal.
+If I provide a Polymath runtime export, import it before starting the stack.
+Do not change the embedding model or vector dimension unless you clearly
+explain that doing so requires re-ingestion or a new corpus. Start by running
+the bootstrap/check scripts with Mac-safe profiles, then create a
+docker-compose.override.yml if needed.
+```
+
+Good starting command on a Mac mini:
+
+```bash
+bash scripts/bootstrap-runtime.sh --generate-secrets --compose-profiles mcp
+bash scripts/check-install.sh
+docker compose up -d --build
+```
+
+Add parser/embedding/reranking services only after choosing a Mac-compatible
+path. For a moved corpus, prefer importing the portable archive first so the
+Mac continues from the existing Mongo/Qdrant/Neo4j state instead of
+re-ingesting.
 
 ### AMD GPU (ROCm)
 
@@ -348,6 +393,9 @@ MCP_API_KEY=<openssl rand -hex 32>
 
 | Task | Command |
 |---|---|
+| Fresh bootstrap (Windows) | `.\scripts\bootstrap-runtime.ps1 -GenerateSecrets -StageModels` |
+| Fresh bootstrap (Linux/macOS) | `bash scripts/bootstrap-runtime.sh --generate-secrets --stage-models` |
+| Validate install | `.\scripts\check-install.ps1` or `bash scripts/check-install.sh` |
 | Bring up | `docker compose up -d --build` |
 | Bring down | `docker compose down` |
 | Tail one service | `docker compose logs -f backend` |

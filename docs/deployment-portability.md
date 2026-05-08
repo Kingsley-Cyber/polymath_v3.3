@@ -6,7 +6,32 @@ the runtime root, not inside Docker's disposable internal volume store.
 
 ## Runtime State
 
-Set the runtime root in `.env`:
+For a fresh install, run the bootstrap script first. It creates the runtime
+tree, seeds bind-mounted config files, and can generate local secrets.
+
+Windows PowerShell:
+
+```powershell
+.\scripts\bootstrap-runtime.ps1 -GenerateSecrets -StageModels
+```
+
+Linux/macOS:
+
+```bash
+bash scripts/bootstrap-runtime.sh --generate-secrets --stage-models
+```
+
+Then verify before starting containers:
+
+```powershell
+.\scripts\check-install.ps1
+```
+
+```bash
+bash scripts/check-install.sh
+```
+
+The runtime root is stored in `.env`:
 
 ```bash
 POLYMATH_DOCKER_DATA_ROOT=C:/PolymathRuntime
