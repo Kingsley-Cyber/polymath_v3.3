@@ -168,16 +168,11 @@ export async function deleteConversation(
 
 // Collections
 export async function getCollections(): Promise<Collection[]> {
-  try {
-    return await fetchJSON("/collections");
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("HTTP 404")) {
-      // v3 corpus-scoped retrieval no longer requires the legacy collections
-      // endpoint. Keep the old selector harmless while the UI migration settles.
-      return [];
-    }
-    throw error;
-  }
+  // v3 is corpus-scoped — the legacy /api/collections endpoint was removed.
+  // Short-circuit instead of firing a request that always 404s and noisily
+  // pollutes the browser console. The CollectionSelector renders empty,
+  // which is the intended state until that legacy UI surface is retired.
+  return [];
 }
 
 // Chat Streaming (SSE)

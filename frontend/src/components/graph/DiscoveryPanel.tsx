@@ -121,7 +121,9 @@ export function DiscoveryPanel({ corpusId, onClose }: DiscoveryPanelProps) {
   const [activeQuery, setActiveQuery] = useState("");
   const [panelWidth, setPanelWidth] = useState(storedPanelWidth);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const mainRef = useRef<HTMLElement | null>(null);
   const inFlightRef = useRef(false);
+  const wasLoadingRef = useRef(false);
   const seenDraft = useRef<number | null>(null);
   const seenNode = useRef<number | null>(null);
   const panelWidthRef = useRef(panelWidth);
@@ -182,9 +184,18 @@ export function DiscoveryPanel({ corpusId, onClose }: DiscoveryPanelProps) {
     if (!loading || !requestStartedAt) return;
     const tick = () => setElapsedMs(Date.now() - requestStartedAt);
     tick();
-    const timer = window.setInterval(tick, 500);
+    const timer = window.setInterval(tick, 250);
     return () => window.clearInterval(timer);
   }, [loading, requestStartedAt]);
+
+  // Scroll the panel to the top whenever a new query starts so the running
+  // banner is unmissable — even if the user is mid-read on a previous result.
+  useEffect(() => {
+    if (loading && !wasLoadingRef.current) {
+      mainRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    wasLoadingRef.current = loading;
+  }, [loading]);
 
   useEffect(() => {
     panelWidthRef.current = panelWidth;
@@ -404,11 +415,28 @@ export function DiscoveryPanel({ corpusId, onClose }: DiscoveryPanelProps) {
       >
         <div className="h-16 w-[2px] rounded-full bg-white/10 transition-colors group-hover:bg-amber-200/60 group-focus:bg-amber-200/70" />
       </div>
+      {/* Header-level progress strip — full-width, always visible regardless
+          of where the inner main is scrolled. Animates only while loading. */}
+      {loading && (
+        <div className="absolute inset-x-0 top-0 z-40 h-1 overflow-hidden bg-amber-200/10">
+          <div className="h-full w-1/3 animate-loading-bar bg-gradient-to-r from-transparent via-amber-300 to-transparent" />
+        </div>
+      )}
       <header className="border-b border-white/10 bg-[#08090d]/95 px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.28em] text-amber-200/80">
               <Sparkles className="h-3.5 w-3.5" /> Mission Control
+              {loading && (
+                <span className="ml-2 inline-flex items-center gap-2 rounded-full border border-amber-200/40 bg-amber-200/[0.10] px-2 py-0.5 normal-case tracking-normal">
+                  <span className="flex items-center gap-0.5">
+                    <span className="h-1 w-1 animate-bounce rounded-full bg-amber-300" style={{ animationDelay: "0ms" }} />
+                    <span className="h-1 w-1 animate-bounce rounded-full bg-amber-300" style={{ animationDelay: "150ms" }} />
+                    <span className="h-1 w-1 animate-bounce rounded-full bg-amber-300" style={{ animationDelay: "300ms" }} />
+                  </span>
+                  <span className="font-mono text-[10px] tabular-nums text-amber-100">{(elapsedMs/1000).toFixed(1)}s</span>
+                </span>
+              )}
             </div>
             <h2 className="mt-1 truncate text-sm font-semibold tracking-wide text-neutral-50">Auto-Synthesis Graph Query</h2>
             <p className="mt-1 text-[11px] leading-relaxed text-neutral-500">
@@ -470,14 +498,15 @@ Query-first synthesis. Groups are query-scoped concept/document neighborhoods, n
         </div>
       )}
 
-      <main className="min-h-0 flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
+      <main ref={mainRef} className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
         {loading && <RunningQueryBanner phase={phase} query={activeQuery} elapsedMs={elapsedMs} />}
         {error && <div className="mb-4 rounded border border-red-400/25 bg-red-500/[0.06] px-3 py-2 text-[12px] leading-relaxed text-red-100">{error}</div>}
         {latest ? <MissionRead response={latest} onPickQuery={setQuery} /> : <EmptyState suggestions={suggestions} onPickSuggestion={setQuery} />}
+        {loading && <FloatingTimerChip elapsedMs={elapsedMs} phase={phase} />}
       </main>
 
       <form onSubmit={onSubmit} className="border-t border-white/10 bg-[#07080b] p-3">
-        <div className="flex items-center gap-2 rounded border border-white/10 bg-black/35 px-2 py-2 focus-within:border-amber-200/40">
+        <div className="flex items-center gap-2 rounded-md border border-white/10 bg-black/35 px-2 py-2 transition-colors focus-within:border-amber-200/40">
           <input
             ref={inputRef}
             value={query}
@@ -490,10 +519,32 @@ Query-first synthesis. Groups are query-scoped concept/document neighborhoods, n
             type="submit"
             disabled={submitDisabled}
             title={submitTitle}
-            className="inline-flex h-8 w-8 items-center justify-center rounded border border-amber-200/25 bg-amber-200/10 text-amber-100 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-neutral-600"
             aria-label="Run graph synthesis"
+            className={cx(
+              "group relative inline-flex h-9 min-w-[68px] items-center justify-center gap-1.5 overflow-hidden rounded-md px-3 text-[11px] font-semibold uppercase tracking-[0.16em] transition-all duration-150 ease-out",
+              "active:scale-[0.94] active:duration-75",
+              loading
+                ? "border border-amber-200/60 bg-amber-200/30 text-amber-50 shadow-[0_0_18px_rgba(251,191,36,0.35)]"
+                : submitDisabled
+                  ? "cursor-not-allowed border border-white/10 bg-white/[0.03] text-neutral-600"
+                  : "border border-amber-200/40 bg-amber-200/15 text-amber-100 shadow-[0_0_0_0_rgba(251,191,36,0.0)] hover:border-amber-200/70 hover:bg-amber-200/30 hover:text-amber-50 hover:shadow-[0_0_14px_rgba(251,191,36,0.30)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/60"
+            )}
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizontal className="h-4 w-4" />}
+            {/* Click ripple — kicks in via :active scale + this brief flash. */}
+            {!submitDisabled && !loading && (
+              <span aria-hidden className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-amber-100/30 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-full" />
+            )}
+            {loading ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>thinking</span>
+              </>
+            ) : (
+              <>
+                <SendHorizontal className="h-3.5 w-3.5 transition-transform duration-150 group-active:translate-x-0.5" />
+                <span>send</span>
+              </>
+            )}
           </button>
         </div>
         <div className="mt-2 flex items-center justify-between gap-3 font-mono text-[9px] uppercase tracking-wider text-neutral-600">
@@ -564,6 +615,22 @@ function RequestStages({ phase, loading, hasResponse, elapsedMs }: { phase: Phas
   );
 }
 
+function FloatingTimerChip({ elapsedMs, phase }: { elapsedMs: number; phase: Phase }) {
+  const seconds = (elapsedMs / 1000).toFixed(1);
+  const label = phase === "synthesizing" ? "synthesizing" : "curating";
+  return (
+    <div className="pointer-events-none sticky bottom-3 z-30 ml-auto flex w-fit items-center gap-2 rounded-full border border-amber-200/40 bg-[#0c0d10]/95 px-3 py-1.5 shadow-[0_0_24px_rgba(251,191,36,0.18)] backdrop-blur">
+      <div className="flex shrink-0 items-center gap-1">
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-amber-300" style={{ animationDelay: "0ms" }} />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-amber-300" style={{ animationDelay: "150ms" }} />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-amber-300" style={{ animationDelay: "300ms" }} />
+      </div>
+      <span className="text-[10px] uppercase tracking-[0.2em] text-amber-100/80">{label}</span>
+      <span className="font-mono text-[12px] font-semibold tabular-nums text-amber-100">{seconds}s</span>
+    </div>
+  );
+}
+
 function RunningQueryBanner({ phase, query, elapsedMs }: { phase: Phase; query: string; elapsedMs: number }) {
   const label = phase === "synthesizing" ? "Polymath is synthesizing" : "Curating the graph packet";
   const detail = phase === "synthesizing"
@@ -571,11 +638,13 @@ function RunningQueryBanner({ phase, query, elapsedMs }: { phase: Phase; query: 
     : "Selecting anchored chunks, edges, and concept neighborhoods…";
   const seconds = (elapsedMs / 1000).toFixed(1);
   return (
-    <div className="sticky top-0 z-20 mb-4 overflow-hidden rounded-lg border-2 border-amber-200/40 bg-gradient-to-br from-amber-200/[0.10] via-[#11141b]/95 to-amber-200/[0.04] px-4 py-3 shadow-[0_0_60px_rgba(251,191,36,0.20)]">
+    <div className="sticky top-0 z-20 mb-4 overflow-hidden rounded-lg border border-amber-200/30 bg-gradient-to-br from-amber-200/[0.08] via-[#11141b]/95 to-amber-200/[0.03] px-4 py-3 shadow-[0_0_42px_rgba(251,191,36,0.18)]">
       <div className="flex items-center gap-3">
-        <div className="relative flex h-8 w-8 shrink-0 items-center justify-center">
-          <span className="absolute inset-0 animate-ping rounded-full bg-amber-300/30" />
-          <Loader2 className="relative h-5 w-5 animate-spin text-amber-200" />
+        {/* Three-dot thinking animation, matching the chat bot's loading state. */}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className="h-2 w-2 animate-bounce rounded-full bg-amber-300" style={{ animationDelay: "0ms" }} />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-amber-300" style={{ animationDelay: "150ms" }} />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-amber-300" style={{ animationDelay: "300ms" }} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-3">
@@ -647,6 +716,7 @@ function SynthesisProse({ markdown, sources }: { markdown: string; sources: Synt
     for (const source of sources) map.set(source.index, source);
     return map;
   }, [sources]);
+  const stats = useMemo(() => readingStats(markdown), [markdown]);
   if (!markdown.trim()) {
     return (
       <section id="mission-synthesis" className="scroll-mt-20">
@@ -657,7 +727,12 @@ function SynthesisProse({ markdown, sources }: { markdown: string; sources: Synt
   const annotated = annotateCitations(markdown, sourceByIndex);
   return (
     <section id="mission-synthesis" className="scroll-mt-20">
-      <div className="prose prose-invert max-w-none text-[14px] leading-[1.75] text-neutral-200 [&_h2]:mt-6 [&_h2]:mb-3 [&_h2]:text-neutral-50 [&_h2]:text-[17px] [&_h2]:font-semibold [&_h3]:mt-5 [&_h3]:mb-2 [&_h3]:text-neutral-100 [&_h3]:text-[15px] [&_h3]:font-semibold [&_p]:my-4 [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-l-amber-200/40 [&_blockquote]:bg-amber-200/[0.04] [&_blockquote]:px-4 [&_blockquote]:py-2 [&_blockquote]:text-amber-100/90 [&_blockquote]:not-italic [&_strong]:font-semibold [&_strong]:text-neutral-50 [&_em]:text-neutral-300 [&_a]:text-amber-200 [&_a]:no-underline hover:[&_a]:text-amber-100 [&_li]:my-1.5 [&_ul]:my-3 [&_ol]:my-3 [&_code]:rounded [&_code]:border [&_code]:border-white/10 [&_code]:bg-white/[0.04] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-[12.5px] [&_hr]:my-6 [&_hr]:border-white/10">
+      <div className="mb-3 flex items-center gap-3 text-[10px] uppercase tracking-[0.2em] text-neutral-500">
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5">~{stats.minutes} min read</span>
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5">{stats.paragraphs} sections</span>
+        {sources.length > 0 && <span className="rounded-full border border-amber-200/20 bg-amber-200/[0.04] px-2 py-0.5 text-amber-100/70">{sources.length} sources</span>}
+      </div>
+      <div className="prose prose-invert max-w-none text-[14px] leading-[1.75] text-neutral-200 [&_h2]:mt-6 [&_h2]:mb-3 [&_h2]:text-neutral-50 [&_h2]:text-[17px] [&_h2]:font-semibold [&_h3]:mt-5 [&_h3]:mb-2 [&_h3]:text-neutral-100 [&_h3]:text-[15px] [&_h3]:font-semibold [&_p]:my-5 [&_p]:relative [&_p]:pl-5 [&_p]:before:absolute [&_p]:before:left-0 [&_p]:before:top-3 [&_p]:before:h-1.5 [&_p]:before:w-1.5 [&_p]:before:rounded-full [&_p]:before:bg-amber-200/30 [&_p:first-child]:mt-0 [&_p:first-child:first-letter]:float-left [&_p:first-child:first-letter]:mr-2 [&_p:first-child:first-letter]:text-[34px] [&_p:first-child:first-letter]:font-bold [&_p:first-child:first-letter]:leading-none [&_p:first-child:first-letter]:text-amber-200 [&_p:first-child:first-letter]:pt-1 [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-l-amber-200/40 [&_blockquote]:bg-amber-200/[0.04] [&_blockquote]:px-4 [&_blockquote]:py-2 [&_blockquote]:text-amber-100/90 [&_blockquote]:not-italic [&_strong]:font-semibold [&_strong]:text-amber-100 [&_em]:text-neutral-300 [&_a]:text-amber-200 [&_a]:no-underline hover:[&_a]:text-amber-100 [&_li]:my-1.5 [&_ul]:my-3 [&_ol]:my-3 [&_code]:rounded [&_code]:border [&_code]:border-white/10 [&_code]:bg-white/[0.04] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-[12.5px] [&_hr]:my-6 [&_hr]:border-white/10">
         <ReactMarkdown
           components={{
             a: ({ href, children, ...rest }) => {
@@ -688,6 +763,20 @@ function SynthesisProse({ markdown, sources }: { markdown: string; sources: Synt
       </div>
     </section>
   );
+}
+
+function readingStats(markdown: string): { minutes: number; paragraphs: number; words: number } {
+  const text = markdown
+    .replace(/\[\d+\]/g, " ")
+    .replace(/[#>*_`-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const words = text ? text.split(/\s+/).length : 0;
+  // Average ADHD-friendly read pace: ~220 wpm (slower than the 250 typical
+  // benchmark, since this is dense analytical prose, not light reading).
+  const minutes = Math.max(1, Math.round(words / 220));
+  const paragraphs = markdown.split(/\n{2,}/).filter((p) => p.trim()).length || 1;
+  return { minutes, paragraphs, words };
 }
 
 function annotateCitations(markdown: string, sourceByIndex: Map<number, SynthesisSource>): string {

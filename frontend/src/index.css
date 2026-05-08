@@ -289,6 +289,19 @@
         }
     }
 
+    .animate-loading-bar {
+        animation: loading-bar 1.4s ease-in-out infinite;
+    }
+
+    @keyframes loading-bar {
+        0% {
+            transform: translateX(-100%);
+        }
+        100% {
+            transform: translateX(400%);
+        }
+    }
+
     .animate-slide-up {
         animation: slide-up 0.1s step-end forwards;
     }
