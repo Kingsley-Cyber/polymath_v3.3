@@ -40,6 +40,10 @@ tiktoken==0.5.2
 
 # === Discourse / graph analytics (services.discourse pulls networkx) ===
 networkx==3.2.1
+# Mission Control graph synthesis uses the same domain-emergence analytics as
+# the backend. Keep these aligned with backend/requirements.txt.
+numpy>=1.26,<2.0
+scikit-learn==1.3.2
 
 # === Misc dotenv loader (Pydantic Settings reads ../.env) ===
 python-dotenv==1.0.0

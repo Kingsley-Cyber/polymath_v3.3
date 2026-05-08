@@ -17,6 +17,7 @@ import {
   Layers,
   Sparkles,
   Plug,
+  Archive,
 } from "lucide-react";
 import { useAuthStore } from "../../stores/authStore";
 import * as api from "../../lib/api";
@@ -27,6 +28,7 @@ import { InfrastructureTab } from "./InfrastructureTab";
 import { RetrievalSettingsTab } from "./RetrievalSettingsTab";
 import { IngestionSettingsTab } from "./IngestionSettingsTab";
 import { ModelsTab } from "./ModelsTab";
+import { PortabilityTab } from "./PortabilityTab";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -144,6 +146,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     { id: "Infrastructure", icon: Server, label: "Infrastructure" },
     { id: "Retrieval", icon: Settings2, label: "Retrieval Config" },
     { id: "Ingestion", icon: Layers, label: "Ingestion Config" },
+    { id: "Portability", icon: Archive, label: "Portability" },
   ];
 
   // ── Tab Content Renderers ──
@@ -446,6 +449,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   const renderModelsTab = () => <ModelsTab />;
 
+  const renderPortabilityTab = () => <PortabilityTab />;
+
   const renderTabContent = () => {
     switch (activeTab) {
       case "Security":
@@ -468,6 +473,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         return renderRetrievalTab();
       case "Ingestion":
         return renderIngestionTab();
+      case "Portability":
+        return renderPortabilityTab();
       default:
         return renderGeneralTab();
     }

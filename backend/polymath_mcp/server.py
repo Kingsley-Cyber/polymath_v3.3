@@ -3,7 +3,7 @@
 Sidecar process. Lifecycle:
     1. Initialize backend service singletons (auth, conversation, ingestion).
        These connect MongoDB / Qdrant / Neo4j the same way the FastAPI lifespan does.
-    2. Construct a FastMCP server and register the 4 Phase 8 tools.
+    2. Construct a FastMCP server and register the Polymath MCP tools.
     3. Dispatch on MCP_TRANSPORT:
          - 'streamable-http' → uvicorn on MCP_HOST:MCP_PORT (production / compose)
          - 'stdio'           → attach to stdin/stdout (local Claude Desktop proxy)
@@ -60,7 +60,7 @@ async def _bootstrap_services() -> None:
 
 
 def _build_mcp_server():
-    """Construct the FastMCP server and register the 4 tools."""
+    """Construct the FastMCP server and register the tool surface."""
     from mcp.server.fastmcp import FastMCP
 
     from . import tools
@@ -68,9 +68,10 @@ def _build_mcp_server():
     mcp = FastMCP(
         name="polymath",
         instructions=(
-            "Polymath RAG tools — search corpora, fetch chunk extractions, "
-            "list entities, traverse relations. All tools are corpus-scoped "
-            "and respect the authenticated user's allowed corpus set."
+            "Polymath RAG tools — cross-search corpora, ask chat, run graph "
+            "synthesis, fetch chunk extractions, list entities, and traverse "
+            "relations. All tools respect the authenticated user's allowed "
+            "corpus set."
         ),
     )
 

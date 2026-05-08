@@ -447,6 +447,8 @@ services:
       # the backend image built 2026-04-18 enforces these (older images didn't).
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD}
+      # Public MCP URL is surfaced by /api/mcp/info for Settings -> MCP snippets.
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
       # Phase 7.6 — Docling sidecar (parser replacement for unstructured/regex)
       DOCLING_URL: http://docling:8500
       # GHOST B — 0.0 disables self-reported-confidence filter (glosses + schema
@@ -503,6 +505,7 @@ services:
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      NEO4J_ENABLED: ${NEO4J_ENABLED:-false}
       LITELLM_URL: http://litellm:4000
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       # Same host-Ollama routing as backend (see comment above).
@@ -521,7 +524,8 @@ services:
       MCP_PORT: "8765"
       MCP_TRANSPORT: streamable-http
       MCP_REQUIRE_AUTH: ${MCP_REQUIRE_AUTH:-true}
-      MCP_DEFAULT_TOP_K: "5"
+      MCP_DEFAULT_TOP_K: ${MCP_DEFAULT_TOP_K:-5}
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
       # Static API key for system-level access (no per-user corpus scoping).
       # Tried BEFORE JWT validation via constant-time compare. Leave blank to
       # require JWT for every request. Set in .env, never commit.
@@ -555,27 +559,28 @@ services:
     restart: unless-stopped
 
   # ============================================================
-  # TUNNEL (Cloudflare — optional, fails gracefully if no token)
+  # CLOUDFLARE TUNNEL (optional)
+  #
+  # Cloudflare-managed ingress should point public hostnames at service names
+  # on this compose network, for example:
+  #   app.example.com -> http://frontend:80
+  #   api.example.com -> http://backend:8000
+  #   mcp.example.com -> http://mcp:8765
+  #
+  # Start with:
+  #   docker compose --profile cloudflare up -d cloudflared
+  # Include --profile mcp when the tunnel has an MCP hostname.
   # ============================================================
-
-  # ============================================================
-  # DISABLED 2026-04-18 — sibling `cloudflared-tunnel` container (outside compose)
-  # already runs the tunnel with a valid token. The compose-managed copy was
-  # crash-looping on "Provided Tunnel token is not valid" because .env's
-  # CLOUDFLARE_TUNNEL_TOKEN is stale/empty. Re-enable by uncommenting and
-  # setting a fresh token in .env, then `docker stop cloudflared-tunnel` so
-  # they don't fight for the same routes.
-  # ============================================================
-  # cloudflared:
-  #   image: cloudflare/cloudflared:latest
-  #   restart: unless-stopped
-  #   command: tunnel --no-autoupdate run
-  #   environment:
-  #     TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
-  #   depends_on:
-  #     frontend:
-  #       condition: service_healthy
-  #     backend:
-  #       condition: service_healthy
-  #     mcp:
-  #       condition: service_healthy
+  cloudflared:
+    <<: *default-logging
+    image: cloudflare/cloudflared:latest
+    profiles: ["cloudflare"]
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped

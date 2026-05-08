@@ -324,6 +324,7 @@ OPENROUTER_API_KEY=...
 ```bash
 # Where bind-mounted data lives (fast SSD recommended)
 POLYMATH_DOCKER_DATA_ROOT=C:/PolymathRuntime    # or /mnt/ssd/polymath
+POLYMATH_RUNTIME_BINDS_ROOT=C:/PolymathRuntime/binds
 POLYMATH_MODELS_ROOT=C:/PolymathRuntime/models
 
 # Ingestion concurrency (lower for small machines)
@@ -337,6 +338,8 @@ EMBED_BATCH_SIZE=64
 
 # Cloudflare tunnel (optional — for kingsleylab.xyz-style publishing)
 CLOUDFLARE_TUNNEL_TOKEN=...
+MCP_PUBLIC_URL=https://mcp.example.com
+MCP_API_KEY=<openssl rand -hex 32>
 ```
 
 ---
@@ -352,6 +355,10 @@ CLOUDFLARE_TUNNEL_TOKEN=...
 | Open Mongo Express UI | `docker compose --profile admin up -d mongo-express`  →  http://localhost:8083 |
 | Open Neo4j browser | http://localhost:7474 |
 | Open Qdrant dashboard | http://localhost:6333/dashboard |
+| Start MCP sidecar | `docker compose --profile mcp up -d --build mcp` |
+| Start Cloudflare tunnel | `docker compose --profile cloudflare up -d cloudflared` |
+| Export portable archive | `.\scripts\export-runtime.ps1 -Destination E:\PolymathRuntime-export -IncludeEnv -Archive` |
+| Import portable archive | `.\scripts\import-runtime.ps1 -Source E:\PolymathRuntime-export.zip -IncludeEnv` |
 | Run backend tests | `cd backend && python -m pytest tests/graph -q` |
 | Wipe a corpus | DELETE via the API or use the corpus selector → settings → delete |
 | Clear Redis cache | `docker compose exec redis redis-cli FLUSHALL` |
@@ -380,6 +387,13 @@ CLOUDFLARE_TUNNEL_TOKEN=...
   helper to keep the legacy UI quiet. Don't depend on it.
 - **Cache responses.** LiteLLM is configured with Redis-backed caching.
   Identical queries return in < 1s.
+- **Moving machines does not require re-ingestion if you move the runtime
+  stores.** Stop the stack and copy Mongo, Qdrant, and Neo4j from
+  `POLYMATH_DOCKER_DATA_ROOT`; see `docs/deployment-portability.md`. Today
+  that is a whole-runtime mount, not a raw single-corpus folder copy.
+- **MCP agents can choose retrieval, chat, or graph synthesis.** The sidecar
+  exposes cross-corpus search, `/api/chat` equivalent querying, and Mission
+  Control graph synthesis through the same backend services the UI uses.
 
 ---
 

@@ -336,6 +336,13 @@ class Settings(BaseSettings):
             "set via .env. Recommended: 32+ random bytes (`openssl rand -hex 32`)."
         ),
     )
+    MCP_PUBLIC_URL: str = Field(
+        default="",
+        description=(
+            "Public base URL for the MCP sidecar, for example a Cloudflare "
+            "Tunnel hostname. Used only by /api/mcp/info to render client snippets."
+        ),
+    )
 
     # === GHOST A — PARENT SUMMARIZATION ===
     SUMMARY_MAX_CONCURRENT: int = Field(

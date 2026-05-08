@@ -1265,6 +1265,46 @@ export async function getMcpInfo(): Promise<McpInfo> {
   return fetchJSON("/mcp/info");
 }
 
+export interface PortabilityImportResponse {
+  status: "ok";
+  stats: {
+    mongo_documents?: Record<string, number>;
+    qdrant_points?: Record<string, number>;
+    neo4j_nodes?: number;
+    neo4j_relationships?: number;
+  };
+}
+
+export async function downloadPortabilityArchive(): Promise<Blob> {
+  const token = getPersistedToken();
+  const response = await fetch(`${API_BASE}/portability/export`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`HTTP ${response.status}: ${error}`);
+  }
+  return response.blob();
+}
+
+export async function uploadPortabilityArchive(
+  file: File,
+): Promise<PortabilityImportResponse> {
+  const token = getPersistedToken();
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(`${API_BASE}/portability/import`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`HTTP ${response.status}: ${error}`);
+  }
+  return response.json();
+}
+
 export async function discoverGraph(
   body: import("../types").GraphDiscoverRequest,
 ): Promise<import("../types").GraphDiscoverResponse> {

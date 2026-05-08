@@ -25,6 +25,7 @@ from routers.model_profiles import router as model_profiles_router
 from routers.models import router as models_router
 from routers.query_prefs import router as query_prefs_router
 from routers.modal_ops import router as modal_ops_router
+from routers.portability import router as portability_router
 from routers.settings import router as settings_router
 from routers.tools import router as tools_router
 from routers.skills import router as skills_router
@@ -320,6 +321,7 @@ app.include_router(conversations_router)
 app.include_router(tools_router)
 app.include_router(skills_router)         # Phase 24 — Skills CRUD
 app.include_router(mcp_info_router)       # Phase 24 — MCP server info for Settings tab
+app.include_router(portability_router)    # Runtime archive download/upload for Settings
 app.include_router(ingestion_router)
 app.include_router(graph_router)
 app.include_router(graph_discovery_router)  # Phase 17 Wave 1 — /api/graph/query
