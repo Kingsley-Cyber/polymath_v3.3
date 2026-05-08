@@ -288,7 +288,11 @@ export const useGraphSessionStore = create<GraphSessionState>((set, get) => ({
   clearNodeNavigation: () => set({ nodeNavigation: null }),
 
   setLoading: (v) => set({ loading: v }),
-  setError: (msg) => set({ error: msg, loading: false }),
+  // setError(message) means "an error occurred, stop loading".
+  // setError(null) means "clear any prior error" — and must NOT touch loading,
+  // otherwise the in-flight indicator gets killed instantly when runDiscover
+  // calls setError(null) right after setLoading(true) at submit time.
+  setError: (msg) => set(msg ? { error: msg, loading: false } : { error: null }),
   setSessions: (sessions) => set({ sessions }),
 
   ensureDomainColors: (corpusId, domains) => {
