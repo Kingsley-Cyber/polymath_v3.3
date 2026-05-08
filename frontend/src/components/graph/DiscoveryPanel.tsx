@@ -201,6 +201,17 @@ export function DiscoveryPanel({ corpusId, onClose }: DiscoveryPanelProps) {
     panelWidthRef.current = panelWidth;
   }, [panelWidth]);
 
+  // Publish the panel's live width as a CSS custom property so GraphView's
+  // right edge can track us in real time. Without this, resizing the panel
+  // exposes the chat interface in the gap between GraphView's right edge
+  // and the panel's left edge.
+  useEffect(() => {
+    document.documentElement.style.setProperty("--mc-panel-width", `${panelWidth}px`);
+    return () => {
+      document.documentElement.style.removeProperty("--mc-panel-width");
+    };
+  }, [panelWidth]);
+
   useEffect(() => {
     const handleResize = () => setPanelWidth((width) => clampPanelWidth(width));
     window.addEventListener("resize", handleResize);

@@ -1219,8 +1219,14 @@ export function GraphView({ onClose }: GraphViewProps) {
   return (
     <div
       id="global-graph-view"
-      data-graph-view-build="mission-context-52vw"
-      className="fixed left-0 top-0 bottom-0 right-[min(42rem,52vw)] z-50 bg-[#0b0c10] flex flex-col font-mono"
+      data-graph-view-build="mission-context-cssvar"
+      // Right edge tracks the DiscoveryPanel's actual width via the
+      // --mc-panel-width custom property the panel publishes on :root.
+      // Falls back to the prior literal when the panel isn't mounted, so
+      // GraphView still renders correctly when used standalone. This closes
+      // the resize gap that used to expose the chat interface behind.
+      className="fixed left-0 top-0 bottom-0 z-50 bg-[#0b0c10] flex flex-col font-mono"
+      style={{ right: "var(--mc-panel-width, min(42rem, 52vw))" }}
     >
       {/* Topbar */}
       <div className="flex items-center gap-3 px-4 py-2 border-b border-border-minimal bg-[#0f1116]">
