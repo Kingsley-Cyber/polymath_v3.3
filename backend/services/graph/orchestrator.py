@@ -723,8 +723,70 @@ _LOW_VALUE_EVIDENCE_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
-_LOW_VALUE_EVIDENCE_FLAGS = {"low_value_section", "index_like", "front_matter_like"}
+_LOW_VALUE_EVIDENCE_FLAGS = {"low_value_section", "index_like", "front_matter_like", "appendix_like", "back_matter_like"}
 _INDEX_ROW_RE = re.compile(r"\b[A-Za-z][A-Za-z -]{2,},\s*\d{1,4}\b")
+_FILE_EXT_RE = re.compile(r"\.(md|markdown|pdf|docx?|txt|rst|html?|epub)$", re.IGNORECASE)
+_SOURCE_PATH_RE = re.compile(r"\s+-\s+(?:libgen|annas[\s_-]archive|libgen\.li|z-library)[^.]*", re.IGNORECASE)
+
+
+def _build_synonym_clusters(pairs: list[tuple[str, str]]) -> list[list[str]]:
+    """Union-find over synonym pairs → list of canonical-form clusters."""
+
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        while parent.get(x, x) != x:
+            parent[x] = parent.get(parent[x], parent[x])
+            x = parent[x]
+        return x
+
+    for a, b in pairs:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    groups: dict[str, list[str]] = {}
+    for member in {x for pair in pairs for x in pair}:
+        groups.setdefault(find(member), []).append(member)
+    return [sorted(set(members)) for members in groups.values() if len(members) >= 2]
+
+
+def _clean_prompt_source_label(label: str, *, source: dict[str, Any] | None = None) -> str:
+    """Tighten the source label for the synthesis prompt.
+
+    Files in this corpus are ingested with messy markdown/pdf filenames that
+    leak ingest-pipeline noise (libgen/anna's-archive suffixes, content hashes).
+    For the prompt we want a clean human-readable handle: strip extensions,
+    drop noise suffixes, and append (Author, Year) when document metadata
+    surfaces them — so the model can cite "Kleppmann (2017)" naturally.
+    """
+
+    text = (label or "").strip()
+    text = _FILE_EXT_RE.sub("", text)
+    text = _SOURCE_PATH_RE.sub("", text)
+    text = re.sub(r"\s+--\s+\d{4,}\s+--.*$", "", text)  # drop library-id tails
+    text = re.sub(r"\s{2,}", " ", text).strip(" -·")
+    if not text:
+        text = label or "source"
+
+    src = source or {}
+    author = str(src.get("author") or src.get("authors") or "").strip()
+    if isinstance(author, str) and "," in author:
+        author = author.split(",", 1)[0].strip()
+    date = str(src.get("publication_date") or src.get("date") or "").strip()
+    year_match = re.search(r"\b(19|20)\d{2}\b", date)
+    year = year_match.group(0) if year_match else ""
+
+    suffix_bits: list[str] = []
+    if author:
+        suffix_bits.append(author.split()[-1] if " " in author else author)
+    if year:
+        suffix_bits.append(year)
+    suffix = ", ".join(suffix_bits)
+    if suffix and suffix.lower() not in text.lower():
+        text = f"{text} ({suffix})"
+
+    return _text(text, 140)
 
 
 def _query_terms_for_evidence(query: str) -> set[str]:
@@ -905,6 +967,13 @@ def _evidence_quality(raw: dict[str, Any], query_terms: set[str]) -> tuple[float
     if "page_1" in heading_text and term_hits < 2 and "abstract" not in lowered:
         score -= 2.5
         reasons.append("front_matter_like")
+    chunk_kind = str(raw.get("chunk_kind") or "").lower()
+    if chunk_kind == "appendix":
+        score -= 4.0
+        reasons.append("appendix_like")
+    elif chunk_kind == "back_matter":
+        score -= 4.0
+        reasons.append("back_matter_like")
 
     # Summary chunks are useful only when their text is actually topical.
     chunk_id = str(raw.get("chunk_id") or raw.get("id") or "")
@@ -1205,7 +1274,15 @@ def _curated_evidence_rows(
         best_by_chunk[cid] for cid in seen_order
     ]
 
+    # Two-pass selection with a per-document diversity cap. The first pass
+    # caps how many chunks any single doc can take, so cross-source bridges
+    # become inevitable instead of lucky. The second pass fills any remaining
+    # slots from the deferred queue (when only one or two docs were anchored,
+    # the cap relaxes naturally).
+    diversity_cap = max(2, _PACKET_MAX_EVIDENCE // 3)
     accepted: list[tuple[float, int, dict[str, Any], list[str]]] = []
+    deferred: list[tuple[float, int, dict[str, Any], list[str]]] = []
+    per_doc: dict[str, int] = {}
     for entry in ranked:
         score, idx, row, reasons = entry
         flags = set(reasons)
@@ -1214,9 +1291,19 @@ def _curated_evidence_rows(
                 key = str(reason).split(":", 1)[0] or "structural_disqualifier"
                 rejection_reasons[key] = rejection_reasons.get(key, 0) + 1
             continue
+        doc_key = str(row.get("doc_id") or row.get("chunk_id") or "")
+        if per_doc.get(doc_key, 0) >= diversity_cap:
+            deferred.append(entry)
+            continue
         accepted.append(entry)
+        per_doc[doc_key] = per_doc.get(doc_key, 0) + 1
         if len(accepted) >= _PACKET_MAX_EVIDENCE:
             break
+    if len(accepted) < _PACKET_MAX_EVIDENCE:
+        for entry in deferred:
+            accepted.append(entry)
+            if len(accepted) >= _PACKET_MAX_EVIDENCE:
+                break
 
     # No fallback when only structurally-disqualified chunks were retrieved.
     # If the corpus only surfaced bibliography/index/front-matter for this
@@ -1407,6 +1494,7 @@ async def _hydrate_trace_source_docs(
                 "summary": 1,
                 "heading_path": 1,
                 "source_tier": 1,
+                "chunk_kind": 1,
                 "page_start": 1,
                 "page_end": 1,
             },
@@ -1520,6 +1608,7 @@ async def _hydrate_trace_source_docs(
                 "text": _text(text, _PACKET_EVIDENCE_TEXT_LIMIT),
                 "summary": parent_summary,
                 "heading_path": heading_path,
+                "chunk_kind": str(chunk.get("chunk_kind") or row.get("chunk_kind") or ""),
                 "source_tier": (
                     chunk.get("source_tier")
                     or parent.get("source_tier")
@@ -2306,6 +2395,34 @@ def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
             "structure and say so plainly."
         )
 
+    docs_in_scope = compact.get("documents_in_scope") or []
+    if docs_in_scope:
+        lines.append("")
+        lines.append(
+            "Documents in scope (one-line orientation per source — read these "
+            "first to know what each book is about, then use the numbered "
+            "evidence below to cite specific passages):"
+        )
+        for doc in docs_in_scope:
+            label = doc.get("label") or "source"
+            summary = (doc.get("summary") or "").strip().replace("\n", " ")
+            if summary:
+                if len(summary) > 200:
+                    summary = summary[:197] + "..."
+                lines.append(f"- {label} — {summary}")
+            else:
+                lines.append(f"- {label}")
+
+    synonym_clusters = compact.get("synonym_clusters") or []
+    if synonym_clusters:
+        lines.append("")
+        lines.append(
+            "Synonym clusters (the corpus uses these as canonical-form "
+            "equivalents — treat them as the same concept):"
+        )
+        for cluster in synonym_clusters:
+            lines.append("- " + " ≡ ".join(cluster))
+
     lines.append("")
     lines.append(
         "Numbered evidence (cite as [1], [2], ...). Each item carries a "
@@ -2439,17 +2556,24 @@ def _source_brief_for_prompt(item: dict[str, Any]) -> dict[str, Any]:
 def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
     evidence_filter = packet.get("evidence_filter") if isinstance(packet.get("evidence_filter"), dict) else {}
     graph_context_allowed = not bool(evidence_filter.get("all_rejected"))
-    evidence = [
-        {
-            "id": str(item.get("evidence_id") or f"e{idx}"),
-            "source": _source_brief_for_prompt(item),
-            "heading_path": [str(h) for h in (item.get("heading_path") or []) if h][:6],
-            "summary": _text(item.get("summary") or "", 320),
-            "text": _text(item.get("text") or "", 360),
-        }
-        for idx, item in enumerate(packet.get("evidence") or [], start=1)
-        if isinstance(item, dict)
-    ]
+    evidence = []
+    for idx, item in enumerate(packet.get("evidence") or [], start=1):
+        if not isinstance(item, dict):
+            continue
+        brief = _source_brief_for_prompt(item)
+        if isinstance(brief, dict):
+            label_field = brief.get("label") or brief.get("title") or item.get("source_label") or ""
+            cleaned = _clean_prompt_source_label(str(label_field), source=brief)
+            brief = {**brief, "label": cleaned, "title": cleaned}
+        evidence.append(
+            {
+                "id": str(item.get("evidence_id") or f"e{idx}"),
+                "source": brief,
+                "heading_path": [str(h) for h in (item.get("heading_path") or []) if h][:6],
+                "summary": _text(item.get("summary") or "", 320),
+                "text": _text(item.get("text") or "", 360),
+            }
+        )
     groups = [
         {
             "label": _text(group.get("label") or "", 70),
@@ -2458,7 +2582,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         for group in (packet.get("communities") or [])[:_PACKET_MAX_COMMUNITIES]
         if graph_context_allowed and isinstance(group, dict)
     ]
-    edges = [
+    raw_edges = [
         {
             "s": _text(edge.get("source_name") or edge.get("source") or "", 45),
             "p": _text(edge.get("predicate") or "", 35),
@@ -2471,6 +2595,23 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         for edge in (packet.get("edges") or [])[:_PACKET_MAX_EDGES]
         if graph_context_allowed and isinstance(edge, dict)
     ]
+    # Fold synonym-of / canonicalization edges into clusters: A ≡ B ≡ C is
+    # one fact, not three. Saves tokens and gives the model a clearer view of
+    # the canonical form. Non-synonym edges pass through unchanged.
+    synonym_predicates = {"synonym_of", "is_synonym_of", "alias_of", "same_as"}
+    synonym_pairs: list[tuple[str, str]] = []
+    edges: list[dict[str, Any]] = []
+    for edge in raw_edges:
+        predicate = (edge.get("p") or "").lower().strip()
+        family = (edge.get("family") or "").lower()
+        if predicate in synonym_predicates or family == "canonicalization":
+            s = (edge.get("s") or "").strip()
+            t = (edge.get("t") or "").strip()
+            if s and t:
+                synonym_pairs.append((s, t))
+            continue
+        edges.append(edge)
+    synonym_clusters: list[list[str]] = _build_synonym_clusters(synonym_pairs)
     # Schema lens — typed entity facets pulled from Neo4j (object_kind /
     # domain_type / canonical_family). Only entities with at least one populated
     # facet make it through; bare entities are noise here.
@@ -2555,6 +2696,17 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         },
         "anchors": [str(a) for a in (packet.get("anchors") or [])[:5] if a],
         "groups": groups,
+        "documents_in_scope": [
+            {
+                "label": _clean_prompt_source_label(
+                    str(d.get("filename") or d.get("source_label") or d.get("doc_id") or ""),
+                ),
+                "summary": _text(d.get("summary") or "", 220),
+            }
+            for d in (packet.get("documents_in_scope") or [])
+            if isinstance(d, dict)
+        ][:6],
+        "synonym_clusters": [members[:6] for members in synonym_clusters][:6],
         "evidence": evidence,
         "edges": edges,
         "entity_facets": entity_facets,
@@ -2765,13 +2917,16 @@ def _synthesis_sources_from_packet(
         chunk_id = str(item.get("chunk_id") or "")
         doc_id = str(item.get("doc_id") or "")
         snippet = _text((item.get("text") or "").replace("\n", " "), 220)
+        raw_label = _source_label_from_row(item, doc_id=doc_id, chunk_id=chunk_id)
+        clean_label = _clean_prompt_source_label(
+            raw_label,
+            source=item.get("source") if isinstance(item.get("source"), dict) else None,
+        )
         receipts.append(
             {
                 "index": idx,
                 "evidence_id": str(item.get("evidence_id") or f"e{idx}"),
-                "source_label": _source_label_from_row(
-                    item, doc_id=doc_id, chunk_id=chunk_id
-                ),
+                "source_label": clean_label,
                 "doc_id": doc_id,
                 "chunk_id": chunk_id,
                 "snippet": snippet,
@@ -3049,6 +3204,45 @@ async def _enrich_packet_with_extractions(
                     entity[key] = facets[key]
             if facets.get("observed_entity_types") and not entity.get("observed_entity_types"):
                 entity["observed_entity_types"] = facets["observed_entity_types"]
+
+    # ── Documents-in-scope orientation: pull a one-line summary per unique doc
+    # in evidence so the model sees the source-level "what is this book about"
+    # before the chunk-level details. Bounded by the number of unique docs in
+    # evidence, so cost is at most ~_PACKET_MAX_EVIDENCE single-doc reads.
+    evidence = [e for e in (packet.get("evidence") or []) if isinstance(e, dict)]
+    doc_ids_in_scope = list({str(e.get("doc_id") or "") for e in evidence if e.get("doc_id")})
+    documents_in_scope: list[dict[str, Any]] = []
+    if doc_ids_in_scope and db is not None:
+        try:
+            cursor = db["documents"].find(
+                {"corpus_id": corpus_id, "doc_id": {"$in": doc_ids_in_scope[:8]}},
+                {
+                    "_id": 0,
+                    "doc_id": 1,
+                    "filename": 1,
+                    "parent_chunks.summary": {"$slice": 1},
+                    "parent_chunks.text": {"$slice": 1},
+                    "metadata": 1,
+                    "document_metadata": 1,
+                    "source_metadata": 1,
+                },
+            )
+            async for doc in cursor:
+                parents = doc.get("parent_chunks") or []
+                head_summary = ""
+                if parents and isinstance(parents[0], dict):
+                    head_summary = str(parents[0].get("summary") or parents[0].get("text") or "")
+                documents_in_scope.append(
+                    {
+                        "doc_id": str(doc.get("doc_id") or ""),
+                        "filename": str(doc.get("filename") or ""),
+                        "summary": _text(head_summary, 220),
+                    }
+                )
+        except Exception as exc:
+            logger.debug("documents-in-scope summary fetch failed: %s", exc)
+    if documents_in_scope:
+        packet["documents_in_scope"] = documents_in_scope
 
 
 async def _persist_enriched_turn(db: Any, result: Any) -> None:

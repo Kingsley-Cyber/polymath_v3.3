@@ -671,7 +671,10 @@ def test_graph_receipts_prefer_filename_when_source_label_is_doc_hash():
 
     assert receipt["files"][0]["source_label"] == filename
     assert receipt["chunks"][0]["source_label"] == filename
-    assert filename in receipt["prompt"]["preview"]
+    # Prompt rendering strips .md extensions so the model cites
+    # "Designing Data-Intensive Applications" naturally.
+    cleaned = filename.rsplit(".md", 1)[0]
+    assert cleaned in receipt["prompt"]["preview"]
     assert doc_id not in receipt["prompt"]["preview"]
 
     result = SimpleNamespace(
@@ -755,7 +758,10 @@ def test_compact_packet_prompt_includes_source_metadata_without_ingest_dates():
     packet = _build_insight_packet(result, query="how does checkpoint support the obby movement loop?", corpus_id="c1")
     compact = _compact_packet_for_prompt(packet)
     source = compact["evidence"][0]["source"]
-    assert source["title"] == "Obby Design Notes"
+    # Prompt-side label is cleaned and gets an "(Author, Year)" suffix when
+    # document metadata supplies them, so the model can cite naturally.
+    assert source["title"].startswith("Obby Design Notes")
+    assert "(Team, 2026)" in source["title"] or "Studio Team" in source.get("author", "")
     assert source["author"] == "Studio Team"
     assert source["date"] == "2026-04-01"
     assert "created_at" not in source

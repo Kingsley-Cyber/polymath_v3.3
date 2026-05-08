@@ -547,12 +547,39 @@ Query-first synthesis. Groups are query-scoped concept/document neighborhoods, n
             )}
           </button>
         </div>
-        <div className="mt-2 flex items-center justify-between gap-3 font-mono text-[9px] uppercase tracking-wider text-neutral-600">
-          <span className={loading ? "text-amber-100/80" : !corpusId ? "text-red-200/80" : "text-neutral-600"}>
-            {footerStatus}
-          </span>
-          {loading && <span className="shrink-0 text-amber-100/70">{formatDuration(elapsedMs)}</span>}
-        </div>
+        {loading ? (
+          <div className="mt-2 flex items-center gap-3 rounded-md border border-amber-200/40 bg-amber-200/[0.08] px-3 py-2 shadow-[0_0_18px_rgba(251,191,36,0.18)]">
+            <div className="flex shrink-0 items-center gap-1">
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-amber-300" style={{ animationDelay: "0ms" }} />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-amber-300" style={{ animationDelay: "150ms" }} />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-amber-300" style={{ animationDelay: "300ms" }} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.20em] text-amber-100">
+                  {phase === "synthesizing" ? "Synthesizing" : "Curating"}
+                </span>
+                <span className="font-mono text-[12px] font-semibold tabular-nums text-amber-50">
+                  {(elapsedMs / 1000).toFixed(1)}s
+                </span>
+              </div>
+              {activeQuery && (
+                <div className="mt-0.5 truncate font-mono text-[10px] text-amber-100/70">
+                  {activeQuery}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-2 flex items-center justify-between gap-3 font-mono text-[9px] uppercase tracking-wider text-neutral-600">
+            <span className={!corpusId ? "text-red-200/80" : "text-neutral-600"}>
+              {footerStatus}
+            </span>
+            {lastDurationMs != null && (
+              <span className="shrink-0 text-emerald-200/70">last: {formatDuration(lastDurationMs)}</span>
+            )}
+          </div>
+        )}
       </form>
     </aside>
   );
