@@ -1,19 +1,30 @@
 // Playwright headed UI demo — every action is a real button click or form fill.
 // No backend API shortcuts. Red cursor overlay + slow-mo so every step is visible.
 //
-// Run:  node C:/Users/Sammb/Downloads/Polymath_v3.3/frontend/scripts/autoresearch-demo.mjs
+// Run from the repo root:
+//   node frontend/scripts/autoresearch-demo.mjs
+//
+// Override the corpus file paths with AUTORESEARCH_FILES (comma-separated)
+// or POLYMATH_TEST_FILES_DIR (directory containing the demo corpus).
 
 import { chromium } from '@playwright/test';
+import { resolve } from 'node:path';
 
-const FRONTEND = 'http://localhost:3000';
-const USERNAME = 'dev';
-const PASSWORD = 'devpass-throwaway-2026';
+const FRONTEND = process.env.POLYMATH_FRONTEND_URL || 'http://localhost:3000';
+const USERNAME = process.env.POLYMATH_TEST_USER || 'dev';
+const PASSWORD = process.env.POLYMATH_TEST_PASSWORD || 'devpass-throwaway-2026';
 
-const CORPUS_NAME = 'Autoresearch';
-const FILES = [
-  'C:/Users/Sammb/Downloads/Polymath_v3.3/TEST/Autoresearch/Product Overview.txt',
-  'C:/Users/Sammb/Downloads/Polymath_v3.3/TEST/Autoresearch/Architecture_Feasibility_Report.docx',
-];
+const CORPUS_NAME = process.env.AUTORESEARCH_CORPUS_NAME || 'Autoresearch';
+const TEST_DIR = process.env.POLYMATH_TEST_FILES_DIR
+  ? resolve(process.env.POLYMATH_TEST_FILES_DIR)
+  : resolve(process.cwd(), 'tests/fixtures/autoresearch');
+const FILES = (process.env.AUTORESEARCH_FILES
+  ? process.env.AUTORESEARCH_FILES.split(',').map((p) => p.trim()).filter(Boolean)
+  : [
+      `${TEST_DIR}/Product Overview.txt`,
+      `${TEST_DIR}/Architecture_Feasibility_Report.docx`,
+    ]
+);
 
 const KEY_A = process.env.DEEPSEEK_KEY_A || '';
 const KEY_B = process.env.DEEPSEEK_KEY_B || '';

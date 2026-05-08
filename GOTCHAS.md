@@ -133,7 +133,7 @@ NEVER use `localhost` in Docker context.
 The embedder container needs GPU access (`deploy.resources.reservations.devices`). If embedder is unhealthy, backend won't start (depends_on).
 
 ### 21. Reranker Model Path
-Reranker weights live at `C:/Users/Sammb/Downloads/polymath_rag/models/ms-marco-MiniLM-L6-v2/`, NOT in `./download/`. Check `docker-compose.yml` volume mounts.
+Reranker weights live under `${POLYMATH_MODELS_ROOT}/ms-marco-MiniLM-L6-v2/`, NOT in `./download/`. Check `docker-compose.yml` volume mounts.
 
 ---
 

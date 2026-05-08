@@ -12,3 +12,7 @@ graphify-out/cache/
 .env
 .env.*
 !.env.example
+# Personal scratch — session notes, ad-hoc smoke runs, etc.
+backend/TEST/
+.DS_Store
+Thumbs.db

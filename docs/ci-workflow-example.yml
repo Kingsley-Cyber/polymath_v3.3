@@ -1,0 +1,46 @@
+name: backend tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-tests.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-tests.yml"
+
+jobs:
+  graph-tests:
+    name: graph orchestrator (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # The graph orchestrator suite has no DB / network deps — pure unit tests.
+      # Other suites (ingestion, retrieval) need Mongo/Qdrant/Neo4j and are
+      # skipped here. Run them locally with `docker compose up` first.
+      - name: Run graph orchestrator tests
+        working-directory: backend
+        env:
+          MONGO_PASSWORD: ci-placeholder
+          NEO4J_PASSWORD: ci-placeholder
+          AUTH_SECRET_KEY: ci-placeholder-key-not-for-prod
+          LITELLM_MASTER_KEY: ci-placeholder
+        run: python -m pytest tests/graph -q

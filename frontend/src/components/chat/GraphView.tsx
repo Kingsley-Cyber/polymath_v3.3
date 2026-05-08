@@ -3,9 +3,6 @@
 // graphology for data structure + Louvain community detection + ForceAtlas2
 // layout. Scales smoothly to ~20k nodes / 60k edges on a modest GPU.
 //
-// The prior implementation (Agent Query, discourse mode, split mode) is
-// preserved in GraphView.legacy.tsx for reference while the rewrite stabilizes.
-//
 // Data source: GET /api/corpora/{corpus_id}/graph/full by default;
 // the cached map overview remains available behind the explicit map switch.
 // Community detection: graphology-communities-louvain (client-side)
