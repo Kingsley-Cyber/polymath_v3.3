@@ -4,7 +4,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import { ChevronDown, ChevronRight, Loader2, MessageSquare, SendHorizontal, Sparkles, Trash2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, FileText, FlaskConical, GitBranch, Loader2, MessageSquare, Network, SendHorizontal, Sparkles, Tags, Trash2, X } from "lucide-react";
 import {
   deleteGraphSession,
   discoverGraph,
@@ -32,6 +32,7 @@ interface DiscoveryPanelProps {
 
 type Phase = "idle" | "curating" | "synthesizing" | "done" | "error";
 type MissionSection = "themes" | "bridges" | "gaps" | "signals" | "moves" | "trace";
+type ClaimLevel = "observed" | "structure" | "hypothesis" | "action";
 
 type ReceiptFile = {
   doc_id: string;
@@ -586,7 +587,10 @@ function MissionRead({ response, onPickQuery }: { response: GraphDiscoverRespons
   const temporal = !!response.insight_packet_summary?.temporal_support;
   return (
     <div className="space-y-5">
+      <ReadStatusStrip response={response} />
       <GroupingBasis response={response} />
+      <ClaimLevelGuide response={response} />
+      <OntologyLensPanel response={response} />
       <ContextTerminal response={response} />
       <GraphHintPanel response={response} />
       <article className="space-y-5 text-[13px] leading-6 text-neutral-300">
@@ -598,14 +602,110 @@ function MissionRead({ response, onPickQuery }: { response: GraphDiscoverRespons
             <span className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-neutral-500">{temporal ? "source order included" : "source order not included"}</span>
           </div>
         </section>
-        <InsightSection id="themes" title="Themes" items={synthesis.themes} empty="No theme narrative was returned for this query." />
-        <InsightSection id="bridges" title="Bridges" items={synthesis.bridges} empty="No bridge narrative was returned for this query." />
-        <InsightSection id="gaps" title="Gaps" items={synthesis.gaps} empty="No gap narrative was returned for this query." />
-        <InsightSection id="signals" title="Emerging Signals" items={synthesis.emerging_signals} empty="No emerging-signal narrative was returned for this query." />
+        <InsightSection id="themes" title="Themes" claim="structure" items={synthesis.themes} empty="No theme narrative was returned for this query." />
+        <InsightSection id="bridges" title="Bridges" claim="structure" items={synthesis.bridges} empty="No bridge narrative was returned for this query." />
+        <InsightSection id="gaps" title="Gaps" claim="hypothesis" items={synthesis.gaps} empty="No supported gap hypothesis was returned for this query." />
+        <InsightSection id="signals" title="Emerging Signals" claim="structure" items={synthesis.emerging_signals} empty="No emerging-signal narrative was returned for this query." />
         <NextMoves items={synthesis.next_moves} onPickQuery={onPickQuery} />
         <EvidenceTrace response={response} notes={synthesis.evidence_notes} />
       </article>
     </div>
+  );
+}
+
+function ReadStatusStrip({ response }: { response: GraphDiscoverResponse }) {
+  const chunks = receiptChunks(response);
+  const filter = response.trace?.evidence_filter;
+  const counts = filter ? evidenceFilterCounts(filter, chunks.length) : null;
+  const fallbackReason = response.insight_packet_summary?.fallback_reason;
+  const sparse = Boolean(response.insight_packet_summary?.sparse || response.trace?.llm_context?.visibility?.sparse);
+  const synthesisTone = fallbackReason ? "warn" : "ok";
+  const evidenceTone = filter?.all_rejected ? "danger" : counts && counts.accepted === 0 ? "warn" : "ok";
+  const graphTone = (response.graph?.nodes?.length || 0) > 0 ? "ok" : "warn";
+  return (
+    <section className="rounded border border-emerald-300/20 bg-emerald-300/[0.035] px-3 py-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.28em] text-emerald-100/80">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Graph query complete
+        </div>
+        <span className="font-mono text-[9px] uppercase tracking-wider text-neutral-500">{response.mode || "auto"} synthesis</span>
+      </div>
+      <div className="grid gap-2 md:grid-cols-4">
+        <StatusTile tone="ok" label="request" value="returned" detail="backend responded" />
+        <StatusTile tone={evidenceTone} label="evidence" value={counts ? `${counts.accepted}/${counts.raw}` : `${chunks.length}`} detail={filter?.all_rejected ? "all chunks filtered" : "accepted snippets"} />
+        <StatusTile tone={graphTone} label="structure" value={`${response.graph?.nodes?.length || 0}`} detail={`${response.graph?.links?.length || 0} visible links`} />
+        <StatusTile tone={synthesisTone} label="synthesis" value={fallbackReason ? "fallback" : sparse ? "thin" : "ready"} detail={fallbackReason || (sparse ? "limited packet" : "LLM packet valid")} />
+      </div>
+    </section>
+  );
+}
+
+function ClaimLevelGuide({ response }: { response: GraphDiscoverResponse }) {
+  const contract = response.trace?.llm_context?.research_contract;
+  const levels = contract?.claim_levels?.length
+    ? contract.claim_levels
+    : ["observed evidence", "graph structure", "testable hypothesis"];
+  return (
+    <section className="rounded border border-white/10 bg-white/[0.025] px-3 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.28em] text-neutral-500">research contract</div>
+          <p className="mt-1 text-[12px] leading-relaxed text-neutral-400">
+            {contract?.job || "The backend must turn retrieved evidence and graph structure into grounded research insight."}
+          </p>
+        </div>
+        <span className="shrink-0 rounded border border-white/10 bg-black/20 px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-neutral-600">claim levels</span>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-3">
+        {levels.slice(0, 3).map((level, index) => {
+          const claim = index === 0 ? "observed" : index === 1 ? "structure" : "hypothesis";
+          return (
+            <div key={level} className="rounded border border-white/10 bg-black/20 px-2 py-2">
+              <div className="mb-1"><ClaimBadge level={claim} /></div>
+              <div className="text-[11px] leading-relaxed text-neutral-500">{claimLevelDescription(claim)}</div>
+            </div>
+          );
+        })}
+      </div>
+      {contract?.avoid && <div className="mt-2 text-[10px] leading-relaxed text-neutral-600">avoids: {contract.avoid}</div>}
+    </section>
+  );
+}
+
+function OntologyLensPanel({ response }: { response: GraphDiscoverResponse }) {
+  const nodes = response.graph?.nodes || [];
+  const links = [
+    ...(response.graph?.links || []),
+    ...((response.trace?.selected_edges || []) as Array<Record<string, any>>),
+  ];
+  const domains = rankedValues(nodes.map((node) => node.domain_type || node.domain));
+  const objects = rankedValues(nodes.map((node) => node.object_kind));
+  const families = rankedValues(nodes.map((node) => node.canonical_family));
+  const relations = rankedValues(links.map((link) => String(link.relation_family || link.predicate || "").trim()));
+  const hasLens = domains.length || objects.length || families.length || relations.length;
+  if (!hasLens) return null;
+  return (
+    <section className="rounded border border-sky-300/15 bg-sky-300/[0.025] px-3 py-3">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.28em] text-sky-100/75">
+            <Tags className="h-3.5 w-3.5" />
+            ontology lens
+          </div>
+          <p className="mt-1 text-[12px] leading-relaxed text-neutral-500">
+            These facets came from extracted entities and relations; they help the backend group concepts before synthesis.
+          </p>
+        </div>
+        <span className="shrink-0 rounded border border-sky-200/15 bg-black/20 px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-neutral-600">facets</span>
+      </div>
+      <div className="grid gap-2 md:grid-cols-4">
+        <FacetColumn title="domain type" values={domains} />
+        <FacetColumn title="object kind" values={objects} />
+        <FacetColumn title="canonical family" values={families} />
+        <FacetColumn title="relation family" values={relations} />
+      </div>
+    </section>
   );
 }
 
@@ -779,21 +879,31 @@ function ContextTerminal({ response }: { response: GraphDiscoverResponse }) {
   );
 }
 
-function InsightSection({ id, title, items, empty }: { id: MissionSection; title: string; items: AutoSynthesisItem[]; empty: string }) {
+function InsightSection({ id, title, claim, items, empty }: { id: MissionSection; title: string; claim: ClaimLevel; items: AutoSynthesisItem[]; empty: string }) {
   return (
     <section id={`mission-${id}`} className="scroll-mt-20 border-b border-white/10 pb-5">
-      <div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-[11px] font-semibold uppercase tracking-[0.28em] text-neutral-400">{title}</h4><span className="text-[10px] text-neutral-700">{items.length}</span></div>
-      {items.length ? <div className="space-y-4">{items.map((item, index) => <InsightItem key={`${title}:${item.title}:${index}`} item={item} index={index} />)}</div> : <p className="text-[12px] leading-relaxed text-neutral-600">{empty}</p>}
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h4 className="text-[11px] font-semibold uppercase tracking-[0.28em] text-neutral-400">{title}</h4>
+          <ClaimBadge level={claim} />
+        </div>
+        <span className="text-[10px] text-neutral-700">{items.length}</span>
+      </div>
+      {items.length ? <div className="space-y-4">{items.map((item, index) => <InsightItem key={`${title}:${item.title}:${index}`} item={item} index={index} claim={claim} />)}</div> : <p className="text-[12px] leading-relaxed text-neutral-600">{empty}</p>}
     </section>
   );
 }
 
-function InsightItem({ item, index }: { item: AutoSynthesisItem; index: number }) {
+function InsightItem({ item, index, claim }: { item: AutoSynthesisItem; index: number; claim: ClaimLevel }) {
   return (
     <div>
-      <div className="mb-1 flex items-baseline gap-2"><span className="font-mono text-[10px] text-neutral-700">{String(index + 1).padStart(2, "0")}</span><h5 className="text-[14px] font-semibold leading-snug text-neutral-100">{cleanTitle(item.title)}</h5></div>
+      <div className="mb-1 flex flex-wrap items-baseline gap-2">
+        <span className="font-mono text-[10px] text-neutral-700">{String(index + 1).padStart(2, "0")}</span>
+        <h5 className="text-[14px] font-semibold leading-snug text-neutral-100">{cleanTitle(item.title)}</h5>
+        <span className="text-[9px] uppercase tracking-wider text-neutral-700">{claimLevelShort(claim)}</span>
+      </div>
       <div className="space-y-2">{paragraphs(item.body).map((paragraph, i) => <p key={`${item.title}:p:${i}`} className="text-[13px] leading-6 text-neutral-300">{paragraph}</p>)}</div>
-      {item.evidence.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{item.evidence.slice(0, 4).map((evidence, i) => <span key={`${item.title}:ev:${i}`} className="rounded border border-white/10 bg-white/[0.03] px-2 py-0.5 font-mono text-[9px] text-neutral-500">{evidence}</span>)}</div>}
+      {item.evidence.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{item.evidence.slice(0, 4).map((evidence, i) => <EvidenceChip key={`${item.title}:ev:${i}`} evidence={evidence} />)}</div>}
     </div>
   );
 }
@@ -801,7 +911,13 @@ function InsightItem({ item, index }: { item: AutoSynthesisItem; index: number }
 function NextMoves({ items, onPickQuery }: { items: AutoSynthesisItem[]; onPickQuery: (text: string) => void }) {
   return (
     <section id="mission-moves" className="scroll-mt-20 border-b border-white/10 pb-5">
-      <div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-[11px] font-semibold uppercase tracking-[0.28em] text-neutral-400">Next Moves</h4><span className="text-[10px] text-neutral-700">{items.length}</span></div>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h4 className="text-[11px] font-semibold uppercase tracking-[0.28em] text-neutral-400">Next Moves</h4>
+          <ClaimBadge level="action" />
+        </div>
+        <span className="text-[10px] text-neutral-700">{items.length}</span>
+      </div>
       {items.length ? (
         <div className="space-y-2">
           {items.map((item, index) => (
@@ -837,7 +953,13 @@ function EvidenceTrace({ response, notes }: { response: GraphDiscoverResponse; n
     : [];
   return (
     <section id="mission-trace" className="scroll-mt-20 pb-6">
-      <div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-[11px] font-semibold uppercase tracking-[0.28em] text-neutral-400">Evidence / Trace</h4><span className="text-[10px] text-neutral-700">advanced</span></div>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h4 className="text-[11px] font-semibold uppercase tracking-[0.28em] text-neutral-400">Evidence / Trace</h4>
+          <ClaimBadge level="observed" />
+        </div>
+        <span className="text-[10px] text-neutral-700">advanced</span>
+      </div>
       {notes.length > 0 && <div className="mb-3 space-y-2">{notes.map((note, index) => <div key={`${note.title}:${index}`} className="rounded border border-white/10 bg-white/[0.025] px-3 py-2"><div className="text-[12px] font-semibold text-neutral-200">{cleanTitle(note.title)}</div><div className="mt-1 text-[12px] leading-relaxed text-neutral-500">{note.body}</div></div>)}</div>}
       {hasRetrievalFilter && (
         <div className="mb-3 rounded border border-white/10 bg-black/20 p-3 font-mono">
@@ -898,6 +1020,73 @@ function TraceChip({ label, tone = "neutral" }: { label: string; tone?: "neutral
     )}>
       {label}
     </span>
+  );
+}
+
+function StatusTile({ tone, label, value, detail }: { tone: "ok" | "warn" | "danger"; label: string; value: string; detail: string }) {
+  const Icon = tone === "ok" ? CheckCircle2 : tone === "warn" ? AlertTriangle : AlertTriangle;
+  return (
+    <div className={cx(
+      "rounded border px-2 py-2",
+      tone === "ok" && "border-emerald-300/15 bg-black/20",
+      tone === "warn" && "border-amber-200/25 bg-amber-200/[0.045]",
+      tone === "danger" && "border-red-300/25 bg-red-500/[0.055]",
+    )}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[9px] uppercase tracking-[0.22em] text-neutral-600">{label}</span>
+        <Icon className={cx("h-3.5 w-3.5", tone === "ok" && "text-emerald-200/70", tone === "warn" && "text-amber-100/80", tone === "danger" && "text-red-100/80")} />
+      </div>
+      <div className="mt-1 font-mono text-[13px] text-neutral-100">{value}</div>
+      <div className="mt-0.5 text-[10px] text-neutral-600">{detail}</div>
+    </div>
+  );
+}
+
+function ClaimBadge({ level }: { level: ClaimLevel }) {
+  const config = claimConfig(level);
+  const Icon = config.icon;
+  return (
+    <span className={cx("inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-wider", config.className)} title={config.description}>
+      <Icon className="h-3 w-3" />
+      {config.label}
+    </span>
+  );
+}
+
+function EvidenceChip({ evidence }: { evidence: string }) {
+  const clean = String(evidence || "").trim();
+  const observed = /^\[?e\d+\]?$/i.test(clean);
+  const graph = clean.toLowerCase().includes("graph");
+  const fallback = clean.toLowerCase().includes("fallback");
+  return (
+    <span className={cx(
+      "rounded border px-2 py-0.5 font-mono text-[9px]",
+      observed && "border-emerald-300/20 bg-emerald-300/[0.04] text-emerald-100/75",
+      graph && "border-sky-300/20 bg-sky-300/[0.04] text-sky-100/75",
+      fallback && "border-amber-200/25 bg-amber-200/[0.05] text-amber-100/75",
+      !observed && !graph && !fallback && "border-white/10 bg-white/[0.03] text-neutral-500",
+    )}>
+      {clean}
+    </span>
+  );
+}
+
+function FacetColumn({ title, values }: { title: string; values: string[] }) {
+  return (
+    <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
+      <div className="mb-1.5 text-[9px] uppercase tracking-[0.22em] text-neutral-600">{title}</div>
+      {values.length ? (
+        <div className="flex flex-wrap gap-1.5">
+          {values.slice(0, 5).map((value) => (
+            <span key={`${title}:${value}`} className="rounded border border-sky-200/15 bg-sky-200/[0.035] px-1.5 py-0.5 text-[9px] text-sky-100/70">
+              {value}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div className="text-[10px] text-neutral-700">none surfaced</div>
+      )}
+    </div>
   );
 }
 
@@ -1120,6 +1309,66 @@ function readableSourceLabel(label: string, index: number): string {
   if (/^[a-f0-9]{32,}$/i.test(clean)) return `Source ${index + 1} (${clean.slice(0, 8)})`;
   if (clean.length > 64) return `${clean.slice(0, 61).trim()}...`;
   return clean || `Source ${index + 1}`;
+}
+
+function rankedValues(values: Array<string | null | undefined>): string[] {
+  const counts = new Map<string, number>();
+  values
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .filter((value) => value.toLowerCase() !== "unknown")
+    .forEach((value) => counts.set(value, (counts.get(value) || 0) + 1));
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 5)
+    .map(([value, count]) => `${value}${count > 1 ? ` x${count}` : ""}`);
+}
+
+function claimConfig(level: ClaimLevel) {
+  if (level === "observed") {
+    return {
+      label: "observed evidence",
+      description: "Retrieved chunks or source metadata accepted by the evidence gate.",
+      icon: FileText,
+      className: "border-emerald-300/20 bg-emerald-300/[0.04] text-emerald-100/75",
+    };
+  }
+  if (level === "structure") {
+    return {
+      label: "graph structure",
+      description: "Entities, relations, ontology facets, and selected graph neighborhoods.",
+      icon: Network,
+      className: "border-sky-300/20 bg-sky-300/[0.04] text-sky-100/75",
+    };
+  }
+  if (level === "hypothesis") {
+    return {
+      label: "testable hypothesis",
+      description: "A candidate gap or bridge that needs more evidence before becoming a claim.",
+      icon: FlaskConical,
+      className: "border-amber-200/25 bg-amber-200/[0.045] text-amber-100/80",
+    };
+  }
+  return {
+    label: "next action",
+    description: "A follow-up query or inspection move.",
+    icon: GitBranch,
+    className: "border-violet-300/20 bg-violet-300/[0.04] text-violet-100/75",
+  };
+}
+
+function claimLevelDescription(level: ClaimLevel): string {
+  if (level === "observed") return "Real source snippets and file metadata that passed the evidence filter.";
+  if (level === "structure") return "Ontology-shaped graph neighborhoods: entities, relations, facets, and bridges.";
+  if (level === "hypothesis") return "A possible hidden connection that should be tested by retrieval before being trusted.";
+  return "A useful next query or inspection path for continuing the research thread.";
+}
+
+function claimLevelShort(level: ClaimLevel): string {
+  if (level === "observed") return "from accepted evidence";
+  if (level === "structure") return "from graph structure";
+  if (level === "hypothesis") return "hypothesis";
+  return "next action";
 }
 
 function clamp(text: string, limit: number): string {

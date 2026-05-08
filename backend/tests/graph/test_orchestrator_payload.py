@@ -408,7 +408,7 @@ def _packet_result_fixture(*, with_evidence: bool = True, with_temporal: bool = 
                 {
                     "chunk_id": "chunk:abc123",
                     "doc_id": "doc:obby_design",
-                    "text": "The obby uses a checkpoint loop to teach movement before each gap.",
+                    "text": "The obby uses a checkpoint loop to teach movement before each onboarding gap.",
                     "source_label": "Obby Design Notes",
                     "source": {
                         "title": "Obby Design Notes",
@@ -462,6 +462,10 @@ def _packet_result_fixture(*, with_evidence: bool = True, with_temporal: bool = 
                 "top_entities": ["Roblox obby", "Movement Loop"],
             }
         ],
+        entity_concept_map={
+            "concept:roblox-obby": {"concept_id": "c0", "label": "Game Mechanics"},
+            "concept:movement": {"concept_id": "c0", "label": "Game Mechanics"},
+        },
         gaps_v2=[
             {
                 "gap_id": "g0",
@@ -1229,7 +1233,7 @@ def test_packet_filters_unrelated_vector_scope_neighborhoods():
                     "chunk_id": "mlkit:1",
                     "doc_id": "doc:mlkit",
                     "source_label": "ML Kit Guide",
-                    "text": "ML Kit runs on Android and supports image labeling.",
+                    "text": "ML Kit runs on Android and is commonly paired with CameraX for image labeling.",
                 }
             ],
         },
@@ -1254,11 +1258,116 @@ def test_packet_filters_unrelated_vector_scope_neighborhoods():
     assert "option strategy cross-border tax" not in labels
     assert ("call option", "option") not in edge_names
     assert [gap["gap_id"] for gap in packet["gaps"]] == ["ml-gap"]
+    assert packet["gaps"][0]["support_status"] == "off_scope_terms_supported_by_evidence"
     assert packet["weak_links"] == []
     assert [signal["canonical_name"] for signal in packet["signals"]] == ["ML Kit MLKit ImageView"]
     assert packet["signals"][0]["domain"] == "query_scope"
+
+    compact = _compact_packet_for_prompt(packet)
+    assert compact["research_contract"]["claim_levels"] == [
+        "observed evidence",
+        "graph structure",
+        "testable hypothesis",
+    ]
+    assert compact["gaps"][0]["support"] == "off_scope_terms_supported_by_evidence"
 
     context = _context_graph_from_result(result)
     topic_labels = {node["label"] for node in context["nodes"] if node["kind"] == "topic"}
     assert "ML Kit MLKit ImageView" in topic_labels
     assert "option strategy cross-border tax" not in topic_labels
+
+
+def test_packet_drops_cross_domain_gaps_without_evidence_support():
+    result = SimpleNamespace(
+        query="Explore the database linearizability client concept neighborhood around database, linearizability, client and its cross-domain bridges.",
+        concept_communities=[],
+        entity_concept_map={
+            "entity:database": {"concept_id": "c0", "label": "database linearizability client"},
+            "entity:client": {"concept_id": "c0", "label": "database linearizability client"},
+            "entity:rorschach": {"concept_id": "c9", "label": "RORSCHACH TAT projective techniques"},
+        },
+        themes=[
+            {"theme_id": "c0", "name": "database linearizability client"},
+            {"theme_id": "c9", "name": "RORSCHACH TAT projective techniques"},
+        ],
+        bridges_v2=[],
+        gaps_v2=[
+            {
+                "gap_id": "psych-gap",
+                "cluster_a": "c0",
+                "cluster_b": "c9",
+                "cluster_a_label": "database linearizability client",
+                "cluster_b_label": "RORSCHACH TAT projective techniques",
+                "question": "What connects database linearizability client to RORSCHACH TAT projective techniques through life course, depression?",
+                "coherence": {"shared_terms": ["life course", "depression"]},
+                "anchor_concepts": ["database", "linearizability", "RORSCHACH", "depression"],
+            }
+        ],
+        latent_topics=[],
+        weak_links=[],
+        anchors=[],
+        interpretation="",
+        headline={},
+        trace={
+            "working_entities": [
+                {"entity_id": "entity:database", "name": "database"},
+                {"entity_id": "entity:client", "name": "client"},
+                {"entity_id": "entity:rorschach", "name": "RORSCHACH"},
+            ],
+            "selected_edges": [
+                {
+                    "source": "entity:database",
+                    "target": "entity:client",
+                    "predicate": "uses",
+                }
+            ],
+            "source_docs": [
+                {
+                    "chunk_id": "db:1",
+                    "doc_id": "doc:db",
+                    "source_label": "Designing Data-Intensive Applications.md",
+                    "text": "Linearizability lets a database client observe the system as if there were a single copy of the data.",
+                }
+            ],
+        },
+        graph={
+            "nodes": [
+                {"id": "entity:database", "label": "database", "concept": "database linearizability client", "degree": 10},
+                {"id": "entity:client", "label": "client", "concept": "database linearizability client", "degree": 5},
+                {"id": "entity:rorschach", "label": "RORSCHACH", "concept": "RORSCHACH TAT projective techniques", "degree": 7},
+            ],
+            "links": [
+                {"source": "entity:database", "target": "entity:client", "predicate": "uses"},
+            ],
+        },
+    )
+
+    packet = _build_insight_packet(result, query=result.query, corpus_id="c1")
+
+    assert packet["gaps"] == []
+
+
+def test_synthesis_scrub_replaces_metric_headline():
+    packet = {
+        "query": "database linearizability client",
+        "communities": [
+            {"label": "database linearizability client"},
+        ],
+        "edges": [],
+        "temporal_support": False,
+    }
+    payload = {
+        "headline": "database linearizability client: 0.0% cross-domain edges and Operational 22%",
+        "themes": [],
+        "bridges": [],
+        "gaps": [],
+        "emerging_signals": [],
+        "next_moves": [],
+        "evidence_notes": [],
+    }
+
+    scrubbed = _scrub_synthesis_payload(payload, packet)
+
+    assert "%" not in scrubbed["headline"]
+    assert "edge" not in scrubbed["headline"].lower()
+    assert "database linearizability client" in scrubbed["headline"]

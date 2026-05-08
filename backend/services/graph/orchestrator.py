@@ -853,6 +853,17 @@ def _query_terms_for_evidence(query: str) -> set[str]:
         "between",
         "patterns",
         "pattern",
+        "concept",
+        "concepts",
+        "neighborhood",
+        "neighborhoods",
+        "bridge",
+        "bridges",
+        "cross",
+        "domain",
+        "corpus",
+        "query",
+        "explore",
     }
     terms = {
         term.lower()
@@ -865,6 +876,89 @@ def _query_terms_for_evidence(query: str) -> set[str]:
         and (len(term) >= 3 or term in short_domain_terms)
         and term not in stopwords
     }
+
+
+def _terms_from_values(*values: Any) -> set[str]:
+    return _query_terms_for_evidence(" ".join(str(value or "") for value in values))
+
+
+def _evidence_term_index(rows: list[dict[str, Any]]) -> set[str]:
+    terms: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        source = row.get("source") if isinstance(row.get("source"), dict) else {}
+        terms.update(
+            _terms_from_values(
+                row.get("text"),
+                row.get("source_label"),
+                source.get("title"),
+                source.get("filename"),
+                source.get("section"),
+            )
+        )
+    return terms
+
+
+def _edge_term_index(edges: list[dict[str, Any]]) -> set[str]:
+    terms: set[str] = set()
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        terms.update(
+            _terms_from_values(
+                edge.get("source_name"),
+                edge.get("target_name"),
+                edge.get("predicate"),
+                edge.get("relation_family"),
+            )
+        )
+    return terms
+
+
+def _gap_cluster_terms(gap: dict[str, Any], side: str) -> set[str]:
+    label = gap.get(f"cluster_{side}_label") or gap.get(f"cluster_{side}") or ""
+    terms = _terms_from_values(label)
+    terms.update(_terms_from_values(gap.get("question")))
+    anchors = gap.get("anchor_concepts") or []
+    if isinstance(anchors, list):
+        terms.update(_terms_from_values(*anchors))
+    coherence = gap.get("coherence") if isinstance(gap.get("coherence"), dict) else {}
+    for key in ("shared_terms", "shared_families", "shared_domain_types", "shared_neighbors"):
+        values = coherence.get(key)
+        if isinstance(values, list):
+            terms.update(_terms_from_values(*values))
+    return terms
+
+
+def _gap_supported_by_scope(
+    gap: dict[str, Any],
+    *,
+    relevant_cluster_ids: set[str],
+    query_terms: set[str],
+    evidence_terms: set[str],
+    edge_terms: set[str],
+) -> tuple[bool, str]:
+    """Gate speculative gaps so unrelated corpus regions do not become synthesis bait."""
+
+    if not relevant_cluster_ids:
+        return False, "no_query_cluster"
+
+    cluster_a = str(gap.get("cluster_a") or "")
+    cluster_b = str(gap.get("cluster_b") or "")
+    a_relevant = cluster_a in relevant_cluster_ids
+    b_relevant = cluster_b in relevant_cluster_ids
+    if a_relevant and b_relevant:
+        return True, "both_query_clusters"
+    if not (a_relevant or b_relevant):
+        return False, "outside_query_scope"
+
+    support_terms = (evidence_terms | edge_terms) - query_terms
+    off_scope_side = "b" if a_relevant else "a"
+    off_scope_terms = _gap_cluster_terms(gap, off_scope_side) - query_terms
+    if off_scope_terms and support_terms and off_scope_terms & support_terms:
+        return True, "off_scope_terms_supported_by_evidence"
+    return False, "off_scope_cluster_not_in_evidence"
 
 
 def _evidence_quality(raw: dict[str, Any], query_terms: set[str]) -> tuple[float, list[str]]:
@@ -1817,6 +1911,11 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
         for t in (getattr(result, "themes", []) or [])
         if isinstance(t, dict)
     }
+    community_id_by_label = {
+        str(c.get("label") or "").strip().lower(): str(c.get("concept_id") or "").strip()
+        for c in (getattr(result, "concept_communities", []) or [])
+        if isinstance(c, dict) and c.get("label") and c.get("concept_id")
+    }
     scoped_groups: dict[str, dict[str, Any]] = {}
     for eid, raw in graph_nodes_index.items():
         if relevance_entity_ids and eid not in relevance_entity_ids:
@@ -1834,6 +1933,8 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
             or raw.get("label")
             or "Query neighborhood"
         ).strip()
+        if not cid:
+            cid = community_id_by_label.get(label.lower(), "")
         gid = f"concept:{cid}" if cid else f"facet:{label.lower().replace(' ', '-')[:80] or eid}"
         group = scoped_groups.setdefault(
             gid,
@@ -1906,6 +2007,21 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
         if len(edges) >= _PACKET_MAX_EDGES:
             break
 
+    # ── evidence chunks (with temporal-support detection) ──────────────────
+    # Gaps are hypotheses, so they are gated against accepted evidence below.
+    source_docs = trace.get("source_docs") or []
+    if not isinstance(source_docs, list):
+        source_docs = []
+    raw_evidence_count = len([row for row in source_docs if isinstance(row, dict)])
+    evidence, evidence_rejected, temporal_support, rejection_reasons = _curated_evidence_rows(
+        source_docs,
+        query=query,
+    )
+    evidence_all_rejected = raw_evidence_count > 0 and len(evidence) == 0
+    evidence_terms = _evidence_term_index(evidence)
+    edge_terms = _edge_term_index(edges)
+    query_terms = _graph_relevance_terms(query)
+
     # ── gaps (suggested, not real Neo4j edges) ─────────────────────────────
     gaps: list[dict[str, Any]] = []
     relevant_cluster_ids = {
@@ -1916,10 +2032,17 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
     for gap in (getattr(result, "gaps_v2", []) or []):
         if not isinstance(gap, dict):
             continue
+        include_gap, support_status = _gap_supported_by_scope(
+            gap,
+            relevant_cluster_ids=relevant_cluster_ids,
+            query_terms=query_terms,
+            evidence_terms=evidence_terms,
+            edge_terms=edge_terms,
+        )
+        if not include_gap:
+            continue
         cluster_a = str(gap.get("cluster_a") or "")
         cluster_b = str(gap.get("cluster_b") or "")
-        if relevant_cluster_ids and cluster_a not in relevant_cluster_ids and cluster_b not in relevant_cluster_ids:
-            continue
         gaps.append(
             {
                 "gap_id": str(gap.get("gap_id") or ""),
@@ -1928,6 +2051,9 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
                 "cluster_a_label": str(gap.get("cluster_a_label") or ""),
                 "cluster_b_label": str(gap.get("cluster_b_label") or ""),
                 "question": str(gap.get("question") or ""),
+                "coherence": gap.get("coherence") if isinstance(gap.get("coherence"), dict) else {},
+                "anchor_concepts": [str(v) for v in (gap.get("anchor_concepts") or [])[:6] if v],
+                "support_status": support_status,
             }
         )
         if len(gaps) >= _PACKET_MAX_GAPS:
@@ -2028,17 +2154,6 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
         )
         if len(weak_links) >= _PACKET_MAX_WEAK_LINKS:
             break
-
-    # ── evidence chunks (with temporal-support detection) ──────────────────
-    source_docs = trace.get("source_docs") or []
-    if not isinstance(source_docs, list):
-        source_docs = []
-    raw_evidence_count = len([row for row in source_docs if isinstance(row, dict)])
-    evidence, evidence_rejected, temporal_support, rejection_reasons = _curated_evidence_rows(
-        source_docs,
-        query=query,
-    )
-    evidence_all_rejected = raw_evidence_count > 0 and len(evidence) == 0
 
     # ── trace stages (already populated by _trace_with_stages) ─────────────
     stages_raw = trace.get("stages") or []
@@ -2151,6 +2266,7 @@ def _llm_context_trace_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
     )
 
     user_prompt = _render_packet_user_prompt(packet)
+    research_contract = _research_contract_for_prompt()
 
     return {
         "packet_version": "graph-insight-v1",
@@ -2158,6 +2274,7 @@ def _llm_context_trace_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "collections": packet.get("collections") or {},
         "retrieval": packet.get("retrieval") or {},
         "graph_hint": packet.get("graph_hint") or {},
+        "research_contract": research_contract,
         "files": files,
         "chunks": chunks,
         "prompt": {
@@ -2185,11 +2302,16 @@ def _llm_context_trace_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
             "graph_hint": packet.get("graph_hint") or {},
             "temporal_support": bool(packet.get("temporal_support")),
             "sparse": bool(packet.get("sparse")),
+            "claim_levels": research_contract.get("claim_levels") or [],
         },
     }
 
 
 _SYNTHESIS_SYSTEM_PROMPT = (
+    "You are Polymath's research synthesizer: read the supplied packet like a "
+    "careful interdisciplinary researcher who wants useful nuance, not a graph "
+    "dashboard. Transform stored chunks, summaries, entities, relations, and "
+    "source metadata into grounded information and testable knowledge. "
     "Write a concise corpus insight synthesis from ONLY the supplied packet. "
     "Return JSON only with keys: headline, themes, bridges, gaps, "
     "emerging_signals, next_moves, evidence_notes. Each list item is "
@@ -2197,18 +2319,21 @@ _SYNTHESIS_SYSTEM_PROMPT = (
     "Maximum items: themes 3, bridges 2, gaps 3, emerging_signals 3, "
     "next_moves 2, evidence_notes 2. Keep headline under 140 characters and "
     "each body under 320 characters. "
-    "Prioritize bridges, gaps, and emerging_signals; themes should frame the "
-    "read, not dominate it. Bodies should be natural 1-2 sentence notes, not "
-    "cards or bullets. For bridges, explain what is being connected and why "
-    "the connection matters. For gaps, explain the missing relation as a "
-    "testable question and name what evidence would resolve it. For "
-    "emerging_signals, describe the relation pattern visible in the packet; "
-    "if web_state is absent, do not make current-market or current-web claims. "
-    "Do not frame the answer as occurrence counts, a metric report, or "
-    "strong/weak scoring. Avoid occurrence/mention phrasing such as repeated "
-    "mentions, recurring, frequent, weak, or strong unless those words are "
-    "inside quoted source text. Use graph_hint as the reading lens: shape, "
-    "gateway concepts, gap depth, and supporting statements. "
+    "Prioritize bridges, gaps, and emerging_signals; themes should be short "
+    "orientation frames, not the main answer. Bodies should be natural "
+    "1-2 sentence research notes. For bridges, explain the mechanism, analogy, "
+    "or tension being connected and why it matters for the user's query. For "
+    "gaps, explain the missing relation as a testable hypothesis and name what "
+    "evidence would resolve it. Ignore any gap whose support says outside or "
+    "not in evidence. For emerging_signals, describe a relation pattern visible "
+    "in the packet; if web_state is absent, do not make current-market or "
+    "current-web claims. Distinguish direct evidence from graph structure from "
+    "hypothesis. Do not frame the answer as occurrence counts, a metric report, "
+    "or strong/weak scoring. Never put raw percentages, edge counts, or relation "
+    "family percentages in the headline. Avoid occurrence/mention phrasing such "
+    "as repeated mentions, recurring, frequent, weak, or strong unless those "
+    "words are inside quoted source text. Use graph_hint as the reading lens: "
+    "shape, gateway concepts, gap depth, and supporting statements. "
     "Cite supplied evidence ids like [e1] or graph structure as [graph]. "
     "Use source metadata for orientation, but only state author/date/publisher "
     "when supplied in the packet. "
@@ -2314,6 +2439,20 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
                 _text(gap.get("cluster_b_label") or gap.get("cluster_b") or "", 50),
             ],
             "q": _text(gap.get("question") or "", 150),
+            "support": _text(gap.get("support_status") or "", 50),
+            "basis": {
+                "shared_terms": [
+                    str(v)
+                    for v in ((gap.get("coherence") or {}).get("shared_terms") or [])[:4]
+                    if v
+                ],
+                "shared_neighbors": [
+                    str(v)
+                    for v in ((gap.get("coherence") or {}).get("shared_neighbors") or [])[:4]
+                    if v
+                ],
+                "anchors": [str(v) for v in (gap.get("anchor_concepts") or [])[:4] if v],
+            },
         }
         for idx, gap in enumerate((packet.get("gaps") or [])[:_PACKET_MAX_GAPS], start=1)
         if graph_context_allowed and isinstance(gap, dict) and gap.get("question")
@@ -2352,6 +2491,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         "retrieval": packet.get("retrieval") or {},
         "temporal": bool(packet.get("temporal_support")),
         "sparse": bool(packet.get("sparse")),
+        "research_contract": _research_contract_for_prompt(),
         "synthesis_priority": {
             "primary": ["bridges", "gaps", "emerging_signals"],
             "themes": "brief framing only",
@@ -2372,6 +2512,14 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
             if evidence_filter.get("all_rejected")
             else ""
         ),
+    }
+
+
+def _research_contract_for_prompt() -> dict[str, Any]:
+    return {
+        "job": "turn stored chunks, summaries, entities, relations, and source metadata into grounded research insight",
+        "claim_levels": ["observed evidence", "graph structure", "testable hypothesis"],
+        "avoid": "metric narration, whole-corpus trivia, or unrelated cross-domain jumps",
     }
 
 
@@ -2661,6 +2809,29 @@ def _string_list(value: Any) -> list[str]:
 _SLASH_TITLE_RE = re.compile(r"\s*/\s*")
 _TREND_BODY_RE = re.compile(r"\b[Tt]rends?\b")
 _TRENDING_BODY_RE = re.compile(r"\b[Tt]rending\b")
+_METRIC_HEADLINE_RE = re.compile(
+    r"(\d+(?:\.\d+)?%|\b(edge|edges|density|modularity|pagerank|weakassociation|operational)\b)",
+    re.IGNORECASE,
+)
+
+
+def _research_headline_from_packet(packet: dict[str, Any]) -> str:
+    query = _text(packet.get("query") or "Graph query", 70)
+    groups = [
+        str(group.get("label") or "")
+        for group in (packet.get("communities") or [])[:2]
+        if isinstance(group, dict) and group.get("label")
+    ]
+    edges = [
+        f"{edge.get('source_name') or edge.get('source')} -> {edge.get('target_name') or edge.get('target')}"
+        for edge in (packet.get("edges") or [])[:1]
+        if isinstance(edge, dict)
+    ]
+    if edges:
+        return _text(f"{query}: evidence-backed bridge around {edges[0]}", 140)
+    if groups:
+        return _text(f"{query}: research read across {', '.join(groups[:2])}", 140)
+    return _text(f"{query}: evidence-grounded graph read", 140)
 
 
 def _scrub_synthesis_payload(
@@ -2683,9 +2854,10 @@ def _scrub_synthesis_payload(
             "related_ids": [str(r) for r in (item.get("related_ids") or []) if r][:6],
         }
 
-    cleaned = {
-        "headline": _text(payload.get("headline") or "", 280),
-    }
+    headline = _text(payload.get("headline") or "", 280)
+    if not headline or _METRIC_HEADLINE_RE.search(headline):
+        headline = _research_headline_from_packet(packet)
+    cleaned = {"headline": headline}
     for key in ("themes", "bridges", "gaps", "emerging_signals", "next_moves", "evidence_notes"):
         cleaned[key] = [
             _clean_item(item) for item in (payload.get(key) or []) if isinstance(item, dict)

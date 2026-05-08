@@ -292,6 +292,11 @@ export interface DiscoverTracePayload {
     packet_version?: string;
     query?: string;
     collections?: Record<string, string>;
+    research_contract?: {
+      job?: string;
+      claim_levels?: string[];
+      avoid?: string;
+    };
     prompt?: {
       system_chars?: number;
       user_chars?: number;
