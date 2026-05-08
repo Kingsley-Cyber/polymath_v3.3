@@ -5,6 +5,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, FileText, FlaskConical, GitBranch, Loader2, MessageSquare, Network, SendHorizontal, Sparkles, Tags, Trash2, X } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import {
   deleteGraphSession,
   discoverGraph,
@@ -17,12 +18,12 @@ import { useChatStore } from "../../stores/chatStore";
 import { useGraphSessionStore } from "../../stores/graphSessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import type {
-  AutoSynthesisItem,
   AutoSynthesisPayload,
   DiscoverMode,
   GraphSourceMetadata,
   GraphDiscoverResponse,
   GraphDiscoverSession,
+  SynthesisSource,
 } from "../../types";
 
 interface DiscoveryPanelProps {
@@ -31,7 +32,7 @@ interface DiscoveryPanelProps {
 }
 
 type Phase = "idle" | "curating" | "synthesizing" | "done" | "error";
-type MissionSection = "themes" | "bridges" | "gaps" | "signals" | "moves" | "trace";
+type MissionSection = "synthesis" | "sources" | "trace";
 type ClaimLevel = "observed" | "structure" | "hypothesis" | "action";
 
 type ReceiptFile = {
@@ -174,7 +175,7 @@ export function DiscoveryPanel({ corpusId, onClose }: DiscoveryPanelProps) {
     if (!nodeNavigation || nodeNavigation.nonce === seenNode.current) return;
     seenNode.current = nodeNavigation.nonce;
     const targets = nodeNavigation.links.map((link) => sectionForJump(link.section)).filter(Boolean);
-    if (targets.length === 1 && targets[0] === "themes") scrollToSection("themes");
+    if (targets.length === 1 && targets[0] === "synthesis") scrollToSection("synthesis");
   }, [nodeNavigation]);
 
   useEffect(() => {
@@ -520,22 +521,17 @@ function chatPromptForGraphRead(response: GraphDiscoverResponse): string {
     .slice(0, 6)
     .map((file, index) => `- ${readableSourceLabel(file.source_label, index)} (${file.chunk_count || file.chunk_ids?.length || 0} chunks)`)
     .join("\n");
-  const section = (label: string, items: AutoSynthesisItem[]) => {
-    const lines = items
-      .slice(0, 3)
-      .map((item) => `- ${item.title}: ${clamp(item.body, 260)}`);
-    return lines.length ? `${label}\n${lines.join("\n")}` : "";
-  };
+  const sources = synthesis.sources
+    .slice(0, 12)
+    .map((source) => `[${source.index}] ${source.source_label}${source.snippet ? ` — ${clamp(source.snippet, 160)}` : ""}`)
+    .join("\n");
   return [
     "Use this Mission Control graph synthesis as context for my next chat turn. Verify any new claims against retrieval before answering.",
     `Graph query: ${response.query}`,
     `Corpus: ${response.corpus_id}`,
-    `Headline: ${synthesis.headline}`,
-    section("Themes:", synthesis.themes),
-    section("Bridges:", synthesis.bridges),
-    section("Gaps:", synthesis.gaps),
-    section("Emerging Signals:", synthesis.emerging_signals),
-    section("Next Moves:", synthesis.next_moves),
+    synthesis.headline ? `Headline: ${synthesis.headline}` : "",
+    synthesis.markdown ? `Synthesis:\n${synthesis.markdown}` : "",
+    sources ? `Cited sources:\n${sources}` : "",
     files ? `Evidence files sent to the graph LLM:\n${files}` : "",
   ]
     .filter(Boolean)
@@ -569,47 +565,181 @@ function RequestStages({ phase, loading, hasResponse, elapsedMs }: { phase: Phas
 }
 
 function RunningQueryBanner({ phase, query, elapsedMs }: { phase: Phase; query: string; elapsedMs: number }) {
-  const label = phase === "synthesizing" ? "Synthesizing insight" : "Curating graph";
+  const label = phase === "synthesizing" ? "Polymath is synthesizing" : "Curating the graph packet";
+  const detail = phase === "synthesizing"
+    ? "Reading evidence, weaving bridges and contradictions into prose…"
+    : "Selecting anchored chunks, edges, and concept neighborhoods…";
+  const seconds = (elapsedMs / 1000).toFixed(1);
   return (
-    <div className="sticky top-0 z-20 mb-4 rounded border border-amber-200/25 bg-[#11141b]/95 px-3 py-2 font-mono shadow-[0_0_42px_rgba(0,0,0,0.45)]">
-      <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-amber-100/80">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        <span>{label}</span>
-        <span className="ml-auto text-amber-100/60">{formatDuration(elapsedMs)}</span>
+    <div className="sticky top-0 z-20 mb-4 overflow-hidden rounded-lg border-2 border-amber-200/40 bg-gradient-to-br from-amber-200/[0.10] via-[#11141b]/95 to-amber-200/[0.04] px-4 py-3 shadow-[0_0_60px_rgba(251,191,36,0.20)]">
+      <div className="flex items-center gap-3">
+        <div className="relative flex h-8 w-8 shrink-0 items-center justify-center">
+          <span className="absolute inset-0 animate-ping rounded-full bg-amber-300/30" />
+          <Loader2 className="relative h-5 w-5 animate-spin text-amber-200" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="text-[12px] font-semibold uppercase tracking-[0.20em] text-amber-100">{label}</div>
+            <div className="font-mono text-[14px] font-semibold tabular-nums text-amber-200">{seconds}s</div>
+          </div>
+          <div className="mt-0.5 text-[11px] leading-relaxed text-amber-100/70">{detail}</div>
+        </div>
       </div>
-      <div className="mt-1 truncate text-[11px] text-neutral-400">{query || "Graph query request is running"}</div>
+      {query && (
+        <div className="mt-2 truncate border-t border-amber-200/20 pt-2 font-mono text-[10px] text-neutral-400">
+          <span className="text-amber-200/60">query › </span>{query}
+        </div>
+      )}
+      <div className="mt-2 h-[3px] overflow-hidden rounded-full bg-white/5">
+        <div className="h-full w-1/3 animate-[pulse_1.6s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-amber-300/60 via-amber-200 to-amber-300/60" />
+      </div>
     </div>
   );
 }
 
 function MissionRead({ response, onPickQuery }: { response: GraphDiscoverResponse; onPickQuery: (text: string) => void }) {
   const synthesis = useMemo(() => synthesisForResponse(response), [response]);
-  const temporal = !!response.insight_packet_summary?.temporal_support;
   return (
-    <div className="space-y-5">
-      <ReadStatusStrip response={response} />
-      <GroupingBasis response={response} />
-      <ClaimLevelGuide response={response} />
-      <OntologyLensPanel response={response} />
-      <ContextTerminal response={response} />
-      <GraphHintPanel response={response} />
-      <article className="space-y-5 text-[13px] leading-6 text-neutral-300">
-        <section id="mission-headline" className="border-b border-white/10 pb-4">
-          <div className="mb-2 text-[10px] uppercase tracking-[0.28em] text-neutral-500">Structural Headline</div>
-          <h3 className="text-xl font-semibold leading-tight tracking-tight text-neutral-50">{synthesis.headline || "The graph did not have enough evidence for a confident synthesis."}</h3>
-          <div className="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-wider">
-            <span className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-neutral-500">backend response returned</span>
-            <span className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-neutral-500">{temporal ? "source order included" : "source order not included"}</span>
+    <article className="space-y-6 text-[13px] leading-6 text-neutral-300">
+      <header id="mission-headline" className="space-y-2">
+        <h3 className="text-2xl font-semibold leading-tight tracking-tight text-neutral-50">
+          {synthesis.headline || "The graph did not have enough evidence for a confident synthesis."}
+        </h3>
+        {synthesis.fallback && (
+          <div className="inline-flex items-center gap-2 rounded border border-amber-200/30 bg-amber-200/[0.08] px-2 py-1 text-[10px] uppercase tracking-wider text-amber-100/85">
+            <AlertTriangle className="h-3 w-3" />
+            deterministic fallback{synthesis.fallback_reason ? ` · ${synthesis.fallback_reason}` : ""}
           </div>
-        </section>
-        <InsightSection id="themes" title="Themes" claim="structure" items={synthesis.themes} empty="No theme narrative was returned for this query." />
-        <InsightSection id="bridges" title="Bridges" claim="structure" items={synthesis.bridges} empty="No bridge narrative was returned for this query." />
-        <InsightSection id="gaps" title="Gaps" claim="hypothesis" items={synthesis.gaps} empty="No supported gap hypothesis was returned for this query." />
-        <InsightSection id="signals" title="Emerging Signals" claim="structure" items={synthesis.emerging_signals} empty="No emerging-signal narrative was returned for this query." />
-        <NextMoves items={synthesis.next_moves} onPickQuery={onPickQuery} />
-        <EvidenceTrace response={response} notes={synthesis.evidence_notes} />
-      </article>
-    </div>
+        )}
+      </header>
+      <SynthesisProse markdown={synthesis.markdown} sources={synthesis.sources} />
+      <SourceReceipts sources={synthesis.sources} />
+      <NextQueryHints questions={response.questions || []} onPickQuery={onPickQuery} />
+      <DiagnosticsDisclosure response={response} />
+    </article>
+  );
+}
+
+function DiagnosticsDisclosure({ response }: { response: GraphDiscoverResponse }) {
+  return (
+    <details className="group rounded border border-white/10 bg-white/[0.015] open:bg-white/[0.025]">
+      <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-[10px] uppercase tracking-[0.24em] text-neutral-500 hover:text-neutral-300">
+        <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
+        diagnostics &amp; trace
+        <span className="ml-auto font-mono text-neutral-700">advanced</span>
+      </summary>
+      <div className="space-y-5 border-t border-white/10 px-3 py-4">
+        <ReadStatusStrip response={response} />
+        <GroupingBasis response={response} />
+        <ClaimLevelGuide response={response} />
+        <OntologyLensPanel response={response} />
+        <ContextTerminal response={response} />
+        <GraphHintPanel response={response} />
+        <EvidenceTrace response={response} />
+      </div>
+    </details>
+  );
+}
+
+function SynthesisProse({ markdown, sources }: { markdown: string; sources: SynthesisSource[] }) {
+  const sourceByIndex = useMemo(() => {
+    const map = new Map<number, SynthesisSource>();
+    for (const source of sources) map.set(source.index, source);
+    return map;
+  }, [sources]);
+  if (!markdown.trim()) {
+    return (
+      <section id="mission-synthesis" className="scroll-mt-20">
+        <p className="text-[13px] leading-relaxed text-neutral-500">No synthesis prose was returned for this query.</p>
+      </section>
+    );
+  }
+  const annotated = annotateCitations(markdown, sourceByIndex);
+  return (
+    <section id="mission-synthesis" className="scroll-mt-20">
+      <div className="prose prose-invert max-w-none text-[14px] leading-[1.75] text-neutral-200 [&_h2]:mt-6 [&_h2]:mb-3 [&_h2]:text-neutral-50 [&_h2]:text-[17px] [&_h2]:font-semibold [&_h3]:mt-5 [&_h3]:mb-2 [&_h3]:text-neutral-100 [&_h3]:text-[15px] [&_h3]:font-semibold [&_p]:my-4 [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-l-amber-200/40 [&_blockquote]:bg-amber-200/[0.04] [&_blockquote]:px-4 [&_blockquote]:py-2 [&_blockquote]:text-amber-100/90 [&_blockquote]:not-italic [&_strong]:font-semibold [&_strong]:text-neutral-50 [&_em]:text-neutral-300 [&_a]:text-amber-200 [&_a]:no-underline hover:[&_a]:text-amber-100 [&_li]:my-1.5 [&_ul]:my-3 [&_ol]:my-3 [&_code]:rounded [&_code]:border [&_code]:border-white/10 [&_code]:bg-white/[0.04] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-[12.5px] [&_hr]:my-6 [&_hr]:border-white/10">
+        <ReactMarkdown
+          components={{
+            a: ({ href, children, ...rest }) => {
+              const m = String(href || "").match(/^#cite-(\d+)$/);
+              if (m) {
+                const idx = Number(m[1]);
+                const src = sourceByIndex.get(idx);
+                return (
+                  <a
+                    href={`#mission-source-${idx}`}
+                    title={src ? `${src.source_label}${src.snippet ? ` — ${src.snippet}` : ""}` : `Source ${idx}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      document.getElementById(`mission-source-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }}
+                    className="ml-0.5 inline-flex items-center align-baseline rounded border border-amber-200/25 bg-amber-200/[0.06] px-1 py-0 text-[10px] font-mono text-amber-100/85 hover:border-amber-100/40 hover:text-amber-50"
+                  >
+                    {children}
+                  </a>
+                );
+              }
+              return <a href={href} {...rest}>{children}</a>;
+            },
+          }}
+        >
+          {annotated}
+        </ReactMarkdown>
+      </div>
+    </section>
+  );
+}
+
+function annotateCitations(markdown: string, sourceByIndex: Map<number, SynthesisSource>): string {
+  return markdown.replace(/\[(\d{1,3})\]/g, (raw, num: string) => {
+    const idx = Number(num);
+    if (!sourceByIndex.has(idx)) return raw;
+    return `[\\[${num}\\]](#cite-${num})`;
+  });
+}
+
+function SourceReceipts({ sources }: { sources: SynthesisSource[] }) {
+  if (!sources.length) return null;
+  return (
+    <section id="mission-sources" className="scroll-mt-20 border-t border-white/10 pt-5">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.20em] text-neutral-400">Sources</div>
+        <span className="text-[10px] text-neutral-600">{sources.length}</span>
+      </div>
+      <div className="space-y-2">
+        {sources.map((source) => (
+          <div key={`source:${source.index}`} id={`mission-source-${source.index}`} className="scroll-mt-20 rounded-md border border-white/10 bg-white/[0.02] px-3 py-2.5 hover:border-white/20">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <span className="rounded border border-amber-200/30 bg-amber-200/[0.08] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-100">[{source.index}]</span>
+              <span className="text-[12.5px] font-semibold text-neutral-100">{source.source_label || `Source ${source.index}`}</span>
+              {source.chunk_id && <span className="ml-auto font-mono text-[9px] text-neutral-600">{source.chunk_id.slice(0, 12)}</span>}
+            </div>
+            {source.snippet && <p className="mt-1.5 text-[12px] leading-relaxed text-neutral-400">{source.snippet}</p>}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function NextQueryHints({ questions, onPickQuery }: { questions: GraphDiscoverResponse["questions"]; onPickQuery: (text: string) => void }) {
+  if (!questions || questions.length === 0) return null;
+  return (
+    <section className="scroll-mt-20 border-t border-white/10 pt-5">
+      <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.20em] text-neutral-400">Pull on these threads</div>
+      <div className="space-y-2">
+        {questions.slice(0, 5).map((q, index) => (
+          <button
+            key={`${q.text}:${index}`}
+            type="button"
+            onClick={() => onPickQuery(q.text)}
+            className="block w-full rounded-md border border-white/10 bg-white/[0.02] px-3 py-2 text-left text-[12.5px] text-neutral-300 hover:border-amber-200/30 hover:bg-amber-200/[0.04] hover:text-amber-50"
+          >
+            {q.text}
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -879,60 +1009,7 @@ function ContextTerminal({ response }: { response: GraphDiscoverResponse }) {
   );
 }
 
-function InsightSection({ id, title, claim, items, empty }: { id: MissionSection; title: string; claim: ClaimLevel; items: AutoSynthesisItem[]; empty: string }) {
-  return (
-    <section id={`mission-${id}`} className="scroll-mt-20 border-b border-white/10 pb-5">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <h4 className="text-[11px] font-semibold uppercase tracking-[0.28em] text-neutral-400">{title}</h4>
-          <ClaimBadge level={claim} />
-        </div>
-        <span className="text-[10px] text-neutral-700">{items.length}</span>
-      </div>
-      {items.length ? <div className="space-y-4">{items.map((item, index) => <InsightItem key={`${title}:${item.title}:${index}`} item={item} index={index} claim={claim} />)}</div> : <p className="text-[12px] leading-relaxed text-neutral-600">{empty}</p>}
-    </section>
-  );
-}
-
-function InsightItem({ item, index, claim }: { item: AutoSynthesisItem; index: number; claim: ClaimLevel }) {
-  return (
-    <div>
-      <div className="mb-1 flex flex-wrap items-baseline gap-2">
-        <span className="font-mono text-[10px] text-neutral-700">{String(index + 1).padStart(2, "0")}</span>
-        <h5 className="text-[14px] font-semibold leading-snug text-neutral-100">{cleanTitle(item.title)}</h5>
-        <span className="text-[9px] uppercase tracking-wider text-neutral-700">{claimLevelShort(claim)}</span>
-      </div>
-      <div className="space-y-2">{paragraphs(item.body).map((paragraph, i) => <p key={`${item.title}:p:${i}`} className="text-[13px] leading-6 text-neutral-300">{paragraph}</p>)}</div>
-      {item.evidence.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{item.evidence.slice(0, 4).map((evidence, i) => <EvidenceChip key={`${item.title}:ev:${i}`} evidence={evidence} />)}</div>}
-    </div>
-  );
-}
-
-function NextMoves({ items, onPickQuery }: { items: AutoSynthesisItem[]; onPickQuery: (text: string) => void }) {
-  return (
-    <section id="mission-moves" className="scroll-mt-20 border-b border-white/10 pb-5">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <h4 className="text-[11px] font-semibold uppercase tracking-[0.28em] text-neutral-400">Next Moves</h4>
-          <ClaimBadge level="action" />
-        </div>
-        <span className="text-[10px] text-neutral-700">{items.length}</span>
-      </div>
-      {items.length ? (
-        <div className="space-y-2">
-          {items.map((item, index) => (
-            <button key={`${item.title}:${index}`} type="button" onClick={() => onPickQuery(item.title)} className="w-full rounded border border-white/10 bg-white/[0.025] px-3 py-2 text-left hover:border-amber-200/25 hover:bg-amber-200/[0.04]">
-              <div className="text-[13px] font-semibold text-neutral-100">{cleanTitle(item.title)}</div>
-              {item.body && <div className="mt-1 text-[12px] leading-relaxed text-neutral-500">{clamp(item.body, 220)}</div>}
-            </button>
-          ))}
-        </div>
-      ) : <p className="text-[12px] leading-relaxed text-neutral-600">No follow-up move was returned.</p>}
-    </section>
-  );
-}
-
-function EvidenceTrace({ response, notes }: { response: GraphDiscoverResponse; notes: AutoSynthesisItem[] }) {
+function EvidenceTrace({ response }: { response: GraphDiscoverResponse }) {
   const files = receiptFiles(response);
   const chunks = receiptChunks(response);
   const context = contextGraphFromDiscoverResponse(response);
@@ -960,7 +1037,6 @@ function EvidenceTrace({ response, notes }: { response: GraphDiscoverResponse; n
         </div>
         <span className="text-[10px] text-neutral-700">advanced</span>
       </div>
-      {notes.length > 0 && <div className="mb-3 space-y-2">{notes.map((note, index) => <div key={`${note.title}:${index}`} className="rounded border border-white/10 bg-white/[0.025] px-3 py-2"><div className="text-[12px] font-semibold text-neutral-200">{cleanTitle(note.title)}</div><div className="mt-1 text-[12px] leading-relaxed text-neutral-500">{note.body}</div></div>)}</div>}
       {hasRetrievalFilter && (
         <div className="mb-3 rounded border border-white/10 bg-black/20 p-3 font-mono">
           <div className="mb-2 text-[9px] uppercase tracking-[0.24em] text-neutral-500">retrieval & filter</div>
@@ -1053,24 +1129,6 @@ function ClaimBadge({ level }: { level: ClaimLevel }) {
   );
 }
 
-function EvidenceChip({ evidence }: { evidence: string }) {
-  const clean = String(evidence || "").trim();
-  const observed = /^\[?e\d+\]?$/i.test(clean);
-  const graph = clean.toLowerCase().includes("graph");
-  const fallback = clean.toLowerCase().includes("fallback");
-  return (
-    <span className={cx(
-      "rounded border px-2 py-0.5 font-mono text-[9px]",
-      observed && "border-emerald-300/20 bg-emerald-300/[0.04] text-emerald-100/75",
-      graph && "border-sky-300/20 bg-sky-300/[0.04] text-sky-100/75",
-      fallback && "border-amber-200/25 bg-amber-200/[0.05] text-amber-100/75",
-      !observed && !graph && !fallback && "border-white/10 bg-white/[0.03] text-neutral-500",
-    )}>
-      {clean}
-    </span>
-  );
-}
-
 function FacetColumn({ title, values }: { title: string; values: string[] }) {
   return (
     <div className="rounded border border-white/10 bg-black/20 px-2 py-2">
@@ -1128,80 +1186,21 @@ function TerminalLine({ command, text }: { command: string; text: string }) {
 }
 
 function synthesisForResponse(response: GraphDiscoverResponse): AutoSynthesisPayload {
-  if (response.auto_synthesis) return normalizeSynthesis(response.auto_synthesis);
-  const themes = (response.themes || []).map((theme) => ({
-    title: theme.name,
-    body: theme.prose?.join(" ") || "The backend returned this theme without a narrative body.",
-    evidence: theme.top_concepts.slice(0, 4),
-    related_ids: [theme.theme_id],
-  }));
-  const bridges = response.bridges_v2?.length
-    ? response.bridges_v2.map((bridge) => ({
-        title: bridge.subhead,
-        body: bridge.prose?.join(" ") || "The backend returned this bridge without a narrative body.",
-        evidence: bridge.anchor_concepts.slice(0, 4),
-        related_ids: [bridge.bridge_id, bridge.source_entity_id || "", bridge.target_entity_id || ""].filter(Boolean),
-      }))
-    : response.bridges.map((bridge) => ({
-        title: `${bridge.source_name} to ${bridge.target_name}`,
-        body: bridge.explanation || bridge.evidence || "Legacy bridge returned without a narrative explanation.",
-        evidence: [bridge.evidence || bridge.classification].filter(Boolean),
-        related_ids: [bridge.source, bridge.target],
-      }));
-  const gaps = (response.gaps_v2 || []).map((gap) => ({
-    title: gap.question,
-    body: gap.prose?.join(" ") || "The backend returned this gap candidate without a narrative body.",
-    evidence: gap.anchor_concepts.slice(0, 4),
-    related_ids: [gap.gap_id, gap.cluster_a, gap.cluster_b],
-  }));
-  const emergingSignals = (response.latent_topics || []).map((topic) => ({
-    title: topic.canonical_name,
-    body: topic.prose?.join(" ") || topic.rationale || "The backend returned this emerging signal without a narrative body.",
-    evidence: [topic.domain],
-    related_ids: [topic.entity_id],
-  }));
-  const nextMoves = (response.questions || []).map((question) => ({
-    title: question.text,
-    body: question.domain_pills.length ? `Useful scope: ${question.domain_pills.join(", ")}.` : "Use this as the next graph query.",
-    evidence: question.domain_pills,
-    related_ids: [],
-  }));
-  const evidenceNotes = (response.weak_links || []).slice(0, 5).map((link) => ({
-    title: `${link.source_name} to ${link.target_name}`,
-    body: link.rationale || link.action_question || "The backend marked this relationship for review.",
-    evidence: [],
-    related_ids: [link.source, link.target],
-  }));
-  return normalizeSynthesis({
-    headline: response.headline?.headline || response.interpretation || "Structural read from legacy graph response",
-    themes,
-    bridges,
-    gaps,
-    emerging_signals: emergingSignals,
-    next_moves: nextMoves,
-    evidence_notes: evidenceNotes,
-  });
+  return normalizeSynthesis(response.auto_synthesis, response);
 }
 
-function normalizeSynthesis(payload: AutoSynthesisPayload): AutoSynthesisPayload {
+function normalizeSynthesis(
+  payload: AutoSynthesisPayload | undefined,
+  response: GraphDiscoverResponse,
+): AutoSynthesisPayload {
+  const fallbackHeadline = response.headline?.headline || response.interpretation || "Structural read from legacy graph response";
   return {
-    headline: payload.headline || "Graph synthesis returned without a headline.",
-    themes: normalizeItems(payload.themes),
-    bridges: normalizeItems(payload.bridges),
-    gaps: normalizeItems(payload.gaps),
-    emerging_signals: normalizeItems(payload.emerging_signals),
-    next_moves: normalizeItems(payload.next_moves),
-    evidence_notes: normalizeItems(payload.evidence_notes),
+    headline: payload?.headline || fallbackHeadline,
+    markdown: payload?.markdown || "",
+    sources: Array.isArray(payload?.sources) ? payload.sources : [],
+    fallback: !!payload?.fallback,
+    fallback_reason: payload?.fallback_reason || null,
   };
-}
-
-function normalizeItems(items: AutoSynthesisItem[] | undefined): AutoSynthesisItem[] {
-  return (items || []).map((item) => ({
-    title: cleanTitle(item.title || "Untitled insight"),
-    body: item.body || "No narrative body was returned for this item.",
-    evidence: Array.isArray(item.evidence) ? item.evidence.filter(Boolean).map(String) : [],
-    related_ids: Array.isArray(item.related_ids) ? item.related_ids.filter(Boolean).map(String) : [],
-  }));
 }
 
 function graphHintForResponse(response: GraphDiscoverResponse): GraphHintTrace | null {
@@ -1294,16 +1293,6 @@ function receiptChunks(response: GraphDiscoverResponse): ReceiptChunk[] {
   });
 }
 
-function paragraphs(text: string): string[] {
-  const clean = text.replace(/\s+\n/g, "\n").trim();
-  if (!clean) return ["No narrative body was returned for this section."];
-  return clean.split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
-}
-
-function cleanTitle(title: string): string {
-  return title.replace(/\s*\/\s*/g, " and ").replace(/\s+/g, " ").trim();
-}
-
 function readableSourceLabel(label: string, index: number): string {
   const clean = String(label || "").trim();
   if (/^[a-f0-9]{32,}$/i.test(clean)) return `Source ${index + 1} (${clean.slice(0, 8)})`;
@@ -1364,13 +1353,6 @@ function claimLevelDescription(level: ClaimLevel): string {
   return "A useful next query or inspection path for continuing the research thread.";
 }
 
-function claimLevelShort(level: ClaimLevel): string {
-  if (level === "observed") return "from accepted evidence";
-  if (level === "structure") return "from graph structure";
-  if (level === "hypothesis") return "hypothesis";
-  return "next action";
-}
-
 function clamp(text: string, limit: number): string {
   const clean = text.replace(/\s+/g, " ").trim();
   if (clean.length <= limit) return clean;
@@ -1378,9 +1360,12 @@ function clamp(text: string, limit: number): string {
 }
 
 function sectionForJump(section: string): MissionSection | null {
-  if (section === "themes") return "themes";
-  if (section === "bridges") return "bridges";
-  if (section === "gaps" || section === "tensions") return "gaps";
+  // The card-shaped sections (themes/bridges/gaps/signals/moves) folded into a
+  // single woven synthesis. Legacy jump targets all land on the synthesis prose.
+  if (section === "themes" || section === "bridges" || section === "gaps" || section === "tensions" || section === "signals" || section === "moves" || section === "synthesis") {
+    return "synthesis";
+  }
+  if (section === "sources") return "sources";
   if (section === "trace") return "trace";
   return null;
 }

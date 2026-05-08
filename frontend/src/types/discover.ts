@@ -351,21 +351,21 @@ export interface GraphSourceMetadata {
   hints?: Record<string, string[]>;
 }
 
-export interface AutoSynthesisItem {
-  title: string;
-  body: string;
-  evidence: string[];
-  related_ids: string[];
+export interface SynthesisSource {
+  index: number;
+  evidence_id: string;
+  source_label: string;
+  doc_id: string;
+  chunk_id: string;
+  snippet: string;
 }
 
 export interface AutoSynthesisPayload {
   headline: string;
-  themes: AutoSynthesisItem[];
-  bridges: AutoSynthesisItem[];
-  gaps: AutoSynthesisItem[];
-  emerging_signals: AutoSynthesisItem[];
-  next_moves: AutoSynthesisItem[];
-  evidence_notes: AutoSynthesisItem[];
+  markdown: string;
+  sources: SynthesisSource[];
+  fallback: boolean;
+  fallback_reason?: string | null;
 }
 
 export interface InsightPacketSummary {

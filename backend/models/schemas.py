@@ -342,21 +342,29 @@ class GlobalSettingsUpdate(BaseModel):
     models: ModelsConfig | None = None
 
 
-class AutoSynthesisItem(BaseModel):
-    title: str = ""
-    body: str = ""
-    evidence: list[str] = Field(default_factory=list)
-    related_ids: list[str] = Field(default_factory=list)
+class SynthesisSource(BaseModel):
+    """Source receipt that backs a [n] inline citation in `markdown`."""
+
+    index: int = 0
+    evidence_id: str = ""
+    source_label: str = ""
+    doc_id: str = ""
+    chunk_id: str = ""
+    snippet: str = ""
 
 
 class AutoSynthesisPayload(BaseModel):
+    """Polymath prose synthesis: one woven analysis with inline [n] citations.
+
+    `markdown` carries the entire synthesis as ADHD-encyclopedia-newspaper prose.
+    `sources` lists the receipts each [n] citation refers to. No card schema.
+    """
+
     headline: str = ""
-    themes: list[AutoSynthesisItem] = Field(default_factory=list)
-    bridges: list[AutoSynthesisItem] = Field(default_factory=list)
-    gaps: list[AutoSynthesisItem] = Field(default_factory=list)
-    emerging_signals: list[AutoSynthesisItem] = Field(default_factory=list)
-    next_moves: list[AutoSynthesisItem] = Field(default_factory=list)
-    evidence_notes: list[AutoSynthesisItem] = Field(default_factory=list)
+    markdown: str = ""
+    sources: list[SynthesisSource] = Field(default_factory=list)
+    fallback: bool = False
+    fallback_reason: str | None = None
 
 
 class InsightPacketSummary(BaseModel):

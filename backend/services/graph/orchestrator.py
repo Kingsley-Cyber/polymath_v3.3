@@ -132,8 +132,13 @@ _PACKET_MAX_SUPPORTING_STATEMENTS = 4
 # paragraphs (5-7 sentences each, ~3 themes + 2 bridges + 2 gaps + 2 signals)
 # need ~3500 output tokens to land cleanly without truncation.
 _SYNTHESIS_TIMEOUT_SECONDS = 120.0
-_SYNTHESIS_MAX_TOKENS = 2200
-_SYNTHESIS_TEMPERATURE = 0.45
+# Prose-only synthesis fits comfortably in ~1400 tokens. Reasoning models can
+# burn extra reasoning tokens before emitting prose; we accept that and keep
+# the cap modest because the output itself is bounded by the prompt.
+_SYNTHESIS_MAX_TOKENS = 1400
+_SYNTHESIS_TEMPERATURE = 0.55
+_SYNTHESIS_HEADLINE_RE = re.compile(r"^\s*#\s+(.+?)\s*$", re.MULTILINE)
+_SYNTHESIS_CITATION_RE = re.compile(r"\[(\d{1,3})\]")
 _CONTEXT_MAX_GROUPS = 10
 _CONTEXT_MAX_CONCEPT_NODES = 64
 _CONTEXT_MAX_DOCUMENT_NODES = 8
@@ -231,122 +236,9 @@ def _query_relevant_entity_ids(
     return relevant
 
 
-def _auto_item(
-    title: str,
-    body: str,
-    evidence: list[str] | None = None,
-    related_ids: list[str] | None = None,
-) -> dict[str, Any]:
-    title = re.sub(r"\s*/\s*", " ", _text(title, 120))
-    body = re.sub(r"\b[Tt]rends?\b", "signals", _text(body, 900))
-    body = re.sub(r"\b[Tt]rending\b", "emerging", body)
-    return {
-        "title": title,
-        "body": body,
-        "evidence": evidence or ["graph packet"],
-        "related_ids": related_ids or [],
-    }
-
-
-def _auto_synthesis_from_result(result: Any) -> dict[str, Any]:
-    headline_payload = getattr(result, "headline", {}) or {}
-    headline = (
-        headline_payload.get("headline")
-        if isinstance(headline_payload, dict)
-        else ""
-    ) or getattr(result, "interpretation", "") or "Mission Control synthesis"
-
-    themes = [
-        _auto_item(
-            t.get("name") or f"Theme {idx}",
-            " ".join(t.get("prose") or []) or f"{t.get('name', 'This theme')} is active in the query scope.",
-            [t.get("theme_id") or f"theme:{idx}"],
-            [t.get("theme_id") or ""],
-        )
-        for idx, t in enumerate(getattr(result, "themes", []) or [], start=1)
-    ][:6]
-
-    bridges = [
-        _auto_item(
-            b.get("subhead") or f"Bridge {idx}",
-            " ".join(b.get("prose") or []) or "Cached bridge evidence connects these graph neighborhoods.",
-            [b.get("bridge_id") or f"bridge:{idx}"],
-            _ids([b.get("source_entity_id"), b.get("target_entity_id")]),
-        )
-        for idx, b in enumerate(getattr(result, "bridges_v2", []) or [], start=1)
-    ][:5]
-
-    gaps = [
-        _auto_item(
-            g.get("question") or f"Gap {idx}",
-            " ".join(g.get("prose") or []) or "This is a thin expected connection, not a proven missing edge.",
-            [g.get("gap_id") or f"gap:{idx}"],
-            _ids([g.get("cluster_a"), g.get("cluster_b")]),
-        )
-        for idx, g in enumerate(getattr(result, "gaps_v2", []) or [], start=1)
-    ][:5]
-
-    signals = [
-        _auto_item(
-            s.get("canonical_name") or f"Emerging signal {idx}",
-            " ".join(s.get("prose") or [])
-            or (
-                "Non-temporal signal: this concept acts as an integration point "
-                "inside the scoped packet."
-            ),
-            [s.get("entity_id") or f"signal:{idx}"],
-            [s.get("entity_id") or ""],
-        )
-        for idx, s in enumerate(getattr(result, "latent_topics", []) or [], start=1)
-    ][:5]
-
-    next_moves = [
-        _auto_item(
-            q.get("text") or f"Next move {idx}",
-            q.get("text") or "Run a narrower follow-up query against this graph packet.",
-            ["next_move"],
-            [],
-        )
-        for idx, q in enumerate(getattr(result, "questions", []) or [], start=1)
-    ][:5]
-    if not next_moves:
-        next_moves = [
-            _auto_item(
-                "Inspect the evidence trace",
-                "Use the trace to verify which anchors, chunks, entities, and edges actually supported this synthesis.",
-                ["trace"],
-                [],
-            )
-        ]
-
-    evidence_notes = [
-        _auto_item(
-            w.get("weakness_type", "Weak link").replace("_", " ").title(),
-            w.get("rationale") or w.get("evidence") or "This is a provenance warning, not a gap.",
-            [w.get("source") or "weak_link", w.get("target") or ""],
-            _ids([w.get("source"), w.get("target")]),
-        )
-        for w in (getattr(result, "weak_links", []) or [])[:5]
-    ]
-    if not evidence_notes:
-        evidence_notes = [
-            _auto_item(
-                "Evidence packet",
-                "No weak-link warnings were generated for this bounded graph packet.",
-                ["weak_links:0"],
-                [],
-            )
-        ]
-
-    return {
-        "headline": _text(headline, 220),
-        "themes": themes,
-        "bridges": bridges,
-        "gaps": gaps,
-        "emerging_signals": signals,
-        "next_moves": next_moves,
-        "evidence_notes": evidence_notes,
-    }
+# Card-shape synthesis builders (themes/bridges/gaps/signals/next_moves) were
+# removed when the graph query switched to woven prose. The deterministic
+# fallback now lives in `_deterministic_prose_fallback` near the LLM call.
 
 
 def _trace_with_stages(trace: dict[str, Any] | None) -> dict[str, Any]:
@@ -962,17 +854,33 @@ def _gap_supported_by_scope(
 
 
 def _evidence_quality(raw: dict[str, Any], query_terms: set[str]) -> tuple[float, list[str]]:
+    """Score for ordering, not gating.
+
+    The gate in `_curated_evidence_rows` keeps every chunk the retriever
+    returned unless a structural disqualifier fires (bibliography/index/
+    front-matter). This scorer just produces a stable ranking signal — query
+    term overlap and sentence completeness as tie-breakers on top of the
+    retriever's own rank — so duplicates of the *same* chunk-id can be
+    deduped by keeping the highest-scoring instance.
+    """
+
     text = _text(raw.get("text") or raw.get("chunk_text") or "", 1400)
     lowered = text.lower()
     reasons: list[str] = []
-    score = float(raw.get("score") or 0.0) * 2.0
+    # Cross-encoder reranker scores are unbounded log-odds, not probabilities.
+    # Use them only as a soft ordering signal — don't compare against a fixed
+    # threshold and don't multiply: a single wildly-negative score should not
+    # bury an otherwise topical chunk.
+    score = max(-2.0, min(4.0, float(raw.get("score") or 0.0)))
 
     term_hits = sum(1 for term in query_terms if term in lowered)
     score += min(4.0, term_hits * 0.9)
     if term_hits:
         reasons.append(f"query_terms:{term_hits}")
     else:
-        score -= 1.5
+        # No-overlap is information for the trace, not a penalty: vector
+        # retrieval is the *point* — its job is to surface chunks that are
+        # semantically relevant without sharing query vocabulary.
         reasons.append("no_query_terms")
 
     sentence_count = len(re.findall(r"[.!?](?:\s|$)", text))
@@ -1252,11 +1160,23 @@ def _curated_evidence_rows(
     *,
     query: str,
 ) -> tuple[list[dict[str, Any]], int, bool, dict[str, int]]:
+    """Curate retrieved chunks into the synthesis evidence packet.
+
+    Trust the retriever: any chunk it returned reaches the synthesis prompt
+    unless a *structural* disqualifier fires (bibliography, index page,
+    front-matter, near-empty). The score from `_evidence_quality` is used
+    only for ordering and for picking the best instance among duplicate
+    chunk-ids — not as a gate.
+    """
     query_terms = _query_terms_for_evidence(query)
-    scored: list[tuple[float, int, dict[str, Any], list[str]]] = []
     temporal_support = False
     rejection_reasons: dict[str, int] = {}
 
+    # Dedupe by chunk_id: upstream funnels (vector + lexical + graph
+    # expansion) sometimes surface the same chunk multiple times with
+    # different rerank scores. Keep the highest-scoring instance.
+    best_by_chunk: dict[str, tuple[float, int, dict[str, Any], list[str]]] = {}
+    seen_order: list[str] = []
     for idx, raw in enumerate(source_docs):
         if not isinstance(raw, dict):
             continue
@@ -1269,55 +1189,39 @@ def _curated_evidence_rows(
         has_temporal = _has_temporal_source_support(raw)
         temporal_support = bool(temporal_support or has_temporal)
         score, reasons = _evidence_quality(raw, query_terms)
-        scored.append((score, idx, {**raw, "text": text, "has_temporal": has_temporal}, reasons))
+        candidate = (score, idx, {**raw, "text": text, "has_temporal": has_temporal}, reasons)
+        existing = best_by_chunk.get(chunk_id)
+        if existing is None:
+            best_by_chunk[chunk_id] = candidate
+            seen_order.append(chunk_id)
+        elif candidate[0] > existing[0]:
+            best_by_chunk[chunk_id] = candidate
 
-    if not scored:
+    if not best_by_chunk:
         return [], 0, temporal_support, rejection_reasons
 
-    scored.sort(key=lambda row: (row[0], -row[1]), reverse=True)
-    accepted = [
-        (score, idx, row, reasons)
-        for score, idx, row, reasons in scored
-        if score >= 1.0 and not (_LOW_VALUE_EVIDENCE_FLAGS & set(reasons))
-    ][: _PACKET_MAX_EVIDENCE]
+    # Keep retrieval order (first-seen) as primary, score as tiebreaker.
+    ranked: list[tuple[float, int, dict[str, Any], list[str]]] = [
+        best_by_chunk[cid] for cid in seen_order
+    ]
 
-    def _term_hit_count(reasons: list[str]) -> int:
-        for reason in reasons:
-            text = str(reason)
-            if text.startswith("query_terms:"):
-                try:
-                    return int(text.split(":", 1)[1])
-                except Exception:
-                    return 0
-        return 0
-
-    def _fallback_safe(score: float, reasons: list[str]) -> bool:
-        if _LOW_VALUE_EVIDENCE_FLAGS & set(reasons):
-            return False
-        if score >= 0.0:
-            return True
-        required_hits = min(2, max(1, len(query_terms)))
-        return _term_hit_count(reasons) >= required_hits
-
-    # If every topical row is merely thin, keep one so the synthesis can explain
-    # the limits. Explicit bibliography/front-matter/index-like rows stay out,
-    # and rows with no query-term overlap plus a poor rank score stay out too.
-    if not accepted:
-        accepted = [
-            (score, idx, row, reasons)
-            for score, idx, row, reasons in scored
-            if _fallback_safe(score, reasons)
-        ][:1]
-
-    accepted_keys = {(idx, str(row.get("chunk_id") or row.get("id") or "")) for _score, idx, row, _reasons in accepted}
-    for _score, idx, row, reasons in scored:
-        key = (idx, str(row.get("chunk_id") or row.get("id") or ""))
-        if key in accepted_keys:
+    accepted: list[tuple[float, int, dict[str, Any], list[str]]] = []
+    for entry in ranked:
+        score, idx, row, reasons = entry
+        flags = set(reasons)
+        if _LOW_VALUE_EVIDENCE_FLAGS & flags:
+            for reason in reasons:
+                key = str(reason).split(":", 1)[0] or "structural_disqualifier"
+                rejection_reasons[key] = rejection_reasons.get(key, 0) + 1
             continue
-        reason_list = reasons or ["below_quality_floor"]
-        for reason in reason_list:
-            reason_key = str(reason).split(":", 1)[0] or "below_quality_floor"
-            rejection_reasons[reason_key] = rejection_reasons.get(reason_key, 0) + 1
+        accepted.append(entry)
+        if len(accepted) >= _PACKET_MAX_EVIDENCE:
+            break
+
+    # No fallback when only structurally-disqualified chunks were retrieved.
+    # If the corpus only surfaced bibliography/index/front-matter for this
+    # query, the synthesis must say so plainly via evidence_filter.all_rejected
+    # rather than fabricate substance from a citation list.
 
     evidence: list[dict[str, Any]] = []
     for evidence_idx, (score, _idx, row, reasons) in enumerate(accepted, start=1):
@@ -1327,6 +1231,10 @@ def _curated_evidence_rows(
                 "chunk_id": str(row.get("chunk_id") or row.get("id") or ""),
                 "doc_id": str(row.get("doc_id") or ""),
                 "text": _text(row.get("text") or "", _PACKET_EVIDENCE_TEXT_LIMIT),
+                # Parent-chunk summary is an extraction layer the LLM should
+                # see alongside the raw excerpt — gives one-paragraph context
+                # for where the chunk sits in the document.
+                "summary": _text(row.get("summary") or row.get("parent_summary") or "", 320),
                 "source_label": _source_label_from_row(
                     row,
                     doc_id=str(row.get("doc_id") or ""),
@@ -1334,13 +1242,14 @@ def _curated_evidence_rows(
                 ),
                 "source": row.get("source") or row.get("source_meta") or {},
                 "heading_path": row.get("heading_path") or [],
+                "source_tier": str(row.get("source_tier") or ""),
                 "score": round(score, 3),
                 "quality_flags": reasons,
                 "has_temporal": bool(row.get("has_temporal")),
             }
         )
 
-    return evidence, max(0, len(scored) - len(evidence)), temporal_support, rejection_reasons
+    return evidence, max(0, len(ranked) - len(evidence)), temporal_support, rejection_reasons
 
 
 def _source_docs_from_retrieval_chunks(
@@ -1589,6 +1498,17 @@ async def _hydrate_trace_source_docs(
             source_label=source_label,
             heading_path=heading_path,
         )
+        # Parent-chunk summary is an extraction layer: the LLM-written
+        # one-paragraph abstraction of the parent block this chunk lives in.
+        # Carry it separately from `text` (the raw excerpt) so the synthesis
+        # prompt can show both — abstraction *and* quote — for nuance work.
+        parent_summary = str(
+            parent.get("summary")
+            or parent.get("summary_text")
+            or chunk.get("summary")
+            or row.get("summary")
+            or ""
+        )
         hydrated.append(
             {
                 **row,
@@ -1598,6 +1518,7 @@ async def _hydrate_trace_source_docs(
                 "source_label": source_label,
                 "source": source_meta,
                 "text": _text(text, _PACKET_EVIDENCE_TEXT_LIMIT),
+                "summary": parent_summary,
                 "heading_path": heading_path,
                 "source_tier": (
                     chunk.get("source_tier")
@@ -2308,68 +2229,162 @@ def _llm_context_trace_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
 
 
 _SYNTHESIS_SYSTEM_PROMPT = (
-    "You are Polymath's research synthesizer: read the supplied packet like a "
-    "careful interdisciplinary researcher who wants useful nuance, not a graph "
-    "dashboard. Transform stored chunks, summaries, entities, relations, and "
-    "source metadata into grounded information and testable knowledge. "
-    "Write a concise corpus insight synthesis from ONLY the supplied packet. "
-    "Return JSON only with keys: headline, themes, bridges, gaps, "
-    "emerging_signals, next_moves, evidence_notes. Each list item is "
-    '{"title":str,"body":str,"evidence":[str],"related_ids":[str]}. '
-    "Maximum items: themes 3, bridges 2, gaps 3, emerging_signals 3, "
-    "next_moves 2, evidence_notes 2. Keep headline under 140 characters and "
-    "each body under 320 characters. "
-    "Prioritize bridges, gaps, and emerging_signals; themes should be short "
-    "orientation frames, not the main answer. Bodies should be natural "
-    "1-2 sentence research notes. For bridges, explain the mechanism, analogy, "
-    "or tension being connected and why it matters for the user's query. For "
-    "gaps, explain the missing relation as a testable hypothesis and name what "
-    "evidence would resolve it. Ignore any gap whose support says outside or "
-    "not in evidence. For emerging_signals, describe a relation pattern visible "
-    "in the packet; if web_state is absent, do not make current-market or "
-    "current-web claims. Distinguish direct evidence from graph structure from "
-    "hypothesis. Do not frame the answer as occurrence counts, a metric report, "
-    "or strong/weak scoring. Never put raw percentages, edge counts, or relation "
-    "family percentages in the headline. Avoid occurrence/mention phrasing such "
-    "as repeated mentions, recurring, frequent, weak, or strong unless those "
-    "words are inside quoted source text. Use graph_hint as the reading lens: "
-    "shape, gateway concepts, gap depth, and supporting statements. "
-    "Cite supplied evidence ids like [e1] or graph structure as [graph]. "
-    "Use source metadata for orientation, but only state author/date/publisher "
-    "when supplied in the packet. "
-    "Do not invent entities, edges, chunks, counts, files, or citations. "
-    "Gaps are hypotheses, not confirmed missing edges. Weak links belong in "
-    "evidence_notes only. Never say trend/trending unless temporal=true; say "
-    "emerging signal or recurrence. No markdown and no slash-joined titles. "
-    "If evidence is thin, write fewer items and say what is missing."
-)
-
-
-_SYNTHESIS_REPAIR_SYSTEM_PROMPT = (
-    "Return compact valid JSON only. Use exactly these top-level keys: "
-    "headline, themes, bridges, gaps, emerging_signals, next_moves, "
-    "evidence_notes. headline is a string. Other fields are arrays with at "
-    "most 2 items. Each item is {\"title\":str,\"body\":str,\"evidence\":[str],"
-    "\"related_ids\":[str]}. Keep every body under 240 characters. No markdown."
+    "You are Polymath's synthesizer — a nuance-obsessed researcher who treats "
+    "the supplied packet as a brain dump from your own corpus. Your job is to "
+    "transform stored chunks, summaries, entities, relations, and source "
+    "metadata into a single woven analysis: an ADHD-encyclopedia-newspaper "
+    "brief that reads like a sharp researcher thinking out loud, not a "
+    "dashboard.\n\n"
+    "Output rules:\n"
+    "- Write Markdown prose only. Start with a one-line `# headline` (<= 140 "
+    "chars). Then 3-6 short paragraphs. Optional inline `**bold**`, "
+    "`> blockquote`, or a tight bulleted list when it actually helps. No JSON. "
+    "No section labels like \"Themes:\" or \"Bridges:\". No card schema.\n"
+    "- Cite evidence inline as `[1]`, `[2]`, ... using the numbered evidence "
+    "list from the user message. Each citation must point to a real source id "
+    "you were given. Do not invent citations.\n"
+    "- Weave the analysis: surface bridges between sources, contradictions, "
+    "hidden concepts, and structural gaps inside the prose itself. Let one "
+    "paragraph link to the next. Do not produce a list of disconnected "
+    "observations.\n"
+    "- Distinguish observed evidence from graph structure from hypothesis using "
+    "the prose itself (e.g. \"the corpus shows...\", \"the graph suggests...\", "
+    "\"a testable read is...\"). Gaps are hypotheses, not proven missing edges.\n"
+    "- If evidence is thin, write fewer paragraphs and say plainly what is "
+    "missing. Do not pad. Do not invent entities, edges, files, or counts.\n"
+    "- Avoid metric narration (no raw percentages, edge counts, density, "
+    "modularity). Avoid \"trend/trending\" unless temporal=true; prefer "
+    "\"emerging signal\" or \"recurrence\".\n"
+    "- Stay under ~900 words. Tight, layered, every sentence earns its place."
 )
 
 
 def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
-    """Render only the curated synthesis brief, not the full trace packet."""
+    """Render the curated synthesis brief as a numbered-evidence reading list."""
 
     compact = _compact_packet_for_prompt(packet)
-    payload = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
-    return f"Synthesize this curated graph brief as JSON only:\n{payload}"
+    evidence = compact.pop("evidence", []) or []
 
+    lines: list[str] = []
+    lines.append(f"Query: {compact.get('q') or ''}")
+    if compact.get("anchors"):
+        lines.append("Anchor concepts: " + ", ".join(compact["anchors"]))
+    if compact.get("groups"):
+        labels = [g.get("label") for g in compact["groups"] if g.get("label")][:6]
+        if labels:
+            lines.append("Concept groupings: " + ", ".join(labels))
+    if compact.get("temporal"):
+        lines.append("Temporal evidence: yes")
+    else:
+        lines.append("Temporal evidence: no — avoid trend/trending language")
+    if compact.get("sparse"):
+        lines.append("Packet density: sparse — be honest about what is missing")
+    if compact.get("filter", {}).get("all_rejected"):
+        lines.append(
+            "All evidence was rejected by the quality filter; lean on graph "
+            "structure and say so plainly."
+        )
 
-def _render_packet_repair_prompt(packet: dict[str, Any]) -> str:
-    compact = _compact_packet_for_prompt(packet)
-    payload = json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
-    return (
-        "The previous graph synthesis response was invalid or truncated. "
-        "Re-synthesize the same brief as smaller valid JSON only:\n"
-        f"{payload}"
+    lines.append("")
+    lines.append(
+        "Numbered evidence (cite as [1], [2], ...). Each item carries a "
+        "parent-chunk SUMMARY (LLM-written abstraction of the surrounding "
+        "section) and an EXCERPT (raw quote). Weave from both — summaries "
+        "give thematic context, excerpts give quotable nuance."
     )
+    if evidence:
+        for idx, item in enumerate(evidence, start=1):
+            source = item.get("source") or {}
+            source_label = source.get("label") or source.get("title") or "source"
+            heading = " › ".join(
+                str(h).strip() for h in (item.get("heading_path") or []) if str(h).strip()
+            )[:160]
+            summary = (item.get("summary") or "").strip().replace("\n", " ")
+            excerpt = (item.get("text") or "").strip().replace("\n", " ")
+            if len(excerpt) > 360:
+                excerpt = excerpt[:357] + "..."
+            if len(summary) > 320:
+                summary = summary[:317] + "..."
+            header = f"[{idx}] {source_label}"
+            if heading:
+                header += f" · {heading}"
+            lines.append(header)
+            if summary:
+                lines.append(f"    summary: {summary}")
+            if excerpt:
+                lines.append(f"    excerpt: {excerpt}")
+    else:
+        lines.append("(none — packet has no anchored chunks)")
+
+    edges = compact.get("edges") or []
+    if edges:
+        lines.append("")
+        lines.append(
+            "Graph edges (structural, with extracted rationale where stored). "
+            "Rationale is the chunk text the extractor used to assert the edge — "
+            "treat it as graph-derived support, not direct observed evidence:"
+        )
+        for edge in edges[:10]:
+            family = edge.get("family") or edge.get("role") or ""
+            conf = edge.get("conf")
+            head_bits = []
+            if family:
+                head_bits.append(family)
+            if isinstance(conf, (int, float)) and conf:
+                head_bits.append(f"confidence {conf:.2f}")
+            head = f" ({' · '.join(head_bits)})" if head_bits else ""
+            line = (
+                f"- {edge.get('s') or '?'} -[{edge.get('p') or '?'}]-> "
+                f"{edge.get('t') or '?'}{head}"
+            )
+            rationale = (edge.get("rationale") or "").strip().replace("\n", " ")
+            if rationale:
+                if len(rationale) > 200:
+                    rationale = rationale[:197] + "..."
+                line += f"\n    rationale: \"{rationale}\""
+            lines.append(line)
+
+    entity_facets = compact.get("entity_facets") or []
+    if entity_facets:
+        lines.append("")
+        lines.append(
+            "Schema lens (typed entities — object_kind / domain_type / canonical_family). "
+            "Use these as ontology orientation when weaving cross-domain bridges:"
+        )
+        for facet in entity_facets[:10]:
+            kind = facet.get("object_kind") or "?"
+            dom = facet.get("domain_type") or "?"
+            fam = facet.get("canonical_family") or "?"
+            lines.append(
+                f"- {facet.get('name') or '?'} :: object_kind={kind} · domain_type={dom} · family={fam}"
+            )
+
+    gaps = compact.get("gaps") or []
+    if gaps:
+        lines.append("")
+        lines.append("Candidate gaps (hypotheses, not proven):")
+        for gap in gaps[:5]:
+            between = " ↔ ".join([b for b in (gap.get("between") or []) if b])
+            lines.append(f"- {between}: {gap.get('q') or ''}")
+
+    signals = compact.get("signals") or []
+    if signals:
+        lines.append("")
+        lines.append("Emerging-signal candidates:")
+        for sig in signals[:5]:
+            lines.append(f"- {sig.get('name') or ''}: {sig.get('why') or ''}")
+
+    graph_hint = compact.get("graph_hint") or {}
+    if graph_hint.get("context_hint"):
+        lines.append("")
+        lines.append("Graph reading lens: " + str(graph_hint["context_hint"]))
+
+    lines.append("")
+    lines.append(
+        "Write the synthesis now. Markdown prose only, inline [n] citations, "
+        "no JSON, no card labels."
+    )
+    return "\n".join(lines)
 
 
 def _source_brief_for_prompt(item: dict[str, Any]) -> dict[str, Any]:
@@ -2407,7 +2422,9 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         {
             "id": str(item.get("evidence_id") or f"e{idx}"),
             "source": _source_brief_for_prompt(item),
-            "text": _text(item.get("text") or "", 220),
+            "heading_path": [str(h) for h in (item.get("heading_path") or []) if h][:6],
+            "summary": _text(item.get("summary") or "", 320),
+            "text": _text(item.get("text") or "", 360),
         }
         for idx, item in enumerate(packet.get("evidence") or [], start=1)
         if isinstance(item, dict)
@@ -2426,11 +2443,29 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
             "p": _text(edge.get("predicate") or "", 35),
             "t": _text(edge.get("target_name") or edge.get("target") or "", 45),
             "role": _text(edge.get("role") or edge.get("relation_family") or "", 35),
+            "family": _text(edge.get("relation_family") or "", 35),
             "conf": round(float(edge.get("confidence") or 0.0), 2),
+            "rationale": _text(edge.get("rationale") or "", 220),
         }
         for edge in (packet.get("edges") or [])[:_PACKET_MAX_EDGES]
         if graph_context_allowed and isinstance(edge, dict)
     ]
+    # Schema lens — typed entity facets pulled from Neo4j (object_kind /
+    # domain_type / canonical_family). Only entities with at least one populated
+    # facet make it through; bare entities are noise here.
+    entity_facets = []
+    for entity in (packet.get("entities") or [])[:12]:
+        if not isinstance(entity, dict):
+            continue
+        facets = {
+            "name": _text(entity.get("canonical_name") or entity.get("entity_id") or "", 60),
+            "object_kind": _text(entity.get("object_kind") or "", 40),
+            "domain_type": _text(entity.get("domain_type") or "", 40),
+            "canonical_family": _text(entity.get("canonical_family") or "", 40),
+        }
+        if not (facets["object_kind"] or facets["domain_type"] or facets["canonical_family"]):
+            continue
+        entity_facets.append(facets)
     gaps = [
         {
             "id": _text(gap.get("gap_id") or f"g{idx}", 24),
@@ -2501,6 +2536,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         "groups": groups,
         "evidence": evidence,
         "edges": edges,
+        "entity_facets": entity_facets,
         "gateway_focus": gateway_focus,
         "graph_hint": compact_graph_hint,
         "gaps": gaps,
@@ -2610,10 +2646,9 @@ async def _call_llm_synthesis(
 ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """Call the synthesis LLM. Returns (payload_dict, fallback_reason).
 
-    Every graph query send/Enter path attempts this call, even when the packet
-    is sparse. Sparse evidence is content the model must honestly discuss, not
-    a reason to let deterministic templates take over. Deterministic fallback
-    is reserved for request, parse, or schema failure.
+    Returns markdown prose with inline [n] citations — not a card schema.
+    Every graph query attempts this call, even when the packet is sparse.
+    Deterministic prose fallback covers only hard transport failures.
     """
 
     try:
@@ -2627,10 +2662,7 @@ async def _call_llm_synthesis(
         {"role": "user", "content": _render_packet_user_prompt(packet)},
     ]
     creds = await _resolve_graph_model(user_id, model_override)
-    extra: dict[str, Any] = {
-        **(creds.get("extra_params") or {}),
-        "response_format": {"type": "json_object"},
-    }
+    extra: dict[str, Any] = dict(creds.get("extra_params") or {})
     evidence_items = [
         item for item in (packet.get("evidence") or []) if isinstance(item, dict)
     ]
@@ -2662,210 +2694,149 @@ async def _call_llm_synthesis(
         logger.warning("synthesis LLM call failed: %s", exc)
         return None, "llm_request_failure"
 
-    if not raw or not raw.strip():
+    prose = _strip_code_fences(raw or "").strip()
+    if not prose:
         logger.warning("synthesis LLM returned empty response")
         return None, "llm_empty_response"
 
-    try:
-        decoded = json.loads(_strip_code_fences(raw))
-    except Exception as exc:
-        logger.warning(
-            "synthesis JSON decode failed (%s); attempting compact retry; raw_head=%r",
-            exc,
-            raw[:160],
+    headline_match = _SYNTHESIS_HEADLINE_RE.search(prose)
+    if headline_match:
+        headline = headline_match.group(1).strip()
+        markdown = (prose[: headline_match.start()] + prose[headline_match.end():]).strip()
+    else:
+        headline = ""
+        markdown = prose
+
+    sources = _synthesis_sources_from_packet(packet, markdown)
+
+    return {
+        "headline": _text(headline, 220),
+        "markdown": markdown,
+        "sources": sources,
+        "fallback": False,
+        "fallback_reason": None,
+    }, None
+
+
+def _synthesis_sources_from_packet(
+    packet: dict[str, Any], markdown: str
+) -> list[dict[str, Any]]:
+    """Build [n] source receipts from packet evidence in citation order.
+
+    The model is told to cite evidence as [1], [2], ... matching the numbered
+    evidence list in the user prompt. We mirror that numbering here so the UI
+    can map citations back to source receipts even if the model uses a subset.
+    """
+
+    evidence = [
+        item for item in (packet.get("evidence") or []) if isinstance(item, dict)
+    ]
+    cited = sorted({int(m) for m in _SYNTHESIS_CITATION_RE.findall(markdown or "") if m.isdigit()})
+    indexes = cited if cited else list(range(1, len(evidence) + 1))
+
+    receipts: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for idx in indexes:
+        if idx in seen or idx < 1 or idx > len(evidence):
+            continue
+        seen.add(idx)
+        item = evidence[idx - 1]
+        chunk_id = str(item.get("chunk_id") or "")
+        doc_id = str(item.get("doc_id") or "")
+        snippet = _text((item.get("text") or "").replace("\n", " "), 220)
+        receipts.append(
+            {
+                "index": idx,
+                "evidence_id": str(item.get("evidence_id") or f"e{idx}"),
+                "source_label": _source_label_from_row(
+                    item, doc_id=doc_id, chunk_id=chunk_id
+                ),
+                "doc_id": doc_id,
+                "chunk_id": chunk_id,
+                "snippet": snippet,
+            }
         )
-        try:
-            raw = await llm_service.complete_sync(
-                messages=[
-                    {"role": "system", "content": _SYNTHESIS_REPAIR_SYSTEM_PROMPT},
-                    {"role": "user", "content": _render_packet_repair_prompt(packet)},
-                ],
-                model=creds["model"],
-                temperature=0.1,
-                max_tokens=min(1200, _SYNTHESIS_MAX_TOKENS),
-                api_base=creds.get("api_base"),
-                api_key=creds.get("api_key"),
-                timeout=_SYNTHESIS_TIMEOUT_SECONDS,
-                extra_params=extra,
-            )
-        except Exception as retry_exc:
-            logger.warning("synthesis JSON compact retry failed: %s", retry_exc)
-            return None, "json_parse_failure"
-        try:
-            decoded = json.loads(_strip_code_fences(raw or ""))
-        except Exception as retry_exc:
-            logger.warning(
-                "synthesis JSON compact retry decode failed (%s); raw_head=%r",
-                retry_exc,
-                (raw or "")[:160],
-            )
-            return None, "json_parse_failure"
-
-    if not isinstance(decoded, dict):
-        logger.warning("synthesis JSON was not an object: %r", type(decoded).__name__)
-        return None, "json_shape_failure"
-
-    decoded = _coerce_synthesis_shape(decoded)
-
-    try:
-        from models.schemas import AutoSynthesisPayload  # local import to avoid cycle
-    except Exception as exc:  # pragma: no cover
-        logger.warning("AutoSynthesisPayload import failed: %s", exc)
-        return None, "schema_import_failure"
-
-    try:
-        validated = AutoSynthesisPayload.model_validate(decoded)
-    except Exception as exc:
-        logger.warning("synthesis payload failed validation: %s", exc)
-        return None, "validation_failure"
-
-    payload_dict = validated.model_dump()
-    payload_dict = _scrub_synthesis_payload(payload_dict, packet)
-    return payload_dict, None
+    return receipts
 
 
-_SYNTHESIS_LIST_FIELDS = (
-    "themes",
-    "bridges",
-    "gaps",
-    "emerging_signals",
-    "next_moves",
-    "evidence_notes",
-)
+def _deterministic_prose_fallback(
+    result: Any, packet: dict[str, Any], reason: str
+) -> dict[str, Any]:
+    """Render a prose fallback when the LLM is unreachable or empty.
 
+    We do NOT manufacture an essay; we plainly describe what the graph layer
+    surfaced so the user knows the prose isn't model-generated.
+    """
 
-def _coerce_synthesis_shape(decoded: dict[str, Any]) -> dict[str, Any]:
-    """Normalize useful-but-imperfect JSON before strict Pydantic validation."""
+    query = _text(packet.get("query") or "this query", 100)
+    headline_payload = getattr(result, "headline", {}) or {}
+    headline = (
+        headline_payload.get("headline")
+        if isinstance(headline_payload, dict)
+        else ""
+    ) or f"Structural read for {query}"
 
-    payload = dict(decoded)
-    payload["headline"] = _text(
-        payload.get("headline") or payload.get("title") or payload.get("summary") or "",
-        280,
+    chunks = packet.get("evidence") or []
+    edges = packet.get("edges") or []
+    groups = [
+        g.get("label") for g in (packet.get("communities") or []) if isinstance(g, dict) and g.get("label")
+    ]
+    gaps = [
+        g for g in (packet.get("gaps") or []) if isinstance(g, dict) and g.get("question")
+    ]
+
+    blurb = {
+        "llm_request_failure": "The synthesis model could not be reached on this turn.",
+        "llm_empty_response": "The synthesis model returned an empty response.",
+        "llm_import_failure": "The synthesis model layer is not available.",
+    }.get(reason, "The synthesis model is unavailable; this is a deterministic structural read.")
+
+    paragraphs: list[str] = [f"_{blurb}_ Below is what the graph layer actually loaded — no model prose was generated for this turn."]
+
+    if chunks:
+        paragraphs.append(
+            f"The packet anchored **{len(chunks)} chunks** across "
+            f"{len({str(c.get('doc_id') or '') for c in chunks if c.get('doc_id')})} sources."
+        )
+    else:
+        paragraphs.append("No anchored evidence chunks were retrieved for this query.")
+
+    if groups:
+        paragraphs.append(
+            "Concept groupings active in scope: " + ", ".join(groups[:6]) + "."
+        )
+
+    if edges:
+        edge_lines = []
+        for edge in edges[:5]:
+            s = edge.get("source_name") or edge.get("source") or "?"
+            t = edge.get("target_name") or edge.get("target") or "?"
+            p = edge.get("predicate") or "→"
+            edge_lines.append(f"- {s} —{p}→ {t}")
+        paragraphs.append("Selected graph edges:\n" + "\n".join(edge_lines))
+
+    if gaps:
+        gap_lines = [f"- {g.get('question')}" for g in gaps[:4] if g.get("question")]
+        if gap_lines:
+            paragraphs.append("Candidate gaps (hypotheses):\n" + "\n".join(gap_lines))
+
+    paragraphs.append(
+        "Re-run the query with any cloud model selected to get the woven synthesis."
     )
 
-    for field in _SYNTHESIS_LIST_FIELDS:
-        value = payload.get(field, [])
-        if value is None:
-            payload[field] = []
-        elif isinstance(value, list):
-            payload[field] = [
-                item for item in (_coerce_synthesis_item(item, field) for item in value) if item
-            ]
-        else:
-            item = _coerce_synthesis_item(value, field)
-            payload[field] = [item] if item else []
-
-    return payload
-
-
-def _coerce_synthesis_item(value: Any, field: str) -> Optional[dict[str, Any]]:
-    if isinstance(value, dict):
-        title_source = value.get("title") or value.get("heading") or value.get("name")
-        body_source = value.get("body") or value.get("summary") or value.get("text") or value.get("content")
-        body = _text(body_source or title_source or "", 1200)
-        if not body:
-            return None
-        title = _text(title_source or _synthesis_title_from_text(body, field), 180)
-        evidence = value.get("evidence") or value.get("evidence_refs") or value.get("sources") or []
-        related_ids = value.get("related_ids") or value.get("ids") or value.get("node_ids") or []
-        return {
-            "title": title,
-            "body": body,
-            "evidence": _string_list(evidence)[:6],
-            "related_ids": _string_list(related_ids)[:6],
-        }
-
-    body = _text(value, 1200)
-    if not body:
-        return None
+    markdown = "\n\n".join(paragraphs)
     return {
-        "title": _synthesis_title_from_text(body, field),
-        "body": body,
-        "evidence": ["graph packet"],
-        "related_ids": [],
+        "headline": _text(headline, 220),
+        "markdown": markdown,
+        "sources": _synthesis_sources_from_packet(packet, markdown),
+        "fallback": True,
+        "fallback_reason": reason,
     }
 
 
-def _synthesis_title_from_text(text: str, field: str) -> str:
-    first_clause = re.split(r"(?<=[.!?])\s+|[:;]\s+", text, maxsplit=1)[0]
-    title = _text(first_clause, 90).strip(" -")
-    if title:
-        return title
-    return field.replace("_", " ").title()
-
-
-def _string_list(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, (str, int, float, bool)):
-        return [str(value)]
-    if isinstance(value, dict):
-        return [str(v) for v in value.values() if v]
-    if isinstance(value, (list, tuple, set)):
-        return [str(v) for v in value if v]
-    return [str(value)]
-
-
-_SLASH_TITLE_RE = re.compile(r"\s*/\s*")
-_TREND_BODY_RE = re.compile(r"\b[Tt]rends?\b")
-_TRENDING_BODY_RE = re.compile(r"\b[Tt]rending\b")
-_METRIC_HEADLINE_RE = re.compile(
-    r"(\d+(?:\.\d+)?%|\b(edge|edges|density|modularity|pagerank|weakassociation|operational)\b)",
-    re.IGNORECASE,
-)
-
-
-def _research_headline_from_packet(packet: dict[str, Any]) -> str:
-    query = _text(packet.get("query") or "Graph query", 70)
-    groups = [
-        str(group.get("label") or "")
-        for group in (packet.get("communities") or [])[:2]
-        if isinstance(group, dict) and group.get("label")
-    ]
-    edges = [
-        f"{edge.get('source_name') or edge.get('source')} -> {edge.get('target_name') or edge.get('target')}"
-        for edge in (packet.get("edges") or [])[:1]
-        if isinstance(edge, dict)
-    ]
-    if edges:
-        return _text(f"{query}: evidence-backed bridge around {edges[0]}", 140)
-    if groups:
-        return _text(f"{query}: research read across {', '.join(groups[:2])}", 140)
-    return _text(f"{query}: evidence-grounded graph read", 140)
-
-
-def _scrub_synthesis_payload(
-    payload: dict[str, Any], packet: dict[str, Any]
-) -> dict[str, Any]:
-    """Apply non-negotiable hygiene rules even if the LLM ignored them."""
-
-    temporal = bool(packet.get("temporal_support"))
-
-    def _clean_item(item: dict[str, Any]) -> dict[str, Any]:
-        title = _SLASH_TITLE_RE.sub(" ", _text(item.get("title") or "", 160))
-        body = _text(item.get("body") or "", 1200)
-        if not temporal:
-            body = _TREND_BODY_RE.sub("signals", body)
-            body = _TRENDING_BODY_RE.sub("emerging", body)
-        return {
-            "title": title,
-            "body": body,
-            "evidence": [str(e) for e in (item.get("evidence") or []) if e][:6],
-            "related_ids": [str(r) for r in (item.get("related_ids") or []) if r][:6],
-        }
-
-    headline = _text(payload.get("headline") or "", 280)
-    if not headline or _METRIC_HEADLINE_RE.search(headline):
-        headline = _research_headline_from_packet(packet)
-    cleaned = {"headline": headline}
-    for key in ("themes", "bridges", "gaps", "emerging_signals", "next_moves", "evidence_notes"):
-        cleaned[key] = [
-            _clean_item(item) for item in (payload.get(key) or []) if isinstance(item, dict)
-        ]
-    return cleaned
-
-
 def _sync_headline_from_auto_synthesis(result: Any) -> None:
+    """Mirror the synthesis headline onto result.headline for legacy callers."""
+
     payload = getattr(result, "auto_synthesis", {}) or {}
     if not isinstance(payload, dict):
         return
@@ -2879,42 +2850,6 @@ def _sync_headline_from_auto_synthesis(result: Any) -> None:
         result.headline = {"headline": headline}
 
 
-def _fallback_evidence_note(reason: str) -> dict[str, Any]:
-    if reason == "sparse_evidence":
-        body = (
-            "The graph packet for this query was sparse: not enough anchored chunks, "
-            "concept communities, or bounded edges to write a synthesized narrative. "
-            "The structural read below was assembled deterministically from the cached "
-            "graph metrics so the trail is still inspectable."
-        )
-        title = "Sparse evidence"
-    elif reason in {"json_parse_failure", "json_shape_failure", "validation_failure"}:
-        body = (
-            "The synthesis model returned text that did not validate against the "
-            "AutoSynthesisPayload schema, so the deterministic graph-derived view is "
-            "shown instead. Re-running the query with a different model usually fixes this."
-        )
-        title = "Model output rejected"
-    elif reason in {"llm_request_failure", "llm_empty_response", "llm_import_failure", "schema_import_failure"}:
-        body = (
-            "The synthesis model could not be reached for this turn. The deterministic "
-            "graph-derived view below was rendered from cached metrics."
-        )
-        title = "Synthesis model unavailable"
-    else:
-        body = (
-            "Falling back to the deterministic graph-derived view; see the evidence trace "
-            "for what was actually loaded."
-        )
-        title = "Deterministic fallback"
-    return {
-        "title": title,
-        "body": body,
-        "evidence": [f"fallback:{reason}"],
-        "related_ids": [],
-    }
-
-
 def _snapshot_from_result(result: Any) -> dict[str, Any]:
     keys = [
         "session_id", "corpus_id", "query", "mode", "interpretation",
@@ -2926,6 +2861,172 @@ def _snapshot_from_result(result: Any) -> dict[str, Any]:
         "trace", "auto_synthesis", "insight_packet_summary", "context_graph",
     ]
     return {key: getattr(result, key, None) for key in keys}
+
+
+async def _enrich_packet_with_extractions(
+    *,
+    neo4j_driver: Any,
+    db: Any,
+    packet: dict[str, Any],
+    corpus_id: str,
+) -> None:
+    """Mutate packet to add edge rationales and entity schema-lens facets.
+
+    Edges in the packet are bare (s, t, predicate) tuples by default. The
+    underlying Neo4j relation carries `evidence_chunk_ids` — the chunks the
+    extractor used as justification — plus `relation_family` and `confidence`.
+    Entities in the packet may or may not have facets populated depending on
+    which path produced them; the canonical store is the entity node's
+    `object_kind / domain_type / canonical_family` properties.
+
+    This function does TWO bounded reads — one Cypher query for edges, one
+    for entities — and one Mongo lookup for the first rationale chunk per
+    edge. The packet's edge and entity lists are mutated in place; the
+    function never adds new entries.
+    """
+
+    edges = [e for e in (packet.get("edges") or []) if isinstance(e, dict)]
+    entities = [e for e in (packet.get("entities") or []) if isinstance(e, dict)]
+    if not edges and not entities:
+        return
+    if neo4j_driver is None:
+        return
+
+    # ── Edge enrichment: pull evidence_chunk_ids per (s, t, predicate) ──────
+    triples = [
+        {
+            "s": str(e.get("source") or ""),
+            "t": str(e.get("target") or ""),
+            "p": str(e.get("predicate") or ""),
+        }
+        for e in edges
+        if e.get("source") and e.get("target") and e.get("predicate")
+    ][:_PACKET_MAX_EDGES]
+
+    edge_meta: dict[tuple[str, str, str], dict[str, Any]] = {}
+    if triples:
+        cypher_edges = """
+        UNWIND $triples AS triple
+        MATCH (a:Entity {entity_id: triple.s})-[r:RELATES_TO {predicate: triple.p}]->(b:Entity {entity_id: triple.t})
+        WHERE $corpus_id IN coalesce(r.corpus_ids, [])
+           OR EXISTS {
+               MATCH (c:Chunk {corpus_id: $corpus_id})
+               WHERE c.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+           }
+        RETURN triple.s AS s, triple.t AS t, triple.p AS p,
+               coalesce(r.evidence_chunk_ids, []) AS chunk_ids,
+               coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
+               r.confidence AS confidence
+        """
+        try:
+            async with neo4j_driver.session() as session:
+                result = await session.run(
+                    cypher_edges,
+                    triples=triples,
+                    corpus_id=corpus_id,
+                )
+                async for rec in result:
+                    chunk_ids = [str(cid) for cid in (rec.get("chunk_ids") or []) if cid]
+                    edge_meta[(rec["s"], rec["t"], rec["p"])] = {
+                        "evidence_chunk_ids": chunk_ids[:3],
+                        "relation_family": rec.get("relation_family") or "",
+                        "confidence": rec.get("confidence"),
+                    }
+        except Exception as exc:
+            logger.debug("edge enrichment cypher failed: %s", exc)
+
+    # ── Pull rationale chunk text for each edge (one Mongo round-trip) ──────
+    rationale_chunk_ids: set[str] = set()
+    for meta in edge_meta.values():
+        for cid in meta.get("evidence_chunk_ids") or []:
+            rationale_chunk_ids.add(cid)
+            break  # first chunk per edge is enough
+    chunk_text_by_id: dict[str, str] = {}
+    if rationale_chunk_ids and db is not None:
+        try:
+            cursor = db["chunks"].find(
+                {
+                    "corpus_id": corpus_id,
+                    "chunk_id": {"$in": list(rationale_chunk_ids)[:24]},
+                },
+                {"_id": 0, "chunk_id": 1, "text": 1, "summary": 1},
+            )
+            async for row in cursor:
+                cid = str(row.get("chunk_id") or "")
+                if not cid:
+                    continue
+                text = str(row.get("text") or row.get("summary") or "").strip()
+                if text:
+                    chunk_text_by_id[cid] = text
+        except Exception as exc:
+            logger.debug("edge rationale chunk fetch failed: %s", exc)
+
+    for edge in edges:
+        key = (
+            str(edge.get("source") or ""),
+            str(edge.get("target") or ""),
+            str(edge.get("predicate") or ""),
+        )
+        meta = edge_meta.get(key)
+        if not meta:
+            continue
+        chunk_ids = meta.get("evidence_chunk_ids") or []
+        edge["evidence_chunk_ids"] = chunk_ids
+        if meta.get("relation_family") and not edge.get("relation_family"):
+            edge["relation_family"] = meta["relation_family"]
+        if meta.get("confidence") is not None and not edge.get("confidence"):
+            try:
+                edge["confidence"] = float(meta["confidence"])
+            except Exception:
+                pass
+        if chunk_ids:
+            text = chunk_text_by_id.get(chunk_ids[0]) or ""
+            if text:
+                edge["rationale"] = _text(text.replace("\n", " "), 220)
+                edge["rationale_chunk_id"] = chunk_ids[0]
+
+    # ── Entity enrichment: pull object_kind / domain_type / canonical_family ─
+    entity_ids = [str(e.get("entity_id") or "") for e in entities if e.get("entity_id")]
+    if entity_ids:
+        cypher_entities = """
+        MATCH (e:Entity)
+        WHERE e.entity_id IN $ids
+        RETURN e.entity_id AS id,
+               e.object_kind AS object_kind,
+               e.domain_type AS domain_type,
+               e.canonical_family AS canonical_family,
+               coalesce(e.observed_entity_types, []) AS observed_entity_types
+        """
+        facets_by_id: dict[str, dict[str, str]] = {}
+        try:
+            async with neo4j_driver.session() as session:
+                result = await session.run(cypher_entities, ids=entity_ids[:24])
+                async for rec in result:
+                    eid = str(rec.get("id") or "")
+                    if not eid:
+                        continue
+                    facets_by_id[eid] = {
+                        "object_kind": str(rec.get("object_kind") or ""),
+                        "domain_type": str(rec.get("domain_type") or ""),
+                        "canonical_family": str(rec.get("canonical_family") or ""),
+                        "observed_entity_types": [
+                            str(t) for t in (rec.get("observed_entity_types") or []) if t
+                        ][:4],
+                    }
+        except Exception as exc:
+            logger.debug("entity facet cypher failed: %s", exc)
+            facets_by_id = {}
+
+        for entity in entities:
+            eid = str(entity.get("entity_id") or "")
+            facets = facets_by_id.get(eid)
+            if not facets:
+                continue
+            for key in ("object_kind", "domain_type", "canonical_family"):
+                if facets.get(key) and not entity.get(key):
+                    entity[key] = facets[key]
+            if facets.get("observed_entity_types") and not entity.get("observed_entity_types"):
+                entity["observed_entity_types"] = facets["observed_entity_types"]
 
 
 async def _persist_enriched_turn(db: Any, result: Any) -> None:
@@ -2992,6 +3093,20 @@ async def discover(
     result.trace = await _hydrate_trace_source_docs(db, result.trace, corpus_id=corpus_id)
 
     packet = _build_insight_packet(result, query=query, corpus_id=corpus_id)
+    # Pull edge rationale chunks and entity schema-lens facets — these are
+    # extraction layers stored on the Neo4j relations and entity nodes that
+    # the legacy packet builder does not surface. Bounded reads: one Cypher
+    # for edges, one for entities, one Mongo lookup for the first rationale
+    # chunk per edge.
+    try:
+        await _enrich_packet_with_extractions(
+            neo4j_driver=neo4j_driver,
+            db=db,
+            packet=packet,
+            corpus_id=corpus_id,
+        )
+    except Exception as exc:
+        logger.debug("packet extraction enrichment skipped: %s", exc)
     if isinstance(result.trace, dict):
         result.trace["source_docs_raw"] = result.trace.get("source_docs") or []
         result.trace["source_docs"] = packet.get("evidence") or []
@@ -3011,13 +3126,9 @@ async def discover(
         result.auto_synthesis = llm_payload
         synthesis_source = "llm"
     else:
-        deterministic = _scrub_synthesis_payload(_auto_synthesis_from_result(result), packet)
-        # Make the fallback reason explicit at the top of the evidence notes so
-        # the reader knows the LLM didn't write the prose.
-        evidence_notes = list(deterministic.get("evidence_notes") or [])
-        evidence_notes.insert(0, _fallback_evidence_note(fallback_reason or "unknown"))
-        deterministic["evidence_notes"] = evidence_notes[:6]
-        result.auto_synthesis = deterministic
+        result.auto_synthesis = _deterministic_prose_fallback(
+            result, packet, fallback_reason or "unknown"
+        )
         synthesis_source = f"fallback:{fallback_reason or 'unknown'}"
     _sync_headline_from_auto_synthesis(result)
 
@@ -3040,15 +3151,13 @@ async def discover(
     except Exception:
         pass
     logger.info(
-        "discover auto_packet source=%s themes=%d bridges=%d gaps=%d signals=%d "
+        "discover auto_packet source=%s prose_chars=%d sources=%d "
         "context_nodes=%d context_links=%d packet_entities=%d packet_evidence=%d "
         "sparse=%s temporal=%s timings=legacy_scope:%.2fs packet:%.2fs llm:%.2fs total:%.2fs "
         "corpus=%s q=%r",
         synthesis_source,
-        len(result.auto_synthesis.get("themes") or []),
-        len(result.auto_synthesis.get("bridges") or []),
-        len(result.auto_synthesis.get("gaps") or []),
-        len(result.auto_synthesis.get("emerging_signals") or []),
+        len((result.auto_synthesis or {}).get("markdown") or ""),
+        len((result.auto_synthesis or {}).get("sources") or []),
         len(result.context_graph.get("nodes") or []),
         len(result.context_graph.get("links") or []),
         len(packet.get("entities") or []),

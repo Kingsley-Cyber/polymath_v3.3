@@ -9,7 +9,6 @@ from services.graph.analytics import CorpusMetrics, DomainCluster, DomainMap
 from services.graph.analytics import QueryAnchor, VectorScopeResult, resolve_query_scope
 from services.graph.overview import build_overview_graph
 from services.graph.orchestrator import (
-    _auto_synthesis_from_result,
     _build_insight_packet,
     _build_subgraph_payload,
     _build_weak_links,
@@ -17,13 +16,13 @@ from services.graph.orchestrator import (
     _compact_packet_for_prompt,
     _context_graph_from_result,
     _curated_evidence_rows,
-    _fallback_evidence_note,
+    _deterministic_prose_fallback,
     _llm_context_trace_from_packet,
-    _scrub_synthesis_payload,
     _should_skip_synthesis,
     _source_docs_from_retrieval_chunks,
     _source_label_from_row,
     _sync_headline_from_auto_synthesis,
+    _synthesis_sources_from_packet,
 )
 
 
@@ -218,31 +217,37 @@ def test_context_graph_marks_topics_and_gap_edges():
     assert any(link["suggested"] for link in payload["links"])
 
 
-def test_auto_synthesis_uses_emerging_signals_not_trends():
+def test_deterministic_prose_fallback_describes_the_packet():
+    """When the LLM is unreachable, the fallback should be honest prose, not card scaffolding."""
+
     result = SimpleNamespace(
-        headline={"headline": "A structural signal is visible"},
-        interpretation="A structural signal is visible",
-        themes=[],
-        bridges_v2=[],
-        gaps_v2=[],
-        latent_topics=[
-            {
-                "entity_id": "concept:roblox-obby",
-                "canonical_name": "Roblox obby",
-                "mention_count": 4,
-                "doc_count": 2,
-                "degree": 1,
-                "prose": ["This trend should be rewritten as a signal."],
-            }
-        ],
-        questions=[],
-        weak_links=[],
+        headline={"headline": "Database linearizability client"},
+        interpretation="",
     )
+    packet = {
+        "query": "database linearizability client",
+        "evidence": [
+            {"doc_id": "doc-1", "chunk_id": "c1", "text": "linearizability proof", "evidence_id": "e1"},
+        ],
+        "communities": [{"label": "Distributed Systems"}],
+        "edges": [
+            {"source_name": "Riak", "target_name": "Cassandra", "predicate": "compared_to"},
+        ],
+        "gaps": [],
+    }
 
-    payload = _auto_synthesis_from_result(result)
+    payload = _deterministic_prose_fallback(result, packet, "llm_request_failure")
 
-    assert "emerging_signals" in payload
-    assert "trend" not in payload["emerging_signals"][0]["body"].lower()
+    assert payload["fallback"] is True
+    assert payload["fallback_reason"] == "llm_request_failure"
+    assert "markdown" in payload
+    assert payload["markdown"]
+    # Prose should plainly say it's a fallback (italic underscore wrapper) so
+    # the reader knows no model wrote the prose.
+    assert "synthesis model" in payload["markdown"].lower()
+    # No card schema fields should leak into the payload.
+    for legacy_key in ("themes", "bridges", "gaps", "emerging_signals", "next_moves", "evidence_notes"):
+        assert legacy_key not in payload
 
 
 def test_overview_graph_builds_domain_and_concept_supernodes():
@@ -579,8 +584,13 @@ def test_curated_evidence_drops_bibliography_without_least_bad_fallback():
     assert rejection_reasons["low_value_section"] == 1
 
 
-def test_curated_evidence_drops_negative_single_overlap_fallback():
-    evidence, rejected, _temporal_support, rejection_reasons = _curated_evidence_rows(
+def test_curated_evidence_keeps_low_overlap_non_structural_chunks():
+    """The retriever's job is finding semantically relevant chunks even when
+    they don't share query vocabulary. We trust its ranking — only structural
+    disqualifiers (bibliography/index/front_matter) get dropped. Letting raw
+    rerank score gate substance was the bug we deliberately fixed."""
+
+    evidence, rejected, _temporal_support, _rejection_reasons = _curated_evidence_rows(
         [
             {
                 "chunk_id": "chunk:weak",
@@ -596,9 +606,9 @@ def test_curated_evidence_drops_negative_single_overlap_fallback():
         query="explaining journalism in AI",
     )
 
-    assert evidence == []
-    assert rejected == 1
-    assert rejection_reasons["query_terms"] == 1
+    assert len(evidence) == 1
+    assert evidence[0]["chunk_id"] == "chunk:weak"
+    assert rejected == 0
 
 
 def test_retrieval_chunks_convert_to_capped_packet_source_docs():
@@ -758,58 +768,73 @@ def test_compact_packet_prompt_includes_source_metadata_without_ingest_dates():
     assert "mentions" not in compact["signals"][0]
 
 
-def test_scrub_synthesis_payload_drops_slash_titles_and_trends_without_temporal():
-    payload = {
-        "headline": "Movement loop / Checkpoint cadence",
-        "themes": [
-            {
-                "title": "Movement loop / Checkpoint cadence",
-                "body": "The obby's trend toward longer gaps is trending upward.",
-                "evidence": ["chunk:abc123"],
-                "related_ids": ["concept:roblox-obby"],
-            }
-        ],
-        "bridges": [],
+def _empty_packet(**overrides):
+    base = {
+        "sparse": False,
+        "temporal_support": False,
+        "query": "q",
+        "corpus_id": "c1",
+        "entities": [],
+        "edges": [],
+        "communities": [],
+        "evidence": [],
+        "anchors": [],
+        "trace_stages": [],
         "gaps": [],
-        "emerging_signals": [],
-        "next_moves": [],
-        "evidence_notes": [],
+        "signals": [],
+        "weak_links": [],
+        "interpretation": "",
+        "headline": "",
     }
-    cleaned = _scrub_synthesis_payload(payload, {"temporal_support": False})
-    assert "/" not in cleaned["themes"][0]["title"]
-    body = cleaned["themes"][0]["body"].lower()
-    assert "trend" not in body
-    assert "trending" not in body
+    base.update(overrides)
+    return base
 
 
-def test_scrub_synthesis_payload_keeps_trend_when_temporal_supported():
-    payload = {
-        "headline": "Trends in obby design",
-        "themes": [
-            {
-                "title": "Checkpoint cadence",
-                "body": "The trend toward longer gaps is well documented.",
-                "evidence": ["chunk:abc123"],
-                "related_ids": ["concept:roblox-obby"],
-            }
-        ],
-        "bridges": [],
-        "gaps": [],
-        "emerging_signals": [],
-        "next_moves": [],
-        "evidence_notes": [],
-    }
-    cleaned = _scrub_synthesis_payload(payload, {"temporal_support": True})
-    assert "trend" in cleaned["themes"][0]["body"].lower()
+@pytest.mark.asyncio
+async def test_call_llm_synthesis_returns_prose_with_inline_citations(monkeypatch):
+    """The synthesis call must return woven Markdown prose, not card JSON."""
 
+    from services.graph import orchestrator as orch_mod
 
-def test_fallback_evidence_note_explains_sparse_and_parse_failures():
-    sparse = _fallback_evidence_note("sparse_evidence")
-    assert "sparse" in sparse["body"].lower()
-    assert sparse["evidence"] == ["fallback:sparse_evidence"]
+    prose = (
+        "# Movement loop carries the obby\n\n"
+        "The corpus shows a tight checkpoint cadence around the obby's first "
+        "minute, with new players cycling through three deaths before the loop "
+        "stabilizes [1]. Across the same scope, the graph suggests a bridge "
+        "to onboarding pacing — a structural read, not a confirmed claim [2].\n\n"
+        "A testable read: longer respawn windows would weaken the loop's grip."
+    )
 
-    parse = _fallback_evidence_note("json_parse_failure")
-    assert "did not validate" in parse["body"].lower() or "schema" in parse["body"].lower()
+    class _StubLLM:
+        async def complete_sync(self, **_kwargs):
+            return prose
+
+    fake_module = SimpleNamespace(llm_service=_StubLLM())
+    monkeypatch.setitem(sys.modules, "services.llm", fake_module)
+
+    payload, reason = await orch_mod._call_llm_synthesis(
+        _empty_packet(
+            evidence=[
+                {"evidence_id": "e1", "doc_id": "d1", "chunk_id": "c1", "text": "checkpoint loop"},
+                {"evidence_id": "e2", "doc_id": "d2", "chunk_id": "c2", "text": "onboarding pacing"},
+            ]
+        ),
+        model_override=None,
+    )
+
+    assert reason is None
+    assert payload is not None
+    assert payload["fallback"] is False
+    assert payload["headline"].startswith("Movement loop")
+    assert "checkpoint cadence" in payload["markdown"].lower()
+    # The headline line was lifted out of the markdown body.
+    assert "# Movement loop" not in payload["markdown"]
+    # Inline [1] [2] citations resolved to source receipts in citation order.
+    assert [s["index"] for s in payload["sources"]] == [1, 2]
+    assert payload["sources"][0]["evidence_id"] == "e1"
+    # No card-shape leakage.
+    for legacy_key in ("themes", "bridges", "gaps", "emerging_signals", "next_moves", "evidence_notes"):
+        assert legacy_key not in payload
 
 
 @pytest.mark.asyncio
@@ -817,45 +842,31 @@ async def test_call_llm_synthesis_calls_model_even_when_packet_is_sparse(monkeyp
     from services.graph import orchestrator as orch_mod
 
     calls = {"count": 0}
-    valid_json = (
-        '{"headline":"The packet is thin, but the graph still needs a read",'
-        '"themes":[],"bridges":[],"gaps":[],"emerging_signals":[],'
-        '"next_moves":[{"title":"Broaden the query","body":"Ask a broader follow-up because the packet has sparse evidence.","evidence":["sparse:true"],"related_ids":[]}],'
-        '"evidence_notes":[{"title":"Sparse packet","body":"The model saw the sparse packet and reported the missing evidence honestly.","evidence":["sparse:true"],"related_ids":[]}]}'
+    prose = (
+        "# Sparse read\n\n"
+        "The packet is thin and the corpus has not surfaced enough chunks to "
+        "anchor a confident analysis. The graph layer suggests a single "
+        "neighborhood worth probing further."
     )
 
     class _StubLLM:
         async def complete_sync(self, **_kwargs):
             calls["count"] += 1
-            return valid_json
+            return prose
 
     fake_module = SimpleNamespace(llm_service=_StubLLM())
     monkeypatch.setitem(sys.modules, "services.llm", fake_module)
 
     payload, reason = await orch_mod._call_llm_synthesis(
-        {
-            "sparse": True,
-            "temporal_support": False,
-            "query": "thin query",
-            "corpus_id": "c1",
-            "entities": [],
-            "edges": [],
-            "communities": [],
-            "evidence": [],
-            "anchors": [],
-            "trace_stages": [],
-            "gaps": [],
-            "signals": [],
-            "weak_links": [],
-            "interpretation": "",
-            "headline": "",
-        },
+        _empty_packet(sparse=True, query="thin query"),
         model_override=None,
     )
+
     assert calls["count"] == 1
     assert reason is None
     assert payload is not None
-    assert payload["evidence_notes"][0]["evidence"] == ["sparse:true"]
+    assert payload["fallback"] is False
+    assert "sparse" in payload["markdown"].lower() or "thin" in payload["markdown"].lower()
 
 
 @pytest.mark.asyncio
@@ -864,10 +875,6 @@ async def test_call_llm_synthesis_resolves_pool_model_credentials(monkeypatch):
     from services import query_model_resolver as resolver_mod
 
     calls: dict[str, object] = {}
-    valid_json = (
-        '{"headline":"Mistral resolved",'
-        '"themes":[],"bridges":[],"gaps":[],"emerging_signals":[],"next_moves":[],"evidence_notes":[]}'
-    )
 
     async def _resolve_by_entry_id(user_id, entry_id):
         calls["resolved"] = (user_id, entry_id)
@@ -881,30 +888,14 @@ async def test_call_llm_synthesis_resolves_pool_model_credentials(monkeypatch):
     class _StubLLM:
         async def complete_sync(self, **kwargs):
             calls["llm_kwargs"] = kwargs
-            return valid_json
+            return "# Mistral resolved\n\nProse body here."
 
     monkeypatch.setattr(resolver_mod, "resolve_by_entry_id", _resolve_by_entry_id)
     fake_module = SimpleNamespace(llm_service=_StubLLM())
     monkeypatch.setitem(sys.modules, "services.llm", fake_module)
 
     payload, reason = await orch_mod._call_llm_synthesis(
-        {
-            "sparse": False,
-            "temporal_support": False,
-            "query": "q",
-            "corpus_id": "c1",
-            "entities": [],
-            "edges": [],
-            "communities": [],
-            "evidence": [],
-            "anchors": [],
-            "trace_stages": [],
-            "gaps": [],
-            "signals": [],
-            "weak_links": [],
-            "interpretation": "",
-            "headline": "",
-        },
+        _empty_packet(),
         model_override="pool:mistral-entry",
         user_id="user-1",
     )
@@ -917,136 +908,46 @@ async def test_call_llm_synthesis_resolves_pool_model_credentials(monkeypatch):
     assert llm_kwargs["api_base"] == "https://api.mistral.ai/v1"
     assert llm_kwargs["api_key"] == "test-key"
     assert llm_kwargs["extra_params"]["custom"] == "value"
-    assert llm_kwargs["extra_params"]["response_format"] == {"type": "json_object"}
+    # Prose contract: model-agnostic, no JSON response format coercion.
+    assert "response_format" not in llm_kwargs["extra_params"]
 
 
 @pytest.mark.asyncio
-async def test_call_llm_synthesis_falls_back_on_parse_failure(monkeypatch):
+async def test_call_llm_synthesis_returns_empty_failure_on_blank_output(monkeypatch):
+    """No JSON repair retry: empty output is a clean fallback signal."""
+
     from services.graph import orchestrator as orch_mod
 
     class _StubLLM:
         async def complete_sync(self, **_kwargs):
-            return "this is not json"
+            return "   "
 
     fake_module = SimpleNamespace(llm_service=_StubLLM())
     monkeypatch.setitem(sys.modules, "services.llm", fake_module)
 
     payload, reason = await orch_mod._call_llm_synthesis(
-        {
-            "sparse": False,
-            "temporal_support": False,
-            "query": "q",
-            "corpus_id": "c1",
-            "entities": [],
-            "edges": [],
-            "communities": [],
-            "evidence": [],
-            "anchors": [],
-            "trace_stages": [],
-            "gaps": [],
-            "signals": [],
-            "weak_links": [],
-            "interpretation": "",
-            "headline": "",
-        },
+        _empty_packet(),
         model_override=None,
     )
+
     assert payload is None
-    assert reason == "json_parse_failure"
+    assert reason == "llm_empty_response"
 
 
-@pytest.mark.asyncio
-async def test_call_llm_synthesis_retries_compact_json_after_truncation(monkeypatch):
-    from services.graph import orchestrator as orch_mod
+def test_synthesis_sources_only_includes_cited_indexes():
+    packet = {
+        "evidence": [
+            {"evidence_id": "e1", "doc_id": "d1", "chunk_id": "c1", "text": "alpha"},
+            {"evidence_id": "e2", "doc_id": "d2", "chunk_id": "c2", "text": "beta"},
+            {"evidence_id": "e3", "doc_id": "d3", "chunk_id": "c3", "text": "gamma"},
+        ]
+    }
 
-    calls: list[dict[str, object]] = []
-    valid_json = (
-        '{"headline":"Compact retry recovered",'
-        '"themes":[{"title":"Recovered","body":"The second pass returned compact JSON.","evidence":["graph"],"related_ids":[]}],'
-        '"bridges":[],"gaps":[],"emerging_signals":[],"next_moves":[],"evidence_notes":[]}'
-    )
+    sources = _synthesis_sources_from_packet(packet, "Cited [1] and [3] only.")
 
-    class _StubLLM:
-        async def complete_sync(self, **kwargs):
-            calls.append(kwargs)
-            if len(calls) == 1:
-                return '{"headline":"cut off","themes":[{"title":"x","body":"unterminated'
-            return valid_json
-
-    fake_module = SimpleNamespace(llm_service=_StubLLM())
-    monkeypatch.setitem(sys.modules, "services.llm", fake_module)
-
-    payload, reason = await orch_mod._call_llm_synthesis(
-        {
-            "sparse": False,
-            "temporal_support": False,
-            "query": "q",
-            "corpus_id": "c1",
-            "entities": [],
-            "edges": [],
-            "communities": [],
-            "evidence": [],
-            "anchors": [],
-            "trace_stages": [],
-            "gaps": [],
-            "signals": [],
-            "weak_links": [],
-            "interpretation": "",
-            "headline": "",
-        },
-        model_override=None,
-    )
-
-    assert reason is None
-    assert payload is not None
-    assert payload["headline"] == "Compact retry recovered"
-    assert len(calls) == 2
-    assert calls[0]["max_tokens"] == orch_mod._SYNTHESIS_MAX_TOKENS
-    assert calls[1]["max_tokens"] == 1200
-    assert calls[1]["temperature"] == 0.1
-
-
-@pytest.mark.asyncio
-async def test_call_llm_synthesis_returns_validated_payload(monkeypatch):
-    from services.graph import orchestrator as orch_mod
-
-    valid_json = (
-        '{"headline":"Movement loop carries the obby",'
-        '"themes":[{"title":"Checkpoint cadence","body":"The obby uses a tight checkpoint loop to teach movement [chunk:abc123].","evidence":["chunk:abc123"],"related_ids":["concept:roblox-obby"]}],'
-        '"bridges":[],"gaps":[],"emerging_signals":[],"next_moves":[],"evidence_notes":[]}'
-    )
-
-    class _StubLLM:
-        async def complete_sync(self, **_kwargs):
-            return valid_json
-
-    fake_module = SimpleNamespace(llm_service=_StubLLM())
-    monkeypatch.setitem(sys.modules, "services.llm", fake_module)
-
-    payload, reason = await orch_mod._call_llm_synthesis(
-        {
-            "sparse": False,
-            "temporal_support": False,
-            "query": "q",
-            "corpus_id": "c1",
-            "entities": [],
-            "edges": [],
-            "communities": [],
-            "evidence": [],
-            "anchors": [],
-            "trace_stages": [],
-            "gaps": [],
-            "signals": [],
-            "weak_links": [],
-            "interpretation": "",
-            "headline": "",
-        },
-        model_override=None,
-    )
-    assert reason is None
-    assert payload is not None
-    assert payload["headline"].startswith("Movement loop")
-    assert payload["themes"][0]["evidence"] == ["chunk:abc123"]
+    assert [s["index"] for s in sources] == [1, 3]
+    assert sources[0]["evidence_id"] == "e1"
+    assert sources[1]["evidence_id"] == "e3"
 
 
 def test_context_graph_node_carries_jump_metadata():
@@ -1348,36 +1249,16 @@ def test_packet_drops_cross_domain_gaps_without_evidence_support():
     assert packet["gaps"] == []
 
 
-def test_synthesis_scrub_replaces_metric_headline():
-    packet = {
-        "query": "database linearizability client",
-        "communities": [
-            {"label": "database linearizability client"},
-        ],
-        "edges": [],
-        "temporal_support": False,
-    }
-    payload = {
-        "headline": "database linearizability client: 0.0% cross-domain edges and Operational 22%",
-        "themes": [],
-        "bridges": [],
-        "gaps": [],
-        "emerging_signals": [],
-        "next_moves": [],
-        "evidence_notes": [],
-    }
+def test_auto_synthesis_headline_sync_mirrors_prose_headline_onto_legacy_field():
+    """The headline from the prose payload is mirrored onto result.headline for legacy callers."""
 
-    scrubbed = _scrub_synthesis_payload(payload, packet)
-
-    assert "%" not in scrubbed["headline"]
-    assert "edge" not in scrubbed["headline"].lower()
-    assert "database linearizability client" in scrubbed["headline"]
-
-
-def test_auto_synthesis_headline_sync_replaces_legacy_metric_headline():
     result = SimpleNamespace(
-        headline={"headline": "database linearizability client: 0.0% cross-domain edges"},
-        auto_synthesis={"headline": "database linearizability client: research read across Riak"},
+        headline={"headline": "database linearizability client: stale legacy headline"},
+        auto_synthesis={
+            "headline": "database linearizability client: research read across Riak",
+            "markdown": "# database linearizability client: research read across Riak\n\nProse...",
+            "sources": [],
+        },
     )
 
     _sync_headline_from_auto_synthesis(result)
