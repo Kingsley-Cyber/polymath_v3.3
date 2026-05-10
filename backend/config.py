@@ -371,6 +371,15 @@ class Settings(BaseSettings):
             "the budget caused mid-string JSON truncation."
         ),
     )
+    EXTRACTION_JSONL_MAX_CALLS: int = Field(
+        default=8,
+        ge=1,
+        le=32,
+        description=(
+            "Maximum sequential JSONL continuation calls for one Ghost B chunk "
+            "before marking it failed."
+        ),
+    )
     EXTRACTION_MAX_ENTITIES_PER_CHUNK: int = Field(
         default=14,
         ge=1,

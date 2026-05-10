@@ -20,8 +20,12 @@ from services.ghost_b import (
     UNIVERSAL_RELATION_SCHEMA,
     SchemaContext,
     _apply_schema,
+    _merge_jsonl_items,
     _parse,
+    _parse_jsonl_items,
+    _parse_jsonl_lines,
     _validate_evidence,
+    build_continuation_prompt,
     build_user_prompt,
     normalize_relation_predicate_alias,
 )
@@ -123,7 +127,11 @@ def test_prompt_renders_universal_vocab():
     assert "other=fallback [FALLBACK]" in prompt
     assert "related_to=use only when no specific predicate fits [FALLBACK]" in prompt
     assert "evidence_phrase" in prompt
-    # Universal predicates still listed in the JSON-example enum
+    assert "Output JSONL only" in prompt
+    assert '"t":"e"' in prompt
+    assert '"t":"r"' in prompt
+    assert '{"t":"x"}' in prompt
+    # Universal predicates still listed in the JSONL line shape
     assert "runs_on" in prompt
     assert "trained_on" in prompt
     # Canonicalization + missing-relation predicates added in the schema patch
@@ -152,10 +160,98 @@ def test_prompt_renders_optional_fact_shape_when_enabled():
         max_facts=5,
     )
 
-    assert '"facts":[{' in prompt
-    assert '"fact_type":"property|status|timestamp|threshold|category|tag|rule_condition|rule_action"' in prompt
+    assert '"t":"f"' in prompt
+    assert '"ft":"property|status|timestamp|threshold|category|tag|rule_condition|rule_action"' in prompt
     assert "max 5 facts" in prompt
     assert "fact subject must match an entity canonical_name" in prompt
+
+
+def test_jsonl_parser_keeps_complete_lines_and_discards_partial_tail():
+    task = ExtractionTask(
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        text="constexpr functions produce compile-time results.",
+    )
+    raw = "\n".join(
+        [
+            '{"t":"e","cn":"constexpr functions","sf":"constexpr functions","et":"Concept","cf":0.91}',
+            '{"t":"r","sub":"constexpr functions","pred":"produces","obj":"compile-time results","ok":"literal","cf":0.86,"ev":"produce compile-time results"}',
+            '{"t":"e","cn":"truncated"',
+        ]
+    )
+
+    parsed = _parse_jsonl_lines(raw)
+    result = _parse_jsonl_items(parsed.items, task, 0.0)
+
+    assert parsed.finished is False
+    assert parsed.valid_lines == 2
+    assert parsed.invalid_line is not None
+    assert result is not None
+    assert [e.canonical_name for e in result.entities] == ["constexpr functions"]
+    assert len(result.relations) == 1
+    assert result.relations[0].predicate == "produces"
+
+
+def test_jsonl_continuation_merge_dedupes_and_preserves_facts():
+    task = ExtractionTask(
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        text="constexpr objects are initialized during compilation.",
+    )
+    first = _parse_jsonl_lines(
+        '{"t":"e","cn":"constexpr objects","sf":"constexpr objects","et":"Concept","cf":0.92}'
+    )
+    second = _parse_jsonl_lines(
+        "\n".join(
+            [
+                '{"t":"e","cn":"constexpr objects","sf":"constexpr objects","et":"Concept","cf":0.92}',
+                '{"t":"f","sub":"constexpr objects","ft":"property","pn":"initialized_when","val":"during compilation","cf":0.82,"ev":"during compilation"}',
+                '{"t":"x"}',
+            ]
+        )
+    )
+
+    merged = _merge_jsonl_items(first.items, second.items)
+    result = _parse_jsonl_items(
+        merged,
+        task,
+        0.0,
+        enable_facts=True,
+        max_facts=5,
+    )
+
+    assert second.finished is True
+    assert len(merged) == 2
+    assert result is not None
+    assert len(result.entities) == 1
+    assert len(result.facts) == 1
+    assert result.facts[0].property_name == "initialized_when"
+
+
+def test_continuation_prompt_carries_recent_jsonl_without_restart():
+    previous = [
+        {"t": "e", "cn": "a", "sf": "A", "et": "Concept", "cf": 0.9},
+        {"t": "e", "cn": "b", "sf": "B", "et": "Concept", "cf": 0.9},
+        {"t": "e", "cn": "c", "sf": "C", "et": "Concept", "cf": 0.9},
+        {"t": "e", "cn": "d", "sf": "D", "et": "Concept", "cf": 0.9},
+    ]
+
+    prompt = build_continuation_prompt(
+        previous_items=previous,
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        text="sample",
+    )
+
+    assert "Continue extracting from the chunk below" in prompt
+    assert "do not repeat" in prompt
+    assert '"cn":"a"' not in prompt
+    assert '"cn":"b"' in prompt
+    assert '"cn":"d"' in prompt
+    assert '{"t":"x"}' in prompt
 
 
 def test_parse_facts_is_backward_compatible_when_missing():
