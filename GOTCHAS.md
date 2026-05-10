@@ -507,3 +507,24 @@ Anything outside the 12 Title-Case types is pre-migration data; wipe `write_stat
 
 ### 73. Deprecated: `format_router.py` and `source_classifier.py`
 Both modules were replaced by the docling sidecar + `docling_adapter` in Phase 7.6 (§60). They remain on disk with **no live importers** — `grep -rn "format_router\|source_classifier\|DecodeResult" backend/` returns only the dead file itself, a comment in `docling_adapter.py`, and a header comment in `worker.py`. Scheduled for removal in a future cleanup sweep. Do not add new callers.
+
+---
+
+## 🟫 Ghost B Extraction — Operator Nuances
+
+### 74. DeepSeek v4-flash defaults to thinking-mode ON — Ghost B disables it
+DeepSeek v4-flash (and v4-pro) ship with `thinking` enabled by default. Every output token goes to `reasoning_content` until the chain-of-thought finishes. With `EXTRACTION_MAX_TOKENS=1024`, reasoning consumes the entire budget and `message.content` stays empty — extraction reports 99%+ failure rate even though `finish_reason=length` looks like a token-cap problem.
+
+[`backend/services/ghost_b.py`](backend/services/ghost_b.py) sends `"thinking": {"type": "disabled"}` for any model whose name starts with `deepseek/`. Operators can override per-corpus via `extra_params` on the model entry if they actually want reasoning. If you swap to another reasoning provider (Claude extended thinking, OpenAI o-series, Qwen QwQ, etc.), wire its own disable param the same way — generic `reasoning_effort: "low"` is silently ignored by DeepSeek, and `thinking_mode: "disabled"` is the wrong key. Only `thinking: {"type": "disabled"}` works for DeepSeek.
+
+### 75. `EXTRACTION_MAX_TOTAL_LINES` must sit above the per-type theoretical max
+Per-type caps are `14 entities + 20 relations + 5 facts + 1 sentinel = 40 lines max possible`. The parser line-cap was historically `20`, well below that ceiling, so dense chunks emitted 21–30 valid JSONL lines, the parser truncated the tail, and the audit logged `error_type=line_cap_exceeded` even though extraction succeeded. Default is now `55` — the prompt no longer carries an explicit line-cap rule, so the parser is the only gate. Don't drop this below ~45 unless you've also reduced the per-type caps. The rescue profile (`EXTRACTION_RESCUE_MAX_TOTAL_LINES`, default `16`) has the same below-per-type-max issue on smaller scale (rescue caps 8/8/5 + sentinel = 22), worth bumping to ~30 if you see frequent rescue line_cap_exceeded events.
+
+### 76. The failure-budget circuit breaker protects you from runaway provider spend
+[`backend/services/ghost_b.py`](backend/services/ghost_b.py) opens a per-document failure circuit when `(failed/processed) × 100 ≥ EXTRACTION_FAILURE_PAUSE_PERCENT` (default `25.0`) after at least `EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS` chunks (default `20`) have been processed. Remaining queued chunks are marked `not_processed` — no more API calls fire for that doc. The doc still proceeds to Mongo + Qdrant write; only the graph extraction is skipped for the unprocessed chunks. A `ghost_b_failure_budget_tripped` audit event records the trip. **This is what saves you from burning $5 of tokens on a doc whose first 20 chunks all fail** — leave the threshold at 25% unless you have a reason.
+
+### 77. Audit log is sampled per-doc, not exhaustive
+`ghost_b_error_events` caps at `EXTRACTION_ERROR_AUDIT_MAX_FAILED_ATTEMPTS_PER_DOC=25` failed events plus `EXTRACTION_ERROR_AUDIT_MAX_SUCCESS_ATTEMPTS_PER_DOC=2` success events per document, plus all budget-trip events. So if you see exactly 25 failures in the audit, the actual failure count is **at least** 25 — possibly more. The authoritative per-doc tally lives on `documents.ghost_b_metrics` (`requested_chunks`, `extracted_chunks`, `failed_chunks`, `success_rate`); use that for hard counts. Audit rows are for forensic classification, not for arithmetic.
+
+### 78. `error_type=line_cap_exceeded` is not a true failure post-fix
+Pre-§75, this was a real failure mode. Post-fix (default 55), the model can no longer emit more lines than the parser accepts in normal cases. If you see `line_cap_exceeded` in the audit log on the new default, check: (a) did someone lower `EXTRACTION_MAX_TOTAL_LINES`, (b) did someone raise `EXTRACTION_MAX_ENTITIES_PER_CHUNK` / `..._RELATIONS_PER_CHUNK` / `..._FACTS_PER_CHUNK` above the budgeted slack, or (c) is the model emitting duplicates despite the prompt forbidding them (rare; usually a model regression).

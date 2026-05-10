@@ -387,6 +387,31 @@ MCP_PUBLIC_URL=https://mcp.example.com
 MCP_API_KEY=<openssl rand -hex 32>
 ```
 
+**Ghost B (entity / relation extractor) — read this if you change the model:**
+
+The default extraction model (`deepseek/deepseek-v4-flash`) is a reasoning
+model that ships with thinking-mode ON. Polymath disables it per call by
+sending `thinking={"type":"disabled"}` so reasoning tokens don't eat the
+output budget — see `GOTCHAS.md` § "Ghost B + DeepSeek thinking-mode" for
+the why. Two consequences for operators:
+
+- **`EXTRACTION_MAX_TOKENS=6144`** is the post-fix default. With thinking
+  disabled, real output is ~600–1500 tokens — the headroom is for safety
+  on dense chunks. If you swap to a non-DeepSeek **reasoning** model
+  (Claude extended thinking, o-series, QwQ, etc.) you must wire its own
+  disable knob the same way, or budget for ~3× more max_tokens.
+- **`EXTRACTION_MAX_TOTAL_LINES=55`** sits 15 lines above the per-type
+  theoretical max (14 entities + 20 relations + 5 facts + 1 sentinel = 40).
+  Don't drop below ~45 unless you've also reduced the per-type caps,
+  or you'll start seeing `error_type=line_cap_exceeded` audit events on
+  dense documents.
+
+The system has a per-doc failure circuit (default trips at ≥25 % failed
+after 20 chunks processed) that protects against runaway provider spend
+on a misbehaving doc; documents that trip the circuit still complete the
+Mongo + Qdrant write so vector RAG works for them. Tally per doc lives on
+`documents.ghost_b_metrics`.
+
 ---
 
 ## Common operations
