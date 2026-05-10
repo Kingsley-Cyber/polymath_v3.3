@@ -1282,13 +1282,38 @@ async def run_ingest_job(
     )
 
     # ── Phase 2: Chunk ───────────────────────────────────────────────────
+    # Run sync chunker in a thread with a wall-clock cap so pathological
+    # docs (PBR4-style: thousands of code/math blocks with no sentence
+    # boundaries) can't stall the whole batch. If the cap trips, raise so
+    # the doc is marked failed and the batch moves on.
     t0 = time.monotonic()
-    parents, children, injected_headers = tier_chunker.chunk(
-        parse_result=parse_result,
-        doc_id=doc_id,
-        corpus_id=corpus_id,
-        config=ingestion_config,
+    _chunk_timeout = max(
+        60, int(getattr(settings, "TIER_CHUNKER_DOC_TIMEOUT_SECONDS", 600))
     )
+    try:
+        parents, children, injected_headers = await asyncio.wait_for(
+            asyncio.to_thread(
+                tier_chunker.chunk,
+                parse_result=parse_result,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                config=ingestion_config,
+            ),
+            timeout=_chunk_timeout,
+        )
+    except asyncio.TimeoutError as exc:
+        logger.error(
+            "phase=tier_chunker_timeout doc=%s corpus=%s timeout=%ds — "
+            "doc has pathological content (long unbroken token sequences). "
+            "Pre-process with Pandoc / strip code-math blocks and retry, "
+            "or raise TIER_CHUNKER_DOC_TIMEOUT_SECONDS.",
+            doc_id[:12], corpus_id[:8], _chunk_timeout,
+        )
+        raise RuntimeError(
+            f"tier_chunker exceeded {_chunk_timeout}s wall-clock for this "
+            "document — likely pathological content (long code/math/table "
+            "blocks with no sentence boundaries). Pre-process and retry."
+        ) from exc
     chunking_config = tier_chunker.describe_chunking(parse_result, ingestion_config)
     if injected_headers:
         chunking_config["injected_headers"] = [

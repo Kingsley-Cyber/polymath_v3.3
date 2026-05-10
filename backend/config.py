@@ -446,6 +446,18 @@ class Settings(BaseSettings):
             "should normally enforce this first; this is the extraction safety net."
         ),
     )
+    TIER_CHUNKER_DOC_TIMEOUT_SECONDS: int = Field(
+        default=600,
+        ge=60,
+        le=7200,
+        description=(
+            "Wall-clock cap on tier_chunker.chunk() per document. Pathological "
+            "content (long code/math/table blocks with no sentence boundaries) "
+            "can pin the chunker CPU-bound for many minutes; tripping this "
+            "timeout marks the doc failed and lets the batch move on instead "
+            "of stalling indefinitely."
+        ),
+    )
     EXTRACTION_MAX_TOTAL_LINES: int = Field(
         default=55,
         ge=1,

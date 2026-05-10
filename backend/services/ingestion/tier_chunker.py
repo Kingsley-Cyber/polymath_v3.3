@@ -268,6 +268,20 @@ def _split_at_boundary(
                 chunks.append("\n\n".join(buf))
                 buf, buf_tok = [], 0
             sentences = _split_at_sentences(para)
+            # Pathological-paragraph bailout. Code listings, inline math,
+            # stringified tables, and other no-sentence-boundary content
+            # produce _split_at_sentences() == [para] — the whole paragraph
+            # is one "sentence". Without this guard we'd then re-tokenize
+            # that mega-sentence inside the loop below for zero useful
+            # work, AND hard_split_oversize would re-encode it AGAIN
+            # downstream. Both passes are O(N) over the paragraph's tokens,
+            # so on docs with thousands of these (e.g. PBR4) the chunker
+            # CPU-stalls for many minutes before yielding to the worker.
+            # Skip straight to handing the whole paragraph to the hard
+            # splitter, which slices once at exact token boundaries.
+            if len(sentences) <= 1:
+                chunks.append(para)
+                continue
             s_buf: list[str] = []
             s_tok = 0
             for s in sentences:

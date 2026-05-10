@@ -554,5 +554,16 @@ Current `mlx-embeddings` cannot load Jina v3's quantized 2-layer MLP projector i
 ### 83. The LaunchAgent is sticky — `KeepAlive=true` + `RunAtLoad=true`
 The plist at `~/Library/LaunchAgents/com.polymath.apple-ml.plist` will restart the sidecars on crash AND on reboot. To stop them cleanly: `launchctl bootout gui/$(id -u)/com.polymath.apple-ml`. To restart: `launchctl kickstart -k gui/$(id -u)/com.polymath.apple-ml`. To wipe: delete the plist, run `bootout` once. Logs are at `~/PolymathRuntime/logs/apple_ml_services.{log,err.log}`.
 
+### 84b. tier_chunker stalls on docs with no sentence boundaries
+Symptom: backend container at 100% CPU, no DB writes, no httpx calls, no log output for many minutes. Last log line is `tier_chunker hard-split: N/N chunks force-broken at max_tokens=512`. Common on graphics / math textbooks (e.g. *Physically Based Rendering 4e*) where pandoc-converted markdown contains long unbroken code listings, inline math, and stringified tables with zero `.!?` punctuation.
+
+Root cause: `_split_at_boundary` in `tier_chunker.py` falls back to sentence-splitting when a paragraph exceeds 1.5× the target. The regex `(?<=[.!?])\s+` returns `[paragraph]` for these blocks — i.e. the whole paragraph as one "sentence". The downstream loop still tokenizes that mega-sentence (O(N) per pass), and `_hard_split_oversize` re-encodes it AGAIN to slice. Across hundreds of such paragraphs the wasted tokenization passes pin the CPU.
+
+Mitigations now in place:
+- `_split_at_boundary` short-circuits when `_split_at_sentences()` returns ≤ 1 entry: the whole paragraph goes straight to the hard splitter (one pass instead of three).
+- `worker.py` runs the chunker in a thread with an `asyncio.wait_for` cap. `TIER_CHUNKER_DOC_TIMEOUT_SECONDS` (default 600s) trips a clean RuntimeError so the doc is marked failed and the batch moves on instead of stalling indefinitely.
+
+If a doc still times out: pre-process with Pandoc to strip code blocks (`pandoc --strip-comments` + a fenced-code-block filter), or raise `TIER_CHUNKER_DOC_TIMEOUT_SECONDS` and accept the slow chunk pass.
+
 ### 84. The agent prompt for Apple setup lives at `docs/agent-prompts/mlx-setup.md`
 When handing the repo to Claude Code or another coding agent for Apple bring-up, paste the prompt at `docs/agent-prompts/mlx-setup.md`. It enforces the order-of-operations (bootstrap → install MLX → docker up with both files → smoke → verify env wiring), names the constraints the agent must respect (no NVIDIA path, no embedding-dim changes, no PR bypass), and defines what "done" looks like.
