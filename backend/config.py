@@ -360,13 +360,16 @@ class Settings(BaseSettings):
         description="Max concurrent LiteLLM calls for entity extraction (GHOST B)",
     )
     EXTRACTION_MAX_TOKENS: int = Field(
-        default=1200,
+        default=6144,
         ge=256,
         le=8192,
         description=(
             "Maximum completion tokens for the normal foreground entity extraction "
-            "call (GHOST B). Facts do not raise this cap; failed chunks switch "
-            "to the smaller rescue profile instead of retrying this exact prompt."
+            "call (GHOST B). 6144 sits comfortably above realistic worst-case "
+            "output (~1100-1500 tokens for dense relation-heavy chunks) and "
+            "leaves headroom for reasoning-mode providers if thinking ever "
+            "slips back on. Facts do not raise this cap; failed chunks switch "
+            "to the rescue profile instead of retrying this exact prompt."
         ),
     )
     EXTRACTION_OUTPUT_MODE: Literal["auto", "json_object", "jsonl"] = Field(
@@ -423,12 +426,15 @@ class Settings(BaseSettings):
         ),
     )
     EXTRACTION_RESCUE_MAX_TOKENS: int = Field(
-        default=900,
+        default=4096,
         ge=256,
-        le=4096,
+        le=8192,
         description=(
             "Maximum completion tokens for Ghost B rescue mode after the first "
-            "foreground extraction contract violation."
+            "foreground extraction contract violation. Rescue must be >= the "
+            "normal cap minus a small margin — a smaller rescue budget than "
+            "the normal call defeats the point of the rescue: it can't recover "
+            "any chunk the normal call couldn't fit."
         ),
     )
     EXTRACTION_MAX_INPUT_TOKENS: int = Field(
@@ -453,10 +459,14 @@ class Settings(BaseSettings):
         ),
     )
     EXTRACTION_RESCUE_MAX_TOTAL_LINES: int = Field(
-        default=16,
+        default=30,
         ge=1,
         le=64,
-        description="Maximum JSONL item lines accepted from Ghost B rescue mode.",
+        description=(
+            "Maximum JSONL item lines accepted from Ghost B rescue mode. Sits "
+            "above the rescue per-type theoretical max (8 entities + 8 relations "
+            "+ 5 facts + 1 sentinel = 22) for the same reason as the normal cap."
+        ),
     )
     EXTRACTION_JSONL_MAX_CALLS: int = Field(
         default=2,
