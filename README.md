@@ -243,17 +243,61 @@ for embeddings). **Caveat:** Qwen3-Embedding-0.6B at 1024d is the reference
 embedding shape; switching to `nomic-embed-text` (768d) means re-ingesting
 your corpus. Don't mix dimensions in the same Qdrant collection.
 
-**Option B — MLX-native embedder/reranker on the host:**
+**Option B — MLX-native embedder/reranker/docling on the host (recommended):**
+
+The repo ships an end-to-end installer that stages three host-native FastAPI
+sidecars (embedder, reranker, docling), pre-pulls the MLX model weights
+(~1.5–3 GB), wires a LaunchAgent for auto-restart, and adds a Docker compose
+override that points the backend at the host services. **One command:**
 
 ```bash
-pip install mlx-embeddings sentence-transformers
-# Run a small FastAPI shim on :8082 / :8081 that mimics the Dockerized
-# embedder/reranker /info and /embed endpoints.
-# The agent setup prompt at the bottom can scaffold this.
+# from repo root, on a Darwin/arm64 host
+bash scripts/install_apple_mlx_runtime.sh
+
+# then bring up Docker with the override
+docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build
+
+# verify
+bash scripts/smoke_apple_mlx.sh
+```
+
+What the installer does:
+
+| step | result |
+|---|---|
+| platform gate | hard-rejects non-Darwin / non-arm64 hosts |
+| stage code | `rsync` to `~/PolymathRuntime/apple_ml_services/` |
+| venv | `uv` + `requirements.txt` |
+| **model pull** | `pull_apple_mlx_models.py` warms `~/PolymathRuntime/volumes/hf-cache` with the two MLX repos so first ingest doesn't stall |
+| LaunchAgent | `~/Library/LaunchAgents/com.polymath.apple-ml.plist` with `RunAtLoad` + `KeepAlive` |
+| smoke | curls `/info`, `/health`, `/health` for embedder/reranker/docling |
+
+Models pulled (CC BY-NC 4.0 for the reranker — fine for personal/research):
+- `mlx-community/Qwen3-Embedding-0.6B-mxfp8` — 1024-dim embeddings (matches Docker default)
+- `mlx-community/jina-reranker-v3-4bit-mxfp4` — cosine reranker
+
+**Critical env knob set by the override**: `RERANKER_SCORE_SCALE=cosine`. Jina v3
+returns cosine in 0..1, not logits. Without this, the retriever's negative-logit
+"low confidence" guard discards every result.
+
+**Implementation note on the sidecars**: the wire contracts (`/info`, `/health`,
+`/embeddings`, `/rerank`, `/parse`) are stable. The internal model loading inside
+`scripts/apple_ml_services/{embedder_mlx,reranker_mlx,docling_svc}/main.py` is
+shipped as a working scaffold — if you have a tuned MLX implementation
+(specifically the hand-built `MLPProjector` for Jina v3), drop it in and the
+rest of the stack is unaffected. See `GOTCHAS.md § "Ghost B + DeepSeek
+thinking-mode"` and the inline `REPLACE THIS BODY` markers for what changes.
+
+Logs / ops:
+```bash
+tail -f ~/PolymathRuntime/logs/apple_ml_services.log
+launchctl kickstart -k gui/$(id -u)/com.polymath.apple-ml   # restart
+launchctl bootout    gui/$(id -u)/com.polymath.apple-ml     # stop
 ```
 
 MLX is significantly faster than CPU on Apple Silicon for both embedding and
-reranking. A small adapter is the right amount of work for the win.
+reranking. The unified-memory architecture means batch sizes that are tight on
+discrete GPUs (8GB+) run comfortably here.
 
 **Mac mini / Claude handoff prompt:**
 

@@ -1,0 +1,27 @@
+# Pinned for the host-native MLX hybrid profile (Apple Silicon).
+# Installed via uv into ~/PolymathRuntime/apple_ml_services/.venv.
+
+# MLX runtime + model loaders
+mlx>=0.30.0
+mlx-lm>=0.30.0
+mlx-embeddings>=0.0.6
+
+# FastAPI sidecars
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
+# Tokenization shared with the model loaders
+tokenizers>=0.20.0
+sentencepiece>=0.2.0
+
+# HuggingFace cache + hub (model pull, not inference)
+huggingface_hub>=0.26.0
+
+# Docling host-native sidecar (CPU on macOS)
+docling>=2.90.0
+docling-core>=2.0.0
+
+# Generic
+numpy>=2.0.0
+pydantic>=2.9.0
+httpx>=0.27.0

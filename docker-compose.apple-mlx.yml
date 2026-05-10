@@ -1,0 +1,55 @@
+# Apple Silicon (MLX) hybrid override.
+#
+# Why this exists: Docker Desktop on macOS cannot pass through the Apple
+# GPU. Containerized embed/rerank would fall back to CPU and run 10–20×
+# slower. So MLX runs HOST-NATIVE on the Mac (via launchd) and the
+# Docker stack reaches it over `host.docker.internal`.
+#
+# Use:
+#   docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build
+#
+# Prerequisite — host services running:
+#   bash scripts/install_apple_mlx_runtime.sh
+#   curl http://localhost:8082/info     # embedder up
+#   curl http://localhost:8081/health   # reranker up
+#   curl http://localhost:8500/health   # docling up
+#
+# This override:
+#   * Disables the in-cluster embedder, reranker, and docling services
+#     (they're replaced by host-native MLX equivalents).
+#   * Points the backend at host.docker.internal:{8082,8081,8500}.
+#   * Sets RERANKER_SCORE_SCALE=cosine because Jina v3 returns cosine
+#     scores, not logits — without this the negative-logit "low confidence"
+#     guard misclassifies every result.
+
+services:
+  # ── disable in-cluster GPU services ─────────────────────────────────
+  embedder:
+    profiles: ["disabled"]
+  reranker:
+    profiles: ["disabled"]
+  docling:
+    profiles: ["disabled"]
+
+  # ── retarget backend at host services ───────────────────────────────
+  backend:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      EMBEDDER_URL: http://host.docker.internal:8082
+      RERANKER_URL: http://host.docker.internal:8081
+      DOCLING_URL: http://host.docker.internal:8500
+      RERANKER_SCORE_SCALE: cosine
+      LOCAL_EMBEDDER_ENABLED: "true"
+      LOCAL_RERANKER_ENABLED: "true"
+      EMBED_DEVICE: mps
+
+  # MCP container also needs the embedder/reranker (same retarget).
+  mcp:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      EMBEDDER_URL: http://host.docker.internal:8082
+      RERANKER_URL: http://host.docker.internal:8081
+      DOCLING_URL: http://host.docker.internal:8500
+      RERANKER_SCORE_SCALE: cosine

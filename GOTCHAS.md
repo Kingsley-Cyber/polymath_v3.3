@@ -528,3 +528,31 @@ Per-type caps are `14 entities + 20 relations + 5 facts + 1 sentinel = 40 lines 
 
 ### 78. `error_type=line_cap_exceeded` is not a true failure post-fix
 Pre-§75, this was a real failure mode. Post-fix (default 55), the model can no longer emit more lines than the parser accepts in normal cases. If you see `line_cap_exceeded` in the audit log on the new default, check: (a) did someone lower `EXTRACTION_MAX_TOTAL_LINES`, (b) did someone raise `EXTRACTION_MAX_ENTITIES_PER_CHUNK` / `..._RELATIONS_PER_CHUNK` / `..._FACTS_PER_CHUNK` above the budgeted slack, or (c) is the model emitting duplicates despite the prompt forbidding them (rare; usually a model regression).
+
+---
+
+## 🍎 Apple Silicon Hybrid Profile
+
+### 79. Apple GPUs are not accessible from Docker Desktop
+Docker Desktop on macOS cannot pass through the Apple GPU. A containerized embedder/reranker would silently fall back to CPU and run 10–20× slower than MLX on Metal. So Polymath ships a **hybrid profile** for Darwin/arm64:
+
+- **Core stack** (Mongo, Qdrant, Neo4j, Redis, LiteLLM, backend, frontend, MCP) → Docker, unchanged
+- **Embedder, reranker, docling** → host-native FastAPI sidecars under `launchd`, reached over `host.docker.internal`
+- Compose override `docker-compose.apple-mlx.yml` rewrites `EMBEDDER_URL` / `RERANKER_URL` / `DOCLING_URL` to point at the host
+
+Bootstrap: `bash scripts/install_apple_mlx_runtime.sh` (idempotent — runs the platform gate, stages code into `~/PolymathRuntime/apple_ml_services/`, sets up the uv venv, pre-pulls the MLX model weights, installs the LaunchAgent, smokes the endpoints). Bring up Docker with both files: `docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build`.
+
+### 80. `RERANKER_SCORE_SCALE=cosine` is mandatory for Jina v3
+`mlx-community/jina-reranker-v3-4bit-mxfp4` returns **cosine scores in [0, 1]**, not logits. The retriever's negative-logit "low confidence" guard ([`config.py`](backend/config.py)) treats anything ≤ 0 as throwaway — every result looks broken. The override sets `RERANKER_SCORE_SCALE=cosine`. If you fork the override or write your own compose file for Mac, copy this env var or your retrieval will quietly fail.
+
+### 81. The Jina v3 reranker projector is hand-built
+Current `mlx-embeddings` cannot load Jina v3's quantized 2-layer MLP projector into the Qwen3 trunk automatically. The verified Mac Studio implementation builds an `MLPProjector(mlx.nn.Module)` by hand and loads only the trunk through `mlx-embeddings.utils.load`. The repo ships a scaffold at `scripts/apple_ml_services/reranker_mlx/main.py` with explicit `REPLACE THIS BODY` markers — drop the verified implementation in there before relying on the rerank scores. While the scaffold is in place, `/rerank` returns zeroes (intentional: signals the misconfiguration loudly rather than randomising relevance). The smoke script asserts ordering, so a missing projector fails fast.
+
+### 82. Models live in HF cache at `~/PolymathRuntime/volumes/hf-cache`
+`scripts/pull_apple_mlx_models.py` pre-warms the cache during install. Re-running is cheap. If you switch to a different MLX quantization, edit the `MODELS` list at the top of that script — and remember a different embedding repo means re-ingesting every corpus (Qdrant collections are dimension-locked, see §3).
+
+### 83. The LaunchAgent is sticky — `KeepAlive=true` + `RunAtLoad=true`
+The plist at `~/Library/LaunchAgents/com.polymath.apple-ml.plist` will restart the sidecars on crash AND on reboot. To stop them cleanly: `launchctl bootout gui/$(id -u)/com.polymath.apple-ml`. To restart: `launchctl kickstart -k gui/$(id -u)/com.polymath.apple-ml`. To wipe: delete the plist, run `bootout` once. Logs are at `~/PolymathRuntime/logs/apple_ml_services.{log,err.log}`.
+
+### 84. The agent prompt for Apple setup lives at `docs/agent-prompts/mlx-setup.md`
+When handing the repo to Claude Code or another coding agent for Apple bring-up, paste the prompt at `docs/agent-prompts/mlx-setup.md`. It enforces the order-of-operations (bootstrap → install MLX → docker up with both files → smoke → verify env wiring), names the constraints the agent must respect (no NVIDIA path, no embedding-dim changes, no PR bypass), and defines what "done" looks like.
