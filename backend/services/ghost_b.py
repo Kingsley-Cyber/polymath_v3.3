@@ -996,7 +996,6 @@ def build_user_prompt(
         f"{fact_protocol}"
         '- Finished line: {"t":"x"}\n'
         "Rules:\n"
-        f"- max {line_cap} total extraction item lines before the finished line\n"
         f"- max {entity_cap} entities, max {relation_cap} relations\n"
         f"{fact_rules}"
         "- compact JSONL, no prose/markdown/duplicates; omit null or empty fields\n"
@@ -2667,6 +2666,12 @@ async def extract_entities(
         for _k, _v in (entry.get("extra_params") or {}).items():
             if _k not in ("model", "messages", "response_format"):
                 payload_base[_k] = _v
+        # DeepSeek v4-flash/v4-pro default thinking-mode ON: reasoning tokens
+        # consume the entire output budget before any JSONL content emits.
+        # Force thinking off for extraction; explicit operator overrides via
+        # the corpus extra_params escape hatch take precedence.
+        if str(entry["model"]).startswith("deepseek/") and "thinking" not in payload_base:
+            payload_base["thinking"] = {"type": "disabled"}
 
         # Bounded foreground state machine:
         #   attempt 1 = normal compact graph extraction
