@@ -30,8 +30,10 @@ from services.ghost_b import (
     _parse,
     _parse_jsonl_items,
     _parse_jsonl_lines,
+    _select_extraction_output_mode,
     _validate_evidence,
     build_continuation_prompt,
+    build_json_object_prompt,
     build_user_prompt,
     normalize_relation_predicate_alias,
 )
@@ -171,6 +173,76 @@ def test_prompt_renders_optional_fact_shape_when_enabled():
     assert '"ft":"property|status|timestamp|threshold|category|tag|rule_condition|rule_action"' in prompt
     assert "max 5 facts" in prompt
     assert "fact subject must match an entity canonical_name" in prompt
+
+
+def test_json_object_prompt_renders_strict_primary_contract():
+    cfg = IngestionConfig()
+    ctx = SchemaContext(
+        entity_schema=cfg.entity_schema,
+        relation_schema=cfg.relation_schema,
+        strict=cfg.schema_strict,
+    )
+    prompt = build_json_object_prompt(
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        text="constexpr functions produce compile-time results.",
+        schema=ctx,
+        enable_facts=True,
+        max_entities=8,
+        max_relations=12,
+        max_facts=4,
+        evidence_max_chars=120,
+        fact_value_max_chars=160,
+    )
+
+    assert "Return exactly one valid JSON object" in prompt
+    assert "Do not use markdown, code fences, JSONL" in prompt
+    assert '"entities"' in prompt
+    assert '"relations"' in prompt
+    assert '"facts"' in prompt
+    assert "entities: max 8" in prompt
+    assert "relations: max 12" in prompt
+    assert "facts: max 4" in prompt
+    assert "evidence_phrase <= 120 chars" in prompt
+    assert "value <= 160 chars" in prompt
+    assert "entity_type one of: Person=human individual" in prompt
+    assert "predicate one of: part_of=X subcomponent of Y" in prompt
+
+
+def test_output_mode_auto_uses_json_object_for_deepseek_only():
+    assert (
+        _select_extraction_output_mode(
+            "auto",
+            {"model": "deepseek/deepseek-v4-flash", "base_url": None},
+            profile_name="normal",
+        )
+        == "json_object"
+    )
+    assert (
+        _select_extraction_output_mode(
+            "auto",
+            {"model": "test-model", "base_url": None},
+            profile_name="normal",
+        )
+        == "jsonl"
+    )
+    assert (
+        _select_extraction_output_mode(
+            "json_object",
+            {"model": "test-model", "base_url": None},
+            profile_name="normal",
+        )
+        == "json_object"
+    )
+    assert (
+        _select_extraction_output_mode(
+            "json_object",
+            {"model": "deepseek/deepseek-v4-flash", "base_url": None},
+            profile_name="rescue",
+        )
+        == "jsonl"
+    )
 
 
 def test_jsonl_parser_keeps_complete_lines_and_discards_partial_tail():
@@ -372,6 +444,12 @@ async def test_extraction_switches_to_rescue_without_repeating_capped_prompt(mon
         SCHEMA_INLINE_LIMIT=30,
         SCHEMA_RETRIEVAL_TOP_K=10,
         EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_OUTPUT_MODE="jsonl",
+        EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK=12,
+        EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK=4,
+        EXTRACTION_EVIDENCE_MAX_CHARS=120,
+        EXTRACTION_FACT_VALUE_MAX_CHARS=160,
         EXTRACTION_RESCUE_MAX_TOKENS=900,
         EXTRACTION_ENABLE_FACTS=True,
         EXTRACTION_MAX_FACTS_PER_CHUNK=5,
@@ -430,6 +508,119 @@ async def test_extraction_switches_to_rescue_without_repeating_capped_prompt(mon
 
 
 @pytest.mark.asyncio
+async def test_deepseek_auto_uses_json_object_payload_on_primary(monkeypatch):
+    calls: list[dict] = []
+    content = json.dumps(
+        {
+            "schema_version": "polymath.extract.v2",
+            "entities": [
+                {
+                    "canonical_name": "alpha",
+                    "surface_form": "Alpha",
+                    "entity_type": "concept",
+                    "confidence": 0.95,
+                }
+            ],
+            "relations": [],
+            "facts": [],
+        }
+    )
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "usage": {"total_tokens": 120, "prompt_tokens": 90, "completion_tokens": 30},
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": content}}
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            calls.append(json)
+            return FakeResponse()
+
+    fake_settings = SimpleNamespace(
+        ENTITY_CONFIDENCE_THRESHOLD=0.0,
+        SCHEMA_INLINE_LIMIT=30,
+        SCHEMA_RETRIEVAL_TOP_K=10,
+        EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_OUTPUT_MODE="auto",
+        EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK=12,
+        EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK=4,
+        EXTRACTION_EVIDENCE_MAX_CHARS=120,
+        EXTRACTION_FACT_VALUE_MAX_CHARS=160,
+        EXTRACTION_RESCUE_MAX_TOKENS=900,
+        EXTRACTION_ENABLE_FACTS=False,
+        EXTRACTION_MAX_FACTS_PER_CHUNK=5,
+        EXTRACTION_JSONL_MAX_CALLS=2,
+        EXTRACTION_FOREGROUND_MAX_CALLS=2,
+        EXTRACTION_JSONL_DEBUG_RAW=False,
+        EXTRACTION_MAX_INPUT_TOKENS=700,
+        EXTRACTION_MAX_TOTAL_LINES=20,
+        EXTRACTION_RESCUE_MAX_TOTAL_LINES=16,
+        EXTRACTION_MAX_ENTITIES_PER_CHUNK=14,
+        EXTRACTION_MAX_RELATIONS_PER_CHUNK=20,
+        EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK=8,
+        LITELLM_MASTER_KEY="test-key",
+        LITELLM_URL="http://litellm",
+        DEFAULT_COMPLETION_MODEL="test-model",
+        EXTRACTION_MAX_CONCURRENT=1,
+        EXTRACTION_GLOBAL_MAX_CONCURRENT=180,
+        EXTRACTION_FAILURE_PAUSE_PERCENT=100.0,
+        EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS=20,
+    )
+    monkeypatch.setattr(ghost_b, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    report = await ghost_b.extract_entities(
+        [
+            ExtractionTask(
+                chunk_id="c1",
+                doc_id="d1",
+                corpus_id="corp1",
+                text="Alpha is a compact test concept.",
+            )
+        ],
+        pool=[{
+            "model": "deepseek/deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": None,
+            "max_concurrent": 1,
+            "extra_params": {},
+        }],
+        return_report=True,
+        enable_facts=False,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["response_format"] == {"type": "json_object"}
+    assert "Output EXACTLY one valid JSON object" in calls[0]["messages"][0]["content"]
+    assert "Return exactly one valid JSON object" in calls[0]["messages"][1]["content"]
+    assert "Do not use markdown, code fences, JSONL" in calls[0]["messages"][1]["content"]
+    assert "entities: max 8" in calls[0]["messages"][1]["content"]
+    assert "relations: max 12" in calls[0]["messages"][1]["content"]
+    assert "facts must be []" in calls[0]["messages"][1]["content"]
+    assert report.results and report.results[0].entities[0].canonical_name == "alpha"
+    assert report.metrics["attempt_count"] == 1
+    assert report.metrics["completion_tokens"] == 30
+
+
+@pytest.mark.asyncio
 async def test_global_extraction_budget_limits_simultaneous_provider_calls(monkeypatch):
     active = 0
     max_active = 0
@@ -474,6 +665,12 @@ async def test_global_extraction_budget_limits_simultaneous_provider_calls(monke
         SCHEMA_INLINE_LIMIT=30,
         SCHEMA_RETRIEVAL_TOP_K=10,
         EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_OUTPUT_MODE="jsonl",
+        EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK=12,
+        EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK=4,
+        EXTRACTION_EVIDENCE_MAX_CHARS=120,
+        EXTRACTION_FACT_VALUE_MAX_CHARS=160,
         EXTRACTION_RESCUE_MAX_TOKENS=900,
         EXTRACTION_ENABLE_FACTS=False,
         EXTRACTION_MAX_FACTS_PER_CHUNK=5,
@@ -564,6 +761,12 @@ async def test_model_lane_concurrency_is_shared_across_concurrent_documents(monk
         SCHEMA_INLINE_LIMIT=30,
         SCHEMA_RETRIEVAL_TOP_K=10,
         EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_OUTPUT_MODE="jsonl",
+        EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK=12,
+        EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK=4,
+        EXTRACTION_EVIDENCE_MAX_CHARS=120,
+        EXTRACTION_FACT_VALUE_MAX_CHARS=160,
         EXTRACTION_RESCUE_MAX_TOKENS=900,
         EXTRACTION_ENABLE_FACTS=False,
         EXTRACTION_MAX_FACTS_PER_CHUNK=5,
@@ -655,6 +858,12 @@ async def test_failure_budget_pauses_remaining_foreground_queue(monkeypatch):
         SCHEMA_INLINE_LIMIT=30,
         SCHEMA_RETRIEVAL_TOP_K=10,
         EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_OUTPUT_MODE="jsonl",
+        EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK=12,
+        EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK=4,
+        EXTRACTION_EVIDENCE_MAX_CHARS=120,
+        EXTRACTION_FACT_VALUE_MAX_CHARS=160,
         EXTRACTION_RESCUE_MAX_TOKENS=900,
         EXTRACTION_ENABLE_FACTS=False,
         EXTRACTION_MAX_FACTS_PER_CHUNK=5,

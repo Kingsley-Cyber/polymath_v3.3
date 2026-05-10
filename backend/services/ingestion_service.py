@@ -1425,9 +1425,18 @@ class IngestionService:
             "extraction_risk": {
                 "foreground_facts_enabled": False,
                 "facts_configured": settings.EXTRACTION_ENABLE_FACTS,
+                "output_mode": settings.EXTRACTION_OUTPUT_MODE,
                 "max_input_tokens": settings.EXTRACTION_MAX_INPUT_TOKENS,
                 "normal_max_tokens": settings.EXTRACTION_MAX_TOKENS,
                 "rescue_max_tokens": settings.EXTRACTION_RESCUE_MAX_TOKENS,
+                "json_object_max_entities": (
+                    settings.EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK
+                ),
+                "json_object_max_relations": (
+                    settings.EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK
+                ),
+                "json_object_max_facts": settings.EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK,
+                "evidence_max_chars": settings.EXTRACTION_EVIDENCE_MAX_CHARS,
                 "max_total_lines": settings.EXTRACTION_MAX_TOTAL_LINES,
                 "rescue_max_total_lines": settings.EXTRACTION_RESCUE_MAX_TOTAL_LINES,
                 "calls_per_child": foreground_calls_per_child,

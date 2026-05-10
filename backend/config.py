@@ -369,6 +369,59 @@ class Settings(BaseSettings):
             "to the smaller rescue profile instead of retrying this exact prompt."
         ),
     )
+    EXTRACTION_OUTPUT_MODE: Literal["auto", "json_object", "jsonl"] = Field(
+        default="auto",
+        description=(
+            "Ghost B normal-attempt output contract. auto uses provider JSON "
+            "object mode for DeepSeek/OpenAI-compatible lanes and keeps JSONL "
+            "for other providers; rescue mode always uses bounded JSONL."
+        ),
+    )
+    EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK: int = Field(
+        default=8,
+        ge=1,
+        le=32,
+        description=(
+            "Maximum entities requested when Ghost B uses provider JSON object "
+            "mode for the primary extraction attempt."
+        ),
+    )
+    EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK: int = Field(
+        default=12,
+        ge=0,
+        le=32,
+        description=(
+            "Maximum relations requested when Ghost B uses provider JSON object "
+            "mode for the primary extraction attempt."
+        ),
+    )
+    EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK: int = Field(
+        default=4,
+        ge=0,
+        le=12,
+        description=(
+            "Maximum facts requested when Ghost B uses provider JSON object "
+            "mode and facts are enabled for the primary extraction attempt."
+        ),
+    )
+    EXTRACTION_EVIDENCE_MAX_CHARS: int = Field(
+        default=120,
+        ge=20,
+        le=500,
+        description=(
+            "Prompted maximum character length for Ghost B evidence phrases. "
+            "Parser truncation remains a final safety net."
+        ),
+    )
+    EXTRACTION_FACT_VALUE_MAX_CHARS: int = Field(
+        default=160,
+        ge=20,
+        le=500,
+        description=(
+            "Prompted maximum character length for Ghost B fact values when "
+            "facts are enabled."
+        ),
+    )
     EXTRACTION_RESCUE_MAX_TOKENS: int = Field(
         default=900,
         ge=256,

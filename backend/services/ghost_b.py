@@ -54,6 +54,13 @@ _SYSTEM = (
     "Extract only what is explicitly stated in the text. "
     "Do not hallucinate entities, relations, or facts."
 )
+_JSON_OBJECT_SYSTEM = (
+    "You are a precise entity, relation, and fact extractor. "
+    "Output EXACTLY one valid JSON object. "
+    "Do NOT output JSONL, code fences, explanations, preambles, or postambles. "
+    "Extract only what is explicitly stated in the text. "
+    "Do not hallucinate entities, relations, or facts."
+)
 
 # Default open-vocabulary enums when no schema is provided.
 _DEFAULT_ENTITY_TYPES = ["person", "org", "concept", "other"]
@@ -826,6 +833,45 @@ async def resolve_chunk_vocab(
     return eff_entity, eff_relation
 
 
+def _lane_supports_json_object(entry: dict) -> bool:
+    """Return True for provider lanes known to honor OpenAI JSON object mode."""
+    model = str(entry.get("model") or "").lower()
+    base_url = str(entry.get("base_url") or "").lower()
+    provider = str(entry.get("provider_preset") or "").lower()
+    extra_params = entry.get("extra_params") or {}
+    explicit = extra_params.get("supports_json_object")
+    if isinstance(explicit, bool):
+        return explicit
+    if isinstance(explicit, str):
+        return explicit.strip().lower() in {"1", "true", "yes", "on"}
+    if "deepseek" in model or "deepseek" in base_url or provider == "deepseek":
+        return True
+    if "api.openai.com" in base_url or provider == "openai":
+        return True
+    return model.startswith("openai/") or model.startswith("gpt-")
+
+
+def _select_extraction_output_mode(
+    configured_mode: str | None,
+    entry: dict,
+    *,
+    profile_name: str,
+) -> Literal["json_object", "jsonl"]:
+    """Resolve the actual Ghost B output contract for one lane attempt."""
+    if profile_name != "normal":
+        return "jsonl"
+    mode = (configured_mode or "auto").strip().lower()
+    if mode == "jsonl":
+        return "jsonl"
+    if mode == "json_object":
+        return "json_object"
+    return "json_object" if _lane_supports_json_object(entry) else "jsonl"
+
+
+def _json_object_response_format() -> dict[str, str]:
+    return {"type": "json_object"}
+
+
 def build_user_prompt(
     *,
     chunk_id: str,
@@ -959,6 +1005,154 @@ def build_user_prompt(
         "- if evidence_phrase contains a newline, escape it as \\n or rewrite it as one sentence\n"
         "- object_kind=entity only if object is a named entity in text and also listed in entities\n"
         f"- pick the narrowest predicate; use '{SchemaContext.RELATION_SENTINEL}' only when no specific predicate fits. Never invent a new predicate\n"
+        "- omit ontology fields (domain_type, canonical_family, ontology_tags, ontology_version)\n"
+        f"{vocab_block}\n"
+        f"{lens_block}\n"
+        "\n"
+        "TEXT:\n"
+        f"{text}"
+    )
+
+
+def build_json_object_prompt(
+    *,
+    chunk_id: str,
+    doc_id: str,
+    corpus_id: str,
+    text: str,
+    max_entities: int | None = None,
+    max_relations: int | None = None,
+    schema: SchemaContext | None = None,
+    effective_entity_vocab: list[str] | None = None,
+    effective_relation_vocab: list[str] | None = None,
+    schema_lens: SchemaLens | dict | None = None,
+    enable_facts: bool | None = None,
+    max_facts: int | None = None,
+    evidence_max_chars: int | None = None,
+    fact_value_max_chars: int | None = None,
+) -> str:
+    """Render the strict JSON-object primary extraction prompt.
+
+    This path is used only when the provider lane can enforce JSON object mode
+    at the transport layer. Rescue mode deliberately stays JSONL because JSONL
+    lets a partially generated answer be salvaged line-by-line.
+    """
+    if schema and schema.has_entity_schema:
+        entity_vocab = effective_entity_vocab or schema.entity_vocab
+        entity_type_desc = "|".join(entity_vocab)
+        entity_vocab_for_block = entity_vocab
+    else:
+        entity_type_desc = "|".join(_DEFAULT_ENTITY_TYPES)
+        entity_vocab_for_block = None
+
+    if schema and schema.has_relation_schema:
+        relation_vocab = effective_relation_vocab or schema.relation_vocab
+        predicate_desc = "|".join(relation_vocab)
+        relation_vocab_for_block = relation_vocab
+    else:
+        predicate_desc = "short verb phrase label"
+        relation_vocab_for_block = None
+
+    vocab_block_lines: list[str] = []
+    if entity_vocab_for_block or relation_vocab_for_block:
+        vocab_block_lines.append("\nVocab:")
+        if entity_vocab_for_block:
+            rendered = _render_vocab_constraint(
+                entity_vocab_for_block,
+                UNIVERSAL_ENTITY_GLOSSES,
+                SchemaContext.ENTITY_SENTINEL,
+            )
+            vocab_block_lines.append(f"entity_type one of: {rendered}")
+            vocab_block_lines.append(
+                f"If none fit use '{SchemaContext.ENTITY_SENTINEL}'. Never invent."
+            )
+        if relation_vocab_for_block:
+            rendered = _render_vocab_constraint(
+                relation_vocab_for_block,
+                UNIVERSAL_RELATION_GLOSSES,
+                SchemaContext.RELATION_SENTINEL,
+            )
+            vocab_block_lines.append(f"predicate one of: {rendered}")
+            vocab_block_lines.append(
+                f"If none fit use '{SchemaContext.RELATION_SENTINEL}'. Never invent."
+            )
+    vocab_block = "\n".join(vocab_block_lines)
+    lens_block = _render_schema_lens_block(schema_lens)
+    settings = get_settings()
+    entity_cap = max_entities or settings.EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK
+    relation_cap = (
+        max_relations
+        if max_relations is not None
+        else settings.EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK
+    )
+    facts_enabled = settings.EXTRACTION_ENABLE_FACTS if enable_facts is None else enable_facts
+    fact_cap = (
+        settings.EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK
+        if max_facts is None
+        else max(0, int(max_facts))
+    )
+    evidence_cap = evidence_max_chars or settings.EXTRACTION_EVIDENCE_MAX_CHARS
+    value_cap = fact_value_max_chars or settings.EXTRACTION_FACT_VALUE_MAX_CHARS
+    fact_types = "|".join(FACT_TYPES)
+    fact_rule = (
+        f"- facts: max {fact_cap}; fact_type one of {fact_types}; "
+        "subject must match an entity canonical_name; "
+        f"value <= {value_cap} chars\n"
+        if facts_enabled and fact_cap > 0
+        else "- facts must be []\n"
+    )
+    shape = {
+        "schema_version": "polymath.extract.v2",
+        "entities": [
+            {
+                "canonical_name": "lowercase no-punct",
+                "surface_form": "verbatim phrase",
+                "entity_type": entity_type_desc,
+                "confidence": 0.0,
+            }
+        ],
+        "relations": [
+            {
+                "subject": "entity canonical_name",
+                "predicate": predicate_desc,
+                "object": "entity canonical_name or literal",
+                "object_kind": "entity|literal",
+                "confidence": 0.0,
+                "evidence_phrase": "short exact phrase",
+            }
+        ],
+        "facts": [
+            {
+                "subject": "entity canonical_name",
+                "fact_type": fact_types,
+                "property_name": "snake_case",
+                "value": "verbatim or normalized",
+                "unit": "optional unit",
+                "condition": "optional condition",
+                "confidence": 0.0,
+                "evidence_phrase": "short exact phrase",
+            }
+        ],
+    }
+    shape_json = json.dumps(shape, ensure_ascii=False, separators=(",", ":"))
+    return (
+        "Return exactly one valid JSON object and nothing else. "
+        "Do not use markdown, code fences, JSONL, prose, or comments.\n"
+        "The response must be parseable by json.loads. The word json is part of this contract.\n"
+        "Object shape:\n"
+        f"{shape_json}\n"
+        "Rules:\n"
+        f"- entities: max {entity_cap}; canonical_name lowercase, stripped punctuation; "
+        "do not invent entity_type\n"
+        f"- relations: max {relation_cap}; predicate from allowed vocabulary; "
+        "subject must match an entity canonical_name\n"
+        f"{fact_rule}"
+        f"- evidence_phrase <= {evidence_cap} chars and must be an exact phrase from TEXT\n"
+        "- if evidence_phrase contains a newline, escape it as \\n or rewrite it as one sentence\n"
+        "- confidence in [0,1]; drop low-confidence or redundant items\n"
+        "- prefer fewer correct items over broad coverage; "
+        "do not fill caps just because they exist\n"
+        f"- use '{SchemaContext.RELATION_SENTINEL}' only when no specific predicate fits\n"
         "- omit ontology fields (domain_type, canonical_family, ontology_tags, ontology_version)\n"
         f"{vocab_block}\n"
         f"{lens_block}\n"
@@ -2164,8 +2358,14 @@ async def extract_entities(
     inline_limit = settings.SCHEMA_INLINE_LIMIT
     top_k = settings.SCHEMA_RETRIEVAL_TOP_K
     max_completion_tokens = settings.EXTRACTION_MAX_TOKENS
+    output_mode_setting = settings.EXTRACTION_OUTPUT_MODE
     facts_enabled = settings.EXTRACTION_ENABLE_FACTS if enable_facts is None else enable_facts
     max_facts = settings.EXTRACTION_MAX_FACTS_PER_CHUNK
+    json_object_max_entities = settings.EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK
+    json_object_max_relations = settings.EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK
+    json_object_max_facts = settings.EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK
+    evidence_max_chars = settings.EXTRACTION_EVIDENCE_MAX_CHARS
+    fact_value_max_chars = settings.EXTRACTION_FACT_VALUE_MAX_CHARS
     rescue_max_tokens = settings.EXTRACTION_RESCUE_MAX_TOKENS
     max_jsonl_calls = min(
         settings.EXTRACTION_JSONL_MAX_CALLS,
@@ -2323,14 +2523,34 @@ async def extract_entities(
             "max_facts": max_facts,
             "max_total_lines": max_total_lines,
         }
+        normal_output_mode = _select_extraction_output_mode(
+            output_mode_setting,
+            entry,
+            profile_name="normal",
+        )
+        normal_max_entities = (
+            min(max_entities, json_object_max_entities)
+            if normal_output_mode == "json_object"
+            else max_entities
+        )
+        normal_max_relations = (
+            min(max_relations, json_object_max_relations)
+            if normal_output_mode == "json_object"
+            else max_relations
+        )
+        normal_max_facts = (
+            min(max_facts, json_object_max_facts)
+            if normal_output_mode == "json_object"
+            else max_facts
+        )
         normal_profile = ExtractionAttemptProfile(
             name="normal",
             max_tokens=max_completion_tokens,
-            max_entities=max_entities,
-            max_relations=max_relations,
+            max_entities=normal_max_entities,
+            max_relations=normal_max_relations,
             max_total_lines=max_total_lines,
             enable_facts=facts_enabled,
-            max_facts=max_facts if facts_enabled else 0,
+            max_facts=normal_max_facts if facts_enabled else 0,
         )
         rescue_profile = ExtractionAttemptProfile(
             name="rescue",
@@ -2375,16 +2595,35 @@ async def extract_entities(
                 "max_facts": profile.max_facts,
                 "max_total_lines": profile.max_total_lines,
             }
-            prompt = (
-                build_user_prompt(**profile_kwargs)
-                if profile.name == "normal"
-                else build_rescue_prompt(**profile_kwargs)
+            profile_output_mode = (
+                normal_output_mode if profile.name == "normal" else "jsonl"
             )
+            if profile_output_mode == "json_object":
+                prompt = build_json_object_prompt(
+                    **{k: v for k, v in profile_kwargs.items() if k != "max_total_lines"},
+                    evidence_max_chars=evidence_max_chars,
+                    fact_value_max_chars=fact_value_max_chars,
+                )
+            else:
+                prompt = (
+                    build_user_prompt(**profile_kwargs)
+                    if profile.name == "normal"
+                    else build_rescue_prompt(**profile_kwargs)
+                )
             attempt_payload = dict(payload_base)
             attempt_payload["messages"] = [
-                {"role": "system", "content": _SYSTEM},
+                {
+                    "role": "system",
+                    "content": (
+                        _JSON_OBJECT_SYSTEM
+                        if profile_output_mode == "json_object"
+                        else _SYSTEM
+                    ),
+                },
                 {"role": "user", "content": prompt},
             ]
+            if profile_output_mode == "json_object":
+                attempt_payload["response_format"] = _json_object_response_format()
             attempt_max_tokens = profile.max_tokens
             attempt_payload["max_tokens"] = attempt_max_tokens
             try:
@@ -2408,7 +2647,7 @@ async def extract_entities(
                         "GHOST B extraction call: chunk_id=%s model=%s "
                         "duration=%.2fs total_tokens=%s prompt_tokens=%s "
                         "completion_tokens=%s finish_reason=%s max_tokens=%s "
-                        "lane=%d attempt=%d",
+                        "lane=%d attempt=%d output_mode=%s",
                         task.chunk_id,
                         entry["model"],
                         duration,
@@ -2419,6 +2658,7 @@ async def extract_entities(
                         attempt_max_tokens,
                         pool_idx,
                         attempt + 1,
+                        profile_output_mode,
                     )
                     raw = choice.get("message", {}).get("content", "")
                     _debug_log_raw_jsonl_lines(
@@ -2440,15 +2680,13 @@ async def extract_entities(
                             and completion_tokens >= attempt_max_tokens
                         )
                     )
-                    jsonl_chunk = _parse_jsonl_lines(raw)
-                    jsonl_items, line_cap_exceeded = _cap_jsonl_items(
-                        jsonl_chunk.items,
-                        profile.max_total_lines,
-                    )
+                    jsonl_chunk = JsonlParseChunk(items=[])
+                    jsonl_items: list[dict[str, Any]] = []
+                    line_cap_exceeded = False
                     fallback_used = False
-                    if jsonl_items or jsonl_chunk.finished:
-                        result = _parse_jsonl_items(
-                            jsonl_items,
+                    if profile_output_mode == "json_object":
+                        result = _parse_object_with_repair(
+                            raw,
                             prompt_task,
                             threshold,
                             schema=schema,
@@ -2456,14 +2694,32 @@ async def extract_entities(
                             enable_facts=profile.enable_facts,
                             max_facts=profile.max_facts,
                         )
+                        fallback_used = result is not None
+                        if result is None:
+                            jsonl_chunk = _parse_jsonl_lines(raw)
+                            jsonl_items, line_cap_exceeded = _cap_jsonl_items(
+                                jsonl_chunk.items,
+                                profile.max_total_lines,
+                            )
+                            if jsonl_items or jsonl_chunk.finished:
+                                result = _parse_jsonl_items(
+                                    jsonl_items,
+                                    prompt_task,
+                                    threshold,
+                                    schema=schema,
+                                    schema_lens=schema_lens,
+                                    enable_facts=profile.enable_facts,
+                                    max_facts=profile.max_facts,
+                                )
                     else:
-                        looks_like_legacy_object = any(
-                            marker in raw
-                            for marker in ('"entities"', '"relations"', '"schema_version"')
+                        jsonl_chunk = _parse_jsonl_lines(raw)
+                        jsonl_items, line_cap_exceeded = _cap_jsonl_items(
+                            jsonl_chunk.items,
+                            profile.max_total_lines,
                         )
-                        result = (
-                            _parse_object_with_repair(
-                                raw,
+                        if jsonl_items or jsonl_chunk.finished:
+                            result = _parse_jsonl_items(
+                                jsonl_items,
                                 prompt_task,
                                 threshold,
                                 schema=schema,
@@ -2471,12 +2727,29 @@ async def extract_entities(
                                 enable_facts=profile.enable_facts,
                                 max_facts=profile.max_facts,
                             )
-                            if looks_like_legacy_object
-                            else None
-                        )
-                        fallback_used = result is not None
+                        else:
+                            looks_like_legacy_object = any(
+                                marker in raw
+                                for marker in ('"entities"', '"relations"', '"schema_version"')
+                            )
+                            result = (
+                                _parse_object_with_repair(
+                                    raw,
+                                    prompt_task,
+                                    threshold,
+                                    schema=schema,
+                                    schema_lens=schema_lens,
+                                    enable_facts=profile.enable_facts,
+                                    max_facts=profile.max_facts,
+                                )
+                                if looks_like_legacy_object
+                                else None
+                            )
+                            fallback_used = result is not None
                     result = _cap_result(result, profile)
-                    complete = fallback_used or (jsonl_chunk.finished and result is not None)
+                    complete = fallback_used or (
+                        jsonl_chunk.finished and result is not None
+                    )
                     attempt_error_type = None
                     if not complete:
                         if line_cap_exceeded:
@@ -2498,6 +2771,7 @@ async def extract_entities(
                             "model": entry["model"],
                             "lane": pool_idx,
                             "profile": profile.name,
+                            "output_mode": profile_output_mode,
                             "attempt": attempt + 1,
                             "duration_seconds": round(duration, 3),
                             "total_tokens": usage.get("total_tokens"),
@@ -2579,6 +2853,43 @@ async def extract_entities(
                 last_exc = exc
                 last_error_type = exc.__class__.__name__
                 exception_failures += 1
+                if (
+                    profile_output_mode == "json_object"
+                    and isinstance(exc, httpx.HTTPStatusError)
+                    and exc.response is not None
+                    and exc.response.status_code in {400, 422}
+                    and attempt + 1 < max_attempts
+                ):
+                    last_error_type = "json_object_unsupported"
+                    call_metrics.append(
+                        {
+                            "chunk_id": task.chunk_id,
+                            "model": entry["model"],
+                            "lane": pool_idx,
+                            "profile": profile.name,
+                            "output_mode": profile_output_mode,
+                            "attempt": attempt + 1,
+                            "duration_seconds": round(
+                                time.perf_counter() - started,
+                                3,
+                            ),
+                            "total_tokens": 0,
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "finish_reason": None,
+                            "max_tokens": attempt_payload.get("max_tokens"),
+                            "success": False,
+                            "error_type": last_error_type,
+                        }
+                    )
+                    logger.warning(
+                        "GHOST B JSON object mode was rejected by provider "
+                        "chunk_id=%s lane=%d status=%s; switching_to_rescue=True",
+                        task.chunk_id,
+                        pool_idx,
+                        exc.response.status_code,
+                    )
+                    continue
                 fatal_tier = provider_error_tier(exc)
                 fatal_lane = fatal_tier is not None
                 call_metrics.append(
@@ -2586,6 +2897,8 @@ async def extract_entities(
                         "chunk_id": task.chunk_id,
                         "model": entry["model"],
                         "lane": pool_idx,
+                        "profile": profile.name,
+                        "output_mode": profile_output_mode,
                         "attempt": attempt + 1,
                         "duration_seconds": round(time.perf_counter() - started, 3),
                         "total_tokens": 0,
