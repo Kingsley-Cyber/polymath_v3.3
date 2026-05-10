@@ -63,6 +63,8 @@ export interface PoolProviderPreset {
   base_url: string;
   /** Default model used when the user picks this preset for the first time. */
   example_model: string;
+  /** Optional default concurrency for ingestion model-pool chips. */
+  default_max_concurrent?: number;
   /**
    * Optional list of recommended model names for this provider. The model
    * field renders as a free-text input with these as `<datalist>` suggestions
@@ -152,7 +154,9 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
     name: "SiliconFlow",
     litellm_provider: "openai",
     base_url: "https://api.siliconflow.com/v1",
-    example_model: "deepseek-ai/DeepSeek-V3.2",
+    example_model: "tencent/Hy3-preview",
+    example_models: ["tencent/Hy3-preview"],
+    default_max_concurrent: 8,
   },
   {
     id: "zai",

@@ -1000,6 +1000,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                               )
                             }
                             modalStatus={modalStatus}
+                            corpusId={corpus.corpus_id}
                           />
 
                           <IngestionModelsSection
@@ -1010,6 +1011,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                               )
                             }
                             editing={true}
+                            corpusId={corpus.corpus_id}
                           />
 
                           <div className="grid grid-cols-3 gap-1.5">
@@ -1196,10 +1198,12 @@ function IngestionModelsSection({
   config,
   onPatch,
   editing,
+  corpusId,
 }: {
   config: IngestionConfig;
   onPatch: (patch: Partial<IngestionConfig>) => void;
   editing: boolean;
+  corpusId?: string;
 }) {
   const linked = config.models_linked !== false;
   const summaryPool = config.summary_models ?? [];
@@ -1231,6 +1235,8 @@ function IngestionModelsSection({
         value={summaryPool}
         onChange={(next) => onPatch({ summary_models: next })}
         editing={editing}
+        testKind="chat"
+        testContext={{ corpusId, poolField: "summary_models" }}
       />
 
       <IngestionModelPool
@@ -1245,6 +1251,11 @@ function IngestionModelsSection({
         editing={editing}
         readOnly={linked}
         readOnlyHint="Uncheck 'Reuse Summary pool' to configure Extraction independently."
+        testKind="chat"
+        testContext={{
+          corpusId,
+          poolField: linked ? "summary_models" : "extraction_models",
+        }}
       />
     </div>
   );
@@ -1299,10 +1310,12 @@ function EmbedSection({
   config,
   onPatch,
   modalStatus,
+  corpusId,
 }: {
   config: IngestionConfig;
   onPatch: (patch: Partial<IngestionConfig>) => void;
   modalStatus: ModalStatus | null;
+  corpusId?: string;
 }) {
   const mode = config.embed_mode ?? "local";
   const modalDeployed = !!modalStatus?.deployed;
@@ -1409,6 +1422,8 @@ function EmbedSection({
             presets={EMBEDDING_PROVIDER_PRESETS}
             composeModel={(_presetId, model) => model.trim()}
             modelPlaceholder="embedding model (required)"
+            testKind="embedding"
+            testContext={{ corpusId, poolField: "embedding_models" }}
           />
           <div className="text-[10px] text-content-tertiary leading-snug px-2 py-1.5 bg-bg-base border border-border-minimal">
             Add one or more embedding API chips. Each chip carries its own

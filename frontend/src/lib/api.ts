@@ -21,6 +21,7 @@ import type {
   CorpusUpdate,
   CorpusResponse,
   CorpusDeleteResponse,
+  ModelProfileRef,
   DocumentResponse,
   IngestJobResponse,
   EntityResult,
@@ -450,6 +451,40 @@ export async function deleteCorpus(
 ): Promise<CorpusDeleteResponse> {
   return fetchJSON(`/corpora/${corpusId}`, {
     method: "DELETE",
+  });
+}
+
+export type IngestionModelTestKind = "chat" | "embedding";
+export type IngestionModelPoolField =
+  | "summary_models"
+  | "extraction_models"
+  | "embedding_models";
+
+export interface IngestionModelTestRequest {
+  kind: IngestionModelTestKind;
+  entry: ModelProfileRef;
+  corpus_id?: string | null;
+  pool_field?: IngestionModelPoolField | null;
+  index?: number | null;
+}
+
+export interface IngestionModelTestResult {
+  ok: boolean;
+  kind: IngestionModelTestKind;
+  status?: number | null;
+  latency_ms?: number | null;
+  model?: string | null;
+  base_url?: string | null;
+  dimension?: number | null;
+  error?: string | null;
+}
+
+export async function testIngestionModelRef(
+  body: IngestionModelTestRequest,
+): Promise<IngestionModelTestResult> {
+  return fetchJSON("/ingestion/model-ref/test", {
+    method: "POST",
+    body: JSON.stringify(body),
   });
 }
 
@@ -1042,6 +1077,7 @@ export const api = {
   createCorpus,
   updateCorpus,
   deleteCorpus,
+  testIngestionModelRef,
   listDocuments,
   uploadDocumentToCorpus,
   queryGraph,

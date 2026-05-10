@@ -5,15 +5,31 @@
 // chips only (used on the "mirrored" extraction card when models_linked).
 
 import { useState, useRef, useEffect } from "react";
-import { Plus, X, KeyRound, Cpu } from "lucide-react";
+import {
+  Plus,
+  X,
+  KeyRound,
+  Cpu,
+  Loader2,
+  Zap,
+  CheckCircle,
+  AlertTriangle,
+} from "lucide-react";
 import type { ModelProfileRef } from "../../types";
 import { PROVIDER_PRESETS, composeModelString } from "../../types";
+import * as api from "../../lib/api";
+import type {
+  IngestionModelPoolField,
+  IngestionModelTestKind,
+  IngestionModelTestResult,
+} from "../../lib/api";
 
 type PoolPreset = {
   id: string;
   name: string;
   base_url: string;
   example_model: string;
+  default_max_concurrent?: number;
   kwargs?: Record<string, unknown>;
 };
 
@@ -30,6 +46,11 @@ interface Props {
   presets?: PoolPreset[];
   composeModel?: (presetId: string, model: string) => string;
   modelPlaceholder?: string;
+  testKind?: IngestionModelTestKind;
+  testContext?: {
+    corpusId?: string | null;
+    poolField?: IngestionModelPoolField;
+  };
 }
 
 const EMPTY_DRAFT = {
@@ -51,9 +72,17 @@ export function IngestionModelPool({
   presets = PROVIDER_PRESETS,
   composeModel = composeModelString,
   modelPlaceholder = "model (required)",
+  testKind = "chat",
+  testContext,
 }: Props) {
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [flashId, setFlashId] = useState<string | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [lastTest, setLastTest] = useState<{
+    id: string;
+    label: string;
+    result: IngestionModelTestResult;
+  } | null>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
 
   const canAdd = draft.model.trim().length > 0;
@@ -61,22 +90,7 @@ export function IngestionModelPool({
 
   const commit = () => {
     if (!canAdd) return;
-    // Safety net: prefix with the preset's LiteLLM provider unless already
-    // prefixed. SiliconFlow model IDs contain slashes but still need openai/*.
-    const preset = presets.find((p) => p.id === draft.provider_preset);
-    const bare = draft.model.trim();
-    const finalModel = composeModel(draft.provider_preset, bare);
-    const extraParams: Record<string, unknown> = preset?.kwargs
-      ? { ...(preset.kwargs as Record<string, unknown>) }
-      : {};
-    const next: ModelProfileRef = {
-      provider_preset: draft.provider_preset,
-      model: finalModel,
-      base_url: draft.base_url.trim() || null,
-      api_key: draft.api_key ? draft.api_key : null,
-      max_concurrent: Math.max(1, Math.min(64, Number(draft.max_concurrent) || 1)),
-      extra_params: extraParams,
-    };
+    const next = buildDraftRef();
     onChange([...value, next]);
     const fid = `${Date.now()}-${value.length}`;
     setFlashId(fid);
@@ -95,6 +109,54 @@ export function IngestionModelPool({
     onChange(value.filter((_, i) => i !== idx));
   };
 
+  const buildDraftRef = (): ModelProfileRef => {
+    const preset = presets.find((p) => p.id === draft.provider_preset);
+    const bare = draft.model.trim();
+    const extraParams: Record<string, unknown> = preset?.kwargs
+      ? { ...(preset.kwargs as Record<string, unknown>) }
+      : {};
+    return {
+      provider_preset: draft.provider_preset,
+      // Safety net: prefix with the preset's LiteLLM provider unless already
+      // prefixed. SiliconFlow model IDs contain slashes but still need openai/*.
+      model: composeModel(draft.provider_preset, bare),
+      base_url: draft.base_url.trim() || null,
+      api_key: draft.api_key ? draft.api_key : null,
+      max_concurrent: Math.max(1, Math.min(64, Number(draft.max_concurrent) || 1)),
+      extra_params: extraParams,
+    };
+  };
+
+  const testEntry = async (id: string, label: string, entry: ModelProfileRef, index?: number) => {
+    if (!entry.model.trim()) return;
+    setTestingId(id);
+    setLastTest(null);
+    try {
+      const result = await api.testIngestionModelRef({
+        kind: testKind,
+        entry,
+        corpus_id: testContext?.corpusId ?? null,
+        pool_field: testContext?.poolField ?? null,
+        index: index ?? null,
+      });
+      setLastTest({ id, label, result });
+    } catch (err) {
+      setLastTest({
+        id,
+        label,
+        result: {
+          ok: false,
+          kind: testKind,
+          model: entry.model,
+          base_url: entry.base_url,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    } finally {
+      setTestingId(null);
+    }
+  };
+
   const applyPreset = (presetId: string) => {
     const p = presets.find((pp) => pp.id === presetId);
     setDraft((d) => ({
@@ -105,6 +167,7 @@ export function IngestionModelPool({
       // router can match. For "custom" / missing providers leave the model
       // field alone.
       model: p?.example_model ? composeModel(presetId, p.example_model) : d.model,
+      max_concurrent: p?.default_max_concurrent ?? d.max_concurrent,
     }));
   };
 
@@ -137,6 +200,7 @@ export function IngestionModelPool({
         )}
         {value.map((m, idx) => {
           const fid = `${idx}-${m.model}`;
+          const testId = `chip-${idx}`;
           const isFresh =
             flashId !== null &&
             idx === value.length - 1 &&
@@ -165,6 +229,23 @@ export function IngestionModelPool({
                   aria-label="api key set"
                 />
               )}
+              <button
+                type="button"
+                onClick={() => testEntry(testId, m.model, m, idx)}
+                disabled={testingId !== null}
+                className="ml-0.5 text-content-tertiary hover:text-accent-main disabled:opacity-40"
+                title="Test API key and model connection"
+              >
+                {testingId === testId ? (
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                ) : lastTest?.id === testId && lastTest.result.ok ? (
+                  <CheckCircle className="w-2.5 h-2.5 text-emerald-400" />
+                ) : lastTest?.id === testId && !lastTest.result.ok ? (
+                  <AlertTriangle className="w-2.5 h-2.5 text-error" />
+                ) : (
+                  <Zap className="w-2.5 h-2.5" />
+                )}
+              </button>
               {!readOnly && editing && (
                 <button
                   onClick={() => remove(idx)}
@@ -244,6 +325,20 @@ export function IngestionModelPool({
             className="w-[110px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono placeholder:text-content-tertiary"
           />
           <button
+            type="button"
+            onClick={() => testEntry("draft", "draft model", buildDraftRef())}
+            disabled={!canAdd || testingId !== null}
+            className="flex items-center gap-1 px-2 py-1 rounded border border-border-minimal text-content-secondary text-[10px] font-bold uppercase tracking-widest hover:border-accent-main hover:text-accent-main disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Test API key and model connection before adding"
+          >
+            {testingId === "draft" ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <Zap className="w-3 h-3" />
+            )}
+            Test
+          </button>
+          <button
             onClick={commit}
             disabled={!canAdd}
             className="flex items-center gap-1 px-2 py-1 rounded border border-accent-main/60 bg-accent-main/10 text-accent-main text-[10px] font-bold uppercase tracking-widest hover:bg-accent-main/20 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -252,6 +347,34 @@ export function IngestionModelPool({
             <Plus className="w-3 h-3" />
             Add
           </button>
+        </div>
+      )}
+
+      {lastTest && (
+        <div
+          className={`flex items-start gap-2 px-2 py-1.5 rounded border text-[10px] font-mono leading-snug ${
+            lastTest.result.ok
+              ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-300"
+              : "border-error/30 bg-error/5 text-error"
+          }`}
+        >
+          {lastTest.result.ok ? (
+            <CheckCircle className="w-3 h-3 shrink-0 mt-0.5" />
+          ) : (
+            <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+          )}
+          <span className="break-words">
+            {lastTest.label}:{" "}
+            {lastTest.result.ok
+              ? `connected · HTTP ${lastTest.result.status ?? "ok"} · ${
+                  lastTest.result.latency_ms ?? "?"
+                }ms${
+                  lastTest.result.dimension
+                    ? ` · ${lastTest.result.dimension}d`
+                    : ""
+                }`
+              : lastTest.result.error || "connection failed"}
+          </span>
         </div>
       )}
     </div>

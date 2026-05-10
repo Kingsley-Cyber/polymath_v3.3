@@ -14,8 +14,11 @@ import asyncio
 import json
 import logging
 import re
+import time
 from datetime import datetime
+from typing import Literal
 
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from config import get_settings
@@ -24,6 +27,7 @@ from models.schemas import (
     CorpusResponse,
     IngestionConfig,
     IngestJobResponse,
+    ModelProfileRef,
     WriteState,
 )
 from pydantic import BaseModel, Field
@@ -99,8 +103,233 @@ class CorpusUpdate(BaseModel):
     default_ingestion_config: IngestionConfig | None = None
 
 
+class ModelRefTestRequest(BaseModel):
+    """Ad-hoc probe for ingestion model-pool entries.
+
+    The entry is not persisted. When an existing corpus chip has api_key="[set]",
+    corpus_id + pool_field + index let the backend load/decrypt the saved key.
+    """
+
+    kind: Literal["chat", "embedding"] = "chat"
+    entry: ModelProfileRef
+    corpus_id: str | None = None
+    pool_field: Literal["summary_models", "extraction_models", "embedding_models"] | None = None
+    index: int | None = Field(default=None, ge=0)
+
+
+class ModelRefTestResult(BaseModel):
+    ok: bool
+    kind: Literal["chat", "embedding"]
+    status: int | None = None
+    latency_ms: int | None = None
+    model: str | None = None
+    base_url: str | None = None
+    dimension: int | None = None
+    error: str | None = None
+
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["ingestion"])
+
+
+def _safe_provider_text(text: str) -> str:
+    return _SECRET_RE.sub("sk-...[redacted]", text.replace("\n", " "))[:1000]
+
+
+async def _model_ref_for_test(
+    body: ModelRefTestRequest,
+    *,
+    user_id: str,
+) -> tuple[dict, str | None]:
+    data = body.entry.model_dump()
+    raw_key = data.get("api_key")
+
+    if raw_key == "[set]":
+        if not (body.corpus_id and body.pool_field is not None and body.index is not None):
+            return data, "Saved API key is masked. Type a new key or save the corpus first."
+
+        corpus = await ingestion_service._get_corpus_raw(body.corpus_id)
+        if not corpus or corpus.get("user_id") != user_id:
+            raise HTTPException(status_code=404, detail="Corpus not found")
+
+        pool = (corpus.get("default_ingestion_config") or {}).get(body.pool_field) or []
+        requested_model = str(data.get("model") or "").strip()
+        requested_base = str(data.get("base_url") or "").strip()
+
+        def _same_entry(candidate: dict) -> bool:
+            return (
+                str(candidate.get("model") or "").strip() == requested_model
+                and str(candidate.get("base_url") or "").strip() == requested_base
+            )
+
+        saved_entry = (
+            pool[body.index]
+            if body.index < len(pool) and isinstance(pool[body.index], dict)
+            else None
+        )
+        if saved_entry is not None and not _same_entry(saved_entry):
+            saved_entry = next(
+                (candidate for candidate in pool if isinstance(candidate, dict) and _same_entry(candidate)),
+                None,
+            )
+        if saved_entry is None:
+            return data, "Saved API key could not be resolved for this model chip."
+
+        raw_key = saved_entry.get("api_key")
+        if not raw_key:
+            return data, "No API key is saved for this model chip."
+        data["api_key"] = raw_key
+
+    if data.get("api_key"):
+        from services.secrets import decrypt
+
+        plaintext = decrypt(data["api_key"])
+        if plaintext is not None:
+            data["api_key"] = plaintext
+
+    return data, None
+
+
+async def _test_chat_model_ref(entry: dict) -> ModelRefTestResult:
+    settings = get_settings()
+    model = str(entry.get("model") or "").strip()
+    if not model:
+        return ModelRefTestResult(ok=False, kind="chat", error="Model is required")
+
+    payload: dict = {
+        "model": model,
+        "messages": [{"role": "user", "content": "Reply with ok."}],
+        "temperature": 0,
+        "max_tokens": 1,
+        "stream": False,
+    }
+    base_url = (entry.get("base_url") or "").strip() or None
+    if base_url:
+        payload["api_base"] = base_url
+    if entry.get("api_key"):
+        payload["api_key"] = entry["api_key"]
+    for key, value in (entry.get("extra_params") or {}).items():
+        if key not in {"model", "messages", "response_format"}:
+            payload[key] = value
+
+    headers = {
+        "Authorization": f"Bearer {settings.LITELLM_MASTER_KEY}",
+        "Content-Type": "application/json",
+    }
+    started = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                f"{settings.LITELLM_URL}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+        latency_ms = int((time.monotonic() - started) * 1000)
+        if resp.status_code >= 400:
+            return ModelRefTestResult(
+                ok=False,
+                kind="chat",
+                status=resp.status_code,
+                latency_ms=latency_ms,
+                model=model,
+                base_url=base_url,
+                error=_safe_provider_text(resp.text),
+            )
+        return ModelRefTestResult(
+            ok=True,
+            kind="chat",
+            status=resp.status_code,
+            latency_ms=latency_ms,
+            model=model,
+            base_url=base_url,
+        )
+    except httpx.TimeoutException:
+        return ModelRefTestResult(
+            ok=False,
+            kind="chat",
+            model=model,
+            base_url=base_url,
+            error="Request timed out after 20s",
+        )
+    except Exception as exc:
+        logger.warning("ingestion model chat probe failed: %s", exc)
+        return ModelRefTestResult(
+            ok=False,
+            kind="chat",
+            model=model,
+            base_url=base_url,
+            error=_safe_provider_text(str(exc)),
+        )
+
+
+async def _test_embedding_model_ref(entry: dict) -> ModelRefTestResult:
+    model = str(entry.get("model") or "").strip()
+    base_url = (entry.get("base_url") or "").strip()
+    api_key = (entry.get("api_key") or "").strip()
+    if not model:
+        return ModelRefTestResult(ok=False, kind="embedding", error="Model is required")
+    if not base_url:
+        return ModelRefTestResult(ok=False, kind="embedding", model=model, error="Base URL is required")
+    if not api_key:
+        return ModelRefTestResult(
+            ok=False,
+            kind="embedding",
+            model=model,
+            base_url=base_url,
+            error="API key is required for embedding API pool entries",
+        )
+
+    url = base_url.rstrip("/")
+    if not url.endswith("/embeddings"):
+        url = url + "/embeddings"
+    started = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                url,
+                json={"input": ["health"], "model": model},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+        latency_ms = int((time.monotonic() - started) * 1000)
+        if resp.status_code >= 400:
+            return ModelRefTestResult(
+                ok=False,
+                kind="embedding",
+                status=resp.status_code,
+                latency_ms=latency_ms,
+                model=model,
+                base_url=base_url,
+                error=_safe_provider_text(resp.text),
+            )
+        body_json = resp.json()
+        vector = ((body_json.get("data") or [{}])[0] or {}).get("embedding") or []
+        dimension = len(vector) if isinstance(vector, list) else None
+        return ModelRefTestResult(
+            ok=True,
+            kind="embedding",
+            status=resp.status_code,
+            latency_ms=latency_ms,
+            model=model,
+            base_url=base_url,
+            dimension=dimension,
+        )
+    except httpx.TimeoutException:
+        return ModelRefTestResult(
+            ok=False,
+            kind="embedding",
+            model=model,
+            base_url=base_url,
+            error="Request timed out after 20s",
+        )
+    except Exception as exc:
+        logger.warning("ingestion model embedding probe failed: %s", exc)
+        return ModelRefTestResult(
+            ok=False,
+            kind="embedding",
+            model=model,
+            base_url=base_url,
+            error=_safe_provider_text(str(exc)),
+        )
 
 
 def _resolve_ingest_progress(
@@ -222,6 +451,26 @@ async def list_corpora(
         )
         for d in docs
     ]
+
+
+@router.post("/ingestion/model-ref/test", response_model=ModelRefTestResult)
+async def test_ingestion_model_ref(
+    body: ModelRefTestRequest,
+    current_user: dict = Depends(get_current_user),
+) -> ModelRefTestResult:
+    """Probe an ingestion model-pool chip without persisting it."""
+    entry, error = await _model_ref_for_test(body, user_id=current_user["user_id"])
+    if error:
+        return ModelRefTestResult(
+            ok=False,
+            kind=body.kind,
+            model=entry.get("model"),
+            base_url=entry.get("base_url"),
+            error=error,
+        )
+    if body.kind == "embedding":
+        return await _test_embedding_model_ref(entry)
+    return await _test_chat_model_ref(entry)
 
 
 @router.get("/corpora/{corpus_id}", response_model=CorpusResponse)
