@@ -441,12 +441,15 @@ class Settings(BaseSettings):
         ),
     )
     EXTRACTION_MAX_TOTAL_LINES: int = Field(
-        default=20,
+        default=55,
         ge=1,
         le=128,
         description=(
             "Maximum JSONL extraction item lines Ghost B may emit before the "
-            "finished sentinel. Enforced in the prompt and parser."
+            "finished sentinel. Set 15 lines above the per-type theoretical "
+            "max (14 entities + 20 relations + 5 facts + 1 sentinel = 40) so "
+            "dense chunks never bump the parser line cap. Enforced in the "
+            "parser; the prompt no longer carries an explicit line-cap rule."
         ),
     )
     EXTRACTION_RESCUE_MAX_TOTAL_LINES: int = Field(
