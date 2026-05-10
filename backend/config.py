@@ -380,6 +380,14 @@ class Settings(BaseSettings):
             "before marking it failed."
         ),
     )
+    EXTRACTION_JSONL_DEBUG_RAW: bool = Field(
+        default=False,
+        description=(
+            "When true, log raw Ghost B JSONL response lines at DEBUG level "
+            "for ingestion troubleshooting. Disabled by default because "
+            "lines can contain source-derived content."
+        ),
+    )
     EXTRACTION_MAX_ENTITIES_PER_CHUNK: int = Field(
         default=14,
         ge=1,

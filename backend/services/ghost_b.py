@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import re
 import time
 from dataclasses import dataclass, field
@@ -883,6 +884,7 @@ def build_user_prompt(
         "- canonical_name: lowercase, strip punctuation\n"
         "- confidence in [0,1]; drop low-confidence entries\n"
         "- evidence_phrase: short exact phrase from text\n"
+        "- if evidence_phrase contains a newline, escape it as \\n or rewrite it as one sentence\n"
         "- object_kind=entity only if object is a named entity in text and also listed in entities\n"
         f"- pick the narrowest predicate; use '{SchemaContext.RELATION_SENTINEL}' only when no specific predicate fits. Never invent a new predicate\n"
         "- omit ontology fields (domain_type, canonical_family, ontology_tags, ontology_version)\n"
@@ -1670,6 +1672,38 @@ def _compact_jsonl_line(item: dict) -> str:
     return json.dumps(item, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
 
 
+def _debug_log_raw_jsonl_lines(
+    raw: str,
+    *,
+    chunk_id: str,
+    lane: int,
+    attempt: int,
+    enabled: bool,
+) -> None:
+    """Emit exact provider JSONL lines behind an explicit debug flag."""
+
+    if not enabled:
+        return
+    lines = str(raw or "").splitlines()
+    if not lines:
+        logger.debug(
+            "GHOST B raw JSONL chunk_id=%s lane=%d attempt=%d line=0 raw=''",
+            chunk_id,
+            lane,
+            attempt,
+        )
+        return
+    for line_no, line in enumerate(lines, start=1):
+        logger.debug(
+            "GHOST B raw JSONL chunk_id=%s lane=%d attempt=%d line=%d raw=%r",
+            chunk_id,
+            lane,
+            attempt,
+            line_no,
+            line,
+        )
+
+
 def _parse_jsonl_lines(raw: str) -> JsonlParseChunk:
     """Parse complete JSONL records until the first invalid line.
 
@@ -1683,6 +1717,13 @@ def _parse_jsonl_lines(raw: str) -> JsonlParseChunk:
         stripped = line.strip()
         if not stripped:
             continue
+        if stripped.startswith("`"):
+            continue
+        first_brace = stripped.find("{")
+        if first_brace < 0:
+            continue
+        if first_brace > 0:
+            stripped = stripped[first_brace:]
         try:
             item = json.loads(stripped)
         except json.JSONDecodeError:
@@ -1922,12 +1963,13 @@ def build_continuation_prompt(
     if not recent:
         recent = "(none)"
     return (
-        "Continue extracting from the chunk below. You have already produced "
-        "these recent JSONL items; do not repeat them:\n"
+        "Continue extracting from the chunk below.\n"
+        "--- PREVIOUS ITEMS (do not repeat) ---\n"
         f"{recent}\n"
+        "--- END PREVIOUS ITEMS ---\n"
         "Continue with the next entity/relation/fact, one JSON object per line. "
         'End with {"t":"x"} only when the entire extraction is complete.\n'
-        "---\n"
+        "--- CHUNK TEXT AND EXTRACTION RULES ---\n"
         f"{build_user_prompt(**kwargs)}"
     )
 
@@ -1984,6 +2026,7 @@ async def extract_entities(
     if facts_enabled and max_facts > 0:
         max_completion_tokens = min(8192, max(max_completion_tokens, 3200))
     max_jsonl_calls = settings.EXTRACTION_JSONL_MAX_CALLS
+    raw_jsonl_debug = settings.EXTRACTION_JSONL_DEBUG_RAW
     max_entities = settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK
     max_relations = settings.EXTRACTION_MAX_RELATIONS_PER_CHUNK
     headers = {
@@ -2132,6 +2175,7 @@ async def extract_entities(
                         ),
                     },
                 ]
+                await asyncio.sleep(random.uniform(0.5, 2.0))
             attempt_max_tokens = max_completion_tokens
             attempt_payload["max_tokens"] = attempt_max_tokens
             try:
@@ -2166,6 +2210,13 @@ async def extract_entities(
                         attempt + 1,
                     )
                     raw = choice.get("message", {}).get("content", "")
+                    _debug_log_raw_jsonl_lines(
+                        raw,
+                        chunk_id=task.chunk_id,
+                        lane=pool_idx,
+                        attempt=attempt + 1,
+                        enabled=raw_jsonl_debug,
+                    )
                     jsonl_chunk = _parse_jsonl_lines(raw)
                     if jsonl_chunk.items:
                         jsonl_items = _merge_jsonl_items(

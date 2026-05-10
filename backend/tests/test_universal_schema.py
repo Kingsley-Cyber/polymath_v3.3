@@ -8,6 +8,7 @@ crosses SCHEMA_INLINE_LIMIT) flips ghost_b into degraded retrieval mode.
 """
 
 import json
+import logging
 
 from config import get_settings
 from models.schemas import IngestionConfig
@@ -20,6 +21,7 @@ from services.ghost_b import (
     UNIVERSAL_RELATION_SCHEMA,
     SchemaContext,
     _apply_schema,
+    _debug_log_raw_jsonl_lines,
     _merge_jsonl_items,
     _parse,
     _parse_jsonl_items,
@@ -131,6 +133,7 @@ def test_prompt_renders_universal_vocab():
     assert '"t":"e"' in prompt
     assert '"t":"r"' in prompt
     assert '{"t":"x"}' in prompt
+    assert "escape it as \\n" in prompt
     # Universal predicates still listed in the JSONL line shape
     assert "runs_on" in prompt
     assert "trained_on" in prompt
@@ -193,6 +196,54 @@ def test_jsonl_parser_keeps_complete_lines_and_discards_partial_tail():
     assert result.relations[0].predicate == "produces"
 
 
+def test_jsonl_parser_skips_fences_and_preambles():
+    raw = "\n".join(
+        [
+            "Here is the extraction:",
+            "```jsonl",
+            'prefix text {"t":"e","cn":"constexpr objects","sf":"constexpr objects","et":"Concept","cf":0.92}',
+            '  {"t":"x"}',
+            "```",
+        ]
+    )
+
+    parsed = _parse_jsonl_lines(raw)
+
+    assert parsed.finished is True
+    assert parsed.valid_lines == 2
+    assert parsed.invalid_line is None
+    assert len(parsed.items) == 1
+    assert parsed.items[0]["cn"] == "constexpr objects"
+
+
+def test_raw_jsonl_debug_logging_is_flag_guarded(caplog):
+    raw = '{"t":"e","cn":"constexpr objects"}\n{"t":"x"}'
+
+    with caplog.at_level(logging.DEBUG, logger="services.ghost_b"):
+        _debug_log_raw_jsonl_lines(
+            raw,
+            chunk_id="c1",
+            lane=2,
+            attempt=3,
+            enabled=False,
+        )
+    assert "GHOST B raw JSONL" not in caplog.text
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger="services.ghost_b"):
+        _debug_log_raw_jsonl_lines(
+            raw,
+            chunk_id="c1",
+            lane=2,
+            attempt=3,
+            enabled=True,
+        )
+
+    assert "GHOST B raw JSONL chunk_id=c1 lane=2 attempt=3 line=1" in caplog.text
+    assert '"cn":"constexpr objects"' in caplog.text
+    assert "line=2" in caplog.text
+
+
 def test_jsonl_continuation_merge_dedupes_and_preserves_facts():
     task = ExtractionTask(
         chunk_id="c1",
@@ -248,6 +299,9 @@ def test_continuation_prompt_carries_recent_jsonl_without_restart():
 
     assert "Continue extracting from the chunk below" in prompt
     assert "do not repeat" in prompt
+    assert "--- PREVIOUS ITEMS (do not repeat) ---" in prompt
+    assert "--- END PREVIOUS ITEMS ---" in prompt
+    assert "--- CHUNK TEXT AND EXTRACTION RULES ---" in prompt
     assert '"cn":"a"' not in prompt
     assert '"cn":"b"' in prompt
     assert '"cn":"d"' in prompt
