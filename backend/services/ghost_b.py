@@ -43,6 +43,9 @@ _TOKENIZER = tiktoken.get_encoding("cl100k_base")
 _GLOBAL_EXTRACTION_SEMAPHORE: asyncio.Semaphore | None = None
 _GLOBAL_EXTRACTION_SEMAPHORE_LIMIT: int | None = None
 _GLOBAL_EXTRACTION_SEMAPHORE_LOOP: asyncio.AbstractEventLoop | None = None
+_MODEL_LANE_SEMAPHORES: dict[tuple[int, str, str], asyncio.Semaphore] = {}
+_MODEL_LANE_SEMAPHORE_LIMITS: dict[tuple[int, str, str], int] = {}
+_MODEL_LANE_SEMAPHORE_LOOPS: dict[tuple[int, str, str], asyncio.AbstractEventLoop] = {}
 
 _SYSTEM = (
     "You are a precise entity, relation, and fact extractor. "
@@ -623,6 +626,33 @@ def _global_extraction_semaphore(limit: int) -> asyncio.Semaphore:
         _GLOBAL_EXTRACTION_SEMAPHORE_LIMIT = normalized_limit
         _GLOBAL_EXTRACTION_SEMAPHORE_LOOP = loop
     return _GLOBAL_EXTRACTION_SEMAPHORE
+
+
+def _model_lane_key(entry: dict, pool_idx: int) -> tuple[int, str, str]:
+    return (
+        pool_idx,
+        str(entry.get("model") or ""),
+        str(entry.get("base_url") or ""),
+    )
+
+
+def _model_lane_semaphore(
+    entry: dict,
+    pool_idx: int,
+    limit: int,
+) -> asyncio.Semaphore:
+    normalized_limit = max(1, int(limit or 1))
+    loop = asyncio.get_running_loop()
+    key = _model_lane_key(entry, pool_idx)
+    if (
+        key not in _MODEL_LANE_SEMAPHORES
+        or _MODEL_LANE_SEMAPHORE_LIMITS.get(key) != normalized_limit
+        or _MODEL_LANE_SEMAPHORE_LOOPS.get(key) is not loop
+    ):
+        _MODEL_LANE_SEMAPHORES[key] = asyncio.Semaphore(normalized_limit)
+        _MODEL_LANE_SEMAPHORE_LIMITS[key] = normalized_limit
+        _MODEL_LANE_SEMAPHORE_LOOPS[key] = loop
+    return _MODEL_LANE_SEMAPHORES[key]
 
 
 @dataclass
@@ -2149,10 +2179,8 @@ async def extract_entities(
     rescue_max_entities = settings.EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK
     rescue_max_relations = settings.EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK
     rescue_max_total_lines = settings.EXTRACTION_RESCUE_MAX_TOTAL_LINES
-    global_max_concurrent = settings.EXTRACTION_GLOBAL_MAX_CONCURRENT
     failure_pause_percent = settings.EXTRACTION_FAILURE_PAUSE_PERCENT
     failure_pause_min_chunks = settings.EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS
-    global_sem = _global_extraction_semaphore(global_max_concurrent)
     headers = {
         "Authorization": f"Bearer {settings.LITELLM_MASTER_KEY}",
         "Content-Type": "application/json",
@@ -2168,6 +2196,18 @@ async def extract_entities(
                 "extra_params": {},
             }
         ]
+
+    lane_limits = [max(1, int(entry.get("max_concurrent") or 1) or 1) for entry in pool]
+    configured_lane_concurrency = sum(lane_limits) or max(1, settings.EXTRACTION_MAX_CONCURRENT)
+    global_max_concurrent = min(
+        settings.EXTRACTION_GLOBAL_MAX_CONCURRENT,
+        configured_lane_concurrency,
+    )
+    global_sem = _global_extraction_semaphore(global_max_concurrent)
+    lane_sems = [
+        _model_lane_semaphore(entry, idx, lane_limits[idx])
+        for idx, entry in enumerate(pool)
+    ]
 
     # Phase K — WORK-STEALING POOL. Instead of round-robin assignment
     # (task i → pool[i%N]), we spawn one worker coroutine PER lane slot
@@ -2348,13 +2388,14 @@ async def extract_entities(
             attempt_max_tokens = profile.max_tokens
             attempt_payload["max_tokens"] = attempt_max_tokens
             try:
-                async with global_sem:
-                    async with httpx.AsyncClient(timeout=120.0) as client:
-                        resp = await client.post(
-                            f"{settings.LITELLM_URL}/chat/completions",
-                            json=attempt_payload,
-                            headers=headers,
-                        )
+                async with lane_sems[pool_idx]:
+                    async with global_sem:
+                        async with httpx.AsyncClient(timeout=120.0) as client:
+                            resp = await client.post(
+                                f"{settings.LITELLM_URL}/chat/completions",
+                                json=attempt_payload,
+                                headers=headers,
+                            )
                     duration = time.perf_counter() - started
                     resp.raise_for_status()
                     call_attempts += 1
@@ -2466,6 +2507,7 @@ async def extract_entities(
                             "max_tokens": attempt_max_tokens,
                             "max_total_lines": profile.max_total_lines,
                             "global_max_concurrent": global_max_concurrent,
+                            "model_lane_max_concurrent": lane_limits[pool_idx],
                             "input_tokens": input_token_count,
                             "input_truncated": input_truncated,
                             "success": bool(complete),
@@ -2649,7 +2691,7 @@ async def extract_entities(
         for pool_idx, entry in enumerate(pool):
             if pool_idx in disabled_lanes:
                 continue
-            slots = int(entry.get("max_concurrent") or 1) or 1
+            slots = lane_limits[pool_idx]
             for _ in range(slots):
                 workers.append(asyncio.create_task(_lane_worker(pool_idx)))
         if workers:

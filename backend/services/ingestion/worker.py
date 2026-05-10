@@ -66,6 +66,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 _PARSE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_PARSE_JOBS))
 _MODEL_PHASE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_MODEL_PHASE_DOCS))
+_GHOST_B_FILE_SEMAPHORE = asyncio.Semaphore(max(1, settings.EXTRACTION_MAX_ACTIVE_DOCS))
 
 
 class GhostAFailure(RuntimeError):
@@ -688,17 +689,25 @@ async def _run_ghosts_parallel(
             len(pool) or 1,
             schema_ctx.strict,
         )
-        report = await extract_entities(
-            tasks,
-            schema=schema_ctx,
-            schema_lens=schema_lens,
-            chunk_vectors=None,
-            schema_resolver=_schema_resolver,
-            pool=pool,
-            model=model,
-            return_report=True,
-            enable_facts=False,
-        )
+        async with _GHOST_B_FILE_SEMAPHORE:
+            logger.info(
+                "phase=ghost_b_file_gate doc=%s corpus=%s active_doc_limit=%d children=%d",
+                doc_id[:12],
+                corpus_id[:8],
+                settings.EXTRACTION_MAX_ACTIVE_DOCS,
+                len(tasks),
+            )
+            report = await extract_entities(
+                tasks,
+                schema=schema_ctx,
+                schema_lens=schema_lens,
+                chunk_vectors=None,
+                schema_resolver=_schema_resolver,
+                pool=pool,
+                model=model,
+                return_report=True,
+                enable_facts=False,
+            )
         if not isinstance(report, ExtractionBatchReport):
             results = report
             failures: list[ExtractionFailureItem] = []

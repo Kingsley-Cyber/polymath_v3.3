@@ -425,8 +425,19 @@ class Settings(BaseSettings):
         ge=1,
         le=4096,
         description=(
-            "Process-wide ceiling for simultaneous Ghost B provider requests "
-            "across all active documents and extraction model lanes."
+            "Safety ceiling for simultaneous Ghost B provider requests. The "
+            "effective process cap is also bounded by the configured extraction "
+            "model lanes so per-model max_concurrent is not multiplied by docs."
+        ),
+    )
+    EXTRACTION_MAX_ACTIVE_DOCS: int = Field(
+        default=1,
+        ge=1,
+        le=16,
+        description=(
+            "Maximum documents allowed to run foreground Ghost B extraction at "
+            "once. Default 1 keeps extraction concurrency targeted at one file's "
+            "child queue instead of multiplying by model-phase document fanout."
         ),
     )
     EXTRACTION_FAILURE_PAUSE_PERCENT: float = Field(

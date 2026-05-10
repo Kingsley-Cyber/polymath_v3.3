@@ -1396,7 +1396,7 @@ class IngestionService:
         )
         per_process_extraction_ceiling = min(
             settings.EXTRACTION_GLOBAL_MAX_CONCURRENT,
-            settings.INGEST_MAX_MODEL_PHASE_DOCS * extraction_concurrency,
+            settings.EXTRACTION_MAX_ACTIVE_DOCS * extraction_concurrency,
         )
         warnings: list[str] = []
         if len(children) > 500:
@@ -1433,6 +1433,7 @@ class IngestionService:
                 "calls_per_child": foreground_calls_per_child,
                 "extraction_concurrency": extraction_concurrency,
                 "model_phase_doc_concurrency": settings.INGEST_MAX_MODEL_PHASE_DOCS,
+                "active_extraction_docs": settings.EXTRACTION_MAX_ACTIVE_DOCS,
                 "global_max_concurrent": settings.EXTRACTION_GLOBAL_MAX_CONCURRENT,
                 "per_process_extraction_ceiling": per_process_extraction_ceiling,
                 "failure_pause_percent": settings.EXTRACTION_FAILURE_PAUSE_PERCENT,

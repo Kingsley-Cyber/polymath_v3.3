@@ -16,6 +16,8 @@ guarded by @pytest.mark.integration and is skipped in default runs.
 
 from __future__ import annotations
 
+import asyncio
+
 from dataclasses import asdict
 from types import SimpleNamespace
 from typing import Any
@@ -573,6 +575,66 @@ async def test_ghost_b_zero_extractions_leaves_neo4j_pending():
     assert result.ghost_b_metrics["extracted_chunks"] == 0
     assert result.warnings
     assert result.warnings[0].startswith("Ghost B graph extraction produced 0/2")
+
+
+@pytest.mark.asyncio
+async def test_ghost_b_file_gate_serializes_concurrent_documents():
+    active = 0
+    max_active = 0
+
+    async def fake_extract(tasks, **kwargs):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return ExtractionBatchReport(
+            results=[
+                _fake_extraction_result(t.chunk_id, t.doc_id, t.corpus_id)
+                for t in tasks
+            ],
+            failures=[],
+            metrics={
+                "requested_chunks": len(tasks),
+                "extracted_chunks": len(tasks),
+                "failed_chunks": 0,
+            },
+        )
+
+    lens = SimpleNamespace(to_dict=lambda: {"lens_id": "test-lens"})
+
+    async def run_doc(doc_id: str):
+        parent, child = _parent(doc_id, "c" * 36, child_id=f"{doc_id}-c0")
+        cfg = IngestionConfig(
+            use_neo4j=True,
+            chunk_summarization=False,
+            target_qdrant_collections=["naive", "hrag", "graph"],
+            extraction_models=[
+                ModelProfileRef(model="test-model", max_concurrent=45),
+            ],
+        )
+        return await worker._run_ghosts_parallel(
+            config=cfg,
+            parents=[parent],
+            children=[child],
+            doc_id=doc_id,
+            corpus_id="c" * 36,
+            model="m",
+            db=MagicMock(),
+            qdrant_client=MagicMock(),
+            neo4j_driver=MagicMock(),
+            existing_doc=None,
+            ws=WriteState(),
+        )
+
+    with patch.object(worker, "extract_entities", fake_extract), \
+         patch.object(worker, "get_or_create_schema_lens", AsyncMock(return_value=lens)), \
+         patch.object(worker, "_GHOST_B_FILE_SEMAPHORE", asyncio.Semaphore(1)), \
+         patch.object(worker.settings, "NEO4J_ENABLED", True):
+        results = await asyncio.gather(run_doc("doc-a"), run_doc("doc-b"))
+
+    assert max_active == 1
+    assert [len(result.ghost_b_out or []) for result in results] == [1, 1]
 
 
 # ── Hard-abort tests ────────────────────────────────────────────────────────

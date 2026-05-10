@@ -520,6 +520,106 @@ async def test_global_extraction_budget_limits_simultaneous_provider_calls(monke
 
 
 @pytest.mark.asyncio
+async def test_model_lane_concurrency_is_shared_across_concurrent_documents(monkeypatch):
+    active = 0
+    max_active = 0
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "usage": {"total_tokens": 20, "prompt_tokens": 10, "completion_tokens": 10},
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": '{"t":"e","cn":"alpha","sf":"Alpha","et":"concept","cf":0.95}\n{"t":"x"}'
+                        },
+                    }
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return FakeResponse()
+
+    fake_settings = SimpleNamespace(
+        ENTITY_CONFIDENCE_THRESHOLD=0.0,
+        SCHEMA_INLINE_LIMIT=30,
+        SCHEMA_RETRIEVAL_TOP_K=10,
+        EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_RESCUE_MAX_TOKENS=900,
+        EXTRACTION_ENABLE_FACTS=False,
+        EXTRACTION_MAX_FACTS_PER_CHUNK=5,
+        EXTRACTION_JSONL_MAX_CALLS=2,
+        EXTRACTION_FOREGROUND_MAX_CALLS=2,
+        EXTRACTION_JSONL_DEBUG_RAW=False,
+        EXTRACTION_MAX_INPUT_TOKENS=700,
+        EXTRACTION_MAX_TOTAL_LINES=20,
+        EXTRACTION_RESCUE_MAX_TOTAL_LINES=16,
+        EXTRACTION_MAX_ENTITIES_PER_CHUNK=14,
+        EXTRACTION_MAX_RELATIONS_PER_CHUNK=20,
+        EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK=8,
+        LITELLM_MASTER_KEY="test-key",
+        LITELLM_URL="http://litellm",
+        DEFAULT_COMPLETION_MODEL="test-model",
+        EXTRACTION_MAX_CONCURRENT=3,
+        EXTRACTION_GLOBAL_MAX_CONCURRENT=180,
+        EXTRACTION_FAILURE_PAUSE_PERCENT=100.0,
+        EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS=20,
+    )
+    monkeypatch.setattr(ghost_b, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    pool = [{
+        "model": "test-model",
+        "base_url": None,
+        "api_key": None,
+        "max_concurrent": 3,
+        "extra_params": {},
+    }]
+
+    async def run_doc(doc_id: str):
+        return await ghost_b.extract_entities(
+            [
+                ExtractionTask(
+                    chunk_id=f"{doc_id}-c{i}",
+                    doc_id=doc_id,
+                    corpus_id="corp1",
+                    text="Alpha works.",
+                )
+                for i in range(3)
+            ],
+            pool=pool,
+            return_report=True,
+            enable_facts=False,
+        )
+
+    reports = await asyncio.gather(run_doc("d1"), run_doc("d2"))
+
+    assert max_active == 3
+    assert sum(len(report.results) for report in reports) == 6
+    assert sum(report.metrics["attempt_count"] for report in reports) == 6
+
+
+@pytest.mark.asyncio
 async def test_failure_budget_pauses_remaining_foreground_queue(monkeypatch):
     calls = 0
 
