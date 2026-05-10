@@ -84,6 +84,21 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
         logger.warning("Could not create chunks text index: %s", exc)
     logger.info("Indexes ensured: chunks")
 
+    # --- ghost_b_error_events ---
+    # Sampled forensic rows for Ghost B extraction failures. These are small by
+    # design: no child text, only raw output snippets plus failure metadata.
+    await db["ghost_b_error_events"].create_index("run_id")
+    await db["ghost_b_error_events"].create_index("doc_id")
+    await db["ghost_b_error_events"].create_index(
+        [("corpus_id", 1), ("doc_id", 1), ("created_at", -1)],
+        name="ghost_b_error_doc_time",
+    )
+    await db["ghost_b_error_events"].create_index(
+        [("event", 1), ("created_at", -1)],
+        name="ghost_b_error_event_time",
+    )
+    logger.info("Indexes ensured: ghost_b_error_events")
+
     # --- settings ---
     await db["settings"].create_index("user_id", unique=True)
     logger.info("Indexes ensured: settings (unique user_id)")

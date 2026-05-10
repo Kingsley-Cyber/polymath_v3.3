@@ -937,6 +937,7 @@ async def test_jsonl_repair_is_hard_clamped_to_one_retry(monkeypatch):
 @pytest.mark.asyncio
 async def test_failure_budget_pauses_remaining_foreground_queue(monkeypatch):
     calls = 0
+    audit_events: list[dict] = []
 
     class FakeResponse:
         def raise_for_status(self) -> None:
@@ -1000,6 +1001,9 @@ async def test_failure_budget_pauses_remaining_foreground_queue(monkeypatch):
     monkeypatch.setattr(ghost_b, "get_settings", lambda: fake_settings)
     monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
 
+    async def _audit(event: dict) -> None:
+        audit_events.append(event)
+
     report = await ghost_b.extract_entities(
         [
             ExtractionTask(chunk_id=f"c{i}", doc_id="d1", corpus_id="corp1", text="bad")
@@ -1014,6 +1018,8 @@ async def test_failure_budget_pauses_remaining_foreground_queue(monkeypatch):
         }],
         return_report=True,
         enable_facts=False,
+        audit_event_sink=_audit,
+        audit_run_id="run-test",
     )
 
     assert calls == 2
@@ -1021,6 +1027,23 @@ async def test_failure_budget_pauses_remaining_foreground_queue(monkeypatch):
     assert len(report.failures) == 5
     assert report.metrics["error_counts"]["parse_error"] == 2
     assert report.metrics["error_counts"]["failure_budget_exceeded"] == 3
+    failed_events = [
+        event for event in audit_events
+        if event["event"] == "ghost_b_attempt_failed"
+    ]
+    budget_events = [
+        event for event in audit_events
+        if event["event"] == "ghost_b_failure_budget_tripped"
+    ]
+    assert len(failed_events) == 2
+    assert len(budget_events) == 1
+    assert failed_events[0]["run_id"] == "run-test"
+    assert failed_events[0]["error_type"] == "parse_error"
+    assert failed_events[0]["raw"]["sha256"]
+    assert failed_events[0]["raw"]["first"] == "not jsonl"
+    assert failed_events[0]["jsonl"]["valid_lines"] == 0
+    assert budget_events[0]["failed"] == 2
+    assert budget_events[0]["queued_remaining"] == 3
 
 
 def test_parse_facts_is_backward_compatible_when_missing():

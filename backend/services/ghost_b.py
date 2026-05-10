@@ -14,6 +14,7 @@ Extraction target: child text ONLY. Never parent body, never summary strings.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -37,6 +38,7 @@ from services.llm_lane_pool import (
 #   args: (kind, query_vec, top_k)
 #   returns: list of allowed terms ranked by similarity
 SchemaResolver = Callable[[str, list[float], int], Awaitable[list[str]]]
+GhostBAuditSink = Callable[[dict[str, Any]], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
@@ -1274,6 +1276,57 @@ class ExtractionAttemptProfile:
     max_facts: int
 
 
+def _raw_output_fingerprint(
+    raw: str,
+    *,
+    first_chars: int = 200,
+    last_chars: int = 400,
+) -> dict[str, Any]:
+    text = str(raw or "")
+    encoded = text.encode("utf-8", errors="replace")
+    return {
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "chars": len(text),
+        "first": text[: max(0, first_chars)],
+        "last": text[-max(0, last_chars):] if last_chars > 0 else "",
+    }
+
+
+def _jsonl_item_counts(items: list[dict[str, Any]] | None) -> dict[str, int]:
+    counts = {"entities": 0, "relations": 0, "facts": 0}
+    for item in items or []:
+        item_type = _jsonl_type(item)
+        if item_type == "e":
+            counts["entities"] += 1
+        elif item_type == "r":
+            counts["relations"] += 1
+        elif item_type == "f":
+            counts["facts"] += 1
+    return counts
+
+
+def _result_counts(result: ExtractionResult | None) -> dict[str, int]:
+    if result is None:
+        return {"entities": 0, "relations": 0, "facts": 0}
+    return {
+        "entities": len(result.entities),
+        "relations": len(result.relations),
+        "facts": len(getattr(result, "facts", []) or []),
+    }
+
+
+async def _emit_ghost_b_audit_event(
+    sink: GhostBAuditSink | None,
+    event: dict[str, Any],
+) -> None:
+    if sink is None:
+        return
+    try:
+        await sink(event)
+    except Exception as exc:
+        logger.warning("Ghost B audit event sink failed: %s", exc)
+
+
 def _cap_jsonl_items(items: list[dict], max_items: int) -> tuple[list[dict], bool]:
     if max_items <= 0 or len(items) <= max_items:
         return items, False
@@ -2353,6 +2406,8 @@ async def extract_entities(
     pool: list[dict] | None = None,
     return_report: bool = False,
     enable_facts: bool | None = None,
+    audit_event_sink: GhostBAuditSink | None = None,
+    audit_run_id: str | None = None,
 ) -> list[ExtractionResult] | ExtractionBatchReport:
     """
     Extract entities from child chunks in parallel, bounded by EXTRACTION_MAX_CONCURRENT.
@@ -2405,6 +2460,12 @@ async def extract_entities(
         2,
     )
     raw_jsonl_debug = settings.EXTRACTION_JSONL_DEBUG_RAW
+    audit_raw_first_chars = int(
+        getattr(settings, "EXTRACTION_ERROR_AUDIT_RAW_FIRST_CHARS", 200) or 0
+    )
+    audit_raw_last_chars = int(
+        getattr(settings, "EXTRACTION_ERROR_AUDIT_RAW_LAST_CHARS", 400) or 0
+    )
     max_input_tokens = settings.EXTRACTION_MAX_INPUT_TOKENS
     max_total_lines = settings.EXTRACTION_MAX_TOTAL_LINES
     max_entities = settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK
@@ -2618,6 +2679,86 @@ async def extract_entities(
         call_attempts = 0
         accepted_jsonl_items: list[dict[str, Any]] = []
         max_attempts = max(1, max_jsonl_calls)
+
+        async def _audit_attempt(
+            *,
+            event: str,
+            attempt: int,
+            profile: ExtractionAttemptProfile,
+            output_mode: str,
+            raw: str = "",
+            result: ExtractionResult | None = None,
+            jsonl_chunk: JsonlParseChunk | None = None,
+            jsonl_items: list[dict[str, Any]] | None = None,
+            merged_jsonl_items: list[dict[str, Any]] | None = None,
+            line_cap_exceeded: bool = False,
+            empty_after_validation: bool = False,
+            hit_output_cap: bool = False,
+            finish_reason: Any = None,
+            usage: dict[str, Any] | None = None,
+            max_tokens: int | None = None,
+            error_type: str | None = None,
+            error_message: str | None = None,
+        ) -> None:
+            pre_counts = _jsonl_item_counts(merged_jsonl_items or jsonl_items)
+            post_counts = _result_counts(result)
+            body: dict[str, Any] = {
+                "event": event,
+                "run_id": audit_run_id,
+                "corpus_id": task.corpus_id,
+                "doc_id": task.doc_id,
+                "chunk_id": task.chunk_id,
+                "attempt": attempt,
+                "profile": profile.name,
+                "model": str(entry["model"]),
+                "lane": pool_idx,
+                "input_tokens": input_token_count,
+                "input_truncated": input_truncated,
+                "output_mode": output_mode,
+                "max_tokens": max_tokens,
+                "completion_tokens": (usage or {}).get("completion_tokens"),
+                "prompt_tokens": (usage or {}).get("prompt_tokens"),
+                "total_tokens": (usage or {}).get("total_tokens"),
+                "finish_reason": finish_reason,
+                "hit_output_cap": hit_output_cap,
+                "facts_enabled": profile.enable_facts,
+                "caps": {
+                    "entities": profile.max_entities,
+                    "relations": profile.max_relations,
+                    "facts": profile.max_facts if profile.enable_facts else 0,
+                    "lines": profile.max_total_lines,
+                },
+                "jsonl": {
+                    "valid_lines": jsonl_chunk.valid_lines if jsonl_chunk else 0,
+                    "finished": jsonl_chunk.finished if jsonl_chunk else False,
+                    "invalid_tail": bool(jsonl_chunk.invalid_line) if jsonl_chunk else False,
+                    "items": len(jsonl_items or []),
+                    "accepted_items": len(accepted_jsonl_items),
+                    "merged_items": len(merged_jsonl_items or []),
+                    "line_cap_exceeded": line_cap_exceeded,
+                },
+                "validation": {
+                    "pre_entities": pre_counts["entities"],
+                    "pre_relations": pre_counts["relations"],
+                    "pre_facts": pre_counts["facts"],
+                    "post_entities": post_counts["entities"],
+                    "post_relations": post_counts["relations"],
+                    "post_facts": post_counts["facts"],
+                    "evidence_drops": getattr(result, "evidence_drop_count", 0) if result else 0,
+                    "fact_drops": getattr(result, "fact_drop_count", 0) if result else 0,
+                    "empty_after_validation": empty_after_validation,
+                },
+                "error_type": error_type,
+                "error_message": (error_message or "")[:1000],
+            }
+            if event == "ghost_b_attempt_failed":
+                body["raw"] = _raw_output_fingerprint(
+                    raw,
+                    first_chars=audit_raw_first_chars,
+                    last_chars=audit_raw_last_chars,
+                )
+            await _emit_ghost_b_audit_event(audit_event_sink, body)
+
         for attempt in range(max_attempts):
             started = time.perf_counter()
             profile = profiles[min(attempt, len(profiles) - 1)]
@@ -2839,6 +2980,22 @@ async def extract_entities(
                         }
                     )
                     if complete and result:
+                        await _audit_attempt(
+                            event="ghost_b_attempt_succeeded",
+                            attempt=attempt + 1,
+                            profile=profile,
+                            output_mode=profile_output_mode,
+                            result=result,
+                            jsonl_chunk=jsonl_chunk,
+                            jsonl_items=jsonl_items,
+                            merged_jsonl_items=merged_jsonl_items,
+                            line_cap_exceeded=line_cap_exceeded,
+                            empty_after_validation=empty_after_claimed_items,
+                            hit_output_cap=hit_output_cap,
+                            finish_reason=finish_reason,
+                            usage=usage,
+                            max_tokens=attempt_max_tokens,
+                        )
                         logger.debug(
                             "GHOST B: chunk_id=%s entities=%d relations=%d "
                             "(attempt=%d lane=%d profile=%s jsonl_items=%d)",
@@ -2851,6 +3008,25 @@ async def extract_entities(
                             len(jsonl_items),
                         )
                         return result
+                    await _audit_attempt(
+                        event="ghost_b_attempt_failed",
+                        attempt=attempt + 1,
+                        profile=profile,
+                        output_mode=profile_output_mode,
+                        raw=raw,
+                        result=result,
+                        jsonl_chunk=jsonl_chunk,
+                        jsonl_items=jsonl_items,
+                        merged_jsonl_items=merged_jsonl_items,
+                        line_cap_exceeded=line_cap_exceeded,
+                        empty_after_validation=empty_after_claimed_items,
+                        hit_output_cap=hit_output_cap,
+                        finish_reason=finish_reason,
+                        usage=usage,
+                        max_tokens=attempt_max_tokens,
+                        error_type=attempt_error_type,
+                        error_message=str(attempt_error_type or last_exc or ""),
+                    )
                     if (
                         jsonl_items
                         or empty_after_claimed_items
@@ -2944,6 +3120,18 @@ async def extract_entities(
                             "error_type": last_error_type,
                         }
                     )
+                    await _audit_attempt(
+                        event="ghost_b_attempt_failed",
+                        attempt=attempt + 1,
+                        profile=profile,
+                        output_mode=profile_output_mode,
+                        hit_output_cap=False,
+                        finish_reason=None,
+                        usage={},
+                        max_tokens=attempt_payload.get("max_tokens"),
+                        error_type=last_error_type,
+                        error_message=str(exc),
+                    )
                     logger.warning(
                         "GHOST B JSON object mode was rejected by provider "
                         "chunk_id=%s lane=%d status=%s; switching_to_rescue=True",
@@ -2975,6 +3163,22 @@ async def extract_entities(
                             else last_error_type
                         ),
                     }
+                )
+                await _audit_attempt(
+                    event="ghost_b_attempt_failed",
+                    attempt=attempt + 1,
+                    profile=profile,
+                    output_mode=profile_output_mode,
+                    hit_output_cap=False,
+                    finish_reason=None,
+                    usage={},
+                    max_tokens=attempt_payload.get("max_tokens"),
+                    error_type=(
+                        f"{fatal_tier}_fatal_lane_error"
+                        if fatal_lane
+                        else last_error_type
+                    ),
+                    error_message=str(exc),
                 )
                 if fatal_lane:
                     raise FatalLaneError(exc) from exc
@@ -3056,6 +3260,24 @@ async def extract_entities(
                             failure_pause_percent,
                             failure_pause_min_chunks,
                             task_queue.qsize(),
+                        )
+                        await _emit_ghost_b_audit_event(
+                            audit_event_sink,
+                            {
+                                "event": "ghost_b_failure_budget_tripped",
+                                "run_id": audit_run_id,
+                                "corpus_id": task.corpus_id,
+                                "doc_id": task.doc_id,
+                                "chunk_id": task.chunk_id,
+                                "failed": failed_count,
+                                "processed": processed,
+                                "successes": len(results_list),
+                                "threshold_percent": failure_pause_percent,
+                                "min_chunks": failure_pause_min_chunks,
+                                "queued_remaining": task_queue.qsize(),
+                                "lane_limits": lane_limits,
+                                "global_max_concurrent": global_max_concurrent,
+                            },
                         )
             finally:
                 task_queue.task_done()

@@ -126,6 +126,59 @@ def _merge_warnings(existing: list[str] | None, new: list[str] | None) -> list[s
     return merged
 
 
+def _build_ghost_b_error_event_sink(
+    db: AsyncIOMotorDatabase,
+    *,
+    run_id: str,
+) -> Callable[[dict[str, Any]], Any] | None:
+    if not getattr(settings, "EXTRACTION_ERROR_AUDIT_ENABLED", True):
+        return None
+
+    max_failed = max(
+        0,
+        int(getattr(settings, "EXTRACTION_ERROR_AUDIT_MAX_FAILED_ATTEMPTS_PER_DOC", 25) or 0),
+    )
+    max_success = max(
+        0,
+        int(getattr(settings, "EXTRACTION_ERROR_AUDIT_MAX_SUCCESS_ATTEMPTS_PER_DOC", 2) or 0),
+    )
+    counts = {
+        "ghost_b_attempt_failed": 0,
+        "ghost_b_attempt_succeeded": 0,
+        "ghost_b_failure_budget_tripped": 0,
+    }
+    lock = asyncio.Lock()
+
+    async def _sink(event: dict[str, Any]) -> None:
+        name = str(event.get("event") or "")
+        async with lock:
+            if name == "ghost_b_attempt_failed":
+                if counts[name] >= max_failed:
+                    return
+                counts[name] += 1
+                sample_index = counts[name]
+            elif name == "ghost_b_attempt_succeeded":
+                if counts[name] >= max_success:
+                    return
+                counts[name] += 1
+                sample_index = counts[name]
+            elif name == "ghost_b_failure_budget_tripped":
+                counts[name] += 1
+                sample_index = counts[name]
+            else:
+                return
+        doc = dict(event)
+        doc["run_id"] = doc.get("run_id") or run_id
+        doc["sample_index"] = sample_index
+        doc["created_at"] = datetime.utcnow()
+        try:
+            await db["ghost_b_error_events"].insert_one(doc)
+        except Exception as exc:
+            logger.warning("phase=ghost_b_error_audit_write_failed error=%s", exc)
+
+    return _sink
+
+
 def _ghost_b_partial_warning(
     *,
     extracted: int,
@@ -697,6 +750,7 @@ async def _run_ghosts_parallel(
                 settings.EXTRACTION_MAX_ACTIVE_DOCS,
                 len(tasks),
             )
+            ghost_b_run_id = str(uuid.uuid4())
             report = await extract_entities(
                 tasks,
                 schema=schema_ctx,
@@ -707,6 +761,11 @@ async def _run_ghosts_parallel(
                 model=model,
                 return_report=True,
                 enable_facts=settings.EXTRACTION_ENABLE_FACTS,
+                audit_event_sink=_build_ghost_b_error_event_sink(
+                    db,
+                    run_id=ghost_b_run_id,
+                ),
+                audit_run_id=ghost_b_run_id,
             )
         if not isinstance(report, ExtractionBatchReport):
             results = report

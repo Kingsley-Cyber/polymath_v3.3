@@ -521,6 +521,37 @@ class Settings(BaseSettings):
             "lines can contain source-derived content."
         ),
     )
+    EXTRACTION_ERROR_AUDIT_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Persist sampled Ghost B extraction failure evidence to Mongo "
+            "collection ghost_b_error_events."
+        ),
+    )
+    EXTRACTION_ERROR_AUDIT_MAX_FAILED_ATTEMPTS_PER_DOC: int = Field(
+        default=25,
+        ge=0,
+        le=1000,
+        description="Maximum failed Ghost B attempt audit rows stored per document.",
+    )
+    EXTRACTION_ERROR_AUDIT_MAX_SUCCESS_ATTEMPTS_PER_DOC: int = Field(
+        default=2,
+        ge=0,
+        le=100,
+        description="Maximum successful Ghost B attempt audit rows stored per document.",
+    )
+    EXTRACTION_ERROR_AUDIT_RAW_FIRST_CHARS: int = Field(
+        default=200,
+        ge=0,
+        le=2000,
+        description="Characters kept from the beginning of failed Ghost B raw output.",
+    )
+    EXTRACTION_ERROR_AUDIT_RAW_LAST_CHARS: int = Field(
+        default=400,
+        ge=0,
+        le=4000,
+        description="Characters kept from the end of failed Ghost B raw output.",
+    )
     EXTRACTION_MAX_ENTITIES_PER_CHUNK: int = Field(
         default=14,
         ge=1,

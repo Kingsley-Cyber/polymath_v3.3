@@ -8,6 +8,7 @@ holes later by retrying only the failed chunks and patching Neo4j incrementally.
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import asdict
 from datetime import datetime
 from typing import Any
@@ -28,6 +29,7 @@ from services.ghost_b import (
 from services.graph.neo4j_writer import write_document_graph
 from services.ingestion.worker import (
     _build_ghost_pool,
+    _build_ghost_b_error_event_sink,
     _ghost_b_partial_warning,
     _rehydrate_ghost_b_staging,
 )
@@ -179,6 +181,7 @@ async def backfill_failed_graph_chunks(
     async def _schema_resolver(kind: str, query_vec: list[float], top_k: int) -> list[str]:
         return await retrieve_schema_for_chunk(qdrant_client, corpus_id, kind, query_vec, top_k)
 
+    ghost_b_run_id = f"backfill-{uuid.uuid4()}"
     report = await extract_entities(
         tasks,
         schema=schema_ctx,
@@ -187,6 +190,11 @@ async def backfill_failed_graph_chunks(
         pool=pool,
         model=None,
         return_report=True,
+        audit_event_sink=_build_ghost_b_error_event_sink(
+            db,
+            run_id=ghost_b_run_id,
+        ),
+        audit_run_id=ghost_b_run_id,
     )
     if not isinstance(report, ExtractionBatchReport):
         raise RuntimeError("Ghost B did not return a batch report")

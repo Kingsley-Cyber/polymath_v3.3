@@ -138,6 +138,51 @@ class PhaseRecorder:
         return _mk
 
 
+@pytest.mark.asyncio
+async def test_ghost_b_error_event_sink_samples_to_mongo():
+    inserted: list[dict] = []
+
+    class FakeCollection:
+        async def insert_one(self, doc: dict) -> None:
+            inserted.append(doc)
+
+    class FakeDb:
+        def __getitem__(self, name: str) -> FakeCollection:
+            assert name == "ghost_b_error_events"
+            return FakeCollection()
+
+    with patch.object(worker.settings, "EXTRACTION_ERROR_AUDIT_ENABLED", True), \
+         patch.object(worker.settings, "EXTRACTION_ERROR_AUDIT_MAX_FAILED_ATTEMPTS_PER_DOC", 3), \
+         patch.object(worker.settings, "EXTRACTION_ERROR_AUDIT_MAX_SUCCESS_ATTEMPTS_PER_DOC", 1):
+        sink = worker._build_ghost_b_error_event_sink(FakeDb(), run_id="run-1")
+        assert sink is not None
+        for i in range(5):
+            await sink({
+                "event": "ghost_b_attempt_failed",
+                "run_id": "run-1",
+                "doc_id": "d1",
+                "chunk_id": f"c{i}",
+            })
+        for i in range(2):
+            await sink({
+                "event": "ghost_b_attempt_succeeded",
+                "run_id": "run-1",
+                "doc_id": "d1",
+                "chunk_id": f"s{i}",
+            })
+        await sink({
+            "event": "ghost_b_failure_budget_tripped",
+            "run_id": "run-1",
+            "doc_id": "d1",
+        })
+
+    assert [doc["event"] for doc in inserted].count("ghost_b_attempt_failed") == 3
+    assert [doc["event"] for doc in inserted].count("ghost_b_attempt_succeeded") == 1
+    assert [doc["event"] for doc in inserted].count("ghost_b_failure_budget_tripped") == 1
+    assert all(doc["run_id"] == "run-1" for doc in inserted)
+    assert all(doc.get("created_at") for doc in inserted)
+
+
 def _install_mocks(
     recorder: PhaseRecorder,
     *,
