@@ -360,24 +360,64 @@ class Settings(BaseSettings):
         description="Max concurrent LiteLLM calls for entity extraction (GHOST B)",
     )
     EXTRACTION_MAX_TOKENS: int = Field(
-        default=2400,
+        default=1200,
         ge=256,
         le=8192,
         description=(
-            "Maximum completion tokens for each entity extraction call (GHOST B). "
-            "Bumped from 1536 → 2400 alongside the relations cap bump (14 → 20) "
-            "and the schema additions (synonym_of, instance_of, owns, etc.). "
-            "1536 was already tight at cap=14; growing the cap without growing "
-            "the budget caused mid-string JSON truncation."
+            "Maximum completion tokens for the normal foreground entity extraction "
+            "call (GHOST B). Facts do not raise this cap; failed chunks switch "
+            "to the smaller rescue profile instead of retrying this exact prompt."
         ),
     )
+    EXTRACTION_RESCUE_MAX_TOKENS: int = Field(
+        default=900,
+        ge=256,
+        le=4096,
+        description=(
+            "Maximum completion tokens for Ghost B rescue mode after the first "
+            "foreground extraction contract violation."
+        ),
+    )
+    EXTRACTION_MAX_INPUT_TOKENS: int = Field(
+        default=700,
+        ge=128,
+        le=4096,
+        description=(
+            "Hard token cap for the child text span sent to Ghost B. The chunker "
+            "should normally enforce this first; this is the extraction safety net."
+        ),
+    )
+    EXTRACTION_MAX_TOTAL_LINES: int = Field(
+        default=20,
+        ge=1,
+        le=128,
+        description=(
+            "Maximum JSONL extraction item lines Ghost B may emit before the "
+            "finished sentinel. Enforced in the prompt and parser."
+        ),
+    )
+    EXTRACTION_RESCUE_MAX_TOTAL_LINES: int = Field(
+        default=16,
+        ge=1,
+        le=64,
+        description="Maximum JSONL item lines accepted from Ghost B rescue mode.",
+    )
     EXTRACTION_JSONL_MAX_CALLS: int = Field(
-        default=8,
+        default=2,
         ge=1,
         le=32,
         description=(
-            "Maximum sequential JSONL continuation calls for one Ghost B chunk "
-            "before marking it failed."
+            "Legacy upper bound for sequential Ghost B JSONL calls. Foreground "
+            "ingest is also clamped by EXTRACTION_FOREGROUND_MAX_CALLS."
+        ),
+    )
+    EXTRACTION_FOREGROUND_MAX_CALLS: int = Field(
+        default=2,
+        ge=1,
+        le=3,
+        description=(
+            "Hard foreground ingest limit for extraction calls per child chunk. "
+            "Call 1 uses the normal prompt; later calls use rescue mode."
         ),
     )
     EXTRACTION_JSONL_DEBUG_RAW: bool = Field(
@@ -406,6 +446,18 @@ class Settings(BaseSettings):
             "the cap ever squeezes out content, the next refactor should tier "
             "canonicalization predicates out of this count."
         ),
+    )
+    EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK: int = Field(
+        default=8,
+        ge=1,
+        le=32,
+        description="Maximum entities Ghost B rescue mode should return for a child chunk.",
+    )
+    EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK: int = Field(
+        default=8,
+        ge=0,
+        le=32,
+        description="Maximum relations Ghost B rescue mode should return for a child chunk.",
     )
     EXTRACTION_ENABLE_FACTS: bool = Field(
         default=False,

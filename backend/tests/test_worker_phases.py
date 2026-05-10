@@ -201,6 +201,10 @@ def _install_mocks(
         "default_ingestion_config": {},
     })
     ensure_progress_mock = AsyncMock()
+    async def _checkpoint_side_effect(**kwargs):
+        recorder.events.append("chunk_checkpoint")
+
+    checkpoint_mock = AsyncMock(side_effect=_checkpoint_side_effect)
     update_state_mock = AsyncMock()
     mongo_db = MagicMock()
     # For the corpora counter update path in run_ingest_job
@@ -217,6 +221,7 @@ def _install_mocks(
         patch.object(worker.mongo_reader, "get_document", get_doc_mock),
         patch.object(worker.mongo_reader, "get_corpus", get_corpus_mock),
         patch.object(worker, "_ensure_progress_document", ensure_progress_mock),
+        patch.object(worker, "_checkpoint_child_chunks", checkpoint_mock),
         patch.object(worker.mongo_writer, "update_write_state", update_state_mock),
         patch.object(worker.settings, "NEO4J_ENABLED", True),
     ]
@@ -238,6 +243,7 @@ def _install_mocks(
         "neo4j": neo4j_mock,
         "get_doc": get_doc_mock,
         "ensure_progress": ensure_progress_mock,
+        "checkpoint_chunks": checkpoint_mock,
         "update_state": update_state_mock,
         "db": mongo_db,
         "stop_all": _stop_all,
@@ -281,7 +287,7 @@ async def test_phase_order_deep_mode():
         result = await _run_job(m, cfg)
         assert result.status == "done"
         assert rec.events == [
-            "parse", "chunk", "ghosts_parallel",
+            "parse", "chunk", "chunk_checkpoint", "ghosts_parallel",
             "mongo_write", "embed", "qdrant_write", "neo4j_write",
         ]
     finally:
@@ -307,7 +313,7 @@ async def test_phase_order_fast_mode():
         assert "neo4j_write" not in rec.events
         # Mongo + Qdrant still run; ghosts_parallel still called (returns None/None)
         assert rec.events == [
-            "parse", "chunk", "ghosts_parallel",
+            "parse", "chunk", "chunk_checkpoint", "ghosts_parallel",
             "mongo_write", "embed", "qdrant_write",
         ]
     finally:
@@ -332,7 +338,7 @@ async def test_phase_order_balanced_mode():
         )
         await _run_job(m, cfg)
         assert rec.events == [
-            "parse", "chunk", "ghosts_parallel",
+            "parse", "chunk", "chunk_checkpoint", "ghosts_parallel",
             "mongo_write", "embed", "qdrant_write", "neo4j_write",
         ]
         # Ghost A off, Ghost B on — summaries arg to the mongo write was None.
@@ -560,6 +566,7 @@ async def test_ghost_b_zero_extractions_leaves_neo4j_pending():
         )
 
     assert extract_mock.await_count == 1
+    assert extract_mock.await_args.kwargs["enable_facts"] is False
     assert result.ghost_b_out is None
     assert result.ghost_b_failures == [failure]
     assert result.ghost_b_metrics is not None

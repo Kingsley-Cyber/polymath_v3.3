@@ -9,9 +9,12 @@ crosses SCHEMA_INLINE_LIMIT) flips ghost_b into degraded retrieval mode.
 
 import json
 import logging
+from types import SimpleNamespace
 
+import pytest
 from config import get_settings
 from models.schemas import IngestionConfig
+import services.ghost_b as ghost_b
 from services.ghost_b import (
     EntityItem,
     ExtractionTask,
@@ -306,6 +309,120 @@ def test_continuation_prompt_carries_recent_jsonl_without_restart():
     assert '"cn":"b"' in prompt
     assert '"cn":"d"' in prompt
     assert '{"t":"x"}' in prompt
+
+
+@pytest.mark.asyncio
+async def test_extraction_switches_to_rescue_without_repeating_capped_prompt(monkeypatch):
+    calls: list[dict] = []
+    responses = [
+        {
+            "usage": {"total_tokens": 2400, "prompt_tokens": 1200, "completion_tokens": 1200},
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {"content": '{"t":"e","cn":"unterminated"'},
+                }
+            ],
+        },
+        {
+            "usage": {"total_tokens": 160, "prompt_tokens": 100, "completion_tokens": 60},
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {
+                        "content": "\n".join(
+                            [
+                                '{"t":"e","cn":"alpha","sf":"Alpha","et":"concept","cf":0.95}',
+                                '{"t":"x"}',
+                            ]
+                        )
+                    },
+                }
+            ],
+        },
+    ]
+
+    class FakeResponse:
+        def __init__(self, body: dict):
+            self._body = body
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return self._body
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            calls.append(json)
+            return FakeResponse(responses[len(calls) - 1])
+
+    fake_settings = SimpleNamespace(
+        ENTITY_CONFIDENCE_THRESHOLD=0.0,
+        SCHEMA_INLINE_LIMIT=30,
+        SCHEMA_RETRIEVAL_TOP_K=10,
+        EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_RESCUE_MAX_TOKENS=900,
+        EXTRACTION_ENABLE_FACTS=True,
+        EXTRACTION_MAX_FACTS_PER_CHUNK=5,
+        EXTRACTION_JSONL_MAX_CALLS=8,
+        EXTRACTION_FOREGROUND_MAX_CALLS=2,
+        EXTRACTION_JSONL_DEBUG_RAW=False,
+        EXTRACTION_MAX_INPUT_TOKENS=700,
+        EXTRACTION_MAX_TOTAL_LINES=20,
+        EXTRACTION_RESCUE_MAX_TOTAL_LINES=16,
+        EXTRACTION_MAX_ENTITIES_PER_CHUNK=14,
+        EXTRACTION_MAX_RELATIONS_PER_CHUNK=20,
+        EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK=8,
+        LITELLM_MASTER_KEY="test-key",
+        LITELLM_URL="http://litellm",
+        DEFAULT_COMPLETION_MODEL="test-model",
+        EXTRACTION_MAX_CONCURRENT=1,
+    )
+    monkeypatch.setattr(ghost_b, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    report = await ghost_b.extract_entities(
+        [
+            ExtractionTask(
+                chunk_id="c1",
+                doc_id="d1",
+                corpus_id="corp1",
+                text="Alpha is a compact test concept.",
+            )
+        ],
+        pool=[{
+            "model": "test-model",
+            "base_url": None,
+            "api_key": None,
+            "max_concurrent": 1,
+            "extra_params": {},
+        }],
+        return_report=True,
+        enable_facts=False,
+    )
+
+    assert len(calls) == 2
+    assert calls[0]["max_tokens"] == 1200
+    assert '"t":"f"' not in calls[0]["messages"][1]["content"]
+    assert "max 20 total extraction item lines" in calls[0]["messages"][1]["content"]
+    assert calls[1]["max_tokens"] == 900
+    assert "RESCUE MODE" in calls[1]["messages"][1]["content"]
+    assert "Facts are disabled" in calls[1]["messages"][1]["content"]
+    assert "max 8 entities" in calls[1]["messages"][1]["content"]
+    assert report.results and report.results[0].entities[0].canonical_name == "alpha"
+    assert report.metrics["attempt_count"] == 2
+    assert report.metrics["completion_tokens"] == 1260
 
 
 def test_parse_facts_is_backward_compatible_when_missing():

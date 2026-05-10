@@ -187,6 +187,7 @@ async def backfill_failed_graph_chunks(
         pool=pool,
         model=None,
         return_report=True,
+        enable_facts=False,
     )
     if not isinstance(report, ExtractionBatchReport):
         raise RuntimeError("Ghost B did not return a batch report")

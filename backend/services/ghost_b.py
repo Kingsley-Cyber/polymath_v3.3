@@ -16,13 +16,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import random
 import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, ClassVar, Literal
 
 import httpx
+import tiktoken
 
 from config import get_settings
 from services.llm_lane_pool import (
@@ -39,6 +39,7 @@ from services.llm_lane_pool import (
 SchemaResolver = Callable[[str, list[float], int], Awaitable[list[str]]]
 
 logger = logging.getLogger(__name__)
+_TOKENIZER = tiktoken.get_encoding("cl100k_base")
 
 _SYSTEM = (
     "You are a precise entity, relation, and fact extractor. "
@@ -590,6 +591,19 @@ def _render_schema_lens_block(schema_lens: SchemaLens | dict | None) -> str:
     return "\n".join(lines)
 
 
+def _bounded_extraction_text(text: str, max_tokens: int) -> tuple[str, int, bool]:
+    """Bound the span sent to Ghost B independently of chunker correctness."""
+
+    raw = str(text or "")
+    if max_tokens <= 0:
+        return raw, 0, False
+    tokens = _TOKENIZER.encode(raw, disallowed_special=())
+    if len(tokens) <= max_tokens:
+        return raw, len(tokens), False
+    bounded = _TOKENIZER.decode(tokens[:max_tokens]).strip()
+    return bounded, len(tokens), True
+
+
 @dataclass
 class SchemaContext:
     """Phase 14: Ontology-Lite schema for entity-type and relation-predicate vocabularies.
@@ -775,6 +789,7 @@ def build_user_prompt(
     schema_lens: SchemaLens | dict | None = None,
     enable_facts: bool | None = None,
     max_facts: int | None = None,
+    max_total_lines: int | None = None,
 ) -> str:
     """Render the per-chunk extraction user prompt, with optional schema constraints.
 
@@ -843,6 +858,11 @@ def build_user_prompt(
         if max_facts is None
         else max(0, int(max_facts))
     )
+    line_cap = (
+        settings.EXTRACTION_MAX_TOTAL_LINES
+        if max_total_lines is None
+        else max(1, int(max_total_lines))
+    )
     fact_rules = ""
     fact_protocol = ""
     target = "entities and relations"
@@ -878,6 +898,7 @@ def build_user_prompt(
         f"{fact_protocol}"
         '- Finished line: {"t":"x"}\n'
         "Rules:\n"
+        f"- max {line_cap} total extraction item lines before the finished line\n"
         f"- max {entity_cap} entities, max {relation_cap} relations\n"
         f"{fact_rules}"
         "- compact JSONL, no prose/markdown/duplicates; omit null or empty fields\n"
@@ -996,6 +1017,35 @@ class ExtractionBatchReport:
     results: list[ExtractionResult]
     failures: list[ExtractionFailureItem]
     metrics: dict
+
+
+@dataclass(frozen=True)
+class ExtractionAttemptProfile:
+    name: str
+    max_tokens: int
+    max_entities: int
+    max_relations: int
+    max_total_lines: int
+    enable_facts: bool
+    max_facts: int
+
+
+def _cap_jsonl_items(items: list[dict], max_items: int) -> tuple[list[dict], bool]:
+    if max_items <= 0 or len(items) <= max_items:
+        return items, False
+    return items[:max_items], True
+
+
+def _cap_result(
+    result: ExtractionResult | None,
+    profile: ExtractionAttemptProfile,
+) -> ExtractionResult | None:
+    if result is None:
+        return None
+    result.entities = result.entities[: profile.max_entities]
+    result.relations = result.relations[: profile.max_relations]
+    result.facts = result.facts[: profile.max_facts] if profile.enable_facts else []
+    return result
 
 
 def summarize_extraction_batch(
@@ -1974,6 +2024,47 @@ def build_continuation_prompt(
     )
 
 
+def build_rescue_prompt(
+    *,
+    chunk_id: str,
+    doc_id: str,
+    corpus_id: str,
+    text: str,
+    max_entities: int,
+    max_relations: int,
+    max_total_lines: int,
+    schema: SchemaContext | None = None,
+    effective_entity_vocab: list[str] | None = None,
+    effective_relation_vocab: list[str] | None = None,
+    **_: Any,
+) -> str:
+    """Shorter second-pass prompt used after a foreground contract violation."""
+
+    if schema and schema.has_entity_schema:
+        entity_vocab = effective_entity_vocab or schema.entity_vocab
+    else:
+        entity_vocab = _DEFAULT_ENTITY_TYPES
+    if schema and schema.has_relation_schema:
+        relation_vocab = effective_relation_vocab or schema.relation_vocab
+    else:
+        relation_vocab = ["short verb phrase label"]
+    return (
+        "RESCUE MODE: the previous extraction was invalid or capped.\n"
+        "Return only the highest-confidence core graph items. Facts are disabled.\n"
+        "Output compact JSONL only, one object per line; no prose, markdown, or arrays.\n"
+        'End the complete extraction with exactly: {"t":"x"}\n'
+        f"Limits: max {max_total_lines} item lines, max {max_entities} entities, "
+        f"max {max_relations} relations.\n"
+        f'Entity: {{"t":"e","cn":"lowercase no-punct","sf":"verbatim","et":"{"|".join(entity_vocab)}","cf":0.0}}\n'
+        f'Relation: {{"t":"r","sub":"canonical_name","pred":"{"|".join(relation_vocab)}","obj":"canonical_name or literal","ok":"entity|literal","cf":0.0,"ev":"exact short phrase"}}\n'
+        "- Use only labels listed above; use related_to only if no specific predicate fits.\n"
+        "- Relation ev must be an exact short phrase from TEXT.\n"
+        "- Prefer fewer correct lines over broad coverage.\n"
+        "TEXT:\n"
+        f"{text}"
+    )
+
+
 async def extract_entities(
     tasks: list[ExtractionTask],
     model: str | None = None,
@@ -1984,6 +2075,7 @@ async def extract_entities(
     *,
     pool: list[dict] | None = None,
     return_report: bool = False,
+    enable_facts: bool | None = None,
 ) -> list[ExtractionResult] | ExtractionBatchReport:
     """
     Extract entities from child chunks in parallel, bounded by EXTRACTION_MAX_CONCURRENT.
@@ -2021,14 +2113,21 @@ async def extract_entities(
     inline_limit = settings.SCHEMA_INLINE_LIMIT
     top_k = settings.SCHEMA_RETRIEVAL_TOP_K
     max_completion_tokens = settings.EXTRACTION_MAX_TOKENS
-    facts_enabled = settings.EXTRACTION_ENABLE_FACTS
+    facts_enabled = settings.EXTRACTION_ENABLE_FACTS if enable_facts is None else enable_facts
     max_facts = settings.EXTRACTION_MAX_FACTS_PER_CHUNK
-    if facts_enabled and max_facts > 0:
-        max_completion_tokens = min(8192, max(max_completion_tokens, 3200))
-    max_jsonl_calls = settings.EXTRACTION_JSONL_MAX_CALLS
+    rescue_max_tokens = settings.EXTRACTION_RESCUE_MAX_TOKENS
+    max_jsonl_calls = min(
+        settings.EXTRACTION_JSONL_MAX_CALLS,
+        settings.EXTRACTION_FOREGROUND_MAX_CALLS,
+    )
     raw_jsonl_debug = settings.EXTRACTION_JSONL_DEBUG_RAW
+    max_input_tokens = settings.EXTRACTION_MAX_INPUT_TOKENS
+    max_total_lines = settings.EXTRACTION_MAX_TOTAL_LINES
     max_entities = settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK
     max_relations = settings.EXTRACTION_MAX_RELATIONS_PER_CHUNK
+    rescue_max_entities = settings.EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK
+    rescue_max_relations = settings.EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK
+    rescue_max_total_lines = settings.EXTRACTION_RESCUE_MAX_TOTAL_LINES
     headers = {
         "Authorization": f"Bearer {settings.LITELLM_MASTER_KEY}",
         "Content-Type": "application/json",
@@ -2107,6 +2206,23 @@ async def extract_entities(
 
     async def _process_one(task: ExtractionTask, pool_idx: int) -> ExtractionResult | None:
         entry = pool[pool_idx]
+        bounded_text, input_token_count, input_truncated = _bounded_extraction_text(
+            task.text,
+            max_input_tokens,
+        )
+        prompt_task = ExtractionTask(
+            chunk_id=task.chunk_id,
+            doc_id=task.doc_id,
+            corpus_id=task.corpus_id,
+            text=bounded_text,
+        )
+        if input_truncated:
+            logger.warning(
+                "GHOST B input span truncated chunk_id=%s tokens=%d max_input_tokens=%d",
+                task.chunk_id,
+                input_token_count,
+                max_input_tokens,
+            )
         chunk_vec = chunk_vectors.get(task.chunk_id) if chunk_vectors else None
         eff_entity, eff_relation = await resolve_chunk_vocab(
             schema=schema,
@@ -2119,7 +2235,7 @@ async def extract_entities(
             "chunk_id": task.chunk_id,
             "doc_id": task.doc_id,
             "corpus_id": task.corpus_id,
-            "text": task.text,
+            "text": bounded_text,
             "max_entities": max_entities,
             "max_relations": max_relations,
             "schema": schema,
@@ -2128,55 +2244,71 @@ async def extract_entities(
             "schema_lens": schema_lens,
             "enable_facts": facts_enabled,
             "max_facts": max_facts,
+            "max_total_lines": max_total_lines,
         }
-        payload: dict = {
+        normal_profile = ExtractionAttemptProfile(
+            name="normal",
+            max_tokens=max_completion_tokens,
+            max_entities=max_entities,
+            max_relations=max_relations,
+            max_total_lines=max_total_lines,
+            enable_facts=facts_enabled,
+            max_facts=max_facts if facts_enabled else 0,
+        )
+        rescue_profile = ExtractionAttemptProfile(
+            name="rescue",
+            max_tokens=rescue_max_tokens,
+            max_entities=rescue_max_entities,
+            max_relations=rescue_max_relations,
+            max_total_lines=rescue_max_total_lines,
+            enable_facts=False,
+            max_facts=0,
+        )
+        profiles = [normal_profile, rescue_profile]
+        payload_base: dict = {
             "model": entry["model"],
-            "messages": [
-                {"role": "system", "content": _SYSTEM},
-                {
-                    "role": "user",
-                    "content": build_user_prompt(**prompt_kwargs),
-                },
-            ],
             "temperature": 0,
-            "max_tokens": max_completion_tokens,
         }
         if entry.get("base_url"):
-            payload["api_base"] = entry["base_url"]
+            payload_base["api_base"] = entry["base_url"]
         if entry.get("api_key"):
-            payload["api_key"] = entry["api_key"]
+            payload_base["api_key"] = entry["api_key"]
         for _k, _v in (entry.get("extra_params") or {}).items():
             if _k not in ("model", "messages", "response_format"):
-                payload[_k] = _v
+                payload_base[_k] = _v
 
-        # Retry/continue on the same lane. Work-stealing handles cross-lane
-        # rebalancing naturally, so a long chunk can consume several sequential
-        # calls without blocking the other lane slots. JSONL means a provider
-        # output cap no longer erases the already-valid lines; if the finished
-        # sentinel is missing, the next call asks for continuation.
+        # Bounded foreground state machine:
+        #   attempt 1 = normal compact graph extraction
+        #   attempt 2 = smaller rescue prompt, no facts, lower caps
+        # Never repeat the exact same broad prompt after a capped/malformed reply.
         last_exc: Exception | None = None
         last_error_type = "unknown"
-        jsonl_items: list[dict] = []
         parse_failures = 0
         exception_failures = 0
         call_attempts = 0
-        max_attempts = max_jsonl_calls
+        max_attempts = max(1, max_jsonl_calls)
         for attempt in range(max_attempts):
             started = time.perf_counter()
-            attempt_payload = dict(payload)
-            if jsonl_items:
-                attempt_payload["messages"] = [
-                    {"role": "system", "content": _SYSTEM},
-                    {
-                        "role": "user",
-                        "content": build_continuation_prompt(
-                            previous_items=jsonl_items,
-                            **prompt_kwargs,
-                        ),
-                    },
-                ]
-                await asyncio.sleep(random.uniform(0.5, 2.0))
-            attempt_max_tokens = max_completion_tokens
+            profile = profiles[min(attempt, len(profiles) - 1)]
+            profile_kwargs = {
+                **prompt_kwargs,
+                "max_entities": profile.max_entities,
+                "max_relations": profile.max_relations,
+                "enable_facts": profile.enable_facts,
+                "max_facts": profile.max_facts,
+                "max_total_lines": profile.max_total_lines,
+            }
+            prompt = (
+                build_user_prompt(**profile_kwargs)
+                if profile.name == "normal"
+                else build_rescue_prompt(**profile_kwargs)
+            )
+            attempt_payload = dict(payload_base)
+            attempt_payload["messages"] = [
+                {"role": "system", "content": _SYSTEM},
+                {"role": "user", "content": prompt},
+            ]
+            attempt_max_tokens = profile.max_tokens
             attempt_payload["max_tokens"] = attempt_max_tokens
             try:
                 async with httpx.AsyncClient(timeout=120.0) as client:
@@ -2217,98 +2349,6 @@ async def extract_entities(
                         attempt=attempt + 1,
                         enabled=raw_jsonl_debug,
                     )
-                    jsonl_chunk = _parse_jsonl_lines(raw)
-                    if jsonl_chunk.items:
-                        jsonl_items = _merge_jsonl_items(
-                            jsonl_items,
-                            jsonl_chunk.items,
-                        )
-                    fallback_used = False
-                    if jsonl_items or jsonl_chunk.finished:
-                        result = _parse_jsonl_items(
-                            jsonl_items,
-                            task,
-                            threshold,
-                            schema=schema,
-                            schema_lens=schema_lens,
-                            enable_facts=facts_enabled,
-                            max_facts=max_facts,
-                        )
-                    else:
-                        looks_like_legacy_object = any(
-                            marker in raw
-                            for marker in ('"entities"', '"relations"', '"schema_version"')
-                        )
-                        result = (
-                            _parse_object_with_repair(
-                                raw,
-                                task,
-                                threshold,
-                                schema=schema,
-                                schema_lens=schema_lens,
-                                enable_facts=facts_enabled,
-                                max_facts=max_facts,
-                            )
-                            if looks_like_legacy_object
-                            else None
-                        )
-                        fallback_used = result is not None
-                    complete = fallback_used or (jsonl_chunk.finished and result is not None)
-                    call_metrics.append(
-                        {
-                            "chunk_id": task.chunk_id,
-                            "model": entry["model"],
-                            "lane": pool_idx,
-                            "attempt": attempt + 1,
-                            "duration_seconds": round(duration, 3),
-                            "total_tokens": usage.get("total_tokens"),
-                            "prompt_tokens": usage.get("prompt_tokens"),
-                            "completion_tokens": usage.get("completion_tokens"),
-                            "finish_reason": finish_reason,
-                            "max_tokens": attempt_max_tokens,
-                            "success": bool(complete),
-                            "error_type": (
-                                None
-                                if complete
-                                else (
-                                    "jsonl_incomplete"
-                                    if jsonl_items
-                                    else "parse_error"
-                                )
-                            ),
-                            "jsonl_valid_lines": jsonl_chunk.valid_lines,
-                            "jsonl_finished": jsonl_chunk.finished,
-                        }
-                    )
-                    if complete and result:
-                        logger.debug(
-                            "GHOST B: chunk_id=%s entities=%d relations=%d "
-                            "(attempt=%d lane=%d jsonl_items=%d)",
-                            task.chunk_id,
-                            len(result.entities),
-                            len(result.relations),
-                            attempt + 1,
-                            pool_idx,
-                            len(jsonl_items),
-                        )
-                        return result
-                    if jsonl_items:
-                        last_error_type = "jsonl_incomplete"
-                        last_exc = RuntimeError(
-                            "JSONL extraction did not emit finished sentinel"
-                        )
-                        logger.warning(
-                            "GHOST B JSONL continuation needed chunk_id=%s lane=%d "
-                            "items=%d valid_lines=%d finish_reason=%s invalid_tail=%s",
-                            task.chunk_id,
-                            pool_idx,
-                            len(jsonl_items),
-                            jsonl_chunk.valid_lines,
-                            finish_reason,
-                            bool(jsonl_chunk.invalid_line),
-                        )
-                        continue
-                    parse_failures += 1
                     completion_tokens_raw = usage.get("completion_tokens")
                     try:
                         completion_tokens = int(completion_tokens_raw)
@@ -2321,6 +2361,119 @@ async def extract_entities(
                             and completion_tokens >= attempt_max_tokens
                         )
                     )
+                    jsonl_chunk = _parse_jsonl_lines(raw)
+                    jsonl_items, line_cap_exceeded = _cap_jsonl_items(
+                        jsonl_chunk.items,
+                        profile.max_total_lines,
+                    )
+                    fallback_used = False
+                    if jsonl_items or jsonl_chunk.finished:
+                        result = _parse_jsonl_items(
+                            jsonl_items,
+                            prompt_task,
+                            threshold,
+                            schema=schema,
+                            schema_lens=schema_lens,
+                            enable_facts=profile.enable_facts,
+                            max_facts=profile.max_facts,
+                        )
+                    else:
+                        looks_like_legacy_object = any(
+                            marker in raw
+                            for marker in ('"entities"', '"relations"', '"schema_version"')
+                        )
+                        result = (
+                            _parse_object_with_repair(
+                                raw,
+                                prompt_task,
+                                threshold,
+                                schema=schema,
+                                schema_lens=schema_lens,
+                                enable_facts=profile.enable_facts,
+                                max_facts=profile.max_facts,
+                            )
+                            if looks_like_legacy_object
+                            else None
+                        )
+                        fallback_used = result is not None
+                    result = _cap_result(result, profile)
+                    complete = fallback_used or (jsonl_chunk.finished and result is not None)
+                    attempt_error_type = None
+                    if not complete:
+                        if line_cap_exceeded:
+                            attempt_error_type = "line_cap_exceeded"
+                        elif hit_output_cap:
+                            attempt_error_type = "truncated_json"
+                        elif jsonl_items:
+                            attempt_error_type = "jsonl_incomplete"
+                        else:
+                            attempt_error_type = "parse_error"
+                        last_error_type = attempt_error_type
+                        if jsonl_items:
+                            last_exc = RuntimeError(
+                                "JSONL extraction did not emit finished sentinel"
+                            )
+                    call_metrics.append(
+                        {
+                            "chunk_id": task.chunk_id,
+                            "model": entry["model"],
+                            "lane": pool_idx,
+                            "profile": profile.name,
+                            "attempt": attempt + 1,
+                            "duration_seconds": round(duration, 3),
+                            "total_tokens": usage.get("total_tokens"),
+                            "prompt_tokens": usage.get("prompt_tokens"),
+                            "completion_tokens": usage.get("completion_tokens"),
+                            "finish_reason": finish_reason,
+                            "max_tokens": attempt_max_tokens,
+                            "max_total_lines": profile.max_total_lines,
+                            "input_tokens": input_token_count,
+                            "input_truncated": input_truncated,
+                            "success": bool(complete),
+                            "error_type": attempt_error_type,
+                            "jsonl_valid_lines": jsonl_chunk.valid_lines,
+                            "jsonl_finished": jsonl_chunk.finished,
+                            "line_cap_exceeded": line_cap_exceeded,
+                        }
+                    )
+                    if complete and result:
+                        logger.debug(
+                            "GHOST B: chunk_id=%s entities=%d relations=%d "
+                            "(attempt=%d lane=%d profile=%s jsonl_items=%d)",
+                            task.chunk_id,
+                            len(result.entities),
+                            len(result.relations),
+                            attempt + 1,
+                            pool_idx,
+                            profile.name,
+                            len(jsonl_items),
+                        )
+                        return result
+                    if jsonl_items:
+                        if line_cap_exceeded:
+                            last_error_type = "line_cap_exceeded"
+                        elif hit_output_cap:
+                            last_error_type = "truncated_json"
+                        else:
+                            last_error_type = "jsonl_incomplete"
+                        last_exc = RuntimeError(
+                            "JSONL extraction did not emit finished sentinel"
+                        )
+                        logger.warning(
+                            "GHOST B JSONL contract violation chunk_id=%s lane=%d "
+                            "profile=%s items=%d valid_lines=%d finish_reason=%s "
+                            "invalid_tail=%s line_cap_exceeded=%s",
+                            task.chunk_id,
+                            pool_idx,
+                            profile.name,
+                            len(jsonl_items),
+                            jsonl_chunk.valid_lines,
+                            finish_reason,
+                            bool(jsonl_chunk.invalid_line),
+                            line_cap_exceeded,
+                        )
+                        continue
+                    parse_failures += 1
                     if hit_output_cap and attempt + 1 < max_attempts:
                         last_error_type = "truncated_json"
                         last_exc = RuntimeError(
@@ -2329,11 +2482,12 @@ async def extract_entities(
                         logger.warning(
                             "GHOST B JSON parse failed after output cap "
                             "chunk_id=%s lane=%d completion_tokens=%s "
-                            "max_tokens=%s; retrying",
+                            "max_tokens=%s; switching_to_rescue=%s",
                             task.chunk_id,
                             pool_idx,
                             completion_tokens_raw,
                             attempt_max_tokens,
+                            attempt == 0,
                         )
                         continue
                     last_error_type = "parse_error"
@@ -2380,7 +2534,7 @@ async def extract_entities(
             "GHOST B failed chunk_id=%s lane=%d after %d attempts: %s",
             task.chunk_id,
             pool_idx,
-            parse_failures + exception_failures,
+            call_attempts or (parse_failures + exception_failures),
             last_exc,
         )
         failures_list.append(

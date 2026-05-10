@@ -697,6 +697,7 @@ async def _run_ghosts_parallel(
             pool=pool,
             model=model,
             return_report=True,
+            enable_facts=False,
         )
         if not isinstance(report, ExtractionBatchReport):
             results = report
@@ -784,6 +785,26 @@ def _build_parent_dicts(parents, summaries: list[SummaryResult] | None) -> list[
     ]
 
 
+def _build_child_dicts(children, user_id: str) -> list[dict]:
+    return [
+        {
+            "chunk_id": c.chunk_id,
+            "parent_id": c.parent_id,
+            "doc_id": c.doc_id,
+            "corpus_id": c.corpus_id,
+            "user_id": user_id,
+            "text": c.text,
+            "heading_path": c.heading_path,
+            "source_tier": c.source_tier,
+            "token_count": c.token_count,
+            "page_start": getattr(c, "page_start", None),
+            "page_end": getattr(c, "page_end", None),
+            "chunk_kind": getattr(c, "chunk_kind", ChunkKind.BODY),
+        }
+        for c in children
+    ]
+
+
 async def _write_mongo_all(
     *,
     db: AsyncIOMotorDatabase,
@@ -817,23 +838,7 @@ async def _write_mongo_all(
         doc_id=doc_id,
         parent_texts=[p.get("text") or "" for p in parent_dicts],
     )
-    child_dicts = [
-        {
-            "chunk_id": c.chunk_id,
-            "parent_id": c.parent_id,
-            "doc_id": c.doc_id,
-            "corpus_id": c.corpus_id,
-            "user_id": user_id,
-            "text": c.text,
-            "heading_path": c.heading_path,
-            "source_tier": c.source_tier,
-            "token_count": c.token_count,
-            "page_start": getattr(c, "page_start", None),
-            "page_end": getattr(c, "page_end", None),
-            "chunk_kind": getattr(c, "chunk_kind", ChunkKind.BODY),
-        }
-        for c in children
-    ]
+    child_dicts = _build_child_dicts(children, user_id)
     ghost_b_staging = (
         [asdict(r) for r in ghost_b_out] if ghost_b_out else None
     )
@@ -918,6 +923,26 @@ async def _ensure_progress_document(
             "created_at": now,
             "updated_at": now,
         },
+    )
+
+
+async def _checkpoint_child_chunks(
+    *,
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+    user_id: str,
+    children,
+) -> None:
+    """Persist child chunks before Ghost B so graph failures cannot strand them."""
+
+    child_dicts = _build_child_dicts(children, user_id)
+    await mongo_writer.upsert_chunks(db, child_dicts)
+    logger.info(
+        "phase=chunk_checkpoint doc=%s corpus=%s children=%d",
+        doc_id[:12],
+        corpus_id[:8],
+        len(child_dicts),
     )
 
 
@@ -1251,6 +1276,15 @@ async def run_ingest_job(
             on_doc_id(doc_id)
         except Exception as _exc:
             logger.debug("on_doc_id callback raised: %s", _exc)
+
+    if not ws.mongo_written:
+        await _checkpoint_child_chunks(
+            db=db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            children=children,
+        )
 
     # ── Phase 3: Ghost model phases ──────────────────────────────────────
     async with _MODEL_PHASE_SEMAPHORE:

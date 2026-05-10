@@ -1374,11 +1374,37 @@ class IngestionService:
         total_tokens = sum(child_tokens)
         graph_calls = len(children) if ingestion_config.use_neo4j else 0
         summary_calls = len(parents) if ingestion_config.chunk_summarization else 0
+        settings = get_settings()
+        extraction_pool = (
+            ingestion_config.summary_models
+            if ingestion_config.models_linked or not ingestion_config.extraction_models
+            else ingestion_config.extraction_models
+        )
+        extraction_concurrency = sum(
+            max(1, int(getattr(m, "max_concurrent", 1) or 1))
+            for m in extraction_pool
+        ) or settings.EXTRACTION_MAX_CONCURRENT
+        foreground_calls_per_child = min(
+            settings.EXTRACTION_JSONL_MAX_CALLS,
+            settings.EXTRACTION_FOREGROUND_MAX_CALLS,
+        )
+        rescue_calls_per_child = max(foreground_calls_per_child - 1, 0)
+        worst_case_extraction_calls = graph_calls * foreground_calls_per_child
+        worst_case_completion_tokens = graph_calls * (
+            settings.EXTRACTION_MAX_TOKENS
+            + rescue_calls_per_child * settings.EXTRACTION_RESCUE_MAX_TOKENS
+        )
         warnings: list[str] = []
         if len(children) > 500:
             warnings.append("High child-chunk count; ingest this file in a controlled batch.")
-        if child_tokens and max(child_tokens) > 900:
-            warnings.append("At least one child chunk is unusually large and may stress extraction.")
+        if child_tokens and max(child_tokens) > settings.EXTRACTION_MAX_INPUT_TOKENS:
+            warnings.append(
+                "At least one child chunk exceeds the Ghost B extraction input cap."
+            )
+        if settings.EXTRACTION_ENABLE_FACTS:
+            warnings.append(
+                "Structured facts are configured on, but foreground graph extraction disables facts."
+            )
         return {
             "filename": filename,
             "doc_id": doc_id,
@@ -1392,6 +1418,20 @@ class IngestionService:
             "ghost_b_calls": graph_calls,
             "summary_calls": summary_calls,
             "estimated_llm_calls": graph_calls + summary_calls,
+            "extraction_risk": {
+                "foreground_facts_enabled": False,
+                "facts_configured": settings.EXTRACTION_ENABLE_FACTS,
+                "max_input_tokens": settings.EXTRACTION_MAX_INPUT_TOKENS,
+                "normal_max_tokens": settings.EXTRACTION_MAX_TOKENS,
+                "rescue_max_tokens": settings.EXTRACTION_RESCUE_MAX_TOKENS,
+                "max_total_lines": settings.EXTRACTION_MAX_TOTAL_LINES,
+                "rescue_max_total_lines": settings.EXTRACTION_RESCUE_MAX_TOTAL_LINES,
+                "calls_per_child": foreground_calls_per_child,
+                "extraction_concurrency": extraction_concurrency,
+                "model_phase_doc_concurrency": settings.INGEST_MAX_MODEL_PHASE_DOCS,
+                "worst_case_extraction_calls": worst_case_extraction_calls,
+                "worst_case_completion_tokens": worst_case_completion_tokens,
+            },
             "injected_headers": len(injected_headers),
             "chunking_config": tier_chunker.describe_chunking(parse_result, ingestion_config),
             "recommended_batch_size": 25 if len(children) < 500 else 10,
