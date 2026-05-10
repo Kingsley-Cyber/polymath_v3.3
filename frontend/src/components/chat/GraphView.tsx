@@ -24,6 +24,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import Graph from "graphology";
+import { BooksClusterView } from "./BooksClusterView";
 import { SigmaContainer, useLoadGraph, useSigma, useRegisterEvents } from "@react-sigma/core";
 import louvain from "graphology-communities-louvain";
 import forceAtlas2 from "graphology-layout-forceatlas2";
@@ -112,7 +113,7 @@ interface GraphViewProps {
   onClose: () => void;
 }
 
-type GraphViewMode = "context" | "discourse" | "overview" | "raw" | "full";
+type GraphViewMode = "context" | "discourse" | "overview" | "raw" | "full" | "books";
 type DiscourseLens = "topics" | "concepts" | "gaps" | "context";
 
 const GRAPH_VIEW_MODES: {
@@ -156,6 +157,15 @@ const GRAPH_VIEW_MODES: {
     title: "Load the largest visual corpus graph allowed by the backend",
     nodeCap: 50000,
     edgeCap: 200000,
+  },
+  {
+    id: "books",
+    label: "books",
+    title:
+      "Books-as-clusters: each Document is a cluster, shared entities form bridges. " +
+      "Honors all selected corpora — click a book to drill into its entities + bridges.",
+    nodeCap: 20000,
+    edgeCap: 60000,
   },
 ];
 
@@ -1077,6 +1087,13 @@ export function GraphView({ onClose }: GraphViewProps) {
   }, [searchInput]);
 
   const fetchData = useCallback(async () => {
+    // books mode owns its own data lifecycle in BooksClusterView; skip
+    // the legacy single-corpus fetch entirely.
+    if (viewMode === "books") {
+      setLoading(false);
+      setError(null);
+      return;
+    }
     if (!corpusId) {
       setError("Select a corpus from the dropdown first.");
       return;
@@ -1268,7 +1285,7 @@ export function GraphView({ onClose }: GraphViewProps) {
         </div>
 
         <div className="flex items-center rounded border border-border-minimal bg-[#1a1d24] p-0.5">
-          {GRAPH_VIEW_MODES.filter((mode) => ["context", "discourse", "overview"].includes(mode.id)).map((mode) => (
+          {GRAPH_VIEW_MODES.filter((mode) => ["context", "discourse", "overview", "books"].includes(mode.id)).map((mode) => (
             <button
               key={mode.id}
               onClick={() => setViewMode(mode.id)}
@@ -1354,7 +1371,11 @@ export function GraphView({ onClose }: GraphViewProps) {
           </div>
         )}
 
-        {!error && data && (
+        {viewMode === "books" && (
+          <BooksClusterView corpusIds={selectedCorpusIds} />
+        )}
+
+        {!error && data && viewMode !== "books" && (
           <SigmaContainer
             style={{
               height: "100%",

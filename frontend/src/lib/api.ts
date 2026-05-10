@@ -1387,3 +1387,74 @@ export async function getFullCorpusGraph(
   const qs = new URLSearchParams({ max_nodes: String(maxNodes), max_edges: String(maxEdges) });
   return fetchJSON(`/corpora/${encodeURIComponent(corpusId)}/graph/full?${qs}`);
 }
+
+// ─── Books-as-clusters graph (multi-corpus) ─────────────────────────
+//
+// POST /api/graph/by-document — three modes:
+//   "overview" → just clusters (no nodes/edges) for 100s+ of books
+//   "drill"    → expand one cluster + its bridge neighbours
+//   "full"     → every node/edge across the requested corpora
+//
+// See backend/services/graph/neo4j_reader.py for the response shape.
+export interface ByDocumentCluster {
+  cluster_id: string;
+  corpus_id: string;
+  label?: string;
+  entity_count: number;
+  total_mentions?: number;
+  top_entities?: string[];
+  top_entity_names?: string[];
+  ghost_b_success_rate?: number | null;
+  ghost_b_extracted?: number | null;
+  ghost_b_total?: number | null;
+}
+
+export interface ByDocumentNode {
+  id: string;
+  display_name: string;
+  entity_type?: string;
+  primary_doc_id: string;
+  bridge_doc_ids: string[];
+  total_mentions: number;
+  per_doc_mentions: Record<string, number>;
+}
+
+export interface ByDocumentEdge {
+  source: string;
+  target: string;
+  predicate: string;
+  relation_family?: string;
+  confidence?: number | null;
+  cross_cluster?: boolean;
+}
+
+export interface ByDocumentGraphResponse {
+  mode: "overview" | "drill" | "full";
+  clusters: ByDocumentCluster[];
+  nodes: ByDocumentNode[];
+  edges: ByDocumentEdge[];
+  truncated: boolean;
+}
+
+export async function getGraphByDocument(opts: {
+  corpusIds: string[];
+  mode?: "overview" | "drill" | "full";
+  drillDocId?: string;
+  minEntityMentions?: number;
+  maxNodes?: number;
+  maxEdges?: number;
+  topEntitiesPerCluster?: number;
+}): Promise<ByDocumentGraphResponse> {
+  return fetchJSON("/graph/by-document", {
+    method: "POST",
+    body: JSON.stringify({
+      corpus_ids: opts.corpusIds,
+      mode: opts.mode ?? "overview",
+      drill_doc_id: opts.drillDocId,
+      min_entity_mentions: opts.minEntityMentions ?? 2,
+      max_nodes: opts.maxNodes ?? 20000,
+      max_edges: opts.maxEdges ?? 60000,
+      top_entities_per_cluster: opts.topEntitiesPerCluster ?? 200,
+    }),
+  });
+}
