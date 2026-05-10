@@ -422,6 +422,108 @@ async def entity_search(body: EntitySearchRequest = Body(...)) -> EntitySearchRe
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+@discovery_router.post(
+    "/by-document",
+    summary="Books-as-clusters graph: each Document is one cluster, shared "
+            "entities form bridges between clusters",
+)
+async def graph_by_document(body: dict = Body(...)) -> dict:
+    """Multi-corpus, books-as-clusters view of the entity graph.
+
+    Three modes (request body `mode` field):
+      "overview" — one row per Document with cheap aggregates only.
+                   No nodes / no edges. For 100s-1000s of docs.
+                   Frontend renders these as cluster anchors and lazily
+                   drills on click.
+      "drill"    — same shape as "full" but scoped to one doc's entities
+                   (and their bridge neighbours from other docs).
+                   `drill_doc_id` is required.
+      "full"     — every entity + every relation across the requested
+                   corpora, capped at max_nodes / max_edges. Default.
+
+    Common request fields:
+      corpus_ids:       list[str]   required, 1+
+      mode:             str         optional, default "full"
+      drill_doc_id:     str         required when mode="drill"
+      min_entity_mentions: int      optional, default 2
+      max_nodes:        int         optional, default 20000
+      max_edges:        int         optional, default 60000
+      top_entities_per_cluster: int optional, default 200
+
+    Cluster labels are enriched with filename + ghost_b_metrics from
+    MongoDB so the frontend renders book names instead of doc_id hashes.
+    """
+    driver = _require_neo4j()
+    db = ingestion_service.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+
+    from services.graph.neo4j_reader import (
+        get_document_clusters_overview,
+        get_documents_as_clusters,
+    )
+
+    corpus_ids = body.get("corpus_ids") or []
+    if not isinstance(corpus_ids, list) or not corpus_ids:
+        raise HTTPException(status_code=400, detail="corpus_ids must be a non-empty list")
+    corpus_ids = [str(c) for c in corpus_ids]
+
+    mode = (body.get("mode") or "full").lower()
+    if mode not in ("overview", "drill", "full"):
+        raise HTTPException(status_code=400, detail="mode must be one of: overview, drill, full")
+
+    # Always fetch document metadata once — used to enrich cluster labels.
+    async def _enrich(clusters: list[dict]) -> None:
+        ids = [c["cluster_id"] for c in clusters]
+        if not ids:
+            return
+        cursor = db["documents"].find(
+            {"doc_id": {"$in": ids}},
+            {"doc_id": 1, "filename": 1, "ghost_b_metrics": 1, "_id": 0},
+        )
+        meta_by_doc = {d["doc_id"]: d async for d in cursor}
+        for c in clusters:
+            doc = meta_by_doc.get(c["cluster_id"]) or {}
+            c["label"] = doc.get("filename") or c["cluster_id"]
+            metrics = doc.get("ghost_b_metrics") or {}
+            c["ghost_b_success_rate"] = metrics.get("success_rate")
+            c["ghost_b_extracted"] = metrics.get("extracted_chunks")
+            c["ghost_b_total"] = metrics.get("requested_chunks")
+
+    if mode == "overview":
+        rows = await get_document_clusters_overview(driver, corpus_ids)
+        clusters = [
+            {
+                "cluster_id": r["doc_id"],
+                "corpus_id": r["corpus_id"],
+                "entity_count": r["entity_count"],
+                "total_mentions": r["total_mentions"],
+                "top_entities": r["top_entity_ids"],
+                "top_entity_names": r["top_entity_names"],
+            }
+            for r in rows
+        ]
+        await _enrich(clusters)
+        return {"mode": "overview", "clusters": clusters, "nodes": [], "edges": [], "truncated": False}
+
+    drill_doc_id = body.get("drill_doc_id")
+    if mode == "drill" and not drill_doc_id:
+        raise HTTPException(status_code=400, detail="drill_doc_id is required for mode=drill")
+
+    result = await get_documents_as_clusters(
+        driver,
+        corpus_ids=corpus_ids,
+        min_entity_mentions=int(body.get("min_entity_mentions", 2) or 2),
+        max_nodes=int(body.get("max_nodes", 20000) or 20000),
+        max_edges=int(body.get("max_edges", 60000) or 60000),
+        top_entities_per_cluster=int(body.get("top_entities_per_cluster", 200) or 200),
+        drill_doc_id=drill_doc_id,
+    )
+    result["mode"] = mode
+    await _enrich(result["clusters"])
+    return result
+
+
 @discovery_router.post("/discover", response_model=GraphDiscoverResponse)
 async def graph_discover(
     body: GraphDiscoverRequest,

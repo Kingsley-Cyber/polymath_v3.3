@@ -200,6 +200,247 @@ async def get_full_corpus_graph(
     return {"nodes": nodes, "edges": edges, "truncated": truncated}
 
 
+async def get_document_clusters_overview(
+    driver: AsyncDriver,
+    corpus_ids: list[str],
+) -> list[dict]:
+    """Cluster-only overview for the books-as-clusters graph.
+
+    Returns one row per Document scoped to the given corpora, with cheap
+    aggregates (entity count, mention count, top label entities) and ZERO
+    node/edge payload. Suitable for the 500-book overview where rendering
+    every internal entity at once would freeze the browser.
+
+    Returns: [{cluster_id, corpus_id, entity_count, total_mentions,
+               top_entity_ids, top_entity_names}]
+    """
+    if not corpus_ids:
+        return []
+    cypher = """
+    MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
+    WHERE c.corpus_id IN $corpus_ids
+    WITH c.doc_id AS doc_id, c.corpus_id AS corpus_id, e,
+         count(c) AS mention_count
+    WITH doc_id, corpus_id, collect({
+        eid: e.entity_id,
+        name: coalesce(e.display_name, e.canonical_name),
+        mc: mention_count
+    }) AS entries
+    RETURN doc_id, corpus_id,
+           size(entries) AS entity_count,
+           reduce(t = 0, x IN entries | t + x.mc) AS total_mentions,
+           [x IN entries | x.eid][..12] AS top_entity_ids,
+           [x IN entries | x.name][..12] AS top_entity_names
+    """
+    async with driver.session() as session:
+        res = await session.run(cypher, corpus_ids=corpus_ids)
+        rows = [dict(r) async for r in res]
+    rows.sort(key=lambda r: r.get("entity_count", 0), reverse=True)
+    return rows
+
+
+async def get_documents_as_clusters(
+    driver: AsyncDriver,
+    corpus_ids: list[str],
+    *,
+    min_entity_mentions: int = 2,
+    max_nodes: int = 20000,
+    max_edges: int = 60000,
+    top_entities_per_cluster: int = 200,
+    drill_doc_id: str | None = None,
+    bridge_neighbor_cap: int = 100,
+) -> dict:
+    """Build a books-as-clusters view: each Document is a cluster, entities
+    that appear in multiple Documents become bridges between clusters.
+
+    Returns:
+        {
+          "clusters": [
+              {
+                "cluster_id": doc_id,
+                "corpus_id": corpus_id,
+                "label": filename or doc_id,
+                "entity_count": int,
+                "top_entities": [entity_id, ...]
+              }, ...
+          ],
+          "nodes": [
+              {
+                "id": entity_id,
+                "display_name": str,
+                "entity_type": str,
+                "primary_doc_id": doc_id,
+                "bridge_doc_ids": [doc_id, ...],   // other docs that mention it
+                "total_mentions": int,
+                "per_doc_mentions": {doc_id: count, ...}
+              }, ...
+          ],
+          "edges": [
+              {source, target, predicate, relation_family, confidence,
+               source_doc_id?, cross_cluster: bool}, ...
+          ],
+          "truncated": bool,
+        }
+
+    `cross_cluster` on an edge is true when source and target have different
+    primary_doc_id — those are the visual bridges between book clusters.
+    """
+    if not corpus_ids:
+        return {"clusters": [], "nodes": [], "edges": [], "truncated": False}
+
+    # Per-(doc, entity) mention counts. We filter min_entity_mentions
+    # in Python after the aggregate so we keep entities that are below the
+    # threshold in one doc but cross it via bridges to other docs.
+    #
+    # When drill_doc_id is set, restrict the universe to: that doc's entities
+    # PLUS any other doc that mentions one of those entities (the bridge
+    # neighbours). This is what powers a click-to-drill cluster expansion
+    # without dragging in the whole corpus.
+    if drill_doc_id:
+        mention_cypher = """
+        MATCH (c0:Chunk {doc_id: $drill_doc_id})-[:MENTIONS]->(target:Entity)
+        WHERE c0.corpus_id IN $corpus_ids
+        WITH collect(DISTINCT target.entity_id) AS drill_entity_ids
+
+        MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
+        WHERE c.corpus_id IN $corpus_ids
+          AND e.entity_id IN drill_entity_ids
+        WITH c.doc_id AS doc_id, c.corpus_id AS corpus_id, e,
+             count(c) AS mention_count
+        RETURN doc_id, corpus_id,
+               e.entity_id AS entity_id,
+               coalesce(e.display_name, e.canonical_name) AS display_name,
+               coalesce(e.primary_entity_type, e.entity_type) AS entity_type,
+               mention_count
+        """
+    else:
+        mention_cypher = """
+        MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
+        WHERE c.corpus_id IN $corpus_ids
+        WITH c.doc_id AS doc_id, c.corpus_id AS corpus_id, e,
+             count(c) AS mention_count
+        RETURN doc_id, corpus_id,
+               e.entity_id AS entity_id,
+               coalesce(e.display_name, e.canonical_name) AS display_name,
+               coalesce(e.primary_entity_type, e.entity_type) AS entity_type,
+               mention_count
+        """
+
+    edges_cypher = """
+    MATCH (c:Chunk)-[:MENTIONS]->(a:Entity)
+    WHERE c.corpus_id IN $corpus_ids
+    MATCH (c2:Chunk)-[:MENTIONS]->(b:Entity)
+    WHERE c2.corpus_id IN $corpus_ids AND a <> b
+    MATCH (a)-[r:RELATES_TO]->(b)
+    WHERE any(cid IN $corpus_ids WHERE cid IN coalesce(r.corpus_ids, []))
+    RETURN DISTINCT a.entity_id AS source,
+                    b.entity_id AS target,
+                    r.predicate AS predicate,
+                    coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
+                    r.confidence AS confidence
+    LIMIT $max_edges
+    """
+
+    async with driver.session() as session:
+        mention_params: dict[str, object] = {"corpus_ids": corpus_ids}
+        if drill_doc_id:
+            mention_params["drill_doc_id"] = drill_doc_id
+        mention_res = await session.run(mention_cypher, **mention_params)
+        mention_rows = [dict(r) async for r in mention_res]
+        edges_res = await session.run(
+            edges_cypher, corpus_ids=corpus_ids, max_edges=max_edges
+        )
+        edges = [dict(r) async for r in edges_res]
+
+    # Aggregate per-entity stats: which doc has the most mentions = primary,
+    # all other docs = bridges. Track per-doc mention counts for sizing.
+    by_entity: dict[str, dict] = {}
+    cluster_entity_lists: dict[str, list[tuple[str, int]]] = {}
+    cluster_meta: dict[str, dict] = {}
+
+    for row in mention_rows:
+        eid = row["entity_id"]
+        did = row["doc_id"]
+        cid = row["corpus_id"]
+        mc = int(row["mention_count"] or 0)
+
+        ent = by_entity.setdefault(
+            eid,
+            {
+                "id": eid,
+                "display_name": row["display_name"],
+                "entity_type": row["entity_type"],
+                "per_doc_mentions": {},
+                "total_mentions": 0,
+                "primary_doc_id": None,
+                "primary_doc_count": 0,
+                "bridge_doc_ids": [],
+            },
+        )
+        ent["per_doc_mentions"][did] = ent["per_doc_mentions"].get(did, 0) + mc
+        ent["total_mentions"] += mc
+        if ent["per_doc_mentions"][did] > ent["primary_doc_count"]:
+            ent["primary_doc_count"] = ent["per_doc_mentions"][did]
+            ent["primary_doc_id"] = did
+
+        cluster_meta.setdefault(
+            did, {"cluster_id": did, "corpus_id": cid, "entity_count": 0}
+        )
+        cluster_entity_lists.setdefault(did, []).append((eid, mc))
+
+    # Compute bridge_doc_ids and apply min_entity_mentions threshold.
+    nodes: list[dict] = []
+    for ent in by_entity.values():
+        if ent["total_mentions"] < min_entity_mentions:
+            continue
+        ent["bridge_doc_ids"] = [
+            d for d in ent["per_doc_mentions"].keys() if d != ent["primary_doc_id"]
+        ]
+        ent.pop("primary_doc_count", None)
+        nodes.append(ent)
+
+    # Sort nodes by total_mentions descending for the truncation cap.
+    nodes.sort(key=lambda n: n["total_mentions"], reverse=True)
+    truncated_nodes = len(nodes) > max_nodes
+    if truncated_nodes:
+        nodes = nodes[:max_nodes]
+    surviving_node_ids = {n["id"] for n in nodes}
+
+    # Compute per-cluster top entities + entity counts using only surviving nodes.
+    for did, ents in cluster_entity_lists.items():
+        ents_alive = [(eid, mc) for eid, mc in ents if eid in surviving_node_ids]
+        ents_alive.sort(key=lambda t: t[1], reverse=True)
+        cluster_meta[did]["entity_count"] = len(ents_alive)
+        cluster_meta[did]["top_entities"] = [
+            eid for eid, _ in ents_alive[:top_entities_per_cluster]
+        ]
+
+    # Drop edges that point at nodes we discarded.
+    edges = [
+        e
+        for e in edges
+        if e["source"] in surviving_node_ids and e["target"] in surviving_node_ids
+    ]
+    truncated_edges = len(edges) >= max_edges
+
+    # Annotate each edge as cross_cluster vs intra_cluster using primary_doc_id.
+    primary_by_id = {n["id"]: n["primary_doc_id"] for n in nodes}
+    for e in edges:
+        sp = primary_by_id.get(e["source"])
+        tp = primary_by_id.get(e["target"])
+        e["cross_cluster"] = bool(sp and tp and sp != tp)
+
+    clusters = list(cluster_meta.values())
+    clusters.sort(key=lambda c: c["entity_count"], reverse=True)
+
+    return {
+        "clusters": clusters,
+        "nodes": nodes,
+        "edges": edges,
+        "truncated": truncated_nodes or truncated_edges,
+    }
+
+
 async def get_entity_relations(
     driver: AsyncDriver,
     corpus_id: str,
