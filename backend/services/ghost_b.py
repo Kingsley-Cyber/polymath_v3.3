@@ -857,15 +857,14 @@ def _select_extraction_output_mode(
     *,
     profile_name: str,
 ) -> Literal["json_object", "jsonl"]:
-    """Resolve the actual Ghost B output contract for one lane attempt."""
-    if profile_name != "normal":
-        return "jsonl"
-    mode = (configured_mode or "auto").strip().lower()
-    if mode == "jsonl":
-        return "jsonl"
-    if mode == "json_object":
-        return "json_object"
-    return "json_object" if _lane_supports_json_object(entry) else "jsonl"
+    """Resolve the actual Ghost B output contract for one lane attempt.
+
+    JSONL is the production transport. Legacy config values are still accepted
+    by Settings/env parsing, but foreground extraction no longer switches into
+    JSON-object primary mode based on provider heuristics.
+    """
+    _ = (configured_mode, entry, profile_name)
+    return "jsonl"
 
 
 def _json_object_response_format() -> dict[str, str]:
@@ -987,11 +986,11 @@ def build_user_prompt(
         "Abbreviations:\n"
         "- t=e entity, t=r relation, t=f fact, t=x finished\n"
         "- Entity: cn=canonical_name, sf=surface_form, et=entity_type, cf=confidence\n"
-        "- Relation: sub=subject, pred=predicate, obj=object, ok=object_kind, cf=confidence, ev=evidence_phrase\n"
+        "- Relation: sub=subject, pred=predicate, obj=object, ok=object_kind, cf=confidence, ev=evidence_phrase, cue=optional relation trigger\n"
         "- Fact: sub=subject, ft=fact_type, pn=property_name, val=value, unit=unit, cond=condition, cf=confidence, ev=evidence_phrase\n"
         "Line shapes:\n"
         f'- Entity line: {{"t":"e","cn":"lowercase no-punct","sf":"verbatim","et":"{entity_type_enum}","cf":0.0}}\n'
-        f'- Relation line: {{"t":"r","sub":"canonical_name","pred":"{predicate_desc}","obj":"canonical_name or literal","ok":"entity|literal","cf":0.0,"ev":"short source phrase"}}\n'
+        f'- Relation line: {{"t":"r","sub":"canonical_name","pred":"{predicate_desc}","obj":"canonical_name or literal","ok":"entity|literal","cf":0.0,"ev":"short source phrase","cue":"trigger"}}\n'
         f"{fact_protocol}"
         '- Finished line: {"t":"x"}\n'
         "Rules:\n"
@@ -1291,6 +1290,12 @@ def _cap_result(
     result.relations = result.relations[: profile.max_relations]
     result.facts = result.facts[: profile.max_facts] if profile.enable_facts else []
     return result
+
+
+def _result_has_items(result: ExtractionResult | None) -> bool:
+    if result is None:
+        return False
+    return bool(result.entities or result.relations or result.facts)
 
 
 def summarize_extraction_batch(
@@ -2066,14 +2071,21 @@ def _jsonl_item_identity(item: dict) -> tuple:
     return (item_type, _compact_jsonl_line(item))
 
 
-def _merge_jsonl_items(existing: list[dict], incoming: list[dict]) -> list[dict]:
+def _merge_jsonl_items(
+    existing: list[dict],
+    incoming: list[dict],
+    *,
+    prefer_incoming: bool = False,
+) -> list[dict]:
     out = list(existing)
-    seen = {_jsonl_item_identity(item) for item in out}
+    seen = {_jsonl_item_identity(item): idx for idx, item in enumerate(out)}
     for item in incoming:
         identity = _jsonl_item_identity(item)
         if identity in seen:
+            if prefer_incoming:
+                out[seen[identity]] = item
             continue
-        seen.add(identity)
+        seen[identity] = len(out)
         out.append(item)
     return out
 
@@ -2126,7 +2138,12 @@ def _jsonl_items_to_object(items: list[dict], task: ExtractionTask) -> dict:
                     "evidence_phrase": str(
                         item.get("ev") or item.get("evidence_phrase") or ""
                     ).strip(),
-                    "relation_cue": str(item.get("rc") or item.get("relation_cue") or "").strip(),
+                    "relation_cue": str(
+                        item.get("rc")
+                        or item.get("relation_cue")
+                        or item.get("cue")
+                        or ""
+                    ).strip(),
                 }
             )
         elif item_type == "f":
@@ -2249,26 +2266,6 @@ def _parse_object_with_repair(
     )
 
 
-def build_continuation_prompt(
-    *,
-    previous_items: list[dict],
-    **kwargs,
-) -> str:
-    recent = "\n".join(_compact_jsonl_line(item) for item in previous_items[-3:])
-    if not recent:
-        recent = "(none)"
-    return (
-        "Continue extracting from the chunk below.\n"
-        "--- PREVIOUS ITEMS (do not repeat) ---\n"
-        f"{recent}\n"
-        "--- END PREVIOUS ITEMS ---\n"
-        "Continue with the next entity/relation/fact, one JSON object per line. "
-        'End with {"t":"x"} only when the entire extraction is complete.\n'
-        "--- CHUNK TEXT AND EXTRACTION RULES ---\n"
-        f"{build_user_prompt(**kwargs)}"
-    )
-
-
 def build_rescue_prompt(
     *,
     chunk_id: str,
@@ -2281,9 +2278,13 @@ def build_rescue_prompt(
     schema: SchemaContext | None = None,
     effective_entity_vocab: list[str] | None = None,
     effective_relation_vocab: list[str] | None = None,
+    accepted_items: list[dict] | None = None,
+    failure_reason: str | None = None,
+    enable_facts: bool | None = None,
+    max_facts: int | None = None,
     **_: Any,
 ) -> str:
-    """Shorter second-pass prompt used after a foreground contract violation."""
+    """Single bounded repair/resume prompt after a foreground contract violation."""
 
     if schema and schema.has_entity_schema:
         entity_vocab = effective_entity_vocab or schema.entity_vocab
@@ -2293,15 +2294,46 @@ def build_rescue_prompt(
         relation_vocab = effective_relation_vocab or schema.relation_vocab
     else:
         relation_vocab = ["short verb phrase label"]
+    entity_vocab_text = "|".join(entity_vocab)
+    relation_vocab_text = "|".join(relation_vocab)
+    accepted_lines = "\n".join(
+        _compact_jsonl_line(item) for item in (accepted_items or [])
+    )
+    if not accepted_lines:
+        accepted_lines = "(none)"
+    facts_enabled = bool(enable_facts) and int(max_facts or 0) > 0
+    fact_limit = max(0, int(max_facts or 0))
+    fact_protocol = ""
+    fact_rule = "- Facts are disabled for this repair.\n"
+    target = "entities and relations"
+    if facts_enabled:
+        fact_types = "|".join(FACT_TYPES)
+        target = "entities, relations, and facts"
+        fact_protocol = (
+            f'Fact: {{"t":"f","sub":"canonical_name","ft":"{fact_types}",'
+            '"pn":"snake_case","val":"verbatim or normalized","unit":"optional unit",'
+            '"cond":"optional condition","cf":0.0,"ev":"exact short phrase"}}\n'
+        )
+        fact_rule = (
+            f"- Max {fact_limit} facts; include facts only when they are high-value and evidence-backed.\n"
+        )
     return (
-        "RESCUE MODE: the previous extraction was invalid or capped.\n"
-        "Return only the highest-confidence core graph items. Facts are disabled.\n"
+        "REPAIR MODE: the previous JSONL extraction was incomplete, malformed, capped, or failed validation.\n"
+        f"Failure reason: {failure_reason or 'contract_violation'}.\n"
+        "You have one repair attempt.\n"
+        "Accepted valid JSONL lines already kept:\n"
+        f"{accepted_lines}\n"
+        "Do not repeat accepted lines. Return only the missing highest-value remaining lines.\n"
+        'If the accepted lines already cover the complete extraction, return only {"t":"x"}.\n'
+        f"Focus on {target}.\n"
         "Output compact JSONL only, one object per line; no prose, markdown, or arrays.\n"
-        'End the complete extraction with exactly: {"t":"x"}\n'
+        'End with exactly: {"t":"x"}\n'
         f"Limits: max {max_total_lines} item lines, max {max_entities} entities, "
         f"max {max_relations} relations.\n"
-        f'Entity: {{"t":"e","cn":"lowercase no-punct","sf":"verbatim","et":"{"|".join(entity_vocab)}","cf":0.0}}\n'
-        f'Relation: {{"t":"r","sub":"canonical_name","pred":"{"|".join(relation_vocab)}","obj":"canonical_name or literal","ok":"entity|literal","cf":0.0,"ev":"exact short phrase"}}\n'
+        f"{fact_rule}"
+        f'Entity: {{"t":"e","cn":"lowercase no-punct","sf":"verbatim","et":"{entity_vocab_text}","cf":0.0}}\n'
+        f'Relation: {{"t":"r","sub":"canonical_name","pred":"{relation_vocab_text}","obj":"canonical_name or literal","ok":"entity|literal","cf":0.0,"ev":"exact short phrase","cue":"trigger"}}\n'
+        f"{fact_protocol}"
         "- Use only labels listed above; use related_to only if no specific predicate fits.\n"
         "- Relation ev must be an exact short phrase from TEXT.\n"
         "- Prefer fewer correct lines over broad coverage.\n"
@@ -2370,6 +2402,7 @@ async def extract_entities(
     max_jsonl_calls = min(
         settings.EXTRACTION_JSONL_MAX_CALLS,
         settings.EXTRACTION_FOREGROUND_MAX_CALLS,
+        2,
     )
     raw_jsonl_debug = settings.EXTRACTION_JSONL_DEBUG_RAW
     max_input_tokens = settings.EXTRACTION_MAX_INPUT_TOKENS
@@ -2558,8 +2591,8 @@ async def extract_entities(
             max_entities=rescue_max_entities,
             max_relations=rescue_max_relations,
             max_total_lines=rescue_max_total_lines,
-            enable_facts=False,
-            max_facts=0,
+            enable_facts=facts_enabled,
+            max_facts=max_facts if facts_enabled else 0,
         )
         profiles = [normal_profile, rescue_profile]
         payload_base: dict = {
@@ -2583,6 +2616,7 @@ async def extract_entities(
         parse_failures = 0
         exception_failures = 0
         call_attempts = 0
+        accepted_jsonl_items: list[dict[str, Any]] = []
         max_attempts = max(1, max_jsonl_calls)
         for attempt in range(max_attempts):
             started = time.perf_counter()
@@ -2608,7 +2642,11 @@ async def extract_entities(
                 prompt = (
                     build_user_prompt(**profile_kwargs)
                     if profile.name == "normal"
-                    else build_rescue_prompt(**profile_kwargs)
+                    else build_rescue_prompt(
+                        **profile_kwargs,
+                        accepted_items=accepted_jsonl_items,
+                        failure_reason=last_error_type,
+                    )
                 )
             attempt_payload = dict(payload_base)
             attempt_payload["messages"] = [
@@ -2682,8 +2720,9 @@ async def extract_entities(
                     )
                     jsonl_chunk = JsonlParseChunk(items=[])
                     jsonl_items: list[dict[str, Any]] = []
+                    merged_jsonl_items: list[dict[str, Any]] = []
                     line_cap_exceeded = False
-                    fallback_used = False
+                    empty_after_claimed_items = False
                     if profile_output_mode == "json_object":
                         result = _parse_object_with_repair(
                             raw,
@@ -2694,16 +2733,20 @@ async def extract_entities(
                             enable_facts=profile.enable_facts,
                             max_facts=profile.max_facts,
                         )
-                        fallback_used = result is not None
                         if result is None:
                             jsonl_chunk = _parse_jsonl_lines(raw)
                             jsonl_items, line_cap_exceeded = _cap_jsonl_items(
                                 jsonl_chunk.items,
                                 profile.max_total_lines,
                             )
-                            if jsonl_items or jsonl_chunk.finished:
+                            merged_jsonl_items = _merge_jsonl_items(
+                                accepted_jsonl_items,
+                                jsonl_items,
+                                prefer_incoming=True,
+                            )
+                            if merged_jsonl_items or jsonl_chunk.finished:
                                 result = _parse_jsonl_items(
-                                    jsonl_items,
+                                    merged_jsonl_items,
                                     prompt_task,
                                     threshold,
                                     schema=schema,
@@ -2717,9 +2760,18 @@ async def extract_entities(
                             jsonl_chunk.items,
                             profile.max_total_lines,
                         )
-                        if jsonl_items or jsonl_chunk.finished:
-                            result = _parse_jsonl_items(
+                        merged_jsonl_items = (
+                            _merge_jsonl_items(
+                                accepted_jsonl_items,
                                 jsonl_items,
+                                prefer_incoming=True,
+                            )
+                            if profile.name != "normal"
+                            else list(jsonl_items)
+                        )
+                        if merged_jsonl_items or jsonl_chunk.finished:
+                            result = _parse_jsonl_items(
+                                merged_jsonl_items,
                                 prompt_task,
                                 threshold,
                                 schema=schema,
@@ -2728,27 +2780,18 @@ async def extract_entities(
                                 max_facts=profile.max_facts,
                             )
                         else:
-                            looks_like_legacy_object = any(
-                                marker in raw
-                                for marker in ('"entities"', '"relations"', '"schema_version"')
-                            )
-                            result = (
-                                _parse_object_with_repair(
-                                    raw,
-                                    prompt_task,
-                                    threshold,
-                                    schema=schema,
-                                    schema_lens=schema_lens,
-                                    enable_facts=profile.enable_facts,
-                                    max_facts=profile.max_facts,
-                                )
-                                if looks_like_legacy_object
-                                else None
-                            )
-                            fallback_used = result is not None
+                            result = None
                     result = _cap_result(result, profile)
-                    complete = fallback_used or (
-                        jsonl_chunk.finished and result is not None
+                    empty_after_claimed_items = (
+                        result is not None
+                        and bool(merged_jsonl_items)
+                        and not _result_has_items(result)
+                    )
+                    complete = (
+                        jsonl_chunk.finished
+                        and result is not None
+                        and not empty_after_claimed_items
+                        and not line_cap_exceeded
                     )
                     attempt_error_type = None
                     if not complete:
@@ -2756,12 +2799,14 @@ async def extract_entities(
                             attempt_error_type = "line_cap_exceeded"
                         elif hit_output_cap:
                             attempt_error_type = "truncated_json"
-                        elif jsonl_items:
+                        elif empty_after_claimed_items:
+                            attempt_error_type = "empty_after_validation"
+                        elif merged_jsonl_items:
                             attempt_error_type = "jsonl_incomplete"
                         else:
                             attempt_error_type = "parse_error"
                         last_error_type = attempt_error_type
-                        if jsonl_items:
+                        if merged_jsonl_items:
                             last_exc = RuntimeError(
                                 "JSONL extraction did not emit finished sentinel"
                             )
@@ -2788,7 +2833,9 @@ async def extract_entities(
                             "error_type": attempt_error_type,
                             "jsonl_valid_lines": jsonl_chunk.valid_lines,
                             "jsonl_finished": jsonl_chunk.finished,
+                            "jsonl_accepted_items": len(accepted_jsonl_items),
                             "line_cap_exceeded": line_cap_exceeded,
+                            "empty_after_validation": empty_after_claimed_items,
                         }
                     )
                     if complete and result:
@@ -2804,28 +2851,43 @@ async def extract_entities(
                             len(jsonl_items),
                         )
                         return result
-                    if jsonl_items:
+                    if (
+                        jsonl_items
+                        or empty_after_claimed_items
+                        or (merged_jsonl_items and not jsonl_chunk.finished)
+                    ):
+                        if jsonl_items:
+                            accepted_jsonl_items = _merge_jsonl_items(
+                                accepted_jsonl_items,
+                                jsonl_items,
+                                prefer_incoming=True,
+                            )
                         if line_cap_exceeded:
                             last_error_type = "line_cap_exceeded"
                         elif hit_output_cap:
                             last_error_type = "truncated_json"
+                        elif empty_after_claimed_items:
+                            last_error_type = "empty_after_validation"
                         else:
                             last_error_type = "jsonl_incomplete"
                         last_exc = RuntimeError(
-                            "JSONL extraction did not emit finished sentinel"
+                            "JSONL extraction did not complete with a valid normalized object"
                         )
                         logger.warning(
                             "GHOST B JSONL contract violation chunk_id=%s lane=%d "
-                            "profile=%s items=%d valid_lines=%d finish_reason=%s "
-                            "invalid_tail=%s line_cap_exceeded=%s",
+                            "profile=%s items=%d accepted_items=%d valid_lines=%d "
+                            "finish_reason=%s invalid_tail=%s line_cap_exceeded=%s "
+                            "empty_after_validation=%s",
                             task.chunk_id,
                             pool_idx,
                             profile.name,
                             len(jsonl_items),
+                            len(accepted_jsonl_items),
                             jsonl_chunk.valid_lines,
                             finish_reason,
                             bool(jsonl_chunk.invalid_line),
                             line_cap_exceeded,
+                            empty_after_claimed_items,
                         )
                         continue
                     parse_failures += 1

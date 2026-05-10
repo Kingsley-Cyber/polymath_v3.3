@@ -32,8 +32,8 @@ from services.ghost_b import (
     _parse_jsonl_lines,
     _select_extraction_output_mode,
     _validate_evidence,
-    build_continuation_prompt,
     build_json_object_prompt,
+    build_rescue_prompt,
     build_user_prompt,
     normalize_relation_predicate_alias,
 )
@@ -210,14 +210,14 @@ def test_json_object_prompt_renders_strict_primary_contract():
     assert "predicate one of: part_of=X subcomponent of Y" in prompt
 
 
-def test_output_mode_auto_uses_json_object_for_deepseek_only():
+def test_output_mode_is_jsonl_primary_even_for_deepseek_and_legacy_config():
     assert (
         _select_extraction_output_mode(
             "auto",
             {"model": "deepseek/deepseek-v4-flash", "base_url": None},
             profile_name="normal",
         )
-        == "json_object"
+        == "jsonl"
     )
     assert (
         _select_extraction_output_mode(
@@ -233,7 +233,7 @@ def test_output_mode_auto_uses_json_object_for_deepseek_only():
             {"model": "test-model", "base_url": None},
             profile_name="normal",
         )
-        == "json_object"
+        == "jsonl"
     )
     assert (
         _select_extraction_output_mode(
@@ -290,6 +290,29 @@ def test_jsonl_parser_skips_fences_and_preambles():
     assert parsed.invalid_line is None
     assert len(parsed.items) == 1
     assert parsed.items[0]["cn"] == "constexpr objects"
+
+
+def test_jsonl_relation_cue_alias_is_preserved():
+    task = ExtractionTask(
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        text="constexpr functions produce compile-time results.",
+    )
+    parsed = _parse_jsonl_lines(
+        "\n".join(
+            [
+                '{"t":"e","cn":"constexpr functions","sf":"constexpr functions","et":"Concept","cf":0.91}',
+                '{"t":"r","sub":"constexpr functions","pred":"produces","obj":"compile-time results","ok":"literal","cf":0.86,"ev":"produce compile-time results","cue":"produce"}',
+                '{"t":"x"}',
+            ]
+        )
+    )
+
+    result = _parse_jsonl_items(parsed.items, task, 0.0)
+
+    assert result is not None
+    assert result.relations[0].relation_cue == "produce"
 
 
 def test_raw_jsonl_debug_logging_is_flag_guarded(caplog):
@@ -357,7 +380,7 @@ def test_jsonl_continuation_merge_dedupes_and_preserves_facts():
     assert result.facts[0].property_name == "initialized_when"
 
 
-def test_continuation_prompt_carries_recent_jsonl_without_restart():
+def test_repair_prompt_carries_accepted_jsonl_without_open_ended_continuation():
     previous = [
         {"t": "e", "cn": "a", "sf": "A", "et": "Concept", "cf": 0.9},
         {"t": "e", "cn": "b", "sf": "B", "et": "Concept", "cf": 0.9},
@@ -365,27 +388,31 @@ def test_continuation_prompt_carries_recent_jsonl_without_restart():
         {"t": "e", "cn": "d", "sf": "D", "et": "Concept", "cf": 0.9},
     ]
 
-    prompt = build_continuation_prompt(
-        previous_items=previous,
+    prompt = build_rescue_prompt(
+        accepted_items=previous,
+        failure_reason="jsonl_incomplete",
         chunk_id="c1",
         doc_id="d1",
         corpus_id="corp1",
         text="sample",
+        max_entities=8,
+        max_relations=8,
+        max_total_lines=16,
     )
 
-    assert "Continue extracting from the chunk below" in prompt
-    assert "do not repeat" in prompt
-    assert "--- PREVIOUS ITEMS (do not repeat) ---" in prompt
-    assert "--- END PREVIOUS ITEMS ---" in prompt
-    assert "--- CHUNK TEXT AND EXTRACTION RULES ---" in prompt
-    assert '"cn":"a"' not in prompt
+    assert "REPAIR MODE" in prompt
+    assert "one repair attempt" in prompt
+    assert "Do not repeat accepted lines" in prompt
+    assert "Accepted valid JSONL lines already kept" in prompt
+    assert "Continue with the next" not in prompt
+    assert '"cn":"a"' in prompt
     assert '"cn":"b"' in prompt
     assert '"cn":"d"' in prompt
     assert '{"t":"x"}' in prompt
 
 
 @pytest.mark.asyncio
-async def test_extraction_switches_to_rescue_without_repeating_capped_prompt(monkeypatch):
+async def test_extraction_repairs_once_and_merges_accepted_primary_lines(monkeypatch):
     calls: list[dict] = []
     responses = [
         {
@@ -393,19 +420,22 @@ async def test_extraction_switches_to_rescue_without_repeating_capped_prompt(mon
             "choices": [
                 {
                     "finish_reason": "length",
-                    "message": {"content": '{"t":"e","cn":"unterminated"'},
+                    "message": {
+                        "content": '{"t":"e","cn":"alpha","sf":"Alpha","et":"Concept","cf":0.95}'
+                    },
                 }
             ],
         },
         {
-            "usage": {"total_tokens": 160, "prompt_tokens": 100, "completion_tokens": 60},
+            "usage": {"total_tokens": 180, "prompt_tokens": 110, "completion_tokens": 70},
             "choices": [
                 {
                     "finish_reason": "stop",
                     "message": {
                         "content": "\n".join(
                             [
-                                '{"t":"e","cn":"alpha","sf":"Alpha","et":"concept","cf":0.95}',
+                                '{"t":"e","cn":"beta","sf":"Beta","et":"Concept","cf":0.9}',
+                                '{"t":"r","sub":"alpha","pred":"produces","obj":"beta","ok":"entity","cf":0.86,"ev":"Alpha produces Beta","cue":"produces"}',
                                 '{"t":"x"}',
                             ]
                         )
@@ -480,7 +510,7 @@ async def test_extraction_switches_to_rescue_without_repeating_capped_prompt(mon
                 chunk_id="c1",
                 doc_id="d1",
                 corpus_id="corp1",
-                text="Alpha is a compact test concept.",
+                text="Alpha produces Beta.",
             )
         ],
         pool=[{
@@ -499,31 +529,29 @@ async def test_extraction_switches_to_rescue_without_repeating_capped_prompt(mon
     assert '"t":"f"' not in calls[0]["messages"][1]["content"]
     assert "max 20 total extraction item lines" in calls[0]["messages"][1]["content"]
     assert calls[1]["max_tokens"] == 900
-    assert "RESCUE MODE" in calls[1]["messages"][1]["content"]
-    assert "Facts are disabled" in calls[1]["messages"][1]["content"]
+    assert "REPAIR MODE" in calls[1]["messages"][1]["content"]
+    assert "Accepted valid JSONL lines already kept" in calls[1]["messages"][1]["content"]
+    assert '"cn":"alpha"' in calls[1]["messages"][1]["content"]
+    assert "Do not repeat accepted lines" in calls[1]["messages"][1]["content"]
+    assert "one repair attempt" in calls[1]["messages"][1]["content"]
     assert "max 8 entities" in calls[1]["messages"][1]["content"]
-    assert report.results and report.results[0].entities[0].canonical_name == "alpha"
+    assert report.results
+    result = report.results[0]
+    assert [e.canonical_name for e in result.entities] == ["alpha", "beta"]
+    assert len(result.relations) == 1
+    assert result.relations[0].relation_cue == "produces"
     assert report.metrics["attempt_count"] == 2
-    assert report.metrics["completion_tokens"] == 1260
+    assert report.metrics["completion_tokens"] == 1270
 
 
 @pytest.mark.asyncio
-async def test_deepseek_auto_uses_json_object_payload_on_primary(monkeypatch):
+async def test_deepseek_auto_uses_jsonl_payload_on_primary(monkeypatch):
     calls: list[dict] = []
-    content = json.dumps(
-        {
-            "schema_version": "polymath.extract.v2",
-            "entities": [
-                {
-                    "canonical_name": "alpha",
-                    "surface_form": "Alpha",
-                    "entity_type": "concept",
-                    "confidence": 0.95,
-                }
-            ],
-            "relations": [],
-            "facts": [],
-        }
+    content = "\n".join(
+        [
+            '{"t":"e","cn":"alpha","sf":"Alpha","et":"Concept","cf":0.95}',
+            '{"t":"x"}',
+        ]
     )
 
     class FakeResponse:
@@ -608,13 +636,12 @@ async def test_deepseek_auto_uses_json_object_payload_on_primary(monkeypatch):
     )
 
     assert len(calls) == 1
-    assert calls[0]["response_format"] == {"type": "json_object"}
-    assert "Output EXACTLY one valid JSON object" in calls[0]["messages"][0]["content"]
-    assert "Return exactly one valid JSON object" in calls[0]["messages"][1]["content"]
-    assert "Do not use markdown, code fences, JSONL" in calls[0]["messages"][1]["content"]
-    assert "entities: max 8" in calls[0]["messages"][1]["content"]
-    assert "relations: max 12" in calls[0]["messages"][1]["content"]
-    assert "facts must be []" in calls[0]["messages"][1]["content"]
+    assert "response_format" not in calls[0]
+    assert "Output EXACTLY one JSON object per line" in calls[0]["messages"][0]["content"]
+    assert "Output JSONL only" in calls[0]["messages"][1]["content"]
+    assert "max 14 entities" in calls[0]["messages"][1]["content"]
+    assert "max 20 relations" in calls[0]["messages"][1]["content"]
+    assert '{"t":"x"}' in calls[0]["messages"][1]["content"]
     assert report.results and report.results[0].entities[0].canonical_name == "alpha"
     assert report.metrics["attempt_count"] == 1
     assert report.metrics["completion_tokens"] == 30
@@ -820,6 +847,91 @@ async def test_model_lane_concurrency_is_shared_across_concurrent_documents(monk
     assert max_active == 3
     assert sum(len(report.results) for report in reports) == 6
     assert sum(report.metrics["attempt_count"] for report in reports) == 6
+
+
+@pytest.mark.asyncio
+async def test_jsonl_repair_is_hard_clamped_to_one_retry(monkeypatch):
+    calls = 0
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "usage": {"total_tokens": 20, "prompt_tokens": 10, "completion_tokens": 10},
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": "not jsonl"}}
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            nonlocal calls
+            calls += 1
+            return FakeResponse()
+
+    fake_settings = SimpleNamespace(
+        ENTITY_CONFIDENCE_THRESHOLD=0.0,
+        SCHEMA_INLINE_LIMIT=30,
+        SCHEMA_RETRIEVAL_TOP_K=10,
+        EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_OUTPUT_MODE="jsonl",
+        EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK=12,
+        EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK=4,
+        EXTRACTION_EVIDENCE_MAX_CHARS=120,
+        EXTRACTION_FACT_VALUE_MAX_CHARS=160,
+        EXTRACTION_RESCUE_MAX_TOKENS=900,
+        EXTRACTION_ENABLE_FACTS=False,
+        EXTRACTION_MAX_FACTS_PER_CHUNK=5,
+        EXTRACTION_JSONL_MAX_CALLS=8,
+        EXTRACTION_FOREGROUND_MAX_CALLS=3,
+        EXTRACTION_JSONL_DEBUG_RAW=False,
+        EXTRACTION_MAX_INPUT_TOKENS=700,
+        EXTRACTION_MAX_TOTAL_LINES=20,
+        EXTRACTION_RESCUE_MAX_TOTAL_LINES=16,
+        EXTRACTION_MAX_ENTITIES_PER_CHUNK=14,
+        EXTRACTION_MAX_RELATIONS_PER_CHUNK=20,
+        EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK=8,
+        LITELLM_MASTER_KEY="test-key",
+        LITELLM_URL="http://litellm",
+        DEFAULT_COMPLETION_MODEL="test-model",
+        EXTRACTION_MAX_CONCURRENT=1,
+        EXTRACTION_GLOBAL_MAX_CONCURRENT=180,
+        EXTRACTION_FAILURE_PAUSE_PERCENT=100.0,
+        EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS=20,
+    )
+    monkeypatch.setattr(ghost_b, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    report = await ghost_b.extract_entities(
+        [ExtractionTask(chunk_id="c1", doc_id="d1", corpus_id="corp1", text="bad")],
+        pool=[{
+            "model": "test-model",
+            "base_url": None,
+            "api_key": None,
+            "max_concurrent": 1,
+            "extra_params": {},
+        }],
+        return_report=True,
+        enable_facts=False,
+    )
+
+    assert calls == 2
+    assert len(report.results) == 0
+    assert len(report.failures) == 1
+    assert report.failures[0].attempts == 2
 
 
 @pytest.mark.asyncio

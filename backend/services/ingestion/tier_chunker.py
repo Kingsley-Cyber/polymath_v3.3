@@ -650,6 +650,7 @@ def chunk(
                     tier_value,
                     child_idx,
                     child_target_tokens=policy.child_target_tokens,
+                    child_max_tokens=policy.child_max_tokens,
                     chunk_kind=kind,
                 )
                 parents.append(

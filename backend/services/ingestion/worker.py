@@ -706,7 +706,7 @@ async def _run_ghosts_parallel(
                 pool=pool,
                 model=model,
                 return_report=True,
-                enable_facts=False,
+                enable_facts=settings.EXTRACTION_ENABLE_FACTS,
             )
         if not isinstance(report, ExtractionBatchReport):
             results = report

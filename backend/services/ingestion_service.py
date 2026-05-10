@@ -1387,6 +1387,7 @@ class IngestionService:
         foreground_calls_per_child = min(
             settings.EXTRACTION_JSONL_MAX_CALLS,
             settings.EXTRACTION_FOREGROUND_MAX_CALLS,
+            2,
         )
         rescue_calls_per_child = max(foreground_calls_per_child - 1, 0)
         worst_case_extraction_calls = graph_calls * foreground_calls_per_child
@@ -1405,10 +1406,6 @@ class IngestionService:
             warnings.append(
                 "At least one child chunk exceeds the Ghost B extraction input cap."
             )
-        if settings.EXTRACTION_ENABLE_FACTS:
-            warnings.append(
-                "Structured facts are configured on, but foreground graph extraction disables facts."
-            )
         return {
             "filename": filename,
             "doc_id": doc_id,
@@ -1423,19 +1420,14 @@ class IngestionService:
             "summary_calls": summary_calls,
             "estimated_llm_calls": graph_calls + summary_calls,
             "extraction_risk": {
-                "foreground_facts_enabled": False,
+                "foreground_facts_enabled": settings.EXTRACTION_ENABLE_FACTS,
                 "facts_configured": settings.EXTRACTION_ENABLE_FACTS,
-                "output_mode": settings.EXTRACTION_OUTPUT_MODE,
+                "output_mode": "jsonl",
+                "configured_output_mode": settings.EXTRACTION_OUTPUT_MODE,
+                "repair_strategy": "one_jsonl_repair_resume",
                 "max_input_tokens": settings.EXTRACTION_MAX_INPUT_TOKENS,
                 "normal_max_tokens": settings.EXTRACTION_MAX_TOKENS,
                 "rescue_max_tokens": settings.EXTRACTION_RESCUE_MAX_TOKENS,
-                "json_object_max_entities": (
-                    settings.EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK
-                ),
-                "json_object_max_relations": (
-                    settings.EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK
-                ),
-                "json_object_max_facts": settings.EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK,
                 "evidence_max_chars": settings.EXTRACTION_EVIDENCE_MAX_CHARS,
                 "max_total_lines": settings.EXTRACTION_MAX_TOTAL_LINES,
                 "rescue_max_total_lines": settings.EXTRACTION_RESCUE_MAX_TOTAL_LINES,

@@ -568,7 +568,7 @@ async def test_ghost_b_zero_extractions_leaves_neo4j_pending():
         )
 
     assert extract_mock.await_count == 1
-    assert extract_mock.await_args.kwargs["enable_facts"] is False
+    assert extract_mock.await_args.kwargs["enable_facts"] is worker.settings.EXTRACTION_ENABLE_FACTS
     assert result.ghost_b_out is None
     assert result.ghost_b_failures == [failure]
     assert result.ghost_b_metrics is not None

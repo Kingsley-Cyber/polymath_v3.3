@@ -370,11 +370,11 @@ class Settings(BaseSettings):
         ),
     )
     EXTRACTION_OUTPUT_MODE: Literal["auto", "json_object", "jsonl"] = Field(
-        default="auto",
+        default="jsonl",
         description=(
-            "Ghost B normal-attempt output contract. auto uses provider JSON "
-            "object mode for DeepSeek/OpenAI-compatible lanes and keeps JSONL "
-            "for other providers; rescue mode always uses bounded JSONL."
+            "Ghost B output transport. JSONL is enforced for foreground "
+            "extraction; legacy auto/json_object values are accepted but "
+            "treated as JSONL."
         ),
     )
     EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK: int = Field(
@@ -382,8 +382,8 @@ class Settings(BaseSettings):
         ge=1,
         le=32,
         description=(
-            "Maximum entities requested when Ghost B uses provider JSON object "
-            "mode for the primary extraction attempt."
+            "Legacy JSON-object cap retained for env compatibility. JSONL "
+            "primary extraction ignores this value."
         ),
     )
     EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK: int = Field(
@@ -391,8 +391,8 @@ class Settings(BaseSettings):
         ge=0,
         le=32,
         description=(
-            "Maximum relations requested when Ghost B uses provider JSON object "
-            "mode for the primary extraction attempt."
+            "Legacy JSON-object cap retained for env compatibility. JSONL "
+            "primary extraction ignores this value."
         ),
     )
     EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK: int = Field(
@@ -400,8 +400,8 @@ class Settings(BaseSettings):
         ge=0,
         le=12,
         description=(
-            "Maximum facts requested when Ghost B uses provider JSON object "
-            "mode and facts are enabled for the primary extraction attempt."
+            "Legacy JSON-object cap retained for env compatibility. JSONL "
+            "primary extraction ignores this value."
         ),
     )
     EXTRACTION_EVIDENCE_MAX_CHARS: int = Field(
@@ -461,7 +461,7 @@ class Settings(BaseSettings):
         le=32,
         description=(
             "Legacy upper bound for sequential Ghost B JSONL calls. Foreground "
-            "ingest is also clamped by EXTRACTION_FOREGROUND_MAX_CALLS."
+            "ingest is hard-clamped to two calls: one primary plus one repair."
         ),
     )
     EXTRACTION_FOREGROUND_MAX_CALLS: int = Field(
@@ -470,7 +470,8 @@ class Settings(BaseSettings):
         le=3,
         description=(
             "Hard foreground ingest limit for extraction calls per child chunk. "
-            "Call 1 uses the normal prompt; later calls use rescue mode."
+            "Values above 2 are clamped: call 1 is primary JSONL, call 2 is "
+            "the single repair/resume call."
         ),
     )
     EXTRACTION_GLOBAL_MAX_CONCURRENT: int = Field(
@@ -552,11 +553,11 @@ class Settings(BaseSettings):
         description="Maximum relations Ghost B rescue mode should return for a child chunk.",
     )
     EXTRACTION_ENABLE_FACTS: bool = Field(
-        default=False,
+        default=True,
         description=(
             "When true, Ghost B also extracts capped structured facts/properties "
-            "alongside entities and relations. Defaults off so existing ingests "
-            "and staging records stay backward-compatible."
+            "alongside entities and relations. Stored output remains normalized "
+            "as ExtractionResult entities/relations/facts."
         ),
     )
     EXTRACTION_MAX_FACTS_PER_CHUNK: int = Field(

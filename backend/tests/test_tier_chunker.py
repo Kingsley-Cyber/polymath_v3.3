@@ -60,6 +60,33 @@ def test_chunking_config_reports_auto_policy_and_semantic_split_as_hint():
     assert config["page_ranges_preserved"] is True
 
 
+def test_tier_a_child_chunks_respect_configured_child_max_tokens():
+    text = ("alpha beta gamma delta epsilon. " * 260).strip()
+    cfg = IngestionConfig(
+        parent_chunk_tokens={
+            "min_tokens": 100,
+            "target_tokens": 800,
+            "max_tokens": 1200,
+        },
+        child_chunk_tokens={
+            "min_tokens": 100,
+            "target_tokens": 200,
+            "max_tokens": 500,
+        },
+        chunk_overlap=0,
+    )
+
+    _, children, _ = tier_chunker.chunk(
+        _parse_result(source_tier=SourceTier.tier_a, text=text),
+        doc_id="doc",
+        corpus_id="corpus",
+        config=cfg,
+    )
+
+    assert len(children) > 1
+    assert max(c.token_count for c in children) <= 500
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Markup scrub + hard-split safety nets
 # ─────────────────────────────────────────────────────────────────────────
