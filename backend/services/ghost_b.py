@@ -40,6 +40,9 @@ SchemaResolver = Callable[[str, list[float], int], Awaitable[list[str]]]
 
 logger = logging.getLogger(__name__)
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
+_GLOBAL_EXTRACTION_SEMAPHORE: asyncio.Semaphore | None = None
+_GLOBAL_EXTRACTION_SEMAPHORE_LIMIT: int | None = None
+_GLOBAL_EXTRACTION_SEMAPHORE_LOOP: asyncio.AbstractEventLoop | None = None
 
 _SYSTEM = (
     "You are a precise entity, relation, and fact extractor. "
@@ -602,6 +605,24 @@ def _bounded_extraction_text(text: str, max_tokens: int) -> tuple[str, int, bool
         return raw, len(tokens), False
     bounded = _TOKENIZER.decode(tokens[:max_tokens]).strip()
     return bounded, len(tokens), True
+
+
+def _global_extraction_semaphore(limit: int) -> asyncio.Semaphore:
+    global _GLOBAL_EXTRACTION_SEMAPHORE
+    global _GLOBAL_EXTRACTION_SEMAPHORE_LIMIT
+    global _GLOBAL_EXTRACTION_SEMAPHORE_LOOP
+
+    normalized_limit = max(1, int(limit or 1))
+    loop = asyncio.get_running_loop()
+    if (
+        _GLOBAL_EXTRACTION_SEMAPHORE is None
+        or _GLOBAL_EXTRACTION_SEMAPHORE_LIMIT != normalized_limit
+        or _GLOBAL_EXTRACTION_SEMAPHORE_LOOP is not loop
+    ):
+        _GLOBAL_EXTRACTION_SEMAPHORE = asyncio.Semaphore(normalized_limit)
+        _GLOBAL_EXTRACTION_SEMAPHORE_LIMIT = normalized_limit
+        _GLOBAL_EXTRACTION_SEMAPHORE_LOOP = loop
+    return _GLOBAL_EXTRACTION_SEMAPHORE
 
 
 @dataclass
@@ -2128,6 +2149,10 @@ async def extract_entities(
     rescue_max_entities = settings.EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK
     rescue_max_relations = settings.EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK
     rescue_max_total_lines = settings.EXTRACTION_RESCUE_MAX_TOTAL_LINES
+    global_max_concurrent = settings.EXTRACTION_GLOBAL_MAX_CONCURRENT
+    failure_pause_percent = settings.EXTRACTION_FAILURE_PAUSE_PERCENT
+    failure_pause_min_chunks = settings.EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS
+    global_sem = _global_extraction_semaphore(global_max_concurrent)
     headers = {
         "Authorization": f"Bearer {settings.LITELLM_MASTER_KEY}",
         "Content-Type": "application/json",
@@ -2163,6 +2188,18 @@ async def extract_entities(
     disabled_lanes: set[int] = set()
     lane_fatal_strikes: dict[int, int] = {}
     _disabled_lock = asyncio.Lock()
+    failure_budget_open = False
+    failure_budget_reason = "failure_budget_exceeded"
+
+    def _failure_budget_should_open() -> bool:
+        if failure_pause_percent >= 100.0:
+            return False
+        processed = len(results_list) + failed_count
+        if processed < failure_pause_min_chunks:
+            return False
+        if processed <= 0:
+            return False
+        return (100.0 * failed_count / processed) >= failure_pause_percent
 
     async def _lane_disable_ready(pool_idx: int, exc: Exception) -> bool:
         tier = provider_error_tier(exc)
@@ -2311,12 +2348,13 @@ async def extract_entities(
             attempt_max_tokens = profile.max_tokens
             attempt_payload["max_tokens"] = attempt_max_tokens
             try:
-                async with httpx.AsyncClient(timeout=120.0) as client:
-                    resp = await client.post(
-                        f"{settings.LITELLM_URL}/chat/completions",
-                        json=attempt_payload,
-                        headers=headers,
-                    )
+                async with global_sem:
+                    async with httpx.AsyncClient(timeout=120.0) as client:
+                        resp = await client.post(
+                            f"{settings.LITELLM_URL}/chat/completions",
+                            json=attempt_payload,
+                            headers=headers,
+                        )
                     duration = time.perf_counter() - started
                     resp.raise_for_status()
                     call_attempts += 1
@@ -2427,6 +2465,7 @@ async def extract_entities(
                             "finish_reason": finish_reason,
                             "max_tokens": attempt_max_tokens,
                             "max_total_lines": profile.max_total_lines,
+                            "global_max_concurrent": global_max_concurrent,
                             "input_tokens": input_token_count,
                             "input_truncated": input_truncated,
                             "success": bool(complete),
@@ -2553,16 +2592,16 @@ async def extract_entities(
 
     async def _lane_worker(pool_idx: int) -> None:
         """One coroutine per lane slot. Drains the shared queue until empty."""
-        nonlocal failed_count
+        nonlocal failed_count, failure_budget_open
         while True:
-            if pool_idx in disabled_lanes:
+            if pool_idx in disabled_lanes or failure_budget_open:
                 return
             try:
                 task = task_queue.get_nowait()
             except asyncio.QueueEmpty:
                 return
             try:
-                if pool_idx in disabled_lanes:
+                if pool_idx in disabled_lanes or failure_budget_open:
                     task_queue.put_nowait(task)
                     return
                 try:
@@ -2589,6 +2628,18 @@ async def extract_entities(
                         results_list.append(result)
                     else:
                         failed_count += 1
+                    if not failure_budget_open and _failure_budget_should_open():
+                        failure_budget_open = True
+                        processed = len(results_list) + failed_count
+                        logger.error(
+                            "GHOST B failure budget tripped: failed=%d processed=%d "
+                            "threshold=%.1f%% min_chunks=%d queued=%d",
+                            failed_count,
+                            processed,
+                            failure_pause_percent,
+                            failure_pause_min_chunks,
+                            task_queue.qsize(),
+                        )
             finally:
                 task_queue.task_done()
 
@@ -2606,6 +2657,12 @@ async def extract_entities(
 
     await _run_enabled_workers()
     while not task_queue.empty():
+        if failure_budget_open:
+            logger.error(
+                "GHOST B stopped with %d chunks still queued after failure budget tripped",
+                task_queue.qsize(),
+            )
+            break
         enabled_count = sum(
             1 for pool_idx in range(len(pool)) if pool_idx not in disabled_lanes
         )
@@ -2639,16 +2696,23 @@ async def extract_entities(
     }
     unprocessed_tasks = [t for t in tasks if t.chunk_id not in accounted_chunk_ids]
     if unprocessed_tasks:
-        reason = (
-            "all_enabled_lanes_exhausted_after_circuit_breaker"
-            if disabled_lanes
-            else "not_processed"
-        )
-        message = (
-            "No healthy extraction lane remained to process this chunk."
-            if disabled_lanes
-            else "Extraction worker exited before processing this chunk."
-        )
+        if failure_budget_open:
+            reason = failure_budget_reason
+            message = (
+                "Foreground Ghost B paused this document after the failed-chunk "
+                "percentage exceeded the configured budget."
+            )
+        else:
+            reason = (
+                "all_enabled_lanes_exhausted_after_circuit_breaker"
+                if disabled_lanes
+                else "not_processed"
+            )
+            message = (
+                "No healthy extraction lane remained to process this chunk."
+                if disabled_lanes
+                else "Extraction worker exited before processing this chunk."
+            )
         for task in unprocessed_tasks:
             failures_list.append(
                 ExtractionFailureItem(

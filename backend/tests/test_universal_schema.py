@@ -7,6 +7,7 @@ reordering them breaks cross-corpus queries and (when either vocabulary list
 crosses SCHEMA_INLINE_LIMIT) flips ghost_b into degraded retrieval mode.
 """
 
+import asyncio
 import json
 import logging
 from types import SimpleNamespace
@@ -388,6 +389,9 @@ async def test_extraction_switches_to_rescue_without_repeating_capped_prompt(mon
         LITELLM_URL="http://litellm",
         DEFAULT_COMPLETION_MODEL="test-model",
         EXTRACTION_MAX_CONCURRENT=1,
+        EXTRACTION_GLOBAL_MAX_CONCURRENT=180,
+        EXTRACTION_FAILURE_PAUSE_PERCENT=100.0,
+        EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS=20,
     )
     monkeypatch.setattr(ghost_b, "get_settings", lambda: fake_settings)
     monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
@@ -423,6 +427,179 @@ async def test_extraction_switches_to_rescue_without_repeating_capped_prompt(mon
     assert report.results and report.results[0].entities[0].canonical_name == "alpha"
     assert report.metrics["attempt_count"] == 2
     assert report.metrics["completion_tokens"] == 1260
+
+
+@pytest.mark.asyncio
+async def test_global_extraction_budget_limits_simultaneous_provider_calls(monkeypatch):
+    active = 0
+    max_active = 0
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "usage": {"total_tokens": 20, "prompt_tokens": 10, "completion_tokens": 10},
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": '{"t":"e","cn":"alpha","sf":"Alpha","et":"concept","cf":0.95}\n{"t":"x"}'
+                        },
+                    }
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return FakeResponse()
+
+    fake_settings = SimpleNamespace(
+        ENTITY_CONFIDENCE_THRESHOLD=0.0,
+        SCHEMA_INLINE_LIMIT=30,
+        SCHEMA_RETRIEVAL_TOP_K=10,
+        EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_RESCUE_MAX_TOKENS=900,
+        EXTRACTION_ENABLE_FACTS=False,
+        EXTRACTION_MAX_FACTS_PER_CHUNK=5,
+        EXTRACTION_JSONL_MAX_CALLS=2,
+        EXTRACTION_FOREGROUND_MAX_CALLS=2,
+        EXTRACTION_JSONL_DEBUG_RAW=False,
+        EXTRACTION_MAX_INPUT_TOKENS=700,
+        EXTRACTION_MAX_TOTAL_LINES=20,
+        EXTRACTION_RESCUE_MAX_TOTAL_LINES=16,
+        EXTRACTION_MAX_ENTITIES_PER_CHUNK=14,
+        EXTRACTION_MAX_RELATIONS_PER_CHUNK=20,
+        EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK=8,
+        LITELLM_MASTER_KEY="test-key",
+        LITELLM_URL="http://litellm",
+        DEFAULT_COMPLETION_MODEL="test-model",
+        EXTRACTION_MAX_CONCURRENT=3,
+        EXTRACTION_GLOBAL_MAX_CONCURRENT=1,
+        EXTRACTION_FAILURE_PAUSE_PERCENT=100.0,
+        EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS=20,
+    )
+    monkeypatch.setattr(ghost_b, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    report = await ghost_b.extract_entities(
+        [
+            ExtractionTask(chunk_id=f"c{i}", doc_id="d1", corpus_id="corp1", text="Alpha works.")
+            for i in range(3)
+        ],
+        pool=[{
+            "model": "test-model",
+            "base_url": None,
+            "api_key": None,
+            "max_concurrent": 3,
+            "extra_params": {},
+        }],
+        return_report=True,
+        enable_facts=False,
+    )
+
+    assert max_active == 1
+    assert len(report.results) == 3
+    assert report.metrics["attempt_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_failure_budget_pauses_remaining_foreground_queue(monkeypatch):
+    calls = 0
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "usage": {"total_tokens": 20, "prompt_tokens": 10, "completion_tokens": 10},
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": "not jsonl"}}
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            nonlocal calls
+            calls += 1
+            return FakeResponse()
+
+    fake_settings = SimpleNamespace(
+        ENTITY_CONFIDENCE_THRESHOLD=0.0,
+        SCHEMA_INLINE_LIMIT=30,
+        SCHEMA_RETRIEVAL_TOP_K=10,
+        EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_RESCUE_MAX_TOKENS=900,
+        EXTRACTION_ENABLE_FACTS=False,
+        EXTRACTION_MAX_FACTS_PER_CHUNK=5,
+        EXTRACTION_JSONL_MAX_CALLS=1,
+        EXTRACTION_FOREGROUND_MAX_CALLS=1,
+        EXTRACTION_JSONL_DEBUG_RAW=False,
+        EXTRACTION_MAX_INPUT_TOKENS=700,
+        EXTRACTION_MAX_TOTAL_LINES=20,
+        EXTRACTION_RESCUE_MAX_TOTAL_LINES=16,
+        EXTRACTION_MAX_ENTITIES_PER_CHUNK=14,
+        EXTRACTION_MAX_RELATIONS_PER_CHUNK=20,
+        EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK=8,
+        LITELLM_MASTER_KEY="test-key",
+        LITELLM_URL="http://litellm",
+        DEFAULT_COMPLETION_MODEL="test-model",
+        EXTRACTION_MAX_CONCURRENT=1,
+        EXTRACTION_GLOBAL_MAX_CONCURRENT=180,
+        EXTRACTION_FAILURE_PAUSE_PERCENT=50.0,
+        EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS=2,
+    )
+    monkeypatch.setattr(ghost_b, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    report = await ghost_b.extract_entities(
+        [
+            ExtractionTask(chunk_id=f"c{i}", doc_id="d1", corpus_id="corp1", text="bad")
+            for i in range(5)
+        ],
+        pool=[{
+            "model": "test-model",
+            "base_url": None,
+            "api_key": None,
+            "max_concurrent": 1,
+            "extra_params": {},
+        }],
+        return_report=True,
+        enable_facts=False,
+    )
+
+    assert calls == 2
+    assert len(report.results) == 0
+    assert len(report.failures) == 5
+    assert report.metrics["error_counts"]["parse_error"] == 2
+    assert report.metrics["error_counts"]["failure_budget_exceeded"] == 3
 
 
 def test_parse_facts_is_backward_compatible_when_missing():

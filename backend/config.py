@@ -420,6 +420,34 @@ class Settings(BaseSettings):
             "Call 1 uses the normal prompt; later calls use rescue mode."
         ),
     )
+    EXTRACTION_GLOBAL_MAX_CONCURRENT: int = Field(
+        default=180,
+        ge=1,
+        le=4096,
+        description=(
+            "Process-wide ceiling for simultaneous Ghost B provider requests "
+            "across all active documents and extraction model lanes."
+        ),
+    )
+    EXTRACTION_FAILURE_PAUSE_PERCENT: float = Field(
+        default=25.0,
+        ge=0.0,
+        le=100.0,
+        description=(
+            "Pause a document's foreground Ghost B queue when the failed chunk "
+            "percentage reaches this value after the minimum sample size. Set "
+            "100 to effectively disable early pause."
+        ),
+    )
+    EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS: int = Field(
+        default=20,
+        ge=1,
+        le=10000,
+        description=(
+            "Minimum processed Ghost B chunks before the failure-percentage "
+            "pause circuit can trip."
+        ),
+    )
     EXTRACTION_JSONL_DEBUG_RAW: bool = Field(
         default=False,
         description=(
