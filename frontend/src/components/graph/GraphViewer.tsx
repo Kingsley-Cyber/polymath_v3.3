@@ -69,6 +69,7 @@ interface NodeAttrs {
   // Polymath payload metadata.
   display_name: string;
   mention_count: number;
+  entity_type?: string;
   supernode_type?: string;
   primary_domain?: string;
   source_corpora?: string[];
@@ -76,11 +77,14 @@ interface NodeAttrs {
   member_ids?: string[];
   isSeed?: boolean;
   isHub?: boolean;
+  isBook?: boolean;
   hidden?: boolean;
   zIndex?: number;
   highlighted?: boolean;
   // sigma additions for runtime styling
   forceLabel?: boolean;
+  // when user drags a node, sigma marks it fixed via this flag
+  fixed?: boolean;
 }
 
 interface EdgeAttrs {
@@ -98,9 +102,13 @@ interface EdgeAttrs {
 }
 
 type ColorMode = "community" | "corpus";
+type BrainViewMode = "domains" | "books";
 
 type DrillFrame = {
-  conceptId: string;
+  // For domains mode: clusterId is the concept_id ("concept:abc" → "abc")
+  // For books mode:   clusterId is the doc_id of the book to drill into
+  source: BrainViewMode;
+  clusterId: string;
   label: string;
 };
 
@@ -114,36 +122,102 @@ function hashString(s: string): number {
   return h;
 }
 
-function hslToHex(h: number, s: number, l: number): string {
-  s /= 100;
-  l /= 100;
-  const k = (n: number) => (n + h / 30) % 12;
-  const a = s * Math.min(l, 1 - l);
-  const f = (n: number) => {
-    const v = l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-    return Math.round(255 * v)
-      .toString(16)
-      .padStart(2, "0");
-  };
-  return `#${f(0)}${f(8)}${f(4)}`;
+// Curated 14-color palette tuned for dark backgrounds — distinct hues at
+// readable saturation/lightness, no neon. Cycled deterministically by hash.
+const COMMUNITY_PALETTE = [
+  "#a78bfa", // violet
+  "#22d3ee", // cyan
+  "#f472b6", // pink
+  "#fbbf24", // amber
+  "#34d399", // emerald
+  "#60a5fa", // blue
+  "#fb7185", // rose
+  "#a3e635", // lime
+  "#c084fc", // purple
+  "#fcd34d", // yellow
+  "#5eead4", // teal
+  "#f97316", // orange
+  "#818cf8", // indigo
+  "#facc15", // gold
+];
+
+// Slightly darker / more saturated variants for domain supernodes so they
+// stand out from the concept supernodes within the same hue family.
+const DOMAIN_PALETTE = COMMUNITY_PALETTE.map((c) => brightenColor(c, 1.15));
+
+// Distinct corpus palette — used when colorMode === "corpus". Same hues
+// but with a different cycle so adjacent corpora visually contrast.
+const CORPUS_PALETTE = [
+  "#f472b6", // pink
+  "#22d3ee", // cyan
+  "#fbbf24", // amber
+  "#a78bfa", // violet
+  "#34d399", // emerald
+  "#fb7185", // rose
+  "#60a5fa", // blue
+  "#a3e635", // lime
+  "#fcd34d", // yellow
+  "#c084fc", // purple
+  "#5eead4", // teal
+  "#f97316", // orange
+];
+
+// Per-entity-type palette for entity-level views (drill + query).
+// Generic fallback for entity_type values we don't have explicit colors for.
+const ENTITY_TYPE_PALETTE: Record<string, string> = {
+  Person: "#f472b6",
+  Organization: "#fbbf24",
+  Product: "#22d3ee",
+  Method: "#34d399",
+  Concept: "#a78bfa",
+  Document: "#94a3b8",
+  Event: "#fb7185",
+  Place: "#fcd34d",
+  Artifact: "#5eead4",
+  Rule: "#c084fc",
+  Time: "#60a5fa",
+  TimeReference: "#60a5fa",
+  Date: "#60a5fa",
+  Other: "#a3a3a3",
+};
+
+function pickColor(palette: string[], seed: string): string {
+  return palette[hashString(seed) % palette.length];
 }
 
 function colorForCommunity(node: {
   id: string;
   primary_domain?: string;
   supernode_type?: string;
+  entity_type?: string;
 }): string {
-  const seed =
-    node.primary_domain || node.id.split(":").slice(-1)[0] || node.id;
-  const hue = hashString(seed) % 360;
-  if (node.supernode_type === "domain") return hslToHex(hue, 70, 60);
-  if (node.supernode_type === "concept") return hslToHex(hue, 55, 65);
-  return hslToHex(hue, 50, 65);
+  // Entity-level node (drill / query): color by entity type when known.
+  if (
+    !node.supernode_type &&
+    node.entity_type &&
+    ENTITY_TYPE_PALETTE[node.entity_type]
+  ) {
+    return ENTITY_TYPE_PALETTE[node.entity_type];
+  }
+  // Domain supernode: brighter saturated palette pick.
+  if (node.supernode_type === "domain") {
+    const seed =
+      node.primary_domain || node.id.split(":").slice(-1)[0] || node.id;
+    return pickColor(DOMAIN_PALETTE, seed);
+  }
+  // Concept supernode: standard community palette pick keyed by primary_domain
+  // so concepts in the same domain share a hue family.
+  if (node.supernode_type === "concept") {
+    const seed = node.primary_domain || node.id;
+    return pickColor(COMMUNITY_PALETTE, seed);
+  }
+  // Books-as-clusters: each doc gets its own hue.
+  return pickColor(COMMUNITY_PALETTE, node.id);
 }
 
 function colorForCorpus(corpora: string[] | undefined): string {
   const seed = (corpora && corpora[0]) || "unknown";
-  return hslToHex(hashString(seed) % 360, 65, 55);
+  return pickColor(CORPUS_PALETTE, seed);
 }
 
 function getNodeColor(node: NodeAttrs, mode: ColorMode): string {
@@ -152,6 +226,7 @@ function getNodeColor(node: NodeAttrs, mode: ColorMode): string {
     id: (node as any).__id ?? "",
     primary_domain: node.primary_domain,
     supernode_type: node.supernode_type,
+    entity_type: (node as any).entity_type,
   });
 }
 
@@ -225,16 +300,41 @@ function getLayoutDuration(nodeCount: number): number {
   return 10000;
 }
 
-// Map mention_count → node radius (log-scaled, clamped).
-function nodeSize(mentionCount: number, isSeed?: boolean): number {
-  const base = Math.log2((mentionCount || 1) + 1) * 2.5 + 4;
-  const clamped = Math.max(4, Math.min(22, base));
-  return clamped + (isSeed ? 4 : 0);
+// Map mention_count → node radius. Different scales per node kind:
+//   • Domain supernodes     — always large (12-30px) — they anchor the canvas
+//   • Concept supernodes    — medium-large (8-22px)  — readable as cluster heads
+//   • Book clusters         — medium-large (8-24px)  — sized by entity_count
+//   • Entity nodes (drill)  — small-medium (4-14px)  — sized by mention_count
+//   • Seeds in query mode   — +4px on top of whatever bucket they're in
+function nodeSize(
+  mentionCount: number,
+  opts?: { isSeed?: boolean; supernode_type?: string; isBook?: boolean },
+): number {
+  const v = Math.max(1, Number(mentionCount) || 1);
+  let base: number;
+  if (opts?.supernode_type === "domain") {
+    base = 12 + Math.log2(v + 1) * 2.4;
+    base = Math.min(30, base);
+  } else if (opts?.supernode_type === "concept") {
+    base = 8 + Math.log2(v + 1) * 1.8;
+    base = Math.min(22, base);
+  } else if (opts?.isBook) {
+    base = 8 + Math.log2(v + 1) * 1.6;
+    base = Math.min(24, base);
+  } else {
+    base = 4 + Math.log2(v + 1) * 1.4;
+    base = Math.min(14, base);
+  }
+  return Math.max(4, base) + (opts?.isSeed ? 4 : 0);
 }
 
 // ─── Brain mode data hook ─────────────────────────────────────────────────
 
-function useBrainGraph(corpusIds: string[], drill: DrillFrame | null) {
+function useBrainGraph(
+  corpusIds: string[],
+  drill: DrillFrame | null,
+  brainMode: BrainViewMode,
+) {
   const [data, setData] = useState<{
     nodes: any[];
     links: any[];
@@ -256,8 +356,66 @@ function useBrainGraph(corpusIds: string[], drill: DrillFrame | null) {
     setLoading(true);
     setError(null);
     try {
-      if (drill) {
-        const res = await api.getGraphCluster(drill.conceptId, corpusIds);
+      // ── books-as-clusters view ──
+      if (brainMode === "books") {
+        const res = await api.getGraphByDocument({
+          corpusIds,
+          mode: drill && drill.source === "books" ? "drill" : "full",
+          drillDocId:
+            drill && drill.source === "books" ? drill.clusterId : undefined,
+        });
+        // The book cluster anchors are returned as `clusters[]`, separate
+        // from the entity `nodes[]`. We render BOTH layers as graphology
+        // nodes — anchors get `kind: "book"`, entities get the standard
+        // entity attributes. Edges between entity → book represent
+        // membership; entity → entity edges represent RELATES_TO across
+        // documents.
+        const anchorNodes = (res.clusters || []).map((c) => ({
+          id: `book:${c.cluster_id}`,
+          display_name: c.label || c.cluster_id.slice(0, 8),
+          mention_count: c.entity_count || 1,
+          kind: "book" as const,
+          source_corpora: [c.corpus_id],
+          source_corpus: c.corpus_id,
+          top_entities: c.top_entities,
+        }));
+        // Build membership edges only when we have entity nodes (full / drill).
+        const memberEdges: any[] = [];
+        for (const e of res.nodes || []) {
+          const primary = (e as any).primary_doc_id;
+          if (primary) {
+            memberEdges.push({
+              source: e.id,
+              target: `book:${primary}`,
+              predicate: "in_book",
+              confidence: 1,
+              weight: 0.4,
+            });
+          }
+          const bridges = (e as any).bridge_doc_ids || [];
+          for (const did of bridges) {
+            memberEdges.push({
+              source: e.id,
+              target: `book:${did}`,
+              predicate: "bridges_to",
+              confidence: 0.6,
+              weight: 0.3,
+              source_corpora: [],
+            });
+          }
+        }
+        setData({
+          nodes: [...anchorNodes, ...(res.nodes || [])],
+          links: [...memberEdges, ...(res.edges || [])],
+        });
+        setMeta({ truncated: Boolean(res.truncated) });
+        setCacheWarming([]);
+        return;
+      }
+
+      // ── domains view (concept-community supernodes) ──
+      if (drill && drill.source === "domains") {
+        const res = await api.getGraphCluster(drill.clusterId, corpusIds);
         setData({ nodes: res.nodes || [], links: res.edges || [] });
         setMeta({ truncated: res.truncated });
         setCacheWarming(res._meta?.cache_warming_corpora || []);
@@ -276,7 +434,7 @@ function useBrainGraph(corpusIds: string[], drill: DrillFrame | null) {
     } finally {
       setLoading(false);
     }
-  }, [corpusIds, drill]);
+  }, [corpusIds, drill, brainMode]);
 
   useEffect(() => {
     reload();
@@ -416,11 +574,19 @@ function buildGraphologyGraph(
     if (g.hasNode(id)) return;
     const isSeed = seedIds.has(id);
     const isHub = hubIds.has(id) || bridgeIds.has(id);
+    // books-mode nodes have `primary_doc_id` in their payload (cluster anchors
+    // get a `kind: "book"` flag; entity nodes within a book have neither).
+    const isBook = node.kind === "book" || Boolean(node.is_cluster_anchor);
     const angle = idx * goldenAngle;
     const r =
       radius0 *
       Math.sqrt((idx + 1) / Math.max(n, 1)) *
       (1 + (Math.random() - 0.5) * 0.15);
+    const sizeForCount =
+      // For book-mode entity nodes, size by total_mentions if present.
+      typeof node.total_mentions === "number"
+        ? node.total_mentions
+        : node.mention_count;
     const baseColor = getNodeColor(
       {
         ...node,
@@ -432,11 +598,16 @@ function buildGraphologyGraph(
     g.addNode(id, {
       x: r * Math.cos(angle),
       y: r * Math.sin(angle),
-      size: nodeSize(node.mention_count, isSeed),
+      size: nodeSize(sizeForCount, {
+        isSeed,
+        supernode_type: node.supernode_type,
+        isBook,
+      }),
       color: baseColor,
       label: String(node.display_name || id),
       display_name: String(node.display_name || id),
-      mention_count: Number(node.mention_count || 1),
+      mention_count: Number(sizeForCount || 1),
+      entity_type: node.entity_type,
       supernode_type: node.supernode_type,
       primary_domain: node.primary_domain,
       source_corpora: node.source_corpora || [],
@@ -444,8 +615,9 @@ function buildGraphologyGraph(
       member_ids: node.member_ids,
       isSeed,
       isHub,
+      isBook,
       hidden: false,
-      forceLabel: isSeed,
+      forceLabel: isSeed || isBook || node.supernode_type === "domain",
     });
   });
 
@@ -494,14 +666,21 @@ export function GraphViewer({
   const layoutRef = useRef<FA2Layout | null>(null);
   const layoutTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedRef = useRef<string | null>(null);
+  const draggedRef = useRef<string | null>(null);
+  const isDraggingRef = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredName, setHoveredName] = useState<string | null>(null);
   const [colorMode, setColorMode] = useState<ColorMode>("community");
+  const [brainMode, setBrainMode] = useState<BrainViewMode>("domains");
   const [drillStack, setDrillStack] = useState<DrillFrame[]>([]);
   const [layoutRunning, setLayoutRunning] = useState(false);
 
   const drill = drillStack.length ? drillStack[drillStack.length - 1] : null;
-  const brain = useBrainGraph(mode === "brain" ? corpusIds : [], drill);
+  const brain = useBrainGraph(
+    mode === "brain" ? corpusIds : [],
+    drill,
+    brainMode,
+  );
   const q = useQueryGraph(
     mode === "query" ? corpusIds : [],
     query,
@@ -652,6 +831,11 @@ export function GraphViewer({
     sigmaRef.current = sigma;
 
     sigma.on("clickNode", ({ node }) => {
+      // Suppress click side-effects when this came at the end of a drag.
+      if (isDraggingRef.current) {
+        isDraggingRef.current = false;
+        return;
+      }
       selectedRef.current = node;
       setSelectedId(node);
       sigma.refresh();
@@ -673,17 +857,76 @@ export function GraphViewer({
       setHoveredName(null);
       if (containerRef.current) containerRef.current.style.cursor = "grab";
     });
-    sigma.on("doubleClickNode", ({ node }) => {
-      // Drill into a concept supernode.
-      if (mode !== "brain") return;
+    sigma.on("doubleClickNode", ({ node, event }) => {
+      // Drill into a concept supernode (domains mode) or a book cluster
+      // anchor (books mode). Single-click selects, double-click drills.
+      // event.preventSigmaDefault() suppresses the default zoom-on-double-click.
       const g = graphRef.current;
       if (!g || !g.hasNode(node)) return;
       const a = g.getNodeAttributes(node);
-      if (a.supernode_type !== "concept") return;
-      const conceptId = node.split(":").slice(1).join(":");
-      if (!conceptId) return;
-      setDrillStack((s) => [...s, { conceptId, label: a.display_name }]);
+      if (a.supernode_type === "concept") {
+        event?.preventSigmaDefault?.();
+        const conceptId = node.split(":").slice(1).join(":");
+        if (!conceptId) return;
+        setDrillStack((s) => [
+          ...s,
+          { source: "domains", clusterId: conceptId, label: a.display_name },
+        ]);
+      } else if (a.isBook) {
+        event?.preventSigmaDefault?.();
+        const docId = node.startsWith("book:") ? node.slice(5) : node;
+        setDrillStack((s) => [
+          ...s,
+          { source: "books", clusterId: docId, label: a.display_name },
+        ]);
+      }
     });
+
+    // ── Node dragging — let the user reposition any node ──
+    // Pattern from the sigma.js docs: capture downNode → switch the camera
+    // captor off, listen for mousemovebody, write graph coords to the node,
+    // then re-enable on mouseup. Works regardless of layout running state
+    // (the FA2 worker continues but the dragged node's position is stamped
+    // each frame so it follows the cursor).
+    sigma.on("downNode", ({ node, event }) => {
+      draggedRef.current = node;
+      isDraggingRef.current = false; // becomes true on first mousemove
+      const g = graphRef.current;
+      if (g && g.hasNode(node)) {
+        // Mark the node fixed so FA2 doesn't fight the drag.
+        g.setNodeAttribute(node, "highlighted", true);
+      }
+      // Prevent sigma from also panning the camera while dragging.
+      event?.preventSigmaDefault?.();
+    });
+    const mouseCaptor = sigma.getMouseCaptor();
+    mouseCaptor.on("mousemovebody", (e) => {
+      const dragged = draggedRef.current;
+      if (!dragged) return;
+      isDraggingRef.current = true;
+      const sigmaInst = sigmaRef.current;
+      const g = graphRef.current;
+      if (!sigmaInst || !g || !g.hasNode(dragged)) return;
+      const pos = sigmaInst.viewportToGraph({ x: e.x, y: e.y });
+      g.setNodeAttribute(dragged, "x", pos.x);
+      g.setNodeAttribute(dragged, "y", pos.y);
+      // Sigma needs to know the camera shouldn't move during this drag.
+      e.preventSigmaDefault();
+      e.original.preventDefault();
+      e.original.stopPropagation();
+    });
+    const release = () => {
+      const dragged = draggedRef.current;
+      if (dragged) {
+        const g = graphRef.current;
+        if (g && g.hasNode(dragged)) {
+          g.removeNodeAttribute(dragged, "highlighted");
+        }
+      }
+      draggedRef.current = null;
+    };
+    mouseCaptor.on("mouseup", release);
+    mouseCaptor.on("mouseleave", release);
 
     return () => {
       if (layoutTimeoutRef.current) clearTimeout(layoutTimeoutRef.current);
@@ -898,15 +1141,27 @@ export function GraphViewer({
         </div>
         <div className="flex items-center gap-2 pointer-events-auto">
           {mode === "brain" && (
-            <button
-              className="text-[10px] uppercase tracking-widest text-zinc-400 hover:text-amber-400 border border-zinc-800 bg-[#0d0d14]/80 backdrop-blur rounded px-2 py-1 font-mono"
-              onClick={() =>
-                setColorMode((m) => (m === "community" ? "corpus" : "community"))
-              }
-              title="Toggle color scheme"
-            >
-              color: {colorMode}
-            </button>
+            <>
+              <button
+                className="text-[10px] uppercase tracking-widest text-zinc-400 hover:text-amber-400 border border-zinc-800 bg-[#0d0d14]/80 backdrop-blur rounded px-2 py-1 font-mono"
+                onClick={() => {
+                  setBrainMode((m) => (m === "domains" ? "books" : "domains"));
+                  setDrillStack([]);
+                }}
+                title="Toggle: domains (concept communities) ↔ books (each file is a cluster)"
+              >
+                view: {brainMode}
+              </button>
+              <button
+                className="text-[10px] uppercase tracking-widest text-zinc-400 hover:text-amber-400 border border-zinc-800 bg-[#0d0d14]/80 backdrop-blur rounded px-2 py-1 font-mono"
+                onClick={() =>
+                  setColorMode((m) => (m === "community" ? "corpus" : "community"))
+                }
+                title="Toggle color scheme"
+              >
+                color: {colorMode}
+              </button>
+            </>
           )}
           {mode === "query" && onRerun && (
             <button

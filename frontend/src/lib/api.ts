@@ -799,6 +799,9 @@ export async function getCorpusCacheStatus(corpusId: string): Promise<CacheStatu
   return fetchJSON(`/corpora/${encodeURIComponent(corpusId)}/cache-status`);
 }
 
+// PR 4 fix — `getGraphByDocument` is already declared near line 1650 of
+// this file; the GraphViewer imports it from there.
+
 // ── Phase 19 Wave 2 — Cloud API key manager ────────────────────────────────
 
 /**
