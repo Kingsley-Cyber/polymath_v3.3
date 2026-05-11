@@ -554,10 +554,19 @@ class Settings(BaseSettings):
         ),
     )
     EXTRACTION_ERROR_AUDIT_MAX_FAILED_ATTEMPTS_PER_DOC: int = Field(
-        default=25,
+        default=200,
         ge=0,
-        le=1000,
-        description="Maximum failed Ghost B attempt audit rows stored per document.",
+        le=2000,
+        description=(
+            "Maximum failed Ghost B attempt audit rows stored per document. "
+            "Raised from 25 to 200 so a catastrophically-failing doc (e.g. "
+            "the pre-thinking-disable Design Patterns case with 466 failures) "
+            "is visible in the audit collection rather than masked by the "
+            "cap. The authoritative count remains on "
+            "documents.ghost_b_metrics.failed_chunks; this cap controls "
+            "forensic detail only. 200 rows × 500 docs ≈ 100K rows, ~100 MB "
+            "in Mongo — trivial."
+        ),
     )
     EXTRACTION_ERROR_AUDIT_MAX_SUCCESS_ATTEMPTS_PER_DOC: int = Field(
         default=2,
@@ -578,10 +587,17 @@ class Settings(BaseSettings):
         description="Characters kept from the end of failed Ghost B raw output.",
     )
     EXTRACTION_MAX_ENTITIES_PER_CHUNK: int = Field(
-        default=14,
+        default=18,
         ge=1,
         le=64,
-        description="Maximum entities Ghost B should return for a single child chunk",
+        description=(
+            "Maximum entities Ghost B should return for a single child chunk. "
+            "Raised from 14 to 18 after observing dense Design Patterns chunks "
+            "(_0000, _0031, _0043) saturate the cap with post_entities==14, "
+            "i.e. the model wanted to emit more. Recompute output budget: "
+            "18 entities + 20 relations + 5 facts + 1 sentinel = 44 lines "
+            "max, still under EXTRACTION_MAX_TOTAL_LINES=55."
+        ),
     )
     EXTRACTION_MAX_RELATIONS_PER_CHUNK: int = Field(
         default=20,
