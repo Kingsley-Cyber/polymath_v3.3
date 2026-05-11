@@ -302,8 +302,19 @@ export function polymathToGraphology(
       // Cross-corpus edge — mix the style color with violet to signal "bridge."
       color = "#a78bfa";
     }
+    // Brain View bridges carry a `weight` = shared-entity strength from
+    // /api/graph/brain-view. Thicken the edge proportionally so a
+    // strong bridge (many shared entities) reads more present than a
+    // weak one (1-2 shared entities). PRD spec for edgeReducer.
+    let size = edgeBaseSize * style.sizeMultiplier;
+    if (rel.predicate === "bridges_to" && typeof rel.weight === "number") {
+      // 1.2 baseline + 0.18 per shared edge, capped at 5.5 — matches the
+      // strength formula in sigma-constants.ts::edgeReducer.
+      const strength = Math.max(0, rel.weight);
+      size = Math.min(1.2 + strength * 0.18, 5.5);
+    }
     graph.addEdgeWithKey(`e${i}`, s, t, {
-      size: edgeBaseSize * style.sizeMultiplier,
+      size,
       color,
       type: "curved",
       curvature,

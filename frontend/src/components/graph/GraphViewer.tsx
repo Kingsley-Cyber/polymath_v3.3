@@ -60,55 +60,10 @@ type DrillFrame = {
 
 // ─── Brain mode data hook ─────────────────────────────────────────────────
 
-/** Compute lightweight bridge edges between book clusters by intersecting
- *  their `top_entities` lists. Two clusters that share K of their top
- *  entities get an edge with weight = K. Cheap, runs client-side, gives
- *  the canvas the "bridges" structure that makes books-as-clusters feel
- *  like a graph instead of a static grid. */
-function computeClusterBridges(
-  clusters: { cluster_id: string; top_entities?: string[] }[],
-  opts?: { minSharedEntities?: number; maxBridgesPerCluster?: number },
-): any[] {
-  const minShared = opts?.minSharedEntities ?? 1;
-  const maxPer = opts?.maxBridgesPerCluster ?? 6;
-  const sets = clusters.map((c) => ({
-    id: c.cluster_id,
-    set: new Set((c.top_entities || []).map(String)),
-  }));
-  const perCluster = new Map<string, number>();
-  const out: any[] = [];
-  for (let i = 0; i < sets.length; i++) {
-    const a = sets[i];
-    const candidates: { other: string; shared: number }[] = [];
-    for (let j = i + 1; j < sets.length; j++) {
-      const b = sets[j];
-      let shared = 0;
-      // Iterate the smaller set for the intersection.
-      const [small, large] = a.set.size <= b.set.size ? [a.set, b.set] : [b.set, a.set];
-      small.forEach((x) => {
-        if (large.has(x)) shared++;
-      });
-      if (shared >= minShared) candidates.push({ other: b.id, shared });
-    }
-    candidates.sort((x, y) => y.shared - x.shared);
-    for (const { other, shared } of candidates) {
-      if ((perCluster.get(a.id) || 0) >= maxPer) break;
-      if ((perCluster.get(other) || 0) >= maxPer) continue;
-      out.push({
-        source: `book:${a.id}`,
-        target: `book:${other}`,
-        predicate: "bridges_to",
-        confidence: Math.min(1, shared / 12),
-        weight: shared,
-        // Adapter draws cross-cluster edges in violet so these stand out.
-        source_corpora: ["a", "b"],
-      });
-      perCluster.set(a.id, (perCluster.get(a.id) || 0) + 1);
-      perCluster.set(other, (perCluster.get(other) || 0) + 1);
-    }
-  }
-  return out;
-}
+// Note: client-side bridge synthesis from `top_entities` intersection used to
+// live here as `computeClusterBridges`. Replaced by /api/graph/brain-view
+// which computes ground-truth bridge strengths in Cypher (shared MENTIONS
+// + RELATES_TO traversal) so we no longer approximate.
 
 function useBrainGraph(
   corpusIds: string[],
@@ -138,85 +93,150 @@ function useBrainGraph(
     setLoading(true);
     setError(null);
     try {
-      // ── Books-as-clusters is the canonical Brain View ──
+      // ── DRILL: one Document anchor + its local entities + cross-book bridges ──
+      // Powered by the rich :Document anchor schema — Cypher returns the
+      // anchor's local_entities + intra-book relations + cross_book_bridges
+      // in one query. No MongoDB enrichment, no Python aggregation.
       if (drill) {
-        // Drilled into a specific book — fetch that book's entities +
-        // bridge neighbours. This is the only "show me everything" path
-        // and it's scoped to one document, so the canvas stays readable.
-        const res = await api.getGraphByDocument({
+        const drillRes = await api.getBookDrilldown(
+          drill.docId,
           corpusIds,
-          mode: "drill",
-          drillDocId: drill.docId,
-        });
-        // Render book anchors + entity nodes + entity↔book membership
-        // edges so the drilled book reads as a "this book's contents"
-        // local subgraph.
-        const anchorNodes = (res.clusters || []).map((c) => ({
-          id: `book:${c.cluster_id}`,
-          display_name: c.label || c.cluster_id.slice(0, 8),
-          mention_count: c.entity_count || 1,
-          kind: "book" as const,
-          source_corpora: [c.corpus_id],
-          source_corpus: c.corpus_id,
-          top_entities: c.top_entities,
+        );
+
+        const anchorNode: any = drillRes.anchor
+          ? {
+              id: `book:${drillRes.anchor.doc_id}`,
+              display_name:
+                drillRes.anchor.label ||
+                drillRes.anchor.filename ||
+                drillRes.anchor.doc_id?.slice(0, 8),
+              mention_count: drillRes.anchor.chunk_count || 1,
+              kind: "book" as const,
+              source_corpora: [drillRes.anchor.corpus_id],
+              source_corpus: drillRes.anchor.corpus_id,
+              is_cluster_anchor: true,
+            }
+          : null;
+
+        const entityNodes = drillRes.local_entities.map((e) => ({
+          id: e.entity_id,
+          display_name: e.display_name,
+          entity_type: e.entity_type,
+          object_kind: e.object_kind,
+          canonical_family: e.canonical_family,
+          primary_doc_id: drill.docId,
+          mention_count: 1,
         }));
-        const memberEdges: any[] = [];
-        for (const e of res.nodes || []) {
-          const primary = (e as any).primary_doc_id;
-          if (primary) {
-            memberEdges.push({
-              source: e.id,
-              target: `book:${primary}`,
-              predicate: "in_book",
-              confidence: 1,
-              weight: 0.4,
-            });
-          }
-          const bridges = (e as any).bridge_doc_ids || [];
-          for (const did of bridges) {
-            memberEdges.push({
-              source: e.id,
-              target: `book:${did}`,
-              predicate: "bridges_to",
-              confidence: 0.6,
-              weight: 0.3,
-            });
-          }
-        }
+
+        // Bridge entities (from cross-book results) become their own nodes
+        // so the user sees the literal entity that connects two books.
+        const bridgeNodes = drillRes.cross_book_bridges.map((b) => ({
+          id: b.bridge_entity_id,
+          display_name: b.bridge_entity_name || b.bridge_entity_id,
+          entity_type: "Concept",
+          mention_count: b.strength || 1,
+        }));
+
+        // Edges: book→entity (membership), entity→entity (intra-book), entity→other-book (bridge).
+        const memberEdges = entityNodes.map((e) => ({
+          source: e.id,
+          target: `book:${drill.docId}`,
+          predicate: "in_book",
+          confidence: 1,
+          weight: 0.4,
+        }));
+        const intraEdges = drillRes.local_relations.map((r) => ({
+          source: r.source_id,
+          target: r.target_id,
+          predicate: r.predicate,
+          relation_family: r.relation_family,
+          confidence: r.confidence,
+        }));
+        const bridgeEdges = drillRes.cross_book_bridges.flatMap((b) => [
+          {
+            source: b.via_entity_id,
+            target: b.bridge_entity_id,
+            predicate: "bridges_to",
+            weight: b.strength,
+            confidence: 0.7,
+          },
+          {
+            source: b.bridge_entity_id,
+            target: `book:${b.target_doc_id}`,
+            predicate: "in_book",
+            weight: 0.3,
+            confidence: 0.6,
+          },
+        ]);
+        // Synthetic anchors for the bridge target books so the canvas has
+        // a node to land the bridge edge on.
+        const targetAnchorNodes = drillRes.cross_book_bridges.map((b) => ({
+          id: `book:${b.target_doc_id}`,
+          display_name: b.target_filename || b.target_doc_id.slice(0, 8),
+          mention_count: 1,
+          kind: "book" as const,
+          source_corpora: [b.target_corpus_id || ""],
+          source_corpus: b.target_corpus_id || "",
+          is_cluster_anchor: true,
+        }));
+
+        const nodes = [
+          ...(anchorNode ? [anchorNode] : []),
+          ...entityNodes,
+          ...bridgeNodes,
+          ...targetAnchorNodes,
+        ];
+        // Dedup by id (target anchors may collide with the drilled anchor on
+        // self-bridges; entity nodes can repeat across local + bridge).
+        const seen = new Set<string>();
+        const dedupedNodes = nodes.filter((n) => {
+          if (seen.has(n.id)) return false;
+          seen.add(n.id);
+          return true;
+        });
+
         setData({
-          nodes: [...anchorNodes, ...(res.nodes || [])],
-          links: [...memberEdges, ...(res.edges || [])],
+          nodes: dedupedNodes,
+          links: [...memberEdges, ...intraEdges, ...bridgeEdges],
         });
         setCacheWarming([]);
         return;
       }
 
-      // ── Top-level: OVERVIEW mode — cluster anchors only, no entities ──
-      // Backend returns one row per Document with entity_count +
-      // top_entities. We render those as the only nodes and synthesize
-      // inter-cluster bridge edges from shared top_entities. This is
-      // what makes the canvas read as "a graph of N books" rather than
-      // "every entity in every book at once."
-      const res = await api.getGraphByDocument({
-        corpusIds,
-        mode: "overview",
-      });
-      const anchorNodes = (res.clusters || []).map((c) => ({
-        id: `book:${c.cluster_id}`,
-        display_name: c.label || c.cluster_id.slice(0, 8),
-        mention_count: c.entity_count || 1,
+      // ── TOP-LEVEL: Brain View v2 — pure-Cypher anchors + bridge strengths ──
+      // POST /api/graph/brain-view keys off :Document {is_cluster_anchor: true}
+      // and computes pairwise bridge strength on the Neo4j side. Anchor
+      // metadata (filename, chunk_count, ghost_b_success_rate) lives on the
+      // Document node so no MongoDB round-trip is needed.
+      const bv = await api.getBrainView(corpusIds);
+      const anchorNodes = bv.documents.map((d) => ({
+        id: `book:${d.doc_id}`,
+        display_name: d.label || d.filename || d.doc_id.slice(0, 8),
+        // mention_count drives node size in the adapter — use chunk_count
+        // so a 5000-chunk book is visually larger than a 50-chunk one.
+        mention_count: Math.max(1, d.chunk_count || d.actual_chunk_count || 1),
         kind: "book" as const,
-        source_corpora: [c.corpus_id],
-        source_corpus: c.corpus_id,
-        top_entities: c.top_entities,
+        source_corpora: [d.corpus_id],
+        source_corpus: d.corpus_id,
+        is_cluster_anchor: true,
+        // Pass anchor metadata through so the selection bar can render it.
+        ghost_b_success_rate: d.ghost_b_success_rate,
+        ghost_b_extracted: d.ghost_b_extracted,
+        ghost_b_total: d.ghost_b_total,
+        chunk_count: d.chunk_count,
+        parent_count: d.parent_count,
+        filename: d.filename,
       }));
-      const bridges = computeClusterBridges(
-        (res.clusters || []).map((c) => ({
-          cluster_id: c.cluster_id,
-          top_entities: c.top_entities,
-        })),
-      );
-      setData({ nodes: anchorNodes, links: bridges });
+      const bridgeLinks = bv.bridges.map((b) => ({
+        source: `book:${b.source}`,
+        target: `book:${b.target}`,
+        predicate: "bridges_to",
+        // Use strength on weight so the adapter / sigma reducer thickens
+        // bridges by how many cross-book entity pairs they represent.
+        weight: b.strength,
+        confidence: Math.min(1, (b.shared_entities || 0) / 12),
+      }));
+      setData({ nodes: anchorNodes, links: bridgeLinks });
       setCacheWarming([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

@@ -35,23 +35,36 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("backfill_doc_anchors")
 
-# Allow running from repo root: `python scripts/backfill_doc_anchors.py`
-ROOT = Path(__file__).resolve().parent.parent
-BACKEND = ROOT / "backend"
-if BACKEND.exists() and str(BACKEND) not in sys.path:
-    sys.path.insert(0, str(BACKEND))
+# Resolve the backend module path whether the script is run from the repo
+# root (`python backend/scripts/backfill_doc_anchors.py`) or from inside the
+# container (`python /app/scripts/backfill_doc_anchors.py`).
+HERE = Path(__file__).resolve()
+for candidate in (HERE.parent.parent, HERE.parent.parent / "backend"):
+    if (candidate / "services" / "graph" / "neo4j_writer.py").exists():
+        if str(candidate) not in sys.path:
+            sys.path.insert(0, str(candidate))
+        break
 
 
 async def _amain(corpus_ids: list[str] | None, dry_run: bool) -> int:
     from motor.motor_asyncio import AsyncIOMotorClient
     from neo4j import AsyncGraphDatabase
 
-    mongo_url = os.environ.get("MONGO_URL") or os.environ.get("MONGODB_URL")
+    # Backend uses MONGODB_URI / NEO4J_URI; legacy env var names kept as fallback.
+    mongo_url = (
+        os.environ.get("MONGODB_URI")
+        or os.environ.get("MONGO_URL")
+        or os.environ.get("MONGODB_URL")
+    )
     if not mongo_url:
-        logger.error("MONGO_URL / MONGODB_URL not set")
+        logger.error("MONGODB_URI / MONGO_URL / MONGODB_URL not set")
         return 2
 
-    neo4j_url = os.environ.get("NEO4J_URL", "bolt://neo4j:7687")
+    neo4j_url = (
+        os.environ.get("NEO4J_URI")
+        or os.environ.get("NEO4J_URL")
+        or "bolt://neo4j:7687"
+    )
     neo4j_user = os.environ.get("NEO4J_USER", "neo4j")
     neo4j_password = os.environ.get("NEO4J_PASSWORD") or os.environ.get("NEO4J_AUTH_PASSWORD")
     if not neo4j_password:

@@ -1640,3 +1640,128 @@ export async function getGraphByDocument(opts: {
     }),
   });
 }
+
+// ─── Brain View (anchor-driven, pure Cypher) ────────────────────────
+//
+// POST /api/graph/brain-view — returns :Document cluster anchors + bridge
+// strengths derived from shared Entity mentions. Anchor metadata (filename,
+// chunk_count, ghost_b_*) lives on the Document node directly, so the
+// response needs zero MongoDB enrichment. Pairs with POST /api/graph/
+// book-drilldown for click-to-drill.
+
+export interface BrainViewBridge {
+  target_doc_id: string;
+  target_filename?: string;
+  target_corpus_id?: string;
+  shared_entities: number;
+  strength: number;
+}
+
+export interface BrainViewDocument {
+  doc_id: string;
+  corpus_id: string;
+  label: string;
+  filename?: string | null;
+  kind: string;
+  chunk_count: number;
+  parent_count: number;
+  actual_chunk_count: number;
+  ghost_b_success_rate?: number | null;
+  ghost_b_extracted?: number | null;
+  ghost_b_total?: number | null;
+  schema_lens_id?: string | null;
+  source_tier?: string | null;
+  ingested_at?: string | null;
+  updated_at?: string | null;
+  bridge_count: number;
+  bridges: BrainViewBridge[];
+}
+
+export interface BrainViewFlatBridge {
+  source: string;
+  source_corpus_id?: string;
+  target: string;
+  target_corpus_id?: string;
+  strength: number;
+  shared_entities: number;
+}
+
+export interface BrainViewResponse {
+  documents: BrainViewDocument[];
+  bridges: BrainViewFlatBridge[];
+  meta: {
+    corpus_count: number;
+    total_documents: number;
+    total_bridges: number;
+    limit_applied: number;
+    error?: string;
+    partial?: boolean;
+  };
+}
+
+export async function getBrainView(
+  corpusIds: string[],
+  limit = 2000,
+): Promise<BrainViewResponse> {
+  return fetchJSON("/graph/brain-view", {
+    method: "POST",
+    body: JSON.stringify({ corpus_ids: corpusIds, limit }),
+  });
+}
+
+export interface BookDrilldownEntity {
+  entity_id: string;
+  display_name: string;
+  entity_type: string;
+  object_kind?: string | null;
+  canonical_family?: string | null;
+}
+
+export interface BookDrilldownRelation {
+  source_id: string;
+  target_id: string;
+  predicate: string;
+  relation_family: string;
+  confidence?: number | null;
+}
+
+export interface BookDrilldownCrossBridge {
+  via_entity_id: string;
+  bridge_entity_id: string;
+  bridge_entity_name?: string;
+  target_doc_id: string;
+  target_filename?: string;
+  target_corpus_id?: string;
+  strength: number;
+}
+
+export interface BookDrilldownResponse {
+  anchor: Record<string, any> | null;
+  local_entities: BookDrilldownEntity[];
+  local_relations: BookDrilldownRelation[];
+  cross_book_bridges: BookDrilldownCrossBridge[];
+  meta: {
+    found: boolean;
+    local_entity_count?: number;
+    local_relation_count?: number;
+    bridge_count?: number;
+    limit?: number;
+    error?: string;
+    partial?: boolean;
+  };
+}
+
+export async function getBookDrilldown(
+  docId: string,
+  otherCorpusIds: string[],
+  limit = 350,
+): Promise<BookDrilldownResponse> {
+  return fetchJSON("/graph/book-drilldown", {
+    method: "POST",
+    body: JSON.stringify({
+      doc_id: docId,
+      other_corpus_ids: otherCorpusIds,
+      limit,
+    }),
+  });
+}

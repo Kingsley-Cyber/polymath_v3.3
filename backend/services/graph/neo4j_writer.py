@@ -1231,6 +1231,10 @@ async def write_document_graph(
                 "canonical_name": identity["canonical_name"],
                 "display_name": identity["display_name"],
                 "surface_form": entity.surface_form or entity.canonical_name,
+                # PRD parity — keep the chunk-grounded evidence phrase on the
+                # MENTIONS edge so downstream retrieval can render "this is
+                # WHY we think the chunk mentions this entity".
+                "evidence_phrase": getattr(entity, "evidence_phrase", None),
                 "primary_entity_type": identity["primary_entity_type"],
                 "entity_type": identity["primary_entity_type"],
                 "extracted_type": entity.entity_type,
@@ -1414,6 +1418,7 @@ async def write_document_graph(
                     END,
                     m.extracted_type = row.extracted_type,
                     m.surface_form = row.surface_form,
+                    m.evidence_phrase = coalesce(row.evidence_phrase, m.evidence_phrase),
                     m.extractor = 'ghost_b',
                     m.ontology_version = row.ontology_version,
                     m.corpus_id = $corpus_id,

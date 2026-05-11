@@ -21,6 +21,28 @@ from neo4j import AsyncDriver
 logger = logging.getLogger(__name__)
 
 
+def _iso_or_none(value: Any) -> str | None:
+    """Coerce Neo4j temporal types (DateTime / Date / Time) to ISO strings.
+
+    FastAPI's default JSON serializer (pydantic_core) does not know how to
+    handle `neo4j.time.DateTime`; without this coercion the Brain View route
+    raises `PydanticSerializationError: Unable to serialize unknown type`.
+    Returns the input unchanged when it is already None or a primitive.
+    """
+    if value is None:
+        return None
+    # neo4j.time.DateTime, Date, Time all expose iso_format()
+    iso = getattr(value, "iso_format", None)
+    if callable(iso):
+        try:
+            return iso()
+        except Exception:
+            return str(value)
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
 _BRAIN_VIEW_CYPHER = """
 MATCH (d:Document)
 WHERE d.corpus_id IN $corpus_ids
@@ -150,8 +172,8 @@ async def get_brain_view(
             "ghost_b_total": record.get("ghost_b_total"),
             "schema_lens_id": record.get("schema_lens_id"),
             "source_tier": record.get("source_tier"),
-            "ingested_at": record.get("ingested_at"),
-            "updated_at": record.get("updated_at"),
+            "ingested_at": _iso_or_none(record.get("ingested_at")),
+            "updated_at": _iso_or_none(record.get("updated_at")),
             "bridge_count": record.get("bridge_count") or 0,
             "bridges": record.get("bridges") or [],
         }
@@ -296,6 +318,11 @@ async def get_book_drilldown(
         }
 
     anchor = dict(record["anchor"]) if record["anchor"] is not None else None
+    # Coerce Neo4j temporal types on the anchor so FastAPI can serialize.
+    if anchor:
+        for key in ("ingested_at", "updated_at"):
+            if key in anchor:
+                anchor[key] = _iso_or_none(anchor[key])
     local_entities = list(record["local_entities"] or [])
     local_relations = list(record["local_relations"] or [])
     cross_book_bridges = list(record["cross_book_bridges"] or [])

@@ -497,6 +497,26 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
         layoutTimeoutRef.current = null;
       }
       graphRef.current = newGraph;
+      // ── LOD: gate labels by node count (PRD §F performance rule) ──
+      // Below 800 → labels on, normal density. Above → keep only
+      // forceLabel:true nodes (Book anchors, seeds) visible, drop density
+      // and raise the size threshold so the canvas stays readable at scale.
+      const nodeCount = newGraph.order;
+      const isLargeGraph = nodeCount > 800;
+      const isHugeGraph = nodeCount > 3000;
+      try {
+        sigma.setSetting("renderLabels", !isLargeGraph);
+        sigma.setSetting(
+          "labelDensity",
+          isHugeGraph ? 0.02 : isLargeGraph ? 0.05 : 0.1,
+        );
+        sigma.setSetting(
+          "labelRenderedSizeThreshold",
+          isHugeGraph ? 14 : isLargeGraph ? 11 : 8,
+        );
+      } catch {
+        /* setSetting may throw if the renderer is mid-frame — ignore */
+      }
       sigma.setGraph(newGraph);
       setSelectedNode(null);
       runLayout(newGraph);
