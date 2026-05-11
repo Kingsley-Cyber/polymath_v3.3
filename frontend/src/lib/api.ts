@@ -632,12 +632,12 @@ export async function getEntityGraph(
 }
 
 /**
- * POST /api/graph/query — Phase 17 Wave 1 Agent Query
- * Backend extracts query entities, expands N-hop subgraph, finds bridges/hubs/gaps.
- * Returns everything the GraphView canvas + DiscoveryPanel need.
+ * POST /api/graph/query — Agent Query (PR 3 multi-corpus)
+ * Backend extracts query entities per corpus, expands subgraph, finds
+ * bridges/hubs/gaps, then merges across all selected corpora.
  */
 export async function queryGraph(
-  corpusId: string,
+  corpusIds: string[],
   query: string,
   maxHops: number = 2,
   limit: number = 50,
@@ -645,13 +645,195 @@ export async function queryGraph(
   return fetchJSON("/graph/query", {
     method: "POST",
     body: JSON.stringify({
-      corpus_id: corpusId,
+      corpus_ids: corpusIds,
       query,
       max_hops: maxHops,
       limit,
     }),
   });
 }
+
+// ─── PR 2 / PR 3 multi-corpus graph viewer endpoints ──────────────────────
+
+export type GraphOverviewMultiResponse = {
+  view: string;
+  status: "ready" | "cache_warming";
+  message?: string;
+  nodes: Array<{
+    id: string;
+    display_name: string;
+    entity_type: string;
+    mention_count: number;
+    supernode_type?: string;
+    primary_domain?: string;
+    top_entities?: string[];
+    member_ids?: string[];
+    bridge_count?: number;
+    source_corpus?: string;
+    source_corpora?: string[];
+  }>;
+  edges: Array<{
+    source: string;
+    target: string;
+    predicate: string;
+    confidence: number;
+    weight: number;
+    source_corpus?: string;
+    source_corpora?: string[];
+    dangling?: boolean;
+  }>;
+  truncated: boolean;
+  raw_node_count: number;
+  raw_edge_count: number;
+  concept_count: number;
+  domain_count: number;
+  _meta?: {
+    successful_ids: string[];
+    failed_ids: string[];
+    errors: Record<string, string>;
+    cache_warming_corpora: string[];
+  };
+};
+
+export type GraphFullMultiResponse = {
+  nodes: Array<{
+    id: string;
+    display_name: string;
+    entity_type: string;
+    mention_count: number;
+    object_kind?: string;
+    canonical_family?: string;
+    source_corpus?: string;
+    source_corpora?: string[];
+  }>;
+  edges: Array<{
+    source: string;
+    target: string;
+    predicate: string;
+    relation_family?: string;
+    confidence?: number;
+    source_corpus?: string;
+    source_corpora?: string[];
+    dangling?: boolean;
+  }>;
+  truncated: boolean;
+  _meta?: {
+    successful_ids: string[];
+    failed_ids: string[];
+    errors: Record<string, string>;
+    cache_warming_corpora: string[];
+  };
+};
+
+export type CacheStatus = {
+  corpus_id: string;
+  domain_cache: "ready" | "warming" | "missing";
+  metrics_cache: "ready" | "warming" | "missing";
+  signature: string;
+  last_built_at: string | null;
+};
+
+/**
+ * POST /api/graph/overview — multi-corpus cached supernode overview.
+ * Brain View's primary data source. Per-corpus cache misses surface as
+ * `_meta.cache_warming_corpora`; the warm corpora still render.
+ */
+export async function getGraphOverviewMulti(
+  corpusIds: string[],
+  opts?: { max_concepts?: number; max_edges?: number },
+): Promise<GraphOverviewMultiResponse> {
+  return fetchJSON("/graph/overview", {
+    method: "POST",
+    body: JSON.stringify({
+      corpus_ids: corpusIds,
+      max_concepts: opts?.max_concepts ?? 80,
+      max_edges: opts?.max_edges ?? 220,
+    }),
+  });
+}
+
+/**
+ * POST /api/graph/full — multi-corpus full entity graph.
+ * Used for drill into a cluster (after applying node_id filter on the
+ * client) when /graph/cluster/{concept_id} isn't appropriate.
+ */
+export async function getGraphFullMulti(
+  corpusIds: string[],
+  opts?: { max_nodes?: number; max_edges?: number },
+): Promise<GraphFullMultiResponse> {
+  return fetchJSON("/graph/full", {
+    method: "POST",
+    body: JSON.stringify({
+      corpus_ids: corpusIds,
+      max_nodes: opts?.max_nodes ?? 20000,
+      max_edges: opts?.max_edges ?? 60000,
+    }),
+  });
+}
+
+/**
+ * POST /api/graph/cluster/{concept_id} — single concept-community drill.
+ * Returns all entity nodes + RELATES_TO edges within the requested
+ * community across the selected corpora.
+ */
+export async function getGraphCluster(
+  conceptId: string,
+  corpusIds: string[],
+  opts?: { max_nodes?: number; max_edges?: number },
+): Promise<GraphFullMultiResponse & { concept_id: string }> {
+  return fetchJSON(`/graph/cluster/${encodeURIComponent(conceptId)}`, {
+    method: "POST",
+    body: JSON.stringify({
+      corpus_ids: corpusIds,
+      max_nodes: opts?.max_nodes ?? 5000,
+      max_edges: opts?.max_edges ?? 20000,
+    }),
+  });
+}
+
+/**
+ * GET /api/corpora/{cid}/cache-status — lightweight warming poll target.
+ * Frontend polls every 15s while any selected corpus is warming.
+ */
+export async function getCorpusCacheStatus(corpusId: string): Promise<CacheStatus> {
+  return fetchJSON(`/corpora/${encodeURIComponent(corpusId)}/cache-status`);
+}
+
+/**
+ * POST /api/graph/cache/rebuild — manually trigger analytics cache build
+ * for corpora whose cache is missing or stale. Returns immediately; the
+ * actual emerge_domains run happens in a background asyncio.Task.
+ */
+export type GraphCacheRebuildResponse = {
+  rebuilding: string[];
+  already_running: string[];
+  skipped: string[];
+  errors: Record<string, string>;
+};
+
+export async function rebuildGraphCache(
+  corpusIds: string[],
+  opts?: { force?: boolean },
+): Promise<GraphCacheRebuildResponse> {
+  return fetchJSON("/graph/cache/rebuild", {
+    method: "POST",
+    body: JSON.stringify({
+      corpus_ids: corpusIds,
+      force: Boolean(opts?.force),
+    }),
+  });
+}
+
+/** GET /api/graph/cache/rebuild-status — which corpora are mid-rebuild. */
+export async function getGraphCacheRebuildStatus(): Promise<{
+  in_flight: string[];
+  finished: string[];
+}> {
+  return fetchJSON("/graph/cache/rebuild-status");
+}
+
+// PR 4 fix — `getGraphByDocument` is already declared near line 1650 of
+// this file; the GraphViewer imports it from there.
 
 // ── Phase 19 Wave 2 — Cloud API key manager ────────────────────────────────
 

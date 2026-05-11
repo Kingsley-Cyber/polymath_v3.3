@@ -1,0 +1,944 @@
+/**
+ * GraphViewer — orchestration layer over `useSigma` (hook port of
+ * GitNexus's useSigma.ts) and `polymath-graph-adapter` (Polymath payload
+ * → graphology). All rendering / physics / reducer logic lives in those
+ * two modules; this file owns:
+ *
+ *   • Multi-corpus data fetch (Brain View domains/books, Query View)
+ *   • Cache-warming poll
+ *   • UI chrome: corpus pill stats, color/view toggles, breadcrumb,
+ *     hover tooltip, selection bar, controls cluster, prose pane
+ *   • Drill stack management (concept community drill, book drill)
+ */
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import ReactMarkdown from "react-markdown";
+import {
+  ChevronLeft,
+  Loader2,
+  Maximize2,
+  Pause,
+  Play,
+  X,
+  Zap,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
+
+import * as api from "../../lib/api";
+import { useSigma } from "../../hooks/useSigma";
+import {
+  polymathToGraphology,
+  type ColorMode,
+} from "../../lib/polymath-graph-adapter";
+
+// ─── Types ────────────────────────────────────────────────────────────────
+
+export type GraphViewerMode = "brain" | "query";
+
+interface GraphViewerProps {
+  mode: GraphViewerMode;
+  corpusIds: string[];
+  query?: string;
+  onRerun?: () => void;
+  onClose?: () => void;
+  model?: string;
+}
+
+// Books-as-clusters drill: we only ever drill into a book (no concept-
+// community drill anymore — that was the domains mode that's been retired).
+type DrillFrame = {
+  docId: string;
+  label: string;
+};
+
+// ─── Brain mode data hook ─────────────────────────────────────────────────
+
+/** Compute lightweight bridge edges between book clusters by intersecting
+ *  their `top_entities` lists. Two clusters that share K of their top
+ *  entities get an edge with weight = K. Cheap, runs client-side, gives
+ *  the canvas the "bridges" structure that makes books-as-clusters feel
+ *  like a graph instead of a static grid. */
+function computeClusterBridges(
+  clusters: { cluster_id: string; top_entities?: string[] }[],
+  opts?: { minSharedEntities?: number; maxBridgesPerCluster?: number },
+): any[] {
+  const minShared = opts?.minSharedEntities ?? 1;
+  const maxPer = opts?.maxBridgesPerCluster ?? 6;
+  const sets = clusters.map((c) => ({
+    id: c.cluster_id,
+    set: new Set((c.top_entities || []).map(String)),
+  }));
+  const perCluster = new Map<string, number>();
+  const out: any[] = [];
+  for (let i = 0; i < sets.length; i++) {
+    const a = sets[i];
+    const candidates: { other: string; shared: number }[] = [];
+    for (let j = i + 1; j < sets.length; j++) {
+      const b = sets[j];
+      let shared = 0;
+      // Iterate the smaller set for the intersection.
+      const [small, large] = a.set.size <= b.set.size ? [a.set, b.set] : [b.set, a.set];
+      small.forEach((x) => {
+        if (large.has(x)) shared++;
+      });
+      if (shared >= minShared) candidates.push({ other: b.id, shared });
+    }
+    candidates.sort((x, y) => y.shared - x.shared);
+    for (const { other, shared } of candidates) {
+      if ((perCluster.get(a.id) || 0) >= maxPer) break;
+      if ((perCluster.get(other) || 0) >= maxPer) continue;
+      out.push({
+        source: `book:${a.id}`,
+        target: `book:${other}`,
+        predicate: "bridges_to",
+        confidence: Math.min(1, shared / 12),
+        weight: shared,
+        // Adapter draws cross-cluster edges in violet so these stand out.
+        source_corpora: ["a", "b"],
+      });
+      perCluster.set(a.id, (perCluster.get(a.id) || 0) + 1);
+      perCluster.set(other, (perCluster.get(other) || 0) + 1);
+    }
+  }
+  return out;
+}
+
+function useBrainGraph(
+  corpusIds: string[],
+  drill: DrillFrame | null,
+) {
+  const [data, setData] = useState<{
+    nodes: any[];
+    links: any[];
+  } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [cacheWarming, setCacheWarming] = useState<string[]>([]);
+  // Per-corpus cache classification: "missing" (never built — needs manual
+  // rebuild) vs "warming" (stale signature — rebuild already needed) vs
+  // "ready". Populated by polling /api/corpora/{cid}/cache-status whenever
+  // cacheWarming is non-empty.
+  const [cacheStatuses, setCacheStatuses] = useState<
+    Record<string, api.CacheStatus>
+  >({});
+  const [rebuildingIds, setRebuildingIds] = useState<Set<string>>(new Set());
+
+  const reload = useCallback(async () => {
+    if (corpusIds.length === 0) {
+      setData(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      // ── Books-as-clusters is the canonical Brain View ──
+      if (drill) {
+        // Drilled into a specific book — fetch that book's entities +
+        // bridge neighbours. This is the only "show me everything" path
+        // and it's scoped to one document, so the canvas stays readable.
+        const res = await api.getGraphByDocument({
+          corpusIds,
+          mode: "drill",
+          drillDocId: drill.docId,
+        });
+        // Render book anchors + entity nodes + entity↔book membership
+        // edges so the drilled book reads as a "this book's contents"
+        // local subgraph.
+        const anchorNodes = (res.clusters || []).map((c) => ({
+          id: `book:${c.cluster_id}`,
+          display_name: c.label || c.cluster_id.slice(0, 8),
+          mention_count: c.entity_count || 1,
+          kind: "book" as const,
+          source_corpora: [c.corpus_id],
+          source_corpus: c.corpus_id,
+          top_entities: c.top_entities,
+        }));
+        const memberEdges: any[] = [];
+        for (const e of res.nodes || []) {
+          const primary = (e as any).primary_doc_id;
+          if (primary) {
+            memberEdges.push({
+              source: e.id,
+              target: `book:${primary}`,
+              predicate: "in_book",
+              confidence: 1,
+              weight: 0.4,
+            });
+          }
+          const bridges = (e as any).bridge_doc_ids || [];
+          for (const did of bridges) {
+            memberEdges.push({
+              source: e.id,
+              target: `book:${did}`,
+              predicate: "bridges_to",
+              confidence: 0.6,
+              weight: 0.3,
+            });
+          }
+        }
+        setData({
+          nodes: [...anchorNodes, ...(res.nodes || [])],
+          links: [...memberEdges, ...(res.edges || [])],
+        });
+        setCacheWarming([]);
+        return;
+      }
+
+      // ── Top-level: OVERVIEW mode — cluster anchors only, no entities ──
+      // Backend returns one row per Document with entity_count +
+      // top_entities. We render those as the only nodes and synthesize
+      // inter-cluster bridge edges from shared top_entities. This is
+      // what makes the canvas read as "a graph of N books" rather than
+      // "every entity in every book at once."
+      const res = await api.getGraphByDocument({
+        corpusIds,
+        mode: "overview",
+      });
+      const anchorNodes = (res.clusters || []).map((c) => ({
+        id: `book:${c.cluster_id}`,
+        display_name: c.label || c.cluster_id.slice(0, 8),
+        mention_count: c.entity_count || 1,
+        kind: "book" as const,
+        source_corpora: [c.corpus_id],
+        source_corpus: c.corpus_id,
+        top_entities: c.top_entities,
+      }));
+      const bridges = computeClusterBridges(
+        (res.clusters || []).map((c) => ({
+          cluster_id: c.cluster_id,
+          top_entities: c.top_entities,
+        })),
+      );
+      setData({ nodes: anchorNodes, links: bridges });
+      setCacheWarming([]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [corpusIds, drill]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  // Whenever cacheWarming changes, fetch per-corpus statuses ONCE so the
+  // chip + Build button can show the real state (missing vs warming vs
+  // running rebuild). Then poll every 15s if any are still not ready.
+  useEffect(() => {
+    if (!cacheWarming.length) {
+      setCacheStatuses({});
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const [statuses, rebuildState] = await Promise.all([
+          Promise.all(cacheWarming.map((cid) => api.getCorpusCacheStatus(cid))),
+          api.getGraphCacheRebuildStatus().catch(() => ({
+            in_flight: [],
+            finished: [],
+          })),
+        ]);
+        if (cancelled) return;
+        setCacheStatuses(
+          Object.fromEntries(statuses.map((s) => [s.corpus_id, s])),
+        );
+        setRebuildingIds(new Set(rebuildState.in_flight));
+        const stillNotReady = statuses
+          .filter(
+            (s) => s.metrics_cache !== "ready" || s.domain_cache !== "ready",
+          )
+          .map((s) => s.corpus_id);
+        if (stillNotReady.length === 0) reload();
+        else setCacheWarming(stillNotReady);
+      } catch {
+        /* swallow */
+      }
+    };
+    refresh();
+    const t = setInterval(refresh, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [cacheWarming, reload]);
+
+  const triggerRebuild = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      try {
+        const res = await api.rebuildGraphCache(ids);
+        const triggered = new Set([...res.rebuilding, ...res.already_running]);
+        setRebuildingIds((prev) => {
+          const next = new Set(prev);
+          for (const cid of triggered) next.add(cid);
+          return next;
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [],
+  );
+
+  return {
+    data,
+    loading,
+    error,
+    cacheWarming,
+    cacheStatuses,
+    rebuildingIds,
+    triggerRebuild,
+    reload,
+  };
+}
+
+// ─── Query mode data hook ─────────────────────────────────────────────────
+
+function useQueryGraph(
+  corpusIds: string[],
+  query: string | undefined,
+  model: string | undefined,
+) {
+  const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "error">(
+    "idle",
+  );
+  const [data, setData] = useState<{ nodes: any[]; links: any[] } | null>(null);
+  const [seedIds, setSeedIds] = useState<Set<string>>(new Set());
+  const [hubIds, setHubIds] = useState<Set<string>>(new Set());
+  const [bridgeIds, setBridgeIds] = useState<Set<string>>(new Set());
+  const [gaps, setGaps] = useState<any[]>([]);
+  const [synthesis, setSynthesis] = useState<{
+    markdown: string;
+    sources: any[];
+    perCorpus?: Array<{ corpus_id: string; markdown: string }>;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancel = false;
+    const run = async () => {
+      if (!corpusIds.length || !query?.trim()) return;
+      setPhase("loading");
+      setError(null);
+      try {
+        const subgraphP = api.queryGraph(corpusIds, query, 2, 50);
+        const synthP = api.discoverGraph({
+          corpus_ids: corpusIds as any,
+          query,
+          mode: "auto",
+          ...(model ? { model } : {}),
+        } as any);
+        const sub = await subgraphP;
+        if (cancel) return;
+        setSeedIds(
+          new Set<string>((sub.seed_entities || []).map((s: any) => String(s.id))),
+        );
+        setHubIds(
+          new Set<string>((sub.hubs || []).map((h: any) => String(h.entity_id))),
+        );
+        setBridgeIds(
+          new Set<string>((sub.bridges || []).map((b: any) => String(b.entity_id))),
+        );
+        setGaps(sub.gaps || []);
+        setData({ nodes: sub.nodes || [], links: sub.links || [] });
+        setPhase("ready");
+        const synth = await synthP;
+        if (cancel) return;
+        const auto = (synth as any).auto_synthesis || {};
+        setSynthesis({
+          markdown:
+            auto.markdown ||
+            (synth as any).interpretation ||
+            "(no synthesis generated)",
+          sources: auto.sources || [],
+          perCorpus: auto.per_corpus_synthesis || undefined,
+        });
+      } catch (e) {
+        if (cancel) return;
+        setError(e instanceof Error ? e.message : String(e));
+        setPhase("error");
+      }
+    };
+    run();
+    return () => {
+      cancel = true;
+    };
+  }, [corpusIds, query, model]);
+
+  return {
+    phase,
+    data,
+    seedIds,
+    hubIds,
+    bridgeIds,
+    gaps,
+    synthesis,
+    error,
+  };
+}
+
+// ─── Component ────────────────────────────────────────────────────────────
+
+export function GraphViewer({
+  mode,
+  corpusIds,
+  query,
+  onRerun,
+  onClose,
+  model,
+}: GraphViewerProps) {
+  const [colorMode, setColorMode] = useState<ColorMode>("community");
+  const [drillStack, setDrillStack] = useState<DrillFrame[]>([]);
+  const [hoveredName, setHoveredName] = useState<string | null>(null);
+  const drillStackRef = useRef(drillStack);
+  drillStackRef.current = drillStack;
+
+  const drill = drillStack.length ? drillStack[drillStack.length - 1] : null;
+  const brain = useBrainGraph(
+    mode === "brain" ? corpusIds : [],
+    drill,
+  );
+  const q = useQueryGraph(
+    mode === "query" ? corpusIds : [],
+    query,
+    model,
+  );
+
+  const data = mode === "brain" ? brain.data : q.data;
+  const loading = mode === "brain" ? brain.loading : q.phase === "loading";
+  const error = mode === "brain" ? brain.error : q.error;
+
+  // Double-click handler — drills into a book anchor (single-click selects
+  // the node + neighbors as usual). Books-as-clusters is the only Brain
+  // View now, so the only drill target is `book:<doc_id>`.
+  const handleDoubleClickNode = useCallback(
+    (nodeId: string) => {
+      if (mode !== "brain") return;
+      if (!nodeId.startsWith("book:")) return;
+      const docId = nodeId.slice(5);
+      const found = (data?.nodes || []).find((n: any) => String(n.id) === nodeId);
+      const label =
+        (found && (found.display_name as string)) || docId.slice(0, 8);
+      setDrillStack([...drillStackRef.current, { docId, label }]);
+    },
+    [mode, data],
+  );
+
+  const sigma = useSigma({
+    onNodeHover: (id) => {
+      if (!id || !data) {
+        setHoveredName(null);
+        return;
+      }
+      const found = (data.nodes || []).find((n: any) => String(n.id) === id);
+      setHoveredName(found ? String(found.display_name || id) : id);
+    },
+    onDoubleClickNode: handleDoubleClickNode,
+  });
+
+  // Push new data into sigma when it lands.
+  useEffect(() => {
+    if (!data) return;
+    const seedIds = mode === "query" ? q.seedIds : new Set<string>();
+    const hubIds = mode === "query" ? q.hubIds : new Set<string>();
+    const bridgeIds = mode === "query" ? q.bridgeIds : new Set<string>();
+    const newGraph = polymathToGraphology(data.nodes, data.links, {
+      colorMode,
+      seedIds,
+      hubIds,
+      bridgeIds,
+    });
+    sigma.setGraph(newGraph);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run on data change
+  }, [data, mode, q.seedIds, q.hubIds, q.bridgeIds]);
+
+  // Apply colorMode toggle without rebuilding graph.
+  useEffect(() => {
+    const sigmaInst = sigma.sigmaRef.current;
+    const g = (sigmaInst as any)?.getGraph?.();
+    if (!sigmaInst || !g || g.order === 0 || !data) return;
+    // Easiest correct path: rebuild the graph with new colorMode. The
+    // adapter is fast enough that this stays under a few ms even for
+    // overview payloads (~80 nodes).
+    const seedIds = mode === "query" ? q.seedIds : new Set<string>();
+    const hubIds = mode === "query" ? q.hubIds : new Set<string>();
+    const bridgeIds = mode === "query" ? q.bridgeIds : new Set<string>();
+    const newGraph = polymathToGraphology(data.nodes, data.links, {
+      colorMode,
+      seedIds,
+      hubIds,
+      bridgeIds,
+    });
+    sigma.setGraph(newGraph);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- triggered only on colorMode flip
+  }, [colorMode]);
+
+  const selectedId = sigma.selectedNode;
+  const selectedDisplay = useMemo(() => {
+    if (!selectedId || !data) return null;
+    const found = (data.nodes || []).find((n: any) => String(n.id) === selectedId);
+    if (!found) return null;
+    return {
+      id: selectedId,
+      display_name: String((found as any).display_name || selectedId),
+      source_corpora: ((found as any).source_corpora || []) as string[],
+    };
+  }, [selectedId, data]);
+
+  // ── Render ──
+
+  if (corpusIds.length === 0) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-[#06060a] text-zinc-400">
+        <div className="text-center">
+          <div className="text-base mb-2 font-mono">
+            Select a corpus from the sidebar to begin
+          </div>
+          <div className="text-xs text-zinc-600 font-mono">
+            Tip: select multiple corpora to see cross-book connections
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative h-full w-full bg-[#06060a]">
+      {/* Background gradient — same recipe as GitNexus GraphCanvas */}
+      <div className="pointer-events-none absolute inset-0">
+        <div
+          className="absolute inset-0"
+          style={{
+            background: `
+              radial-gradient(circle at 50% 50%, rgba(124, 58, 237, 0.05) 0%, transparent 65%),
+              linear-gradient(to bottom, #06060a, #0a0a14)
+            `,
+          }}
+        />
+      </div>
+
+      {/* Top chrome */}
+      <div className="absolute top-3 left-3 right-3 z-20 flex items-start justify-between pointer-events-none">
+        <div className="flex flex-col gap-1.5 pointer-events-auto">
+          <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono">
+            {mode === "brain" ? "Corpora View" : "Query View"}
+          </div>
+          {mode === "brain" && drillStack.length > 0 && (
+            <div className="flex items-center gap-1 text-xs text-zinc-300 font-mono">
+              <button
+                className="hover:text-amber-400 transition-colors"
+                onClick={() => setDrillStack([])}
+              >
+                Overview
+              </button>
+              {drillStack.map((f, i) => (
+                <span key={i} className="flex items-center gap-1">
+                  <ChevronLeft className="w-3 h-3 rotate-180 text-zinc-600" />
+                  <button
+                    className="hover:text-amber-400 transition-colors"
+                    onClick={() => setDrillStack(drillStack.slice(0, i + 1))}
+                  >
+                    {f.label}
+                  </button>
+                </span>
+              ))}
+              <button
+                className="ml-2 text-zinc-500 hover:text-zinc-300"
+                onClick={() => setDrillStack(drillStack.slice(0, -1))}
+                title="Pop one level"
+              >
+                ↩ back
+              </button>
+            </div>
+          )}
+          <div className="text-[11px] text-zinc-500 font-mono">
+            {corpusIds.length} corpora
+            {data && ` · ${data.nodes.length} nodes · ${data.links.length} edges`}
+            {mode === "brain" && brain.cacheWarming.length > 0 && (
+              <CacheWarmingChip
+                cacheWarming={brain.cacheWarming}
+                statuses={brain.cacheStatuses}
+                rebuildingIds={brain.rebuildingIds}
+                onRebuild={brain.triggerRebuild}
+              />
+            )}
+            {sigma.isLayoutRunning && (
+              <span className="ml-2 text-violet-300/80">· settling…</span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 pointer-events-auto">
+          {mode === "brain" && (
+            <button
+              className="text-[10px] uppercase tracking-widest text-zinc-400 hover:text-amber-400 border border-zinc-800 bg-[#0d0d14]/80 backdrop-blur rounded px-2 py-1 font-mono"
+              onClick={() =>
+                setColorMode((m) => (m === "community" ? "corpus" : "community"))
+              }
+              title="Toggle color scheme"
+            >
+              color: {colorMode}
+            </button>
+          )}
+          {mode === "query" && onRerun && (
+            <button
+              className="text-[10px] uppercase tracking-widest text-zinc-200 hover:text-amber-400 border border-zinc-800 bg-[#0d0d14]/80 backdrop-blur rounded px-2 py-1 font-mono flex items-center gap-1"
+              onClick={onRerun}
+              title="Re-run synthesis"
+            >
+              <Zap className="w-3 h-3" /> re-run
+            </button>
+          )}
+          {onClose && (
+            <button
+              className="text-zinc-500 hover:text-zinc-200 bg-[#0d0d14]/80 backdrop-blur rounded p-1.5"
+              onClick={onClose}
+              title="Close viewer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Hovered node tooltip — only when nothing is selected */}
+      {hoveredName && !selectedId && (
+        <div className="pointer-events-none absolute top-16 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-zinc-800 bg-[#0d0d14]/95 px-3 py-1.5 backdrop-blur">
+          <span className="font-mono text-sm text-zinc-100">{hoveredName}</span>
+        </div>
+      )}
+
+      {/* Selection info bar */}
+      {selectedDisplay && (
+        <div className="absolute top-16 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 backdrop-blur">
+          <div className="h-2 w-2 animate-pulse rounded-full bg-violet-300" />
+          <span className="font-mono text-sm text-zinc-100">
+            {selectedDisplay.display_name}
+          </span>
+          {selectedDisplay.source_corpora.length > 0 && (
+            <span className="text-[10px] text-zinc-400 font-mono">
+              · {selectedDisplay.source_corpora.length} corpora
+            </span>
+          )}
+          <button
+            onClick={() => sigma.setSelectedNode(null)}
+            className="ml-2 rounded px-2 py-0.5 text-xs text-zinc-300 transition-colors hover:bg-white/10 hover:text-zinc-50"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Loading / error overlay */}
+      {(loading || error) && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+          {loading && !error && (
+            <div className="flex items-center gap-2 text-zinc-400 text-xs font-mono">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              {mode === "query" ? "synthesizing across corpora…" : "loading graph…"}
+            </div>
+          )}
+          {error && (
+            <div className="text-rose-300 text-xs font-mono pointer-events-auto bg-[#0d0d14] border border-rose-900/50 rounded px-3 py-2 max-w-md">
+              {error}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Empty data fallback */}
+      {data && data.nodes.length === 0 && !loading && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center">
+          <EmptyDataState
+            mode={mode}
+            cacheWarming={mode === "brain" ? brain.cacheWarming : []}
+            statuses={mode === "brain" ? brain.cacheStatuses : {}}
+            rebuildingIds={mode === "brain" ? brain.rebuildingIds : new Set()}
+            onRebuild={mode === "brain" ? brain.triggerRebuild : async () => {}}
+          />
+        </div>
+      )}
+
+      {/* Sigma canvas + optional prose pane */}
+      <div className="absolute inset-0 flex">
+        <div
+          ref={sigma.containerRef}
+          className="flex-1 min-w-0 cursor-grab active:cursor-grabbing"
+        />
+        {mode === "query" && q.synthesis && (
+          <div className="w-[40%] min-w-[320px] max-w-[640px] border-l border-zinc-900 bg-[#08080d]/90 backdrop-blur overflow-y-auto z-10">
+            <div className="p-4 space-y-3">
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono">
+                synthesis
+              </div>
+              <div className="prose prose-invert prose-sm max-w-none">
+                <ReactMarkdown>{q.synthesis.markdown}</ReactMarkdown>
+              </div>
+              {q.synthesis.sources && q.synthesis.sources.length > 0 && (
+                <div className="border-t border-zinc-900 pt-3">
+                  <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono mb-2">
+                    sources ({q.synthesis.sources.length})
+                  </div>
+                  <ol className="text-xs text-zinc-400 space-y-1 list-decimal list-inside">
+                    {q.synthesis.sources.map((s: any, i: number) => (
+                      <li key={s.chunk_id || i} className="truncate" title={s.snippet}>
+                        {s.source_label || s.doc_id || s.chunk_id}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+              {q.gaps && q.gaps.length > 0 && (
+                <div className="border-t border-zinc-900 pt-3">
+                  <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono mb-2">
+                    gaps detected ({q.gaps.length})
+                  </div>
+                  <ul className="text-xs text-zinc-400 space-y-1">
+                    {q.gaps.slice(0, 8).map((g: any, i: number) => (
+                      <li key={i}>
+                        <span className="text-zinc-300">{g.entity_a_name}</span>{" "}
+                        ↔{" "}
+                        <span className="text-zinc-300">{g.entity_b_name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {q.synthesis.perCorpus && q.synthesis.perCorpus.length > 1 && (
+                <details className="border-t border-zinc-900 pt-3">
+                  <summary className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono cursor-pointer">
+                    per-corpus syntheses ({q.synthesis.perCorpus.length})
+                  </summary>
+                  <div className="mt-2 space-y-3">
+                    {q.synthesis.perCorpus.map((p) => (
+                      <div key={p.corpus_id}>
+                        <div className="text-xs font-mono text-amber-400 mb-1">
+                          {p.corpus_id.slice(0, 8)}
+                        </div>
+                        <div className="prose prose-invert prose-sm max-w-none text-zinc-300">
+                          <ReactMarkdown>{p.markdown}</ReactMarkdown>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bottom-right control cluster — same layout as GitNexus */}
+      <div className="absolute right-4 bottom-4 z-20 flex flex-col gap-1 pointer-events-auto">
+        <button
+          onClick={sigma.zoomIn}
+          className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+          title="Zoom in"
+        >
+          <ZoomIn className="h-4 w-4" />
+        </button>
+        <button
+          onClick={sigma.zoomOut}
+          className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+          title="Zoom out"
+        >
+          <ZoomOut className="h-4 w-4" />
+        </button>
+        <button
+          onClick={sigma.resetZoom}
+          className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+          title="Fit to screen"
+        >
+          <Maximize2 className="h-4 w-4" />
+        </button>
+        <div className="h-px bg-zinc-800 my-1" />
+        <button
+          onClick={sigma.isLayoutRunning ? sigma.stopLayout : sigma.startLayout}
+          className={`flex h-9 w-9 items-center justify-center rounded-md border transition-all ${
+            sigma.isLayoutRunning
+              ? "animate-pulse border-violet-500 bg-violet-500/30 text-white"
+              : "border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+          }`}
+          title={sigma.isLayoutRunning ? "Pause layout" : "Resume layout"}
+        >
+          {sigma.isLayoutRunning ? (
+            <Pause className="h-4 w-4" />
+          ) : (
+            <Play className="h-4 w-4" />
+          )}
+        </button>
+      </div>
+
+      {/* Layout running indicator */}
+      {sigma.isLayoutRunning && (
+        <div className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/20 px-3 py-1.5 backdrop-blur">
+          <div className="h-2 w-2 animate-ping rounded-full bg-emerald-400" />
+          <span className="text-xs font-medium text-emerald-200 font-mono">
+            layout optimizing…
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default GraphViewer;
+
+
+// ─── Cache-warming sub-components ─────────────────────────────────────────
+
+interface CacheChipProps {
+  cacheWarming: string[];
+  statuses: Record<string, api.CacheStatus>;
+  rebuildingIds: Set<string>;
+  onRebuild: (ids: string[]) => Promise<void>;
+}
+
+/** Stats-pill chip that distinguishes "missing" (never built) from
+ *  "warming" (stale signature, needs rebuild) from "rebuilding" (task
+ *  already in flight). Click → kick the rebuild for the eligible ones. */
+function CacheWarmingChip({
+  cacheWarming,
+  statuses,
+  rebuildingIds,
+  onRebuild,
+}: CacheChipProps) {
+  const counts = cacheWarming.reduce(
+    (acc, cid) => {
+      const s = statuses[cid];
+      if (rebuildingIds.has(cid)) acc.rebuilding++;
+      else if (!s) acc.unknown++;
+      else if (s.metrics_cache === "missing" || s.domain_cache === "missing")
+        acc.missing++;
+      else acc.warming++;
+      return acc;
+    },
+    { missing: 0, warming: 0, rebuilding: 0, unknown: 0 },
+  );
+  const buildable = cacheWarming.filter(
+    (cid) => !rebuildingIds.has(cid),
+  );
+  const label =
+    counts.rebuilding > 0
+      ? `${counts.rebuilding} rebuilding…`
+      : counts.missing > 0 && counts.warming === 0
+      ? `${counts.missing} cache${counts.missing > 1 ? "s" : ""} not built`
+      : counts.warming > 0 && counts.missing === 0
+      ? `${counts.warming} cache${counts.warming > 1 ? "s" : ""} stale`
+      : `${counts.missing + counts.warming} need rebuild`;
+  return (
+    <span className="ml-2 inline-flex items-center gap-1.5">
+      <span className="text-amber-400">· {label}</span>
+      {buildable.length > 0 && counts.rebuilding === 0 && (
+        <button
+          className="text-[10px] uppercase tracking-widest text-amber-300 hover:text-amber-100 border border-amber-700/40 bg-amber-500/5 rounded px-1.5 py-0.5"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRebuild(buildable);
+          }}
+          title="Run analytics pipeline now (Louvain + PageRank + concept communities). Takes anywhere from seconds to several minutes depending on corpus size."
+        >
+          build
+        </button>
+      )}
+    </span>
+  );
+}
+
+interface EmptyStateProps {
+  mode: GraphViewerMode;
+  cacheWarming: string[];
+  statuses: Record<string, api.CacheStatus>;
+  rebuildingIds: Set<string>;
+  onRebuild: (ids: string[]) => Promise<void>;
+}
+
+function EmptyDataState({
+  mode,
+  cacheWarming,
+  statuses,
+  rebuildingIds,
+  onRebuild,
+}: EmptyStateProps) {
+  if (mode !== "brain") {
+    return (
+      <div className="text-center text-zinc-500 text-xs font-mono pointer-events-none">
+        <div>no query result yet</div>
+        <div className="text-zinc-700 mt-1">type a question below</div>
+      </div>
+    );
+  }
+  if (cacheWarming.length === 0) {
+    return (
+      <div className="text-center text-zinc-500 text-xs font-mono pointer-events-none">
+        <div>no graph data</div>
+        <div className="text-zinc-700 mt-1">
+          the selected corpora have empty supernode overviews
+        </div>
+      </div>
+    );
+  }
+  const missingIds = cacheWarming.filter((cid) => {
+    const s = statuses[cid];
+    return s && (s.metrics_cache === "missing" || s.domain_cache === "missing");
+  });
+  const warmingIds = cacheWarming.filter((cid) => {
+    const s = statuses[cid];
+    return s && s.metrics_cache !== "missing" && s.domain_cache !== "missing";
+  });
+  const rebuildingHere = cacheWarming.filter((cid) => rebuildingIds.has(cid));
+  const buildable = cacheWarming.filter((cid) => !rebuildingIds.has(cid));
+  return (
+    <div className="text-center text-zinc-300 text-xs font-mono max-w-xl px-6 space-y-2 pointer-events-auto">
+      <div className="text-zinc-200 text-sm mb-3">
+        Analytics cache not ready for{" "}
+        <span className="text-amber-300">{cacheWarming.length}</span> corpor
+        {cacheWarming.length === 1 ? "us" : "a"}
+      </div>
+      {missingIds.length > 0 && (
+        <div className="text-zinc-400">
+          <span className="text-rose-300">{missingIds.length} never built</span>{" "}
+          — Polymath warms the analytics cache automatically at the end of
+          ingestion, but these corpora were ingested before that hook landed
+          (or never finished). Rebuild manually below.
+        </div>
+      )}
+      {warmingIds.length > 0 && (
+        <div className="text-zinc-400">
+          <span className="text-amber-300">{warmingIds.length} stale</span> —
+          new docs were ingested since the last cache build. Rebuild to refresh.
+        </div>
+      )}
+      {rebuildingHere.length > 0 && (
+        <div className="text-violet-300">
+          {rebuildingHere.length} currently rebuilding (this can take seconds
+          for tiny corpora to several minutes for thousands of entities).
+          Frontend polls every 15s; the canvas will populate when each
+          finishes.
+        </div>
+      )}
+      {buildable.length > 0 && (
+        <button
+          className="mt-3 text-[11px] uppercase tracking-widest text-amber-100 hover:text-amber-50 border border-amber-500/50 bg-amber-500/10 rounded px-3 py-1.5 font-mono"
+          onClick={() => onRebuild(buildable)}
+        >
+          Build cache for {buildable.length} corpor{buildable.length === 1 ? "us" : "a"}
+        </button>
+      )}
+      <div className="text-zinc-600 text-[10px] mt-2">
+        Behind the scenes: services/graph/analytics.py:emerge_domains runs
+        Louvain on document embeddings, computes PageRank + concept
+        communities, then writes the result to graph_domain_cache and
+        graph_metrics_cache.
+      </div>
+    </div>
+  );
+}

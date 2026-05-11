@@ -10,8 +10,7 @@ import { ModelSelector } from "./components/chat/ModelSelector";
 import { ReasoningModeSelector } from "./components/chat/ReasoningModeSelector";
 import { QueryProfileSelector } from "./components/chat/QueryProfileSelector";
 import { RetrievalTierSelector } from "./components/chat/RetrievalTierSelector";
-import { GraphView } from "./components/chat/GraphView";
-import { DiscoveryPanel } from "./components/graph/DiscoveryPanel";
+import { GraphViewer } from "./components/graph/GraphViewer";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { LoginView } from "./components/auth/LoginView";
 import { IngestionDashboard } from "./components/ingestion/IngestionDashboard";
@@ -29,11 +28,17 @@ function App() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [pipelineStatus, setPipelineStatus] = useState<string>("");
-  const [graphFallbackCorpusId, setGraphFallbackCorpusId] = useState<string | null>(null);
+
+  // PR 4 — graph viewer mode + query state. Brain mode renders the
+  // multi-corpus supernode overview; query mode runs Mission Control
+  // synthesis against the selected corpora and plays the entry animation.
+  const [graphViewerMode, setGraphViewerMode] = useState<"brain" | "query">("brain");
+  const [graphViewerQuery, setGraphViewerQuery] = useState<string>("");
+  const [graphViewerQueryDraft, setGraphViewerQueryDraft] = useState<string>("");
+  const [graphViewerRunCount, setGraphViewerRunCount] = useState(0);
 
   const { selectedModel, setSelectedModel, setModels, maxTokens, theme, selectedCorpusIds } =
     useSettingsStore();
-  const graphPanelCorpusId = selectedCorpusIds[0] ?? graphFallbackCorpusId;
 
   // Auth state — route guard depends on isAuthenticated
   const { isAuthenticated, setAuth, clearAuth } = useAuthStore();
@@ -63,29 +68,10 @@ function App() {
     checkAuth();
   }, []);
 
-  useEffect(() => {
-    if (!isGraphViewOpen || selectedCorpusIds[0]) {
-      setGraphFallbackCorpusId(null);
-      return;
-    }
-
-    let cancelled = false;
-    api.listCorpora()
-      .then((corpora) => {
-        if (!cancelled) {
-          setGraphFallbackCorpusId(corpora[0]?.corpus_id ?? null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setGraphFallbackCorpusId(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isGraphViewOpen, selectedCorpusIds]);
+  // PR 4 — no auto-fallback when no corpora selected. The new GraphViewer
+  // renders an empty-state prompt instead. Multi-corpus selection is
+  // explicit; the legacy "first available corpus" fallback is retired
+  // (Phase F cleanup of GRAPH_VIEWER_BRIDGE.md).
 
   // Uploads each file into the user's selected corpus, pushes the returned
   // doc_id into the ingestion queue store, and returns immediately. The
@@ -592,21 +578,78 @@ function App() {
 
       {/* Global Views & Modals */}
       {isGraphViewOpen && (
-        <>
-          <div className="fixed inset-0 z-50">
-            <GraphView onClose={() => setIsGraphViewOpen(false)} />
+        <div className="fixed inset-0 z-50 bg-[#0a0a0a]/95">
+          <div className="absolute inset-0 flex flex-col">
+            {/* GraphViewer fills the canvas area */}
+            <div className="flex-1 min-h-0">
+              <GraphViewer
+                mode={graphViewerMode}
+                corpusIds={selectedCorpusIds}
+                query={graphViewerMode === "query" ? graphViewerQuery : undefined}
+                model={selectedModel || undefined}
+                onRerun={
+                  graphViewerMode === "query"
+                    ? () => setGraphViewerRunCount((n) => n + 1)
+                    : undefined
+                }
+                onClose={() => setIsGraphViewOpen(false)}
+                key={`gv-${graphViewerMode}-${graphViewerQuery}-${graphViewerRunCount}`}
+              />
+            </div>
+            {/* Query input bar — bottom-center, switches mode between
+                brain and query. PR 4 of the multi-corpus rollout. */}
+            <div className="border-t border-zinc-800 bg-zinc-950/90 backdrop-blur p-3 z-50">
+              <form
+                className="max-w-3xl mx-auto flex items-center gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const q = graphViewerQueryDraft.trim();
+                  if (!q) return;
+                  setGraphViewerQuery(q);
+                  setGraphViewerMode("query");
+                  setGraphViewerRunCount((n) => n + 1);
+                }}
+              >
+                <input
+                  type="text"
+                  value={graphViewerQueryDraft}
+                  onChange={(e) => setGraphViewerQueryDraft(e.target.value)}
+                  placeholder={
+                    selectedCorpusIds.length === 0
+                      ? "Select a corpus first…"
+                      : graphViewerMode === "query"
+                      ? "Ask another question across selected corpora…"
+                      : "Ask the graph: how does X relate to Y across corpora?"
+                  }
+                  disabled={selectedCorpusIds.length === 0}
+                  className="flex-1 bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-amber-700 font-mono"
+                />
+                <button
+                  type="submit"
+                  disabled={
+                    selectedCorpusIds.length === 0 || !graphViewerQueryDraft.trim()
+                  }
+                  className="text-[10px] uppercase tracking-widest text-zinc-200 hover:text-amber-400 border border-zinc-700 rounded px-3 py-2 font-mono disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Synthesize
+                </button>
+                {graphViewerMode === "query" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGraphViewerMode("brain");
+                      setGraphViewerQuery("");
+                      setGraphViewerQueryDraft("");
+                    }}
+                    className="text-[10px] uppercase tracking-widest text-zinc-500 hover:text-zinc-200 border border-zinc-800 rounded px-3 py-2 font-mono"
+                  >
+                    Back to Brain
+                  </button>
+                )}
+              </form>
+            </div>
           </div>
-          {/* Mission Control sidebar — sits on top of the right edge of the
-              graph view at a higher z-index. The panel owns its own width
-              (drag-resizable via its left-edge handle, persisted in
-              localStorage) so we only need a fixed positional wrapper here. */}
-          <div className="fixed top-0 right-0 bottom-0 z-[60] shadow-2xl">
-            <DiscoveryPanel
-              corpusId={graphPanelCorpusId}
-              onClose={() => setIsGraphViewOpen(false)}
-            />
-          </div>
-        </>
+        </div>
       )}
 
       <SettingsModal

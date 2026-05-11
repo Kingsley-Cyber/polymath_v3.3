@@ -393,6 +393,12 @@ class ContextGraphNode(BaseModel):
     evidence_count: int = 0
     top_entities: list[str] = Field(default_factory=list)
     jump_targets: list[ContextGraphJumpTarget] = Field(default_factory=list)
+    # Multi-corpus PR 1 — provenance for cross-corpus rendering.
+    # source_corpus = primary corpus the node came from; source_corpora =
+    # full set of corpora that contributed (populated by PR 3's merger when
+    # the same entity_id appears in multiple corpora).
+    source_corpus: str = ""
+    source_corpora: list[str] = Field(default_factory=list)
 
 
 class ContextGraphLink(BaseModel):
@@ -403,6 +409,11 @@ class ContextGraphLink(BaseModel):
     weight: float = 1.0
     suggested: bool = False
     evidence: str = ""
+    # Multi-corpus PR 1 — edge provenance. `dangling=True` is set by PR 2's
+    # graph merger when the target node is absent from the loaded corpora set.
+    source_corpus: str = ""
+    source_corpora: list[str] = Field(default_factory=list)
+    dangling: bool = False
 
 
 class ContextGraphPayload(BaseModel):
@@ -445,21 +456,52 @@ class DiscoverTracePayload(BaseModel):
 
 
 class GraphDiscoverRequest(BaseModel):
+    """Mission Control discover request.
+
+    Multi-corpus PR 1 — `corpus_id: str` is preserved as a deprecated alias.
+    Callers should use `corpus_ids: list[str]` going forward. The
+    model_validator below normalizes legacy single-id payloads into the
+    canonical list at validation time.
+    """
+
     model_config = ConfigDict(extra="ignore")
 
-    corpus_id: str
+    corpus_id: str | None = Field(
+        default=None,
+        description="DEPRECATED — use corpus_ids. Wrapped into corpus_ids=[corpus_id] when present.",
+    )
+    corpus_ids: list[str] = Field(default_factory=list)
     query: str
     mode: Literal["auto", "connect", "gaps", "themes"] = "auto"
     session_id: str | None = None
     model: str | None = None
     agentic: bool = False
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_corpus_ids(cls, values):
+        if not isinstance(values, dict):
+            return values
+        ids = values.get("corpus_ids")
+        single = values.get("corpus_id")
+        if not ids and isinstance(single, str) and single:
+            values["corpus_ids"] = [single]
+        return values
+
 
 class GraphDiscoverResponse(BaseModel):
+    """Mission Control discover response. Multi-corpus PR 1 adds `corpus_ids`.
+
+    `corpus_id` is preserved as a deprecated alias (set to corpus_ids[0] for
+    legacy clients). New consumers should read `corpus_ids` and the
+    `source_corpus` attribution on graph nodes/edges.
+    """
+
     model_config = ConfigDict(extra="allow")
 
     session_id: str = ""
     corpus_id: str = ""
+    corpus_ids: list[str] = Field(default_factory=list)
     query: str = ""
     mode: str = "auto"
     interpretation: str = ""
@@ -498,15 +540,38 @@ def _utcnow() -> datetime:
 
 
 class GraphDiscoverSession(BaseModel):
+    """Mission Control session metadata.
+
+    Multi-corpus PR 1 adds `corpus_ids: list[str]`. `corpus_id` is preserved
+    as a deprecated alias for backward compat with sessions stored before
+    PR 3's lifespan migration. The validator below populates one from the
+    other so the dict shape works regardless of which field is set.
+    """
+
     model_config = ConfigDict(extra="allow")
 
     session_id: str
-    corpus_id: str
+    corpus_id: str = ""
+    corpus_ids: list[str] = Field(default_factory=list)
     title: str = ""
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
     turn_count: int = 0
     first_query: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_corpus_fields(cls, values):
+        if not isinstance(values, dict):
+            return values
+        ids = values.get("corpus_ids")
+        single = values.get("corpus_id")
+        if not ids and isinstance(single, str) and single:
+            values["corpus_ids"] = [single]
+        elif ids and not single:
+            # Echo first id into legacy field so old clients keep working.
+            values["corpus_id"] = ids[0]
+        return values
 
 
 class GraphDiscoverTurn(BaseModel):
@@ -523,16 +588,68 @@ class GraphDiscoverSessionDetail(GraphDiscoverSession):
 
 
 class GraphResumeCandidateRequest(BaseModel):
+    """Find an existing Mission Control session by query similarity.
+
+    Multi-corpus PR 1 — `corpus_id` deprecated, use `corpus_ids`. Same
+    normalization pattern as GraphDiscoverRequest.
+    """
+
     model_config = ConfigDict(extra="ignore")
 
-    corpus_id: str
+    corpus_id: str | None = Field(
+        default=None,
+        description="DEPRECATED — use corpus_ids.",
+    )
+    corpus_ids: list[str] = Field(default_factory=list)
     query: str
     threshold: float | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_corpus_ids(cls, values):
+        if not isinstance(values, dict):
+            return values
+        ids = values.get("corpus_ids")
+        single = values.get("corpus_id")
+        if not ids and isinstance(single, str) and single:
+            values["corpus_ids"] = [single]
+        return values
 
 
 class GraphResumeCandidateResponse(BaseModel):
     session: GraphDiscoverSession | None = None
     score: float = 0.0
+
+
+class GraphQueryRequest(BaseModel):
+    """POST /api/graph/query body — Agent Query backend call from GraphView.
+
+    Multi-corpus PR 1 — overrides _legacy.GraphQueryRequest to add
+    `corpus_ids: list[str]`. `corpus_id` is preserved as a deprecated alias;
+    the model_validator below wraps a legacy single id into the new list.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    corpus_id: str | None = Field(
+        default=None,
+        description="DEPRECATED — use corpus_ids. Wrapped into corpus_ids=[corpus_id] when present.",
+    )
+    corpus_ids: list[str] = Field(default_factory=list)
+    query: str = Field(..., min_length=1, description="Free-text query; tokens matched against Entity names")
+    max_hops: int = Field(default=2, ge=1, le=3, description="Entity→Entity traversal depth from seeds")
+    limit: int = Field(default=50, ge=1, le=200, description="Max nodes in returned subgraph")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_corpus_ids(cls, values):
+        if not isinstance(values, dict):
+            return values
+        ids = values.get("corpus_ids")
+        single = values.get("corpus_id")
+        if not ids and isinstance(single, str) and single:
+            values["corpus_ids"] = [single]
+        return values
 
 
 class GraphSuggestionItem(BaseModel):
@@ -571,6 +688,10 @@ class GraphInsightPacketEntity(BaseModel):
     canonical_family: str = ""
     degree: int = 0
     role: str = "working"
+    # Multi-corpus PR 1 — provenance. PR 3's merger populates these when the
+    # same entity is seen across multiple corpora.
+    source_corpus: str = ""
+    source_corpora: list[str] = Field(default_factory=list)
 
 
 class GraphInsightPacketCommunity(BaseModel):
@@ -591,6 +712,12 @@ class GraphInsightPacketEdge(BaseModel):
     relation_family: str = ""
     confidence: float = 0.0
     role: str = "context"
+    # Multi-corpus PR 1 — edge provenance. RELATES_TO edges already carry
+    # r.corpus_ids: list[str] in Neo4j, so this can be populated directly
+    # from that field.
+    source_corpus: str = ""
+    source_corpora: list[str] = Field(default_factory=list)
+    dangling: bool = False
 
 
 class GraphInsightPacketGap(BaseModel):
@@ -640,10 +767,17 @@ class GraphInsightPacket(BaseModel):
     """Bounded packet handed to the synthesis LLM. Hard caps applied at build
     time; if the legacy result has more data, the assembler keeps the highest-
     weight items and drops the rest. The LLM never sees raw corpus text beyond
-    this packet."""
+    this packet.
+
+    Multi-corpus PR 1 — `corpus_ids: list[str]` is the new canonical scope.
+    `corpus_id` stays as the deprecated single-value alias so the legacy
+    packet builder in services.graph.orchestrator (PR 3 wraps this) keeps
+    working unchanged.
+    """
 
     query: str
-    corpus_id: str
+    corpus_id: str = ""
+    corpus_ids: list[str] = Field(default_factory=list)
     interpretation: str = ""
     headline: str = ""
     anchors: list[str] = Field(default_factory=list)

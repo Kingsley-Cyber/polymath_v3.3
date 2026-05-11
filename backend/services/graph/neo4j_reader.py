@@ -521,3 +521,188 @@ async def get_entity_relations(
             limit=limit,
         )
         return [dict(r) async for r in result]
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Multi-corpus extensions (PR 2 of the multi-corpus rollout)
+# ────────────────────────────────────────────────────────────────────────────
+
+
+async def get_full_corpora_graph(
+    driver: AsyncDriver,
+    corpus_ids: list[str],
+    *,
+    max_nodes: int = 20000,
+    max_edges: int = 60000,
+) -> dict:
+    """Multi-corpus version of get_full_corpus_graph.
+
+    Cypher patterns mirror the canonical multi-corpus shape from
+    `services.graph.neo4j_reader.get_documents_as_clusters`:
+      • Nodes: WHERE c.corpus_id IN $corpus_ids
+      • Edges: WHERE any(cid IN $corpus_ids WHERE cid IN coalesce(r.corpus_ids, []))
+
+    Each node carries `source_corpora: list[str]` listing every requested
+    corpus that mentioned the entity. Each edge carries `source_corpora`
+    from the relation's own corpus_ids field, and `dangling: True` is set
+    when the target node was not in the loaded set (e.g. truncation hit).
+    """
+    if not corpus_ids:
+        return {"nodes": [], "edges": [], "truncated": False}
+
+    nodes_cypher = """
+    MATCH (c:Chunk)-[m:MENTIONS]->(e:Entity)
+    WHERE c.corpus_id IN $corpus_ids
+    WITH e,
+         count(DISTINCT c) AS mention_count,
+         collect(DISTINCT c.corpus_id) AS source_corpora
+    RETURN e.entity_id       AS id,
+           e.display_name    AS display_name,
+           coalesce(e.primary_entity_type, e.entity_type) AS entity_type,
+           e.observed_entity_types AS observed_entity_types,
+           e.object_kind     AS object_kind,
+           e.object_kind_parent AS object_kind_parent,
+           e.object_kind_root AS object_kind_root,
+           e.domain_type AS domain_type,
+           e.domain_type_parent AS domain_type_parent,
+           e.domain_type_root AS domain_type_root,
+           e.canonical_family AS canonical_family,
+           e.ontology_version AS ontology_version,
+           mention_count,
+           source_corpora
+    ORDER BY mention_count DESC
+    LIMIT $max_nodes
+    """
+    edges_cypher = """
+    MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
+    WHERE any(cid IN $corpus_ids WHERE cid IN coalesce(r.corpus_ids, []))
+    RETURN DISTINCT a.entity_id AS source,
+                    b.entity_id AS target,
+                    r.predicate AS predicate,
+                    coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
+                    r.confidence AS confidence,
+                    coalesce(r.corpus_ids, []) AS source_corpora
+    LIMIT $max_edges
+    """
+
+    async with driver.session() as session:
+        nodes_res = await session.run(
+            nodes_cypher, corpus_ids=corpus_ids, max_nodes=max_nodes
+        )
+        nodes = [dict(r) async for r in nodes_res]
+        edges_res = await session.run(
+            edges_cypher, corpus_ids=corpus_ids, max_edges=max_edges
+        )
+        edges = [dict(r) async for r in edges_res]
+
+    # Annotate nodes with primary source_corpus = first in their set, sorted
+    # for determinism.
+    node_ids = {n["id"] for n in nodes}
+    for n in nodes:
+        sc = sorted(n.get("source_corpora") or [])
+        n["source_corpora"] = sc
+        n["source_corpus"] = sc[0] if sc else ""
+
+    # Annotate edges; mark dangling when target outside loaded set (truncation
+    # or the relation references entities not surfaced at this max_nodes cap).
+    surviving_edges: list[dict] = []
+    for e in edges:
+        sc = sorted(e.get("source_corpora") or [])
+        e["source_corpora"] = sc
+        e["source_corpus"] = sc[0] if sc else ""
+        e["dangling"] = (e["source"] not in node_ids) or (e["target"] not in node_ids)
+        surviving_edges.append(e)
+    edges = surviving_edges
+
+    truncated = len(nodes) >= max_nodes or len(edges) >= max_edges
+    return {"nodes": nodes, "edges": edges, "truncated": truncated}
+
+
+async def get_concept_community_full(
+    driver: AsyncDriver,
+    *,
+    entity_ids: list[str],
+    corpus_ids: list[str],
+    max_nodes: int = 5000,
+    max_edges: int = 20000,
+) -> dict:
+    """Single-cluster drill — returns full entity nodes + RELATES_TO edges
+    for the entities that belong to one concept community.
+
+    Caller resolves the entity_ids from the cached metrics' entity_concept_map
+    (see services.graph.analytics.CorpusMetrics) for the chosen concept_id,
+    then passes them in. This keeps the Cypher independent of the analytics
+    cache and lets the same helper power any "show me these N entities + their
+    in-set relations" drill (cluster, search result, custom selection).
+    """
+    if not entity_ids or not corpus_ids:
+        return {"nodes": [], "edges": [], "truncated": False}
+
+    nodes_cypher = """
+    MATCH (e:Entity)
+    WHERE e.entity_id IN $entity_ids
+      AND EXISTS {
+          MATCH (c:Chunk)-[:MENTIONS]->(e)
+          WHERE c.corpus_id IN $corpus_ids
+      }
+    OPTIONAL MATCH (c2:Chunk)-[:MENTIONS]->(e)
+    WHERE c2.corpus_id IN $corpus_ids
+    WITH e,
+         count(DISTINCT c2) AS mention_count,
+         collect(DISTINCT c2.corpus_id) AS source_corpora
+    RETURN e.entity_id       AS id,
+           e.display_name    AS display_name,
+           coalesce(e.primary_entity_type, e.entity_type) AS entity_type,
+           e.object_kind     AS object_kind,
+           e.canonical_family AS canonical_family,
+           e.ontology_version AS ontology_version,
+           mention_count,
+           source_corpora
+    ORDER BY mention_count DESC
+    LIMIT $max_nodes
+    """
+    edges_cypher = """
+    MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
+    WHERE a.entity_id IN $entity_ids AND b.entity_id IN $entity_ids
+      AND any(cid IN $corpus_ids WHERE cid IN coalesce(r.corpus_ids, []))
+    RETURN DISTINCT a.entity_id AS source,
+                    b.entity_id AS target,
+                    r.predicate AS predicate,
+                    coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
+                    r.confidence AS confidence,
+                    coalesce(r.corpus_ids, []) AS source_corpora
+    LIMIT $max_edges
+    """
+
+    async with driver.session() as session:
+        nodes_res = await session.run(
+            nodes_cypher,
+            entity_ids=entity_ids,
+            corpus_ids=corpus_ids,
+            max_nodes=max_nodes,
+        )
+        nodes = [dict(r) async for r in nodes_res]
+        edges_res = await session.run(
+            edges_cypher,
+            entity_ids=entity_ids,
+            corpus_ids=corpus_ids,
+            max_edges=max_edges,
+        )
+        edges = [dict(r) async for r in edges_res]
+
+    node_ids = {n["id"] for n in nodes}
+    for n in nodes:
+        sc = sorted(n.get("source_corpora") or [])
+        n["source_corpora"] = sc
+        n["source_corpus"] = sc[0] if sc else ""
+    surviving: list[dict] = []
+    for e in edges:
+        sc = sorted(e.get("source_corpora") or [])
+        e["source_corpora"] = sc
+        e["source_corpus"] = sc[0] if sc else ""
+        e["dangling"] = (e["source"] not in node_ids) or (e["target"] not in node_ids)
+        surviving.append(e)
+    edges = surviving
+
+    truncated = len(nodes) >= max_nodes or len(edges) >= max_edges
+    return {"nodes": nodes, "edges": edges, "truncated": truncated}

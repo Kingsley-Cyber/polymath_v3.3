@@ -9,6 +9,7 @@ below, discovery query is mounted under a separate `/api/graph` prefix
 because it's not scoped to a single corpus in the URL path (corpus_id is in
 the request body).
 """
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -184,18 +185,16 @@ async def get_entity_relations(
     summary="Agent Query: extract entities from question, expand subgraph, find bridges/hubs/gaps",
 )
 async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse:
-    """
-    Phase 17 Wave 1 — the backend for the "Agent Query" tab in GraphView.
+    """Agent Query — entity-first subgraph extraction.
 
-    Flow:
-      1. Tokenize the query and match tokens against Entity nodes in this corpus
-      2. N-hop RELATES_TO expansion from matched seeds
-      3. Bridge detection: entities connected to ≥2 seeds (no shortestPath — Community-safe)
-      4. Hub detection: Python degree count on the returned subgraph
-      5. Gap detection: seed pairs with no direct RELATES_TO edge
-
-    Returns the discovery payload for the frontend's DiscoveryPanel + canvas.
+    PR 3 — multi-corpus fan-out. The PR 1 GraphQueryRequest validator
+    wraps a legacy corpus_id into corpus_ids=[corpus_id], so single-corpus
+    payloads continue to work unchanged. For len(corpus_ids) > 1 the
+    handler runs the per-corpus pipeline in parallel under a Semaphore(4)
+    and merges nodes/links/bridges/hubs/gaps/seed_entities by entity_id.
     """
+    import asyncio as _asyncio
+
     driver = _require_neo4j()
     from services.graph.graph_query import (
         expand_subgraph,
@@ -205,63 +204,130 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
         find_hubs,
     )
 
-    # Step 1 — seed entities
-    seeds = await extract_query_entities(body.query, body.corpus_id, driver)
-    if not seeds:
-        # Return an empty-but-well-formed response; the UI will render a
-        # friendly "no entities matched" state.
-        return GraphQueryResponse(
-            nodes=[],
-            links=[],
-            bridges=[],
-            hubs=[],
-            gaps=[],
-            seed_entities=[],
+    # PR 3 — both fields are populated by the PR 1 model_validator.
+    corpus_ids: list[str] = list(body.corpus_ids or [])
+    if not corpus_ids and body.corpus_id:
+        corpus_ids = [body.corpus_id]
+    if not corpus_ids:
+        raise HTTPException(status_code=400, detail="corpus_ids must be a non-empty list")
+
+    async def _run_one(cid: str):
+        seeds = await extract_query_entities(body.query, cid, driver)
+        if not seeds:
+            return cid, {"nodes": [], "links": [], "bridges": [], "gaps": [], "seeds": []}
+        seed_ids = [s["entity_id"] for s in seeds]
+        subgraph = await expand_subgraph(
+            entity_ids=seed_ids,
+            corpus_id=cid,
+            driver=driver,
+            max_hops=body.max_hops,
+            limit=body.limit,
         )
+        bridges = await find_bridges(
+            driver=driver,
+            entity_ids=seed_ids,
+            corpus_id=cid,
+            max_hops=body.max_hops,
+        )
+        gaps = await find_gaps(driver=driver, entity_ids=seed_ids)
+        return cid, {
+            "nodes": subgraph["nodes"],
+            "links": subgraph["links"],
+            "bridges": bridges,
+            "gaps": gaps,
+            "seeds": seeds,
+        }
 
-    seed_ids = [s["entity_id"] for s in seeds]
+    sem = asyncio.Semaphore(4)
 
-    # Step 2 — expand subgraph
-    subgraph = await expand_subgraph(
-        entity_ids=seed_ids,
-        corpus_id=body.corpus_id,
-        driver=driver,
-        max_hops=body.max_hops,
-        limit=body.limit,
-    )
-    nodes = subgraph["nodes"]
-    links = subgraph["links"]
+    async def _gated(cid: str):
+        async with sem:
+            return await _run_one(cid)
 
-    # Step 3 — bridges
-    bridges = await find_bridges(
-        driver=driver,
-        entity_ids=seed_ids,
-        corpus_id=body.corpus_id,
-        max_hops=body.max_hops,
-    )
+    per_corpus = await asyncio.gather(*[_gated(cid) for cid in corpus_ids])
 
-    # Step 4 — hubs (Python, on the subgraph we already have)
+    # Merge: nodes by id, links by (source, target, predicate), bridges +
+    # gaps + seeds with source_corpus tagging.
+    merged_nodes: dict[str, dict] = {}
+    merged_links: dict[tuple, dict] = {}
+    merged_bridges: dict[str, dict] = {}
+    merged_gaps: list[dict] = []
+    merged_seeds: dict[str, dict] = {}
+
+    def _stamp(item: dict, cid: str) -> dict:
+        if not isinstance(item, dict):
+            return item
+        sc = list(item.get("source_corpora") or [])
+        if cid and cid not in sc:
+            sc.append(cid)
+        item["source_corpora"] = sc
+        item.setdefault("source_corpus", cid)
+        return item
+
+    for cid, payload in per_corpus:
+        for n in payload["nodes"]:
+            nid = n.get("id")
+            if not nid:
+                continue
+            if nid in merged_nodes:
+                _stamp(merged_nodes[nid], cid)
+            else:
+                merged_nodes[nid] = _stamp(dict(n), cid)
+        for l in payload["links"]:
+            k = (l.get("source"), l.get("target"), l.get("predicate"))
+            if k in merged_links:
+                _stamp(merged_links[k], cid)
+            else:
+                merged_links[k] = _stamp(dict(l), cid)
+        for b in payload["bridges"]:
+            bid = b.get("entity_id")
+            if not bid:
+                continue
+            if bid in merged_bridges:
+                _stamp(merged_bridges[bid], cid)
+                # Sum connected_seed_count across corpora.
+                try:
+                    merged_bridges[bid]["connected_seed_count"] = (
+                        int(merged_bridges[bid].get("connected_seed_count") or 0)
+                        + int(b.get("connected_seed_count") or 0)
+                    )
+                except Exception:
+                    pass
+            else:
+                merged_bridges[bid] = _stamp(dict(b), cid)
+        for g in payload["gaps"]:
+            merged_gaps.append(_stamp(dict(g), cid))
+        for s in payload["seeds"]:
+            sid = s.get("entity_id")
+            if not sid:
+                continue
+            if sid in merged_seeds:
+                _stamp(merged_seeds[sid], cid)
+            else:
+                merged_seeds[sid] = _stamp(dict(s), cid)
+
+    nodes = list(merged_nodes.values())
+    links = list(merged_links.values())
+    bridges = list(merged_bridges.values())
     hubs = find_hubs(nodes, links)
-
-    # Step 5 — gaps (between seed pairs only — not all subgraph pairs)
-    gaps = await find_gaps(driver=driver, entity_ids=seed_ids)
+    seeds_out = [
+        {
+            "id": s["entity_id"],
+            "display_name": s.get("display_name", ""),
+            "entity_type": s.get("entity_type", "other"),
+            "mention_count": s.get("mention_count", 0),
+            "is_seed": True,
+        }
+        for s in merged_seeds.values()
+    ]
 
     return GraphQueryResponse(
         nodes=nodes,
         links=links,
         bridges=bridges,
         hubs=hubs,
-        gaps=gaps,
-        seed_entities=[
-            {
-                "id": s["entity_id"],
-                "display_name": s.get("display_name", ""),
-                "entity_type": s.get("entity_type", "other"),
-                "mention_count": s.get("mention_count", 0),
-                "is_seed": True,
-            }
-            for s in seeds
-        ],
+        gaps=merged_gaps,
+        seed_entities=seeds_out,
     )
 
 
@@ -554,12 +620,19 @@ async def graph_discover(
         if owner and owner.get("user_id") and owner["user_id"] != current_user["user_id"]:
             raise HTTPException(status_code=404, detail="Session not found")
 
+    # PR 3 — both fields populated by GraphDiscoverRequest's PR 1 validator.
+    discover_corpus_ids = list(body.corpus_ids or [])
+    if not discover_corpus_ids and body.corpus_id:
+        discover_corpus_ids = [body.corpus_id]
+    if not discover_corpus_ids:
+        raise HTTPException(status_code=400, detail="corpus_ids must be a non-empty list")
+
     try:
         result = await discover(
             qdrant=qdrant,
             neo4j_driver=neo4j,
             db=db,
-            corpus_id=body.corpus_id,
+            corpus_ids=discover_corpus_ids,
             query=body.query,
             mode=body.mode,
             session_id=body.session_id,
@@ -612,14 +685,32 @@ async def graph_discover(
 @discovery_router.get("/sessions", response_model=list[GraphDiscoverSession])
 async def list_graph_sessions(
     corpus_id: Optional[str] = Query(default=None),
+    corpus_ids: Optional[str] = Query(
+        default=None,
+        description="PR 3 — comma-separated list of corpus IDs. Wins over corpus_id when both present.",
+    ),
     current_user: dict = Depends(get_current_user),
 ):
-    """List Mission Control sessions owned by the current user."""
+    """List Mission Control sessions owned by the current user.
+
+    PR 3 multi-corpus: pass corpus_ids="id1,id2" as a query param to filter
+    sessions touching any of those corpora. Single-corpus corpus_id query
+    param remains supported.
+    """
     from services.graph.orchestrator import list_sessions as _list
     db = ingestion_service.db
     if db is None:
         raise HTTPException(status_code=503, detail="Database not connected")
-    sessions = await _list(db, corpus_id=corpus_id, user_id=current_user["user_id"])
+
+    parsed_ids: list[str] = []
+    if corpus_ids:
+        parsed_ids = [c.strip() for c in corpus_ids.split(",") if c.strip()]
+    sessions = await _list(
+        db,
+        corpus_id=corpus_id if not parsed_ids else None,
+        corpus_ids=parsed_ids or None,
+        user_id=current_user["user_id"],
+    )
     return [GraphDiscoverSession(**s) for s in sessions]
 
 
@@ -628,19 +719,27 @@ async def graph_resume_candidate(
     body: GraphResumeCandidateRequest,
     current_user: dict = Depends(get_current_user),
 ) -> GraphResumeCandidateResponse:
-    """Find a prior Mission Control thread by query-embedding cosine similarity."""
+    """Find a prior Mission Control thread by query-embedding cosine similarity.
+
+    PR 3 — multi-corpus: searches across all selected corpora and returns
+    the highest-scoring candidate above threshold.
+    """
     from services.graph.orchestrator import find_resume_candidate
 
     db = ingestion_service.db
     if db is None:
         raise HTTPException(status_code=503, detail="Database not connected")
 
+    rc_corpus_ids = list(body.corpus_ids or [])
+    if not rc_corpus_ids and body.corpus_id:
+        rc_corpus_ids = [body.corpus_id]
+
     candidate = await find_resume_candidate(
         db,
-        corpus_id=body.corpus_id,
+        corpus_ids=rc_corpus_ids,
         query=body.query,
         user_id=current_user["user_id"],
-        threshold=body.threshold,
+        threshold=body.threshold or 0.85,
     )
     if not candidate:
         return GraphResumeCandidateResponse()
@@ -669,10 +768,17 @@ async def get_graph_session(
 
 @discovery_router.get("/suggestions", response_model=GraphSuggestionsResponse)
 async def graph_suggestions(
-    corpus_id: str = Query(...),
+    corpus_id: Optional[str] = Query(default=None),
+    corpus_ids: Optional[str] = Query(
+        default=None,
+        description="PR 3 — comma-separated list of corpus IDs. Wins over corpus_id when both present.",
+    ),
     current_user: dict = Depends(get_current_user),
 ):
-    """Return corpus-seeded Mission Control suggestions without a synthesis turn."""
+    """Return corpus-seeded Mission Control suggestions without a synthesis turn.
+
+    PR 3 — multi-corpus support via comma-separated corpus_ids query param.
+    """
     from services.graph.orchestrator import build_corpus_suggestions
 
     qdrant = ingestion_service.qdrant_client
@@ -682,11 +788,21 @@ async def graph_suggestions(
     if db is None:
         raise HTTPException(status_code=503, detail="Database not connected")
 
+    parsed_ids: list[str] = []
+    if corpus_ids:
+        parsed_ids = [c.strip() for c in corpus_ids.split(",") if c.strip()]
+    if not parsed_ids and corpus_id:
+        parsed_ids = [corpus_id]
+    if not parsed_ids:
+        raise HTTPException(
+            status_code=400, detail="corpus_id or corpus_ids query parameter required"
+        )
+
     payload = await build_corpus_suggestions(
         qdrant=qdrant,
         neo4j_driver=ingestion_service.neo4j_driver,
         db=db,
-        corpus_id=corpus_id,
+        corpus_ids=parsed_ids,
         user_id=current_user["user_id"],
     )
     return GraphSuggestionsResponse(**payload)
@@ -706,3 +822,321 @@ async def delete_graph_session(
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"deleted": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PR 2 — multi-corpus graph viewer endpoints
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Three POST endpoints + one cache-status GET. Additive — the legacy
+# GET /api/corpora/{corpus_id}/graph/overview and /graph/full are NOT
+# modified. Frontend rewrite (PR 4) consumes the new POSTs; existing
+# clients keep working until cutover.
+#
+# All bodies accept `corpus_ids: list[str]`. The DISABLE_MULTI_CORPUS env
+# var (set in backend/utils/corpus_ids.py) rejects any input with len > 1
+# at the normalization layer, returning 400.
+
+
+# Re-export the canonical validator so existing route handlers keep
+# their import path. Logic lives in utils.corpus_ids so unit tests can
+# import it without dragging in the auth chain (jose) at module load.
+from utils.corpus_ids import validate_corpus_ids_or_400 as _validate_corpus_ids_or_400
+
+
+@discovery_router.post(
+    "/full",
+    summary="Multi-corpus full entity graph (PR 2 — Phased Rollout Plan §1)",
+)
+async def graph_full_multi_corpus(body: dict = Body(...)) -> dict:
+    """Full entity + RELATES_TO edge graph across N corpora.
+
+    Body:
+      corpus_ids: list[str]   required, 1-32
+      max_nodes: int          optional, default 20000
+      max_edges: int          optional, default 60000
+
+    Returns:
+      {nodes, edges, truncated, _meta:{successful_ids, failed_ids, errors,
+       cache_warming_corpora}}
+    Each node/edge carries source_corpora + source_corpus. Edges where
+    target was outside the loaded set are flagged dangling: true.
+    """
+    driver = _require_neo4j()
+    corpus_ids = _validate_corpus_ids_or_400(body)
+    max_nodes = max(1, min(int(body.get("max_nodes", 20000) or 20000), 50000))
+    max_edges = max(1, min(int(body.get("max_edges", 60000) or 60000), 200000))
+
+    from services.graph.neo4j_reader import get_full_corpora_graph
+
+    try:
+        result = await get_full_corpora_graph(
+            driver, corpus_ids, max_nodes=max_nodes, max_edges=max_edges
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).exception("graph_full_multi_corpus failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Graph load failed")
+
+    result["_meta"] = {
+        "successful_ids": corpus_ids,
+        "failed_ids": [],
+        "errors": {},
+        "cache_warming_corpora": [],
+    }
+    return result
+
+
+@discovery_router.post(
+    "/overview",
+    summary="Multi-corpus cached supernode overview (PR 2)",
+)
+async def graph_overview_multi_corpus(body: dict = Body(...)) -> dict:
+    """Cached supernode overview merged across N corpora.
+
+    Body:
+      corpus_ids: list[str]   required, 1-32
+      max_concepts: int       optional, default 80
+      max_edges: int          optional, default 220
+
+    Returns the merged supernode graph with `_meta.cache_warming_corpora`
+    listing any corpora whose analytics cache wasn't ready. The render
+    succeeds for all warm corpora; cold corpora simply contribute nothing.
+    """
+    db = ingestion_service.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    corpus_ids = _validate_corpus_ids_or_400(body)
+    max_concepts = max(1, min(int(body.get("max_concepts", 80) or 80), 500))
+    max_edges = max(1, min(int(body.get("max_edges", 220) or 220), 2000))
+
+    from services.graph.overview import get_cached_graph_overview_multi
+
+    return await get_cached_graph_overview_multi(
+        db, corpus_ids, max_concepts=max_concepts, max_edges=max_edges
+    )
+
+
+@discovery_router.post(
+    "/cluster/{concept_id}",
+    summary="Single-cluster drill — full entities + relations within one concept community (PR 2)",
+)
+async def graph_cluster_drill(concept_id: str, body: dict = Body(...)) -> dict:
+    """Drill into one concept community across N corpora.
+
+    The concept_id comes from a node in the overview response (the `id`
+    prefix is `concept:` for concept-community supernodes; pass just the
+    suffix here). Internally:
+      1. Load each corpus's cached metrics.
+      2. Walk metrics.entity_concept_map to gather entity_ids whose
+         concept_id matches the requested community.
+      3. Run get_concept_community_full Cypher across the union.
+
+    Body:
+      corpus_ids: list[str]   required, 1-32
+      max_nodes: int          optional, default 5000
+      max_edges: int          optional, default 20000
+    """
+    driver = _require_neo4j()
+    db = ingestion_service.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    corpus_ids = _validate_corpus_ids_or_400(body)
+    max_nodes = max(1, min(int(body.get("max_nodes", 5000) or 5000), 50000))
+    max_edges = max(1, min(int(body.get("max_edges", 20000) or 20000), 200000))
+
+    from services.graph.analytics import (
+        compute_corpus_change_signature,
+        get_cached_metrics,
+    )
+    from services.graph.neo4j_reader import get_concept_community_full
+
+    # Gather entity_ids belonging to the requested concept across all
+    # warm corpora. Cold corpora are reported in cache_warming_corpora.
+    entity_id_set: set[str] = set()
+    cache_warming: list[str] = []
+    successful: list[str] = []
+    for cid in corpus_ids:
+        try:
+            sig = await compute_corpus_change_signature(db, cid)
+            metrics = await get_cached_metrics(db, cid, sig)
+        except Exception:
+            cache_warming.append(cid)
+            continue
+        if metrics is None:
+            cache_warming.append(cid)
+            continue
+        successful.append(cid)
+        ec_map = getattr(metrics, "entity_concept_map", {}) or {}
+        for entity_id, info in ec_map.items():
+            if str((info or {}).get("concept_id") or "") == str(concept_id):
+                entity_id_set.add(str(entity_id))
+
+    entity_ids = sorted(entity_id_set)
+    if not entity_ids:
+        return {
+            "nodes": [],
+            "edges": [],
+            "truncated": False,
+            "concept_id": concept_id,
+            "_meta": {
+                "successful_ids": successful,
+                "failed_ids": [],
+                "errors": {},
+                "cache_warming_corpora": cache_warming,
+                "entity_id_count": 0,
+            },
+        }
+
+    result = await get_concept_community_full(
+        driver,
+        entity_ids=entity_ids,
+        corpus_ids=successful or corpus_ids,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+    )
+    result["concept_id"] = concept_id
+    result["_meta"] = {
+        "successful_ids": successful,
+        "failed_ids": [],
+        "errors": {},
+        "cache_warming_corpora": cache_warming,
+        "entity_id_count": len(entity_ids),
+    }
+    return result
+
+
+@router.get(
+    "/{corpus_id}/cache-status",
+    summary="Lightweight cache-readiness check for the multi-corpus warming chip (PR 2)",
+)
+async def graph_cache_status(corpus_id: str) -> dict:
+    """Cheap poll target for the frontend warming chip.
+
+    Returns {corpus_id, domain_cache, metrics_cache, signature, last_built_at}
+    where each cache field is one of "ready" | "warming" | "missing".
+    Frontend polls every 15s while any selected corpus is warming.
+    """
+    db = ingestion_service.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    from services.graph.analytics import get_corpus_cache_status
+
+    return await get_corpus_cache_status(db, corpus_id)
+
+
+# Track in-flight cache-rebuild jobs so we don't double-fire and so the
+# frontend can poll for completion without spinning up a new task each time.
+_CACHE_REBUILD_TASKS: dict[str, asyncio.Task] = {}
+
+
+@discovery_router.post(
+    "/cache/rebuild",
+    summary="Manually trigger graph analytics cache rebuild for one or more corpora (PR 2 follow-up)",
+)
+async def graph_cache_rebuild(body: dict = Body(...)) -> dict:
+    """Manually kick the analytics cache pipeline for corpora whose
+    cache-status reads `missing` or `warming`.
+
+    Polymath's normal trigger is `worker.py:schedule_graph_discovery_cache_warm`,
+    which fires only at the end of a fresh ingest. Corpora ingested before
+    that hook landed (or whose ingest crashed before the warm step) stay
+    permanently in `missing` state — `analytics.emerge_domains` is the
+    canonical entry point but there was no route to call it manually.
+
+    Body:
+      corpus_ids: list[str]   required, 1+
+      force: bool             optional, default false. When true, rebuild
+                              even if the cache is already `ready`.
+
+    Response:
+      {
+        rebuilding: ["cid1", ...],   # tasks newly kicked off
+        already_running: ["cid2"],   # already had an in-flight task
+        skipped: ["cid3"],           # already ready and force=false
+        errors: {cid: msg, ...},
+      }
+
+    The work runs in a background asyncio.Task so the caller returns
+    immediately. Poll `/api/corpora/{cid}/cache-status` to know when each
+    corpus's `metrics_cache` flips to `ready`.
+    """
+    db = ingestion_service.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    qdrant = ingestion_service.qdrant_client
+    if qdrant is None:
+        raise HTTPException(status_code=503, detail="Qdrant not connected")
+    neo4j = ingestion_service.neo4j_driver  # may be None — emerge_domains tolerates
+
+    corpus_ids = _validate_corpus_ids_or_400(body)
+    force = bool(body.get("force") or False)
+
+    from services.graph.analytics import emerge_domains, get_corpus_cache_status
+
+    rebuilding: list[str] = []
+    already_running: list[str] = []
+    skipped: list[str] = []
+    errors: dict[str, str] = {}
+
+    for cid in corpus_ids:
+        # Don't re-fire if a task is already in flight for this corpus.
+        existing = _CACHE_REBUILD_TASKS.get(cid)
+        if existing and not existing.done():
+            already_running.append(cid)
+            continue
+        if not force:
+            try:
+                status = await get_corpus_cache_status(db, cid)
+                if (
+                    status.get("metrics_cache") == "ready"
+                    and status.get("domain_cache") == "ready"
+                ):
+                    skipped.append(cid)
+                    continue
+            except Exception as exc:
+                errors[cid] = f"status check failed: {exc}"
+                continue
+
+        async def _warm_one(target_cid: str) -> None:
+            try:
+                await emerge_domains(qdrant, neo4j, db, target_cid, force=force)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).exception(
+                    "graph cache rebuild failed for %s: %s", target_cid, exc
+                )
+            finally:
+                _CACHE_REBUILD_TASKS.pop(target_cid, None)
+
+        task = asyncio.create_task(_warm_one(cid))
+        _CACHE_REBUILD_TASKS[cid] = task
+        rebuilding.append(cid)
+
+    return {
+        "rebuilding": rebuilding,
+        "already_running": already_running,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
+@discovery_router.get(
+    "/cache/rebuild-status",
+    summary="Snapshot of in-flight cache-rebuild tasks (PR 2 follow-up)",
+)
+async def graph_cache_rebuild_status() -> dict:
+    """Return which corpora currently have a cache-rebuild task running.
+
+    Used by the frontend to disable the "Build cache" button while a job
+    is already in flight, and to know when to start polling cache-status.
+    """
+    in_flight: list[str] = []
+    finished: list[str] = []
+    for cid, task in list(_CACHE_REBUILD_TASKS.items()):
+        if task.done():
+            finished.append(cid)
+            _CACHE_REBUILD_TASKS.pop(cid, None)
+        else:
+            in_flight.append(cid)
+    return {"in_flight": in_flight, "finished": finished}
