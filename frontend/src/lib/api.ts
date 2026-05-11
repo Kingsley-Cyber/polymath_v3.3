@@ -799,6 +799,39 @@ export async function getCorpusCacheStatus(corpusId: string): Promise<CacheStatu
   return fetchJSON(`/corpora/${encodeURIComponent(corpusId)}/cache-status`);
 }
 
+/**
+ * POST /api/graph/cache/rebuild — manually trigger analytics cache build
+ * for corpora whose cache is missing or stale. Returns immediately; the
+ * actual emerge_domains run happens in a background asyncio.Task.
+ */
+export type GraphCacheRebuildResponse = {
+  rebuilding: string[];
+  already_running: string[];
+  skipped: string[];
+  errors: Record<string, string>;
+};
+
+export async function rebuildGraphCache(
+  corpusIds: string[],
+  opts?: { force?: boolean },
+): Promise<GraphCacheRebuildResponse> {
+  return fetchJSON("/graph/cache/rebuild", {
+    method: "POST",
+    body: JSON.stringify({
+      corpus_ids: corpusIds,
+      force: Boolean(opts?.force),
+    }),
+  });
+}
+
+/** GET /api/graph/cache/rebuild-status — which corpora are mid-rebuild. */
+export async function getGraphCacheRebuildStatus(): Promise<{
+  in_flight: string[];
+  finished: string[];
+}> {
+  return fetchJSON("/graph/cache/rebuild-status");
+}
+
 // PR 4 fix — `getGraphByDocument` is already declared near line 1650 of
 // this file; the GraphViewer imports it from there.
 

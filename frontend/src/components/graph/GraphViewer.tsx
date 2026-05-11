@@ -41,7 +41,6 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────
 
 export type GraphViewerMode = "brain" | "query";
-type BrainViewMode = "domains" | "books";
 
 interface GraphViewerProps {
   mode: GraphViewerMode;
@@ -52,18 +51,68 @@ interface GraphViewerProps {
   model?: string;
 }
 
+// Books-as-clusters drill: we only ever drill into a book (no concept-
+// community drill anymore — that was the domains mode that's been retired).
 type DrillFrame = {
-  source: BrainViewMode;
-  clusterId: string;
+  docId: string;
   label: string;
 };
 
 // ─── Brain mode data hook ─────────────────────────────────────────────────
 
+/** Compute lightweight bridge edges between book clusters by intersecting
+ *  their `top_entities` lists. Two clusters that share K of their top
+ *  entities get an edge with weight = K. Cheap, runs client-side, gives
+ *  the canvas the "bridges" structure that makes books-as-clusters feel
+ *  like a graph instead of a static grid. */
+function computeClusterBridges(
+  clusters: { cluster_id: string; top_entities?: string[] }[],
+  opts?: { minSharedEntities?: number; maxBridgesPerCluster?: number },
+): any[] {
+  const minShared = opts?.minSharedEntities ?? 1;
+  const maxPer = opts?.maxBridgesPerCluster ?? 6;
+  const sets = clusters.map((c) => ({
+    id: c.cluster_id,
+    set: new Set((c.top_entities || []).map(String)),
+  }));
+  const perCluster = new Map<string, number>();
+  const out: any[] = [];
+  for (let i = 0; i < sets.length; i++) {
+    const a = sets[i];
+    const candidates: { other: string; shared: number }[] = [];
+    for (let j = i + 1; j < sets.length; j++) {
+      const b = sets[j];
+      let shared = 0;
+      // Iterate the smaller set for the intersection.
+      const [small, large] = a.set.size <= b.set.size ? [a.set, b.set] : [b.set, a.set];
+      small.forEach((x) => {
+        if (large.has(x)) shared++;
+      });
+      if (shared >= minShared) candidates.push({ other: b.id, shared });
+    }
+    candidates.sort((x, y) => y.shared - x.shared);
+    for (const { other, shared } of candidates) {
+      if ((perCluster.get(a.id) || 0) >= maxPer) break;
+      if ((perCluster.get(other) || 0) >= maxPer) continue;
+      out.push({
+        source: `book:${a.id}`,
+        target: `book:${other}`,
+        predicate: "bridges_to",
+        confidence: Math.min(1, shared / 12),
+        weight: shared,
+        // Adapter draws cross-cluster edges in violet so these stand out.
+        source_corpora: ["a", "b"],
+      });
+      perCluster.set(a.id, (perCluster.get(a.id) || 0) + 1);
+      perCluster.set(other, (perCluster.get(other) || 0) + 1);
+    }
+  }
+  return out;
+}
+
 function useBrainGraph(
   corpusIds: string[],
   drill: DrillFrame | null,
-  brainMode: BrainViewMode,
 ) {
   const [data, setData] = useState<{
     nodes: any[];
@@ -72,6 +121,14 @@ function useBrainGraph(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cacheWarming, setCacheWarming] = useState<string[]>([]);
+  // Per-corpus cache classification: "missing" (never built — needs manual
+  // rebuild) vs "warming" (stale signature — rebuild already needed) vs
+  // "ready". Populated by polling /api/corpora/{cid}/cache-status whenever
+  // cacheWarming is non-empty.
+  const [cacheStatuses, setCacheStatuses] = useState<
+    Record<string, api.CacheStatus>
+  >({});
+  const [rebuildingIds, setRebuildingIds] = useState<Set<string>>(new Set());
 
   const reload = useCallback(async () => {
     if (corpusIds.length === 0) {
@@ -81,13 +138,19 @@ function useBrainGraph(
     setLoading(true);
     setError(null);
     try {
-      if (brainMode === "books") {
+      // ── Books-as-clusters is the canonical Brain View ──
+      if (drill) {
+        // Drilled into a specific book — fetch that book's entities +
+        // bridge neighbours. This is the only "show me everything" path
+        // and it's scoped to one document, so the canvas stays readable.
         const res = await api.getGraphByDocument({
           corpusIds,
-          mode: drill && drill.source === "books" ? "drill" : "full",
-          drillDocId:
-            drill && drill.source === "books" ? drill.clusterId : undefined,
+          mode: "drill",
+          drillDocId: drill.docId,
         });
+        // Render book anchors + entity nodes + entity↔book membership
+        // edges so the drilled book reads as a "this book's contents"
+        // local subgraph.
         const anchorNodes = (res.clusters || []).map((c) => ({
           id: `book:${c.cluster_id}`,
           display_name: c.label || c.cluster_id.slice(0, 8),
@@ -97,7 +160,6 @@ function useBrainGraph(
           source_corpus: c.corpus_id,
           top_entities: c.top_entities,
         }));
-        // Membership + bridge edges so anchors physically pull entities.
         const memberEdges: any[] = [];
         for (const e of res.nodes || []) {
           const primary = (e as any).primary_doc_id;
@@ -129,47 +191,114 @@ function useBrainGraph(
         return;
       }
 
-      // Domains view — concept-community supernodes.
-      if (drill && drill.source === "domains") {
-        const res = await api.getGraphCluster(drill.clusterId, corpusIds);
-        setData({ nodes: res.nodes || [], links: res.edges || [] });
-        setCacheWarming(res._meta?.cache_warming_corpora || []);
-      } else {
-        const res = await api.getGraphOverviewMulti(corpusIds);
-        setData({ nodes: res.nodes || [], links: res.edges || [] });
-        setCacheWarming(res._meta?.cache_warming_corpora || []);
-      }
+      // ── Top-level: OVERVIEW mode — cluster anchors only, no entities ──
+      // Backend returns one row per Document with entity_count +
+      // top_entities. We render those as the only nodes and synthesize
+      // inter-cluster bridge edges from shared top_entities. This is
+      // what makes the canvas read as "a graph of N books" rather than
+      // "every entity in every book at once."
+      const res = await api.getGraphByDocument({
+        corpusIds,
+        mode: "overview",
+      });
+      const anchorNodes = (res.clusters || []).map((c) => ({
+        id: `book:${c.cluster_id}`,
+        display_name: c.label || c.cluster_id.slice(0, 8),
+        mention_count: c.entity_count || 1,
+        kind: "book" as const,
+        source_corpora: [c.corpus_id],
+        source_corpus: c.corpus_id,
+        top_entities: c.top_entities,
+      }));
+      const bridges = computeClusterBridges(
+        (res.clusters || []).map((c) => ({
+          cluster_id: c.cluster_id,
+          top_entities: c.top_entities,
+        })),
+      );
+      setData({ nodes: anchorNodes, links: bridges });
+      setCacheWarming([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [corpusIds, drill, brainMode]);
+  }, [corpusIds, drill]);
 
   useEffect(() => {
     reload();
   }, [reload]);
 
+  // Whenever cacheWarming changes, fetch per-corpus statuses ONCE so the
+  // chip + Build button can show the real state (missing vs warming vs
+  // running rebuild). Then poll every 15s if any are still not ready.
   useEffect(() => {
-    if (!cacheWarming.length) return;
-    const t = setInterval(async () => {
+    if (!cacheWarming.length) {
+      setCacheStatuses({});
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
       try {
-        const statuses = await Promise.all(
-          cacheWarming.map((cid) => api.getCorpusCacheStatus(cid)),
+        const [statuses, rebuildState] = await Promise.all([
+          Promise.all(cacheWarming.map((cid) => api.getCorpusCacheStatus(cid))),
+          api.getGraphCacheRebuildStatus().catch(() => ({
+            in_flight: [],
+            finished: [],
+          })),
+        ]);
+        if (cancelled) return;
+        setCacheStatuses(
+          Object.fromEntries(statuses.map((s) => [s.corpus_id, s])),
         );
-        const stillWarming = statuses
-          .filter((s) => s.metrics_cache !== "ready" || s.domain_cache !== "ready")
+        setRebuildingIds(new Set(rebuildState.in_flight));
+        const stillNotReady = statuses
+          .filter(
+            (s) => s.metrics_cache !== "ready" || s.domain_cache !== "ready",
+          )
           .map((s) => s.corpus_id);
-        if (stillWarming.length === 0) reload();
-        else setCacheWarming(stillWarming);
+        if (stillNotReady.length === 0) reload();
+        else setCacheWarming(stillNotReady);
       } catch {
         /* swallow */
       }
-    }, 15000);
-    return () => clearInterval(t);
+    };
+    refresh();
+    const t = setInterval(refresh, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
   }, [cacheWarming, reload]);
 
-  return { data, loading, error, cacheWarming, reload };
+  const triggerRebuild = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      try {
+        const res = await api.rebuildGraphCache(ids);
+        const triggered = new Set([...res.rebuilding, ...res.already_running]);
+        setRebuildingIds((prev) => {
+          const next = new Set(prev);
+          for (const cid of triggered) next.add(cid);
+          return next;
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [],
+  );
+
+  return {
+    data,
+    loading,
+    error,
+    cacheWarming,
+    cacheStatuses,
+    rebuildingIds,
+    triggerRebuild,
+    reload,
+  };
 }
 
 // ─── Query mode data hook ─────────────────────────────────────────────────
@@ -268,7 +397,6 @@ export function GraphViewer({
   model,
 }: GraphViewerProps) {
   const [colorMode, setColorMode] = useState<ColorMode>("community");
-  const [brainMode, setBrainMode] = useState<BrainViewMode>("domains");
   const [drillStack, setDrillStack] = useState<DrillFrame[]>([]);
   const [hoveredName, setHoveredName] = useState<string | null>(null);
   const drillStackRef = useRef(drillStack);
@@ -278,7 +406,6 @@ export function GraphViewer({
   const brain = useBrainGraph(
     mode === "brain" ? corpusIds : [],
     drill,
-    brainMode,
   );
   const q = useQueryGraph(
     mode === "query" ? corpusIds : [],
@@ -290,37 +417,18 @@ export function GraphViewer({
   const loading = mode === "brain" ? brain.loading : q.phase === "loading";
   const error = mode === "brain" ? brain.error : q.error;
 
-  // Double-click handler — drills into a cluster (concept supernode in
-  // domains mode) or a book anchor (books mode).
+  // Double-click handler — drills into a book anchor (single-click selects
+  // the node + neighbors as usual). Books-as-clusters is the only Brain
+  // View now, so the only drill target is `book:<doc_id>`.
   const handleDoubleClickNode = useCallback(
     (nodeId: string) => {
       if (mode !== "brain") return;
-      const ds = drillStackRef.current;
-      // We don't have direct access to the graph node here, but the id
-      // encodes the kind: concept supernodes start with "concept:" and
-      // book anchors start with "book:".
-      if (nodeId.startsWith("concept:")) {
-        const conceptId = nodeId.split(":").slice(1).join(":");
-        if (!conceptId) return;
-        // Look up the label from the current data so the breadcrumb
-        // doesn't show "concept:abc123".
-        const found = (data?.nodes || []).find((n: any) => String(n.id) === nodeId);
-        const label =
-          (found && (found.display_name as string)) || conceptId.slice(0, 8);
-        setDrillStack([
-          ...ds,
-          { source: "domains", clusterId: conceptId, label },
-        ]);
-      } else if (nodeId.startsWith("book:")) {
-        const docId = nodeId.slice(5);
-        const found = (data?.nodes || []).find((n: any) => String(n.id) === nodeId);
-        const label =
-          (found && (found.display_name as string)) || docId.slice(0, 8);
-        setDrillStack([
-          ...ds,
-          { source: "books", clusterId: docId, label },
-        ]);
-      }
+      if (!nodeId.startsWith("book:")) return;
+      const docId = nodeId.slice(5);
+      const found = (data?.nodes || []).find((n: any) => String(n.id) === nodeId);
+      const label =
+        (found && (found.display_name as string)) || docId.slice(0, 8);
+      setDrillStack([...drillStackRef.current, { docId, label }]);
     },
     [mode, data],
   );
@@ -456,9 +564,12 @@ export function GraphViewer({
             {corpusIds.length} corpora
             {data && ` · ${data.nodes.length} nodes · ${data.links.length} edges`}
             {mode === "brain" && brain.cacheWarming.length > 0 && (
-              <span className="ml-2 text-amber-400">
-                · {brain.cacheWarming.length} warming…
-              </span>
+              <CacheWarmingChip
+                cacheWarming={brain.cacheWarming}
+                statuses={brain.cacheStatuses}
+                rebuildingIds={brain.rebuildingIds}
+                onRebuild={brain.triggerRebuild}
+              />
             )}
             {sigma.isLayoutRunning && (
               <span className="ml-2 text-violet-300/80">· settling…</span>
@@ -467,27 +578,15 @@ export function GraphViewer({
         </div>
         <div className="flex items-center gap-2 pointer-events-auto">
           {mode === "brain" && (
-            <>
-              <button
-                className="text-[10px] uppercase tracking-widest text-zinc-400 hover:text-amber-400 border border-zinc-800 bg-[#0d0d14]/80 backdrop-blur rounded px-2 py-1 font-mono"
-                onClick={() => {
-                  setBrainMode((m) => (m === "domains" ? "books" : "domains"));
-                  setDrillStack([]);
-                }}
-                title="Toggle: domains (concept communities) ↔ books (each file is a cluster)"
-              >
-                view: {brainMode}
-              </button>
-              <button
-                className="text-[10px] uppercase tracking-widest text-zinc-400 hover:text-amber-400 border border-zinc-800 bg-[#0d0d14]/80 backdrop-blur rounded px-2 py-1 font-mono"
-                onClick={() =>
-                  setColorMode((m) => (m === "community" ? "corpus" : "community"))
-                }
-                title="Toggle color scheme"
-              >
-                color: {colorMode}
-              </button>
-            </>
+            <button
+              className="text-[10px] uppercase tracking-widest text-zinc-400 hover:text-amber-400 border border-zinc-800 bg-[#0d0d14]/80 backdrop-blur rounded px-2 py-1 font-mono"
+              onClick={() =>
+                setColorMode((m) => (m === "community" ? "corpus" : "community"))
+              }
+              title="Toggle color scheme"
+            >
+              color: {colorMode}
+            </button>
           )}
           {mode === "query" && onRerun && (
             <button
@@ -557,17 +656,14 @@ export function GraphViewer({
 
       {/* Empty data fallback */}
       {data && data.nodes.length === 0 && !loading && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-          <div className="text-center text-zinc-500 text-xs font-mono">
-            <div>no graph data yet</div>
-            <div className="text-zinc-700 mt-1">
-              {mode === "brain"
-                ? brain.cacheWarming.length > 0
-                  ? `${brain.cacheWarming.length} corpora still warming — wait ~30s`
-                  : "the selected corpora have empty supernode overviews"
-                : "no query result yet — type a question below"}
-            </div>
-          </div>
+        <div className="absolute inset-0 z-10 flex items-center justify-center">
+          <EmptyDataState
+            mode={mode}
+            cacheWarming={mode === "brain" ? brain.cacheWarming : []}
+            statuses={mode === "brain" ? brain.cacheStatuses : {}}
+            rebuildingIds={mode === "brain" ? brain.rebuildingIds : new Set()}
+            onRebuild={mode === "brain" ? brain.triggerRebuild : async () => {}}
+          />
         </div>
       )}
 
@@ -695,3 +791,154 @@ export function GraphViewer({
 }
 
 export default GraphViewer;
+
+
+// ─── Cache-warming sub-components ─────────────────────────────────────────
+
+interface CacheChipProps {
+  cacheWarming: string[];
+  statuses: Record<string, api.CacheStatus>;
+  rebuildingIds: Set<string>;
+  onRebuild: (ids: string[]) => Promise<void>;
+}
+
+/** Stats-pill chip that distinguishes "missing" (never built) from
+ *  "warming" (stale signature, needs rebuild) from "rebuilding" (task
+ *  already in flight). Click → kick the rebuild for the eligible ones. */
+function CacheWarmingChip({
+  cacheWarming,
+  statuses,
+  rebuildingIds,
+  onRebuild,
+}: CacheChipProps) {
+  const counts = cacheWarming.reduce(
+    (acc, cid) => {
+      const s = statuses[cid];
+      if (rebuildingIds.has(cid)) acc.rebuilding++;
+      else if (!s) acc.unknown++;
+      else if (s.metrics_cache === "missing" || s.domain_cache === "missing")
+        acc.missing++;
+      else acc.warming++;
+      return acc;
+    },
+    { missing: 0, warming: 0, rebuilding: 0, unknown: 0 },
+  );
+  const buildable = cacheWarming.filter(
+    (cid) => !rebuildingIds.has(cid),
+  );
+  const label =
+    counts.rebuilding > 0
+      ? `${counts.rebuilding} rebuilding…`
+      : counts.missing > 0 && counts.warming === 0
+      ? `${counts.missing} cache${counts.missing > 1 ? "s" : ""} not built`
+      : counts.warming > 0 && counts.missing === 0
+      ? `${counts.warming} cache${counts.warming > 1 ? "s" : ""} stale`
+      : `${counts.missing + counts.warming} need rebuild`;
+  return (
+    <span className="ml-2 inline-flex items-center gap-1.5">
+      <span className="text-amber-400">· {label}</span>
+      {buildable.length > 0 && counts.rebuilding === 0 && (
+        <button
+          className="text-[10px] uppercase tracking-widest text-amber-300 hover:text-amber-100 border border-amber-700/40 bg-amber-500/5 rounded px-1.5 py-0.5"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRebuild(buildable);
+          }}
+          title="Run analytics pipeline now (Louvain + PageRank + concept communities). Takes anywhere from seconds to several minutes depending on corpus size."
+        >
+          build
+        </button>
+      )}
+    </span>
+  );
+}
+
+interface EmptyStateProps {
+  mode: GraphViewerMode;
+  cacheWarming: string[];
+  statuses: Record<string, api.CacheStatus>;
+  rebuildingIds: Set<string>;
+  onRebuild: (ids: string[]) => Promise<void>;
+}
+
+function EmptyDataState({
+  mode,
+  cacheWarming,
+  statuses,
+  rebuildingIds,
+  onRebuild,
+}: EmptyStateProps) {
+  if (mode !== "brain") {
+    return (
+      <div className="text-center text-zinc-500 text-xs font-mono pointer-events-none">
+        <div>no query result yet</div>
+        <div className="text-zinc-700 mt-1">type a question below</div>
+      </div>
+    );
+  }
+  if (cacheWarming.length === 0) {
+    return (
+      <div className="text-center text-zinc-500 text-xs font-mono pointer-events-none">
+        <div>no graph data</div>
+        <div className="text-zinc-700 mt-1">
+          the selected corpora have empty supernode overviews
+        </div>
+      </div>
+    );
+  }
+  const missingIds = cacheWarming.filter((cid) => {
+    const s = statuses[cid];
+    return s && (s.metrics_cache === "missing" || s.domain_cache === "missing");
+  });
+  const warmingIds = cacheWarming.filter((cid) => {
+    const s = statuses[cid];
+    return s && s.metrics_cache !== "missing" && s.domain_cache !== "missing";
+  });
+  const rebuildingHere = cacheWarming.filter((cid) => rebuildingIds.has(cid));
+  const buildable = cacheWarming.filter((cid) => !rebuildingIds.has(cid));
+  return (
+    <div className="text-center text-zinc-300 text-xs font-mono max-w-xl px-6 space-y-2 pointer-events-auto">
+      <div className="text-zinc-200 text-sm mb-3">
+        Analytics cache not ready for{" "}
+        <span className="text-amber-300">{cacheWarming.length}</span> corpor
+        {cacheWarming.length === 1 ? "us" : "a"}
+      </div>
+      {missingIds.length > 0 && (
+        <div className="text-zinc-400">
+          <span className="text-rose-300">{missingIds.length} never built</span>{" "}
+          — Polymath warms the analytics cache automatically at the end of
+          ingestion, but these corpora were ingested before that hook landed
+          (or never finished). Rebuild manually below.
+        </div>
+      )}
+      {warmingIds.length > 0 && (
+        <div className="text-zinc-400">
+          <span className="text-amber-300">{warmingIds.length} stale</span> —
+          new docs were ingested since the last cache build. Rebuild to refresh.
+        </div>
+      )}
+      {rebuildingHere.length > 0 && (
+        <div className="text-violet-300">
+          {rebuildingHere.length} currently rebuilding (this can take seconds
+          for tiny corpora to several minutes for thousands of entities).
+          Frontend polls every 15s; the canvas will populate when each
+          finishes.
+        </div>
+      )}
+      {buildable.length > 0 && (
+        <button
+          className="mt-3 text-[11px] uppercase tracking-widest text-amber-100 hover:text-amber-50 border border-amber-500/50 bg-amber-500/10 rounded px-3 py-1.5 font-mono"
+          onClick={() => onRebuild(buildable)}
+        >
+          Build cache for {buildable.length} corpor{buildable.length === 1 ? "us" : "a"}
+        </button>
+      )}
+      <div className="text-zinc-600 text-[10px] mt-2">
+        Behind the scenes: services/graph/analytics.py:emerge_domains runs
+        Louvain on document embeddings, computes PageRank + concept
+        communities, then writes the result to graph_domain_cache and
+        graph_metrics_cache.
+      </div>
+    </div>
+  );
+}

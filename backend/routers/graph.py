@@ -1023,3 +1023,120 @@ async def graph_cache_status(corpus_id: str) -> dict:
     from services.graph.analytics import get_corpus_cache_status
 
     return await get_corpus_cache_status(db, corpus_id)
+
+
+# Track in-flight cache-rebuild jobs so we don't double-fire and so the
+# frontend can poll for completion without spinning up a new task each time.
+_CACHE_REBUILD_TASKS: dict[str, asyncio.Task] = {}
+
+
+@discovery_router.post(
+    "/cache/rebuild",
+    summary="Manually trigger graph analytics cache rebuild for one or more corpora (PR 2 follow-up)",
+)
+async def graph_cache_rebuild(body: dict = Body(...)) -> dict:
+    """Manually kick the analytics cache pipeline for corpora whose
+    cache-status reads `missing` or `warming`.
+
+    Polymath's normal trigger is `worker.py:schedule_graph_discovery_cache_warm`,
+    which fires only at the end of a fresh ingest. Corpora ingested before
+    that hook landed (or whose ingest crashed before the warm step) stay
+    permanently in `missing` state — `analytics.emerge_domains` is the
+    canonical entry point but there was no route to call it manually.
+
+    Body:
+      corpus_ids: list[str]   required, 1+
+      force: bool             optional, default false. When true, rebuild
+                              even if the cache is already `ready`.
+
+    Response:
+      {
+        rebuilding: ["cid1", ...],   # tasks newly kicked off
+        already_running: ["cid2"],   # already had an in-flight task
+        skipped: ["cid3"],           # already ready and force=false
+        errors: {cid: msg, ...},
+      }
+
+    The work runs in a background asyncio.Task so the caller returns
+    immediately. Poll `/api/corpora/{cid}/cache-status` to know when each
+    corpus's `metrics_cache` flips to `ready`.
+    """
+    db = ingestion_service.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    qdrant = ingestion_service.qdrant_client
+    if qdrant is None:
+        raise HTTPException(status_code=503, detail="Qdrant not connected")
+    neo4j = ingestion_service.neo4j_driver  # may be None — emerge_domains tolerates
+
+    corpus_ids = _validate_corpus_ids_or_400(body)
+    force = bool(body.get("force") or False)
+
+    from services.graph.analytics import emerge_domains, get_corpus_cache_status
+
+    rebuilding: list[str] = []
+    already_running: list[str] = []
+    skipped: list[str] = []
+    errors: dict[str, str] = {}
+
+    for cid in corpus_ids:
+        # Don't re-fire if a task is already in flight for this corpus.
+        existing = _CACHE_REBUILD_TASKS.get(cid)
+        if existing and not existing.done():
+            already_running.append(cid)
+            continue
+        if not force:
+            try:
+                status = await get_corpus_cache_status(db, cid)
+                if (
+                    status.get("metrics_cache") == "ready"
+                    and status.get("domain_cache") == "ready"
+                ):
+                    skipped.append(cid)
+                    continue
+            except Exception as exc:
+                errors[cid] = f"status check failed: {exc}"
+                continue
+
+        async def _warm_one(target_cid: str) -> None:
+            try:
+                await emerge_domains(qdrant, neo4j, db, target_cid, force=force)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).exception(
+                    "graph cache rebuild failed for %s: %s", target_cid, exc
+                )
+            finally:
+                _CACHE_REBUILD_TASKS.pop(target_cid, None)
+
+        task = asyncio.create_task(_warm_one(cid))
+        _CACHE_REBUILD_TASKS[cid] = task
+        rebuilding.append(cid)
+
+    return {
+        "rebuilding": rebuilding,
+        "already_running": already_running,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
+@discovery_router.get(
+    "/cache/rebuild-status",
+    summary="Snapshot of in-flight cache-rebuild tasks (PR 2 follow-up)",
+)
+async def graph_cache_rebuild_status() -> dict:
+    """Return which corpora currently have a cache-rebuild task running.
+
+    Used by the frontend to disable the "Build cache" button while a job
+    is already in flight, and to know when to start polling cache-status.
+    """
+    in_flight: list[str] = []
+    finished: list[str] = []
+    for cid, task in list(_CACHE_REBUILD_TASKS.items()):
+        if task.done():
+            finished.append(cid)
+            _CACHE_REBUILD_TASKS.pop(cid, None)
+        else:
+            in_flight.append(cid)
+    return {"in_flight": in_flight, "finished": finished}
