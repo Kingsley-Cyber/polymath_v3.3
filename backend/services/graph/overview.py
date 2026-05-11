@@ -102,7 +102,11 @@ def build_overview_graph(
             "object_kind": "",
             "domain_type": "",
             "ontology_version": metrics.ontology_version,
-            "top_entities": cluster.top_entities[:6],
+            # PR 2 multi-corpus rollout: cap bumped 6 → 50 so the frontend can
+            # use this list as a client-side drill workaround when the new
+            # POST /api/graph/cluster/{concept_id} endpoint is unavailable.
+            # See GRAPH_VIEWER_BRIDGE.md §2.4 — interim until full drill ships.
+            "top_entities": cluster.top_entities[:50],
         })
 
     concepts = sorted(
@@ -144,7 +148,9 @@ def build_overview_graph(
             "domain_type": "",
             "ontology_version": metrics.ontology_version,
             "primary_domain": primary_domain,
-            "top_entities": list(concept.get("top_entities") or [])[:6],
+            # PR 2: cap bumped 6 → 50, see comment on the domain branch above.
+            "top_entities": list(concept.get("top_entities") or [])[:50],
+            "member_ids": list(concept.get("member_ids") or [])[:200],
             "bridge_count": int(concept.get("bridge_count") or 0),
         })
         domain_node = domain_node_by_name.get(primary_domain)
@@ -206,6 +212,205 @@ def build_overview_graph(
         "raw_edge_count": metrics.edge_count,
         "concept_count": len(metrics.concept_communities or []),
         "domain_count": len(domain_map.clusters),
+    }
+
+
+async def get_cached_graph_overview_multi(
+    db,
+    corpus_ids: list[str],
+    *,
+    max_concepts: int = 80,
+    max_edges: int = 220,
+) -> dict[str, Any]:
+    """PR 2 — multi-corpus version of get_cached_graph_overview.
+
+    Loads each corpus's cached overview independently and merges:
+      • Nodes deduped by id; source_corpora tracks every corpus that surfaced
+        the node.
+      • Edges deduped by (source, target, predicate); source_corpora similar.
+      • Per-corpus cache misses surface as `_meta.cache_warming_corpora`
+        without failing the whole call.
+
+    The merger never re-runs Louvain or any analytics — it composes already-
+    cached supernode graphs. If a single corpus's cache is missing, that
+    corpus contributes nothing but the rest still render. This is the
+    "partial render + warming chip" behavior locked in
+    GRAPH_VIEWER_BRIDGE.md §2.8.
+    """
+    if not corpus_ids:
+        return {
+            "view": "overview",
+            "status": "ready",
+            "nodes": [],
+            "edges": [],
+            "truncated": False,
+            "raw_node_count": 0,
+            "raw_edge_count": 0,
+            "concept_count": 0,
+            "domain_count": 0,
+            "_meta": {
+                "successful_ids": [],
+                "failed_ids": [],
+                "errors": {},
+                "cache_warming_corpora": [],
+            },
+        }
+
+    # Fan out per-corpus overview loads in parallel under a small concurrency
+    # cap (no need to overwhelm Mongo with 32 simultaneous reads).
+    import asyncio
+
+    sem = asyncio.Semaphore(4)
+
+    async def _load_one(cid: str) -> tuple[str, dict[str, Any] | None, str | None]:
+        async with sem:
+            try:
+                payload = await get_cached_graph_overview(
+                    db, cid, max_concepts=max_concepts, max_edges=max_edges
+                )
+                return cid, payload, None
+            except Exception as exc:  # pragma: no cover — defensive
+                return cid, None, str(exc)
+
+    results = await asyncio.gather(*[_load_one(cid) for cid in corpus_ids])
+
+    cache_warming: list[str] = []
+    successful: list[str] = []
+    errors: dict[str, str] = {}
+    per_corpus: list[tuple[str, dict[str, Any]]] = []
+
+    for cid, payload, err in results:
+        if err is not None:
+            errors[cid] = err
+            continue
+        if not payload:
+            cache_warming.append(cid)
+            continue
+        if payload.get("status") == "cache_warming":
+            cache_warming.append(cid)
+            continue
+        successful.append(cid)
+        per_corpus.append((cid, payload))
+
+    if not per_corpus:
+        # All corpora cold — return cache_warming envelope so the UI shows
+        # the chip and skips render.
+        return {
+            "view": "overview",
+            "status": "cache_warming",
+            "message": "All selected corpora are still warming.",
+            "nodes": [],
+            "edges": [],
+            "truncated": False,
+            "raw_node_count": 0,
+            "raw_edge_count": 0,
+            "concept_count": 0,
+            "domain_count": 0,
+            "_meta": {
+                "successful_ids": successful,
+                "failed_ids": list(errors.keys()),
+                "errors": errors,
+                "cache_warming_corpora": cache_warming,
+            },
+        }
+
+    # Merge nodes by id; source_corpora accumulates every corpus that
+    # surfaced the node. mention_count sums (so a concept seen in two
+    # corpora visually scales). For string fields we keep the first
+    # value seen — the corpora are sorted into per_corpus iteration
+    # order for determinism (caller passes corpus_ids in a stable order
+    # already; we rely on that).
+    merged_nodes: dict[str, dict[str, Any]] = {}
+    for cid, payload in per_corpus:
+        for n in payload.get("nodes") or []:
+            key = str(n.get("id") or "")
+            if not key:
+                continue
+            existing = merged_nodes.get(key)
+            if existing is None:
+                merged = dict(n)
+                merged["source_corpora"] = [cid]
+                merged["source_corpus"] = cid
+                merged_nodes[key] = merged
+            else:
+                if cid not in (existing.get("source_corpora") or []):
+                    existing.setdefault("source_corpora", []).append(cid)
+                # Aggregate size proxy across corpora.
+                try:
+                    existing["mention_count"] = int(existing.get("mention_count") or 0) + int(
+                        n.get("mention_count") or 0
+                    )
+                except Exception:
+                    pass
+
+    merged_edges: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for cid, payload in per_corpus:
+        for e in payload.get("edges") or []:
+            src = str(e.get("source") or "")
+            tgt = str(e.get("target") or "")
+            pred = str(e.get("predicate") or "")
+            if not src or not tgt:
+                continue
+            key = (src, tgt, pred)
+            existing = merged_edges.get(key)
+            if existing is None:
+                merged = dict(e)
+                merged["source_corpora"] = [cid]
+                merged["source_corpus"] = cid
+                merged["dangling"] = (src not in merged_nodes) or (tgt not in merged_nodes)
+                merged_edges[key] = merged
+            else:
+                if cid not in (existing.get("source_corpora") or []):
+                    existing.setdefault("source_corpora", []).append(cid)
+                # Confidence/weight reinforce: take max.
+                try:
+                    existing["confidence"] = max(
+                        float(existing.get("confidence") or 0.0),
+                        float(e.get("confidence") or 0.0),
+                    )
+                    existing["weight"] = max(
+                        float(existing.get("weight") or 0.0),
+                        float(e.get("weight") or 0.0),
+                    )
+                except Exception:
+                    pass
+
+    nodes = list(merged_nodes.values())
+    edges = list(merged_edges.values())
+
+    # Re-sort edges by combined weight so cap remains meaningful.
+    edges.sort(
+        key=lambda e: (float(e.get("weight") or 0.0), float(e.get("confidence") or 0.0)),
+        reverse=True,
+    )
+    truncated = len(edges) > max_edges
+    edges = edges[:max_edges]
+
+    raw_node_total = sum(
+        int(p.get("raw_node_count") or 0) for _, p in per_corpus
+    )
+    raw_edge_total = sum(
+        int(p.get("raw_edge_count") or 0) for _, p in per_corpus
+    )
+    concept_total = sum(int(p.get("concept_count") or 0) for _, p in per_corpus)
+    domain_total = sum(int(p.get("domain_count") or 0) for _, p in per_corpus)
+
+    return {
+        "view": "overview",
+        "status": "ready",
+        "nodes": nodes,
+        "edges": edges,
+        "truncated": truncated,
+        "raw_node_count": raw_node_total,
+        "raw_edge_count": raw_edge_total,
+        "concept_count": concept_total,
+        "domain_count": domain_total,
+        "_meta": {
+            "successful_ids": successful,
+            "failed_ids": list(errors.keys()),
+            "errors": errors,
+            "cache_warming_corpora": cache_warming,
+        },
     }
 
 

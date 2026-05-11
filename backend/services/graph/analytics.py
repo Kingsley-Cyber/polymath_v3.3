@@ -595,6 +595,68 @@ async def get_cached_metrics(
     return _deserialize_metrics(cached)
 
 
+async def get_corpus_cache_status(db, corpus_id: str) -> dict:
+    """PR 2 — lightweight cache-readiness check for the multi-corpus
+    warming chip in the frontend Brain View.
+
+    Returns a small dict the frontend can poll every 15s while
+    `cache_warming_corpora` is non-empty in the merged overview response,
+    without paying for the full overview/metrics deserialization on each
+    poll.
+
+    Shape:
+        {
+          "corpus_id": str,
+          "domain_cache":  "ready" | "warming" | "missing",
+          "metrics_cache": "ready" | "warming" | "missing",
+          "signature": str,           # current corpus_change_signature
+          "last_built_at": ISO str | null,
+        }
+    """
+    sig = await compute_corpus_change_signature(db, corpus_id)
+
+    domain_cached = await db["graph_domain_cache"].find_one(
+        {"corpus_id": corpus_id},
+        {"corpus_change_signature": 1, "computed_at": 1, "_id": 0},
+    )
+    metrics_cached = await db["graph_metrics_cache"].find_one(
+        {"corpus_id": corpus_id},
+        {
+            "corpus_change_signature": 1,
+            "schema_version": 1,
+            "computed_at": 1,
+            "_id": 0,
+        },
+    )
+
+    def _classify(record: dict | None, *, check_schema_version: bool = False) -> str:
+        if not record:
+            return "missing"
+        if check_schema_version and record.get("schema_version") != METRICS_CACHE_SCHEMA_VERSION:
+            return "warming"
+        if record.get("corpus_change_signature") != sig:
+            return "warming"
+        return "ready"
+
+    domain_status = _classify(domain_cached)
+    metrics_status = _classify(metrics_cached, check_schema_version=True)
+
+    last_built = None
+    for record in (metrics_cached, domain_cached):
+        if record and record.get("computed_at"):
+            ts = record["computed_at"]
+            last_built = ts.isoformat() if isinstance(ts, datetime) else str(ts)
+            break
+
+    return {
+        "corpus_id": corpus_id,
+        "domain_cache": domain_status,
+        "metrics_cache": metrics_status,
+        "signature": sig,
+        "last_built_at": last_built,
+    }
+
+
 # ── Public orchestrator ────────────────────────────────────────────────────
 
 async def emerge_domains(

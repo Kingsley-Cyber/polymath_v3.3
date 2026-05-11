@@ -706,3 +706,204 @@ async def delete_graph_session(
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"deleted": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PR 2 — multi-corpus graph viewer endpoints
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Three POST endpoints + one cache-status GET. Additive — the legacy
+# GET /api/corpora/{corpus_id}/graph/overview and /graph/full are NOT
+# modified. Frontend rewrite (PR 4) consumes the new POSTs; existing
+# clients keep working until cutover.
+#
+# All bodies accept `corpus_ids: list[str]`. The DISABLE_MULTI_CORPUS env
+# var (set in backend/utils/corpus_ids.py) rejects any input with len > 1
+# at the normalization layer, returning 400.
+
+
+# Re-export the canonical validator so existing route handlers keep
+# their import path. Logic lives in utils.corpus_ids so unit tests can
+# import it without dragging in the auth chain (jose) at module load.
+from utils.corpus_ids import validate_corpus_ids_or_400 as _validate_corpus_ids_or_400
+
+
+@discovery_router.post(
+    "/full",
+    summary="Multi-corpus full entity graph (PR 2 — Phased Rollout Plan §1)",
+)
+async def graph_full_multi_corpus(body: dict = Body(...)) -> dict:
+    """Full entity + RELATES_TO edge graph across N corpora.
+
+    Body:
+      corpus_ids: list[str]   required, 1-32
+      max_nodes: int          optional, default 20000
+      max_edges: int          optional, default 60000
+
+    Returns:
+      {nodes, edges, truncated, _meta:{successful_ids, failed_ids, errors,
+       cache_warming_corpora}}
+    Each node/edge carries source_corpora + source_corpus. Edges where
+    target was outside the loaded set are flagged dangling: true.
+    """
+    driver = _require_neo4j()
+    corpus_ids = _validate_corpus_ids_or_400(body)
+    max_nodes = max(1, min(int(body.get("max_nodes", 20000) or 20000), 50000))
+    max_edges = max(1, min(int(body.get("max_edges", 60000) or 60000), 200000))
+
+    from services.graph.neo4j_reader import get_full_corpora_graph
+
+    try:
+        result = await get_full_corpora_graph(
+            driver, corpus_ids, max_nodes=max_nodes, max_edges=max_edges
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).exception("graph_full_multi_corpus failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Graph load failed")
+
+    result["_meta"] = {
+        "successful_ids": corpus_ids,
+        "failed_ids": [],
+        "errors": {},
+        "cache_warming_corpora": [],
+    }
+    return result
+
+
+@discovery_router.post(
+    "/overview",
+    summary="Multi-corpus cached supernode overview (PR 2)",
+)
+async def graph_overview_multi_corpus(body: dict = Body(...)) -> dict:
+    """Cached supernode overview merged across N corpora.
+
+    Body:
+      corpus_ids: list[str]   required, 1-32
+      max_concepts: int       optional, default 80
+      max_edges: int          optional, default 220
+
+    Returns the merged supernode graph with `_meta.cache_warming_corpora`
+    listing any corpora whose analytics cache wasn't ready. The render
+    succeeds for all warm corpora; cold corpora simply contribute nothing.
+    """
+    db = ingestion_service.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    corpus_ids = _validate_corpus_ids_or_400(body)
+    max_concepts = max(1, min(int(body.get("max_concepts", 80) or 80), 500))
+    max_edges = max(1, min(int(body.get("max_edges", 220) or 220), 2000))
+
+    from services.graph.overview import get_cached_graph_overview_multi
+
+    return await get_cached_graph_overview_multi(
+        db, corpus_ids, max_concepts=max_concepts, max_edges=max_edges
+    )
+
+
+@discovery_router.post(
+    "/cluster/{concept_id}",
+    summary="Single-cluster drill — full entities + relations within one concept community (PR 2)",
+)
+async def graph_cluster_drill(concept_id: str, body: dict = Body(...)) -> dict:
+    """Drill into one concept community across N corpora.
+
+    The concept_id comes from a node in the overview response (the `id`
+    prefix is `concept:` for concept-community supernodes; pass just the
+    suffix here). Internally:
+      1. Load each corpus's cached metrics.
+      2. Walk metrics.entity_concept_map to gather entity_ids whose
+         concept_id matches the requested community.
+      3. Run get_concept_community_full Cypher across the union.
+
+    Body:
+      corpus_ids: list[str]   required, 1-32
+      max_nodes: int          optional, default 5000
+      max_edges: int          optional, default 20000
+    """
+    driver = _require_neo4j()
+    db = ingestion_service.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    corpus_ids = _validate_corpus_ids_or_400(body)
+    max_nodes = max(1, min(int(body.get("max_nodes", 5000) or 5000), 50000))
+    max_edges = max(1, min(int(body.get("max_edges", 20000) or 20000), 200000))
+
+    from services.graph.analytics import (
+        compute_corpus_change_signature,
+        get_cached_metrics,
+    )
+    from services.graph.neo4j_reader import get_concept_community_full
+
+    # Gather entity_ids belonging to the requested concept across all
+    # warm corpora. Cold corpora are reported in cache_warming_corpora.
+    entity_id_set: set[str] = set()
+    cache_warming: list[str] = []
+    successful: list[str] = []
+    for cid in corpus_ids:
+        try:
+            sig = await compute_corpus_change_signature(db, cid)
+            metrics = await get_cached_metrics(db, cid, sig)
+        except Exception:
+            cache_warming.append(cid)
+            continue
+        if metrics is None:
+            cache_warming.append(cid)
+            continue
+        successful.append(cid)
+        ec_map = getattr(metrics, "entity_concept_map", {}) or {}
+        for entity_id, info in ec_map.items():
+            if str((info or {}).get("concept_id") or "") == str(concept_id):
+                entity_id_set.add(str(entity_id))
+
+    entity_ids = sorted(entity_id_set)
+    if not entity_ids:
+        return {
+            "nodes": [],
+            "edges": [],
+            "truncated": False,
+            "concept_id": concept_id,
+            "_meta": {
+                "successful_ids": successful,
+                "failed_ids": [],
+                "errors": {},
+                "cache_warming_corpora": cache_warming,
+                "entity_id_count": 0,
+            },
+        }
+
+    result = await get_concept_community_full(
+        driver,
+        entity_ids=entity_ids,
+        corpus_ids=successful or corpus_ids,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+    )
+    result["concept_id"] = concept_id
+    result["_meta"] = {
+        "successful_ids": successful,
+        "failed_ids": [],
+        "errors": {},
+        "cache_warming_corpora": cache_warming,
+        "entity_id_count": len(entity_ids),
+    }
+    return result
+
+
+@router.get(
+    "/{corpus_id}/cache-status",
+    summary="Lightweight cache-readiness check for the multi-corpus warming chip (PR 2)",
+)
+async def graph_cache_status(corpus_id: str) -> dict:
+    """Cheap poll target for the frontend warming chip.
+
+    Returns {corpus_id, domain_cache, metrics_cache, signature, last_built_at}
+    where each cache field is one of "ready" | "warming" | "missing".
+    Frontend polls every 15s while any selected corpus is warming.
+    """
+    db = ingestion_service.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    from services.graph.analytics import get_corpus_cache_status
+
+    return await get_corpus_cache_status(db, corpus_id)

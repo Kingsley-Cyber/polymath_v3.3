@@ -107,3 +107,58 @@ def utcnow_isoformat() -> str:
     """Helper for audit timestamps. Centralized so PR 2's audit log writes
     use the same ISO-8601 formatting as everything else in the codebase."""
     return datetime.utcnow().isoformat()
+
+
+# ─── HTTP-layer helper (PR 2) ────────────────────────────────────────────────
+#
+# Lives here (not in routers/graph.py) so unit tests can exercise it
+# without importing the routers package — which transitively pulls in
+# auth → jose, a Docker-only host dependency that isn't installed on
+# every developer machine.
+
+# Default cap mirrors RetrievalSettings.max_corpora_per_query default.
+_DEFAULT_MAX_CORPORA_PER_REQUEST = 32
+
+
+def validate_corpus_ids_or_400(
+    body: dict,
+    *,
+    max_corpora: int = _DEFAULT_MAX_CORPORA_PER_REQUEST,
+) -> list[str]:
+    """Pull and validate corpus_ids from a request body.
+
+    Raises fastapi.HTTPException(400) on:
+      • non-list shape
+      • empty list (after legacy single-id wrapping)
+      • DISABLE_MULTI_CORPUS env var rejecting multi-corpus inputs
+      • count > max_corpora
+
+    Returns the canonical list[str] for the route handler to use.
+    """
+    # Local import so this module stays usable in environments without
+    # FastAPI installed (e.g. lightweight scripts that only need
+    # normalize_corpus_ids).
+    from fastapi import HTTPException
+
+    raw = body.get("corpus_ids")
+    legacy = body.get("corpus_id")
+    if raw is not None and not isinstance(raw, list):
+        raise HTTPException(
+            status_code=400, detail="corpus_ids must be a list of strings"
+        )
+    try:
+        ids = normalize_corpus_ids(corpus_id=legacy, corpus_ids=raw)
+    except MultiCorpusDisabledError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if not ids:
+        raise HTTPException(
+            status_code=400, detail="corpus_ids must be a non-empty list"
+        )
+
+    if len(ids) > max_corpora:
+        raise HTTPException(
+            status_code=400,
+            detail=f"max {max_corpora} corpora per request (received {len(ids)})",
+        )
+    return ids
