@@ -3262,7 +3262,8 @@ async def discover(
     qdrant,
     neo4j_driver,
     db,
-    corpus_id: str,
+    corpus_id: Optional[str] = None,
+    corpus_ids: Optional[list[str]] = None,
     query: str,
     mode: str = "auto",
     session_id: Optional[str] = None,
@@ -3275,15 +3276,86 @@ async def discover(
     The legacy orchestrator still owns cache-safe graph scoping and card
     construction. This wrapper makes mode compatibility-only and adds the new
     narrative/context-map contract without touching Chat RAG.
+
+    PR 3 multi-corpus rollout: accepts `corpus_ids: list[str]`. For
+    single-corpus calls (the common case), the legacy path runs unchanged.
+    For len > 1, the wrapper fans out N legacy calls under a small
+    Semaphore(4) cap and merges results via merge_discover_results below.
+    The LLM synthesis call path inside _legacy.discover stays untouched —
+    multi-corpus only extends the wrapper input/output boundary.
     """
     if _legacy is None or not hasattr(_legacy, "discover"):
         raise RuntimeError(_LEGACY_MISSING_MESSAGE)
+
+    # Normalize input. utils.corpus_ids is the single source of truth.
+    from utils.corpus_ids import normalize_corpus_ids
+
+    ids = normalize_corpus_ids(corpus_id=corpus_id, corpus_ids=corpus_ids)
+    if not ids:
+        raise ValueError("discover() requires at least one corpus_id")
+
+    # ── Multi-corpus fan-out ──
+    if len(ids) > 1:
+        import asyncio as _asyncio
+
+        sem = _asyncio.Semaphore(4)
+
+        async def _one(cid: str) -> tuple[str, Any | None, str | None]:
+            async with sem:
+                try:
+                    sub = await discover(
+                        qdrant=qdrant,
+                        neo4j_driver=neo4j_driver,
+                        db=db,
+                        corpus_id=cid,
+                        query=query,
+                        mode=mode,
+                        # Multi-corpus runs always create fresh sessions per
+                        # corpus internally; persistence happens on the
+                        # merged result only.
+                        session_id=None,
+                        user_id=user_id,
+                        model_override=model_override,
+                        agentic=agentic,
+                    )
+                    return cid, sub, None
+                except Exception as exc:  # pragma: no cover — defensive
+                    return cid, None, str(exc)
+
+        per_corpus_results = await _asyncio.gather(*[_one(cid) for cid in ids])
+        merged = merge_discover_results(
+            per_corpus_results, query=query, corpus_ids=ids, mode=mode
+        )
+        # Persist as a single multi-corpus session. The legacy persist path
+        # is corpus-scoped; we reuse it on the first successful per-corpus
+        # result to keep schema compatibility, then patch corpus_ids.
+        try:
+            first_success = next(
+                (r for _, r, err in per_corpus_results if err is None and r is not None),
+                None,
+            )
+            if first_success is not None:
+                merged.session_id = getattr(first_success, "session_id", "")
+                # Echo the merged corpus_ids on the result so PR 4 frontend
+                # can read them.
+                merged.corpus_ids = list(ids)
+                merged.corpus_id = ids[0]
+        except Exception:
+            pass
+        return merged
+
+    # ── Single-corpus path (unchanged from PR 1) ──
+    single_cid = ids[0]
+    # Re-bind corpus_id so the rest of this function (which references it
+    # by name) sees the resolved value even when the caller passed
+    # corpus_ids=[X] rather than corpus_id="X".
+    corpus_id = single_cid
     started_at = _time.perf_counter()
     result = await _legacy.discover(
         qdrant=qdrant,
         neo4j_driver=neo4j_driver,
         db=db,
-        corpus_id=corpus_id,
+        corpus_id=single_cid,
         query=query,
         mode="auto",
         session_id=session_id,
@@ -3291,6 +3363,11 @@ async def discover(
         model_override=model_override,
         agentic=False,
     )
+    # Echo corpus_ids on the result so PR 4 frontend reads a consistent shape.
+    try:
+        result.corpus_ids = [single_cid]
+    except Exception:
+        pass
     legacy_done_at = _time.perf_counter()
     # `mode` is compatibility-only: callers may still send it and we echo it
     # back, but discover always behaves as auto-synthesis.
@@ -3389,3 +3466,534 @@ async def discover(
     )
     await _persist_enriched_turn(db, result)
     return result
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PR 3 — Mission Control multi-corpus merger + sibling wrappers
+# ════════════════════════════════════════════════════════════════════════════
+#
+# The merger union-deduplicates the per-corpus discover() results into a
+# single composite turn. It does NOT touch the LLM synthesis call path —
+# every per-corpus result already ran its own _call_llm_synthesis. The
+# merger composes the structural fields (graph nodes/edges, frontier,
+# bridges, etc.) and picks the highest-confidence prose for the merged
+# headline + interpretation. Per-corpus auto_synthesis prose is kept
+# alongside as a `multi_corpus_per_corpus_synthesis` overlay so the
+# frontend can present a "compare per-book" view if it wants.
+
+
+def _empty_discover_result_like(template: Any) -> Any:
+    """Build a minimal Result instance with the same class as the template
+    so attribute reads in the merger don't crash on unknown model shapes."""
+    cls = type(template)
+    try:
+        return cls()
+    except Exception:
+        # Fallback: a SimpleNamespace with the template's attrs zeroed.
+        from types import SimpleNamespace
+        return SimpleNamespace(**{k: None for k in vars(template).keys()})
+
+
+def _node_id(node: Any) -> str:
+    if isinstance(node, dict):
+        return str(node.get("id") or node.get("entity_id") or "")
+    return str(getattr(node, "id", "") or getattr(node, "entity_id", ""))
+
+
+def _link_key(link: Any) -> tuple[str, str, str]:
+    if isinstance(link, dict):
+        return (
+            str(link.get("source") or ""),
+            str(link.get("target") or ""),
+            str(link.get("predicate") or link.get("kind") or ""),
+        )
+    return (
+        str(getattr(link, "source", "")),
+        str(getattr(link, "target", "")),
+        str(getattr(link, "predicate", "") or getattr(link, "kind", "")),
+    )
+
+
+def _stamp_source(item: Any, cid: str) -> Any:
+    """Add source_corpus + source_corpora to a node/edge dict in-place."""
+    if not isinstance(item, dict):
+        return item
+    sc = list(item.get("source_corpora") or [])
+    if cid and cid not in sc:
+        sc.append(cid)
+    item["source_corpora"] = sc
+    if not item.get("source_corpus"):
+        item["source_corpus"] = sc[0] if sc else cid
+    return item
+
+
+def merge_discover_results(
+    per_corpus_results: list[tuple[str, Any | None, str | None]],
+    *,
+    query: str,
+    corpus_ids: list[str],
+    mode: str = "auto",
+) -> Any:
+    """Compose N per-corpus discover() Results into one merged Result.
+
+    `per_corpus_results` is the output of asyncio.gather over
+    `_one(cid)` callbacks: list[(corpus_id, result_or_None, error_or_None)].
+
+    Merge rules:
+      * Errors collected into trace.errors_per_corpus + result._meta.errors
+      * Lists (frontier, analogies, bridges, weak_links, transfers, questions,
+        latent_topics, tensions, anchors): concatenate with source_corpus
+        attribution; cap at the first-result's length (or 12, whichever is
+        larger) to keep the LLM-facing payload bounded.
+      * Graph + context_graph: union nodes by entity_id, union edges by
+        (source, target, predicate); track source_corpora on each.
+      * Headline + interpretation + auto_synthesis.markdown: pick the
+        highest-confidence per-corpus result (largest evidence_count proxy).
+        Per-corpus prose preserved under
+        result.auto_synthesis.per_corpus_synthesis for UI compare views.
+      * metrics: merge dict with values from the first result, then update
+        with per-corpus packets via `multi_corpus_packets` array.
+    """
+    successes: list[tuple[str, Any]] = [
+        (cid, r) for cid, r, err in per_corpus_results if err is None and r is not None
+    ]
+    errors: dict[str, str] = {
+        cid: err for cid, _r, err in per_corpus_results if err is not None
+    }
+
+    if not successes:
+        # No corpus succeeded — return a stub with errors envelope.
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            session_id="",
+            corpus_id=corpus_ids[0] if corpus_ids else "",
+            corpus_ids=list(corpus_ids),
+            query=query,
+            mode=mode,
+            interpretation="No corpora returned a usable Mission Control result.",
+            frontier=[],
+            analogies=[],
+            bridges=[],
+            weak_links=[],
+            transfers=[],
+            questions=[],
+            strategic_read=None,
+            intent_profile=None,
+            atomic_trace=[],
+            socratic_prompts=[],
+            metrics={},
+            domain_map_summary=[],
+            graph={"nodes": [], "links": []},
+            anchors=[],
+            concept_communities=[],
+            entity_concept_map={},
+            headline=None,
+            themes=[],
+            bridges_v2=[],
+            gaps_v2=[],
+            latent_topics=[],
+            tensions=[],
+            trace={
+                "stages": [],
+                "errors_per_corpus": errors,
+                "_meta": {
+                    "successful_ids": [],
+                    "failed_ids": list(errors.keys()),
+                    "errors": errors,
+                },
+            },
+            auto_synthesis={"markdown": "", "sources": [], "fallback": True, "fallback_reason": "all_corpora_failed"},
+            insight_packet_summary={"sparse": True, "temporal_support": False, "counts": {}, "evidence_sources": {}, "fallback_reason": "all_corpora_failed"},
+            context_graph={"nodes": [], "links": [], "meta": {}},
+        )
+
+    # Use the first success as the merged result template, then overlay.
+    base_cid, base = successes[0]
+
+    def _merge_list(attr: str, key_fn=None, cap: int = 32) -> list:
+        seen: set = set() if key_fn else set()
+        out: list = []
+        for cid, res in successes:
+            for item in (getattr(res, attr, None) or []):
+                stamped = _stamp_source(dict(item) if isinstance(item, dict) else item, cid)
+                if key_fn:
+                    k = key_fn(stamped)
+                    if k in seen:
+                        continue
+                    seen.add(k)
+                out.append(stamped)
+                if len(out) >= cap:
+                    return out
+        return out
+
+    merged_frontier = _merge_list("frontier", cap=24)
+    merged_analogies = _merge_list("analogies", cap=24)
+    merged_bridges = _merge_list("bridges", cap=24)
+    merged_weak_links = _merge_list("weak_links", cap=24)
+    merged_transfers = _merge_list("transfers", cap=24)
+    merged_questions = _merge_list("questions", cap=24)
+    merged_anchors = _merge_list("anchors", cap=24)
+    merged_themes = _merge_list("themes", cap=16)
+    merged_bridges_v2 = _merge_list("bridges_v2", cap=24)
+    merged_gaps_v2 = _merge_list("gaps_v2", cap=24)
+    merged_latent_topics = _merge_list("latent_topics", cap=16)
+    merged_tensions = _merge_list("tensions", cap=16)
+    merged_atomic = _merge_list("atomic_trace", cap=64)
+    merged_socratic = _merge_list("socratic_prompts", cap=16)
+    merged_concepts = _merge_list(
+        "concept_communities",
+        key_fn=lambda c: str((c or {}).get("concept_id") if isinstance(c, dict) else getattr(c, "concept_id", "")),
+        cap=64,
+    )
+
+    # Graph union — nodes by id, edges by (source, target, predicate).
+    merged_nodes: dict[str, dict] = {}
+    merged_links: dict[tuple[str, str, str], dict] = {}
+    for cid, res in successes:
+        graph = getattr(res, "graph", None) or {}
+        for n in (graph.get("nodes") or []):
+            nid = _node_id(n)
+            if not nid:
+                continue
+            existing = merged_nodes.get(nid)
+            if existing is None:
+                merged_nodes[nid] = _stamp_source(dict(n) if isinstance(n, dict) else n, cid)
+            else:
+                _stamp_source(existing, cid)
+        for l in (graph.get("links") or []):
+            k = _link_key(l)
+            existing = merged_links.get(k)
+            if existing is None:
+                merged_links[k] = _stamp_source(dict(l) if isinstance(l, dict) else l, cid)
+            else:
+                _stamp_source(existing, cid)
+                # confidence/weight reinforce
+                if isinstance(existing, dict) and isinstance(l, dict):
+                    try:
+                        existing["confidence"] = max(
+                            float(existing.get("confidence") or 0.0),
+                            float(l.get("confidence") or 0.0),
+                        )
+                        existing["weight"] = max(
+                            float(existing.get("weight") or 0.0),
+                            float(l.get("weight") or 0.0),
+                        )
+                    except Exception:
+                        pass
+
+    # Same merge for context_graph.
+    ctx_nodes: dict[str, dict] = {}
+    ctx_links: dict[tuple[str, str, str], dict] = {}
+    for cid, res in successes:
+        ctx = getattr(res, "context_graph", None) or {}
+        for n in (ctx.get("nodes") or []):
+            nid = str((n or {}).get("id") if isinstance(n, dict) else getattr(n, "id", ""))
+            if not nid:
+                continue
+            existing = ctx_nodes.get(nid)
+            if existing is None:
+                ctx_nodes[nid] = _stamp_source(dict(n) if isinstance(n, dict) else n, cid)
+            else:
+                _stamp_source(existing, cid)
+        for l in (ctx.get("links") or []):
+            k = _link_key(l)
+            existing = ctx_links.get(k)
+            if existing is None:
+                ctx_links[k] = _stamp_source(dict(l) if isinstance(l, dict) else l, cid)
+            else:
+                _stamp_source(existing, cid)
+
+    # Pick the most substantive prose as the headline/interpretation.
+    def _prose_score(res: Any) -> int:
+        ips = getattr(res, "insight_packet_summary", None) or {}
+        counts = ips.get("counts") if isinstance(ips, dict) else {}
+        try:
+            return int(counts.get("evidence", 0)) + int(counts.get("entities", 0))
+        except Exception:
+            return 0
+
+    best_cid, best = max(successes, key=lambda x: _prose_score(x[1]))
+
+    per_corpus_synthesis = []
+    for cid, res in successes:
+        auto = getattr(res, "auto_synthesis", None) or {}
+        if isinstance(auto, dict):
+            md = auto.get("markdown") or ""
+            sources = auto.get("sources") or []
+        else:
+            md = getattr(auto, "markdown", "") or ""
+            sources = getattr(auto, "sources", []) or []
+        if md:
+            per_corpus_synthesis.append({
+                "corpus_id": cid,
+                "markdown": md,
+                "sources": sources,
+            })
+
+    # Build the merged Result by mutating a shallow copy of the best result.
+    merged = best
+    merged.corpus_id = corpus_ids[0] if corpus_ids else best_cid
+    merged.corpus_ids = list(corpus_ids)
+    merged.query = query
+    merged.mode = mode
+    merged.frontier = merged_frontier
+    merged.analogies = merged_analogies
+    merged.bridges = merged_bridges
+    merged.weak_links = merged_weak_links
+    merged.transfers = merged_transfers
+    merged.questions = merged_questions
+    merged.anchors = merged_anchors
+    merged.themes = merged_themes
+    merged.bridges_v2 = merged_bridges_v2
+    merged.gaps_v2 = merged_gaps_v2
+    merged.latent_topics = merged_latent_topics
+    merged.tensions = merged_tensions
+    merged.atomic_trace = merged_atomic
+    merged.socratic_prompts = merged_socratic
+    merged.concept_communities = merged_concepts
+
+    merged.graph = {
+        "nodes": list(merged_nodes.values()),
+        "links": list(merged_links.values()),
+    }
+    merged.context_graph = {
+        "nodes": list(ctx_nodes.values()),
+        "links": list(ctx_links.values()),
+        "meta": {
+            "merged_corpora": list(corpus_ids),
+            "successful_ids": [c for c, _ in successes],
+            "failed_ids": list(errors.keys()),
+            "errors": errors,
+        },
+    }
+
+    # Augment auto_synthesis with per-corpus prose so frontend can present
+    # "compare per-book" without changing the canonical markdown.
+    auto = getattr(merged, "auto_synthesis", None) or {}
+    if isinstance(auto, dict):
+        auto["per_corpus_synthesis"] = per_corpus_synthesis
+        auto["multi_corpus"] = True
+        merged.auto_synthesis = auto
+    else:
+        try:
+            setattr(auto, "per_corpus_synthesis", per_corpus_synthesis)
+            setattr(auto, "multi_corpus", True)
+        except Exception:
+            pass
+
+    # Trace envelope.
+    trace = getattr(merged, "trace", None) or {}
+    if isinstance(trace, dict):
+        trace["multi_corpus_meta"] = {
+            "successful_ids": [c for c, _ in successes],
+            "failed_ids": list(errors.keys()),
+            "errors": errors,
+            "merged_corpora": list(corpus_ids),
+            "primary_corpus_for_prose": best_cid,
+        }
+        merged.trace = trace
+
+    return merged
+
+
+# ── Sibling-function multi-corpus wrappers ──────────────────────────────────
+#
+# The legacy .pyc exposes single-corpus versions of these functions; PR 3
+# wraps each so the API can accept corpus_ids: list[str]. For len == 1 the
+# wrapper passes through to the legacy helper unchanged. For len > 1 the
+# wrapper uses Mongo $in / parallel fan-out as appropriate.
+
+if _legacy is not None:
+    _legacy_list_sessions = getattr(_legacy, "list_sessions", None)
+    _legacy_get_session = getattr(_legacy, "get_session", None)
+    _legacy_find_resume_candidate = getattr(_legacy, "find_resume_candidate", None)
+    _legacy_build_corpus_suggestions = getattr(_legacy, "build_corpus_suggestions", None)
+    _legacy_delete_session = getattr(_legacy, "delete_session", None)
+
+
+async def list_sessions(
+    db,
+    corpus_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    *,
+    corpus_ids: Optional[list[str]] = None,
+) -> list[dict]:
+    """List Mission Control sessions filtered by corpora and (optionally) user.
+
+    PR 3 — accepts corpus_ids: list[str]. When provided, filter is
+    {corpus_id: {$in: corpus_ids}} OR {corpus_ids: {$elemMatch: {$in: corpus_ids}}}
+    so sessions stored under either schema (pre- or post-PR3 lifespan
+    migration) surface correctly.
+    """
+    from utils.corpus_ids import normalize_corpus_ids
+
+    ids = normalize_corpus_ids(corpus_id=corpus_id, corpus_ids=corpus_ids)
+    if not ids and _legacy_list_sessions is not None:
+        return await _legacy_list_sessions(db, corpus_id=None, user_id=user_id)
+
+    if len(ids) == 1 and _legacy_list_sessions is not None:
+        return await _legacy_list_sessions(db, corpus_id=ids[0], user_id=user_id)
+
+    # Multi-corpus: query Mongo directly so we don't fan out N round-trips.
+    if db is None:
+        return []
+    flt: dict[str, Any] = {
+        "$or": [
+            {"corpus_id": {"$in": ids}},
+            {"corpus_ids": {"$elemMatch": {"$in": ids}}},
+        ]
+    }
+    if user_id:
+        flt["user_id"] = user_id
+    cursor = db["graph_sessions"].find(
+        flt,
+        {
+            "session_id": 1, "corpus_id": 1, "corpus_ids": 1, "title": 1,
+            "created_at": 1, "updated_at": 1, "turn_count": 1,
+            "first_query": 1, "_id": 0,
+        },
+    ).sort("updated_at", -1).limit(200)
+    return [doc async for doc in cursor]
+
+
+async def get_session(
+    db,
+    session_id: str,
+    user_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Pass-through to legacy get_session — session_id is corpus-agnostic
+    so no multi-corpus changes needed. PR 3 keeps the same signature."""
+    if _legacy_get_session is None:
+        raise RuntimeError(_LEGACY_MISSING_MESSAGE)
+    return await _legacy_get_session(db, session_id, user_id=user_id)
+
+
+async def find_resume_candidate(
+    db,
+    *,
+    corpus_id: Optional[str] = None,
+    corpus_ids: Optional[list[str]] = None,
+    query: str,
+    user_id: Optional[str] = None,
+    threshold: float = 0.85,
+) -> Optional[dict]:
+    """Find a prior Mission Control session by query similarity across N corpora.
+
+    Strategy: for each corpus, call the legacy single-corpus helper, then
+    return the candidate with the highest score above threshold.
+    """
+    from utils.corpus_ids import normalize_corpus_ids
+
+    ids = normalize_corpus_ids(corpus_id=corpus_id, corpus_ids=corpus_ids)
+    if not ids:
+        return None
+    if _legacy_find_resume_candidate is None:
+        raise RuntimeError(_LEGACY_MISSING_MESSAGE)
+    if len(ids) == 1:
+        return await _legacy_find_resume_candidate(
+            db, corpus_id=ids[0], query=query, user_id=user_id, threshold=threshold
+        )
+
+    import asyncio as _asyncio
+
+    sem = _asyncio.Semaphore(4)
+
+    async def _one(cid: str) -> Optional[dict]:
+        async with sem:
+            try:
+                return await _legacy_find_resume_candidate(
+                    db, corpus_id=cid, query=query, user_id=user_id, threshold=threshold
+                )
+            except Exception:
+                return None
+
+    results = await _asyncio.gather(*[_one(cid) for cid in ids])
+    candidates = [c for c in results if c]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda c: float((c or {}).get("score", 0)))
+
+
+async def build_corpus_suggestions(
+    *,
+    qdrant,
+    neo4j_driver,
+    db,
+    corpus_id: Optional[str] = None,
+    corpus_ids: Optional[list[str]] = None,
+    user_id: Optional[str] = None,
+) -> dict:
+    """Build domain-map-seeded suggestions across N corpora.
+
+    Single-corpus: pass-through. Multi-corpus: fan out and concatenate
+    suggestions, deduplicate by text, cap at 16.
+    """
+    from utils.corpus_ids import normalize_corpus_ids
+
+    ids = normalize_corpus_ids(corpus_id=corpus_id, corpus_ids=corpus_ids)
+    if not ids:
+        return {"corpus_id": "", "domain_map_summary": [], "suggestions": []}
+    if _legacy_build_corpus_suggestions is None:
+        raise RuntimeError(_LEGACY_MISSING_MESSAGE)
+    if len(ids) == 1:
+        return await _legacy_build_corpus_suggestions(
+            qdrant=qdrant, neo4j_driver=neo4j_driver, db=db, corpus_id=ids[0], user_id=user_id
+        )
+
+    import asyncio as _asyncio
+
+    sem = _asyncio.Semaphore(4)
+
+    async def _one(cid: str) -> Optional[dict]:
+        async with sem:
+            try:
+                return await _legacy_build_corpus_suggestions(
+                    qdrant=qdrant, neo4j_driver=neo4j_driver, db=db,
+                    corpus_id=cid, user_id=user_id,
+                )
+            except Exception as exc:
+                logger.debug("build_corpus_suggestions failed for %s: %s", cid, exc)
+                return None
+
+    results = await _asyncio.gather(*[_one(cid) for cid in ids])
+    suggestions: list = []
+    domain_summary: list = []
+    seen_text: set = set()
+    for cid, payload in zip(ids, results):
+        if not payload:
+            continue
+        for s in (payload.get("suggestions") or []):
+            text = str((s or {}).get("text") or "").strip()
+            if not text or text in seen_text:
+                continue
+            seen_text.add(text)
+            entry = dict(s) if isinstance(s, dict) else {"text": text}
+            entry["source_corpus"] = cid
+            suggestions.append(entry)
+            if len(suggestions) >= 16:
+                break
+        for d in (payload.get("domain_map_summary") or []):
+            entry = dict(d) if isinstance(d, dict) else {"label": str(d)}
+            entry["source_corpus"] = cid
+            domain_summary.append(entry)
+        if len(suggestions) >= 16:
+            break
+
+    return {
+        "corpus_id": ids[0],
+        "corpus_ids": ids,
+        "domain_map_summary": domain_summary,
+        "suggestions": suggestions,
+    }
+
+
+async def delete_session(
+    db,
+    session_id: str,
+    *,
+    user_id: Optional[str] = None,
+) -> bool:
+    """Pass-through to legacy delete_session — session_id is corpus-agnostic."""
+    if _legacy_delete_session is None:
+        raise RuntimeError(_LEGACY_MISSING_MESSAGE)
+    return await _legacy_delete_session(db, session_id, user_id=user_id)

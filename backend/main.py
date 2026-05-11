@@ -247,6 +247,36 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("Legacy model scrub failed (non-fatal): %s", exc)
 
+    # PR 3 multi-corpus rollout — migrate graph_sessions documents from
+    # the single-corpus shape ({corpus_id: "x", ...}) to the dual-field
+    # shape ({corpus_id: "x", corpus_ids: ["x"], ...}). Idempotent: docs
+    # that already have a non-empty corpus_ids array are skipped via the
+    # filter. Pattern matches existing migrate_universal_schema and
+    # migrate_bare_model_names migrations above.
+    try:
+        db = conversation_service._db
+        if db is not None:
+            r = await db["graph_sessions"].update_many(
+                {
+                    "corpus_id": {"$exists": True, "$ne": ""},
+                    "$or": [
+                        {"corpus_ids": {"$exists": False}},
+                        {"corpus_ids": []},
+                    ],
+                },
+                [
+                    {"$set": {"corpus_ids": ["$corpus_id"]}},
+                ],
+            )
+            if r.modified_count:
+                logger.info(
+                    "graph_sessions multi-corpus migration: corpus_id → corpus_ids: [corpus_id], "
+                    "documents_patched=%d",
+                    r.modified_count,
+                )
+    except Exception as exc:
+        logger.warning("graph_sessions multi-corpus migration failed (non-fatal): %s", exc)
+
     yield
 
     # Shutdown

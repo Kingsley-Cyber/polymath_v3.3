@@ -9,6 +9,7 @@ below, discovery query is mounted under a separate `/api/graph` prefix
 because it's not scoped to a single corpus in the URL path (corpus_id is in
 the request body).
 """
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -184,18 +185,16 @@ async def get_entity_relations(
     summary="Agent Query: extract entities from question, expand subgraph, find bridges/hubs/gaps",
 )
 async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse:
-    """
-    Phase 17 Wave 1 — the backend for the "Agent Query" tab in GraphView.
+    """Agent Query — entity-first subgraph extraction.
 
-    Flow:
-      1. Tokenize the query and match tokens against Entity nodes in this corpus
-      2. N-hop RELATES_TO expansion from matched seeds
-      3. Bridge detection: entities connected to ≥2 seeds (no shortestPath — Community-safe)
-      4. Hub detection: Python degree count on the returned subgraph
-      5. Gap detection: seed pairs with no direct RELATES_TO edge
-
-    Returns the discovery payload for the frontend's DiscoveryPanel + canvas.
+    PR 3 — multi-corpus fan-out. The PR 1 GraphQueryRequest validator
+    wraps a legacy corpus_id into corpus_ids=[corpus_id], so single-corpus
+    payloads continue to work unchanged. For len(corpus_ids) > 1 the
+    handler runs the per-corpus pipeline in parallel under a Semaphore(4)
+    and merges nodes/links/bridges/hubs/gaps/seed_entities by entity_id.
     """
+    import asyncio as _asyncio
+
     driver = _require_neo4j()
     from services.graph.graph_query import (
         expand_subgraph,
@@ -205,63 +204,130 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
         find_hubs,
     )
 
-    # Step 1 — seed entities
-    seeds = await extract_query_entities(body.query, body.corpus_id, driver)
-    if not seeds:
-        # Return an empty-but-well-formed response; the UI will render a
-        # friendly "no entities matched" state.
-        return GraphQueryResponse(
-            nodes=[],
-            links=[],
-            bridges=[],
-            hubs=[],
-            gaps=[],
-            seed_entities=[],
+    # PR 3 — both fields are populated by the PR 1 model_validator.
+    corpus_ids: list[str] = list(body.corpus_ids or [])
+    if not corpus_ids and body.corpus_id:
+        corpus_ids = [body.corpus_id]
+    if not corpus_ids:
+        raise HTTPException(status_code=400, detail="corpus_ids must be a non-empty list")
+
+    async def _run_one(cid: str):
+        seeds = await extract_query_entities(body.query, cid, driver)
+        if not seeds:
+            return cid, {"nodes": [], "links": [], "bridges": [], "gaps": [], "seeds": []}
+        seed_ids = [s["entity_id"] for s in seeds]
+        subgraph = await expand_subgraph(
+            entity_ids=seed_ids,
+            corpus_id=cid,
+            driver=driver,
+            max_hops=body.max_hops,
+            limit=body.limit,
         )
+        bridges = await find_bridges(
+            driver=driver,
+            entity_ids=seed_ids,
+            corpus_id=cid,
+            max_hops=body.max_hops,
+        )
+        gaps = await find_gaps(driver=driver, entity_ids=seed_ids)
+        return cid, {
+            "nodes": subgraph["nodes"],
+            "links": subgraph["links"],
+            "bridges": bridges,
+            "gaps": gaps,
+            "seeds": seeds,
+        }
 
-    seed_ids = [s["entity_id"] for s in seeds]
+    sem = asyncio.Semaphore(4)
 
-    # Step 2 — expand subgraph
-    subgraph = await expand_subgraph(
-        entity_ids=seed_ids,
-        corpus_id=body.corpus_id,
-        driver=driver,
-        max_hops=body.max_hops,
-        limit=body.limit,
-    )
-    nodes = subgraph["nodes"]
-    links = subgraph["links"]
+    async def _gated(cid: str):
+        async with sem:
+            return await _run_one(cid)
 
-    # Step 3 — bridges
-    bridges = await find_bridges(
-        driver=driver,
-        entity_ids=seed_ids,
-        corpus_id=body.corpus_id,
-        max_hops=body.max_hops,
-    )
+    per_corpus = await asyncio.gather(*[_gated(cid) for cid in corpus_ids])
 
-    # Step 4 — hubs (Python, on the subgraph we already have)
+    # Merge: nodes by id, links by (source, target, predicate), bridges +
+    # gaps + seeds with source_corpus tagging.
+    merged_nodes: dict[str, dict] = {}
+    merged_links: dict[tuple, dict] = {}
+    merged_bridges: dict[str, dict] = {}
+    merged_gaps: list[dict] = []
+    merged_seeds: dict[str, dict] = {}
+
+    def _stamp(item: dict, cid: str) -> dict:
+        if not isinstance(item, dict):
+            return item
+        sc = list(item.get("source_corpora") or [])
+        if cid and cid not in sc:
+            sc.append(cid)
+        item["source_corpora"] = sc
+        item.setdefault("source_corpus", cid)
+        return item
+
+    for cid, payload in per_corpus:
+        for n in payload["nodes"]:
+            nid = n.get("id")
+            if not nid:
+                continue
+            if nid in merged_nodes:
+                _stamp(merged_nodes[nid], cid)
+            else:
+                merged_nodes[nid] = _stamp(dict(n), cid)
+        for l in payload["links"]:
+            k = (l.get("source"), l.get("target"), l.get("predicate"))
+            if k in merged_links:
+                _stamp(merged_links[k], cid)
+            else:
+                merged_links[k] = _stamp(dict(l), cid)
+        for b in payload["bridges"]:
+            bid = b.get("entity_id")
+            if not bid:
+                continue
+            if bid in merged_bridges:
+                _stamp(merged_bridges[bid], cid)
+                # Sum connected_seed_count across corpora.
+                try:
+                    merged_bridges[bid]["connected_seed_count"] = (
+                        int(merged_bridges[bid].get("connected_seed_count") or 0)
+                        + int(b.get("connected_seed_count") or 0)
+                    )
+                except Exception:
+                    pass
+            else:
+                merged_bridges[bid] = _stamp(dict(b), cid)
+        for g in payload["gaps"]:
+            merged_gaps.append(_stamp(dict(g), cid))
+        for s in payload["seeds"]:
+            sid = s.get("entity_id")
+            if not sid:
+                continue
+            if sid in merged_seeds:
+                _stamp(merged_seeds[sid], cid)
+            else:
+                merged_seeds[sid] = _stamp(dict(s), cid)
+
+    nodes = list(merged_nodes.values())
+    links = list(merged_links.values())
+    bridges = list(merged_bridges.values())
     hubs = find_hubs(nodes, links)
-
-    # Step 5 — gaps (between seed pairs only — not all subgraph pairs)
-    gaps = await find_gaps(driver=driver, entity_ids=seed_ids)
+    seeds_out = [
+        {
+            "id": s["entity_id"],
+            "display_name": s.get("display_name", ""),
+            "entity_type": s.get("entity_type", "other"),
+            "mention_count": s.get("mention_count", 0),
+            "is_seed": True,
+        }
+        for s in merged_seeds.values()
+    ]
 
     return GraphQueryResponse(
         nodes=nodes,
         links=links,
         bridges=bridges,
         hubs=hubs,
-        gaps=gaps,
-        seed_entities=[
-            {
-                "id": s["entity_id"],
-                "display_name": s.get("display_name", ""),
-                "entity_type": s.get("entity_type", "other"),
-                "mention_count": s.get("mention_count", 0),
-                "is_seed": True,
-            }
-            for s in seeds
-        ],
+        gaps=merged_gaps,
+        seed_entities=seeds_out,
     )
 
 
@@ -554,12 +620,19 @@ async def graph_discover(
         if owner and owner.get("user_id") and owner["user_id"] != current_user["user_id"]:
             raise HTTPException(status_code=404, detail="Session not found")
 
+    # PR 3 — both fields populated by GraphDiscoverRequest's PR 1 validator.
+    discover_corpus_ids = list(body.corpus_ids or [])
+    if not discover_corpus_ids and body.corpus_id:
+        discover_corpus_ids = [body.corpus_id]
+    if not discover_corpus_ids:
+        raise HTTPException(status_code=400, detail="corpus_ids must be a non-empty list")
+
     try:
         result = await discover(
             qdrant=qdrant,
             neo4j_driver=neo4j,
             db=db,
-            corpus_id=body.corpus_id,
+            corpus_ids=discover_corpus_ids,
             query=body.query,
             mode=body.mode,
             session_id=body.session_id,
@@ -612,14 +685,32 @@ async def graph_discover(
 @discovery_router.get("/sessions", response_model=list[GraphDiscoverSession])
 async def list_graph_sessions(
     corpus_id: Optional[str] = Query(default=None),
+    corpus_ids: Optional[str] = Query(
+        default=None,
+        description="PR 3 — comma-separated list of corpus IDs. Wins over corpus_id when both present.",
+    ),
     current_user: dict = Depends(get_current_user),
 ):
-    """List Mission Control sessions owned by the current user."""
+    """List Mission Control sessions owned by the current user.
+
+    PR 3 multi-corpus: pass corpus_ids="id1,id2" as a query param to filter
+    sessions touching any of those corpora. Single-corpus corpus_id query
+    param remains supported.
+    """
     from services.graph.orchestrator import list_sessions as _list
     db = ingestion_service.db
     if db is None:
         raise HTTPException(status_code=503, detail="Database not connected")
-    sessions = await _list(db, corpus_id=corpus_id, user_id=current_user["user_id"])
+
+    parsed_ids: list[str] = []
+    if corpus_ids:
+        parsed_ids = [c.strip() for c in corpus_ids.split(",") if c.strip()]
+    sessions = await _list(
+        db,
+        corpus_id=corpus_id if not parsed_ids else None,
+        corpus_ids=parsed_ids or None,
+        user_id=current_user["user_id"],
+    )
     return [GraphDiscoverSession(**s) for s in sessions]
 
 
@@ -628,19 +719,27 @@ async def graph_resume_candidate(
     body: GraphResumeCandidateRequest,
     current_user: dict = Depends(get_current_user),
 ) -> GraphResumeCandidateResponse:
-    """Find a prior Mission Control thread by query-embedding cosine similarity."""
+    """Find a prior Mission Control thread by query-embedding cosine similarity.
+
+    PR 3 — multi-corpus: searches across all selected corpora and returns
+    the highest-scoring candidate above threshold.
+    """
     from services.graph.orchestrator import find_resume_candidate
 
     db = ingestion_service.db
     if db is None:
         raise HTTPException(status_code=503, detail="Database not connected")
 
+    rc_corpus_ids = list(body.corpus_ids or [])
+    if not rc_corpus_ids and body.corpus_id:
+        rc_corpus_ids = [body.corpus_id]
+
     candidate = await find_resume_candidate(
         db,
-        corpus_id=body.corpus_id,
+        corpus_ids=rc_corpus_ids,
         query=body.query,
         user_id=current_user["user_id"],
-        threshold=body.threshold,
+        threshold=body.threshold or 0.85,
     )
     if not candidate:
         return GraphResumeCandidateResponse()
@@ -669,10 +768,17 @@ async def get_graph_session(
 
 @discovery_router.get("/suggestions", response_model=GraphSuggestionsResponse)
 async def graph_suggestions(
-    corpus_id: str = Query(...),
+    corpus_id: Optional[str] = Query(default=None),
+    corpus_ids: Optional[str] = Query(
+        default=None,
+        description="PR 3 — comma-separated list of corpus IDs. Wins over corpus_id when both present.",
+    ),
     current_user: dict = Depends(get_current_user),
 ):
-    """Return corpus-seeded Mission Control suggestions without a synthesis turn."""
+    """Return corpus-seeded Mission Control suggestions without a synthesis turn.
+
+    PR 3 — multi-corpus support via comma-separated corpus_ids query param.
+    """
     from services.graph.orchestrator import build_corpus_suggestions
 
     qdrant = ingestion_service.qdrant_client
@@ -682,11 +788,21 @@ async def graph_suggestions(
     if db is None:
         raise HTTPException(status_code=503, detail="Database not connected")
 
+    parsed_ids: list[str] = []
+    if corpus_ids:
+        parsed_ids = [c.strip() for c in corpus_ids.split(",") if c.strip()]
+    if not parsed_ids and corpus_id:
+        parsed_ids = [corpus_id]
+    if not parsed_ids:
+        raise HTTPException(
+            status_code=400, detail="corpus_id or corpus_ids query parameter required"
+        )
+
     payload = await build_corpus_suggestions(
         qdrant=qdrant,
         neo4j_driver=ingestion_service.neo4j_driver,
         db=db,
-        corpus_id=corpus_id,
+        corpus_ids=parsed_ids,
         user_id=current_user["user_id"],
     )
     return GraphSuggestionsResponse(**payload)
