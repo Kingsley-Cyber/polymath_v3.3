@@ -37,6 +37,12 @@ import {
   polymathToGraphology,
   type ColorMode,
 } from "../../lib/polymath-graph-adapter";
+import { cleanBookLabel } from "../../lib/label-utils";
+
+// Pt 3 polish: force-label only the strongest N book anchors so the
+// canvas reads as a star-field of named constellations instead of a
+// label storm at 100+ books.
+const BRAIN_VIEW_TOP_N_LABELS = 20;
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -103,18 +109,24 @@ function useBrainGraph(
           corpusIds,
         );
 
+        const anchorRaw =
+          drillRes.anchor?.label ||
+          drillRes.anchor?.filename ||
+          drillRes.anchor?.doc_id?.slice(0, 8) ||
+          "";
         const anchorNode: any = drillRes.anchor
           ? {
               id: `book:${drillRes.anchor.doc_id}`,
-              display_name:
-                drillRes.anchor.label ||
-                drillRes.anchor.filename ||
-                drillRes.anchor.doc_id?.slice(0, 8),
+              display_name: anchorRaw,
+              // Sigma renders `label`; tooltip / selection bar reads
+              // `display_name` for full context.
+              label: cleanBookLabel(anchorRaw) || anchorRaw,
               mention_count: drillRes.anchor.chunk_count || 1,
               kind: "book" as const,
               source_corpora: [drillRes.anchor.corpus_id],
               source_corpus: drillRes.anchor.corpus_id,
               is_cluster_anchor: true,
+              forceLabel: true,
             }
           : null;
 
@@ -170,15 +182,19 @@ function useBrainGraph(
         ]);
         // Synthetic anchors for the bridge target books so the canvas has
         // a node to land the bridge edge on.
-        const targetAnchorNodes = drillRes.cross_book_bridges.map((b) => ({
-          id: `book:${b.target_doc_id}`,
-          display_name: b.target_filename || b.target_doc_id.slice(0, 8),
-          mention_count: 1,
-          kind: "book" as const,
-          source_corpora: [b.target_corpus_id || ""],
-          source_corpus: b.target_corpus_id || "",
-          is_cluster_anchor: true,
-        }));
+        const targetAnchorNodes = drillRes.cross_book_bridges.map((b) => {
+          const rawTarget = b.target_filename || b.target_doc_id.slice(0, 8);
+          return {
+            id: `book:${b.target_doc_id}`,
+            display_name: rawTarget,
+            label: cleanBookLabel(rawTarget) || rawTarget,
+            mention_count: 1,
+            kind: "book" as const,
+            source_corpora: [b.target_corpus_id || ""],
+            source_corpus: b.target_corpus_id || "",
+            is_cluster_anchor: true,
+          };
+        });
 
         const nodes = [
           ...(anchorNode ? [anchorNode] : []),
@@ -209,24 +225,39 @@ function useBrainGraph(
       // metadata (filename, chunk_count, ghost_b_success_rate) lives on the
       // Document node so no MongoDB round-trip is needed.
       const bv = await api.getBrainView(corpusIds);
-      const anchorNodes = bv.documents.map((d) => ({
-        id: `book:${d.doc_id}`,
-        display_name: d.label || d.filename || d.doc_id.slice(0, 8),
-        // mention_count drives node size in the adapter — use chunk_count
-        // so a 5000-chunk book is visually larger than a 50-chunk one.
-        mention_count: Math.max(1, d.chunk_count || d.actual_chunk_count || 1),
-        kind: "book" as const,
-        source_corpora: [d.corpus_id],
-        source_corpus: d.corpus_id,
-        is_cluster_anchor: true,
-        // Pass anchor metadata through so the selection bar can render it.
-        ghost_b_success_rate: d.ghost_b_success_rate,
-        ghost_b_extracted: d.ghost_b_extracted,
-        ghost_b_total: d.ghost_b_total,
-        chunk_count: d.chunk_count,
-        parent_count: d.parent_count,
-        filename: d.filename,
-      }));
+      // Sort by bridge_count desc so we can tag the top-N anchors with
+      // forceLabel — those are the most-connected books and worth always
+      // labelling, the long tail relies on semantic zoom.
+      const sortedDocs = [...bv.documents].sort(
+        (a, b) => (b.bridge_count || 0) - (a.bridge_count || 0),
+      );
+      const anchorNodes = sortedDocs.map((d, idx) => {
+        const rawLabel = d.label || d.filename || d.doc_id.slice(0, 8);
+        return {
+          id: `book:${d.doc_id}`,
+          // Full text kept on display_name for tooltip; sigma renders `label`.
+          display_name: rawLabel,
+          label: cleanBookLabel(rawLabel) || rawLabel,
+          // mention_count drives node size in the adapter — use chunk_count
+          // so a 5000-chunk book is visually larger than a 50-chunk one.
+          mention_count: Math.max(1, d.chunk_count || d.actual_chunk_count || 1),
+          kind: "book" as const,
+          source_corpora: [d.corpus_id],
+          source_corpus: d.corpus_id,
+          is_cluster_anchor: true,
+          // Top-N strongest anchors keep their label visible at all zoom
+          // levels; the long tail relies on semantic-zoom logic in useSigma.
+          forceLabel: idx < BRAIN_VIEW_TOP_N_LABELS,
+          // Pass anchor metadata through so the selection bar can render it.
+          ghost_b_success_rate: d.ghost_b_success_rate,
+          ghost_b_extracted: d.ghost_b_extracted,
+          ghost_b_total: d.ghost_b_total,
+          chunk_count: d.chunk_count,
+          parent_count: d.parent_count,
+          bridge_count: d.bridge_count,
+          filename: d.filename,
+        };
+      });
       const bridgeLinks = bv.bridges.map((b) => ({
         source: `book:${b.source}`,
         target: `book:${b.target}`,

@@ -63,10 +63,16 @@ export const NODE_COLORS: Record<PolymathNodeKind, string> = {
 // =============== NODE SIZES ===============
 // Dramatic differences so structural anchors dominate before the user
 // reads any label — same principle GitNexus uses.
+//
+// Pt 3 polish: shrunk Book from 16 → 7 to match the user's "stars in
+// the night sky" creative direction. Final rendered size grows
+// logarithmically with bridge_count via `nodeReducer` below, so a
+// well-connected book gets larger (~13px) and an isolated one stays
+// small (~7px). Either way it reads as a point of light, not a blob.
 export const NODE_SIZES: Record<PolymathNodeKind, number> = {
   Domain: 20,
   Concept: 12,
-  Book: 16,
+  Book: 7,
   Person: 13,
   Organization: 13,
   Location: 11,
@@ -292,17 +298,20 @@ export function nodeReducer(node: BrainViewNodePayload) {
     label,
   };
 
+  // Pt 3 polish: "stars in the night sky" — Book anchors render as small
+  // bright amber dots that grow logarithmically with their bridge count.
+  // A 1-bridge book sits at ~7px, a 12-bridge hub at ~12px, a 100+
+  // mega-hub caps just above 13px. No more 18px halo+border (sigma's
+  // default node program ignored those attrs anyway).
   if (kind === "Book" || node.is_cluster_anchor) {
+    const bridges = Math.max(0, Number(node.bridge_count ?? 1));
+    const size = 7 + Math.log2(bridges + 1) * 1.4;
     return {
       ...base,
-      size: 18,
+      size,
       mass: 35,
-      borderColor: "#fcd34d",
-      borderWidth: 4,
-      haloColor: "#f59e0b44",
-      haloWidth: 18,
-      labelSize: 16,
-      labelWeight: "700",
+      labelSize: 13,
+      labelWeight: "600",
       zIndex: 2,
     };
   }
@@ -339,8 +348,9 @@ export const BRAIN_VIEW_CONFIG = {
   hideEdgesOnMove: true,
   zIndex: true,
 
-  // Canvas
-  backgroundColor: "#0f172a",        // slate-900 — matches app shell
+  // Canvas — deepened from slate-900 to near-black so bright Book anchors
+  // read as stars in the night sky (Pt 3 creative direction).
+  backgroundColor: "#06060a",
   defaultNodeColor: NODE_COLORS.Other,
   defaultEdgeColor: EDGE_COLORS_BY_FAMILY.WeakAssociation,
 

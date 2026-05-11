@@ -83,6 +83,15 @@ export interface PolymathRawNode {
   per_doc_mentions?: Record<string, number>;
   kind?: "book";
   is_cluster_anchor?: boolean;
+  /** Optional pre-cleaned label (e.g. "Title -- Author" from cleanBookLabel)
+   *  — used by sigma's label renderer in preference to display_name. */
+  label?: string;
+  /** Optional explicit forceLabel — overrides the default kind-based rule.
+   *  Used by the Brain View top-N forceLabel tagging. */
+  forceLabel?: boolean;
+  /** Brain View bridge count, used by sigma-constants::nodeReducer to scale
+   *  Book anchor size logarithmically (well-connected books read larger). */
+  bridge_count?: number;
 }
 
 export interface PolymathRawEdge {
@@ -106,6 +115,18 @@ export interface BuildOpts {
   /** Optional cluster centroids per concept_id / domain key, lets the
    *  adapter cluster-position entity-level nodes around their parent. */
   clusterCenters?: Map<string, { x: number; y: number }>;
+}
+
+// Convert "#rrggbb" → "rgba(r,g,b,a)". Lets us bake opacity into edge
+// colors so weak bridges fade out without needing a separate opacity attr
+// (sigma EdgeCurveProgram reads color alpha directly).
+function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!m) return hex;
+  const r = parseInt(m[1], 16);
+  const g = parseInt(m[2], 16);
+  const b = parseInt(m[3], 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`;
 }
 
 // Scale node size down as graph density grows so the visual hierarchy
@@ -303,8 +324,8 @@ export function polymathToGraphology(
       color = "#a78bfa";
     }
     // Brain View bridges carry a `weight` = shared-entity strength from
-    // /api/graph/brain-view. Thicken the edge proportionally so a
-    // strong bridge (many shared entities) reads more present than a
+    // /api/graph/brain-view. Thicken AND brighten the edge proportionally
+    // so a strong bridge (many shared entities) reads more present than a
     // weak one (1-2 shared entities). PRD spec for edgeReducer.
     let size = edgeBaseSize * style.sizeMultiplier;
     if (rel.predicate === "bridges_to" && typeof rel.weight === "number") {
@@ -312,6 +333,12 @@ export function polymathToGraphology(
       // strength formula in sigma-constants.ts::edgeReducer.
       const strength = Math.max(0, rel.weight);
       size = Math.min(1.2 + strength * 0.18, 5.5);
+      // Pt 3 polish: bake alpha into the edge color so weak bridges
+      // (1 shared entity → opacity ~0.23) fade out and strong bridges
+      // (12+ shared → opacity ~0.85) stay prominent. EdgeCurveProgram
+      // (sigma v3) honours rgba alpha.
+      const opacity = Math.max(0.15, Math.min(0.85, 0.15 + strength * 0.08));
+      color = hexToRgba(color, opacity);
     }
     graph.addEdgeWithKey(`e${i}`, s, t, {
       size,
@@ -368,12 +395,24 @@ function addNodeToGraph(
     kind === "Domain" || kind === "Concept" || kind === "Book"
       ? 0
       : Math.min(6, Math.log2((mentionWeight || 1) + 1) * 1.5);
+  // Pt 3 polish:
+  //   • `raw.label` (pre-cleaned by cleanBookLabel) wins over display_name.
+  //   • `raw.forceLabel` boolean (Brain View top-N tagging) overrides the
+  //     default Domain/Book always-on rule when explicitly provided.
+  const renderedLabel =
+    (raw as PolymathRawNode).label ||
+    raw.display_name ||
+    raw.id;
+  const forceLabel =
+    typeof (raw as PolymathRawNode).forceLabel === "boolean"
+      ? Boolean((raw as PolymathRawNode).forceLabel)
+      : kind === "Domain" || kind === "Book";
   graph.addNode(raw.id, {
     x,
     y,
     size: scaledSize + mentionBoost,
     color,
-    label: raw.display_name || raw.id,
+    label: renderedLabel,
     nodeKind: kind,
     display_name: raw.display_name || raw.id,
     mention_count: Number(mentionWeight || 1),
@@ -382,7 +421,9 @@ function addNodeToGraph(
     primary_domain: raw.primary_domain,
     member_ids: raw.member_ids,
     hidden: false,
-    forceLabel: kind === "Domain" || kind === "Book",
+    forceLabel,
     mass: NODE_MASSES[kind] || 1,
-  });
+    // Carried for sigma-constants::nodeReducer star-field sizing.
+    bridge_count: (raw as PolymathRawNode).bridge_count,
+  } as any);
 }

@@ -98,28 +98,41 @@ interface UseSigmaReturn {
 
 // ── ForceAtlas2 + noverlap settings (verbatim from GitNexus) ─────────────
 
+// Pt 3 polish: longer noverlap pass + wider margin so Book anchors don't
+// crowd each other once labels render. expansion 1.15 fans out clumped
+// regions; margin 18 leaves room for the label pill.
 const NOVERLAP_SETTINGS = {
-  maxIterations: 20,
+  maxIterations: 50,
   ratio: 1.1,
-  margin: 10,
-  expansion: 1.05,
+  margin: 18,
+  expansion: 1.15,
 };
 
 const getFA2Settings = (nodeCount: number) => {
   const isSmall = nodeCount < 500;
   const isMedium = nodeCount >= 500 && nodeCount < 2000;
   const isLarge = nodeCount >= 2000 && nodeCount < 10000;
+  // linLogMode separates dense clusters from sparse ones via a log-scale
+  // attraction force. Disable on tiny graphs (<30 nodes) where it
+  // over-spreads everything into corners; enable everywhere else.
+  const useLinLog = nodeCount >= 30;
   return {
-    gravity: isSmall ? 0.8 : isMedium ? 0.5 : isLarge ? 0.3 : 0.15,
-    scalingRatio: isSmall ? 15 : isMedium ? 30 : isLarge ? 60 : 100,
+    // Lower gravity = books spread out more. Old values 0.8/0.5/0.3/0.15
+    // were too clumpy at the small-graph tier per user feedback.
+    gravity: isSmall ? 0.6 : isMedium ? 0.4 : isLarge ? 0.25 : 0.15,
+    // Stronger negative repulsion (scalingRatio bumped) so node circles
+    // don't pile on each other. Old: 15/30/60/100.
+    scalingRatio: isSmall ? 38 : isMedium ? 55 : isLarge ? 90 : 130,
     slowDown: isSmall ? 1 : isMedium ? 2 : isLarge ? 3 : 5,
     barnesHutOptimize: nodeCount > 200,
     barnesHutTheta: isLarge ? 0.8 : 0.6,
     strongGravityMode: false,
     outboundAttractionDistribution: true,
-    linLogMode: false,
+    linLogMode: useLinLog,
     adjustSizes: true,
-    edgeWeightInfluence: 1,
+    // Strong bridges (many shared entities) pull books closer together;
+    // weak bridges have less attraction. 1 → 1.4 amplifies the signal.
+    edgeWeightInfluence: 1.4,
   };
 };
 
@@ -369,6 +382,48 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
 
     sigmaRef.current = sigma;
 
+    // ── Semantic zoom (Pt 3 polish) ────────────────────────────────────
+    // At zoom-out only forceLabel anchors (Brain View top-N books) show
+    // their label; at deep zoom-out labels disappear entirely; at zoom-in
+    // the full density returns. Debounced via one rAF so it doesn't fight
+    // sigma's own redraw loop.
+    let rafScheduled = false;
+    const applySemanticZoom = () => {
+      rafScheduled = false;
+      const s = sigmaRef.current;
+      const g = graphRef.current;
+      if (!s || !g) return;
+      const ratio = s.getCamera().ratio;
+      const nodeCount = g.order;
+      const isLargeGraph = nodeCount > 800;
+      const isHugeGraph = nodeCount > 3000;
+      // Camera tier: closer in = lower ratio. Defaults Sigma uses ~1.0.
+      const zoomedFar = ratio >= 4;
+      const zoomedMid = ratio >= 1.5 && ratio < 4;
+      // Take the STRICTER of zoom-tier and node-count rules.
+      const renderLabels = !zoomedFar && !isLargeGraph;
+      const labelDensity = zoomedMid || isLargeGraph
+        ? (isHugeGraph ? 0.02 : 0.05)
+        : 0.1;
+      const labelThreshold = zoomedMid || isLargeGraph
+        ? (isHugeGraph ? 14 : 11)
+        : 8;
+      try {
+        s.setSetting("renderLabels", renderLabels);
+        s.setSetting("labelDensity", labelDensity);
+        s.setSetting("labelRenderedSizeThreshold", labelThreshold);
+      } catch {
+        /* setSetting can throw mid-frame — ignore */
+      }
+    };
+    const onCameraUpdated = () => {
+      if (rafScheduled) return;
+      rafScheduled = true;
+      requestAnimationFrame(applySemanticZoom);
+    };
+    const camera = sigma.getCamera();
+    camera.on("updated", onCameraUpdated);
+
     sigma.on("clickNode", ({ node }: any) => {
       // Suppress click-as-select when this came at the tail of a drag.
       if (isDraggingRef.current) {
@@ -409,6 +464,19 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
     mouseCaptor.on("mousemovebody", (e: any) => {
       const dragged = draggedRef.current;
       if (!dragged) return;
+      // Pt 3 polish: on the FIRST move of a drag, stop the FA2 layout
+      // worker so physics doesn't fight the cursor (rubber-banding). On
+      // release we leave the layout off so the user's position sticks —
+      // they can hit "Run layout" to re-settle if they want to.
+      if (!isDraggingRef.current) {
+        layoutRef.current?.stop();
+        layoutRef.current = null;
+        if (layoutTimeoutRef.current) {
+          clearTimeout(layoutTimeoutRef.current);
+          layoutTimeoutRef.current = null;
+        }
+        setIsLayoutRunning(false);
+      }
       isDraggingRef.current = true;
       const sigmaInst = sigmaRef.current;
       const g = graphRef.current;
@@ -436,6 +504,11 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
     return () => {
       if (layoutTimeoutRef.current) clearTimeout(layoutTimeoutRef.current);
       layoutRef.current?.kill();
+      try {
+        camera.off("updated", onCameraUpdated);
+      } catch {
+        /* sigma may already be torn down */
+      }
       sigma.kill();
       sigmaRef.current = null;
       graphRef.current = null;
