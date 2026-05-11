@@ -1,0 +1,174 @@
+"""
+Backfill :Document anchor properties on Neo4j from MongoDB.
+
+Existing Documents (ingested before the Brain View refactor) lack the
+anchor properties — `is_cluster_anchor`, `kind`, `filename`,
+`chunk_count`, and the three flat ghost_b_* metrics. Without these the
+Brain View Cypher (`WHERE d.is_cluster_anchor = true`) returns nothing
+for legacy corpora.
+
+This script:
+  1. Reads every `documents.{doc_id, corpus_id, filename, ghost_b_metrics,
+     parent_chunks, ingestion_config}` from MongoDB.
+  2. Counts each doc's chunks and parents from MongoDB.
+  3. Calls `_upsert_document` on Neo4j to mirror the rich anchor properties.
+  4. Reports per-corpus counts.
+
+Idempotent — re-running on already-anchored docs only refreshes timestamps
+and the `ghost_b_*` flat metrics. Cypher MERGE semantics keep first ingest
+time intact via `ON CREATE`.
+
+Usage (from repo root, with backend env loaded):
+    docker exec polymath_v3_3-backend-1 python scripts/backfill_doc_anchors.py
+        --corpus-id <id>            # filter to one corpus, repeatable
+        --dry-run                   # report counts without writing
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import os
+import sys
+from pathlib import Path
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("backfill_doc_anchors")
+
+# Allow running from repo root: `python scripts/backfill_doc_anchors.py`
+ROOT = Path(__file__).resolve().parent.parent
+BACKEND = ROOT / "backend"
+if BACKEND.exists() and str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
+
+
+async def _amain(corpus_ids: list[str] | None, dry_run: bool) -> int:
+    from motor.motor_asyncio import AsyncIOMotorClient
+    from neo4j import AsyncGraphDatabase
+
+    mongo_url = os.environ.get("MONGO_URL") or os.environ.get("MONGODB_URL")
+    if not mongo_url:
+        logger.error("MONGO_URL / MONGODB_URL not set")
+        return 2
+
+    neo4j_url = os.environ.get("NEO4J_URL", "bolt://neo4j:7687")
+    neo4j_user = os.environ.get("NEO4J_USER", "neo4j")
+    neo4j_password = os.environ.get("NEO4J_PASSWORD") or os.environ.get("NEO4J_AUTH_PASSWORD")
+    if not neo4j_password:
+        logger.error("NEO4J_PASSWORD not set")
+        return 2
+
+    mongo_client = AsyncIOMotorClient(mongo_url)
+    db = mongo_client.get_default_database()
+    driver = AsyncGraphDatabase.driver(neo4j_url, auth=(neo4j_user, neo4j_password))
+
+    from services.graph.neo4j_writer import _upsert_document  # noqa: WPS437
+
+    query = {}
+    if corpus_ids:
+        query["corpus_id"] = {"$in": corpus_ids}
+
+    projection = {
+        "doc_id": 1,
+        "corpus_id": 1,
+        "user_id": 1,
+        "file_id": 1,
+        "filename": 1,
+        "ghost_b_metrics": 1,
+        "ingestion_config": 1,
+        "_id": 0,
+    }
+
+    cursor = db["documents"].find(query, projection)
+    per_corpus_counts: dict[str, int] = {}
+    written = 0
+    skipped_missing_id = 0
+
+    async for doc in cursor:
+        doc_id = doc.get("doc_id")
+        corpus_id = doc.get("corpus_id")
+        if not doc_id or not corpus_id:
+            skipped_missing_id += 1
+            continue
+        per_corpus_counts[corpus_id] = per_corpus_counts.get(corpus_id, 0) + 1
+
+        # Cheap server-side counts so we don't drag full chunk text across.
+        chunk_count = await db["chunks"].count_documents(
+            {"doc_id": doc_id, "corpus_id": corpus_id}
+        )
+        parent_count = await db["chunks"].count_documents(
+            {"doc_id": doc_id, "corpus_id": corpus_id, "chunk_kind": "parent"}
+        )
+        # Fallback: many docs store parents on the Document record itself.
+        if parent_count == 0:
+            parents = doc.get("parent_chunks") or []
+            parent_count = len(parents) if isinstance(parents, list) else 0
+
+        metrics = doc.get("ghost_b_metrics") or {}
+        success_rate = metrics.get("success_rate")
+        extracted = metrics.get("extracted_chunks")
+        total = metrics.get("requested_chunks")
+        schema_lens_id = (
+            (doc.get("ingestion_config") or {}).get("schema_lens_id")
+            or metrics.get("schema_lens")
+        )
+
+        if dry_run:
+            logger.info(
+                "[dry] doc=%s corpus=%s filename=%s chunks=%d parents=%d success=%s",
+                doc_id[:12],
+                corpus_id[:8],
+                doc.get("filename"),
+                chunk_count,
+                parent_count,
+                success_rate,
+            )
+            continue
+
+        await _upsert_document(
+            driver,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            user_id=doc.get("user_id"),
+            file_id=doc.get("file_id"),
+            filename=doc.get("filename"),
+            chunk_count=chunk_count,
+            parent_count=parent_count,
+            schema_lens_id=schema_lens_id if isinstance(schema_lens_id, str) else None,
+            ghost_b_success_rate=float(success_rate) if success_rate is not None else None,
+            ghost_b_extracted=int(extracted) if extracted is not None else None,
+            ghost_b_total=int(total) if total is not None else None,
+        )
+        written += 1
+        if written % 50 == 0:
+            logger.info("...backfilled %d documents", written)
+
+    logger.info(
+        "Backfill complete: wrote=%d dry_run=%s skipped_missing_id=%d corpus_counts=%s",
+        written,
+        dry_run,
+        skipped_missing_id,
+        per_corpus_counts,
+    )
+
+    await driver.close()
+    mongo_client.close()
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Backfill :Document anchor properties from MongoDB.")
+    parser.add_argument(
+        "--corpus-id",
+        action="append",
+        default=None,
+        help="Restrict to one or more corpora (repeatable). Defaults to all.",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Report counts without writing.")
+    args = parser.parse_args()
+
+    return asyncio.run(_amain(args.corpus_id, args.dry_run))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

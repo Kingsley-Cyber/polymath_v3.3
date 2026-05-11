@@ -844,19 +844,110 @@ async def _upsert_document(
     corpus_id: str,
     user_id: str | None,
     file_id: str | None,
+    *,
+    filename: str | None = None,
+    chunk_count: int = 0,
+    parent_count: int = 0,
+    source_path: str | None = None,
+    source_tier: str | None = None,
+    schema_lens_id: str | None = None,
+    ghost_b_success_rate: float | None = None,
+    ghost_b_extracted: int | None = None,
+    ghost_b_total: int | None = None,
 ) -> None:
+    """Create or update a rich :Document anchor.
+
+    Every Document is a cluster anchor by definition — `is_cluster_anchor=true`
+    is set unconditionally so the Brain View Cypher (`WHERE d.is_cluster_anchor
+    = true`) finds it without a separate backfill. The anchor stores enough
+    metadata (filename, chunk_count, ghost_b health) for the front-end to
+    render book cards without a MongoDB round-trip.
+
+    Optional kwargs use COALESCE on update so a partial caller (e.g. fresh
+    ingest before ghost_b_metrics is computed) does not nuke values written
+    by a later anchor-metrics update.
+    """
     async with driver.session() as session:
         await session.run(
             """
             MERGE (d:Document {doc_id: $doc_id})
+            ON CREATE SET d.ingested_at = datetime()
             SET d.corpus_id = $corpus_id,
                 d.user_id = $user_id,
-                d.file_id = $file_id
+                d.file_id = $file_id,
+                d.is_cluster_anchor = true,
+                d.kind = 'book',
+                d.node_type = 'Document',
+                d.updated_at = datetime(),
+                d.filename = coalesce($filename, d.filename),
+                d.chunk_count = $chunk_count,
+                d.parent_count = $parent_count,
+                d.source_path = coalesce($source_path, d.source_path),
+                d.source_tier = coalesce($source_tier, d.source_tier),
+                d.schema_lens_id = coalesce($schema_lens_id, d.schema_lens_id),
+                d.ghost_b_success_rate = coalesce($ghost_b_success_rate, d.ghost_b_success_rate),
+                d.ghost_b_extracted = coalesce($ghost_b_extracted, d.ghost_b_extracted),
+                d.ghost_b_total = coalesce($ghost_b_total, d.ghost_b_total)
             """,
             doc_id=doc_id,
             corpus_id=corpus_id,
             user_id=user_id,
             file_id=file_id,
+            filename=filename,
+            chunk_count=int(chunk_count or 0),
+            parent_count=int(parent_count or 0),
+            source_path=source_path,
+            source_tier=source_tier,
+            schema_lens_id=schema_lens_id,
+            ghost_b_success_rate=ghost_b_success_rate,
+            ghost_b_extracted=ghost_b_extracted,
+            ghost_b_total=ghost_b_total,
+        )
+
+
+async def update_document_anchor_metrics(
+    driver: AsyncDriver,
+    doc_id: str,
+    *,
+    chunk_count: int | None = None,
+    parent_count: int | None = None,
+    ghost_b_success_rate: float | None = None,
+    ghost_b_extracted: int | None = None,
+    ghost_b_total: int | None = None,
+    schema_lens_id: str | None = None,
+) -> None:
+    """Late-bound update of metrics on an existing :Document anchor.
+
+    Called after Ghost B finishes and the worker has computed success rate,
+    so the Brain View can render `success_rate` badges without a MongoDB
+    lookup. No-op if the Document node does not exist yet (a fresh upsert
+    would have created it via `_upsert_document`).
+    """
+    async with driver.session() as session:
+        await session.run(
+            """
+            MATCH (d:Document {doc_id: $doc_id})
+            SET d.updated_at = datetime(),
+                d.chunk_count = coalesce($chunk_count, d.chunk_count),
+                d.parent_count = coalesce($parent_count, d.parent_count),
+                d.ghost_b_success_rate = coalesce($ghost_b_success_rate, d.ghost_b_success_rate),
+                d.ghost_b_extracted = coalesce($ghost_b_extracted, d.ghost_b_extracted),
+                d.ghost_b_total = coalesce($ghost_b_total, d.ghost_b_total),
+                d.schema_lens_id = coalesce($schema_lens_id, d.schema_lens_id)
+            """,
+            doc_id=doc_id,
+            chunk_count=int(chunk_count) if chunk_count is not None else None,
+            parent_count=int(parent_count) if parent_count is not None else None,
+            ghost_b_success_rate=(
+                float(ghost_b_success_rate) if ghost_b_success_rate is not None else None
+            ),
+            ghost_b_extracted=(
+                int(ghost_b_extracted) if ghost_b_extracted is not None else None
+            ),
+            ghost_b_total=(
+                int(ghost_b_total) if ghost_b_total is not None else None
+            ),
+            schema_lens_id=schema_lens_id,
         )
 
 
@@ -1016,6 +1107,15 @@ async def write_document_graph(
     user_id: str | None = None,
     file_id: str | None = None,
     all_chunk_ids: list[str] | None = None,
+    *,
+    filename: str | None = None,
+    parent_count: int = 0,
+    source_path: str | None = None,
+    source_tier: str | None = None,
+    schema_lens_id: str | None = None,
+    ghost_b_success_rate: float | None = None,
+    ghost_b_extracted: int | None = None,
+    ghost_b_total: int | None = None,
 ) -> None:
     """
     Write the full graph for one document after GHOST B completes.
@@ -1031,12 +1131,34 @@ async def write_document_graph(
     plus optional Fact nodes linked by HAS_FACT and SUPPORTS_FACT.
     all_chunk_ids lets ingestion preserve complete document/chunk coverage in
     Neo4j even when Ghost B only returned partial entity/relation extraction.
-    """
-    # 1. Document node — single MERGE.
-    await _upsert_document(driver, doc_id, corpus_id, user_id, file_id)
 
-    # 2. Build batched payloads from the extraction results.
+    Brain View anchor properties: `filename`, `parent_count`, `source_*`,
+    `schema_lens_id`, and the three flat ghost_b_* metrics are forwarded to
+    the rich `_upsert_document` so the Document node serves as a cluster
+    anchor for the books-as-clusters view. `chunk_count` is auto-derived
+    from `all_chunk_ids` + the extraction-result chunk ids.
+    """
+    # 1. Document node — rich anchor MERGE with cluster-anchor flags.
     chunk_ids = list(dict.fromkeys([*(all_chunk_ids or []), *[r.chunk_id for r in extraction_results]]))
+    await _upsert_document(
+        driver,
+        doc_id,
+        corpus_id,
+        user_id,
+        file_id,
+        filename=filename,
+        chunk_count=len(chunk_ids),
+        parent_count=parent_count,
+        source_path=source_path,
+        source_tier=source_tier,
+        schema_lens_id=schema_lens_id,
+        ghost_b_success_rate=ghost_b_success_rate,
+        ghost_b_extracted=ghost_b_extracted,
+        ghost_b_total=ghost_b_total,
+    )
+
+    # 2. Build batched payloads from the extraction results. `chunk_ids` was
+    # computed above for the anchor's chunk_count — reuse it for the chunk rows.
     chunk_rows: list[dict] = [{"chunk_id": chunk_id} for chunk_id in chunk_ids]
 
     entity_groups: dict[str, dict] = {}
@@ -1293,7 +1415,9 @@ async def write_document_graph(
                     m.extracted_type = row.extracted_type,
                     m.surface_form = row.surface_form,
                     m.extractor = 'ghost_b',
-                    m.ontology_version = row.ontology_version
+                    m.ontology_version = row.ontology_version,
+                    m.corpus_id = $corpus_id,
+                    m.doc_id = c.doc_id
                 SET m.extracted_types = CASE
                     WHEN m.extracted_types IS NULL THEN [row.extracted_type]
                     WHEN row.extracted_type IN m.extracted_types THEN m.extracted_types

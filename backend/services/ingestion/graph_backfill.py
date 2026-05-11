@@ -221,6 +221,19 @@ async def backfill_failed_graph_chunks(
         )
     ]
     if report.results:
+        # Anchor metadata from Mongo so the Neo4j Document mirrors filename +
+        # ghost_b health without a follow-up backfill pass.
+        doc_metrics = doc.get("ghost_b_metrics") or {}
+        success_rate = doc_metrics.get("success_rate")
+        extracted = doc_metrics.get("extracted_chunks")
+        total = doc_metrics.get("requested_chunks")
+        parents = doc.get("parent_chunks") or []
+        parent_count = len(parents) if isinstance(parents, list) else 0
+        schema_lens_id = (
+            (doc.get("ingestion_config") or {}).get("schema_lens_id")
+            or doc_metrics.get("schema_lens")
+        )
+
         await write_document_graph(
             driver=neo4j_driver,
             doc_id=doc_id,
@@ -229,6 +242,12 @@ async def backfill_failed_graph_chunks(
             user_id=user_id,
             file_id=doc.get("file_id"),
             all_chunk_ids=all_chunk_ids,
+            filename=doc.get("filename"),
+            parent_count=parent_count,
+            schema_lens_id=schema_lens_id if isinstance(schema_lens_id, str) else None,
+            ghost_b_success_rate=float(success_rate) if success_rate is not None else None,
+            ghost_b_extracted=int(extracted) if extracted is not None else None,
+            ghost_b_total=int(total) if total is not None else None,
         )
 
     warnings = _clean_graph_warnings((doc.get("write_state") or {}).get("warnings") or [])

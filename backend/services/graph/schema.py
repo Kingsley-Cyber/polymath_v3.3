@@ -20,6 +20,11 @@ _CONSTRAINTS = [
 
 _INDEXES = [
     "CREATE INDEX IF NOT EXISTS FOR (d:Document) ON (d.corpus_id)",
+    # Brain View anchor + composite indexes — drive the books-as-clusters query.
+    "CREATE INDEX IF NOT EXISTS FOR (d:Document) ON (d.is_cluster_anchor)",
+    "CREATE INDEX IF NOT EXISTS FOR (d:Document) ON (d.filename)",
+    "CREATE INDEX IF NOT EXISTS FOR (d:Document) ON (d.corpus_id, d.is_cluster_anchor)",
+    "CREATE INDEX IF NOT EXISTS FOR (d:Document) ON (d.corpus_id, d.filename)",
     "CREATE INDEX IF NOT EXISTS FOR (c:Chunk) ON (c.corpus_id)",
     "CREATE INDEX IF NOT EXISTS FOR (c:Chunk) ON (c.doc_id)",
     "CREATE INDEX IF NOT EXISTS FOR (e:Entity) ON (e.normalized_name)",
@@ -38,6 +43,11 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.predicate)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.edge_strength)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.eligible_for_synthesis)",
+    # Bridge detection across multi-corpus selections — replaces full-graph scans.
+    "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.corpus_ids)",
+    # MENTIONS scoping — fast bridge lookup when shared entity spans books.
+    "CREATE INDEX IF NOT EXISTS FOR ()-[m:MENTIONS]-() ON (m.corpus_id)",
+    "CREATE INDEX IF NOT EXISTS FOR ()-[m:MENTIONS]-() ON (m.doc_id)",
     "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.corpus_id)",
     "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.doc_id)",
     "CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.fact_type)",

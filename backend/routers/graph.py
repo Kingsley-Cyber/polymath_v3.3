@@ -489,6 +489,71 @@ async def entity_search(body: EntitySearchRequest = Body(...)) -> EntitySearchRe
 
 
 @discovery_router.post(
+    "/brain-view",
+    summary="Brain View: :Document cluster anchors + inter-book bridge strengths",
+)
+async def graph_brain_view(body: dict = Body(...)) -> dict:
+    """Brain View — books-as-clusters using :Document anchors.
+
+    Returns one entry per `:Document {is_cluster_anchor: true}` in the
+    selected corpora, plus pairwise bridge strengths derived from shared
+    Entity mentions. Anchor metadata (filename, chunk_count, ghost_b
+    success rate) lives on the Document node, so this query never touches
+    MongoDB and scales linearly with the anchor count via the
+    `(corpus_id, is_cluster_anchor)` composite index.
+
+    Body:
+      corpus_ids: list[str]   required, 1+
+      limit:      int         optional, default 2000 (safety cap)
+
+    Response:
+      {documents, bridges, meta} — see services.graph.queries.get_brain_view.
+    """
+    driver = _require_neo4j()
+    corpus_ids = _validate_corpus_ids_or_400(body)
+    limit = max(1, min(int(body.get("limit", 2000) or 2000), 10000))
+
+    from services.graph.queries import get_brain_view
+
+    return await get_brain_view(driver, corpus_ids, limit=limit)
+
+
+@discovery_router.post(
+    "/book-drilldown",
+    summary="Brain View drill: one :Document anchor's entities + cross-book bridges",
+)
+async def graph_book_drilldown(body: dict = Body(...)) -> dict:
+    """Drill into a single book anchor.
+
+    Returns the anchor's local Entity neighborhood, intra-book RELATES_TO
+    edges, and bridge entities connecting this book to other anchors in
+    the selected corpora.
+
+    Body:
+      doc_id:           str        required
+      other_corpus_ids: list[str]  required, 1+ — corpora to scan for bridges
+      limit:            int        optional, default 350 (caps local_entities)
+    """
+    driver = _require_neo4j()
+    doc_id = str(body.get("doc_id") or "").strip()
+    if not doc_id:
+        raise HTTPException(status_code=400, detail="doc_id is required")
+    other_corpus_ids = body.get("other_corpus_ids") or []
+    if not isinstance(other_corpus_ids, list) or not other_corpus_ids:
+        raise HTTPException(
+            status_code=400, detail="other_corpus_ids must be a non-empty list"
+        )
+    other_corpus_ids = [str(c) for c in other_corpus_ids]
+    limit = max(1, min(int(body.get("limit", 350) or 350), 5000))
+
+    from services.graph.queries import get_book_drilldown
+
+    return await get_book_drilldown(
+        driver, doc_id, other_corpus_ids, limit=limit
+    )
+
+
+@discovery_router.post(
     "/by-document",
     summary="Books-as-clusters graph: each Document is one cluster, shared "
             "entities form bridges between clusters",

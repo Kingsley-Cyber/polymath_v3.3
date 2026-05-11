@@ -1185,9 +1185,25 @@ async def _write_neo4j_for_doc(
     file_id: str,
     children,
     ghost_b_out: list[ExtractionResult] | None,
+    filename: str | None = None,
+    parents: list | None = None,
+    ghost_b_metrics: dict | None = None,
+    schema_lens_id: str | None = None,
+    source_tier: str | None = None,
 ) -> None:
-    """Delegate to neo4j_writer.write_document_graph with Ghost B output."""
+    """Delegate to neo4j_writer.write_document_graph with rich anchor metadata.
+
+    `filename` and `parents` are forwarded so the :Document node serves as
+    a Brain-View cluster anchor without a follow-up MongoDB round-trip. The
+    three ghost_b_* metrics are flattened out of the nested metrics dict for
+    Neo4j (which doesn't accept dict-valued node properties).
+    """
     from services.graph.neo4j_writer import write_document_graph
+
+    metrics = ghost_b_metrics or {}
+    success_rate = metrics.get("success_rate")
+    extracted = metrics.get("extracted_chunks")
+    total = metrics.get("requested_chunks")
 
     await write_document_graph(
         driver=neo4j_driver,
@@ -1197,6 +1213,13 @@ async def _write_neo4j_for_doc(
         user_id=user_id,
         file_id=file_id,
         all_chunk_ids=[c.chunk_id for c in children],
+        filename=filename,
+        parent_count=len(parents) if parents is not None else 0,
+        schema_lens_id=schema_lens_id,
+        source_tier=source_tier,
+        ghost_b_success_rate=float(success_rate) if success_rate is not None else None,
+        ghost_b_extracted=int(extracted) if extracted is not None else None,
+        ghost_b_total=int(total) if total is not None else None,
     )
 
 
@@ -1589,6 +1612,9 @@ async def run_ingest_job(
                 file_id=file_id,
                 children=children,
                 ghost_b_out=ghost_b_out,
+                filename=filename,
+                parents=parents,
+                ghost_b_metrics=ghost_b_metrics,
             )
             await mongo_writer.update_write_state(
                 db, doc_id, corpus_id=corpus_id, neo4j_written=True
