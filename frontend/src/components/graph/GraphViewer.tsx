@@ -20,13 +20,10 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import {
-  ChevronLeft,
   Loader2,
   Maximize2,
   Pause,
   Play,
-  X,
-  Zap,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -38,6 +35,7 @@ import {
   type ColorMode,
 } from "../../lib/polymath-graph-adapter";
 import { cleanBookLabel } from "../../lib/label-utils";
+import { BrainViewDashboard } from "./BrainViewDashboard";
 
 // Pt 4 polish: adaptive top-N forceLabel. At 16 books, hardcoded N=20
 // meant every label rendered every frame → overlap storm. The new
@@ -254,6 +252,10 @@ function useBrainGraph(
           // Top-N strongest anchors keep their label visible at all zoom
           // levels; the long tail relies on semantic-zoom logic in useSigma.
           forceLabel: idx < topN,
+          // Pt 5: extraction-schema facets drive deterministic node color
+          // in polymath-graph-adapter::pickNodeColor.
+          dominant_family: d.dominant_family,
+          dominant_entity_type: d.dominant_entity_type,
           // Pass anchor metadata through so the selection bar can render it.
           ghost_b_success_rate: d.ghost_b_success_rate,
           ghost_b_extracted: d.ghost_b_extracted,
@@ -272,6 +274,9 @@ function useBrainGraph(
         // bridges by how many cross-book entity pairs they represent.
         weight: b.strength,
         confidence: Math.min(1, (b.shared_entities || 0) / 12),
+        // Pt 5: passes through to the adapter, which uses
+        // EDGE_COLORS_BY_FAMILY[dominant_relation_family] for the edge color.
+        dominant_relation_family: b.dominant_relation_family,
       }));
       setData({ nodes: anchorNodes, links: bridgeLinks });
       setCacheWarming([]);
@@ -456,6 +461,8 @@ export function GraphViewer({
   const [colorMode, setColorMode] = useState<ColorMode>("community");
   const [drillStack, setDrillStack] = useState<DrillFrame[]>([]);
   const [hoveredName, setHoveredName] = useState<string | null>(null);
+  // Pt 5: right sidebar dashboard collapse state.
+  const [dashboardCollapsed, setDashboardCollapsed] = useState(false);
   const drillStackRef = useRef(drillStack);
   drillStackRef.current = drillStack;
 
@@ -569,128 +576,27 @@ export function GraphViewer({
   }
 
   return (
-    <div className="relative h-full w-full bg-[#06060a]">
-      {/* Background gradient — same recipe as GitNexus GraphCanvas */}
-      <div className="pointer-events-none absolute inset-0">
-        <div
-          className="absolute inset-0"
-          style={{
-            background: `
-              radial-gradient(circle at 50% 50%, rgba(124, 58, 237, 0.05) 0%, transparent 65%),
-              linear-gradient(to bottom, #06060a, #0a0a14)
-            `,
-          }}
-        />
-      </div>
-
-      {/* Top chrome */}
-      <div className="absolute top-3 left-3 right-3 z-20 flex items-start justify-between pointer-events-none">
-        <div className="flex flex-col gap-1.5 pointer-events-auto">
-          <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono">
-            {mode === "brain" ? "Corpora View" : "Query View"}
-          </div>
-          {mode === "brain" && drillStack.length > 0 && (
-            <div className="flex items-center gap-1 text-xs text-zinc-300 font-mono">
-              <button
-                className="hover:text-amber-400 transition-colors"
-                onClick={() => setDrillStack([])}
-              >
-                Overview
-              </button>
-              {drillStack.map((f, i) => (
-                <span key={i} className="flex items-center gap-1">
-                  <ChevronLeft className="w-3 h-3 rotate-180 text-zinc-600" />
-                  <button
-                    className="hover:text-amber-400 transition-colors"
-                    onClick={() => setDrillStack(drillStack.slice(0, i + 1))}
-                  >
-                    {f.label}
-                  </button>
-                </span>
-              ))}
-              <button
-                className="ml-2 text-zinc-500 hover:text-zinc-300"
-                onClick={() => setDrillStack(drillStack.slice(0, -1))}
-                title="Pop one level"
-              >
-                ↩ back
-              </button>
-            </div>
-          )}
-          <div className="text-[11px] text-zinc-500 font-mono">
-            {corpusIds.length} corpora
-            {data && ` · ${data.nodes.length} nodes · ${data.links.length} edges`}
-            {mode === "brain" && brain.cacheWarming.length > 0 && (
-              <CacheWarmingChip
-                cacheWarming={brain.cacheWarming}
-                statuses={brain.cacheStatuses}
-                rebuildingIds={brain.rebuildingIds}
-                onRebuild={brain.triggerRebuild}
-              />
-            )}
-            {sigma.isLayoutRunning && (
-              <span className="ml-2 text-violet-300/80">· settling…</span>
-            )}
-          </div>
+    <div className="relative flex h-full w-full bg-[#06060a]">
+      {/* Canvas column (fills remaining width) */}
+      <div className="relative flex-1 min-w-0">
+        {/* Background gradient — same recipe as GitNexus GraphCanvas */}
+        <div className="pointer-events-none absolute inset-0">
+          <div
+            className="absolute inset-0"
+            style={{
+              background: `
+                radial-gradient(circle at 50% 50%, rgba(124, 58, 237, 0.05) 0%, transparent 65%),
+                linear-gradient(to bottom, #06060a, #0a0a14)
+              `,
+            }}
+          />
         </div>
-        <div className="flex items-center gap-2 pointer-events-auto">
-          {mode === "brain" && (
-            <button
-              className="text-[10px] uppercase tracking-widest text-zinc-400 hover:text-amber-400 border border-zinc-800 bg-[#0d0d14]/80 backdrop-blur rounded px-2 py-1 font-mono"
-              onClick={() =>
-                setColorMode((m) => (m === "community" ? "corpus" : "community"))
-              }
-              title="Toggle color scheme"
-            >
-              color: {colorMode}
-            </button>
-          )}
-          {mode === "query" && onRerun && (
-            <button
-              className="text-[10px] uppercase tracking-widest text-zinc-200 hover:text-amber-400 border border-zinc-800 bg-[#0d0d14]/80 backdrop-blur rounded px-2 py-1 font-mono flex items-center gap-1"
-              onClick={onRerun}
-              title="Re-run synthesis"
-            >
-              <Zap className="w-3 h-3" /> re-run
-            </button>
-          )}
-          {onClose && (
-            <button
-              className="text-zinc-500 hover:text-zinc-200 bg-[#0d0d14]/80 backdrop-blur rounded p-1.5"
-              onClick={onClose}
-              title="Close viewer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-      </div>
 
-      {/* Hovered node tooltip — only when nothing is selected */}
+      {/* Hovered node tooltip — only when nothing is selected. Stays on
+          canvas (cursor-following pill) rather than in the dashboard. */}
       {hoveredName && !selectedId && (
-        <div className="pointer-events-none absolute top-16 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-zinc-800 bg-[#0d0d14]/95 px-3 py-1.5 backdrop-blur">
+        <div className="pointer-events-none absolute top-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-zinc-800 bg-[#0d0d14]/95 px-3 py-1.5 backdrop-blur">
           <span className="font-mono text-sm text-zinc-100">{hoveredName}</span>
-        </div>
-      )}
-
-      {/* Selection info bar */}
-      {selectedDisplay && (
-        <div className="absolute top-16 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 backdrop-blur">
-          <div className="h-2 w-2 animate-pulse rounded-full bg-violet-300" />
-          <span className="font-mono text-sm text-zinc-100">
-            {selectedDisplay.display_name}
-          </span>
-          {selectedDisplay.source_corpora.length > 0 && (
-            <span className="text-[10px] text-zinc-400 font-mono">
-              · {selectedDisplay.source_corpora.length} corpora
-            </span>
-          )}
-          <button
-            onClick={() => sigma.setSelectedNode(null)}
-            className="ml-2 rounded px-2 py-0.5 text-xs text-zinc-300 transition-colors hover:bg-white/10 hover:text-zinc-50"
-          >
-            Clear
-          </button>
         </div>
       )}
 
@@ -843,6 +749,35 @@ export function GraphViewer({
           </span>
         </div>
       )}
+      </div>{/* end canvas column */}
+
+      {/* Right sidebar dashboard (Pt 5 — flex layout). Holds breadcrumb,
+          stats, cache health, color mode, selection info, layout controls.
+          Collapses to a 36px strip via the panel toggle. */}
+      <BrainViewDashboard
+        collapsed={dashboardCollapsed}
+        onToggle={() => setDashboardCollapsed((v) => !v)}
+        mode={mode}
+        drillStack={drillStack}
+        setDrillStack={setDrillStack}
+        corpusIds={corpusIds}
+        data={data as any}
+        cacheWarming={mode === "brain" ? brain.cacheWarming : []}
+        cacheStatuses={mode === "brain" ? brain.cacheStatuses : {}}
+        rebuildingIds={mode === "brain" ? brain.rebuildingIds : new Set()}
+        onRebuild={mode === "brain" ? brain.triggerRebuild : async () => {}}
+        colorMode={colorMode}
+        onColorModeToggle={() =>
+          setColorMode((m) => (m === "community" ? "corpus" : "community"))
+        }
+        onRerun={onRerun}
+        onClose={onClose}
+        selectedDisplay={selectedDisplay}
+        onClearSelection={() => sigma.setSelectedNode(null)}
+        isLayoutRunning={sigma.isLayoutRunning}
+        startLayout={sigma.startLayout}
+        stopLayout={sigma.stopLayout}
+      />
     </div>
   );
 }
@@ -851,64 +786,9 @@ export default GraphViewer;
 
 
 // ─── Cache-warming sub-components ─────────────────────────────────────────
-
-interface CacheChipProps {
-  cacheWarming: string[];
-  statuses: Record<string, api.CacheStatus>;
-  rebuildingIds: Set<string>;
-  onRebuild: (ids: string[]) => Promise<void>;
-}
-
-/** Stats-pill chip that distinguishes "missing" (never built) from
- *  "warming" (stale signature, needs rebuild) from "rebuilding" (task
- *  already in flight). Click → kick the rebuild for the eligible ones. */
-function CacheWarmingChip({
-  cacheWarming,
-  statuses,
-  rebuildingIds,
-  onRebuild,
-}: CacheChipProps) {
-  const counts = cacheWarming.reduce(
-    (acc, cid) => {
-      const s = statuses[cid];
-      if (rebuildingIds.has(cid)) acc.rebuilding++;
-      else if (!s) acc.unknown++;
-      else if (s.metrics_cache === "missing" || s.domain_cache === "missing")
-        acc.missing++;
-      else acc.warming++;
-      return acc;
-    },
-    { missing: 0, warming: 0, rebuilding: 0, unknown: 0 },
-  );
-  const buildable = cacheWarming.filter(
-    (cid) => !rebuildingIds.has(cid),
-  );
-  const label =
-    counts.rebuilding > 0
-      ? `${counts.rebuilding} rebuilding…`
-      : counts.missing > 0 && counts.warming === 0
-      ? `${counts.missing} cache${counts.missing > 1 ? "s" : ""} not built`
-      : counts.warming > 0 && counts.missing === 0
-      ? `${counts.warming} cache${counts.warming > 1 ? "s" : ""} stale`
-      : `${counts.missing + counts.warming} need rebuild`;
-  return (
-    <span className="ml-2 inline-flex items-center gap-1.5">
-      <span className="text-amber-400">· {label}</span>
-      {buildable.length > 0 && counts.rebuilding === 0 && (
-        <button
-          className="text-[10px] uppercase tracking-widest text-amber-300 hover:text-amber-100 border border-amber-700/40 bg-amber-500/5 rounded px-1.5 py-0.5"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRebuild(buildable);
-          }}
-          title="Run analytics pipeline now (Louvain + PageRank + concept communities). Takes anywhere from seconds to several minutes depending on corpus size."
-        >
-          build
-        </button>
-      )}
-    </span>
-  );
-}
+// Pt 5: CacheWarmingChip + CacheChipProps removed. BrainViewDashboard
+// renders per-corpus cache health inline as a list with individual
+// build buttons, which is more informative than the aggregate chip.
 
 interface EmptyStateProps {
   mode: GraphViewerMode;

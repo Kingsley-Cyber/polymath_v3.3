@@ -1,0 +1,509 @@
+================================================================================
+PRD STATUS — LIVE IMPLEMENTATION TRACKER
+================================================================================
+Last touched: 2026-05-11 (Pt 5, in flight — commit pending).
+Branch: main (local; never pushed to origin).
+Legend: ✅ FULLY · 🟡 PARTIAL · ❌ REMOVED · 🔁 REPLACED · ➕ ADDED ·
+        ⏸ DEFERRED · ⚠️ SKIPPED
+
+Sections in this file:
+
+  1. Python wrapper for drill-down (get_book_drilldown)
+       ✅ Pt 1 — services/graph/queries.py::get_book_drilldown.
+       ✅ Wired into router as POST /api/graph/book-drilldown.
+       ✅ Pt 2 consumed by frontend useBrainGraph.drill branch.
+
+  2. Core Indexes (run these first)
+       ✅ Pt 1 — extended backend/services/graph/schema.py with 7 new indexes
+       (anchor + composite + RELATES_TO.corpus_ids + MENTIONS.corpus_id/doc_id).
+       ✅ Existing constraints (Document.doc_id UNIQUE, Chunk.chunk_id UNIQUE,
+          Entity.entity_id UNIQUE, Fact.fact_id UNIQUE) preserved.
+       ✅ Applied at startup via initialize_schema(). Verified live in Neo4j.
+
+  3. Composite Indexes (High-Impact Queries)
+       ✅ Pt 1 — (corpus_id, is_cluster_anchor) + (corpus_id, filename) on Document.
+       ⏸ idx_entity_name_type composite — not added; would require dedup first.
+       ⚠️ idx_chunk_doc_mention with relationship-on-path syntax — INVALID Cypher
+          per PRD writer error. Existing relationship-property indexes on
+          MENTIONS(corpus_id), MENTIONS(doc_id) cover the same access pattern.
+
+  4. Vector Index (vec_chunk_embedding)
+       ⚠️ Skipped — Polymath embeddings live in Qdrant, not on Neo4j Chunk
+          nodes. Chunk has no `embedding` property in our writer. Would be
+          a no-op against the current schema.
+
+  5. Full Recommended Index Script
+       ✅ Equivalent applied via services/graph/schema.py (Python-driven,
+          not a standalone .cypher file). Same effect.
+
+  6. Maintenance Commands
+       ⏸ Not codified as ops scripts; available via cypher-shell on demand.
+
+  7. Combined Indexes + Constraints Master Script
+       🟡 Indexes ✅ shipped.
+       ⚠️ Skipped constraints with data-risk per cog/preferences.md:
+          ⚠️ constraint_doc_file_id UNIQUE — file_id can be null; rejected.
+          ⚠️ constraint_doc_corpus composite UNIQUE — redundant (doc_id already
+             unique globally).
+          ⚠️ constraint_entity_canonical UNIQUE — would fail on legacy
+             duplicate names (e.g. multiple "John Smith" Person entities).
+          ⚠️ constraint_entity_name_type composite UNIQUE — same risk.
+          All four deferred pending an entity-dedup pass.
+
+  8. Backfill Documents (cypher)
+       ✅ Pt 1 — Python equivalent: scripts/backfill_doc_anchors.py reads
+          MongoDB documents and calls _upsert_document. 16 docs anchored on
+          live data (Pt 2 run).
+       ➕ Pt 2 moved script to backend/scripts/ so it ships in the container.
+
+  9. Backfill Entities (normalized_name + entity_id)
+       ✅ No-op — verified post-Pt 2: 0 entities had NULL normalized_name or
+          NULL entity_id. The merged PR 4 (commit 11caa30) ingestion already
+          wrote these fields on every entity upsert. Cypher would write 0 rows.
+
+ 10. Backfill RELATES_TO.relation_family (CASE WHEN)
+       ✅ No-op — verified post-Pt 2: 0 edges had NULL relation_family. The
+          writer sets relation_family on every MERGE via
+          relation_family_for_predicate(). Cypher would write 0 rows.
+
+ 11. Updated _upsert_entity_and_mention with strong uniqueness
+       ✅ Pt 1 — MENTIONS edge in batched UNWIND now sets m.corpus_id +
+          m.doc_id (via c.doc_id lookup).
+       ✅ Pt 2 — also sets m.evidence_phrase (was missing in Pt 1).
+       ✅ Entity MERGE by entity_id already canonical pre-PR.
+       ✅ canonical_name = normalized_name (backward compat) preserved.
+
+Pt 5 (just landed — pending commit):
+  • No content from THIS file changed in Pt 5; status markers above
+    reflect the live state (Pt 1-4 results).
+  • Cross-reference: file 1 (Brain View Cypher) now extended with
+    dominant_canonical_family + dominant_relation_family per Pt 5.
+  • File 2 (sigma-constants frontend) extended with FAMILY_TO_COLOR
+    map per Pt 5.
+  • This file's three backfill scripts remain valid + no-op on the
+    current DB (entities and relations are already conformant).
+================================================================================
+
+Here’s the complete, production-ready Python wrapper for the drill-down query:
+backend/services/graph/queries.py (or neo4j_writer.py / graph_query.py)
+Pythonfrom datetime import datetime
+from neo4j import AsyncDriver
+import logging
+from typing import List, Dict, Any
+
+logger = logging.getLogger(__name__)
+
+
+async def get_book_drilldown(
+    driver: AsyncDriver,
+    doc_id: str,
+    other_corpus_ids: List[str],
+    limit: int = 350,
+    max_hops: int = 2,
+) -> Dict[str, Any]:
+    """
+    Load a single book's local neighborhood + cross-book bridges to other selected corpora.
+    Used when user double-clicks a Book node in Brain View.
+    """
+    query = """
+    // Drill-down: Single Book + Local Entities + Cross-Book Bridges
+    MATCH (d:Document {doc_id: $doc_id})
+    WHERE d.is_cluster_anchor = true
+
+    // Local neighborhood
+    OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
+    OPTIONAL MATCH (c)-[:MENTIONS]->(e:Entity)
+    OPTIONAL MATCH path = (e)-[r:RELATES_TO*1..$max_hops]->(e2:Entity)
+    WHERE e2 <> e
+
+    // Cross-book bridges
+    OPTIONAL MATCH (e)-[rb:RELATES_TO]->(bridge:Entity)<-[:MENTIONS]-(:Chunk)<-[:HAS_CHUNK]-(d2:Document)
+    WHERE d2.corpus_id IN $other_corpus_ids 
+      AND d2.doc_id <> $doc_id
+      AND d2.is_cluster_anchor = true
+
+    WITH 
+        d,
+        collect(DISTINCT c) as chunks,
+        collect(DISTINCT e) as local_entities,
+        collect(DISTINCT r) as local_relations,
+        collect(DISTINCT {
+            bridge_entity: bridge,
+            target_book_doc_id: d2.doc_id,
+            target_book_filename: COALESCE(d2.filename, d2.doc_id),
+            strength: count(rb)
+        }) as raw_bridges
+
+    WITH d, chunks, local_entities, local_relations,
+         apoc.coll.toSet(raw_bridges) as cross_book_bridges
+
+    RETURN 
+        d {
+            .*,
+            label: COALESCE(d.filename, d.doc_id),
+            node_kind: "Book"
+        } as anchor,
+        local_entities,
+        local_relations,
+        cross_book_bridges
+    LIMIT $limit;
+    """
+
+    try:
+        async with driver.session() as session:
+            result = await session.run(
+                query,
+                doc_id=doc_id,
+                other_corpus_ids=other_corpus_ids,
+                limit=limit,
+                max_hops=max_hops
+            )
+            
+            record = await result.single()
+
+            if not record:
+                return {
+                    "anchor": None,
+                    "local_entities": [],
+                    "local_relations": [],
+                    "cross_book_bridges": [],
+                    "meta": {"found": False}
+                }
+
+            anchor = record["anchor"]
+            local_entities = record["local_entities"] or []
+            local_relations = record["local_relations"] or []
+            cross_book_bridges = record["cross_book_bridges"] or []
+
+            return {
+                "anchor": anchor,
+                "local_entities": local_entities,
+                "local_relations": local_relations,
+                "cross_book_bridges": cross_book_bridges,
+                "meta": {
+                    "found": True,
+                    "local_entity_count": len(local_entities),
+                    "bridge_count": len(cross_book_bridges),
+                    "limit": limit
+                }
+            }
+
+    except Exception as e:
+        logger.error(f"Drilldown query failed for doc_id={doc_id}: {e}", exc_info=True)
+        return {
+            "anchor": None,
+            "local_entities": [],
+            "local_relations": [],
+            "cross_book_bridges": [],
+            "meta": {
+                "found": False,
+                "error": str(e),
+                "partial": True
+            },
+            "_error": True
+        }
+
+Usage Example
+Python# In your router or service layer
+result = await get_book_drilldown(
+    driver=neo4j_driver,
+    doc_id="doc_abc123",
+    other_corpus_ids=["corpus_1", "corpus_2", "corpus_3"],
+    limit=300,
+    max_hops=2
+)
+
+# Then pass to frontend
+return GraphDrilldownResponse(**result)
+
+1. Core Indexes (Run These First)
+[STATUS: indexed inline below — Pt 1 added what's marked ✅ NEW.
+ Existing pre-PR4 indexes marked ✅ EXISTING. The one ⚠️ skip is documented.]
+cypher-- === DOCUMENT (Book Anchors) ===
+CREATE INDEX idx_doc_doc_id IF NOT EXISTS FOR (d:Document) ON (d.doc_id);                           -- ✅ Covered by UNIQUE constraint on doc_id
+CREATE INDEX idx_doc_corpus IF NOT EXISTS FOR (d:Document) ON (d.corpus_id);                        -- ✅ EXISTING (pre-PR4)
+CREATE INDEX idx_doc_anchor IF NOT EXISTS FOR (d:Document) ON (d.is_cluster_anchor);                -- ✅ NEW Pt 1
+CREATE INDEX idx_doc_corpus_anchor IF NOT EXISTS FOR (d:Document) ON (d.corpus_id, d.is_cluster_anchor); -- ✅ NEW Pt 1 (composite)
+
+-- === CHUNK ===
+CREATE INDEX idx_chunk_chunk_id IF NOT EXISTS FOR (c:Chunk) ON (c.chunk_id);                        -- ✅ UNIQUE constraint
+CREATE INDEX idx_chunk_doc IF NOT EXISTS FOR (c:Chunk) ON (c.doc_id);                               -- ✅ EXISTING
+CREATE INDEX idx_chunk_corpus IF NOT EXISTS FOR (c:Chunk) ON (c.corpus_id);                         -- ✅ EXISTING
+
+-- === ENTITY ===
+CREATE INDEX idx_entity_id IF NOT EXISTS FOR (e:Entity) ON (e.entity_id);                           -- ✅ UNIQUE constraint
+CREATE INDEX idx_entity_canonical IF NOT EXISTS FOR (e:Entity) ON (e.normalized_name);              -- ✅ EXISTING
+CREATE INDEX idx_entity_type IF NOT EXISTS FOR (e:Entity) ON (e.entity_type);                       -- ✅ EXISTING
+CREATE INDEX idx_entity_corpus IF NOT EXISTS FOR (e:Entity) ON (e.corpus_id);                       -- ⚠️ SKIPPED — Entity is GLOBAL,
+                                                                                                      --              corpus_id is on MENTIONS
+                                                                                                      --              edge instead (✅ Pt 1 added)
+-- === RELATIONSHIP PROPERTIES (very important for multi-corpus) ===
+CREATE INDEX idx_rel_predicate IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.predicate);             -- ✅ EXISTING
+CREATE INDEX idx_rel_family IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.relation_family);          -- ✅ EXISTING
+CREATE INDEX idx_rel_corpus IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.corpus_ids);               -- ✅ NEW Pt 1
+2. Composite Indexes (High-Impact Queries)
+cypher-- Brain View & Multi-Corpus filtering
+CREATE INDEX idx_doc_corpus_filename IF NOT EXISTS FOR (d:Document) ON (d.corpus_id, d.filename);   -- ✅ NEW Pt 1
+
+-- Query / Seed extraction performance
+CREATE INDEX idx_entity_name_type IF NOT EXISTS FOR (e:Entity) ON (e.normalized_name, e.entity_type); -- ⏸ DEFERRED — would need
+                                                                                                       --   dedup first. UNIQUE
+                                                                                                       --   composite same fields
+                                                                                                       --   also deferred (file3 §7).
+
+-- Drill-down performance
+CREATE INDEX idx_chunk_doc_mention IF NOT EXISTS FOR (c:Chunk)-[:MENTIONS]->(e:Entity) ON (c.doc_id); -- ⚠️ INVALID Cypher (path-shape
+                                                                                                       --   indexes don't exist).
+                                                                                                       --   Equivalent shipped: ✅ Pt 1
+                                                                                                       --   MENTIONS(corpus_id) + (doc_id)
+                                                                                                       --   relationship indexes.
+3. Vector Index (if you're using embeddings on Chunks)
+[STATUS: ⚠️ SKIPPED — Polymath stores chunk embeddings in Qdrant, not on
+ Neo4j Chunk nodes. Chunk has no `embedding` property in our writer. Adding
+ this index would target a non-existent property (no-op). Revisit if/when
+ we mirror embeddings into Neo4j for in-graph similarity search.]
+cypherCREATE VECTOR INDEX vec_chunk_embedding IF NOT EXISTS
+FOR (c:Chunk) ON c.embedding
+OPTIONS {
+    indexConfig: {
+        `vector.dimensions`: 1024,
+        `vector.similarity_function`: 'cosine'
+    }
+};
+4. Full Recommended Index Script (Copy-Paste)
+cypher// =============================================
+// Polymath Neo4j Indexing Strategy (v1)
+// For 1000-2000+ documents + multi-corpus Brain View
+// =============================================
+
+CREATE INDEX idx_doc_doc_id IF NOT EXISTS FOR (d:Document) ON (d.doc_id);
+CREATE INDEX idx_doc_corpus IF NOT EXISTS FOR (d:Document) ON (d.corpus_id);
+CREATE INDEX idx_doc_anchor IF NOT EXISTS FOR (d:Document) ON (d.is_cluster_anchor);
+CREATE INDEX idx_doc_corpus_anchor IF NOT EXISTS FOR (d:Document) ON (d.corpus_id, d.is_cluster_anchor);
+CREATE INDEX idx_doc_corpus_filename IF NOT EXISTS FOR (d:Document) ON (d.corpus_id, d.filename);
+
+CREATE INDEX idx_chunk_chunk_id IF NOT EXISTS FOR (c:Chunk) ON (c.chunk_id);
+CREATE INDEX idx_chunk_doc IF NOT EXISTS FOR (c:Chunk) ON (c.doc_id);
+CREATE INDEX idx_chunk_corpus IF NOT EXISTS FOR (c:Chunk) ON (c.corpus_id);
+
+CREATE INDEX idx_entity_id IF NOT EXISTS FOR (e:Entity) ON (e.entity_id);
+CREATE INDEX idx_entity_canonical IF NOT EXISTS FOR (e:Entity) ON (e.normalized_name);
+CREATE INDEX idx_entity_type IF NOT EXISTS FOR (e:Entity) ON (e.entity_type);
+
+CREATE INDEX idx_rel_predicate IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.predicate);
+CREATE INDEX idx_rel_family IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.relation_family);
+CREATE INDEX idx_rel_corpus IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.corpus_ids);
+
+// Vector index for chunks (optional but recommended)
+CREATE VECTOR INDEX vec_chunk_embedding IF NOT EXISTS
+FOR (c:Chunk) ON c.embedding
+OPTIONS { indexConfig: { `vector.dimensions`: 1024, `vector.similarity_function`: 'cosine' }};
+
+// Show all indexes
+SHOW INDEXES;
+5. Maintenance Commands
+[STATUS: ⏸ Not codified as ops scripts. Available via cypher-shell on demand.
+ Maintenance happens via services/graph/schema.py::initialize_schema() at every
+ backend startup (idempotent), not a separate ops doc.]
+cypher-- Check index usage
+CALL db.indexes();
+
+-- Drop unused indexes later if needed
+DROP INDEX idx_name IF EXISTS;
+
+Recommended Order of Operations
+[STATUS LIVE-CHECKLIST]
+✅ Run the full indexing script above — initialize_schema() at startup (Pt 1).
+✅ Update your _upsert_document (rich version) — Pt 1 (commit 458968f).
+✅ Re-ingest or backfill — scripts/backfill_doc_anchors.py executed in Pt 2:
+   16 legacy docs anchored across 3 corpora.
+🟡 Test the Brain View query — Pt 2 smoke verified on 8 anchors (corpus
+   6c3d677d → 5 anchors + 30 bridges) and 3 anchors (corpus aa7cb51a →
+   5 bridges). Scale-test to 100+ books pending Mac Studio export.
+
+Run the full indexing script above.
+Update your _upsert_document (rich version we did earlier).
+Re-ingest a few documents or run a background job to backfill missing properties (is_cluster_anchor, kind, etc.).
+Test the Brain View query — it should become significantly faster.
+
+1. Combined Indexes + Constraints Master Script
+[STATUS: 🟡 Indexes shipped, constraints PARTIAL. Inline status per constraint below.]
+Run this once (safe to run multiple times):
+cypher// =============================================
+// Polymath Neo4j — Indexes + Constraints (v1)
+// For 1000–2000+ books, Brain View, Multi-Corpus
+// =============================================
+
+/// --- CONSTRAINTS ---
+
+CREATE CONSTRAINT constraint_doc_doc_id IF NOT EXISTS
+    FOR (d:Document) REQUIRE d.doc_id IS UNIQUE;
+-- ✅ EXISTING (pre-PR4 schema.py).
+
+CREATE CONSTRAINT constraint_doc_file_id IF NOT EXISTS
+    FOR (d:Document) REQUIRE d.file_id IS UNIQUE;
+-- ⚠️ SKIPPED — file_id can be null (inline content ingests have no file_id),
+--    UNIQUE constraint would reject MERGE. Revisit if file_id becomes mandatory.
+
+CREATE CONSTRAINT constraint_chunk_chunk_id IF NOT EXISTS
+    FOR (c:Chunk) REQUIRE c.chunk_id IS UNIQUE;
+-- ✅ EXISTING.
+
+CREATE CONSTRAINT constraint_entity_id IF NOT EXISTS
+    FOR (e:Entity) REQUIRE e.entity_id IS UNIQUE;
+-- ✅ EXISTING.
+
+CREATE CONSTRAINT constraint_entity_canonical IF NOT EXISTS
+    FOR (e:Entity) REQUIRE e.normalized_name IS UNIQUE;
+-- ⚠️ SKIPPED — would fail on legacy duplicate names (e.g. multiple
+--    "John Smith" Person entities across books, or "Transformer" as both
+--    Concept and Product). Needs an entity-dedup pass first; deferred.
+
+CREATE CONSTRAINT constraint_doc_corpus IF NOT EXISTS
+    FOR (d:Document) REQUIRE (d.doc_id, d.corpus_id) IS UNIQUE;
+-- ⚠️ SKIPPED — redundant (doc_id is already globally UNIQUE per the existing
+--    constraint above). Composite adds no protection.
+
+CREATE CONSTRAINT constraint_entity_name_type IF NOT EXISTS
+    FOR (e:Entity) REQUIRE (e.normalized_name, e.entity_type) IS UNIQUE;
+-- ⚠️ SKIPPED — same risk as constraint_entity_canonical. Deferred pending dedup.
+
+
+/// --- INDEXES ---
+
+CREATE INDEX idx_doc_doc_id IF NOT EXISTS FOR (d:Document) ON (d.doc_id);
+CREATE INDEX idx_doc_corpus IF NOT EXISTS FOR (d:Document) ON (d.corpus_id);
+CREATE INDEX idx_doc_anchor IF NOT EXISTS FOR (d:Document) ON (d.is_cluster_anchor);
+CREATE INDEX idx_doc_corpus_anchor IF NOT EXISTS FOR (d:Document) ON (d.corpus_id, d.is_cluster_anchor);
+CREATE INDEX idx_doc_corpus_filename IF NOT EXISTS FOR (d:Document) ON (d.corpus_id, d.filename);
+
+CREATE INDEX idx_chunk_chunk_id IF NOT EXISTS FOR (c:Chunk) ON (c.chunk_id);
+CREATE INDEX idx_chunk_doc IF NOT EXISTS FOR (c:Chunk) ON (c.doc_id);
+CREATE INDEX idx_chunk_corpus IF NOT EXISTS FOR (c:Chunk) ON (c.corpus_id);
+
+CREATE INDEX idx_entity_id IF NOT EXISTS FOR (e:Entity) ON (e.entity_id);
+CREATE INDEX idx_entity_canonical IF NOT EXISTS FOR (e:Entity) ON (e.normalized_name);
+CREATE INDEX idx_entity_type IF NOT EXISTS FOR (e:Entity) ON (e.entity_type);
+
+CREATE INDEX idx_rel_predicate IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.predicate);
+CREATE INDEX idx_rel_family IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.relation_family);
+CREATE INDEX idx_rel_corpus IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.corpus_ids);
+
+-- Vector index (if using embeddings on chunks)
+CREATE VECTOR INDEX vec_chunk_embedding IF NOT EXISTS
+FOR (c:Chunk) ON c.embedding
+OPTIONS { indexConfig: { `vector.dimensions`: 1024, `vector.similarity_function`: 'cosine' }};
+
+SHOW CONSTRAINTS;
+SHOW INDEXES;
+
+2. Backfill Script (for Existing Nodes)
+[STATUS — three backfills below.
+ (a) Document anchors → ✅ Pt 1 + Pt 2 — executed via scripts/backfill_doc_anchors.py
+     (Python equivalent that reads MongoDB and calls _upsert_document). 16 docs
+     anchored across 3 corpora. Pt 2 also moved the script under backend/scripts/
+     so it ships in the container image.
+ (b) Entities normalized_name/entity_id → ✅ NO-OP — verified post-Pt 2 against
+     live Neo4j: 0 entities had NULL normalized_name OR NULL entity_id. The
+     merged PR 4 ingestion already writes both fields at upsert time. Cypher
+     would write 0 rows on this DB.
+     ⚠️ NOTE: if you DO run this Cypher, use 'entity:' + slugify(name) format
+     not 'ent_' + name — backend's entity_id_from_name uses the colon prefix.
+     Running the PRD's exact Cypher would split the graph if any null IDs
+     existed (which they don't on this DB, so it's moot).
+ (c) RELATES_TO.relation_family → ✅ NO-OP — verified: 0 edges had NULL
+     relation_family. The writer sets relation_family on every MERGE via
+     relation_family_for_predicate(). Cypher would write 0 rows on this DB.]
+Run this to bring old data up to the new rich schema:
+cypher// Backfill Documents
+MATCH (d:Document)
+WHERE d.is_cluster_anchor IS NULL
+SET
+    d.is_cluster_anchor = true,
+    d.kind = "book",
+    d.node_type = "Document",
+    d.updated_at = datetime();
+
+// Backfill Entities - normalized_name & entity_id
+MATCH (e:Entity)
+WHERE e.normalized_name IS NULL OR e.entity_id IS NULL
+SET
+    e.normalized_name = coalesce(e.normalized_name, toLower(trim(e.name))),
+    e.entity_id = coalesce(e.entity_id, "ent_" + toLower(trim(e.name)));   -- ⚠️ format mismatch
+                                                                            -- backend uses "entity:" prefix, not "ent_"
+                                                                            -- (see _upsert_entity_and_mention)
+
+// Optional: Backfill relation_family if missing
+MATCH ()-[r:RELATES_TO]-()
+WHERE r.relation_family IS NULL
+SET r.relation_family =
+    CASE
+        WHEN r.predicate IN ["part_of", "member_of"] THEN "Structural"
+        WHEN r.predicate IN ["uses", "implements", "depends_on", "produces", "stores", "detects", "classifies", "runs_on", "trained_on", "supports"] THEN "Operational"
+        WHEN r.predicate IN ["references", "derived_from", "represents", "maps_to"] THEN "Referential"
+        WHEN r.predicate IN ["causes", "preceded_by", "overlaps"] THEN "Causal"
+        WHEN r.predicate IN ["contradicts", "excepts", "overrides"] THEN "Conflict"
+        ELSE "WeakAssociation"
+    END;
+-- ✅ This CASE expression matches RELATION_FAMILY_MAP in neo4j_writer.py
+-- (verified — Pt 1 audit). Safe to run; no-op on the current DB.
+
+3. Updated MERGE Examples for _upsert_entity_and_mention
+[STATUS: ✅ Pt 1 + Pt 2.
+ ✅ Pt 1: Entity MERGE by entity_id (already canonical in pre-PR neo4j_writer).
+    canonical_name = normalized_name backward-compat preserved.
+ ✅ Pt 1: MENTIONS edge now carries m.corpus_id + m.doc_id via c.doc_id lookup
+    in the batched UNWIND query (line ~1430 of neo4j_writer.py).
+ ✅ Pt 2: m.evidence_phrase added to the MENTIONS UNWIND (was missing in Pt 1).
+ ➕ Beyond PRD: m.surface_form, m.extracted_type, m.extracted_types (array),
+    m.confidence (max-coalesce), m.extractor='ghost_b', m.ontology_version
+    are also written.
+ ⚠️ Note: the PRD example below uses a SINGLE-entity single-call MERGE. Our
+    actual implementation uses UNWIND-batched UNION over `mention_rows` for
+    per-document throughput (1 query writes N mentions). Semantics match.]
+Python# backend/services/graph/neo4j_writer.py
+
+async def _upsert_entity_and_mention(
+    driver: AsyncDriver,
+    entity_data: dict,
+    chunk_id: str,
+    corpus_id: str,
+    doc_id: str
+):
+    query = """
+    // Upsert Entity with strong uniqueness
+    MERGE (e:Entity {entity_id: $entity_id})
+    ON CREATE SET 
+        e.normalized_name = $normalized_name,
+        e.created_at = datetime()
+    SET 
+        e.display_name = $display_name,
+        e.entity_type = $entity_type,
+        e.canonical_name = $normalized_name,   // backward compat
+        e.updated_at = datetime()
+
+    // Link to Chunk
+    WITH e
+    MATCH (c:Chunk {chunk_id: $chunk_id})
+    MERGE (c)-[m:MENTIONS]->(e)
+    SET 
+        m.confidence = $confidence,
+        m.evidence_phrase = $evidence_phrase,
+        m.corpus_id = $corpus_id,
+        m.doc_id = $doc_id
+    """
+
+    params = {
+        "entity_id": entity_data.get("entity_id") or f"ent_{entity_data['normalized_name']}",
+        "normalized_name": entity_data["normalized_name"],
+        "display_name": entity_data.get("surface_form") or entity_data["normalized_name"],
+        "entity_type": entity_data["entity_type"],
+        "confidence": entity_data.get("confidence", 0.8),
+        "evidence_phrase": entity_data.get("evidence_phrase"),
+        "chunk_id": chunk_id,
+        "corpus_id": corpus_id,
+        "doc_id": doc_id,
+    }
+
+    async with driver.session() as session:
+        await session.run(query, params)

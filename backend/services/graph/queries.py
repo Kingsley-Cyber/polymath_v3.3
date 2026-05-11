@@ -48,21 +48,45 @@ MATCH (d:Document)
 WHERE d.corpus_id IN $corpus_ids
   AND d.is_cluster_anchor = true
 
+// 1. Total chunk count for this anchor.
 OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
 WITH d, count(DISTINCT c) AS actual_chunk_count
 
+// 2. Dominant canonical_family per anchor (Pt 5 — drives Book node color
+//    in the frontend galaxy view). Counts mentions of each family across
+//    every chunk in the book, picks the most-mentioned family.
+OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c_fam:Chunk)-[:MENTIONS]->(e_fam:Entity)
+WHERE e_fam.canonical_family IS NOT NULL
+WITH d, actual_chunk_count, e_fam.canonical_family AS fam_name, count(*) AS fam_n
+  ORDER BY fam_n DESC
+WITH d, actual_chunk_count, collect(fam_name)[0] AS dominant_family
+
+// 3. Dominant primary_entity_type per anchor (Pt 5 — fallback when no
+//    canonical_family is set on most entities, gives an entity-type tint).
+OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c_typ:Chunk)-[:MENTIONS]->(e_typ:Entity)
+WHERE e_typ.primary_entity_type IS NOT NULL
+WITH d, actual_chunk_count, dominant_family,
+     e_typ.primary_entity_type AS type_name, count(*) AS type_n
+  ORDER BY type_n DESC
+WITH d, actual_chunk_count, dominant_family,
+     collect(type_name)[0] AS dominant_entity_type
+
+// 4. Bridges to other selected anchors via shared entities + RELATES_TO.
+//    Pt 5 — also collects the relation_family list per bridge so we can
+//    pick a dominant family for edge coloring on the frontend.
 OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c1:Chunk)-[:MENTIONS]->(e:Entity)
 OPTIONAL MATCH (e)-[r:RELATES_TO]->(e2:Entity)<-[:MENTIONS]-(c2:Chunk)<-[:HAS_CHUNK]-(d2:Document)
 WHERE d2.corpus_id IN $corpus_ids
   AND d2.is_cluster_anchor = true
   AND d2.doc_id <> d.doc_id
 
-WITH d, actual_chunk_count, d2,
+WITH d, actual_chunk_count, dominant_family, dominant_entity_type, d2,
      count(DISTINCT e) AS shared_entities,
-     count(r) AS edge_count
+     count(r) AS edge_count,
+     collect(r.relation_family) AS bridge_families
 WHERE d2 IS NULL OR shared_entities > 0
 
-WITH d, actual_chunk_count,
+WITH d, actual_chunk_count, dominant_family, dominant_entity_type,
      collect(
         CASE WHEN d2 IS NULL THEN NULL
              ELSE {
@@ -70,12 +94,15 @@ WITH d, actual_chunk_count,
                target_filename: coalesce(d2.filename, d2.doc_id),
                target_corpus_id: d2.corpus_id,
                shared_entities: shared_entities,
-               strength: edge_count
+               strength: edge_count,
+               // Pt 5: first non-null relation_family seen between this
+               // pair of books. Drives bridge edge color (EDGE_COLORS_BY_FAMILY).
+               dominant_relation_family: head([f IN bridge_families WHERE f IS NOT NULL])
              }
         END
      ) AS raw_bridges
 
-WITH d, actual_chunk_count,
+WITH d, actual_chunk_count, dominant_family, dominant_entity_type,
      [b IN raw_bridges WHERE b IS NOT NULL] AS bridges
 
 RETURN
@@ -87,6 +114,8 @@ RETURN
     d.chunk_count     AS chunk_count,
     d.parent_count    AS parent_count,
     actual_chunk_count,
+    dominant_family,
+    dominant_entity_type,
     d.ghost_b_success_rate AS ghost_b_success_rate,
     d.ghost_b_extracted    AS ghost_b_extracted,
     d.ghost_b_total        AS ghost_b_total,
@@ -167,6 +196,9 @@ async def get_brain_view(
             "chunk_count": record.get("chunk_count") or 0,
             "parent_count": record.get("parent_count") or 0,
             "actual_chunk_count": record.get("actual_chunk_count") or 0,
+            # Pt 5: extraction-schema facets drive deterministic frontend colors.
+            "dominant_family": record.get("dominant_family"),
+            "dominant_entity_type": record.get("dominant_entity_type"),
             "ghost_b_success_rate": record.get("ghost_b_success_rate"),
             "ghost_b_extracted": record.get("ghost_b_extracted"),
             "ghost_b_total": record.get("ghost_b_total"),
@@ -188,6 +220,8 @@ async def get_brain_view(
                     "target_corpus_id": b.get("target_corpus_id"),
                     "strength": int(b.get("strength") or 0),
                     "shared_entities": int(b.get("shared_entities") or 0),
+                    # Pt 5: edge color on the frontend keys off this family.
+                    "dominant_relation_family": b.get("dominant_relation_family"),
                 }
             )
 

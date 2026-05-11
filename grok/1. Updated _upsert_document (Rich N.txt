@@ -1,0 +1,467 @@
+================================================================================
+PRD STATUS — LIVE IMPLEMENTATION TRACKER
+================================================================================
+Last touched: 2026-05-11 (Pt 5, in flight — commit pending).
+Branch: main (local; never pushed to origin per user direction).
+Legend: ✅ FULLY IMPLEMENTED · 🟡 PARTIAL · ❌ REMOVED · 🔁 REPLACED ·
+        ➕ ADDED BEYOND PRD · ⏸ DEFERRED · ⚠️ SKIPPED (with reason)
+
+Sections in this file:
+  1. _upsert_document (Rich Node)        ✅ Pt 1 — commit 458968f
+  2. Recommended Indexes                   ✅ Pt 1 — 7 added in services/graph/schema.py
+  3. Brain View Cypher                     ✅ Pt 1 — services/graph/queries.py::get_brain_view
+  4. Drill-down Cypher                     ✅ Pt 1 — get_book_drilldown
+  5. sigma-constants type defs             ✅ Pt 1
+  6. nodeReducer / edgeReducer             🟡 Pt 3 — exported but NOT consumed by useSigma
+                                                     (useSigma keeps inline reducers for
+                                                     selection logic; adapter pre-bakes
+                                                     size/color so reducers run on top).
+                                                     ➕ Pt 3 added gold-halo for Book
+                                                     (sigma's default program ignores
+                                                     border/halo attrs — visual relies
+                                                     on color + size only).
+  7. BRAIN_VIEW_CONFIG                     🟡 Pt 3 — exported; useSigma uses its own
+                                                     inline sigma options. BG color
+                                                     #06060a applied via GraphViewer
+                                                     container CSS instead.
+  8. ➕ Pt 3 added: cleanBookLabel util    ✅ frontend/src/lib/label-utils.ts
+  9. ➕ Pt 4 added: aggressive label trim  ✅ smartTrim + unsnake + firstAuthor in label-utils
+
+Pt 5 (just landed — pending commit):
+  ✅ dominant_family per doc + dominant_relation_family per bridge —
+     extended _BRAIN_VIEW_CYPHER (queries.py); two new OPTIONAL MATCH legs.
+     ➕ Bonus: dominant_entity_type as fallback when canonical_family is sparse.
+  ✅ BrainViewDashboard.tsx (new) — right-side collapsible flex panel
+     holding breadcrumb, stats, cache health, color toggle, selection
+     info, layout controls. GraphViewer wrapped in flex row.
+  ✅ Books re-colored by dominant_canonical_family via FAMILY_TO_COLOR
+     map seeded from canonical_families.json. Replaces Pt 4 universal-amber.
+  ✅ Bridge edges colored by dominant_relation_family via EDGE_COLORS_BY_FAMILY
+     (Operational=blue, Structural=emerald, Conflict=red, etc.). Replaces
+     the predicate-keyed legacy.
+  ✅ Thinner edges: max 1.8px ("thin spaghetti" per user spec).
+     Formula 0.35 + 0.05*strength; cap 1.8.
+  ✅ Filter bridges with strength<2 + per-book top-3 strongest cap —
+     hub-books no longer web out the canvas.
+  ✅ FA2 to PRD spec exactly: gravity:1.2, scalingRatio:12, slowDown:4.
+     Restores galaxy bulge + spiral-arm shape (was uniform scatter in Pt 4).
+  ✅ Verified live: brain-view endpoint returns dominant_family=
+     "identity_extraction"/"creative_coding"/"generative_ai" etc. and
+     dominant_relation_family=Operational/Structural/WeakAssociation
+     on real bridges.
+================================================================================
+
+1. Updated _upsert_document (Rich Node)
+[STATUS: ✅ Pt 1 (commit 458968f). Shipped at backend/services/graph/neo4j_writer.py.
+ ➕ Beyond PRD: ghost_b_metrics dict is FLATTENED into three scalar fields
+ (ghost_b_success_rate, ghost_b_extracted, ghost_b_total) because Neo4j cannot
+ store nested dicts. file_metadata field deferred — no consumer needs it yet.
+ ➕ Added update_document_anchor_metrics helper for late-bound metric writes.]
+Python# backend/services/graph/neo4j_writer.py
+from datetime import datetime
+
+async def _upsert_document(
+    driver: AsyncDriver,
+    doc_id: str,
+    corpus_id: str,
+    user_id: str | None,
+    file_id: str | None,
+    filename: str,
+    source_path: str | None = None,
+    source_tier: str | None = None,
+    chunk_count: int = 0,
+    parent_count: int = 0,
+    ghost_b_metrics: dict | None = None,
+    schema_lens_id: str | None = None,
+    file_metadata: dict | None = None,
+) -> None:
+    """
+    Create or update a rich :Document node that serves as a strong cluster anchor.
+    """
+    async with driver.session() as session:
+        await session.run(
+            """
+            MERGE (d:Document {doc_id: $doc_id})
+            SET 
+                d.corpus_id = $corpus_id,
+                d.user_id = $user_id,
+                d.file_id = $file_id,
+                d.filename = $filename,
+                d.source_path = $source_path,
+                d.source_tier = $source_tier,
+                d.chunk_count = $chunk_count,
+                d.parent_count = $parent_count,
+                d.ingested_at = $ingested_at,
+                d.updated_at = datetime(),
+                d.schema_lens_id = $schema_lens_id,
+                d.ghost_b_metrics = $ghost_b_metrics,
+                d.file_metadata = $file_metadata,
+                
+                -- Important for Brain View + frontend
+                d.is_cluster_anchor = true,
+                d.kind = "book",
+                
+                -- Optional: helps with future analytics
+                d.node_type = "Document"
+            """,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            file_id=file_id,
+            filename=filename,
+            source_path=source_path,
+            source_tier=source_tier,
+            chunk_count=chunk_count,
+            parent_count=parent_count,
+            ingested_at=datetime.utcnow(),
+            schema_lens_id=schema_lens_id,
+            ghost_b_metrics=ghost_b_metrics or {},
+            file_metadata=file_metadata or {},
+        )
+Recommended Indexes (run once):
+[STATUS: ✅ Pt 1 (commit 458968f). 7 indexes added to backend/services/graph/schema.py
+ (is_cluster_anchor, filename, two composites on Document, RELATES_TO.corpus_ids,
+ MENTIONS.corpus_id, MENTIONS.doc_id). Applied at every backend startup via
+ services/graph/schema.py::initialize_schema(). Verified live in Neo4j post-deploy.]
+cypherCREATE INDEX idx_doc_corpus IF NOT EXISTS FOR (d:Document) ON (d.corpus_id);
+CREATE INDEX idx_doc_anchor IF NOT EXISTS FOR (d:Document) ON (d.is_cluster_anchor);
+CREATE INDEX idx_doc_corpus_anchor IF NOT EXISTS FOR (d:Document) ON (d.corpus_id, d.is_cluster_anchor);
+CREATE INDEX idx_doc_filename IF NOT EXISTS FOR (d:Document) ON (d.filename);
+
+2. Main Brain-View Cypher Query (Books as Clusters + Bridges)
+[STATUS: ✅ Pt 1 (commit 458968f). Shipped as services/graph/queries.py::get_brain_view.
+ Pure Cypher, anchor-driven (WHERE d.is_cluster_anchor=true), uses the new
+ composite (corpus_id, is_cluster_anchor) index. Returns documents[] + flat bridges[].
+ ➕ Pt 1: also returns parent_count, ghost_b_* flat metrics, schema_lens_id,
+   source_tier, ingested_at, updated_at.
+ ➕ Pt 1: _iso_or_none coerces neo4j.time.DateTime → ISO string for JSON.
+ ✅ Pt 5: added dominant_canonical_family per doc + dominant_entity_type
+   fallback + dominant_relation_family per bridge. Drives family-
+   deterministic frontend colors via FAMILY_TO_COLOR and
+   EDGE_COLORS_BY_FAMILY. Verified live with curl smoke against
+   corpus aa7cb51a: 5 docs returned families, 6 bridges with relation
+   families (Operational/Structural/WeakAssociation).]
+This query is optimized for your use case: show selected books as anchors + bridge strength between them.
+cypher// Brain View: Book Anchors + Inter-Book Bridges
+MATCH (d:Document)
+WHERE d.corpus_id IN $corpus_ids 
+  AND d.is_cluster_anchor = true
+
+// Get basic stats for this document
+OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
+WITH d, count(c) as actual_chunk_count
+
+// Find bridges to other selected books via shared entities
+OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)-[:MENTIONS]->(e:Entity)
+OPTIONAL MATCH (e)-[r:RELATES_TO]->(e2:Entity)<-[:MENTIONS]-(c2:Chunk)<-[:HAS_CHUNK]-(d2:Document)
+WHERE d2.corpus_id IN $corpus_ids 
+  AND d2.is_cluster_anchor = true 
+  AND d2.doc_id <> d.doc_id
+
+WITH 
+    d,
+    actual_chunk_count,
+    count(DISTINCT d2) as bridge_count,
+    count(r) as total_bridge_relations,
+    collect(DISTINCT {
+        target_doc_id: d2.doc_id,
+        target_filename: d2.filename,
+        shared_entities: count(DISTINCT e),
+        strength: count(r)
+    }) as bridges_raw
+
+// Aggregate bridge strength per target document
+WITH d, actual_chunk_count, bridge_count, total_bridge_relations,
+     apoc.coll.toSet(bridges_raw) as bridges
+
+RETURN 
+    d {
+        .*,
+        label: d.filename,
+        node_kind: "Book",
+        actual_chunk_count: actual_chunk_count,
+        bridge_count: bridge_count,
+        total_bridge_relations: total_bridge_relations
+    } as document,
+    bridges
+ORDER BY bridge_count DESC, d.filename ASC
+LIMIT 2000;   // safety cap
+How to call it (example)
+Pythonparams = {
+    "corpus_ids": ["corpus_1", "corpus_2", "corpus_3"]
+}
+
+result = await session.run(query, params)
+
+Bonus: Drill-down Query (Double-click a Book)
+[STATUS: ✅ Pt 1 (commit 458968f). Shipped as services/graph/queries.py::get_book_drilldown
+ with full Python wrapper, error handling, and pagination. Wired into router as
+ POST /api/graph/book-drilldown. Frontend useBrainGraph.drill branch consumes it
+ to overlay local entities + cross-book bridges (Pt 2, commit 1226515).]
+When user clicks a book, load its local neighborhood + connections to other books:
+cypherMATCH (d:Document {doc_id: $doc_id, is_cluster_anchor: true})
+
+OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
+OPTIONAL MATCH (c)-[:MENTIONS]->(e:Entity)
+OPTIONAL MATCH (e)-[r:RELATES_TO]->(e2:Entity)
+WHERE e2 <> e
+
+RETURN d as anchor,
+       collect(DISTINCT c) as chunks,
+       collect(DISTINCT e) as local_entities,
+       collect(DISTINCT r) as local_relations,
+       // Cross-book bridges
+       collect(DISTINCT CASE WHEN exists((e2)<-[:MENTIONS]-(:Chunk)<-[:HAS_CHUNK]-(:Document)) 
+                            THEN e2 ELSE null END) as bridging_entities
+LIMIT 300;   // tune this
+
+Next Steps Recommendation:
+[STATUS LIVE-CHECKLIST]
+✅ Implement the rich _upsert_document first — Pt 1 (commit 458968f).
+   All callsites updated: worker.py:_write_neo4j_for_doc + graph_backfill.py.
+✅ Add the indexes — Pt 1 (7 new indexes in services/graph/schema.py).
+🟡 Test the Brain View query with 50–100 books, then scale up — Pt 2 smoke
+   tested on real corpora (3 anchors + 5 bridges from corpus aa7cb51a;
+   5 anchors + 30 bridges from corpus 6c3d677d). Scale to 100+ not yet
+   exercised; will revisit after Mac Studio export.
+
+Implement the rich _upsert_document first (update the call sites).
+Add the indexes.
+Test the Brain View query with 50–100 books, then scale up.
+
+Would you like me to also give you:
+
+The updated call site example in the ingestion worker?
+Sigma.js settings tuned for this scale?
+
+
+1. Full Brain View Cypher Query + Python Wrapper
+[STATUS: ✅ Pt 1 — section is a re-statement of the same Brain View query above
+ with $limit parameterized. Shipped: backend/services/graph/queries.py contains
+ the parameterized version as _BRAIN_VIEW_CYPHER constant.
+ ➕ Pt 1 added: total_bridge_edges (was total_bridge_relations), per-doc
+ ghost_b_* metrics passthrough, ISO-coerced datetime fields.
+ 🔁 Pt 5 will MODIFY this query to also collect dominant_canonical_family
+ per Document and dominant_relation_family per bridge.]
+
+A. The Cypher Query (brain_view_anchors.cypher)
+cypher// Brain View: Book Anchors + Bridge Strength (Multi-Corpus)
+// Optimized for 1000-2000+ books
+
+MATCH (d:Document)
+WHERE d.corpus_id IN $corpus_ids 
+  AND d.is_cluster_anchor = true
+
+// Basic document stats
+OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
+WITH d, count(c) as actual_chunk_count
+
+// Bridge detection to other selected books
+OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)-[:MENTIONS]->(e:Entity)
+OPTIONAL MATCH (e)-[r:RELATES_TO]->(e2:Entity)<-[:MENTIONS]-(c2:Chunk)<-[:HAS_CHUNK]-(d2:Document)
+WHERE d2.corpus_id IN $corpus_ids 
+  AND d2.is_cluster_anchor = true 
+  AND d2.doc_id <> d.doc_id
+
+WITH 
+    d,
+    actual_chunk_count,
+    count(DISTINCT d2) as bridge_count,
+    count(r) as total_bridge_edges,
+    collect(DISTINCT {
+        target_doc_id: d2.doc_id,
+        target_filename: COALESCE(d2.filename, d2.doc_id),
+        strength: count(r),
+        shared_entities: count(DISTINCT e)
+    }) as raw_bridges
+
+// Final aggregation
+WITH d, actual_chunk_count, bridge_count, total_bridge_edges,
+     apoc.coll.toSet(raw_bridges) as bridges
+
+RETURN 
+    d {
+        .*,
+        label: COALESCE(d.filename, d.doc_id),
+        node_kind: "Book",
+        actual_chunk_count: actual_chunk_count,
+        bridge_count: bridge_count,
+        total_bridge_edges: total_bridge_edges
+    } as document,
+    bridges
+ORDER BY bridge_count DESC, d.filename ASC
+LIMIT $limit;
+B. Python Wrapper (with error handling)
+[STATUS: ✅ Pt 1 — get_brain_view shipped at backend/services/graph/queries.py
+ with the exact error-handling pattern below (try/except → {documents:[],
+ bridges:[], meta:{error, partial:true}, _error:true} on failure).
+ ➕ Pt 1: also helper _iso_or_none to coerce neo4j.time.DateTime → ISO string.
+ ➕ Pt 2: meta also returns total_bridges + limit_applied for client UI.]
+Python# backend/services/graph/queries.py  or inside orchestrator
+
+async def get_brain_view(
+    driver: AsyncDriver,
+    corpus_ids: list[str],
+    limit: int = 2000
+) -> dict:
+    query = """..."""  # paste the query above
+
+    try:
+        async with driver.session(database="neo4j") as session:  # or your DB name
+            result = await session.run(
+                query,
+                corpus_ids=corpus_ids,
+                limit=limit
+            )
+            
+            records = await result.to_list()
+            
+            documents = []
+            all_bridges = []
+            
+            for record in records:
+                doc = record["document"]
+                bridges = record["bridges"] or []
+                
+                documents.append(doc)
+                for b in bridges:
+                    all_bridges.append({
+                        "source": doc["doc_id"],
+                        "target": b["target_doc_id"],
+                        "strength": b["strength"],
+                        "shared_entities": b.get("shared_entities", 0)
+                    })
+            
+            return {
+                "documents": documents,
+                "bridges": all_bridges,
+                "meta": {
+                    "corpus_count": len(set(d["corpus_id"] for d in documents)),
+                    "total_documents": len(documents),
+                    "limit_applied": limit
+                }
+            }
+            
+    except Exception as e:
+        # Graceful degradation
+        logger.error(f"Brain view query failed: {e}", exc_info=True)
+        return {
+            "documents": [],
+            "bridges": [],
+            "meta": {
+                "error": str(e),
+                "partial": True
+            },
+            "_error": True
+        }
+
+[STATUS — sigma reducers / BRAIN_VIEW_CONFIG below]
+✅ Pt 1: exported from frontend/src/lib/sigma-constants.ts as nodeReducer + edgeReducer
+   + BRAIN_VIEW_CONFIG.
+🟡 Pt 3: useSigma.ts keeps its OWN inline reducers for selection/highlight/hover
+   logic — they wrap the per-node attrs the adapter pre-bakes. So the
+   visual behavior expressed below is APPLIED via the adapter writing
+   color/size/forceLabel/borderColor onto graph nodes, then useSigma's
+   selection reducer layers selection/hover state on top.
+⚠️ Sigma's default node program ignores borderColor / haloColor /
+   haloWidth attrs. The "gold halo" effect described below would need a
+   custom NodeProgram (~150 LOC of WebGL). Deferred: pure size+color
+   tuning chosen as the cheaper proxy (Pt 3 → Pt 4 → Pt 5).
+🔁 Pt 4: hard-coded amber Book in pickNodeColor (overriding hash-color).
+🔁 Pt 5: REPLACED Pt 4 amber with dominant_canonical_family → FAMILY_TO_COLOR
+   lookup + dominant_entity_type fallback. Books now vary in color across
+   the canvas like stars of different spectral classes. Amber stays as the
+   final fallback (NODE_COLORS.Book) when family/type are both null.
+
+export const nodeReducer = (node: any) => {
+  const kind = node.kind || node.node_kind || "Other";
+
+  let visual = {
+    color: NODE_COLORS[kind],
+    size: NODE_SIZES[kind],
+    mass: NODE_MASSES[kind],
+    label: node.label || node.filename || node.name,
+  };
+
+  if (kind === "Book" || node.is_cluster_anchor) {
+    visual = {
+      ...visual,
+      size: 18,                         // 🔁 Pt 3: 18 → 7 baseline + log2(bridge_count)
+      mass: 35,                         // ✅ Pt 1
+      borderColor: "#fcd34d",           // ⚠️ ignored by sigma default node program
+      borderWidth: 4,                   // ⚠️ ignored
+      haloColor: "#f59e0b44",           // ⚠️ ignored
+      haloWidth: 18,                    // ⚠️ ignored
+      labelSize: 16,                    // 🔁 Pt 3: → 13
+      labelWeight: "700",               // 🔁 Pt 3: → "600"
+    };
+  }
+
+  return { ...node, ...visual };
+};
+
+export const edgeReducer = (edge: any) => {
+  const family = edge.relation_family || "WeakAssociation";
+  const strength = edge.strength || 1;
+
+  return {
+    ...edge,
+    color: EDGE_COLORS_BY_FAMILY[family],
+    size: Math.min(1.2 + strength * 0.18, 5.5),   // ✅ Pt 5: NOW 0.35 + 0.05*strength,
+                                                    //   cap 1.8px ("thin spaghetti").
+    opacity: family === "WeakAssociation" ? 0.35 : 0.75 + (strength * 0.08),
+                                                    // ✅ Pt 3 implemented via hexToRgba
+                                                    //   in polymath-graph-adapter
+    type: "arrow",                                  // ✅ honored
+    curvature: 0.6,   // nice curved bridges        // ✅ EdgeCurveProgram v3
+  };
+};
+
+[STATUS: ✅ Pt 1 exported from sigma-constants.ts.
+ 🟡 Not consumed by useSigma.ts (which constructs sigma with its own settings).
+ ✅ Background color #06060a applied via GraphViewer container CSS (deeper than
+    the original #0f172a — Pt 3 deepened for star-field aesthetic).
+ ✅ hideEdgesOnMove + zIndex echoed in useSigma.ts construction.
+ ✅ Pt 5: swapped FA2 params to PRD spec exactly (gravity:1.2, scalingRatio:12,
+    slowDown:4). Pt 3-4 deviated to gravity:0.6/scaling:38 etc; Pt 5 reverted
+    to PRD values. Result: central bulge + linLog spiral-arm scatter outward.]
+export const BRAIN_VIEW_CONFIG = {
+  mode: "webgl",
+  renderLabels: true,
+  hideEdgesOnMove: true,
+  zIndex: true,
+
+  // Beauty
+  backgroundColor: "#0f172a",
+  defaultNodeColor: "#94a3b8",
+  defaultEdgeColor: "#475569",
+
+  labelSize: 13,
+  labelBackground: true,
+  labelBackgroundOpacity: 0.9,
+  labelColor: "#e2e8f0",
+
+  // Performance at 1000-2000 books
+  minCameraRatio: 0.1,
+  maxCameraRatio: 8,
+
+  // Reducers (most important part)
+  nodeReducer,
+  edgeReducer,
+
+  // ForceAtlas2 - tuned for cluster anchors
+  fa2: {
+    barnesHutOptimize: true,
+    gravity: 1.2,
+    scalingRatio: 12,
+    slowDown: 4,
+    adjustSizes: true,
+    linLogMode: true,
+  },
+
+  noverlap: {
+    nodeMargin: 10,
+    scaleNodes: 1.3,
+    speed: 4,
+  },
+};

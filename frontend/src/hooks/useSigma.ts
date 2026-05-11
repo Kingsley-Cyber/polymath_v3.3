@@ -109,29 +109,26 @@ const NOVERLAP_SETTINGS = {
 };
 
 const getFA2Settings = (nodeCount: number) => {
-  const isSmall = nodeCount < 500;
-  const isMedium = nodeCount >= 500 && nodeCount < 2000;
-  const isLarge = nodeCount >= 2000 && nodeCount < 10000;
-  // linLogMode separates dense clusters from sparse ones via a log-scale
-  // attraction force. Pt 4: threshold lowered 30→8 so the user's first
-  // brain view (16 books) actually benefits from the spread.
+  // Pt 5 — FA2 params re-aligned to the original grok PRD spec for a
+  // galaxy / Milky Way feel: high gravity + moderate repulsion + linLog
+  // attraction produces a central bulge with outward spiral-arm scatter.
+  // The Pt 3-4 values (low gravity, very high repulsion) produced a
+  // uniform grid scatter — visually correct for "no clumping" but wrong
+  // for the user's "imitate a universe / space" direction. PRD wins.
   const useLinLog = nodeCount >= 8;
   return {
-    // Lower gravity = books spread out more. Old values 0.8/0.5/0.3/0.15
-    // were too clumpy at the small-graph tier per user feedback.
-    gravity: isSmall ? 0.6 : isMedium ? 0.4 : isLarge ? 0.25 : 0.15,
-    // Stronger negative repulsion (scalingRatio bumped) so node circles
-    // don't pile on each other. Old: 15/30/60/100.
-    scalingRatio: isSmall ? 38 : isMedium ? 55 : isLarge ? 90 : 130,
-    slowDown: isSmall ? 1 : isMedium ? 2 : isLarge ? 3 : 5,
+    gravity: 1.2,            // PRD — central bulge attractor (was 0.6-0.15)
+    scalingRatio: 12,        // PRD — moderate repulsion (was 38-130)
+    slowDown: 4,             // PRD — calmer settle, less jitter
     barnesHutOptimize: nodeCount > 200,
-    barnesHutTheta: isLarge ? 0.8 : 0.6,
+    barnesHutTheta: 0.6,
     strongGravityMode: false,
     outboundAttractionDistribution: true,
-    linLogMode: useLinLog,
+    linLogMode: useLinLog,   // PRD — log-scale attraction = spiral arms
     adjustSizes: true,
     // Strong bridges (many shared entities) pull books closer together;
-    // weak bridges have less attraction. 1 → 1.4 amplifies the signal.
+    // weak bridges have less attraction. 1.4 amplifies that signal so
+    // density-driven clustering shows up as visible "arms."
     edgeWeightInfluence: 1.4,
   };
 };

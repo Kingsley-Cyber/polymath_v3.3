@@ -208,6 +208,53 @@ export const EDGE_STYLES: Record<string, { color: string; sizeMultiplier: number
 
 export const DEFAULT_EDGE_STYLE = { color: "#4a4a5a", sizeMultiplier: 0.45 };
 
+// =============== FAMILY-TO-COLOR PALETTE (Pt 5) ===============
+//
+// Deterministic color schema driven by Polymath's extraction schema. Each
+// canonical_family from `backend/services/graph/canonical_families.json`
+// gets a stable hue here. Unmapped families fall back to amber (NODE_COLORS.Book).
+//
+// Picked to read as a galaxy: cyans, blues, violets dominate (cool stars),
+// emeralds + ambers + roses for warm clusters, all bright enough against
+// #06060a canvas.
+export const FAMILY_TO_COLOR: Record<string, string> = {
+  // Seeded from canonical_families.json — extend as new families surface.
+  physics_simulation: "#22d3ee", // cyan       — blue-white stars
+  creative_coding:    "#a78bfa", // violet-lt  — distant nebula
+  cymatics:           "#06b6d4", // cyan-deep
+  generative_ai:      "#10b981", // emerald    — green-yellow stars
+  identity_extraction:"#34d399", // emerald-lt
+  graph_rag:          "#3b82f6", // blue
+  app_architecture:   "#8b5cf6", // violet-deep
+  council_chat:       "#ec4899", // rose
+  book_generation:    "#f59e0b", // amber      — sun-like
+  mobile_ai:          "#84cc16", // lime
+  prd_architecture:   "#6366f1", // indigo
+  source_management:  "#fb7185", // rose-lt
+  // Optional generic-purpose seeds for future families:
+  philosophy:         "#a855f7",
+  psychology:         "#f472b6",
+  literature:         "#fb923c",
+  software:           "#60a5fa",
+  mathematics:        "#c084fc",
+  economics:          "#a3e635",
+  biology:            "#5eead4",
+  history:            "#fbbf24",
+};
+
+/** Stable color for a canonical_family. Falls back to amber Book default. */
+export function colorForFamily(family: string | null | undefined): string {
+  if (!family) return NODE_COLORS.Book;
+  return FAMILY_TO_COLOR[family] ?? NODE_COLORS.Book;
+}
+
+// Optional secondary palette — color by primary_entity_type when no
+// canonical_family is set. Reuses the existing NODE_COLORS entries.
+export function colorForEntityType(t: string | null | undefined): string {
+  if (!t) return NODE_COLORS.Book;
+  return (NODE_COLORS as any)[t] ?? NODE_COLORS.Book;
+}
+
 // =============== COMMUNITY / CORPUS PALETTES ===============
 // Curated 12-color palettes for community- and corpus-keyed coloring
 // (Mission Control supernode view + multi-corpus Brain View).

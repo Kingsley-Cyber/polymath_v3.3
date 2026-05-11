@@ -21,10 +21,23 @@ import {
   NODE_MASSES,
   CORPUS_COLORS,
   EDGE_STYLES,
+  EDGE_COLORS_BY_FAMILY,
   DEFAULT_EDGE_STYLE,
   getCommunityColor,
+  colorForFamily,
+  colorForEntityType,
   type PolymathNodeKind,
+  type RelationFamily,
 } from "./sigma-constants";
+
+// Pt 5: cap how many outbound bridges any single book can show. Prevents
+// hub-books from creating a web that swamps the canvas; long-tail bridges
+// drop off the visible graph but stay in the payload.
+const MAX_BRIDGES_PER_BOOK = 3;
+
+// Pt 5: hide bridges below this shared-entity strength at the top-level
+// brain view. They're still in the API response — just not rendered.
+const MIN_BRIDGE_STRENGTH = 2;
 
 export interface SigmaNodeAttributes {
   x: number;
@@ -99,6 +112,9 @@ export interface PolymathRawEdge {
   target: string;
   predicate?: string;
   relation_family?: string;
+  // Pt 5: dominant_relation_family is computed in the Brain View Cypher
+  // and used to color bridge edges via EDGE_COLORS_BY_FAMILY.
+  dominant_relation_family?: string | null;
   weight?: number;
   confidence?: number;
   source_corpora?: string[];
@@ -153,12 +169,19 @@ function pickNodeColor(
   raw: PolymathRawNode,
   colorMode: ColorMode,
 ): string {
-  // Pt 4 polish: Book anchors are the canonical "stars in the night sky"
-  // points of light — always render in NODE_COLORS.Book amber regardless
-  // of community/corpus color mode. Uniform color makes the constellation
-  // structure read clearly; mode-specific palettes apply only to leaf
-  // entities and Concept supernodes.
+  // Pt 5 polish — galaxy aesthetic: Book anchors are colored by their
+  // dominant canonical_family (varied star hues, like a real galaxy where
+  // stars vary by spectral class). Falls back to dominant_entity_type for
+  // books whose entities mostly lack canonical_family. Final fallback is
+  // amber NODE_COLORS.Book.
+  //
+  // Replaces Pt 4 "always amber" override per user feedback that uniform
+  // color erased the constellation structure.
   if (kind === "Book") {
+    const fam = (raw as any).dominant_family as string | null | undefined;
+    if (fam) return colorForFamily(fam);
+    const etype = (raw as any).dominant_entity_type as string | null | undefined;
+    if (etype) return colorForEntityType(etype);
     return NODE_COLORS.Book;
   }
   if (colorMode === "corpus") {
@@ -311,8 +334,45 @@ export function polymathToGraphology(
   // 4) Edges. EDGE_STYLES gives each predicate / relation_family a
   //    distinct color + size multiplier so the mesh of relationships is
   //    visually parseable rather than a uniform gray cloud.
+  //
+  // Pt 5 polish — galaxy aesthetic for bridges_to:
+  //   • Filter weight<MIN_BRIDGE_STRENGTH (=2) — drops 1-shared-entity
+  //     noise that wasn't carrying signal anyway.
+  //   • Cap to MAX_BRIDGES_PER_BOOK (=3) per source — strongest bridges
+  //     only, sorted by weight desc. Hub-books no longer web out.
+  //   • Color by dominant_relation_family from the backend (Pt 5 Cypher
+  //     extension) → semantic edge color (Operational=blue, Causal=amber,
+  //     Conflict=red, etc.) instead of all-violet.
+  //   • Thinner size: max ~1.8px ("thin spaghetti" per user spec).
   const edgeBaseSize = n > 20000 ? 0.4 : n > 5000 ? 0.6 : 1.0;
-  rawLinks.forEach((rel, i) => {
+
+  // Pre-process Brain View bridges so we can apply the strength filter +
+  // per-source top-N cap before writing edges. All non-bridge edges pass
+  // through unchanged.
+  const bridgeLinks: PolymathRawEdge[] = [];
+  const otherLinks: PolymathRawEdge[] = [];
+  for (const rel of rawLinks) {
+    if (rel.predicate === "bridges_to") bridgeLinks.push(rel);
+    else otherLinks.push(rel);
+  }
+  // Filter weak bridges then sort each source's outbound bridges by weight
+  // desc, keeping only the top MAX_BRIDGES_PER_BOOK.
+  const strongBridges = bridgeLinks.filter(
+    (b) => (b.weight ?? 0) >= MIN_BRIDGE_STRENGTH,
+  );
+  const perSourceCount = new Map<string, number>();
+  strongBridges.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
+  const cappedBridges: PolymathRawEdge[] = [];
+  for (const rel of strongBridges) {
+    const s = String(rel.source);
+    const used = perSourceCount.get(s) ?? 0;
+    if (used >= MAX_BRIDGES_PER_BOOK) continue;
+    cappedBridges.push(rel);
+    perSourceCount.set(s, used + 1);
+  }
+  const linksToRender: PolymathRawEdge[] = [...cappedBridges, ...otherLinks];
+
+  linksToRender.forEach((rel, i) => {
     const s = String(typeof rel.source === "object" ? (rel as any).source.id : rel.source);
     const t = String(typeof rel.target === "object" ? (rel as any).target.id : rel.target);
     if (!graph.hasNode(s) || !graph.hasNode(t) || s === t) return;
@@ -332,21 +392,24 @@ export function polymathToGraphology(
       color = "#a78bfa";
     }
     // Brain View bridges carry a `weight` = shared-entity strength from
-    // /api/graph/brain-view. Thicken AND brighten the edge proportionally
-    // so a strong bridge (many shared entities) reads more present than a
-    // weak one (1-2 shared entities). PRD spec for edgeReducer.
+    // /api/graph/brain-view. Pt 5: family-driven color + thin "spaghetti"
+    // size, with alpha by strength.
     let size = edgeBaseSize * style.sizeMultiplier;
     if (rel.predicate === "bridges_to" && typeof rel.weight === "number") {
-      // 1.2 baseline + 0.18 per shared edge, capped at 5.5 — matches the
-      // strength formula in sigma-constants.ts::edgeReducer.
       const strength = Math.max(0, rel.weight);
-      size = Math.min(1.2 + strength * 0.18, 5.5);
-      // Pt 3 polish: bake alpha into the edge color so weak bridges
-      // (1 shared entity → opacity ~0.23) fade out and strong bridges
-      // (12+ shared → opacity ~0.85) stay prominent. EdgeCurveProgram
-      // (sigma v3) honours rgba alpha.
+      // Pt 5: max 1.8px (was 5.5px). Baseline 0.35, +0.05 per shared entity.
+      // 1-shared → 0.40px, 5-shared → 0.60px, 30-shared → capped 1.8px.
+      size = Math.min(0.35 + strength * 0.05, 1.8);
+      // Pt 5: color by dominant_relation_family from backend Cypher. Fall
+      // back to WeakAssociation slate so unknown families still render
+      // faintly without dropping the edge.
+      const fam = ((rel as any).dominant_relation_family ||
+        "WeakAssociation") as RelationFamily;
+      const familyColor =
+        EDGE_COLORS_BY_FAMILY[fam] ?? EDGE_COLORS_BY_FAMILY.WeakAssociation;
+      // Pt 3 alpha-by-strength preserved: weak bridges fade.
       const opacity = Math.max(0.15, Math.min(0.85, 0.15 + strength * 0.08));
-      color = hexToRgba(color, opacity);
+      color = hexToRgba(familyColor, opacity);
     }
     graph.addEdgeWithKey(`e${i}`, s, t, {
       size,

@@ -1655,6 +1655,8 @@ export interface BrainViewBridge {
   target_corpus_id?: string;
   shared_entities: number;
   strength: number;
+  // Pt 5: pass-through from backend Cypher; same as the flattened version.
+  dominant_relation_family?: string | null;
 }
 
 export interface BrainViewDocument {
@@ -1666,6 +1668,11 @@ export interface BrainViewDocument {
   chunk_count: number;
   parent_count: number;
   actual_chunk_count: number;
+  // Pt 5: extraction-schema facets surfaced for deterministic frontend coloring.
+  // `dominant_family` = top canonical_family by entity mention across the book.
+  // `dominant_entity_type` = fallback when canonical_family is sparse.
+  dominant_family?: string | null;
+  dominant_entity_type?: string | null;
   ghost_b_success_rate?: number | null;
   ghost_b_extracted?: number | null;
   ghost_b_total?: number | null;
@@ -1684,6 +1691,9 @@ export interface BrainViewFlatBridge {
   target_corpus_id?: string;
   strength: number;
   shared_entities: number;
+  // Pt 5: dominant RELATES_TO.relation_family across this bridge. Drives
+  // edge color (EDGE_COLORS_BY_FAMILY) on the frontend canvas.
+  dominant_relation_family?: string | null;
 }
 
 export interface BrainViewResponse {
