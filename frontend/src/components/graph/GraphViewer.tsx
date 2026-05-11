@@ -39,10 +39,15 @@ import {
 } from "../../lib/polymath-graph-adapter";
 import { cleanBookLabel } from "../../lib/label-utils";
 
-// Pt 3 polish: force-label only the strongest N book anchors so the
-// canvas reads as a star-field of named constellations instead of a
-// label storm at 100+ books.
-const BRAIN_VIEW_TOP_N_LABELS = 20;
+// Pt 4 polish: adaptive top-N forceLabel. At 16 books, hardcoded N=20
+// meant every label rendered every frame → overlap storm. The new
+// formula scales N with the corpus size so the canvas always has
+// breathing room: ~30% of books get the forced label, clamped to
+// [3, 24]. A 16-book brain view labels ~5 anchors; 100 books → 24;
+// 1000+ → 24 too.
+function adaptiveTopN(total: number): number {
+  return Math.min(24, Math.max(3, Math.ceil(total * 0.3)));
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -231,6 +236,7 @@ function useBrainGraph(
       const sortedDocs = [...bv.documents].sort(
         (a, b) => (b.bridge_count || 0) - (a.bridge_count || 0),
       );
+      const topN = adaptiveTopN(sortedDocs.length);
       const anchorNodes = sortedDocs.map((d, idx) => {
         const rawLabel = d.label || d.filename || d.doc_id.slice(0, 8);
         return {
@@ -247,7 +253,7 @@ function useBrainGraph(
           is_cluster_anchor: true,
           // Top-N strongest anchors keep their label visible at all zoom
           // levels; the long tail relies on semantic-zoom logic in useSigma.
-          forceLabel: idx < BRAIN_VIEW_TOP_N_LABELS,
+          forceLabel: idx < topN,
           // Pass anchor metadata through so the selection bar can render it.
           ghost_b_success_rate: d.ghost_b_success_rate,
           ghost_b_extracted: d.ghost_b_extracted,

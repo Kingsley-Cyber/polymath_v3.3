@@ -153,6 +153,14 @@ function pickNodeColor(
   raw: PolymathRawNode,
   colorMode: ColorMode,
 ): string {
+  // Pt 4 polish: Book anchors are the canonical "stars in the night sky"
+  // points of light — always render in NODE_COLORS.Book amber regardless
+  // of community/corpus color mode. Uniform color makes the constellation
+  // structure read clearly; mode-specific palettes apply only to leaf
+  // entities and Concept supernodes.
+  if (kind === "Book") {
+    return NODE_COLORS.Book;
+  }
   if (colorMode === "corpus") {
     return colorForCorpus(raw.source_corpora);
   }
@@ -160,17 +168,11 @@ function pickNodeColor(
   //   • Concept supernodes → color by primary_domain hash so concepts in
   //     the same domain share a hue family (visual community grouping).
   //   • Domain supernodes → use the Domain palette color.
-  //   • Book anchors → color by hash of doc_id so each book is distinct.
   //   • Entity-level nodes → color by entity_type from NODE_COLORS.
   if (kind === "Concept") {
     const domain = raw.primary_domain || raw.id;
     let h = 0;
     for (let i = 0; i < domain.length; i++) h = (h * 31 + domain.charCodeAt(i)) >>> 0;
-    return getCommunityColor(h);
-  }
-  if (kind === "Book") {
-    let h = 0;
-    for (let i = 0; i < raw.id.length; i++) h = (h * 31 + raw.id.charCodeAt(i)) >>> 0;
     return getCommunityColor(h);
   }
   return NODE_COLORS[kind];
@@ -219,7 +221,13 @@ export function polymathToGraphology(
   // Wide spread for structural anchors — same approach GitNexus uses for
   // folders. Square-root scaling so 5000 nodes don't try to cram into the
   // same window 100 nodes do.
-  const structuralSpread = Math.sqrt(Math.max(n, 50)) * 32;
+  //
+  // Pt 4 polish: bumped the floor (max(n, 50) → max(n, 120)) and the
+  // multiplier (32 → 48) so a brain view with ~16 books starts from a
+  // wider seed. FA2 then only has to fine-tune positions, not push the
+  // whole pile outward, so the canvas reads as spread-out within the
+  // first second instead of clumping for 20s while FA2 settles.
+  const structuralSpread = Math.sqrt(Math.max(n, 120)) * 48;
   const conceptOrbit = structuralSpread * 0.55;
   const leafJitter = Math.sqrt(Math.max(n, 50)) * 4;
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));

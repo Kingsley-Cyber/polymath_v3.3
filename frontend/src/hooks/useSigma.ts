@@ -113,9 +113,9 @@ const getFA2Settings = (nodeCount: number) => {
   const isMedium = nodeCount >= 500 && nodeCount < 2000;
   const isLarge = nodeCount >= 2000 && nodeCount < 10000;
   // linLogMode separates dense clusters from sparse ones via a log-scale
-  // attraction force. Disable on tiny graphs (<30 nodes) where it
-  // over-spreads everything into corners; enable everywhere else.
-  const useLinLog = nodeCount >= 30;
+  // attraction force. Pt 4: threshold lowered 30→8 so the user's first
+  // brain view (16 books) actually benefits from the spread.
+  const useLinLog = nodeCount >= 8;
   return {
     // Lower gravity = books spread out more. Old values 0.8/0.5/0.3/0.15
     // were too clumpy at the small-graph tier per user feedback.

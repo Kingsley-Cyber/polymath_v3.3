@@ -23,7 +23,43 @@ const TRAILING_BRACKET_RE = /\s*\[[^\]]*\]\s*$/;
 const TRAILING_PAREN_RE = /\s*\([^)]*\)\s*$/;
 const SEGMENT_SEP_RE = /\s+--\s+|\s+—\s+/;
 
-const MAX_FALLBACK_LEN = 40;
+// Pt 4 polish: hard caps so books with verbose titles + co-authors don't
+// render as 80-char labels that collide on the canvas.
+const MAX_TITLE_LEN = 32;
+const MAX_AUTHOR_LEN = 22;
+const MAX_FALLBACK_LEN = 32;
+
+/** Trim at the last word boundary <= maxLen, append ellipsis. */
+function smartTrim(s: string, maxLen: number): string {
+  if (s.length <= maxLen) return s;
+  const slice = s.slice(0, maxLen);
+  const lastSpace = slice.lastIndexOf(" ");
+  // Only break at a word boundary if it's reasonably close to the end —
+  // otherwise just take maxLen chars and append ellipsis.
+  const cut = lastSpace > maxLen * 0.6 ? lastSpace : maxLen;
+  return slice.slice(0, cut).trimEnd() + "…";
+}
+
+/** Snake_case → space-separated, then trim. */
+function unsnake(s: string): string {
+  return s.replace(/_/g, " ").replace(/\s{2,}/g, " ").trim();
+}
+
+/** Authors → first author only. Cuts at ', and ', ' and ', '; ', ' & ', ', '
+ *  so "Connie Scoles West and Robert J_ Marzano; with Kathy Marx" becomes
+ *  "Connie Scoles West". */
+function firstAuthor(s: string): string {
+  const cuts = [
+    /\s+(?:and|with|&)\s+.*$/i,
+    /\s*,\s+.*$/, // "Alvesson, Mats; Sköldberg, Kaj" → "Alvesson"
+    /\s*;\s*.*$/,
+  ];
+  let out = s;
+  for (const re of cuts) {
+    out = out.replace(re, "");
+  }
+  return out.trim();
+}
 
 /**
  * Distill a raw filename / citation string into a short display label.
@@ -63,13 +99,14 @@ export function cleanBookLabel(raw: string | null | undefined): string {
   // 4. Split on `--` or em-dash and keep first two segments (title + author).
   const parts = s.split(SEGMENT_SEP_RE).map((p) => p.trim()).filter(Boolean);
   if (parts.length >= 2) {
-    return `${parts[0]} -- ${parts[1]}`;
+    const title = smartTrim(unsnake(parts[0]), MAX_TITLE_LEN);
+    const author = smartTrim(firstAuthor(unsnake(parts[1])), MAX_AUTHOR_LEN);
+    return author ? `${title} — ${author}` : title;
   }
-  if (parts.length === 1 && parts[0].length <= MAX_FALLBACK_LEN) {
-    return parts[0];
+  if (parts.length === 1) {
+    return smartTrim(unsnake(parts[0]), MAX_FALLBACK_LEN);
   }
 
-  // 5. Fallback: truncate at MAX_FALLBACK_LEN with ellipsis.
-  if (s.length <= MAX_FALLBACK_LEN) return s;
-  return s.slice(0, MAX_FALLBACK_LEN).trimEnd() + "…";
+  // 5. Fallback: unsnake + truncate at MAX_FALLBACK_LEN with ellipsis.
+  return smartTrim(unsnake(s), MAX_FALLBACK_LEN);
 }
