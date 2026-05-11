@@ -57,8 +57,29 @@ start_service "embedder" "embedder_mlx.main" EMBEDDER_HOST EMBEDDER_PORT
 start_service "reranker" "reranker_mlx.main" RERANKER_HOST RERANKER_PORT
 start_service "docling"  "docling_svc.main"  DOCLING_HOST  DOCLING_PORT
 
-# launchd's KeepAlive needs a foreground process to monitor.
-# Wait on any child; if any die, exit so launchd can restart.
-wait -n
-echo "[apple-ml] a sidecar exited; bubbling up to launchd"
-exit 1
+# launchd's KeepAlive needs a foreground process to monitor. We can't
+# use `wait -n` here — that's bash 4.3+, and the macOS-shipped /bin/bash
+# is still 3.2.x. The LaunchAgent points at /bin/bash so even with
+# Homebrew bash 5 installed, the plist won't pick it up. Poll the
+# child PIDs at 5s cadence; first one to die kills the supervisor and
+# launchd restarts the whole group. Compatible with macOS system bash.
+PID_FILES=(
+  "${LOG_DIR}/embedder.pid"
+  "${LOG_DIR}/reranker.pid"
+  "${LOG_DIR}/docling.pid"
+)
+trap 'echo "[apple-ml] supervisor signalled, exiting"; exit 0' INT TERM
+while true; do
+  for pid_file in "${PID_FILES[@]}"; do
+    [[ -f "${pid_file}" ]] || continue
+    pid="$(cat "${pid_file}" 2>/dev/null || echo)"
+    if [[ -z "${pid}" ]]; then
+      continue
+    fi
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      echo "[apple-ml] sidecar pid=${pid} (${pid_file##*/}) exited; bubbling up to launchd"
+      exit 1
+    fi
+  done
+  sleep 5
+done
