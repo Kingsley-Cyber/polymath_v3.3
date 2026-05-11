@@ -345,3 +345,13 @@ async def root() -> dict[str, str]:
         "docs": "/docs",
         "health": "/api/health",
     }
+
+
+@app.get("/health", tags=["root"], include_in_schema=False)
+async def health_alias():
+    """Conventional /health alias for monitoring tools that ping the
+    canonical path. The substantive health check lives at /api/health;
+    this just forwards by re-using the same handler so dashboards that
+    expect /health get a non-404."""
+    from routers.health import health_check
+    return await health_check()
