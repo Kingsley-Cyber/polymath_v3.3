@@ -724,6 +724,21 @@ class Settings(BaseSettings):
     APP_ENV: str = Field(default="development", description="Application environment")
     LOG_LEVEL: str = Field(default="info", description="Logging level")
 
+    # === MULTI-CORPUS EMERGENCY KILL SWITCH ===
+    # Multi-corpus rollout PR 1 — backward compat is provided by Pydantic
+    # input normalization (no runtime feature flag). This env var is a
+    # deploy-time emergency lever: when "true"/"1"/"yes", utils.corpus_ids
+    # rejects any request resolving to more than one corpus_id with a
+    # MultiCorpusDisabledError → 400. Leave unset/false in normal operation.
+    DISABLE_MULTI_CORPUS: bool = Field(
+        default=False,
+        description=(
+            "Emergency kill switch. When true, any request with more than one "
+            "corpus_id is rejected at the input normalization layer. Used only "
+            "as a rollback lever if multi-corpus exhibits production issues."
+        ),
+    )
+
     class Config:
         """Pydantic config."""
 
