@@ -180,6 +180,16 @@ _TOC_LINE_RE = re.compile(r"\.{3,}\s*\d+\s*$")
 _INDEX_LINE_RE = re.compile(
     r"^\s*[A-Za-z][A-Za-z\s,'\-&]{1,40},\s*\d+(?:[\s,\-]+\d+)*\s*$"
 )
+# "see X" / "see also X" cross-reference — the canonical *partial-index*
+# shape that has terms but no page numbers (Design Patterns chunk_0501
+# is this: "adapter, see adapter, object | granularity of, see also
+# FLYWEIGHT | composition, see object composition"). Page-numbered
+# index lines and cross-reference lines often intermix in the same
+# chunk, so detecting either signal alone underclassifies the page.
+_INDEX_SEE_RE = re.compile(r"\bsee\s+(?:also\s+)?[A-Z]", re.IGNORECASE)
+# Lines that don't end in sentence punctuation — used as a secondary
+# signal to confirm a chunk is reference material rather than prose.
+_SENTENCE_END_RE = re.compile(r"[.!?][\"')\]]?\s*$")
 
 
 def _heading_is_inconclusive(heading_path: Iterable[str] | None) -> bool:
@@ -226,23 +236,78 @@ def classify_content(text: str | None) -> str:
         index_hits = sum(1 for ln in lines if _INDEX_LINE_RE.match(ln))
         if index_hits / len(lines) >= 0.40:
             return ChunkKind.INDEX
+        if _is_partial_index(lines):
+            return ChunkKind.INDEX
 
     return ChunkKind.BODY
+
+
+def _is_partial_index(lines: list[str]) -> bool:
+    """Detect index pages dominated by 'see X' cross-references and short
+    term labels rather than name-page-number lines.
+
+    Design Patterns chunk_0501 was the canonical miss for the original
+    page-numbered index detector: most lines were "adapter, see adapter,
+    object" or bare term labels with no page reference. This catches
+    that shape.
+
+    Two conjunctive requirements keep body chapters with stray
+    "see also …" mentions from tripping:
+      1. At least one cross-reference signal per ~10 lines, OR multiple
+         comma-page-list lines (mixed indices have both).
+      2. At least 60% of lines are short (<80 chars) AND don't end in
+         sentence punctuation — body chapters fail this because their
+         lines are sentences.
+    """
+    if len(lines) < 5:
+        return False
+    see_hits = sum(1 for ln in lines if _INDEX_SEE_RE.search(ln))
+    index_hits = sum(1 for ln in lines if _INDEX_LINE_RE.match(ln))
+    short_non_sentence = sum(
+        1 for ln in lines
+        if len(ln.strip()) < 80 and not _SENTENCE_END_RE.search(ln)
+    )
+    return (
+        (see_hits + index_hits) >= max(2, int(len(lines) * 0.10))
+        and short_non_sentence / len(lines) >= 0.60
+    )
 
 
 def classify_chunk(
     heading_path: Iterable[str] | None,
     text: str | None = None,
 ) -> str:
-    """Combined classifier: heading first, then content fallback when the
-    heading is inconclusive (None, empty, or page-style label like
-    "page_178" / "pages_10-12"). This is the entry point chunker callers
-    should use — `classify_heading` is exposed for tests and explicit
-    heading-only paths.
+    """Combined classifier: heading first, then content classification.
+
+    Precedence:
+      1. If the heading produces a confident non-BODY classification, trust
+         it (Bibliography heading on a content chunk wins over content cues).
+      2. Otherwise — heading says BODY OR heading is inconclusive — run the
+         content classifier. The content thresholds are conservative enough
+         that body chapters quoting a citation or two don't trip biblio, and
+         only structurally-reference-shaped content trips index/TOC.
+      3. Default to BODY if no signal.
+
+    The earlier version only ran the content classifier when the heading
+    was "inconclusive" (None, empty, or page-style). That missed
+    mid-section index pages where the heading carries forward from the
+    enclosing chapter and classifies as BODY (Design Patterns chunk_0501
+    was the canonical miss).
     """
-    kind = classify_heading(heading_path)
-    if kind != ChunkKind.BODY:
-        return kind
-    if text and _heading_is_inconclusive(heading_path):
+    heading_kind = classify_heading(heading_path)
+    if heading_kind != ChunkKind.BODY:
+        return heading_kind
+    if not text:
+        return ChunkKind.BODY
+    if _heading_is_inconclusive(heading_path):
+        # No semantic signal in the heading — defer entirely to content.
         return classify_content(text)
+    # Heading says BODY confidently. Only let content override for the
+    # partial-index shape — the one signal a body chapter literally
+    # cannot produce (its lines end in sentence punctuation). Don't fire
+    # full content classification here because biblio/TOC false positives
+    # on citation-dense body chunks are a real risk.
+    lines = [ln for ln in text[:2000].split("\n") if ln.strip()]
+    if _is_partial_index(lines):
+        return ChunkKind.INDEX
     return ChunkKind.BODY
