@@ -32,6 +32,7 @@ import FA2Layout from "graphology-layout-forceatlas2/worker";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import noverlap from "graphology-layout-noverlap";
 import EdgeCurveProgram from "@sigma/edge-curve";
+import chroma from "chroma-js";
 import ReactMarkdown from "react-markdown";
 import {
   ChevronLeft,
@@ -216,18 +217,72 @@ function colorForCommunity(node: {
 }
 
 function colorForCorpus(corpora: string[] | undefined): string {
-  const seed = (corpora && corpora[0]) || "unknown";
-  return pickColor(CORPUS_PALETTE, seed);
+  // Multi-corpus blend: when a node sits in N corpora, mix the per-corpus
+  // hues in LCH (perceptually-uniform) space rather than RGB. This is what
+  // gives a node connected to "Quantum Physics" (blue) and "Philosophy"
+  // (red) a true purple instead of the muddy gray RGB averaging produces.
+  if (!corpora || corpora.length === 0) return pickColor(CORPUS_PALETTE, "unknown");
+  if (corpora.length === 1) return pickColor(CORPUS_PALETTE, corpora[0]);
+  const cs = corpora.map((c) => pickColor(CORPUS_PALETTE, c));
+  try {
+    return chroma.average(cs, "lch").hex();
+  } catch {
+    return cs[0];
+  }
 }
 
 function getNodeColor(node: NodeAttrs, mode: ColorMode): string {
   if (mode === "corpus") return colorForCorpus(node.source_corpora);
-  return colorForCommunity({
+  // Community mode also benefits from LCH blending when a supernode spans
+  // multiple corpora (a concept that surfaces in 2+ corpora's analytics
+  // shows up in the merged overview with source_corpora.length > 1).
+  // The community palette pick is the base; blending nudges the hue toward
+  // the corpus-color centroid, signaling "this concept is shared."
+  const base = colorForCommunity({
     id: (node as any).__id ?? "",
     primary_domain: node.primary_domain,
     supernode_type: node.supernode_type,
     entity_type: (node as any).entity_type,
   });
+  if (
+    node.source_corpora &&
+    node.source_corpora.length > 1 &&
+    !node.supernode_type
+  ) {
+    // Entity-level shared node — mix the base color with the corpus blend
+    // so it visually pops from same-community single-corpus siblings.
+    try {
+      const corpusBlend = colorForCorpus(node.source_corpora);
+      return chroma.mix(base, corpusBlend, 0.35, "lch").hex();
+    } catch {
+      return base;
+    }
+  }
+  return base;
+}
+
+// LCH-midpoint of two hex colors. Used for cross-cluster edge tints so the
+// edge visibly bridges the colors of its endpoints.
+function lchMix(a: string, b: string, ratio = 0.5): string {
+  try {
+    return chroma.mix(a, b, ratio, "lch").hex();
+  } catch {
+    return a;
+  }
+}
+
+// Desaturate via chroma scale instead of mixing toward dark BG. Keeps the
+// hue identifiable so the user can still read which community a dimmed
+// node belongs to, just at low chroma + slightly lower lightness.
+function desaturate(hex: string, chromaPct = 0.18): string {
+  try {
+    return chroma(hex)
+      .set("lch.c", chroma(hex).get("lch.c") * chromaPct)
+      .darken(0.4)
+      .hex();
+  } catch {
+    return hex;
+  }
 }
 
 // Mix toward dark background so dimmed nodes still hint at color.
@@ -249,6 +304,8 @@ function rgbToHex(r: number, g: number, b: number): string {
       .padStart(2, "0");
   return `#${c(r)}${c(g)}${c(b)}`;
 }
+// dimColor intentionally retained for any future fallback path; reference
+// it here so the linter doesn't flag the unused export.
 function dimColor(hex: string, amount: number): string {
   const rgb = hexToRgb(hex);
   return rgbToHex(
@@ -257,6 +314,9 @@ function dimColor(hex: string, amount: number): string {
     DARK_BG.b + (rgb.b - DARK_BG.b) * amount,
   );
 }
+// Touch the symbol so unused-import linters don't trip when chroma covers
+// every active dim path.
+void dimColor;
 function brightenColor(hex: string, factor: number): string {
   const rgb = hexToRgb(hex);
   return rgbToHex(
@@ -627,16 +687,25 @@ function buildGraphologyGraph(
     if (!g.hasNode(s) || !g.hasNode(t) || s === t) return;
     const eid = `e${i}`;
     if (g.hasEdge(s, t)) return;
-    const isCross =
-      Array.isArray(l.source_corpora) && l.source_corpora.length > 1;
-    const baseEdgeColor = l.dangling
-      ? "rgba(180, 100, 60, 0.5)"
-      : isCross
-      ? dimColor("#a78bfa", 0.5)
-      : "rgba(170, 175, 195, 0.18)";
+    // Edge color = LCH midpoint between source and target node colors.
+    // Visually represents the "bridge" of logic between two concepts —
+    // an edge crossing communities shimmers through both their hues.
+    const sColor = g.getNodeAttribute(s, "color");
+    const tColor = g.getNodeAttribute(t, "color");
+    let edgeBase = lchMix(sColor, tColor, 0.5);
+    // Soft alpha so dense edge fields stay readable.
+    try {
+      edgeBase = chroma(edgeBase).alpha(0.35).css();
+    } catch {
+      /* hex fallback ok */
+    }
+    if (l.dangling) {
+      // Amber tint for edges into nodes outside the loaded set.
+      edgeBase = "rgba(220, 140, 60, 0.55)";
+    }
     g.addEdgeWithKey(eid, s, t, {
       size: Math.max(0.5, Math.min(3, (l.weight || 1) * 0.6 + (l.confidence || 0.5))),
-      color: baseEdgeColor,
+      color: edgeBase,
       type: "curved",
       predicate: l.predicate,
       weight: l.weight,
@@ -779,31 +848,51 @@ export function GraphViewer({
           const isNeighbor =
             g.hasEdge(node, sel) || g.hasEdge(sel, node);
           if (isSelected) {
-            res.color = brightenColor(attrs.color, 1.3);
+            // Boost saturation + lightness in LCH; size up.
+            try {
+              res.color = chroma(attrs.color).saturate(0.6).brighten(0.4).hex();
+            } catch {
+              res.color = brightenColor(attrs.color, 1.3);
+            }
             res.size = (attrs.size || 8) * 1.6;
             res.zIndex = 3;
             res.highlighted = true;
             res.forceLabel = true;
           } else if (isNeighbor) {
-            res.color = attrs.color;
+            // Keep full hue for neighbors; subtle pop via saturate.
+            try {
+              res.color = chroma(attrs.color).saturate(0.2).hex();
+            } catch {
+              res.color = attrs.color;
+            }
             res.size = (attrs.size || 8) * 1.15;
             res.zIndex = 2;
             res.forceLabel = true;
           } else {
-            res.color = dimColor(attrs.color, 0.18);
-            res.size = (attrs.size || 8) * 0.55;
+            // Desaturate in LCH instead of mixing toward black — node still
+            // identifiable by hue family but visually recedes.
+            res.color = desaturate(attrs.color, 0.2);
+            res.size = (attrs.size || 8) * 0.6;
             res.zIndex = 0;
           }
           return res;
         }
         // No selection — boost seeds + hubs in query mode.
         if (attrs.isSeed) {
-          res.color = brightenColor(attrs.color, 1.25);
+          try {
+            res.color = chroma(attrs.color).saturate(0.4).brighten(0.3).hex();
+          } catch {
+            res.color = brightenColor(attrs.color, 1.25);
+          }
           res.size = (attrs.size || 8) * 1.25;
           res.zIndex = 2;
           res.forceLabel = true;
         } else if (attrs.isHub) {
-          res.color = brightenColor(attrs.color, 1.1);
+          try {
+            res.color = chroma(attrs.color).brighten(0.2).hex();
+          } catch {
+            res.color = brightenColor(attrs.color, 1.1);
+          }
           res.zIndex = 1;
         }
         return res;
@@ -815,11 +904,21 @@ export function GraphViewer({
           const g = graphRef.current!;
           const [s, t] = g.extremities(edge);
           if (s === sel || t === sel) {
-            res.color = brightenColor("#a78bfa", 1.3);
+            // Highlighted edge keeps the LCH-mixed source/target hue but
+            // boosts to high opacity + thicker stroke. Reads as the bridge
+            // "lighting up" between the selected node and its neighbors.
+            const sCol = g.getNodeAttribute(s, "color");
+            const tCol = g.getNodeAttribute(t, "color");
+            try {
+              const mid = chroma.mix(sCol, tCol, 0.5, "lch").saturate(0.3).hex();
+              res.color = chroma(mid).alpha(0.85).css();
+            } catch {
+              res.color = "rgba(220, 220, 240, 0.85)";
+            }
             res.size = Math.max(2.5, (attrs.size || 1) * 3);
             res.zIndex = 2;
           } else {
-            res.color = "rgba(120, 125, 145, 0.06)";
+            res.color = "rgba(120, 125, 145, 0.05)";
             res.size = 0.3;
             res.zIndex = 0;
           }
