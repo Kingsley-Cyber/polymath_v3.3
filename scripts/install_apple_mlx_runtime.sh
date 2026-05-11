@@ -41,11 +41,37 @@ echo "[apple-mlx] launch agent : ${LAUNCH_AGENT_PATH}"
 mkdir -p "${SERVICES_DIR}" "${LOG_DIR}" "${RUNTIME_ROOT}/models" "${RUNTIME_ROOT}/volumes/hf-cache"
 
 # ── 2. Stage code ────────────────────────────────────────────────────
+# The three sidecar main.py files are explicitly EXCLUDED from rsync when
+# a verified host copy is already in place. The repo ships them as
+# scaffolds — the verified Mac Studio implementation (notably the
+# hand-built MLPProjector for Jina v3, which mlx-embeddings can't load
+# automatically) lives only on the host. Without these excludes, every
+# re-run of this installer would clobber working host code with the
+# scaffold and silently break retrieval — see GOTCHAS §81. Override by
+# deleting the host file first if you really want a fresh sync.
+EXCLUDES=(
+  '.venv'
+  '__pycache__'
+  '*.pyc'
+)
+PROTECT_RELS=(
+  'embedder_mlx/main.py'
+  'reranker_mlx/main.py'
+  'docling_svc/main.py'
+)
+for rel in "${PROTECT_RELS[@]}"; do
+  if [[ -f "${SERVICES_DIR}/${rel}" ]]; then
+    EXCLUDES+=("${rel}")
+    echo "[apple-mlx] protecting verified host file: ${rel}"
+  fi
+done
+
 echo "[apple-mlx] syncing source from repo → runtime"
-rsync -a --delete \
-  --exclude='.venv' \
-  --exclude='__pycache__' \
-  --exclude='*.pyc' \
+RSYNC_EXCLUDES=()
+for ex in "${EXCLUDES[@]}"; do
+  RSYNC_EXCLUDES+=(--exclude="${ex}")
+done
+rsync -a --delete "${RSYNC_EXCLUDES[@]}" \
   "${REPO_ROOT}/scripts/apple_ml_services/" "${SERVICES_DIR}/"
 chmod +x "${SERVICES_DIR}/start.sh" || true
 
