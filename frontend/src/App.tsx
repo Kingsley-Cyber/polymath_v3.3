@@ -37,6 +37,20 @@ function App() {
   const [graphViewerQueryDraft, setGraphViewerQueryDraft] = useState<string>("");
   const [graphViewerRunCount, setGraphViewerRunCount] = useState(0);
 
+  // Pt 7: prefill bridge from GraphViewer's Graph Query tab to ChatInput.
+  // When the user clicks a refined chip in the dashboard, GraphViewer
+  // fires onSendToChat(text). We bump nonce + load the text; ChatInput's
+  // useEffect on prefill.nonce replaces its input and focuses. We also
+  // close the graph modal so the chat is visible.
+  const [chatPrefill, setChatPrefill] = useState<{ text: string; nonce: number }>({
+    text: "",
+    nonce: 0,
+  });
+  const handleGraphSendToChat = useCallback((text: string) => {
+    setChatPrefill((prev) => ({ text, nonce: prev.nonce + 1 }));
+    setIsGraphViewOpen(false);
+  }, []);
+
   const { selectedModel, setSelectedModel, setModels, maxTokens, theme, selectedCorpusIds } =
     useSettingsStore();
 
@@ -571,6 +585,7 @@ function App() {
                   : "INITIALIZING SYSTEMS..."
               }
               tokenCount={{ current: 0, max: maxTokens }}
+              prefill={chatPrefill}
             />
           </div>
         </div>
@@ -593,6 +608,7 @@ function App() {
                     : undefined
                 }
                 onClose={() => setIsGraphViewOpen(false)}
+                onSendToChat={handleGraphSendToChat}
                 key={`gv-${graphViewerMode}-${graphViewerQuery}-${graphViewerRunCount}`}
               />
             </div>

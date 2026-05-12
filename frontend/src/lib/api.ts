@@ -1775,3 +1775,153 @@ export async function getBookDrilldown(
     }),
   });
 }
+
+// ─── Pt 7 — HyDE-style query refinement + entity-type search ───────────
+//
+// Both clients implement client-side IDEMPOTENCY at two layers:
+//   (a) In-flight de-duplication — if a request with the same key is
+//       already pending, return the SAME promise instead of firing a
+//       second one. Stops double-clicks from doubling cost.
+//   (b) Short-TTL result cache — for the next N seconds after a
+//       successful result, return the cached payload instead of fetching
+//       again. Tighter than the backend's 24h cache because the backend
+//       is already doing the heavy lifting; this is just UX smoothing.
+//
+// The backend `/api/graph/refine` is itself idempotent (Mongo cache
+// keyed by hash(question + corpus_ids + model)) — these client-side
+// layers are belt-and-suspenders so we don't ship even a network round
+// trip on a known-recent request.
+
+export interface RefinementResult {
+  alternative_phrasings: string[];
+  opposing_framings: string[];
+  related_questions: string[];
+}
+
+export interface RefineQueryResponse {
+  idempotency_key: string;
+  cached: boolean;
+  result: RefinementResult;
+  error?: string;
+}
+
+// In-flight + result caches (module-scoped — survive component re-mounts).
+const _refineInflight = new Map<string, Promise<RefineQueryResponse>>();
+const _refineCache = new Map<string, { at: number; value: RefineQueryResponse }>();
+const REFINE_RESULT_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function _refineKey(question: string, corpusIds: string[], model?: string): string {
+  const normalized = question.trim().toLowerCase().replace(/\s+/g, " ");
+  const ids = [...corpusIds].sort().join(",");
+  return `${normalized}|${ids}|${model ?? ""}`;
+}
+
+export async function refineQuery(
+  question: string,
+  corpusIds: string[],
+  model?: string,
+  forceRefresh = false,
+): Promise<RefineQueryResponse> {
+  const key = _refineKey(question, corpusIds, model);
+
+  // (a) Result cache hit (skipped on forceRefresh).
+  if (!forceRefresh) {
+    const cached = _refineCache.get(key);
+    if (cached && Date.now() - cached.at < REFINE_RESULT_TTL_MS) {
+      return cached.value;
+    }
+  }
+
+  // (b) In-flight dedupe — return the same promise if one's pending.
+  const pending = _refineInflight.get(key);
+  if (pending) return pending;
+
+  const fire = (async () => {
+    try {
+      const res = await fetchJSON<RefineQueryResponse>("/graph/refine", {
+        method: "POST",
+        body: JSON.stringify({
+          question,
+          corpus_ids: corpusIds,
+          model,
+          force_refresh: forceRefresh,
+        }),
+      });
+      _refineCache.set(key, { at: Date.now(), value: res });
+      return res;
+    } finally {
+      _refineInflight.delete(key);
+    }
+  })();
+  _refineInflight.set(key, fire);
+  return fire;
+}
+
+// ─── Entity-type search (Pt 7 Graph Query tab) ──────────────────────────
+// Wraps the existing GET /api/corpora/{id}/entities with the same
+// in-flight + result-cache pattern. Listings are stable per corpus
+// snapshot so a short TTL is plenty.
+
+export interface EntityRow {
+  entity_id: string;
+  normalized_name: string;
+  display_name: string;
+  entity_type: string;
+  confidence?: number | null;
+  mention_count: number;
+}
+
+const _entityInflight = new Map<string, Promise<EntityRow[]>>();
+const _entityCache = new Map<string, { at: number; value: EntityRow[] }>();
+const ENTITY_RESULT_TTL_MS = 30 * 1000; // 30 seconds
+
+function _entityKey(
+  corpusId: string,
+  q: string,
+  entityType: string,
+  limit: number,
+): string {
+  return `${corpusId}|${q.trim().toLowerCase()}|${entityType}|${limit}`;
+}
+
+export async function searchEntities(
+  corpusId: string,
+  opts: { q?: string; entityType?: string; limit?: number } = {},
+): Promise<EntityRow[]> {
+  const q = opts.q ?? "";
+  const entityType = opts.entityType ?? "";
+  const limit = opts.limit ?? 20;
+  const key = _entityKey(corpusId, q, entityType, limit);
+
+  const cached = _entityCache.get(key);
+  if (cached && Date.now() - cached.at < ENTITY_RESULT_TTL_MS) {
+    return cached.value;
+  }
+
+  const pending = _entityInflight.get(key);
+  if (pending) return pending;
+
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  params.set("limit", String(limit));
+
+  const fire = (async () => {
+    try {
+      const rows = await fetchJSON<EntityRow[]>(
+        `/corpora/${encodeURIComponent(corpusId)}/entities?${params.toString()}`,
+      );
+      // Backend doesn't filter by type today — filter client-side. Adding
+      // `?type=` to the backend is a one-line Cypher tweak; for v1 we
+      // just narrow on the result.
+      const filtered = entityType
+        ? rows.filter((r) => r.entity_type === entityType)
+        : rows;
+      _entityCache.set(key, { at: Date.now(), value: filtered });
+      return filtered;
+    } finally {
+      _entityInflight.delete(key);
+    }
+  })();
+  _entityInflight.set(key, fire);
+  return fire;
+}

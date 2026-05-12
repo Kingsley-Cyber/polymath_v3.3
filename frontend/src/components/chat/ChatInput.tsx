@@ -67,6 +67,12 @@ interface ChatInputProps {
   isLoading?: boolean;
   placeholder?: string;
   tokenCount?: { current: number; max: number };
+  /** Pt 7: when the parent wants to seed the input with text (e.g. the
+   *  Graph Query tab's "send to chat" callback), it bumps this value.
+   *  ChatInput watches it and replaces its internal state on change.
+   *  Each call should use a fresh object so equality changes even when
+   *  the text is identical to the last prefill — { text, nonce }. */
+  prefill?: { text: string; nonce: number };
 }
 
 export function ChatInput({
@@ -75,6 +81,7 @@ export function ChatInput({
   isLoading = false,
   placeholder = "EXECUTE QUERY // INJECT CONTEXT...",
   tokenCount,
+  prefill,
 }: ChatInputProps) {
   const tokensUsed = useChatStore((s) => s.tokensUsed);
   const tokensMax = useChatStore((s) => s.tokensMax);
@@ -88,6 +95,24 @@ export function ChatInput({
 
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<File[]>([]);
+
+  // Pt 7: parent-driven prefill. Bumping prefill.nonce on the parent
+  // replaces the input with the new text. Focuses the textarea so the
+  // user can edit/extend the suggestion before sending.
+  useEffect(() => {
+    if (!prefill) return;
+    setInput(prefill.text);
+    // Defer focus to after React commits the new value.
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus();
+        const end = ta.value.length;
+        ta.setSelectionRange(end, end);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- nonce IS the trigger
+  }, [prefill?.nonce]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);

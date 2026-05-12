@@ -35,7 +35,7 @@ import {
   type ColorMode,
 } from "../../lib/polymath-graph-adapter";
 import { cleanBookLabel } from "../../lib/label-utils";
-import { BrainViewDashboard } from "./BrainViewDashboard";
+import { BrainViewDashboard, type DashboardTab } from "./BrainViewDashboard";
 import { GalaxyBackground } from "./GalaxyBackground";
 
 // Pt 4 polish: adaptive top-N forceLabel. At 16 books, hardcoded N=20
@@ -59,6 +59,10 @@ interface GraphViewerProps {
   onRerun?: () => void;
   onClose?: () => void;
   model?: string;
+  /** Pt 7: callback fired when the user picks a refined chip / entity in
+   *  the Graph Query tab. Parent typically closes the modal and loads
+   *  the text into the chat input. */
+  onSendToChat?: (text: string) => void;
 }
 
 // Books-as-clusters drill: we only ever drill into a book (no concept-
@@ -458,6 +462,7 @@ export function GraphViewer({
   onRerun,
   onClose,
   model,
+  onSendToChat,
 }: GraphViewerProps) {
   const [colorMode, setColorMode] = useState<ColorMode>("community");
   const [drillStack, setDrillStack] = useState<DrillFrame[]>([]);
@@ -471,6 +476,15 @@ export function GraphViewer({
   // Pt 6: re-settle FA2 layout briefly after the user releases a dragged
   // node. Off by default; user toggles in the Layout section of the dashboard.
   const [settleAfterDrag, setSettleAfterDrag] = useState(false);
+  // Pt 7: tab selection in the sidebar + Agent Search tab's local input.
+  // `agentInput` is what the user types; `agentQuery` is what useQueryGraph
+  // actually consumes (only promoted when the user hits Run). This way
+  // every keystroke doesn't refire the query.
+  const [activeTab, setActiveTab] = useState<DashboardTab>(
+    mode === "query" ? "agent" : "brain",
+  );
+  const [agentInput, setAgentInput] = useState<string>(query ?? "");
+  const [agentQuery, setAgentQuery] = useState<string | undefined>(query);
   const drillStackRef = useRef(drillStack);
   drillStackRef.current = drillStack;
 
@@ -479,9 +493,15 @@ export function GraphViewer({
     mode === "brain" ? corpusIds : [],
     drill,
   );
+  // Pt 7: useQueryGraph now reads `agentQuery` state instead of the props.query.
+  // For mode==="query" callers, props.query seeds agentQuery on mount. For
+  // mode==="brain", the Agent Search tab inside the dashboard can drive
+  // queries by promoting agentInput → agentQuery via onAgentRun.
+  // Corpora pool is always available (regardless of mode) so users can
+  // run an agent query from the brain canvas without switching modes.
   const q = useQueryGraph(
-    mode === "query" ? corpusIds : [],
-    query,
+    corpusIds,
+    agentQuery,
     model,
   );
 
@@ -800,6 +820,26 @@ export function GraphViewer({
         onMaxBridgesPerBookChange={setMaxBridgesPerBook}
         settleAfterDrag={settleAfterDrag}
         onSettleAfterDragToggle={() => setSettleAfterDrag((v) => !v)}
+        activeTab={activeTab}
+        onActiveTabChange={setActiveTab}
+        agentQuery={agentInput}
+        onAgentQueryChange={setAgentInput}
+        onAgentRun={() => setAgentQuery(agentInput)}
+        agentPhase={q.phase}
+        agentError={q.error}
+        agentSynthesisMarkdown={q.synthesis?.markdown ?? null}
+        agentSeedNames={(q.data?.nodes || [])
+          .filter((n: any) => q.seedIds.has(String(n.id)))
+          .map((n: any) => String(n.display_name || n.id))}
+        agentBridgeNames={(q.data?.nodes || [])
+          .filter((n: any) => q.bridgeIds.has(String(n.id)))
+          .map((n: any) => String(n.display_name || n.id))}
+        agentHubNames={(q.data?.nodes || [])
+          .filter((n: any) => q.hubIds.has(String(n.id)))
+          .map((n: any) => String(n.display_name || n.id))}
+        agentGaps={q.gaps as any}
+        onSendToChat={onSendToChat}
+        model={model}
         onRerun={onRerun}
         onClose={onClose}
         selectedDisplay={selectedDisplay}

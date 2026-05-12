@@ -483,6 +483,74 @@ async def entity_search(body: EntitySearchRequest = Body(...)) -> EntitySearchRe
     return EntitySearchResponse(chunks=chunks, neo4j_enabled=True)
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# Pt 7 — Query refinement (HyDE-style suggestion helper for the Graph Query
+# sidebar tab). Idempotent: same question + corpus_ids + model → same result
+# every call. Cached in MongoDB with 24h TTL. LLM is called with temperature=0
+# for determinism on cache misses.
+# ────────────────────────────────────────────────────────────────────────────
+
+
+@discovery_router.post(
+    "/refine",
+    summary="HyDE-style query refinement — returns alternative / opposing / "
+            "related phrasings of a user's draft question. Idempotent.",
+)
+async def graph_refine_query(body: dict = Body(...)) -> dict:
+    """Refine a user's draft question into a small structured suggestion set.
+
+    Body:
+      question:        str          required
+      corpus_ids:      list[str]    required (used for cache key)
+      model:           str          optional (LLM model override)
+      force_refresh:   bool         optional (bypass cache, default false)
+
+    Returns:
+      {
+        idempotency_key: str,
+        cached:          bool,
+        result: {
+          alternative_phrasings: [...],
+          opposing_framings:     [...],
+          related_questions:     [...]
+        },
+        error?:          str  // present only when LLM failed or returned non-JSON
+      }
+
+    Idempotency: re-calling with the same (question, corpus_ids, model)
+    returns the cached suggestions without hitting the LLM. 24h TTL.
+    """
+    db = ingestion_service.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+
+    question = str(body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+
+    corpus_ids = body.get("corpus_ids") or []
+    if not isinstance(corpus_ids, list):
+        raise HTTPException(status_code=400, detail="corpus_ids must be a list")
+    corpus_ids = [str(c) for c in corpus_ids]
+
+    model = body.get("model")
+    force_refresh = bool(body.get("force_refresh") or False)
+
+    from services.query_refinement import refine_query, ensure_cache_index
+
+    # Idempotency cache + TTL index — ensure_cache_index is a no-op after
+    # first call, so this stays cheap.
+    await ensure_cache_index(db)
+
+    return await refine_query(
+        db=db,
+        question=question,
+        corpus_ids=corpus_ids,
+        model=model if isinstance(model, str) else None,
+        force_refresh=force_refresh,
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Mission Control — cross-domain synthesis (P3)
 # ═══════════════════════════════════════════════════════════════════════════

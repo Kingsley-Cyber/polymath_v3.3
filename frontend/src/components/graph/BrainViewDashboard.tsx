@@ -18,16 +18,45 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
+  Loader2,
   PanelRightClose,
   PanelRightOpen,
   Pause,
   Play,
+  Search,
+  Send,
+  Sparkles,
   X,
   Zap,
 } from "lucide-react";
 
-import type { CacheStatus } from "../../lib/api";
+import type {
+  CacheStatus,
+  EntityRow,
+  RefinementResult,
+} from "../../lib/api";
+import * as api from "../../lib/api";
 import { cleanBookLabel } from "../../lib/label-utils";
+
+export type DashboardTab = "brain" | "agent" | "graph-query";
+
+// Entity types surfaced in the Graph Query tab dropdown. Aligned with
+// backend ENTITY_TYPE_PRIORITY + the frontend PolymathNodeKind union.
+const ENTITY_TYPE_OPTIONS = [
+  "",
+  "Person",
+  "Organization",
+  "Location",
+  "Event",
+  "Concept",
+  "Method",
+  "Product",
+  "Document",
+  "Rule",
+  "Law",
+  "Artifact",
+  "TimeReference",
+];
 
 // Sidebar width bounds when expanded. Default mirrors Pt 5 baseline (320).
 const SIDEBAR_MIN_W = 240;
@@ -74,6 +103,27 @@ export interface BrainViewDashboardProps {
   // Pt 6: settle-restart-after-drag toggle
   settleAfterDrag: boolean;
   onSettleAfterDragToggle: () => void;
+
+  // Pt 7: tab + Agent / Graph Query content
+  activeTab: DashboardTab;
+  onActiveTabChange: (t: DashboardTab) => void;
+  // Agent Search tab — wired to existing useQueryGraph state
+  agentQuery: string;
+  onAgentQueryChange: (q: string) => void;
+  onAgentRun: () => void;
+  agentPhase: "idle" | "loading" | "ready" | "error";
+  agentError?: string | null;
+  agentSynthesisMarkdown?: string | null;
+  agentSeedNames?: string[];
+  agentBridgeNames?: string[];
+  agentHubNames?: string[];
+  agentGaps?: Array<{ entity_a_name?: string; entity_b_name?: string }>;
+  // Pt 7: Graph Query tab — send a refined chip back to the chat
+  onSendToChat?: (text: string) => void;
+  /** Pt 7: model id passed through to api.refineQuery so the LLM call
+   *  uses the user's currently-selected chat model. Required by LiteLLM
+   *  (rejects empty model in the body). */
+  model?: string;
 
   // Query mode actions
   onRerun?: () => void;
@@ -126,6 +176,20 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     onMaxBridgesPerBookChange,
     settleAfterDrag,
     onSettleAfterDragToggle,
+    activeTab,
+    onActiveTabChange,
+    agentQuery,
+    onAgentQueryChange,
+    onAgentRun,
+    agentPhase,
+    agentError,
+    agentSynthesisMarkdown,
+    agentSeedNames,
+    agentBridgeNames,
+    agentHubNames,
+    agentGaps,
+    onSendToChat,
+    model,
     onRerun,
     onClose,
     selectedDisplay,
@@ -232,10 +296,90 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
         </button>
       </div>
 
+      {/* Pt 7: Tab strip — three tabs. State is fully owned by the parent
+          so each tab can independently retain its own content (query input,
+          entity-type filter, refinement chips) when the user flips back. */}
+      <div className="flex items-stretch border-b border-zinc-900 px-1.5 pt-1.5 pb-0 gap-0.5">
+        {([
+          { id: "brain", label: "Brain" },
+          { id: "agent", label: "Agent Search" },
+          { id: "graph-query", label: "Graph Query" },
+        ] as const).map((t) => (
+          <button
+            key={t.id}
+            onClick={() => onActiveTabChange(t.id)}
+            className={`flex-1 px-2 py-1.5 font-mono text-[10px] uppercase tracking-widest border-b-2 transition-colors ${
+              activeTab === t.id
+                ? "border-amber-500/60 bg-amber-500/5 text-amber-300"
+                : "border-transparent text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       {/* Scrollable body */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
-        {/* Drill stack — brain mode only */}
-        {mode === "brain" && drillStack.length > 0 && (
+        {/* Persistent Selection card — visible on every tab, sits at the
+            top of the body so clicking a node in the canvas always shows
+            its info regardless of which tab is active. */}
+        {selectedDisplay && (
+          <section>
+            <SectionLabel>Selection</SectionLabel>
+            <div className="rounded-lg border border-violet-500/30 bg-violet-500/10 p-2">
+              <div className="flex items-start gap-2 min-w-0">
+                <div className="h-2 w-2 animate-pulse rounded-full bg-violet-300 mt-1.5 shrink-0" />
+                <div
+                  className="font-mono text-xs text-zinc-100 break-words min-w-0 flex-1"
+                  title={selectedDisplay.display_name}
+                >
+                  {cleanBookLabel(selectedDisplay.display_name) ||
+                    selectedDisplay.display_name}
+                </div>
+              </div>
+              {selectedDisplay.source_corpora.length > 0 && (
+                <div className="mt-1 ml-4 text-[10px] text-zinc-400 font-mono">
+                  {selectedDisplay.source_corpora.length} corpora
+                </div>
+              )}
+              <button
+                onClick={onClearSelection}
+                className="mt-2 ml-4 rounded px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-white/10 hover:text-zinc-50"
+              >
+                Clear
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* Pt 7: Agent Search tab content — input + run + synthesis chips. */}
+        {activeTab === "agent" && (
+          <AgentSearchTab
+            query={agentQuery}
+            onChange={onAgentQueryChange}
+            onRun={onAgentRun}
+            phase={agentPhase}
+            error={agentError}
+            synthesisMarkdown={agentSynthesisMarkdown}
+            seedNames={agentSeedNames}
+            bridgeNames={agentBridgeNames}
+            hubNames={agentHubNames}
+            gaps={agentGaps}
+          />
+        )}
+
+        {/* Pt 7: Graph Query tab content — entity-type search + HyDE refinement. */}
+        {activeTab === "graph-query" && (
+          <GraphQueryTab
+            corpusIds={corpusIds}
+            onSendToChat={onSendToChat}
+            model={model}
+          />
+        )}
+
+        {/* Brain tab — original sections (only render when this tab is active). */}
+        {activeTab === "brain" && mode === "brain" && drillStack.length > 0 && (
           <section>
             <SectionLabel>Drill Stack</SectionLabel>
             <div className="space-y-1 font-mono text-xs text-zinc-300">
@@ -266,42 +410,11 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           </section>
         )}
 
-        {/* Selection — when a node is selected.
-            Pt 5 polish: long raw filenames distilled to "Title — Author"
-            via cleanBookLabel so the selection card doesn't blow out
-            the sidebar's column width. Full raw filename kept on the
-            element's `title` attribute for tooltip on hover. */}
-        {selectedDisplay && (
-          <section>
-            <SectionLabel>Selection</SectionLabel>
-            <div className="rounded-lg border border-violet-500/30 bg-violet-500/10 p-2">
-              <div className="flex items-start gap-2 min-w-0">
-                <div className="h-2 w-2 animate-pulse rounded-full bg-violet-300 mt-1.5 shrink-0" />
-                <div
-                  className="font-mono text-xs text-zinc-100 break-words min-w-0 flex-1"
-                  title={selectedDisplay.display_name}
-                >
-                  {cleanBookLabel(selectedDisplay.display_name) ||
-                    selectedDisplay.display_name}
-                </div>
-              </div>
-              {selectedDisplay.source_corpora.length > 0 && (
-                <div className="mt-1 ml-4 text-[10px] text-zinc-400 font-mono">
-                  {selectedDisplay.source_corpora.length} corpora
-                </div>
-              )}
-              <button
-                onClick={onClearSelection}
-                className="mt-2 ml-4 rounded px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-white/10 hover:text-zinc-50"
-              >
-                Clear
-              </button>
-            </div>
-          </section>
-        )}
+        {/* Selection card was moved up — now persistent across all tabs
+            (rendered above the tab-specific content). Removed from here. */}
 
-        {/* Cache health — brain mode */}
-        {mode === "brain" && cacheWarming.length > 0 && (
+        {/* Cache health — brain mode + brain tab only */}
+        {activeTab === "brain" && mode === "brain" && cacheWarming.length > 0 && (
           <section>
             <SectionLabel>Cache Health</SectionLabel>
             <ul className="space-y-1.5 font-mono text-[11px]">
@@ -335,8 +448,8 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           </section>
         )}
 
-        {/* Color mode — brain mode */}
-        {mode === "brain" && (
+        {/* Color mode — brain tab only */}
+        {activeTab === "brain" && mode === "brain" && (
           <section>
             <SectionLabel>Color Scheme</SectionLabel>
             <button
@@ -351,9 +464,9 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           </section>
         )}
 
-        {/* Pt 6: Bridge filters — brain mode only. Sliders let the user
+        {/* Pt 6: Bridge filters — brain tab only. Sliders let the user
             tune which bridges show without re-fetching from backend. */}
-        {mode === "brain" && (
+        {activeTab === "brain" && mode === "brain" && (
           <section>
             <SectionLabel>Bridge Filters</SectionLabel>
             <div className="space-y-2.5">
@@ -401,8 +514,10 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           </section>
         )}
 
-        {/* Layout controls */}
-        <section>
+        {/* Layout controls — brain tab only (Agent + Graph Query tabs have
+            their own panels and don't need pan/zoom-style layout knobs). */}
+        {activeTab === "brain" && (
+          <section>
           <SectionLabel>Layout</SectionLabel>
           <button
             onClick={isLayoutRunning ? stopLayout : startLayout}
@@ -438,9 +553,11 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
             restart layout briefly after releasing a node
           </div>
         </section>
+        )}
 
-        {/* Query mode actions */}
-        {mode === "query" && onRerun && (
+        {/* Query mode actions — only on the legacy Query mode (different
+            from the new Agent Search tab which has its own re-run button). */}
+        {activeTab === "brain" && mode === "query" && onRerun && (
           <section>
             <SectionLabel>Actions</SectionLabel>
             <button
@@ -465,5 +582,424 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
         </div>
       )}
     </aside>
+  );
+}
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Pt 7 — Agent Search tab. Wraps the existing query state that
+// GraphViewer's useQueryGraph already manages; the tab just renders
+// the input + the result summary chips. Heavy lifting (extracting
+// seeds, expanding subgraph, calling discover for synthesis) happens
+// in the parent so this component is purely presentational.
+// ────────────────────────────────────────────────────────────────────────
+
+interface AgentSearchTabProps {
+  query: string;
+  onChange: (q: string) => void;
+  onRun: () => void;
+  phase: "idle" | "loading" | "ready" | "error";
+  error?: string | null;
+  synthesisMarkdown?: string | null;
+  seedNames?: string[];
+  bridgeNames?: string[];
+  hubNames?: string[];
+  gaps?: Array<{ entity_a_name?: string; entity_b_name?: string }>;
+}
+
+function AgentSearchTab(props: AgentSearchTabProps) {
+  const {
+    query,
+    onChange,
+    onRun,
+    phase,
+    error,
+    synthesisMarkdown,
+    seedNames,
+    bridgeNames,
+    hubNames,
+    gaps,
+  } = props;
+  const canRun = phase !== "loading" && query.trim().length > 0;
+  return (
+    <>
+      <section>
+        <SectionLabel>Ask</SectionLabel>
+        <textarea
+          rows={3}
+          value={query}
+          onChange={(e) => onChange(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canRun) {
+              e.preventDefault();
+              onRun();
+            }
+          }}
+          placeholder="What does my library think about…?"
+          className="w-full resize-none rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-amber-700 focus:outline-none"
+        />
+        <button
+          onClick={onRun}
+          disabled={!canRun}
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest text-zinc-300 hover:border-amber-700 hover:text-amber-300 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {phase === "loading" ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin" /> running…
+            </>
+          ) : (
+            <>
+              <Zap className="h-3 w-3" /> run query
+            </>
+          )}
+        </button>
+        <div className="mt-1 text-[10px] text-zinc-500 font-mono">
+          {phase === "loading"
+            ? "synthesizing across corpora…"
+            : phase === "error"
+              ? error || "error"
+              : "⌘/Ctrl + Enter to run"}
+        </div>
+      </section>
+
+      {phase === "ready" && synthesisMarkdown && (
+        <section>
+          <SectionLabel>Synthesis</SectionLabel>
+          <div className="rounded border border-zinc-800 bg-[#0d0d14] px-2.5 py-2 text-xs text-zinc-200 whitespace-pre-wrap leading-relaxed max-h-[40vh] overflow-y-auto">
+            {synthesisMarkdown}
+          </div>
+        </section>
+      )}
+
+      {phase === "ready" && (seedNames?.length || 0) > 0 && (
+        <ChipList label="Seeds" items={seedNames || []} tone="cyan" />
+      )}
+      {phase === "ready" && (bridgeNames?.length || 0) > 0 && (
+        <ChipList label="Bridges" items={bridgeNames || []} tone="violet" />
+      )}
+      {phase === "ready" && (hubNames?.length || 0) > 0 && (
+        <ChipList label="Hubs" items={hubNames || []} tone="amber" />
+      )}
+      {phase === "ready" && (gaps?.length || 0) > 0 && (
+        <section>
+          <SectionLabel>Gaps</SectionLabel>
+          <ul className="space-y-1 font-mono text-[11px] text-zinc-400">
+            {(gaps || []).slice(0, 8).map((g, i) => (
+              <li key={i}>
+                <span className="text-zinc-200">{g.entity_a_name || "?"}</span>{" "}
+                ↔{" "}
+                <span className="text-zinc-200">{g.entity_b_name || "?"}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </>
+  );
+}
+
+function ChipList({
+  label,
+  items,
+  tone,
+}: {
+  label: string;
+  items: string[];
+  tone: "cyan" | "violet" | "amber";
+}) {
+  const toneClass =
+    tone === "cyan"
+      ? "border-cyan-700/40 bg-cyan-500/5 text-cyan-200"
+      : tone === "violet"
+        ? "border-violet-700/40 bg-violet-500/5 text-violet-200"
+        : "border-amber-700/40 bg-amber-500/5 text-amber-200";
+  return (
+    <section>
+      <SectionLabel>{label}</SectionLabel>
+      <div className="flex flex-wrap gap-1.5">
+        {items.slice(0, 12).map((name, i) => (
+          <span
+            key={`${name}-${i}`}
+            className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${toneClass}`}
+            title={name}
+          >
+            {name.length > 28 ? name.slice(0, 28) + "…" : name}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Pt 7 — Graph Query tab. Two subsections in one tab:
+//   (a) Entity-type search — filter the corpora's entities by type +
+//       substring. Results are clickable; clicking sends to chat or
+//       just shows the entity name (TODO: highlight on canvas).
+//   (b) HyDE refinement — user types a draft question, hits "Refine",
+//       gets back three structured chip lists (alternative phrasings /
+//       opposing framings / related questions). Each chip is clickable
+//       → sends that text to the chat for actual RAG retrieval.
+//
+// Idempotency: api.refineQuery() + api.searchEntities() implement
+// in-flight dedupe + short-TTL result cache so double-clicks, rapid
+// re-runs, and re-mounts never duplicate LLM calls or DB reads.
+// ────────────────────────────────────────────────────────────────────────
+
+interface GraphQueryTabProps {
+  corpusIds: string[];
+  onSendToChat?: (text: string) => void;
+  model?: string;
+}
+
+function GraphQueryTab({ corpusIds, onSendToChat, model }: GraphQueryTabProps) {
+  // Entity-type search state.
+  const [entityType, setEntityType] = useState<string>("");
+  const [entityQ, setEntityQ] = useState<string>("");
+  const [entityRows, setEntityRows] = useState<EntityRow[]>([]);
+  const [entityLoading, setEntityLoading] = useState(false);
+  const [entityError, setEntityError] = useState<string | null>(null);
+
+  // HyDE refinement state.
+  const [refineQ, setRefineQ] = useState<string>("");
+  const [refineLoading, setRefineLoading] = useState(false);
+  const [refineError, setRefineError] = useState<string | null>(null);
+  const [refinement, setRefinement] = useState<RefinementResult | null>(null);
+  const [refineCached, setRefineCached] = useState<boolean>(false);
+
+  const primaryCorpus = corpusIds[0]; // entity search is per-corpus; use first selected
+
+  // Debounce entity search by 300ms so each keystroke doesn't fire a request.
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!primaryCorpus) {
+      setEntityRows([]);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setEntityLoading(true);
+      setEntityError(null);
+      try {
+        // searchEntities is idempotent: in-flight dedupe + 30s result cache,
+        // so even rapid typing or repeated mounts cost at most one round trip.
+        const rows = await api.searchEntities(primaryCorpus, {
+          q: entityQ,
+          entityType,
+          limit: 30,
+        });
+        setEntityRows(rows);
+      } catch (e: any) {
+        setEntityError(String(e?.message || e));
+      } finally {
+        setEntityLoading(false);
+      }
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [primaryCorpus, entityQ, entityType]);
+
+  const canRefine =
+    !refineLoading && refineQ.trim().length > 0 && corpusIds.length > 0;
+  // Re-run the cache-key derivation whenever model changes — pinning to
+  // the comment so the linter knows model is intentionally read here.
+  void model;
+  const runRefine = useCallback(async () => {
+    if (!canRefine) return;
+    setRefineLoading(true);
+    setRefineError(null);
+    try {
+      // refineQuery is idempotent: backend has a 24h Mongo cache keyed by
+      // hash(question + corpus_ids + model); frontend layers a 5min
+      // result cache + in-flight dedupe on top of that. Net effect:
+      // the same question never triggers two LLM calls.
+      const res = await api.refineQuery(refineQ, corpusIds, model);
+      setRefinement(res.result);
+      setRefineCached(res.cached);
+      if (res.error) setRefineError(res.error);
+    } catch (e: any) {
+      setRefineError(String(e?.message || e));
+    } finally {
+      setRefineLoading(false);
+    }
+  }, [canRefine, refineQ, corpusIds]);
+
+  return (
+    <>
+      {/* ── A. Entity-type search ──────────────────────────────────── */}
+      <section>
+        <SectionLabel>Entity Search</SectionLabel>
+        <div className="flex gap-1.5">
+          <select
+            value={entityType}
+            onChange={(e) => setEntityType(e.currentTarget.value)}
+            className="shrink-0 rounded border border-zinc-800 bg-[#0d0d14] px-1.5 py-1 font-mono text-[10px] uppercase tracking-widest text-zinc-300"
+            title="Filter by entity type"
+          >
+            {ENTITY_TYPE_OPTIONS.map((t) => (
+              <option key={t} value={t}>
+                {t || "any"}
+              </option>
+            ))}
+          </select>
+          <div className="relative flex-1 min-w-0">
+            <Search className="pointer-events-none absolute left-1.5 top-1.5 h-3 w-3 text-zinc-600" />
+            <input
+              value={entityQ}
+              onChange={(e) => setEntityQ(e.currentTarget.value)}
+              placeholder="search…"
+              className="w-full rounded border border-zinc-800 bg-[#0d0d14] pl-6 pr-2 py-1 font-mono text-[11px] text-zinc-100 placeholder:text-zinc-600 focus:border-amber-700 focus:outline-none"
+            />
+          </div>
+        </div>
+        <div className="mt-2 max-h-56 overflow-y-auto rounded border border-zinc-900">
+          {entityLoading && (
+            <div className="px-2 py-2 text-[10px] text-zinc-500 font-mono">
+              searching…
+            </div>
+          )}
+          {entityError && (
+            <div className="px-2 py-2 text-[10px] text-rose-300 font-mono">
+              {entityError}
+            </div>
+          )}
+          {!entityLoading && !entityError && entityRows.length === 0 && (
+            <div className="px-2 py-2 text-[10px] text-zinc-600 font-mono">
+              no entities match
+            </div>
+          )}
+          {entityRows.map((row) => (
+            <button
+              key={row.entity_id}
+              onClick={() => onSendToChat?.(row.display_name)}
+              className="flex w-full items-center justify-between gap-2 border-b border-zinc-900 px-2 py-1 text-left last:border-b-0 hover:bg-zinc-900/50"
+              title={`${row.entity_type} · ${row.mention_count} mentions`}
+            >
+              <span className="font-mono text-xs text-zinc-100 truncate">
+                {row.display_name}
+              </span>
+              <span className="shrink-0 font-mono text-[9px] uppercase tracking-widest text-zinc-500">
+                {row.entity_type}
+              </span>
+            </button>
+          ))}
+        </div>
+        {!primaryCorpus && (
+          <div className="mt-1 text-[10px] text-zinc-600 font-mono">
+            select a corpus to search entities
+          </div>
+        )}
+      </section>
+
+      {/* ── B. HyDE refinement ─────────────────────────────────────── */}
+      <section>
+        <SectionLabel>Refine a Question</SectionLabel>
+        <textarea
+          rows={3}
+          value={refineQ}
+          onChange={(e) => setRefineQ(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canRefine) {
+              e.preventDefault();
+              runRefine();
+            }
+          }}
+          placeholder="Type a draft question — get alternative phrasings, opposing framings, and related questions."
+          className="w-full resize-none rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-amber-700 focus:outline-none"
+        />
+        <button
+          onClick={runRefine}
+          disabled={!canRefine}
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest text-zinc-300 hover:border-amber-700 hover:text-amber-300 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {refineLoading ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin" /> refining…
+            </>
+          ) : (
+            <>
+              <Sparkles className="h-3 w-3" /> refine
+            </>
+          )}
+        </button>
+        <div className="mt-1 text-[10px] text-zinc-500 font-mono">
+          {refineError
+            ? refineError
+            : refineCached
+              ? "served from cache (idempotent) · ⌘/Ctrl + Enter"
+              : "fresh result will cache for 24h · ⌘/Ctrl + Enter"}
+        </div>
+      </section>
+
+      {refinement && (
+        <>
+          {refinement.alternative_phrasings.length > 0 && (
+            <RefineChips
+              label="Alternative Phrasings"
+              tone="cyan"
+              items={refinement.alternative_phrasings}
+              onPick={onSendToChat}
+            />
+          )}
+          {refinement.opposing_framings.length > 0 && (
+            <RefineChips
+              label="Opposing Framings"
+              tone="rose"
+              items={refinement.opposing_framings}
+              onPick={onSendToChat}
+            />
+          )}
+          {refinement.related_questions.length > 0 && (
+            <RefineChips
+              label="Related Questions"
+              tone="emerald"
+              items={refinement.related_questions}
+              onPick={onSendToChat}
+            />
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+function RefineChips({
+  label,
+  tone,
+  items,
+  onPick,
+}: {
+  label: string;
+  tone: "cyan" | "rose" | "emerald";
+  items: string[];
+  onPick?: (text: string) => void;
+}) {
+  const toneClass =
+    tone === "cyan"
+      ? "border-cyan-700/40 bg-cyan-500/5 text-cyan-100 hover:border-cyan-500/70 hover:bg-cyan-500/15"
+      : tone === "rose"
+        ? "border-rose-700/40 bg-rose-500/5 text-rose-100 hover:border-rose-500/70 hover:bg-rose-500/15"
+        : "border-emerald-700/40 bg-emerald-500/5 text-emerald-100 hover:border-emerald-500/70 hover:bg-emerald-500/15";
+  return (
+    <section>
+      <SectionLabel>{label}</SectionLabel>
+      <ul className="space-y-1.5">
+        {items.map((text, i) => (
+          <li key={`${i}-${text.slice(0, 24)}`}>
+            <button
+              onClick={() => onPick?.(text)}
+              disabled={!onPick}
+              className={`group flex w-full items-start gap-2 rounded border px-2 py-1.5 text-left font-mono text-[11px] leading-relaxed transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${toneClass}`}
+              title={onPick ? "Send to chat" : "Read-only"}
+            >
+              <Send className="h-3 w-3 shrink-0 mt-0.5 opacity-50 group-hover:opacity-100 transition-opacity" />
+              <span className="flex-1 min-w-0 break-words">{text}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
