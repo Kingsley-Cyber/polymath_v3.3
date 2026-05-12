@@ -15,6 +15,7 @@
  * width. Pt 5 of the Brain View refactor.
  */
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
   PanelRightClose,
@@ -26,6 +27,12 @@ import {
 } from "lucide-react";
 
 import type { CacheStatus } from "../../lib/api";
+import { cleanBookLabel } from "../../lib/label-utils";
+
+// Sidebar width bounds when expanded. Default mirrors Pt 5 baseline (320).
+const SIDEBAR_MIN_W = 240;
+const SIDEBAR_MAX_W = 560;
+const SIDEBAR_DEFAULT_W = 320;
 
 export type DrillFrame = { docId: string; label: string };
 
@@ -112,6 +119,46 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     stopLayout,
   } = props;
 
+  // Drag-resize state. Persists across renders within the component
+  // instance; resets to default when the dashboard remounts.
+  const [width, setWidth] = useState<number>(SIDEBAR_DEFAULT_W);
+  const draggingRef = useRef<{ startX: number; startW: number } | null>(null);
+
+  const onResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingRef.current = { startX: e.clientX, startW: width };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [width]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const drag = draggingRef.current;
+      if (!drag) return;
+      // Dragging LEFT (toward canvas) widens; dragging RIGHT narrows —
+      // because the sidebar is on the right, the handle sits at the
+      // sidebar's left edge.
+      const delta = drag.startX - e.clientX;
+      const next = Math.max(
+        SIDEBAR_MIN_W,
+        Math.min(SIDEBAR_MAX_W, drag.startW + delta),
+      );
+      setWidth(next);
+    };
+    const onUp = () => {
+      if (!draggingRef.current) return;
+      draggingRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
   if (collapsed) {
     return (
       <aside className="z-30 flex h-full w-9 flex-col items-center border-l border-zinc-900 bg-[#0a0a0e]/95 backdrop-blur">
@@ -131,7 +178,20 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
   }
 
   return (
-    <aside className="z-30 flex h-full w-[320px] flex-col border-l border-zinc-900 bg-[#0a0a0e]/95 backdrop-blur">
+    <aside
+      className="relative z-30 flex h-full shrink-0 flex-col border-l border-zinc-900 bg-[#0a0a0e]/95 backdrop-blur"
+      style={{ width: `${width}px` }}
+    >
+      {/* Drag handle — 6px hot-zone on the sidebar's left edge. Hover
+          shows the col-resize cursor; drag adjusts width within
+          [SIDEBAR_MIN_W, SIDEBAR_MAX_W]. */}
+      <div
+        onMouseDown={onResizeStart}
+        className="group absolute -left-1 top-0 z-40 h-full w-1.5 cursor-col-resize"
+        title="Drag to resize"
+      >
+        <div className="h-full w-px bg-zinc-900 transition-colors group-hover:bg-amber-500/40 group-active:bg-amber-500/70" />
+      </div>
       {/* Header strip */}
       <div className="flex items-start justify-between border-b border-zinc-900 px-3 py-2.5">
         <div>
@@ -190,15 +250,23 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           </section>
         )}
 
-        {/* Selection — when a node is selected */}
+        {/* Selection — when a node is selected.
+            Pt 5 polish: long raw filenames distilled to "Title — Author"
+            via cleanBookLabel so the selection card doesn't blow out
+            the sidebar's column width. Full raw filename kept on the
+            element's `title` attribute for tooltip on hover. */}
         {selectedDisplay && (
           <section>
             <SectionLabel>Selection</SectionLabel>
             <div className="rounded-lg border border-violet-500/30 bg-violet-500/10 p-2">
-              <div className="flex items-start gap-2">
+              <div className="flex items-start gap-2 min-w-0">
                 <div className="h-2 w-2 animate-pulse rounded-full bg-violet-300 mt-1.5 shrink-0" />
-                <div className="font-mono text-xs text-zinc-100 break-words">
-                  {selectedDisplay.display_name}
+                <div
+                  className="font-mono text-xs text-zinc-100 break-words min-w-0 flex-1"
+                  title={selectedDisplay.display_name}
+                >
+                  {cleanBookLabel(selectedDisplay.display_name) ||
+                    selectedDisplay.display_name}
                 </div>
               </div>
               {selectedDisplay.source_corpora.length > 0 && (
