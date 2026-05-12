@@ -57,6 +57,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from config import get_settings
 from services.llm import llm_service
+from services.graph.graph_query import extract_query_entities
 
 _settings = get_settings()
 
@@ -194,6 +195,55 @@ def _coerce_suggestions(raw: dict[str, Any]) -> dict[str, list[str]]:
     return out
 
 
+async def _extract_entities_for_question(
+    *,
+    neo4j_driver: Any,
+    question: str,
+    corpus_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Pt 7b: run extract_query_entities across all selected corpora and
+    merge by entity_id (sum mention_counts, take max score).
+
+    Pure Cypher per corpus — no LLM, no cache (the corpus state can change
+    between calls so results must reflect the live graph). Cheap enough
+    that we run it on every /refine call alongside the cached HyDE
+    suggestions, so the Graph Query tab gets "what entities are in this
+    question's neighborhood?" for free.
+    """
+    if not neo4j_driver or not question.strip() or not corpus_ids:
+        return []
+    merged: dict[str, dict[str, Any]] = {}
+    for cid in corpus_ids:
+        try:
+            rows = await extract_query_entities(question, cid, neo4j_driver)
+        except Exception as exc:
+            logger.warning(
+                "extract_query_entities failed for corpus=%s: %s", cid, exc
+            )
+            continue
+        for r in rows:
+            eid = str(r.get("entity_id") or "")
+            if not eid:
+                continue
+            cur = merged.get(eid)
+            if cur is None:
+                merged[eid] = dict(r)
+                merged[eid].setdefault("source_corpora", [cid])
+            else:
+                cur["mention_count"] = (cur.get("mention_count") or 0) + (
+                    r.get("mention_count") or 0
+                )
+                if (r.get("score") or 0) > (cur.get("score") or 0):
+                    cur["score"] = r.get("score")
+                sc = cur.get("source_corpora") or []
+                if cid not in sc:
+                    sc.append(cid)
+                cur["source_corpora"] = sc
+    out = list(merged.values())
+    out.sort(key=lambda x: (x.get("score") or 0, x.get("mention_count") or 0), reverse=True)
+    return out[:24]
+
+
 async def refine_query(
     *,
     db: AsyncIOMotorDatabase,
@@ -204,16 +254,24 @@ async def refine_query(
     api_key: str | None = None,
     extra_params: dict[str, Any] | None = None,
     force_refresh: bool = False,
+    neo4j_driver: Any = None,
 ) -> dict[str, Any]:
-    """Return {idempotency_key, cached: bool, result: {...three lists...}}.
+    """Return {idempotency_key, cached, result, entities}.
 
-    Cache flow:
+    Pt 7b: now also calls extract_query_entities (pure Cypher, fast) to
+    surface the entities already in the corpus that match the question.
+    Entity list is NEVER cached — corpus state changes invalidate it.
+    Refinement (LLM call) keeps its 24h Mongo cache.
+
+    Cache flow (refinement only):
       1. Compute idempotency_key from inputs.
       2. If `force_refresh=False`: try Mongo cache hit. On hit → return cached.
       3. On miss: call LLM (temperature=0) with structured JSON prompt.
       4. Parse, coerce, validate.
       5. Write to Mongo (upsert keyed by idempotency_key — concurrent safe).
       6. Return result.
+
+    Entity extraction runs on every call regardless of cache.
     """
     normalized = _normalize_question(question)
     if not normalized:
@@ -225,15 +283,30 @@ async def refine_query(
                 "opposing_framings": [],
                 "related_questions": [],
             },
+            "entities": [],
             "error": "empty question",
         }
 
     key = compute_idempotency_key(normalized, corpus_ids, model)
 
+    # Pt 7b: entity extraction runs on every call (fast Cypher, no cache).
+    # Even cache HITS for refinement should re-extract entities so the user
+    # sees fresh graph state.
+    entities = await _extract_entities_for_question(
+        neo4j_driver=neo4j_driver,
+        question=normalized,
+        corpus_ids=corpus_ids,
+    )
+
     if not force_refresh:
         cached = await get_cached_refinement(db, key)
         if cached:
-            return {"idempotency_key": key, "cached": True, "result": cached}
+            return {
+                "idempotency_key": key,
+                "cached": True,
+                "result": cached,
+                "entities": entities,
+            }
 
     # Cache miss → LLM call. temperature=0 so the response is deterministic
     # for the (question, model) pair — even before the cache lands, two
@@ -263,6 +336,7 @@ async def refine_query(
             "idempotency_key": key,
             "cached": False,
             "result": _coerce_suggestions({}),
+            "entities": entities,
             "error": f"llm_unavailable: {exc}",
         }
 
@@ -287,9 +361,15 @@ async def refine_query(
             "idempotency_key": key,
             "cached": False,
             "result": _coerce_suggestions({}),
+            "entities": entities,
             "error": "llm_returned_non_json",
         }
 
     result = _coerce_suggestions(parsed)
     await _store_cached_refinement(db, key, normalized, corpus_ids, model, result)
-    return {"idempotency_key": key, "cached": False, "result": result}
+    return {
+        "idempotency_key": key,
+        "cached": False,
+        "result": result,
+        "entities": entities,
+    }

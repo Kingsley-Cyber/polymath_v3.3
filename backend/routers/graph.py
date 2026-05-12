@@ -542,12 +542,18 @@ async def graph_refine_query(body: dict = Body(...)) -> dict:
     # first call, so this stays cheap.
     await ensure_cache_index(db)
 
+    # Pt 7b: pass the Neo4j driver so refine_query can ALSO run
+    # extract_query_entities and surface in-corpus entities matched against
+    # the question (independent of the cached LLM refinement).
+    neo4j = ingestion_service.neo4j_driver  # may be None — refine_query tolerates
+
     return await refine_query(
         db=db,
         question=question,
         corpus_ids=corpus_ids,
         model=model if isinstance(model, str) else None,
         force_refresh=force_refresh,
+        neo4j_driver=neo4j,
     )
 
 

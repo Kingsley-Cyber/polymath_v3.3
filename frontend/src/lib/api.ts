@@ -1798,10 +1798,27 @@ export interface RefinementResult {
   related_questions: string[];
 }
 
+/** Pt 7b: entity extracted from the user's question via
+ *  extract_query_entities Cypher. Same shape as EntityRow (below) so the
+ *  frontend can reuse rendering helpers. `score` is a rough token-overlap
+ *  metric the backend computes; clients can use it to sort. */
+export interface ExtractedEntity {
+  entity_id: string;
+  display_name: string;
+  entity_type: string;
+  mention_count: number;
+  score?: number;
+  source_corpora?: string[];
+}
+
 export interface RefineQueryResponse {
   idempotency_key: string;
   cached: boolean;
   result: RefinementResult;
+  /** Pt 7b: in-corpus entities matched against the question. NOT cached
+   *  on the backend (recomputed every call) so it reflects fresh graph
+   *  state. Returned even on cache hits for the refinement portion. */
+  entities: ExtractedEntity[];
   error?: string;
 }
 

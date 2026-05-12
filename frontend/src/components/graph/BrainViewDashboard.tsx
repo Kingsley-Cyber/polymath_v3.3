@@ -23,7 +23,6 @@ import {
   PanelRightOpen,
   Pause,
   Play,
-  Search,
   Send,
   Sparkles,
   X,
@@ -32,31 +31,13 @@ import {
 
 import type {
   CacheStatus,
-  EntityRow,
+  ExtractedEntity,
   RefinementResult,
 } from "../../lib/api";
 import * as api from "../../lib/api";
 import { cleanBookLabel } from "../../lib/label-utils";
 
 export type DashboardTab = "brain" | "agent" | "graph-query";
-
-// Entity types surfaced in the Graph Query tab dropdown. Aligned with
-// backend ENTITY_TYPE_PRIORITY + the frontend PolymathNodeKind union.
-const ENTITY_TYPE_OPTIONS = [
-  "",
-  "Person",
-  "Organization",
-  "Location",
-  "Event",
-  "Concept",
-  "Method",
-  "Product",
-  "Document",
-  "Rule",
-  "Law",
-  "Artifact",
-  "TimeReference",
-];
 
 // Sidebar width bounds when expanded. Default mirrors Pt 5 baseline (320).
 const SIDEBAR_MIN_W = 240;
@@ -754,58 +735,25 @@ interface GraphQueryTabProps {
 }
 
 function GraphQueryTab({ corpusIds, onSendToChat, model }: GraphQueryTabProps) {
-  // Entity-type search state.
-  const [entityType, setEntityType] = useState<string>("");
-  const [entityQ, setEntityQ] = useState<string>("");
-  const [entityRows, setEntityRows] = useState<EntityRow[]>([]);
-  const [entityLoading, setEntityLoading] = useState(false);
-  const [entityError, setEntityError] = useState<string | null>(null);
-
-  // HyDE refinement state.
+  // Pt 7b: ONE input drives both HyDE refinement AND entity extraction.
+  // The question is the all-purpose entity search — typing it surfaces:
+  //   • alternative / opposing / related question chips (LLM-driven, cached)
+  //   • entities mentioned in the question that already exist in the corpus
+  //     (pure Cypher, recomputed every call)
+  // A second optional filter at the bottom (entity-type pill row) lets the
+  // user narrow the entity list without re-running.
   const [refineQ, setRefineQ] = useState<string>("");
   const [refineLoading, setRefineLoading] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
   const [refinement, setRefinement] = useState<RefinementResult | null>(null);
   const [refineCached, setRefineCached] = useState<boolean>(false);
-
-  const primaryCorpus = corpusIds[0]; // entity search is per-corpus; use first selected
-
-  // Debounce entity search by 300ms so each keystroke doesn't fire a request.
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!primaryCorpus) {
-      setEntityRows([]);
-      return;
-    }
-    debounceRef.current = setTimeout(async () => {
-      setEntityLoading(true);
-      setEntityError(null);
-      try {
-        // searchEntities is idempotent: in-flight dedupe + 30s result cache,
-        // so even rapid typing or repeated mounts cost at most one round trip.
-        const rows = await api.searchEntities(primaryCorpus, {
-          q: entityQ,
-          entityType,
-          limit: 30,
-        });
-        setEntityRows(rows);
-      } catch (e: any) {
-        setEntityError(String(e?.message || e));
-      } finally {
-        setEntityLoading(false);
-      }
-    }, 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [primaryCorpus, entityQ, entityType]);
+  const [entities, setEntities] = useState<ExtractedEntity[]>([]);
+  const [entityTypeFilter, setEntityTypeFilter] = useState<string>("");
 
   const canRefine =
     !refineLoading && refineQ.trim().length > 0 && corpusIds.length > 0;
-  // Re-run the cache-key derivation whenever model changes — pinning to
-  // the comment so the linter knows model is intentionally read here.
-  void model;
+  void model; // marker for the lint that model affects the cache key
+
   const runRefine = useCallback(async () => {
     if (!canRefine) return;
     setRefineLoading(true);
@@ -813,10 +761,16 @@ function GraphQueryTab({ corpusIds, onSendToChat, model }: GraphQueryTabProps) {
     try {
       // refineQuery is idempotent: backend has a 24h Mongo cache keyed by
       // hash(question + corpus_ids + model); frontend layers a 5min
-      // result cache + in-flight dedupe on top of that. Net effect:
-      // the same question never triggers two LLM calls.
+      // result cache + in-flight dedupe on top of that. Same question
+      // never triggers two LLM calls.
+      //
+      // Pt 7b: the same response now ALSO carries `entities` extracted
+      // from the question via extract_query_entities (pure Cypher, not
+      // cached on the backend so it reflects live graph state). One
+      // round trip, two outputs.
       const res = await api.refineQuery(refineQ, corpusIds, model);
       setRefinement(res.result);
+      setEntities(res.entities || []);
       setRefineCached(res.cached);
       if (res.error) setRefineError(res.error);
     } catch (e: any) {
@@ -824,78 +778,25 @@ function GraphQueryTab({ corpusIds, onSendToChat, model }: GraphQueryTabProps) {
     } finally {
       setRefineLoading(false);
     }
-  }, [canRefine, refineQ, corpusIds]);
+  }, [canRefine, refineQ, corpusIds, model]);
+
+  // Filter the surfaced entities by type pill (client-side, no extra fetch).
+  const filteredEntities =
+    entityTypeFilter === ""
+      ? entities
+      : entities.filter((e) => e.entity_type === entityTypeFilter);
+
+  // Build the distinct entity-type pill row from what came back.
+  const typesSeen = Array.from(
+    new Set(entities.map((e) => e.entity_type).filter(Boolean)),
+  );
 
   return (
     <>
-      {/* ── A. Entity-type search ──────────────────────────────────── */}
+      {/* ── A. Question input — THE primary interaction. Drives both
+              HyDE refinement and entity extraction in one call. ──── */}
       <section>
-        <SectionLabel>Entity Search</SectionLabel>
-        <div className="flex gap-1.5">
-          <select
-            value={entityType}
-            onChange={(e) => setEntityType(e.currentTarget.value)}
-            className="shrink-0 rounded border border-zinc-800 bg-[#0d0d14] px-1.5 py-1 font-mono text-[10px] uppercase tracking-widest text-zinc-300"
-            title="Filter by entity type"
-          >
-            {ENTITY_TYPE_OPTIONS.map((t) => (
-              <option key={t} value={t}>
-                {t || "any"}
-              </option>
-            ))}
-          </select>
-          <div className="relative flex-1 min-w-0">
-            <Search className="pointer-events-none absolute left-1.5 top-1.5 h-3 w-3 text-zinc-600" />
-            <input
-              value={entityQ}
-              onChange={(e) => setEntityQ(e.currentTarget.value)}
-              placeholder="search…"
-              className="w-full rounded border border-zinc-800 bg-[#0d0d14] pl-6 pr-2 py-1 font-mono text-[11px] text-zinc-100 placeholder:text-zinc-600 focus:border-amber-700 focus:outline-none"
-            />
-          </div>
-        </div>
-        <div className="mt-2 max-h-56 overflow-y-auto rounded border border-zinc-900">
-          {entityLoading && (
-            <div className="px-2 py-2 text-[10px] text-zinc-500 font-mono">
-              searching…
-            </div>
-          )}
-          {entityError && (
-            <div className="px-2 py-2 text-[10px] text-rose-300 font-mono">
-              {entityError}
-            </div>
-          )}
-          {!entityLoading && !entityError && entityRows.length === 0 && (
-            <div className="px-2 py-2 text-[10px] text-zinc-600 font-mono">
-              no entities match
-            </div>
-          )}
-          {entityRows.map((row) => (
-            <button
-              key={row.entity_id}
-              onClick={() => onSendToChat?.(row.display_name)}
-              className="flex w-full items-center justify-between gap-2 border-b border-zinc-900 px-2 py-1 text-left last:border-b-0 hover:bg-zinc-900/50"
-              title={`${row.entity_type} · ${row.mention_count} mentions`}
-            >
-              <span className="font-mono text-xs text-zinc-100 truncate">
-                {row.display_name}
-              </span>
-              <span className="shrink-0 font-mono text-[9px] uppercase tracking-widest text-zinc-500">
-                {row.entity_type}
-              </span>
-            </button>
-          ))}
-        </div>
-        {!primaryCorpus && (
-          <div className="mt-1 text-[10px] text-zinc-600 font-mono">
-            select a corpus to search entities
-          </div>
-        )}
-      </section>
-
-      {/* ── B. HyDE refinement ─────────────────────────────────────── */}
-      <section>
-        <SectionLabel>Refine a Question</SectionLabel>
+        <SectionLabel>Ask a Question</SectionLabel>
         <textarea
           rows={3}
           value={refineQ}
@@ -906,7 +807,7 @@ function GraphQueryTab({ corpusIds, onSendToChat, model }: GraphQueryTabProps) {
               runRefine();
             }
           }}
-          placeholder="Type a draft question — get alternative phrasings, opposing framings, and related questions."
+          placeholder="Type a question. Get alternative phrasings + the entities your library already has on this topic."
           className="w-full resize-none rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-amber-700 focus:outline-none"
         />
         <button
@@ -916,11 +817,11 @@ function GraphQueryTab({ corpusIds, onSendToChat, model }: GraphQueryTabProps) {
         >
           {refineLoading ? (
             <>
-              <Loader2 className="h-3 w-3 animate-spin" /> refining…
+              <Loader2 className="h-3 w-3 animate-spin" /> running…
             </>
           ) : (
             <>
-              <Sparkles className="h-3 w-3" /> refine
+              <Sparkles className="h-3 w-3" /> run
             </>
           )}
         </button>
@@ -928,11 +829,12 @@ function GraphQueryTab({ corpusIds, onSendToChat, model }: GraphQueryTabProps) {
           {refineError
             ? refineError
             : refineCached
-              ? "served from cache (idempotent) · ⌘/Ctrl + Enter"
-              : "fresh result will cache for 24h · ⌘/Ctrl + Enter"}
+              ? "refinement from cache · entities fresh · ⌘/Ctrl + Enter"
+              : "fresh run · cached 24h · ⌘/Ctrl + Enter"}
         </div>
       </section>
 
+      {/* ── B. HyDE chip groups (when refined) ─────────────────────── */}
       {refinement && (
         <>
           {refinement.alternative_phrasings.length > 0 && (
@@ -960,6 +862,74 @@ function GraphQueryTab({ corpusIds, onSendToChat, model }: GraphQueryTabProps) {
             />
           )}
         </>
+      )}
+
+      {/* ── C. Entities surfaced from the question ─────────────────── */}
+      {entities.length > 0 && (
+        <section>
+          <SectionLabel>
+            Entities in Your Library ({filteredEntities.length}/{entities.length})
+          </SectionLabel>
+          {typesSeen.length > 1 && (
+            <div className="mb-2 flex flex-wrap gap-1">
+              <button
+                onClick={() => setEntityTypeFilter("")}
+                className={`rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest ${
+                  entityTypeFilter === ""
+                    ? "border-amber-500/60 bg-amber-500/10 text-amber-200"
+                    : "border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                all
+              </button>
+              {typesSeen.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setEntityTypeFilter(t)}
+                  className={`rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest ${
+                    entityTypeFilter === t
+                      ? "border-amber-500/60 bg-amber-500/10 text-amber-200"
+                      : "border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="max-h-72 overflow-y-auto rounded border border-zinc-900">
+            {filteredEntities.map((row) => (
+              <button
+                key={row.entity_id}
+                onClick={() => onSendToChat?.(row.display_name)}
+                className="flex w-full items-center justify-between gap-2 border-b border-zinc-900 px-2 py-1 text-left last:border-b-0 hover:bg-zinc-900/50"
+                title={`${row.entity_type} · ${row.mention_count} mentions${
+                  row.score != null ? ` · score ${row.score.toFixed(1)}` : ""
+                }`}
+              >
+                <span className="font-mono text-xs text-zinc-100 truncate">
+                  {row.display_name}
+                </span>
+                <span className="shrink-0 font-mono text-[9px] uppercase tracking-widest text-zinc-500">
+                  {row.entity_type}
+                </span>
+              </button>
+            ))}
+            {filteredEntities.length === 0 && (
+              <div className="px-2 py-2 text-[10px] text-zinc-600 font-mono">
+                no entities match this filter
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {!refinement && !refineLoading && (
+        <div className="text-[11px] text-zinc-600 font-mono">
+          Type a question above and run it. You'll get suggested phrasings +
+          the actual entities your library has on the topic. Click any chip
+          or entity to send it to the chat.
+        </div>
       )}
     </>
   );
