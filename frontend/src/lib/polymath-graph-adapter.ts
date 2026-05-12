@@ -33,11 +33,14 @@ import {
 // Pt 5: cap how many outbound bridges any single book can show. Prevents
 // hub-books from creating a web that swamps the canvas; long-tail bridges
 // drop off the visible graph but stay in the payload.
-const MAX_BRIDGES_PER_BOOK = 3;
+// Pt 6: now overridable via BuildOpts.maxBridgesPerBook so the dashboard
+// slider can dial the cap up/down at runtime.
+const MAX_BRIDGES_PER_BOOK_DEFAULT = 3;
 
 // Pt 5: hide bridges below this shared-entity strength at the top-level
 // brain view. They're still in the API response — just not rendered.
-const MIN_BRIDGE_STRENGTH = 2;
+// Pt 6: overridable via BuildOpts.minBridgeStrength.
+const MIN_BRIDGE_STRENGTH_DEFAULT = 2;
 
 export interface SigmaNodeAttributes {
   x: number;
@@ -131,6 +134,10 @@ export interface BuildOpts {
   /** Optional cluster centroids per concept_id / domain key, lets the
    *  adapter cluster-position entity-level nodes around their parent. */
   clusterCenters?: Map<string, { x: number; y: number }>;
+  /** Pt 6: dashboard-controlled bridge filter knobs. Override the static
+   *  Pt 5 defaults so the user can crank the slider live. */
+  minBridgeStrength?: number;
+  maxBridgesPerBook?: number;
 }
 
 // Convert "#rrggbb" → "rgba(r,g,b,a)". Lets us bake opacity into edge
@@ -356,9 +363,18 @@ export function polymathToGraphology(
     else otherLinks.push(rel);
   }
   // Filter weak bridges then sort each source's outbound bridges by weight
-  // desc, keeping only the top MAX_BRIDGES_PER_BOOK.
+  // desc, keeping only the top MAX_BRIDGES_PER_BOOK. Pt 6: thresholds are
+  // now overridable via opts so the dashboard slider can crank them live.
+  const minStrength =
+    typeof opts.minBridgeStrength === "number"
+      ? opts.minBridgeStrength
+      : MIN_BRIDGE_STRENGTH_DEFAULT;
+  const maxPerBook =
+    typeof opts.maxBridgesPerBook === "number"
+      ? opts.maxBridgesPerBook
+      : MAX_BRIDGES_PER_BOOK_DEFAULT;
   const strongBridges = bridgeLinks.filter(
-    (b) => (b.weight ?? 0) >= MIN_BRIDGE_STRENGTH,
+    (b) => (b.weight ?? 0) >= minStrength,
   );
   const perSourceCount = new Map<string, number>();
   strongBridges.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
@@ -366,7 +382,7 @@ export function polymathToGraphology(
   for (const rel of strongBridges) {
     const s = String(rel.source);
     const used = perSourceCount.get(s) ?? 0;
-    if (used >= MAX_BRIDGES_PER_BOOK) continue;
+    if (used >= maxPerBook) continue;
     cappedBridges.push(rel);
     perSourceCount.set(s, used + 1);
   }

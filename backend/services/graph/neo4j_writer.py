@@ -854,14 +854,22 @@ async def _upsert_document(
     ghost_b_success_rate: float | None = None,
     ghost_b_extracted: int | None = None,
     ghost_b_total: int | None = None,
+    dominant_family: str | None = None,
+    dominant_entity_type: str | None = None,
 ) -> None:
     """Create or update a rich :Document anchor.
 
     Every Document is a cluster anchor by definition — `is_cluster_anchor=true`
     is set unconditionally so the Brain View Cypher (`WHERE d.is_cluster_anchor
     = true`) finds it without a separate backfill. The anchor stores enough
-    metadata (filename, chunk_count, ghost_b health) for the front-end to
-    render book cards without a MongoDB round-trip.
+    metadata (filename, chunk_count, ghost_b health, dominant_family) for the
+    front-end to render book cards without a MongoDB round-trip.
+
+    Pt 6 scaling fix: dominant_family + dominant_entity_type are pre-computed
+    at ingest and mirrored to the Document node. The Brain View Cypher reads
+    these properties directly instead of an OPTIONAL MATCH traversal across
+    every chunk×entity per anchor — drops a 100M-edge-walk query to a single
+    indexed node read at 2000+ books.
 
     Optional kwargs use COALESCE on update so a partial caller (e.g. fresh
     ingest before ghost_b_metrics is computed) does not nuke values written
@@ -887,7 +895,9 @@ async def _upsert_document(
                 d.schema_lens_id = coalesce($schema_lens_id, d.schema_lens_id),
                 d.ghost_b_success_rate = coalesce($ghost_b_success_rate, d.ghost_b_success_rate),
                 d.ghost_b_extracted = coalesce($ghost_b_extracted, d.ghost_b_extracted),
-                d.ghost_b_total = coalesce($ghost_b_total, d.ghost_b_total)
+                d.ghost_b_total = coalesce($ghost_b_total, d.ghost_b_total),
+                d.dominant_family = coalesce($dominant_family, d.dominant_family),
+                d.dominant_entity_type = coalesce($dominant_entity_type, d.dominant_entity_type)
             """,
             doc_id=doc_id,
             corpus_id=corpus_id,
@@ -902,7 +912,47 @@ async def _upsert_document(
             ghost_b_success_rate=ghost_b_success_rate,
             ghost_b_extracted=ghost_b_extracted,
             ghost_b_total=ghost_b_total,
+            dominant_family=dominant_family,
+            dominant_entity_type=dominant_entity_type,
         )
+
+
+def summarize_dominant_facets(
+    extraction_results: list[ExtractionResult],
+) -> tuple[str | None, str | None]:
+    """Pt 6 scaling fix: compute dominant_canonical_family + dominant_entity_type
+    once at ingest from the in-memory ExtractionResult list — same logic the
+    Brain View Cypher used to run as an OPTIONAL MATCH per query.
+
+    Strategy: tally every entity mention from every chunk; return the most
+    frequent canonical_family + the most frequent primary_entity_type.
+    Returns `(None, None)` when no entities were extracted (e.g. empty doc).
+
+    The returned values feed `_upsert_document(dominant_family=...,
+    dominant_entity_type=...)` so the Brain View Cypher can read the
+    properties directly off the Document node instead of walking the
+    chunk→entity graph for every anchor on every query.
+    """
+    from collections import Counter
+
+    family_counter: Counter[str] = Counter()
+    type_counter: Counter[str] = Counter()
+    for result in extraction_results:
+        for entity in result.entities:
+            canonical = canonicalize_entity_name(entity.canonical_name)
+            if not canonical:
+                continue
+            primary_type = resolve_primary_entity_type(canonical, [entity.entity_type])
+            ontology = resolve_ontology_metadata(canonical, primary_type)
+            family = ontology.get("canonical_family")
+            if family:
+                family_counter[family] += 1
+            if primary_type:
+                type_counter[primary_type] += 1
+
+    dominant_family = family_counter.most_common(1)[0][0] if family_counter else None
+    dominant_entity_type = type_counter.most_common(1)[0][0] if type_counter else None
+    return dominant_family, dominant_entity_type
 
 
 async def update_document_anchor_metrics(
@@ -915,6 +965,8 @@ async def update_document_anchor_metrics(
     ghost_b_extracted: int | None = None,
     ghost_b_total: int | None = None,
     schema_lens_id: str | None = None,
+    dominant_family: str | None = None,
+    dominant_entity_type: str | None = None,
 ) -> None:
     """Late-bound update of metrics on an existing :Document anchor.
 
@@ -922,6 +974,9 @@ async def update_document_anchor_metrics(
     so the Brain View can render `success_rate` badges without a MongoDB
     lookup. No-op if the Document node does not exist yet (a fresh upsert
     would have created it via `_upsert_document`).
+
+    Pt 6: also writes pre-computed dominant_family + dominant_entity_type
+    so the Brain View Cypher can skip the chunk→entity OPTIONAL MATCH.
     """
     async with driver.session() as session:
         await session.run(
@@ -933,7 +988,9 @@ async def update_document_anchor_metrics(
                 d.ghost_b_success_rate = coalesce($ghost_b_success_rate, d.ghost_b_success_rate),
                 d.ghost_b_extracted = coalesce($ghost_b_extracted, d.ghost_b_extracted),
                 d.ghost_b_total = coalesce($ghost_b_total, d.ghost_b_total),
-                d.schema_lens_id = coalesce($schema_lens_id, d.schema_lens_id)
+                d.schema_lens_id = coalesce($schema_lens_id, d.schema_lens_id),
+                d.dominant_family = coalesce($dominant_family, d.dominant_family),
+                d.dominant_entity_type = coalesce($dominant_entity_type, d.dominant_entity_type)
             """,
             doc_id=doc_id,
             chunk_count=int(chunk_count) if chunk_count is not None else None,
@@ -948,6 +1005,8 @@ async def update_document_anchor_metrics(
                 int(ghost_b_total) if ghost_b_total is not None else None
             ),
             schema_lens_id=schema_lens_id,
+            dominant_family=dominant_family,
+            dominant_entity_type=dominant_entity_type,
         )
 
 
@@ -1140,6 +1199,11 @@ async def write_document_graph(
     """
     # 1. Document node — rich anchor MERGE with cluster-anchor flags.
     chunk_ids = list(dict.fromkeys([*(all_chunk_ids or []), *[r.chunk_id for r in extraction_results]]))
+    # Pt 6 scaling fix: compute dominant family + entity type here from the
+    # in-memory extraction results, write to the Document node. Brain View
+    # Cypher then reads the property instead of OPTIONAL MATCH'ing every
+    # chunk × entity per anchor per query.
+    dom_family, dom_type = summarize_dominant_facets(extraction_results)
     await _upsert_document(
         driver,
         doc_id,
@@ -1155,6 +1219,8 @@ async def write_document_graph(
         ghost_b_success_rate=ghost_b_success_rate,
         ghost_b_extracted=ghost_b_extracted,
         ghost_b_total=ghost_b_total,
+        dominant_family=dom_family,
+        dominant_entity_type=dom_type,
     )
 
     # 2. Build batched payloads from the extraction results. `chunk_ids` was

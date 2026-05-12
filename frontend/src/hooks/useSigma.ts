@@ -78,6 +78,9 @@ interface UseSigmaOptions {
   onStageClick?: () => void;
   onDoubleClickNode?: (nodeId: string) => void;
   highlightedNodeIds?: Set<string>;
+  /** Pt 6: when true, FA2 restarts for ~5s after a node-drag release so
+   *  the neighbors re-arrange around the new position. Default false. */
+  settleAfterDrag?: boolean;
 }
 
 interface UseSigmaReturn {
@@ -493,7 +496,17 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
           g.removeNodeAttribute(dragged, "highlighted");
         }
       }
+      const wasDragging = isDraggingRef.current;
       draggedRef.current = null;
+      // Pt 6: settle-restart-after-drag. When the user opts in, restart
+      // FA2 for ~5s after a real drag release so neighbors re-arrange
+      // around the new node position. Default OFF so position sticks.
+      if (wasDragging && optionsRef.current.settleAfterDrag) {
+        const g = graphRef.current;
+        if (g && g.order > 0 && !layoutRef.current) {
+          runLayoutForRef.current?.(g, 5000);
+        }
+      }
     };
     mouseCaptor.on("mouseup", release);
     mouseCaptor.on("mouseleave", release);
@@ -513,8 +526,14 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
   }, [setSelectedNode]);
 
   // Run ForceAtlas2 layout — verbatim from GitNexus useSigma.
-  const runLayout = useCallback(
-    (graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>) => {
+  // Pt 6: refactored to take an optional duration override so the
+  // settle-after-drag handler can request a short 5s settle while the
+  // initial-load callsite uses the tier-based default duration.
+  const runLayoutFor = useCallback(
+    (
+      graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>,
+      durationOverrideMs?: number,
+    ) => {
       const nodeCount = graph.order;
       if (nodeCount === 0) return;
 
@@ -536,7 +555,7 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       layout.start();
       setIsLayoutRunning(true);
 
-      const duration = getLayoutDuration(nodeCount);
+      const duration = durationOverrideMs ?? getLayoutDuration(nodeCount);
       layoutTimeoutRef.current = setTimeout(() => {
         if (layoutRef.current) {
           layoutRef.current.stop();
@@ -553,6 +572,21 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
     },
     [],
   );
+
+  // Back-compat alias — tier-based default duration when no override given.
+  const runLayout = useCallback(
+    (graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>) => {
+      runLayoutFor(graph);
+    },
+    [runLayoutFor],
+  );
+
+  // Stash the latest runLayoutFor in a ref so the drag-release handler
+  // (created inside the init useEffect) can call it without going stale.
+  const runLayoutForRef = useRef<typeof runLayoutFor | null>(null);
+  useEffect(() => {
+    runLayoutForRef.current = runLayoutFor;
+  }, [runLayoutFor]);
 
   const setGraph = useCallback(
     (newGraph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>) => {

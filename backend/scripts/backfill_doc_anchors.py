@@ -77,6 +77,41 @@ async def _amain(corpus_ids: list[str] | None, dry_run: bool) -> int:
 
     from services.graph.neo4j_writer import _upsert_document  # noqa: WPS437
 
+    # Pt 6 add-on: compute dominant_family / dominant_entity_type per doc
+    # from the live Neo4j Entity graph (since the in-memory ExtractionResult
+    # list isn't available for legacy docs). Single Cypher per doc.
+    from neo4j import AsyncDriver as _D  # noqa: F401 (typing reuse)
+
+    async def _compute_dominant_facets(
+        nd, doc_id: str
+    ) -> tuple[str | None, str | None]:
+        async with nd.session() as session:
+            r = await session.run(
+                """
+                MATCH (d:Document {doc_id: $doc_id})-[:HAS_CHUNK]->(c:Chunk)-[:MENTIONS]->(e:Entity)
+                WITH e.canonical_family AS fam, e.primary_entity_type AS typ
+                WITH collect(fam) AS fams, collect(typ) AS types
+                RETURN
+                  // Top non-null canonical_family by frequency
+                  reduce(top = '', f IN [x IN fams WHERE x IS NOT NULL] |
+                    CASE WHEN size([y IN [x IN fams WHERE x IS NOT NULL] WHERE y = f]) >
+                              size([y IN [x IN fams WHERE x IS NOT NULL] WHERE y = top]) THEN f
+                         ELSE top END) AS dom_family,
+                  // Top non-null primary_entity_type
+                  reduce(top = '', t IN [x IN types WHERE x IS NOT NULL] |
+                    CASE WHEN size([y IN [x IN types WHERE x IS NOT NULL] WHERE y = t]) >
+                              size([y IN [x IN types WHERE x IS NOT NULL] WHERE y = top]) THEN t
+                         ELSE top END) AS dom_type
+                """,
+                doc_id=doc_id,
+            )
+            row = await r.single()
+            if not row:
+                return None, None
+            df = row.get("dom_family") or None
+            dt = row.get("dom_type") or None
+            return (df or None, dt or None)
+
     query = {}
     if corpus_ids:
         query["corpus_id"] = {"$in": corpus_ids}
@@ -126,15 +161,22 @@ async def _amain(corpus_ids: list[str] | None, dry_run: bool) -> int:
             or metrics.get("schema_lens")
         )
 
+        # Pt 6 add-on: compute dominant_family / dominant_entity_type for
+        # this legacy doc by querying its Entity graph in Neo4j (since the
+        # in-memory ExtractionResult list isn't available for backfill).
+        dom_family, dom_type = await _compute_dominant_facets(driver, doc_id)
+
         if dry_run:
             logger.info(
-                "[dry] doc=%s corpus=%s filename=%s chunks=%d parents=%d success=%s",
+                "[dry] doc=%s corpus=%s filename=%s chunks=%d parents=%d success=%s fam=%s type=%s",
                 doc_id[:12],
                 corpus_id[:8],
                 doc.get("filename"),
                 chunk_count,
                 parent_count,
                 success_rate,
+                dom_family,
+                dom_type,
             )
             continue
 
@@ -151,6 +193,8 @@ async def _amain(corpus_ids: list[str] | None, dry_run: bool) -> int:
             ghost_b_success_rate=float(success_rate) if success_rate is not None else None,
             ghost_b_extracted=int(extracted) if extracted is not None else None,
             ghost_b_total=int(total) if total is not None else None,
+            dominant_family=dom_family,
+            dominant_entity_type=dom_type,
         )
         written += 1
         if written % 50 == 0:

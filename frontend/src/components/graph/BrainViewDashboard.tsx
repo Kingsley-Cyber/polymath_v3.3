@@ -65,6 +65,16 @@ export interface BrainViewDashboardProps {
   colorMode: "community" | "corpus";
   onColorModeToggle: () => void;
 
+  // Pt 6: bridge filter knobs (brain mode only)
+  minBridgeStrength: number;
+  onMinBridgeStrengthChange: (n: number) => void;
+  maxBridgesPerBook: number;
+  onMaxBridgesPerBookChange: (n: number) => void;
+
+  // Pt 6: settle-restart-after-drag toggle
+  settleAfterDrag: boolean;
+  onSettleAfterDragToggle: () => void;
+
   // Query mode actions
   onRerun?: () => void;
 
@@ -110,6 +120,12 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     onRebuild,
     colorMode,
     onColorModeToggle,
+    minBridgeStrength,
+    onMinBridgeStrengthChange,
+    maxBridgesPerBook,
+    onMaxBridgesPerBookChange,
+    settleAfterDrag,
+    onSettleAfterDragToggle,
     onRerun,
     onClose,
     selectedDisplay,
@@ -335,6 +351,56 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           </section>
         )}
 
+        {/* Pt 6: Bridge filters — brain mode only. Sliders let the user
+            tune which bridges show without re-fetching from backend. */}
+        {mode === "brain" && (
+          <section>
+            <SectionLabel>Bridge Filters</SectionLabel>
+            <div className="space-y-2.5">
+              <label className="block">
+                <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-widest text-zinc-400">
+                  <span>min strength</span>
+                  <span className="text-amber-300">{minBridgeStrength}</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={20}
+                  step={1}
+                  value={minBridgeStrength}
+                  onChange={(e) =>
+                    onMinBridgeStrengthChange(Number(e.currentTarget.value))
+                  }
+                  className="mt-1 w-full accent-amber-400"
+                />
+                <div className="mt-0.5 text-[10px] text-zinc-500 font-mono">
+                  hide bridges with fewer shared entities
+                </div>
+              </label>
+              <label className="block">
+                <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-widest text-zinc-400">
+                  <span>top-N per book</span>
+                  <span className="text-amber-300">{maxBridgesPerBook}</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={10}
+                  step={1}
+                  value={maxBridgesPerBook}
+                  onChange={(e) =>
+                    onMaxBridgesPerBookChange(Number(e.currentTarget.value))
+                  }
+                  className="mt-1 w-full accent-amber-400"
+                />
+                <div className="mt-0.5 text-[10px] text-zinc-500 font-mono">
+                  keep only strongest N bridges per book
+                </div>
+              </label>
+            </div>
+          </section>
+        )}
+
         {/* Layout controls */}
         <section>
           <SectionLabel>Layout</SectionLabel>
@@ -356,6 +422,21 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
               </>
             )}
           </button>
+          {/* Pt 6: settle-after-drag toggle. When ON, FA2 re-runs for ~5s
+              after the user releases a dragged book so neighbors re-arrange
+              around the new position. */}
+          <label className="mt-2 flex items-center gap-2 font-mono text-[11px] text-zinc-300 cursor-pointer">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 accent-amber-400 cursor-pointer"
+              checked={settleAfterDrag}
+              onChange={onSettleAfterDragToggle}
+            />
+            <span>re-settle after drag</span>
+          </label>
+          <div className="mt-1 ml-5 text-[10px] text-zinc-500 font-mono">
+            restart layout briefly after releasing a node
+          </div>
         </section>
 
         {/* Query mode actions */}

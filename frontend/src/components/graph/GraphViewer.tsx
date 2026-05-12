@@ -36,6 +36,7 @@ import {
 } from "../../lib/polymath-graph-adapter";
 import { cleanBookLabel } from "../../lib/label-utils";
 import { BrainViewDashboard } from "./BrainViewDashboard";
+import { GalaxyBackground } from "./GalaxyBackground";
 
 // Pt 4 polish: adaptive top-N forceLabel. At 16 books, hardcoded N=20
 // meant every label rendered every frame → overlap storm. The new
@@ -463,6 +464,13 @@ export function GraphViewer({
   const [hoveredName, setHoveredName] = useState<string | null>(null);
   // Pt 5: right sidebar dashboard collapse state.
   const [dashboardCollapsed, setDashboardCollapsed] = useState(false);
+  // Pt 6: bridge filter knobs (driven by dashboard sliders). Defaults match
+  // the Pt 5 hardcoded behavior so the canvas looks the same on load.
+  const [minBridgeStrength, setMinBridgeStrength] = useState(2);
+  const [maxBridgesPerBook, setMaxBridgesPerBook] = useState(3);
+  // Pt 6: re-settle FA2 layout briefly after the user releases a dragged
+  // node. Off by default; user toggles in the Layout section of the dashboard.
+  const [settleAfterDrag, setSettleAfterDrag] = useState(false);
   const drillStackRef = useRef(drillStack);
   drillStackRef.current = drillStack;
 
@@ -507,6 +515,7 @@ export function GraphViewer({
       setHoveredName(found ? String(found.display_name || id) : id);
     },
     onDoubleClickNode: handleDoubleClickNode,
+    settleAfterDrag,
   });
 
   // Push new data into sigma when it lands.
@@ -520,10 +529,12 @@ export function GraphViewer({
       seedIds,
       hubIds,
       bridgeIds,
+      minBridgeStrength,
+      maxBridgesPerBook,
     });
     sigma.setGraph(newGraph);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run on data change
-  }, [data, mode, q.seedIds, q.hubIds, q.bridgeIds]);
+  }, [data, mode, q.seedIds, q.hubIds, q.bridgeIds, minBridgeStrength, maxBridgesPerBook]);
 
   // Apply colorMode toggle without rebuilding graph.
   useEffect(() => {
@@ -541,6 +552,8 @@ export function GraphViewer({
       seedIds,
       hubIds,
       bridgeIds,
+      minBridgeStrength,
+      maxBridgesPerBook,
     });
     sigma.setGraph(newGraph);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- triggered only on colorMode flip
@@ -632,10 +645,21 @@ export function GraphViewer({
 
       {/* Sigma canvas + optional prose pane */}
       <div className="absolute inset-0 flex">
-        <div
-          ref={sigma.containerRef}
-          className="flex-1 min-w-0 cursor-grab active:cursor-grabbing"
-        />
+        <div className="relative flex-1 min-w-0">
+          {/* Pt 6: Galaxy background canvas — dust particles + family
+              nebulae + Book-anchor glow halos, all painted in lockstep
+              with sigma via its `afterRender` event. Sits BEHIND sigma's
+              own canvas (z-0) with pointer-events:none so it never
+              swallows clicks. */}
+          <GalaxyBackground
+            sigmaRef={sigma.sigmaRef as any}
+            isLayoutRunning={sigma.isLayoutRunning}
+          />
+          <div
+            ref={sigma.containerRef}
+            className="absolute inset-0 z-10 cursor-grab active:cursor-grabbing"
+          />
+        </div>
         {mode === "query" && q.synthesis && (
           <div className="w-[40%] min-w-[320px] max-w-[640px] border-l border-zinc-900 bg-[#08080d]/90 backdrop-blur overflow-y-auto z-10">
             <div className="p-4 space-y-3">
@@ -697,7 +721,7 @@ export function GraphViewer({
             </div>
           </div>
         )}
-      </div>
+      </div>{/* end absolute inset-0 flex */}
 
       {/* Bottom-right control cluster — same layout as GitNexus */}
       <div className="absolute right-4 bottom-4 z-20 flex flex-col gap-1 pointer-events-auto">
@@ -770,6 +794,12 @@ export function GraphViewer({
         onColorModeToggle={() =>
           setColorMode((m) => (m === "community" ? "corpus" : "community"))
         }
+        minBridgeStrength={minBridgeStrength}
+        onMinBridgeStrengthChange={setMinBridgeStrength}
+        maxBridgesPerBook={maxBridgesPerBook}
+        onMaxBridgesPerBookChange={setMaxBridgesPerBook}
+        settleAfterDrag={settleAfterDrag}
+        onSettleAfterDragToggle={() => setSettleAfterDrag((v) => !v)}
         onRerun={onRerun}
         onClose={onClose}
         selectedDisplay={selectedDisplay}

@@ -52,24 +52,39 @@ WHERE d.corpus_id IN $corpus_ids
 OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
 WITH d, count(DISTINCT c) AS actual_chunk_count
 
-// 2. Dominant canonical_family per anchor (Pt 5 — drives Book node color
-//    in the frontend galaxy view). Counts mentions of each family across
-//    every chunk in the book, picks the most-mentioned family.
+// 2. Pt 6 scaling fix: dominant_family + dominant_entity_type are now
+//    pre-computed at ingest and stored on the :Document node. Read them
+//    DIRECTLY off the node — one indexed property lookup per anchor —
+//    instead of OPTIONAL MATCH'ing every Chunk → Entity per anchor on
+//    every query. This drops a O(books × chunks × entities) traversal
+//    to O(books). Brain View now scales linearly.
+//
+//    LEGACY FALLBACK: if a Document was ingested before Pt 6, its
+//    dominant_* properties are null. The fallback OPTIONAL MATCH legs
+//    below run only for those rows (gated via d.dominant_* IS NULL
+//    inside the WHERE) so legacy docs still get a color until the
+//    backfill catches up. Final pick happens at RETURN via COALESCE.
 OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c_fam:Chunk)-[:MENTIONS]->(e_fam:Entity)
-WHERE e_fam.canonical_family IS NOT NULL
-WITH d, actual_chunk_count, e_fam.canonical_family AS fam_name, count(*) AS fam_n
+WHERE d.dominant_family IS NULL
+  AND e_fam.canonical_family IS NOT NULL
+WITH d, actual_chunk_count,
+     e_fam.canonical_family AS fam_name, count(*) AS fam_n
   ORDER BY fam_n DESC
-WITH d, actual_chunk_count, collect(fam_name)[0] AS dominant_family
+WITH d, actual_chunk_count,
+     collect(fam_name)[0] AS computed_family
 
-// 3. Dominant primary_entity_type per anchor (Pt 5 — fallback when no
-//    canonical_family is set on most entities, gives an entity-type tint).
 OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c_typ:Chunk)-[:MENTIONS]->(e_typ:Entity)
-WHERE e_typ.primary_entity_type IS NOT NULL
-WITH d, actual_chunk_count, dominant_family,
+WHERE d.dominant_entity_type IS NULL
+  AND e_typ.primary_entity_type IS NOT NULL
+WITH d, actual_chunk_count, computed_family,
      e_typ.primary_entity_type AS type_name, count(*) AS type_n
   ORDER BY type_n DESC
-WITH d, actual_chunk_count, dominant_family,
-     collect(type_name)[0] AS dominant_entity_type
+WITH d, actual_chunk_count, computed_family,
+     collect(type_name)[0] AS computed_type
+
+WITH d, actual_chunk_count,
+     coalesce(d.dominant_family, computed_family) AS dominant_family,
+     coalesce(d.dominant_entity_type, computed_type) AS dominant_entity_type
 
 // 4. Bridges to other selected anchors via shared entities + RELATES_TO.
 //    Pt 5 — also collects the relation_family list per bridge so we can
