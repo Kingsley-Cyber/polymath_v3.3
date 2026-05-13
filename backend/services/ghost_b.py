@@ -449,6 +449,27 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
     "prevents": ("contradicts", False),
     "replaces": ("overrides", False),
     "supersedes": ("overrides", False),
+    # Pt 8a — audit-identified LLM-emitted predicates that previously got
+    # demoted to `related_to` because they were outside the 30-slot schema.
+    # Aliasing recovers the relational intent without expanding the schema
+    # (expansion would break the inline-vocab path per GOTCHAS §42 since the
+    # cap is exactly 30 with the sentinel). Mapping rationale:
+    #   measures      → detects     (sensor measures = detects values)
+    #   studies       → references  (a book studies/cites a topic)
+    #   correlates_with → overlaps  (statistical / temporal co-occurrence)
+    #   similar_to    → derived_from (X similar to Y ≈ X based on Y)
+    #   influences    → causes      (partial / soft causation)
+    #   affects       → causes      (induces change)
+    #   reduces       → causes      (directional causation; sign loss is acceptable)
+    #   published_by  → created_by  (work created by publisher)
+    "measures": ("detects", False),
+    "studies": ("references", False),
+    "correlates_with": ("overlaps", False),
+    "similar_to": ("derived_from", False),
+    "influences": ("causes", False),
+    "affects": ("causes", False),
+    "reduces": ("causes", False),
+    "published_by": ("created_by", False),
 }
 
 # Whitespace collapse for the Phase B evidence gate. Both the chunk text and
@@ -2014,7 +2035,80 @@ def _parse(
             continue
         kept_relations.append(r)
     relations = kept_relations
+
+    # Pt 8b — strict Pydantic validation (idempotent / opt-in).
+    #
+    # Runs AFTER the existing schema + evidence gates. When the
+    # EXTRACTION_STRICT_PYDANTIC_VALIDATION flag is OFF (default), this
+    # block is a no-op — output is bit-for-bit identical to pre-Pt-8b
+    # behavior. When ON, each entity / relation is validated through
+    # services.ghost_b_schemas (Pydantic + Literal types). Items that
+    # fail validation are DROPPED (vs the existing soft-remap path which
+    # silently converts them to the sentinel). This gives the user a
+    # clean way to A/B-test schema-strict ingestion against the current
+    # soft-remap behavior without touching code on either side.
     settings = get_settings()
+    if getattr(settings, "EXTRACTION_STRICT_PYDANTIC_VALIDATION", False):
+        from services.ghost_b_schemas import LLMEntity, LLMRelation
+        from pydantic import ValidationError
+
+        strict_entities: list[EntityItem] = []
+        strict_entity_drops = 0
+        for e in entities:
+            try:
+                LLMEntity(
+                    canonical_name=e.canonical_name,
+                    surface_form=e.surface_form or "",
+                    entity_type=e.entity_type,
+                    confidence=float(e.confidence),
+                )
+                strict_entities.append(e)
+            except ValidationError as ve:
+                strict_entity_drops += 1
+                logger.warning(
+                    "GHOST B Pt8b strict-validation dropped entity chunk_id=%s "
+                    "name=%r type=%r reason=%s",
+                    task.chunk_id,
+                    (e.canonical_name or "")[:40],
+                    e.entity_type,
+                    str(ve)[:200],
+                )
+        entities = strict_entities
+
+        strict_relations: list[RelationItem] = []
+        strict_relation_drops = 0
+        for r in relations:
+            try:
+                LLMRelation(
+                    subject=r.subject,
+                    predicate=r.predicate,
+                    object=r.object,
+                    object_kind=r.object_kind if r.object_kind in {"entity", "literal"} else "literal",
+                    confidence=float(r.confidence),
+                    evidence_phrase=r.evidence_phrase or "",
+                    relation_cue=r.relation_cue or "",
+                )
+                strict_relations.append(r)
+            except ValidationError as ve:
+                strict_relation_drops += 1
+                logger.warning(
+                    "GHOST B Pt8b strict-validation dropped relation chunk_id=%s "
+                    "predicate=%r subject=%r object=%r reason=%s",
+                    task.chunk_id,
+                    r.predicate,
+                    (r.subject or "")[:30],
+                    (r.object or "")[:30],
+                    str(ve)[:200],
+                )
+        relations = strict_relations
+        if strict_entity_drops or strict_relation_drops:
+            logger.info(
+                "GHOST B Pt8b strict-validation chunk_id=%s entity_drops=%d relation_drops=%d",
+                task.chunk_id,
+                strict_entity_drops,
+                strict_relation_drops,
+            )
+
     facts_enabled = settings.EXTRACTION_ENABLE_FACTS if enable_facts is None else enable_facts
     fact_cap = (
         settings.EXTRACTION_MAX_FACTS_PER_CHUNK

@@ -26,6 +26,11 @@ neo4j==5.17.0
 litellm==1.31.3
 httpx==0.25.2
 openai==1.6.1
+# Pt 8b — Phase 1 schema-strict validation uses Pydantic Literal types
+# only (already shipped via `pydantic==2.5.0` above). The `instructor`
+# package would be added in Phase 2 (LLM-call wrap with retry-on-
+# validation) and pins `pydantic>=2.8.0`, so adding it later requires a
+# coordinated pydantic upgrade. Not strictly needed for Phase 1.
 
 # === Modal CLI (for `modal token info` verify-token endpoint) ===
 # We don't run Modal apps from the backend; we only shell out to the CLI

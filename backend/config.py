@@ -380,6 +380,19 @@ class Settings(BaseSettings):
             "treated as JSONL."
         ),
     )
+    EXTRACTION_STRICT_PYDANTIC_VALIDATION: bool = Field(
+        default=False,
+        description=(
+            "Pt 8b — when True, validate each Ghost B entity / relation "
+            "through services.ghost_b_schemas (Pydantic + Literal types) "
+            "after the existing _parse step. Items that fail validation "
+            "(off-vocab entity_type, off-vocab predicate, malformed "
+            "confidence) are dropped instead of soft-remapped to the "
+            "sentinel. Idempotent toggle: off = bit-for-bit identical to "
+            "pre-Pt-8b behavior; on = stricter schema adherence for new "
+            "extractions. Existing graph data is untouched in either mode."
+        ),
+    )
     EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK: int = Field(
         default=8,
         ge=1,
