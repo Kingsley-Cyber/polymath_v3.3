@@ -112,7 +112,22 @@ async def backfill_failed_graph_chunks(
     doc_id: str,
     user_id: str,
 ) -> dict:
-    """Retry failed Ghost B chunks and patch Neo4j without reingesting the file."""
+    """Retry failed Ghost B chunks AND/OR flush staged extraction to Neo4j.
+
+    Pt 9 — this function now serves two complementary purposes that share
+    the same Mongo state and the same writer call:
+
+    1. **Failure retry** — if `ghost_b_failures` is non-empty, re-extract
+       those chunks via Ghost B and merge the results into staging.
+    2. **Neo4j flush** — if `write_state.neo4j_written` is not True and
+       `ghost_b_staging` is non-empty, fire `write_document_graph` against
+       the staged results so Neo4j catches up.
+
+    Either trigger (or both) leads to the same idempotent MERGE pass —
+    safe to call repeatedly. The function is no-op only when there's
+    genuinely nothing to do (no failures AND Neo4j already written, or
+    no staging available).
+    """
     if neo4j_driver is None:
         raise RuntimeError("Neo4j driver is not available")
 
@@ -125,7 +140,13 @@ async def backfill_failed_graph_chunks(
         for row in (doc.get("ghost_b_failures") or [])
         if row.get("chunk_id")
     ]
-    if not failures:
+    write_state = doc.get("write_state") or {}
+    neo4j_already_written = bool(write_state.get("neo4j_written"))
+    staged_raw = doc.get("ghost_b_staging") or []
+    needs_neo4j_flush = (not neo4j_already_written) and bool(staged_raw)
+
+    # Pt 9 — early-return only when there's truly nothing to do.
+    if not failures and not needs_neo4j_flush:
         return {
             "status": "noop",
             "doc_id": doc_id,
@@ -133,6 +154,87 @@ async def backfill_failed_graph_chunks(
             "retried_chunks": 0,
             "recovered_chunks": 0,
             "remaining_failed_chunks": 0,
+            "neo4j_flushed": False,
+        }
+
+    # Pt 9 — when there are no failures but Neo4j needs flushing, take a
+    # fast path that skips Ghost B entirely and just runs the writer on
+    # the existing staged results. This is the common case after an
+    # embedder / Qdrant outage left the doc in `neo4j_written=False`
+    # despite extraction being complete.
+    if not failures and needs_neo4j_flush:
+        staged_results = _rehydrate_ghost_b_staging(staged_raw)
+        if not staged_results:
+            return {
+                "status": "noop",
+                "doc_id": doc_id,
+                "corpus_id": corpus_id,
+                "retried_chunks": 0,
+                "recovered_chunks": 0,
+                "remaining_failed_chunks": 0,
+                "neo4j_flushed": False,
+            }
+        all_chunk_ids = [
+            row["chunk_id"]
+            async for row in db["chunks"].find(
+                {"doc_id": doc_id, "corpus_id": corpus_id},
+                {"chunk_id": 1, "_id": 0},
+            )
+        ]
+        doc_metrics = doc.get("ghost_b_metrics") or {}
+        parents = doc.get("parent_chunks") or []
+        await write_document_graph(
+            driver=neo4j_driver,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            extraction_results=staged_results,
+            user_id=user_id,
+            file_id=doc.get("file_id"),
+            all_chunk_ids=all_chunk_ids,
+            filename=doc.get("filename"),
+            parent_count=len(parents) if isinstance(parents, list) else 0,
+            schema_lens_id=(
+                (doc.get("ingestion_config") or {}).get("schema_lens_id")
+                or doc_metrics.get("schema_lens")
+            ) if isinstance(
+                (doc.get("ingestion_config") or {}).get("schema_lens_id")
+                or doc_metrics.get("schema_lens"),
+                str,
+            ) else None,
+            ghost_b_success_rate=(
+                float(doc_metrics["success_rate"])
+                if doc_metrics.get("success_rate") is not None else None
+            ),
+            ghost_b_extracted=(
+                int(doc_metrics["extracted_chunks"])
+                if doc_metrics.get("extracted_chunks") is not None else None
+            ),
+            ghost_b_total=(
+                int(doc_metrics["requested_chunks"])
+                if doc_metrics.get("requested_chunks") is not None else None
+            ),
+        )
+        # Flip the flag — same contract the worker uses on success.
+        await db["documents"].update_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {"$set": {
+                "write_state.neo4j_written": True,
+                "updated_at": datetime.utcnow(),
+            }},
+        )
+        logger.info(
+            "phase=ghost_b_backfill_flush doc=%s corpus=%s chunks=%d staged=%d",
+            doc_id[:12], corpus_id[:8], len(all_chunk_ids), len(staged_results),
+        )
+        return {
+            "status": "flushed_to_neo4j",
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "retried_chunks": 0,
+            "recovered_chunks": 0,
+            "remaining_failed_chunks": 0,
+            "neo4j_flushed": True,
+            "staged_results_written": len(staged_results),
         }
 
     failed_ids = list(dict.fromkeys(f.chunk_id for f in failures if f.chunk_id))
@@ -275,25 +377,33 @@ async def backfill_failed_graph_chunks(
         retry_metrics=report.metrics,
     )
 
+    # Pt 9 — if the writer was called (report.results non-empty), flip
+    # `neo4j_written=True`. Pre-Pt-9 the function updated everything else
+    # but left this flag untouched, so subsequent backfill calls saw
+    # neo4j_written=False and re-fired the writer. MERGE makes that
+    # safe but wasteful. Flipping the flag makes the contract honest.
+    update_set: dict[str, Any] = {
+        "ghost_b_staging": [asdict(result) for result in staged_results],
+        "ghost_b_failures": [asdict(failure) for failure in remaining_failures],
+        "ghost_b_metrics": metrics,
+        "write_state.warnings": warnings,
+        "updated_at": datetime.utcnow(),
+    }
+    if report.results:
+        update_set["write_state.neo4j_written"] = True
+
     await db["documents"].update_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
-        {
-            "$set": {
-                "ghost_b_staging": [asdict(result) for result in staged_results],
-                "ghost_b_failures": [asdict(failure) for failure in remaining_failures],
-                "ghost_b_metrics": metrics,
-                "write_state.warnings": warnings,
-                "updated_at": datetime.utcnow(),
-            }
-        },
+        {"$set": update_set},
     )
     logger.info(
-        "phase=ghost_b_backfill doc=%s corpus=%s retried=%d recovered=%d remaining=%d",
+        "phase=ghost_b_backfill doc=%s corpus=%s retried=%d recovered=%d remaining=%d neo4j_written=%s",
         doc_id[:12],
         corpus_id[:8],
         len(tasks),
         len(recovered_ids),
         len(remaining_failures),
+        bool(report.results),
     )
     return {
         "status": "done",

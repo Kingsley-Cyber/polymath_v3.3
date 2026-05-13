@@ -610,23 +610,39 @@ async def backfill_document_graph(
     doc_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    """Retry only failed Ghost B chunks for a document and patch Neo4j."""
+    """Retry failed Ghost B chunks AND/OR flush staged extraction to Neo4j.
+
+    Pt 9 — broadened from the original "retry failures only" contract.
+    The endpoint now also handles the common Pt-8c-era failure mode
+    where Phase 5/6 (embed/Qdrant) raised, run_ingest_job exited, and
+    Neo4j was left unwritten even though Ghost B had completed and
+    Mongo had `ghost_b_staging` populated. Returning `queued` whenever
+    the doc has failures OR `neo4j_written=False` with staged extraction
+    available; the underlying `backfill_failed_graph_chunks` decides
+    which path runs (retry, flush, both, or genuine noop).
+    """
     corpus = await ingestion_service.get_corpus(corpus_id)
     if not corpus:
         raise HTTPException(status_code=404, detail="Corpus not found")
     doc = await ingestion_service.db["documents"].find_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"ghost_b_failures": 1, "write_state": 1, "_id": 0},
+        {"ghost_b_failures": 1, "ghost_b_staging": 1, "write_state": 1, "_id": 0},
     )
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     failures = doc.get("ghost_b_failures") or []
-    if not failures:
+    write_state = doc.get("write_state") or {}
+    neo4j_written = bool(write_state.get("neo4j_written"))
+    has_staging = bool(doc.get("ghost_b_staging"))
+    # Pt 9 — true noop only when there's genuinely nothing to do.
+    if not failures and (neo4j_written or not has_staging):
         return {
             "status": "noop",
             "doc_id": doc_id,
             "corpus_id": corpus_id,
             "failed_chunks": 0,
+            "neo4j_written": neo4j_written,
+            "has_staging": has_staging,
         }
 
     async def _run() -> None:
@@ -669,6 +685,59 @@ async def ingestion_audit(
     if not existing:
         raise HTTPException(status_code=404, detail="Corpus not found")
     return await ingestion_service.get_ingestion_audit(corpus_id)
+
+
+@router.get("/ingestion/health")
+async def ingestion_health(
+    current_user: dict = Depends(get_current_user),
+):
+    """Pt 9 — cross-cutting write-state distribution.
+
+    Surfaces the kind of stuck-state we discovered in the Pt 8 era:
+    docs with Mongo+Ghost-B done but `qdrant_written=False` and/or
+    `neo4j_written=False`. The `stuck_neo4j_with_staged_extraction`
+    count is the actionable bucket — those docs are exactly what the
+    `/graph-backfill` endpoint can repair without re-ingesting.
+    """
+    db = ingestion_service.db
+    if db is None:
+        return {"error": "db unavailable"}
+    total = await db["documents"].count_documents({})
+    mongo_true = await db["documents"].count_documents({"write_state.mongo_written": True})
+    qdrant_true = await db["documents"].count_documents({"write_state.qdrant_written": True})
+    neo4j_true = await db["documents"].count_documents({"write_state.neo4j_written": True})
+    stuck_count = await db["documents"].count_documents({
+        "write_state.neo4j_written": {"$ne": True},
+        "ghost_b_staging.0": {"$exists": True},
+    })
+    qdrant_stuck = await db["documents"].count_documents({
+        "write_state.qdrant_written": {"$ne": True},
+        "write_state.mongo_written": True,
+    })
+    cursor = db["documents"].find(
+        {
+            "write_state.neo4j_written": {"$ne": True},
+            "ghost_b_staging.0": {"$exists": True},
+        },
+        {"_id": 0, "doc_id": 1, "corpus_id": 1, "filename": 1, "ghost_b_metrics.success_rate": 1},
+    ).limit(20)
+    actionable = []
+    async for d in cursor:
+        actionable.append({
+            "doc_id": d.get("doc_id"),
+            "corpus_id": d.get("corpus_id"),
+            "filename": d.get("filename"),
+            "ghost_b_success_rate": (d.get("ghost_b_metrics") or {}).get("success_rate"),
+        })
+    return {
+        "docs_total": total,
+        "mongo_written": {"true": mongo_true, "false": total - mongo_true},
+        "qdrant_written": {"true": qdrant_true, "false": total - qdrant_true},
+        "neo4j_written": {"true": neo4j_true, "false": total - neo4j_true},
+        "stuck_neo4j_with_staged_extraction": stuck_count,
+        "stuck_qdrant_after_mongo": qdrant_stuck,
+        "actionable_via_graph_backfill": actionable,
+    }
 
 
 @router.post("/corpora/{corpus_id}/graph-cache/warm")

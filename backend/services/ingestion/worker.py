@@ -1530,73 +1530,104 @@ async def run_ingest_job(
         )
 
     # ── Phase 5: Embed + Phase 6: Qdrant ─────────────────────────────────
+    #
+    # Pt 9 — Phase 5+6 is now best-effort and DOES NOT abort the function
+    # on failure. Pre-Pt-9, an embedder 500 or Qdrant outage raised through
+    # this block, exited run_ingest_job, and left Neo4j permanently
+    # unwritten even though ghost_b_out was fully populated and Mongo had
+    # everything staged. Fix: catch the exception, log + warn, and fall
+    # through to Phase 7 so Neo4j can still get the document.
     if not ws.qdrant_written:
-        async with _MODEL_PHASE_SEMAPHORE:
-            t0 = time.monotonic()
-            vec_map, summary_vec_map = await _embed_batch_for_doc(
-                children=children,
-                summaries=summaries,
-                config=ingestion_config,
+        try:
+            async with _MODEL_PHASE_SEMAPHORE:
+                t0 = time.monotonic()
+                vec_map, summary_vec_map = await _embed_batch_for_doc(
+                    children=children,
+                    summaries=summaries,
+                    config=ingestion_config,
+                )
+            logger.info(
+                "phase=embed duration=%.2fs doc=%s corpus=%s mode=%s children=%d summaries=%d",
+                time.monotonic() - t0,
+                doc_id[:12],
+                cid8,
+                getattr(ingestion_config, "embed_mode", "local_st"),
+                len(vec_map),
+                len(summary_vec_map),
             )
-        logger.info(
-            "phase=embed duration=%.2fs doc=%s corpus=%s mode=%s children=%d summaries=%d",
-            time.monotonic() - t0,
-            doc_id[:12],
-            cid8,
-            getattr(ingestion_config, "embed_mode", "local_st"),
-            len(vec_map),
-            len(summary_vec_map),
-        )
 
-        # Sparse vectors for Qdrant hybrid search. Pure-Python BM25 with
-        # server-side IDF — no GPU, no model load. New corpora store these
-        # alongside the dense vector under the "sparse" named slot;
-        # legacy corpora's collections silently drop the sparse field at
-        # upsert time and keep the Mongo $text fallback in place.
-        from services.storage.sparse_encoder import encode_text as _bm25_encode
-        t0 = time.monotonic()
-        child_sparse_map = {
-            c.chunk_id: _bm25_encode(c.text)
-            for c in children
-            if c.chunk_id in vec_map
-        }
-        summary_sparse_map = {
-            s.parent_id: _bm25_encode(s.summary) for s in (summaries or [])
-        }
-        logger.info(
-            "phase=sparse_encode duration=%.2fs doc=%s corpus=%s children=%d summaries=%d",
-            time.monotonic() - t0,
-            doc_id[:12],
-            cid8,
-            len(child_sparse_map),
-            len(summary_sparse_map),
-        )
+            # Sparse vectors for Qdrant hybrid search. Pure-Python BM25 with
+            # server-side IDF — no GPU, no model load. New corpora store these
+            # alongside the dense vector under the "sparse" named slot;
+            # legacy corpora's collections silently drop the sparse field at
+            # upsert time and keep the Mongo $text fallback in place.
+            from services.storage.sparse_encoder import encode_text as _bm25_encode
+            t0 = time.monotonic()
+            child_sparse_map = {
+                c.chunk_id: _bm25_encode(c.text)
+                for c in children
+                if c.chunk_id in vec_map
+            }
+            summary_sparse_map = {
+                s.parent_id: _bm25_encode(s.summary) for s in (summaries or [])
+            }
+            logger.info(
+                "phase=sparse_encode duration=%.2fs doc=%s corpus=%s children=%d summaries=%d",
+                time.monotonic() - t0,
+                doc_id[:12],
+                cid8,
+                len(child_sparse_map),
+                len(summary_sparse_map),
+            )
 
-        t0 = time.monotonic()
-        await _write_qdrant_for_doc(
-            qdrant_client=qdrant_client,
-            corpus_id=corpus_id,
-            user_id=user_id,
-            parents=parents,
-            children=children,
-            vec_map=vec_map,
-            summaries=summaries,
-            summary_vec_map=summary_vec_map,
-            config=ingestion_config,
-            child_sparse_map=child_sparse_map,
-            summary_sparse_map=summary_sparse_map,
-        )
-        await mongo_writer.update_write_state(
-            db, doc_id, corpus_id=corpus_id, qdrant_written=True
-        )
-        ws.qdrant_written = True
-        logger.info(
-            "phase=qdrant duration=%.2fs doc=%s corpus=%s targets=%s",
-            time.monotonic() - t0,
-            doc_id[:12],
-            cid8,
-            ",".join(ingestion_config.target_qdrant_collections),
-        )
+            t0 = time.monotonic()
+            await _write_qdrant_for_doc(
+                qdrant_client=qdrant_client,
+                corpus_id=corpus_id,
+                user_id=user_id,
+                parents=parents,
+                children=children,
+                vec_map=vec_map,
+                summaries=summaries,
+                summary_vec_map=summary_vec_map,
+                config=ingestion_config,
+                child_sparse_map=child_sparse_map,
+                summary_sparse_map=summary_sparse_map,
+            )
+            await mongo_writer.update_write_state(
+                db, doc_id, corpus_id=corpus_id, qdrant_written=True
+            )
+            ws.qdrant_written = True
+            logger.info(
+                "phase=qdrant duration=%.2fs doc=%s corpus=%s targets=%s",
+                time.monotonic() - t0,
+                doc_id[:12],
+                cid8,
+                ",".join(ingestion_config.target_qdrant_collections),
+            )
+        except Exception as embed_qdrant_exc:
+            # Pt 9 — capture, warn, continue. Neo4j will still write below
+            # if ghost_b_out is populated. The user can later retry Qdrant
+            # via the backfill endpoint without re-doing extraction.
+            warning = f"Embed/Qdrant failed: {embed_qdrant_exc}"
+            ws.warnings = _merge_warnings(ws.warnings, [warning])
+            logger.warning(
+                "phase=embed_qdrant doc=%s corpus=%s status=failed_continue err=%s",
+                doc_id[:12], cid8, embed_qdrant_exc,
+            )
+            try:
+                await db["documents"].update_one(
+                    {"doc_id": doc_id, "corpus_id": corpus_id},
+                    {"$set": {
+                        "write_state.warnings": ws.warnings,
+                        "updated_at": datetime.utcnow(),
+                    }},
+                )
+            except Exception as warn_persist_exc:
+                logger.warning(
+                    "phase=embed_qdrant warn-persist failed doc=%s err=%s",
+                    doc_id[:12], warn_persist_exc,
+                )
 
     # ── Phase 7: Neo4j (optional) ────────────────────────────────────────
     if (
