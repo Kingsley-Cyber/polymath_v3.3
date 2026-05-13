@@ -380,19 +380,12 @@ class Settings(BaseSettings):
             "treated as JSONL."
         ),
     )
-    EXTRACTION_STRICT_PYDANTIC_VALIDATION: bool = Field(
-        default=False,
-        description=(
-            "Pt 8b — when True, validate each Ghost B entity / relation "
-            "through services.ghost_b_schemas (Pydantic + Literal types) "
-            "after the existing _parse step. Items that fail validation "
-            "(off-vocab entity_type, off-vocab predicate, malformed "
-            "confidence) are dropped instead of soft-remapped to the "
-            "sentinel. Idempotent toggle: off = bit-for-bit identical to "
-            "pre-Pt-8b behavior; on = stricter schema adherence for new "
-            "extractions. Existing graph data is untouched in either mode."
-        ),
-    )
+    # Pt 8b — Pydantic Literal-typed validation is now a core / intrinsic
+    # step in the extraction pipeline (not a flag). Removed in favor of
+    # unconditional execution alongside the Pt 7f entity evidence gate and
+    # the Phase B relation evidence gate. To roll back, revert the
+    # validation block in services/ghost_b.py._parse — there is no env
+    # var override.
     EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK: int = Field(
         default=8,
         ge=1,
