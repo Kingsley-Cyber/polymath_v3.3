@@ -887,6 +887,43 @@ class SourceFact(BaseModel):
     corpus_id: str | None = None
 
 
+class GraphDecorationEvidence(BaseModel):
+    """A single supporting chunk for a graph-decoration arrow."""
+
+    chunk_id: str
+    doc_id: str | None = None
+    parent_boost: int = 1  # 2 = same parent doc as the winner, 1 = cross-doc
+
+
+class GraphDecoration(BaseModel):
+    """A single neighbor-edge arrow attached to a winning chunk.
+
+    Pt 10d (Cluster 2 — Graph Decoration) — produced by
+    services/retriever/graph_decoration.py:decorate_winners() AFTER
+    retrieval seals its winners. Read-only against Neo4j. Carries one
+    RELATES_TO edge per (winner, seed_entity, neighbor_entity) tuple —
+    `winner_chunk_id` ties the arrow back to a specific SourceChunk so
+    the context_manager's `via` renderer can attach it inline.
+
+    Edge quality gates are applied at the Cypher level — only edges
+    with `eligible_for_synthesis=true` AND `edge_strength IN ['strong',
+    'repaired']` reach this layer. `direction_repaired` and
+    `predicate_refined` are surfaced as separate flags so the renderer
+    can append a ⚠ glyph for lower-confidence arrows.
+    """
+
+    winner_chunk_id: str
+    seed_entity: str
+    neighbor_entity: str
+    predicate: str
+    relation_family: str
+    edge_evidence: str = ""
+    direction_repaired: bool = False
+    predicate_refined: bool = False
+    edge_weight: float = 0.0
+    evidence_chunks: list[GraphDecorationEvidence] = Field(default_factory=list)
+
+
 class RetrievalResult(BaseModel):
     """Retriever output — chunks plus tier-intersection metadata for the orchestrator."""
 

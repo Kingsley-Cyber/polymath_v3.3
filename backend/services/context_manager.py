@@ -391,6 +391,7 @@ class ContextManager:
         active_skills: Optional[list[dict]] = None,
         analysis: Optional[str] = None,
         facts: Optional[list] = None,
+        decoration: Optional[list] = None,
     ) -> str:
         """
         Build the RAG-augmented prompt with spec-compliant [Source: ...] headers.
@@ -412,6 +413,22 @@ class ContextManager:
         attached. Giving the LLM facts first reduces TTFT and prevents the
         model from synthesizing definitions when one is already encoded.
         """
+        # Pt 10d — index decoration by winner chunk_id once so the per-source
+        # render loop can append graph arrows in O(1). Decoration items can be
+        # Pydantic models OR plain dicts (defensive against future callers
+        # that build them without the model layer).
+        decoration_by_winner: dict[str, list] = {}
+        if decoration:
+            for d in decoration:
+                if hasattr(d, "winner_chunk_id"):
+                    wid = getattr(d, "winner_chunk_id", None)
+                elif isinstance(d, dict):
+                    wid = d.get("winner_chunk_id")
+                else:
+                    wid = None
+                if wid:
+                    decoration_by_winner.setdefault(str(wid), []).append(d)
+
         if not sources and not facts:
             base = query
         else:
@@ -469,6 +486,49 @@ class ContextManager:
                         via_parts.append(part)
                     if via_parts:
                         attribution += f" (via {'; '.join(via_parts)})"
+
+                # Pt 10d (Cluster 2 — Graph Decoration) — append quality-
+                # gated neighbor-edge arrows for this chunk. Each arrow is
+                # one RELATES_TO edge that survived eligible_for_synthesis +
+                # edge_strength filters in graph_decoration.py. Format:
+                #   "→ predicate(family) → neighbor_entity"
+                # with ⚠ glyph when direction_repaired or predicate_refined.
+                # Skip silently when the active reasoning mode is graph-
+                # building (chat_orchestrator withholds decoration in that
+                # case — defense in depth here so this block never fires
+                # against a graph-reasoning mode even if upstream changes).
+                chunk_decoration = decoration_by_winner.get(s.chunk_id or "", [])
+                if chunk_decoration:
+                    arrow_parts: list[str] = []
+                    for d in chunk_decoration[:3]:  # cap inline arrows per chunk
+                        if hasattr(d, "predicate"):
+                            pred = getattr(d, "predicate", "") or ""
+                            fam = getattr(d, "relation_family", "") or ""
+                            neighbor = getattr(d, "neighbor_entity", "") or ""
+                            dr = getattr(d, "direction_repaired", False)
+                            pr = getattr(d, "predicate_refined", False)
+                            seed = getattr(d, "seed_entity", "") or ""
+                        elif isinstance(d, dict):
+                            pred = str(d.get("predicate") or "")
+                            fam = str(d.get("relation_family") or "")
+                            neighbor = str(d.get("neighbor_entity") or "")
+                            dr = bool(d.get("direction_repaired") or False)
+                            pr = bool(d.get("predicate_refined") or False)
+                            seed = str(d.get("seed_entity") or "")
+                        else:
+                            continue
+                        if not pred or not neighbor:
+                            continue
+                        # Format: "seed → predicate(family) → neighbor"
+                        if fam:
+                            arrow = f"{seed} → {pred}({fam}) → {neighbor}"
+                        else:
+                            arrow = f"{seed} → {pred} → {neighbor}"
+                        if dr or pr:
+                            arrow += " ⚠"
+                        arrow_parts.append(arrow)
+                    if arrow_parts:
+                        attribution += f" [graph: {' ; '.join(arrow_parts)}]"
                 passages.append(f"{attribution}: {s.text}")
 
             context_block = "<context>\n" + "\n\n".join(passages) + "\n</context>" if passages else ""

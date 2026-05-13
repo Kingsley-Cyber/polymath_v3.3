@@ -340,6 +340,34 @@ class ChatOrchestrator:
             logger.warning("Fact retrieval skipped: %s", exc)
             facts = []
 
+        # Pt 10d (Cluster 2 — Graph Decoration) — post-retrieval enrichment.
+        # ALWAYS computed (cheap, read-only, try/except → empty fallback).
+        # Whether it reaches the chat prompt depends on the reasoning mode.
+        # When the LLM is already instructed to build the graph itself
+        # (graph_reason / kg_augmented / graphrag_integrated, either as the
+        # main mode or anywhere in reasoning_blend), the decoration is
+        # withheld from the prompt to avoid the "contradict or ignore"
+        # conflict — but it's still computed so the reasoning cascade can
+        # consume it as structured pre-digest input.
+        decoration: list = []
+        try:
+            from services.retriever.graph_decoration import (
+                graph_decorator as _graph_decorator,
+                should_skip_inline_decoration as _should_skip_inline_decoration,
+            )
+
+            decoration = await _graph_decorator.decorate_winners(
+                winning_chunks=sources,
+                corpus_ids=request.corpus_ids,
+                wanted_families=None,  # v1: no QueryFacets yet — accept all families
+                neighbor_limit=8,
+                chunks_per_neighbor=3,
+            )
+        except Exception as exc:
+            logger.warning("Graph decoration skipped: %s", exc)
+            decoration = []
+            _should_skip_inline_decoration = None  # type: ignore[assignment]
+
         # Trust-signal snapshot — captured here so it carries through to
         # both the `done` SSE frame and the persisted assistant message.
         # `agentic_on_request` was resolved earlier (line ~80) and reflects
@@ -471,6 +499,27 @@ class ChatOrchestrator:
 
         # Build augmented prompt — works whether or not we have sources, as
         # long as skills or analysis or sources is present.
+        # Pt 10d — decide whether decoration reaches the chat prompt. The
+        # decoration was already computed above; the gate here is whether
+        # the active reasoning mode tells the LLM to infer the graph
+        # itself. If yes, withhold inline decoration (and rely on the
+        # reasoning cascade or the LLM's own graph-reasoning prompt). If
+        # no, pass it through to build_augmented_prompt for inline
+        # rendering inside the existing citation `(via ...)` parens.
+        inline_decoration: list = []
+        if decoration:
+            try:
+                from services.retriever.graph_decoration import (
+                    should_skip_inline_decoration as _should_skip_inline_decoration_fn,
+                )
+
+                if not _should_skip_inline_decoration_fn(reasoning_mode, reasoning_blend):
+                    inline_decoration = decoration
+            except Exception:
+                # If the helper somehow fails, prefer "render" over "drop"
+                # since the underlying check is just a string-set lookup.
+                inline_decoration = decoration
+
         if sources or facts or active_skills_dicts or analysis_text:
             user_message.content = context_manager.build_augmented_prompt(
                 query=user_message.content,
@@ -481,6 +530,7 @@ class ChatOrchestrator:
                 reasoning_blend=reasoning_blend,
                 active_skills=active_skills_dicts or None,
                 analysis=analysis_text,
+                decoration=inline_decoration,
             )
 
         # Step 4: Prepare messages for context
