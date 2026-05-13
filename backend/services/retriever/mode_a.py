@@ -43,7 +43,11 @@ class ModeAExpansion:
         # Phase 16.1 — confidence-weighted expansion:
         # score each candidate by sum(seed_edge.confidence * expanded_edge.confidence)
         # across all shared entities, instead of raw shared-entity count.
-        # Also collect the {entity, confidence} list as provenance for the prompt.
+        # Also collect the {entity, confidence, ...} list as provenance for the prompt.
+        # Pt 10a (Cluster 5) — enriched provenance: surface_form + evidence_phrase
+        # from the MENTIONS edge, domain_type + canonical_family from the Entity.
+        # Predicate/relation_family stay null here (Mode A walks MENTIONS only);
+        # Mode C (Pt 10a follow-on) will populate them.
         cypher = """
         MATCH (seed:Chunk)-[s:MENTIONS]->(e:Entity)<-[x:MENTIONS]-(expanded:Chunk)
         WHERE seed.chunk_id IN $seed_ids
@@ -56,7 +60,12 @@ class ModeAExpansion:
              sum(coalesce(s.confidence, 0.5) * coalesce(x.confidence, 0.5)) AS score,
              collect(DISTINCT {
                  entity: coalesce(e.display_name, e.normalized_name, ''),
-                 confidence: coalesce(x.confidence, 0.5)
+                 confidence: coalesce(x.confidence, 0.5),
+                 surface_form: coalesce(x.surface_form, ''),
+                 evidence_phrase: coalesce(x.evidence_phrase, ''),
+                 domain_type: coalesce(e.domain_type, ''),
+                 canonical_family: coalesce(e.canonical_family, ''),
+                 entity_type: coalesce(e.primary_entity_type, e.entity_type, '')
              })[..5] AS via
         ORDER BY score DESC
         LIMIT $limit
@@ -88,7 +97,20 @@ class ModeAExpansion:
                 norm_score = min(raw_score, 1.0)
                 via_list = row.get("via") or []
                 provenance = [
-                    {"entity": v.get("entity", ""), "confidence": float(v.get("confidence") or 0.0)}
+                    {
+                        "entity": v.get("entity", ""),
+                        "confidence": float(v.get("confidence") or 0.0),
+                        # Pt 10a (Cluster 5) — ontology-aware citation context.
+                        "surface_form": v.get("surface_form") or "",
+                        "evidence_phrase": v.get("evidence_phrase") or "",
+                        "domain_type": v.get("domain_type") or "",
+                        "canonical_family": v.get("canonical_family") or "",
+                        "entity_type": v.get("entity_type") or "",
+                        # Predicate/relation_family populated by Mode C (RELATES_TO walk).
+                        # Mode A walks MENTIONS only, so these stay None here.
+                        "predicate": None,
+                        "relation_family": None,
+                    }
                     for v in via_list
                     if v and v.get("entity")
                 ]

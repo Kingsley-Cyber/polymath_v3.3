@@ -390,6 +390,7 @@ class ContextManager:
         reasoning_blend: Optional[list[str]] = None,
         active_skills: Optional[list[dict]] = None,
         analysis: Optional[str] = None,
+        facts: Optional[list] = None,
     ) -> str:
         """
         Build the RAG-augmented prompt with spec-compliant [Source: ...] headers.
@@ -403,8 +404,15 @@ class ContextManager:
         Phase 15 — `reasoning_mode` / `reasoning_blend` prepend a reasoning
         template to the final prompt (see services/reasoning.py). None/"none"
         leaves the prompt unchanged.
+
+        Pt 10a (Cluster 1) — when `facts` is non-empty, a `[Key Facts]` block
+        is rendered BEFORE the chunk `<context>` block. Facts come from
+        services/retriever/fact_retrieval.py and bypass the reranker — they're
+        pre-distilled answer units with confidence and evidence_phrase already
+        attached. Giving the LLM facts first reduces TTFT and prevents the
+        model from synthesizing definitions when one is already encoded.
         """
-        if not sources:
+        if not sources and not facts:
             base = query
         else:
             # Phase 23 — inline prose attribution instead of block
@@ -423,18 +431,71 @@ class ContextManager:
                     attribution += f" §{section}"
                 attribution += f' in "{corpus_label}"'
                 # Phase 16.1 — graph provenance: bridging entity + confidence.
+                # Pt 10a (Cluster 5) — ontology-aware citation context. Each
+                # provenance entry may carry domain_type, canonical_family,
+                # surface_form, evidence_phrase, and (Mode C only) predicate +
+                # relation_family. We render compactly: only fields that are
+                # present and informative get inlined.
                 if s.provenance:
-                    via = [
-                        f"{p.get('entity','?')}@{float(p.get('confidence') or 0.0):.2f}"
-                        for p in s.provenance[:3]
-                        if p.get("entity")
-                    ]
-                    if via:
-                        attribution += f" (via {', '.join(via)})"
+                    via_parts: list[str] = []
+                    for p in s.provenance[:3]:
+                        entity = p.get("entity")
+                        if not entity:
+                            continue
+                        part = f"{entity}@{float(p.get('confidence') or 0.0):.2f}"
+                        predicate = p.get("predicate")
+                        if predicate:
+                            family = p.get("relation_family")
+                            part += (
+                                f" --{predicate}({family})-->" if family
+                                else f" --{predicate}-->"
+                            )
+                        domain = p.get("domain_type")
+                        if domain:
+                            part += f" [{domain}]"
+                        via_parts.append(part)
+                    if via_parts:
+                        attribution += f" (via {'; '.join(via_parts)})"
                 passages.append(f"{attribution}: {s.text}")
 
-            context_block = "<context>\n" + "\n\n".join(passages) + "\n</context>"
-            base = f"{context_block}\n\nQuestion: {query}"
+            context_block = "<context>\n" + "\n\n".join(passages) + "\n</context>" if passages else ""
+
+            # Pt 10a (Cluster 1) — pre-distilled facts rendered first, before
+            # chunk excerpts. Each fact line: subject + type + property→value
+            # + evidence_phrase. Skipping the reranker preserves Ghost B's
+            # quality ordering (confidence descending).
+            facts_block = ""
+            if facts:
+                fact_lines: list[str] = []
+                for f in facts:
+                    subject = getattr(f, "subject", "") or ""
+                    fact_type = getattr(f, "fact_type", "") or ""
+                    prop = getattr(f, "property_name", None) or ""
+                    val = getattr(f, "value", None) or ""
+                    unit = getattr(f, "unit", None) or ""
+                    cond = getattr(f, "condition", None) or ""
+                    ev = getattr(f, "evidence_phrase", None) or ""
+                    conf = float(getattr(f, "confidence", 0.0) or 0.0)
+                    parts = [f"- {subject} ({fact_type})"]
+                    if prop and val:
+                        parts.append(f": {prop} = {val}{(' ' + unit) if unit else ''}")
+                    elif val:
+                        parts.append(f": {val}{(' ' + unit) if unit else ''}")
+                    if cond:
+                        parts.append(f" [when {cond}]")
+                    parts.append(f" (conf={conf:.2f})")
+                    line = "".join(parts)
+                    if ev:
+                        line += f'\n    Evidence: "{ev}"'
+                    fact_lines.append(line)
+                facts_block = "<key_facts>\n" + "\n".join(fact_lines) + "\n</key_facts>\n\n"
+
+            if facts_block and context_block:
+                base = f"{facts_block}{context_block}\n\nQuestion: {query}"
+            elif facts_block:
+                base = f"{facts_block}Question: {query}"
+            else:
+                base = f"{context_block}\n\nQuestion: {query}"
 
         # Phase 24 — Skills as context. Each active skill's `instructions`
         # is wrapped in a <skill> block and prepended above <context>. Skills

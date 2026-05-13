@@ -854,13 +854,47 @@ class SourceChunk(BaseModel):
     # Phase 16.1 — graph expansion provenance: which Entity/predicate surfaced this
     # chunk, with the edge confidence. Only populated for Mode A / Mode B chunks.
     # Each entry: {"entity": str, "confidence": float, "predicate"?: str}
+    # Pt 10a (Cluster 5) — entries now also carry surface_form, evidence_phrase,
+    # domain_type, canonical_family, entity_type (Mode A) and predicate +
+    # relation_family (Mode C only). Fields default to "" / None when unknown.
     provenance: list[dict] | None = None
+
+
+class SourceFact(BaseModel):
+    """A retrieved Fact node from Neo4j — pre-distilled answer unit.
+
+    Pt 10a (Cluster 1) — chat retrieval returns Facts in parallel with chunks.
+    Facts bypass the cross-encoder reranker (they're already pre-distilled by
+    Ghost B with confidence + evidence_phrase) and feed a separate
+    [Key Facts] section in the LLM prompt ahead of the chunk-text section.
+
+    Fields mirror the Fact node's Neo4j shape (see
+    services/graph/neo4j_writer.py:1586). `chunk_id` / `doc_id` point at the
+    supporting source so citations can resolve to a normal SourceChunk.
+    """
+
+    fact_id: str
+    subject: str
+    fact_type: str
+    property_name: str | None = None
+    value: str | None = None
+    unit: str | None = None
+    condition: str | None = None
+    confidence: float = 0.0
+    evidence_phrase: str | None = None
+    chunk_id: str | None = None
+    doc_id: str | None = None
+    corpus_id: str | None = None
 
 
 class RetrievalResult(BaseModel):
     """Retriever output — chunks plus tier-intersection metadata for the orchestrator."""
 
     chunks: list[SourceChunk] = Field(default_factory=list)
+    # Pt 10a (Cluster 1) — Facts retrieved in parallel with chunks, bypass
+    # reranker, feed a separate [Key Facts] LLM prompt section. Empty when
+    # Neo4j is disabled or no facts match the seed entities.
+    facts: list[SourceFact] = Field(default_factory=list)
     requested_tier: RetrievalTier
     effective_tier: RetrievalTier
     downgrade_reason: str | None = Field(

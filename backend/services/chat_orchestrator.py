@@ -314,6 +314,32 @@ class ChatOrchestrator:
             )
         sources = retrieval.chunks
 
+        # Pt 10a (Cluster 1) — Fact-centric retrieval, runs in parallel with
+        # the chunk path. Bypasses the reranker. Seed entities come from the
+        # provenance of the just-retrieved chunks (Mode A annotations). v1
+        # filters to fact_type=property for definitional queries; broader
+        # fact_type sets land in week 2.
+        facts: list = []
+        try:
+            from services.retriever.fact_retrieval import fact_retrieval as _fact_retrieval
+
+            seed_entities: list[str] = []
+            for s in sources:
+                for p in (s.provenance or []):
+                    ent = p.get("entity")
+                    if ent and ent not in seed_entities:
+                        seed_entities.append(ent)
+            if seed_entities:
+                facts = await _fact_retrieval.retrieve_facts_for_entities(
+                    entity_names=seed_entities[:12],
+                    corpus_ids=request.corpus_ids,
+                    fact_types=["property"],  # v1: definitional only
+                    limit=8,
+                )
+        except Exception as exc:
+            logger.warning("Fact retrieval skipped: %s", exc)
+            facts = []
+
         # Trust-signal snapshot — captured here so it carries through to
         # both the `done` SSE frame and the persisted assistant message.
         # `agentic_on_request` was resolved earlier (line ~80) and reflects
@@ -445,10 +471,11 @@ class ChatOrchestrator:
 
         # Build augmented prompt — works whether or not we have sources, as
         # long as skills or analysis or sources is present.
-        if sources or active_skills_dicts or analysis_text:
+        if sources or facts or active_skills_dicts or analysis_text:
             user_message.content = context_manager.build_augmented_prompt(
                 query=user_message.content,
                 sources=sources,
+                facts=facts,
                 corpus_ids=request.corpus_ids,
                 reasoning_mode=reasoning_mode,
                 reasoning_blend=reasoning_blend,

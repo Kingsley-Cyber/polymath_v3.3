@@ -51,6 +51,39 @@ async def get_cached_graph_overview(
     )
 
 
+def _dominant_facet(
+    member_ids: list[str],
+    facet_map: dict[str, dict[str, Any]],
+    facet_key: str,
+    *,
+    top_k_distribution: int = 5,
+) -> tuple[str, dict[str, int]]:
+    """Pt 10a (Cluster 6) — aggregate the dominant ontology facet across cluster members.
+
+    Supernodes (domain clusters, concept communities) represent many entities. The
+    pre-Pt-10a overview emitted `canonical_family / object_kind / domain_type = ""`
+    on every supernode because picking ONE entity's value would be a category error.
+    This helper counts the facet values across the member sample and returns:
+      - the most-common non-empty value (or "" if every member lacks the facet),
+      - the top-N distribution for diagnostics / hover panels.
+
+    For domain clusters the input is `cluster.top_entities` (top representative
+    sample, since DomainCluster doesn't persist the full member list). For
+    concept communities the input is `concept["member_ids"]` (full population).
+    """
+    counter = Counter(
+        (facet_map.get(eid) or {}).get(facet_key)
+        for eid in member_ids
+        if facet_map.get(eid)
+    )
+    counter = Counter({k: v for k, v in counter.items() if k})
+    if not counter:
+        return "", {}
+    dominant = counter.most_common(1)[0][0]
+    distribution = dict(counter.most_common(top_k_distribution))
+    return str(dominant), distribution
+
+
 def build_overview_graph(
     domain_map: DomainMap,
     metrics,
@@ -63,6 +96,7 @@ def build_overview_graph(
     edges: list[dict[str, Any]] = []
     edge_scores: dict[str, float] = {}
     domain_node_by_name: dict[str, str] = {}
+    facet_map = getattr(metrics, "entity_facet_map", None) or {}
 
     def _add_edge(
         source: str,
@@ -92,15 +126,24 @@ def build_overview_graph(
     for cluster in sorted(domain_map.clusters.values(), key=lambda c: c.size, reverse=True):
         node_id = f"domain:{cluster.cluster_id}"
         domain_node_by_name[cluster.name] = node_id
+        # Pt 10a — aggregate dominants over cluster.top_entities (DomainCluster
+        # doesn't persist the full member list, so the top-K representatives
+        # define the cluster's ontology character — accurate enough for color/shape).
+        dom_family, family_dist = _dominant_facet(cluster.top_entities, facet_map, "canonical_family")
+        dom_kind, kind_dist = _dominant_facet(cluster.top_entities, facet_map, "object_kind")
+        dom_domain, domain_dist = _dominant_facet(cluster.top_entities, facet_map, "domain_type")
         nodes.append({
             "id": node_id,
             "display_name": cluster.name,
             "entity_type": "domain",
             "mention_count": int(cluster.size),
             "supernode_type": "domain",
-            "canonical_family": "",
-            "object_kind": "",
-            "domain_type": "",
+            "canonical_family": dom_family,
+            "object_kind": dom_kind,
+            "domain_type": dom_domain,
+            "family_distribution": family_dist,
+            "kind_distribution": kind_dist,
+            "domain_type_distribution": domain_dist,
             "ontology_version": metrics.ontology_version,
             # PR 2 multi-corpus rollout: cap bumped 6 → 50 so the frontend can
             # use this list as a client-side drill workaround when the new
@@ -137,15 +180,23 @@ def build_overview_graph(
             else str(concept.get("primary_domain") or "unknown")
         )
         node_id = f"concept:{concept_id}"
+        # Pt 10a — aggregate dominants over the FULL concept-community member set
+        # (more accurate than the domain-cluster path which only has top_entities).
+        c_family, c_family_dist = _dominant_facet(members, facet_map, "canonical_family")
+        c_kind, c_kind_dist = _dominant_facet(members, facet_map, "object_kind")
+        c_domain, c_domain_dist = _dominant_facet(members, facet_map, "domain_type")
         nodes.append({
             "id": node_id,
             "display_name": str(concept.get("label") or "Concept Neighborhood"),
             "entity_type": "concept_community",
             "mention_count": int(concept.get("size") or 0),
             "supernode_type": "concept",
-            "canonical_family": "",
-            "object_kind": "",
-            "domain_type": "",
+            "canonical_family": c_family,
+            "object_kind": c_kind,
+            "domain_type": c_domain,
+            "family_distribution": c_family_dist,
+            "kind_distribution": c_kind_dist,
+            "domain_type_distribution": c_domain_dist,
             "ontology_version": metrics.ontology_version,
             "primary_domain": primary_domain,
             # PR 2: cap bumped 6 → 50, see comment on the domain branch above.
