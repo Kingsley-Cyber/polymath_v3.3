@@ -276,12 +276,21 @@ services:
             - driver: nvidia
               device_ids: ['0']
               capabilities: [gpu]
+    # Pt 9b — `autoheal=true` label tells the autoheal sidecar (below)
+    # to restart this container when its healthcheck flips to unhealthy.
+    # Pairs with the embedder's `/health` endpoint, which now performs a
+    # real 1-token GPU forward pass on every probe and returns 503 if
+    # the CUDA context is poisoned. Pre-Pt-9b the healthcheck only
+    # checked `model is None`, so the container reported healthy for
+    # 12+ hours while every /embeddings request returned 500.
+    labels:
+      autoheal: "true"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 90s
     restart: unless-stopped
 
   # ============================================================
@@ -310,13 +319,56 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    # Pt 9b — autoheal labeled. Reranker is a GPU service vulnerable to
+    # the same CUDA-context-poisoning failure mode the embedder hit
+    # (RTX PRO 6000 Blackwell + torch 2.11+cu128).
+    labels:
+      autoheal: "true"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
+      interval: 30s
+      timeout: 15s
+      retries: 3
       start_period: 60s
     restart: unless-stopped
+
+  # ============================================================
+  # AUTOHEAL — restart-on-unhealthy sidecar
+  #
+  # Pt 9b — Docker's `restart: unless-stopped` policy only restarts a
+  # container on process exit. It does NOT restart on `unhealthy`
+  # status. Without this sidecar, a poisoned CUDA context can leave a
+  # GPU service reporting unhealthy forever — the healthcheck flips
+  # red but the container keeps running its dead model. autoheal
+  # watches the Docker daemon's event stream and restarts every
+  # container labeled `autoheal=true` whenever it goes unhealthy.
+  #
+  # Pairs with the improved /health endpoints on embedder + reranker
+  # that now do a real GPU forward pass on every probe (so unhealthy
+  # actually means unhealthy, not "server is up but model is dead").
+  #
+  # The mounted docker.sock gives autoheal admin rights on the local
+  # daemon. Acceptable here because Polymath is single-machine local
+  # infra; on a shared/cloud host this would need RBAC scoping.
+  # ============================================================
+  autoheal:
+    image: willfarrell/autoheal:latest
+    restart: always
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      # Poll interval in seconds. Lower = faster recovery, higher = lower
+      # daemon load. 30s is the upstream default; reasonable for our scale.
+      AUTOHEAL_INTERVAL: "30"
+      # Wait this many seconds after starting a container before considering
+      # it eligible for restart. Matches the longest start_period above.
+      AUTOHEAL_START_PERIOD: "90"
+      # Always use the local docker socket. AUTOHEAL_DEFAULT_STOP_TIMEOUT
+      # is upstream's grace-period before SIGKILL during the restart.
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: "20"
+      DOCKER_SOCK: /var/run/docker.sock
+      TZ: ${TZ:-UTC}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   # ============================================================
   # DOCLING SIDECAR — IBM Docling parser with GPU layout, OCR disabled

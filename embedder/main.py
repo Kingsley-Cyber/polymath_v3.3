@@ -112,8 +112,33 @@ class InfoResponse(BaseModel):
 
 @app.get("/health")
 def health():
+    """End-to-end health check including a 1-token GPU forward pass.
+
+    Pre-fix: this endpoint only checked `model is None`. The model
+    object persists in Python memory even after the CUDA context is
+    poisoned (e.g. `cudaErrorUnknown` from a driver/context fault),
+    so /health kept returning 200 while every /embeddings request
+    failed with HTTP 500. Docker's healthcheck saw green; the container
+    was actually dead. The fix is to run a real (minimal) embedding
+    call on the GPU and fail fast if it raises — that way the
+    healthcheck loop will eventually restart the container and clear
+    the poisoned context.
+    """
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
+    try:
+        # Tiny forward pass to validate the CUDA context is alive.
+        # `convert_to_numpy=True` keeps the result off-GPU after.
+        _ = model.encode(["health"], batch_size=1, convert_to_numpy=True)
+    except Exception as exc:
+        # Any exception here (CUDA, OOM, model state corruption) =>
+        # the container is not actually serving traffic. Returning
+        # 503 lets Docker's healthcheck flip to unhealthy and the
+        # restart policy take over.
+        raise HTTPException(
+            status_code=503,
+            detail=f"GPU forward pass failed: {type(exc).__name__}: {exc}",
+        )
     return {
         "status": "ok",
         "model": model_name,
