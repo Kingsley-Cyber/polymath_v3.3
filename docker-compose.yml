@@ -274,7 +274,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['0']
+              device_ids: ["0"]
               capabilities: [gpu]
     # Pt 9b — `autoheal=true` label tells the autoheal sidecar (below)
     # to restart this container when its healthcheck flips to unhealthy.
@@ -394,7 +394,7 @@ services:
       DOCLING_OCR_ENABLED: "false"
       DOCLING_IDLE_UNLOAD_SECONDS: ${DOCLING_IDLE_UNLOAD_SECONDS:-300}
       CUDA_DEVICE_ORDER: PCI_BUS_ID
-      CUDA_VISIBLE_DEVICES: "0"            # RTX 3090
+      CUDA_VISIBLE_DEVICES: "0" # RTX 3090
       NVIDIA_VISIBLE_DEVICES: "0"
       PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True,max_split_size_mb:128
     deploy:
@@ -402,7 +402,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['0']
+              device_ids: ["0"]
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8500/health"]
