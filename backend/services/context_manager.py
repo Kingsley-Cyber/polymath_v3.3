@@ -453,6 +453,19 @@ class ContextManager:
                         domain = p.get("domain_type")
                         if domain:
                             part += f" [{domain}]"
+                        # Pt 10c — Ghost B's one-sentence definition, if it
+                        # captured one for this entity. Gives the LLM
+                        # immediate semantic context without a second
+                        # retrieval hop. Empty for pre-Pt-10c entities.
+                        defn = p.get("definitional_phrase")
+                        if defn:
+                            # Trim to keep the context block compact —
+                            # Ghost B is asked to emit ≤200 chars but trim
+                            # again defensively for the inline render.
+                            defn_short = str(defn).strip()
+                            if len(defn_short) > 140:
+                                defn_short = defn_short[:137] + "..."
+                            part += f': "{defn_short}"'
                         via_parts.append(part)
                     if via_parts:
                         attribution += f" (via {'; '.join(via_parts)})"

@@ -65,7 +65,8 @@ class ModeAExpansion:
                  evidence_phrase: coalesce(x.evidence_phrase, ''),
                  domain_type: coalesce(e.domain_type, ''),
                  canonical_family: coalesce(e.canonical_family, ''),
-                 entity_type: coalesce(e.primary_entity_type, e.entity_type, '')
+                 entity_type: coalesce(e.primary_entity_type, e.entity_type, ''),
+                 definitional_phrase: coalesce(e.definitional_phrase, '')
              })[..5] AS via
         ORDER BY score DESC
         LIMIT $limit
@@ -106,6 +107,10 @@ class ModeAExpansion:
                         "domain_type": v.get("domain_type") or "",
                         "canonical_family": v.get("canonical_family") or "",
                         "entity_type": v.get("entity_type") or "",
+                        # Pt 10c — definitional_phrase if Ghost B extracted one.
+                        # Empty for pre-Pt-10c entities (coalesced from missing
+                        # property in Neo4j).
+                        "definitional_phrase": v.get("definitional_phrase") or "",
                         # Predicate/relation_family populated by Mode C (RELATES_TO walk).
                         # Mode A walks MENTIONS only, so these stay None here.
                         "predicate": None,

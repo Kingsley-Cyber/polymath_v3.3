@@ -98,12 +98,30 @@ class LLMEntity(BaseModel):
     Literal. If the LLM (or downstream alias normalization) emits a type
     outside this set, Pydantic raises ValidationError and the item is
     dropped by the caller.
+
+    Pt 10c — added two query-facing fields. Before, the schema captured
+    only graph-storage shape (canonical_name + entity_type). That made
+    entity-first search (services/retriever/mode_b.py) brittle: substring
+    matching the user query against `e.normalized_name` misses common
+    variants like "alpha coefficient" → "cronbach alpha". The new fields
+    are additive — Ghost B is asked to emit them when natural; both
+    default to empty so back-compat with pre-Pt-10c extractions is
+    preserved at every layer (Pydantic, dataclass, Neo4j SET, Cypher
+    matching via `coalesce(..., [])`).
     """
 
     canonical_name: str = Field(min_length=1, max_length=200)
     surface_form: str = Field(default="", max_length=300)
     entity_type: EntityType
     confidence: float = Field(ge=0.0, le=1.0)
+    # Pt 10c — query-facing variants the LLM should list (abbreviations,
+    # synonyms, spelling variants). Mode B's WHERE clause matches against
+    # these in addition to normalized_name / display_name.
+    query_aliases: list[str] = Field(default_factory=list, max_length=5)
+    # Pt 10c — one-sentence "what is this" pulled from the surrounding text.
+    # Rendered in chat provenance so the LLM gets immediate semantic
+    # context about each cited entity.
+    definitional_phrase: str = Field(default="", max_length=200)
 
 
 class LLMRelation(BaseModel):

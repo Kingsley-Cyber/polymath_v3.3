@@ -1160,11 +1160,11 @@ def build_user_prompt(
         'End the complete extraction with exactly: {"t":"x"}\n'
         "Abbreviations:\n"
         "- t=e entity, t=r relation, t=f fact, t=x finished\n"
-        "- Entity: cn=canonical_name, sf=surface_form, et=entity_type, cf=confidence\n"
+        "- Entity: cn=canonical_name, sf=surface_form, et=entity_type, cf=confidence, qa=query_aliases (optional list of 2-4 search variants), def=definitional_phrase (optional 1-sentence definition pulled from this chunk)\n"
         "- Relation: sub=subject, pred=predicate, obj=object, ok=object_kind, cf=confidence, ev=evidence_phrase, cue=optional relation trigger\n"
         "- Fact: sub=subject, ft=fact_type, pn=property_name, val=value, unit=unit, cond=condition, cf=confidence, ev=evidence_phrase\n"
         "Line shapes:\n"
-        f'- Entity line: {{"t":"e","cn":"lowercase no-punct","sf":"verbatim","et":"{entity_type_enum}","cf":0.0}}\n'
+        f'- Entity line: {{"t":"e","cn":"lowercase no-punct","sf":"verbatim","et":"{entity_type_enum}","cf":0.0,"qa":["abbreviation","alt name"],"def":"one-sentence definition if explicitly stated in this chunk"}}\n'
         f'- Relation line: {{"t":"r","sub":"canonical_name","pred":"{predicate_desc}","obj":"canonical_name or literal","ok":"entity|literal","cf":0.0,"ev":"short source phrase","cue":"trigger"}}\n'
         f"{fact_protocol}"
         '- Finished line: {"t":"x"}\n'
@@ -1299,6 +1299,11 @@ def build_json_object_prompt(
                 "surface_form": "verbatim phrase",
                 "entity_type": entity_type_desc,
                 "confidence": 0.0,
+                # Pt 10c — query-facing fields. Both optional. Emit only when
+                # naturally present in the chunk; omit entirely (or set to
+                # empty) otherwise.
+                "query_aliases": ["abbreviation or synonym (optional)"],
+                "definitional_phrase": "one-sentence definition if explicitly stated (optional)",
             }
         ],
         "relations": [
@@ -1381,6 +1386,11 @@ class EntityItem:
     surface_form: str
     entity_type: str  # person | org | concept | other
     confidence: float
+    # Pt 10c — query-facing fields. Default-empty so all existing
+    # EntityItem(**dict) call sites (including the worker rehydrator that
+    # reads pre-Pt-10c Mongo staging) keep working without code changes.
+    query_aliases: list[str] = field(default_factory=list)
+    definitional_phrase: str = ""
 
 
 @dataclass
@@ -1945,6 +1955,10 @@ def _apply_schema(
                         surface_form=e.surface_form,
                         entity_type=SchemaContext.ENTITY_SENTINEL,
                         confidence=e.confidence,
+                        # Pt 10c — preserve query-facing fields across the
+                        # soft-remap (only entity_type is being rewritten).
+                        query_aliases=list(getattr(e, "query_aliases", []) or []),
+                        definitional_phrase=getattr(e, "definitional_phrase", "") or "",
                     )
                 )
                 counters["entity_remap_count"] += 1
@@ -2109,12 +2123,25 @@ def _parse(
         if e.get("confidence", 0.0) < threshold:
             continue
         try:
+            # Pt 10c — query_aliases + definitional_phrase. Defensive coercion
+            # for the legacy JSON parser (the JSONL parser at line ~2477
+            # already normalizes these into the dict, so values arrive
+            # well-shaped here; legacy JSON output may carry them raw).
+            qa_raw = e.get("query_aliases") or []
+            if isinstance(qa_raw, str):
+                qa_list = [qa_raw.strip()] if qa_raw.strip() else []
+            elif isinstance(qa_raw, list):
+                qa_list = [str(a).strip() for a in qa_raw if str(a).strip()][:5]
+            else:
+                qa_list = []
             entities.append(
                 EntityItem(
                     canonical_name=e["canonical_name"],
                     surface_form=e.get("surface_form", e["canonical_name"]),
                     entity_type=e.get("entity_type", "other"),
                     confidence=float(e["confidence"]),
+                    query_aliases=qa_list,
+                    definitional_phrase=str(e.get("definitional_phrase", "") or "").strip()[:200],
                 )
             )
         except (KeyError, TypeError, ValueError):
@@ -2474,6 +2501,18 @@ def _jsonl_items_to_object(items: list[dict], task: ExtractionTask) -> dict:
             ).strip()
             if not canonical_name:
                 continue
+            # Pt 10c — query_aliases + definitional_phrase. Coerce defensively:
+            # the LLM may emit a single string instead of a list for qa, or
+            # omit either field entirely. Both default to safe empty values.
+            qa_raw = item.get("qa") or item.get("query_aliases") or []
+            if isinstance(qa_raw, str):
+                qa_list = [qa_raw.strip()] if qa_raw.strip() else []
+            elif isinstance(qa_raw, list):
+                qa_list = [str(a).strip() for a in qa_raw if str(a).strip()][:5]
+            else:
+                qa_list = []
+            def_raw = item.get("def") or item.get("definitional_phrase") or ""
+            def_str = str(def_raw).strip()[:200]
             data["entities"].append(
                 {
                     "canonical_name": canonical_name,
@@ -2484,6 +2523,8 @@ def _jsonl_items_to_object(items: list[dict], task: ExtractionTask) -> dict:
                         item.get("et") or item.get("entity_type") or "other"
                     ).strip(),
                     "confidence": _jsonl_confidence(item),
+                    "query_aliases": qa_list,
+                    "definitional_phrase": def_str,
                 }
             )
         elif item_type == "r":

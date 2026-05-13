@@ -42,10 +42,28 @@ class ModeBExpansion:
         # Phase 16.1 — confidence-weighted entity-first traversal.
         # Rank by sum of MENTIONS.confidence across matched entities, collect
         # the matched entity names + confidences as provenance.
+        # Pt 10c — also match against query_aliases (alternate names /
+        # abbreviations / spelling variants the LLM emits at extraction time).
+        # `coalesce(e.query_aliases, [])` makes this safe against pre-Pt-10c
+        # entities that lack the property entirely. Pure recall improvement
+        # for entity-first search (this endpoint, /api/graph/entity-search);
+        # zero impact on the default chat retrieval path which doesn't call
+        # Mode B.
+        #
+        # Pt 10c drive-by — the parameter name was `$query` historically,
+        # which collided with Neo4j's `AsyncSession.run(query, parameters,
+        # **kwparameters)` first positional (Cypher gets bound positionally,
+        # then kwarg `query=...` tries to rebind the same parameter →
+        # TypeError). Renamed to `$q` to unblock this endpoint. Mode B was
+        # unused in chat retrieval so the bug never surfaced; surfaced here
+        # only because the Pt 10c smoke test exercises the endpoint
+        # directly.
         cypher = """
         MATCH (e:Entity)<-[m:MENTIONS]-(c:Chunk)
-        WHERE toLower(e.normalized_name) CONTAINS toLower($query)
-           OR toLower(e.display_name) CONTAINS toLower($query)
+        WHERE toLower(e.normalized_name) CONTAINS toLower($q)
+           OR toLower(e.display_name) CONTAINS toLower($q)
+           OR ANY(alias IN coalesce(e.query_aliases, [])
+                  WHERE toLower(alias) CONTAINS toLower($q))
         """
         if corpus_ids:
             cypher += "  AND c.corpus_id IN $corpus_ids\n"
@@ -70,7 +88,7 @@ class ModeBExpansion:
             async with self._driver.session() as session:
                 result = await session.run(
                     cypher,
-                    query=query.strip(),
+                    q=query.strip(),
                     corpus_ids=corpus_ids or [],
                     limit=limit,
                 )

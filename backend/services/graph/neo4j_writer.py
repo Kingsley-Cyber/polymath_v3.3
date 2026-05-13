@@ -1078,7 +1078,16 @@ async def _upsert_entity_and_mention(
                 e.domain_type_parent = $domain_type_parent,
                 e.domain_type_root = $domain_type_root,
                 e.canonical_family = $canonical_family,
-                e.ontology_version = $ontology_version
+                e.ontology_version = $ontology_version,
+                e.query_aliases = CASE
+                    WHEN $query_aliases IS NULL OR size($query_aliases) = 0 THEN coalesce(e.query_aliases, [])
+                    ELSE [a IN $query_aliases WHERE NOT a IN coalesce(e.query_aliases, [])] + coalesce(e.query_aliases, [])
+                END,
+                e.definitional_phrase = CASE
+                    WHEN $definitional_phrase IS NULL OR $definitional_phrase = '' THEN coalesce(e.definitional_phrase, '')
+                    WHEN coalesce(e.definitional_phrase, '') = '' THEN $definitional_phrase
+                    ELSE e.definitional_phrase
+                END
             WITH e
             SET e.observed_entity_types = CASE
                 WHEN e.observed_entity_types IS NULL THEN [$extracted_type]
@@ -1117,6 +1126,9 @@ async def _upsert_entity_and_mention(
             domain_type_root=ontology.get("domain_type_root"),
             canonical_family=ontology.get("canonical_family"),
             ontology_version=ontology.get("ontology_version"),
+            # Pt 10c — query-facing fields. Both default-safe.
+            query_aliases=list(getattr(entity, "query_aliases", []) or []),
+            definitional_phrase=(getattr(entity, "definitional_phrase", "") or "")[:200],
             chunk_id=chunk_id,
             corpus_id=corpus_id,
         )
@@ -1263,6 +1275,16 @@ async def write_document_graph(
                     # appears. Capped at 3 to keep the resolver haystack
                     # bounded (substring matching is O(haystack × terms)).
                     "text_chunks": [],
+                    # Pt 10c — union of query_aliases across all mentions
+                    # (deduped, case-insensitive). Cap 8 — slightly above the
+                    # per-mention cap of 5 to allow different chunks to
+                    # contribute distinct variants.
+                    "query_aliases": [],
+                    # Pt 10c — first non-empty definitional phrase, sourced
+                    # from the highest-confidence mention. We pick early-bind:
+                    # whichever mention raises the group's confidence high-
+                    # water mark and has a non-empty phrase wins.
+                    "definitional_phrase": "",
                 },
             )
             if entity.entity_type not in group["observed_entity_types"]:
@@ -1270,6 +1292,13 @@ async def write_document_graph(
             if entity.confidence > group["confidence"]:
                 group["confidence"] = entity.confidence
                 group["display_name"] = entity.surface_form or entity.canonical_name
+                # Pt 10c — promote definitional_phrase from the new highest-
+                # confidence mention if it has one. Stickier than "first
+                # seen" because high-confidence mentions tend to come from
+                # more definitional surrounding text.
+                phrase = (getattr(entity, "definitional_phrase", "") or "").strip()
+                if phrase and not group["definitional_phrase"]:
+                    group["definitional_phrase"] = phrase[:200]
             # Pt 10b — gather context for taxonomy resolution. Dedupe by
             # exact text (same chunk may surface the entity multiple times).
             if (
@@ -1278,6 +1307,18 @@ async def write_document_graph(
                 and len(group["text_chunks"]) < 3
             ):
                 group["text_chunks"].append(result_text)
+            # Pt 10c — union query_aliases case-insensitively. Skip aliases
+            # equal to the canonical or display name (no signal value).
+            for alias in (getattr(entity, "query_aliases", None) or []):
+                alias_clean = str(alias).strip()
+                if not alias_clean or len(group["query_aliases"]) >= 8:
+                    continue
+                alias_lc = alias_clean.lower()
+                if alias_lc == canonical.lower():
+                    continue
+                if any(a.lower() == alias_lc for a in group["query_aliases"]):
+                    continue
+                group["query_aliases"].append(alias_clean)
 
     entity_identity: dict[str, dict] = {}
     for canonical, group in entity_groups.items():
@@ -1308,6 +1349,12 @@ async def write_document_graph(
             "domain_type_root": ontology.get("domain_type_root"),
             "canonical_family": ontology.get("canonical_family"),
             "ontology_version": ontology.get("ontology_version"),
+            # Pt 10c — query-facing fields for Mode B entity search and
+            # chat-citation context. Both default-safe (empty list / "") on
+            # pre-Pt-10c entities so existing data + Cypher coalesces work
+            # without migration.
+            "query_aliases": group.get("query_aliases") or [],
+            "definitional_phrase": group.get("definitional_phrase") or "",
         }
 
     mention_rows: list[dict] = []
@@ -1354,6 +1401,12 @@ async def write_document_graph(
                 "domain_type_root": identity.get("domain_type_root"),
                 "canonical_family": identity.get("canonical_family"),
                 "ontology_version": identity.get("ontology_version"),
+                # Pt 10c — query-facing fields. Identity dict already
+                # aggregated these across mentions; pass through to the
+                # UNWIND row so the Cypher SET CASE-merge can additively
+                # accumulate aliases and stash the definitional phrase.
+                "query_aliases": identity.get("query_aliases") or [],
+                "definitional_phrase": identity.get("definitional_phrase") or "",
             })
 
     relation_rows: list[dict] = []
@@ -1508,7 +1561,16 @@ async def write_document_graph(
                     e.domain_type_parent = row.domain_type_parent,
                     e.domain_type_root = row.domain_type_root,
                     e.canonical_family = row.canonical_family,
-                    e.ontology_version = row.ontology_version
+                    e.ontology_version = row.ontology_version,
+                    e.query_aliases = CASE
+                        WHEN row.query_aliases IS NULL OR size(row.query_aliases) = 0 THEN coalesce(e.query_aliases, [])
+                        ELSE [a IN row.query_aliases WHERE NOT a IN coalesce(e.query_aliases, [])] + coalesce(e.query_aliases, [])
+                    END,
+                    e.definitional_phrase = CASE
+                        WHEN row.definitional_phrase IS NULL OR row.definitional_phrase = '' THEN coalesce(e.definitional_phrase, '')
+                        WHEN coalesce(e.definitional_phrase, '') = '' THEN row.definitional_phrase
+                        ELSE e.definitional_phrase
+                    END
                 WITH e, row
                 SET e.observed_entity_types = reduce(
                     types = coalesce(e.observed_entity_types, []),
