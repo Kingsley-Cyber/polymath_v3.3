@@ -180,6 +180,26 @@ _TOC_LINE_RE = re.compile(r"\.{3,}\s*\d+\s*$")
 _INDEX_LINE_RE = re.compile(
     r"^\s*[A-Za-z][A-Za-z\s,'\-&]{1,40},\s*\d+(?:[\s,\-]+\d+)*\s*$"
 )
+# Pt 8c — modern ebook TOC lines using markdown anchor links instead of
+# dot-leaders + page numbers. Example: `[Chapter 1: Introduction](#ch01)`.
+# Common in epub-converted markdown where docling preserves the link
+# syntax. Triggers when ≥30% of lines match.
+_MD_ANCHOR_TOC_LINE_RE = re.compile(r"\[[^\]]{1,100}\]\(#[\w\-]+\)")
+# Pt 8c — numbered cheat-sheet / structured-listing pattern, e.g.
+#   1.1: Fill out the Habits Scorecard
+#   1.2: Use implementation intentions
+#   2.1: Use temptation bundling
+# Found in back-matter cheat sheets, lecture-note recap pages,
+# multi-level structured summaries. Triggers when ≥50% of lines match.
+_CHEATSHEET_LINE_RE = re.compile(r"^\s*\d+\.\d+\s*[:.\-]\s+\S")
+# Pt 8c — glossary / dictionary-entry pattern, e.g.
+#   atomic — an extremely small amount of a thing
+#   habit — a routine or practice performed regularly
+# Term followed by em-dash / en-dash / hyphen-with-spaces, then a lowercase
+# definition. Triggers when ≥30% of lines match.
+_GLOSSARY_LINE_RE = re.compile(
+    r"^\s*[A-Za-z][\w\s\-']{1,40}\s+[—–\-]\s+[a-z]"
+)
 # "see X" / "see also X" cross-reference — the canonical *partial-index*
 # shape that has terms but no page numbers (Design Patterns chunk_0501
 # is this: "adapter, see adapter, object | granularity of, see also
@@ -233,6 +253,24 @@ def classify_content(text: str | None) -> str:
         toc_hits = sum(1 for ln in lines if _TOC_LINE_RE.search(ln))
         if toc_hits / len(lines) >= 0.30:
             return ChunkKind.TOC
+        # Pt 8c — modern ebook TOC (markdown anchor links). Same TOC bucket;
+        # we don't need a separate "ebook_toc" kind because the downstream
+        # skip-policy treats them identically.
+        md_anchor_hits = sum(1 for ln in lines if _MD_ANCHOR_TOC_LINE_RE.search(ln))
+        if md_anchor_hits / len(lines) >= 0.30:
+            return ChunkKind.TOC
+        # Pt 8c — numbered cheat-sheet / structured-listing rows. These
+        # surface in back-matter sections like "Habits Cheat Sheet" or
+        # multi-law recap pages. Treated as back_matter.
+        cheat_hits = sum(1 for ln in lines if _CHEATSHEET_LINE_RE.match(ln))
+        if cheat_hits / len(lines) >= 0.50:
+            return ChunkKind.BACK_MATTER
+        # Pt 8c — glossary / dictionary entries (front-matter for most
+        # technical books, back-matter for some). Pattern: short term +
+        # em-dash + lowercase definition, repeated.
+        glossary_hits = sum(1 for ln in lines if _GLOSSARY_LINE_RE.match(ln))
+        if glossary_hits / len(lines) >= 0.30:
+            return ChunkKind.FRONT_MATTER
         index_hits = sum(1 for ln in lines if _INDEX_LINE_RE.match(ln))
         if index_hits / len(lines) >= 0.40:
             return ChunkKind.INDEX

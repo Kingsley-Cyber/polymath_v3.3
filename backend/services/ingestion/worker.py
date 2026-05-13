@@ -1199,11 +1199,28 @@ async def _write_neo4j_for_doc(
     Neo4j (which doesn't accept dict-valued node properties).
     """
     from services.graph.neo4j_writer import write_document_graph
+    from services.ingestion.section_classifier import GHOST_B_SKIP_KINDS
 
     metrics = ghost_b_metrics or {}
     success_rate = metrics.get("success_rate")
     extracted = metrics.get("extracted_chunks")
     total = metrics.get("requested_chunks")
+
+    # Pt 8c — only write `body` chunks to Neo4j. Chunks tagged toc / index /
+    # bibliography / front_matter / back_matter / appendix were already
+    # skipped by Ghost B (no MENTIONS / RELATES_TO would form), but they
+    # were still being MERGE'd as :Chunk nodes with HAS_CHUNK edges,
+    # polluting the graph with structural / glossary / cheatsheet noise.
+    # The retrieval-side Mongo `chunks` collection keeps them so opt-in
+    # citation queries still work; the GRAPH stays clean.
+    body_children = [c for c in children if c.chunk_kind not in GHOST_B_SKIP_KINDS]
+    skipped_count = len(children) - len(body_children)
+    if skipped_count:
+        logger.info(
+            "Pt8c neo4j writer skipping %d noisy chunks (toc/index/biblio/...) "
+            "of %d total for doc_id=%s",
+            skipped_count, len(children), doc_id,
+        )
 
     await write_document_graph(
         driver=neo4j_driver,
@@ -1212,7 +1229,7 @@ async def _write_neo4j_for_doc(
         extraction_results=ghost_b_out or [],
         user_id=user_id,
         file_id=file_id,
-        all_chunk_ids=[c.chunk_id for c in children],
+        all_chunk_ids=[c.chunk_id for c in body_children],
         filename=filename,
         parent_count=len(parents) if parents is not None else 0,
         schema_lens_id=schema_lens_id,

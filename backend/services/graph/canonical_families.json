@@ -173,5 +173,134 @@
       "source router"
     ],
     "synonyms": ["source management", "source selection", "active source", "library source"]
+  },
+  "behavioral_science": {
+    "members": [
+      "habit",
+      "habits",
+      "atomic habits",
+      "habit formation",
+      "habit loop",
+      "cue craving response reward",
+      "behavior change",
+      "behavioral change",
+      "behavior modification",
+      "compounding habits",
+      "tiny habits"
+    ],
+    "synonyms": ["behavior change", "habit formation", "behavioral science", "self-improvement habits", "compound effect"]
+  },
+  "self_help": {
+    "members": [
+      "mastery",
+      "deliberate practice",
+      "10000 hour rule",
+      "the seven habits",
+      "personal development",
+      "self-help",
+      "growth mindset"
+    ],
+    "synonyms": ["self help", "self-improvement", "personal growth", "self-development", "self-mastery"]
+  },
+  "clinical_psychology": {
+    "members": [
+      "depression",
+      "anxiety",
+      "neurosis",
+      "psychoanalysis",
+      "psychotherapy",
+      "cognitive behavioral therapy",
+      "cbt",
+      "personality disorder",
+      "trauma",
+      "ptsd",
+      "transference",
+      "freud",
+      "jung",
+      "rorschach",
+      "dsm",
+      "mmpi"
+    ],
+    "synonyms": ["clinical psychology", "psychological assessment", "mental health", "psychotherapy", "psychiatric"]
+  },
+  "existential_psychology": {
+    "members": [
+      "denial of death",
+      "ernest becker",
+      "kierkegaard",
+      "otto rank",
+      "fear of death",
+      "causa-sui",
+      "heroism",
+      "immortality project",
+      "existentialism",
+      "human condition"
+    ],
+    "synonyms": ["existential psychology", "existential", "death anxiety", "meaning of life", "human condition"]
+  },
+  "machine_learning": {
+    "members": [
+      "neural network",
+      "deep learning",
+      "gradient descent",
+      "backpropagation",
+      "convolutional neural network",
+      "recurrent neural network",
+      "transformer",
+      "attention mechanism",
+      "embedding",
+      "fine-tuning",
+      "supervised learning",
+      "unsupervised learning",
+      "reinforcement learning",
+      "loss function",
+      "overfitting",
+      "regularization",
+      "dropout",
+      "batch normalization"
+    ],
+    "synonyms": ["machine learning", "deep learning", "neural network", "model training", "ml model", "ai model"]
+  },
+  "software_architecture": {
+    "members": [
+      "microservices",
+      "monolith",
+      "service mesh",
+      "event-driven architecture",
+      "message queue",
+      "publish-subscribe",
+      "cqrs",
+      "event sourcing",
+      "data-intensive",
+      "distributed systems",
+      "load balancing",
+      "consistency",
+      "partition tolerance",
+      "cap theorem",
+      "saga pattern",
+      "enterprise integration patterns",
+      "message broker"
+    ],
+    "synonyms": ["software architecture", "system design", "distributed systems", "integration patterns", "scalability"]
+  },
+  "programming_languages": {
+    "members": [
+      "c++",
+      "java",
+      "python",
+      "rust",
+      "go",
+      "javascript",
+      "typescript",
+      "haskell",
+      "ocaml",
+      "compiler",
+      "garbage collection",
+      "type system",
+      "memory management",
+      "pointer",
+      "reference"
+    ],
+    "synonyms": ["programming language", "language design", "compiler", "interpreter", "type theory"]
   }
 }

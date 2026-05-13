@@ -82,12 +82,17 @@ RELATION_FAMILY_MAP = {
     "instance_of": "Canonicalization",
     "stores": "Operational",
     "detects": "Operational",
-    "classifies": "Operational",
-    "runs_on": "Operational",
-    "trained_on": "Operational",
     "supports": "Operational",
     "represents": "Referential",
     "maps_to": "Referential",
+    # Pt 8d — three new first-class predicates. `defines` lives in
+    # Referential (a definition is a citation-like description of meaning);
+    # `example_of` lives in Canonicalization (entity-typing like instance_of
+    # but pedagogical); `during` lives in Causal (the temporal family,
+    # alongside preceded_by / overlaps / causes).
+    "defines": "Referential",
+    "example_of": "Canonicalization",
+    "during": "Causal",
     "related_to": "WeakAssociation",
 }
 _APPROVED_SPECIFIC_RELATIONS = {

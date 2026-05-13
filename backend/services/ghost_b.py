@@ -70,6 +70,7 @@ FACT_TYPES: tuple[str, ...] = (
     "property",
     "status",
     "timestamp",
+    "quantity",        # Pt 8d — numeric with unit ($100, 5kg, 30%, 2.3M)
     "threshold",
     "category",
     "tag",
@@ -113,25 +114,25 @@ UNIVERSAL_RELATION_SCHEMA: list[str] = [
     # in case future versions tier them out of EXTRACTION_MAX_RELATIONS_PER_CHUNK.)
     "synonym_of",
     "instance_of",
+    "example_of",    # Pt 8d — pedagogical "X is an example/case of Y" distinct from instance_of
     # Operational
-    "uses",          # absorbs the previous `calls` predicate (X invokes Y is a kind of X uses Y)
+    "uses",          # absorbs the previous `calls` + `trained_on` + `runs_on` predicates
     "references",
     "implements",
     "depends_on",
     "produces",
     "stores",
-    "detects",       # absorbs the previous `extracts` predicate
-    "classifies",
-    "runs_on",
-    "trained_on",
+    "detects",       # absorbs the previous `extracts` + `classifies` predicates
     "supports",
-    # Referential / transformation
+    # Referential / definitional / transformation
+    "defines",       # Pt 8d — "X defines Y" — definitions, glossaries, formal specs
     "represents",
     "maps_to",
     # Temporal
     "preceded_by",
     "causes",
     "overlaps",      # temporal co-occurrence (Event/TimeReference overlap)
+    "during",        # Pt 8d — temporal containment "X happens during Y" (distinct from overlaps)
     # Provenance / conflict
     "derived_from",
     "contradicts",
@@ -190,15 +191,15 @@ UNIVERSAL_RELATION_GLOSSES: dict[str, str] = {
     "produces":        "X outputs Y",
     "stores":          "X persists Y",
     "detects":         "X identifies or pulls Y from data",
-    "classifies":      "X categorizes Y",
-    "runs_on":         "X executes on Y",
-    "trained_on":      "X learned from Y",
     "supports":        "X enables Y",
+    "example_of":      "X concrete instance illustrating Y",
+    "defines":         "X gives meaning of Y",
     "represents":      "X models Y",
     "maps_to":         "X transforms to Y",
     "preceded_by":     "X follows Y in time",
     "causes":          "X leads to Y",
     "overlaps":        "X co-occurs in time with Y",
+    "during":          "X happens within timespan of Y",
     "derived_from":    "X evolved from Y",
     "contradicts":     "X conflicts with Y",
     "excepts":         "X carveout from Y",
@@ -396,10 +397,15 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
     "enables": ("supports", False),
     "allows": ("supports", False),
     "facilitates": ("supports", False),
-    "runs_on": ("runs_on", False),
-    "deployed_on": ("runs_on", False),
-    "executes_on": ("runs_on", False),
-    "trained_with": ("trained_on", False),
+    # Pt 8d — `runs_on`, `trained_on`, `classifies` dropped from schema in
+    # favor of broader-fit `defines` / `example_of` / `during`. Their
+    # legacy aliases now route to broader operational predicates so any
+    # historical LLM emission still normalizes cleanly.
+    "runs_on": ("uses", False),
+    "deployed_on": ("uses", False),
+    "executes_on": ("uses", False),
+    "trained_on": ("uses", False),
+    "trained_with": ("uses", False),
     # `extracts` was merged into `detects`; both legacy aliases route to the
     # survivor so old prompts and historical snapshots still normalize.
     "extract": ("detects", False),
@@ -428,9 +434,20 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
     "sponsored_by": ("affiliated_with", False),
     "co_occurs_with": ("overlaps", False),
     "concurrent_with": ("overlaps", False),
-    "during": ("overlaps", False),
-    "predicts": ("classifies", False),
-    "labels": ("classifies", False),
+    # Pt 8d — `during` is now a first-class schema member (temporal
+    # containment, distinct from `overlaps` co-occurrence). The literal
+    # word "during" is preserved as a self-routing alias so the LLM can
+    # emit it directly without confusion.
+    "during": ("during", False),
+    "within_timespan_of": ("during", False),
+    "throughout": ("during", False),
+    # Pt 8d — `classifies` dropped; route prediction-/labeling-style verbs
+    # to `detects` which has identical semantic flavor (model produces
+    # category).
+    "predicts": ("detects", False),
+    "labels": ("detects", False),
+    "classifies": ("detects", False),
+    "categorizes": ("detects", False),
     "models": ("represents", False),
     "encodes": ("represents", False),
     "converts": ("maps_to", False),
@@ -470,6 +487,32 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
     "affects": ("causes", False),
     "reduces": ("causes", False),
     "published_by": ("created_by", False),
+    # Pt 8d — aliases for the new first-class predicates `defines` and
+    # `example_of`. The LLM may emit any of these surface forms; all
+    # normalize to the canonical schema slot so downstream queries stay
+    # bounded. Reverse-direction entries (rev=True) flip subject/object
+    # because "Y defined_in X" reads as "X defines Y".
+    "describes": ("defines", False),
+    "specifies": ("defines", False),
+    "denotes": ("defines", False),
+    "means": ("defines", False),
+    "defined_in": ("defines", True),
+    "defined_by": ("defines", True),
+    "explained_in": ("defines", True),
+    "exemplifies": ("example_of", False),
+    "case_of": ("example_of", False),
+    "illustrates": ("example_of", False),
+    "demonstrates_case": ("example_of", False),
+    "illustrated_in": ("references", True),
+    # Pt 8d — high-frequency off-schema predicates seen in the existing
+    # graph (audit Pt 7c finding). Route to closest semantic-family
+    # canonical so future ingestions canonicalize them instead of
+    # demoting to the `related_to` sentinel.
+    "tests": ("uses", False),
+    "parameter_of": ("part_of", False),
+    "equivalent_to": ("synonym_of", False),
+    "activates": ("uses", False),
+    "experiences": ("causes", True),
 }
 
 # Whitespace collapse for the Phase B evidence gate. Both the chunk text and
@@ -478,32 +521,141 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
 # matches "trained on the corpus".
 _WHITESPACE_RE = re.compile(r"\s+")
 
+# Pt 8c — semantic-empty Unicode characters that break substring match
+# but carry no meaning: soft hyphens (frontmatter hyphenation),
+# middle-dots / hyphenation points (dictionary syllabification like
+# `at·om·ic`), zero-width joiners (some PDF→markdown converters insert
+# these between every glyph), BOM. Stripped entirely before comparison.
+_UNICODE_NOISE_TRANSLATE = str.maketrans({
+    "­": None,  # soft hyphen
+    "·": None,  # middle dot
+    "‧": None,  # hyphenation point
+    "​": None,  # zero-width space
+    "‌": None,  # zero-width non-joiner
+    "‍": None,  # zero-width joiner
+    "﻿": None,  # zero-width no-break space / BOM
+})
+# Pt 8c — Unicode dash variants normalized to ASCII hyphen so an en-dash
+# in the chunk text and a plain hyphen in the LLM-emitted phrase still
+# substring-match.
+_DASH_NORMALIZE_RE = re.compile(r"[‐-―−⁃]")
+# Pt 8c — markdown emphasis / code-fence markers that wrap words in the
+# chunk (`**Atomic Habits**`) but rarely appear in LLM-emitted phrases.
+# Stripped (not space-replaced) because they touch word boundaries.
+_MD_EMPHASIS_RE = re.compile(r"[*_`]+")
+
 
 def _normalize_evidence(text: str) -> str:
-    """Lowercase + whitespace-collapse for the Phase B comparison.
+    """Lowercase + whitespace-collapse + Unicode/markdown noise strip.
 
-    Both the chunk text and the model-supplied evidence_phrase pass through
-    this normalizer before the substring check so trivial formatting
-    differences (extra spaces, line breaks, mixed case) don't cause false
-    rejections. Centralized so the unit tests can exercise the same code
-    path the runtime uses.
+    Pt 8c expansion: HTML entities decoded (`&amp;` → `&`), syllabification
+    marks and zero-width characters removed, Unicode dashes normalized to
+    `-`, markdown emphasis stripped. This lifts the Pt 7f false-drop
+    class on dictionary-formatted text (atomic, habit, the book title)
+    and the Phase B miss on cite-style entities with `&amp;`.
     """
-    return _WHITESPACE_RE.sub(" ", (text or "")).lower().strip()
+    if not text:
+        return ""
+    s = text
+    if "&" in s:
+        # html.unescape handles &amp; &lt; &gt; &quot; &#39; and numeric refs.
+        # Cheap when no entities are present (early exit on the substring).
+        import html as _html  # local import keeps module load light
+        s = _html.unescape(s)
+    s = s.translate(_UNICODE_NOISE_TRANSLATE)
+    s = _DASH_NORMALIZE_RE.sub("-", s)
+    s = _MD_EMPHASIS_RE.sub("", s)
+    return _WHITESPACE_RE.sub(" ", s).lower().strip()
+
+
+# Pt 8c — paraphrase tolerance. English function-word stoplist — these
+# are tokens the LLM commonly omits / swaps / inserts when paraphrasing,
+# so they shouldn't count toward content overlap. Anything outside this
+# list is treated as "content" and must be present in the chunk for the
+# overlap fraction to credit it.
+_EVIDENCE_STOPWORDS: frozenset[str] = frozenset({
+    # articles / coordinators / determiners
+    "a", "an", "the", "and", "or", "but", "nor", "so", "yet",
+    # prepositions
+    "of", "in", "on", "at", "to", "for", "with", "by", "from", "as",
+    "into", "onto", "out", "off", "up", "down", "over", "under", "about",
+    "through", "between", "across", "above", "below", "behind", "before",
+    "after", "during", "since", "until", "near", "against", "along",
+    "around", "among", "via", "per", "than", "like",
+    # be / have / do / modals
+    "is", "are", "was", "were", "be", "been", "being", "am",
+    "have", "has", "had", "having",
+    "do", "does", "did", "doing", "done",
+    "will", "would", "shall", "should", "may", "might", "must",
+    "can", "could", "ought",
+    # demonstratives / pronouns / possessives
+    "this", "that", "these", "those", "it", "its",
+    "i", "me", "you", "we", "they", "us", "them",
+    "his", "her", "hers", "their", "theirs", "our", "ours", "your", "yours",
+    "my", "mine", "him", "she", "he", "who", "whom", "whose", "which",
+    # wh-words / connectors
+    "when", "where", "why", "how", "what",
+    "if", "then", "because", "although", "though", "while", "whereas",
+    # frequency / generic adverbs that rarely carry topical signal
+    "also", "just", "only", "very", "really", "still", "even", "ever",
+    "always", "never", "often", "sometimes", "usually",
+    # negation / generic quantifiers
+    "not", "no", "yes",
+    "more", "most", "less", "least", "much", "many", "some", "any",
+    "all", "each", "every", "few", "several",
+})
+_EVIDENCE_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _evidence_token_overlap(phrase: str, text: str, *, threshold: float = 0.6) -> bool:
+    """Token-overlap fallback for paraphrased evidence.
+
+    Returns True iff at least `threshold` fraction of `phrase`'s content
+    tokens (non-stopword alphanumeric runs after lowercasing) also appear
+    in `text`. Both inputs are assumed already normalized.
+
+    Defaults to 0.6 — empirically permissive enough to recover paraphrases
+    like `"Scott Adams, the cartoonist behind the Dilbert comic"`
+    matching a chunk that says `"Scott Adams created Dilbert"` (4/6
+    content tokens = 67%), while still rejecting bald hallucinations
+    where the LLM invents a phrase wholesale.
+    """
+    phrase_tokens = {
+        t for t in _EVIDENCE_TOKEN_RE.findall(phrase or "")
+        if t not in _EVIDENCE_STOPWORDS
+    }
+    if not phrase_tokens:
+        return False
+    text_tokens = set(_EVIDENCE_TOKEN_RE.findall(text or ""))
+    overlap = phrase_tokens & text_tokens
+    return (len(overlap) / len(phrase_tokens)) >= threshold
 
 
 def _validate_evidence(evidence_phrase: str | None, chunk_text: str) -> bool:
-    """Phase B evidence gate — return True iff `evidence_phrase` is a
-    substring of `chunk_text` after lowercase + whitespace-collapse.
+    """Phase B evidence gate — return True iff `evidence_phrase` matches
+    `chunk_text` after normalization.
 
-    An empty / missing phrase fails the check. The function is intentionally
-    side-effect-free so callers can decide what to do with the result
-    (drop the relation, log a warning, increment a counter). Unit-tested
-    in `tests/test_universal_schema.py::test_validate_evidence_*`.
+    Two-stage check:
+      1. Verbatim substring after `_normalize_evidence` (the original
+         Phase B contract — Unicode-noise-cleaned, lowercase, whitespace-
+         collapsed, HTML-decoded, markdown-stripped).
+      2. Pt 8c paraphrase fallback — if substring fails, accept when ≥60%
+         of the phrase's content tokens appear in the normalized chunk
+         text. Rejects bald hallucinations but recovers legitimate
+         paraphrases like `"Scott Adams, the cartoonist behind the
+         Dilbert comic"` for a chunk saying `"Scott Adams created
+         Dilbert"`.
+
+    Empty / missing phrase fails. Side-effect-free so callers decide
+    what to do with the result.
     """
     norm_phrase = _normalize_evidence(evidence_phrase or "")
     if not norm_phrase:
         return False
-    return norm_phrase in _normalize_evidence(chunk_text)
+    norm_text = _normalize_evidence(chunk_text)
+    if norm_phrase in norm_text:
+        return True
+    return _evidence_token_overlap(norm_phrase, norm_text, threshold=0.6)
 
 
 EVIDENCE_CUE_RULES: list[tuple[re.Pattern[str], str, bool]] = [
