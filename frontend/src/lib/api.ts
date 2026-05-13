@@ -1657,6 +1657,9 @@ export interface BrainViewBridge {
   strength: number;
   // Pt 5: pass-through from backend Cypher; same as the flattened version.
   dominant_relation_family?: string | null;
+  // Pt 7c: top 3 distinct shared concept names — drives the on-edge label
+  // so users see what connects two books without clicking.
+  top_shared_entities?: string[];
 }
 
 export interface BrainViewDocument {
@@ -1694,6 +1697,8 @@ export interface BrainViewFlatBridge {
   // Pt 5: dominant RELATES_TO.relation_family across this bridge. Drives
   // edge color (EDGE_COLORS_BY_FAMILY) on the frontend canvas.
   dominant_relation_family?: string | null;
+  // Pt 7c: top 3 distinct shared concept names. Drives the on-edge label.
+  top_shared_entities?: string[];
 }
 
 export interface BrainViewResponse {

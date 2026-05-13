@@ -1006,6 +1006,23 @@ def build_user_prompt(
         "- object_kind=entity only if object is a named entity in text and also listed in entities\n"
         f"- pick the narrowest predicate; use '{SchemaContext.RELATION_SENTINEL}' only when no specific predicate fits. Never invent a new predicate\n"
         "- omit ontology fields (domain_type, canonical_family, ontology_tags, ontology_version)\n"
+        # Pt 7e — entity-quality gate. Without this, the LLM dutifully extracts
+        # everything `explicitly stated` including generic role words and
+        # structural references, which then form spurious cross-book bridges
+        # in the Brain View. This rule is the upstream version of the
+        # entity_stoplist.json gate applied at query time.
+        "- SKIP generic mentions: pronouns (I, you, we, they, it); single letters and "
+        "isolated math variables (k, i, n, x, v, w; subscripted symbols like S_k or v'); "
+        "theorem / lemma / equation / proposition / corollary references (Theorem N, "
+        "Lemma N, Equation N) and chapter/section/figure/table references (chapter N, "
+        "table N, figure N, section N, index, references, introduction, appendix, "
+        "this book, this chapter, the book); type names used as entities "
+        "(person, organization, concept, document, entity); generic role/kinship words "
+        "(user, users, patient, parent, children, family, the author, the reader, "
+        "teacher, student, human, people, individual) unless the text is defining or "
+        "specifying THIS one; generic abstract nouns standing alone (state, system, "
+        "time, language, subject, data, object, action, rule) unless the text is treating "
+        "them as a specific named concept. Prefer specific named concepts.\n"
         f"{vocab_block}\n"
         f"{lens_block}\n"
         "\n"
@@ -1154,6 +1171,21 @@ def build_json_object_prompt(
         "do not fill caps just because they exist\n"
         f"- use '{SchemaContext.RELATION_SENTINEL}' only when no specific predicate fits\n"
         "- omit ontology fields (domain_type, canonical_family, ontology_tags, ontology_version)\n"
+        # Pt 7e — entity-quality gate (mirrors the JSONL prompt). Without
+        # this the LLM extracts everything stated in the text, including
+        # generic words that spawn spurious cross-book bridges.
+        "- SKIP generic mentions: pronouns (I, you, we, they, it); single letters and "
+        "isolated math variables (k, i, n, x, v, w; subscripted symbols like S_k or v'); "
+        "theorem / lemma / equation / proposition / corollary references (Theorem N, "
+        "Lemma N, Equation N) and chapter/section/figure/table references (chapter N, "
+        "table N, figure N, section N, index, references, introduction, appendix, "
+        "this book, this chapter, the book); type names used as entities "
+        "(person, organization, concept, document, entity); generic role/kinship words "
+        "(user, users, patient, parent, children, family, the author, the reader, "
+        "teacher, student, human, people, individual) unless the text is defining or "
+        "specifying THIS one; generic abstract nouns standing alone (state, system, "
+        "time, language, subject, data, object, action, rule) unless the text is treating "
+        "them as a specific named concept. Prefer specific named concepts.\n"
         f"{vocab_block}\n"
         f"{lens_block}\n"
         "\n"
@@ -1925,6 +1957,33 @@ def _parse(
             continue
 
     entities, relations, counters = _apply_schema(entities, relations, schema)
+
+    # Pt 7f — Entity evidence gate. Mirrors the Phase B relation gate just
+    # below: drop any entity whose `surface_form` (the LLM's claim about
+    # what literal phrase it saw) doesn't actually appear in `task.text`
+    # after lowercase + whitespace-collapsed comparison. This catches the
+    # dominant specific-name hallucination class — e.g. DeepSeek inventing
+    # "Netflix" / "Yelp" / "eBay" at confidence 0.95 in a chunk that only
+    # discusses Amazon. Falls back to `canonical_name` when `surface_form`
+    # is empty (some legacy paths leave it blank). Dropped entities
+    # cascade through `neo4j_writer.write_document_graph`, which already
+    # skips MENTIONS / RELATES_TO rows whose endpoint isn't in
+    # `entity_identity`, so no downstream change is required.
+    kept_entities: list[EntityItem] = []
+    entity_evidence_drop_count = 0
+    for e in entities:
+        surface = e.surface_form or e.canonical_name
+        if _validate_evidence(surface, task.text):
+            kept_entities.append(e)
+            continue
+        entity_evidence_drop_count += 1
+        logger.warning(
+            "GHOST B evidence gate dropped entity chunk_id=%s name=%r surface=%r",
+            task.chunk_id,
+            (e.canonical_name or "")[:40],
+            (surface or "")[:40],
+        )
+    entities = kept_entities
 
     # Phase B evidence-validation gate. Drop any relation whose evidence_phrase
     # is empty / missing OR is not a substring of the chunk text after a

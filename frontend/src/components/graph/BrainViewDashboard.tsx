@@ -41,7 +41,7 @@ export type DashboardTab = "brain" | "agent" | "graph-query";
 
 // Sidebar width bounds when expanded. Default mirrors Pt 5 baseline (320).
 const SIDEBAR_MIN_W = 240;
-const SIDEBAR_MAX_W = 560;
+const SIDEBAR_MAX_W = 900;
 const SIDEBAR_DEFAULT_W = 320;
 
 export type DrillFrame = { docId: string; label: string };

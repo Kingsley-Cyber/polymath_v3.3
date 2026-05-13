@@ -13,12 +13,63 @@ Two entry points:
 
 from __future__ import annotations
 
+import json
 import logging
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from neo4j import AsyncDriver
 
 logger = logging.getLogger(__name__)
+
+
+# Pt 7d — Entity stop-list for Brain View bridges.
+#
+# The brain-view bridge query joins (book → entity → entity → book), so any
+# generic / structural / type-leak entity name (e.g. "Index", "this book",
+# "Person", "users", "k") creates spurious cross-book bridges. The audit at
+# Pt 7c revealed roughly half the top-30 highest-degree entities were noise.
+#
+# This loader reads `entity_stoplist.json` (sibling file) and exposes a
+# compiled (exact_set, combined_regex) tuple used by `_BRAIN_VIEW_CYPHER` to
+# exclude those entities from contributing to bridges. Drill-down queries
+# are intentionally NOT filtered — in-book entity lists keep everything.
+ENTITY_STOPLIST_PATH = Path(__file__).with_name("entity_stoplist.json")
+
+
+@lru_cache(maxsize=1)
+def _load_entity_stoplist() -> tuple[list[str], str]:
+    """Return (exact_lowercase_list, combined_pattern_regex).
+
+    The exact list is what gets passed to Cypher as `$stop_exact` — Neo4j
+    handles the IN-membership test. The pattern is a single Java regex
+    string (alternation of the JSON `patterns` entries) passed as
+    `$stop_pattern` and matched with `=~`.
+
+    Both inputs are already lowercased / anchored; the Cypher caller
+    lowercases `e.display_name` before testing. Returns ([], "$^") (a
+    never-matching regex) if the JSON is missing — safer to bridge-with-
+    noise than to silently filter nothing.
+    """
+    try:
+        data = json.loads(ENTITY_STOPLIST_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        logger.warning("Entity stop-list missing at %s — running with no filter", ENTITY_STOPLIST_PATH)
+        return [], "$^"
+    except Exception as exc:
+        logger.warning("Entity stop-list failed to load (%s) — running with no filter", exc)
+        return [], "$^"
+
+    exact_raw = data.get("exact_lowercase") or []
+    exact_list = sorted({str(s).strip().lower() for s in exact_raw if isinstance(s, str) and s.strip()})
+
+    patterns = data.get("patterns") or []
+    pattern_parts = [str(p).strip() for p in patterns if isinstance(p, str) and p.strip()]
+    # Combine via | so a single =~ call covers all patterns. "$^" never
+    # matches and serves as the "no patterns" sentinel.
+    combined = "|".join(f"(?:{p})" for p in pattern_parts) if pattern_parts else "$^"
+    return exact_list, combined
 
 
 def _iso_or_none(value: Any) -> str | None:
@@ -89,16 +140,28 @@ WITH d, actual_chunk_count,
 // 4. Bridges to other selected anchors via shared entities + RELATES_TO.
 //    Pt 5 — also collects the relation_family list per bridge so we can
 //    pick a dominant family for edge coloring on the frontend.
+//    Pt 7d — both sides of the bridge are filtered through the entity
+//    stop-list ($stop_exact + $stop_pattern, loaded from
+//    entity_stoplist.json) so structural / generic / type-leak entities
+//    (Index, "this book", Person, users, k, …) don't manufacture spurious
+//    cross-book bridges. Drill-down queries are NOT filtered.
 OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c1:Chunk)-[:MENTIONS]->(e:Entity)
+WHERE NOT toLower(coalesce(e.display_name, '')) IN $stop_exact
+  AND NOT toLower(coalesce(e.display_name, '')) =~ $stop_pattern
 OPTIONAL MATCH (e)-[r:RELATES_TO]->(e2:Entity)<-[:MENTIONS]-(c2:Chunk)<-[:HAS_CHUNK]-(d2:Document)
 WHERE d2.corpus_id IN $corpus_ids
   AND d2.is_cluster_anchor = true
   AND d2.doc_id <> d.doc_id
+  AND NOT toLower(coalesce(e2.display_name, '')) IN $stop_exact
+  AND NOT toLower(coalesce(e2.display_name, '')) =~ $stop_pattern
 
 WITH d, actual_chunk_count, dominant_family, dominant_entity_type, d2,
      count(DISTINCT e) AS shared_entities,
      count(r) AS edge_count,
-     collect(r.relation_family) AS bridge_families
+     collect(r.relation_family) AS bridge_families,
+     // Pt 7c: distinct concept names that form this bridge — drives the
+     // on-edge label so users see what connects two books without clicking.
+     collect(DISTINCT coalesce(e.display_name, e.entity_id)) AS shared_entity_names
 WHERE d2 IS NULL OR shared_entities > 0
 
 WITH d, actual_chunk_count, dominant_family, dominant_entity_type,
@@ -112,7 +175,10 @@ WITH d, actual_chunk_count, dominant_family, dominant_entity_type,
                strength: edge_count,
                // Pt 5: first non-null relation_family seen between this
                // pair of books. Drives bridge edge color (EDGE_COLORS_BY_FAMILY).
-               dominant_relation_family: head([f IN bridge_families WHERE f IS NOT NULL])
+               dominant_relation_family: head([f IN bridge_families WHERE f IS NOT NULL]),
+               // Pt 7c: top 3 shared concept names. First-3 distinct (not
+               // ranked); ordering is whatever the Cypher engine emits.
+               top_shared_entities: shared_entity_names[..3]
              }
         END
      ) AS raw_bridges
@@ -169,7 +235,8 @@ async def get_brain_view(
             ...
           ],
           "bridges": [        # flattened, source/target pair view
-            {source: doc_id, target: target_doc_id, strength, shared_entities},
+            {source: doc_id, target: target_doc_id, strength, shared_entities,
+             dominant_relation_family, top_shared_entities: [name, ...]},
             ...
           ],
           "meta": {corpus_count, total_documents, total_bridges, limit_applied},
@@ -182,10 +249,15 @@ async def get_brain_view(
             "meta": {"corpus_count": 0, "total_documents": 0, "total_bridges": 0, "limit_applied": limit},
         }
 
+    stop_exact, stop_pattern = _load_entity_stoplist()
     try:
         async with driver.session() as session:
             result = await session.run(
-                _BRAIN_VIEW_CYPHER, corpus_ids=list(corpus_ids), limit=int(limit)
+                _BRAIN_VIEW_CYPHER,
+                corpus_ids=list(corpus_ids),
+                limit=int(limit),
+                stop_exact=stop_exact,
+                stop_pattern=stop_pattern,
             )
             records = [dict(r) async for r in result]
     except Exception as exc:
@@ -237,6 +309,9 @@ async def get_brain_view(
                     "shared_entities": int(b.get("shared_entities") or 0),
                     # Pt 5: edge color on the frontend keys off this family.
                     "dominant_relation_family": b.get("dominant_relation_family"),
+                    # Pt 7c: top 3 shared concept names — drives the on-edge
+                    # label so users see what connects two books at a glance.
+                    "top_shared_entities": list(b.get("top_shared_entities") or []),
                 }
             )
 

@@ -78,6 +78,10 @@ export interface SigmaEdgeAttributes {
   dangling?: boolean;
   hidden?: boolean;
   zIndex?: number;
+  // Pt 7c: text label rendered at edge midpoint (gated by
+  // `labelRenderedSizeThreshold`). Used for Brain View bridges to show
+  // the top shared concept name between two books at a glance.
+  label?: string;
 }
 
 export type ColorMode = "community" | "corpus";
@@ -124,6 +128,12 @@ export interface PolymathRawEdge {
   source_corpus?: string;
   dangling?: boolean;
   cross_cluster?: boolean;
+  // Pt 7c: Brain View bridges carry the top shared concept names from
+  // the backend. Drives the on-edge label so users see what links two
+  // books without clicking. `shared_entities` is the total count so we
+  // can compute a "+N more" suffix when only the top 3 names are shown.
+  top_shared_entities?: string[];
+  shared_entities?: number;
 }
 
 export interface BuildOpts {
@@ -411,6 +421,7 @@ export function polymathToGraphology(
     // /api/graph/brain-view. Pt 5: family-driven color + thin "spaghetti"
     // size, with alpha by strength.
     let size = edgeBaseSize * style.sizeMultiplier;
+    let edgeLabel: string | undefined;
     if (rel.predicate === "bridges_to" && typeof rel.weight === "number") {
       const strength = Math.max(0, rel.weight);
       // Pt 5: max 1.8px (was 5.5px). Baseline 0.35, +0.05 per shared entity.
@@ -426,6 +437,20 @@ export function polymathToGraphology(
       // Pt 3 alpha-by-strength preserved: weak bridges fade.
       const opacity = Math.max(0.15, Math.min(0.85, 0.15 + strength * 0.08));
       color = hexToRgba(familyColor, opacity);
+      // Pt 7c: on-edge concept label. Show the strongest shared entity
+      // name with a "+N more" overflow suffix so users see what two
+      // books actually share at a glance. Truncate the head at 24 chars
+      // to match the chip-truncation pattern in BrainViewDashboard so a
+      // long concept name doesn't dominate the canvas.
+      const tops = rel.top_shared_entities ?? [];
+      if (tops.length > 0) {
+        const rawHead = tops[0];
+        const head =
+          rawHead.length > 24 ? rawHead.slice(0, 24) + "…" : rawHead;
+        const totalShared = rel.shared_entities ?? tops.length;
+        const overflow = Math.max(0, totalShared - 1);
+        edgeLabel = overflow > 0 ? `${head} +${overflow}` : head;
+      }
     }
     graph.addEdgeWithKey(`e${i}`, s, t, {
       size,
@@ -438,6 +463,7 @@ export function polymathToGraphology(
       source_corpora: rel.source_corpora || [],
       source_corpus: rel.source_corpus,
       dangling: Boolean(rel.dangling),
+      label: edgeLabel,
     });
   });
 

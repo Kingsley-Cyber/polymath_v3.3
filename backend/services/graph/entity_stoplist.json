@@ -1,0 +1,65 @@
+{
+  "_comment": "Hard stop-list of generic / structural / type-leak entity names that must NOT contribute to Brain View book-to-book bridges. Applied at query time in services/graph/queries.py:_BRAIN_VIEW_CYPHER. Drill-down queries are NOT filtered (in-book entity lists keep all entities). All `exact_lowercase` matches are compared against `toLower(e.display_name)`. `patterns` are Java regex strings combined with `|` and matched against the same lowercased name.",
+  "_categories": {
+    "back_matter": "Chunker-level contamination: ToC, indices, chapter headers, bibliographies that the LLM grabbed as content",
+    "type_leak":   "The literal type word (Person, Organization, Concept, ...) emitted as an entity",
+    "role":        "Generic role / kinship / occupation words mis-typed as Person or Organization",
+    "abstract":    "Generic Concept words that are too broad to form an informative cross-book bridge",
+    "single_char": "Single-letter and ultra-short tokens (i, k, B., etc.)",
+    "pattern":     "Regex-based catches for structural elements (Chapter N, Table N, ...)"
+  },
+  "exact_lowercase": [
+    "book", "books", "this book", "the book",
+    "chapter", "chapters", "this chapter", "the chapter",
+    "section", "sections", "this section", "subsection",
+    "index", "introduction", "references", "bibliography",
+    "appendix", "appendices", "preface", "epilogue",
+    "foreword", "afterword", "glossary", "abstract",
+    "page", "pages", "table", "tables", "figure", "figures",
+    "footnote", "footnotes", "endnote", "endnotes",
+
+    "person", "organization", "location", "concept", "product",
+    "method", "document", "entity", "thing", "things",
+
+    "user", "users", "patient", "patients",
+    "client", "clients", "customer", "customers",
+    "member", "members",
+    "parent", "parents", "father", "mother", "children", "child",
+    "son", "daughter", "family", "families", "sibling", "siblings",
+    "friend", "friends", "peer", "peers", "partner", "partners",
+    "teacher", "teachers", "student", "students",
+    "human", "humans", "individual", "individuals", "people",
+    "the author", "author", "authors", "the reader", "reader", "readers",
+    "researcher", "researchers", "master", "boss",
+    "king", "kings", "queen", "queens",
+
+    "state", "system", "environment", "memory",
+    "action", "actions", "pattern", "patterns", "prototype",
+    "rule", "rules", "culture", "time", "language",
+    "subject", "description", "title",
+    "data", "context", "model", "process", "service",
+    "key", "string", "void", "duration", "message",
+    "object", "objects", "concept", "values",
+    "creative process", "mind", "knowledge", "choice", "body",
+    "networks", "company", "community", "group",
+    "work", "program", "application", "web application", "web",
+    "human nature", "self", "self-control", "specialization",
+    "persistence", "resource", "belief", "individual",
+
+    "i", "me", "you", "we", "they", "it", "us", "them",
+    "a", "b", "c", "d", "k", "b.", "a.", "p."
+  ],
+  "patterns": [
+    "^chapter\\s+\\d+$",
+    "^chapters?\\s+\\d+(\\s+and\\s+\\d+)?$",
+    "^table\\s+\\d+(\\.\\d+)?$",
+    "^figure\\s+\\d+(\\.\\d+)?$",
+    "^section\\s+\\d+(\\.\\d+)?$",
+    "^page\\s+\\d+$",
+    "^appendix(\\s+[a-z])?$",
+    "^this\\s+(book|paper|study|chapter|section|article|figure|table|essay|volume|work)$",
+    "^the\\s+(book|paper|study|chapter|section|article|figure|table)$",
+    "^[a-z]$",
+    "^\\d+$"
+  ]
+}

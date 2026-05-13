@@ -282,6 +282,11 @@ function useBrainGraph(
         // Pt 5: passes through to the adapter, which uses
         // EDGE_COLORS_BY_FAMILY[dominant_relation_family] for the edge color.
         dominant_relation_family: b.dominant_relation_family,
+        // Pt 7c: top shared concept names + total count. The adapter
+        // builds an on-edge label string like "Bayes' theorem +5" so
+        // users see what links two books without clicking.
+        top_shared_entities: b.top_shared_entities || [],
+        shared_entities: b.shared_entities,
       }));
       setData({ nodes: anchorNodes, links: bridgeLinks });
       setCacheWarming([]);

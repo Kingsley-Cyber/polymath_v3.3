@@ -410,6 +410,20 @@ export const BRAIN_VIEW_CONFIG = {
   labelGridCellSize: 80,             // dedupe overlapping labels at scale
   labelRenderedSizeThreshold: 6,
 
+  // Pt 7c — Edge labels (Brain View bridges).
+  // Each bridge edge gets a midpoint label like "Bayes' theorem +5" built
+  // by the adapter from `top_shared_entities`. The same slate-200 used by
+  // node labels above so edges + nodes read as one typographic family;
+  // size 10 keeps books visually dominant. Gated by the shared
+  // `labelRenderedSizeThreshold` — labels auto-hide at low zoom or when
+  // many bridges overlap, fade in when the user zooms into a region.
+  renderEdgeLabels: true,
+  edgeLabelColor: { color: "#e2e8f0" },
+  edgeLabelSize: 10,
+  edgeLabelFont:
+    "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+  edgeLabelWeight: "400",
+
   // Camera bounds — keep the user from zooming so far out the canvas blanks.
   minCameraRatio: 0.1,
   maxCameraRatio: 8,
