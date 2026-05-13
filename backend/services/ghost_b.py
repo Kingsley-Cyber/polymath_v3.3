@@ -1430,6 +1430,16 @@ class ExtractionResult:
     relations: list[RelationItem] = field(default_factory=list)
     facts: list[FactItem] = field(default_factory=list)
 
+    # Pt 10b — original chunk text. Carried alongside the structured
+    # extraction output so that neo4j_writer.resolve_ontology_metadata can
+    # use it as `text_context` for taxonomy synonym matching. Without this
+    # field, the three call sites in neo4j_writer.py defaulted `text_context`
+    # to "" and the haystack-based synonym matching in resolve_facets /
+    # resolve_domain_type / resolve_canonical_family fell through for ~99%
+    # of entities (only exact-known-name hits + filename-extension shortcuts
+    # ever populated object_kind / domain_type / canonical_family).
+    text: str = ""
+
     # Phase 14 observability counters (per-chunk; aggregated at corpus level later).
     entity_remap_count: int = 0   # soft mode: entity_type → 'other'
     entity_drop_count: int = 0    # hard mode: entity dropped
@@ -2285,6 +2295,9 @@ def _parse(
         chunk_id=task.chunk_id,
         doc_id=task.doc_id,
         corpus_id=task.corpus_id,
+        # Pt 10b — preserve the chunk text so the downstream Neo4j writer can
+        # feed it to resolve_ontology_metadata for taxonomy synonym matching.
+        text=task.text,
         entities=entities,
         relations=relations,
         facts=facts,

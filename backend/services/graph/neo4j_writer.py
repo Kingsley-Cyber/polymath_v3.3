@@ -943,12 +943,16 @@ def summarize_dominant_facets(
     family_counter: Counter[str] = Counter()
     type_counter: Counter[str] = Counter()
     for result in extraction_results:
+        # Pt 10b — feed chunk text as `text_context` so taxonomy synonym
+        # matching can fire. Pre-fix this defaulted to "" and ~99% of
+        # entities ended up with empty canonical_family.
+        result_text = getattr(result, "text", "") or ""
         for entity in result.entities:
             canonical = canonicalize_entity_name(entity.canonical_name)
             if not canonical:
                 continue
             primary_type = resolve_primary_entity_type(canonical, [entity.entity_type])
-            ontology = resolve_ontology_metadata(canonical, primary_type)
+            ontology = resolve_ontology_metadata(canonical, primary_type, result_text)
             family = ontology.get("canonical_family")
             if family:
                 family_counter[family] += 1
@@ -1041,11 +1045,18 @@ async def _upsert_entity_and_mention(
     entity: EntityItem,
     chunk_id: str,
     corpus_id: str,
+    text_context: str = "",
 ) -> None:
+    """Single-entity upsert path. Pt 10b — accepts `text_context` so taxonomy
+    synonym matching can fire. Callers that have the chunk text should pass
+    it; default empty preserves pre-fix behavior for back-compat (this
+    function is currently unreferenced in the codebase but kept for the
+    live-API/legacy path described in earlier comments).
+    """
     canonical = canonicalize_entity_name(entity.canonical_name)
     primary_type = resolve_primary_entity_type(canonical, [entity.entity_type])
     eid = entity_id_from_name(canonical, primary_type)
-    ontology = resolve_ontology_metadata(canonical, primary_type)
+    ontology = resolve_ontology_metadata(canonical, primary_type, text_context)
     async with driver.session() as session:
         await session.run(
             """
@@ -1234,6 +1245,9 @@ async def write_document_graph(
 
     entity_groups: dict[str, dict] = {}
     for result in extraction_results:
+        # Pt 10b — per-result chunk text, used to seed `text_context` for
+        # taxonomy synonym matching at resolve time. See note below.
+        result_text = getattr(result, "text", "") or ""
         for entity in result.entities:
             canonical = canonicalize_entity_name(entity.canonical_name)
             if not canonical:
@@ -1245,6 +1259,10 @@ async def write_document_graph(
                     "display_name": entity.surface_form or entity.canonical_name,
                     "observed_entity_types": [],
                     "confidence": 0.0,
+                    # Pt 10b — collect distinct chunk texts where this entity
+                    # appears. Capped at 3 to keep the resolver haystack
+                    # bounded (substring matching is O(haystack × terms)).
+                    "text_chunks": [],
                 },
             )
             if entity.entity_type not in group["observed_entity_types"]:
@@ -1252,12 +1270,29 @@ async def write_document_graph(
             if entity.confidence > group["confidence"]:
                 group["confidence"] = entity.confidence
                 group["display_name"] = entity.surface_form or entity.canonical_name
+            # Pt 10b — gather context for taxonomy resolution. Dedupe by
+            # exact text (same chunk may surface the entity multiple times).
+            if (
+                result_text
+                and result_text not in group["text_chunks"]
+                and len(group["text_chunks"]) < 3
+            ):
+                group["text_chunks"].append(result_text)
 
     entity_identity: dict[str, dict] = {}
     for canonical, group in entity_groups.items():
         observed_types = list(group["observed_entity_types"])
         primary_type = resolve_primary_entity_type(canonical, observed_types)
-        ontology = resolve_ontology_metadata(canonical, primary_type)
+        # Pt 10b — concatenate the up-to-3 chunk texts as `text_context`.
+        # Pre-fix this defaulted to "" and synonym matching in the taxonomy
+        # resolvers fell through for ~99% of entities. Production data:
+        # only 1.2% of Entity nodes had object_kind populated, 5.3% had
+        # domain_type, 0.6% had canonical_family — and those were almost
+        # entirely Products (exact-name hits), Documents (.pdf/.doc), and
+        # Artifacts (.dll/.so). Concept / Method / Organization / Person
+        # entities were starved of context and ended up with empty ontology.
+        text_context = " ".join(group["text_chunks"])
+        ontology = resolve_ontology_metadata(canonical, primary_type, text_context)
         entity_identity[canonical] = {
             "entity_id": entity_id_from_name(canonical, primary_type),
             "canonical_name": canonical,

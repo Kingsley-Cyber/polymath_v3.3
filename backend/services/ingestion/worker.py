@@ -338,6 +338,12 @@ def _rehydrate_ghost_b_staging(staged: list[dict]) -> list[ExtractionResult]:
                 chunk_id=r["chunk_id"],
                 doc_id=r["doc_id"],
                 corpus_id=r["corpus_id"],
+                # Pt 10b — chunk text was added to ExtractionResult to feed
+                # taxonomy synonym matching. Stale staging written before
+                # the fix won't have this field; default to "" so backfill
+                # still runs (ontology stays empty for those — re-ingest if
+                # you want the new behavior).
+                text=r.get("text", ""),
                 entities=[EntityItem(**e) for e in r.get("entities", [])],
                 relations=[RelationItem(**x) for x in r.get("relations", [])],
                 facts=[FactItem(**f) for f in r.get("facts", [])],
