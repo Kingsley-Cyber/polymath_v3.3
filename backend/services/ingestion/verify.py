@@ -161,10 +161,21 @@ async def verify_ingest(
             errors.append(f"probe.scroll({probe_col}): {exc}")
 
     # 5. Neo4j chunk count (only when use_neo4j and driver available).
+    # Pt 8c — worker.py filters NOISY_KINDS (toc/index/bibliography/front_matter
+    # /back_matter/appendix) before calling write_document_graph, so Neo4j
+    # legitimately has fewer Chunk nodes than Mongo. Compare against the
+    # body-only expected count (same filter Qdrant uses above) or every doc
+    # with a bibliography reads false-failed.
     if use_neo4j and neo4j_driver is None:
         errors.append("neo4j: required but driver is unavailable")
     elif use_neo4j and neo4j_driver is not None:
         try:
+            expected_neo4j = await _expected_child_count(
+                db,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                collection_kind="naive",
+            )
             cypher = (
                 "MATCH (d:Document {doc_id: $doc_id, corpus_id: $corpus_id})"
                 "-[:HAS_CHUNK]->(c:Chunk) "
@@ -176,9 +187,10 @@ async def verify_ingest(
                 )
                 row = await result.single()
                 neo_cnt = int(row["cnt"]) if row else 0
-            if neo_cnt != mongo_chunk_count:
+            if neo_cnt != expected_neo4j:
                 errors.append(
-                    f"neo4j: HAS_CHUNK count={neo_cnt} but mongo={mongo_chunk_count}"
+                    f"neo4j: HAS_CHUNK count={neo_cnt} but expected={expected_neo4j} "
+                    f"(body chunks; mongo total={mongo_chunk_count})"
                 )
         except Exception as exc:
             errors.append(f"neo4j.count: {exc}")

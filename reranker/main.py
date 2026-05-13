@@ -92,8 +92,26 @@ class RerankResponse(BaseModel):
 
 @app.get("/health")
 def health():
+    """Pt 9b mirror — end-to-end probe including a real cross-encoder forward pass.
+
+    The model object stays in Python memory after a CUDA context corruption
+    (cudaErrorUnknown on WSL2 + WDDM / RTX PRO 6000 Blackwell). Without a
+    real forward pass here, /health returns 200 while every /rerank request
+    fails with 503. Docker's healthcheck sees green, autoheal never fires,
+    and retrieval silently degrades to score-sort. Reuse the same probe
+    helper the startup lifespan uses — fail fast if it raises so the
+    healthcheck loop will flip unhealthy and autoheal can restart the
+    container to clear the poisoned context.
+    """
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
+    try:
+        _predict_health_probe(model)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"GPU forward pass failed: {type(exc).__name__}: {exc}",
+        )
     return {
         "status": "ok",
         "model": MODEL_PATH,
