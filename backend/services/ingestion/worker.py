@@ -30,11 +30,54 @@ from collections import Counter
 import hashlib
 import logging
 import mimetypes
+import os
 import re
 import time
 import uuid
 from datetime import datetime
 from typing import Any, Callable
+
+
+# Pt 10e — filename sanitizer.
+# Anna's Archive / libgen / z-library export filenames carry aggregator
+# markers that pollute (a) the chat citation display, (b) the Ghost B
+# extraction context (filename is passed alongside chunk text to the LLM),
+# and (c) downstream entity extraction when the markers leak into the
+# parsed markdown title. This sanitizer strips ONLY unambiguous aggregator
+# suffixes — leaves author, year, publisher in the title since those may
+# be useful metadata. Conservative by design — never strips content that
+# could be a real part of the title.
+_FILENAME_AGGREGATOR_PATTERNS = [
+    re.compile(r"\s*[-–]+\s*libgen\.\w+\b.*$", re.IGNORECASE),
+    re.compile(r"\s*[-–]+\s*z[\s-]?library\b.*$", re.IGNORECASE),
+    re.compile(r"\s*[-–]+\s*anna_?s?\s+archive\b.*$", re.IGNORECASE),
+    re.compile(r"\s*[-–]+\s*[0-9a-f]{32,}\b", re.IGNORECASE),
+]
+
+
+def _sanitize_filename(name: str) -> str:
+    """Strip aggregator markers (libgen.li, Anna's Archive, file-hash suffixes)
+    from a filename so they don't leak into citations or the Ghost B prompt.
+
+    Preserves the file extension and any author/year/publisher tokens since
+    those are often part of the legitimate title (e.g. "Cialdini - Pre-suasion
+    _2016_ Random House.md" should keep "Cialdini" and "2016").
+
+    Returns the original name on any error.
+    """
+    if not name or not isinstance(name, str):
+        return name
+    try:
+        stem, ext = os.path.splitext(name)
+        cleaned = stem
+        for pattern in _FILENAME_AGGREGATOR_PATTERNS:
+            cleaned = pattern.sub("", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ._-–")
+        if not cleaned:
+            return name
+        return f"{cleaned}{ext}" if ext else cleaned
+    except Exception:
+        return name
 
 from config import get_settings
 from models.schemas import IngestionConfig, IngestJobResponse, SourceTier, WriteState
@@ -1280,6 +1323,14 @@ async def run_ingest_job(
     """
 
     cid8 = corpus_id[:8]
+
+    # Pt 10e — sanitize the filename ONCE at the top of the pipeline so every
+    # downstream consumer (Mongo document.filename, Ghost B prompt context,
+    # chat citation display) sees the cleaned name. The aggregator markers
+    # (libgen.li, Anna's Archive, file-hash suffixes) used to leak into the
+    # extraction context and pollute entity names. Sanitizer is conservative
+    # and idempotent — clean filenames pass through unchanged.
+    filename = _sanitize_filename(filename)
 
     # Load live corpus + build effective config (Phase 21). The `corpus` doc
     # carries unmasked ciphertext for embed_api_key / pool api_keys; worker

@@ -60,6 +60,13 @@
     "^this\\s+(book|paper|study|chapter|section|article|figure|table|essay|volume|work)$",
     "^the\\s+(book|paper|study|chapter|section|article|figure|table)$",
     "^[a-z]$",
-    "^\\d+$"
+    "^\\d+$",
+    "^https?://.*$",
+    "^www\\..*$",
+    "^v?\\d+(\\.\\d+){1,3}(-[a-z0-9.]+)?$",
+    "^arxiv:\\s*\\d{4}\\.\\d{4,5}(v\\d+)?$",
+    "^doi:?\\s*10\\.\\d{4,9}/.*$",
+    "^isbn[-\\s:]*(?:97[89][-\\s]*)?\\d[\\d\\s-]{8,}\\d[xX]?$",
+    "^[0-9a-f]{32,}$"
   ]
 }

@@ -14,6 +14,7 @@
     "synonyms": ["physics simulation", "physics engine", "particle physics", "rigid body", "verlet physics"]
   },
   "creative_coding": {
+    "_comment": "Pt 10e — removed 'mover' (matched anything mentioning movement) and 'arraylist' (Java collection class, not specifically creative coding). Keeps the framework-name members which are specific enough to not false-positive.",
     "members": [
       "processing",
       "p5.js",
@@ -23,8 +24,6 @@
       "creative coding",
       "processing sketch",
       "pvector",
-      "mover",
-      "arraylist",
       "particlesystem",
       "particle system"
     ],
@@ -284,6 +283,7 @@
     "synonyms": ["software architecture", "system design", "distributed systems", "integration patterns", "scalability"]
   },
   "programming_languages": {
+    "_comment": "Pt 10e — removed overly-broad members ('reference', 'pointer') that were matching every database textbook (FK references) and game-theory paper (citations). Substring matching on 'reference' was the dominant false-positive class — caused 'virtual relvar' and 'Iterated Prisoner's Dilemma' to be tagged programming_languages.",
     "members": [
       "c++",
       "java",
@@ -297,9 +297,7 @@
       "compiler",
       "garbage collection",
       "type system",
-      "memory management",
-      "pointer",
-      "reference"
+      "memory management"
     ],
     "synonyms": ["programming language", "language design", "compiler", "interpreter", "type theory"]
   }
