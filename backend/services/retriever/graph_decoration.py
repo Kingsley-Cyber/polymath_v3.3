@@ -34,6 +34,7 @@ skip it entirely.
 from __future__ import annotations
 
 import logging
+import time
 from typing import List, Optional
 
 from config import get_settings
@@ -163,6 +164,11 @@ class GraphDecorator:
         LIMIT $neighbor_limit
         """
 
+        # Pt 10d.1 — latency log. Without this we're blind to decoration
+        # speed in production. The decoration runs on every chat turn that
+        # isn't already short-circuited by the Facts gate; latency above
+        # ~200ms p95 is the threshold where users start to feel it.
+        t0 = time.perf_counter()
         try:
             async with self._driver.session() as session:
                 result = await session.run(
@@ -205,15 +211,24 @@ class GraphDecorator:
                         evidence_chunks=evidence_chunks,
                     )
                 )
+            elapsed_ms = (time.perf_counter() - t0) * 1000
             logger.info(
-                "Graph decoration: %d arrows over %d winners (wanted_families=%s)",
-                len(decorations),
+                "decorate_winners ms=%.1f winners=%d arrows=%d "
+                "neighbor_limit=%d chunks_per_neighbor=%d families=%s",
+                elapsed_ms,
                 len(winning_chunk_ids),
-                wanted_families,
+                len(decorations),
+                neighbor_limit,
+                chunks_per_neighbor,
+                wanted_families or "[]",
             )
             return decorations
         except Exception as exc:
-            logger.warning("Graph decoration failed (chunk-only fallback): %s", exc)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.warning(
+                "decorate_winners FAILED ms=%.1f winners=%d (chunk-only fallback): %s",
+                elapsed_ms, len(winning_chunk_ids), exc,
+            )
             return []
 
     async def close(self) -> None:

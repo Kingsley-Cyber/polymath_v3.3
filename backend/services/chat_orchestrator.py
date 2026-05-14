@@ -341,32 +341,46 @@ class ChatOrchestrator:
             facts = []
 
         # Pt 10d (Cluster 2 — Graph Decoration) — post-retrieval enrichment.
-        # ALWAYS computed (cheap, read-only, try/except → empty fallback).
-        # Whether it reaches the chat prompt depends on the reasoning mode.
-        # When the LLM is already instructed to build the graph itself
+        # ALWAYS computed (cheap, read-only, try/except → empty fallback)
+        # UNLESS the Pt 10d.1 Facts-answered gate fires (see below). Whether
+        # it reaches the chat prompt depends on the reasoning mode. When the
+        # LLM is already instructed to build the graph itself
         # (graph_reason / kg_augmented / graphrag_integrated, either as the
         # main mode or anywhere in reasoning_blend), the decoration is
         # withheld from the prompt to avoid the "contradict or ignore"
         # conflict — but it's still computed so the reasoning cascade can
         # consume it as structured pre-digest input.
+        #
+        # Pt 10d.1 — Facts-answered gate. Definitional queries ("what is X")
+        # get a [Key Facts] block from fact_retrieval that already encodes
+        # the answer. Layering graph arrows on top is redundant signal and
+        # costs ~50-150ms of Neo4j time per turn. When Facts retrieval
+        # returns 3 or more results, skip decoration entirely. Highest-
+        # volume query shape gets the biggest latency win.
         decoration: list = []
-        try:
-            from services.retriever.graph_decoration import (
-                graph_decorator as _graph_decorator,
-                should_skip_inline_decoration as _should_skip_inline_decoration,
+        if len(facts) >= 3:
+            logger.info(
+                "Graph decoration skipped — %d facts answered the query (Pt 10d.1 gate)",
+                len(facts),
             )
+        else:
+            try:
+                from services.retriever.graph_decoration import (
+                    graph_decorator as _graph_decorator,
+                    should_skip_inline_decoration as _should_skip_inline_decoration,
+                )
 
-            decoration = await _graph_decorator.decorate_winners(
-                winning_chunks=sources,
-                corpus_ids=request.corpus_ids,
-                wanted_families=None,  # v1: no QueryFacets yet — accept all families
-                neighbor_limit=8,
-                chunks_per_neighbor=3,
-            )
-        except Exception as exc:
-            logger.warning("Graph decoration skipped: %s", exc)
-            decoration = []
-            _should_skip_inline_decoration = None  # type: ignore[assignment]
+                decoration = await _graph_decorator.decorate_winners(
+                    winning_chunks=sources,
+                    corpus_ids=request.corpus_ids,
+                    wanted_families=None,  # v1: no QueryFacets yet — accept all families
+                    neighbor_limit=8,
+                    chunks_per_neighbor=3,
+                )
+            except Exception as exc:
+                logger.warning("Graph decoration skipped: %s", exc)
+                decoration = []
+                _should_skip_inline_decoration = None  # type: ignore[assignment]
 
         # Trust-signal snapshot — captured here so it carries through to
         # both the `done` SSE frame and the persisted assistant message.

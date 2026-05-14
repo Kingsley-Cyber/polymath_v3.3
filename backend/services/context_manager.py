@@ -429,6 +429,15 @@ class ContextManager:
                 if wid:
                     decoration_by_winner.setdefault(str(wid), []).append(d)
 
+        # Pt 10d.1 — total decoration arrow budget across the WHOLE response.
+        # Per-chunk cap of 3 doesn't bound the total — a broad query that
+        # returns 20 winners could render 60 arrows. Empirically LLM working
+        # memory for structured pre-context tops out around 15 arrows before
+        # signal-to-noise drops. Counter is decremented inside the per-source
+        # loop; further arrow rendering is skipped once depleted.
+        _TOTAL_ARROW_BUDGET = 15
+        remaining_arrow_budget = _TOTAL_ARROW_BUDGET
+
         if not sources and not facts:
             base = query
         else:
@@ -498,9 +507,14 @@ class ContextManager:
                 # case — defense in depth here so this block never fires
                 # against a graph-reasoning mode even if upstream changes).
                 chunk_decoration = decoration_by_winner.get(s.chunk_id or "", [])
-                if chunk_decoration:
+                if chunk_decoration and remaining_arrow_budget > 0:
                     arrow_parts: list[str] = []
                     for d in chunk_decoration[:3]:  # cap inline arrows per chunk
+                        # Pt 10d.1 — bail when total budget hits zero so that
+                        # broad-query responses (many winning chunks × 3 each)
+                        # don't explode to 60+ arrows.
+                        if remaining_arrow_budget <= 0:
+                            break
                         if hasattr(d, "predicate"):
                             pred = getattr(d, "predicate", "") or ""
                             fam = getattr(d, "relation_family", "") or ""
@@ -527,6 +541,7 @@ class ContextManager:
                         if dr or pr:
                             arrow += " ⚠"
                         arrow_parts.append(arrow)
+                        remaining_arrow_budget -= 1
                     if arrow_parts:
                         attribution += f" [graph: {' ; '.join(arrow_parts)}]"
                 passages.append(f"{attribution}: {s.text}")
