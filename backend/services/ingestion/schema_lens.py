@@ -17,13 +17,12 @@ from datetime import datetime
 from typing import Any
 
 import httpx
-from motor.motor_asyncio import AsyncIOMotorDatabase
-
 from config import get_settings
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from services.ghost_b import (
-    SchemaLens,
     UNIVERSAL_ENTITY_SCHEMA,
     UNIVERSAL_RELATION_SCHEMA,
+    SchemaLens,
 )
 
 logger = logging.getLogger(__name__)
@@ -122,57 +121,147 @@ _DOMAIN_RULES: list[dict[str, Any]] = [
     {
         "domain": "product_prd",
         "triggers": [
-            "prd", "product", "feature", "requirement", "workflow", "user",
-            "screen", "modal", "app", "api", "architecture", "feasibility",
-            "constraint", "backend", "frontend",
+            "prd",
+            "product",
+            "feature",
+            "requirement",
+            "workflow",
+            "user",
+            "screen",
+            "modal",
+            "app",
+            "api",
+            "architecture",
+            "feasibility",
+            "constraint",
+            "backend",
+            "frontend",
         ],
         "entities": ["Product", "Method", "Concept", "Document", "Rule", "Artifact"],
-        "relations": ["part_of", "uses", "implements", "depends_on", "produces", "stores", "supports", "references"],
+        "relations": [
+            "part_of",
+            "uses",
+            "implements",
+            "depends_on",
+            "produces",
+            "stores",
+            "supports",
+            "references",
+        ],
         "object_kinds": ["App", "Service", "Report", "API", "Model", "Database"],
         "families": ["product_design", "identity_extraction", "workflow_automation"],
     },
     {
         "domain": "generative_ai",
         "triggers": [
-            "llm", "genai", "generative ai", "rag", "embedding", "vector",
-            "prompt", "agent", "mistral", "openai", "model", "synthesis",
+            "llm",
+            "genai",
+            "generative ai",
+            "rag",
+            "embedding",
+            "vector",
+            "prompt",
+            "agent",
+            "mistral",
+            "openai",
+            "model",
+            "synthesis",
         ],
         "entities": ["Concept", "Method", "Product", "Artifact", "Document"],
-        "relations": ["uses", "implements", "depends_on", "produces", "detects", "trained_on", "supports", "derived_from", "references"],
+        "relations": [
+            "uses",
+            "implements",
+            "depends_on",
+            "produces",
+            "detects",
+            "trained_on",
+            "supports",
+            "derived_from",
+            "references",
+        ],
         "object_kinds": ["Model", "API", "Service", "Dataset", "Report"],
         "families": ["generative_ai", "retrieval_augmented_generation", "agentic_ai"],
     },
     {
         "domain": "creative_coding",
         "triggers": [
-            "processing", "pvector", "particle", "mover", "force", "box2d",
-            "generative art", "creative coding", "sketch", "simulation",
-            "algorithm", "neural network",
+            "processing",
+            "pvector",
+            "particle",
+            "mover",
+            "force",
+            "box2d",
+            "generative art",
+            "creative coding",
+            "sketch",
+            "simulation",
+            "algorithm",
+            "neural network",
         ],
         "entities": ["Concept", "Method", "Artifact", "Product", "Document"],
-        "relations": ["uses", "implements", "part_of", "represents", "maps_to", "derived_from", "produces", "references"],
+        "relations": [
+            "uses",
+            "implements",
+            "part_of",
+            "represents",
+            "maps_to",
+            "derived_from",
+            "produces",
+            "references",
+        ],
         "object_kinds": ["Library", "Framework", "Snippet", "Book", "Tutorial"],
         "families": ["creative_coding", "physics_simulation", "generative_art"],
     },
     {
         "domain": "cymatics",
         "triggers": [
-            "cymatics", "chladni", "oscillation", "fourier", "wave",
-            "frequency", "vibration", "trigonometric", "periodic",
+            "cymatics",
+            "chladni",
+            "oscillation",
+            "fourier",
+            "wave",
+            "frequency",
+            "vibration",
+            "trigonometric",
+            "periodic",
         ],
         "entities": ["Concept", "Method", "Document", "Event"],
-        "relations": ["uses", "represents", "maps_to", "derived_from", "causes", "references", "implements"],
+        "relations": [
+            "uses",
+            "represents",
+            "maps_to",
+            "derived_from",
+            "causes",
+            "references",
+            "implements",
+        ],
         "object_kinds": ["Report", "Paper", "Dataset"],
         "families": ["cymatics", "wave_physics", "generative_art"],
     },
     {
         "domain": "research_literature",
         "triggers": [
-            "paper", "book", "report", "study", "university", "graduate",
-            "chapter", "abstract", "methodology", "citation",
+            "paper",
+            "book",
+            "report",
+            "study",
+            "university",
+            "graduate",
+            "chapter",
+            "abstract",
+            "methodology",
+            "citation",
         ],
         "entities": ["Document", "Concept", "Method", "Person", "Organization"],
-        "relations": ["references", "created_by", "derived_from", "part_of", "uses", "represents", "supports"],
+        "relations": [
+            "references",
+            "created_by",
+            "derived_from",
+            "part_of",
+            "uses",
+            "represents",
+            "supports",
+        ],
         "object_kinds": ["Book", "Report", "Paper", "Whitepaper"],
         "families": ["research_literature"],
     },
@@ -185,21 +274,43 @@ _DOMAIN_RULES: list[dict[str, Any]] = [
         # code-side entities produced by Phase 4 + roblox_ontology.
         "domain": "roblox",
         "triggers": [
-            "roblox", "luau",
-            "game:getservice", "instance.new",
-            "remoteevent", "remotefunction", "bindableevent",
-            "humanoid", "tweenservice", "runservice",
-            "modulescript", "localscript", "replicatedstorage",
-            "serverstorage", "serverscriptservice",
-            "particleemitter", "animator", "animationtrack",
-            "cframe", "vector3", "udim2", "color3",
-            "datastore", "userinputservice", "httpservice",
-            "datamodel", "workspace",
+            "roblox",
+            "luau",
+            "game:getservice",
+            "instance.new",
+            "remoteevent",
+            "remotefunction",
+            "bindableevent",
+            "humanoid",
+            "tweenservice",
+            "runservice",
+            "modulescript",
+            "localscript",
+            "replicatedstorage",
+            "serverstorage",
+            "serverscriptservice",
+            "particleemitter",
+            "animator",
+            "animationtrack",
+            "cframe",
+            "vector3",
+            "udim2",
+            "color3",
+            "datastore",
+            "userinputservice",
+            "httpservice",
+            "datamodel",
+            "workspace",
         ],
         "entities": ["Method", "Product", "Artifact", "Concept", "Document"],
         "relations": [
-            "uses", "implements", "depends_on", "produces",
-            "defines", "example_of", "during",
+            "uses",
+            "implements",
+            "depends_on",
+            "produces",
+            "defines",
+            "example_of",
+            "during",
         ],
         "relation_aliases": {
             "fires": "uses",
@@ -213,8 +324,13 @@ _DOMAIN_RULES: list[dict[str, Any]] = [
             "tweens": "uses",
         },
         "object_kinds": [
-            "Service", "Class", "Event", "Signal",
-            "Animation", "ParticleEffect", "DataModel",
+            "Service",
+            "Class",
+            "Event",
+            "Signal",
+            "Animation",
+            "ParticleEffect",
+            "DataModel",
         ],
         "families": ["roblox", "game_engine", "game_design"],
     },
@@ -260,7 +376,9 @@ def _sample_text(filename: str, parents: list[Any], children: list[Any]) -> str:
     return "\n\n".join(parts)[:max_chars]
 
 
-def _relation_aliases_from_text(text: str, relation_schema: list[str]) -> dict[str, str]:
+def _relation_aliases_from_text(
+    text: str, relation_schema: list[str]
+) -> dict[str, str]:
     allowed = set(relation_schema or UNIVERSAL_RELATION_SCHEMA)
     aliases: dict[str, str] = {}
     lower = text.lower()
@@ -295,6 +413,7 @@ def build_deterministic_schema_lens(
     relations: list[str] = []
     object_kinds: list[str] = []
     families: list[str] = []
+    domain_aliases: dict[str, str] = {}
 
     for rule in _DOMAIN_RULES:
         if any(trigger in lower for trigger in rule["triggers"]):
@@ -303,19 +422,41 @@ def build_deterministic_schema_lens(
             relations.extend([v for v in rule["relations"] if v in allowed_relations])
             object_kinds.extend(rule["object_kinds"])
             families.extend(rule["families"])
+            for raw_alias, raw_predicate in (rule.get("relation_aliases") or {}).items():
+                alias_key = str(raw_alias or "").strip().lower()
+                predicate = str(raw_predicate or "").strip()
+                if alias_key and predicate in allowed_relations:
+                    domain_aliases.setdefault(alias_key, predicate)
 
     if not domains:
         domains.append("general_knowledge")
-        entity_types.extend([v for v in ["Concept", "Document", "Method", "Product"] if v in allowed_entities])
-        relations.extend([v for v in ["references", "part_of", "uses", "related_to"] if v in allowed_relations])
+        entity_types.extend(
+            [
+                v
+                for v in ["Concept", "Document", "Method", "Product"]
+                if v in allowed_entities
+            ]
+        )
+        relations.extend(
+            [
+                v
+                for v in ["references", "part_of", "uses", "related_to"]
+                if v in allowed_relations
+            ]
+        )
 
-    if "Architecture_Feasibility_Report".lower() in lower or "feasibility report" in lower:
+    if (
+        "Architecture_Feasibility_Report".lower() in lower
+        or "feasibility report" in lower
+    ):
         object_kinds.append("Report")
         families.append("architecture_feasibility")
         if "Document" in allowed_entities:
             entity_types.insert(0, "Document")
 
-    lens_hash = hashlib.sha1(f"{corpus_id}:{','.join(domains)}".encode("utf-8")).hexdigest()[:10]
+    lens_hash = hashlib.sha1(
+        f"{corpus_id}:{','.join(domains)}".encode("utf-8")
+    ).hexdigest()[:10]
     return SchemaLens(
         lens_id=f"lens:{lens_hash}",
         version=SCHEMA_LENS_VERSION,
@@ -324,7 +465,10 @@ def build_deterministic_schema_lens(
         corpus_domains=_dedupe(domains, limit=8),
         preferred_entity_types=_dedupe(entity_types, limit=8),
         preferred_relations=_dedupe(relations, limit=10),
-        relation_aliases=_relation_aliases_from_text(text, list(allowed_relations)),
+        relation_aliases={
+            **_relation_aliases_from_text(text, list(allowed_relations)),
+            **domain_aliases,
+        },
         object_kinds=_dedupe(object_kinds, limit=10),
         canonical_families=_dedupe([_snake(v) for v in families], limit=10),
         confidence=0.55,
@@ -366,14 +510,21 @@ def sanitize_schema_lens(
             aliases[alias[:60]] = predicate
 
     entity_types = [
-        v for v in [*base.preferred_entity_types, *(data.get("preferred_entity_types") or [])]
+        v
+        for v in [
+            *base.preferred_entity_types,
+            *(data.get("preferred_entity_types") or []),
+        ]
         if v in allowed_entities
     ]
     relations = [
-        v for v in [*base.preferred_relations, *(data.get("preferred_relations") or [])]
+        v
+        for v in [*base.preferred_relations, *(data.get("preferred_relations") or [])]
         if v in allowed_relations
     ]
-    domains = [_snake(v) for v in [*base.corpus_domains, *(data.get("corpus_domains") or [])]]
+    domains = [
+        _snake(v) for v in [*base.corpus_domains, *(data.get("corpus_domains") or [])]
+    ]
     families = [
         _snake(v)
         for v in [*base.canonical_families, *(data.get("canonical_families") or [])]
@@ -388,7 +539,9 @@ def sanitize_schema_lens(
         preferred_entity_types=_dedupe(entity_types, limit=8),
         preferred_relations=_dedupe(relations, limit=10),
         relation_aliases=dict(list(aliases.items())[:16]),
-        object_kinds=_dedupe([*base.object_kinds, *(data.get("object_kinds") or [])], limit=10),
+        object_kinds=_dedupe(
+            [*base.object_kinds, *(data.get("object_kinds") or [])], limit=10
+        ),
         canonical_families=_dedupe(families, limit=10),
         confidence=max(float(data.get("confidence") or 0.0), base.confidence),
     )
@@ -402,7 +555,9 @@ def merge_schema_lenses(
     relation_schema: list[str] | None = None,
 ) -> SchemaLens:
     """Merge a stored corpus lens with cheap document-local hints."""
-    base = SchemaLens.from_dict(stored if isinstance(stored, dict) else None) or doc_lens
+    base = (
+        SchemaLens.from_dict(stored if isinstance(stored, dict) else None) or doc_lens
+    )
     merged_payload = {
         "lens_id": base.lens_id,
         "source": "stored+deterministic",
@@ -411,7 +566,10 @@ def merge_schema_lenses(
             *base.preferred_entity_types,
             *doc_lens.preferred_entity_types,
         ],
-        "preferred_relations": [*base.preferred_relations, *doc_lens.preferred_relations],
+        "preferred_relations": [
+            *base.preferred_relations,
+            *doc_lens.preferred_relations,
+        ],
         "relation_aliases": {**base.relation_aliases, **doc_lens.relation_aliases},
         "object_kinds": [*base.object_kinds, *doc_lens.object_kinds],
         "canonical_families": [*base.canonical_families, *doc_lens.canonical_families],
@@ -439,12 +597,16 @@ async def _profile_with_llm(
     if not bool(getattr(settings, "SCHEMA_LENS_LLM_ENABLED", True)):
         return None
 
-    entry = pool[0] if pool else {
-        "model": model or settings.DEFAULT_COMPLETION_MODEL,
-        "base_url": None,
-        "api_key": None,
-        "extra_params": {},
-    }
+    entry = (
+        pool[0]
+        if pool
+        else {
+            "model": model or settings.DEFAULT_COMPLETION_MODEL,
+            "base_url": None,
+            "api_key": None,
+            "extra_params": {},
+        }
+    )
     prompt = (
         "Profile this corpus sample and propose a bounded schema lens for extraction.\n"
         "You are NOT creating a new schema. Only choose from approved entity types "

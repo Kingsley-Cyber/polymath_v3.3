@@ -181,6 +181,34 @@ def test_roblox_relation_aliases_present():
     assert lens.relation_aliases.get("binds") == "depends_on"
 
 
+def test_roblox_domain_only_aliases_surface_when_domain_triggers():
+    """Aliases defined ONLY in the per-domain rule (not in the global
+    _RELATION_ALIAS_TO_APPROVED map) must surface when the domain fires.
+    `exposes -> implements`, `instances -> produces`, `tweens -> uses`
+    are Roblox-local: they have no entry in the global alias map, and
+    the bug being fixed was that the builder ignored
+    rule['relation_aliases'] entirely."""
+    lens = build_deterministic_schema_lens(
+        corpus_id="c" * 36,
+        filename="combat.luau",
+        parents=[],
+        children=[
+            _child(
+                "local TweenService = game:GetService('TweenService')\n"
+                "function ModuleScript.run() end"
+            )
+        ],
+        entity_schema=UNIVERSAL_ENTITY_SCHEMA,
+        relation_schema=UNIVERSAL_RELATION_SCHEMA,
+    )
+    # These aliases live ONLY in _DOMAIN_RULES['roblox']['relation_aliases'],
+    # not in _RELATION_ALIAS_TO_APPROVED. They must appear because the
+    # domain triggered — not because the phrase was in the sampled text.
+    assert lens.relation_aliases.get("exposes") == "implements"
+    assert lens.relation_aliases.get("instances") == "produces"
+    assert lens.relation_aliases.get("tweens") == "uses"
+
+
 def test_non_roblox_corpus_does_not_get_roblox_domain():
     """A pure prose corpus (e.g., a novel chapter, a recipe blog)
     must NOT match the Roblox trigger set. No pollution into
