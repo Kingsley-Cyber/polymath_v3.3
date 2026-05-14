@@ -4,9 +4,16 @@
 
 FROM python:3.11-slim AS base
 
-# Prevent Python from writing .pyc files and enable unbuffered output
+# Prevent Python from writing .pyc files and enable unbuffered output.
+# XDG_CACHE_HOME points the tree-sitter-language-pack rust binding (and any
+# other XDG-respecting tool) at /app/.cache, which is chowned to appuser
+# below. Without this, the pre-warm step would cache under /root/.cache
+# at build time, then the appuser runtime would EACCES on its own
+# ~/.cache and silently fall back to byte-chunking every code chunk —
+# leaving symbols_defined empty for Phase 4/5's entity promotion.
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    XDG_CACHE_HOME=/app/.cache
 
 # Install system dependencies required by some Python packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -41,10 +48,13 @@ print(f'tree-sitter pack: pre-warmed {len(langs)} grammars')" \
 # Copy application code
 COPY . .
 
-# Create non-root user for security
+# Create non-root user for security. chown /home/appuser too so any tool
+# that ignores XDG_CACHE_HOME and writes to $HOME/.cache directly still
+# works at runtime (huggingface_hub, transformers, etc.).
 RUN groupadd --gid 1000 appuser && \
     useradd --uid 1000 --gid appuser --shell /bin/bash --create-home appuser && \
-    chown -R appuser:appuser /app
+    mkdir -p /home/appuser/.cache /app/.cache && \
+    chown -R appuser:appuser /app /home/appuser
 
 USER appuser
 
