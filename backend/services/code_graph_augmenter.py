@@ -92,6 +92,12 @@ class GraphifyEnrichment:
     call_edges: list[tuple[str, str, str, str]]
     # raw graphify community labels for diagnostics (community_id → label, if any)
     community_labels: dict[int, str]
+    # chunk_id → list of symbol names this chunk's code calls. Derived from
+    # call_edges by parsing source_file (written as `<chunk_id>.<ext>` by
+    # `_write_temp_inputs`) back to the originating chunk. Used by the
+    # worker to backfill `metadata.symbols_called` before sparse encoding
+    # so BM25 indexes graphify-derived call sites.
+    chunk_calls: dict[str, list[str]]
     # node counts for ops visibility
     node_count: int
     edge_count: int
@@ -102,6 +108,7 @@ class GraphifyEnrichment:
             entity_communities={},
             call_edges=[],
             community_labels={},
+            chunk_calls={},
             node_count=0,
             edge_count=0,
         )
@@ -157,6 +164,11 @@ def _translate(graph_json: dict[str, Any]) -> GraphifyEnrichment:
                 community_labels[comm_id] = clean
 
     call_edges: list[tuple[str, str, str, str]] = []
+    # chunk_id → list of called symbol names. graphify writes `source_file`
+    # as the BASENAME of the temp file we created. `_write_temp_inputs`
+    # uses `<chunk_id>.<ext>` so Path(source_file).stem reverses cleanly
+    # back to the originating chunk_id.
+    chunk_calls: dict[str, list[str]] = {}
     for link in links:
         rel = (link.get("relation") or "").lower()
         if rel != "calls":
@@ -167,51 +179,67 @@ def _translate(graph_json: dict[str, Any]) -> GraphifyEnrichment:
         dst = id_to_clean.get(dst_id)
         if not src or not dst or src == dst:
             continue
-        call_edges.append((
-            src,
-            dst,
-            str(link.get("source_file") or ""),
-            str(link.get("source_location") or ""),
-        ))
+        source_file = str(link.get("source_file") or "")
+        source_location = str(link.get("source_location") or "")
+        call_edges.append((src, dst, source_file, source_location))
+        # Bucket per-chunk for the worker's symbols_called backfill.
+        # An empty / malformed source_file is silently skipped — defensive
+        # against future graphify schema changes.
+        if source_file:
+            try:
+                chunk_id = Path(source_file).stem
+            except Exception:
+                chunk_id = ""
+            if chunk_id:
+                bucket = chunk_calls.setdefault(chunk_id, [])
+                # Dedupe within a chunk (one function may call dst many times)
+                if dst not in bucket:
+                    bucket.append(dst)
 
     return GraphifyEnrichment(
         entity_communities=communities,
         call_edges=call_edges,
         community_labels=community_labels,
+        chunk_calls=chunk_calls,
         node_count=len(nodes),
         edge_count=len(links),
     )
+
+
+def _safe_chunk_id_filename(chunk_id: str) -> str:
+    """Sanitize a chunk_id for filesystem use. chunk_id is constructed in
+    tier_chunker as `f"{doc_id}_{idx:04d}"` where doc_id is sha256-hex —
+    already filesystem-safe across Win/macOS/Linux. This pass is defense
+    in depth against future ID shape changes."""
+    return "".join(c if c.isalnum() or c in "_-" else "_" for c in chunk_id)
 
 
 def _write_temp_inputs(
     code_chunks: list[Any],
     tmpdir: Path,
 ) -> int:
-    """Write each code chunk to a file inside tmpdir, picking the extension
-    from the chunk's `language`. Returns the count actually written."""
+    """Write each code chunk to a file named `<chunk_id>.<ext>` so graphify's
+    `source_file` output reverses cleanly back to the originating chunk_id
+    via `Path(source_file).stem`. Chunks without a chunk_id, language, or
+    non-empty text are silently skipped. Returns the count actually written.
+
+    Using chunk_id (not file_path) as the filename trades the file_path
+    information loss (graphify's path-tokenization in `analyze` is mostly
+    cosmetic — it doesn't affect call-graph resolution) for a reversible
+    mapping that the worker's `symbols_called` backfill depends on.
+    """
     written = 0
-    for i, chunk in enumerate(code_chunks):
+    for chunk in code_chunks:
         text = getattr(chunk, "text", "") or ""
         lang = (getattr(chunk, "language", None) or "").lower()
-        if not text.strip() or not lang:
+        chunk_id = getattr(chunk, "chunk_id", None) or ""
+        if not text.strip() or not lang or not chunk_id:
             continue
         ext = _LANG_TO_EXT.get(lang, ".txt")
-        meta = getattr(chunk, "metadata", None) or {}
-        file_path = meta.get("file_path") or f"chunk_{i:04d}{ext}"
-        # Sanitize — graphify treats path semantically, but we don't want
-        # the upload to write outside tmpdir or collide on case-insensitive
-        # filesystems.
-        safe = Path(file_path).name
-        if not safe:
-            safe = f"chunk_{i:04d}{ext}"
-        target = tmpdir / safe
-        if target.exists():
-            # avoid collision between same-name chunks (e.g. two fences in
-            # one .md that share a file_path metadata)
-            stem = target.stem
-            target = tmpdir / f"{stem}_{i:04d}{target.suffix}"
-        if not target.suffix:
-            target = target.with_suffix(ext)
+        safe_id = _safe_chunk_id_filename(chunk_id)
+        if not safe_id:
+            continue
+        target = tmpdir / f"{safe_id}{ext}"
         target.write_text(text, encoding="utf-8")
         written += 1
     return written

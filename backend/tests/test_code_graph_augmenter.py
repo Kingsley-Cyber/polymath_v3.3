@@ -25,44 +25,45 @@ from services.code_graph_augmenter import (
 )
 
 
-# Sample graphify graph.json captured from a real run on a 2-file Luau+Python
-# probe. Stored inline so the test stays hermetic.
+# Sample graphify graph.json captured from a real run, then rewritten so
+# source_file follows the Pt 11.1 contract: `<chunk_id>.<ext>`. This lets
+# _translate's chunk_calls bucketing reverse the mapping back to chunk_id.
 _REAL_GRAPHIFY_OUTPUT = {
     "directed": False,
     "multigraph": False,
     "graph": {},
     "nodes": [
-        {"label": "combat.lua", "file_type": "code", "source_file": "combat.lua",
+        {"label": "combat_chunk_a.luau", "file_type": "code", "source_file": "combat_chunk_a.luau",
          "source_location": "L1", "id": "combat_lua", "community": 1,
-         "norm_label": "combat.lua"},
-        {"label": "Combat.PunchAttack()", "file_type": "code", "source_file": "combat.lua",
+         "norm_label": "combat_chunk_a.luau"},
+        {"label": "Combat.PunchAttack()", "file_type": "code", "source_file": "combat_chunk_a.luau",
          "source_location": "L3", "id": "combat_punchattack", "community": 1,
          "norm_label": "combat.punchattack()"},
-        {"label": "Combat.Hitbox()", "file_type": "code", "source_file": "combat.lua",
+        {"label": "Combat.Hitbox()", "file_type": "code", "source_file": "combat_chunk_a.luau",
          "source_location": "L7", "id": "combat_hitbox", "community": 1,
          "norm_label": "combat.hitbox()"},
-        {"label": "sample.py", "file_type": "code", "source_file": "sample.py",
+        {"label": "sample_chunk_b.py", "file_type": "code", "source_file": "sample_chunk_b.py",
          "source_location": "L1", "id": "sample_py", "community": 0,
-         "norm_label": "sample.py"},
-        {"label": "normalize()", "file_type": "code", "source_file": "sample.py",
+         "norm_label": "sample_chunk_b.py"},
+        {"label": "normalize()", "file_type": "code", "source_file": "sample_chunk_b.py",
          "source_location": "L4", "id": "normalize", "community": 0,
          "norm_label": "normalize()"},
-        {"label": "VectorStore", "file_type": "code", "source_file": "sample.py",
+        {"label": "VectorStore", "file_type": "code", "source_file": "sample_chunk_b.py",
          "source_location": "L7", "id": "vectorstore", "community": 0,
          "norm_label": "vectorstore"},
-        {"label": ".__init__()", "file_type": "code", "source_file": "sample.py",
+        {"label": ".__init__()", "file_type": "code", "source_file": "sample_chunk_b.py",
          "source_location": "L8", "id": "vectorstore_init", "community": 0},
-        {"label": ".insert()", "file_type": "code", "source_file": "sample.py",
+        {"label": ".insert()", "file_type": "code", "source_file": "sample_chunk_b.py",
          "source_location": "L10", "id": "vectorstore_insert", "community": 0},
     ],
     "links": [
         {"relation": "contains", "source": "combat_lua", "target": "combat_punchattack"},
         {"relation": "contains", "source": "combat_lua", "target": "combat_hitbox"},
-        {"relation": "calls", "context": "call", "source_file": "combat.lua",
+        {"relation": "calls", "context": "call", "source_file": "combat_chunk_a.luau",
          "source_location": "L8", "source": "combat_hitbox", "target": "combat_punchattack"},
         {"relation": "contains", "source": "sample_py", "target": "normalize"},
         {"relation": "contains", "source": "sample_py", "target": "vectorstore"},
-        {"relation": "calls", "context": "call", "source_file": "sample.py",
+        {"relation": "calls", "context": "call", "source_file": "sample_chunk_b.py",
          "source_location": "L11", "source": "vectorstore_insert", "target": "normalize"},
     ],
 }
@@ -148,7 +149,8 @@ def test_translate_call_edges_carry_source_file_and_location():
     out = _translate(_REAL_GRAPHIFY_OUTPUT)
     for src, dst, source_file, source_location in out.call_edges:
         if src == "Combat.Hitbox":
-            assert source_file == "combat.lua"
+            # source_file is the temp filename graphify saw (Pt 11.1: <chunk_id>.<ext>)
+            assert source_file == "combat_chunk_a.luau"
             assert source_location == "L8"
 
 
@@ -160,10 +162,19 @@ def test_translate_is_empty_property():
 
 # ─── augment_code_chunks (subprocess wrapper) ───────────────────────────────
 
-def _make_code_chunk(text: str, language: str = "python", file_path: str | None = None):
+def _make_code_chunk(
+    text: str,
+    language: str = "python",
+    file_path: str | None = None,
+    chunk_id: str | None = None,
+):
+    # Pt 11.1 — chunk_id is now required by _write_temp_inputs (filenames
+    # are `<chunk_id>.<ext>` so graphify's source_file reverses back to
+    # chunk_id for the symbols_called backfill).
     return SimpleNamespace(
         text=text,
         language=language,
+        chunk_id=chunk_id or f"c_{abs(hash((text, language, file_path))) % 100000:05d}",
         metadata={"file_path": file_path} if file_path else {},
     )
 
@@ -241,24 +252,111 @@ def test_augment_happy_path_with_mocked_graphify(monkeypatch, tmp_path):
     assert any(f.endswith(".py") for f in captured["files"])
 
 
-def test_augment_collides_filenames_gracefully(monkeypatch):
-    """Two chunks with the same file_path metadata shouldn't overwrite each other."""
+def test_augment_writes_files_keyed_by_chunk_id(monkeypatch):
+    """Pt 11.1 — _write_temp_inputs uses <chunk_id>.<ext> as filename so
+    graphify's source_file output reverses cleanly back to chunk_id.
+    Two chunks with the same file_path metadata don't collide because
+    they have distinct chunk_ids."""
     written_files = []
 
     def fake_run(cmd, **kwargs):
         tmpdir = Path(cmd[-1])
         for p in tmpdir.iterdir():
             written_files.append(p.name)
-        # No graphify output — just confirm both got written
         return SimpleNamespace(returncode=1, stderr="", stdout="")
 
     monkeypatch.setattr("services.code_graph_augmenter.subprocess.run", fake_run)
 
     chunks = [
-        _make_code_chunk("def foo(): pass", "python", "module.py"),
-        _make_code_chunk("def bar(): pass", "python", "module.py"),  # same name!
+        _make_code_chunk("def foo(): pass", "python", chunk_id="docA_0001"),
+        _make_code_chunk("def bar(): pass", "python", chunk_id="docA_0002"),
     ]
     augment_code_chunks(chunks)
-    # Both should be on disk under different names (one renamed)
-    assert len(written_files) == 2
-    assert len(set(written_files)) == 2  # distinct
+    assert sorted(written_files) == ["docA_0001.py", "docA_0002.py"]
+
+
+def test_augment_skips_chunks_without_chunk_id(monkeypatch):
+    """Chunks lacking chunk_id are silently skipped — the backfill
+    contract depends on chunk_id being the filename stem."""
+    written_files = []
+
+    def fake_run(cmd, **kwargs):
+        tmpdir = Path(cmd[-1])
+        for p in tmpdir.iterdir():
+            written_files.append(p.name)
+        return SimpleNamespace(returncode=1, stderr="", stdout="")
+
+    monkeypatch.setattr("services.code_graph_augmenter.subprocess.run", fake_run)
+    bad = SimpleNamespace(text="def foo(): pass", language="python", chunk_id=None, metadata={})
+    good = _make_code_chunk("def bar(): pass", "python", chunk_id="chunk_42")
+    augment_code_chunks([bad, good])
+    assert written_files == ["chunk_42.py"]
+
+
+# ─── Pt 11.1 — chunk_calls bucketing ────────────────────────────────────────
+
+def test_translate_populates_chunk_calls():
+    """Pt 11.1 — `calls` edges are bucketed per-chunk_id via
+    Path(source_file).stem so the worker can backfill symbols_called."""
+    out = _translate(_REAL_GRAPHIFY_OUTPUT)
+    # combat_chunk_a.luau → chunk_calls["combat_chunk_a"]
+    assert "combat_chunk_a" in out.chunk_calls
+    assert "Combat.PunchAttack" in out.chunk_calls["combat_chunk_a"]
+    # sample_chunk_b.py → chunk_calls["sample_chunk_b"]
+    assert "sample_chunk_b" in out.chunk_calls
+    assert "normalize" in out.chunk_calls["sample_chunk_b"]
+
+
+def test_translate_dedupes_calls_within_chunk():
+    """If graphify reports a function called twice in the same chunk,
+    the bucket only lists it once."""
+    payload = {
+        "nodes": [
+            {"id": "src", "label": "Caller()"},
+            {"id": "dst", "label": "TweenService"},
+        ],
+        "links": [
+            {"relation": "calls", "source_file": "chunk_x.luau",
+             "source_location": "L5", "source": "src", "target": "dst"},
+            {"relation": "calls", "source_file": "chunk_x.luau",
+             "source_location": "L12", "source": "src", "target": "dst"},
+        ],
+    }
+    out = _translate(payload)
+    assert out.chunk_calls["chunk_x"] == ["TweenService"]
+
+
+def test_translate_ignores_calls_with_missing_source_file():
+    """Defensive: a malformed graph.json where source_file is None
+    should not populate chunk_calls (and shouldn't crash)."""
+    payload = {
+        "nodes": [
+            {"id": "src", "label": "Caller()"},
+            {"id": "dst", "label": "Callee()"},
+        ],
+        "links": [
+            {"relation": "calls", "source_file": None,
+             "source": "src", "target": "dst"},
+            {"relation": "calls", "source_file": "",
+             "source": "src", "target": "dst"},
+        ],
+    }
+    out = _translate(payload)
+    assert out.chunk_calls == {}
+    # call_edges still populated (with empty source_file) — the
+    # legacy data path doesn't filter on source_file presence.
+    assert len(out.call_edges) == 2
+
+
+def test_translate_chunk_calls_empty_on_empty_graph():
+    out = _translate({"nodes": [], "links": []})
+    assert out.chunk_calls == {}
+
+
+def test_empty_enrichment_has_chunk_calls_dict():
+    """GraphifyEnrichment.empty() must expose chunk_calls as an empty dict
+    so downstream `.get(chunk_id, [])` calls work without isinstance guards."""
+    from services.code_graph_augmenter import GraphifyEnrichment
+    e = GraphifyEnrichment.empty()
+    assert e.chunk_calls == {}
+    assert e.chunk_calls.get("any_id", []) == []

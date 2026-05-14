@@ -20,6 +20,24 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# Pt 11 — pre-warm tree-sitter grammars used by the code lane so the first
+# ingest in a fresh container doesn't pay the per-language download cost
+# (~200ms × N grammars, ~62 MB cache). Mirrors scripts/prefetch_tree_sitter_
+# grammars.py at project root but inlined here because that script lives
+# outside the backend/ build context. Soft-fail if graphifyy is missing
+# — the build continues; the augmenter degrades to no-op at runtime.
+RUN python -c "\
+import tree_sitter_language_pack as p; \
+langs = ['python','javascript','typescript','tsx','lua','luau','go','rust', \
+        'java','kotlin','c','cpp','cuda','swift','objc','dart','csharp', \
+        'ruby','php','scala','bash','sql','r','haskell','nix', \
+        'glsl','hlsl','vue','svelte','html','css','xml', \
+        'json','yaml','toml','ini','hcl','dockerfile','make','cmake', \
+        'proto','graphql']; \
+[p.process('x', p.ProcessConfig(language=l)) for l in langs]; \
+print(f'tree-sitter pack: pre-warmed {len(langs)} grammars')" \
+    || echo "tree-sitter pack pre-warm skipped (code lane will download on first use)"
+
 # Copy application code
 COPY . .
 

@@ -85,15 +85,31 @@ class RerankerService:
             return sorted(code_pool, key=lambda c: c.score, reverse=True)
 
         reranked_prose = await self._rerank_pool(query, prose_pool)
-        # Normalize both halves to [0,1] so a cross-encoder logit of +9 doesn't
-        # auto-beat a cosine-fused score of +0.8.
-        _minmax_inplace(reranked_prose)
-        _minmax_inplace(code_pool)
-        merged = sorted(
-            reranked_prose + code_pool,
-            key=lambda c: c.score,
-            reverse=True,
-        )
+
+        # Tiny-pool short-circuit. Min-max normalization collapses single-
+        # element pools to score=1.0 (no spread to normalize against),
+        # which would force both a lone prose chunk and a lone code chunk
+        # to tie at the top regardless of their actual relevance signal.
+        # When either subpool has ≤1 element, skip normalization and trust
+        # the raw scores. The cross-encoder / cosine scale mismatch is
+        # less harmful than the all-1.0 collapse on 1-vs-N pools because
+        # raw scores at least preserve within-pool ordering.
+        if len(reranked_prose) <= 1 or len(code_pool) <= 1:
+            merged = sorted(
+                reranked_prose + code_pool,
+                key=lambda c: c.score,
+                reverse=True,
+            )
+        else:
+            # Normalize both halves to [0,1] so a cross-encoder logit of +9
+            # doesn't auto-beat a cosine-fused score of +0.8.
+            _minmax_inplace(reranked_prose)
+            _minmax_inplace(code_pool)
+            merged = sorted(
+                reranked_prose + code_pool,
+                key=lambda c: c.score,
+                reverse=True,
+            )
         logger.info(
             "Reranker bypass: cross-encoded %d prose, kept original scores on %d code (merged %d)",
             len(reranked_prose), len(code_pool), len(merged),

@@ -1357,6 +1357,7 @@ async def _write_neo4j_for_doc(
     ghost_b_metrics: dict | None = None,
     schema_lens_id: str | None = None,
     source_tier: str | None = None,
+    graphify_enrichment=None,
 ) -> None:
     """Delegate to neo4j_writer.write_document_graph with rich anchor metadata.
 
@@ -1427,6 +1428,12 @@ async def _write_neo4j_for_doc(
     # touched. Code chunks get cross-symbol :CALLS edges and Leiden
     # community labels on top of Phase 4's deterministic entity write.
     # The augmenter never raises — failures degrade silently to no-op.
+    #
+    # Pt 11.1 — `graphify_enrichment` is now passed in by run_ingest_job
+    # (computed earlier so it could backfill metadata.symbols_called for
+    # BM25 indexing). When provided, reuse it for the Neo4j writes. When
+    # None (e.g. called directly outside run_ingest_job, like
+    # backfill_document_graph), compute it locally as before for back-compat.
     try:
         from config import get_settings
         if get_settings().GRAPHIFY_AUGMENT_CODE_LANE:
@@ -1434,9 +1441,12 @@ async def _write_neo4j_for_doc(
             from services.graph.neo4j_writer import write_graphify_enrichment
             from services.ingestion.section_classifier import ChunkKind
 
-            code_only = [c for c in graph_children if c.chunk_kind == ChunkKind.CODE]
-            if code_only:
-                enrichment = code_graph_augmenter.augment_code_chunks(code_only)
+            enrichment = graphify_enrichment
+            if enrichment is None:
+                code_only = [c for c in graph_children if c.chunk_kind == ChunkKind.CODE]
+                if code_only:
+                    enrichment = code_graph_augmenter.augment_code_chunks(code_only)
+            if enrichment is not None:
                 await write_graphify_enrichment(
                     driver=neo4j_driver,
                     corpus_id=corpus_id,
@@ -1747,6 +1757,54 @@ async def run_ingest_job(
             },
         )
 
+    # Phase 4.5 graphify augmentation — opt-in per Settings. Runs HERE,
+    # before sparse encoding, so the augmenter's `chunk_calls` mapping
+    # can backfill `metadata.symbols_called` BEFORE BM25 indexes the
+    # chunks. The same enrichment is threaded forward to Phase 7 (Neo4j)
+    # so write_graphify_enrichment uses it without re-running graphify.
+    graphify_enrichment = None
+    if settings.GRAPHIFY_AUGMENT_CODE_LANE:
+        try:
+            from services import code_graph_augmenter
+            code_only = [
+                c for c in children
+                if getattr(c, "chunk_kind", None) == ChunkKind.CODE
+            ]
+            if code_only:
+                t0 = time.monotonic()
+                graphify_enrichment = code_graph_augmenter.augment_code_chunks(code_only)
+                # Backfill: write graphify-derived call sites into each
+                # chunk's metadata.symbols_called so _searchable_text
+                # appends them to the BM25 input. Dedupe case-insensitively;
+                # cap at 60 (matches code_splitter._extract_metadata cap).
+                backfilled = 0
+                for c in code_only:
+                    called = graphify_enrichment.chunk_calls.get(c.chunk_id, [])
+                    if not called:
+                        continue
+                    existing = list(c.metadata.get("symbols_called", []) or [])
+                    seen = {x.lower() for x in existing}
+                    for sym in called:
+                        if sym.lower() in seen or len(existing) >= 60:
+                            continue
+                        existing.append(sym)
+                        seen.add(sym.lower())
+                    c.metadata["symbols_called"] = existing
+                    backfilled += 1
+                logger.info(
+                    "phase=graphify_backfill duration=%.2fs doc=%s corpus=%s "
+                    "code_chunks=%d chunks_backfilled=%d call_edges=%d",
+                    time.monotonic() - t0, doc_id[:12], cid8,
+                    len(code_only), backfilled,
+                    len(graphify_enrichment.call_edges),
+                )
+        except Exception as exc:
+            # Pure augmentation — never block the ingest if it fails.
+            logger.warning(
+                "phase=graphify_backfill doc=%s status=failed_continue err=%s",
+                doc_id[:12], exc,
+            )
+
     # ── Phase 5: Embed + Phase 6: Qdrant ─────────────────────────────────
     #
     # Pt 9 — Phase 5+6 is now best-effort and DOES NOT abort the function
@@ -1889,6 +1947,7 @@ async def run_ingest_job(
                 filename=filename,
                 parents=parents,
                 ghost_b_metrics=ghost_b_metrics,
+                graphify_enrichment=graphify_enrichment,
             )
             await mongo_writer.update_write_state(
                 db, doc_id, corpus_id=corpus_id, neo4j_written=True
