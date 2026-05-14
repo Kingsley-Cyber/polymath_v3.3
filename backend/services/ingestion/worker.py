@@ -883,6 +883,11 @@ async def _run_ghosts_parallel(
 def _build_parent_dicts(parents, summaries: list[SummaryResult] | None) -> list[dict]:
     """Assemble the parent_chunks[] array for the Mongo document record,
     populating `summary` inline from Ghost A output when available.
+
+    Code lane (Phase 1) — emits chunk_kind, language, and metadata on every
+    parent. `chunk_kind` was a pre-existing gap here (children had it, parents
+    didn't); fixing alongside the code-lane additions so retrieval / decoration
+    code reading parent records gets a consistent shape.
     """
     summary_by_parent = {s.parent_id: s.summary for s in (summaries or [])}
     return [
@@ -897,6 +902,9 @@ def _build_parent_dicts(parents, summaries: list[SummaryResult] | None) -> list[
             "page_end": getattr(p, "page_end", None),
             "summary": summary_by_parent.get(p.parent_id),
             "child_ids": [c.chunk_id for c in p.children],
+            "chunk_kind": getattr(p, "chunk_kind", ChunkKind.BODY),
+            "language": getattr(p, "language", None),
+            "metadata": getattr(p, "metadata", {}) or {},
         }
         for p in parents
     ]
@@ -917,6 +925,8 @@ def _build_child_dicts(children, user_id: str) -> list[dict]:
             "page_start": getattr(c, "page_start", None),
             "page_end": getattr(c, "page_end", None),
             "chunk_kind": getattr(c, "chunk_kind", ChunkKind.BODY),
+            "language": getattr(c, "language", None),
+            "metadata": getattr(c, "metadata", {}) or {},
         }
         for c in children
     ]
@@ -1225,6 +1235,114 @@ async def _write_qdrant_for_doc(
         )
 
 
+def _searchable_text(chunk) -> str:
+    """Phase 4.5 — augment a chunk's text with metadata tokens for BM25
+    indexing. Code chunks get symbols_defined / imports / file_path
+    appended so lexical search hits structured-API names even when the
+    chunk body uses local aliases. Prose chunks pass through unchanged.
+
+    The augmented text is ONLY fed to the sparse encoder. The Qdrant
+    payload still carries `chunk.text[:512]` for display, and hydrate.py
+    still replaces chunk.text with the full Mongo body at retrieval —
+    nothing the LLM sees changes here.
+    """
+    base = getattr(chunk, "text", "") or ""
+    meta = getattr(chunk, "metadata", None) or {}
+    if not meta:
+        return base
+    tokens: list[str] = []
+    for sym in (meta.get("symbols_defined") or [])[:30]:
+        s = str(sym).strip()
+        if s:
+            tokens.append(s)
+    for imp in (meta.get("imports") or [])[:15]:
+        s = str(imp).strip()
+        if s:
+            tokens.append(s)
+    for call in (meta.get("symbols_called") or [])[:30]:
+        s = str(call).strip()
+        if s:
+            tokens.append(s)
+    file_path = str(meta.get("file_path") or "").strip()
+    if file_path:
+        tokens.append(file_path)
+        # Tokenize the path so each segment becomes a BM25 term:
+        # "ReplicatedStorage/Combat/CombatModule.luau"
+        # → ReplicatedStorage Combat CombatModule luau
+        for part in file_path.replace("/", " ").replace("\\", " ").replace(".", " ").split():
+            if part and part not in tokens:
+                tokens.append(part)
+    if not tokens:
+        return base
+    return base + "\n\n" + " ".join(tokens)
+
+
+def _synthesize_code_extraction_results(graph_children) -> list:
+    """Phase 4 code graph — turn each CODE-kind chunk's AST metadata into a
+    synthetic ExtractionResult so it flows through write_document_graph
+    alongside Ghost B's prose extractions.
+
+    Inputs are tier_chunker ChildChunk objects (post-filter against
+    NOISY_KINDS). For every chunk with `chunk_kind == ChunkKind.CODE`:
+      - `metadata.symbols_defined` → :Entity(Method) with MENTIONS
+      - `metadata.imports`         → :Entity(Artifact) with MENTIONS
+    Confidence is fixed at 1.0 because the symbols came from the
+    tree-sitter parse, not from an LLM guess. Within a single chunk the
+    same symbol is deduped (case-insensitive) so a function and its
+    fully-qualified form ("foo" vs "Module.foo") don't double-count.
+
+    Returns a list of ExtractionResult — empty when no CODE chunks were
+    passed in or none carried symbols/imports.
+    """
+    from services.ghost_b import EntityItem, ExtractionResult
+    from services.ingestion.section_classifier import ChunkKind
+
+    out: list[ExtractionResult] = []
+    for c in graph_children:
+        if getattr(c, "chunk_kind", None) != ChunkKind.CODE:
+            continue
+        meta = getattr(c, "metadata", None) or {}
+        entities: list[EntityItem] = []
+        seen: set[str] = set()
+        for name in meta.get("symbols_defined", []) or []:
+            sym = str(name).strip()
+            if not sym:
+                continue
+            key = sym.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            entities.append(EntityItem(
+                canonical_name=sym, surface_form=sym,
+                entity_type="Method", confidence=1.0,
+            ))
+        for imp in meta.get("imports", []) or []:
+            src = str(imp).strip()
+            if not src:
+                continue
+            key = src.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            entities.append(EntityItem(
+                canonical_name=src, surface_form=src,
+                entity_type="Artifact", confidence=1.0,
+            ))
+        if not entities:
+            continue
+        out.append(ExtractionResult(
+            schema_version="polymath.code.v1",
+            chunk_id=c.chunk_id,
+            doc_id=c.doc_id,
+            corpus_id=c.corpus_id,
+            text=getattr(c, "text", "") or "",
+            entities=entities,
+            relations=[],
+            facts=[],
+        ))
+    return out
+
+
 async def _write_neo4j_for_doc(
     *,
     neo4j_driver,
@@ -1248,22 +1366,27 @@ async def _write_neo4j_for_doc(
     Neo4j (which doesn't accept dict-valued node properties).
     """
     from services.graph.neo4j_writer import write_document_graph
-    from services.ingestion.section_classifier import GHOST_B_SKIP_KINDS
+    from services.ingestion.section_classifier import NOISY_KINDS
 
     metrics = ghost_b_metrics or {}
     success_rate = metrics.get("success_rate")
     extracted = metrics.get("extracted_chunks")
     total = metrics.get("requested_chunks")
 
-    # Pt 8c — only write `body` chunks to Neo4j. Chunks tagged toc / index /
-    # bibliography / front_matter / back_matter / appendix were already
-    # skipped by Ghost B (no MENTIONS / RELATES_TO would form), but they
-    # were still being MERGE'd as :Chunk nodes with HAS_CHUNK edges,
-    # polluting the graph with structural / glossary / cheatsheet noise.
-    # The retrieval-side Mongo `chunks` collection keeps them so opt-in
+    # Pt 8c — exclude only NOISY_KINDS from the graph (toc / index /
+    # bibliography / front_matter / back_matter / appendix). Body AND code
+    # chunks pass through. Mongo `chunks` keeps the noisy ones so opt-in
     # citation queries still work; the GRAPH stays clean.
-    body_children = [c for c in children if c.chunk_kind not in GHOST_B_SKIP_KINDS]
-    skipped_count = len(children) - len(body_children)
+    #
+    # Phase 4 (code lane): code chunks aren't extracted by Ghost B (skipped
+    # to avoid hallucinated Method/Artifact entities), but their AST
+    # metadata.symbols_defined / metadata.imports are already deterministic
+    # ground truth. Synthesize ExtractionResult objects from that metadata
+    # so they flow through the standard write_document_graph entity +
+    # MENTIONS pipeline. Confidence is fixed at 1.0 because the symbols
+    # came from the tree-sitter parse, not from an LLM guess.
+    graph_children = [c for c in children if c.chunk_kind not in NOISY_KINDS]
+    skipped_count = len(children) - len(graph_children)
     if skipped_count:
         logger.info(
             "Pt8c neo4j writer skipping %d noisy chunks (toc/index/biblio/...) "
@@ -1271,14 +1394,25 @@ async def _write_neo4j_for_doc(
             skipped_count, len(children), doc_id,
         )
 
+    code_extraction_results = _synthesize_code_extraction_results(graph_children)
+
+    if code_extraction_results:
+        logger.info(
+            "Phase 4 code graph: synthesized %d ExtractionResult objects "
+            "(deterministic, from metadata.symbols_defined / imports) "
+            "for doc_id=%s", len(code_extraction_results), doc_id[:12],
+        )
+
+    all_extraction_results = list(ghost_b_out or []) + code_extraction_results
+
     await write_document_graph(
         driver=neo4j_driver,
         doc_id=doc_id,
         corpus_id=corpus_id,
-        extraction_results=ghost_b_out or [],
+        extraction_results=all_extraction_results,
         user_id=user_id,
         file_id=file_id,
-        all_chunk_ids=[c.chunk_id for c in body_children],
+        all_chunk_ids=[c.chunk_id for c in graph_children],
         filename=filename,
         parent_count=len(parents) if parents is not None else 0,
         schema_lens_id=schema_lens_id,
@@ -1287,6 +1421,33 @@ async def _write_neo4j_for_doc(
         ghost_b_extracted=int(extracted) if extracted is not None else None,
         ghost_b_total=int(total) if total is not None else None,
     )
+
+    # Phase 4.5 — opt-in graphify augmentation. Runs only when the setting
+    # is on; safe-by-default off so private/emotional corpora are never
+    # touched. Code chunks get cross-symbol :CALLS edges and Leiden
+    # community labels on top of Phase 4's deterministic entity write.
+    # The augmenter never raises — failures degrade silently to no-op.
+    try:
+        from config import get_settings
+        if get_settings().GRAPHIFY_AUGMENT_CODE_LANE:
+            from services import code_graph_augmenter
+            from services.graph.neo4j_writer import write_graphify_enrichment
+            from services.ingestion.section_classifier import ChunkKind
+
+            code_only = [c for c in graph_children if c.chunk_kind == ChunkKind.CODE]
+            if code_only:
+                enrichment = code_graph_augmenter.augment_code_chunks(code_only)
+                await write_graphify_enrichment(
+                    driver=neo4j_driver,
+                    corpus_id=corpus_id,
+                    enrichment=enrichment,
+                )
+    except Exception as exc:
+        # Pure augmentation — never block the ingest if it fails.
+        logger.warning(
+            "Phase 4.5 graphify augmentation skipped for doc=%s: %s",
+            doc_id[:12] if doc_id else "?", exc,
+        )
 
 
 async def run_ingest_job(
@@ -1618,10 +1779,18 @@ async def run_ingest_job(
             # alongside the dense vector under the "sparse" named slot;
             # legacy corpora's collections silently drop the sparse field at
             # upsert time and keep the Mongo $text fallback in place.
+            #
+            # Phase 4.5 metadata indexing — for CODE chunks we append the
+            # AST-derived metadata (symbols_defined, imports, file_path) to
+            # the BM25 input. This makes call sites and import targets
+            # surface via lexical search even when the literal string
+            # doesn't appear in the first ~500 chars of the chunk text
+            # (e.g. a function that uses TweenService via a local alias).
+            # Prose chunks pass through unchanged.
             from services.storage.sparse_encoder import encode_text as _bm25_encode
             t0 = time.monotonic()
             child_sparse_map = {
-                c.chunk_id: _bm25_encode(c.text)
+                c.chunk_id: _bm25_encode(_searchable_text(c))
                 for c in children
                 if c.chunk_id in vec_map
             }

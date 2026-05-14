@@ -212,6 +212,13 @@ _CHUNK_PAYLOAD_INDEXES: tuple[str, ...] = (
     "chunk_type",
     "source_tier",
     "user_id",
+    # Code lane (Phase 1) — chunk_kind was stored on payload but never
+    # indexed, so default retrieval's `must_not in noisy_kinds` was a full
+    # scan. Indexed here so filter-by-kind (including the new "code" kind)
+    # is O(log n). language enables fast per-language scopes for /python,
+    # /rust, /luau, etc.
+    "chunk_kind",
+    "language",
 )
 _SCHEMA_PAYLOAD_INDEXES: tuple[str, ...] = ("corpus_id", "kind", "term")
 
@@ -530,10 +537,16 @@ async def upsert_children(
             "heading_path": c.get("heading_path"),
             "chunk_text": c["text"][:512],
             "user_id": c.get("user_id", ""),
-            # Semantic role (body / toc / bibliography / …). Default
+            # Semantic role (body / toc / bibliography / … / code). Default
             # retrieval excludes non-body via a `must_not` filter on this
             # field; missing field treated as body for backwards compat.
             "chunk_kind": c.get("chunk_kind", "body"),
+            # Code lane (Phase 1) — language tag + AST-derived metadata
+            # (symbols_defined / symbols_called / imports / ast_signature /
+            # file_path). Empty for prose chunks. Used at retrieval time for
+            # /python, /rust, … skill scoping and code-aware reranking.
+            "language": c.get("language"),
+            "metadata": c.get("metadata") or {},
         }
         for c in chunks
     ]
@@ -605,6 +618,8 @@ async def upsert_summaries(
             "chunk_text": p["summary"][:512],
             "user_id": p.get("user_id", ""),
             "chunk_kind": p.get("chunk_kind", "body"),
+            "language": p.get("language"),
+            "metadata": p.get("metadata") or {},
         }
         for p in summary_payloads
     ]

@@ -172,3 +172,204 @@ def test_hard_split_handles_multiple_chunks_mixed_sizes():
     assert sum(1 for c in out if c == short) == 2
     assert len(out) >= 5
 
+
+# ─────────────────────────────────────────────────────────────────────────
+# Code lane (Phase 1) — code-file ingest, markdown fence routing, AST
+# packing, embedder-safety contract, and metadata propagation.
+# ─────────────────────────────────────────────────────────────────────────
+
+from services.ingestion.section_classifier import ChunkKind  # noqa: E402
+
+
+def _section(text, *, element_type="paragraph", heading_path=None, language=None, level=None):
+    return SimpleNamespace(
+        heading_path=heading_path or [],
+        text=text,
+        element_type=element_type,
+        level=level,
+        language=language,
+    )
+
+
+def _code_parse_result(*, sections, language=None, filename="sample.py", source_tier=SourceTier.tier_code):
+    return SimpleNamespace(
+        source_tier=source_tier,
+        text="\n\n".join(s.text for s in sections),
+        markdown="\n\n".join(s.text for s in sections),
+        sections=sections,
+        pages=None,
+        injected_headers_audit=[],
+        language=language,
+        filename=filename,
+    )
+
+
+def test_tier_code_routes_through_code_splitter():
+    src = "def hello():\n    return 1\n\nclass X:\n    pass\n"
+    parents, children, _ = tier_chunker.chunk(
+        _code_parse_result(
+            sections=[_section(src, element_type="code_block", heading_path=["foo.py"], language="python")],
+            language="python",
+            filename="foo.py",
+        ),
+        doc_id="doc1",
+        corpus_id="corpus1",
+    )
+    assert len(parents) >= 1
+    for p in parents:
+        assert p.chunk_kind == ChunkKind.CODE
+        assert p.language == "python"
+        assert p.source_tier == SourceTier.tier_code.value
+    # metadata.file_path stamped from the parse result's filename
+    assert any(c.metadata.get("file_path") == "foo.py" for c in children)
+    # symbols_defined populated by code_splitter
+    defined = set()
+    for c in children:
+        defined.update(c.metadata.get("symbols_defined", []))
+    assert "hello" in defined or "X" in defined
+
+
+def test_tier_code_no_child_exceeds_embedder_cap(monkeypatch):
+    # Build a fat Python listing that would blow past the cap if not packed.
+    src = "import numpy as np\n\n" + "\n\n".join(
+        f"def fn_{i}(x):\n    return x + {i}\n" for i in range(80)
+    )
+    cap = 200
+    # Monkeypatch the safety cap getter so the test isn't tied to Settings.
+    monkeypatch.setattr(tier_chunker, "_embedder_safe_max_tokens", lambda: cap)
+
+    parents, children, _ = tier_chunker.chunk(
+        _code_parse_result(
+            sections=[_section(src, element_type="code_block", language="python", heading_path=["fat.py"])],
+            language="python",
+            filename="fat.py",
+        ),
+        doc_id="doc2",
+        corpus_id="corpus2",
+    )
+    assert children, "expected at least one child chunk"
+    for c in children:
+        # Hard contract: every child fits the embedder cap.
+        assert c.token_count <= cap, (
+            f"child {c.chunk_id} token_count={c.token_count} > cap={cap}"
+        )
+
+
+def test_tier_code_unknown_language_still_under_cap(monkeypatch):
+    # Unsupported language → pack returns sentinel → caller hard-splits.
+    src = "MOVE 1 TO X.\n" * 200  # ~600 tokens of fake COBOL
+    cap = 100
+    monkeypatch.setattr(tier_chunker, "_embedder_safe_max_tokens", lambda: cap)
+    parents, children, _ = tier_chunker.chunk(
+        _code_parse_result(
+            sections=[_section(src, element_type="code_block", language="cobol")],
+            language="cobol",
+            filename="legacy.cob",
+        ),
+        doc_id="doc3",
+        corpus_id="corpus3",
+    )
+    for c in children:
+        assert c.token_count <= cap
+
+
+def test_tier_a_markdown_with_code_fence_emits_code_parent(monkeypatch):
+    # Simulate sections that the markdown walker would produce: a heading
+    # + a code_block + a paragraph + a code_block.
+    sections = [
+        _section("Intro", element_type="section_heading", heading_path=["Intro"], level=1),
+        _section("Prose paragraph one. " * 20, element_type="paragraph", heading_path=["Intro"]),
+        _section(
+            "```python\ndef foo():\n    return 1\n```",
+            element_type="code_block",
+            heading_path=["Intro"],
+            language="python",
+        ),
+        _section("Prose paragraph two. " * 20, element_type="paragraph", heading_path=["Intro"]),
+    ]
+    pr = SimpleNamespace(
+        source_tier=SourceTier.tier_a,
+        text="",
+        markdown="",
+        sections=sections,
+        pages=None,
+        injected_headers_audit=[],
+        language=None,
+        filename="book.md",
+    )
+    parents, children, _ = tier_chunker.chunk(pr, doc_id="doc4", corpus_id="corpus4")
+    code_parents = [p for p in parents if p.chunk_kind == ChunkKind.CODE]
+    body_parents = [p for p in parents if p.chunk_kind == ChunkKind.BODY]
+    assert code_parents, "expected at least one CODE parent"
+    assert body_parents, "expected at least one BODY parent"
+    for p in code_parents:
+        assert p.language == "python"
+
+
+def test_coalesce_does_not_merge_code_into_prose():
+    blocks = [
+        (["sec"], "prose one " * 10, ChunkKind.BODY, None),
+        (["sec"], "```python\ndef f(): pass\n```", ChunkKind.CODE, "python"),
+        (["sec"], "prose two " * 10, ChunkKind.BODY, None),
+    ]
+    out = tier_chunker._coalesce_small_blocks(
+        blocks, min_parent_tokens=1000, max_parent_tokens=4000
+    )
+    kinds = [b[2] for b in out]
+    # CODE must remain its own block; the two BODY blocks may have merged.
+    assert ChunkKind.CODE in kinds
+    code_count = sum(1 for k in kinds if k == ChunkKind.CODE)
+    assert code_count == 1
+
+
+def test_sections_to_parent_blocks_emits_code_blocks():
+    sections = [
+        _section("H1", element_type="section_heading", heading_path=["H1"], level=1),
+        _section("prose body", element_type="paragraph", heading_path=["H1"]),
+        _section(
+            "```python\ndef g(): pass\n```",
+            element_type="code_block",
+            heading_path=["H1"],
+            language="python",
+        ),
+    ]
+    blocks = tier_chunker._sections_to_parent_blocks(sections)
+    kinds = [b[2] for b in blocks]
+    languages = [b[3] for b in blocks]
+    assert ChunkKind.CODE in kinds
+    assert "python" in languages
+
+
+def test_chunk_kind_filters_through_parent_dataclass():
+    # Regression — confirm the new fields default cleanly when missing on
+    # rehydrated data (chunk_kind=BODY, language=None, metadata={}).
+    sections = [_section("hello", element_type="paragraph", heading_path=["H"])]
+    pr = SimpleNamespace(
+        source_tier=SourceTier.tier_a,
+        text="hello",
+        markdown="hello",
+        sections=sections,
+        pages=None,
+        injected_headers_audit=[],
+        language=None,
+        filename=None,
+    )
+    parents, children, _ = tier_chunker.chunk(pr, doc_id="doc5", corpus_id="corpus5")
+    if parents:
+        assert parents[0].chunk_kind in (ChunkKind.BODY, ChunkKind.FRONT_MATTER, ChunkKind.BACK_MATTER, ChunkKind.TOC, ChunkKind.BIBLIOGRAPHY, ChunkKind.INDEX, ChunkKind.APPENDIX)
+        assert parents[0].language is None
+        assert parents[0].metadata == {}
+
+
+def test_describe_chunking_reports_ast_bound_for_tier_code():
+    pr = SimpleNamespace(
+        source_tier=SourceTier.tier_code,
+        text="def f(): pass\n",
+        markdown="def f(): pass\n",
+        sections=[],
+        pages=None,
+        injected_headers_audit=[],
+    )
+    desc = tier_chunker.describe_chunking(pr)
+    assert desc["parent_strategy"] == "ast_bound_code"
+

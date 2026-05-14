@@ -464,6 +464,93 @@ class Settings(BaseSettings):
             "of stalling indefinitely."
         ),
     )
+    EMBEDDER_SAFE_MAX_TOKENS: int = Field(
+        default=960,
+        ge=128,
+        le=8192,
+        description=(
+            "Hard cap on tokens of any text sent to the embedder. "
+            "sentence-transformers silently truncates inputs that exceed the "
+            "model's max_seq_length; for code (no sentence-boundary fallback) "
+            "that destroys retrieval fidelity. The code lane packs every "
+            "child under this cap. Set conservatively below the model's true "
+            "ceiling to absorb tokenizer drift between cl100k (used for "
+            "budget math) and the model tokenizer (used at encode time)."
+        ),
+    )
+    TIER_CHUNKER_CODE_LANE_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Kill switch for the code-aware lane. When False, the early-"
+            "intercept gate in parse_document and the fence walker in "
+            "_markdown_sections both fall through to legacy prose behavior. "
+            "Use to bisect regressions during rollout."
+        ),
+    )
+    RERANKER_BYPASS_CODE: bool = Field(
+        default=True,
+        description=(
+            "Code-aware reranking. The default cross-encoder "
+            "(ms-marco-MiniLM-L6-v2) is prose-trained and systematically "
+            "demotes code-shaped chunks. When True, chunks with chunk_kind=code "
+            "(detected via the `language` field) bypass the cross-encoder and "
+            "keep their pre-rerank score; prose chunks are reranked normally. "
+            "Both pools are min-max normalized before merge so neither side "
+            "crowds the other out. Flip False if you swap to a code-aware "
+            "reranker like jinaai/jina-reranker-v2-base-code."
+        ),
+    )
+    GRAPHIFY_AUGMENT_CODE_LANE: bool = Field(
+        default=False,
+        description=(
+            "Phase 4.5 opt-in. When True, the ingestion worker invokes "
+            "graphify (safishamsi/graphify, MIT) on code corpora after the "
+            "Phase 1 chunker runs and writes the cross-file call/inheritance"
+            "/import edges plus Leiden community labels into Neo4j alongside "
+            "the existing Phase 4 entities. Defaults False so prose corpora "
+            "and personal/emotional corpora are unaffected. Flip on per "
+            "corpus via IngestionConfig override, not globally — graphify's "
+            "LLM passes are inappropriate for private content (it can route "
+            "doc/PDF extraction to external APIs unless Ollama is configured)."
+        ),
+    )
+    GRAPHIFY_LLM_PROVIDER: str = Field(
+        default="ollama",
+        description=(
+            "Provider for graphify's Pass 3 (LLM extraction over docs / PDFs "
+            "/ images). 'ollama' keeps everything local — the safe default. "
+            "Other values (claude, gemini, openai) route to external APIs "
+            "and should only be used for non-sensitive code corpora. The "
+            "augmenter reads this at call time; changing it requires no "
+            "restart."
+        ),
+    )
+    TIER_CHUNKER_CODE_SUPPORTED_LANGS: list[str] = Field(
+        default=[
+            # mainstream code
+            "python", "javascript", "typescript", "tsx", "lua", "luau",
+            "go", "rust", "java", "c", "cpp", "cuda", "ruby", "bash",
+            "sql", "csharp", "kotlin", "swift", "php", "scala", "elixir",
+            "haskell", "r", "dart", "nix", "objc",
+            # shaders
+            "glsl", "hlsl",
+            # web frameworks
+            "vue", "svelte",
+            # markup + styling (parsed as code so structure survives splits)
+            "html", "css", "xml",
+            # data / config (parsed for atomic packing; symbols usually empty)
+            "json", "yaml", "toml", "ini",
+            # IaC / build / API
+            "hcl", "dockerfile", "make", "cmake",
+            "proto", "graphql",
+        ],
+        description=(
+            "Languages where the AST packer is invoked. Outside this list, "
+            "code chunks still get chunk_kind=CODE and are packed under the "
+            "embedder cap via blank-line splitting, but no symbol metadata "
+            "is extracted."
+        ),
+    )
     EXTRACTION_MAX_TOTAL_LINES: int = Field(
         default=55,
         ge=1,

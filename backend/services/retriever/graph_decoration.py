@@ -120,8 +120,37 @@ class GraphDecorator:
         if not winning_chunk_ids:
             return []
 
+        relates_to_decorations = await self._decorate_via_relates_to(
+            winning_chunk_ids=winning_chunk_ids,
+            corpus_ids=corpus_ids,
+            wanted_families=wanted_families,
+            neighbor_limit=neighbor_limit,
+            chunks_per_neighbor=chunks_per_neighbor,
+        )
+        calls_decorations = await self._decorate_via_calls(
+            winning_chunk_ids=winning_chunk_ids,
+            corpus_ids=corpus_ids,
+            neighbor_limit=neighbor_limit,
+            chunks_per_neighbor=chunks_per_neighbor,
+        )
+
+        # Concat; both lists already capped individually. The downstream
+        # arrow renderer in context_manager has its own per-chunk and total
+        # arrow budgets (Pt 10d.1), so over-counting here is safe — the
+        # renderer trims.
+        return relates_to_decorations + calls_decorations
+
+    async def _decorate_via_relates_to(
+        self,
+        *,
+        winning_chunk_ids: List[str],
+        corpus_ids: Optional[List[str]],
+        wanted_families: Optional[List[str]],
+        neighbor_limit: int,
+        chunks_per_neighbor: int,
+    ) -> List[GraphDecoration]:
         cypher = """
-        // Pt 10d — graph decoration over winners
+        // Pt 10d — graph decoration over winners (RELATES_TO walk)
         MATCH (winner:Chunk)-[:MENTIONS]->(seed:Entity)-[r:RELATES_TO]-(neighbor:Entity)
         WHERE winner.chunk_id IN $winning_chunk_ids
           AND r.eligible_for_synthesis = true
@@ -181,39 +210,10 @@ class GraphDecorator:
                 )
                 rows = [dict(r) async for r in result]
 
-            decorations: List[GraphDecoration] = []
-            for row in rows:
-                if not row.get("predicate"):
-                    continue
-                evidence_chunks: List[GraphDecorationEvidence] = []
-                for ev in row.get("evidence_chunks") or []:
-                    cid = ev.get("chunk_id") if isinstance(ev, dict) else None
-                    if not cid:
-                        continue
-                    evidence_chunks.append(
-                        GraphDecorationEvidence(
-                            chunk_id=str(cid),
-                            doc_id=ev.get("doc_id"),
-                            parent_boost=int(ev.get("parent_boost") or 1),
-                        )
-                    )
-                decorations.append(
-                    GraphDecoration(
-                        winner_chunk_id=str(row.get("winner_chunk_id") or ""),
-                        seed_entity=str(row.get("seed_entity") or ""),
-                        neighbor_entity=str(row.get("neighbor_entity") or ""),
-                        predicate=str(row.get("predicate") or ""),
-                        relation_family=str(row.get("relation_family") or ""),
-                        edge_evidence=str(row.get("edge_evidence") or ""),
-                        direction_repaired=bool(row.get("direction_repaired") or False),
-                        predicate_refined=bool(row.get("predicate_refined") or False),
-                        edge_weight=float(row.get("edge_weight") or 0.0),
-                        evidence_chunks=evidence_chunks,
-                    )
-                )
+            decorations = self._rows_to_decorations(rows)
             elapsed_ms = (time.perf_counter() - t0) * 1000
             logger.info(
-                "decorate_winners ms=%.1f winners=%d arrows=%d "
+                "decorate_winners[RELATES_TO] ms=%.1f winners=%d arrows=%d "
                 "neighbor_limit=%d chunks_per_neighbor=%d families=%s",
                 elapsed_ms,
                 len(winning_chunk_ids),
@@ -226,10 +226,135 @@ class GraphDecorator:
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - t0) * 1000
             logger.warning(
-                "decorate_winners FAILED ms=%.1f winners=%d (chunk-only fallback): %s",
+                "decorate_winners[RELATES_TO] FAILED ms=%.1f winners=%d "
+                "(chunk-only fallback): %s",
                 elapsed_ms, len(winning_chunk_ids), exc,
             )
             return []
+
+    async def _decorate_via_calls(
+        self,
+        *,
+        winning_chunk_ids: List[str],
+        corpus_ids: Optional[List[str]],
+        neighbor_limit: int,
+        chunks_per_neighbor: int,
+    ) -> List[GraphDecoration]:
+        """Phase 4.5 — emit decorations for graphify-emitted CALLS edges.
+
+        Mirrors `_decorate_via_relates_to` but walks `:CALLS` (entity→entity,
+        from `graphify` extractor) instead of `:RELATES_TO` (from Ghost B).
+        CALLS edges are deterministic — every one is treated as 'strong'
+        (no `edge_strength` gate, no `eligible_for_synthesis` check). The
+        emitted GraphDecoration carries `predicate='calls'` and
+        `relation_family='code_call_graph'`, which the existing arrow
+        renderer in context_manager prints as
+        `seed --calls(code_call_graph)--> neighbor` in the LLM prompt.
+        """
+        if not self._settings.NEO4J_ENABLED or not self._driver:
+            return []
+
+        cypher = """
+        // Phase 4.5 — graph decoration over winners (CALLS walk)
+        MATCH (winner:Chunk)-[:MENTIONS]->(seed:Entity)-[r:CALLS]-(neighbor:Entity)
+        WHERE winner.chunk_id IN $winning_chunk_ids
+          AND seed <> neighbor
+        """
+        if corpus_ids:
+            cypher += "  AND any(cid IN $corpus_ids WHERE cid IN coalesce(r.corpus_ids, []))\n"
+        cypher += """
+        WITH winner, seed, neighbor, r,
+             coalesce(r.confidence, 1.0) AS edge_weight
+        OPTIONAL MATCH (neighbor)<-[:MENTIONS]-(evidence:Chunk)
+        WHERE (size($corpus_ids) = 0 OR evidence.corpus_id IN $corpus_ids)
+          AND evidence.chunk_id <> winner.chunk_id
+        WITH winner, seed, neighbor, r, edge_weight, evidence,
+             CASE WHEN evidence.doc_id = winner.doc_id THEN 2 ELSE 1 END AS parent_boost
+        ORDER BY parent_boost DESC, edge_weight DESC
+        WITH winner.chunk_id              AS winner_chunk_id,
+             coalesce(seed.display_name, seed.normalized_name, '')         AS seed_entity,
+             coalesce(neighbor.display_name, neighbor.normalized_name, '') AS neighbor_entity,
+             'calls'           AS predicate,
+             'code_call_graph' AS relation_family,
+             // Use source_file:source_location as evidence — graphify writes both.
+             coalesce(r.source_file, '') + CASE WHEN r.source_location IS NULL THEN '' ELSE ':' + r.source_location END AS edge_evidence,
+             false AS direction_repaired,
+             false AS predicate_refined,
+             edge_weight,
+             collect(DISTINCT {
+                 chunk_id: evidence.chunk_id,
+                 doc_id: evidence.doc_id,
+                 parent_boost: parent_boost
+             })[..$chunks_per_neighbor] AS evidence_chunks
+        ORDER BY edge_weight DESC
+        RETURN winner_chunk_id, seed_entity, neighbor_entity, predicate,
+               relation_family, edge_evidence, direction_repaired,
+               predicate_refined, edge_weight, evidence_chunks
+        LIMIT $neighbor_limit
+        """
+
+        t0 = time.perf_counter()
+        try:
+            async with self._driver.session() as session:
+                result = await session.run(
+                    cypher,
+                    winning_chunk_ids=winning_chunk_ids,
+                    corpus_ids=corpus_ids or [],
+                    neighbor_limit=int(neighbor_limit),
+                    chunks_per_neighbor=int(chunks_per_neighbor),
+                )
+                rows = [dict(r) async for r in result]
+
+            decorations = self._rows_to_decorations(rows)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.info(
+                "decorate_winners[CALLS] ms=%.1f winners=%d arrows=%d",
+                elapsed_ms, len(winning_chunk_ids), len(decorations),
+            )
+            return decorations
+        except Exception as exc:
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.warning(
+                "decorate_winners[CALLS] FAILED ms=%.1f winners=%d (skipping): %s",
+                elapsed_ms, len(winning_chunk_ids), exc,
+            )
+            return []
+
+    @staticmethod
+    def _rows_to_decorations(rows: list[dict]) -> List[GraphDecoration]:
+        """Shared row → GraphDecoration translation. Used by both the
+        RELATES_TO and CALLS query paths."""
+        decorations: List[GraphDecoration] = []
+        for row in rows:
+            if not row.get("predicate"):
+                continue
+            evidence_chunks: List[GraphDecorationEvidence] = []
+            for ev in row.get("evidence_chunks") or []:
+                cid = ev.get("chunk_id") if isinstance(ev, dict) else None
+                if not cid:
+                    continue
+                evidence_chunks.append(
+                    GraphDecorationEvidence(
+                        chunk_id=str(cid),
+                        doc_id=ev.get("doc_id"),
+                        parent_boost=int(ev.get("parent_boost") or 1),
+                    )
+                )
+            decorations.append(
+                GraphDecoration(
+                    winner_chunk_id=str(row.get("winner_chunk_id") or ""),
+                    seed_entity=str(row.get("seed_entity") or ""),
+                    neighbor_entity=str(row.get("neighbor_entity") or ""),
+                    predicate=str(row.get("predicate") or ""),
+                    relation_family=str(row.get("relation_family") or ""),
+                    edge_evidence=str(row.get("edge_evidence") or ""),
+                    direction_repaired=bool(row.get("direction_repaired") or False),
+                    predicate_refined=bool(row.get("predicate_refined") or False),
+                    edge_weight=float(row.get("edge_weight") or 0.0),
+                    evidence_chunks=evidence_chunks,
+                )
+            )
+        return decorations
 
     async def close(self) -> None:
         if self._driver:

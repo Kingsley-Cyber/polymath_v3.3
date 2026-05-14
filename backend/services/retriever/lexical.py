@@ -249,6 +249,8 @@ class LexicalRetriever:
                         score=float(hit.score or 0.0),
                         source_tier=f"{payload.get('source_tier') or 'chunk'}+lexical",
                         heading_path=payload.get("heading_path") or None,
+                        language=payload.get("language"),
+                        metadata=payload.get("metadata") or {},
                         provenance=[{"retriever": "qdrant_sparse"}],
                     )
                 )
@@ -376,6 +378,8 @@ class LexicalRetriever:
             score=float(score),
             source_tier=f"{row.get('source_tier') or 'chunk'}+lexical",
             heading_path=row.get("heading_path") or None,
+            language=row.get("language"),
+            metadata=row.get("metadata") or {},
             provenance=[{"retriever": "lexical"}],
         )
 

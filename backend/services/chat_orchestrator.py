@@ -534,6 +534,19 @@ class ChatOrchestrator:
                 # since the underlying check is just a string-set lookup.
                 inline_decoration = decoration
 
+        # Code lane (Phase 2) — if retrieval surfaced code chunks, auto-detect
+        # the dominant language and append a virtual skill carrying generic
+        # code-synthesis rules plus the language-specific override (when one
+        # is defined). Skipped silently when the user has already activated
+        # a /code-* skill manually. The skill flows through the standard
+        # active_skills_dicts envelope — no special rendering path.
+        from services.code_lane_skills import maybe_inject_code_skill
+        active_skills_dicts = maybe_inject_code_skill(sources, active_skills_dicts)
+        if active_skills_dicts and len(active_skills_dicts) > len(skills_loaded):
+            auto = active_skills_dicts[-1]
+            if auto.get("auto_selected"):
+                logger.info("Code lane: auto-injected skill %s", auto["name"])
+
         if sources or facts or active_skills_dicts or analysis_text:
             user_message.content = context_manager.build_augmented_prompt(
                 query=user_message.content,

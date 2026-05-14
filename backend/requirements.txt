@@ -51,6 +51,25 @@ python-pptx==0.6.23
 openpyxl==3.1.2
 ebooklib==0.18
 
+# === Code Parsing (code lane Phase 1) ===
+# Bundled tree-sitter grammars (306 languages) with prebuilt win_amd64 wheels.
+# Used by services/ingestion/code_splitter.py for AST-aware code chunking
+# at top-level boundaries (functions/classes/imports), keeping each chunk
+# under EMBEDDER_SAFE_MAX_TOKENS instead of letting prose splitters slice
+# mid-function. Optional dep at runtime: code_splitter falls back to
+# blank-line packing if the import fails.
+tree-sitter-language-pack>=1.8.0,<2.0.0
+
+# === Code Graph Augmenter (Phase 4.5, opt-in) ===
+# graphify (safishamsi/graphify, MIT) provides cross-file CALLS / INHERITS_FROM /
+# IMPORTS edges, Leiden communities, and populates the symbols_called slot that
+# tree-sitter-language-pack v1.8 doesn't surface. Per-corpus opt-in via
+# Settings.GRAPHIFY_AUGMENT_CODE_LANE — defaults False; only code corpora flip
+# it on (technical-prose and personal/emotional corpora stay on Polymath's own
+# pipeline). Imported lazily inside the augmenter module so this dep stays
+# soft — bare ingestion still works if graphify is uninstalled.
+graphifyy>=0.7.19
+
 # === Discourse graph (Phase 17.3) ===
 # Networkx powers co-occurrence graph analytics: betweenness centrality,
 # modularity-based clustering, structural-hole detection. No GDS dependency.

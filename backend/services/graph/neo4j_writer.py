@@ -1716,3 +1716,112 @@ async def write_document_graph(
         relation_count,
         fact_count,
     )
+
+
+async def write_graphify_enrichment(
+    driver: AsyncDriver,
+    *,
+    corpus_id: str,
+    enrichment,
+) -> None:
+    """Phase 4.5 — write graphify enrichment onto Phase 4's existing entities.
+
+    Two side effects:
+    1. Stamp `graphify_community` integer on `:Entity` nodes whose
+       normalized name matches a graphify node's clean label.
+    2. MERGE `(:Entity)-[:CALLS]->(:Entity)` edges for cross-symbol calls
+       graphify detected. Confidence is fixed at 1.0 because the relation
+       came from graphify's deterministic AST pass, not an LLM guess.
+
+    Idempotent. Safe to re-run. No-op when `enrichment.is_empty`.
+    """
+    if enrichment is None or enrichment.is_empty:
+        return
+
+    community_rows = [
+        {"normalized_name": normalize_entity_name(name), "community": int(community)}
+        for name, community in enrichment.entity_communities.items()
+        if normalize_entity_name(name)
+    ]
+    call_rows = [
+        {
+            "src": normalize_entity_name(src),
+            "dst": normalize_entity_name(dst),
+            "source_file": source_file or "",
+            "source_location": source_location or "",
+        }
+        for src, dst, source_file, source_location in enrichment.call_edges
+        if normalize_entity_name(src) and normalize_entity_name(dst)
+        and normalize_entity_name(src) != normalize_entity_name(dst)
+    ]
+    community_label_rows = [
+        {"community": int(cid), "label": label}
+        for cid, label in enrichment.community_labels.items()
+        if label
+    ]
+
+    if not (community_rows or call_rows or community_label_rows):
+        return
+
+    async with driver.session() as session:
+        if community_rows:
+            # Stamp community ID on entities. We match on normalized_name so
+            # graphify's "Combat.PunchAttack" finds the Phase-4-written entity
+            # that has canonical_name="combatpunchattack" — the existing
+            # canonicalization rule lossy-strips dots/punctuation.
+            await session.run(
+                """
+                UNWIND $rows AS row
+                MATCH (e:Entity {normalized_name: row.normalized_name})
+                SET e.graphify_community = row.community
+                """,
+                rows=community_rows,
+            )
+
+        if community_label_rows:
+            await session.run(
+                """
+                UNWIND $rows AS row
+                MATCH (e:Entity {graphify_community: row.community})
+                SET e.graphify_community_label = row.label
+                """,
+                rows=community_label_rows,
+            )
+
+        if call_rows:
+            # CALLS edges between Entity nodes. MATCH by normalized_name on
+            # both endpoints; only create the edge if BOTH entities already
+            # exist (Phase 4 should have created them from symbols_defined).
+            #
+            # Storage shape matches RELATES_TO above (corpus_ids as array,
+            # not a single corpus_id string). This is the convention every
+            # retriever-side WHERE clause uses (see neo4j_reader.py:173,335:
+            # `WHERE any(cid IN $corpus_ids WHERE cid IN coalesce(r.corpus_ids, []))`).
+            # Using the array shape means CALLS edges become discoverable to
+            # corpus-scoped retrieval without bespoke filter logic.
+            await session.run(
+                """
+                UNWIND $rows AS row
+                MATCH (src:Entity {normalized_name: row.src})
+                MATCH (dst:Entity {normalized_name: row.dst})
+                MERGE (src)-[r:CALLS]->(dst)
+                ON CREATE SET r.confidence = 1.0,
+                              r.extractor = 'graphify',
+                              r.first_seen = timestamp()
+                SET r.source_file = coalesce(row.source_file, r.source_file),
+                    r.source_location = coalesce(row.source_location, r.source_location),
+                    r.corpus_ids = CASE
+                        WHEN r.corpus_ids IS NULL THEN [$corpus_id]
+                        WHEN $corpus_id IN r.corpus_ids THEN r.corpus_ids
+                        ELSE r.corpus_ids + [$corpus_id]
+                    END
+                """,
+                rows=call_rows,
+                corpus_id=corpus_id,
+            )
+
+    logger.info(
+        "Phase 4.5 graphify enrichment written: corpus=%s communities=%d "
+        "community_labels=%d call_edges=%d",
+        corpus_id, len(community_rows), len(community_label_rows), len(call_rows),
+    )

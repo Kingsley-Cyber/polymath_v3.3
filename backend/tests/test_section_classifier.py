@@ -122,19 +122,25 @@ def test_all_kinds_includes_body():
     assert ChunkKind.BODY in ALL_KINDS
 
 
-def test_noisy_kinds_excludes_body():
+def test_noisy_kinds_excludes_body_and_code():
+    # Code is retrievable first-class content (Phase 1 code lane) — not noisy.
     assert ChunkKind.BODY not in NOISY_KINDS
-    assert set(NOISY_KINDS) == set(ALL_KINDS) - {ChunkKind.BODY}
+    assert ChunkKind.CODE not in NOISY_KINDS
+    assert set(NOISY_KINDS) == set(ALL_KINDS) - {ChunkKind.BODY, ChunkKind.CODE}
 
 
-def test_ghost_b_skip_kinds_matches_noisy():
-    assert GHOST_B_SKIP_KINDS == frozenset(NOISY_KINDS)
+def test_ghost_b_skip_kinds_includes_code():
+    # CODE is retrievable but Ghost B is skipped on it (hallucinates Method
+    # /Artifact entities from raw code). Skip set = noisy + code.
+    assert GHOST_B_SKIP_KINDS == frozenset(list(NOISY_KINDS) + [ChunkKind.CODE])
+    assert ChunkKind.CODE in GHOST_B_SKIP_KINDS
 
 
 @pytest.mark.parametrize(
     "kind, expected",
     [
         (ChunkKind.BODY, False),
+        (ChunkKind.CODE, False),  # code is retrievable, not noisy
         (ChunkKind.TOC, True),
         (ChunkKind.BIBLIOGRAPHY, True),
         (ChunkKind.INDEX, True),
@@ -154,6 +160,7 @@ def test_is_noisy(kind, expected):
     "kind, expected",
     [
         (ChunkKind.BODY, False),
+        (ChunkKind.CODE, True),  # Ghost B is skipped on code chunks (Phase 1)
         (ChunkKind.TOC, True),
         (ChunkKind.BIBLIOGRAPHY, True),
         (ChunkKind.APPENDIX, True),

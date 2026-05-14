@@ -25,6 +25,12 @@ MODEL_PATH = os.getenv("MODEL_PATH", "/model")
 MODEL_NAME = os.getenv("MODEL_NAME", Path(MODEL_PATH).name)
 BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "32"))
 DEVICE = os.getenv("EMBED_DEVICE", "cuda")  # cuda | cpu — override via env
+# Code lane Phase 1 — soft pre-encode cap. sentence-transformers truncates
+# silently when input exceeds the model's max_seq_length; we log a WARNING
+# when any input crosses this threshold so silent truncation becomes loud.
+# Match backend EMBEDDER_SAFE_MAX_TOKENS so a single config value drives
+# both the chunker's hard cap and the embedder's observability check.
+SOFT_TOKEN_CAP = int(os.getenv("EMBEDDER_SOFT_TOKEN_CAP", "960"))
 
 # ── Runtime state ──────────────────────────────────────────────────────────────
 model: SentenceTransformer = None
@@ -179,6 +185,29 @@ def embed(req: EmbeddingRequest):
 
     if not texts:
         raise HTTPException(status_code=400, detail="input must be non-empty")
+
+    # Defense in depth — flag oversized inputs before encode. sentence-
+    # transformers would silently truncate at the model's max_seq_length;
+    # we want a loud log line so ingestion bugs that ship oversized chunks
+    # are immediately visible in ops logs instead of degrading retrieval
+    # quietly. The model's tokenizer is the authoritative counter.
+    try:
+        tok = getattr(model, "tokenizer", None)
+        if tok is not None:
+            for i, t in enumerate(texts):
+                try:
+                    n = len(tok.encode(t, add_special_tokens=False))
+                except Exception:
+                    continue
+                if n > SOFT_TOKEN_CAP:
+                    logger.warning(
+                        "embedder: input[%d] tokens=%d > cap=%d "
+                        "(model may silently truncate). text_prefix=%r",
+                        i, n, SOFT_TOKEN_CAP, t[:80],
+                    )
+    except Exception:
+        # Never let observability hardening break the encode path.
+        pass
 
     # Encode — batch_size controls GPU memory pressure
     # Serialize local GPU encodes inside this process. Large ingestion batches

@@ -8,6 +8,7 @@ from typing import Optional
 
 from config import get_settings
 from models.schemas import ChatMessage, SourceChunk
+from services import code_lane_skills
 from utils.tokens import count_tokens, count_tokens_messages, get_model_context_limit
 
 logger = logging.getLogger(__name__)
@@ -451,6 +452,21 @@ class ContextManager:
             for s in sources:
                 corpus_label = s.corpus_name or s.corpus_id or "Unknown"
                 doc_label = s.doc_name or s.doc_id or "Unknown"
+
+                # Code lane (Phase 2) — code chunks render as
+                # <file language="…" path="…">…<code>…</code></file>. The
+                # block carries language, symbols_defined, and imports so
+                # the LLM can synthesize without guessing conventions.
+                # Graph decoration / provenance below don't fire on code
+                # chunks (Ghost B is skipped on them).
+                if code_lane_skills.is_code_source(s):
+                    passages.append(
+                        code_lane_skills.format_code_source(
+                            s, corpus_label=corpus_label, doc_label=doc_label,
+                        )
+                    )
+                    continue
+
                 section = " / ".join(s.heading_path) if s.heading_path else ""
                 attribution = f'from "{doc_label}"'
                 if section:

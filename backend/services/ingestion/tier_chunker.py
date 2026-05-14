@@ -26,6 +26,19 @@ logger = logging.getLogger(__name__)
 from models.schemas import SourceTier
 from services.ingestion.b_plus_normalizer import InjectedHeader  # re-exported for worker
 from services.ingestion.section_classifier import ChunkKind, classify_chunk
+from services.ingestion import code_splitter
+
+
+def _embedder_safe_max_tokens() -> int:
+    """Pull the embedder-safety cap from Settings at call time (don't cache
+    so tests can override via `monkeypatch.setattr(...)`). Fallback 960
+    matches the Settings default so misconfig still keeps code under a 1024
+    tokenizer ceiling."""
+    try:
+        from config import settings as _settings
+        return int(getattr(_settings, "EMBEDDER_SAFE_MAX_TOKENS", 960))
+    except Exception:
+        return 960
 
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
 PARENT_TARGET_TOKENS = 1200
@@ -64,10 +77,15 @@ class ChildChunk:
     page_start: int | None = None
     page_end: int | None = None
     # Semantic role within the document (body / toc / bibliography / index /
-    # appendix / front_matter / back_matter). Inherited from the parent's
+    # appendix / front_matter / back_matter / code). Inherited from the parent's
     # heading classification. Defaults to BODY so legacy code paths and
     # rehydrated data without this field behave identically to a normal chunk.
     chunk_kind: str = ChunkKind.BODY
+    # Code lane: language tag (e.g. "python", "luau") and AST-derived metadata
+    # (symbols_defined / symbols_called / imports / ast_signature / file_path).
+    # Both default to None/{} so prose chunks and legacy data are unaffected.
+    language: str | None = None
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -82,6 +100,8 @@ class ParentChunk:
     page_start: int | None = None
     page_end: int | None = None
     chunk_kind: str = ChunkKind.BODY
+    language: str | None = None
+    metadata: dict = field(default_factory=dict)
 
 
 def _count_tokens(text: str) -> int:
@@ -310,42 +330,51 @@ def _split_at_boundary(
     return _apply_overlap(chunks, overlap_tokens)
 
 
+_Block = tuple[list[str] | None, str, str, str | None]
+# 4-tuple: (heading_path, text, chunk_kind, language)
+
+
 def _coalesce_small_blocks(
-    blocks: list[tuple[list[str] | None, str]],
+    blocks: list[_Block],
     *,
     min_parent_tokens: int,
     max_parent_tokens: int,
-) -> list[tuple[list[str] | None, str]]:
-    """Merge consecutive below-MIN sections up to MAX_PARENT_TOKENS.
+) -> list[_Block]:
+    """Merge consecutive below-MIN BODY sections up to MAX_PARENT_TOKENS.
 
-    Policy: if current block is under MIN_PARENT_TOKENS AND combining with
-    the next block keeps us at or below MAX_PARENT_TOKENS, fold them together
-    and keep the first block's heading_path. Otherwise, push current and
-    advance. Preserves structure-awareness for well-sized sections while
-    smoothing out doc-specific pathologies (e.g. a 4K-token docx with 37
-    tiny heading sections).
+    Policy: if current block is BODY AND under MIN_PARENT_TOKENS AND combining
+    with the next block (also BODY) keeps us at or below MAX_PARENT_TOKENS,
+    fold them together and keep the first block's heading_path. Otherwise,
+    push current and advance.
 
-    The over-size case (single section > 1.5x target) is still handled
-    downstream by the existing `_split_at_boundary` call — coalesce only
-    fixes the UNDER-size failure mode.
+    Code lane: NEVER merges across a kind boundary. A small BODY block
+    immediately followed by a CODE block (or vice versa) stays separate so
+    the code-aware splitter can route the CODE block to code_splitter.pack().
+
+    Preserves structure-awareness for well-sized sections while smoothing out
+    doc-specific pathologies (e.g. a 4K-token docx with 37 tiny heading
+    sections).
     """
     if not blocks:
         return blocks
-    out: list[tuple[list[str] | None, str]] = []
-    cur_path, cur_text = blocks[0]
+    out: list[_Block] = []
+    cur_path, cur_text, cur_kind, cur_lang = blocks[0]
     merges = 0
-    for next_path, next_text in blocks[1:]:
-        cur_tok = _count_tokens(cur_text)
-        if cur_tok < min_parent_tokens:
-            combined = cur_text + "\n\n" + next_text
-            combined_tok = _count_tokens(combined)
-            if combined_tok <= max_parent_tokens:
-                cur_text = combined
-                merges += 1
-                continue
-        out.append((cur_path, cur_text))
-        cur_path, cur_text = next_path, next_text
-    out.append((cur_path, cur_text))
+    for next_path, next_text, next_kind, next_lang in blocks[1:]:
+        if cur_kind == ChunkKind.BODY and next_kind == ChunkKind.BODY:
+            cur_tok = _count_tokens(cur_text)
+            if cur_tok < min_parent_tokens:
+                combined = cur_text + "\n\n" + next_text
+                combined_tok = _count_tokens(combined)
+                if combined_tok <= max_parent_tokens:
+                    cur_text = combined
+                    merges += 1
+                    continue
+        out.append((cur_path, cur_text, cur_kind, cur_lang))
+        cur_path, cur_text, cur_kind, cur_lang = (
+            next_path, next_text, next_kind, next_lang,
+        )
+    out.append((cur_path, cur_text, cur_kind, cur_lang))
     if merges > 0:
         logger.info(
             "tier_chunker coalesce: %d/%d blocks merged (input=%d, output=%d)",
@@ -354,40 +383,50 @@ def _coalesce_small_blocks(
     return out
 
 
-def _sections_to_parent_blocks(parse_sections) -> list[tuple[list[str] | None, str]]:
-    """Fold the docling section walk into (heading_path, parent_text) pairs.
+def _sections_to_parent_blocks(parse_sections) -> list[_Block]:
+    """Fold the docling section walk into 4-tuple blocks.
 
-    Each section_heading starts a new parent block; subsequent paragraph
-    sections accumulate into the current block. The heading_path on each
-    paragraph is taken verbatim from the docling walker (which already
-    tracks the current heading stack).
+    Returns list[(heading_path, text, chunk_kind, language)]:
+      - section_heading starts a new BODY block (heading text becomes first line).
+      - paragraph / list / table sections accumulate into the current BODY block.
+      - code_block sections flush the BODY buffer and emit their own CODE block
+        carrying the language tag. The chunker routes CODE blocks through
+        code_splitter.pack() instead of the prose sentence/token splitters.
     """
-    blocks: list[tuple[list[str] | None, list[str]]] = []
+    blocks: list[_Block] = []
     current_path: list[str] | None = None
     current_buf: list[str] = []
 
-    def flush():
+    def flush_body():
         nonlocal current_buf
         if current_buf:
-            blocks.append((current_path, current_buf))
+            text = "\n\n".join(current_buf).strip()
+            if text:
+                blocks.append((current_path, text, ChunkKind.BODY, None))
             current_buf = []
 
     for sec in parse_sections:
         if sec.element_type == "section_heading":
-            flush()
+            flush_body()
             current_path = list(sec.heading_path or [])
-            # Render the heading itself as the first line of the block so
-            # downstream summarizers / embedders see the title.
+            # Render the heading itself as the first line of the next BODY
+            # block so downstream summarizers/embedders see the title.
             level = sec.level or 1
             current_buf = [f"{'#' * min(level, 6)} {sec.text}".strip()]
+        elif sec.element_type == "code_block":
+            # Code lane: emit the fenced block as its own CODE-kind block
+            # under the active heading path. Don't fold into BODY.
+            flush_body()
+            code_path = list(current_path) if current_path else list(sec.heading_path or [])
+            blocks.append((code_path, sec.text, ChunkKind.CODE, sec.language))
         else:
-            # Paragraph / list / table chunk → accumulate.
+            # Paragraph / list / table chunk → accumulate into BODY buffer.
             if current_path is None and sec.heading_path:
                 current_path = list(sec.heading_path)
             current_buf.append(sec.text)
 
-    flush()
-    return [(path, "\n\n".join(buf).strip()) for path, buf in blocks if buf]
+    flush_body()
+    return blocks
 
 
 def _make_children(
@@ -505,6 +544,8 @@ def describe_chunking(parse_result, config=None) -> dict:
     source_tier: SourceTier = parse_result.source_tier
     if source_tier == SourceTier.ocr_ast:
         parent_strategy = "pdf_page_grouped"
+    elif source_tier == SourceTier.tier_code:
+        parent_strategy = "ast_bound_code"
     elif source_tier in (SourceTier.tier_a, SourceTier.tier_b):
         parent_strategy = "heading_bound"
     elif source_tier == SourceTier.tier_b_plus:
@@ -537,6 +578,93 @@ def describe_chunking(parse_result, config=None) -> dict:
     return {k: v for k, v in details.items() if v is not None}
 
 
+def _emit_code_parents(
+    blocks: list[_Block],
+    *,
+    doc_id: str,
+    corpus_id: str,
+    tier_value: str,
+    parent_idx: int,
+    child_idx: int,
+    file_path: str | None,
+) -> tuple[list[ParentChunk], list[ChildChunk], int, int]:
+    """Build ParentChunk + ChildChunk for every CODE-kind block via
+    code_splitter.pack(). Returns (parents, children, parent_idx, child_idx).
+
+    Embedder-safety contract: every emitted ChildChunk.text fits
+    EMBEDDER_SAFE_MAX_TOKENS cl100k tokens. When pack() can't meet the cap
+    (unsupported language, missing tree-sitter pack, pathological source),
+    we hard-split via _hard_split_oversize so the embedder never silently
+    truncates. A WARNING is logged in that path so ops can see what slipped.
+    """
+    safe_cap = _embedder_safe_max_tokens()
+    parents: list[ParentChunk] = []
+    children: list[ChildChunk] = []
+
+    for heading_path, text, kind, language in blocks:
+        if kind != ChunkKind.CODE:
+            continue
+        if not text or not text.strip():
+            continue
+
+        slices = code_splitter.pack(text, language or "", safe_cap)
+
+        # Fallback: pack returned single (source, {}) for an over-cap input
+        # because tree-sitter couldn't meet the budget. Hard-split with a
+        # warning so embedder safety holds.
+        if len(slices) == 1 and _count_tokens(slices[0][0]) > safe_cap:
+            logger.warning(
+                "code_splitter: pack failed to meet embedder cap; hard-splitting "
+                "doc_id=%s lang=%s tokens=%d cap=%d",
+                doc_id[:12] if doc_id else "?",
+                language,
+                _count_tokens(slices[0][0]),
+                safe_cap,
+            )
+            forced = _hard_split_oversize([slices[0][0]], safe_cap)
+            slices = [(t, {}) for t in forced]
+
+        for slice_text, meta in slices:
+            if not slice_text.strip():
+                continue
+            parent_id = f"{doc_id}_parent_{parent_idx:04d}"
+            chunk_id = f"{doc_id}_{child_idx:04d}"
+            chunk_meta = dict(meta) if meta else {}
+            if file_path and "file_path" not in chunk_meta:
+                chunk_meta["file_path"] = file_path
+            child = ChildChunk(
+                chunk_id=chunk_id,
+                parent_id=parent_id,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                text=slice_text,
+                heading_path=heading_path,
+                source_tier=tier_value,
+                token_count=_count_tokens(slice_text),
+                chunk_kind=ChunkKind.CODE,
+                language=language,
+                metadata=chunk_meta,
+            )
+            parent = ParentChunk(
+                parent_id=parent_id,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                text=slice_text,
+                heading_path=heading_path,
+                source_tier=tier_value,
+                children=[child],
+                chunk_kind=ChunkKind.CODE,
+                language=language,
+                metadata=chunk_meta,
+            )
+            parents.append(parent)
+            children.append(child)
+            parent_idx += 1
+            child_idx += 1
+
+    return parents, children, parent_idx, child_idx
+
+
 def chunk(
     parse_result,
     doc_id: str,
@@ -564,8 +692,35 @@ def chunk(
 
     source_tier: SourceTier = parse_result.source_tier
     tier_value = source_tier.value
+    parse_filename = getattr(parse_result, "filename", None)
 
-    if source_tier == SourceTier.ocr_ast:
+    if source_tier == SourceTier.tier_code:
+        # Code-file ingest (early-intercept lane). DoclingParseResult contains
+        # exactly one Section(element_type="code_block"). Run it through the
+        # AST packer with the embedder-safety cap; never hand to prose splitters.
+        code_blocks: list[_Block] = []
+        for sec in parse_result.sections or []:
+            if not sec.text or not sec.text.strip():
+                continue
+            code_blocks.append((
+                list(sec.heading_path or []),
+                sec.text,
+                ChunkKind.CODE,
+                sec.language or getattr(parse_result, "language", None),
+            ))
+        code_parents, code_children, parent_idx, child_idx = _emit_code_parents(
+            code_blocks,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            tier_value=tier_value,
+            parent_idx=parent_idx,
+            child_idx=child_idx,
+            file_path=parse_filename,
+        )
+        parents.extend(code_parents)
+        all_children.extend(code_children)
+
+    elif source_tier == SourceTier.ocr_ast:
         # Scrub markup noise (pandoc divs, bracketed anchors, image markdown,
         # ornamental HTML) per page before page-block grouping. Catches the
         # EPUB cover image and pagebreak scaffolding that used to leak into
@@ -619,22 +774,42 @@ def chunk(
         # tiers but possible on malformed input), fall back to markdown.
         if not blocks and (parse_result.markdown or parse_result.text):
             md = parse_result.markdown or parse_result.text
-            blocks = [(None, md.strip())]
-        # Scrub markup noise per section so EPUB pandoc divs, bracketed
-        # pagebreak anchors, image markdown, and ornamental HTML tags don't
-        # land in body chunks. Heading paths are preserved as-is.
-        blocks = [(hp, _scrub_markup_noise(t)) for hp, t in blocks if t]
-        blocks = [(hp, t) for hp, t in blocks if t]
+            blocks = [(None, md.strip(), ChunkKind.BODY, None)]
+        # Scrub markup noise per BODY section. CODE blocks keep their fences
+        # and original whitespace verbatim — scrubbing would mangle backticks
+        # and the AST round-trip the language tag is part of.
+        blocks = [
+            (hp, _scrub_markup_noise(t) if k == ChunkKind.BODY else t, k, lang)
+            for hp, t, k, lang in blocks if t
+        ]
+        blocks = [(hp, t, k, lang) for hp, t, k, lang in blocks if t]
 
-        # Phase K — adaptive coalesce: merge consecutive small sections so
-        # heading-heavy docs don't explode into hundreds of tiny parents.
+        # Phase K — adaptive coalesce: merge consecutive small BODY sections
+        # so heading-heavy docs don't explode into hundreds of tiny parents.
+        # Coalesce refuses to merge across kind boundaries (code stays separate).
         blocks = _coalesce_small_blocks(
             blocks,
             min_parent_tokens=policy.parent_min_tokens,
             max_parent_tokens=policy.parent_max_tokens,
         )
 
-        for heading_path, section_text in blocks:
+        # Code lane: split CODE blocks out first and run them through the
+        # AST packer. Whatever remains is prose handled by the existing path.
+        code_parents, code_children, parent_idx, child_idx = _emit_code_parents(
+            [b for b in blocks if b[2] == ChunkKind.CODE],
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            tier_value=tier_value,
+            parent_idx=parent_idx,
+            child_idx=child_idx,
+            file_path=parse_filename,
+        )
+        parents.extend(code_parents)
+        all_children.extend(code_children)
+
+        for heading_path, section_text, block_kind, _block_lang in blocks:
+            if block_kind == ChunkKind.CODE:
+                continue  # already handled by _emit_code_parents above
             if not section_text.strip():
                 continue
             if _count_tokens(section_text) > policy.parent_max_tokens:

@@ -47,6 +47,86 @@ _BINARY_DOC_EXTS = {
     ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".epub", ".odt",
     ".ods", ".odp", ".rtf", ".msg", ".eml",
 }
+# Code lane Phase 1 — extension → tree-sitter language tag. Files matching
+# any of these extensions bypass the Docling sidecar entirely via the early-
+# intercept gate at the top of parse_document(). The chunker then routes
+# them through code_splitter.pack() which respects EMBEDDER_SAFE_MAX_TOKENS.
+# Detection is O(1) (single suffix lookup); doc_id is sha256 of raw text
+# downstream, so idempotency is preserved across runs.
+_CODE_EXT_TO_LANGUAGE: dict[str, str] = {
+    # ─── Mainstream programming languages ───────────────────────────────
+    ".py": "python",   ".pyi": "python",
+    ".rs": "rust",
+    ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript", ".jsx": "javascript",
+    ".ts": "typescript", ".tsx": "tsx",
+    ".go": "go",
+    ".lua": "lua",     ".luau": "luau",
+    ".cpp": "cpp",     ".cc": "cpp",       ".cxx": "cpp",      ".hpp": "cpp",
+    ".c": "c",         ".h": "c",
+    ".cu": "cuda",     ".cuh": "cuda",                          # CUDA kernels
+    ".java": "java",
+    ".rb": "ruby",
+    ".php": "php",
+    ".swift": "swift",
+    ".kt": "kotlin",   ".kts": "kotlin",
+    ".scala": "scala",
+    ".sh": "bash",     ".bash": "bash",    ".zsh": "bash",
+    ".ps1": "powershell",
+    ".sql": "sql",
+    ".r": "r",
+    ".cs": "csharp",
+    ".ex": "elixir",   ".exs": "elixir",
+    ".hs": "haskell",
+    ".ml": "ocaml",
+    ".cljs": "clojure",".clj": "clojure",  ".edn": "clojure",
+    ".dart": "dart",
+    ".zig": "zig",
+    ".nix": "nix",
+    ".m": "objc",      ".mm": "objc",                           # Objective-C / Objective-C++
+    # ─── Shaders ────────────────────────────────────────────────────────
+    ".glsl": "glsl",   ".frag": "glsl",    ".vert": "glsl",
+    ".hlsl": "hlsl",
+    # ─── Web frameworks ─────────────────────────────────────────────────
+    ".vue": "vue",
+    ".svelte": "svelte",
+    # ─── Markup + styling (preserve full structure, skip prose extract) ─
+    # .html here routes through the code lane instead of Docling's HTML
+    # prose extractor — desirable for source repos; rename to .txt if you
+    # need prose extraction from an HTML doc.
+    ".html": "html",   ".htm": "html",
+    ".css": "css",     ".scss": "css",
+    # ─── XML family ─────────────────────────────────────────────────────
+    # Apple property lists, Storyboards, Xibs, entitlements; Roblox place
+    # & model files (decomposed XML format from rbx-dom).
+    ".xml": "xml",
+    ".plist": "xml",   ".storyboard": "xml",
+    ".xib": "xml",     ".entitlements": "xml",
+    ".rbxmx": "xml",   ".rbxlx": "xml",
+    # ─── Data / config ──────────────────────────────────────────────────
+    # Parsed by the pack so we get atomic packing (never mid-record splits)
+    # and Ghost B skips them. symbols_defined will usually be empty —
+    # these are data, not callable code.
+    ".json": "json",   ".jsonl": "json",
+    ".ipynb": "json",  # Jupyter notebooks (cell-level extraction is Phase 2)
+    ".yaml": "yaml",   ".yml": "yaml",
+    ".toml": "toml",   # pyproject.toml, Cargo.toml, etc.
+    ".ini": "ini",     ".cfg": "ini",
+    # ─── IaC / build tooling ────────────────────────────────────────────
+    ".tf": "hcl",      ".tfvars": "hcl",   ".hcl": "hcl",
+    # ─── API schemas ────────────────────────────────────────────────────
+    ".proto": "proto",                                          # Protocol Buffers
+    ".graphql": "graphql", ".gql": "graphql",
+}
+
+# Filenames with no extension that should route through the code lane.
+# Looked up case-insensitively before the extension map fires.
+_CODE_FILENAME_TO_LANGUAGE: dict[str, str] = {
+    "dockerfile":     "dockerfile",
+    "containerfile":  "dockerfile",  # Podman / OCI alias
+    "makefile":       "make",
+    "gnumakefile":    "make",
+    "cmakelists.txt": "cmake",
+}
 _FAST_PDF_MIN_TOTAL_CHARS = 1200
 _FAST_PDF_MIN_AVG_CHARS_PER_PAGE = 80
 _FAST_PDF_MIN_NONEMPTY_PAGE_RATIO = 0.25
@@ -73,8 +153,10 @@ def _looks_like_html(filename: str, mime: str) -> bool:
 class Section:
     heading_path: list[str]
     text: str
-    element_type: str
+    element_type: str  # "section_heading" | "paragraph" | "code_block" | ...
     level: int | None = None
+    # Code lane: language tag (e.g. "python", "luau"); None for prose sections.
+    language: str | None = None
 
 
 @dataclass
@@ -91,6 +173,12 @@ class DoclingParseResult:
     source_format: str = ""
     augmented_with_synthetic_headers: bool = False
     injected_headers_audit: list[dict] = field(default_factory=list)
+    # Code lane: filled by the early-intercept gate for code files (.py/.rs/etc).
+    # None for prose / markdown / PDF / EPUB ingest.
+    language: str | None = None
+    # Original upload filename — needed by tier_chunker to stamp file_path
+    # into per-chunk metadata for the code lane.
+    filename: str | None = None
 
 
 def _looks_like_plain_text(filename: str, mime: str) -> bool:
@@ -106,12 +194,19 @@ def _looks_like_plain_text(filename: str, mime: str) -> bool:
     return mime_l == "application/octet-stream" and ext in (_PLAIN_TEXT_EXTS | _MARKDOWN_EXTS)
 
 
-def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
-    """Small local Markdown section walker.
+_FENCE_OPEN_RE = re.compile(r"^```([a-zA-Z0-9_+\-]*)\s*$")
+_FENCE_CLOSE_RE = re.compile(r"^```\s*$")
 
-    This is intentionally modest: headings define the hierarchy, and paragraph
-    text inherits the active heading path. It is enough for tier_chunker to keep
-    Markdown/Text ingestion independent from the Docling sidecar.
+
+def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
+    """Local Markdown section walker, code-fence-aware.
+
+    Headings define the hierarchy; paragraph text inherits the active heading
+    path. Triple-backtick fenced code blocks are emitted as separate
+    Section(element_type="code_block", language=<tag>) entries so the code lane
+    in tier_chunker can route them through code_splitter.pack() instead of the
+    prose sentence/token splitters. Tilde fences (~~~) and indented fences fall
+    through as prose — Phase 1 limitation, documented for later expansion.
     """
     sections: list[Section] = []
     heading_stack: list[str] = []
@@ -133,16 +228,46 @@ def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
             )
         paragraph = []
 
-    for line in markdown.splitlines():
+    lines = markdown.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Fence open? Consume until matching close (or EOF).
+        fence_open = _FENCE_OPEN_RE.match(line.strip())
+        if fence_open is not None:
+            flush_paragraph()
+            language = (fence_open.group(1) or "").lower()
+            fence_lines: list[str] = [line]
+            j = i + 1
+            while j < len(lines):
+                fence_lines.append(lines[j])
+                if _FENCE_CLOSE_RE.match(lines[j].strip()):
+                    j += 1
+                    break
+                j += 1
+            sections.append(
+                Section(
+                    heading_path=list(current_path),
+                    text="\n".join(fence_lines),
+                    element_type="code_block",
+                    language=language or None,
+                )
+            )
+            i = j
+            continue
+
         match = re.match(r"^(#{1,6})\s+(.+?)\s*#*\s*$", line.strip())
         if not match:
             paragraph.append(line)
+            i += 1
             continue
 
         flush_paragraph()
         level = len(match.group(1))
         title = match.group(2).strip()
         if not title:
+            i += 1
             continue
         if level == 1:
             h1_count += 1
@@ -161,6 +286,7 @@ def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
                 level=level,
             )
         )
+        i += 1
 
     flush_paragraph()
     return sections, h1_count, h2_count
@@ -201,6 +327,7 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
             h1_count=h1,
             h2_count=h2,
             source_format="local_markdown",
+            filename=filename,
         )
 
     if not _looks_like_plain_text(filename, mime):
@@ -224,6 +351,7 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
         source_format="local_text",
         augmented_with_synthetic_headers=augmented,
         injected_headers_audit=audit,
+        filename=filename,
     )
 
 
@@ -329,6 +457,7 @@ def _parse_pdf_fast_text(raw_bytes: bytes, filename: str, mime: str) -> DoclingP
         source_tier=source_tier,
         num_pages=num_pages,
         source_format="pypdf_fast_text",
+        filename=filename,
     )
 
 
@@ -375,6 +504,46 @@ async def parse_document(
     if do_ocr:
         logger.warning("Ignoring do_ocr=True for %s; OCR is disabled by policy", filename)
         do_ocr = False
+
+    # Code lane Phase 1 — early-intercept gate. Files matching a known code
+    # extension (or a known filename like "Dockerfile" / "Makefile" /
+    # "CMakeLists.txt") bypass the Docling sidecar entirely (no network hop,
+    # no torch burn) and emit a synthetic DoclingParseResult carrying a single
+    # code_block Section. tier_chunker routes this through code_splitter.pack().
+    code_basename = Path(filename or "").name.lower()
+    code_lang = (
+        _CODE_FILENAME_TO_LANGUAGE.get(code_basename)
+        or _CODE_EXT_TO_LANGUAGE.get(_extension(filename))
+    )
+    if code_lang:
+        try:
+            code_text = raw_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            code_text = raw_bytes.decode("utf-8", errors="replace")
+        return DoclingParseResult(
+            text=code_text,
+            markdown=code_text,
+            sections=[
+                Section(
+                    heading_path=[filename] if filename else [],
+                    text=code_text,
+                    element_type="code_block",
+                    level=1,
+                    language=code_lang,
+                )
+            ],
+            pages=None,
+            has_structure=False,
+            source_tier=SourceTier.tier_code,
+            h1_count=0,
+            h2_count=0,
+            num_pages=1,
+            source_format=f"code_{code_lang}",
+            augmented_with_synthetic_headers=False,
+            injected_headers_audit=[],
+            language=code_lang,
+            filename=filename,
+        )
 
     if _looks_like_pdf(filename, mime):
         fast_result = _parse_pdf_fast_text(raw_bytes, filename, mime)
@@ -447,4 +616,6 @@ async def parse_document(
         source_format=payload.get("source_format", "") or "",
         augmented_with_synthetic_headers=augmented,
         injected_headers_audit=audit,
+        language=None,
+        filename=filename,
     )

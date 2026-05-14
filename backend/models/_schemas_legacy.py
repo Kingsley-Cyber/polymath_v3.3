@@ -499,6 +499,7 @@ class SourceTier(str, Enum):
     tier_b_plus = "tier_b_plus"  # recoverable structure — chapter/section markers injected as MD headers
     tier_c = "tier_c"  # flat prose — no headings, token-budget split only
     ocr_ast = "ocr_ast"  # multi-page PDF — page/column/block layout
+    tier_code = "tier_code"  # source code file (.py/.rs/.lua/...) — early-intercept bypasses Docling sidecar
 
 
 class ModelProfileRef(BaseModel):
@@ -851,6 +852,10 @@ class SourceChunk(BaseModel):
     corpus_name: str | None = None  # populated during hydration from corpora collection
     doc_name: str | None = None  # basename of source_path, populated during hydration
     heading_path: list[str] | None = None  # populated from Qdrant payload / parent chunk
+    # Code lane (Phase 1) — language tag and AST-derived metadata (symbols_defined,
+    # symbols_called, imports, ast_signature, file_path). Empty/None for prose chunks.
+    language: str | None = None
+    metadata: dict = Field(default_factory=dict)
     # Phase 16.1 — graph expansion provenance: which Entity/predicate surfaced this
     # chunk, with the edge confidence. Only populated for Mode A / Mode B chunks.
     # Each entry: {"entity": str, "confidence": float, "predicate"?: str}

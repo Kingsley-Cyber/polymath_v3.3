@@ -38,6 +38,7 @@ class ChunkKind:
     APPENDIX = "appendix"
     FRONT_MATTER = "front_matter"
     BACK_MATTER = "back_matter"
+    CODE = "code"
 
 
 ALL_KINDS: tuple[str, ...] = (
@@ -48,16 +49,22 @@ ALL_KINDS: tuple[str, ...] = (
     ChunkKind.APPENDIX,
     ChunkKind.FRONT_MATTER,
     ChunkKind.BACK_MATTER,
+    ChunkKind.CODE,
 )
 
-# Kinds the default retrieval filter excludes. The retriever keeps `body`
-# AND any chunk where `chunk_kind` is missing entirely (legacy data).
-NOISY_KINDS: tuple[str, ...] = tuple(k for k in ALL_KINDS if k != ChunkKind.BODY)
+# Kinds the default retrieval filter excludes. CODE is first-class
+# retrievable content (programming-textbook listings, source files) and
+# is kept alongside BODY. The retriever also keeps any chunk where
+# `chunk_kind` is missing entirely (legacy data).
+_RETRIEVABLE: tuple[str, ...] = (ChunkKind.BODY, ChunkKind.CODE)
+NOISY_KINDS: tuple[str, ...] = tuple(k for k in ALL_KINDS if k not in _RETRIEVABLE)
 
-# Kinds for which Ghost B extraction is skipped at ingest. Identical to
-# NOISY_KINDS today — exposed as a separate name so the two policies can
-# diverge later (e.g. extract from appendix but not from biblio).
-GHOST_B_SKIP_KINDS: frozenset[str] = frozenset(NOISY_KINDS)
+# Kinds for which Ghost B extraction is skipped at ingest. CODE joins the
+# noisy kinds here even though it's retrievable — Ghost B's universal
+# schema hallucinates Method/Artifact entities on raw code fragments.
+# Deterministic AST extraction will replace Ghost B for code chunks in a
+# later phase.
+GHOST_B_SKIP_KINDS: frozenset[str] = frozenset(list(NOISY_KINDS) + [ChunkKind.CODE])
 
 
 # ─── Heading-text classification rules ──────────────────────────────────────

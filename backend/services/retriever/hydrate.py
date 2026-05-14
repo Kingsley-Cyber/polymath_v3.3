@@ -118,6 +118,16 @@ async def hydrate_chunks(
                 # (e.g. Mode A graph expansion produced empty-text chunks).
                 if not chunk.heading_path and pc.get("heading_path"):
                     chunk.heading_path = pc["heading_path"]
+                # Code lane (Phase 1) — propagate language + AST metadata
+                # from the parent Mongo record. Mode A / Mode B chunks
+                # arrive empty-shaped (no Qdrant payload) so this is the
+                # only spot they get language/metadata. Qdrant-sourced
+                # chunks already have these from the payload; we only fill
+                # when missing so payload values are preserved.
+                if not chunk.language and pc.get("language"):
+                    chunk.language = pc["language"]
+                if not chunk.metadata and pc.get("metadata"):
+                    chunk.metadata = pc["metadata"] or {}
 
             meta = doc_meta.get(chunk.doc_id, {})
             sp = meta.get("source_path", "")
