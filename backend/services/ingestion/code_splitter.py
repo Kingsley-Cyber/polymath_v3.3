@@ -33,6 +33,7 @@ graphs land in Phase 5 via SCIP indexers (sourcegraph/scip).
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import tiktoken
@@ -128,12 +129,125 @@ def _filter_by_span(items, start_byte: int, end_byte: int):
     return out
 
 
+# Phase 5 — Roblox API regex extractor. Pack v1.8's ProcessResult does
+# NOT expose the AST cursor (only chunks, symbols, imports, exports,
+# structure), so we operate on chunk text directly. Patterns target the
+# canonical Roblox surface: services, instance constructors, remote
+# event firings, child lookups, humanoid methods, generic Play/Stop/
+# Pause, require(), RunService event subscriptions. Each pattern is
+# anchored loosely to tolerate Luau's whitespace flexibility.
+#
+# Output goes into `metadata.roblox_apis` (new field) AND `symbols_called`
+# (closing the v1.8 ProcessResult gap deterministically for Luau, without
+# depending on graphify being enabled).
+
+_ROBLOX_PATTERN_GET_SERVICE = re.compile(
+    r'game\s*:\s*GetService\s*\(\s*[\'"]([A-Za-z0-9_]+)[\'"]?\s*\)'
+)
+_ROBLOX_PATTERN_INSTANCE_NEW = re.compile(
+    r'Instance\.new\s*\(\s*[\'"]([A-Za-z0-9_]+)[\'"]?\s*[,)]'
+)
+_ROBLOX_PATTERN_REMOTE_FIRE = re.compile(
+    r'([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(FireServer|FireClient|FireAllClients'
+    r'|InvokeServer|InvokeClient)\s*\('
+)
+_ROBLOX_PATTERN_WAIT_FOR_CHILD = re.compile(
+    r':WaitForChild\s*\(\s*[\'"]([A-Za-z0-9_]+)[\'"]?\s*\)'
+)
+_ROBLOX_PATTERN_HUMANOID_METHOD = re.compile(
+    r'(?:[Hh]umanoid)\s*:\s*(MoveTo|Jump|ChangeState|LoadAnimation|TakeDamage)\s*\('
+)
+_ROBLOX_PATTERN_TWEEN_METHOD = re.compile(
+    r'([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(Play|Stop|Pause|Cancel|Destroy)\s*\('
+)
+_ROBLOX_PATTERN_REQUIRE = re.compile(r'require\s*\(\s*([^\)]{1,200})\s*\)')
+_ROBLOX_PATTERN_RUNSERVICE = re.compile(
+    r'RunService\s*\.\s*(Heartbeat|RenderStepped|Stepped|PreSimulation'
+    r'|PostSimulation)\s*:\s*Connect'
+)
+
+
+def _extract_roblox_apis(body: str) -> dict[str, list[str]]:
+    """Phase 5 regex extractor. Scans Luau body text for canonical Roblox
+    API patterns and returns:
+
+      roblox_apis      — high-confidence engine terms (TweenService,
+                         Humanoid, Part, RemoteEvent.FireServer, etc.)
+                         These get scoped Roblox entity types via
+                         `roblox_ontology.resolve_code_entity_type`.
+      called_methods   — short method names (Play, Connect, FireServer,
+                         Destroy, etc.) without a fully-qualified
+                         receiver. Useful for BM25 lexical hits when
+                         the user queries with a method name alone.
+
+    Document order is preserved: each pattern's matches are collected
+    with their byte offset, and emissions are interleaved by offset so
+    `Part` (Instance.new at byte 0) precedes `TweenService` (GetService
+    at byte 30) even though pattern iteration order differs. Both lists
+    are deduped case-sensitively (first occurrence wins) to avoid
+    `TweenService`/`tweenservice` collisions — the worker side does
+    case-insensitive dedup when merging into `symbols_called`.
+    """
+    # (start_byte, kind, name): kind == "api" → roblox_apis,
+    #                          kind == "method" → called_methods
+    events: list[tuple[int, str, str]] = []
+
+    for m in _ROBLOX_PATTERN_GET_SERVICE.finditer(body):
+        events.append((m.start(), "api", m.group(1)))      # e.g. TweenService
+    for m in _ROBLOX_PATTERN_INSTANCE_NEW.finditer(body):
+        events.append((m.start(), "api", m.group(1)))      # e.g. Part
+        events.append((m.start(), "api", "Instance.new"))
+    for m in _ROBLOX_PATTERN_REMOTE_FIRE.finditer(body):
+        events.append((m.start(), "api", f"{m.group(1)}.{m.group(2)}"))
+        events.append((m.start(), "method", m.group(2)))
+    for m in _ROBLOX_PATTERN_WAIT_FOR_CHILD.finditer(body):
+        events.append((m.start(), "api", m.group(1)))      # the child name as literal
+        events.append((m.start(), "method", "WaitForChild"))
+    for m in _ROBLOX_PATTERN_HUMANOID_METHOD.finditer(body):
+        events.append((m.start(), "api", f"Humanoid.{m.group(1)}"))
+        events.append((m.start(), "api", "Humanoid"))
+        events.append((m.start(), "method", m.group(1)))
+    for m in _ROBLOX_PATTERN_TWEEN_METHOD.finditer(body):
+        events.append((m.start(), "method", m.group(2)))   # bare method name
+    for m in _ROBLOX_PATTERN_REQUIRE.finditer(body):
+        target = m.group(1).strip()
+        if target:
+            target = target.strip('\'"')
+            events.append((m.start(), "api", target[:120]))
+        events.append((m.start(), "method", "require"))
+    for m in _ROBLOX_PATTERN_RUNSERVICE.finditer(body):
+        events.append((m.start(), "api", f"RunService.{m.group(1)}"))
+        events.append((m.start(), "method", "Connect"))
+
+    events.sort(key=lambda ev: ev[0])
+
+    apis: list[str] = []
+    methods: list[str] = []
+    seen_apis: set[str] = set()
+    seen_methods: set[str] = set()
+    for _, kind, name in events:
+        name = name.strip()
+        if not name:
+            continue
+        if kind == "api":
+            if name not in seen_apis:
+                apis.append(name)
+                seen_apis.add(name)
+        else:
+            if name not in seen_methods:
+                methods.append(name)
+                seen_methods.add(name)
+
+    return {"roblox_apis": apis, "called_methods": methods}
+
+
 def _extract_metadata_for_chunk(
     chunk_content: str,
     chunk_start: int,
     chunk_end: int,
     all_symbols,
     all_imports,
+    language: str = "",
 ) -> dict[str, Any]:
     syms = _filter_by_span(all_symbols, chunk_start, chunk_end)
     imps = _filter_by_span(all_imports, chunk_start, chunk_end)
@@ -156,12 +270,26 @@ def _extract_metadata_for_chunk(
         if s and not s.startswith("```"):
             ast_signature = s[:200]
             break
+
+    # Phase 5 Gate 1 — Roblox API regex extraction. Only fires on Luau/Lua
+    # chunks. Other languages get the legacy empty-`symbols_called` shape;
+    # Pt 11.1's graphify backfill remains the cross-language fallback.
+    lang_lower = (language or "").lower()
+    roblox = _extract_roblox_apis(chunk_content) if lang_lower in ("lua", "luau") else {}
+    symbols_called = list(dict.fromkeys(
+        list(roblox.get("roblox_apis", [])) + list(roblox.get("called_methods", []))
+    ))[:60]
+
     return {
         # cap list sizes to keep Qdrant payloads compact
         "symbols_defined": defined[:40],
-        "symbols_called": [],  # not surfaced by v1.8 ProcessResult; Phase 5 (SCIP) fills this
+        "symbols_called": symbols_called,
         "imports": imports_src[:30],
         "ast_signature": ast_signature,
+        # Phase 5 — new field, populated only for Lua/Luau chunks.
+        # Downstream `roblox_ontology.resolve_code_entity_type` uses this
+        # as one of its scope gates (alongside chunk.language).
+        "roblox_apis": list(roblox.get("roblox_apis", []))[:30],
     }
 
 
@@ -201,6 +329,7 @@ def pack(
                 meta = _extract_metadata_for_chunk(
                     body, 0, len(body.encode("utf-8")),
                     list(result.symbols), list(result.imports),
+                    language=language,
                 )
             except Exception as exc:
                 logger.warning(
@@ -242,7 +371,7 @@ def pack(
             continue
         sb = getattr(ch, "start_byte", 0)
         eb = getattr(ch, "end_byte", sb + len(content.encode("utf-8")))
-        meta = _extract_metadata_for_chunk(content, sb, eb, all_symbols, all_imports)
+        meta = _extract_metadata_for_chunk(content, sb, eb, all_symbols, all_imports, language=language)
         wrapped = _wrap(content.rstrip(), open_fence, close_fence) if open_fence else content
         out.append((wrapped, meta))
 

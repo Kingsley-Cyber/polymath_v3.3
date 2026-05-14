@@ -105,6 +105,17 @@ _RELATION_ALIAS_TO_APPROVED: dict[str, str] = {
     "contradicts": "contradicts",
     "supersedes": "overrides",
     "overrides": "overrides",
+    # Phase 5 — Roblox/Luau event vocabulary. Added globally because the
+    # alias detector only activates when the alias text appears in the
+    # sampled corpus text AND the target predicate is in the allowed
+    # schema — so a book that says "the wire connects to the terminal"
+    # picks up `connects→uses` (correct hint) without polluting Roblox
+    # corpora in the other direction.
+    "fires": "uses",
+    "connects": "uses",
+    "binds": "depends_on",
+    "loads": "uses",
+    "tweens": "uses",
 }
 
 _DOMAIN_RULES: list[dict[str, Any]] = [
@@ -164,6 +175,48 @@ _DOMAIN_RULES: list[dict[str, Any]] = [
         "relations": ["references", "created_by", "derived_from", "part_of", "uses", "represents", "supports"],
         "object_kinds": ["Book", "Report", "Paper", "Whitepaper"],
         "families": ["research_literature"],
+    },
+    {
+        # Phase 5 Gate 2 — Roblox/Luau prose corpora (e.g. YouTube transcripts,
+        # creator-docs, devforum posts). Biases Ghost B's universal-schema
+        # extraction toward Method/Product/Artifact so engine terms like
+        # `Humanoid`, `TweenService`, `ParticleEmitter` extract as proper
+        # entities — not generic Concept — and share identity with the
+        # code-side entities produced by Phase 4 + roblox_ontology.
+        "domain": "roblox",
+        "triggers": [
+            "roblox", "luau",
+            "game:getservice", "instance.new",
+            "remoteevent", "remotefunction", "bindableevent",
+            "humanoid", "tweenservice", "runservice",
+            "modulescript", "localscript", "replicatedstorage",
+            "serverstorage", "serverscriptservice",
+            "particleemitter", "animator", "animationtrack",
+            "cframe", "vector3", "udim2", "color3",
+            "datastore", "userinputservice", "httpservice",
+            "datamodel", "workspace",
+        ],
+        "entities": ["Method", "Product", "Artifact", "Concept", "Document"],
+        "relations": [
+            "uses", "implements", "depends_on", "produces",
+            "defines", "example_of", "during",
+        ],
+        "relation_aliases": {
+            "fires": "uses",
+            "connects": "uses",
+            "binds": "depends_on",
+            "loads": "uses",
+            "requires": "depends_on",
+            "exposes": "implements",
+            "instances": "produces",
+            "creates": "produces",
+            "tweens": "uses",
+        },
+        "object_kinds": [
+            "Service", "Class", "Event", "Signal",
+            "Animation", "ParticleEffect", "DataModel",
+        ],
+        "families": ["roblox", "game_engine", "game_design"],
     },
 ]
 

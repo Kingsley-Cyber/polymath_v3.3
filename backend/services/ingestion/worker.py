@@ -1295,6 +1295,7 @@ def _synthesize_code_extraction_results(graph_children) -> list:
     passed in or none carried symbols/imports.
     """
     from services.ghost_b import EntityItem, ExtractionResult
+    from services.graph.roblox_ontology import resolve_code_entity_type
     from services.ingestion.section_classifier import ChunkKind
 
     out: list[ExtractionResult] = []
@@ -1304,6 +1305,16 @@ def _synthesize_code_extraction_results(graph_children) -> list:
         meta = getattr(c, "metadata", None) or {}
         entities: list[EntityItem] = []
         seen: set[str] = set()
+        # Phase 5 Gate 1 — `resolve_code_entity_type(name, c)` returns a
+        # scoped Roblox type (RobloxService / RobloxNetworkPrimitive /
+        # RobloxClass / LuauDataType) ONLY when the chunk is Luau/Lua
+        # or its metadata already carries `roblox_apis`. Returns None for
+        # everything else and we fall through to the default Method type.
+        # This avoids polluting non-Roblox corpora with Roblox-specific
+        # entity tags (a Python `Spring` variable stays Method, a Luau
+        # `Spring` stays Method too — `Spring` is intentionally NOT in
+        # _ROBLOX_ENTITY_TYPES because it collides with Fusion's Spring
+        # physics module name).
         for name in meta.get("symbols_defined", []) or []:
             sym = str(name).strip()
             if not sym:
@@ -1312,9 +1323,27 @@ def _synthesize_code_extraction_results(graph_children) -> list:
             if key in seen:
                 continue
             seen.add(key)
+            entity_type = resolve_code_entity_type(sym, c) or "Method"
             entities.append(EntityItem(
                 canonical_name=sym, surface_form=sym,
-                entity_type="Method", confidence=1.0,
+                entity_type=entity_type, confidence=1.0,
+            ))
+        # symbols_called now includes Roblox APIs from Step 1's regex
+        # extractor + graphify backfill (Pt 11.1). The resolver turns
+        # `TweenService` into `RobloxService`, etc.; unknown names default
+        # to Method so call-site BM25 indexing still works.
+        for sym in meta.get("symbols_called", []) or []:
+            sym = str(sym).strip()
+            if not sym:
+                continue
+            key = sym.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            entity_type = resolve_code_entity_type(sym, c) or "Method"
+            entities.append(EntityItem(
+                canonical_name=sym, surface_form=sym,
+                entity_type=entity_type, confidence=1.0,
             ))
         for imp in meta.get("imports", []) or []:
             src = str(imp).strip()
@@ -1324,9 +1353,10 @@ def _synthesize_code_extraction_results(graph_children) -> list:
             if key in seen:
                 continue
             seen.add(key)
+            entity_type = resolve_code_entity_type(src, c) or "Artifact"
             entities.append(EntityItem(
                 canonical_name=src, surface_form=src,
-                entity_type="Artifact", confidence=1.0,
+                entity_type=entity_type, confidence=1.0,
             ))
         if not entities:
             continue

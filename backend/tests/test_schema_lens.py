@@ -102,3 +102,101 @@ def test_schema_lens_renders_as_guidance_not_schema():
     assert "prefer these approved predicates" in prompt
     assert "Never output the lens fields themselves" in prompt
     assert "Never invent a new predicate" in prompt
+
+
+# ─── Phase 5 Gate 2 — roblox domain rule tests ──────────────────────────────
+
+
+def test_roblox_domain_triggers_on_luau_code_corpus():
+    """A Luau code corpus's sampled text contains game:GetService and
+    related triggers — the deterministic builder must surface a roblox
+    domain in corpus_domains."""
+    lens = build_deterministic_schema_lens(
+        corpus_id="c" * 36,
+        filename="combat.luau",
+        parents=[],
+        children=[
+            _child(
+                "local TweenService = game:GetService('TweenService')\n"
+                "local Players = game:GetService('Players')\n"
+                "function Combat.PunchAttack(player)\n"
+                "    local part = Instance.new('Part')\n"
+                "    humanoid:MoveTo(player.Character.HumanoidRootPart.Position)\n"
+                "end"
+            )
+        ],
+        entity_schema=UNIVERSAL_ENTITY_SCHEMA,
+        relation_schema=UNIVERSAL_RELATION_SCHEMA,
+    )
+    assert "roblox" in lens.corpus_domains
+
+
+def test_roblox_lens_method_entity_preference():
+    """When the roblox domain fires, the preferred entity types should
+    bias toward Method/Product/Artifact — NOT include Person or
+    Organization (those make no sense in Roblox API extraction)."""
+    lens = build_deterministic_schema_lens(
+        corpus_id="c" * 36,
+        filename="combat.luau",
+        parents=[],
+        children=[
+            _child(
+                "game:GetService('TweenService'):Create(part, info, goal):Play()\n"
+                "RemoteEvent:FireServer(target)\n"
+                "Instance.new('ParticleEmitter')"
+            )
+        ],
+        entity_schema=UNIVERSAL_ENTITY_SCHEMA,
+        relation_schema=UNIVERSAL_RELATION_SCHEMA,
+    )
+    assert "Method" in lens.preferred_entity_types
+    # Roblox lens biases toward technical entity types only.
+    # Person/Organization shouldn't appear (those need to come from a
+    # research_literature corpus, not a code corpus).
+    assert "Person" not in lens.preferred_entity_types
+    assert "Organization" not in lens.preferred_entity_types
+
+
+def test_roblox_relation_aliases_present():
+    """Roblox lens supplies aliases that map domain-local phrases
+    (`fires`, `connects`, `binds`) to approved predicates."""
+    lens = build_deterministic_schema_lens(
+        corpus_id="c" * 36,
+        filename="net.luau",
+        parents=[],
+        children=[
+            _child(
+                "RemoteEvent fires the server signal. The client connects "
+                "to a BindableEvent. The script binds to ContextActionService. "
+                "TweenService runs the animation. game:GetService handles modules."
+            )
+        ],
+        entity_schema=UNIVERSAL_ENTITY_SCHEMA,
+        relation_schema=UNIVERSAL_RELATION_SCHEMA,
+    )
+    # Aliases only appear when the alias verb is in the sampled text AND
+    # the target predicate is in the allowed schema.
+    assert lens.relation_aliases.get("fires") == "uses"
+    assert lens.relation_aliases.get("connects") == "uses"
+    assert lens.relation_aliases.get("binds") == "depends_on"
+
+
+def test_non_roblox_corpus_does_not_get_roblox_domain():
+    """A pure prose corpus (e.g., a novel chapter, a recipe blog)
+    must NOT match the Roblox trigger set. No pollution into
+    unrelated corpora."""
+    lens = build_deterministic_schema_lens(
+        corpus_id="c" * 36,
+        filename="spring_garden_recipes.md",
+        parents=[],
+        children=[
+            _child(
+                "Spring weather brings fresh asparagus to the table. "
+                "The chef binds the herbs with twine before roasting. "
+                "Serve with a glass of crisp white wine."
+            )
+        ],
+        entity_schema=UNIVERSAL_ENTITY_SCHEMA,
+        relation_schema=UNIVERSAL_RELATION_SCHEMA,
+    )
+    assert "roblox" not in lens.corpus_domains
