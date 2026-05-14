@@ -412,10 +412,17 @@ export interface ContextGraphPayload {
   meta: Record<string, any>;
 }
 
+export type GraphSynthesisMode = "research" | "ideation";
+
 export interface GraphDiscoverRequest {
   corpus_id: string;
   query: string;
   mode?: DiscoverMode;
+  // Phase 3 — synthesis-mode selector. "research" (default) gives the
+  // concrete-claim research synthesis. "ideation" gives the build-advisor
+  // output with [BUILD IDEA] blocks. Retrieval + packet are identical;
+  // only the system prompt differs.
+  synthesis_mode?: GraphSynthesisMode;
   session_id?: string;
   // Same model reference chat sends in overrides.model. May be a raw
   // LiteLLM id, pool:<id>, or profile:<id>.

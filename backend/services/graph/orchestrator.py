@@ -2317,55 +2317,192 @@ def _llm_context_trace_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ─── Phase B (concrete-claim rewrite) — predicate sanitizer ──────────────────
+# Neo4j label leak protection. The synthesis prompt context used to contain
+# raw labels like RELATES_TO / MENTIONS / PART_OF, which the LLM then
+# parroted into the output ("Humanoid RELATES_TO Animation"). The sanitizer
+# maps internal labels to natural-language phrases BEFORE they reach the
+# prompt, so the LLM only ever sees human-readable predicates.
+_PREDICATE_HUMAN_MAP: dict[str, str] = {
+    "RELATES_TO":     "co-occurs with",
+    "MENTIONS":       "appears alongside",
+    "PART_OF":        "is part of",
+    "MEMBER_OF":      "is a member of",
+    "USES":           "uses",
+    "DEPENDS_ON":     "depends on",
+    "IMPLEMENTS":     "implements",
+    "PRODUCES":       "produces",
+    "CALLS":          "calls",
+    "DERIVED_FROM":   "is derived from",
+    "REFERENCES":     "references",
+    "DEFINES":        "defines",
+    "EXAMPLE_OF":     "is an example of",
+    "DURING":         "occurs during",
+    "OWNED_BY":       "is owned by",
+    "OWNS":           "owns",
+    "AFFILIATED_WITH": "is affiliated with",
+    "LOCATED_IN":     "is located in",
+    "CREATED_BY":     "is created by",
+    "WORKS_FOR":      "works for",
+    "SYNONYM_OF":     "is a synonym of",
+    "INSTANCE_OF":    "is an instance of",
+    "OVERLAPS":       "overlaps with",
+    "STORES":         "stores",
+    "RUNS_ON":        "runs on",
+    "TRAINED_ON":     "was trained on",
+    "DETECTS":        "detects",
+    "CLASSIFIES":     "classifies",
+    "SUPPORTS":       "supports",
+}
+
+
+def _humanize_predicate(label: str | None) -> str:
+    """Map an internal Neo4j relation label (or canonical predicate id)
+    to a natural-language phrase suitable for inclusion in the synthesis
+    prompt. Falls through to a snake→space conversion for unknown labels."""
+    if not label:
+        return "is connected to"
+    key = str(label).strip().upper()
+    if key in _PREDICATE_HUMAN_MAP:
+        return _PREDICATE_HUMAN_MAP[key]
+    # Try the lowercase canonical form (e.g. "part_of" from UNIVERSAL_RELATION_SCHEMA)
+    lc = str(label).strip().lower()
+    if lc.upper() in _PREDICATE_HUMAN_MAP:
+        return _PREDICATE_HUMAN_MAP[lc.upper()]
+    # Unknown predicate — soften it: "RELATES_TO_FOO" → "relates to foo"
+    return lc.replace("_", " ").strip() or "is connected to"
+
+
 _SYNTHESIS_SYSTEM_PROMPT = (
-    "You are Polymath's synthesizer — a nuance-obsessed researcher who treats "
-    "the supplied packet as a brain dump from your own corpus. Your job is to "
-    "transform stored chunks, summaries, entities, relations, and source "
-    "metadata into a single woven analysis that reads like a sharp researcher "
-    "thinking out loud — and that an ADHD reader can skim, scan, or read "
-    "linearly without getting lost.\n\n"
-    "Output rules:\n"
-    "- Write Markdown prose only. Start with a one-line `# headline` (<= 140 "
-    "chars).\n"
-    "- Immediately under the headline, on its own line, write a **theme line** "
-    "in italics: `*Theme: <2-4 short concept tags · separated · by · middots>*`. "
-    "This is a kicker / orientation line — it tells the ADHD reader at a "
-    "glance what topics the synthesis covers before they commit to reading. "
-    "Pull the tags from the concept groupings, schema-lens facets, or anchor "
-    "concepts in the user message. Keep each tag ≤ 28 chars.\n"
-    "- The next paragraph is a **TL;DR** in one sentence, wrapped in `**bold**`, "
-    "that captures the load-bearing claim. The reader should be able to stop "
-    "here and walk away with the key insight.\n"
-    "- Then write 3-5 short, focused paragraphs. Each paragraph is one idea, "
-    "≤ 4 sentences, and starts with a strong topic sentence so a skimmer can "
-    "read just the first sentence of each paragraph and still follow the arc. "
-    "When two paragraphs cover genuinely distinct movements (e.g. a pattern "
-    "vs a counter-pattern), you may add a short `## Subhead` between them — "
-    "use this sparingly, only when it actually helps orientation.\n"
-    "- Within paragraphs, **bold key phrases** (named patterns, specific "
-    "tensions, concrete claims) — 1–3 bolds per paragraph. This gives the "
-    "ADHD reader anchor points to scan to. Do not overuse bold; it stops "
-    "working when everything is bold.\n"
-    "- Optional `> blockquote` for one strong pull-quote from a source, or a "
-    "tight bulleted list (3 items max) for genuinely parallel items. Use "
-    "sparingly. No JSON. No section labels like \"Themes:\" or \"Bridges:\". "
-    "No card schema.\n"
-    "- Cite evidence inline as `[1]`, `[2]`, ... using the numbered evidence "
-    "list from the user message. Each citation must point to a real source id "
-    "you were given. Do not invent citations.\n"
-    "- Weave the analysis: surface bridges between sources, contradictions, "
-    "hidden concepts, and structural gaps inside the prose itself. Let one "
-    "paragraph link to the next. Do not produce a list of disconnected "
-    "observations.\n"
-    "- Distinguish observed evidence from graph structure from hypothesis "
-    "(e.g. \"the corpus shows...\", \"the graph suggests...\", \"a testable "
-    "read is...\"). Gaps are hypotheses, not proven missing edges.\n"
-    "- If evidence is thin, write fewer paragraphs and say plainly what is "
-    "missing. Do not pad. Do not invent entities, edges, files, or counts.\n"
-    "- Avoid metric narration (no raw percentages, edge counts, density, "
-    "modularity). Avoid \"trend/trending\" unless temporal=true; prefer "
-    "\"emerging signal\" or \"recurrence\".\n"
-    "- Stay under ~700 words. Tight, layered, every sentence earns its place."
+    "You are Polymath's build analyst. The user wants concrete, specific "
+    "insights about their corpus — not vague abstractions or schema "
+    "narration. Your job is to state what things ARE, what they DO, and "
+    "how they connect, using the exact names, APIs, file paths, and "
+    "patterns from the evidence packet.\n\n"
+    "OUTPUT FORMAT:\n"
+    "- Markdown prose only. Start with `# headline` (≤ 140 chars).\n"
+    "- Second line: italic theme `*Theme: tag · tag · tag*` — 2-4 short "
+    "concept tags pulled from groupings or anchor concepts.\n"
+    "- Third paragraph: one **bolded TL;DR sentence** carrying the "
+    "load-bearing claim. The reader should be able to stop here and "
+    "walk away with the key insight.\n"
+    "- Then 3-5 short paragraphs, one idea each, strong topic sentence "
+    "first. Use `## Subhead` only when two paragraphs cover genuinely "
+    "distinct movements.\n"
+    "- Bold key phrases (named patterns, specific APIs, concrete tensions) "
+    "— 1–3 per paragraph. Don't over-bold.\n"
+    "- Inline `[1]`, `[2]` citations point to the numbered evidence list. "
+    "Never invent citations.\n"
+    "- Stay under ~700 words.\n\n"
+    "CONCRETE-CLAIM RULES (this is what separates good synthesis from "
+    "schema narration):\n"
+    "- NEVER output the strings `RELATES_TO`, `MENTIONS`, `PART_OF`, or "
+    "any other ALL_CAPS_UNDERSCORED relation label. Those are internal "
+    "Neo4j labels. The prompt below uses natural-language predicates; "
+    "stay in that register.\n"
+    "- NEVER write empty-shell sentences like 'the graph suggests that X "
+    "is connected to Y', 'a relationship exists between A and B', "
+    "'there is a bridge between source 1 and source 2'. These say "
+    "nothing. Instead, state the ACTUAL MECHANISM: 'X calls Y.MoveTo() "
+    "in [3] to drive locomotion', 'the design doc proposes A [1] and "
+    "the code implements it via B [2]'.\n"
+    "- When citing evidence [n], explain the MECHANISM, not the metadata. "
+    "Bad: 'The code references Humanoid [2].' "
+    "Good: 'The code acquires the Humanoid via WaitForChild() and calls "
+    "MoveTo() to drive locomotion [2].'\n"
+    "- Bold ONLY exact, greppable names — API methods, class names, "
+    "file paths, entity names that appear verbatim in the evidence. "
+    "The user must be able to grep their codebase for every bold term. "
+    "If you cannot point to a specific symbol or file, do not bold "
+    "the phrase.\n"
+    "- If you mention a gap, state it as a SPECIFIC missing "
+    "implementation: 'No file calls TweenService:Create() on a "
+    "Humanoid property — joint animation is done via manual CFrame "
+    "instead of declarative tweening.' Not: 'A gap exists between "
+    "TweenService and Humanoid.'\n"
+    "- Every paragraph must contain at least one specific API name, "
+    "file name, entity name, or concrete mechanism. If you cannot be "
+    "specific in a paragraph, drop the paragraph.\n"
+    "- Distinguish observed evidence from graph-derived support from "
+    "hypothesis. Hedges are allowed when warranted (e.g. \"the graph "
+    "suggests…\" is fine WHEN the claim is graph-structural rather "
+    "than text-evidence), but don't use hedge language as a substitute "
+    "for stating what the connection actually carries.\n"
+    "- Sparse packet: write fewer paragraphs and say plainly what is "
+    "missing. Do not pad. Do not invent entities, edges, files, APIs, "
+    "method names, or counts not in the packet.\n"
+    "- Avoid metric narration (no raw percentages, edge counts, "
+    "modularity). Avoid 'trend/trending' unless temporal=true."
+)
+
+
+# ─── Phase 3 — Ideation system prompt (build-advisor mode) ──────────────────
+# Selected when discover() is called with synthesis_mode="ideation". Pairs
+# with the same evidence packet but instructs the LLM to find buildable
+# combinations rather than report what's true. The hard constraints
+# (grep-able names, no API invention) are preserved from the research prompt
+# so ideation doesn't degrade into hallucinated APIs.
+_IDEATION_SYSTEM_PROMPT = (
+    "You are Polymath's build advisor. The user wants to turn their corpus "
+    "into a buildable game, app, system, or product. Your job is to surface "
+    "concrete IDEAS by combining patterns the corpus contains but never "
+    "explicitly connects.\n\n"
+    "OUTPUT FORMAT — one [BUILD IDEA] block (multiple blocks if multiple "
+    "strong ideas exist, ranked by feasibility):\n\n"
+    "# [BUILD IDEA] <catchy 3-6 word name>\n"
+    "*Theme: tag · tag · tag*\n\n"
+    "**The Hook:** one sentence — what it IS, plain enough for a "
+    "screenshot caption.\n\n"
+    "**The Mechanic:** 2-3 paragraphs explaining how it works "
+    "technically. Bold the exact API/method names that appear in the "
+    "evidence. Cite `[n]` for every claim grounded in evidence.\n\n"
+    "**Corpus Evidence:** bullet list. Each bullet cites a specific "
+    "file/source and what it proves about feasibility. "
+    "Example: '- `Humanoid:MoveTo()` is the canonical locomotion "
+    "primitive (4 files: spider.luau, npc.luau, …) [2][4]'\n\n"
+    "**Build Path:** numbered steps. Each step names the file or "
+    "module that gets touched and the API that gets called. "
+    "Example: '1. Wrap `TweenService:Create()` around `Motor6D.C0` "
+    "in a new `JointTweenService` module.'\n\n"
+    "**Feasibility:** HIGH / MEDIUM / LOW — and one sentence on WHY.\n\n"
+    "**Risk / Gap:** honest assessment. What might fail, what the "
+    "corpus does NOT contain, what you would have to invent.\n\n"
+    "CREATIVE RULES — this is what separates ideation from research:\n"
+    "- You MAY connect two evidence items that the corpus never "
+    "connects. Label these connections clearly as [SYNTHESIS] in the "
+    "Mechanic paragraph and explain the bridge. The user wants "
+    "buildable ideas, not a literature review.\n"
+    "- Reframe gaps as opportunities. 'No file does X' becomes 'You "
+    "could be the first to implement X because Y and Z are already "
+    "present and would compose into X.'\n"
+    "- Predict outcomes. If pattern A and pattern B exist independently "
+    "in the corpus, state what their combination would produce. Make "
+    "the prediction CONCRETE: name the API surface and the user-facing "
+    "result.\n\n"
+    "HARD CONSTRAINTS — these match the research mode and prevent "
+    "ideation from degrading into hallucination:\n"
+    "- Every **bold** API name, method name, class name, or file name "
+    "MUST appear verbatim in the evidence packet below. The user must "
+    "be able to grep their codebase for every bold term. If you cannot "
+    "point to a specific symbol in the evidence, do not bold the "
+    "phrase.\n"
+    "- NEVER invent APIs, method signatures, file names, or "
+    "class names that are not in the evidence. If you need a new API "
+    "to make the idea work, name it as a [PROPOSED API] in the Build "
+    "Path and say what it would wrap.\n"
+    "- NEVER output the strings `RELATES_TO`, `MENTIONS`, `PART_OF`, or "
+    "any other ALL_CAPS_UNDERSCORED Neo4j label. The prompt below "
+    "humanizes predicates; stay in that register.\n"
+    "- NEVER write empty-shell sentences like 'these are connected', "
+    "'a relationship exists', 'the graph suggests a bridge'. State "
+    "the MECHANISM: 'X calls Y in [2] which produces Z'.\n"
+    "- If the packet is too sparse to support an idea, say so plainly "
+    "and propose ONE smaller idea grounded in what IS present. Do not "
+    "pad.\n"
+    "- Cap each [BUILD IDEA] block at ~1500 words. Multiple ideas: "
+    "rank by feasibility, separate with `---`.\n"
+    "- Distinguish observed evidence [n] from speculative combinations "
+    "[SYNTHESIS]. Both are allowed; never blend them silently."
 )
 
 
@@ -2458,28 +2595,38 @@ def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
     if edges:
         lines.append("")
         lines.append(
-            "Graph edges (structural, with extracted rationale where stored). "
-            "Rationale is the chunk text the extractor used to assert the edge — "
-            "treat it as graph-derived support, not direct observed evidence:"
+            "Relationships found across the corpus (subject — predicate — "
+            "object, with the supporting evidence quoted below each line). "
+            "Treat each relationship as a CONCRETE CONNECTION you can name "
+            "in prose. Predicates are natural-language phrases — use them "
+            "verbatim or paraphrase, but never output the underscored "
+            "internal label form."
         )
         for edge in edges[:10]:
-            family = edge.get("family") or edge.get("role") or ""
-            conf = edge.get("conf")
-            head_bits = []
-            if family:
-                head_bits.append(family)
-            if isinstance(conf, (int, float)) and conf:
-                head_bits.append(f"confidence {conf:.2f}")
-            head = f" ({' · '.join(head_bits)})" if head_bits else ""
-            line = (
-                f"- {edge.get('s') or '?'} -[{edge.get('p') or '?'}]-> "
-                f"{edge.get('t') or '?'}{head}"
-            )
+            subject = edge.get("s") or "?"
+            object_ = edge.get("t") or "?"
+            predicate = _humanize_predicate(edge.get("p"))
+            line = f"- **{subject}** {predicate} **{object_}**"
+
+            # Code metadata enrichment (Phase B3) — if the source chunk has
+            # file_path / symbols_called metadata threaded onto the edge, surface
+            # it inline so the LLM can cite a specific file + API in prose.
+            code_meta = edge.get("code_metadata") or {}
+            file_path = (code_meta.get("file_path") or "").strip()
+            symbols = code_meta.get("symbols_called") or []
+            mech_bits: list[str] = []
+            if file_path:
+                mech_bits.append(file_path)
+            if symbols:
+                mech_bits.append("calls " + ", ".join(symbols[:4]))
+            if mech_bits:
+                line += f"  *[{' — '.join(mech_bits)}]*"
+
             rationale = (edge.get("rationale") or "").strip().replace("\n", " ")
             if rationale:
                 if len(rationale) > 200:
                     rationale = rationale[:197] + "..."
-                line += f"\n    rationale: \"{rationale}\""
+                line += f"\n    evidence: \"{rationale}\""
             lines.append(line)
 
     entity_facets = compact.get("entity_facets") or []
@@ -2584,13 +2731,30 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
     ]
     raw_edges = [
         {
-            "s": _text(edge.get("source_name") or edge.get("source") or "", 45),
-            "p": _text(edge.get("predicate") or "", 35),
-            "t": _text(edge.get("target_name") or edge.get("target") or "", 45),
+            # Accept either production-shape (source_name/target_name) or
+            # synthesized-test-shape (s/t) so the renderer is testable in
+            # isolation. Production paths always populate source_name+target_name.
+            "s": _text(
+                edge.get("source_name") or edge.get("source") or edge.get("s") or "",
+                45,
+            ),
+            "p": _text(edge.get("predicate") or edge.get("p") or "", 35),
+            "t": _text(
+                edge.get("target_name") or edge.get("target") or edge.get("t") or "",
+                45,
+            ),
             "role": _text(edge.get("role") or edge.get("relation_family") or "", 35),
-            "family": _text(edge.get("relation_family") or "", 35),
-            "conf": round(float(edge.get("confidence") or 0.0), 2),
+            "family": _text(edge.get("relation_family") or edge.get("family") or "", 35),
+            "conf": round(float(edge.get("confidence") or edge.get("conf") or 0.0), 2),
             "rationale": _text(edge.get("rationale") or "", 220),
+            # Phase B3 — code metadata enrichment. Threaded through compaction
+            # so the prompt renderer can surface file_path + symbols_called
+            # inline. Drops silently when an edge has no code evidence.
+            "code_metadata": (
+                edge.get("code_metadata")
+                if isinstance(edge.get("code_metadata"), dict)
+                else None
+            ),
         }
         for edge in (packet.get("edges") or [])[:_PACKET_MAX_EDGES]
         if graph_context_allowed and isinstance(edge, dict)
@@ -2816,12 +2980,22 @@ async def _call_llm_synthesis(
     *,
     model_override: Optional[str],
     user_id: Optional[str] = None,
+    synthesis_mode: str = "research",
 ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """Call the synthesis LLM. Returns (payload_dict, fallback_reason).
 
     Returns markdown prose with inline [n] citations — not a card schema.
     Every graph query attempts this call, even when the packet is sparse.
     Deterministic prose fallback covers only hard transport failures.
+
+    synthesis_mode:
+      "research"  (default) — concrete-claim research synthesis using
+                              _SYNTHESIS_SYSTEM_PROMPT. Faithful to evidence,
+                              forbids invented APIs/edges.
+      "ideation"             — build-advisor mode using _IDEATION_SYSTEM_PROMPT.
+                              Same hard constraints (greppable names, no
+                              invention) but licenses speculative
+                              [SYNTHESIS] combinations across evidence items.
     """
 
     try:
@@ -2830,8 +3004,17 @@ async def _call_llm_synthesis(
         logger.warning("synthesis llm_service import failed: %s", exc)
         return None, "llm_import_failure"
 
+    # Mode dispatch — research is the default; ideation flips the system
+    # prompt only. Evidence packet, user prompt rendering, and the rest of
+    # the pipeline stay identical. This is intentional: the same retrieval
+    # + enrichment surface should drive both modes; only the framing shifts.
+    if synthesis_mode == "ideation":
+        system_prompt = _IDEATION_SYSTEM_PROMPT
+    else:
+        system_prompt = _SYNTHESIS_SYSTEM_PROMPT
+
     messages = [
-        {"role": "system", "content": _SYNTHESIS_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": _render_packet_user_prompt(packet)},
     ]
     creds = await _resolve_graph_model(user_id, model_override)
@@ -3119,6 +3302,10 @@ async def _enrich_packet_with_extractions(
             rationale_chunk_ids.add(cid)
             break  # first chunk per edge is enough
     chunk_text_by_id: dict[str, str] = {}
+    # Phase B3 — per-chunk code metadata cache. Keyed by chunk_id so the
+    # edge-enrichment loop can stamp file_path + symbols_called onto the
+    # source code chunks that justify each edge.
+    chunk_code_meta_by_id: dict[str, dict[str, Any]] = {}
     if rationale_chunk_ids and db is not None:
         try:
             cursor = db["chunks"].find(
@@ -3126,7 +3313,19 @@ async def _enrich_packet_with_extractions(
                     "corpus_id": corpus_id,
                     "chunk_id": {"$in": list(rationale_chunk_ids)[:24]},
                 },
-                {"_id": 0, "chunk_id": 1, "text": 1, "summary": 1},
+                {
+                    "_id": 0,
+                    "chunk_id": 1,
+                    "text": 1,
+                    "summary": 1,
+                    "language": 1,
+                    "chunk_kind": 1,
+                    # Phase 5 — code lane metadata for inline edge enrichment.
+                    "metadata.file_path": 1,
+                    "metadata.symbols_called": 1,
+                    "metadata.symbols_defined": 1,
+                    "metadata.roblox_apis": 1,
+                },
             )
             async for row in cursor:
                 cid = str(row.get("chunk_id") or "")
@@ -3135,6 +3334,27 @@ async def _enrich_packet_with_extractions(
                 text = str(row.get("text") or row.get("summary") or "").strip()
                 if text:
                     chunk_text_by_id[cid] = text
+                # Only emit code_metadata when this is a code chunk with Phase 5
+                # signals. Prose chunks have neither language nor symbols and
+                # would just clutter the edge rendering.
+                meta_blob = row.get("metadata") or {}
+                if not isinstance(meta_blob, dict):
+                    continue
+                lang = (row.get("language") or "").strip()
+                file_path = (meta_blob.get("file_path") or "").strip()
+                symbols_called = meta_blob.get("symbols_called") or []
+                symbols_defined = meta_blob.get("symbols_defined") or []
+                if lang or file_path or symbols_called or symbols_defined:
+                    chunk_code_meta_by_id[cid] = {
+                        "file_path": file_path,
+                        "language": lang,
+                        "symbols_called": [
+                            str(s).strip() for s in symbols_called[:8] if s
+                        ],
+                        "symbols_defined": [
+                            str(s).strip() for s in symbols_defined[:6] if s
+                        ],
+                    }
         except Exception as exc:
             logger.debug("edge rationale chunk fetch failed: %s", exc)
 
@@ -3161,6 +3381,15 @@ async def _enrich_packet_with_extractions(
             if text:
                 edge["rationale"] = _text(text.replace("\n", " "), 220)
                 edge["rationale_chunk_id"] = chunk_ids[0]
+            # Phase B3 — stamp code_metadata so _render_packet_user_prompt
+            # can surface file_path + symbols inline. Walk all evidence
+            # chunks for the edge to find the first one with Phase 5
+            # signals; many edges may have a mix of code + prose evidence.
+            for cid in chunk_ids:
+                code_meta = chunk_code_meta_by_id.get(cid)
+                if code_meta:
+                    edge["code_metadata"] = code_meta
+                    break
 
     # ── Entity enrichment: pull object_kind / domain_type / canonical_family ─
     entity_ids = [str(e.get("entity_id") or "") for e in entities if e.get("entity_id")]
@@ -3266,6 +3495,7 @@ async def discover(
     corpus_ids: Optional[list[str]] = None,
     query: str,
     mode: str = "auto",
+    synthesis_mode: str = "research",
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
     model_override: Optional[str] = None,
@@ -3310,6 +3540,7 @@ async def discover(
                         corpus_id=cid,
                         query=query,
                         mode=mode,
+                        synthesis_mode=synthesis_mode,
                         # Multi-corpus runs always create fresh sessions per
                         # corpus internally; persistence happens on the
                         # merged result only.
@@ -3411,7 +3642,10 @@ async def discover(
     }
     packet_done_at = _time.perf_counter()
     llm_payload, fallback_reason = await _call_llm_synthesis(
-        packet, model_override=model_override, user_id=user_id
+        packet,
+        model_override=model_override,
+        user_id=user_id,
+        synthesis_mode=synthesis_mode,
     )
     llm_done_at = _time.perf_counter()
 

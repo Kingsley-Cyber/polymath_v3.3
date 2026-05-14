@@ -473,6 +473,11 @@ class GraphDiscoverRequest(BaseModel):
     corpus_ids: list[str] = Field(default_factory=list)
     query: str
     mode: Literal["auto", "connect", "gaps", "themes"] = "auto"
+    # Phase 3 — synthesis-mode selector. "research" (default) gives the
+    # concrete-claim research synthesis. "ideation" gives the build-advisor
+    # output with [BUILD IDEA] blocks. Retrieval + packet are identical;
+    # only the system prompt differs.
+    synthesis_mode: Literal["research", "ideation"] = "research"
     session_id: str | None = None
     model: str | None = None
     agentic: bool = False
