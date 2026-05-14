@@ -73,12 +73,30 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     await db["chunks"].create_index("parent_id")
     await db["chunks"].create_index("doc_id")
     await db["chunks"].create_index("user_id")
+    # CRITICAL: language_override="_text_language" (a field that never exists
+    # in our chunk docs) disables MongoDB's per-doc stemmer-override behavior.
+    # Without this, MongoDB looks at the chunk's `language` field (which we
+    # use for code-lane semantics: "luau", "python", "tsx", etc.) and treats
+    # it as a stemmer hint — exploding the bulk write with code 17262
+    # "language override unsupported: luau" because our domain languages
+    # aren't in the snowball stemmer whitelist (en, fr, de, es, ru, ...).
+    # The index is rebuilt if the existing one used the default override so
+    # the fix takes effect on already-deployed instances.
+    try:
+        existing = await db["chunks"].index_information()
+        info = existing.get("chunks_text_search")
+        if info and info.get("language_override", "language") != "_text_language":
+            await db["chunks"].drop_index("chunks_text_search")
+            logger.info("Dropped legacy chunks_text_search index (language_override mismatch)")
+    except Exception as exc:  # pragma: no cover - best-effort cleanup
+        logger.warning("Could not check legacy chunks text index: %s", exc)
     try:
         await db["chunks"].create_index(
             [("text", "text"), ("heading_path", "text")],
             name="chunks_text_search",
             weights={"heading_path": 5, "text": 1},
             default_language="english",
+            language_override="_text_language",
         )
     except Exception as exc:
         logger.warning("Could not create chunks text index: %s", exc)

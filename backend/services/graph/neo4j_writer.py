@@ -42,6 +42,18 @@ ENTITY_TYPE_OVERRIDES_PATH = Path(__file__).with_name("entity_type_overrides.jso
 ONTOLOGY_VERSION = "2026-04-25-v3"
 ENTITY_ID_PREFIX = "entity"
 ENTITY_TYPE_PRIORITY = [
+    # Phase 5 — scoped Roblox/Luau types come BEFORE the generic universal
+    # types so an entity observed as both "RobloxService" (from Phase 5's
+    # ontology resolver on a Luau chunk) and "Method" (from a graphify
+    # symbols_called backfill on the same chunk) resolves to RobloxService.
+    # These types are produced only by the scoped resolver
+    # (services/graph/roblox_ontology.py) which itself is gated on
+    # chunk.language ∈ {lua, luau} OR metadata.roblox_apis non-empty, so
+    # they cannot leak into non-Roblox corpora.
+    "RobloxService",
+    "RobloxClass",
+    "RobloxNetworkPrimitive",
+    "LuauDataType",
     "Person",
     "Organization",
     "Location",

@@ -100,7 +100,11 @@ from services.ghost_b import (
 )
 from services.ingestion import docling_adapter, tier_chunker
 from services.ingestion.schema_lens import get_or_create_schema_lens
-from services.ingestion.section_classifier import ChunkKind, should_skip_ghost_b
+from services.ingestion.section_classifier import (
+    ChunkKind,
+    is_noisy,
+    should_skip_ghost_b,
+)
 from services.secrets import decrypt as _decrypt_api_key
 from services.storage import mongo_reader, mongo_writer, qdrant_writer
 from services.storage.qdrant_writer import retrieve_schema_for_chunk
@@ -155,8 +159,18 @@ _DUPLICATE_STOP_WORDS = {
 
 
 def _is_vectorized_child(chunk) -> bool:
+    """True if this child chunk is part of the retrieval surface.
+
+    Uses `is_noisy()` (NOISY_KINDS = ALL_KINDS - _RETRIEVABLE), NOT
+    `should_skip_ghost_b()` (GHOST_B_SKIP_KINDS = NOISY_KINDS ∪ {CODE}).
+    The two sets diverge on CODE: Ghost B SKIPS code chunks (don't send raw
+    code to the LLM extractor — Phase 4/5 deterministic synthesis handles
+    them), but code chunks ARE retrievable and MUST be embedded so vector
+    + BM25 search can find them. Using should_skip_ghost_b here was a
+    Pt 11 regression that silently zeroed out code-chunk embeddings.
+    """
     kind = getattr(chunk, "chunk_kind", None) or ChunkKind.BODY
-    return not should_skip_ghost_b(kind)
+    return not is_noisy(kind)
 
 
 def _merge_warnings(existing: list[str] | None, new: list[str] | None) -> list[str]:
@@ -1164,6 +1178,12 @@ async def _write_qdrant_for_doc(
     vector_children = [c for c in children if c.chunk_id in vec_map]
 
     def _as_payload(c) -> dict:
+        # CRITICAL: include language + metadata so the Qdrant writer can
+        # stamp them onto the point payload (qdrant_writer.upsert_children
+        # at line 548-549 reads these fields). Without this, code-lane
+        # chunks landed in Qdrant with `language=None` and `metadata={}`
+        # — defeating BM25 lexical augmentation against symbols_called /
+        # roblox_apis / symbols_defined at retrieval time (Pt 11.1).
         return {
             "chunk_id": c.chunk_id,
             "parent_id": c.parent_id,
@@ -1176,6 +1196,8 @@ async def _write_qdrant_for_doc(
             "page_start": getattr(c, "page_start", None),
             "page_end": getattr(c, "page_end", None),
             "chunk_kind": getattr(c, "chunk_kind", ChunkKind.BODY),
+            "language": getattr(c, "language", None),
+            "metadata": getattr(c, "metadata", {}) or {},
         }
 
     if "naive" in target_cols:
