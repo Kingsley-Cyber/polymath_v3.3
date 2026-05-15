@@ -218,6 +218,34 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
     # extractor handles that and falls back to the literal-only path.
     qdrant = getattr(ingestion_service, "qdrant_client", None)
 
+    # Phase 2 hybrid — load per-corpus cached metrics ONCE up-front so
+    # find_bridges can use entity_betweenness + fragile_bridges, and
+    # the merged find_hubs at the end can rank by top_pagerank. Each
+    # lookup is best-effort: corpora without a warm cache map to None
+    # and the helpers fall back to their pre-Phase-2 Cypher behavior.
+    db = ingestion_service.db
+    corpus_metrics_map: dict[str, Any] = {}
+    if db is not None:
+        try:
+            from services.graph.analytics import (
+                compute_corpus_change_signature,
+                get_cached_metrics,
+            )
+            for cid in corpus_ids:
+                try:
+                    sig = await compute_corpus_change_signature(db, cid)
+                    m = await get_cached_metrics(db, cid, sig)
+                    if m is not None:
+                        corpus_metrics_map[cid] = m
+                except Exception as exc:
+                    logger.debug(
+                        "metrics cache lookup skipped for %s: %s", cid, exc
+                    )
+        except Exception as exc:
+            logger.warning(
+                "metrics cache module unavailable — Phase 2 path disabled: %s", exc
+            )
+
     async def _run_one(cid: str):
         seeds = await extract_query_entities(body.query, cid, driver, qdrant=qdrant)
         if not seeds:
@@ -230,11 +258,14 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
             max_hops=body.max_hops,
             limit=body.limit,
         )
+        # Phase 2 — metrics may be None (cold cache); find_bridges
+        # handles that and falls back to path-counting Cypher.
         bridges = await find_bridges(
             driver=driver,
             entity_ids=seed_ids,
             corpus_id=cid,
             max_hops=body.max_hops,
+            metrics=corpus_metrics_map.get(cid),
         )
         gaps = await find_gaps(driver=driver, entity_ids=seed_ids)
         return cid, {
@@ -316,7 +347,34 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
     nodes = list(merged_nodes.values())
     links = list(merged_links.values())
     bridges = list(merged_bridges.values())
-    hubs = find_hubs(nodes, links)
+
+    # Phase 2 — synthesize a merged metrics view for the cross-corpus
+    # find_hubs call. We union top_pagerank entries across all warm
+    # corpora, dedup by entity_id (the higher-scored entry wins), and
+    # wrap in a SimpleNamespace duck-typed object that find_hubs reads
+    # via getattr(metrics, "top_pagerank", None).
+    merged_metrics = None
+    if corpus_metrics_map:
+        from types import SimpleNamespace
+        merged_top_pr: dict[str, dict] = {}
+        for m in corpus_metrics_map.values():
+            for entry in getattr(m, "top_pagerank", None) or []:
+                eid = entry.get("entity_id")
+                if not eid:
+                    continue
+                cur = merged_top_pr.get(eid)
+                if cur is None or float(entry.get("score", 0)) > float(
+                    cur.get("score", 0)
+                ):
+                    merged_top_pr[eid] = entry
+        ordered = sorted(
+            merged_top_pr.values(),
+            key=lambda e: float(e.get("score", 0)),
+            reverse=True,
+        )
+        merged_metrics = SimpleNamespace(top_pagerank=ordered)
+
+    hubs = find_hubs(nodes, links, metrics=merged_metrics)
     seeds_out = [
         {
             "id": s["entity_id"],

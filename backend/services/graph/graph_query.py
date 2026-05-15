@@ -290,16 +290,131 @@ async def find_bridges(
     corpus_id: str,
     max_hops: int = 2,
     limit: int = 10,
+    metrics=None,
 ) -> list[dict]:
     """
-    Bridge detection — Community-safe version (no shortestPath, no GDS).
+    Bridge detection — Phase 2 hybrid (analytics-aware, path-count fallback).
 
-    A "bridge" is an Entity reachable from ≥2 seed entities within `max_hops`
-    via RELATES_TO, that is NOT itself a seed. Ranked by the number of seeds
-    it connects (higher = more central).
+    Pre-Phase-2 behavior (active when `metrics` is None or the cache
+    yields no seed-anchored bridges): Cypher path-count — entities
+    reachable from ≥2 seeds within `max_hops` via RELATES_TO, ranked by
+    seed-count. Community-safe (no shortestPath, no GDS).
+
+    Phase 2 elite path (active when `metrics` is provided AND its
+    `fragile_bridges` / `entity_betweenness` touch the seed set):
+      • fragile_bridges supplies *interdisciplinary articulation edges*
+        — removing one disconnects two domains. Each entry already has
+        source/target/source_domain/target_domain. We filter to entries
+        where either endpoint is a seed.
+      • entity_betweenness supplies the mathematical definition of a
+        bridge — a node lying on the shortest path between other
+        nodes. We filter to entities NOT in the seed set, rank by
+        betweenness score.
+      • Both signals merge into the same result list with a `source`
+        field ("fragile" | "betweenness") for traceability.
+
+    When the elite path returns nothing meaningful (cold cache,
+    metrics with no overlap, single-seed query, etc.) the original
+    Cypher path-count keeps the endpoint functional.
+
+    Result shape (additive — pre-Phase-2 fields preserved):
+      {entity_id, display_name, entity_type, connected_seed_count,
+       connected_seeds, betweenness?, fragile_partner?, source}
     """
+    if not entity_ids:
+        return []
+
+    seed_set = set(entity_ids)
+
+    # Phase 2 elite path — try the cached analytics first when present.
+    if metrics is not None:
+        elite: list[dict] = []
+
+        # Path 1 — fragile_bridges: cross-domain articulation edges
+        # anchored to at least one seed. Each entry IS a bridge edge,
+        # not a single-node bridge, so we emit the non-seed endpoint
+        # as the "bridge entity" and carry the partner endpoint as
+        # `fragile_partner` for downstream rendering.
+        fragiles = getattr(metrics, "fragile_bridges", None) or []
+        for fb in fragiles:
+            src = fb.get("source")
+            tgt = fb.get("target")
+            if src in seed_set and tgt not in seed_set:
+                non_seed, partner = tgt, src
+                non_seed_name = fb.get("target_name", "")
+            elif tgt in seed_set and src not in seed_set:
+                non_seed, partner = src, tgt
+                non_seed_name = fb.get("source_name", "")
+            else:
+                continue
+            elite.append({
+                "entity_id": non_seed,
+                "display_name": non_seed_name,
+                "entity_type": "other",  # fragile_bridges doesn't carry type
+                "connected_seed_count": 1,
+                "connected_seeds": [partner],
+                "fragile_partner": partner,
+                "source": "fragile",
+                "evidence": fb.get("evidence", ""),
+            })
+
+        # Path 2 — betweenness centrality: entities with high topological
+        # bottleneck score that are NOT seeds. Filter to entities present
+        # in the corpus metrics (entity_betweenness is corpus-wide; the
+        # selection happens at fetch time on the routers side).
+        betweenness = getattr(metrics, "entity_betweenness", None) or {}
+        if betweenness:
+            # Build a quick name lookup from top_pagerank if available
+            # (entity_betweenness is just id→float; top_pagerank carries
+            # canonical_name which is the best display label we have).
+            name_map: dict[str, str] = {}
+            for entry in getattr(metrics, "top_pagerank", None) or []:
+                eid = entry.get("entity_id")
+                if eid:
+                    name_map[eid] = entry.get("canonical_name", "")
+            # Sort by betweenness desc, skip seeds, cap at `limit`.
+            seen_in_elite = {e["entity_id"] for e in elite}
+            ranked = sorted(
+                (
+                    (eid, score) for eid, score in betweenness.items()
+                    if eid not in seed_set and eid not in seen_in_elite
+                ),
+                key=lambda kv: kv[1],
+                reverse=True,
+            )
+            for eid, score in ranked[: limit * 2]:
+                if score <= 0:
+                    continue
+                elite.append({
+                    "entity_id": eid,
+                    "display_name": name_map.get(eid, ""),
+                    "entity_type": "other",
+                    "connected_seed_count": 0,  # betweenness is global, not seed-anchored
+                    "connected_seeds": [],
+                    "betweenness": float(score),
+                    "source": "betweenness",
+                })
+
+        if elite:
+            # Stable ordering: fragile first (lower-volume, higher-value),
+            # then betweenness by score.
+            elite.sort(
+                key=lambda e: (
+                    0 if e["source"] == "fragile" else 1,
+                    -float(e.get("betweenness", 0.0)),
+                )
+            )
+            logger.info(
+                "find_bridges: elite path n=%d (fragile=%d, betweenness=%d)",
+                len(elite),
+                sum(1 for e in elite if e["source"] == "fragile"),
+                sum(1 for e in elite if e["source"] == "betweenness"),
+            )
+            return elite[: int(limit)]
+
+    # Pre-Phase-2 path-count fallback. Single-seed queries can't
+    # produce path-count bridges (need ≥2 seeds) — short-circuit.
     if len(entity_ids) < 2:
-        # Bridges are only meaningful between ≥2 seed entities.
         return []
 
     hops = max(1, min(int(max_hops), 3))
@@ -334,21 +449,97 @@ async def find_bridges(
             corpus_id=corpus_id,
             limit=int(limit),
         )
-        return [dict(r) async for r in result]
+        rows = [dict(r) async for r in result]
+        # Stamp source so callers can distinguish path-count results
+        # from the elite path.
+        for r in rows:
+            r["source"] = "path_count"
+        return rows
 
 
 def find_hubs(
     nodes: list[dict],
     links: list[dict],
     top_n: int = 8,
+    metrics=None,
 ) -> list[dict]:
     """
-    Pure-Python degree count on the returned subgraph.
+    Hub detection — Phase 2 hybrid (analytics-aware, degree fallback).
 
-    Hub = node with highest unique neighbor count. Cheaper than a Cypher
-    round-trip since we already have the subgraph in memory.
+    Pre-Phase-2 behavior (still active when `metrics` is None or the
+    cache misses the current subgraph): pure-Python unique-neighbor
+    degree count on the returned subgraph. Cheap, deterministic, no
+    cache dependency. Cheaper than a Cypher round-trip because the
+    subgraph is already in memory.
+
+    Phase 2 elite path (active when `metrics` is provided AND its
+    `top_pagerank` list intersects the current subgraph's nodes): rank
+    hubs by precomputed PageRank centrality. PageRank measures
+    structural importance across the FULL corpus graph, so a node with
+    50 weak external references outranks a node with 100 local self-
+    loops — the limitation that pure degree count produces. Each
+    returned row carries `pagerank_score` so downstream surfaces (Mode
+    A, frontend hub chip) can show *why* an entity ranks where it does.
+
+    Result shape (additive only — every legacy field still present):
+        {entity_id, display_name, entity_type, degree, is_seed,
+         pagerank_score?, source: "pagerank" | "degree"}
     """
-    if not nodes or not links:
+    if not nodes:
+        return []
+
+    index = {n["id"]: n for n in nodes}
+
+    # Phase 2 elite path — PageRank-backed ranking when the corpus
+    # metrics cache is warm AND covers the current subgraph.
+    if metrics is not None:
+        top_pr = getattr(metrics, "top_pagerank", None) or []
+        if top_pr:
+            # Intersect the cached PageRank list with the current
+            # subgraph node set. The metrics are corpus-scoped (whole
+            # graph), the subgraph is query-scoped — only the overlap
+            # is meaningful for this hub query.
+            pr_in_scope = [
+                entry for entry in top_pr if entry.get("entity_id") in index
+            ]
+            if pr_in_scope:
+                # Compute local degree alongside PageRank so the row
+                # carries both signals (degree is still useful as a
+                # secondary tie-break / context hint).
+                local_degree: Counter[str] = Counter()
+                for link in links:
+                    local_degree[link["source"]] += 1
+                    local_degree[link["target"]] += 1
+                scored = [
+                    {
+                        "entity_id": entry["entity_id"],
+                        "display_name": (
+                            index[entry["entity_id"]].get("display_name", "")
+                            or entry.get("canonical_name", "")
+                        ),
+                        "entity_type": index[entry["entity_id"]].get(
+                            "entity_type", "other"
+                        ),
+                        "degree": local_degree.get(entry["entity_id"], 0),
+                        "is_seed": index[entry["entity_id"]].get(
+                            "is_seed", False
+                        ),
+                        "pagerank_score": float(entry.get("score", 0.0)),
+                        "source": "pagerank",
+                    }
+                    for entry in pr_in_scope[:top_n]
+                ]
+                logger.info(
+                    "find_hubs: pagerank path n=%d (top_pr=%d, in_scope=%d)",
+                    len(scored), len(top_pr), len(pr_in_scope),
+                )
+                return scored
+
+    # Pre-Phase-2 degree fallback — also serves when `metrics` is None,
+    # the cache is cold, or the cache has zero overlap with the
+    # subgraph (e.g., query landed in a frontier region not present
+    # in top_pagerank's bounded list).
+    if not links:
         return []
 
     degree: Counter[str] = Counter()
@@ -356,7 +547,6 @@ def find_hubs(
         degree[link["source"]] += 1
         degree[link["target"]] += 1
 
-    index = {n["id"]: n for n in nodes}
     scored = [
         {
             "entity_id": nid,
@@ -364,6 +554,7 @@ def find_hubs(
             "entity_type": index.get(nid, {}).get("entity_type", "other"),
             "degree": deg,
             "is_seed": index.get(nid, {}).get("is_seed", False),
+            "source": "degree",
         }
         for nid, deg in degree.most_common(top_n * 2)
         if nid in index
