@@ -68,15 +68,25 @@ ThinkingEffort = Literal["none", "low", "medium", "high", "auto"]
 #     frequency_penalty are silently ignored. The mapper strips them so
 #     the body the user sees matches what the provider actually honors.
 #
-# We don't yet expose "xhigh" in the agnostic ThinkingEffort enum, so
-# "max" is unreachable through this mapper today. When/if we add xhigh,
-# add `"xhigh": "max"` to _DEEPSEEK_V4_REASONING_EFFORT and update
-# ThinkingEffort. For now low/medium/high all collapse to "high",
-# matching DeepSeek's own normalization.
+# Our agnostic ThinkingEffort enum has 4 thinking levels
+# (low/medium/high — "none" is the disable signal, handled separately).
+# DeepSeek has 2 real tiers (high and max; their `low` / `medium` /
+# `xhigh` are aliases). We map so the user's top selection actually
+# reaches DeepSeek's top tier:
+#
+#   agnostic "low"    → DeepSeek "high"  (lower tier, lighter budget)
+#   agnostic "medium" → DeepSeek "high"  (lower tier, lighter budget)
+#   agnostic "high"   → DeepSeek "max"   (top tier, max budget)
+#
+# Rationale: if a user picks "high" expecting maximum reasoning, they
+# should NOT silently get DeepSeek's lower thinking tier. The two
+# real DeepSeek levels are exposed as low/medium (lower budget) vs
+# high (maximum budget). "auto" resolves to medium → high (lower
+# DeepSeek tier), which is also the sane default for autonomous use.
 _DEEPSEEK_V4_REASONING_EFFORT: dict[ThinkingEffort, str] = {
     "low": "high",
     "medium": "high",
-    "high": "high",
+    "high": "max",
 }
 
 # Body params that thinking mode silently ignores. Stripping them keeps

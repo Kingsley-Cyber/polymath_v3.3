@@ -34,10 +34,13 @@ from services.thinking_mapper import apply_thinking_effort
     ],
 )
 def test_deepseek_v4_models_get_thinking_block(model):
+    """Both Flash and Pro support thinking. Agnostic 'high' reaches
+    DeepSeek's top tier 'max' so the user's strongest selection
+    actually maps to the strongest provider effort."""
     body: dict = {"model": model, "messages": []}
     apply_thinking_effort(body, model, "high")
     assert body.get("thinking") == {"type": "enabled"}
-    assert body.get("reasoning_effort") == "high"
+    assert body.get("reasoning_effort") == "max"
 
 
 @pytest.mark.parametrize(
@@ -71,21 +74,28 @@ def test_other_models_unchanged(model):
 @pytest.mark.parametrize(
     "agnostic_effort,expected_value",
     [
-        ("low", "high"),     # DeepSeek collapses low → high
-        ("medium", "high"),  # DeepSeek collapses medium → high
-        ("high", "high"),
+        # DeepSeek has two real tiers: "high" (lower) and "max" (top).
+        # Our agnostic 5-level enum maps so the user's top selection
+        # ("high") reaches DeepSeek's top tier ("max"). low/medium
+        # both map to DeepSeek's lower tier — they're effectively
+        # aliases of each other within DeepSeek's compat normalization.
+        ("low", "high"),     # lower DeepSeek tier
+        ("medium", "high"),  # lower DeepSeek tier (same effective effort)
+        ("high", "max"),     # top DeepSeek tier
     ],
 )
-def test_effort_levels_collapse_to_high(agnostic_effort, expected_value):
-    """Per DeepSeek docs: 'low and medium are mapped to high'. We emit
-    'high' directly rather than relying on DeepSeek's normalization."""
+def test_effort_levels_use_both_deepseek_tiers(agnostic_effort, expected_value):
     body: dict = {"model": "deepseek/deepseek-v4-pro", "messages": []}
     apply_thinking_effort(body, "deepseek/deepseek-v4-pro", agnostic_effort)
     assert body.get("reasoning_effort") == expected_value
 
 
-def test_auto_resolves_to_high():
-    """auto → default_effort → "medium" → DeepSeek-mapped to "high"."""
+def test_auto_resolves_to_lower_tier():
+    """auto → default_effort → 'medium' → DeepSeek 'high' (lower tier).
+
+    'auto' is the safe default — users who haven't picked a level
+    shouldn't be burning the top DeepSeek tier on every query. They
+    have to explicitly pick 'high' to reach 'max'."""
     body: dict = {"model": "deepseek/deepseek-v4-pro", "messages": []}
     apply_thinking_effort(body, "deepseek/deepseek-v4-pro", "auto")
     assert body.get("thinking") == {"type": "enabled"}
