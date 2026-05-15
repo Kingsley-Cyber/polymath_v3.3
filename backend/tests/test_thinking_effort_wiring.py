@@ -1,12 +1,18 @@
-"""Phase 28 — thinking-effort wiring tests.
+"""Phase 28 — thinking-effort wiring tests (blank-slate state).
 
-Verifies that the ModelOverrides.thinking_effort field flows through
-LLMService._build_request_body into the provider-native body params
-via services.thinking_mapper.apply_thinking_effort.
+The mapper has no providers configured yet — these tests pin the
+EMPTY-STATE behavior:
 
-These tests don't make real LLM calls. They build the request body
-in isolation and assert that the expected param appears (or doesn't,
-for non-reasoning models).
+  - The schema field exists and accepts the 5 effort values
+  - The mapper is a no-op for every model
+  - The LLM service call site doesn't crash when effort is set
+  - The auto / none / explicit-level paths all flow through without
+    raising
+
+When you wire a provider, ADD a test file (e.g.
+`test_thinking_anthropic.py`) that pins the provider-specific shape.
+Don't modify these blank-slate tests — they should stay green even
+as providers come online.
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ import pytest
 
 from models.schemas import ModelOverrides
 from services.llm import LLMService
+from services.thinking_mapper import apply_thinking_effort
 
 
 @pytest.fixture
@@ -26,126 +33,97 @@ def llm():
 
 
 def test_model_overrides_has_thinking_effort():
-    """The field MUST exist on ModelOverrides so the router can accept it."""
+    """The field MUST exist on ModelOverrides so the router accepts it."""
     fields = ModelOverrides.model_fields
     assert "thinking_effort" in fields
-    # Default must be None — the field is opt-in per-request.
+    # Default must be None — opt-in per-request.
     assert fields["thinking_effort"].default is None
 
 
-def test_model_overrides_accepts_known_efforts():
-    """Auto/none/low/medium/high all parse without error."""
-    for value in ("auto", "none", "low", "medium", "high"):
-        overrides = ModelOverrides(thinking_effort=value)
-        assert overrides.thinking_effort == value
+@pytest.mark.parametrize(
+    "value", ["auto", "none", "low", "medium", "high"]
+)
+def test_model_overrides_accepts_known_efforts(value):
+    """All 5 effort values parse without validation error."""
+    overrides = ModelOverrides(thinking_effort=value)
+    assert overrides.thinking_effort == value
 
 
-# ─── _build_request_body wiring ────────────────────────────────────────────
+# ─── Mapper no-op behavior with no providers wired ─────────────────────────
 
 
-def test_no_thinking_effort_omits_provider_params(llm):
-    """When thinking_effort is None, no reasoning_effort / thinking /
-    thinking_budget appears in the body."""
-    body = llm._build_request_body(
-        messages=[{"role": "user", "content": "hi"}],
-        model="openai/o3-mini",
-        overrides=ModelOverrides(),  # thinking_effort=None by default
+def test_mapper_noop_when_effort_is_none():
+    """effort=None means caller didn't opt in → body unchanged."""
+    body = {"model": "openai/gpt-4o", "messages": []}
+    snapshot = dict(body)
+    apply_thinking_effort(body, "openai/gpt-4o", None)
+    assert body == snapshot
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "openai/gpt-4o",
+        "openai/o3-mini",
+        "anthropic/claude-sonnet-4-5",
+        "gemini/gemini-2.5-flash",
+        "deepseek/deepseek-reasoner",
+        "groq/llama-3.3-70b",
+        "ollama/qwen2.5:7b",
+        "bare-model-id-with-no-provider",
+    ],
+)
+@pytest.mark.parametrize(
+    "effort", ["auto", "low", "medium", "high", "none"]
+)
+def test_mapper_is_noop_for_every_model_and_effort(model, effort):
+    """Blank-slate: no providers configured → every (model, effort)
+    combination leaves the body untouched. The function should NEVER
+    raise. When you wire a provider, this test will continue to pass
+    for OTHER models but will be superseded by a provider-specific
+    test for the wired provider."""
+    body = {"model": model, "messages": []}
+    snapshot = dict(body)
+    apply_thinking_effort(body, model, effort)
+    assert body == snapshot, (
+        f"mapper mutated body for ({model!r}, {effort!r}) — "
+        f"if a provider was added, write a provider-specific test."
     )
-    assert "reasoning_effort" not in body
-    assert "thinking" not in body
-    assert "thinking_budget" not in body
 
 
-def test_openai_o3_high_maps_to_reasoning_effort_high(llm):
-    """o3 + high → body.reasoning_effort = 'high'."""
-    body = llm._build_request_body(
+# ─── LLM call-site integration ─────────────────────────────────────────────
+
+
+def test_build_request_body_does_not_crash_with_effort(llm):
+    """The LLM service must invoke the mapper without crashing even
+    when no providers are wired. Body should be unchanged from the
+    no-mapper case."""
+    body_with = llm._build_request_body(
         messages=[{"role": "user", "content": "hi"}],
         model="openai/o3-mini",
         overrides=ModelOverrides(thinking_effort="high"),
     )
-    assert body.get("reasoning_effort") == "high"
-
-
-def test_openai_o3_low_maps_to_reasoning_effort_low(llm):
-    body = llm._build_request_body(
+    body_without = llm._build_request_body(
         messages=[{"role": "user", "content": "hi"}],
         model="openai/o3-mini",
-        overrides=ModelOverrides(thinking_effort="low"),
+        overrides=ModelOverrides(),
     )
-    assert body.get("reasoning_effort") == "low"
+    # The two bodies must be identical (mapper is a no-op until a
+    # provider block is added). The only intentional difference would
+    # be a `model` or `messages` change — neither happens here.
+    assert body_with == body_without
 
 
-def test_anthropic_high_emits_thinking_dict(llm):
-    """Claude with effort=high → body.thinking = {type: enabled, budget_tokens: N}."""
-    body = llm._build_request_body(
+def test_build_request_body_with_effort_none(llm):
+    """effort=None should produce identical output to no overrides at all."""
+    body_with = llm._build_request_body(
         messages=[{"role": "user", "content": "hi"}],
-        model="anthropic/claude-sonnet-4-5",
-        overrides=ModelOverrides(thinking_effort="high"),
+        model="openai/o3-mini",
+        overrides=ModelOverrides(thinking_effort=None),
     )
-    thinking = body.get("thinking")
-    assert isinstance(thinking, dict)
-    assert thinking.get("type") == "enabled"
-    assert isinstance(thinking.get("budget_tokens"), int)
-    assert thinking["budget_tokens"] > 0
-
-
-def test_gemini_25_emits_thinking_budget(llm):
-    """Gemini 2.5 with medium → body.thinking_budget = N (some non-zero int)."""
-    body = llm._build_request_body(
+    body_without = llm._build_request_body(
         messages=[{"role": "user", "content": "hi"}],
-        model="gemini/gemini-2.5-flash",
-        overrides=ModelOverrides(thinking_effort="medium"),
+        model="openai/o3-mini",
+        overrides=ModelOverrides(),
     )
-    # Gemini-specific param (services.thinking_mapper._GEMINI_BUDGETS).
-    # Either thinking_budget or thinkingBudget depending on mapper —
-    # accept either shape.
-    has_budget = (
-        "thinking_budget" in body
-        or "thinkingBudget" in body
-        or isinstance(body.get("thinking"), dict)
-    )
-    assert has_budget, f"expected Gemini thinking param in body, got: {body}"
-
-
-def test_non_reasoning_model_no_thinking_param(llm):
-    """gpt-4o is NOT a reasoning model — even with effort=high, no
-    reasoning_effort should appear (mapper gates on model)."""
-    body = llm._build_request_body(
-        messages=[{"role": "user", "content": "hi"}],
-        model="openai/gpt-4o",
-        overrides=ModelOverrides(thinking_effort="high"),
-    )
-    assert "reasoning_effort" not in body
-
-
-def test_effort_none_disables_thinking(llm):
-    """Even for a reasoning model, effort=none should produce no
-    thinking param (or an explicit-disabled signal — accept either)."""
-    body = llm._build_request_body(
-        messages=[{"role": "user", "content": "hi"}],
-        model="anthropic/claude-sonnet-4-5",
-        overrides=ModelOverrides(thinking_effort="none"),
-    )
-    # Either thinking is absent, or it's an explicit "disabled" structure.
-    if "thinking" in body:
-        thinking = body["thinking"]
-        if isinstance(thinking, dict):
-            assert thinking.get("type") != "enabled" or thinking.get("budget_tokens") in (None, 0)
-
-
-def test_overrides_model_takes_precedence_over_arg(llm):
-    """If overrides.model is set, the thinking mapper should use THAT
-    model name (not the positional `model` arg) when picking provider."""
-    body = llm._build_request_body(
-        messages=[{"role": "user", "content": "hi"}],
-        model="openai/gpt-4o",  # non-reasoning
-        overrides=ModelOverrides(
-            model="anthropic/claude-sonnet-4-5",  # reasoning
-            thinking_effort="medium",
-        ),
-    )
-    assert body["model"] == "anthropic/claude-sonnet-4-5"
-    # And thinking-mapper should have stamped a Claude-shaped thinking dict.
-    thinking = body.get("thinking")
-    assert isinstance(thinking, dict)
-    assert thinking.get("type") == "enabled"
+    assert body_with == body_without

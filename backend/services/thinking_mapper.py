@@ -1,19 +1,46 @@
-"""
-Phase 28 — Thinking-effort normalizer.
+"""thinking_mapper — provider-agnostic thinking/reasoning-effort dial.
 
-Maps a provider-agnostic thinking_effort enum to provider-native body
-params. LiteLLM handles most passthrough natively; this module knows the
-shape each provider expects.
+CURRENT STATE: blank slate. No providers configured. `apply_thinking_effort`
+is wired into LLMService._build_request_body but is a no-op for every
+model until a provider block is added below.
 
-Usage:
+Workflow for adding a provider:
+
+  1. Add a detector predicate (e.g. `_is_<provider>(model, provider)`)
+     that returns True for the model patterns the provider exposes a
+     thinking dial on. Examples per provider's current docs (you will
+     supply these):
+       - "all models matching pattern X"
+       - "all models from this provider"
+       - "specific named models"
+
+  2. Add a per-provider effort mapping. The shape depends on the API:
+       - String-enum APIs (e.g. low/medium/high) → dict[ThinkingEffort, str]
+       - Token-budget APIs → dict[ThinkingEffort, int]
+       - Boolean enable APIs → dict[ThinkingEffort, bool]
+       - Anything else — model the dict to whatever the provider accepts.
+
+  3. Add a block inside `apply_thinking_effort` that gates on the
+     detector and mutates `body` with the provider-native key/value.
+
+  4. If the provider's thinking mode imposes ordering constraints on
+     other body params (e.g. "max_tokens must exceed budget"), apply
+     those guards in the same block.
+
+Effort semantics (agnostic, never provider-specific):
+  - "auto":   resolve to default_effort, then "medium" if still auto
+  - "none":   user explicitly disabled thinking
+  - "low" | "medium" | "high": user-chosen budget tier
+
+`effort=None` means the caller didn't opt in; the function is a no-op.
+This lets non-thinking-aware call sites pass `None` without any branch
+in the caller — the mapper itself handles the "do nothing" path.
+
+Example usage:
+
     from services.thinking_mapper import apply_thinking_effort
-    body = {"model": "anthropic/claude-sonnet-4-6", "messages": [...]}
-    apply_thinking_effort(body, "anthropic/claude-sonnet-4-6", "medium")
-    # body now contains {"thinking": {"type": "enabled", "budget_tokens": 8192}}
-
-Synthesis (Ghost A/B) always calls with thinking_effort="none" unless the
-corpus config explicitly overrides it — reasoning tokens waste the output
-budget on structured extraction/summarization.
+    apply_thinking_effort(body, "openai/o3-mini", "high")
+    # body now has whatever the OpenAI o-series block emits.
 """
 
 from __future__ import annotations
@@ -25,33 +52,24 @@ logger = logging.getLogger(__name__)
 
 ThinkingEffort = Literal["none", "low", "medium", "high", "auto"]
 
-# ── Provider-specific token budgets (Anthropic-style) ────────────────────
-_ANTHROPIC_BUDGETS: dict[ThinkingEffort, int] = {
-    "none": 0,       # disabled via type=disabled
-    "low": 2048,
-    "medium": 8192,
-    "high": 32000,
-}
 
-# Gemini thinking_budget (experimental, gemini-2.5-flash+)
-_GEMINI_BUDGETS: dict[ThinkingEffort, int] = {
-    "none": 0,
-    "low": 1024,
-    "medium": 4096,
-    "high": 24576,
-}
+# ─── Provider-specific maps go here ──────────────────────────────────────
+# Add entries when a provider is wired. Each entry should be a dict keyed
+# by ThinkingEffort that returns the provider-native value. Keep the
+# concrete value type provider-specific (str / int / dict / bool / ...).
 
-# OpenAI o-series reasoning_effort is a string enum
-_OPENAI_REASONING_EFFORT: dict[ThinkingEffort, str] = {
-    "none": "low",    # o-series has no "none"; low is minimal
-    "low": "low",
-    "medium": "medium",
-    "high": "high",
-}
+# (none yet)
+
+
+# ─── Provider detectors ──────────────────────────────────────────────────
+# Each predicate returns True iff the (model, provider) pair belongs to
+# a provider whose thinking-dial we've wired below. Add new predicates
+# under their own header comment so the wiring is easy to audit.
 
 
 def _provider_from_model(model: str) -> str:
-    """Extract provider prefix from a LiteLLM model string."""
+    """Extract LiteLLM-style 'provider/' prefix. Empty when the model
+    string is bare (e.g. 'gpt-4o' rather than 'openai/gpt-4o')."""
     if not model:
         return ""
     if "/" in model:
@@ -59,21 +77,10 @@ def _provider_from_model(model: str) -> str:
     return ""
 
 
-def _is_anthropic(model: str, provider: str) -> bool:
-    return provider == "anthropic" or "claude" in model.lower()
+# (no provider detectors yet — add per-provider helpers here)
 
 
-def _is_openai_reasoning(model: str, provider: str) -> bool:
-    m = model.lower()
-    return provider == "openai" and ("o1" in m or "o3" in m or "o4" in m)
-
-
-def _is_deepseek(model: str, provider: str) -> bool:
-    return provider == "deepseek" or "deepseek" in model.lower()
-
-
-def _is_gemini(model: str, provider: str) -> bool:
-    return provider in ("gemini", "google") or "gemini" in model.lower()
+# ─── Public entry point ──────────────────────────────────────────────────
 
 
 def apply_thinking_effort(
@@ -86,81 +93,38 @@ def apply_thinking_effort(
     """Mutate ``body`` in place to add the provider-native thinking
     parameter for ``model``, given the agnostic ``effort`` value.
 
-    - ``effort=None``: caller didn't ask for thinking; this is a no-op.
-      Callers who want a global default should pass an explicit value.
-    - ``effort="auto"``: resolves to ``default_effort``. For most models
-      this means "medium"; for Anthropic it means enabled-with-no-budget
-      (let the model self-budget); see provider blocks below.
-    - ``effort="none"``: explicit disable. For OpenAI we map to "low"
-      (the o-series has no off switch); for Anthropic we emit
-      ``thinking: {type: "disabled"}``; for Gemini we set budget to 0.
-    - All other values: routed through the per-provider budget map.
-
-    No-ops cleanly for non-reasoning models (gpt-4o, chat-shaped Claude
-    Haiku, gemini-1.5, etc.) — gating is by ``_is_*`` helpers above.
+    With no providers configured (current state), this is always a
+    no-op. The structural plumbing (caller in LLMService, the schema
+    field on ModelOverrides, the UI selector) is in place so adding
+    a provider is a localized edit to this file only.
     """
     if effort is None:
         return  # caller didn't opt in
 
-    # Resolve "auto" to the default. Keep "auto" out of provider maps
-    # so the maps only contain concrete values.
+    # Resolve "auto" to the default, then to "medium" if still auto.
+    # Keep "auto" out of provider maps — those maps only contain
+    # concrete effort levels.
     if effort == "auto":
         effort = default_effort
     if effort == "auto":
-        # default_effort was also "auto" — treat as medium.
         effort = "medium"
 
     provider = _provider_from_model(model)
 
-    # ── Anthropic Claude ──────────────────────────────────────────────
-    # API shape: thinking: {type: "enabled", budget_tokens: N}
-    # or         thinking: {type: "disabled"} for explicit off.
-    if _is_anthropic(model, provider):
-        if effort == "none":
-            body["thinking"] = {"type": "disabled"}
-            return
-        budget = _ANTHROPIC_BUDGETS.get(effort, _ANTHROPIC_BUDGETS["medium"])
-        body["thinking"] = {"type": "enabled", "budget_tokens": budget}
-        # Claude requires max_tokens > thinking budget; pad if the caller
-        # didn't set one or set one too small.
-        existing_max = body.get("max_tokens")
-        floor = budget + 1024
-        if not isinstance(existing_max, int) or existing_max < floor:
-            body["max_tokens"] = floor
-        return
+    # ── Provider blocks go here ──────────────────────────────────────
+    # Pattern:
+    #
+    #   if _is_<provider>(model, provider):
+    #       if effort == "none":
+    #           # provider-specific disable signal (if any)
+    #           return
+    #       budget = _<PROVIDER>_BUDGETS.get(effort, _<PROVIDER>_BUDGETS["medium"])
+    #       body["<provider_native_key>"] = budget
+    #       # any provider-specific guards (e.g. max_tokens floor) here
+    #       return
+    #
+    # (no provider blocks wired yet)
 
-    # ── OpenAI o-series ───────────────────────────────────────────────
-    # API shape: reasoning_effort: "low" | "medium" | "high"
-    # The o-series doesn't have an off switch; "none" maps to "low".
-    if _is_openai_reasoning(model, provider):
-        body["reasoning_effort"] = _OPENAI_REASONING_EFFORT.get(
-            effort, _OPENAI_REASONING_EFFORT["medium"]
-        )
-        return
-
-    # ── Gemini 2.5+ ───────────────────────────────────────────────────
-    # API shape: thinking_budget: N (camelCase thinkingBudget also works
-    # at the Google SDK level; LiteLLM normalizes either).
-    if _is_gemini(model, provider):
-        # Gate on 2.5+ — pre-2.5 Gemini has no thinking dial. Be lenient
-        # and apply the budget anyway; LiteLLM will drop_params if the
-        # model doesn't accept it. Better to over-emit than miss.
-        if effort == "none":
-            body["thinking_budget"] = 0
-            return
-        body["thinking_budget"] = _GEMINI_BUDGETS.get(
-            effort, _GEMINI_BUDGETS["medium"]
-        )
-        return
-
-    # ── DeepSeek R1 / reasoner ────────────────────────────────────────
-    # DeepSeek-R1 has no effort dial — it always reasons and returns
-    # `reasoning_content` alongside `content`. We don't emit anything;
-    # the UI can still SHOW the selector to inform the user, but the
-    # backend correctly no-ops.
-    if _is_deepseek(model, provider):
-        return
-
-    # ── Anything else ─────────────────────────────────────────────────
-    # Non-reasoning model. No-op — the caller's body is unchanged.
+    # No matching provider → silent no-op. Body unchanged.
+    _ = provider  # keep the local for the next provider's gating
     return
