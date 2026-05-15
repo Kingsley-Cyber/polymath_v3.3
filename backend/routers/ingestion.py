@@ -878,10 +878,21 @@ async def ingest_document(
     if not corpus:
         raise HTTPException(status_code=404, detail="Corpus not found")
 
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
-
+    # ── Order matters here ───────────────────────────────────────────
+    # Pre-fix: file.read() ran FIRST, then config build, then slot
+    # acquire. A 500-file batch upload would materialize 500 × ~10MB
+    # = ~5GB of file bytes into RAM (UploadFile's SpooledTemporaryFile
+    # gets fully read into a single `bytes` object) BEFORE any of
+    # them could be rejected by the slot gate. With the gate at
+    # INGEST_MAX_ACTIVE_JOBS=16, the other 484 requests would just
+    # 429 but their RAM was already paid for, easily OOM-killing
+    # the container on dense uploads.
+    #
+    # Post-fix: build the ingestion config (cheap dict ops on the
+    # already-fetched corpus row), then acquire the slot, then read
+    # the file body. If the slot acquire 429s, the file body stays
+    # as a spooled temp file (large files on disk, small in RAM)
+    # and gets cleaned up when FastAPI's request handler returns.
     base_cfg_dict = corpus.get("default_ingestion_config") or {}
     if use_neo4j is not None:
         base_cfg_dict["use_neo4j"] = use_neo4j
@@ -922,6 +933,11 @@ async def ingest_document(
             "extra_params": {},
         }]
 
+    # Acquire the ingest slot BEFORE reading the file body. The slot
+    # is released by the background `_run()` task's finally block once
+    # it starts; if we fail to even start `_run()` (empty body, read
+    # error), the explicit release below keeps the slot accounting
+    # honest.
     if not await _try_acquire_ingest_slot():
         raise HTTPException(
             status_code=429,
@@ -930,6 +946,21 @@ async def ingest_document(
                 "Wait for current uploads to finish or lower upload concurrency."
             ),
         )
+
+    try:
+        data = await file.read()
+    except Exception:
+        # Read failure (network drop mid-upload, malformed multipart) —
+        # release the slot we just acquired so the next request can
+        # use it.
+        await _release_ingest_slot()
+        raise
+
+    if not data:
+        # Empty body — release slot, return 400 (same response as
+        # pre-fix).
+        await _release_ingest_slot()
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     # Phase K — Non-blocking ingest. Worker runs in the background; we wait
     # only for docling parse so the content-derived doc_id exists before the

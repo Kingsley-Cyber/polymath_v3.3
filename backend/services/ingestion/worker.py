@@ -2115,6 +2115,43 @@ async def run_ingest_job(
                 exc,
             )
 
+        # GOTCHAS #70 — drop ghost_b_staging after the graph has landed
+        # in Neo4j. Staging was the intermediate buffer used to get
+        # from Ghost B output to Neo4j writes; once neo4j_written is
+        # True the entities + relations live in the graph and the
+        # staged dicts are dead weight on the Mongo `documents`
+        # collection. At 500 files × ~50KB staging each = 25 MB of
+        # bloat per batch that never goes away without this step.
+        # An operator who wants to re-extract can rerun Ghost B from
+        # the raw `chunks` collection; staging was only needed for
+        # the resume-after-Neo4j-crash path which is no longer
+        # relevant once Neo4j writes confirmed.
+        try:
+            res = await db["documents"].update_one(
+                {"doc_id": doc_id, "corpus_id": corpus_id},
+                {
+                    "$unset": {"ghost_b_staging": ""},
+                    "$set": {"updated_at": datetime.utcnow()},
+                },
+            )
+            if res.modified_count:
+                logger.debug(
+                    "phase=staging_cleanup doc=%s corpus=%s "
+                    "ghost_b_staging field dropped (neo4j_written=True)",
+                    doc_id[:12],
+                    corpus_id[:8],
+                )
+        except Exception as exc:
+            # Non-fatal — staging cleanup is a storage optimization,
+            # not a correctness step. Log and continue so the rest of
+            # the post-write block (final status update) still runs.
+            logger.warning(
+                "phase=staging_cleanup doc=%s corpus=%s failed: %s",
+                doc_id[:12],
+                corpus_id[:8],
+                exc,
+            )
+
     final_status = "failed" if ws.verified is False else "done"
     final_error = None
     if ws.verified is False and ws.verify_errors:
