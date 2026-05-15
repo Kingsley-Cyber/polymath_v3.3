@@ -262,6 +262,37 @@ class ChatOrchestrator:
                     user_id, kind, model_used,
                 )
 
+        # Phase 29 — vision-capability pre-flight. If the user attached
+        # images but picked a non-vision model, the LLM call will 4xx
+        # mid-stream and surface as a generic transport error. Catch
+        # the mismatch HERE with a clear SSE error so the user knows
+        # exactly what to fix. Runs after model resolution (so we
+        # know the final model_used) but before retrieval (so we
+        # don't waste pipeline work on a doomed request).
+        if request.attachments:
+            from services.vision_capabilities import (
+                attachments_include_image,
+                supports_vision,
+                vision_capable_models_hint,
+            )
+
+            if attachments_include_image(request.attachments) and not supports_vision(model_used):
+                logger.warning(
+                    "vision mismatch: model=%r has no vision support but "
+                    "request has image attachments — emitting SSE error",
+                    model_used,
+                )
+                yield build_sse_chunk(
+                    ChatChunk(
+                        type="error",
+                        content=(
+                            f"The selected model ({model_used}) doesn't "
+                            f"support images. {vision_capable_models_hint()}"
+                        ),
+                    )
+                )
+                return
+
         # Resolve reasoning mode (Phase 15) — per-request overrides win,
         # else falls back to server-side default (wired at settings layer).
         reasoning_mode, reasoning_blend = self._resolve_reasoning(request)
@@ -573,6 +604,33 @@ class ChatOrchestrator:
         attachments = list(request.attachments or [])
         text_attachments = [a for a in attachments if a.kind == "text"]
         image_attachments = [a for a in attachments if a.kind == "image"]
+
+        # Phase 29 follow-up — budget attachment tokens against the
+        # context window BEFORE history trimming. Without this, the
+        # trimmer only sees `user_message.token_count` reflecting the
+        # raw text, and the multimodal image_url blocks (which can run
+        # ~1000-1600 tokens each per provider) silently overflow the
+        # context. Text-attachment bodies are also counted here so
+        # the trimmer accounts for them even though they get inlined
+        # AFTER this point — count_tokens reads the raw `att.content`.
+        if attachments:
+            from utils.tokens import estimate_attachment_tokens
+
+            attachment_tokens = estimate_attachment_tokens(
+                attachments, model_used,
+            )
+            if attachment_tokens > 0:
+                user_message.token_count = (
+                    (user_message.token_count or 0) + attachment_tokens
+                )
+                logger.info(
+                    "attachment token budget: +%d (images=%d, text=%d) → "
+                    "user_message.token_count=%d",
+                    attachment_tokens,
+                    len(image_attachments),
+                    len(text_attachments),
+                    user_message.token_count,
+                )
         if text_attachments:
             inlined_parts: list[str] = []
             for att in text_attachments:

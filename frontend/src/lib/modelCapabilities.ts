@@ -131,3 +131,53 @@ export function whyNoThinking(modelName: string | null | undefined): string {
   if (!modelName) return "Pick a model first.";
   return "This model doesn't expose a thinking dial in its API.";
 }
+
+
+// ─── Vision capability heuristic (Phase 29) ──────────────────────────────
+// Mirrors backend/services/vision_capabilities.py — when these change,
+// update both. Used by ChatInput to show a warning when the user
+// attaches an image but has a non-vision model selected; the backend
+// pre-flight check is the source of truth (this is just a UX nicety
+// to avoid a server round-trip for the error).
+
+const VISION_PATTERNS: ReadonlyArray<RegExp> = [
+  // OpenAI GPT-4o family + GPT-4 Turbo + o-series
+  /(^|\/)gpt-4o(\b|-)/,
+  /(^|\/)gpt-4-turbo/,
+  /(^|\/)gpt-4-vision/,
+  /(^|\/)o[134](-|\b)/,
+  // Anthropic — every Claude 3+ supports vision
+  /claude/,
+  // Google Gemini 1.5+ / 2.x
+  /gemini-(1\.5|2\.\d|2-)/,
+  // GLM vision variants (v suffix)
+  /glm-(4\.5v|5v)/,
+  // Mistral Pixtral line
+  /pixtral/,
+  // Qwen-VL
+  /qwen[\d.]*-vl/,
+  // Llama vision (3.2-vision, 3.2-90b-vision-instruct, 4-maverick, 4-scout)
+  /llama[\w.\-]*(vision|maverick|scout)/,
+];
+
+/**
+ * True if the model name matches any registered vision-capable
+ * pattern. Returns false for unknown models — conservative bias.
+ */
+export function supportsVision(modelName: string | null | undefined): boolean {
+  if (!modelName) return false;
+  const m = modelName.toLowerCase().trim();
+  // Defensive — bare pool/profile references aren't resolved here;
+  // the ChatInput component resolves them via the pool store before
+  // calling this function.
+  if (m.startsWith("pool:") || m.startsWith("profile:")) return false;
+  return VISION_PATTERNS.some((re) => re.test(m));
+}
+
+/**
+ * User-facing hint for the error/warning when an image is attached
+ * but the picked model has no vision support.
+ */
+export function visionCapableModelsHint(): string {
+  return "Pick a vision model — GPT-4o, Claude 3.5/4, Gemini 1.5/2.x, GLM-5V, Pixtral, or Qwen-VL.";
+}

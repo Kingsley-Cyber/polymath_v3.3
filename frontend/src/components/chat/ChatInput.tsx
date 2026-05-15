@@ -9,6 +9,7 @@ import {
   type DragEvent,
 } from "react";
 import {
+  AlertTriangle,
   Paperclip,
   FolderUp,
   CornerDownLeft,
@@ -22,6 +23,11 @@ import {
 import { ToggleBar } from "./ToggleBar";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useQueryModelPoolStore } from "../../stores/queryModelPoolStore";
+import {
+  supportsVision,
+  visionCapableModelsHint,
+} from "../../lib/modelCapabilities";
 
 /** Recursively walks a FileSystemEntry tree collecting every File it finds.
  *  Needed because `dataTransfer.files` is flat — dropping a folder yields
@@ -95,6 +101,30 @@ export function ChatInput({
 
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<File[]>([]);
+
+  // Phase 29 — vision-model guardrail. If the user has attached at least
+  // one image and the selected model can't process images, we surface a
+  // warning right above the input so they catch the mismatch BEFORE
+  // hitting send. The backend pre-flight is the source of truth (it
+  // emits an SSE error), but the UX is much nicer when we catch it
+  // client-side. Resolves pool:<id> references through the pool store
+  // — the heuristic needs the raw model_name to pattern-match.
+  const selectedModelRaw = useSettingsStore((s) => s.selectedModel);
+  const queryPool = useQueryModelPoolStore((s) => s.config.query_model_pool);
+  const resolvedModelName = (() => {
+    if (!selectedModelRaw) return "";
+    if (selectedModelRaw.startsWith("pool:")) {
+      const id = selectedModelRaw.slice("pool:".length);
+      return queryPool.find((e) => e.entry_id === id)?.model_name ?? "";
+    }
+    if (selectedModelRaw.startsWith("profile:")) return "";
+    return selectedModelRaw;
+  })();
+  const hasImageAttachment = attachments.some(
+    (f) => (f.type || "").toLowerCase().startsWith("image/"),
+  );
+  const visionMismatch =
+    hasImageAttachment && !supportsVision(resolvedModelName);
 
   // Pt 7: parent-driven prefill. Bumping prefill.nonce on the parent
   // replaces the input with the new text. Focuses the textarea so the
@@ -452,6 +482,25 @@ export function ChatInput({
               <p className="text-[10px] font-bold tracking-widest text-accent-main uppercase">
                 [ INJECT_CONTEXT_FILES ]
               </p>
+            </div>
+          </div>
+        )}
+
+        {/* Phase 29 — vision-model warning. Renders ONLY when the
+            user has attached at least one image and the selected
+            model can't process images. Surfaces the mismatch BEFORE
+            send so the user fixes it without a server round-trip. */}
+        {visionMismatch && (
+          <div className="mx-3 mt-2 flex items-start gap-2 px-3 py-2 rounded-none border border-amber-700/50 bg-amber-900/15 text-amber-300">
+            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+            <div className="text-[10px] font-mono tracking-wider leading-snug">
+              <div className="font-bold uppercase mb-0.5">
+                Selected model has no vision support
+              </div>
+              <div className="normal-case font-normal text-amber-200/80">
+                {visionCapableModelsHint()} The request will be rejected
+                server-side if you send it as-is.
+              </div>
             </div>
           </div>
         )}

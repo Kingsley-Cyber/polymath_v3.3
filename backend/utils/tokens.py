@@ -217,6 +217,80 @@ def estimate_max_messages(
     return messages_fit
 
 
+# Phase 29 — per-provider image-token costs. These are upper-bound
+# estimates published by each provider (so we under-budget rather than
+# over-budget the text). When the model is unknown, fall back to the
+# Claude figure since it's the highest — better to trim text aggressively
+# than overflow the context window.
+#
+# Sources:
+#   OpenAI GPT-4o/Vision: ~85 base + 170 per 512x512 tile, capped per image
+#                         at ~1k for low-res mode and ~2k for high-res
+#   Anthropic Claude:     flat ~1600 tokens per image
+#   Google Gemini 1.5+:   ~258 tokens per image (low) up to ~512 (high)
+#   DeepSeek V4 vision:   unspecified; budget conservatively at 1200
+#   GLM (Z.AI) vision:    unspecified; budget conservatively at 1200
+_PROVIDER_IMAGE_TOKEN_COST: dict[str, int] = {
+    "openai":    1200,
+    "anthropic": 1600,
+    "google":    400,
+    "gemini":    400,
+    "deepseek":  1200,
+    "zai":       1200,
+}
+_DEFAULT_IMAGE_TOKEN_COST = 1600  # safest conservative default
+
+
+def estimate_attachment_tokens(
+    attachments: list | None,
+    model: str = "gpt-4",
+) -> int:
+    """Estimate the per-turn LLM-token cost of chat attachments.
+
+    Text attachments contribute their actual UTF-8 content token count
+    (since they get inlined into the augmented prompt and tiktoken can
+    count them directly). Image attachments contribute a provider-aware
+    flat estimate — image tokens vary with resolution + provider but
+    we don't know the rendered resolution at request-build time, so
+    we pick an upper-bound per provider.
+
+    Returns 0 when `attachments` is None or empty.
+
+    The chat orchestrator adds this to user_message.token_count BEFORE
+    invoking the history trimmer, so the trimmer sees the right total
+    budget and trims older messages to make room.
+    """
+    if not attachments:
+        return 0
+    provider = ""
+    if "/" in model:
+        provider = model.split("/", 1)[0].lower()
+    image_cost_per = _PROVIDER_IMAGE_TOKEN_COST.get(
+        provider, _DEFAULT_IMAGE_TOKEN_COST
+    )
+    total = 0
+    for att in attachments:
+        # Duck-typed: works with both Pydantic ChatAttachment objects
+        # and dicts (so callers can use this with raw request payloads
+        # for pre-flight estimates without instantiating the model).
+        kind = getattr(att, "kind", None) or (
+            att.get("kind") if isinstance(att, dict) else None
+        )
+        if kind == "image":
+            total += image_cost_per
+        elif kind == "text":
+            content = getattr(att, "content", None) or (
+                att.get("content") if isinstance(att, dict) else ""
+            )
+            # Text files use real tiktoken counting — the body lands
+            # inside the augmented prompt verbatim.
+            total += count_tokens(content or "", model)
+            # Also account for the <attached_file name="…"> wrapper
+            # tag overhead. ~20 tokens is a safe over-estimate.
+            total += 20
+    return total
+
+
 def get_model_context_limit(model: str) -> int:
     """
     Get the context window limit for a known model.
