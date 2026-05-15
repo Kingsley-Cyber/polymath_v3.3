@@ -349,6 +349,116 @@ async def test_loop_does_not_deepen_same_entity_twice():
 
 
 @pytest.mark.asyncio
+async def test_loop_dedupes_agentic_evidence_against_base():
+    """Sprint #3 follow-up — if the agentic retriever returns a chunk
+    that's already in the base packet (high-similarity to the original
+    query), the loop must drop it instead of duplicating."""
+
+    class OneRoundLLM:
+        def __init__(self):
+            self.n = 0
+
+        async def complete_sync(self, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                return '{"entities": ["Humanoid"], "reason": "x"}'
+            return '{"entities": [], "reason": "done"}'
+
+    async def _retrieve(entity: str):
+        # Return two chunks — one duplicates the base, one is new.
+        return [
+            {"chunk_id": "already_in_base", "text": "duplicate"},
+            {"chunk_id": "new_chunk", "text": "fresh evidence"},
+        ]
+
+    base = {
+        "evidence": [
+            {"chunk_id": "already_in_base", "text": "originally retrieved"},
+        ],
+        "edges": [],
+        "anchors": ["Humanoid"],
+    }
+    merged = await run_agentic_loop(
+        base_packet=base,
+        user_query="q",
+        creds={"model": "m", "extra_params": {}},
+        llm_service=OneRoundLLM(),
+        retrieve_for_entity=_retrieve,
+    )
+    # Started with 1, added only the non-duplicate → 2 total.
+    assert len(merged["evidence"]) == 2
+    assert merged["agentic_trace"][0]["added_evidence"] == 1
+    assert merged["agentic_trace"][0]["deduped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_loop_dedupes_across_rounds():
+    """If round 1 retrieves chunk_X and round 2 returns chunk_X again
+    (different entity → same chunk), round 2 drops it as a dupe."""
+
+    class TwoRoundLLM:
+        def __init__(self):
+            self.n = 0
+
+        async def complete_sync(self, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                return '{"entities": ["A"], "reason": "first"}'
+            if self.n == 2:
+                return '{"entities": ["B"], "reason": "second"}'
+            return '{"entities": [], "reason": "done"}'
+
+    async def _retrieve(entity: str):
+        # Both entities return the same chunk_X — only round 1 should add it.
+        return [{"chunk_id": "chunk_X", "text": f"about {entity}"}]
+
+    merged = await run_agentic_loop(
+        base_packet={"evidence": [], "edges": [], "anchors": ["A", "B"]},
+        user_query="q",
+        creds={"model": "m", "extra_params": {}},
+        llm_service=TwoRoundLLM(),
+        retrieve_for_entity=_retrieve,
+    )
+    assert len(merged["evidence"]) == 1
+    assert merged["agentic_trace"][1]["deduped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_loop_allows_dedup_when_chunk_id_missing():
+    """Some retrievers may omit chunk_id. The dedup tracker should
+    accept those rather than collapsing them all together."""
+
+    class OneRoundLLM:
+        def __init__(self):
+            self.n = 0
+
+        async def complete_sync(self, **kwargs):
+            self.n += 1
+            return (
+                '{"entities": ["A"], "reason": "first"}'
+                if self.n == 1
+                else '{"entities": [], "reason": "done"}'
+            )
+
+    async def _retrieve(entity: str):
+        # No chunk_ids — both must pass through.
+        return [
+            {"text": "first agentic snippet"},
+            {"text": "second agentic snippet"},
+        ]
+
+    merged = await run_agentic_loop(
+        base_packet={"evidence": [], "edges": [], "anchors": ["A"]},
+        user_query="q",
+        creds={"model": "m", "extra_params": {}},
+        llm_service=OneRoundLLM(),
+        retrieve_for_entity=_retrieve,
+    )
+    assert len(merged["evidence"]) == 2
+    assert merged["agentic_trace"][0]["deduped"] == 0
+
+
+@pytest.mark.asyncio
 async def test_loop_survives_retrieve_exception():
     """retrieve_for_entity raises → loop logs and continues, doesn't crash."""
 

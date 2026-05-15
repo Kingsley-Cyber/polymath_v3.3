@@ -3922,56 +3922,69 @@ async def discover(
         try:
             from services.graph.agentic_retriever import run_agentic_loop
             from services.llm import llm_service as _llm
+            from services.retriever import retriever_orchestrator as _retriever
+            from models.schemas import RetrievalTier
 
             agentic_creds = await _resolve_graph_model(user_id, model_override)
 
+            # Pick the strongest tier the corpus supports so entity-deepening
+            # gets vector + BM25 + Mode A graph expansion + the Sprint #1
+            # degree boost + cross-encoder reranking. Falls back to
+            # qdrant_mongo when Neo4j is disabled.
+            agentic_tier = (
+                RetrievalTier.qdrant_mongo_graph
+                if settings.NEO4J_ENABLED
+                else RetrievalTier.qdrant_mongo
+            )
+
             async def _retrieve_for_entity(entity_name: str) -> list[dict[str, Any]]:
-                """Pull chunks that contain the entity name via Mongo text
-                search, scoped to the corpus. Returns evidence-shaped
-                dicts compatible with packet["evidence"]."""
-                if db is None or not entity_name:
+                """Run the FULL retrieval pipeline with the entity name as
+                query. Inherits vector similarity, BM25 lexical recall,
+                Mode A graph expansion, graph-degree boost, and cross-
+                encoder reranking. Returns evidence-shaped dicts compatible
+                with packet["evidence"]."""
+                if not entity_name:
                     return []
                 try:
-                    cursor = db["chunks"].find(
-                        {
-                            "corpus_id": corpus_id,
-                            "$text": {"$search": f"\"{entity_name}\""},
-                        },
-                        {
-                            "_id": 0,
-                            "chunk_id": 1,
-                            "doc_id": 1,
-                            "text": 1,
-                            "summary": 1,
-                            "heading_path": 1,
-                            "language": 1,
-                            "metadata.file_path": 1,
-                        },
-                    ).limit(5)
-                    docs = await cursor.to_list(length=5)
+                    result_inner = await _retriever.retrieve(
+                        query=entity_name,
+                        corpus_ids=[corpus_id],
+                        retrieval_tier=agentic_tier,
+                        collections=None,
+                        final_top_k=5,  # bounded per-entity recall
+                        rerank_enabled=True,
+                    )
                 except Exception as exc:
                     logger.debug(
-                        "agentic retrieve_for_entity(%r) Mongo query failed: %s",
+                        "agentic retrieve_for_entity(%r) retriever call failed: %s",
                         entity_name, exc,
                     )
                     return []
+
                 evidence_items: list[dict[str, Any]] = []
-                for d in docs:
-                    meta = d.get("metadata") or {}
+                for chunk in (result_inner.chunks or [])[:5]:
+                    meta = getattr(chunk, "metadata", None) or {}
+                    file_path = (
+                        meta.get("file_path") if isinstance(meta, dict) else None
+                    )
                     label = (
-                        (meta.get("file_path") if isinstance(meta, dict) else None)
-                        or d.get("doc_id")
+                        file_path
+                        or getattr(chunk, "doc_name", None)
+                        or getattr(chunk, "doc_id", None)
                         or "source"
                     )
+                    cid = str(getattr(chunk, "chunk_id", "") or "")
                     evidence_items.append({
-                        "evidence_id": f"agentic:{entity_name}:{d.get('chunk_id') or ''}",
-                        "doc_id": d.get("doc_id"),
-                        "chunk_id": d.get("chunk_id"),
+                        "evidence_id": f"agentic:{entity_name}:{cid}",
+                        "doc_id": getattr(chunk, "doc_id", None),
+                        "chunk_id": cid,
                         "source": {"label": str(label)[:80]},
                         "source_label": str(label)[:80],
-                        "heading_path": d.get("heading_path") or [],
-                        "text": str(d.get("text") or "")[:360],
-                        "summary": str(d.get("summary") or "")[:320],
+                        "heading_path": list(
+                            getattr(chunk, "heading_path", None) or []
+                        ),
+                        "text": str(getattr(chunk, "text", "") or "")[:360],
+                        "summary": str(getattr(chunk, "summary", "") or "")[:320],
                         "agentic_deepened_for": entity_name,
                     })
                 return evidence_items

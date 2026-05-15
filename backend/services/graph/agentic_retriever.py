@@ -259,6 +259,18 @@ async def run_agentic_loop(
     trace: list[dict[str, Any]] = []
     deepened_entities: set[str] = set()
 
+    # Dedup tracker — chunk_ids already in the packet. Any agentic-retrieved
+    # item whose chunk_id is in this set is skipped. Without this, the
+    # full-retriever rerouting (Sprint #3 follow-up) can re-surface chunks
+    # that were already in the base retrieval pool because the entity name
+    # has high vector similarity to the original query.
+    seen_chunk_ids: set[str] = set()
+    for item in merged_evidence:
+        if isinstance(item, dict):
+            cid = str(item.get("chunk_id") or "")
+            if cid:
+                seen_chunk_ids.add(cid)
+
     for round_index in range(1, max_rounds + 1):
         entities, reason = await select_entities_to_deepen(
             llm_service=llm_service,
@@ -281,6 +293,7 @@ async def run_agentic_loop(
             break
 
         added_this_round = 0
+        deduped_this_round = 0
         for entity in entities:
             if entity.lower() in deepened_entities:
                 # Avoid loop-pumping on the same entity round after round.
@@ -297,15 +310,27 @@ async def run_agentic_loop(
             if not new_evidence:
                 continue
             for item in new_evidence:
-                if isinstance(item, dict):
-                    merged_evidence.append(item)
-                    added_this_round += 1
+                if not isinstance(item, dict):
+                    continue
+                cid = str(item.get("chunk_id") or "")
+                # Dedup against base packet AND prior agentic rounds.
+                # An empty chunk_id (some retrievers may omit it) is
+                # ALWAYS allowed through; we'd rather have a duplicate
+                # than drop unique-but-unidentified content.
+                if cid and cid in seen_chunk_ids:
+                    deduped_this_round += 1
+                    continue
+                if cid:
+                    seen_chunk_ids.add(cid)
+                merged_evidence.append(item)
+                added_this_round += 1
 
         trace.append({
             "round": round_index,
             "entities": entities,
             "reason": reason or "",
             "added_evidence": added_this_round,
+            "deduped": deduped_this_round,
         })
         merged["evidence"] = merged_evidence
 

@@ -718,7 +718,7 @@ function AgentSearchTab(props: AgentSearchTabProps) {
               "mt-2 flex items-center gap-2 cursor-pointer select-none text-[10px] font-mono uppercase tracking-wider " +
               (validateSynthesis ? "text-amber-300" : "text-zinc-500 hover:text-zinc-300")
             }
-            title="Run a second auditor + editor pass to catch fabricated terms, missing citations, and shell sentences. ~2-3× LLM cost."
+            title="Run a second auditor + editor pass to catch fabricated terms, missing citations, and shell sentences. Costs ~3× the tokens of a normal query (draft + critique + revise calls)."
           >
             <input
               type="checkbox"
@@ -726,7 +726,19 @@ function AgentSearchTab(props: AgentSearchTabProps) {
               onChange={(e) => onValidateSynthesisChange(e.currentTarget.checked)}
               className="accent-amber-600"
             />
-            <span>validate · draft → critique → revise</span>
+            <span className="flex items-center gap-1.5">
+              <span>validate · draft → critique → revise</span>
+              <span
+                className={
+                  "px-1 py-px rounded-sm text-[9px] tracking-widest " +
+                  (validateSynthesis
+                    ? "bg-amber-900/40 text-amber-200 border border-amber-700/40"
+                    : "bg-zinc-800 text-zinc-500 border border-zinc-700")
+                }
+              >
+                ~3× cost
+              </span>
+            </span>
           </label>
         )}
       </section>
