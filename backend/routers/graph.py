@@ -251,12 +251,27 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
         if not seeds:
             return cid, {"nodes": [], "links": [], "bridges": [], "gaps": [], "seeds": []}
         seed_ids = [s["entity_id"] for s in seeds]
+        # Phase 3 — entity_scores carries the Phase 1 hybrid extraction
+        # scores so select_working_entities can use query_relevance as
+        # one of its weighting signals. Cold-cache callers get an empty
+        # dict; the analytics function handles that gracefully.
+        seed_scores = {
+            s["entity_id"]: float(s.get("score") or 0.0)
+            for s in seeds
+            if s.get("entity_id")
+        }
+        cm = corpus_metrics_map.get(cid)
+        # Phase 3 — expand_subgraph annotates returned nodes with
+        # pagerank_score / concept_id / is_working_entity when warm.
+        # Same return shape otherwise.
         subgraph = await expand_subgraph(
             entity_ids=seed_ids,
             corpus_id=cid,
             driver=driver,
             max_hops=body.max_hops,
             limit=body.limit,
+            metrics=cm,
+            entity_scores=seed_scores,
         )
         # Phase 2 — metrics may be None (cold cache); find_bridges
         # handles that and falls back to path-counting Cypher.
@@ -265,9 +280,11 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
             entity_ids=seed_ids,
             corpus_id=cid,
             max_hops=body.max_hops,
-            metrics=corpus_metrics_map.get(cid),
+            metrics=cm,
         )
-        gaps = await find_gaps(driver=driver, entity_ids=seed_ids)
+        # Phase 3 — find_gaps emits terminological / analogy / transfer
+        # gap types when warm, in addition to the missing-edge baseline.
+        gaps = await find_gaps(driver=driver, entity_ids=seed_ids, metrics=cm)
         return cid, {
             "nodes": subgraph["nodes"],
             "links": subgraph["links"],

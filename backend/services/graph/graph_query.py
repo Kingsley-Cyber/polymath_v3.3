@@ -205,12 +205,30 @@ async def expand_subgraph(
     driver,
     max_hops: int = 2,
     limit: int = 50,
+    metrics=None,
+    entity_scores: dict[str, float] | None = None,
 ) -> dict:
     """
     N-hop RELATES_TO expansion from seed entities, corpus-scoped.
 
+    Phase 3 hybrid (additive — never reduces the node set):
+      • metrics=None: exact pre-Phase-3 behavior. BFS returns
+        {nodes, links} with the original field set.
+      • metrics warm: same BFS, but each returned node is annotated
+        with optional analytics fields:
+          - `pagerank_score` from metrics.top_pagerank lookup
+          - `concept_id` from metrics.entity_concept_map
+          - `is_working_entity` flag — true when
+            analytics.select_working_entities picked this node for
+            the diverse working set (scope = BFS nodes,
+            entity_scores = seed relevance from Phase 1).
+        The frontend can render the working set differently
+        (brighter, larger, etc.) but every node is still returned.
+        No information is lost.
+
     Returns: {nodes: [...], links: [...]} where:
-      - nodes: [{id, display_name, entity_type, is_seed, mention_count}]
+      - nodes: [{id, display_name, entity_type, is_seed, mention_count,
+                 pagerank_score?, concept_id?, is_working_entity?}]
       - links: [{source, target, predicate, confidence}]
     """
     if not entity_ids:
@@ -280,6 +298,73 @@ async def expand_subgraph(
     async with driver.session() as session:
         result = await session.run(edge_cypher, node_ids=node_ids, corpus_id=corpus_id)
         edge_rows = [dict(r) async for r in result]
+
+    # Phase 3 — additive annotation when the analytics cache is warm.
+    # Doesn't filter nodes (every BFS result is still returned), just
+    # adds optional fields the frontend can render to highlight the
+    # diversified working set + structurally-important nodes.
+    if metrics is not None and node_rows:
+        try:
+            from services.graph.analytics import select_working_entities
+
+            # PageRank score lookup — top_pagerank is corpus-wide, we
+            # only care about entries that land in this subgraph.
+            pr_by_id: dict[str, float] = {}
+            for entry in getattr(metrics, "top_pagerank", None) or []:
+                eid = entry.get("entity_id")
+                if eid:
+                    pr_by_id[eid] = float(entry.get("score", 0.0))
+
+            # Concept id from entity_concept_map (analytics' community
+            # clustering). Empty when the cache wasn't built with
+            # community detection, in which case the field is omitted.
+            concept_map = getattr(metrics, "entity_concept_map", None) or {}
+
+            # Pick the diversified working set out of BFS nodes. We use
+            # entity_scores (the Phase 1 hybrid seed-extraction scores)
+            # as query_relevance — same signal that pulled these seeds
+            # in the first place, so the working-set choice respects
+            # the user's query.
+            scope = {n["id"] for n in node_rows}
+            try:
+                working = select_working_entities(
+                    metrics=metrics,
+                    scope=scope,
+                    entity_scores=entity_scores or {},
+                )
+            except Exception as exc:
+                # Defensive — if select_working_entities raises (e.g., a
+                # half-deserialized cache without entity_concept_map),
+                # we skip the annotation and still return the BFS rows.
+                logger.warning(
+                    "expand_subgraph: select_working_entities failed (%s)", exc
+                )
+                working = set()
+
+            for n in node_rows:
+                eid = n["id"]
+                if eid in pr_by_id:
+                    n["pagerank_score"] = pr_by_id[eid]
+                concept = concept_map.get(eid) or {}
+                cid_for_node = concept.get("concept_id")
+                if cid_for_node:
+                    n["concept_id"] = str(cid_for_node)
+                if eid in working:
+                    n["is_working_entity"] = True
+
+            logger.info(
+                "expand_subgraph: phase3 annotation nodes=%d pr_hits=%d working=%d",
+                len(node_rows),
+                sum(1 for n in node_rows if "pagerank_score" in n),
+                len(working),
+            )
+        except Exception as exc:
+            # Catch-all so a missing analytics import (or any unexpected
+            # failure during the annotation block) never crashes the
+            # endpoint. Cold-cache fallback is the BFS-only return.
+            logger.warning(
+                "expand_subgraph: phase3 annotation skipped (%s)", exc
+            )
 
     return {"nodes": node_rows, "links": edge_rows}
 
@@ -565,39 +650,155 @@ def find_hubs(
 async def find_gaps(
     driver,
     entity_ids: list[str],
+    metrics=None,
 ) -> list[dict]:
     """
-    Gap detection — for each unordered pair of seed entities, check whether a
-    direct RELATES_TO edge exists. If not, that's a "gap" — the corpus mentions
-    both entities, but never places them in direct relation. That's often
-    interesting: either the relationship exists in the world but wasn't
-    extracted, or the corpus genuinely doesn't connect them.
+    Gap detection — Phase 3 hybrid (analytics-aware, missing-edge fallback).
 
-    Uses `r IS NULL` with OPTIONAL MATCH (the corrected Cypher from the
-    Phase 17 vetted-analysis).
+    Pre-Phase-3 behavior (active when `metrics` is None): for each
+    unordered pair of seed entities, check whether a direct RELATES_TO
+    edge exists. If not, that's a "missing-edge gap" — the corpus
+    mentions both entities but never places them in direct relation.
+    Cheap, deterministic, no cache dependency.
+
+    Phase 3 elite path (active when `metrics` is warm): emits THREE
+    additional gap types alongside the missing-edge results, each
+    filtered to entries that touch the seed set:
+
+      • terminological — entities with high topology similarity AND
+        high neighbor Jaccard but no edge. Likely "the same concept
+        with different names" (e.g. "habit loop" ↔ "cue-craving-
+        response-reward"). Reported with `topology_sim` +
+        `neighbor_jaccard` so the LLM can weigh them.
+      • analogy — entities with high topology similarity but LOW
+        neighbor Jaccard. "A is to B as C is to D" patterns —
+        structural homologs that aren't synonyms. Useful for ideation
+        / cross-domain analogical reasoning.
+      • transfer — hubs in domain X with structural analogs in ≥2
+        other domains. "Method from X could apply to Y." Flattened
+        to one row per (hub, target_domain) pair so the gap list
+        stays uniform.
+
+    Result rows carry `gap_type: "missing_edge" | "terminological"
+    | "analogy" | "transfer"` so callers can route each type to its
+    appropriate UI surface.
     """
-    if len(entity_ids) < 2:
-        return []
+    out: list[dict] = []
+    seed_set = set(entity_ids)
 
-    cypher = """
-    UNWIND $entity_ids AS eid_a
-    UNWIND $entity_ids AS eid_b
-    WITH eid_a, eid_b WHERE eid_a < eid_b
+    # Phase 3 elite path — emit analytics-derived gaps first when warm.
+    if metrics is not None:
+        # Terminological + analogy share the same shape; the discriminator
+        # is which list they came from.
+        for entry in getattr(metrics, "terminological_gaps", None) or []:
+            src = entry.get("source")
+            tgt = entry.get("target")
+            if src not in seed_set and tgt not in seed_set:
+                continue
+            out.append({
+                "entity_a_id": src,
+                "entity_a_name": entry.get("source_name", ""),
+                "entity_b_id": tgt,
+                "entity_b_name": entry.get("target_name", ""),
+                "gap_type": "terminological",
+                "source_domain": entry.get("source_domain"),
+                "target_domain": entry.get("target_domain"),
+                "topology_sim": entry.get("topology_sim"),
+                "neighbor_jaccard": entry.get("neighbor_jaccard"),
+                "question": (
+                    f"Are {entry.get('source_name', '?')} and "
+                    f"{entry.get('target_name', '?')} the same concept?"
+                ),
+            })
+        for entry in getattr(metrics, "structural_analogies", None) or []:
+            src = entry.get("source")
+            tgt = entry.get("target")
+            if src not in seed_set and tgt not in seed_set:
+                continue
+            out.append({
+                "entity_a_id": src,
+                "entity_a_name": entry.get("source_name", ""),
+                "entity_b_id": tgt,
+                "entity_b_name": entry.get("target_name", ""),
+                "gap_type": "analogy",
+                "source_domain": entry.get("source_domain"),
+                "target_domain": entry.get("target_domain"),
+                "topology_sim": entry.get("topology_sim"),
+                "neighbor_jaccard": entry.get("neighbor_jaccard"),
+                "question": (
+                    f"If {entry.get('source_name', '?')} relates to its "
+                    f"neighbors as {entry.get('target_name', '?')} does, "
+                    "what insight follows?"
+                ),
+            })
+        # transfer_candidates: flatten one row per (hub, target_domain).
+        # The hub is the seed-side entity; each analog (from a different
+        # domain) becomes the "other" side of the gap.
+        for entry in getattr(metrics, "transfer_candidates", None) or []:
+            hub = entry.get("hub")
+            if hub not in seed_set:
+                continue
+            for analog in entry.get("analogs", []) or []:
+                out.append({
+                    "entity_a_id": hub,
+                    "entity_a_name": entry.get("hub_name", ""),
+                    "entity_b_id": analog.get("entity"),
+                    "entity_b_name": analog.get("name", ""),
+                    "gap_type": "transfer",
+                    "source_domain": entry.get("hub_domain"),
+                    "target_domain": analog.get("domain"),
+                    "topology_sim": analog.get("topology_sim"),
+                    "cd_pagerank": entry.get("cd_pagerank"),
+                    "question": (
+                        f"Can the approach used for "
+                        f"{entry.get('hub_name', '?')} in "
+                        f"{entry.get('hub_domain', 'its domain')} apply to "
+                        f"{analog.get('name', '?')} in "
+                        f"{analog.get('domain', 'this domain')}?"
+                    ),
+                })
 
-    MATCH (a:Entity {entity_id: eid_a})
-    MATCH (b:Entity {entity_id: eid_b})
+    # Missing-edge fallback — always runs when there are ≥2 seeds. This
+    # is additive to the Phase 3 elite results when warm (since the two
+    # answer different questions: "is there an edge in the graph?" vs.
+    # "is there an interesting structural relationship?"). With cold
+    # cache it's the only signal.
+    if len(entity_ids) >= 2:
+        cypher = """
+        UNWIND $entity_ids AS eid_a
+        UNWIND $entity_ids AS eid_b
+        WITH eid_a, eid_b WHERE eid_a < eid_b
 
-    OPTIONAL MATCH (a)-[r:RELATES_TO]-(b)
+        MATCH (a:Entity {entity_id: eid_a})
+        MATCH (b:Entity {entity_id: eid_b})
 
-    WITH a, b, r WHERE r IS NULL
+        OPTIONAL MATCH (a)-[r:RELATES_TO]-(b)
 
-    RETURN
-        a.entity_id                                          AS entity_a_id,
-        coalesce(a.display_name, a.normalized_name, '')      AS entity_a_name,
-        b.entity_id                                          AS entity_b_id,
-        coalesce(b.display_name, b.normalized_name, '')      AS entity_b_name
-    """
+        WITH a, b, r WHERE r IS NULL
 
-    async with driver.session() as session:
-        result = await session.run(cypher, entity_ids=entity_ids)
-        return [dict(r) async for r in result]
+        RETURN
+            a.entity_id                                          AS entity_a_id,
+            coalesce(a.display_name, a.normalized_name, '')      AS entity_a_name,
+            b.entity_id                                          AS entity_b_id,
+            coalesce(b.display_name, b.normalized_name, '')      AS entity_b_name
+        """
+
+        async with driver.session() as session:
+            result = await session.run(cypher, entity_ids=entity_ids)
+            async for row in result:
+                row_dict = dict(row)
+                row_dict["gap_type"] = "missing_edge"
+                out.append(row_dict)
+
+    if metrics is not None:
+        logger.info(
+            "find_gaps: phase3 total=%d terminological=%d analogy=%d "
+            "transfer=%d missing_edge=%d",
+            len(out),
+            sum(1 for g in out if g["gap_type"] == "terminological"),
+            sum(1 for g in out if g["gap_type"] == "analogy"),
+            sum(1 for g in out if g["gap_type"] == "transfer"),
+            sum(1 for g in out if g["gap_type"] == "missing_edge"),
+        )
+
+    return out
