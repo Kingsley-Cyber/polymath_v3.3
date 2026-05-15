@@ -267,24 +267,39 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
       >
         <div className="h-full w-px bg-zinc-900 transition-colors group-hover:bg-amber-500/40 group-active:bg-amber-500/70" />
       </div>
-      {/* Header strip */}
-      <div className="flex items-start justify-between border-b border-zinc-900 px-3 py-2.5">
-        <div>
-          <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono">
-            {mode === "brain" ? "Corpora View" : "Query View"}
-          </div>
-          <div className="text-xs text-zinc-300 font-mono mt-0.5">
-            {corpusIds.length} corpora
-            {data && (
-              <span className="text-zinc-500">
-                {" "}· {data.nodes.length}n · {data.links.length}e
-              </span>
-            )}
+      {/* Header strip — close-viewer button lives at the TOP-LEFT now
+          (previously at the bottom of the panel as a footer). Moving it
+          here surfaces the escape action as soon as you enter the graph
+          screen with nothing selected, so first-time users always have
+          an obvious way back. */}
+      <div className="flex items-start justify-between border-b border-zinc-900 px-3 py-2.5 gap-2">
+        <div className="flex items-start gap-2 min-w-0">
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="shrink-0 mt-0.5 flex h-6 w-6 items-center justify-center rounded border border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:border-rose-700 hover:text-rose-300"
+              title="Close viewer"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono">
+              {mode === "brain" ? "Corpora View" : "Query View"}
+            </div>
+            <div className="text-xs text-zinc-300 font-mono mt-0.5 truncate">
+              {corpusIds.length} corpora
+              {data && (
+                <span className="text-zinc-500">
+                  {" "}· {data.nodes.length}n · {data.links.length}e
+                </span>
+              )}
+            </div>
           </div>
         </div>
         <button
           onClick={onToggle}
-          className="text-zinc-500 hover:text-zinc-200"
+          className="shrink-0 text-zinc-500 hover:text-zinc-200"
           title="Collapse dashboard"
         >
           <PanelRightClose className="h-4 w-4" />
@@ -569,17 +584,9 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
         )}
       </div>
 
-      {/* Footer — close button */}
-      {onClose && (
-        <div className="border-t border-zinc-900 px-3 py-2.5">
-          <button
-            onClick={onClose}
-            className="flex w-full items-center justify-center gap-2 rounded border border-zinc-800 bg-[#0d0d14] py-1.5 font-mono text-[10px] uppercase tracking-widest text-zinc-400 hover:border-rose-700 hover:text-rose-300"
-          >
-            <X className="h-3 w-3" /> close viewer
-          </button>
-        </div>
-      )}
+      {/* Footer close button removed — relocated to the top-left of the
+          header strip (above). One escape action, surfaced where the
+          user lands first when entering the graph view. */}
     </aside>
   );
 }

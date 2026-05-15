@@ -21,6 +21,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { ToggleBar } from "./ToggleBar";
+import { ModelSelector } from "./ModelSelector";
+import { ThinkingEffortSelector } from "./ThinkingEffortSelector";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useQueryModelPoolStore } from "../../stores/queryModelPoolStore";
@@ -435,14 +437,21 @@ export function ChatInput({
       {/* Active Scanline Indicator (from index.css) */}
       {(hasContent || isLoading) && <div className="pulse-indicator" />}
 
-      {/* Orchestration Header - Per-query toggles */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-bg-surface border-b border-border-minimal">
+      {/* Orchestration Header - Per-query toggles + model/thinking dials.
+          ModelSelector and ThinkingEffortSelector live HERE (not in the
+          page header) because they're the most per-turn settings —
+          users change them on the same beat they type a query. */}
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-bg-surface border-b border-border-minimal">
         <ToggleBar />
-        <div className="flex items-center gap-1.5 opacity-70">
-          <TerminalSquare className="w-3 h-3 text-content-secondary" />
-          <span className="text-[9px] uppercase tracking-[0.2em] text-content-secondary font-bold">
-            I/O Panel
-          </span>
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <ModelSelector />
+          <ThinkingEffortSelector />
+          <div className="hidden sm:flex items-center gap-1.5 opacity-70 pl-2 border-l border-border-minimal">
+            <TerminalSquare className="w-3 h-3 text-content-secondary" />
+            <span className="text-[9px] uppercase tracking-[0.2em] text-content-secondary font-bold">
+              I/O Panel
+            </span>
+          </div>
         </div>
       </div>
 
@@ -534,7 +543,10 @@ export function ChatInput({
 
         {/* Input Area */}
         <div className="flex items-end gap-2 p-3">
-          {/* File Attach Button */}
+          {/* 📎 Paperclip — PER-TURN multimodal attachments. Images go
+              into the LLM call as image_url blocks; text files inline
+              into the augmented prompt. Capped at 4 files / 20 MB each.
+              Does NOT persist anything into a corpus. */}
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isLoading || uploading}
@@ -546,7 +558,7 @@ export function ChatInput({
               }
               ${isLoading || uploading ? "opacity-50 cursor-not-allowed" : ""}
             `}
-            title="Attach files (or drag & drop; dropping a folder walks it recursively)"
+            title="Per-turn attachment — images + text files inlined into THIS message only. Not saved to any corpus. Max 4 files / 20 MB each."
           >
             {uploading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -555,7 +567,11 @@ export function ChatInput({
             )}
           </button>
 
-          {/* Folder Attach Button — walks every file in the picked folder */}
+          {/* 📁 Folder up — CORPUS INGEST. Walks every file in the
+              picked folder and pushes them through the full ingestion
+              pipeline (Docling parse → Ghost A summary → Ghost B
+              extraction → Qdrant + Neo4j writes). Permanent — files
+              become searchable in the selected corpus. */}
           <button
             onClick={() => folderInputRef.current?.click()}
             disabled={isLoading || uploading}
@@ -564,7 +580,7 @@ export function ChatInput({
               border-transparent text-content-tertiary hover:border-border-minimal hover:text-accent-main bg-bg-surface
               ${isLoading || uploading ? "opacity-50 cursor-not-allowed" : ""}
             `}
-            title="Attach an entire folder (recursive)"
+            title="Corpus ingest — recursively walk a folder and add every file to the selected corpus (parsing + embedding + graph extraction). Permanent."
           >
             <FolderUp className="w-4 h-4" />
           </button>

@@ -197,14 +197,25 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   return (
     <>
       {isOpen && (
+        // Mobile backdrop. /80 alpha + backdrop-blur so the page behind
+        // dims visibly when the sidebar is open — without the dim, the
+        // sidebar reads as semi-transparent because the page content
+        // bleeds through at the edge of the viewport on some themes.
         <div
-          className="fixed inset-0 bg-bg-base z-40 lg:hidden"
+          className="fixed inset-0 bg-bg-base/80 backdrop-blur-sm z-40 lg:hidden"
           onClick={onToggle}
         />
       )}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-bg-base border-r border-border-minimal flex flex-col transition-transform duration-150 font-mono select-none ${
-          isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        // bg-bg-base is solid in every theme (#0f0f11 / #141416 / etc.).
+        // The shadow-xl + active-state ring make the panel visually
+        // distinct from the canvas behind it when the sidebar is open,
+        // so it reads as opaque even on themes where bg-base is close
+        // to the page-content color.
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-bg-base border-r border-border-minimal flex flex-col transition-transform duration-150 font-mono select-none shadow-xl lg:shadow-none ${
+          isOpen
+            ? "translate-x-0 ring-1 ring-accent-main/10 lg:ring-0"
+            : "-translate-x-full lg:translate-x-0"
         }`}
       >
         {/* Header / Vault Title */}

@@ -17,6 +17,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { useQueryModelPoolStore } from "../../stores/queryModelPoolStore";
 import {
   supportsThinking,
+  whyNoThinking,
   THINKING_EFFORT_OPTIONS,
   type ThinkingEffort,
 } from "../../lib/modelCapabilities";
@@ -49,10 +50,13 @@ export function ThinkingEffortSelector() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { thinkingEffort, setThinkingEffort } = useSettingsStore();
   const modelName = useResolvedModelName();
+  const thinkingSupported = supportsThinking(modelName);
 
-  // Hard exit: model doesn't expose a thinking dial. Component is null
-  // — no chrome, no spacer, no separator artifact.
-  if (!supportsThinking(modelName)) return null;
+  // Renders ALWAYS now. When the selected model doesn't expose a thinking
+  // dial, the selector shows a "[THINK: N/A]" disabled trigger with a
+  // tooltip explaining why and a hint pointing at a thinking-capable
+  // model. This trades a tiny bit of visual clutter for discoverability
+  // — users no longer have to guess that the dial exists at all.
 
   // Click-outside to close (mirrors ReasoningModeSelector pattern).
   useEffect(() => {
@@ -71,30 +75,59 @@ export function ThinkingEffortSelector() {
   const active = THINKING_EFFORT_OPTIONS.find(
     (o) => o.value === thinkingEffort,
   );
-  const triggerLabel = active
-    ? `[THINK: ${active.label.toUpperCase()}]`
-    : "[THINK: AUTO]";
+  const triggerLabel = thinkingSupported
+    ? `[THINK: ${(active?.label ?? "AUTO").toUpperCase()}]`
+    : "[THINK: N/A]";
+  const disabledHint = thinkingSupported
+    ? null
+    : whyNoThinking(modelName) +
+      " Pick a thinking-capable model (DeepSeek V4, Magistral, GLM-5, Claude, o-series, Gemini 2.5+).";
 
   return (
     <div className="relative" ref={dropdownRef}>
       <button
         data-testid="thinking-effort-selector"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold tracking-widest uppercase border border-transparent hover:border-border-minimal transition-none rounded-none group"
+        disabled={!thinkingSupported}
+        className={`flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold tracking-widest uppercase border transition-none rounded-none group ${
+          thinkingSupported
+            ? "border-transparent hover:border-border-minimal"
+            : "border-transparent opacity-50 cursor-not-allowed"
+        }`}
         title={
+          disabledHint ??
           active?.hint ??
-          "Thinking effort — only applies to reasoning models (o-series, Claude, Gemini 2.5+, R1)."
+          "Thinking effort — applies to reasoning models (DeepSeek V4, Magistral, GLM-5, Claude, o-series, Gemini 2.5+)."
         }
       >
-        <Brain className="w-3.5 h-3.5 text-content-tertiary group-hover:text-accent-main" />
-        <span className="text-content-secondary hidden sm:inline-block">
+        <Brain
+          className={`w-3.5 h-3.5 ${
+            thinkingSupported
+              ? "text-content-tertiary group-hover:text-accent-main"
+              : "text-content-tertiary"
+          }`}
+        />
+        <span
+          className={`hidden sm:inline-block ${
+            thinkingSupported ? "text-content-secondary" : "text-content-tertiary"
+          }`}
+        >
           {triggerLabel}
         </span>
-        <ChevronDown className="w-3 h-3 text-content-tertiary group-hover:text-accent-main" />
+        <ChevronDown
+          className={`w-3 h-3 ${
+            thinkingSupported
+              ? "text-content-tertiary group-hover:text-accent-main"
+              : "text-content-tertiary"
+          }`}
+        />
       </button>
 
-      {isOpen && (
-        <div className="absolute top-full right-0 mt-1 w-64 border border-white/10 bg-[#2a2a2a] z-[60] p-1 shadow-xl rounded">
+      {isOpen && thinkingSupported && (
+        // bottom-full — pops the panel UP (the selector now lives in the
+        // ChatInput orchestration row, which is near the bottom of the
+        // viewport). Top-full would clip against the page edge.
+        <div className="absolute bottom-full right-0 mb-1 w-64 border border-white/10 bg-[#2a2a2a] z-[60] p-1 shadow-xl rounded">
           <div className="text-[9px] font-bold tracking-widest uppercase text-content-tertiary px-2 py-1.5 border-b border-border-minimal mb-1">
             Thinking Effort
           </div>

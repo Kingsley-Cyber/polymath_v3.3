@@ -6,10 +6,10 @@ import { ChatWindow } from "./components/chat/ChatWindow";
 import { ChatInput } from "./components/chat/ChatInput";
 import { CollectionSelector } from "./components/chat/CollectionSelector";
 import { CorpusMultiSelect } from "./components/chat/CorpusMultiSelect";
-import { ModelSelector } from "./components/chat/ModelSelector";
+// ModelSelector + ThinkingEffortSelector now live inside ChatInput's
+// orchestration row (per-turn dials sit closer to the textarea).
 import { ReasoningModeSelector } from "./components/chat/ReasoningModeSelector";
 import { SearchModeSelector } from "./components/chat/SearchModeSelector";
-import { ThinkingEffortSelector } from "./components/chat/ThinkingEffortSelector";
 import { QueryProfileSelector } from "./components/chat/QueryProfileSelector";
 import { RetrievalTierSelector } from "./components/chat/RetrievalTierSelector";
 import { GraphViewer } from "./components/graph/GraphViewer";
@@ -588,12 +588,10 @@ function App() {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap justify-end">
+            {/* Per-query corpus / retrieval selectors stay in the header. */}
             <CorpusMultiSelect />
             <div className="h-4 w-px bg-border-minimal" />
             <CollectionSelector collections={collections} />
-            <div className="h-4 w-px bg-border-minimal" />
-            <ModelSelector />
-            <ThinkingEffortSelector />
             <div className="h-4 w-px bg-border-minimal" />
             <ReasoningModeSelector />
             <div className="h-4 w-px bg-border-minimal" />
@@ -610,6 +608,10 @@ function App() {
             >
               <Network className="w-4 h-4" />
             </button>
+            {/* ModelSelector + ThinkingEffortSelector relocated to the
+                ChatInput orchestration row (closer to the textarea — the
+                model + thinking dial are the most per-turn settings, so
+                they live next to the input). See ChatInput.tsx. */}
           </div>
         </header>
 

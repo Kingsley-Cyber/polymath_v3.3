@@ -89,7 +89,10 @@ export function ActivatorSelector() {
       </button>
 
       {isOpen && (
-        <div className="absolute top-full right-0 mt-1 w-72 border border-white/10 bg-[#2a2a2a] z-[60] shadow-xl rounded">
+        // `bottom-full` pops the panel ABOVE the trigger so it stays visible
+        // when ChatInput is at the bottom of the viewport. With `top-full`
+        // the dropdown opened DOWNWARD and got clipped by the page edge.
+        <div className="absolute bottom-full right-0 mb-1 w-72 border border-white/10 bg-[#2a2a2a] z-[60] shadow-xl rounded">
           {/* Tabs */}
           <div className="flex border-b border-border-minimal">
             <button
