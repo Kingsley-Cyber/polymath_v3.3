@@ -33,7 +33,10 @@ from services.retriever.funnel_a import funnel_a
 from services.retriever.funnel_b import funnel_b
 from services.retriever.hydrate import hydrate_chunks
 from services.retriever.lexical import _terms, lexical_retriever
-from services.retriever.graph_rerank import apply_graph_degree_boost
+from services.retriever.graph_rerank import (
+    apply_graph_degree_boost,
+    apply_graph_degree_boost_metrics_aware,
+)
 from services.retriever.merge import merge_pools
 from services.retriever.mode_a import mode_a_expansion
 
@@ -618,17 +621,26 @@ class RetrieverOrchestrator:
         ):
             phase_started = perf_counter()
             try:
-                neo4j_driver = getattr(
-                    __import__(
-                        "services.ingestion_service",
-                        fromlist=["ingestion_service"],
-                    ).ingestion_service,
-                    "neo4j_driver",
-                    None,
-                )
-                merged = await apply_graph_degree_boost(
-                    merged, corpus_ids, neo4j_driver
-                )
+                ingestion_svc = __import__(
+                    "services.ingestion_service",
+                    fromlist=["ingestion_service"],
+                ).ingestion_service
+                neo4j_driver = getattr(ingestion_svc, "neo4j_driver", None)
+                # Phase 5a — flag-gated metrics-aware variant. Default
+                # OFF; both code paths sit inside the SAME tier gate so
+                # non-graph queries are equally unaffected by either.
+                # Cold-cache fallback is built into the metrics-aware
+                # function itself; when the flag is on but cache is
+                # empty, degree-only behavior is the natural result.
+                if getattr(settings, "RETRIEVAL_CACHE_GRAPH_METRICS", False):
+                    db_handle = getattr(ingestion_svc, "db", None)
+                    merged = await apply_graph_degree_boost_metrics_aware(
+                        merged, corpus_ids, neo4j_driver, db_handle
+                    )
+                else:
+                    merged = await apply_graph_degree_boost(
+                        merged, corpus_ids, neo4j_driver
+                    )
                 # Re-sort after multiplier so the rerank_top_n cap reflects
                 # the boosted ordering.
                 merged.sort(key=lambda c: c.score, reverse=True)

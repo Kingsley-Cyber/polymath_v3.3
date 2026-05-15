@@ -546,6 +546,23 @@ class Settings(BaseSettings):
             "to A/B test boost-vs-no-boost on the same query."
         ),
     )
+    RETRIEVAL_CACHE_GRAPH_METRICS: bool = Field(
+        default=False,
+        description=(
+            "Phase 5a — use the cached analytics.CorpusMetrics (top_pagerank) "
+            "alongside live degree count when graph-reranking. Same code "
+            "path as RETRIEVAL_GRAPH_RERANK_ENABLED: only fires on "
+            "qdrant_mongo_graph tier with Neo4j enabled. The multiplier "
+            "becomes 1 + alpha * log1p(MAX(local_degree, pagerank_pseudo_degree)) "
+            "so a chunk gets boosted by EITHER local connectivity OR global "
+            "structural importance, whichever is stronger. Cold cache "
+            "(no metrics row, or no top_pagerank entries) falls back to "
+            "the existing degree-only path. Default OFF until soak-tested; "
+            "flip to True once you've confirmed the rerank quality win "
+            "on your corpora. Requires Phase 4 auto-warm (or a manual "
+            "/api/graph/cache/rebuild call) for cache population."
+        ),
+    )
     GRAPHIFY_AUGMENT_CODE_LANE: bool = Field(
         default=False,
         description=(

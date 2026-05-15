@@ -145,6 +145,197 @@ def compute_multiplier(degree: int, alpha: float = DEFAULT_ALPHA) -> float:
     return 1.0 + alpha * math.log1p(capped)
 
 
+# Phase 5a — metrics-aware rerank
+# ─────────────────────────────────
+# Cached PageRank scores from analytics.CorpusMetrics.top_pagerank are
+# normalized values in roughly the 0.001-0.10 range. To combine them
+# with raw degree counts (1-50+) under the same log1p + cap math, we
+# scale them up to the same numeric range. 500 maps a typical PR of
+# 0.05 to a pseudo-degree of 25 — comparable to a moderately well-
+# connected entity. The MAX_DEGREE_CAP ceiling clips outliers either
+# way, so the chosen scale only matters for the relative ordering of
+# mid-range entries.
+_PR_TO_DEGREE_SCALE = 500.0
+
+
+async def apply_graph_degree_boost_metrics_aware(
+    chunks: list[SourceChunk],
+    corpus_ids: list[str],
+    neo4j_driver,
+    db,
+    *,
+    alpha: float = DEFAULT_ALPHA,
+) -> list[SourceChunk]:
+    """Phase 5a — graph-rerank with cache-augmented PageRank signal.
+
+    Layers on top of the existing degree-count path: ALSO computes a
+    PageRank-derived multiplier from the cached
+    `analytics.CorpusMetrics.top_pagerank` entries, then takes
+    MAX(degree_pseudo, pagerank_pseudo) per chunk. An entity might be
+    a high-degree local hub OR a structurally-important global
+    PageRank node (or both); either justifies a score boost.
+
+    Compared to `apply_graph_degree_boost`:
+      • Same Cypher round-trip to map chunks → mentioned entities +
+        their degrees. The Cypher returns the entity_id list so we
+        can also look them up in the cache.
+      • Adds a Mongo `find_one` per corpus to fetch the cache row.
+        ~5-20ms per corpus on a warm cache; skipped silently when
+        the cache row is missing.
+      • Same math (`1 + alpha * log1p(min(signal, MAX_DEGREE_CAP))`)
+        so the multiplier range stays 1.0-1.6 regardless of which
+        signal dominates. No re-calibration of `alpha` needed.
+
+    Cold-fallback contract:
+      • db is None → skip cache lookup; use degree-only multiplier.
+      • Cache lookup raises → skip cache; use degree-only multiplier.
+      • Cache returns None (no row) → degree-only multiplier.
+      • Cache present but entity not in top_pagerank → that entity
+        contributes only its degree.
+      • Cypher fails → return chunks unchanged (same as pre-Phase-5a
+        existing function).
+
+    This is the function invoked when
+    `settings.RETRIEVAL_CACHE_GRAPH_METRICS=True`. The flag is OFF by
+    default so the existing degree-only path stays the production
+    behavior until soak-tested.
+    """
+    if not chunks or neo4j_driver is None or not corpus_ids:
+        return chunks
+
+    chunk_ids: list[str] = [
+        str(c.chunk_id) for c in chunks if getattr(c, "chunk_id", None)
+    ]
+    if not chunk_ids:
+        return chunks
+
+    # Same Cypher shape as the existing function, but returns the
+    # per-entity (id, degree) list instead of pre-aggregating to
+    # max(degree). We need the entity_ids to look them up in the
+    # PageRank cache; degree is still collected so cold-cache entries
+    # contribute via the local signal.
+    cypher = """
+    UNWIND $chunk_ids AS cid
+    MATCH (c:Chunk {chunk_id: cid})-[:MENTIONS]->(e:Entity)
+    WITH c.chunk_id AS chunk_id, e
+    OPTIONAL MATCH (e)-[r:RELATES_TO]-()
+    WITH chunk_id, e.entity_id AS entity_id, count(r) AS degree
+    RETURN chunk_id,
+           collect({entity_id: entity_id, degree: degree}) AS entities
+    """
+    chunk_to_entities: dict[str, list[dict]] = {}
+    try:
+        async with neo4j_driver.session() as session:
+            result = await session.run(cypher, chunk_ids=chunk_ids)
+            async for record in result:
+                cid = str(record.get("chunk_id") or "")
+                entities = list(record.get("entities") or [])
+                if cid:
+                    chunk_to_entities[cid] = entities
+    except Exception as exc:
+        logger.warning(
+            "graph_rerank metrics-aware: cypher failed (%d chunks): %s",
+            len(chunk_ids), exc,
+        )
+        return chunks
+
+    if not chunk_to_entities:
+        return chunks
+
+    # Fetch + merge per-corpus PageRank lookups. Best-effort; cold
+    # corpora contribute nothing and their chunks fall back to the
+    # degree-only multiplier (identical to pre-Phase-5a behavior).
+    pagerank_lookup: dict[str, float] = {}
+    if db is not None:
+        try:
+            from services.graph.analytics import (
+                compute_corpus_change_signature,
+                get_cached_metrics,
+            )
+            for corpus_id in corpus_ids:
+                try:
+                    sig = await compute_corpus_change_signature(db, corpus_id)
+                    metrics = await get_cached_metrics(db, corpus_id, sig)
+                    if metrics is None:
+                        continue
+                    for entry in getattr(metrics, "top_pagerank", None) or []:
+                        eid = entry.get("entity_id")
+                        try:
+                            score = float(entry.get("score") or 0.0)
+                        except (TypeError, ValueError):
+                            continue
+                        if eid and score > pagerank_lookup.get(eid, 0.0):
+                            pagerank_lookup[eid] = score
+                except Exception as exc:
+                    logger.debug(
+                        "graph_rerank metrics-aware: cache miss corpus=%s: %s",
+                        corpus_id, exc,
+                    )
+        except ImportError as exc:
+            # Analytics module unavailable — log once and continue
+            # with degree-only behavior.
+            logger.warning(
+                "graph_rerank metrics-aware: analytics import failed (%s) — "
+                "degree-only fallback",
+                exc,
+            )
+
+    by_chunk_id: dict[str, SourceChunk] = {
+        str(c.chunk_id): c for c in chunks if getattr(c, "chunk_id", None)
+    }
+
+    boosted_count = 0
+    max_multiplier = 1.0
+    pr_hit_count = 0
+    for cid, entities in chunk_to_entities.items():
+        chunk = by_chunk_id.get(cid)
+        if chunk is None:
+            continue
+
+        max_degree = 0
+        max_pr_pseudo = 0.0
+        for ent in entities:
+            eid = ent.get("entity_id")
+            try:
+                deg = int(ent.get("degree") or 0)
+            except (TypeError, ValueError):
+                deg = 0
+            if deg > max_degree:
+                max_degree = deg
+            if eid is not None and eid in pagerank_lookup:
+                pseudo = pagerank_lookup[eid] * _PR_TO_DEGREE_SCALE
+                if pseudo > max_pr_pseudo:
+                    max_pr_pseudo = pseudo
+                pr_hit_count += 1
+
+        # Combined signal: MAX of degree and pagerank-derived pseudo-degree.
+        # Both pass through identical log1p + cap + alpha math, so the
+        # multiplier remains in the 1.0-1.6 range regardless of which
+        # signal wins.
+        combined = max(
+            min(max_degree, MAX_DEGREE_CAP),
+            min(int(max_pr_pseudo), MAX_DEGREE_CAP),
+        )
+        if combined > 0:
+            multiplier = 1.0 + alpha * math.log1p(combined)
+            chunk.score = float(chunk.score) * multiplier
+            boosted_count += 1
+            if multiplier > max_multiplier:
+                max_multiplier = multiplier
+
+    logger.info(
+        "graph_rerank metrics-aware: boosted %d/%d chunks "
+        "(alpha=%.2f, max_mult=%.2f, pr_lookup=%d, pr_hits=%d)",
+        boosted_count,
+        len(chunks),
+        alpha,
+        max_multiplier,
+        len(pagerank_lookup),
+        pr_hit_count,
+    )
+    return chunks
+
+
 def chunks_iter_with_score(
     chunks: Iterable[SourceChunk],
 ) -> Iterable[tuple[str, float]]:
