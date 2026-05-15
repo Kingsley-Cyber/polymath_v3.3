@@ -102,11 +102,153 @@ async def get_ollama_models() -> list[ModelInfo]:
 
 
 # ─────────────────────────────────────────────
+# Curated provider catalog + deprecation denylist
+# ─────────────────────────────────────────────
+#
+# Why a curated catalog exists on top of LiteLLM's discovery:
+#
+#   1. Custom-base-URL wildcards in litellm/config.yaml (glm-coding/*,
+#      kimi/*, minimax/*, mimo/*, mimo-coding/*) produce ZERO models
+#      from LiteLLM's pricing DB — LiteLLM only knows about first-party
+#      providers it ships pricing for, not arbitrary OpenAI-compatible
+#      endpoints behind custom base URLs.
+#   2. LiteLLM's pricing DB lags upstream releases. As of the pinned
+#      v1.60.0 image, DeepSeek V4, the latest Claude 4.x line, Gemini
+#      2.5, Magistral, and Pixtral aren't advertised — even though the
+#      wildcard router forwards them correctly at completion time.
+#   3. LiteLLM's pricing DB still advertises models the providers have
+#      sunset (DeepSeek V3 / R1 / chat / coder / reasoner are gone
+#      upstream but show up in discovery). _DEPRECATED_LITELLM_IDS below
+#      strips those before they reach the picker.
+#
+# Maintenance contract: when adding a provider here, ensure the matching
+# wildcard route exists in litellm/config.yaml under the same prefix.
+# Otherwise the model appears in the picker but completion requests 404.
+# When a provider sunsets a SKU upstream, add it to _DEPRECATED_LITELLM_IDS
+# rather than removing it from the curated list (curated is the "we
+# explicitly want this" list; deprecated is the "filter upstream noise"
+# list).
+_DEPRECATED_LITELLM_IDS: set[str] = {
+    # DeepSeek — V3 line + R1/reasoner/chat/coder all sunset in favor
+    # of the V4 line (Flash / Pro). LiteLLM's pricing DB still
+    # advertises these.
+    "deepseek/deepseek-chat",
+    "deepseek/deepseek-coder",
+    "deepseek/deepseek-r1",
+    "deepseek/deepseek-reasoner",
+    "deepseek/deepseek-v3",
+    "deepseek/deepseek-v3.2",
+}
+
+_CURATED_PROVIDER_MODELS: dict[str, list[str]] = {
+    # First-party providers ----------------------------------------------
+    "openai": [
+        "gpt-4o", "gpt-4o-mini",
+        "gpt-4-turbo",
+        "o1", "o1-mini", "o3", "o3-mini", "o4-mini",
+        "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
+        "gpt-3.5-turbo",
+    ],
+    "anthropic": [
+        "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-opus-4",
+        "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest",
+        "claude-3-opus-latest",
+    ],
+    "deepseek": [
+        # V4 line — wired for thinking-mode dispatch in Phase 27.
+        "deepseek-v4-flash", "deepseek-v4-pro",
+    ],
+    "gemini": [
+        "gemini-2.5-pro", "gemini-2.5-flash",
+        "gemini-2.0-flash", "gemini-2.0-flash-lite",
+        "gemini-1.5-pro", "gemini-1.5-flash",
+    ],
+    "mistral": [
+        "mistral-large-latest", "mistral-small-latest",
+        # Magistral reasoning family — wired for thinking-mode dispatch
+        # in Phase 28 (commit 0b918bb).
+        "magistral-small-latest", "magistral-medium-latest",
+        "codestral-latest",
+        # Pixtral vision — wired into supports_vision()
+        "pixtral-large-latest", "pixtral-12b",
+        "ministral-3b-latest", "ministral-8b-latest",
+    ],
+    # ── Custom-base-URL providers (must match litellm/config.yaml) ──
+    # z.ai GLM Coding endpoint. Route prefix is "glm-coding", NOT "zai".
+    # GLM is wired for thinking-mode dispatch in Phase 28 (commit 2ef7cc2).
+    "glm-coding": [
+        "glm-4.6", "glm-4.5", "glm-4-plus",
+        "glm-5", "glm-5-air",
+        # Vision variants
+        "glm-4.5v", "glm-5v-turbo",
+    ],
+    # Moonshot Kimi via OpenAI-compatible endpoint.
+    "kimi": [
+        "kimi-k2-0905-preview", "kimi-latest",
+        "moonshot-v1-128k", "moonshot-v1-32k", "moonshot-v1-8k",
+    ],
+    "minimax": [
+        "MiniMax-M1", "MiniMax-Text-01", "abab6.5s-chat",
+    ],
+    "mimo": [
+        # Xiaomi MiMo-v2 base endpoint. Update suffixes when confirmed
+        # against the upstream catalog — the curated guarantee is "name
+        # routes via wildcard", not "is the canonical SKU."
+        "mimo-7b-rl",
+    ],
+    "mimo-coding": [
+        # Xiaomi MiMo-v2 coding endpoint (SGP token-plan).
+        "mimo-coding-7b",
+    ],
+    # OpenRouter intentionally OMITTED. The aggregator has ~300 models;
+    # the user enrolls specific openrouter/<provider>/<model> strings
+    # via the pool UI rather than dumping the whole catalog here.
+}
+
+
+async def get_curated_provider_models() -> list[ModelInfo]:
+    """Emit ModelInfo for every (provider, model) pair in the curated catalog.
+
+    Always emitted — the backend container does NOT have provider API keys
+    in its env (those live exclusively in the LiteLLM container), so we
+    can't filter by "is the key set." The `reachable=true` filter in
+    list_models() does the per-user trim against the user's actual pool
+    entries, which is the more meaningful gate anyway.
+
+    Display names go through _make_display_name() so the picker shows
+    e.g. "Glm Coding / Glm 4.6" not the raw id. Provider field on the
+    ModelInfo matches the route prefix in litellm/config.yaml.
+    """
+    models: list[ModelInfo] = []
+    for provider, names in _CURATED_PROVIDER_MODELS.items():
+        for name in names:
+            model_id = f"{provider}/{name}"
+            models.append(ModelInfo(
+                id=model_id,
+                name=_make_display_name(model_id),
+                provider=provider,
+                source="curated",
+                type="embedding" if _is_embedding_name(name) else "chat",
+                context_length=None,
+                dimension=None,
+            ))
+    logger.debug("Curated catalog: %d models across %d providers",
+                 len(models), len(_CURATED_PROVIDER_MODELS))
+    return models
+
+
+# ─────────────────────────────────────────────
 # SOURCE 2: LiteLLM (cloud + configured providers)
 # ─────────────────────────────────────────────
 
 async def get_litellm_models() -> list[ModelInfo]:
-    """Fetch configured models from LiteLLM proxy /models."""
+    """Fetch configured models from LiteLLM proxy /models.
+
+    Filters out:
+      - tei/* (surfaced separately via the embedder service /info path)
+      - any id in _DEPRECATED_LITELLM_IDS (providers have sunset these
+        upstream but LiteLLM's pricing DB still lists them)
+    """
     models: list[ModelInfo] = []
     try:
         headers = {}
@@ -126,6 +268,11 @@ async def get_litellm_models() -> list[ModelInfo]:
 
                 # Skip tei/* — local models surfaced via download scanner instead
                 if model_id.startswith("tei/"):
+                    continue
+
+                # Filter deprecated SKUs. The curated catalog above
+                # supplies current replacements where applicable.
+                if model_id in _DEPRECATED_LITELLM_IDS:
                     continue
 
                 provider = model_id.split("/")[0] if "/" in model_id else "unknown"
@@ -274,18 +421,31 @@ def get_local_models() -> list[ModelInfo]:
 def _merge_and_split(
     ollama: list[ModelInfo],
     litellm: list[ModelInfo],
+    curated: list[ModelInfo],
     embedder: list[ModelInfo],
     local: list[ModelInfo],
 ) -> tuple[list[ModelInfo], list[ModelInfo]]:
     """
     Deduplicate by id, split into chat vs embedding lists.
-    Priority: embedder (live) > local (filesystem) > ollama > litellm
-    Embedder wins because it reports the actual loaded model + real dimension.
+
+    Priority (low → high; later writes overwrite earlier on dup id):
+      litellm < curated < ollama < local < embedder
+
+    Rationale:
+      - embedder (live) wins absolutely — it reports the actual loaded
+        model and real introspected dimension.
+      - local + ollama beat catalog sources because they're running on
+        the host and don't depend on an upstream API gate.
+      - curated beats litellm because we maintain it against current
+        provider docs; LiteLLM's bundled pricing DB lags and still
+        advertises sunset SKUs.
     """
     merged: dict[str, ModelInfo] = {}
 
     for m in litellm:
         merged[m.id] = m
+    for m in curated:
+        merged[m.id] = m  # overrides litellm on dup id
     for m in ollama:
         merged[m.id] = m
     for m in local:
@@ -326,9 +486,10 @@ async def list_models(
     matching ollama models from chat_models before returning. Anonymous
     callers see the unfiltered list.
     """
-    ollama_result, litellm_result, embedder_result = await asyncio.gather(
+    ollama_result, litellm_result, curated_result, embedder_result = await asyncio.gather(
         get_ollama_models(),
         get_litellm_models(),
+        get_curated_provider_models(),
         get_embedder_model(),
         return_exceptions=True,
     )
@@ -341,6 +502,10 @@ async def list_models(
         logger.error(f"LiteLLM gather error: {litellm_result}")
         litellm_result = []
 
+    if isinstance(curated_result, Exception):
+        logger.error(f"Curated catalog gather error: {curated_result}")
+        curated_result = []
+
     if isinstance(embedder_result, Exception):
         logger.error(f"Embedder gather error: {embedder_result}")
         embedder_result = []
@@ -351,7 +516,7 @@ async def list_models(
     )
 
     chat_models, embedding_models = _merge_and_split(
-        ollama_result, litellm_result, embedder_result, local_result
+        ollama_result, litellm_result, curated_result, embedder_result, local_result
     )
 
     # Phase F — apply per-user ollama exclusions when authenticated.
@@ -366,9 +531,15 @@ async def list_models(
         except Exception as exc:
             logger.warning("ollama exclusions skipped (%s)", exc)
 
-    # Sprint 3 — ?reachable=true (default): filter the LiteLLM catalog to
+    # Sprint 3 — ?reachable=true (default): filter the cloud catalog to
     # providers the caller has at least one pool entry for. Ollama +
     # embedder paths are always reachable; we only narrow the cloud slice.
+    #
+    # Both `litellm` (LiteLLM's pricing DB) and `curated` (our maintained
+    # catalog of currently-supported provider SKUs) are gated through
+    # this filter because they each represent "could route via LiteLLM
+    # IF the user has the provider's API key + pool entry." Ollama +
+    # local + embedder pass through unconditionally — they're on-host.
     if reachable and current_user:
         try:
             from services.settings import settings_service
@@ -380,10 +551,12 @@ async def list_models(
                 if isinstance(e, dict) and e.get("enabled", True)
             }
             if pool_providers:
+                _CLOUD_SOURCES = {"litellm", "curated"}
+
                 def _keep(m: ModelInfo) -> bool:
-                    if m.source != "litellm":
-                        return True  # ollama + local always kept
-                    # LiteLLM model ids are "provider/model" → check the prefix
+                    if m.source not in _CLOUD_SOURCES:
+                        return True  # ollama + local + embedder always kept
+                    # Cloud model ids are "provider/model" → check the prefix
                     provider = (m.id.split("/", 1)[0] or "").lower() if "/" in m.id else ""
                     return provider in pool_providers or m.provider.lower() in pool_providers
                 chat_models = [m for m in chat_models if _keep(m)]
