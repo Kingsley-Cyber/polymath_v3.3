@@ -3946,12 +3946,23 @@ async def discover(
                 if not entity_name:
                     return []
                 try:
+                    # retrieval_k=8 gives the cross-encoder a wider
+                    # pre-rerank pool (entity-name queries are narrow
+                    # by design, so the underlying vector+BM25 fusion
+                    # has less material to start with; widening the
+                    # pool gives the reranker a chance to find a
+                    # semantic match the narrow query would miss).
+                    # final_top_k=5 caps the post-rerank output so the
+                    # _PACKET_MAX_EVIDENCE=6 synthesis cap still has
+                    # room for the highest-quality 1-2 chunks from
+                    # the base retrieval pool.
                     result_inner = await _retriever.retrieve(
                         query=entity_name,
                         corpus_ids=[corpus_id],
                         retrieval_tier=agentic_tier,
                         collections=None,
-                        final_top_k=5,  # bounded per-entity recall
+                        retrieval_k=8,
+                        final_top_k=5,
                         rerank_enabled=True,
                     )
                 except Exception as exc:
