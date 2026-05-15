@@ -23,6 +23,10 @@ from typing import Any, Literal
 from config import get_settings
 from models.schemas import ChatRequest, ModelOverrides, RetrievalTier
 from services.graph import neo4j_reader
+from services.ingestion.admission import (
+    release_ingest_slot as _release_ingest_slot,
+    try_acquire_ingest_slot as _try_acquire_ingest_slot,
+)
 from services.ingestion_service import ingestion_service
 from services.retriever import retriever_orchestrator
 
@@ -980,26 +984,47 @@ async def _ingest_bytes(
     base_cfg_dict = corpus.get("default_ingestion_config") or {}
     cfg = IngestionConfig(**base_cfg_dict)
 
-    # model="" matches the HTTP ingest router: it means "use the pools
-    # configured on the corpus's IngestionConfig" rather than the
-    # back-compat single-model override.
-    result = await ingestion_service.ingest(
-        data=data,
-        filename=filename,
-        corpus_id=corpus_id,
-        user_id=user_id,
-        ingestion_config=cfg,
-        model="",
-    )
-    return {
-        "status": "queued",
-        "doc_id": result.doc_id,
-        "job_id": result.job_id,
-        "corpus_id": corpus_id,
-        "filename": result.filename,
-        "source_tier": result.source_tier,
-        "size_bytes": len(data),
-    }
+    # Admission gate — share the per-process slot pool with the HTTP router
+    # so an agent looping over 500 docs through MCP can't bypass the
+    # INGEST_MAX_ACTIVE_JOBS cap that the 0a47b8f fix established for the
+    # multipart path. Acquire BEFORE handing the bytes to ingestion_service
+    # so the work that materializes parser state / spawns extractors doesn't
+    # start until we know we have a slot.
+    if not await _try_acquire_ingest_slot():
+        cap = get_settings().INGEST_MAX_ACTIVE_JOBS
+        raise ValueError(
+            f"Ingest queue is full (cap={cap}); retry shortly. "
+            "MCP shares the gate with the HTTP /ingest path."
+        )
+    try:
+        # model="" matches the HTTP ingest router: it means "use the pools
+        # configured on the corpus's IngestionConfig" rather than the
+        # back-compat single-model override.
+        result = await ingestion_service.ingest(
+            data=data,
+            filename=filename,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            ingestion_config=cfg,
+            model="",
+        )
+        return {
+            "status": "queued",
+            "doc_id": result.doc_id,
+            "job_id": result.job_id,
+            "corpus_id": corpus_id,
+            "filename": result.filename,
+            "source_tier": result.source_tier,
+            "size_bytes": len(data),
+        }
+    finally:
+        # Slot is held for the full duration of ingest() — unlike the
+        # HTTP router, the MCP path awaits the entire pipeline rather
+        # than scheduling _run() as a background task, so the slot
+        # release naturally lines up with "ingest finished." The HTTP
+        # router's _run()'s finally block does the equivalent release
+        # for the background-task case (see routers/ingestion.py:1014).
+        await _release_ingest_slot()
 
 
 async def polymath_ingest_from_url(

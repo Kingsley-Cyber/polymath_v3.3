@@ -103,6 +103,7 @@ _install_stubs_if_missing()
 
 
 from routers import ingestion as ing  # noqa: E402
+from services.ingestion import admission as _admission  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -110,12 +111,12 @@ def reset_slot_counter():
     """Tests share module-level _INGEST_ACTIVE_COUNT; reset between
     runs so they don't bleed state. We also restore the original
     limit at the end in case a test shrinks it."""
-    original_count = ing._INGEST_ACTIVE_COUNT
-    original_limit = ing._INGEST_ACTIVE_LIMIT
-    ing._INGEST_ACTIVE_COUNT = 0
+    original_count = _admission._ingest_active_count
+    original_limit = _admission.INGEST_ACTIVE_LIMIT
+    _admission._ingest_active_count = 0
     yield
-    ing._INGEST_ACTIVE_COUNT = original_count
-    ing._INGEST_ACTIVE_LIMIT = original_limit
+    _admission._ingest_active_count = original_count
+    _admission.INGEST_ACTIVE_LIMIT = original_limit
 
 
 # ── Slot primitives ─────────────────────────────────────────────────
@@ -124,43 +125,43 @@ def reset_slot_counter():
 @pytest.mark.asyncio
 async def test_slot_acquire_increments_count():
     """_try_acquire_ingest_slot returns True + bumps the active counter."""
-    assert ing._INGEST_ACTIVE_COUNT == 0
+    assert _admission._ingest_active_count == 0
     ok = await ing._try_acquire_ingest_slot()
     assert ok is True
-    assert ing._INGEST_ACTIVE_COUNT == 1
+    assert _admission._ingest_active_count == 1
 
 
 @pytest.mark.asyncio
 async def test_slot_release_decrements_count():
     """_release_ingest_slot decrements but never goes below 0."""
     await ing._try_acquire_ingest_slot()
-    assert ing._INGEST_ACTIVE_COUNT == 1
+    assert _admission._ingest_active_count == 1
     await ing._release_ingest_slot()
-    assert ing._INGEST_ACTIVE_COUNT == 0
+    assert _admission._ingest_active_count == 0
     # Double-release is safe (defensive on early-failure paths that
     # might race with the _run() task's own release).
     await ing._release_ingest_slot()
-    assert ing._INGEST_ACTIVE_COUNT == 0
+    assert _admission._ingest_active_count == 0
 
 
 @pytest.mark.asyncio
 async def test_slot_acquire_returns_false_at_limit():
     """Once active count hits the limit, further acquires fail."""
-    ing._INGEST_ACTIVE_LIMIT = 3
+    _admission.INGEST_ACTIVE_LIMIT = 3
     for _ in range(3):
         assert await ing._try_acquire_ingest_slot() is True
-    assert ing._INGEST_ACTIVE_COUNT == 3
+    assert _admission._ingest_active_count == 3
     # Fourth acquire fails — this is the 429 path.
     ok = await ing._try_acquire_ingest_slot()
     assert ok is False
     # Counter unchanged.
-    assert ing._INGEST_ACTIVE_COUNT == 3
+    assert _admission._ingest_active_count == 3
 
 
 @pytest.mark.asyncio
 async def test_release_frees_slot_for_next_acquire():
     """A successful release allows the next acquire to succeed."""
-    ing._INGEST_ACTIVE_LIMIT = 1
+    _admission.INGEST_ACTIVE_LIMIT = 1
     assert await ing._try_acquire_ingest_slot() is True
     assert await ing._try_acquire_ingest_slot() is False  # full
     await ing._release_ingest_slot()
@@ -178,7 +179,7 @@ async def test_burst_of_acquires_respects_limit():
     path WITHOUT having read their file bodies into RAM (which is
     the entire point of the reorder fix)."""
     import asyncio
-    ing._INGEST_ACTIVE_LIMIT = 16
+    _admission.INGEST_ACTIVE_LIMIT = 16
 
     async def attempt() -> bool:
         return await ing._try_acquire_ingest_slot()
@@ -188,7 +189,7 @@ async def test_burst_of_acquires_respects_limit():
     failures = sum(1 for r in results if r is False)
     assert successes == 16
     assert failures == 484
-    assert ing._INGEST_ACTIVE_COUNT == 16
+    assert _admission._ingest_active_count == 16
 
 
 # ── Early-failure release contract ──────────────────────────────────
@@ -200,16 +201,16 @@ async def test_early_failure_release_pattern_keeps_accounting_honest():
     If the read fails or the body is empty, the explicit release in
     the except / if-not-data branches keeps the active count
     accurate. This test simulates that pattern manually."""
-    ing._INGEST_ACTIVE_LIMIT = 2
+    _admission.INGEST_ACTIVE_LIMIT = 2
     # Successful slot acquire.
     assert await ing._try_acquire_ingest_slot() is True
-    assert ing._INGEST_ACTIVE_COUNT == 1
+    assert _admission._ingest_active_count == 1
 
     # Simulate the "empty body" branch.
     empty_body = b""
     if not empty_body:
         await ing._release_ingest_slot()
-    assert ing._INGEST_ACTIVE_COUNT == 0
+    assert _admission._ingest_active_count == 0
 
     # Simulate the "read raised" branch.
     assert await ing._try_acquire_ingest_slot() is True
@@ -217,11 +218,11 @@ async def test_early_failure_release_pattern_keeps_accounting_honest():
         raise OSError("network drop mid-upload")
     except OSError:
         await ing._release_ingest_slot()
-    assert ing._INGEST_ACTIVE_COUNT == 0
+    assert _admission._ingest_active_count == 0
 
     # The slot is genuinely free — a new request gets it.
     assert await ing._try_acquire_ingest_slot() is True
-    assert ing._INGEST_ACTIVE_COUNT == 1
+    assert _admission._ingest_active_count == 1
 
 
 # ── Source-code introspection: confirm the reorder is in place ──────

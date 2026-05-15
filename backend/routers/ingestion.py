@@ -41,28 +41,29 @@ from utils.streaming import build_sse_done, build_sse_error
 _INGEST_BG_TASKS: set[asyncio.Task] = set()
 _BACKFILL_BG_TASKS: set[asyncio.Task] = set()
 _SECRET_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b")
-_INGEST_ACTIVE_LIMIT = max(1, int(get_settings().INGEST_MAX_ACTIVE_JOBS))
-_INGEST_ACTIVE_COUNT = 0
-_INGEST_ADMISSION_LOCK = asyncio.Lock()
+# Slot primitives extracted to services/ingestion/admission.py so the
+# MCP write surface (polymath_mcp/tools.py:_ingest_bytes) can share
+# the same gate. Pre-extraction the MCP path bypassed the HTTP slot
+# check entirely — see audit Bug #1. We re-export the same names
+# (`_try_acquire_ingest_slot`, `_release_ingest_slot`,
+# `_INGEST_ACTIVE_LIMIT`, `_INGEST_ACTIVE_COUNT`) so the existing
+# source-code pin in test_ingest_slot_ordering.py keeps catching
+# regressions.
+from services.ingestion import admission as _admission
+
+_INGEST_ACTIVE_LIMIT = _admission.INGEST_ACTIVE_LIMIT
+_try_acquire_ingest_slot = _admission.try_acquire_ingest_slot
+_release_ingest_slot = _admission.release_ingest_slot
+
+
+def _get_active_count() -> int:
+    """Diagnostic accessor — admin endpoint uses this."""
+    return _admission.active_count()
+
 
 # Keep this below frontend/nginx.conf's 300s proxy timeout. OCR is disabled,
 # but layout-heavy documents can still take time before doc_id exists.
 PARSE_DOC_ID_WAIT_SECONDS = 240.0
-
-
-async def _try_acquire_ingest_slot() -> bool:
-    global _INGEST_ACTIVE_COUNT
-    async with _INGEST_ADMISSION_LOCK:
-        if _INGEST_ACTIVE_COUNT >= _INGEST_ACTIVE_LIMIT:
-            return False
-        _INGEST_ACTIVE_COUNT += 1
-        return True
-
-
-async def _release_ingest_slot() -> None:
-    global _INGEST_ACTIVE_COUNT
-    async with _INGEST_ADMISSION_LOCK:
-        _INGEST_ACTIVE_COUNT = max(0, _INGEST_ACTIVE_COUNT - 1)
 
 
 def _safe_ingest_error(exc: Exception) -> str:
