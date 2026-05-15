@@ -235,7 +235,8 @@ async def apply_graph_degree_boost_metrics_aware(
     except Exception as exc:
         logger.warning(
             "graph_rerank metrics-aware: cypher failed (%d chunks): %s",
-            len(chunk_ids), exc,
+            len(chunk_ids),
+            exc,
         )
         return chunks
 
@@ -252,11 +253,25 @@ async def apply_graph_degree_boost_metrics_aware(
                 compute_corpus_change_signature,
                 get_cached_metrics,
             )
+
             for corpus_id in corpus_ids:
                 try:
                     sig = await compute_corpus_change_signature(db, corpus_id)
                     metrics = await get_cached_metrics(db, corpus_id, sig)
                     if metrics is None:
+                        continue
+                    # Defensive: skip PR signal when the graph has no edges.
+                    # Uniform PageRank on 0-edge graphs (e.g. tiny corpora)
+                    # maps every entity to the max pseudo-degree cap, which
+                    # inverts the intended semantics — every chunk gets
+                    # max boost instead of no boost. Falling back to
+                    # degree-only preserves pre-Phase-5a behavior.
+                    if getattr(metrics, "edge_count", 0) == 0:
+                        logger.debug(
+                            "graph_rerank metrics-aware: corpus=%s edge_count=0 "
+                            "— skipping PR lookup (degree-only fallback)",
+                            corpus_id,
+                        )
                         continue
                     for entry in getattr(metrics, "top_pagerank", None) or []:
                         eid = entry.get("entity_id")
@@ -269,7 +284,8 @@ async def apply_graph_degree_boost_metrics_aware(
                 except Exception as exc:
                     logger.debug(
                         "graph_rerank metrics-aware: cache miss corpus=%s: %s",
-                        corpus_id, exc,
+                        corpus_id,
+                        exc,
                     )
         except ImportError as exc:
             # Analytics module unavailable — log once and continue
@@ -341,4 +357,7 @@ def chunks_iter_with_score(
 ) -> Iterable[tuple[str, float]]:
     """Helper for tests — emit (chunk_id, score) pairs."""
     for c in chunks:
-        yield (str(getattr(c, "chunk_id", "") or ""), float(getattr(c, "score", 0.0) or 0.0))
+        yield (
+            str(getattr(c, "chunk_id", "") or ""),
+            float(getattr(c, "score", 0.0) or 0.0),
+        )

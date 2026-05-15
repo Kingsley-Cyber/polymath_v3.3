@@ -229,6 +229,7 @@ async def test_warm_cache_entity_in_top_k_uses_pagerank_signal():
     rows = [{"chunk_id": "c1", "entities": [{"entity_id": "e1", "degree": 3}]}]
     driver = _build_cypher_driver(rows)
     fake_metrics = SimpleNamespace(
+        edge_count=42,  # non-zero so the sparse-graph guard doesn't fire
         top_pagerank=[{"entity_id": "e1", "score": 0.08}],
     )
     with (
@@ -306,6 +307,7 @@ async def test_max_degree_cap_clips_outlier_pagerank():
     driver = _build_cypher_driver(rows)
     # PR=0.5 → pseudo_degree=250 → capped to MAX_DEGREE_CAP=50.
     fake_metrics = SimpleNamespace(
+        edge_count=42,  # non-zero — sparse-graph guard inactive
         top_pagerank=[{"entity_id": "e1", "score": 0.5}],
     )
     with (
@@ -367,9 +369,11 @@ async def test_multi_corpus_merges_top_pagerank_lookups():
     driver = _build_cypher_driver(rows)
     # Two corpora; e_shared appears in both with different scores.
     metrics_a = SimpleNamespace(
+        edge_count=20,
         top_pagerank=[{"entity_id": "e_shared", "score": 0.03}],
     )
     metrics_b = SimpleNamespace(
+        edge_count=35,
         top_pagerank=[{"entity_id": "e_shared", "score": 0.09}],  # higher
     )
     metrics_by_corpus = {"corp-A": metrics_a, "corp-B": metrics_b}
@@ -409,3 +413,125 @@ async def test_zero_degree_no_pagerank_skips_boost():
             chunks=chunks, corpus_ids=["corp-1"], neo4j_driver=driver, db=MagicMock(),
         )
     assert chunks[0].score == 1.0  # unchanged
+
+
+# ── Phase 5a follow-up — sparse-graph guard ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_zero_edge_corpus_skips_pagerank_contribution():
+    """The bug the debugging review caught: a 0-edge corpus produces
+    a uniform NetworkX PageRank distribution (1/N per node). With
+    PR=0.111 and _PR_TO_DEGREE_SCALE=500, the pseudo-degree is ~55,
+    which caps to MAX_DEGREE_CAP=50 → multiplier ≈ 1.59. That would
+    boost EVERY entity-mentioning chunk to maximum even though the
+    graph has no structure.
+
+    With the edge_count==0 guard the PR lookup is skipped for that
+    corpus and the multiplier falls back to degree-only behavior
+    (multiplier=1.0 when degree=0)."""
+    chunks = [_StubChunk("c1", 1.0)]
+    # Entity has 0 local degree (no RELATES_TO edges in the corpus).
+    rows = [{"chunk_id": "c1", "entities": [{"entity_id": "e1", "degree": 0}]}]
+    driver = _build_cypher_driver(rows)
+    # Metrics with uniform PR (simulates a sparse / 0-edge corpus).
+    # If the guard wasn't there, e1's PR of 0.111 would multiply by
+    # 500 → 55 → cap to 50 → multiplier 1.59.
+    fake_metrics = SimpleNamespace(
+        edge_count=0,
+        top_pagerank=[
+            {"entity_id": "e1", "score": 0.111},
+            {"entity_id": "e2", "score": 0.111},
+        ],
+    )
+    with (
+        patch("services.graph.analytics.compute_corpus_change_signature",
+              new=AsyncMock(return_value="sig")),
+        patch("services.graph.analytics.get_cached_metrics",
+              new=AsyncMock(return_value=fake_metrics)),
+    ):
+        await graph_rerank.apply_graph_degree_boost_metrics_aware(
+            chunks=chunks, corpus_ids=["corp-sparse"],
+            neo4j_driver=driver, db=MagicMock(),
+        )
+    # Guard fired → PR lookup skipped → degree-only → degree=0 → no
+    # multiplier applied → score unchanged.
+    assert chunks[0].score == 1.0
+
+
+@pytest.mark.asyncio
+async def test_multi_corpus_only_dense_corpus_contributes_pr():
+    """Two-corpus query: one dense (edge_count > 0), one sparse
+    (edge_count = 0). The sparse corpus's uniform PR must NOT pollute
+    the merged pagerank_lookup. Only the dense corpus contributes."""
+    chunks = [_StubChunk("c1", 1.0)]
+    rows = [{"chunk_id": "c1", "entities": [{"entity_id": "e_in_dense", "degree": 5}]}]
+    driver = _build_cypher_driver(rows)
+    sparse_metrics = SimpleNamespace(
+        edge_count=0,
+        top_pagerank=[
+            # If this leaked into the lookup it would dominate
+            # (pseudo_degree = 0.111 * 500 ≈ 55 → caps to 50).
+            {"entity_id": "e_in_dense", "score": 0.111},
+        ],
+    )
+    dense_metrics = SimpleNamespace(
+        edge_count=42,  # actual graph has edges
+        top_pagerank=[
+            # Modest real PR — pseudo_degree = 0.02 * 500 = 10.
+            {"entity_id": "e_in_dense", "score": 0.02},
+        ],
+    )
+    metrics_by_corpus = {"corp-sparse": sparse_metrics, "corp-dense": dense_metrics}
+
+    async def fake_get(_db, corpus_id, _sig):
+        return metrics_by_corpus.get(corpus_id)
+
+    with (
+        patch("services.graph.analytics.compute_corpus_change_signature",
+              new=AsyncMock(return_value="sig")),
+        patch("services.graph.analytics.get_cached_metrics", new=fake_get),
+    ):
+        await graph_rerank.apply_graph_degree_boost_metrics_aware(
+            chunks=chunks, corpus_ids=["corp-sparse", "corp-dense"],
+            neo4j_driver=driver, db=MagicMock(),
+        )
+    # Combined signal = max(min(degree=5, 50), min(pseudo=10, 50)) = 10.
+    # Multiplier = 1 + 0.15 * log1p(10).
+    expected = 1.0 + 0.15 * math.log1p(10)
+    assert chunks[0].score == pytest.approx(expected)
+    # Sanity check: this is substantially LESS than the inflated
+    # multiplier the sparse corpus would have produced if its PR
+    # had been merged into the lookup (which would have given
+    # pseudo_degree = min(55, 50) = 50, multiplier ≈ 1.59).
+    inflated_if_buggy = 1.0 + 0.15 * math.log1p(graph_rerank.MAX_DEGREE_CAP)
+    assert chunks[0].score < inflated_if_buggy
+
+
+@pytest.mark.asyncio
+async def test_zero_edge_corpus_still_uses_local_degree():
+    """Even with the 0-edge guard, if a chunk's mentioned entity has
+    a non-zero local degree (which can only happen if Neo4j has more
+    edges than the cache recorded — schema-drift scenario), the
+    degree path still applies its multiplier. The guard only skips
+    the PR contribution; degree is independent."""
+    chunks = [_StubChunk("c1", 1.0)]
+    rows = [{"chunk_id": "c1", "entities": [{"entity_id": "e1", "degree": 8}]}]
+    driver = _build_cypher_driver(rows)
+    fake_metrics = SimpleNamespace(
+        edge_count=0,  # cache says 0 edges
+        top_pagerank=[{"entity_id": "e1", "score": 0.111}],  # uniform PR
+    )
+    with (
+        patch("services.graph.analytics.compute_corpus_change_signature",
+              new=AsyncMock(return_value="sig")),
+        patch("services.graph.analytics.get_cached_metrics",
+              new=AsyncMock(return_value=fake_metrics)),
+    ):
+        await graph_rerank.apply_graph_degree_boost_metrics_aware(
+            chunks=chunks, corpus_ids=["corp-1"],
+            neo4j_driver=driver, db=MagicMock(),
+        )
+    # PR skipped, degree=8 contributes → multiplier = 1 + 0.15 * log1p(8).
+    expected = 1.0 + 0.15 * math.log1p(8)
+    assert chunks[0].score == pytest.approx(expected)
