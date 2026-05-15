@@ -293,22 +293,42 @@ export function ChatInput({
     }
   };
 
-  const handleFileSelect = async (files: FileList | null) => {
+  /**
+   * Phase 29 — paperclip path is now PER-TURN ATTACHMENTS, not corpus
+   * ingestion. Files added via the paperclip stay in component state
+   * until the user hits Send, at which point they ride on the chat
+   * request as multimodal content. They are NOT uploaded to the
+   * corpus. For folder-style bulk ingestion, see handleFolderSelect.
+   */
+  const handleFileSelect = (files: FileList | null) => {
     if (!files || files.length === 0) return;
-
     const newFiles = Array.from(files);
-    setAttachments((prev) => [...prev, ...newFiles]);
+    setAttachments((prev) => {
+      // Hard cap mirrors backend ATTACHMENT_MAX_COUNT=4. We accept up
+      // to the cap; any overflow gets dropped silently — the user
+      // sees their pill row stop growing at 4.
+      const combined = [...prev, ...newFiles];
+      return combined.slice(0, 4);
+    });
+  };
 
-    // Upload files if handler provided
-    if (onFileUpload) {
-      setUploading(true);
-      try {
-        await onFileUpload(newFiles);
-      } catch (error) {
-        console.error("File upload failed:", error);
-      } finally {
-        setUploading(false);
-      }
+  /**
+   * Folder picker — bulk corpus ingestion path. Keeps the old
+   * onFileUpload contract because folder uploads are inherently
+   * corpus-shaped (you don't multimodal-attach a 500-file folder
+   * to one chat turn).
+   */
+  const handleFolderSelect = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    if (!onFileUpload) return;
+    const newFiles = Array.from(files);
+    setUploading(true);
+    try {
+      await onFileUpload(newFiles);
+    } catch (error) {
+      console.error("Folder upload failed:", error);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -330,17 +350,30 @@ export function ChatInput({
 
     if (entries.length === 0) {
       // Older browsers / non-dnd sources — fall back to flat file list.
+      // Treat as per-turn attachments (the safer default for raw files).
       handleFileSelect(e.dataTransfer.files);
       return;
     }
 
+    // Phase 29 routing — if ANY dropped entry is a directory, treat the
+    // whole drop as a corpus-ingestion event (calls onFileUpload). If
+    // all entries are individual files, treat as per-turn attachments.
+    // This matches the menu split: paperclip = per-turn, folder button
+    // = corpus. Dragging a folder onto chat continues to ingest as
+    // before; dragging files now stages them for the next message.
+    const hasDirectory = entries.some((en) => en.isDirectory);
+
     const collected: File[] = [];
     await Promise.all(entries.map((en) => walkEntry(en, collected)));
 
-    // Convert to a FileList-shaped object for handleFileSelect.
     const dt = new DataTransfer();
     collected.forEach((f) => dt.items.add(f));
-    handleFileSelect(dt.files);
+
+    if (hasDirectory) {
+      handleFolderSelect(dt.files);
+    } else {
+      handleFileSelect(dt.files);
+    }
   };
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
@@ -493,7 +526,7 @@ export function ChatInput({
             // @ts-expect-error — webkitdirectory is non-standard but supported
             webkitdirectory=""
             directory=""
-            onChange={(e) => handleFileSelect(e.target.files)}
+            onChange={(e) => handleFolderSelect(e.target.files)}
             className="hidden"
           />
           <input

@@ -6,7 +6,7 @@
 import asyncio
 import json
 import logging
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 import httpx
 from config import get_settings
@@ -63,7 +63,7 @@ class LLMService:
 
     def _build_request_body(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         model: str,
         overrides: ModelOverrides | None = None,
         stream: bool = True,
@@ -242,7 +242,7 @@ class LLMService:
 
     async def complete_sync(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         model: str | None = None,
         temperature: float = 0.3,
         max_tokens: int = 1024,
@@ -346,7 +346,13 @@ class LLMService:
 
     async def stream_chat(
         self,
-        messages: list[dict[str, str]],
+        # Phase 29 — message content may be a plain string (text-only)
+        # OR a list of multimodal content blocks ({"type": "text", ...}
+        # or {"type": "image_url", ...}). The chat orchestrator sends
+        # the multimodal shape only for the final user message when
+        # image attachments are present; all other messages stay text.
+        # LiteLLM passes both shapes through unchanged.
+        messages: list[dict[str, Any]],
         model: str | None = None,
         overrides: ModelOverrides | None = None,
         tools: list[dict] | None = None,
@@ -514,7 +520,7 @@ class LLMService:
 
     async def complete_chat(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         model: str | None = None,
         overrides: ModelOverrides | None = None,
     ) -> str:

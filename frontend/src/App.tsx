@@ -183,10 +183,31 @@ function App() {
   };
 
   const handleSend = useCallback(
-    async (message: string, _attachments?: File[]) => {
+    async (message: string, attachedFiles?: File[]) => {
       console.log("handleSend triggered");
       const chat = useChatStore.getState();
       const settings = useSettingsStore.getState();
+
+      // Phase 29 — convert paperclip-staged File[] into the
+      // ChatAttachment shape the backend expects. Images become base64;
+      // text files become UTF-8 strings. Anything unsupported (PDF /
+      // DOCX / etc.) is rejected here with a toast — fail loud at the
+      // entrypoint instead of silently dropping the file.
+      let attachments: import("./types/chat").ChatAttachment[] | undefined;
+      if (attachedFiles && attachedFiles.length > 0) {
+        const { filesToAttachments } = await import("./lib/attachments");
+        const { ok, failed } = await filesToAttachments(attachedFiles);
+        if (failed.length > 0) {
+          const msg = failed
+            .map((f) => `${f.filename}: ${f.reason}`)
+            .join("\n");
+          chat.setError(`Some attachments couldn't be processed:\n${msg}`);
+          // If ALL failed, abort the turn. If only some failed, continue
+          // with the successful ones — the user still gets their message.
+          if (ok.length === 0) return;
+        }
+        attachments = ok.length > 0 ? ok : undefined;
+      }
 
       let cid = chat.activeConversationId;
       if (!cid) {
@@ -223,6 +244,10 @@ function App() {
       const request: ChatRequest = {
         conversation_id: cid,
         message,
+        // Phase 29 — per-turn attachments (images base64, text UTF-8).
+        // Omitted entirely when there are none; backend treats absence
+        // as "no multimodal content" and runs the regular text pipeline.
+        attachments,
         corpus_ids: settings.selectedCorpusIds,
         retrieval_tier: settings.retrievalTier,
         collections: settings.selectedCollectionIds,

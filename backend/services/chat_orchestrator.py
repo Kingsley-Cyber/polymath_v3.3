@@ -564,6 +564,47 @@ class ChatOrchestrator:
             if auto.get("auto_selected"):
                 logger.info("Code lane: auto-injected skill %s", auto["name"])
 
+        # Phase 29 — inline text-file attachments into the user message
+        # BEFORE the RAG augmentation runs. Text files (.md/.txt/code
+        # files) are part of the user's request context; the model
+        # should see them alongside RAG sources. Image attachments are
+        # handled separately at the multimodal-dict conversion step
+        # below — they can't be flattened to text.
+        attachments = list(request.attachments or [])
+        text_attachments = [a for a in attachments if a.kind == "text"]
+        image_attachments = [a for a in attachments if a.kind == "image"]
+        if text_attachments:
+            inlined_parts: list[str] = []
+            for att in text_attachments:
+                # Cap per-file text at ~32K chars (~8K tokens). Truncation
+                # is honest — show the prefix and stamp a marker so the
+                # model knows the file was cut off.
+                body_text = att.content
+                truncated = False
+                if len(body_text) > 32_000:
+                    body_text = body_text[:32_000]
+                    truncated = True
+                marker = (
+                    f"\n[...content truncated — file was {att.size_bytes} bytes]"
+                    if truncated
+                    else ""
+                )
+                inlined_parts.append(
+                    f"<attached_file name=\"{att.filename}\" "
+                    f"mime=\"{att.mime_type}\">\n{body_text}{marker}\n</attached_file>"
+                )
+            attachments_block = "\n\n".join(inlined_parts)
+            # Prepend the attachments block so the user's question reads
+            # last (most-recent / highest-attention position). If the
+            # user's text is empty (attachment-only turn), the joint
+            # validator ensured at least one attachment exists.
+            existing_text = (user_message.content or "").strip()
+            user_message.content = (
+                f"{attachments_block}\n\n{existing_text}"
+                if existing_text
+                else attachments_block
+            )
+
         if sources or facts or active_skills_dicts or analysis_text:
             user_message.content = context_manager.build_augmented_prompt(
                 query=user_message.content,
@@ -637,13 +678,50 @@ class ChatOrchestrator:
             # Convert messages to dict format for LLM. Baseline system prompt
             # (Phase 23) is prepended every turn so style/length/anti-list
             # guidance survives regardless of whether reasoning mode is set.
-            message_dicts = [
+            message_dicts: list[dict] = [
                 {"role": "system", "content": POLYMATH_SYSTEM_PROMPT},
                 *(
                     {"role": msg.role, "content": msg.content}
                     for msg in trimmed_messages
                 ),
             ]
+
+            # Phase 29 — multimodal injection for image attachments. The
+            # text content (RAG sources + inlined text-file attachments
+            # + user query) is already on the last user message. Convert
+            # that message's `content` from a plain string to an OpenAI/
+            # LiteLLM multimodal content array: one text block followed
+            # by image_url blocks (one per image attachment). LiteLLM
+            # passes the array through to the upstream provider, which
+            # handles the multimodal completion natively.
+            #
+            # Only the FINAL user message gets multimodal content —
+            # previous turns are history and stay text-only. Attachments
+            # are per-turn (Phase 29 design choice — they don't persist).
+            if image_attachments:
+                for i in range(len(message_dicts) - 1, -1, -1):
+                    if message_dicts[i].get("role") == "user":
+                        text_content = message_dicts[i].get("content") or ""
+                        content_blocks: list[dict] = [
+                            {"type": "text", "text": text_content},
+                        ]
+                        for att in image_attachments:
+                            # `data:image/png;base64,xxx` URI format —
+                            # universally accepted by OpenAI/Anthropic/
+                            # Gemini multimodal endpoints, and LiteLLM
+                            # forwards the URL field unchanged.
+                            data_url = (
+                                f"data:{att.mime_type};base64,{att.content}"
+                            )
+                            content_blocks.append({
+                                "type": "image_url",
+                                "image_url": {"url": data_url},
+                            })
+                        message_dicts[i] = {
+                            "role": "user",
+                            "content": content_blocks,
+                        }
+                        break
 
             assistant_content = ""
             assistant_thinking = ""

@@ -96,6 +96,50 @@ class ModelOverrides(BaseModel):
     )
 
 
+class ChatAttachment(BaseModel):
+    """Per-turn attachment riding on a chat request (Phase 29).
+
+    Attachments are CHAT-TURN context, NOT corpus ingestion. They live
+    on this single ChatRequest and are gone after the turn. Two kinds
+    are supported:
+
+      - kind="image": content is base64 (no `data:...;base64,` prefix);
+        mime_type drives the data-URL the LLM sees. Image data is sent
+        as a multimodal `image_url` block.
+      - kind="text": content is UTF-8 plain text (NOT base64).
+        Inlined into the augmented prompt alongside RAG sources so the
+        model reads it as additional textual context.
+
+    Out-of-scope for v1: PDF, DOCX, PPTX. The right cross-provider
+    path for those is text-extract at the frontend before send.
+    Native PDF support varies by provider and is deferred.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=False)
+
+    filename: str = Field(..., min_length=1, max_length=240)
+    mime_type: str = Field(..., min_length=1, max_length=120)
+    size_bytes: int = Field(..., ge=0, le=20 * 1024 * 1024)
+    kind: Literal["image", "text"]
+    content: str = Field(..., min_length=1)
+
+    @field_validator("content")
+    @classmethod
+    def _bound_content_length(cls, value: str) -> str:
+        # Per-attachment hard cap. 20MB is the file-size ceiling
+        # (validated above); the content string is base64 for images
+        # (~33% inflation over raw bytes) or raw UTF-8 for text. We cap
+        # the string length at ~28MB to leave room for the base64
+        # expansion of a 20MB binary.
+        max_len = 28 * 1024 * 1024
+        if len(value) > max_len:
+            raise ValueError(
+                f"attachment content exceeds {max_len} chars "
+                f"(got {len(value)})"
+            )
+        return value
+
+
 class ChatRequest(BaseModel):
     """POST /api/chat request body."""
 
@@ -104,7 +148,24 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = Field(
         default=None, description="Existing conversation ID (null for new)"
     )
-    message: str = Field(..., min_length=1, description="User message content")
+    message: str = Field(
+        ...,
+        # Phase 29 — empty message is OK iff attachments are present;
+        # the field validator below enforces that joint constraint.
+        # Keep min_length=0 here so Pydantic accepts the empty string
+        # and the validator gives the clearer error message.
+        min_length=0,
+        description="User message content (may be empty when attachments are present)",
+    )
+    attachments: list[ChatAttachment] | None = Field(
+        default=None,
+        description=(
+            "Per-turn attachments (images, text files). Max 4 per turn. "
+            "Images are sent as multimodal image_url blocks; text files "
+            "are inlined into the augmented prompt as additional context. "
+            "These do NOT get ingested into the corpus."
+        ),
+    )
     corpus_ids: list[str] | None = Field(
         default=None, description="Corpora to scope search (max 3)"
     )
@@ -137,6 +198,30 @@ class ChatRequest(BaseModel):
             if not ObjectId.is_valid(v):
                 raise ValueError(f"Invalid ObjectId format: {v}")
         return v
+
+    @field_validator("attachments")
+    @classmethod
+    def validate_attachments(cls, v):
+        """Hard cap: max 4 attachments per turn. Beyond that, the
+        request payload gets large enough to risk timeouts and the
+        LLM context budget gets crowded out."""
+        if v is not None and len(v) > 4:
+            raise ValueError("Maximum 4 attachments per chat turn.")
+        return v
+
+    @model_validator(mode="after")
+    def _require_message_or_attachments(self):
+        """Phase 29 — message can be empty if at least one attachment is
+        present (e.g., 'what is this image?' with the image as the
+        only content). Reject when BOTH are empty."""
+        has_text = bool(self.message and self.message.strip())
+        has_attachments = bool(self.attachments)
+        if not has_text and not has_attachments:
+            raise ValueError(
+                "Chat request must contain either a non-empty message or "
+                "at least one attachment."
+            )
+        return self
 
 
 class ChatChunk(BaseModel):

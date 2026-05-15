@@ -41,9 +41,11 @@ async def chat(
         - type="error": Error occurred
         - type="done": Stream complete
     """
-    # Validate request
-    if not request.message or not request.message.strip():
-        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    # Phase 29 — message-or-attachments joint constraint is enforced by
+    # the model validator on ChatRequest, so we no longer reject empty
+    # messages here. An attachment-only turn ("what's in this image?")
+    # is now a valid request. Pydantic raises 422 on the joint-empty
+    # case before this handler ever runs.
 
     # Call orchestrator service and return streaming response.
     # Phase 19.3 — user_id forwarded so the orchestrator can resolve

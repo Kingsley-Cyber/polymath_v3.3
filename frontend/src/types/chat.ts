@@ -346,6 +346,30 @@ export const QUERY_PROFILES: QueryProfileOption[] = [
   },
 ];
 
+/**
+ * Phase 29 — per-turn chat attachment.
+ *
+ * Image: `content` is base64 (NO `data:...;base64,` prefix — the
+ * backend builds the data URI from `mime_type` + `content`).
+ * Text: `content` is UTF-8 plain text (NOT base64). Inlined into
+ * the augmented prompt server-side.
+ *
+ * Attachments live on a single ChatRequest. They are NOT ingested
+ * into the corpus — that's a separate upload path.
+ *
+ * Hard caps enforced server-side:
+ *   - Max 4 attachments per turn
+ *   - Per-attachment size: 20MB binary / 28MB content string
+ *   - Text attachments truncated to ~32K chars at prompt build time
+ */
+export interface ChatAttachment {
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  kind: "image" | "text";
+  content: string;
+}
+
 export interface ChatRequest {
   conversation_id?: string | null;
   message: string;
@@ -358,6 +382,9 @@ export interface ChatRequest {
   active_skill_ids?: string[];
   // Phase 24 — opt-in reasoning cascade (analyst → chat model)
   reasoning_cascade?: boolean;
+  // Phase 29 — per-turn attachments (images, text files). Empty
+  // message is valid when at least one attachment is present.
+  attachments?: ChatAttachment[];
 }
 
 export interface SSEEvent {
