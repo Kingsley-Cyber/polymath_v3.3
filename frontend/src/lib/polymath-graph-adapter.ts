@@ -21,13 +21,16 @@ import {
   NODE_MASSES,
   CORPUS_COLORS,
   EDGE_STYLES,
-  EDGE_COLORS_BY_FAMILY,
   DEFAULT_EDGE_STYLE,
   getCommunityColor,
-  colorForFamily,
-  colorForEntityType,
+  // EDGE_COLORS_BY_FAMILY, colorForFamily, colorForEntityType, and
+  // RelationFamily were used by the old dominant_family / dominant_
+  // relation_family color paths. The constellation refactor replaced
+  // those with a deterministic corpus-hash hue for nodes and a single
+  // violet (EDGE_STYLES.bridges_to) with opacity-by-strength for edges,
+  // so those imports are no longer needed here. Left in sigma-constants
+  // exports so other surfaces can still use them.
   type PolymathNodeKind,
-  type RelationFamily,
 } from "./sigma-constants";
 
 // Pt 5: cap how many outbound bridges any single book can show. Prevents
@@ -186,19 +189,29 @@ function pickNodeColor(
   raw: PolymathRawNode,
   colorMode: ColorMode,
 ): string {
-  // Pt 5 polish — galaxy aesthetic: Book anchors are colored by their
-  // dominant canonical_family (varied star hues, like a real galaxy where
-  // stars vary by spectral class). Falls back to dominant_entity_type for
-  // books whose entities mostly lack canonical_family. Final fallback is
-  // amber NODE_COLORS.Book.
+  // Constellation aesthetic — Books are colored by a deterministic hash
+  // of their corpus_id so same-corpus books cluster visually as a single
+  // hue. Within a corpus, lightness varies with bridge_count so books
+  // aren't clones — well-connected hubs read brighter than leaf books.
   //
-  // Replaces Pt 4 "always amber" override per user feedback that uniform
-  // color erased the constellation structure.
+  // Replaces the dominant_family / dominant_entity_type chain (those
+  // fields aren't reliably populated upstream and produced mostly-amber
+  // graphs).
   if (kind === "Book") {
-    const fam = (raw as any).dominant_family as string | null | undefined;
-    if (fam) return colorForFamily(fam);
-    const etype = (raw as any).dominant_entity_type as string | null | undefined;
-    if (etype) return colorForEntityType(etype);
+    const corpusId = String(
+      (raw as any).source_corpus || raw.source_corpora?.[0] || "",
+    );
+    if (corpusId) {
+      let h = 0;
+      for (const ch of corpusId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+      h = h % 360;
+      // Lightness ramp drives within-corpus differentiation. 5 buckets
+      // means a corpus with many books still produces ≤5 distinct
+      // brightness tiers, keeping the hue identity stable.
+      const bridges = Math.max(0, Number((raw as any).bridge_count ?? 0));
+      const l = 42 + (bridges % 5) * 7; // 42%, 49%, 56%, 63%, 70%
+      return `hsl(${h}, 72%, ${l}%)`;
+    }
     return NODE_COLORS.Book;
   }
   if (colorMode === "corpus") {
@@ -418,35 +431,27 @@ export function polymathToGraphology(
       color = "#a78bfa";
     }
     // Brain View bridges carry a `weight` = shared-entity strength from
-    // /api/graph/brain-view. Pt 5: family-driven color + thin "spaghetti"
-    // size, with alpha by strength.
+    // /api/graph/brain-view. ONE color (EDGE_STYLES.bridges_to violet)
+    // for every book-to-book bridge, with opacity carrying the signal:
+    // faint = weak connection, bright = strong. The old
+    // dominant_relation_family branch produced mostly-gray edges
+    // because that field wasn't reliably populated upstream.
     let size = edgeBaseSize * style.sizeMultiplier;
     let edgeLabel: string | undefined;
     if (rel.predicate === "bridges_to" && typeof rel.weight === "number") {
       const strength = Math.max(0, rel.weight);
-      // Pt 5: max 1.8px (was 5.5px). Baseline 0.35, +0.05 per shared entity.
-      // 1-shared → 0.40px, 5-shared → 0.60px, 30-shared → capped 1.8px.
-      size = Math.min(0.35 + strength * 0.05, 1.8);
-      // Pt 5: color by dominant_relation_family from backend Cypher. Fall
-      // back to WeakAssociation slate so unknown families still render
-      // faintly without dropping the edge.
-      const fam = ((rel as any).dominant_relation_family ||
-        "WeakAssociation") as RelationFamily;
-      const familyColor =
-        EDGE_COLORS_BY_FAMILY[fam] ?? EDGE_COLORS_BY_FAMILY.WeakAssociation;
-      // Pt 3 alpha-by-strength preserved: weak bridges fade.
-      const opacity = Math.max(0.15, Math.min(0.85, 0.15 + strength * 0.08));
-      color = hexToRgba(familyColor, opacity);
-      // Pt 7c: on-edge concept label. Show the strongest shared entity
-      // name with a "+N more" overflow suffix so users see what two
-      // books actually share at a glance. Truncate the head at 24 chars
-      // to match the chip-truncation pattern in BrainViewDashboard so a
-      // long concept name doesn't dominate the canvas.
+      size = Math.min(0.3 + strength * 0.04, 1.2);
+      const opacity = Math.max(0.12, Math.min(0.9, 0.12 + strength * 0.06));
+      color = hexToRgba(EDGE_STYLES.bridges_to.color, opacity);
+      // On-edge concept label: strongest shared entity name with
+      // "+N more" overflow suffix so users see what two books share
+      // at a glance. Only show on stronger bridges (≥3 shared) so
+      // weak edges don't clutter the canvas with labels.
       const tops = rel.top_shared_entities ?? [];
-      if (tops.length > 0) {
+      if (tops.length > 0 && strength >= 3) {
         const rawHead = tops[0];
         const head =
-          rawHead.length > 24 ? rawHead.slice(0, 24) + "…" : rawHead;
+          rawHead.length > 20 ? rawHead.slice(0, 19) + "…" : rawHead;
         const totalShared = rel.shared_entities ?? tops.length;
         const overflow = Math.max(0, totalShared - 1);
         edgeLabel = overflow > 0 ? `${head} +${overflow}` : head;

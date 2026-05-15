@@ -363,6 +363,79 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           </section>
         )}
 
+        {/* Connections — answers "how is this node connected to others?"
+            Reads the rendered graph payload (data.links + data.nodes) and
+            lists each edge incident to the selected node with direction,
+            predicate, and weight. Closes the "dead-end click" gap where
+            selecting a node previously only showed its name. */}
+        {selectedDisplay && data && (
+          <section className="mt-3">
+            <SectionLabel>Connections</SectionLabel>
+            <ul className="space-y-1 font-mono text-[11px] max-h-48 overflow-auto">
+              {(() => {
+                const selId = String(selectedDisplay.id);
+                const rels = (data.links || []).filter((l: any) => {
+                  // Edges arrive either flat (source: "id") or hydrated
+                  // (source: {id}) depending on the renderer pass. Handle
+                  // both shapes so this works in every code path.
+                  const s = String(
+                    typeof l.source === "object" ? l.source?.id : l.source,
+                  );
+                  const t = String(
+                    typeof l.target === "object" ? l.target?.id : l.target,
+                  );
+                  return s === selId || t === selId;
+                });
+                if (rels.length === 0) {
+                  return (
+                    <li className="text-zinc-600 italic">
+                      No visible connections
+                    </li>
+                  );
+                }
+                return rels.slice(0, 25).map((l: any, i: number) => {
+                  const s = String(
+                    typeof l.source === "object" ? l.source?.id : l.source,
+                  );
+                  const t = String(
+                    typeof l.target === "object" ? l.target?.id : l.target,
+                  );
+                  const isSource = s === selId;
+                  const nid = isSource ? t : s;
+                  const node = (data.nodes || []).find(
+                    (n: any) => String(n.id) === String(nid),
+                  );
+                  const name =
+                    node?.display_name ||
+                    node?.label ||
+                    String(nid).slice(0, 20);
+                  return (
+                    <li
+                      key={`${nid}-${i}`}
+                      className="flex items-center gap-2 text-zinc-300"
+                    >
+                      <span className="text-zinc-500" title={isSource ? "outgoing" : "incoming"}>
+                        {isSource ? "→" : "←"}
+                      </span>
+                      <span className="truncate flex-1" title={name}>
+                        {name}
+                      </span>
+                      {l.predicate && l.predicate !== "bridges_to" && (
+                        <span className="text-[10px] px-1 rounded bg-zinc-800 text-zinc-400">
+                          {l.predicate}
+                        </span>
+                      )}
+                      {typeof l.weight === "number" && (
+                        <span className="text-zinc-600">({l.weight})</span>
+                      )}
+                    </li>
+                  );
+                });
+              })()}
+            </ul>
+          </section>
+        )}
+
         {/* Pt 7: Agent Search tab content — input + run + synthesis chips. */}
         {activeTab === "agent" && (
           <AgentSearchTab

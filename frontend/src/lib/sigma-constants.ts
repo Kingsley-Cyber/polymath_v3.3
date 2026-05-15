@@ -69,22 +69,27 @@ export const NODE_COLORS: Record<PolymathNodeKind, string> = {
 // logarithmically with bridge_count via `nodeReducer` below, so a
 // well-connected book gets larger (~13px) and an isolated one stays
 // small (~7px). Either way it reads as a point of light, not a blob.
+// "Points of light, not blobs." Base sizes shrunk roughly 40% across the
+// board so Books read as dots even before the bridge-count multiplier
+// kicks in. The largest base (Domain at 14) still beats the smallest
+// (Book at 4) by ~3.5×, preserving the visual hierarchy without
+// dominating the canvas.
 export const NODE_SIZES: Record<PolymathNodeKind, number> = {
-  Domain: 20,
-  Concept: 12,
-  Book: 7,
-  Person: 13,
-  Organization: 13,
-  Location: 11,
-  Event: 11.5,
-  Method: 12,
-  Product: 12,
-  Document: 9,
-  Rule: 11,
-  Law: 11,
-  Artifact: 10.5,
-  TimeReference: 9,
-  Other: 8,
+  Domain: 14,
+  Concept: 9,
+  Book: 4,
+  Person: 9,
+  Organization: 10,
+  Location: 7,
+  Event: 8,
+  Method: 9,
+  Product: 8,
+  Document: 6,
+  Rule: 7,
+  Law: 7,
+  Artifact: 7,
+  TimeReference: 5,
+  Other: 4,
 };
 
 // =============== NODE MASSES (ForceAtlas2) ===============
@@ -345,19 +350,19 @@ export function nodeReducer(node: BrainViewNodePayload) {
     label,
   };
 
-  // Pt 3 polish: "stars in the night sky" — Book anchors render as small
-  // bright amber dots that grow logarithmically with their bridge count.
-  // A 1-bridge book sits at ~7px, a 12-bridge hub at ~12px, a 100+
-  // mega-hub caps just above 13px. No more 18px halo+border (sigma's
-  // default node program ignored those attrs anyway).
+  // "Stars in the night sky" — Books render as small bright dots that
+  // grow with bridge count, but the growth is now flatter + tightly
+  // capped: 1-bridge book ≈ 4px, 12-bridge ≈ 7.7px, 100+ mega-hub caps
+  // at 8px. The Math.min(4, …) ceiling on the log term prevents any
+  // single mega-hub from dominating the canvas.
   if (kind === "Book" || node.is_cluster_anchor) {
     const bridges = Math.max(0, Number(node.bridge_count ?? 1));
-    const size = 7 + Math.log2(bridges + 1) * 1.4;
+    const size = 4 + Math.min(4, Math.log2(bridges + 1));
     return {
       ...base,
       size,
-      mass: 35,
-      labelSize: 13,
+      mass: 22,
+      labelSize: 12,
       labelWeight: "600",
       zIndex: 2,
     };

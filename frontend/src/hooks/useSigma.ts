@@ -101,48 +101,44 @@ interface UseSigmaReturn {
 
 // ── ForceAtlas2 + noverlap settings (verbatim from GitNexus) ─────────────
 
-// Pt 3 polish: longer noverlap pass + wider margin so Book anchors don't
-// crowd each other once labels render. expansion 1.15 fans out clumped
-// regions; margin 18 leaves room for the label pill.
+// Anti-overlap pass is now more aggressive — ratio 1.35 + margin 22 + 80
+// iterations carves real breathing room between nodes after FA2 settles.
+// Without this the no-overlap step had too little authority to undo
+// FA2's central clumping.
 const NOVERLAP_SETTINGS = {
-  maxIterations: 50,
-  ratio: 1.1,
-  margin: 18,
-  expansion: 1.15,
+  maxIterations: 80,
+  ratio: 1.35,
+  margin: 22,
+  expansion: 1.2,
 };
 
-const getFA2Settings = (nodeCount: number) => {
-  // Pt 5 — FA2 params re-aligned to the original grok PRD spec for a
-  // galaxy / Milky Way feel: high gravity + moderate repulsion + linLog
-  // attraction produces a central bulge with outward spiral-arm scatter.
-  // The Pt 3-4 values (low gravity, very high repulsion) produced a
-  // uniform grid scatter — visually correct for "no clumping" but wrong
-  // for the user's "imitate a universe / space" direction. PRD wins.
-  const useLinLog = nodeCount >= 8;
+const getFA2Settings = (_nodeCount: number) => {
+  // Constellation tuning — linLogMode OFF (was forcing the galaxy bulge),
+  // scalingRatio 22 (was 12 — push nodes apart harder), gravity 0.6
+  // (was 1.2 — let same-corpus clusters drift away from center instead
+  // of being pulled toward it). The combined effect: same-corpus books
+  // cluster by hue, distinct corpora separate into their own blobs.
   return {
-    gravity: 1.2,            // PRD — central bulge attractor (was 0.6-0.15)
-    scalingRatio: 12,        // PRD — moderate repulsion (was 38-130)
-    slowDown: 4,             // PRD — calmer settle, less jitter
-    barnesHutOptimize: nodeCount > 200,
+    gravity: 0.6,
+    scalingRatio: 22,
+    slowDown: 3,
+    barnesHutOptimize: _nodeCount > 200,
     barnesHutTheta: 0.6,
     strongGravityMode: false,
     outboundAttractionDistribution: true,
-    linLogMode: useLinLog,   // PRD — log-scale attraction = spiral arms
+    linLogMode: false,
     adjustSizes: true,
-    // Strong bridges (many shared entities) pull books closer together;
-    // weak bridges have less attraction. 1.4 amplifies that signal so
-    // density-driven clustering shows up as visible "arms."
-    edgeWeightInfluence: 1.4,
+    edgeWeightInfluence: 1.0,
   };
 };
 
+// Cut layout duration roughly 4-5× — settles fast enough on
+// modern hardware and matches the user-perceived "load" window.
 const getLayoutDuration = (nodeCount: number): number => {
-  if (nodeCount > 10000) return 45000;
-  if (nodeCount > 5000) return 35000;
-  if (nodeCount > 2000) return 30000;
-  if (nodeCount > 1000) return 30000;
-  if (nodeCount > 500) return 25000;
-  return 20000;
+  if (nodeCount > 5000) return 8000;
+  if (nodeCount > 1000) return 6000;
+  if (nodeCount > 500) return 5000;
+  return 4000;
 };
 
 // ── Hook ─────────────────────────────────────────────────────────────────
@@ -150,7 +146,10 @@ const getLayoutDuration = (nodeCount: number): number => {
 export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
-  const graphRef = useRef<Graph<SigmaNodeAttributes, SigmaEdgeAttributes> | null>(null);
+  const graphRef = useRef<Graph<
+    SigmaNodeAttributes,
+    SigmaEdgeAttributes
+  > | null>(null);
   const layoutRef = useRef<FA2Layout | null>(null);
   const selectedNodeRef = useRef<string | null>(null);
   const highlightedRef = useRef<Set<string>>(new Set());
@@ -191,8 +190,7 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
 
     const sigma = new Sigma(graph, containerRef.current, {
       renderLabels: true,
-      labelFont:
-        "Inter, JetBrains Mono, ui-sans-serif, system-ui, sans-serif",
+      labelFont: "Inter, JetBrains Mono, ui-sans-serif, system-ui, sans-serif",
       labelSize: 12,
       labelWeight: "500",
       labelColor: { color: "#e4e4ed" },
@@ -296,17 +294,22 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
           const g = graphRef.current;
           if (g) {
             const isSelected = node === sel;
-            const isNeighbor =
-              g.hasEdge(node, sel) || g.hasEdge(sel, node);
+            const isNeighbor = g.hasEdge(node, sel) || g.hasEdge(sel, node);
             if (isSelected) {
               res.color = data.color;
-              res.size = (data.size || 8) * 1.8;
+              // Was *1.8 — produced 25px blobs from 14px Domain nodes
+              // on click. 1.25 keeps the highlight readable without
+              // overwhelming neighbors.
+              res.size = (data.size || 8) * 1.25;
               res.zIndex = 2;
               res.highlighted = true;
               res.forceLabel = true;
             } else if (isNeighbor) {
               res.color = data.color;
-              res.size = (data.size || 8) * 1.3;
+              // Was *1.3 — neighbors swelled almost as much as the
+              // selection. 1.1 nudges them just enough to register
+              // visually without competing for attention.
+              res.size = (data.size || 8) * 1.1;
               res.zIndex = 1;
               res.forceLabel = true;
             } else {
@@ -402,12 +405,10 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       const zoomedMid = ratio >= 1.5 && ratio < 4;
       // Take the STRICTER of zoom-tier and node-count rules.
       const renderLabels = !zoomedFar && !isLargeGraph;
-      const labelDensity = zoomedMid || isLargeGraph
-        ? (isHugeGraph ? 0.02 : 0.05)
-        : 0.1;
-      const labelThreshold = zoomedMid || isLargeGraph
-        ? (isHugeGraph ? 14 : 11)
-        : 8;
+      const labelDensity =
+        zoomedMid || isLargeGraph ? (isHugeGraph ? 0.02 : 0.05) : 0.1;
+      const labelThreshold =
+        zoomedMid || isLargeGraph ? (isHugeGraph ? 14 : 11) : 8;
       try {
         s.setSetting("renderLabels", renderLabels);
         s.setSetting("labelDensity", labelDensity);
