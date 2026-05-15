@@ -663,9 +663,13 @@ services:
     <<: *default-logging
     image: cloudflare/cloudflared:latest
     profiles: ["cloudflare"]
-    command: tunnel --no-autoupdate run
-    environment:
-      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    # Locally-managed tunnel: ingress + tunnel id live in
+    # ./.cloudflared/config.yml; credentials file is the JSON dropped
+    # by `cloudflared tunnel create`. No connector token needed — the
+    # cert.pem authenticates the daemon.
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./.cloudflared:/etc/cloudflared:ro
     depends_on:
       frontend:
         condition: service_healthy

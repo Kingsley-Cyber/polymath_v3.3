@@ -16,3 +16,6 @@ graphify-out/cache/
 backend/TEST/
 .DS_Store
 Thumbs.db
+
+# Cloudflare Tunnel credentials (cert.pem + tunnel JSON + config.yml)
+.cloudflared/
