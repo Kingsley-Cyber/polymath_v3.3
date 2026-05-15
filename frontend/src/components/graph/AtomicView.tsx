@@ -23,37 +23,18 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import {
-  discoverGraph,
-  fetchJSON,
-} from "../../lib/api";
+import { discoverGraph, queryGraph } from "../../lib/api";
+import type {
+  GraphBridge,
+  GraphGap,
+  GraphQueryNode,
+  GraphQueryResult,
+} from "../../types/chat";
 import type {
   GraphDiscoverRequest,
   GraphDiscoverResponse,
   GraphSynthesisMode,
 } from "../../types/discover";
-
-// ─── Atomic-view local types ───────────────────────────────────────────────
-
-interface QuerySeed {
-  id: string;
-  display_name: string;
-  entity_type?: string;
-}
-interface QueryBridge {
-  entity_id: string;
-  display_name: string;
-  entity_type?: string;
-}
-interface QueryGap {
-  question?: string;
-  between?: string[];
-}
-interface GraphQueryResponse {
-  seed_entities: QuerySeed[];
-  bridges: QueryBridge[];
-  gaps: QueryGap[];
-}
 
 interface AtomicNode {
   id: string;
@@ -104,7 +85,7 @@ export default function AtomicView({
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
-  const [queryData, setQueryData] = useState<GraphQueryResponse | null>(null);
+  const [queryData, setQueryData] = useState<GraphQueryResult | null>(null);
   const [synthesis, setSynthesis] = useState<GraphDiscoverResponse | null>(
     null,
   );
@@ -136,17 +117,10 @@ export default function AtomicView({
     setQueryError(null);
 
     // graph/query — fast (Cypher only). Surface seeds/bridges/gaps ASAP.
-    fetchJSON("/graph/query", {
-      method: "POST",
-      body: JSON.stringify({
-        corpus_ids: [corpusId],
-        query,
-        max_hops: 2,
-      }),
-    })
+    queryGraph([corpusId], query, 2)
       .then((res) => {
         if (cancelled) return;
-        setQueryData(res as GraphQueryResponse);
+        setQueryData(res);
       })
       .catch((exc) => {
         if (cancelled) return;
@@ -207,7 +181,7 @@ export default function AtomicView({
     }
 
     // ORBIT 1 — seeds.
-    const seeds: QuerySeed[] = queryData?.seed_entities ?? [];
+    const seeds: GraphQueryNode[] = queryData?.seed_entities ?? [];
     for (const seed of seeds) {
       nodes.push({
         id: `seed:${seed.id}`,
@@ -250,7 +224,7 @@ export default function AtomicView({
     });
 
     // ORBIT 3 — bridges.
-    const bridges: QueryBridge[] = queryData?.bridges ?? [];
+    const bridges: GraphBridge[] = queryData?.bridges ?? [];
     for (const b of bridges) {
       const id = `br:${b.entity_id}`;
       nodes.push({
@@ -260,24 +234,29 @@ export default function AtomicView({
         entityType: b.entity_type,
         orbit: 3,
       });
-      for (const seed of seeds) {
+      // Only connect each bridge to the seeds it actually links (the
+      // backend already computes connected_seeds on each GraphBridge).
+      for (const seedId of b.connected_seeds || []) {
         edges.push({
-          source: `seed:${seed.id}`,
+          source: `seed:${seedId}`,
           target: id,
           kind: "bridges",
         });
       }
     }
 
-    // ORBIT 4 — gaps.
-    const gaps: QueryGap[] = queryData?.gaps ?? [];
+    // ORBIT 4 — gaps. The backend's GraphGap shape is a pair of entities
+    // (a, b) that share no graph-edge but have semantic overlap; we render
+    // the pair as a single gap node labeled "A ↔ B".
+    const gaps: GraphGap[] = queryData?.gaps ?? [];
     gaps.slice(0, 6).forEach((g, i) => {
       const id = `gap:${i}`;
+      const label = `${g.entity_a_name} ↔ ${g.entity_b_name}`.slice(0, 60);
       nodes.push({
         id,
         type: "gap",
-        label: g.question?.slice(0, 60) || "Unconnected",
-        hover: g.question,
+        label,
+        hover: label,
         orbit: 4,
       });
       edges.push({ source: "nucleus", target: id, kind: "gap" });
@@ -356,10 +335,16 @@ export default function AtomicView({
     for (const e of edges) {
       const s = byId.get(e.source);
       const t = byId.get(e.target);
-      if (!s || !t || s.x == null || t.x == null) continue;
+      if (
+        !s || !t ||
+        s.x == null || s.y == null ||
+        t.x == null || t.y == null
+      ) {
+        continue;
+      }
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
-      ctx.lineTo(t.x!, t.y!);
+      ctx.lineTo(t.x, t.y);
       if (e.kind === "gap") {
         ctx.strokeStyle = "#FCA5A5";
         ctx.lineWidth = 1.2;
