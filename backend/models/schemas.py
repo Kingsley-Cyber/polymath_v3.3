@@ -40,11 +40,13 @@ def _universal_entity_schema() -> list[str]:
     import lives inside the call site and the function is only invoked from
     the IngestionConfig field defaults at instantiation time."""
     from services.ghost_b import UNIVERSAL_ENTITY_SCHEMA
+
     return UNIVERSAL_ENTITY_SCHEMA
 
 
 def _universal_relation_schema() -> list[str]:
     from services.ghost_b import UNIVERSAL_RELATION_SCHEMA
+
     return UNIVERSAL_RELATION_SCHEMA
 
 
@@ -158,7 +160,13 @@ class IngestionConfig(BaseModel):
                 data["extraction_models"] = [entry]
 
         for prefix in ("summary", "extraction"):
-            for suffix in ("model", "base_url", "api_key", "extra_params", "max_concurrent"):
+            for suffix in (
+                "model",
+                "base_url",
+                "api_key",
+                "extra_params",
+                "max_concurrent",
+            ):
                 data.pop(f"{prefix}_{suffix}", None)
         return data
 
@@ -327,7 +335,9 @@ class GlobalSettings(BaseModel):
     )
     chat: ChatLLMSettings = Field(default_factory=ChatLLMSettings)
     retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
-    modal: _legacy.ModalDeploySettings = Field(default_factory=_legacy.ModalDeploySettings)
+    modal: _legacy.ModalDeploySettings = Field(
+        default_factory=_legacy.ModalDeploySettings
+    )
     models: ModelsConfig = Field(default_factory=ModelsConfig)
 
 
@@ -528,9 +538,7 @@ class GraphDiscoverResponse(BaseModel):
     socratic_prompts: list[dict[str, Any]] = Field(default_factory=list)
     metrics: dict[str, Any] = Field(default_factory=dict)
     domain_map_summary: list[dict[str, Any]] = Field(default_factory=list)
-    graph: dict[str, Any] = Field(
-        default_factory=lambda: {"nodes": [], "links": []}
-    )
+    graph: dict[str, Any] = Field(default_factory=lambda: {"nodes": [], "links": []})
     anchors: list[dict[str, Any]] = Field(default_factory=list)
     concept_communities: list[dict[str, Any]] = Field(default_factory=list)
     entity_concept_map: dict[str, dict[str, Any]] = Field(default_factory=dict)
@@ -542,7 +550,9 @@ class GraphDiscoverResponse(BaseModel):
     tensions: list[dict[str, Any]] = Field(default_factory=list)
     trace: DiscoverTracePayload = Field(default_factory=DiscoverTracePayload)
     auto_synthesis: AutoSynthesisPayload = Field(default_factory=AutoSynthesisPayload)
-    insight_packet_summary: InsightPacketSummary = Field(default_factory=InsightPacketSummary)
+    insight_packet_summary: InsightPacketSummary = Field(
+        default_factory=InsightPacketSummary
+    )
     context_graph: ContextGraphPayload = Field(default_factory=ContextGraphPayload)
 
 
@@ -647,9 +657,17 @@ class GraphQueryRequest(BaseModel):
         description="DEPRECATED — use corpus_ids. Wrapped into corpus_ids=[corpus_id] when present.",
     )
     corpus_ids: list[str] = Field(default_factory=list)
-    query: str = Field(..., min_length=1, description="Free-text query; tokens matched against Entity names")
-    max_hops: int = Field(default=2, ge=1, le=3, description="Entity→Entity traversal depth from seeds")
-    limit: int = Field(default=50, ge=1, le=200, description="Max nodes in returned subgraph")
+    query: str = Field(
+        ...,
+        min_length=1,
+        description="Free-text query; tokens matched against Entity names",
+    )
+    max_hops: int = Field(
+        default=2, ge=1, le=3, description="Entity→Entity traversal depth from seeds"
+    )
+    limit: int = Field(
+        default=50, ge=1, le=200, description="Max nodes in returned subgraph"
+    )
 
     @model_validator(mode="before")
     @classmethod
