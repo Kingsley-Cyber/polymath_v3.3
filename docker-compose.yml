@@ -662,4 +662,14 @@ services:
         condition: service_healthy
       backend:
         condition: service_healthy
+      # Optional MCP wait. `required: false` (Compose 2.20+) means the tunnel
+      # still starts when the mcp profile is OFF — but when both --profile mcp
+      # and --profile cloudflare are passed together, cloudflared waits for
+      # the MCP container's /health endpoint before announcing the tunnel.
+      # Without this, the tunnel comes up first and mcp.<domain> returns 502
+      # for a few seconds (or until the user notices the missing --profile mcp
+      # and adds it).
+      mcp:
+        condition: service_healthy
+        required: false
     restart: unless-stopped
