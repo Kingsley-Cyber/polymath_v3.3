@@ -99,6 +99,12 @@ export interface BrainViewDashboardProps {
   agentBridgeNames?: string[];
   agentHubNames?: string[];
   agentGaps?: Array<{ entity_a_name?: string; entity_b_name?: string }>;
+  // Phase 3 — synthesis-mode selector ("research" | "ideation").
+  // Forwarded into the Agent Search tab so the user can flip between
+  // concrete-claim research synthesis and [BUILD IDEA] ideation output
+  // without leaving the panel. Default "research" preserves existing UX.
+  synthesisMode?: "research" | "ideation";
+  onSynthesisModeChange?: (m: "research" | "ideation") => void;
   // Pt 7: Graph Query tab — send a refined chip back to the chat
   onSendToChat?: (text: string) => void;
   /** Pt 7: model id passed through to api.refineQuery so the LLM call
@@ -169,6 +175,8 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     agentBridgeNames,
     agentHubNames,
     agentGaps,
+    synthesisMode,
+    onSynthesisModeChange,
     onSendToChat,
     model,
     onRerun,
@@ -347,6 +355,8 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
             bridgeNames={agentBridgeNames}
             hubNames={agentHubNames}
             gaps={agentGaps}
+            synthesisMode={synthesisMode}
+            onSynthesisModeChange={onSynthesisModeChange}
           />
         )}
 
@@ -586,6 +596,8 @@ interface AgentSearchTabProps {
   bridgeNames?: string[];
   hubNames?: string[];
   gaps?: Array<{ entity_a_name?: string; entity_b_name?: string }>;
+  synthesisMode?: "research" | "ideation";
+  onSynthesisModeChange?: (m: "research" | "ideation") => void;
 }
 
 function AgentSearchTab(props: AgentSearchTabProps) {
@@ -600,12 +612,54 @@ function AgentSearchTab(props: AgentSearchTabProps) {
     bridgeNames,
     hubNames,
     gaps,
+    synthesisMode = "research",
+    onSynthesisModeChange,
   } = props;
   const canRun = phase !== "loading" && query.trim().length > 0;
   return (
     <>
       <section>
-        <SectionLabel>Ask</SectionLabel>
+        <div className="flex items-center justify-between gap-2">
+          <SectionLabel>Ask</SectionLabel>
+          {onSynthesisModeChange && (
+            <div
+              role="radiogroup"
+              aria-label="Synthesis mode"
+              className="inline-flex rounded-full bg-zinc-900 p-0.5 text-[10px] font-mono uppercase tracking-wider"
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked={synthesisMode === "research"}
+                onClick={() => onSynthesisModeChange("research")}
+                title="Faithful synthesis grounded in evidence."
+                className={
+                  "px-2 py-0.5 rounded-full transition-colors " +
+                  (synthesisMode === "research"
+                    ? "bg-amber-600 text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300")
+                }
+              >
+                research
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={synthesisMode === "ideation"}
+                onClick={() => onSynthesisModeChange("ideation")}
+                title="Speculative [BUILD IDEA] output grounded in corpus APIs."
+                className={
+                  "px-2 py-0.5 rounded-full transition-colors " +
+                  (synthesisMode === "ideation"
+                    ? "bg-amber-600 text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300")
+                }
+              >
+                ideation
+              </button>
+            </div>
+          )}
+        </div>
         <textarea
           rows={3}
           value={query}
@@ -616,7 +670,11 @@ function AgentSearchTab(props: AgentSearchTabProps) {
               onRun();
             }
           }}
-          placeholder="What does my library think about…?"
+          placeholder={
+            synthesisMode === "ideation"
+              ? "What could I build from this corpus?"
+              : "What does my library think about…?"
+          }
           className="w-full resize-none rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-amber-700 focus:outline-none"
         />
         <button

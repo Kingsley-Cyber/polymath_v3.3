@@ -379,6 +379,7 @@ function useQueryGraph(
   corpusIds: string[],
   query: string | undefined,
   model: string | undefined,
+  synthesisMode: "research" | "ideation" = "research",
 ) {
   const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "error">(
     "idle",
@@ -407,6 +408,7 @@ function useQueryGraph(
           corpus_ids: corpusIds as any,
           query,
           mode: "auto",
+          synthesis_mode: synthesisMode,
           ...(model ? { model } : {}),
         } as any);
         const sub = await subgraphP;
@@ -444,7 +446,7 @@ function useQueryGraph(
     return () => {
       cancel = true;
     };
-  }, [corpusIds, query, model]);
+  }, [corpusIds, query, model, synthesisMode]);
 
   return {
     phase,
@@ -490,6 +492,11 @@ export function GraphViewer({
   );
   const [agentInput, setAgentInput] = useState<string>(query ?? "");
   const [agentQuery, setAgentQuery] = useState<string | undefined>(query);
+  // Phase 3 — synthesis-mode toggle. "research" (default) gives the
+  // concrete-claim synthesis; "ideation" produces [BUILD IDEA] blocks
+  // (see backend/services/graph/orchestrator._IDEATION_SYSTEM_PROMPT).
+  const [synthesisMode, setSynthesisMode] =
+    useState<"research" | "ideation">("research");
   const drillStackRef = useRef(drillStack);
   drillStackRef.current = drillStack;
 
@@ -508,6 +515,7 @@ export function GraphViewer({
     corpusIds,
     agentQuery,
     model,
+    synthesisMode,
   );
 
   const data = mode === "brain" ? brain.data : q.data;
@@ -830,6 +838,8 @@ export function GraphViewer({
         agentQuery={agentInput}
         onAgentQueryChange={setAgentInput}
         onAgentRun={() => setAgentQuery(agentInput)}
+        synthesisMode={synthesisMode}
+        onSynthesisModeChange={setSynthesisMode}
         agentPhase={q.phase}
         agentError={q.error}
         agentSynthesisMarkdown={q.synthesis?.markdown ?? null}

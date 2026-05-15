@@ -34,18 +34,22 @@ type Props = {
 
 type PlacedDot = ByDocumentCluster & { x: number; y: number; r: number };
 
-const STROKE_BY_CORPUS = (corpusId: string): string => {
-  // Deterministic HSL by hash so the same corpus always gets the same hue.
+// Deterministic HSL by hash so the same corpus always gets the same hue.
+const HUE_BY_CORPUS = (corpusId: string): number => {
   let h = 0;
   for (const ch of corpusId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return `hsl(${h % 360}, 65%, 45%)`;
+  return h % 360;
 };
+const STROKE_BY_CORPUS = (corpusId: string, hover = false): string =>
+  `hsl(${HUE_BY_CORPUS(corpusId)}, 70%, ${hover ? 38 : 45}%)`;
 
-const FILL_BY_CORPUS = (corpusId: string): string => {
-  let h = 0;
-  for (const ch of corpusId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return `hsl(${h % 360}, 70%, 92%)`;
-};
+// Fill is darker than the earlier 92% so dots feel like solid bodies
+// against the off-white background. Hovering shifts to 78% for a subtle
+// punch; gradient center is 88% so each dot has built-in depth.
+const FILL_BY_CORPUS = (corpusId: string, hover = false): string =>
+  `hsl(${HUE_BY_CORPUS(corpusId)}, 72%, ${hover ? 78 : 84}%)`;
+const FILL_CENTER_BY_CORPUS = (corpusId: string): string =>
+  `hsl(${HUE_BY_CORPUS(corpusId)}, 75%, 90%)`;
 
 const layoutDots = (
   clusters: ByDocumentCluster[],
@@ -134,6 +138,44 @@ export default function ConstellationCanvas({
     [clusters, size.w, size.h],
   );
 
+  // Top-N book ids (by entity_count) — these get persistent labels so the
+  // user always sees the dominant books without having to hover hunt.
+  const labeledIds = useMemo(() => {
+    const ids = new Set<string>();
+    [...placed]
+      .sort((a, b) => (b.entity_count || 0) - (a.entity_count || 0))
+      .slice(0, Math.min(12, Math.max(4, Math.floor(placed.length * 0.15))))
+      .forEach((d) => ids.add(d.cluster_id));
+    return ids;
+  }, [placed]);
+
+  // Faint connectors between books that share a top-entity name — the
+  // "constellation" metaphor needs lines. We compute pairs once per layout
+  // change so the draw loop stays fast.
+  const constellationLines = useMemo(() => {
+    if (placed.length === 0) return [] as Array<[PlacedDot, PlacedDot]>;
+    // For each top entity in book A, find the next book B that also lists
+    // it. Cap at ~120 lines total so dense corpora don't melt the canvas.
+    const byEntity = new Map<string, PlacedDot[]>();
+    for (const d of placed) {
+      for (const e of (d.top_entity_names ?? []).slice(0, 4)) {
+        const k = e.toLowerCase();
+        if (!byEntity.has(k)) byEntity.set(k, []);
+        byEntity.get(k)!.push(d);
+      }
+    }
+    const lines: Array<[PlacedDot, PlacedDot]> = [];
+    for (const dots of byEntity.values()) {
+      if (dots.length < 2) continue;
+      // Connect each consecutive pair in the bucket (cheap; doesn't fan
+      // out into O(n²) cliques on common entities like "Document").
+      for (let i = 0; i < dots.length - 1 && lines.length < 120; i++) {
+        lines.push([dots[i], dots[i + 1]]);
+      }
+    }
+    return lines;
+  }, [placed]);
+
   // Draw — runs on every relevant state change.
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -146,55 +188,117 @@ export default function ConstellationCanvas({
     if (!ctx) return;
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
-    // Background — soft starfield (deterministic seed from size).
+    // Background — soft warm off-white.
     ctx.fillStyle = "#FAFAF7";
     ctx.fillRect(0, 0, size.w, size.h);
+
+    // Starfield — deterministic seed from size + variable star sizes so
+    // a few bright pinpricks pop against the many small ones. ~110 stars.
     const starSeed = (size.w * 7919 + size.h * 104729) >>> 0;
     let s = starSeed;
     const lcg = () => {
       s = (s * 1664525 + 1013904223) >>> 0;
       return s / 4294967296;
     };
-    ctx.fillStyle = "rgba(15, 23, 42, 0.18)";
-    for (let i = 0; i < 240; i++) {
+    for (let i = 0; i < 110; i++) {
       const x = lcg() * size.w;
       const y = lcg() * size.h;
-      const r = lcg() * 1.1 + 0.2;
+      const big = lcg() > 0.93; // ~7% of stars are large
+      const r = big ? lcg() * 1.4 + 1.2 : lcg() * 0.55 + 0.25;
+      ctx.fillStyle = big ? "rgba(15, 23, 42, 0.42)" : "rgba(15, 23, 42, 0.22)";
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Book dots.
-    for (const dot of placed) {
-      const isHover = hovered?.cluster_id === dot.cluster_id;
-      const isDrilled = drilled?.cluster.cluster_id === dot.cluster_id;
+    // Constellation lines — faint white-grey threads between books that
+    // share a top entity. Drawn BEFORE the dots so they sit underneath.
+    for (const [a, b] of constellationLines) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const alpha = Math.max(0.04, 0.18 - dist / 1800); // fade with distance
+      ctx.strokeStyle = `rgba(60, 80, 105, ${alpha})`;
+      ctx.lineWidth = 0.7;
       ctx.beginPath();
-      ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
-      ctx.fillStyle = FILL_BY_CORPUS(dot.corpus_id);
-      ctx.fill();
-      ctx.strokeStyle = STROKE_BY_CORPUS(dot.corpus_id);
-      ctx.lineWidth = isDrilled ? 3.5 : isHover ? 2.5 : 1.5;
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
       ctx.stroke();
     }
 
-    // Hover label.
+    // Book dots — radial gradient fill for depth, drop shadow for lift,
+    // smooth hover/drilled state via stroke + shadow boost.
+    for (const dot of placed) {
+      const isHover = hovered?.cluster_id === dot.cluster_id;
+      const isDrilled = drilled?.cluster.cluster_id === dot.cluster_id;
+
+      // Drop shadow (resets after each dot).
+      ctx.save();
+      ctx.shadowColor =
+        isHover || isDrilled
+          ? "rgba(15, 23, 42, 0.22)"
+          : "rgba(15, 23, 42, 0.08)";
+      ctx.shadowBlur = isHover ? 18 : isDrilled ? 14 : 7;
+      ctx.shadowOffsetY = isHover ? 4 : 2;
+
+      // Radial gradient — lighter at center, darker at rim.
+      const grad = ctx.createRadialGradient(
+        dot.x - dot.r * 0.25,
+        dot.y - dot.r * 0.3,
+        Math.max(1, dot.r * 0.15),
+        dot.x,
+        dot.y,
+        dot.r,
+      );
+      grad.addColorStop(0, FILL_CENTER_BY_CORPUS(dot.corpus_id));
+      grad.addColorStop(1, FILL_BY_CORPUS(dot.corpus_id, isHover));
+
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.restore(); // drop shadow off before stroking
+
+      ctx.strokeStyle = STROKE_BY_CORPUS(dot.corpus_id, isHover);
+      ctx.lineWidth = isDrilled ? 3.2 : isHover ? 2.4 : 1.4;
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Persistent labels for top-N books — small muted text under each.
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.font = "11px ui-sans-serif, system-ui, -apple-system";
+    ctx.fillStyle = "rgba(30, 41, 59, 0.75)";
+    for (const dot of placed) {
+      if (!labeledIds.has(dot.cluster_id)) continue;
+      const label = (dot.label || "").trim();
+      if (!label) continue;
+      // Trim long filenames so labels don't overlap their neighbors.
+      const trimmed = label.length > 22 ? label.slice(0, 21) + "…" : label;
+      ctx.fillText(trimmed, dot.x, dot.y + dot.r + 6);
+    }
+
+    // Hover label — pill above the hovered dot.
     if (hovered) {
       const label = hovered.label || hovered.cluster_id.slice(0, 16);
       ctx.font =
         "13px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont";
-      const tw = ctx.measureText(label).width + 12;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      const tw = ctx.measureText(label).width + 14;
       const tx = Math.min(Math.max(hovered.x - tw / 2, 6), size.w - tw - 6);
-      const ty = Math.max(hovered.y - hovered.r - 22, 6);
+      const ty = Math.max(hovered.y - hovered.r - 26, 6);
       ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
       ctx.beginPath();
       ctx.roundRect(tx, ty, tw, 22, 6);
       ctx.fill();
       ctx.fillStyle = "#FAFAF7";
       ctx.textBaseline = "middle";
-      ctx.fillText(label, tx + 6, ty + 11);
+      ctx.fillText(label, tx + 7, ty + 11);
     }
-  }, [placed, hovered, drilled, size.w, size.h]);
+  }, [placed, constellationLines, labeledIds, hovered, drilled, size.w, size.h]);
 
   // Mouse → dot hit testing.
   const hitTest = (
@@ -239,7 +343,8 @@ export default function ConstellationCanvas({
     <div className="relative w-full h-full">
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 cursor-pointer"
+        className="absolute inset-0"
+        style={{ cursor: hovered ? "pointer" : "default" }}
         onMouseMove={(e) => setHovered(hitTest(e))}
         onMouseLeave={() => setHovered(null)}
         onClick={handleClick}
