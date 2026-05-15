@@ -101,6 +101,44 @@ _DEEPSEEK_V4_THINKING_INCOMPATIBLE_PARAMS: tuple[str, ...] = (
 )
 
 
+# ── GLM (Z.AI: glm-4.5 / 4.6 / 4.7 / 5 / 5.1 / 5-turbo / 5v-turbo) ───────
+# Source: Z.AI GLM thinking-mode docs (user-supplied, 2026-05-15).
+#   - Pure BINARY toggle. No effort dial at all — `thinking.type` is
+#     either "enabled" (default — model auto-decides depth) or
+#     "disabled".
+#   - Default is ENABLED. We send the toggle explicitly anyway so the
+#     wire payload is self-describing.
+#   - GLM exposes additional thinking-mode features
+#     (clear_thinking: False for preserved context, interleaved
+#     thinking for tool calls) but those are content-flow concerns
+#     not effort knobs — they stay opt-in via direct extra_body
+#     manipulation, not through the agnostic ThinkingEffort enum.
+#   - Body field is `thinking: {type}` at the JSON root (per the
+#     cURL examples). The Python SDK examples nest it in extra_body
+#     to bypass the SDK's unknown-param strip; we hit the LiteLLM
+#     REST endpoint directly so top-level is the right placement.
+#
+# Models with thinking support (per the docs' enumeration of
+# "GLM-5.1 GLM-5 GLM-5-Turbo GLM-5V-Turbo GLM-4.5 GLM-4.6 GLM-4.7"):
+#   - glm-5*, glm-5.x, glm-5-turbo, glm-5v-turbo (all glm-5-line)
+#   - glm-4.5, glm-4.6, glm-4.7
+# Models EXCLUDED:
+#   - glm-4, glm-4-plus, glm-4-0520, glm-3-* — non-thinking chat
+#     models; selector hidden.
+#
+# No effort map needed (binary toggle). Effort collapse is handled
+# inline in the provider block below.
+_GLM_THINKING_MODELS: tuple[str, ...] = (
+    "glm-5.1",
+    "glm-5-turbo",
+    "glm-5v-turbo",
+    "glm-5",       # bare glm-5 (substring covers future minor variants)
+    "glm-4.5",
+    "glm-4.6",
+    "glm-4.7",
+)
+
+
 # ── Mistral Magistral (magistral-small, magistral-medium, …) ─────────────
 # Source: Mistral chat-completions API docs (user-supplied, 2026-05-15).
 #   - Dial is BINARY: `reasoning_effort: "high" | "none"`. No low/medium
@@ -137,6 +175,21 @@ def _provider_from_model(model: str) -> str:
     if "/" in model:
         return model.split("/", 1)[0].lower()
     return ""
+
+
+def _is_glm_thinking(model: str, provider: str) -> bool:
+    """Match GLM models that support thinking mode (GLM-4.5+ / 5+).
+
+    Substring check against the curated _GLM_THINKING_MODELS tuple
+    so future minor variants (e.g. glm-5.2, glm-5-turbo-preview) are
+    matched without needing an explicit entry — as long as the name
+    contains a recognized base id.
+
+    Excluded by design: glm-4, glm-4-plus, glm-4-0520, glm-3-* —
+    these are non-thinking chat models per the docs.
+    """
+    m = model.lower()
+    return any(name in m for name in _GLM_THINKING_MODELS)
 
 
 def _is_mistral_magistral(model: str, provider: str) -> bool:
@@ -198,6 +251,19 @@ def apply_thinking_effort(
         effort = "medium"
 
     provider = _provider_from_model(model)
+
+    # ── GLM (Z.AI: glm-4.5+ and glm-5 line) ──────────────────────────
+    # Pure binary toggle. ALL "do think" effort levels (low/medium/
+    # high/auto) collapse to {type: "enabled"}; "none" → {type:
+    # "disabled"}. GLM defaults to enabled — we send it explicitly
+    # anyway so the wire payload is self-describing and a debug log
+    # makes the user's intent legible.
+    if _is_glm_thinking(model, provider):
+        if effort == "none":
+            body["thinking"] = {"type": "disabled"}
+            return
+        body["thinking"] = {"type": "enabled"}
+        return
 
     # ── Mistral Magistral (small / medium / future variants) ────────
     # Binary dial: reasoning_effort: "high" | "none". All four agnostic

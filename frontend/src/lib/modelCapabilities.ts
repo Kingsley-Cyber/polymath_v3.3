@@ -98,6 +98,15 @@ const THINKING_PATTERNS: ReadonlyArray<ThinkingPattern> = [
     test: (m) => m.includes("magistral"),
     provider: "mistral",
   },
+
+  // GLM (Z.AI) — pure binary toggle via `thinking: {type}`. No effort
+  // gradient. Matches glm-5, glm-5.1, glm-5-turbo, glm-5v-turbo,
+  // glm-4.5, glm-4.6, glm-4.7. Excludes glm-4, glm-4-plus, glm-3-*
+  // (non-thinking chat models per the docs).
+  {
+    test: (m) => /glm-(5|4\.[5-7])/.test(m),
+    provider: "zai",
+  },
 ];
 
 
