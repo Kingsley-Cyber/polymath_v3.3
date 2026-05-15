@@ -613,7 +613,7 @@ function App() {
                 />
               ) : graphViewerMode === "atom" && graphViewerQuery ? (
                 <AtomicView
-                  corpusId={selectedCorpusIds[0] || ""}
+                  corpusIds={selectedCorpusIds}
                   query={graphViewerQuery}
                 />
               ) : graphViewerMode === "atom" ? (

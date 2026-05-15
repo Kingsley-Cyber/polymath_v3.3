@@ -42,6 +42,9 @@ interface AtomicNode {
   label: string;
   hover?: string;
   entityType?: string;
+  /** All corpora that contributed this entity (post-merge from PR 3
+   *  backend). length > 1 → cross-corpus bridge, gets amber accent. */
+  sourceCorpora?: string[];
   orbit: number;
   x?: number;
   y?: number;
@@ -54,7 +57,13 @@ interface AtomicEdge {
 }
 
 type Props = {
-  corpusId: string;
+  /**
+   * Multi-corpus by default (PR 3 backend merges per-corpus
+   * discover/query into a single response). Pass every selected
+   * corpus_id; the atom shows ONE unified nucleus with merged
+   * orbits and source-corpus provenance on each dot.
+   */
+  corpusIds: string[];
   query: string;
   synthesisMode?: GraphSynthesisMode;
   onSelectSeed?: (entityId: string) => void;
@@ -74,11 +83,52 @@ const ENTITY_TYPE_COLOR: Record<string, string> = {
   RobloxNetworkPrimitive: "#EA580C",
   LuauDataType: "#0891B2",
 };
-const seedColor = (entityType?: string): string =>
-  ENTITY_TYPE_COLOR[entityType ?? ""] ?? "#64748B";
+
+// Amber accent for cross-corpus bridges — same hue family as the
+// view-mode toggle so users learn "amber = cross-corpus" once.
+const CROSS_CORPUS_COLOR = "#F59E0B";
+
+// Per-corpus HSL hash (matches ConstellationCanvas) so the same
+// corpus_id renders in the same hue everywhere in the app.
+const CORPUS_HUE = (corpusId: string): number => {
+  let h = 0;
+  for (const ch of corpusId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h % 360;
+};
+const corpusColor = (corpusId: string): string =>
+  `hsl(${CORPUS_HUE(corpusId)}, 65%, 50%)`;
+
+/**
+ * Returns the fill color for a node given its entity_type and its
+ * source-corpus provenance.
+ *
+ * - Cross-corpus (>1 source_corpora): amber, signalling the entity
+ *   bridges corpora — this is the highest-value signal on the canvas
+ *   for multi-corpus queries.
+ * - Single-corpus + known entity_type: entity-type color (preserves
+ *   existing palette).
+ * - Single-corpus + unknown entity_type: the corpus's own HSL hash so
+ *   the user can still trace provenance back to a specific corpus.
+ * - No provenance info: muted slate fallback.
+ */
+const nodeFillColor = (
+  entityType: string | undefined,
+  sourceCorpora: string[] | undefined,
+): string => {
+  if (sourceCorpora && sourceCorpora.length > 1) {
+    return CROSS_CORPUS_COLOR;
+  }
+  if (entityType && ENTITY_TYPE_COLOR[entityType]) {
+    return ENTITY_TYPE_COLOR[entityType];
+  }
+  if (sourceCorpora && sourceCorpora.length === 1) {
+    return corpusColor(sourceCorpora[0]);
+  }
+  return "#64748B";
+};
 
 export default function AtomicView({
-  corpusId,
+  corpusIds,
   query,
   synthesisMode = "research",
   onSelectSeed,
@@ -108,8 +158,10 @@ export default function AtomicView({
   }, []);
 
   // Fire both endpoints in parallel; render whichever returns first.
+  // Both endpoints are multi-corpus (PR 3 backend) — we pass the full
+  // corpusIds list and the backend merges per-corpus results.
   useEffect(() => {
-    if (!corpusId || !query.trim()) return;
+    if (corpusIds.length === 0 || !query.trim()) return;
     let cancelled = false;
     setQueryData(null);
     setSynthesis(null);
@@ -117,7 +169,7 @@ export default function AtomicView({
     setQueryError(null);
 
     // graph/query — fast (Cypher only). Surface seeds/bridges/gaps ASAP.
-    queryGraph([corpusId], query, 2)
+    queryGraph(corpusIds, query, 2)
       .then((res) => {
         if (cancelled) return;
         setQueryData(res);
@@ -129,7 +181,7 @@ export default function AtomicView({
 
     // graph/discover — slow (LLM). Independent failure mode.
     const discoverReq: GraphDiscoverRequest = {
-      corpus_id: corpusId,
+      corpus_ids: corpusIds,
       query,
       synthesis_mode: synthesisMode,
     };
@@ -146,7 +198,7 @@ export default function AtomicView({
     return () => {
       cancelled = true;
     };
-  }, [corpusId, query, synthesisMode]);
+  }, [corpusIds.join(","), query, synthesisMode]);
 
   // Build the atomic node graph from whatever has arrived so far.
   const { nodes, edges } = useMemo(() => {
@@ -180,14 +232,19 @@ export default function AtomicView({
       });
     }
 
-    // ORBIT 1 — seeds.
+    // ORBIT 1 — seeds. The PR 3 merged response stamps `source_corpora`
+    // on each entity; we cast through a soft type because the type
+    // declaration in chat.ts predates the multi-corpus PR.
     const seeds: GraphQueryNode[] = queryData?.seed_entities ?? [];
     for (const seed of seeds) {
+      const sourceCorpora =
+        (seed as unknown as { source_corpora?: string[] }).source_corpora ?? undefined;
       nodes.push({
         id: `seed:${seed.id}`,
         type: "seed",
         label: seed.display_name,
         entityType: seed.entity_type,
+        sourceCorpora,
         orbit: 1,
       });
       edges.push({ source: "nucleus", target: `seed:${seed.id}`, kind: "supports" });
@@ -223,15 +280,18 @@ export default function AtomicView({
       }
     });
 
-    // ORBIT 3 — bridges.
+    // ORBIT 3 — bridges. Same source_corpora soft-cast as seeds.
     const bridges: GraphBridge[] = queryData?.bridges ?? [];
     for (const b of bridges) {
       const id = `br:${b.entity_id}`;
+      const sourceCorpora =
+        (b as unknown as { source_corpora?: string[] }).source_corpora ?? undefined;
       nodes.push({
         id,
         type: "bridge",
         label: b.display_name,
         entityType: b.entity_type,
+        sourceCorpora,
         orbit: 3,
       });
       // Only connect each bridge to the seeds it actually links (the
@@ -375,12 +435,21 @@ export default function AtomicView({
       })();
       ctx.beginPath();
       ctx.arc(n.x, n.y, size_px, 0, Math.PI * 2);
+      // Color dispatch — seeds and bridges flow through nodeFillColor
+      // so cross-corpus provenance (> 1 source_corpora) shows as amber,
+      // while single-corpus entities use the entity-type palette or
+      // fall back to the corpus's HSL hash.
+      const provColor = nodeFillColor(n.entityType, n.sourceCorpora);
+      const crossCorpus =
+        Array.isArray(n.sourceCorpora) && n.sourceCorpora.length > 1;
       if (n.type === "synthesis") {
         ctx.fillStyle = "#1E293B";
       } else if (n.type === "seed") {
-        ctx.fillStyle = seedColor(n.entityType);
+        ctx.fillStyle = provColor;
       } else if (n.type === "bridge") {
-        ctx.fillStyle = "#F1F5F9";
+        // Bridges keep their light fill (so they read as connectors)
+        // but get a vivid stroke colored by provenance.
+        ctx.fillStyle = crossCorpus ? "#FEF3C7" : "#F1F5F9";
       } else if (n.type === "gap") {
         ctx.fillStyle = "#FEF2F2";
       } else {
@@ -393,9 +462,11 @@ export default function AtomicView({
           : n.type === "synthesis"
             ? "#0F172A"
             : n.type === "seed"
-              ? seedColor(n.entityType)
-              : "#94A3B8";
-      ctx.lineWidth = isHover ? 3 : 1.5;
+              ? provColor
+              : n.type === "bridge"
+                ? provColor
+                : "#94A3B8";
+      ctx.lineWidth = isHover ? 3 : crossCorpus ? 2.5 : 1.5;
       ctx.stroke();
 
       // Labels for everything but evidence (which is dense).
@@ -478,6 +549,21 @@ export default function AtomicView({
       {queryError && !queryData && (
         <div className="absolute top-4 left-4 right-4 bg-rose-50 border border-rose-200 text-rose-800 text-sm rounded p-2">
           Graph query failed: {queryError}
+        </div>
+      )}
+
+      {/* Multi-corpus legend — only renders when >1 corpus is selected,
+          so the affordance disappears when the convention is irrelevant. */}
+      {corpusIds.length > 1 && (
+        <div className="absolute bottom-4 left-4 flex items-center gap-2 bg-white/95 border border-slate-200 rounded px-2.5 py-1 text-[11px] font-mono text-slate-700 shadow-sm">
+          <span
+            className="inline-block w-2.5 h-2.5 rounded-full"
+            style={{ background: CROSS_CORPUS_COLOR }}
+            aria-hidden
+          />
+          <span>cross-corpus entity</span>
+          <span className="text-slate-400">·</span>
+          <span>{corpusIds.length} corpora merged</span>
         </div>
       )}
 

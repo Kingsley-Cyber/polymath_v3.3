@@ -415,7 +415,19 @@ export interface ContextGraphPayload {
 export type GraphSynthesisMode = "research" | "ideation";
 
 export interface GraphDiscoverRequest {
-  corpus_id: string;
+  /**
+   * DEPRECATED — use corpus_ids. Wrapped server-side into
+   * corpus_ids=[corpus_id] when present. Kept for back-compat with
+   * single-corpus callers.
+   */
+  corpus_id?: string;
+  /**
+   * Multi-corpus discover (PR 3+). Backend fans out per-corpus and
+   * merges results via merge_discover_results. AtomicView passes its
+   * full corpusIds list here so the merged synthesis sees evidence
+   * from every selected corpus.
+   */
+  corpus_ids?: string[];
   query: string;
   mode?: DiscoverMode;
   // Phase 3 — synthesis-mode selector. "research" (default) gives the
