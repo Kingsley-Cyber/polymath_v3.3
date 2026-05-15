@@ -547,7 +547,7 @@ class Settings(BaseSettings):
         ),
     )
     RETRIEVAL_CACHE_GRAPH_METRICS: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Phase 5a — use the cached analytics.CorpusMetrics (top_pagerank) "
             "alongside live degree count when graph-reranking. Same code "
@@ -557,9 +557,13 @@ class Settings(BaseSettings):
             "so a chunk gets boosted by EITHER local connectivity OR global "
             "structural importance, whichever is stronger. Cold cache "
             "(no metrics row, or no top_pagerank entries) falls back to "
-            "the existing degree-only path. Default OFF until soak-tested; "
-            "flip to True once you've confirmed the rerank quality win "
-            "on your corpora. Requires Phase 4 auto-warm (or a manual "
+            "the existing degree-only path. Default ON — every failure "
+            "mode (no cache row, get_cached_metrics raises, cypher fails, "
+            "entity not in top_pagerank) reverts to the pre-Phase-5a "
+            "behavior exactly, and the MAX() semantics mean the "
+            "multiplier can never go BELOW the degree-only value. "
+            "Set to False to A/B test pure-degree vs metrics-aware on "
+            "the same query. Requires Phase 4 auto-warm (or a manual "
             "/api/graph/cache/rebuild call) for cache population."
         ),
     )
