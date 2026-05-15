@@ -615,6 +615,7 @@ function App() {
                 <AtomicView
                   corpusIds={selectedCorpusIds}
                   query={graphViewerQuery}
+                  model={selectedModel || undefined}
                 />
               ) : graphViewerMode === "atom" ? (
                 <div className="flex h-full items-center justify-center text-zinc-500 text-sm font-mono">

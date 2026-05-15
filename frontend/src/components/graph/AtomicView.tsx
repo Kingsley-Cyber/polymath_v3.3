@@ -66,6 +66,16 @@ type Props = {
   corpusIds: string[];
   query: string;
   synthesisMode?: GraphSynthesisMode;
+  /**
+   * Same model reference chat passes through overrides.model — may be
+   * a raw LiteLLM id, `pool:<entry_id>`, or `profile:<entry_id>`. The
+   * backend's _resolve_graph_model resolves all three forms. Wired
+   * through from App.tsx's top-bar ModelSelector so atom synthesis
+   * uses the user's selected model just like Brain / Query modes do.
+   * Optional: when omitted, the backend falls back to the user's
+   * query-model preference.
+   */
+  model?: string;
   onSelectSeed?: (entityId: string) => void;
 };
 
@@ -131,6 +141,7 @@ export default function AtomicView({
   corpusIds,
   query,
   synthesisMode = "research",
+  model,
   onSelectSeed,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -184,6 +195,10 @@ export default function AtomicView({
       corpus_ids: corpusIds,
       query,
       synthesis_mode: synthesisMode,
+      // Conditionally spread so an unset model omits the field
+      // (backend then resolves the user's query-model preference)
+      // instead of explicitly sending `model: undefined`.
+      ...(model ? { model } : {}),
     };
     discoverGraph(discoverReq)
       .then((res) => {
@@ -198,7 +213,7 @@ export default function AtomicView({
     return () => {
       cancelled = true;
     };
-  }, [corpusIds.join(","), query, synthesisMode]);
+  }, [corpusIds.join(","), query, synthesisMode, model]);
 
   // Build the atomic node graph from whatever has arrived so far.
   const { nodes, edges } = useMemo(() => {
