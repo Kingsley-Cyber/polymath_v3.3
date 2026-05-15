@@ -297,6 +297,22 @@ class ChatOrchestrator:
                 model=model_used,
             )
         else:
+            # Phase 27 — resolve search-mode dispatch. "auto" infers from
+            # the user's actual message (NOT the HyDE-expanded retrieval
+            # query, which would have lost the original phrasing signal).
+            from services.retriever.search_mode import resolve_search_mode
+
+            requested_mode = (
+                getattr(request.overrides, "search_mode", None)
+                if request.overrides
+                else None
+            )
+            resolved_mode = resolve_search_mode(requested_mode, request.message)
+            logger.info(
+                "search_mode: requested=%s resolved=%s",
+                requested_mode or "auto",
+                resolved_mode,
+            )
             retrieval = await retriever_orchestrator.retrieve(
                 query=retrieval_query,
                 corpus_ids=request.corpus_ids,
@@ -311,6 +327,7 @@ class ChatOrchestrator:
                 neo4j_expansion_cap=profile_cfg["neo4j_expansion_cap"],
                 max_corpora_per_query=profile_cfg["max_corpora_per_query"],
                 final_top_k=profile_cfg["final_top_k"],
+                search_mode=resolved_mode,
             )
         sources = retrieval.chunks
 

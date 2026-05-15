@@ -280,6 +280,12 @@ export interface ChatOverrides extends Partial<ModelConfig> {
   query_profile?: "fast" | "balanced" | "thorough" | "custom";
   retrieval_k?: number;
   rerank_enabled?: boolean;
+  /** Phase 27 — search-mode dispatch. "auto" lets the backend infer
+   *  local vs global from query shape; "local" forces the full
+   *  vector+BM25+graph+rerank+hydrate path; "global" returns
+   *  summary-only chunks for thematic / corpus-wide queries. Omit
+   *  to use the server default (auto). */
+  search_mode?: "auto" | "local" | "global";
 }
 
 /** Phase 18 / 23 — speed profile options for the ToggleBar dropdown. */

@@ -294,6 +294,14 @@ class RetrieverOrchestrator:
         # Phase 24 — Final K (chunks fed to LLM after rerank). When None,
         # falls back to settings.DEFAULT_RETRIEVAL_K (the legacy hardcoded 5).
         final_top_k: int | None = None,
+        # Phase 27 — Search-mode dispatch. "local" (default) runs the full
+        # pipeline: Funnel A + B + lexical, merge, graph expand, rerank,
+        # hydrate. "global" runs Funnel A only and returns SUMMARY chunks
+        # directly to the LLM (no hydration to full text) — used for
+        # thematic / corpus-wide queries where overview beats evidence.
+        # The caller resolves "auto" to local|global before this point
+        # (see services/retriever/search_mode.py:resolve_search_mode).
+        search_mode: str = "local",
     ) -> RetrievalResult:
         """
         Execute the full retrieval pipeline.
@@ -441,6 +449,54 @@ class RetrieverOrchestrator:
 
         # [2] Determine Qdrant collections for each funnel
         a_cols, b_cols = self._resolve_collections(effective_tier, corpus_ids, collections)
+
+        # ─── Phase 27 — Global mode short-circuit ─────────────────────────
+        # Funnel A only. Summary chunks are returned verbatim (no merge
+        # with children, no graph expansion, no hydration to parent text)
+        # because the WHOLE POINT of global mode is to feed summaries to
+        # the LLM as the synthesis substrate. Hydrating would defeat the
+        # token-density advantage that makes "50 summaries instead of 5
+        # chunks" work.
+        if search_mode == "global":
+            global_top_k = top_k_summary if top_k_summary is not None else 50
+            try:
+                a_results_global = await funnel_a.search(
+                    query_vector, corpus_ids, a_cols, top_k=global_top_k,
+                )
+            except Exception as exc:
+                logger.warning("global-mode Funnel A failed: %s", exc)
+                a_results_global = []
+            _add_timing("global_funnel_a", phase_started)
+            counts["global_summaries"] = len(a_results_global)
+            # Optional rerank — summaries are usually well-ordered by
+            # vector similarity, but the cross-encoder catches mismatches
+            # between query intent and summary phrasing. Honored when the
+            # caller explicitly passes rerank_enabled=True.
+            if rerank_enabled and a_results_global:
+                try:
+                    a_results_global = await reranker_service.rerank(
+                        rank_query, a_results_global,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "global-mode rerank failed, score-sorting: %s", exc,
+                    )
+                    a_results_global = sorted(
+                        a_results_global, key=lambda c: c.score, reverse=True,
+                    )
+            effective_global_k = (
+                final_top_k
+                if final_top_k is not None
+                else max(20, settings.DEFAULT_RETRIEVAL_K)
+            )
+            top = a_results_global[:effective_global_k]
+            _log_timings("global_done", len(top))
+            return RetrievalResult(
+                chunks=top,
+                requested_tier=retrieval_tier,
+                effective_tier=effective_tier,
+                downgrade_reason=downgrade_reason,
+            )
 
         lexical_limit = _lexical_limit_for(
             effective_tier,

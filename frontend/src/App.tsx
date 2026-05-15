@@ -8,6 +8,7 @@ import { CollectionSelector } from "./components/chat/CollectionSelector";
 import { CorpusMultiSelect } from "./components/chat/CorpusMultiSelect";
 import { ModelSelector } from "./components/chat/ModelSelector";
 import { ReasoningModeSelector } from "./components/chat/ReasoningModeSelector";
+import { SearchModeSelector } from "./components/chat/SearchModeSelector";
 import { QueryProfileSelector } from "./components/chat/QueryProfileSelector";
 import { RetrievalTierSelector } from "./components/chat/RetrievalTierSelector";
 import { GraphViewer } from "./components/graph/GraphViewer";
@@ -247,6 +248,14 @@ function App() {
           reasoning_blend:
             settings.reasoningBlend && settings.reasoningBlend.length > 0
               ? settings.reasoningBlend
+              : undefined,
+          // Phase 27 — search-mode dispatch (auto / local / global).
+          // Omit when "auto" so the backend uses its default (which IS
+          // auto) — keeps wire payload small and means an old client
+          // that doesn't set this still behaves correctly.
+          search_mode:
+            settings.searchMode && settings.searchMode !== "auto"
+              ? settings.searchMode
               : undefined,
           // Phase 17 — HyDE per-request model (only when HyDE toggle is on).
           // Empty string shadows Phase F pool resolution, so we send undefined
@@ -550,6 +559,8 @@ function App() {
             <ModelSelector />
             <div className="h-4 w-px bg-border-minimal" />
             <ReasoningModeSelector />
+            <div className="h-4 w-px bg-border-minimal" />
+            <SearchModeSelector />
             <div className="h-4 w-px bg-border-minimal" />
             <QueryProfileSelector />
             <div className="h-4 w-px bg-border-minimal" />

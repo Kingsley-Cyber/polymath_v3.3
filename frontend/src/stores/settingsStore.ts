@@ -42,6 +42,12 @@ const DEFAULT_SETTINGS: Omit<SettingsState, "selectedModel"> = {
   reasoningMode: "none",
   reasoningBlend: [],
 
+  // Search mode dispatch (Phase 27) — "auto" lets the backend infer
+  // local vs global from the query shape; "local" forces the full
+  // pipeline (vector+BM25+graph+rerank+hydrate); "global" returns
+  // summaries-only for thematic / corpus-wide questions.
+  searchMode: "auto",
+
   // HyDE (Phase 17) — cheap model override. Empty = fall back to backend
   // HYDE_MODEL env var.
   hydeModel: "",
@@ -78,6 +84,7 @@ interface SettingsStore extends SettingsState {
   setAgenticModel: (model: string) => Promise<void>;
   setReasoningMode: (mode: string) => void;
   setReasoningBlend: (blend: string[]) => Promise<void>;
+  setSearchMode: (mode: "auto" | "local" | "global") => void;
   /** Phase 18 — per-query speed preset (client-only; read at send-time) */
   setQueryProfile: (profile: "fast" | "balanced" | "thorough" | "custom") => void;
   togglePowerUserReasoning: () => void;
@@ -195,6 +202,13 @@ export const useSettingsStore = create<SettingsStore>()(
         // Per-query knob — purely client-side, read by App.tsx.handleSend at
         // send time and injected into ChatRequest.overrides.reasoning_mode.
         set({ reasoningMode: mode });
+      },
+
+      setSearchMode: (mode: "auto" | "local" | "global") => {
+        // Per-query knob (Phase 27). Read by App.tsx.handleSend and
+        // injected into ChatRequest.overrides.search_mode. "auto" lets
+        // the backend infer; "local"/"global" override.
+        set({ searchMode: mode });
       },
 
       togglePowerUserReasoning: () =>
@@ -369,6 +383,7 @@ export const useSettingsStore = create<SettingsStore>()(
         hydeEnabled: state.hydeEnabled,
         rerankingEnabled: state.rerankingEnabled,
         reasoningMode: state.reasoningMode,
+        searchMode: state.searchMode,
         theme: state.theme,
         fontSize: state.fontSize,
         reducedMotion: state.reducedMotion,

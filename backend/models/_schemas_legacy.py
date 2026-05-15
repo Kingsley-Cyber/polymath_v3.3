@@ -67,6 +67,18 @@ class ModelOverrides(BaseModel):
         default=None,
         description="Per-request reranker switch. When False, retriever skips the cross-encoder call and sorts by vector score. Fixes the previously-dead UI toggle.",
     )
+    search_mode: str | None = Field(
+        default=None,
+        description=(
+            "Per-request search-mode dispatch (Phase 27). One of "
+            "'auto' | 'local' | 'global'. Auto infers from query shape "
+            "(broad/thematic → global, specific → local). Local is the "
+            "existing default pipeline. Global returns summary chunks "
+            "from Funnel A only — used for thematic corpus-wide queries "
+            "where 'overview' beats 'evidence'. When None, server "
+            "defaults to 'auto'."
+        ),
+    )
 
 
 class ChatRequest(BaseModel):

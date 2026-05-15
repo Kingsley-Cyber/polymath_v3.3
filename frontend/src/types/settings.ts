@@ -291,6 +291,10 @@ export interface SettingsState extends RAGSettings, UISettings {
   // reasoningBlend is the advanced power-user blend pool keys.
   reasoningBlend: string[];
 
+  // Search mode dispatch (Phase 27) — backend auto-detects local vs
+  // global from query shape; user can override in the ToggleBar.
+  searchMode: "auto" | "local" | "global";
+
   // HyDE (Phase 17) — dedicated cheap model for hypothetical generation
   hydeModel: string;
 
