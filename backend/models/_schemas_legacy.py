@@ -79,6 +79,21 @@ class ModelOverrides(BaseModel):
             "defaults to 'auto'."
         ),
     )
+    thinking_effort: str | None = Field(
+        default=None,
+        description=(
+            "Per-request thinking/reasoning-effort dial (Phase 28). One "
+            "of 'none' | 'low' | 'medium' | 'high' | 'auto'. Mapped to "
+            "the provider-native body param by services.thinking_mapper: "
+            "OpenAI o-series → reasoning_effort, Anthropic Claude → "
+            "thinking: {budget_tokens}, Gemini 2.5+ → thinking_budget. "
+            "Ignored (no-op) for non-reasoning models. When None, the "
+            "mapper is not invoked at all (default for cheap models). "
+            "When 'auto', the mapper picks a sensible per-provider "
+            "default ('medium' for OpenAI, enabled-no-budget for Claude, "
+            "etc.)."
+        ),
+    )
 
 
 class ChatRequest(BaseModel):
@@ -364,7 +379,7 @@ class ModalDeploySettings(BaseModel):
         ge=0,
         le=50,
         description="Warm fleet size. 0 = fully scale-to-zero. "
-                    "Biggest cost lever — gpu_rate × min_containers × 730h/mo.",
+        "Biggest cost lever — gpu_rate × min_containers × 730h/mo.",
     )
     max_containers: int = Field(default=10, ge=1, le=1000)
     idle_timeout_seconds: int = Field(default=300, ge=30, le=3600)
@@ -374,12 +389,12 @@ class ModalDeploySettings(BaseModel):
         min_length=1,
         max_length=63,
         description="Modal App name. Determines the deployed URL: "
-                    "https://<workspace>--<app_name>-embed.modal.run",
+        "https://<workspace>--<app_name>-embed.modal.run",
     )
     model_id: str = Field(
         default="Qwen/Qwen3-Embedding-0.6B",
         description="Any sentence-transformers-compatible HF model. "
-                    "Must match the corpus's frozen embedding dimension.",
+        "Must match the corpus's frozen embedding dimension.",
     )
     use_auth: bool = Field(
         default=False,
@@ -393,14 +408,14 @@ class ModalDeploySettings(BaseModel):
     embedder_url: str = Field(
         default="",
         description="Deployed Modal app URL (e.g. https://<workspace>--<app>-<fn>.modal.run). "
-                    "When set, new corpora default to embed_mode='modal_tei'.",
+        "When set, new corpora default to embed_mode='modal_tei'.",
     )
     # Populated by the verify-token endpoint so the UI can render the live URL
     # preview (<workspace>--<app>-embed.modal.run). Not a secret — just a label.
     workspace: str = Field(
         default="",
         description="Modal workspace name captured by `modal token info`. "
-                    "UI-only; display under URL preview.",
+        "UI-only; display under URL preview.",
     )
 
 
@@ -532,7 +547,9 @@ class ModelProfileRef(BaseModel):
         default="",
         description="UI label (openai / deepseek / ollama / …). Not runtime-authoritative.",
     )
-    model: str = Field(..., min_length=1, description="LiteLLM model string, e.g. 'openai/gpt-4o'")
+    model: str = Field(
+        ..., min_length=1, description="LiteLLM model string, e.g. 'openai/gpt-4o'"
+    )
     base_url: str | None = Field(
         default=None, description="Per-entry api_base override. None = LITELLM default."
     )
@@ -863,7 +880,9 @@ class SourceChunk(BaseModel):
     source_tier: str
     corpus_name: str | None = None  # populated during hydration from corpora collection
     doc_name: str | None = None  # basename of source_path, populated during hydration
-    heading_path: list[str] | None = None  # populated from Qdrant payload / parent chunk
+    heading_path: list[str] | None = (
+        None  # populated from Qdrant payload / parent chunk
+    )
     # Code lane (Phase 1) — language tag and AST-derived metadata (symbols_defined,
     # symbols_called, imports, ast_signature, file_path). Empty/None for prose chunks.
     language: str | None = None
@@ -1038,9 +1057,17 @@ class GraphQueryRequest(BaseModel):
     """POST /api/graph/query body — Agent Query backend call from GraphView."""
 
     corpus_id: str = Field(..., description="Corpus to scope the discovery to")
-    query: str = Field(..., min_length=1, description="Free-text query; tokens matched against Entity names")
-    max_hops: int = Field(default=2, ge=1, le=3, description="Entity→Entity traversal depth from seeds")
-    limit: int = Field(default=50, ge=1, le=200, description="Max nodes in returned subgraph")
+    query: str = Field(
+        ...,
+        min_length=1,
+        description="Free-text query; tokens matched against Entity names",
+    )
+    max_hops: int = Field(
+        default=2, ge=1, le=3, description="Entity→Entity traversal depth from seeds"
+    )
+    limit: int = Field(
+        default=50, ge=1, le=200, description="Max nodes in returned subgraph"
+    )
 
 
 class GraphQueryNode(BaseModel):
@@ -1104,8 +1131,13 @@ class DiscourseNode(BaseModel):
     id: str = Field(..., description="Lowercased term (node id + label)")
     label: str
     freq: int = Field(..., description="Corpus-wide term frequency")
-    type: str = Field(default="lexeme", description="Always 'lexeme' — distinguishes from entity nodes in Split mode")
-    cluster: int | None = Field(default=None, description="Cluster id from greedy modularity")
+    type: str = Field(
+        default="lexeme",
+        description="Always 'lexeme' — distinguishes from entity nodes in Split mode",
+    )
+    cluster: int | None = Field(
+        default=None, description="Cluster id from greedy modularity"
+    )
 
 
 class DiscourseLink(BaseModel):
@@ -1124,7 +1156,10 @@ class DiscourseGraph(BaseModel):
 class DiscourseCluster(BaseModel):
     cluster_id: int
     size: int
-    top_terms: list[str] = Field(default_factory=list, description="Up to 5 highest-frequency terms in the cluster")
+    top_terms: list[str] = Field(
+        default_factory=list,
+        description="Up to 5 highest-frequency terms in the cluster",
+    )
 
 
 class DiscourseBridge(BaseModel):
@@ -1148,7 +1183,9 @@ class DiscourseGap(BaseModel):
 
 
 class DiscourseShape(BaseModel):
-    shape: str = Field(..., description="CONCENTRATED | SKEWED | DISPERSED | BALANCED | EMPTY")
+    shape: str = Field(
+        ..., description="CONCENTRATED | SKEWED | DISPERSED | BALANCED | EMPTY"
+    )
     shape_description: str
     gini_coefficient: float
     cluster_proportions: dict[int, float] = Field(default_factory=dict)
@@ -1405,8 +1442,9 @@ class ModelProfileCreate(BaseModel):
     """POST /api/model-profiles body. Plaintext api_key is encrypted at rest."""
 
     label: str = Field(..., min_length=1, max_length=120)
-    base_url: str = Field(..., min_length=8, max_length=500,
-                          description="OpenAI-compatible base URL")
+    base_url: str = Field(
+        ..., min_length=8, max_length=500, description="OpenAI-compatible base URL"
+    )
     model_name: str = Field(..., min_length=1, max_length=200)
     api_key: str = Field("", description="Plaintext key; encrypted before storage.")
     extra_params: dict = Field(
@@ -1464,18 +1502,18 @@ class ModelPoolEntryCreate(BaseModel):
 
     label: str = Field(..., min_length=1, max_length=140)
     provider: str = Field(
-        ..., min_length=1, max_length=60,
-        description="Lowercase provider key; matches API Keys registry slots."
+        ...,
+        min_length=1,
+        max_length=60,
+        description="Lowercase provider key; matches API Keys registry slots.",
     )
     base_url: str = Field(..., min_length=8, max_length=500)
     model_name: str = Field(..., min_length=1, max_length=200)
-    api_key: str = Field(
-        "", description="Plaintext; ignored when use_shared_key=True."
-    )
+    api_key: str = Field("", description="Plaintext; ignored when use_shared_key=True.")
     use_shared_key: bool = Field(
         default=False,
         description="Pull key from the API Keys registry by `provider` instead "
-                    "of storing it on this entry.",
+        "of storing it on this entry.",
     )
     extra_params: dict = Field(default_factory=dict)
     context_length: int | None = None
@@ -1536,6 +1574,7 @@ class ModelPoolTestResult(BaseModel):
 # Ollama model exclusions. Chips themselves live in model_pool — this doc
 # stores ONLY pool entry_id references.
 
+
 class QueryPrefsResponse(BaseModel):
     user_id: str
     hyde_pool_id: str | None = None
@@ -1549,6 +1588,7 @@ class QueryPrefsUpdate(BaseModel):
     """Partial update — unset fields are preserved. Pass an empty list to
     ollama_exclusions to clear; pass JSON `null` to a *_pool_id to unset.
     """
+
     hyde_pool_id: str | None = None
     agentic_pool_id: str | None = None
     query_pool_id: str | None = None

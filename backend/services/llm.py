@@ -102,6 +102,34 @@ class LLMService:
             if overrides.model is not None:
                 body["model"] = overrides.model
 
+            # Phase 28 — thinking-effort dial (per-turn). Mapped to the
+            # provider-native body param by services.thinking_mapper:
+            #   OpenAI o-series → reasoning_effort: low|medium|high
+            #   Anthropic Claude → thinking: {type:"enabled", budget_tokens: N}
+            #   Gemini 2.5+ → thinking_budget: N
+            #   DeepSeek-R1 → ignored (always thinks, no dial)
+            # `apply_thinking_effort` is a no-op for non-reasoning models, so
+            # we can call it unconditionally without provider gating here —
+            # the mapper does the gating. Resolves the effective model from
+            # the override first, falling back to the call-site arg.
+            thinking_effort = getattr(overrides, "thinking_effort", None)
+            if thinking_effort is not None:
+                try:
+                    from services.thinking_mapper import apply_thinking_effort
+
+                    apply_thinking_effort(
+                        body,
+                        body.get("model") or model,
+                        thinking_effort,
+                    )
+                except Exception as exc:  # pragma: no cover — defensive
+                    # Never block the LLM call on a mapper failure. Log
+                    # and continue with the unmapped body.
+                    logger.warning(
+                        "thinking_mapper failed (effort=%r model=%r): %s",
+                        thinking_effort, body.get("model") or model, exc,
+                    )
+
         return body
 
     async def _request_with_retry(

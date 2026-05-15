@@ -295,6 +295,12 @@ export interface SettingsState extends RAGSettings, UISettings {
   // global from query shape; user can override in the ToggleBar.
   searchMode: "auto" | "local" | "global";
 
+  // Thinking-effort dial (Phase 28) — per-turn knob for reasoning
+  // models (OpenAI o-series, Claude 3.7+, Gemini 2.5+, DeepSeek-R1).
+  // Backend maps this to provider-native params; UI hides the
+  // selector when the selected model has no thinking dial.
+  thinkingEffort: "auto" | "none" | "low" | "medium" | "high";
+
   // HyDE (Phase 17) — dedicated cheap model for hypothetical generation
   hydeModel: string;
 

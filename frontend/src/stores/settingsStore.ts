@@ -48,6 +48,12 @@ const DEFAULT_SETTINGS: Omit<SettingsState, "selectedModel"> = {
   // summaries-only for thematic / corpus-wide questions.
   searchMode: "auto",
 
+  // Thinking-effort dial (Phase 28) — per-turn reasoning depth for
+  // models that expose it (OpenAI o-series, Claude, Gemini 2.5+,
+  // DeepSeek-R1). "auto" → provider picks default; UI hides the
+  // selector entirely for non-reasoning models.
+  thinkingEffort: "auto",
+
   // HyDE (Phase 17) — cheap model override. Empty = fall back to backend
   // HYDE_MODEL env var.
   hydeModel: "",
@@ -85,6 +91,7 @@ interface SettingsStore extends SettingsState {
   setReasoningMode: (mode: string) => void;
   setReasoningBlend: (blend: string[]) => Promise<void>;
   setSearchMode: (mode: "auto" | "local" | "global") => void;
+  setThinkingEffort: (effort: "auto" | "none" | "low" | "medium" | "high") => void;
   /** Phase 18 — per-query speed preset (client-only; read at send-time) */
   setQueryProfile: (profile: "fast" | "balanced" | "thorough" | "custom") => void;
   togglePowerUserReasoning: () => void;
@@ -209,6 +216,17 @@ export const useSettingsStore = create<SettingsStore>()(
         // injected into ChatRequest.overrides.search_mode. "auto" lets
         // the backend infer; "local"/"global" override.
         set({ searchMode: mode });
+      },
+
+      setThinkingEffort: (
+        effort: "auto" | "none" | "low" | "medium" | "high",
+      ) => {
+        // Per-turn knob (Phase 28). Read by App.tsx.handleSend and
+        // injected into ChatRequest.overrides.thinking_effort. "auto"
+        // means "omit the field and let the backend's thinking_mapper
+        // pick the per-provider default". The selector is hidden in
+        // the UI when the selected model has no thinking dial.
+        set({ thinkingEffort: effort });
       },
 
       togglePowerUserReasoning: () =>
@@ -384,6 +402,7 @@ export const useSettingsStore = create<SettingsStore>()(
         rerankingEnabled: state.rerankingEnabled,
         reasoningMode: state.reasoningMode,
         searchMode: state.searchMode,
+        thinkingEffort: state.thinkingEffort,
         theme: state.theme,
         fontSize: state.fontSize,
         reducedMotion: state.reducedMotion,

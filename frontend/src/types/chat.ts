@@ -286,6 +286,12 @@ export interface ChatOverrides extends Partial<ModelConfig> {
    *  summary-only chunks for thematic / corpus-wide queries. Omit
    *  to use the server default (auto). */
   search_mode?: "auto" | "local" | "global";
+  /** Phase 28 — thinking / reasoning-effort dial. Mapped server-side
+   *  to provider-native params (OpenAI reasoning_effort, Anthropic
+   *  thinking budget, Gemini thinking_budget). Ignored for models
+   *  that don't expose a dial. Omit when "auto" — server picks the
+   *  per-provider default. */
+  thinking_effort?: "auto" | "none" | "low" | "medium" | "high";
 }
 
 /** Phase 18 / 23 — speed profile options for the ToggleBar dropdown. */

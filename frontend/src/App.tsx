@@ -9,6 +9,7 @@ import { CorpusMultiSelect } from "./components/chat/CorpusMultiSelect";
 import { ModelSelector } from "./components/chat/ModelSelector";
 import { ReasoningModeSelector } from "./components/chat/ReasoningModeSelector";
 import { SearchModeSelector } from "./components/chat/SearchModeSelector";
+import { ThinkingEffortSelector } from "./components/chat/ThinkingEffortSelector";
 import { QueryProfileSelector } from "./components/chat/QueryProfileSelector";
 import { RetrievalTierSelector } from "./components/chat/RetrievalTierSelector";
 import { GraphViewer } from "./components/graph/GraphViewer";
@@ -256,6 +257,16 @@ function App() {
           search_mode:
             settings.searchMode && settings.searchMode !== "auto"
               ? settings.searchMode
+              : undefined,
+          // Phase 28 — thinking-effort dial. Omit when "auto" so the
+          // backend's thinking_mapper picks the per-provider default,
+          // AND so non-reasoning model requests don't carry an
+          // irrelevant field on the wire. The frontend hides the
+          // selector entirely for non-reasoning models, so a stray
+          // non-auto value here always indicates a user-set override.
+          thinking_effort:
+            settings.thinkingEffort && settings.thinkingEffort !== "auto"
+              ? settings.thinkingEffort
               : undefined,
           // Phase 17 — HyDE per-request model (only when HyDE toggle is on).
           // Empty string shadows Phase F pool resolution, so we send undefined
@@ -557,6 +568,7 @@ function App() {
             <CollectionSelector collections={collections} />
             <div className="h-4 w-px bg-border-minimal" />
             <ModelSelector />
+            <ThinkingEffortSelector />
             <div className="h-4 w-px bg-border-minimal" />
             <ReasoningModeSelector />
             <div className="h-4 w-px bg-border-minimal" />
