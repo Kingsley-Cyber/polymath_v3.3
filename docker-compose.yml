@@ -640,15 +640,24 @@ services:
   # ============================================================
   # CLOUDFLARE TUNNEL (optional)
   #
-  # Cloudflare-managed ingress should point public hostnames at service names
-  # on this compose network, for example:
-  #   app.example.com -> http://frontend:80
-  #   api.example.com -> http://backend:8000
-  #   mcp.example.com -> http://mcp:8765
+  # Cloudflare-managed ingress should point public hostnames at service
+  # names on this compose network. This deployment uses flat subdomains
+  # under kingsleylab.xyz:
+  #   rag.kingsleylab.xyz  -> http://frontend:80    (React UI)
+  #   api.kingsleylab.xyz  -> http://backend:8000   (FastAPI)
+  #   mcp.kingsleylab.xyz  -> http://mcp:8765       (MCP sidecar)
+  #
+  # Configure the three Public Hostnames in:
+  #   Cloudflare Zero Trust → Networks → Tunnels → <your tunnel>
+  #     → Public Hostname → Add
+  # Use http:// (not https://) because TLS terminates at Cloudflare's
+  # edge; the in-network leg is plaintext.
   #
   # Start with:
   #   docker compose --profile cloudflare up -d cloudflared
-  # Include --profile mcp when the tunnel has an MCP hostname.
+  # Include --profile mcp when the tunnel has an MCP hostname (the
+  # cloudflared service's depends_on uses required:false so it won't
+  # block when the mcp profile is omitted).
   # ============================================================
   cloudflared:
     <<: *default-logging
