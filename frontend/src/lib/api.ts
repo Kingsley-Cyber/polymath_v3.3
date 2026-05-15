@@ -1685,6 +1685,12 @@ export interface BrainViewDocument {
   updated_at?: string | null;
   bridge_count: number;
   bridges: BrainViewBridge[];
+  // Octopus mode — top distinct entity names per anchor (capped at 8 by
+  // the backend Cypher) + the full entity_count for that anchor.
+  // GraphViewer reads `top_entities` to spawn satellite nodes for the
+  // spotlight (top-bridge-count) books; `entity_count` is informational.
+  entity_count?: number;
+  top_entities?: string[];
 }
 
 export interface BrainViewFlatBridge {

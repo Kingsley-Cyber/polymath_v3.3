@@ -186,6 +186,22 @@ WITH d, actual_chunk_count, dominant_family, dominant_entity_type,
 WITH d, actual_chunk_count, dominant_family, dominant_entity_type,
      [b IN raw_bridges WHERE b IS NOT NULL] AS bridges
 
+// Octopus prep — collect up to 8 distinct entity names per anchor so the
+// frontend can spawn them as orbiting satellites. Same stop-list filter
+// as the bridge traversal so we don't surface "Index" / "this book" /
+// generic-type-name junk as orbit tips.
+//
+// Capped via [..8] before aggregation lands; Neo4j won't carry more than
+// 8 entities per doc through the WITH. Worst-case cost: one indexed
+// HAS_CHUNK + MENTIONS walk per anchor — same shape the bridges section
+// already runs, just bounded to 8 distinct emits.
+OPTIONAL MATCH (d)-[:HAS_CHUNK]->(:Chunk)-[:MENTIONS]->(e_top:Entity)
+WHERE NOT toLower(coalesce(e_top.display_name, '')) IN $stop_exact
+  AND NOT toLower(coalesce(e_top.display_name, '')) =~ $stop_pattern
+WITH d, actual_chunk_count, dominant_family, dominant_entity_type, bridges,
+     count(DISTINCT e_top) AS entity_count,
+     collect(DISTINCT coalesce(e_top.display_name, e_top.entity_id))[..8] AS top_entities
+
 RETURN
     d.doc_id          AS doc_id,
     d.corpus_id       AS corpus_id,
@@ -205,7 +221,9 @@ RETURN
     d.ingested_at     AS ingested_at,
     d.updated_at      AS updated_at,
     size(bridges)     AS bridge_count,
-    bridges
+    bridges,
+    entity_count,
+    top_entities
 ORDER BY size(bridges) DESC, label ASC
 LIMIT $limit
 """
@@ -295,6 +313,11 @@ async def get_brain_view(
             "updated_at": _iso_or_none(record.get("updated_at")),
             "bridge_count": record.get("bridge_count") or 0,
             "bridges": record.get("bridges") or [],
+            # Octopus mode — top N entity names + total entity count per
+            # anchor. Capped at 8 by the Cypher; the frontend spawns these
+            # as orbiting satellites for spotlight (top-bridge-count) docs.
+            "entity_count": int(record.get("entity_count") or 0),
+            "top_entities": list(record.get("top_entities") or []),
         }
         documents.append(doc)
         corpora_seen.add(doc["corpus_id"])

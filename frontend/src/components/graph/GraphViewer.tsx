@@ -240,10 +240,24 @@ function useBrainGraph(
         (a, b) => (b.bridge_count || 0) - (a.bridge_count || 0),
       );
       const topN = adaptiveTopN(sortedDocs.length);
-      const anchorNodes = sortedDocs.map((d, idx) => {
+
+      // Octopus / spotlight mode. The top SPOTLIGHT_COUNT docs by bridge
+      // count grow satellites (orbiting Entity nodes). The long tail stays
+      // as plain head-only anchors so the canvas doesn't drown in dots.
+      // 100 docs × 8 satellites = 800 satellite nodes max — well within
+      // sigma's smooth-render budget.
+      const SPOTLIGHT_COUNT = 100;
+      const SAT_ORBIT_R = 28; // initial orbit radius (FA2 will adjust)
+
+      const anchorNodes: any[] = [];
+      const satelliteNodes: any[] = [];
+      const satelliteEdges: any[] = [];
+
+      sortedDocs.forEach((d, idx) => {
         const rawLabel = d.label || d.filename || d.doc_id.slice(0, 8);
-        return {
-          id: `book:${d.doc_id}`,
+        const bookId = `book:${d.doc_id}`;
+        anchorNodes.push({
+          id: bookId,
           // Full text kept on display_name for tooltip; sigma renders `label`.
           display_name: rawLabel,
           label: cleanBookLabel(rawLabel) || rawLabel,
@@ -269,8 +283,49 @@ function useBrainGraph(
           parent_count: d.parent_count,
           bridge_count: d.bridge_count,
           filename: d.filename,
-        };
+          entity_count: d.entity_count,
+        });
+
+        // Only the spotlight (top SPOTLIGHT_COUNT by bridge_count) gets
+        // satellites. Long-tail books read as solo dots, keeping the
+        // canvas legible at 1000+ books.
+        if (idx < SPOTLIGHT_COUNT) {
+          const topEntities = d.top_entities || [];
+          const satCount = topEntities.length;
+          topEntities.forEach((name, i) => {
+            // Pre-bake polar position around (0,0) — the adapter resolves
+            // the book's anchor position and adds these as offsets, so
+            // satellites start in a ring instead of being dragged into
+            // orbit by FA2.
+            const angle =
+              (i / Math.max(satCount, 1)) * Math.PI * 2 + idx * 0.7;
+            const entityId = `ent:${d.doc_id}:${i}`;
+            satelliteNodes.push({
+              id: entityId,
+              display_name: name,
+              label: name.length > 18 ? name.slice(0, 17) + "…" : name,
+              entity_type: "Concept",
+              kind: "Concept", // adapter picks Concept color
+              source_corpus: d.corpus_id,
+              source_corpora: [d.corpus_id],
+              // primary_doc_id wires the adapter's "orbit your book"
+              // positioning. Without this, FA2 would scatter satellites.
+              primary_doc_id: d.doc_id,
+              mention_count: 1,
+              // Pre-baked polar — adapter adds anchor position.
+              x: Math.cos(angle) * SAT_ORBIT_R,
+              y: Math.sin(angle) * SAT_ORBIT_R,
+            });
+            satelliteEdges.push({
+              source: bookId,
+              target: entityId,
+              predicate: "contains",
+              weight: 0.2,
+            });
+          });
+        }
       });
+
       const bridgeLinks = bv.bridges.map((b) => ({
         source: `book:${b.source}`,
         target: `book:${b.target}`,
@@ -288,7 +343,10 @@ function useBrainGraph(
         top_shared_entities: b.top_shared_entities || [],
         shared_entities: b.shared_entities,
       }));
-      setData({ nodes: anchorNodes, links: bridgeLinks });
+      setData({
+        nodes: [...anchorNodes, ...satelliteNodes],
+        links: [...bridgeLinks, ...satelliteEdges],
+      });
       setCacheWarming([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

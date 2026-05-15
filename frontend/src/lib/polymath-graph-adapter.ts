@@ -327,6 +327,7 @@ export function polymathToGraphology(
     let cx = 0;
     let cy = 0;
     let positioned = false;
+    let isOctopusSatellite = false;
     // Book mode: leaf entities have primary_doc_id → orbit that book anchor.
     if (raw.primary_doc_id) {
       const anchorPos = positions.get(`book:${raw.primary_doc_id}`);
@@ -334,6 +335,7 @@ export function polymathToGraphology(
         cx = anchorPos.x;
         cy = anchorPos.y;
         positioned = true;
+        isOctopusSatellite = true;
       }
     }
     // Cluster centers for query/drill mode if caller provides them.
@@ -355,8 +357,23 @@ export function polymathToGraphology(
       cx = radius * Math.cos(angle);
       cy = radius * Math.sin(angle);
     }
-    const x = cx + (Math.random() - 0.5) * leafJitter;
-    const y = cy + (Math.random() - 0.5) * leafJitter;
+
+    let x: number;
+    let y: number;
+    if (isOctopusSatellite) {
+      // Octopus mode — leaf carries a pre-baked polar offset (raw.x/y
+      // set to a ring at ~28px from origin by GraphViewer). Add the
+      // anchor center to land it in tight orbit around the book. This
+      // is much more compact than the scattered-cloud `leafJitter`
+      // fallback, so satellites read as tentacle tips, not as drifters.
+      const offsetX = typeof (raw as any).x === "number" ? (raw as any).x : 0;
+      const offsetY = typeof (raw as any).y === "number" ? (raw as any).y : 0;
+      x = cx + offsetX + (Math.random() - 0.5) * 4;
+      y = cy + offsetY + (Math.random() - 0.5) * 4;
+    } else {
+      x = cx + (Math.random() - 0.5) * leafJitter;
+      y = cy + (Math.random() - 0.5) * leafJitter;
+    }
     positions.set(raw.id, { x, y });
     addNodeToGraph(graph, raw, x, y, n, opts);
   });
@@ -525,6 +542,15 @@ function addNodeToGraph(
     typeof (raw as PolymathRawNode).forceLabel === "boolean"
       ? Boolean((raw as PolymathRawNode).forceLabel)
       : kind === "Domain" || kind === "Book";
+  // Octopus satellites — leaves bound to a book via primary_doc_id —
+  // need very low mass so FA2 doesn't yank them into other orbits. Cap
+  // at 2; the book anchors themselves stay heavy (mass 22 in
+  // sigma-constants::nodeReducer) so the orbit hierarchy is stable.
+  const baseMass = NODE_MASSES[kind] || 1;
+  const isOctopusSatellite =
+    Boolean((raw as PolymathRawNode).primary_doc_id) && kind !== "Book";
+  const mass = isOctopusSatellite ? Math.min(baseMass, 2) : baseMass;
+
   graph.addNode(raw.id, {
     x,
     y,
@@ -540,7 +566,7 @@ function addNodeToGraph(
     member_ids: raw.member_ids,
     hidden: false,
     forceLabel,
-    mass: NODE_MASSES[kind] || 1,
+    mass,
     // Carried for sigma-constants::nodeReducer star-field sizing.
     bridge_count: (raw as PolymathRawNode).bridge_count,
   } as any);
