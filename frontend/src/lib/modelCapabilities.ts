@@ -77,7 +77,18 @@ type ThinkingPattern = {
 };
 
 const THINKING_PATTERNS: ReadonlyArray<ThinkingPattern> = [
-  // (none configured yet — selector will hide for every model)
+  // DeepSeek V4 Flash / Pro — supports `thinking: {type}` toggle +
+  // `reasoning_effort` (low/medium/high all collapse to "high" per the
+  // provider's own normalization; none → disabled). Verified against
+  // DeepSeek thinking-mode docs (2026-05-15).
+  //
+  // Note the negative on the older "reasoner" / "r1" / "chat" models:
+  // they're explicitly NOT enabled here — only V4 follows the toggle
+  // contract. Backend's _is_deepseek_v4 mirrors this gate.
+  {
+    test: (m) => /deepseek-v4(-flash|-pro)?\b/.test(m),
+    provider: "deepseek",
+  },
 ];
 
 

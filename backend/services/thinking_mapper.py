@@ -58,7 +58,37 @@ ThinkingEffort = Literal["none", "low", "medium", "high", "auto"]
 # by ThinkingEffort that returns the provider-native value. Keep the
 # concrete value type provider-specific (str / int / dict / bool / ...).
 
-# (none yet)
+# ── DeepSeek V4 (deepseek-v4-flash, deepseek-v4-pro) ─────────────────────
+# Source: DeepSeek thinking-mode docs (user-supplied, verified 2026-05-15).
+#   - Thinking is DEFAULT ON; toggle via `thinking: {"type": "enabled" |
+#     "disabled"}`.
+#   - Effort dial via `reasoning_effort: "high" | "max"`.
+#   - DeepSeek internally maps "low" and "medium" → "high"; "xhigh" → "max".
+#   - In thinking mode, temperature/top_p/presence_penalty/
+#     frequency_penalty are silently ignored. The mapper strips them so
+#     the body the user sees matches what the provider actually honors.
+#
+# We don't yet expose "xhigh" in the agnostic ThinkingEffort enum, so
+# "max" is unreachable through this mapper today. When/if we add xhigh,
+# add `"xhigh": "max"` to _DEEPSEEK_V4_REASONING_EFFORT and update
+# ThinkingEffort. For now low/medium/high all collapse to "high",
+# matching DeepSeek's own normalization.
+_DEEPSEEK_V4_REASONING_EFFORT: dict[ThinkingEffort, str] = {
+    "low": "high",
+    "medium": "high",
+    "high": "high",
+}
+
+# Body params that thinking mode silently ignores. Stripping them keeps
+# the user's mental model honest: if temperature=0 was set, they'd
+# expect deterministic output, but DeepSeek thinking-mode reads it as
+# "no effect" — surprising. Better to drop and log.
+_DEEPSEEK_V4_THINKING_INCOMPATIBLE_PARAMS: tuple[str, ...] = (
+    "temperature",
+    "top_p",
+    "presence_penalty",
+    "frequency_penalty",
+)
 
 
 # ─── Provider detectors ──────────────────────────────────────────────────
@@ -77,7 +107,18 @@ def _provider_from_model(model: str) -> str:
     return ""
 
 
-# (no provider detectors yet — add per-provider helpers here)
+def _is_deepseek_v4(model: str, provider: str) -> bool:
+    """Match DeepSeek-V4-Flash and DeepSeek-V4-Pro. Excludes older
+    DeepSeek models (deepseek-chat, deepseek-reasoner, deepseek-r1)
+    which either have no dial (chat) or don't follow the v4 toggle
+    contract (reasoner / R1 are always-on with no off switch).
+    """
+    if provider == "deepseek":
+        m = model.lower()
+        return "v4" in m or "v4-flash" in m or "v4-pro" in m
+    # Bare model id without provider/ prefix (some callers strip it).
+    m = model.lower()
+    return "deepseek-v4-flash" in m or "deepseek-v4-pro" in m
 
 
 # ─── Public entry point ──────────────────────────────────────────────────
@@ -111,19 +152,28 @@ def apply_thinking_effort(
 
     provider = _provider_from_model(model)
 
-    # ── Provider blocks go here ──────────────────────────────────────
-    # Pattern:
-    #
-    #   if _is_<provider>(model, provider):
-    #       if effort == "none":
-    #           # provider-specific disable signal (if any)
-    #           return
-    #       budget = _<PROVIDER>_BUDGETS.get(effort, _<PROVIDER>_BUDGETS["medium"])
-    #       body["<provider_native_key>"] = budget
-    #       # any provider-specific guards (e.g. max_tokens floor) here
-    #       return
-    #
-    # (no provider blocks wired yet)
+    # ── DeepSeek V4 (Flash / Pro) ────────────────────────────────────
+    # Wire: `thinking: {type: enabled|disabled}` toggle + optional
+    # `reasoning_effort: "high"`. When thinking is enabled, strip
+    # body params DeepSeek silently ignores so the wire payload
+    # honestly reflects what the provider will honor.
+    if _is_deepseek_v4(model, provider):
+        if effort == "none":
+            # Explicit disable. Per the docs, default is ENABLED, so we
+            # must send the disable signal explicitly to opt out.
+            body["thinking"] = {"type": "disabled"}
+            return
+        body["thinking"] = {"type": "enabled"}
+        body["reasoning_effort"] = _DEEPSEEK_V4_REASONING_EFFORT.get(
+            effort, "high"
+        )
+        # Strip thinking-incompatible params silently — they would be
+        # ignored by DeepSeek anyway, but removing them keeps the body
+        # honest and avoids user confusion ("I set temperature=0, why
+        # is the output non-deterministic?").
+        for key in _DEEPSEEK_V4_THINKING_INCOMPATIBLE_PARAMS:
+            body.pop(key, None)
+        return
 
     # No matching provider → silent no-op. Body unchanged.
     _ = provider  # keep the local for the next provider's gating
