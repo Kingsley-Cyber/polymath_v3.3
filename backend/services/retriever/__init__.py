@@ -33,6 +33,7 @@ from services.retriever.funnel_a import funnel_a
 from services.retriever.funnel_b import funnel_b
 from services.retriever.hydrate import hydrate_chunks
 from services.retriever.lexical import _terms, lexical_retriever
+from services.retriever.graph_rerank import apply_graph_degree_boost
 from services.retriever.merge import merge_pools
 from services.retriever.mode_a import mode_a_expansion
 
@@ -548,6 +549,38 @@ class RetrieverOrchestrator:
                 logger.warning("Mode A expansion failed, continuing: %s", exc)
             finally:
                 _add_timing("graph", phase_started)
+
+        # [5b] Sprint #1 — graph-degree boost (PageRank-shaped multiplier).
+        # Applied BEFORE the rerank_top_n cap so chunks that mention hub
+        # entities (Humanoid, TweenService, etc.) can promote into the
+        # cap window. Gated by RETRIEVAL_GRAPH_RERANK_ENABLED.
+        if (
+            getattr(settings, "RETRIEVAL_GRAPH_RERANK_ENABLED", True)
+            and effective_tier == RetrievalTier.qdrant_mongo_graph
+            and settings.NEO4J_ENABLED
+            and merged
+        ):
+            phase_started = perf_counter()
+            try:
+                neo4j_driver = getattr(
+                    __import__(
+                        "services.ingestion_service",
+                        fromlist=["ingestion_service"],
+                    ).ingestion_service,
+                    "neo4j_driver",
+                    None,
+                )
+                merged = await apply_graph_degree_boost(
+                    merged, corpus_ids, neo4j_driver
+                )
+                # Re-sort after multiplier so the rerank_top_n cap reflects
+                # the boosted ordering.
+                merged.sort(key=lambda c: c.score, reverse=True)
+                counts["merged_after_graph_boost"] = len(merged)
+            except Exception as exc:
+                logger.warning("graph_rerank boost failed, continuing: %s", exc)
+            finally:
+                _add_timing("graph_boost", phase_started)
 
         # [5a] Phase 23 — Custom profile `rerank_top_n` pool cap before reranker
         if rerank_top_n is not None and len(merged) > rerank_top_n:

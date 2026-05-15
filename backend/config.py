@@ -500,6 +500,20 @@ class Settings(BaseSettings):
             "reranker like jinaai/jina-reranker-v2-base-code."
         ),
     )
+    RETRIEVAL_GRAPH_RERANK_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Sprint #1 — graph-based reranking. When True, the retrieval "
+            "pipeline applies a PageRank-shaped degree multiplier to each "
+            "candidate chunk's score AFTER Mode A expansion but BEFORE "
+            "the rerank_top_n cap. The multiplier is "
+            "1 + 0.15 * log1p(min(max_entity_degree, 50)), so a chunk "
+            "that mentions a hub concept (high-degree :Entity) gets a "
+            "structural boost. Only fires when the request uses the "
+            "qdrant_mongo_graph tier AND Neo4j is enabled. Flip False "
+            "to A/B test boost-vs-no-boost on the same query."
+        ),
+    )
     GRAPHIFY_AUGMENT_CODE_LANE: bool = Field(
         default=False,
         description=(

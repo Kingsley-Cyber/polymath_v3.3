@@ -105,6 +105,10 @@ export interface BrainViewDashboardProps {
   // without leaving the panel. Default "research" preserves existing UX.
   synthesisMode?: "research" | "ideation";
   onSynthesisModeChange?: (m: "research" | "ideation") => void;
+  // Sprint #2 — opt-in synthesis validation (draft → critique → revise).
+  // Adds 2-3× latency/tokens; surfaced as a small checkbox in the tab.
+  validateSynthesis?: boolean;
+  onValidateSynthesisChange?: (v: boolean) => void;
   // Pt 7: Graph Query tab — send a refined chip back to the chat
   onSendToChat?: (text: string) => void;
   /** Pt 7: model id passed through to api.refineQuery so the LLM call
@@ -177,6 +181,8 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     agentGaps,
     synthesisMode,
     onSynthesisModeChange,
+    validateSynthesis,
+    onValidateSynthesisChange,
     onSendToChat,
     model,
     onRerun,
@@ -357,6 +363,8 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
             gaps={agentGaps}
             synthesisMode={synthesisMode}
             onSynthesisModeChange={onSynthesisModeChange}
+            validateSynthesis={validateSynthesis}
+            onValidateSynthesisChange={onValidateSynthesisChange}
           />
         )}
 
@@ -598,6 +606,8 @@ interface AgentSearchTabProps {
   gaps?: Array<{ entity_a_name?: string; entity_b_name?: string }>;
   synthesisMode?: "research" | "ideation";
   onSynthesisModeChange?: (m: "research" | "ideation") => void;
+  validateSynthesis?: boolean;
+  onValidateSynthesisChange?: (v: boolean) => void;
 }
 
 function AgentSearchTab(props: AgentSearchTabProps) {
@@ -614,6 +624,8 @@ function AgentSearchTab(props: AgentSearchTabProps) {
     gaps,
     synthesisMode = "research",
     onSynthesisModeChange,
+    validateSynthesis = false,
+    onValidateSynthesisChange,
   } = props;
   const canRun = phase !== "loading" && query.trim().length > 0;
   return (
@@ -699,6 +711,24 @@ function AgentSearchTab(props: AgentSearchTabProps) {
               ? error || "error"
               : "⌘/Ctrl + Enter to run"}
         </div>
+
+        {onValidateSynthesisChange && (
+          <label
+            className={
+              "mt-2 flex items-center gap-2 cursor-pointer select-none text-[10px] font-mono uppercase tracking-wider " +
+              (validateSynthesis ? "text-amber-300" : "text-zinc-500 hover:text-zinc-300")
+            }
+            title="Run a second auditor + editor pass to catch fabricated terms, missing citations, and shell sentences. ~2-3× LLM cost."
+          >
+            <input
+              type="checkbox"
+              checked={validateSynthesis}
+              onChange={(e) => onValidateSynthesisChange(e.currentTarget.checked)}
+              className="accent-amber-600"
+            />
+            <span>validate · draft → critique → revise</span>
+          </label>
+        )}
       </section>
 
       {phase === "ready" && synthesisMarkdown && (

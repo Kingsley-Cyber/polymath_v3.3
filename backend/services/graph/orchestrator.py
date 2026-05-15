@@ -2995,12 +2995,198 @@ async def _resolve_graph_model(
     }
 
 
+# ─── Sprint #2 — Multi-stage synthesis (draft → critique → revise) ─────────
+# The first pass produces the synthesis markdown using the regular
+# research/ideation system prompt. Stages 2-3 fire only when
+# validate_synthesis=True. The critique reads the draft + the evidence
+# packet, lists problems as JSON, and the revise stage applies those
+# corrections in-place. Default OFF — opt-in per query via the
+# `validate_synthesis` flag on GraphDiscoverRequest.
+
+_CRITIQUE_SYSTEM_PROMPT = (
+    "You are Polymath's synthesis auditor. The user prompt contains "
+    "the evidence packet AND a draft synthesis written by another "
+    "model. Your only job is to spot specific problems in the draft. "
+    "Do NOT rewrite or summarize the draft. Output ONLY a JSON "
+    "object with a `problems` array; nothing else.\n\n"
+    "Each problem must point to a SPECIFIC sentence in the draft and "
+    "name a SPECIFIC issue. Use these problem categories:\n"
+    "  - \"fabricated_term\": the sentence bolds or names an API/file/"
+    "    entity that does NOT appear verbatim in the evidence packet.\n"
+    "  - \"missing_citation\": the sentence makes a claim grounded in "
+    "    the evidence but has no [n] inline citation.\n"
+    "  - \"shell_sentence\": the sentence is empty narration "
+    "    (\"a relationship exists between\", \"the graph suggests\", "
+    "    \"these are connected\", \"a bridge exists\") without naming "
+    "    the actual mechanism.\n"
+    "  - \"internal_label_leak\": the sentence contains a raw "
+    "    ALL_CAPS_UNDERSCORED label like RELATES_TO or MENTIONS.\n"
+    "  - \"contradicts_evidence\": the sentence states X about Y but "
+    "    the cited evidence shows the opposite.\n\n"
+    "Output schema:\n"
+    "{\n"
+    "  \"problems\": [\n"
+    "    {\"sentence\": \"<exact quote, ≤200 chars>\",\n"
+    "     \"category\": \"<one of the categories above>\",\n"
+    "     \"detail\": \"<one sentence explaining the issue>\"}\n"
+    "  ]\n"
+    "}\n\n"
+    "If the draft has no problems, return `{\"problems\": []}`. Do not "
+    "invent issues to fill the list — a clean draft IS the success "
+    "case. Cap at 10 problems even if more exist; surface the most "
+    "load-bearing ones first."
+)
+
+_REVISE_SYSTEM_PROMPT = (
+    "You are Polymath's synthesis editor. The user prompt contains "
+    "the evidence packet, a draft synthesis, and a JSON list of "
+    "problems flagged by an auditor. Apply the fixes in place and "
+    "return the corrected synthesis.\n\n"
+    "Editing rules:\n"
+    "- For each problem: rewrite or REMOVE the flagged sentence. "
+    "  Never invent new content to replace removed material — if a "
+    "  claim was fabricated, drop it. The synthesis can be shorter.\n"
+    "- Preserve the original structure: # headline, *Theme:* line, "
+    "  TL;DR, paragraphs, [n] citations. Only sentences flagged in "
+    "  the problems list should change.\n"
+    "- Do NOT add new claims, new bolded terms, or new citations "
+    "  beyond what the original draft already had (minus the dropped "
+    "  bad sentences).\n"
+    "- Do NOT explain your edits — output ONLY the corrected "
+    "  markdown synthesis, nothing else. No \"Here is the revised "
+    "  version:\" preamble.\n"
+    "- If every sentence is flagged and removing them would empty "
+    "  the document, return a one-paragraph honest statement that "
+    "  the evidence was too thin to support a synthesis."
+)
+
+
+async def _critique_synthesis(
+    *,
+    llm_service,
+    draft_markdown: str,
+    user_prompt: str,
+    creds: dict[str, Any],
+) -> tuple[list[dict[str, str]], Optional[str]]:
+    """Run the critique stage. Returns (problems, error_reason).
+
+    On any LLM/parse failure, returns ([], reason) so the caller skips
+    the revise stage and keeps the original draft — never blocks the
+    user on an auditor failure.
+    """
+    import json
+    import re
+
+    critique_user = (
+        user_prompt
+        + "\n\n--- DRAFT SYNTHESIS TO AUDIT ---\n"
+        + draft_markdown
+    )
+    messages = [
+        {"role": "system", "content": _CRITIQUE_SYSTEM_PROMPT},
+        {"role": "user", "content": critique_user},
+    ]
+    extra: dict[str, Any] = dict(creds.get("extra_params") or {})
+    try:
+        raw = await llm_service.complete_sync(
+            messages=messages,
+            model=creds["model"],
+            temperature=0.0,  # deterministic auditor
+            max_tokens=_SYNTHESIS_MAX_TOKENS,
+            api_base=creds.get("api_base"),
+            api_key=creds.get("api_key"),
+            timeout=_SYNTHESIS_TIMEOUT_SECONDS,
+            extra_params=extra,
+        )
+    except Exception as exc:
+        logger.warning("synthesis critique LLM call failed: %s", exc)
+        return [], "critique_llm_failure"
+
+    cleaned = _strip_code_fences(raw or "").strip()
+    if not cleaned:
+        return [], "critique_empty_response"
+    # Tolerate models that wrap JSON in commentary by extracting the
+    # first {...} block.
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if not match:
+        return [], "critique_no_json"
+    try:
+        data = json.loads(match.group(0))
+    except Exception as exc:
+        logger.warning("synthesis critique JSON parse failed: %s", exc)
+        return [], "critique_invalid_json"
+
+    raw_problems = data.get("problems") if isinstance(data, dict) else None
+    if not isinstance(raw_problems, list):
+        return [], "critique_problems_not_list"
+
+    problems: list[dict[str, str]] = []
+    for item in raw_problems[:10]:
+        if not isinstance(item, dict):
+            continue
+        sentence = str(item.get("sentence") or "").strip()[:300]
+        category = str(item.get("category") or "").strip()[:40]
+        detail = str(item.get("detail") or "").strip()[:200]
+        if sentence and category:
+            problems.append(
+                {"sentence": sentence, "category": category, "detail": detail}
+            )
+    return problems, None
+
+
+async def _revise_synthesis(
+    *,
+    llm_service,
+    draft_markdown: str,
+    user_prompt: str,
+    problems: list[dict[str, str]],
+    creds: dict[str, Any],
+) -> tuple[Optional[str], Optional[str]]:
+    """Apply the auditor's flagged problems to the draft. Returns
+    (revised_markdown, error_reason). On failure, returns (None, reason)
+    and the caller keeps the original draft."""
+    import json
+
+    revise_user = (
+        user_prompt
+        + "\n\n--- DRAFT SYNTHESIS ---\n"
+        + draft_markdown
+        + "\n\n--- AUDITOR PROBLEMS (apply these fixes) ---\n"
+        + json.dumps({"problems": problems}, ensure_ascii=False)
+    )
+    messages = [
+        {"role": "system", "content": _REVISE_SYSTEM_PROMPT},
+        {"role": "user", "content": revise_user},
+    ]
+    extra: dict[str, Any] = dict(creds.get("extra_params") or {})
+    try:
+        raw = await llm_service.complete_sync(
+            messages=messages,
+            model=creds["model"],
+            temperature=0.1,
+            max_tokens=_SYNTHESIS_MAX_TOKENS,
+            api_base=creds.get("api_base"),
+            api_key=creds.get("api_key"),
+            timeout=_SYNTHESIS_TIMEOUT_SECONDS,
+            extra_params=extra,
+        )
+    except Exception as exc:
+        logger.warning("synthesis revise LLM call failed: %s", exc)
+        return None, "revise_llm_failure"
+
+    revised = _strip_code_fences(raw or "").strip()
+    if not revised:
+        return None, "revise_empty_response"
+    return revised, None
+
+
 async def _call_llm_synthesis(
     packet: dict[str, Any],
     *,
     model_override: Optional[str],
     user_id: Optional[str] = None,
     synthesis_mode: str = "research",
+    validate_synthesis: bool = False,
 ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """Call the synthesis LLM. Returns (payload_dict, fallback_reason).
 
@@ -3083,6 +3269,57 @@ async def _call_llm_synthesis(
         headline = ""
         markdown = prose
 
+    # ─── Sprint #2 — critique + revise stages (opt-in) ────────────────────
+    # The auditor reads the draft and lists specific problems as JSON.
+    # If problems are found, the revise stage applies them in place.
+    # Any failure in either stage falls back to the original draft —
+    # validation is a quality lift, never a blocker.
+    critique_meta: dict[str, Any] = {"enabled": False}
+    if validate_synthesis:
+        critique_meta["enabled"] = True
+        problems, critique_err = await _critique_synthesis(
+            llm_service=llm_service,
+            draft_markdown=markdown,
+            user_prompt=messages[1]["content"],
+            creds=creds,
+        )
+        critique_meta["problems_found"] = len(problems)
+        critique_meta["critique_error"] = critique_err
+        logger.info(
+            "Synthesis critique stage: problems=%d error=%s",
+            len(problems),
+            critique_err or "none",
+        )
+        if problems and not critique_err:
+            revised, revise_err = await _revise_synthesis(
+                llm_service=llm_service,
+                draft_markdown=markdown,
+                user_prompt=messages[1]["content"],
+                problems=problems,
+                creds=creds,
+            )
+            critique_meta["revise_error"] = revise_err
+            if revised and not revise_err:
+                # Re-extract headline from the revised draft in case the
+                # editor restructured the top of the document.
+                rev_match = _SYNTHESIS_HEADLINE_RE.search(revised)
+                if rev_match:
+                    headline = rev_match.group(1).strip()
+                    markdown = (
+                        revised[: rev_match.start()] + revised[rev_match.end():]
+                    ).strip()
+                else:
+                    markdown = revised
+                critique_meta["revised"] = True
+            else:
+                critique_meta["revised"] = False
+                logger.info(
+                    "Synthesis revise stage failed (%s) — keeping original draft",
+                    revise_err or "unknown",
+                )
+        else:
+            critique_meta["revised"] = False
+
     sources = _synthesis_sources_from_packet(packet, markdown)
 
     return {
@@ -3091,6 +3328,7 @@ async def _call_llm_synthesis(
         "sources": sources,
         "fallback": False,
         "fallback_reason": None,
+        "critique": critique_meta,
     }, None
 
 
@@ -3527,6 +3765,7 @@ async def discover(
     query: str,
     mode: str = "auto",
     synthesis_mode: str = "research",
+    validate_synthesis: bool = False,
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
     model_override: Optional[str] = None,
@@ -3572,6 +3811,7 @@ async def discover(
                         query=query,
                         mode=mode,
                         synthesis_mode=synthesis_mode,
+                        validate_synthesis=validate_synthesis,
                         # Multi-corpus runs always create fresh sessions per
                         # corpus internally; persistence happens on the
                         # merged result only.
@@ -3672,11 +3912,89 @@ async def discover(
         "llm_context": _llm_context_trace_from_packet(packet),
     }
     packet_done_at = _time.perf_counter()
+
+    # ─── Sprint #3 — agentic deepening loop (opt-in via agentic=True) ────
+    # When enabled, the LLM picks 1-3 entities per round to deepen,
+    # we run targeted retrieval on those entities, merge into the
+    # packet, repeat up to MAX_ROUNDS times. Falls through silently
+    # on any failure — base packet is always synthesized.
+    if agentic:
+        try:
+            from services.graph.agentic_retriever import run_agentic_loop
+            from services.llm import llm_service as _llm
+
+            agentic_creds = await _resolve_graph_model(user_id, model_override)
+
+            async def _retrieve_for_entity(entity_name: str) -> list[dict[str, Any]]:
+                """Pull chunks that contain the entity name via Mongo text
+                search, scoped to the corpus. Returns evidence-shaped
+                dicts compatible with packet["evidence"]."""
+                if db is None or not entity_name:
+                    return []
+                try:
+                    cursor = db["chunks"].find(
+                        {
+                            "corpus_id": corpus_id,
+                            "$text": {"$search": f"\"{entity_name}\""},
+                        },
+                        {
+                            "_id": 0,
+                            "chunk_id": 1,
+                            "doc_id": 1,
+                            "text": 1,
+                            "summary": 1,
+                            "heading_path": 1,
+                            "language": 1,
+                            "metadata.file_path": 1,
+                        },
+                    ).limit(5)
+                    docs = await cursor.to_list(length=5)
+                except Exception as exc:
+                    logger.debug(
+                        "agentic retrieve_for_entity(%r) Mongo query failed: %s",
+                        entity_name, exc,
+                    )
+                    return []
+                evidence_items: list[dict[str, Any]] = []
+                for d in docs:
+                    meta = d.get("metadata") or {}
+                    label = (
+                        (meta.get("file_path") if isinstance(meta, dict) else None)
+                        or d.get("doc_id")
+                        or "source"
+                    )
+                    evidence_items.append({
+                        "evidence_id": f"agentic:{entity_name}:{d.get('chunk_id') or ''}",
+                        "doc_id": d.get("doc_id"),
+                        "chunk_id": d.get("chunk_id"),
+                        "source": {"label": str(label)[:80]},
+                        "source_label": str(label)[:80],
+                        "heading_path": d.get("heading_path") or [],
+                        "text": str(d.get("text") or "")[:360],
+                        "summary": str(d.get("summary") or "")[:320],
+                        "agentic_deepened_for": entity_name,
+                    })
+                return evidence_items
+
+            packet = await run_agentic_loop(
+                base_packet=packet,
+                user_query=query,
+                creds=agentic_creds,
+                llm_service=_llm,
+                retrieve_for_entity=_retrieve_for_entity,
+            )
+            if isinstance(result.trace, dict):
+                result.trace["agentic_trace"] = packet.get("agentic_trace") or []
+                result.trace["agentic_rounds_run"] = packet.get("agentic_rounds_run", 0)
+        except Exception as exc:
+            logger.warning("agentic loop failed, continuing with base packet: %s", exc)
+
     llm_payload, fallback_reason = await _call_llm_synthesis(
         packet,
         model_override=model_override,
         user_id=user_id,
         synthesis_mode=synthesis_mode,
+        validate_synthesis=validate_synthesis,
     )
     llm_done_at = _time.perf_counter()
 

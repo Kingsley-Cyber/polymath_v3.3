@@ -775,6 +775,7 @@ async def graph_discover(
             query=body.query,
             mode=body.mode,
             synthesis_mode=body.synthesis_mode,
+            validate_synthesis=body.validate_synthesis,
             session_id=body.session_id,
             user_id=current_user["user_id"],
             model_override=body.model,

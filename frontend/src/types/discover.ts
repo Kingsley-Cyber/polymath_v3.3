@@ -435,6 +435,14 @@ export interface GraphDiscoverRequest {
   // output with [BUILD IDEA] blocks. Retrieval + packet are identical;
   // only the system prompt differs.
   synthesis_mode?: GraphSynthesisMode;
+  /**
+   * Sprint #2 — opt-in multi-stage synthesis. When true, the backend
+   * runs a draft → critique → revise loop (2-3× LLM cost) that flags
+   * fabricated terms / shell sentences / missing citations / label
+   * leaks and revises them away. Off by default. Surfaced in
+   * AgentSearchTab as a "validate" toggle next to synthesis-mode.
+   */
+  validate_synthesis?: boolean;
   session_id?: string;
   // Same model reference chat sends in overrides.model. May be a raw
   // LiteLLM id, pool:<id>, or profile:<id>.

@@ -478,6 +478,12 @@ class GraphDiscoverRequest(BaseModel):
     # output with [BUILD IDEA] blocks. Retrieval + packet are identical;
     # only the system prompt differs.
     synthesis_mode: Literal["research", "ideation"] = "research"
+    # Sprint #2 — opt-in critique + revise loop. When True, the synthesis
+    # pipeline runs a second LLM call to audit the draft (flag fabricated
+    # terms, missing citations, shell sentences, label leaks) and a third
+    # call to revise. Cost: 2-3× tokens. Default False to keep the hot
+    # path single-call.
+    validate_synthesis: bool = False
     session_id: str | None = None
     model: str | None = None
     agentic: bool = False

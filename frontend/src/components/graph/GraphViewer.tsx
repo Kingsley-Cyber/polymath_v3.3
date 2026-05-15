@@ -380,6 +380,7 @@ function useQueryGraph(
   query: string | undefined,
   model: string | undefined,
   synthesisMode: "research" | "ideation" = "research",
+  validateSynthesis: boolean = false,
 ) {
   const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "error">(
     "idle",
@@ -409,6 +410,7 @@ function useQueryGraph(
           query,
           mode: "auto",
           synthesis_mode: synthesisMode,
+          validate_synthesis: validateSynthesis,
           ...(model ? { model } : {}),
         } as any);
         const sub = await subgraphP;
@@ -446,7 +448,7 @@ function useQueryGraph(
     return () => {
       cancel = true;
     };
-  }, [corpusIds, query, model, synthesisMode]);
+  }, [corpusIds, query, model, synthesisMode, validateSynthesis]);
 
   return {
     phase,
@@ -497,6 +499,10 @@ export function GraphViewer({
   // (see backend/services/graph/orchestrator._IDEATION_SYSTEM_PROMPT).
   const [synthesisMode, setSynthesisMode] =
     useState<"research" | "ideation">("research");
+  // Sprint #2 — opt-in critique + revise loop. When true, the backend
+  // runs auditor + editor passes after the draft (2-3× LLM cost).
+  // Off by default so the common case stays single-call.
+  const [validateSynthesis, setValidateSynthesis] = useState<boolean>(false);
   const drillStackRef = useRef(drillStack);
   drillStackRef.current = drillStack;
 
@@ -516,6 +522,7 @@ export function GraphViewer({
     agentQuery,
     model,
     synthesisMode,
+    validateSynthesis,
   );
 
   const data = mode === "brain" ? brain.data : q.data;
@@ -840,6 +847,8 @@ export function GraphViewer({
         onAgentRun={() => setAgentQuery(agentInput)}
         synthesisMode={synthesisMode}
         onSynthesisModeChange={setSynthesisMode}
+        validateSynthesis={validateSynthesis}
+        onValidateSynthesisChange={setValidateSynthesis}
         agentPhase={q.phase}
         agentError={q.error}
         agentSynthesisMarkdown={q.synthesis?.markdown ?? null}
