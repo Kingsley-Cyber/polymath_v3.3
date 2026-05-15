@@ -343,6 +343,38 @@ class Settings(BaseSettings):
             "Tunnel hostname. Used only by /api/mcp/info to render client snippets."
         ),
     )
+    # --- MCP write surface (corpus / document lifecycle tools) ---------------
+    # The ingest-from-url and base64-upload tools share these limits. They
+    # exist so an enthusiastic agent (OpenClaw, etc.) cannot drive the
+    # ingestion pipeline harder than a normal HTTP client could.
+    MCP_INGEST_MAX_BYTES: int = Field(
+        default=50 * 1024 * 1024,
+        ge=1024,
+        description=(
+            "Hard cap on document size for polymath_ingest_from_url and "
+            "polymath_upload_document. Bigger files must go through the "
+            "multipart HTTP endpoint instead."
+        ),
+    )
+    MCP_INGEST_URL_TIMEOUT_SECONDS: float = Field(
+        default=60.0,
+        gt=0.0,
+        description=(
+            "Timeout for httpx GET in polymath_ingest_from_url. Short to keep "
+            "agent loops responsive; large files should use the multipart "
+            "endpoint anyway."
+        ),
+    )
+    MCP_INGEST_URL_ALLOW_PRIVATE: bool = Field(
+        default=False,
+        description=(
+            "When False (default), polymath_ingest_from_url blocks URLs that "
+            "resolve to loopback, link-local, or RFC1918 private ranges. "
+            "Prevents an agent from being tricked into SSRF against internal "
+            "services. Flip to True only on isolated networks where private "
+            "ingest sources are expected."
+        ),
+    )
 
     # === GHOST A — PARENT SUMMARIZATION ===
     SUMMARY_MAX_CONCURRENT: int = Field(
