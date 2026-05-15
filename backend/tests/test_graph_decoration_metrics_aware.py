@@ -150,6 +150,7 @@ async def test_warm_cache_annotates_betweenness_and_pagerank(decorator):
     matching the entity_ids → all 4 numeric annotations land."""
     decorations = [_make_decoration()]
     metrics = SimpleNamespace(
+        edge_count=42,
         entity_betweenness={
             "ent:habit-loop": 0.42,
             "ent:reward-pathway": 0.18,
@@ -186,6 +187,7 @@ async def test_fragile_bridge_flag_set_symmetric(decorator):
         seed_id="ent:a", neighbor_id="ent:b",
     )]
     metrics_a = SimpleNamespace(
+        edge_count=42,
         entity_betweenness={},
         top_pagerank=[],
         fragile_bridges=[{"source": "ent:a", "target": "ent:b"}],
@@ -224,6 +226,7 @@ async def test_entity_id_missing_from_cache_leaves_fields_none(decorator):
         neighbor_id="ent:also-not-in-cache",
     )]
     metrics = SimpleNamespace(
+        edge_count=42,
         entity_betweenness={"ent:different-entity": 0.5},
         top_pagerank=[{"entity_id": "ent:something-else", "score": 0.4}],
         fragile_bridges=[],
@@ -286,11 +289,13 @@ async def test_multi_corpus_merges_betweenness_and_pagerank(decorator):
     """Two warm corpora with overlapping entity_id → higher score wins."""
     decorations = [_make_decoration(seed_id="ent:shared")]
     metrics_a = SimpleNamespace(
+        edge_count=42,
         entity_betweenness={"ent:shared": 0.3},
         top_pagerank=[{"entity_id": "ent:shared", "score": 0.04}],
         fragile_bridges=[],
     )
     metrics_b = SimpleNamespace(
+        edge_count=42,
         entity_betweenness={"ent:shared": 0.7},  # higher
         top_pagerank=[{"entity_id": "ent:shared", "score": 0.08}],  # higher
         fragile_bridges=[],
@@ -319,6 +324,7 @@ async def test_empty_decorations_short_circuits(decorator):
     decorations = []
     fake_sig = AsyncMock(return_value="sig")
     fake_get = AsyncMock(return_value=SimpleNamespace(
+        edge_count=42,
         entity_betweenness={}, top_pagerank=[], fragile_bridges=[],
     ))
     with (

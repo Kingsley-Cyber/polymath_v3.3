@@ -199,6 +199,19 @@ class GraphDecorator:
                 metrics = await get_cached_metrics(db, corpus_id, sig)
                 if metrics is None:
                     continue
+                # Sparse-graph guard — entity_betweenness, top_pagerank,
+                # and fragile_bridges are all empty / uniform on a 0-edge
+                # graph. Skip the per-field loops to avoid no-op iteration.
+                # The base decoration (predicate + relation_family + edge
+                # evidence from Cypher) is unaffected — only annotations
+                # are skipped.
+                if int(getattr(metrics, "edge_count", 0) or 0) == 0:
+                    logger.debug(
+                        "decorate_winners cache annotation: corpus=%s "
+                        "edge_count=0 — skipping annotation merge",
+                        corpus_id,
+                    )
+                    continue
                 warm_corpora += 1
                 for eid, score in (
                     getattr(metrics, "entity_betweenness", None) or {}

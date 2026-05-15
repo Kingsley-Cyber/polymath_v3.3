@@ -176,6 +176,20 @@ class ModeAExpansion:
                 metrics = await get_cached_metrics(db, corpus_id, sig)
                 if metrics is None:
                     continue
+                # Sparse-graph guard — same shape as Phase 5a's. When the
+                # corpus has 0 RELATES_TO edges, fragile_bridges and friends
+                # are guaranteed to be empty lists (the analytics pipeline
+                # only emits them when structure exists). Skip the per-
+                # bridge-type loops to save iteration cost. Same semantic
+                # outcome (empty bonus_scores contribution from this corpus)
+                # but avoids ~4 redundant `or []` walks.
+                if int(getattr(metrics, "edge_count", 0) or 0) == 0:
+                    logger.debug(
+                        "Mode A bridges: corpus=%s edge_count=0 — skipping "
+                        "bridge iteration (no structure)",
+                        corpus_id,
+                    )
+                    continue
                 warm_corpora += 1
                 # fragile_bridges — articulation edges. path_count is
                 # always 1 for true articulation edges; the score floor

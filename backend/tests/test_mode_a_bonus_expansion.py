@@ -246,6 +246,7 @@ async def test_fragile_bridge_seed_match_emits_bonus_chunk():
     driver = _driver_returning(seed_entities=["ent:a"], bonus_rows=bonus_rows)
     exp = _make_expansion(driver)
     metrics = SimpleNamespace(
+        edge_count=42,
         fragile_bridges=[{
             "source": "ent:a", "target": "ent:b",
             "source_name": "SeedAlpha", "target_name": "BridgeBravo",
@@ -287,6 +288,7 @@ async def test_terminological_gap_emits_bonus_chunk():
     driver = _driver_returning(seed_entities=["ent:term-a"], bonus_rows=bonus_rows)
     exp = _make_expansion(driver)
     metrics = SimpleNamespace(
+        edge_count=42,
         fragile_bridges=[],
         structural_analogies=[],
         terminological_gaps=[{
@@ -318,6 +320,7 @@ async def test_structural_analogy_emits_bonus_chunk():
     driver = _driver_returning(seed_entities=["ent:a"], bonus_rows=bonus_rows)
     exp = _make_expansion(driver)
     metrics = SimpleNamespace(
+        edge_count=42,
         fragile_bridges=[],
         structural_analogies=[{
             "source": "ent:a", "target": "ent:analog",
@@ -354,6 +357,7 @@ async def test_transfer_candidate_flattens_analogs_to_bonus_chunks():
     driver = _driver_returning(seed_entities=["ent:hub"], bonus_rows=bonus_rows)
     exp = _make_expansion(driver)
     metrics = SimpleNamespace(
+        edge_count=42,
         fragile_bridges=[],
         structural_analogies=[],
         terminological_gaps=[],
@@ -391,6 +395,7 @@ async def test_seed_entity_not_re_emitted_as_bonus():
     )
     exp = _make_expansion(driver)
     metrics = SimpleNamespace(
+        edge_count=42,
         fragile_bridges=[{
             "source": "ent:a", "target": "ent:b",
             "source_name": "A", "target_name": "B",
@@ -427,6 +432,7 @@ async def test_bonus_pool_respects_limit():
     driver = _driver_returning(seed_entities=["ent:a"], bonus_rows=bonus_rows)
     exp = _make_expansion(driver)
     metrics = SimpleNamespace(
+        edge_count=42,
         fragile_bridges=[{
             "source": "ent:a", "target": "ent:b",
             "source_name": "A", "target_name": "B",
@@ -463,6 +469,7 @@ async def test_synthetic_scores_stay_in_unit_range():
     driver = _driver_returning(seed_entities=["ent:a"], bonus_rows=bonus_rows)
     exp = _make_expansion(driver)
     metrics = SimpleNamespace(
+        edge_count=42,
         fragile_bridges=[{
             "source": "ent:a", "target": "ent:b",
             "source_name": "A", "target_name": "B",

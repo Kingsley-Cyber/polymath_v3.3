@@ -296,8 +296,26 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
     sem = asyncio.Semaphore(4)
 
     async def _gated(cid: str):
+        # Partial-failure safety: mirror the safe-wrapper pattern from
+        # services/graph/orchestrator.py:_one. Without this, a single
+        # Neo4j timeout or transient Mongo blip on ONE corpus crashes
+        # the entire multi-corpus graph query (other corpora's partial
+        # results are lost). With the wrapper, that corpus contributes
+        # an empty result and the others' data still flows through to
+        # the merge step. The merge code already handles empty per-
+        # corpus payloads via `dict | item.get(...)` patterns.
         async with sem:
-            return await _run_one(cid)
+            try:
+                return await _run_one(cid)
+            except Exception as exc:  # pragma: no cover — defensive
+                logger.warning(
+                    "graph_query: corpus=%s failed (%s) — returning empty",
+                    cid, exc,
+                )
+                return cid, {
+                    "nodes": [], "links": [], "bridges": [],
+                    "gaps": [], "seeds": [],
+                }
 
     per_corpus = await asyncio.gather(*[_gated(cid) for cid in corpus_ids])
 

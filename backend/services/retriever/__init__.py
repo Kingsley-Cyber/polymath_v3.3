@@ -48,6 +48,38 @@ _SINGLE_CORPUS_LIMIT = 40  # spec §5.9a: retrieve 40 pre-rerank for single-corp
 _LOW_CONFIDENCE_RERANK_SCORE = -2.5
 
 
+def _unwrap_funnel_result(
+    raw: list[SourceChunk] | BaseException,
+    label: str,
+) -> list[SourceChunk]:
+    """Partial-failure handler for the funnel-level asyncio.gather calls.
+
+    When `return_exceptions=True`, gather returns the raised exception as
+    a value in place of the task's result. Pre-fix the orchestrator
+    treated those exceptions as real result lists and crashed downstream
+    (merge_pools would call list ops on an Exception). This helper
+    converts any exception into an empty list with a single WARNING log
+    so the OTHER funnels' results still flow through.
+
+    Each of the three funnel implementations (funnel_a, funnel_b,
+    lexical) ALREADY uses return_exceptions=True internally for its
+    per-collection sub-searches. This wrapper extends that safety
+    contract to the top-level fan-out: one funnel failing should
+    degrade quality, not 500 the whole turn.
+    """
+    if isinstance(raw, BaseException):
+        logger.warning(
+            "retriever: %s funnel raised — degrading to empty pool (%s: %s)",
+            label,
+            type(raw).__name__,
+            raw,
+        )
+        return []
+    if raw is None:
+        return []
+    return list(raw)
+
+
 def _lexical_limit_for(
     effective_tier: RetrievalTier,
     *,
@@ -535,17 +567,34 @@ class RetrieverOrchestrator:
             lexical_task = lexical_retriever.search(
                 rank_query, corpus_ids, top_k=lexical_limit
             )
-            a_results, lexical_results, *per_corpus_b = await asyncio.gather(
-                a_task, lexical_task, *b_tasks
+            # Partial-failure safety: if any single funnel raises (Qdrant
+            # timeout, Mongo blip, network drop), we want the OTHER funnels'
+            # results to still flow through. `return_exceptions=True`
+            # surfaces the exception as a value in the gather result, which
+            # `_unwrap` then converts to an empty list with a warning log.
+            # Pre-fix: any funnel raise = entire chat/graph query 500.
+            raw_a, raw_lex, *raw_b = await asyncio.gather(
+                a_task, lexical_task, *b_tasks, return_exceptions=True
             )
+            a_results = _unwrap_funnel_result(raw_a, "funnel_a")
+            lexical_results = _unwrap_funnel_result(raw_lex, "lexical")
+            per_corpus_b = [
+                _unwrap_funnel_result(r, f"funnel_b[{i}]")
+                for i, r in enumerate(raw_b)
+            ]
             b_results: list[SourceChunk] = [c for pool in per_corpus_b for c in pool]
         else:
             a_kwargs = {"top_k": top_k_summary} if top_k_summary is not None else {}
-            a_results, b_results, lexical_results = await asyncio.gather(
+            # Same partial-failure safety as the multi-corpus branch above.
+            raw_a, raw_b, raw_lex = await asyncio.gather(
                 funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs),
                 funnel_b.search(query_vector, corpus_ids, b_cols, top_k=single_limit),
                 lexical_retriever.search(rank_query, corpus_ids, top_k=lexical_limit),
+                return_exceptions=True,
             )
+            a_results = _unwrap_funnel_result(raw_a, "funnel_a")
+            b_results = _unwrap_funnel_result(raw_b, "funnel_b")
+            lexical_results = _unwrap_funnel_result(raw_lex, "lexical")
         _add_timing("funnels", phase_started)
         counts["funnel_a"] = len(a_results)
         counts["funnel_b"] = len(b_results)
