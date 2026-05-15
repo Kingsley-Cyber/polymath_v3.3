@@ -57,26 +57,77 @@ async def extract_query_entities(
     corpus_id: str,
     driver,
     limit_per_token: int = 3,
+    qdrant=None,
 ) -> list[dict]:
     """
     Match query tokens against Entity nodes mentioned in this corpus.
 
-    Returns: list of {entity_id, display_name, entity_type, score}
-    Score is a rough matching score (token overlap × mention count).
+    Phase 1 hybrid (additive, low-risk):
+      • Path A — literal `CONTAINS` match on entity name fields. Tokens
+        from the query are checked against normalized_name / canonical_name /
+        display_name. Fast, deterministic, works without any cache or
+        embedder being warm. Original behavior, unchanged.
+      • Path B — vector scope via `analytics.query_scope_entities`. The
+        query is embedded, the per-corpus `naive` Qdrant collection is
+        searched for top-K chunks, and those chunks' MENTIONS are
+        reciprocal-rank-fused into a set of relevant entity_ids. Only
+        runs when a `qdrant` client is supplied AND the query is
+        non-trivial.
+
+    The two seed sets are merged at Cypher-WHERE-clause time so a single
+    pass scores both. Literal matches drive `token_score` (count × token
+    overlap). Vector matches drive `vector_match` (boolean). Final
+    `score` is a weighted blend that lets either path surface an entity
+    even when the other misses it — fixes the synonym/paraphrase blind
+    spot of pure CONTAINS without sacrificing fast literal lookup.
+
+    Returns: list of {entity_id, display_name, entity_type, mention_count,
+                      score, vector_match, sources}
+    Sources is the list of which paths claimed each seed
+    (`["literal"]`, `["vector"]`, or `["literal", "vector"]`) — useful
+    for downstream tracing.
     """
     tokens = _tokenize(query)
-    if not tokens:
+
+    # Path B — vector scope (best-effort, additive). Failures return an
+    # empty set and we silently fall through to the literal path.
+    vector_seed_ids: set[str] = set()
+    if qdrant is not None and query and len(query.strip()) >= 3:
+        try:
+            from services.graph.analytics import query_scope_entities
+            vector_seed_ids = await query_scope_entities(
+                qdrant=qdrant,
+                neo4j_driver=driver,
+                corpus_id=corpus_id,
+                query=query,
+            )
+        except Exception as exc:
+            # Never fail the whole extraction because of a Qdrant /
+            # embedder hiccup. The literal path keeps the endpoint
+            # functional, just with the pre-Phase-1 synonym blind spot.
+            logger.warning(
+                "extract_query_entities: vector path failed (%s) — falling back to CONTAINS",
+                exc,
+            )
+            vector_seed_ids = set()
+
+    if not tokens and not vector_seed_ids:
         return []
 
-    # Corpus scope: only entities mentioned by chunks in this corpus.
-    # Match on normalized_name OR display_name containing any token.
+    # Single Cypher pass — matches via EITHER literal token CONTAINS OR
+    # the vector_seed_ids set. Mention_count comes from the same MENTIONS
+    # subquery. `vector_match` flag rides through so the post-hydrate
+    # scoring can boost vector hits even when their name has no token
+    # overlap (the whole point of the vector path).
     cypher = """
     MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)
-    WHERE ANY(tok IN $tokens WHERE
-        toLower(coalesce(e.normalized_name, '')) CONTAINS tok OR
-        toLower(coalesce(e.canonical_name, '')) CONTAINS tok OR
-        toLower(coalesce(e.display_name, '')) CONTAINS tok
-    )
+    WHERE (
+        size($tokens) > 0 AND ANY(tok IN $tokens WHERE
+            toLower(coalesce(e.normalized_name, '')) CONTAINS tok OR
+            toLower(coalesce(e.canonical_name, '')) CONTAINS tok OR
+            toLower(coalesce(e.display_name, '')) CONTAINS tok
+        )
+    ) OR e.entity_id IN $vector_seed_ids
     WITH e, count(DISTINCT c) AS mention_count
     RETURN
         e.entity_id     AS entity_id,
@@ -86,32 +137,66 @@ async def extract_query_entities(
     ORDER BY mention_count DESC
     LIMIT $hard_limit
     """
-    hard_limit = max(1, limit_per_token * max(1, len(tokens))) * 3
+    # Hard limit budget — give vector seeds room to land on top even
+    # when the literal path would have already filled the result set.
+    hard_limit = max(
+        max(1, limit_per_token * max(1, len(tokens))) * 3,
+        len(vector_seed_ids) + 10,
+    )
 
     async with driver.session() as session:
         result = await session.run(
             cypher,
             corpus_id=corpus_id,
             tokens=tokens,
+            vector_seed_ids=list(vector_seed_ids),
             hard_limit=hard_limit,
         )
         rows = [dict(r) async for r in result]
 
     if not rows:
         logger.info(
-            "graph_query.extract_query_entities: no entities matched tokens=%s",
+            "graph_query.extract_query_entities: no entities matched "
+            "tokens=%s vector_seeds=%d",
             tokens,
+            len(vector_seed_ids),
         )
         return []
 
-    # Score = token overlap × mention_count. Keep top N per-token distinct.
+    # Score blend: literal-overlap × mentions, plus a vector bonus when
+    # the entity_id is in the vector seed set. Vector bonus dominates
+    # when literal overlap is 0 (synonym/paraphrase case), tokens
+    # dominate when both paths matched (high-confidence convergence).
     for r in rows:
         name_low = (r.get("display_name") or "").lower()
         overlap = sum(1 for t in tokens if t in name_low)
-        r["score"] = overlap * r.get("mention_count", 1)
+        mentions = r.get("mention_count", 1)
+        is_vector = r["entity_id"] in vector_seed_ids
+        r["vector_match"] = is_vector
+        # Sources: which path identified this seed. Both paths can claim
+        # the same entity — that's the strongest signal.
+        sources: list[str] = []
+        if overlap > 0:
+            sources.append("literal")
+        if is_vector:
+            sources.append("vector")
+        r["sources"] = sources
+        # Score: literal contribution + vector bonus. The +0.5 baseline
+        # on the vector side means a synonym-only hit (overlap=0) still
+        # ranks ABOVE a pure-mention-count literal hit with zero name
+        # overlap — that's the synonym fix.
+        literal_score = overlap * mentions
+        vector_bonus = (0.5 + 0.5 * min(1.0, mentions / 10)) * mentions if is_vector else 0.0
+        r["score"] = literal_score + vector_bonus
 
     rows.sort(key=lambda r: r["score"], reverse=True)
-    return rows[: len(tokens) * limit_per_token]
+    # Result cap: the original per-token budget plus headroom for vector
+    # hits that the token budget alone would have dropped.
+    result_cap = max(
+        len(tokens) * limit_per_token,
+        min(len(vector_seed_ids), 8),
+    )
+    return rows[:result_cap]
 
 
 async def expand_subgraph(

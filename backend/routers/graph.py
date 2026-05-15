@@ -211,8 +211,15 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
     if not corpus_ids:
         raise HTTPException(status_code=400, detail="corpus_ids must be a non-empty list")
 
+    # Phase 1 hybrid — pass the qdrant client through so the Agent
+    # Search seed-extraction can augment its literal CONTAINS match with
+    # vector scope (synonym / paraphrase coverage via query_scope_entities).
+    # qdrant may be None when the service hasn't initialized; the
+    # extractor handles that and falls back to the literal-only path.
+    qdrant = getattr(ingestion_service, "qdrant_client", None)
+
     async def _run_one(cid: str):
-        seeds = await extract_query_entities(body.query, cid, driver)
+        seeds = await extract_query_entities(body.query, cid, driver, qdrant=qdrant)
         if not seeds:
             return cid, {"nodes": [], "links": [], "bridges": [], "gaps": [], "seeds": []}
         seed_ids = [s["entity_id"] for s in seeds]

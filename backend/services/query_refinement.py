@@ -212,10 +212,20 @@ async def _extract_entities_for_question(
     """
     if not neo4j_driver or not question.strip() or not corpus_ids:
         return []
+    # Phase 1 hybrid — pull the qdrant client from the running
+    # ingestion_service singleton so extract_query_entities can run its
+    # vector-scope augmentation (synonym/paraphrase coverage). Local
+    # import to avoid pulling the singleton at module load time
+    # (refinement runs in worker contexts where the import order matters).
+    try:
+        from services.ingestion_service import ingestion_service
+        qdrant = getattr(ingestion_service, "qdrant_client", None)
+    except Exception:
+        qdrant = None
     merged: dict[str, dict[str, Any]] = {}
     for cid in corpus_ids:
         try:
-            rows = await extract_query_entities(question, cid, neo4j_driver)
+            rows = await extract_query_entities(question, cid, neo4j_driver, qdrant=qdrant)
         except Exception as exc:
             logger.warning(
                 "extract_query_entities failed for corpus=%s: %s", cid, exc
