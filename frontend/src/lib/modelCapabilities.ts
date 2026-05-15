@@ -78,16 +78,25 @@ type ThinkingPattern = {
 
 const THINKING_PATTERNS: ReadonlyArray<ThinkingPattern> = [
   // DeepSeek V4 Flash / Pro — supports `thinking: {type}` toggle +
-  // `reasoning_effort` (low/medium/high all collapse to "high" per the
-  // provider's own normalization; none → disabled). Verified against
-  // DeepSeek thinking-mode docs (2026-05-15).
+  // `reasoning_effort` (low/medium → DeepSeek "high", high → "max",
+  // none → disabled). Verified 2026-05-15.
   //
-  // Note the negative on the older "reasoner" / "r1" / "chat" models:
-  // they're explicitly NOT enabled here — only V4 follows the toggle
-  // contract. Backend's _is_deepseek_v4 mirrors this gate.
+  // Negative on the older "reasoner" / "r1" / "chat" / "v3" models:
+  // only V4 follows the toggle contract. Backend's _is_deepseek_v4
+  // mirrors this gate.
   {
     test: (m) => /deepseek-v4(-flash|-pro)?\b/.test(m),
     provider: "deepseek",
+  },
+
+  // Mistral Magistral — Mistral's named reasoning family
+  // (magistral-small, magistral-medium, future variants).
+  // Binary dial: `reasoning_effort: "high" | "none"`. Other Mistral
+  // models (mistral-small, mistral-large, codestral, open-mistral-7b)
+  // are NOT reasoning models and stay hidden.
+  {
+    test: (m) => m.includes("magistral"),
+    provider: "mistral",
   },
 ];
 

@@ -101,6 +101,28 @@ _DEEPSEEK_V4_THINKING_INCOMPATIBLE_PARAMS: tuple[str, ...] = (
 )
 
 
+# ── Mistral Magistral (magistral-small, magistral-medium, …) ─────────────
+# Source: Mistral chat-completions API docs (user-supplied, 2026-05-15).
+#   - Dial is BINARY: `reasoning_effort: "high" | "none"`. No low/medium
+#     tiers exposed on the API surface.
+#   - The dial is only meaningful for "reasoning models" per the docs.
+#     We gate on the Magistral line (Mistral's named reasoning family)
+#     rather than all mistral-* models so the UI selector only appears
+#     for models where it actually does something.
+#   - Mistral's docs do NOT call out any thinking-incompatible body
+#     params (unlike DeepSeek). temperature / top_p / penalties pass
+#     through untouched.
+#
+# Effort collapse: our 4 agnostic thinking tiers (low/medium/high all
+# meaning "do think") map to Mistral "high". Only "none" maps to "none".
+# This is the tightest possible mapping given Mistral's binary surface.
+_MISTRAL_REASONING_EFFORT: dict[ThinkingEffort, str] = {
+    "low": "high",
+    "medium": "high",
+    "high": "high",
+}
+
+
 # ─── Provider detectors ──────────────────────────────────────────────────
 # Each predicate returns True iff the (model, provider) pair belongs to
 # a provider whose thinking-dial we've wired below. Add new predicates
@@ -115,6 +137,21 @@ def _provider_from_model(model: str) -> str:
     if "/" in model:
         return model.split("/", 1)[0].lower()
     return ""
+
+
+def _is_mistral_magistral(model: str, provider: str) -> bool:
+    """Match Mistral's Magistral reasoning line (magistral-small,
+    magistral-medium, and future variants under the same name).
+
+    Other Mistral models (mistral-small, mistral-large, mistral-medium,
+    open-mistral-7b, codestral-*, ...) are NOT reasoning models and
+    don't have a meaningful effort dial — exclude them so the UI
+    selector doesn't appear for them.
+    """
+    m = model.lower()
+    if provider == "mistral":
+        return "magistral" in m
+    return "magistral" in m  # bare id, no provider/ prefix
 
 
 def _is_deepseek_v4(model: str, provider: str) -> bool:
@@ -161,6 +198,19 @@ def apply_thinking_effort(
         effort = "medium"
 
     provider = _provider_from_model(model)
+
+    # ── Mistral Magistral (small / medium / future variants) ────────
+    # Binary dial: reasoning_effort: "high" | "none". All four agnostic
+    # thinking tiers (low/medium/high) collapse to "high"; "none"
+    # maps to Mistral's explicit "none" value (NOT omitted — Mistral
+    # treats absence vs "none" differently, and we want the explicit
+    # opt-out signal).
+    if _is_mistral_magistral(model, provider):
+        if effort == "none":
+            body["reasoning_effort"] = "none"
+            return
+        body["reasoning_effort"] = _MISTRAL_REASONING_EFFORT.get(effort, "high")
+        return
 
     # ── DeepSeek V4 (Flash / Pro) ────────────────────────────────────
     # Wire: `thinking: {type: enabled|disabled}` toggle + optional
