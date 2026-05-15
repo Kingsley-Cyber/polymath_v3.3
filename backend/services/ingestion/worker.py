@@ -1285,6 +1285,18 @@ def _searchable_text(chunk) -> str:
         s = str(call).strip()
         if s:
             tokens.append(s)
+    # Phase 5 — explicit roblox_apis indexing. In production these mostly
+    # overlap with symbols_called (the regex extractor unions them into
+    # symbols_called at _extract_metadata_for_chunk time), but other paths
+    # (graphify backfill, manual writes) can populate roblox_apis without
+    # touching symbols_called. Index defensively so a Roblox-flavored
+    # corpus's BM25 surface always hits engine terms.
+    seen_tokens = {t for t in tokens}
+    for api in (meta.get("roblox_apis") or [])[:30]:
+        s = str(api).strip()
+        if s and s not in seen_tokens:
+            tokens.append(s)
+            seen_tokens.add(s)
     file_path = str(meta.get("file_path") or "").strip()
     if file_path:
         tokens.append(file_path)

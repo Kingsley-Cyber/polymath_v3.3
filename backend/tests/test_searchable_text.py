@@ -133,3 +133,64 @@ def test_strips_whitespace_in_tokens():
     assert "bar" in out
     # The empty string shouldn't introduce double-spaces or weird artifacts
     assert "  " not in out.split("\n\n", 1)[1].strip()
+
+
+# ─── Phase 5 — roblox_apis BM25 augmentation ────────────────────────────────
+
+
+def test_code_chunk_appends_roblox_apis():
+    """Phase 5: roblox_apis are indexed for BM25 even when not duplicated
+    into symbols_called. This is the defensive path for backfill writers
+    that populate roblox_apis only."""
+    c = _chunk(
+        text="local x = 1",
+        metadata={"roblox_apis": ["TweenService", "Humanoid.MoveTo", "RunService"]},
+    )
+    out = _searchable_text(c)
+    assert "TweenService" in out
+    assert "Humanoid.MoveTo" in out
+    assert "RunService" in out
+
+
+def test_roblox_apis_dedupes_against_symbols_called():
+    """When symbols_called already contains a Roblox API name, the
+    roblox_apis pass should NOT duplicate it into the token stream.
+    First occurrence wins."""
+    c = _chunk(
+        text="local x = 1",
+        metadata={
+            "symbols_called": ["TweenService", "FireServer"],
+            "roblox_apis": ["TweenService", "Humanoid"],
+        },
+    )
+    out = _searchable_text(c)
+    # Both should appear, TweenService should appear exactly once in the
+    # appended token stream.
+    appended = out.split("\n\n", 1)[1] if "\n\n" in out else ""
+    assert appended.count("TweenService") == 1
+    assert "Humanoid" in appended  # roblox-only term still indexed
+    assert "FireServer" in appended  # symbols_called still indexed
+
+
+def test_caps_roblox_apis_at_thirty():
+    """Defense against payload bloat — only the first 30 are indexed."""
+    many = [f"RobloxApi{i}" for i in range(50)]
+    c = _chunk(text="x", metadata={"roblox_apis": many})
+    out = _searchable_text(c)
+    assert "RobloxApi0" in out
+    assert "RobloxApi29" in out
+    assert "RobloxApi30" not in out
+    assert "RobloxApi49" not in out
+
+
+def test_roblox_apis_with_no_other_metadata():
+    """A chunk with ONLY roblox_apis (no symbols_called, no defined, no
+    imports) still gets its Roblox terms into the BM25 surface."""
+    c = _chunk(
+        text="some code",
+        metadata={"roblox_apis": ["TweenService", "Animation"]},
+    )
+    out = _searchable_text(c)
+    assert out.startswith("some code")
+    assert "TweenService" in out
+    assert "Animation" in out

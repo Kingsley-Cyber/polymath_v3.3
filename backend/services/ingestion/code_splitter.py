@@ -248,6 +248,7 @@ def _extract_metadata_for_chunk(
     all_symbols,
     all_imports,
     language: str = "",
+    full_source: str = "",
 ) -> dict[str, Any]:
     syms = _filter_by_span(all_symbols, chunk_start, chunk_end)
     imps = _filter_by_span(all_imports, chunk_start, chunk_end)
@@ -280,6 +281,24 @@ def _extract_metadata_for_chunk(
         list(roblox.get("roblox_apis", [])) + list(roblox.get("called_methods", []))
     ))[:60]
 
+    # Line-number derivation (1-based, matching editor conventions).
+    # When `full_source` is provided, count newlines from byte 0 up to the
+    # chunk's start_byte. When omitted (the single-chunk fast path below),
+    # the chunk is the whole file so it starts at line 1.
+    if full_source and chunk_start > 0:
+        # The pack reports byte offsets; if `full_source` is a str (already
+        # decoded), we approximate by counting newlines in the first
+        # `chunk_start` BYTES of its UTF-8 encoding. For pure-ASCII source
+        # (the common case for code) this is exact; for code with non-ASCII
+        # comments the line number is off by at most O(non_ASCII_chars).
+        try:
+            prefix_bytes = full_source.encode("utf-8")[:chunk_start]
+            line_number = prefix_bytes.count(b"\n") + 1
+        except Exception:
+            line_number = 1
+    else:
+        line_number = 1
+
     return {
         # cap list sizes to keep Qdrant payloads compact
         "symbols_defined": defined[:40],
@@ -290,6 +309,10 @@ def _extract_metadata_for_chunk(
         # Downstream `roblox_ontology.resolve_code_entity_type` uses this
         # as one of its scope gates (alongside chunk.language).
         "roblox_apis": list(roblox.get("roblox_apis", []))[:30],
+        # Line number of the chunk's first line in the source file (1-based).
+        # Used by orchestrator._render_packet_user_prompt to render
+        # `source: [file.luau:14]` style citations in synthesis edges.
+        "line_number": line_number,
     }
 
 
@@ -371,7 +394,10 @@ def pack(
             continue
         sb = getattr(ch, "start_byte", 0)
         eb = getattr(ch, "end_byte", sb + len(content.encode("utf-8")))
-        meta = _extract_metadata_for_chunk(content, sb, eb, all_symbols, all_imports, language=language)
+        meta = _extract_metadata_for_chunk(
+            content, sb, eb, all_symbols, all_imports,
+            language=language, full_source=body,
+        )
         wrapped = _wrap(content.rstrip(), open_fence, close_fence) if open_fence else content
         out.append((wrapped, meta))
 

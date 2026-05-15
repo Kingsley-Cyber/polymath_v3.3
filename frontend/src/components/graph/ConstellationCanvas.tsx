@@ -1,21 +1,20 @@
 /**
- * Phase 4.C1+C2 — Books-as-clusters constellation view.
+ * Phase 4.C1 — Books-as-clusters constellation canvas.
  *
  * Renders every document in the selected corpora as a single circle on a
  * Canvas 2D surface. Calls POST /api/graph/by-document with mode="overview"
  * for the gross layout, then mode="drill" when the user clicks a book to
- * expand it. No force layout — books are packed onto concentric rings
- * sized to the screen.
+ * expand it (drill state and panel rendering live in BookDrillPanel —
+ * this component is the canvas only).
  *
  * Visual mapping:
- *   - Radius          = sqrt(entity_count) * 3   (bigger book = bigger dot)
+ *   - Radius          = sqrt(entity_count) * 3
  *   - Fill            = pastel tint of the corpus_id hash
  *   - Stroke          = vivid version of same hash
  *   - Stroke width    = 1.5 (2.5 when hovered, 3.5 when drilled into)
  *   - Hover           = filename tooltip
- *   - Click           = drill panel slides in from the right
  *
- * No external graph library (no Sigma, no D3). One Canvas, ~300 lines.
+ * No external graph library (no Sigma, no D3). One Canvas, ~280 lines.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -25,6 +24,7 @@ import {
   type ByDocumentEdge,
   type ByDocumentNode,
 } from "../../lib/api";
+import BookDrillPanel from "./BookDrillPanel";
 
 type Props = {
   corpusIds: string[];
@@ -52,16 +52,13 @@ const layoutDots = (
   width: number,
   height: number,
 ): PlacedDot[] => {
-  // Simple circular packing — ring out by entity_count rank.
-  // Bigger books toward the center, smaller toward the rim. No physics.
+  // Simple circular packing — golden-angle spiral so rings emerge
+  // naturally without a hand-tuned ring count.
   const cx = width / 2;
   const cy = height / 2;
   const sorted = [...clusters].sort(
     (a, b) => (b.entity_count || 0) - (a.entity_count || 0),
   );
-
-  // Pack with golden-angle spiral so rings emerge naturally without a
-  // hand-tuned ring count.
   const golden = Math.PI * (3 - Math.sqrt(5));
   const placed: PlacedDot[] = [];
   const maxR = Math.min(width, height) * 0.42;
@@ -80,7 +77,10 @@ const layoutDots = (
   return placed;
 };
 
-export default function ConstellationView({ corpusIds, onSelectDoc }: Props) {
+export default function ConstellationCanvas({
+  corpusIds,
+  onSelectDoc,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [clusters, setClusters] = useState<ByDocumentCluster[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -146,7 +146,7 @@ export default function ConstellationView({ corpusIds, onSelectDoc }: Props) {
     if (!ctx) return;
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
-    // Background — soft starfield (static seed by size).
+    // Background — soft starfield (deterministic seed from size).
     ctx.fillStyle = "#FAFAF7";
     ctx.fillRect(0, 0, size.w, size.h);
     const starSeed = (size.w * 7919 + size.h * 104729) >>> 0;
@@ -203,7 +203,6 @@ export default function ConstellationView({ corpusIds, onSelectDoc }: Props) {
     const rect = evt.currentTarget.getBoundingClientRect();
     const mx = evt.clientX - rect.left;
     const my = evt.clientY - rect.top;
-    // Search in reverse so top-of-stack wins.
     for (let i = placed.length - 1; i >= 0; i--) {
       const dot = placed[i];
       const dx = dot.x - mx;
@@ -258,67 +257,13 @@ export default function ConstellationView({ corpusIds, onSelectDoc }: Props) {
         </div>
       )}
       {drilled && (
-        <aside className="absolute top-0 right-0 h-full w-96 bg-white border-l border-slate-200 shadow-xl overflow-auto p-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-slate-900">
-                {drilled.cluster.label || "Document"}
-              </h3>
-              <p className="text-xs text-slate-500 mt-1">
-                {drilled.cluster.entity_count} entities ·{" "}
-                {drilled.cluster.total_mentions ?? 0} mentions
-              </p>
-            </div>
-            <button
-              className="text-slate-400 hover:text-slate-700"
-              onClick={() => setDrilled(null)}
-              aria-label="Close"
-            >
-              ✕
-            </button>
-          </div>
-          {drillLoading ? (
-            <p className="mt-4 text-sm text-slate-500">Loading…</p>
-          ) : (
-            <>
-              <h4 className="mt-5 mb-2 text-sm font-medium text-slate-700">
-                Entities in this document
-              </h4>
-              <ul className="text-sm text-slate-800 space-y-1">
-                {drilled.nodes.slice(0, 40).map((n) => (
-                  <li key={n.id} className="flex justify-between gap-2">
-                    <span className="truncate">{n.display_name}</span>
-                    <span className="text-slate-400 text-xs">
-                      {n.total_mentions}
-                    </span>
-                  </li>
-                ))}
-                {drilled.nodes.length === 0 && (
-                  <li className="text-slate-400 italic">
-                    No entities extracted yet
-                  </li>
-                )}
-              </ul>
-              {drilled.edges.filter((e) => e.cross_cluster).length > 0 && (
-                <>
-                  <h4 className="mt-5 mb-2 text-sm font-medium text-slate-700">
-                    Bridges to other documents
-                  </h4>
-                  <ul className="text-xs text-slate-700 space-y-1">
-                    {drilled.edges
-                      .filter((e) => e.cross_cluster)
-                      .slice(0, 30)
-                      .map((e, i) => (
-                        <li key={i} className="font-mono">
-                          {e.source} → {e.target}
-                        </li>
-                      ))}
-                  </ul>
-                </>
-              )}
-            </>
-          )}
-        </aside>
+        <BookDrillPanel
+          cluster={drilled.cluster}
+          nodes={drilled.nodes}
+          edges={drilled.edges}
+          loading={drillLoading}
+          onClose={() => setDrilled(null)}
+        />
       )}
     </div>
   );

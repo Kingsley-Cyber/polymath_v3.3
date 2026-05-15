@@ -125,6 +125,41 @@ def test_edge_section_includes_code_metadata_when_present():
     assert "Humanoid.MoveTo" in prompt
 
 
+def test_edge_section_uses_structured_mechanism_source_format():
+    """B3 follow-up — edge rendering uses structured fields:
+       mechanism: "..."
+       source: [file:line]
+       symbols: a, b, c
+    instead of the older single-line italic mash-up."""
+    packet = _packet_with_edges(["USES"])
+    packet["edges"][0]["code_metadata"] = {
+        "file_path": "spider.luau",
+        "line_number": 14,
+        "symbols_called": ["Humanoid.MoveTo", "WaitForChild"],
+    }
+    prompt = _render_packet_user_prompt(packet)
+    # Structured field labels MUST appear so the LLM mirrors them.
+    assert "mechanism:" in prompt
+    assert "source:" in prompt
+    assert "symbols:" in prompt
+    # The file path and line number must be rendered in [path:line] form.
+    assert "[spider.luau:14]" in prompt
+
+
+def test_edge_source_falls_back_when_no_line_number():
+    """When code_metadata.line_number is missing, source: still renders
+    the file path in brackets (no `:None`, no missing closing bracket)."""
+    packet = _packet_with_edges(["USES"])
+    packet["edges"][0]["code_metadata"] = {
+        "file_path": "spider.luau",
+        "symbols_called": ["Humanoid"],
+    }
+    prompt = _render_packet_user_prompt(packet)
+    assert "[spider.luau]" in prompt
+    assert "[spider.luau:None]" not in prompt
+    assert "[spider.luau:0]" not in prompt
+
+
 # ─── System prompt regression tests ─────────────────────────────────────────
 
 

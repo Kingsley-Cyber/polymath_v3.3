@@ -2595,39 +2595,59 @@ def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
     if edges:
         lines.append("")
         lines.append(
-            "Relationships found across the corpus (subject — predicate — "
-            "object, with the supporting evidence quoted below each line). "
-            "Treat each relationship as a CONCRETE CONNECTION you can name "
-            "in prose. Predicates are natural-language phrases — use them "
-            "verbatim or paraphrase, but never output the underscored "
-            "internal label form."
+            "Relationships found across the corpus. Each row gives a "
+            "subject → predicate → object connection with structured "
+            "supporting fields:\n"
+            "  mechanism: the actual chunk text that asserts the edge "
+            "(this is what the LLM should paraphrase or quote)\n"
+            "  source:    [file_path:line] when the edge comes from code, "
+            "or the source label when it comes from prose\n"
+            "  symbols:   APIs/methods called in the source chunk (only "
+            "for code-derived edges)\n"
+            "Predicates are natural-language phrases — use them verbatim "
+            "or paraphrase, but never output the underscored internal "
+            "label form."
         )
         for edge in edges[:10]:
             subject = edge.get("s") or "?"
             object_ = edge.get("t") or "?"
             predicate = _humanize_predicate(edge.get("p"))
-            line = f"- **{subject}** {predicate} **{object_}**"
+            header = f"- **{subject}** {predicate} **{object_}**"
+            lines.append(header)
 
-            # Code metadata enrichment (Phase B3) — if the source chunk has
-            # file_path / symbols_called metadata threaded onto the edge, surface
-            # it inline so the LLM can cite a specific file + API in prose.
+            # Code metadata — file_path:line_number + symbols_called.
             code_meta = edge.get("code_metadata") or {}
             file_path = (code_meta.get("file_path") or "").strip()
+            line_number = code_meta.get("line_number")
             symbols = code_meta.get("symbols_called") or []
-            mech_bits: list[str] = []
-            if file_path:
-                mech_bits.append(file_path)
-            if symbols:
-                mech_bits.append("calls " + ", ".join(symbols[:4]))
-            if mech_bits:
-                line += f"  *[{' — '.join(mech_bits)}]*"
 
+            # `mechanism:` — paraphraseable text. Prefer the rationale
+            # chunk text (the verbatim chunk excerpt the extractor used),
+            # falling back to symbols when there's no rationale.
             rationale = (edge.get("rationale") or "").strip().replace("\n", " ")
+            if len(rationale) > 200:
+                rationale = rationale[:197] + "..."
             if rationale:
-                if len(rationale) > 200:
-                    rationale = rationale[:197] + "..."
-                line += f"\n    evidence: \"{rationale}\""
-            lines.append(line)
+                lines.append(f'    mechanism: "{rationale}"')
+            elif symbols:
+                lines.append(
+                    f'    mechanism: calls {", ".join(symbols[:4])}'
+                )
+
+            # `source:` — file_path:line_number for code, or rely on the
+            # numbered evidence list for prose (caller cites [n]).
+            if file_path:
+                if isinstance(line_number, int) and line_number > 0:
+                    lines.append(f"    source: [{file_path}:{line_number}]")
+                else:
+                    lines.append(f"    source: [{file_path}]")
+
+            # `symbols:` — only for code-derived edges with non-trivial
+            # symbol surface; saves tokens on prose edges.
+            if symbols:
+                lines.append(
+                    f"    symbols: {', '.join(symbols[:6])}"
+                )
 
     entity_facets = compact.get("entity_facets") or []
     if entity_facets:
@@ -3325,6 +3345,9 @@ async def _enrich_packet_with_extractions(
                     "metadata.symbols_called": 1,
                     "metadata.symbols_defined": 1,
                     "metadata.roblox_apis": 1,
+                    # B3 follow-up — 1-based line number of the chunk's
+                    # first line, used to render `source: [file.luau:14]`.
+                    "metadata.line_number": 1,
                 },
             )
             async for row in cursor:
@@ -3345,9 +3368,17 @@ async def _enrich_packet_with_extractions(
                 symbols_called = meta_blob.get("symbols_called") or []
                 symbols_defined = meta_blob.get("symbols_defined") or []
                 if lang or file_path or symbols_called or symbols_defined:
+                    raw_line = meta_blob.get("line_number")
+                    try:
+                        line_number = (
+                            int(raw_line) if raw_line is not None else None
+                        )
+                    except Exception:
+                        line_number = None
                     chunk_code_meta_by_id[cid] = {
                         "file_path": file_path,
                         "language": lang,
+                        "line_number": line_number,
                         "symbols_called": [
                             str(s).strip() for s in symbols_called[:8] if s
                         ],
