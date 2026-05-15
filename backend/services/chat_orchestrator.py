@@ -418,12 +418,25 @@ class ChatOrchestrator:
                     should_skip_inline_decoration as _should_skip_inline_decoration,
                 )
 
+                # Phase 5b — pass db through so decorate_winners can
+                # annotate each row with cached structural metrics
+                # (betweenness, pagerank, fragile_bridge membership).
+                # db=None falls back to base decoration unchanged.
+                _db_for_decoration = getattr(
+                    __import__(
+                        "services.ingestion_service",
+                        fromlist=["ingestion_service"],
+                    ).ingestion_service,
+                    "db",
+                    None,
+                )
                 decoration = await _graph_decorator.decorate_winners(
                     winning_chunks=sources,
                     corpus_ids=request.corpus_ids,
                     wanted_families=None,  # v1: no QueryFacets yet — accept all families
                     neighbor_limit=8,
                     chunks_per_neighbor=3,
+                    db=_db_for_decoration,
                 )
             except Exception as exc:
                 logger.warning("Graph decoration skipped: %s", exc)

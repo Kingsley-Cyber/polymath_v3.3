@@ -567,6 +567,41 @@ class Settings(BaseSettings):
             "/api/graph/cache/rebuild call) for cache population."
         ),
     )
+    RETRIEVAL_CACHE_MODE_A_METRICS: bool = Field(
+        default=True,
+        description=(
+            "Phase 5b — Mode A bonus expansion via cached bridge entries. "
+            "When True AND the cache is warm AND the request is graph-tier, "
+            "Mode A adds a third pass alongside its existing MENTIONS + CALLS "
+            "expansion: for each seed entity that appears in a cache bridge "
+            "(fragile_bridges / structural_analogies / terminological_gaps / "
+            "transfer_candidates), pull chunks mentioning the OTHER endpoint. "
+            "Bonus chunks are capped at max(2, expansion_cap // 4) to keep "
+            "the existing mention/calls pool dominant 3:1. Synthetic scores "
+            "are derived from the bridge entry's signal strength (path_count "
+            "for fragile, topology_sim × neighbor_jaccard for analogies/"
+            "terminological, topology_sim for transfers) so they land in the "
+            "same 0.0-1.0 range as the existing Mode A scores. Cold cache "
+            "(no metrics row, lookup raises, no bridges match seeds) → "
+            "bonus pass returns []; behavior identical to pre-Phase-5b."
+        ),
+    )
+    RETRIEVAL_CACHE_DECORATION_METRICS: bool = Field(
+        default=True,
+        description=(
+            "Phase 5b — annotate GraphDecoration rows with cached structural "
+            "signals (entity_betweenness, top_pagerank lookup, fragile_bridge "
+            "membership). Pure additive metadata on read-only post-retrieval "
+            "decoration; no ranking change. Six new optional fields land on "
+            "each decoration: seed_entity_id, neighbor_entity_id, "
+            "seed_betweenness, neighbor_betweenness, seed_pagerank, "
+            "neighbor_pagerank, is_fragile_bridge. The prompt template "
+            "in context_manager surfaces these to the LLM textually so "
+            "synthesis can weigh which arrows represent structurally "
+            "important bridges. Cold cache or any failure → fields are "
+            "None / False, base decoration unchanged."
+        ),
+    )
     GRAPHIFY_AUGMENT_CODE_LANE: bool = Field(
         default=False,
         description=(
@@ -595,21 +630,54 @@ class Settings(BaseSettings):
     TIER_CHUNKER_CODE_SUPPORTED_LANGS: list[str] = Field(
         default=[
             # mainstream code
-            "python", "javascript", "typescript", "tsx", "lua", "luau",
-            "go", "rust", "java", "c", "cpp", "cuda", "ruby", "bash",
-            "sql", "csharp", "kotlin", "swift", "php", "scala", "elixir",
-            "haskell", "r", "dart", "nix", "objc",
+            "python",
+            "javascript",
+            "typescript",
+            "tsx",
+            "lua",
+            "luau",
+            "go",
+            "rust",
+            "java",
+            "c",
+            "cpp",
+            "cuda",
+            "ruby",
+            "bash",
+            "sql",
+            "csharp",
+            "kotlin",
+            "swift",
+            "php",
+            "scala",
+            "elixir",
+            "haskell",
+            "r",
+            "dart",
+            "nix",
+            "objc",
             # shaders
-            "glsl", "hlsl",
+            "glsl",
+            "hlsl",
             # web frameworks
-            "vue", "svelte",
+            "vue",
+            "svelte",
             # markup + styling (parsed as code so structure survives splits)
-            "html", "css", "xml",
+            "html",
+            "css",
+            "xml",
             # data / config (parsed for atomic packing; symbols usually empty)
-            "json", "yaml", "toml", "ini",
+            "json",
+            "yaml",
+            "toml",
+            "ini",
             # IaC / build / API
-            "hcl", "dockerfile", "make", "cmake",
-            "proto", "graphql",
+            "hcl",
+            "dockerfile",
+            "make",
+            "cmake",
+            "proto",
+            "graphql",
         ],
         description=(
             "Languages where the AST packer is invoked. Outside this list, "
@@ -927,7 +995,7 @@ class Settings(BaseSettings):
         if v.strip() == "polymath-dev-secret-key-change-in-production":
             raise ValueError(
                 "AUTH_SECRET_KEY is still the legacy dev sentinel. Generate a "
-                "secure random key (e.g. `python -c \"import secrets; print(secrets.token_urlsafe(64))\"`) "
+                'secure random key (e.g. `python -c "import secrets; print(secrets.token_urlsafe(64))"`) '
                 "and set it in .env before starting."
             )
         return v

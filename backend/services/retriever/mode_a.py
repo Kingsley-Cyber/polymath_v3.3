@@ -32,6 +32,7 @@ class ModeAExpansion:
         merged_pool: List[SourceChunk],
         corpus_ids: Optional[List[str]] = None,
         limit: int = 20,
+        db=None,
     ) -> List[SourceChunk]:
         if not self._settings.NEO4J_ENABLED or not self._driver:
             return []
@@ -47,8 +48,35 @@ class ModeAExpansion:
         mention_chunks = await self._expand_via_mentions(seed_ids, corpus_ids, limit)
         calls_chunks = await self._expand_via_calls(seed_ids, corpus_ids, limit)
 
+        # Phase 5b — cache-driven bonus expansion. Pulls chunks that mention
+        # entities at the OTHER end of cached bridges (fragile / analogy /
+        # terminological / transfer) when at least one endpoint matches a
+        # seed entity. Capped at max(2, limit // 4) so the existing
+        # mention/calls pool always dominates 3:1. Gated on the flag AND a
+        # db handle being passed; cold-cache → empty list → behavior
+        # identical to pre-Phase-5b.
+        bridge_chunks: List[SourceChunk] = []
+        if (
+            getattr(self._settings, "RETRIEVAL_CACHE_MODE_A_METRICS", True)
+            and db is not None
+            and corpus_ids
+        ):
+            try:
+                bridge_chunks = await self._expand_via_bridges(
+                    seed_ids=seed_ids,
+                    corpus_ids=corpus_ids,
+                    db=db,
+                    limit=max(2, limit // 4),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Mode A bridge expansion failed (%s) — continuing with "
+                    "mentions + calls only", exc,
+                )
+                bridge_chunks = []
+
         merged: dict[str, SourceChunk] = {}
-        for pool in (mention_chunks, calls_chunks):
+        for pool in (mention_chunks, calls_chunks, bridge_chunks):
             for c in pool:
                 if not c.chunk_id:
                     continue
@@ -56,18 +84,263 @@ class ModeAExpansion:
                 if existing is None:
                     merged[c.chunk_id] = c
                 else:
-                    # Same chunk surfaced via both patterns — sum scores, append
-                    # provenance so the prompt can show both bridge entities.
+                    # Same chunk surfaced via two or more patterns — sum
+                    # scores, append provenance so the prompt can show
+                    # all bridge entities that pulled this chunk.
                     existing.score = min(1.0, existing.score + c.score)
                     if c.provenance:
                         existing.provenance = (existing.provenance or []) + c.provenance
         expanded = sorted(merged.values(), key=lambda c: c.score, reverse=True)[:limit]
         logger.info(
-            "Mode A expansion: %d unique chunks (mentions=%d, calls=%d, top score %.3f)",
+            "Mode A expansion: %d unique chunks (mentions=%d, calls=%d, "
+            "bridges=%d, top score %.3f)",
             len(expanded), len(mention_chunks), len(calls_chunks),
+            len(bridge_chunks),
             expanded[0].score if expanded else 0.0,
         )
         return expanded
+
+    async def _expand_via_bridges(
+        self,
+        *,
+        seed_ids: List[str],
+        corpus_ids: List[str],
+        db,
+        limit: int,
+    ) -> List[SourceChunk]:
+        """Phase 5b — cache-driven bonus expansion via bridge endpoints.
+
+        Steps:
+          1. Cypher: collect entity_ids that the seed chunks MENTION.
+             ~1 ms on warm Neo4j (uses the chunk_id index).
+          2. Mongo: per-corpus get_cached_metrics. Skipped corpora
+             contribute nothing.
+          3. Pure Python: walk fragile_bridges + structural_analogies +
+             terminological_gaps + transfer_candidates. For each entry
+             where one endpoint is a seed entity, the OTHER endpoint
+             becomes a bonus entity. Score is derived from the entry's
+             own signal strength so synthetic scores stay in the
+             0.0-1.0 range that Mode A's other passes use.
+          4. Cypher: fetch chunks mentioning the top-K bonus entities,
+             scored by per-chunk MENTIONS confidence × bonus magnitude.
+
+        Returns up to `limit` SourceChunk objects, each with provenance
+        carrying the bridge type and the bonus entity name so the
+        downstream prompt template can surface why each chunk landed.
+        """
+        # Step 1 — seed entity_ids
+        seed_entity_cypher = """
+        MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
+        WHERE c.chunk_id IN $seed_ids
+        RETURN collect(DISTINCT e.entity_id) AS seed_entity_ids
+        """
+        try:
+            async with self._driver.session() as session:
+                result = await session.run(seed_entity_cypher, seed_ids=seed_ids)
+                row = await result.single()
+                seed_entity_ids = set(row.get("seed_entity_ids") or []) if row else set()
+        except Exception as exc:
+            logger.debug("Mode A bridges: seed entity Cypher failed: %s", exc)
+            return []
+        if not seed_entity_ids:
+            return []
+
+        # Step 2 — load + merge cache fields across warm corpora
+        try:
+            from services.graph.analytics import (
+                compute_corpus_change_signature,
+                get_cached_metrics,
+            )
+        except ImportError as exc:
+            logger.warning(
+                "Mode A bridges: analytics module import failed (%s) — "
+                "skipping bonus expansion", exc,
+            )
+            return []
+
+        # bonus_scores: entity_id → (score, label) where label is for
+        # provenance ("fragile to X via path_count=N", "analog of Y", etc.)
+        bonus_scores: dict[str, tuple[float, str, str]] = {}
+
+        def _consider(eid: str, score: float, bridge_type: str, partner_name: str) -> None:
+            if not eid or eid in seed_entity_ids:
+                return
+            cur = bonus_scores.get(eid)
+            if cur is None or score > cur[0]:
+                bonus_scores[eid] = (score, bridge_type, partner_name)
+
+        warm_corpora = 0
+        for corpus_id in corpus_ids:
+            try:
+                sig = await compute_corpus_change_signature(db, corpus_id)
+                metrics = await get_cached_metrics(db, corpus_id, sig)
+                if metrics is None:
+                    continue
+                warm_corpora += 1
+                # fragile_bridges — articulation edges. path_count is
+                # always 1 for true articulation edges; the score floor
+                # of 0.4 reflects "structurally important by construction."
+                for fb in getattr(metrics, "fragile_bridges", None) or []:
+                    src = fb.get("source")
+                    tgt = fb.get("target")
+                    path_count = int(fb.get("path_count") or 1)
+                    base_score = 0.4 + 0.05 * min(path_count, 4)
+                    if src in seed_entity_ids and tgt not in seed_entity_ids:
+                        _consider(tgt, base_score, "fragile",
+                                  fb.get("source_name") or src)
+                    elif tgt in seed_entity_ids and src not in seed_entity_ids:
+                        _consider(src, base_score, "fragile",
+                                  fb.get("target_name") or tgt)
+                # terminological_gaps — high topology + high jaccard.
+                # Score blends both signals; ranges naturally 0.0-0.9.
+                for tg in getattr(metrics, "terminological_gaps", None) or []:
+                    src = tg.get("source")
+                    tgt = tg.get("target")
+                    try:
+                        sim = float(tg.get("topology_sim") or 0.0)
+                        jac = float(tg.get("neighbor_jaccard") or 0.0)
+                    except (TypeError, ValueError):
+                        continue
+                    score = min(0.9, sim * jac * 2.0)
+                    if src in seed_entity_ids and tgt not in seed_entity_ids:
+                        _consider(tgt, score, "terminological",
+                                  tg.get("source_name") or src)
+                    elif tgt in seed_entity_ids and src not in seed_entity_ids:
+                        _consider(src, score, "terminological",
+                                  tg.get("target_name") or tgt)
+                # structural_analogies — high topology, low jaccard.
+                # Slightly capped to keep analogies below
+                # terminological/fragile in calibration.
+                for sa in getattr(metrics, "structural_analogies", None) or []:
+                    src = sa.get("source")
+                    tgt = sa.get("target")
+                    try:
+                        sim = float(sa.get("topology_sim") or 0.0)
+                    except (TypeError, ValueError):
+                        continue
+                    score = min(0.7, sim)
+                    if src in seed_entity_ids and tgt not in seed_entity_ids:
+                        _consider(tgt, score, "analogy",
+                                  sa.get("source_name") or src)
+                    elif tgt in seed_entity_ids and src not in seed_entity_ids:
+                        _consider(src, score, "analogy",
+                                  sa.get("target_name") or tgt)
+                # transfer_candidates — flattened to (hub, analog) pairs.
+                # Hub must be a seed entity; each analog becomes a bonus.
+                for tc in getattr(metrics, "transfer_candidates", None) or []:
+                    hub = tc.get("hub")
+                    if hub not in seed_entity_ids:
+                        continue
+                    hub_name = tc.get("hub_name") or hub
+                    for analog in tc.get("analogs", []) or []:
+                        analog_eid = analog.get("entity")
+                        try:
+                            sim = float(analog.get("topology_sim") or 0.0)
+                        except (TypeError, ValueError):
+                            continue
+                        score = min(0.6, sim)
+                        _consider(analog_eid, score, "transfer", hub_name)
+            except Exception as exc:
+                logger.debug(
+                    "Mode A bridges: cache miss corpus=%s: %s", corpus_id, exc
+                )
+
+        if not bonus_scores or warm_corpora == 0:
+            return []
+
+        # Step 4 — fetch chunks for the top-K bonus entities.
+        # Sort by score desc, take the top entity_ids whose bonus chunks
+        # could fill the cap. Cap on entities not chunks: each entity
+        # contributes up to ~2-3 chunks via the MENTIONS Cypher's
+        # natural breadth, so capping at limit is enough to fill the
+        # `limit` cap downstream.
+        top_entity_ids = sorted(
+            bonus_scores.items(), key=lambda kv: kv[1][0], reverse=True
+        )[: max(limit, 8)]
+        entity_id_list = [eid for eid, _ in top_entity_ids]
+
+        bonus_cypher = """
+        UNWIND $entity_ids AS eid
+        MATCH (e:Entity {entity_id: eid})<-[m:MENTIONS]-(c:Chunk)
+        WHERE c.corpus_id IN $corpus_ids
+          AND NOT c.chunk_id IN $seed_ids
+        WITH eid, c, max(coalesce(m.confidence, 0.5)) AS conf
+        WITH eid, c, conf
+        ORDER BY conf DESC
+        RETURN c.chunk_id AS chunk_id,
+               c.doc_id   AS doc_id,
+               c.corpus_id AS corpus_id,
+               conf       AS mention_conf,
+               eid        AS via_entity_id
+        LIMIT $hard_cap
+        """
+        hard_cap = limit * 4  # over-fetch then trim after scoring
+        try:
+            async with self._driver.session() as session:
+                result = await session.run(
+                    bonus_cypher,
+                    entity_ids=entity_id_list,
+                    corpus_ids=corpus_ids,
+                    seed_ids=seed_ids,
+                    hard_cap=hard_cap,
+                )
+                rows = [dict(r) async for r in result]
+        except Exception as exc:
+            logger.debug("Mode A bridges: bonus Cypher failed: %s", exc)
+            return []
+
+        # Score each row: bonus_score × mention_confidence. Cap at 1.0.
+        out: list[SourceChunk] = []
+        seen: set[str] = set()
+        for row in rows:
+            cid = str(row.get("chunk_id") or "")
+            if not cid or cid in seen:
+                continue
+            seen.add(cid)
+            via_eid = str(row.get("via_entity_id") or "")
+            bonus_tuple = bonus_scores.get(via_eid)
+            if bonus_tuple is None:
+                continue
+            bonus_score, bridge_type, partner_name = bonus_tuple
+            try:
+                mention_conf = float(row.get("mention_conf") or 0.5)
+            except (TypeError, ValueError):
+                mention_conf = 0.5
+            final_score = min(1.0, bonus_score * mention_conf)
+            # Same field defaults as _row_to_chunk — parent_id + text
+            # are filled by the downstream Mongo hydrate step, not here.
+            # source_tier="graph_mode_a_bridge" so the renderer can tell
+            # bridge chunks apart from mention/calls chunks.
+            out.append(SourceChunk(
+                chunk_id=cid,
+                parent_id="",
+                doc_id=str(row.get("doc_id") or ""),
+                corpus_id=str(row.get("corpus_id") or ""),
+                text="",
+                summary=None,
+                score=final_score,
+                source_tier="graph_mode_a_bridge",
+                provenance=[{
+                    "via": "bridge",
+                    "bridge_type": bridge_type,
+                    "via_entity": partner_name,
+                    "bonus_score": round(bonus_score, 3),
+                    "mention_conf": round(mention_conf, 3),
+                }],
+            ))
+
+        out.sort(key=lambda c: c.score, reverse=True)
+        out = out[:limit]
+        logger.info(
+            "Mode A bridges: warm_corpora=%d seed_entities=%d bonus_entities=%d "
+            "chunks=%d (top score %.3f)",
+            warm_corpora,
+            len(seed_entity_ids),
+            len(bonus_scores),
+            len(out),
+            out[0].score if out else 0.0,
+        )
+        return out
 
     async def _expand_via_mentions(
         self,

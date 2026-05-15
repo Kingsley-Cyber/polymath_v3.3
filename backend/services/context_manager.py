@@ -531,6 +531,16 @@ class ContextManager:
                         # don't explode to 60+ arrows.
                         if remaining_arrow_budget <= 0:
                             break
+                        # Phase 5b — extract the cache-driven annotations
+                        # alongside the base fields. is_fragile_bridge flags
+                        # cross-domain articulation edges (removing the
+                        # edge disconnects two communities). seed/neighbor
+                        # betweenness signal which endpoint is structurally
+                        # central. None values are skipped — the prompt
+                        # only carries signal that actually exists.
+                        is_fragile = False
+                        seed_b = None
+                        neighbor_b = None
                         if hasattr(d, "predicate"):
                             pred = getattr(d, "predicate", "") or ""
                             fam = getattr(d, "relation_family", "") or ""
@@ -538,6 +548,9 @@ class ContextManager:
                             dr = getattr(d, "direction_repaired", False)
                             pr = getattr(d, "predicate_refined", False)
                             seed = getattr(d, "seed_entity", "") or ""
+                            is_fragile = bool(getattr(d, "is_fragile_bridge", False))
+                            seed_b = getattr(d, "seed_betweenness", None)
+                            neighbor_b = getattr(d, "neighbor_betweenness", None)
                         elif isinstance(d, dict):
                             pred = str(d.get("predicate") or "")
                             fam = str(d.get("relation_family") or "")
@@ -545,6 +558,9 @@ class ContextManager:
                             dr = bool(d.get("direction_repaired") or False)
                             pr = bool(d.get("predicate_refined") or False)
                             seed = str(d.get("seed_entity") or "")
+                            is_fragile = bool(d.get("is_fragile_bridge") or False)
+                            seed_b = d.get("seed_betweenness")
+                            neighbor_b = d.get("neighbor_betweenness")
                         else:
                             continue
                         if not pred or not neighbor:
@@ -556,6 +572,22 @@ class ContextManager:
                             arrow = f"{seed} → {pred} → {neighbor}"
                         if dr or pr:
                             arrow += " ⚠"
+                        # Phase 5b — append a structural-importance hint
+                        # ONLY when the cache annotation exists. Keeps
+                        # cold-cache decorations rendered identically to
+                        # pre-Phase-5b.
+                        if is_fragile:
+                            arrow += " [cross-domain bridge]"
+                        elif seed_b is not None or neighbor_b is not None:
+                            # Pick the stronger of the two endpoints to
+                            # tag — shorter than "seed=X,neighbor=Y"
+                            # and the LLM only needs a single signal.
+                            best_b = max(
+                                seed_b if seed_b is not None else 0.0,
+                                neighbor_b if neighbor_b is not None else 0.0,
+                            )
+                            if best_b > 0.0:
+                                arrow += f" [centrality={best_b:.2f}]"
                         arrow_parts.append(arrow)
                         remaining_arrow_budget -= 1
                     if arrow_parts:

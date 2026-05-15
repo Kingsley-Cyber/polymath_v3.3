@@ -98,6 +98,7 @@ class GraphDecorator:
         wanted_families: Optional[List[str]] = None,
         neighbor_limit: int = 8,
         chunks_per_neighbor: int = 3,
+        db=None,
     ) -> List[GraphDecoration]:
         """Attach edge-level graph context to chunks that already won retrieval.
 
@@ -138,7 +139,130 @@ class GraphDecorator:
         # arrow renderer in context_manager has its own per-chunk and total
         # arrow budgets (Pt 10d.1), so over-counting here is safe — the
         # renderer trims.
-        return relates_to_decorations + calls_decorations
+        all_decorations = relates_to_decorations + calls_decorations
+
+        # Phase 5b — additive cache annotation. Gated on the
+        # RETRIEVAL_CACHE_DECORATION_METRICS flag. When the flag is on
+        # AND a db handle was passed AND the cache row exists for a
+        # corpus, each decoration gets:
+        #   seed_betweenness / neighbor_betweenness   (from entity_betweenness dict)
+        #   seed_pagerank / neighbor_pagerank         (from top_pagerank list)
+        #   is_fragile_bridge                          (from fragile_bridges set)
+        # Failure modes (no db, cache cold, lookup raises) leave the
+        # decorations exactly as the Cypher returned them — base
+        # behavior is preserved.
+        if (
+            getattr(self._settings, "RETRIEVAL_CACHE_DECORATION_METRICS", True)
+            and db is not None
+            and all_decorations
+            and corpus_ids
+        ):
+            await self._annotate_from_cache(all_decorations, corpus_ids, db)
+
+        return all_decorations
+
+    async def _annotate_from_cache(
+        self,
+        decorations: List[GraphDecoration],
+        corpus_ids: List[str],
+        db,
+    ) -> None:
+        """Phase 5b — annotate decorations with cached structural metrics.
+
+        Mutates each decoration in place. Best-effort: any failure (cache
+        miss, deserialization error, mongo down) leaves the decorations
+        unchanged. The base GraphDecoration shape never breaks.
+        """
+        try:
+            from services.graph.analytics import (
+                compute_corpus_change_signature,
+                get_cached_metrics,
+            )
+        except ImportError as exc:
+            logger.warning(
+                "decorate_winners cache annotation: analytics import "
+                "failed (%s) — skipping enrichment", exc,
+            )
+            return
+
+        # Merge cache fields across all warm corpora — same pattern as
+        # Phase 5a's multi-corpus PageRank merge. Higher score wins on
+        # overlap; betweenness is corpus-scoped but entity_ids are
+        # unique system-wide so we just take max.
+        merged_betweenness: dict[str, float] = {}
+        merged_pagerank: dict[str, float] = {}
+        fragile_pairs: set[tuple[str, str]] = set()
+        warm_corpora = 0
+        for corpus_id in corpus_ids:
+            try:
+                sig = await compute_corpus_change_signature(db, corpus_id)
+                metrics = await get_cached_metrics(db, corpus_id, sig)
+                if metrics is None:
+                    continue
+                warm_corpora += 1
+                for eid, score in (
+                    getattr(metrics, "entity_betweenness", None) or {}
+                ).items():
+                    try:
+                        cur = merged_betweenness.get(eid, 0.0)
+                        val = float(score)
+                        if val > cur:
+                            merged_betweenness[eid] = val
+                    except (TypeError, ValueError):
+                        continue
+                for entry in getattr(metrics, "top_pagerank", None) or []:
+                    eid = entry.get("entity_id")
+                    try:
+                        val = float(entry.get("score") or 0.0)
+                    except (TypeError, ValueError):
+                        continue
+                    if eid and val > merged_pagerank.get(eid, 0.0):
+                        merged_pagerank[eid] = val
+                for fb in getattr(metrics, "fragile_bridges", None) or []:
+                    src = fb.get("source")
+                    tgt = fb.get("target")
+                    if src and tgt:
+                        # Store both directions so lookup is symmetric.
+                        fragile_pairs.add((src, tgt))
+                        fragile_pairs.add((tgt, src))
+            except Exception as exc:
+                logger.debug(
+                    "decorate_winners cache annotation: corpus=%s miss: %s",
+                    corpus_id, exc,
+                )
+
+        if warm_corpora == 0:
+            # No cache hits across any corpus — nothing to annotate.
+            return
+
+        annotated_count = 0
+        fragile_count = 0
+        for d in decorations:
+            seed_id = (d.seed_entity_id or "").strip()
+            neighbor_id = (d.neighbor_entity_id or "").strip()
+            if seed_id and seed_id in merged_betweenness:
+                d.seed_betweenness = merged_betweenness[seed_id]
+                annotated_count += 1
+            if neighbor_id and neighbor_id in merged_betweenness:
+                d.neighbor_betweenness = merged_betweenness[neighbor_id]
+            if seed_id and seed_id in merged_pagerank:
+                d.seed_pagerank = merged_pagerank[seed_id]
+            if neighbor_id and neighbor_id in merged_pagerank:
+                d.neighbor_pagerank = merged_pagerank[neighbor_id]
+            if seed_id and neighbor_id and (seed_id, neighbor_id) in fragile_pairs:
+                d.is_fragile_bridge = True
+                fragile_count += 1
+
+        logger.info(
+            "decorate_winners cache annotation: warm_corpora=%d arrows=%d "
+            "annotated=%d fragile=%d (between_dict=%d, pr_lookup=%d)",
+            warm_corpora,
+            len(decorations),
+            annotated_count,
+            fragile_count,
+            len(merged_betweenness),
+            len(merged_pagerank),
+        )
 
     async def _decorate_via_relates_to(
         self,
@@ -175,6 +299,10 @@ class GraphDecorator:
         WITH winner.chunk_id              AS winner_chunk_id,
              coalesce(seed.display_name, seed.normalized_name, '')     AS seed_entity,
              coalesce(neighbor.display_name, neighbor.normalized_name, '') AS neighbor_entity,
+             // Phase 5b — entity_ids surfaced so the cache annotation
+             // step can look up entity_betweenness + top_pagerank.
+             coalesce(seed.entity_id, '')      AS seed_entity_id,
+             coalesce(neighbor.entity_id, '')  AS neighbor_entity_id,
              coalesce(r.predicate, '')        AS predicate,
              coalesce(r.relation_family, '')  AS relation_family,
              coalesce(r.evidence_phrase, '')  AS edge_evidence,
@@ -187,9 +315,11 @@ class GraphDecorator:
                  parent_boost: parent_boost
              })[..$chunks_per_neighbor] AS evidence_chunks
         ORDER BY edge_weight DESC
-        RETURN winner_chunk_id, seed_entity, neighbor_entity, predicate,
-               relation_family, edge_evidence, direction_repaired,
-               predicate_refined, edge_weight, evidence_chunks
+        RETURN winner_chunk_id, seed_entity, neighbor_entity,
+               seed_entity_id, neighbor_entity_id,
+               predicate, relation_family, edge_evidence,
+               direction_repaired, predicate_refined,
+               edge_weight, evidence_chunks
         LIMIT $neighbor_limit
         """
 
@@ -274,6 +404,9 @@ class GraphDecorator:
         WITH winner.chunk_id              AS winner_chunk_id,
              coalesce(seed.display_name, seed.normalized_name, '')         AS seed_entity,
              coalesce(neighbor.display_name, neighbor.normalized_name, '') AS neighbor_entity,
+             // Phase 5b — entity_ids for cache annotation lookup.
+             coalesce(seed.entity_id, '')      AS seed_entity_id,
+             coalesce(neighbor.entity_id, '')  AS neighbor_entity_id,
              'calls'           AS predicate,
              'code_call_graph' AS relation_family,
              // Use source_file:source_location as evidence — graphify writes both.
@@ -287,9 +420,11 @@ class GraphDecorator:
                  parent_boost: parent_boost
              })[..$chunks_per_neighbor] AS evidence_chunks
         ORDER BY edge_weight DESC
-        RETURN winner_chunk_id, seed_entity, neighbor_entity, predicate,
-               relation_family, edge_evidence, direction_repaired,
-               predicate_refined, edge_weight, evidence_chunks
+        RETURN winner_chunk_id, seed_entity, neighbor_entity,
+               seed_entity_id, neighbor_entity_id,
+               predicate, relation_family, edge_evidence,
+               direction_repaired, predicate_refined,
+               edge_weight, evidence_chunks
         LIMIT $neighbor_limit
         """
 
@@ -345,6 +480,12 @@ class GraphDecorator:
                     winner_chunk_id=str(row.get("winner_chunk_id") or ""),
                     seed_entity=str(row.get("seed_entity") or ""),
                     neighbor_entity=str(row.get("neighbor_entity") or ""),
+                    # Phase 5b — entity_ids carried alongside display names
+                    # so the cache annotation step can look up structural
+                    # metrics. Default to empty string when older corpora
+                    # don't have entity_id populated.
+                    seed_entity_id=str(row.get("seed_entity_id") or ""),
+                    neighbor_entity_id=str(row.get("neighbor_entity_id") or ""),
                     predicate=str(row.get("predicate") or ""),
                     relation_family=str(row.get("relation_family") or ""),
                     edge_evidence=str(row.get("edge_evidence") or ""),
@@ -352,6 +493,9 @@ class GraphDecorator:
                     predicate_refined=bool(row.get("predicate_refined") or False),
                     edge_weight=float(row.get("edge_weight") or 0.0),
                     evidence_chunks=evidence_chunks,
+                    # Annotations land in _annotate_from_cache; defaults
+                    # here so cold-cache decorations have well-defined
+                    # values.
                 )
             )
         return decorations

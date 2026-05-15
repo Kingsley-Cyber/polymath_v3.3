@@ -1043,6 +1043,24 @@ class GraphDecoration(BaseModel):
     predicate_refined: bool = False
     edge_weight: float = 0.0
     evidence_chunks: list[GraphDecorationEvidence] = Field(default_factory=list)
+    # Phase 5b — entity_ids surfaced alongside the display-name fields so
+    # the cache annotation step can look up structural metrics.
+    # entity_betweenness and top_pagerank are keyed by entity_id, not by
+    # display name. Default empty string so older serialized rows
+    # deserialize cleanly under Pydantic V2's default extra='ignore'.
+    seed_entity_id: str = ""
+    neighbor_entity_id: str = ""
+    # Phase 5b — cache-driven structural annotations. None when the
+    # cache is cold or when the entity isn't in the relevant cache
+    # field. Purely additive metadata; no ranking impact. The prompt
+    # template in context_manager renders these to the LLM textually
+    # so synthesis can weigh which arrows represent high-centrality
+    # bridges.
+    seed_betweenness: float | None = None
+    neighbor_betweenness: float | None = None
+    seed_pagerank: float | None = None
+    neighbor_pagerank: float | None = None
+    is_fragile_bridge: bool = False
 
 
 class RetrievalResult(BaseModel):

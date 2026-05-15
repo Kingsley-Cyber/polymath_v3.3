@@ -597,8 +597,19 @@ class RetrieverOrchestrator:
                     if neo4j_expansion_cap is not None
                     else {}
                 )
+                # Phase 5b — pass db through so Mode A can run its
+                # cache-driven bridge bonus expansion when the flag is
+                # on. db=None falls back to mention + calls passes only.
+                db_for_mode_a = getattr(
+                    __import__(
+                        "services.ingestion_service",
+                        fromlist=["ingestion_service"],
+                    ).ingestion_service,
+                    "db",
+                    None,
+                )
                 expanded = await mode_a_expansion.expand(
-                    merged, corpus_ids, **expand_kwargs
+                    merged, corpus_ids, db=db_for_mode_a, **expand_kwargs
                 )
                 counts["graph_expanded"] = len(expanded)
                 if expanded:
