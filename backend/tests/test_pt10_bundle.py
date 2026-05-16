@@ -161,6 +161,8 @@ def test_empty_input_safe():
 # ── Pt10c — HyDE default ────────────────────────────────────────────
 
 
+import services.chat_orchestrator as chat_orchestrator_module  # noqa: E402
+from models.schemas import ChatRequest, ModelOverrides  # noqa: E402
 from services.chat_orchestrator import (  # noqa: E402
     ChatOrchestrator,
     _should_skip_hyde_for_query,
@@ -201,6 +203,86 @@ def test_hyde_skips_source_constrained_direct_support_queries():
 def test_hyde_stays_available_for_open_cross_domain_discovery():
     query = "How could generative AI methods apply to urban planning?"
     assert _should_skip_hyde_for_query(query) is False
+
+
+@pytest.mark.asyncio
+async def test_source_constrained_profile_default_hyde_is_skipped(monkeypatch):
+    query = (
+        "Based on the retrieved excerpts from Fowler's Patterns of Enterprise "
+        "Application Architecture and Myers/Briggs' Gifts Differing, identify "
+        "any defensible intersection. Distinguish direct textual support from "
+        "inferred design recommendations."
+    )
+    request = ChatRequest(
+        message=query,
+        overrides=ModelOverrides(query_profile="thorough"),
+    )
+    orchestrator = ChatOrchestrator()
+
+    profile = await orchestrator._resolve_query_profile(request)
+    assert profile["hyde_enabled"] is True
+    assert profile["hyde_explicit"] is False
+
+    async def fail_complete_sync(**_kwargs):
+        raise AssertionError("profile-default HyDE should be skipped")
+
+    monkeypatch.setattr(
+        chat_orchestrator_module.llm_service,
+        "complete_sync",
+        fail_complete_sync,
+    )
+
+    retrieval_query, applied = await orchestrator._apply_hyde(
+        request,
+        hyde_explicit=profile["hyde_explicit"],
+    )
+
+    assert retrieval_query == query
+    assert applied is False
+
+
+@pytest.mark.asyncio
+async def test_source_constrained_explicit_hyde_toggle_is_honored(monkeypatch):
+    query = (
+        "Based on the retrieved excerpts from Fowler's Patterns of Enterprise "
+        "Application Architecture and Myers/Briggs' Gifts Differing, identify "
+        "any defensible intersection. Distinguish direct textual support from "
+        "inferred design recommendations."
+    )
+    request = ChatRequest(
+        message=query,
+        overrides=ModelOverrides(
+            query_profile="thorough",
+            hyde_enabled=True,
+            hyde_model="test/hyde",
+        ),
+    )
+    orchestrator = ChatOrchestrator()
+    calls = {"count": 0}
+
+    async def fake_complete_sync(**_kwargs):
+        calls["count"] += 1
+        return "A hypothetical answer for retrieval."
+
+    monkeypatch.setattr(
+        chat_orchestrator_module.llm_service,
+        "complete_sync",
+        fake_complete_sync,
+    )
+    chat_orchestrator_module._HYDE_FAILURE_CACHE.clear()
+
+    profile = await orchestrator._resolve_query_profile(request)
+    assert profile["hyde_enabled"] is True
+    assert profile["hyde_explicit"] is True
+
+    retrieval_query, applied = await orchestrator._apply_hyde(
+        request,
+        hyde_explicit=profile["hyde_explicit"],
+    )
+
+    assert retrieval_query == "A hypothetical answer for retrieval."
+    assert applied is True
+    assert calls["count"] == 1
 
 
 # ── Pt10d — model_name validation ───────────────────────────────────

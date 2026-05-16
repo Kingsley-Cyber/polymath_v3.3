@@ -353,7 +353,9 @@ class ChatOrchestrator:
         # use IT as the retrieval query. Answers tend to embed closer to
         # answer-shaped chunks than questions do. Graceful fallback on failure.
         retrieval_query, hyde_applied = await self._apply_hyde(
-            request, user_id=user_id
+            request,
+            user_id=user_id,
+            hyde_explicit=bool(profile_cfg.get("hyde_explicit", False)),
         )
 
         # Step 3.5: Retrieval Pipeline
@@ -1041,7 +1043,7 @@ class ChatOrchestrator:
         self, request: ChatRequest, user_id: str | None = None
     ) -> dict:
         """
-        Resolve Query Profile into eight concrete knobs. Returns a dict:
+        Resolve Query Profile into concrete knobs. Returns a dict:
           retrieval_k, rerank_enabled, hyde_enabled,
           top_k_summary, rerank_top_n, similarity_threshold,
           neo4j_expansion_cap, max_corpora_per_query
@@ -1058,6 +1060,7 @@ class ChatOrchestrator:
         how many chunks reach the LLM after that pool is ranked.
         """
         overrides = request.overrides
+        hyde_explicit = bool(overrides and overrides.hyde_enabled is not None)
         profile_key = (
             overrides.query_profile if overrides and overrides.query_profile else "balanced"
         )
@@ -1147,12 +1150,17 @@ class ChatOrchestrator:
             "retrieval_k": retrieval_k,
             "rerank_enabled": bool(rerank_enabled),
             "hyde_enabled": bool(hyde_enabled),
+            "hyde_explicit": hyde_explicit,
             "query_profile": profile_key,
             **extras,
         }
 
     async def _apply_hyde(
-        self, request: ChatRequest, user_id: str | None = None
+        self,
+        request: ChatRequest,
+        user_id: str | None = None,
+        *,
+        hyde_explicit: bool = False,
     ) -> tuple[str, bool]:
         """
         Phase 17 — Hypothetical Document Embeddings.
@@ -1179,12 +1187,18 @@ class ChatOrchestrator:
         overrides = request.overrides
         if not (overrides and overrides.hyde_enabled):
             return request.message, False
-        if _should_skip_hyde_for_query(request.message):
+        source_constrained = _should_skip_hyde_for_query(request.message)
+        if source_constrained and not hyde_explicit:
             logger.info(
                 "HyDE skipped for source-constrained query: '%s'",
                 request.message[:80],
             )
             return request.message, False
+        if source_constrained:
+            logger.info(
+                "HyDE source-constrained guard bypassed by explicit toggle: '%s'",
+                request.message[:80],
+            )
 
         hyde_model = (overrides.hyde_model if overrides else None) or settings.HYDE_MODEL
         hyde_api_base: str | None = None
