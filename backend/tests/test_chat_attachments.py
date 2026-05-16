@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from models.schemas import ChatAttachment, ChatChunk, ChatRequest
+from models.schemas import ChatAttachment, ChatChunk, ChatMessage, ChatRequest
 
 
 # ─── ChatAttachment field validation ───────────────────────────────────────
@@ -224,3 +224,27 @@ def test_chat_done_chunk_keeps_trust_signal_fields():
     assert dumped["chunks_returned"] == 3
     assert dumped["strategy_used"] == "qdrant_mongo_graph"
     assert dumped["collections_queried"] == ["corpus-a"]
+
+
+def test_chat_message_persists_retrieval_trust_signal_fields():
+    """Reloaded conversations should retain source previews and badges."""
+    msg = ChatMessage(
+        role="assistant",
+        content="answer",
+        chunks_returned=2,
+        strategy_used="qdrant_mongo",
+        query_profile_used="thorough",
+        hyde_applied=False,
+        sources=[
+            {
+                "chunk_id": "c1",
+                "doc_id": "d1",
+                "text": "source preview",
+                "source_tier": "document_anchor+lexical",
+            }
+        ],
+    )
+    dumped = msg.model_dump()
+    assert dumped["chunks_returned"] == 2
+    assert dumped["query_profile_used"] == "thorough"
+    assert dumped["sources"][0]["source_tier"] == "document_anchor+lexical"

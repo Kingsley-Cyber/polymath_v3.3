@@ -68,6 +68,22 @@ class ChatChunk(_legacy.ChatChunk):
     reasoning_cascade_applied: bool | None = None
 
 
+class ChatMessage(_legacy.ChatMessage):
+    """Current persisted chat message shape."""
+
+    chunks_returned: int | None = None
+    strategy_used: str | None = None
+    query_profile_used: str | None = None
+    reasoning_mode_used: str | None = None
+    hyde_applied: bool | None = None
+    agentic_mode_used: bool | None = None
+    downgrade_reason: str | None = None
+    skills_used: list[str] = Field(default_factory=list)
+    tools_used: list[str] = Field(default_factory=list)
+    reasoning_cascade_applied: bool | None = None
+    sources: list[dict[str, Any]] | None = None
+
+
 def _universal_entity_schema() -> list[str]:
     """Lazy accessor for ghost_b.UNIVERSAL_ENTITY_SCHEMA. Importing ghost_b
     eagerly at module load would create a services↔models cycle, so the
