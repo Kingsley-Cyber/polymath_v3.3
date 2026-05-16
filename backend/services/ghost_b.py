@@ -781,6 +781,56 @@ def _render_schema_lens_block(schema_lens: SchemaLens | dict | None) -> str:
     return "\n".join(lines)
 
 
+# Pt9d — fallback when no SchemaLens has been built yet (first ingest of
+# a corpus, before the deterministic lens runs). Intentionally narrow —
+# the scattershot kitchen sink the original Pt9b prompt shipped with
+# pulled the LLM toward emitting empty object_kind because no single
+# example felt domain-appropriate. A short generic list keeps the door
+# open without confusing the model.
+_OBJECT_KIND_FALLBACK_HINTS: list[str] = [
+    "Library", "Framework", "Service", "Method",
+    "Theory", "Document",
+]
+
+
+def _render_object_kind_hint(schema_lens: SchemaLens | dict | None) -> str:
+    """Pt9d — render the prompt's object_kind cheat sheet from the
+    SchemaLens's domain-specific kinds.
+
+    The lens is built deterministically by `build_deterministic_schema_lens`
+    from triggers in the corpus content. A software-heavy corpus produces
+    a software lens with kinds like ["Library", "Framework", "Application",
+    "Service", "API", "Language", "Platform"]. A psychology corpus
+    produces ["Disorder", "Syndrome", "Trait", "Therapy", "Assessment",
+    "Theory"]. Etc.
+
+    Returning the lens's kinds as the prompt's allowed-values list is
+    what makes Pt9b's object_kind extraction actually populate. Without
+    domain-specific steering, the LLM sees a generic kitchen-sink list
+    (library|framework|disorder|trait|therapy|protocol|format|...) where
+    only 2-3 entries match the chunk's domain and emits empty rather
+    than guess.
+
+    When no lens is provided (first ingest of a corpus), fall back to
+    a tight generic list that's better than the original kitchen sink
+    but worse than a real domain-specific list. The lens forms on the
+    second ingest at the latest, so this state is transient.
+    """
+    lens = (
+        schema_lens
+        if isinstance(schema_lens, SchemaLens)
+        else SchemaLens.from_dict(schema_lens if isinstance(schema_lens, dict) else None)
+    )
+    kinds = (
+        list(getattr(lens, "object_kinds", []) or [])
+        if lens is not None
+        else []
+    )
+    if not kinds:
+        kinds = list(_OBJECT_KIND_FALLBACK_HINTS)
+    return "|".join(kinds[:10])
+
+
 def _bounded_extraction_text(text: str, max_tokens: int) -> tuple[str, int, bool]:
     """Bound the span sent to Ghost B independently of chunker correctness."""
 
@@ -1252,6 +1302,13 @@ def build_user_prompt(
             )
     vocab_block = "\n".join(vocab_block_lines)
     lens_block = _render_schema_lens_block(schema_lens)
+    # Pt9d — render the object_kind cheat sheet from the SchemaLens's
+    # domain-specific kinds. The original Pt9b prompt hardcoded a
+    # kitchen-sink list (library|framework|disorder|trait|therapy|...)
+    # that the LLM ignored because no single hint matched a chunk's
+    # domain cleanly. The lens narrows this to the domain that actually
+    # fired.
+    object_kind_hint = _render_object_kind_hint(schema_lens)
     settings = get_settings()
     entity_cap = max_entities or settings.EXTRACTION_MAX_ENTITIES_PER_CHUNK
     relation_cap = max_relations or settings.EXTRACTION_MAX_RELATIONS_PER_CHUNK
@@ -1296,7 +1353,7 @@ def build_user_prompt(
         "- Relation: sub=subject, pred=predicate, obj=object, ok=object_kind (\"entity\"|\"literal\" — distinct from entity ek), cf=confidence, ev=evidence_phrase, cue=optional relation trigger\n"
         "- Fact: sub=subject, ft=fact_type, pn=property_name, val=value, unit=unit, cond=condition, cf=confidence, ev=evidence_phrase\n"
         "Line shapes:\n"
-        f'- Entity line: {{"t":"e","cn":"lowercase no-punct","sf":"verbatim","et":"{entity_type_enum}","ek":"library|framework|disorder|trait|therapy|protocol|format|... (optional refinement)","cf":0.0,"qa":["abbreviation","alt name"],"def":"one-sentence definition if explicitly stated in this chunk"}}\n'
+        f'- Entity line: {{"t":"e","cn":"lowercase no-punct","sf":"verbatim","et":"{entity_type_enum}","ek":"{object_kind_hint} (choose one when applicable)","cf":0.0,"qa":["abbreviation","alt name"],"def":"one-sentence definition if explicitly stated in this chunk"}}\n'
         f'- Relation line: {{"t":"r","sub":"canonical_name","pred":"{predicate_desc}","obj":"canonical_name or literal","ok":"entity|literal","cf":0.0,"ev":"short source phrase","cue":"trigger"}}\n'
         f"{fact_protocol}"
         '- Finished line: {"t":"x"}\n'
@@ -1400,6 +1457,12 @@ def build_json_object_prompt(
             )
     vocab_block = "\n".join(vocab_block_lines)
     lens_block = _render_schema_lens_block(schema_lens)
+    # Pt9d — lens-driven object_kind cheat sheet, same logic as in
+    # build_user_prompt. Pre-Pt9d this was a hardcoded kitchen sink
+    # ("library | framework | disorder | therapy | protocol | format | ...")
+    # that the LLM ignored because no single hint matched a chunk's
+    # domain cleanly.
+    object_kind_hint = _render_object_kind_hint(schema_lens)
     settings = get_settings()
     entity_cap = max_entities or settings.EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK
     relation_cap = (
@@ -1431,10 +1494,12 @@ def build_json_object_prompt(
                 "surface_form": "verbatim phrase",
                 "entity_type": entity_type_desc,
                 # Pt9b — object_kind: free-form second-axis refinement of
-                # entity_type (e.g. library, framework, app, api, language,
-                # platform, disorder, syndrome, trait, therapy, protocol,
-                # format, specification). Omit if not obvious.
-                "object_kind": "library | framework | disorder | therapy | protocol | format | ... (optional refinement, omit if unsure)",
+                # entity_type. Pt9d — the allowed values are domain-tuned
+                # via the SchemaLens (software corpora see Library/
+                # Framework/Service/etc.; psychology corpora see Disorder/
+                # Syndrome/Trait/Therapy/etc.). Choose one when the chunk
+                # text supports it; omit only when no kind genuinely fits.
+                "object_kind": f"{object_kind_hint} (choose one when applicable)",
                 "confidence": 0.0,
                 # Pt 10c — query-facing fields. Both optional. Emit only when
                 # naturally present in the chunk; omit entirely (or set to

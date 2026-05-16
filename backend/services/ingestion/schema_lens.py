@@ -334,6 +334,115 @@ _DOMAIN_RULES: list[dict[str, Any]] = [
         ],
         "families": ["roblox", "game_engine", "game_design"],
     },
+    {
+        # Pt9d — general software engineering (web, mobile, ML infra, etc.).
+        # The existing creative_coding / generative_ai / roblox domains all
+        # cover narrow slices; this rule catches the mainstream stack so
+        # corpora about React/Flutter/PostgreSQL/Docker actually trigger a
+        # software lens and the LLM gets useful object_kind hints rather
+        # than the kitchen-sink fallback list.
+        "domain": "software_engineering",
+        "triggers": [
+            "react", "vue", "angular", "svelte", "next.js", "nextjs",
+            "flutter", "swift", "kotlin", "android", "ios",
+            "fastapi", "django", "flask", "rails", "express", "node.js",
+            "tensorflow", "pytorch", "scikit-learn", "huggingface",
+            "pandas", "numpy", "matplotlib",
+            "postgresql", "postgres", "mongodb", "redis", "sqlite", "mysql",
+            "docker", "kubernetes", "k8s", "terraform", "ansible",
+            "github", "gitlab", "npm", "pip", "cargo", "maven",
+            "javascript", "typescript", "python", "rust", "golang",
+            "library", "framework", "sdk", "api endpoint", "microservice",
+            "compiler", "runtime", "package manager",
+        ],
+        "entities": [
+            "Software", "Method", "Standard", "Concept",
+            "Document", "Artifact", "Organization",
+        ],
+        "relations": [
+            "uses", "implements", "depends_on", "produces",
+            "references", "supports", "part_of", "defines",
+        ],
+        "object_kinds": [
+            "Library", "Framework", "Application", "Service",
+            "API", "Language", "Platform", "Engine", "Tool",
+            "Database", "Runtime", "SDK", "Compiler",
+        ],
+        "families": ["software_engineering", "web_development", "infrastructure"],
+    },
+    {
+        # Pt9d — clinical / behavioral psychology corpora. Triggers on
+        # the broad academic vocabulary (DSM concepts, therapy modalities,
+        # personality science). Without this domain, psychology corpora
+        # match no rule and the LLM gets generic "library|framework|..."
+        # hints that are useless for typing PTSD or CBT.
+        "domain": "psychology",
+        # Trigger discipline: substring matching is case-insensitive against
+        # the sampled text. Short words (act, stress, behavior, emotion)
+        # produce false positives across other domains — "act" matches
+        # "extraction" / "react" / "interact"; "stress" matches "stress
+        # test"; "behavior" matches engineering "expected behavior"
+        # references. Only specific multi-word phrases or clinical jargon
+        # qualifies.
+        "triggers": [
+            "anxiety", "depression", "ptsd", "trauma",
+            "psychotherapy", "counseling", "cbt", "dbt",
+            "acceptance and commitment therapy",
+            "stress disorder", "stress response",
+            "attachment style", "narcissism", "introversion",
+            "extraversion", "neuroticism", "agreeableness",
+            "neurosis", "psychosis", "defense mechanism", "self-esteem",
+            "psychiatric", "dsm-5", "diagnosis", "symptom",
+            "schizophrenia", "bipolar disorder", "obsessive-compulsive",
+            "adhd", "autism spectrum",
+            "mindfulness", "grief", "resilience",
+            "cognitive behavioral", "emotional regulation",
+        ],
+        "entities": [
+            "Concept", "Method", "Person", "Document",
+            "Organization", "Event",
+        ],
+        "relations": [
+            "causes", "references", "derived_from", "defines",
+            "supports", "contradicts", "part_of", "instance_of",
+        ],
+        "object_kinds": [
+            "Disorder", "Syndrome", "Trait", "Therapy", "Technique",
+            "Assessment", "Theory", "Phenomenon", "Emotion",
+            "Behavior", "DefenseMechanism",
+        ],
+        "families": ["clinical_psychology", "behavioral_science", "psychotherapy"],
+    },
+    {
+        # Pt9d — business / product strategy corpora. Distinct from
+        # product_prd (which targets engineering-flavored PRDs); this
+        # catches strategy decks, marketing books, business-school
+        # casebooks. Trigger words are vocabulary, not artifact patterns.
+        "domain": "business_strategy",
+        "triggers": [
+            "strategy", "strategic", "competitive advantage", "market",
+            "customer segment", "value proposition", "business model",
+            "go-to-market", "growth", "kpi", "metric", "okr",
+            "revenue", "pricing", "positioning", "segmentation",
+            "ecosystem", "partnership", "moat", "differentiation",
+            "monetization", "marketing", "sales funnel", "conversion",
+            "retention", "churn", "lifetime value", "acquisition",
+            "stakeholder", "supply chain",
+        ],
+        "entities": [
+            "Concept", "Method", "Organization", "Person",
+            "Product", "Document",
+        ],
+        "relations": [
+            "implements", "depends_on", "produces", "supports",
+            "derived_from", "references", "part_of", "uses",
+        ],
+        "object_kinds": [
+            "Strategy", "Metric", "KPI", "Methodology",
+            "Principle", "BusinessModel", "Market", "Segment", "Channel",
+        ],
+        "families": ["business_strategy", "product_management", "marketing"],
+    },
 ]
 
 
