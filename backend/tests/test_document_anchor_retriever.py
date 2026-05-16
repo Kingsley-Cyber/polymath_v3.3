@@ -70,6 +70,15 @@ def test_document_title_match_scores_embedded_book_title():
     assert _score_doc_match(query, "Unrelated Gardening Handbook") == 0.0
 
 
+def test_document_title_match_does_not_trigger_on_generic_topic_overlap():
+    query = "How should enterprise architecture handle service gateways?"
+
+    assert _score_doc_match(
+        query,
+        "Patterns of Enterprise Application Architecture",
+    ) == 0.0
+
+
 def test_document_anchor_chunk_terms_prioritize_concepts_over_prompt_filler():
     query = (
         "Based on the retrieved excerpts from Fowler's Patterns of Enterprise "

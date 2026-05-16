@@ -809,8 +809,14 @@ class RetrieverOrchestrator:
                 "fair_mode": retrieval_intent.need != QueryNeed.BROAD,
             }
             a_task = funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs)
-            lexical_task = lexical_retriever.search(
-                rank_query, corpus_ids, top_k=lexical_limit
+            lexical_task = (
+                lexical_retriever.search(
+                    rank_query,
+                    corpus_ids,
+                    top_k=lexical_limit,
+                )
+                if lexical_limit > 0
+                else asyncio.sleep(0, result=[])
             )
             document_anchor_task = (
                 document_anchor_retriever.search(
@@ -856,7 +862,15 @@ class RetrieverOrchestrator:
                     b_cols,
                     top_k=funnel_limits.child_top_k,
                 ),
-                lexical_retriever.search(rank_query, corpus_ids, top_k=lexical_limit),
+                (
+                    lexical_retriever.search(
+                        rank_query,
+                        corpus_ids,
+                        top_k=lexical_limit,
+                    )
+                    if lexical_limit > 0
+                    else asyncio.sleep(0, result=[])
+                ),
                 (
                     document_anchor_retriever.search(
                         rank_query,

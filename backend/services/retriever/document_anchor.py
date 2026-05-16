@@ -110,19 +110,48 @@ def _metadata_value(blob: Any, *keys: str) -> str:
     return ""
 
 
+def _metadata_values(blob: Any, *keys: str) -> list[str]:
+    if not isinstance(blob, dict):
+        return []
+    values: list[str] = []
+    for key in keys:
+        value = blob.get(key)
+        raw_values = value if isinstance(value, list) else [value]
+        for raw in raw_values:
+            text = str(raw or "").strip()
+            if text and text not in values:
+                values.append(text)
+    return values
+
+
 def _doc_labels(doc: dict[str, Any]) -> list[str]:
     labels: list[str] = []
-    for value in (
+    titles = [
         doc.get("title"),
         doc.get("filename"),
         re.sub(r"\.[a-zA-Z0-9]{1,8}$", "", str(doc.get("filename") or "")),
         _metadata_value(doc.get("metadata"), "title", "book_title", "name"),
         _metadata_value(doc.get("document_metadata"), "title", "book_title", "name"),
         _metadata_value(doc.get("source_metadata"), "title", "book_title", "name"),
+    ]
+    authors: list[str] = []
+    for blob in (
+        doc.get("metadata"),
+        doc.get("document_metadata"),
+        doc.get("source_metadata"),
     ):
+        authors.extend(
+            _metadata_values(blob, "author", "authors", "creator", "creators")
+        )
+
+    for value in titles:
         text = str(value or "").strip()
         if text and text not in labels:
             labels.append(text)
+            for author in authors[:3]:
+                combo = f"{author} {text}"
+                if combo not in labels:
+                    labels.append(combo)
     return labels
 
 
@@ -144,6 +173,14 @@ def _score_doc_match(query: str, label: str) -> float:
         return 0.0
     coverage = len(overlap) / max(1, len(label_tokens))
     query_coverage = len(overlap) / max(1, len(q_tokens))
+    if len(label_tokens) <= 3:
+        if coverage < 1.0:
+            return 0.0
+    elif len(label_tokens) <= 5:
+        if coverage < 0.75:
+            return 0.0
+    elif coverage < 0.75 and len(overlap) < 4:
+        return 0.0
     return min(0.94, 0.56 + 0.30 * coverage + 0.08 * query_coverage)
 
 
@@ -202,8 +239,12 @@ class DocumentAnchorRetriever:
 
         out: list[SourceChunk] = []
         seen: set[str] = set()
+        all_anchor_terms: set[str] = set()
+        for _doc_score, _label, anchor_terms, _doc in docs[:_DOC_ANCHOR_MAX_DOCS]:
+            all_anchor_terms.update(anchor_terms)
+
         for doc_score, label, anchor_terms, doc in docs[:_DOC_ANCHOR_MAX_DOCS]:
-            terms = _chunk_search_terms(query, anchor_terms)
+            terms = _chunk_search_terms(query, anchor_terms | all_anchor_terms)
             rows = await self._chunks_for_doc(
                 db,
                 doc,
