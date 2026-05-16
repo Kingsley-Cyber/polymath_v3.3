@@ -546,6 +546,79 @@ def test_compact_packet_uses_gateway_hint_not_strength_report():
     assert "strong" not in str(compact["gateway_focus"]).lower()
 
 
+def test_compact_packet_preserves_nuance_bridge_typology():
+    packet = {
+        "query": "What is the hidden bridge?",
+        "evidence": [],
+        "communities": [],
+        "edges": [],
+        "entities": [],
+        "evidence_filter": {},
+        "analogies": [
+            {
+                "source_name": "Identity Map",
+                "target_name": "Memory Palace",
+                "source_domain": "software",
+                "target_domain": "learning",
+                "topology_sim": 0.7349,
+                "neighbor_jaccard": 0.083,
+            }
+        ],
+        "transfers": [
+            {
+                "hub_name": "Two Step View",
+                "hub_domain": "enterprise patterns",
+                "target_domains": ["course design"],
+                "analogs": [
+                    {
+                        "name": "Lesson Shell",
+                        "domain": "education",
+                        "topology_sim": 0.62,
+                    }
+                ],
+            }
+        ],
+        "bridges": [
+            {
+                "source_name": "Domain Model",
+                "target_name": "Generative AI",
+                "bridge_type": "cross_domain",
+                "shared_terms": ["pattern", "generation"],
+            }
+        ],
+        "fragile_bridges": [
+            {
+                "source_name": "Registry",
+                "target_name": "Album track",
+                "path_count": 1,
+                "path_entities": ["Registry", "Album track"],
+            }
+        ],
+        "gaps": [
+            {
+                "gap_id": "g1",
+                "gap_type": "analogy",
+                "cluster_a_label": "Identity Map",
+                "cluster_b_label": "Memory Palace",
+                "question": "If these organize identity similarly, what follows?",
+                "topology_sim": 0.7349,
+                "neighbor_jaccard": 0.083,
+                "support_status": "both_query_clusters",
+            }
+        ],
+    }
+
+    compact = _compact_packet_for_prompt(packet)
+
+    assert compact["gaps"][0]["type"] == "analogy"
+    assert compact["gaps"][0]["topology_sim"] == 0.735
+    assert compact["gaps"][0]["neighbor_jaccard"] == 0.083
+    assert compact["analogies"][0]["source"] == "Identity Map"
+    assert compact["transfers"][0]["target_domains"] == ["course design"]
+    assert compact["bridges"][0]["bridge_type"] == "cross_domain"
+    assert compact["fragile_bridges"][0]["path_count"] == 1
+
+
 def test_insight_packet_marks_sparse_when_evidence_missing():
     result = _packet_result_fixture(with_evidence=False)
     # Strip everything that would otherwise satisfy the sparse heuristic.

@@ -36,6 +36,7 @@ import type {
 } from "../../lib/api";
 import * as api from "../../lib/api";
 import { cleanBookLabel } from "../../lib/label-utils";
+import type { GraphSynthesisMode } from "../../types/discover";
 
 export type DashboardTab = "brain" | "agent" | "graph-query";
 
@@ -99,12 +100,12 @@ export interface BrainViewDashboardProps {
   agentBridgeNames?: string[];
   agentHubNames?: string[];
   agentGaps?: Array<{ entity_a_name?: string; entity_b_name?: string }>;
-  // Phase 3 — synthesis-mode selector ("research" | "ideation").
+  // Phase 3 — synthesis-mode selector ("research" | "ideation" | "nuance").
   // Forwarded into the Agent Search tab so the user can flip between
-  // concrete-claim research synthesis and [BUILD IDEA] ideation output
+  // concrete-claim research, [BUILD IDEA] ideation, and conceptual nuance
   // without leaving the panel. Default "research" preserves existing UX.
-  synthesisMode?: "research" | "ideation";
-  onSynthesisModeChange?: (m: "research" | "ideation") => void;
+  synthesisMode?: GraphSynthesisMode;
+  onSynthesisModeChange?: (m: GraphSynthesisMode) => void;
   // Sprint #2 — opt-in synthesis validation (draft → critique → revise).
   // Adds 2-3× latency/tokens; surfaced as a small checkbox in the tab.
   validateSynthesis?: boolean;
@@ -684,8 +685,8 @@ interface AgentSearchTabProps {
   bridgeNames?: string[];
   hubNames?: string[];
   gaps?: Array<{ entity_a_name?: string; entity_b_name?: string }>;
-  synthesisMode?: "research" | "ideation";
-  onSynthesisModeChange?: (m: "research" | "ideation") => void;
+  synthesisMode?: GraphSynthesisMode;
+  onSynthesisModeChange?: (m: GraphSynthesisMode) => void;
   validateSynthesis?: boolean;
   onValidateSynthesisChange?: (v: boolean) => void;
 }
@@ -717,7 +718,7 @@ function AgentSearchTab(props: AgentSearchTabProps) {
             <div
               role="radiogroup"
               aria-label="Synthesis mode"
-              className="inline-flex rounded-full bg-zinc-900 p-0.5 text-[10px] font-mono uppercase tracking-wider"
+              className="inline-flex rounded-full bg-zinc-900 p-0.5 text-[9px] font-mono uppercase tracking-wider"
             >
               <button
                 type="button"
@@ -726,7 +727,7 @@ function AgentSearchTab(props: AgentSearchTabProps) {
                 onClick={() => onSynthesisModeChange("research")}
                 title="Faithful synthesis grounded in evidence."
                 className={
-                  "px-2 py-0.5 rounded-full transition-colors " +
+                  "px-1.5 py-0.5 rounded-full transition-colors " +
                   (synthesisMode === "research"
                     ? "bg-amber-600 text-zinc-100"
                     : "text-zinc-500 hover:text-zinc-300")
@@ -737,11 +738,26 @@ function AgentSearchTab(props: AgentSearchTabProps) {
               <button
                 type="button"
                 role="radio"
+                aria-checked={synthesisMode === "nuance"}
+                onClick={() => onSynthesisModeChange("nuance")}
+                title="Conceptual exploration of gaps, analogies, transfers, and bridges."
+                className={
+                  "px-1.5 py-0.5 rounded-full transition-colors " +
+                  (synthesisMode === "nuance"
+                    ? "bg-amber-600 text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300")
+                }
+              >
+                nuance
+              </button>
+              <button
+                type="button"
+                role="radio"
                 aria-checked={synthesisMode === "ideation"}
                 onClick={() => onSynthesisModeChange("ideation")}
                 title="Speculative [BUILD IDEA] output grounded in corpus APIs."
                 className={
-                  "px-2 py-0.5 rounded-full transition-colors " +
+                  "px-1.5 py-0.5 rounded-full transition-colors " +
                   (synthesisMode === "ideation"
                     ? "bg-amber-600 text-zinc-100"
                     : "text-zinc-500 hover:text-zinc-300")
@@ -765,6 +781,8 @@ function AgentSearchTab(props: AgentSearchTabProps) {
           placeholder={
             synthesisMode === "ideation"
               ? "What could I build from this corpus?"
+              : synthesisMode === "nuance"
+                ? "Where is the conceptual tension or hidden bridge?"
               : "What does my library think about…?"
           }
           className="w-full resize-none rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-amber-700 focus:outline-none"
@@ -831,7 +849,13 @@ function AgentSearchTab(props: AgentSearchTabProps) {
 
       {phase === "ready" && synthesisMarkdown && (
         <section>
-          <SectionLabel>Synthesis</SectionLabel>
+          <SectionLabel>
+            {synthesisMode === "ideation"
+              ? "Build Idea"
+              : synthesisMode === "nuance"
+                ? "Nuance"
+                : "Synthesis"}
+          </SectionLabel>
           <div className="rounded border border-zinc-800 bg-[#0d0d14] px-2.5 py-2 text-xs text-zinc-200 whitespace-pre-wrap leading-relaxed max-h-[40vh] overflow-y-auto">
             {synthesisMarkdown}
           </div>

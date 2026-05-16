@@ -519,9 +519,10 @@ class GraphDiscoverRequest(BaseModel):
     mode: Literal["auto", "connect", "gaps", "themes"] = "auto"
     # Phase 3 — synthesis-mode selector. "research" (default) gives the
     # concrete-claim research synthesis. "ideation" gives the build-advisor
-    # output with [BUILD IDEA] blocks. Retrieval + packet are identical;
-    # only the system prompt differs.
-    synthesis_mode: Literal["research", "ideation"] = "research"
+    # output with [BUILD IDEA] blocks. "nuance" gives conceptual exploration
+    # of gaps, analogies, transfers, and bridges. Retrieval + packet are
+    # identical; only the system prompt differs.
+    synthesis_mode: Literal["research", "ideation", "nuance"] = "research"
     # Sprint #2 — opt-in critique + revise loop. When True, the synthesis
     # pipeline runs a second LLM call to audit the draft (flag fabricated
     # terms, missing citations, shell sentences, label leaks) and a third
@@ -790,6 +791,12 @@ class GraphInsightPacketGap(BaseModel):
     cluster_a_label: str = ""
     cluster_b_label: str = ""
     question: str = ""
+    gap_type: str = "missing_edge"
+    source_domain: str = ""
+    target_domain: str = ""
+    topology_sim: float | None = None
+    neighbor_jaccard: float | None = None
+    cd_pagerank: float | None = None
 
 
 class GraphInsightPacketSignal(BaseModel):
@@ -849,6 +856,10 @@ class GraphInsightPacket(BaseModel):
     edges: list[GraphInsightPacketEdge] = Field(default_factory=list)
     gaps: list[GraphInsightPacketGap] = Field(default_factory=list)
     signals: list[GraphInsightPacketSignal] = Field(default_factory=list)
+    analogies: list[dict[str, Any]] = Field(default_factory=list)
+    transfers: list[dict[str, Any]] = Field(default_factory=list)
+    bridges: list[dict[str, Any]] = Field(default_factory=list)
+    fragile_bridges: list[dict[str, Any]] = Field(default_factory=list)
     weak_links: list[GraphInsightPacketWeakLink] = Field(default_factory=list)
     evidence: list[GraphInsightPacketEvidence] = Field(default_factory=list)
     graph_hint: dict[str, Any] = Field(default_factory=dict)

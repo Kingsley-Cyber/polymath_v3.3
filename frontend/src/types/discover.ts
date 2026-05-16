@@ -412,7 +412,7 @@ export interface ContextGraphPayload {
   meta: Record<string, any>;
 }
 
-export type GraphSynthesisMode = "research" | "ideation";
+export type GraphSynthesisMode = "research" | "ideation" | "nuance";
 
 export interface GraphDiscoverRequest {
   /**
@@ -432,8 +432,9 @@ export interface GraphDiscoverRequest {
   mode?: DiscoverMode;
   // Phase 3 — synthesis-mode selector. "research" (default) gives the
   // concrete-claim research synthesis. "ideation" gives the build-advisor
-  // output with [BUILD IDEA] blocks. Retrieval + packet are identical;
-  // only the system prompt differs.
+  // output with [BUILD IDEA] blocks. "nuance" gives conceptual exploration
+  // of gaps, analogies, transfers, and bridges. Retrieval + packet are
+  // identical; only the system prompt differs.
   synthesis_mode?: GraphSynthesisMode;
   /**
    * Sprint #2 — opt-in multi-stage synthesis. When true, the backend

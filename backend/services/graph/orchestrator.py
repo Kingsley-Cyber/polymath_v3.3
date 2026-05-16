@@ -119,6 +119,10 @@ _PACKET_MAX_EDGES = 14
 _PACKET_MAX_GAPS = 3
 _PACKET_MAX_SIGNALS = 4
 _PACKET_MAX_WEAK_LINKS = 3
+_PACKET_MAX_ANALOGIES = 4
+_PACKET_MAX_TRANSFERS = 4
+_PACKET_MAX_BRIDGES = 4
+_PACKET_MAX_FRAGILE_BRIDGES = 3
 _PACKET_MAX_EVIDENCE = 6
 _PACKET_EVIDENCE_TEXT_LIMIT = 260
 _PACKET_RETRIEVER_PRE_RERANK_K = 40
@@ -160,6 +164,15 @@ _GRAPH_RELEVANCE_STOPWORDS = {
 def _text(value: Any, limit: int = 700) -> str:
     text = re.sub(r"\s+", " ", str(value or "").strip())
     return text[:limit]
+
+
+def _maybe_float(value: Any, digits: int = 3) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return round(float(value), digits)
+    except Exception:
+        return None
 
 
 def _ids(values: list[Any] | tuple[Any, ...]) -> list[str]:
@@ -2061,6 +2074,12 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
                 "cluster_a_label": str(gap.get("cluster_a_label") or ""),
                 "cluster_b_label": str(gap.get("cluster_b_label") or ""),
                 "question": str(gap.get("question") or ""),
+                "gap_type": str(gap.get("gap_type") or gap.get("type") or "missing_edge"),
+                "source_domain": str(gap.get("source_domain") or ""),
+                "target_domain": str(gap.get("target_domain") or ""),
+                "topology_sim": _maybe_float(gap.get("topology_sim")),
+                "neighbor_jaccard": _maybe_float(gap.get("neighbor_jaccard")),
+                "cd_pagerank": _maybe_float(gap.get("cd_pagerank")),
                 "coherence": gap.get("coherence") if isinstance(gap.get("coherence"), dict) else {},
                 "anchor_concepts": [str(v) for v in (gap.get("anchor_concepts") or [])[:6] if v],
                 "support_status": support_status,
@@ -2142,6 +2161,159 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
             if len(signals) >= _PACKET_MAX_SIGNALS:
                 break
 
+    # ── conceptual bridge material for nuance / ideation ───────────────────
+    metrics_blob = (
+        getattr(result, "_packet_metrics", None)
+        or getattr(result, "metrics", {})
+        or {}
+    )
+
+    def _metric_items(name: str) -> list[dict[str, Any]]:
+        if isinstance(metrics_blob, dict):
+            raw_items = metrics_blob.get(name) or []
+        else:
+            raw_items = getattr(metrics_blob, name, []) or []
+        return [item for item in raw_items if isinstance(item, dict)]
+
+    def _touches_scope(*entity_ids: Any) -> bool:
+        if not relevance_entity_ids:
+            return True
+        return any(str(eid or "").strip() in relevance_entity_ids for eid in entity_ids)
+
+    def _name_for_entity(entity_id: Any) -> str:
+        eid = str(entity_id or "").strip()
+        if not eid:
+            return ""
+        node = graph_nodes_index.get(eid) or {}
+        return str(node.get("label") or node.get("canonical_name") or eid)
+
+    analogies: list[dict[str, Any]] = []
+    seen_analogy_keys: set[tuple[str, str]] = set()
+    for raw in list(getattr(result, "analogies", []) or []) + _metric_items("structural_analogies"):
+        if not isinstance(raw, dict):
+            continue
+        source = str(raw.get("source") or raw.get("entity_a_id") or raw.get("a") or "").strip()
+        target = str(raw.get("target") or raw.get("entity_b_id") or raw.get("b") or "").strip()
+        if not source or not target or not _touches_scope(source, target):
+            continue
+        key = tuple(sorted((source, target)))
+        if key in seen_analogy_keys:
+            continue
+        seen_analogy_keys.add(key)
+        analogies.append(
+            {
+                "source": source,
+                "target": target,
+                "source_name": str(
+                    raw.get("source_name") or raw.get("entity_a_name") or _name_for_entity(source)
+                ),
+                "target_name": str(
+                    raw.get("target_name") or raw.get("entity_b_name") or _name_for_entity(target)
+                ),
+                "source_domain": str(raw.get("source_domain") or ""),
+                "target_domain": str(raw.get("target_domain") or ""),
+                "topology_sim": _maybe_float(raw.get("topology_sim")),
+                "neighbor_jaccard": _maybe_float(raw.get("neighbor_jaccard")),
+                "rationale": _text(raw.get("rationale") or raw.get("question") or "", 220),
+            }
+        )
+        if len(analogies) >= _PACKET_MAX_ANALOGIES:
+            break
+
+    transfers: list[dict[str, Any]] = []
+    seen_transfer_keys: set[tuple[str, str]] = set()
+    for raw in list(getattr(result, "transfers", []) or []) + _metric_items("transfer_candidates"):
+        if not isinstance(raw, dict):
+            continue
+        hub = str(raw.get("hub") or raw.get("source") or raw.get("entity_a_id") or "").strip()
+        target = str(raw.get("target") or raw.get("entity_b_id") or "").strip()
+        analogs_raw = raw.get("analogs") or []
+        analogs = [
+            {
+                "entity": str(a.get("entity") or a.get("target") or ""),
+                "name": str(a.get("name") or a.get("target_name") or ""),
+                "domain": str(a.get("domain") or a.get("target_domain") or ""),
+                "topology_sim": _maybe_float(a.get("topology_sim")),
+            }
+            for a in analogs_raw
+            if isinstance(a, dict)
+        ][:4]
+        analog_entity_ids = [a.get("entity") for a in analogs if a.get("entity")]
+        if not hub or not _touches_scope(hub, target, *analog_entity_ids):
+            continue
+        key = (hub, target or ",".join(sorted(str(a.get("domain") or "") for a in analogs)))
+        if key in seen_transfer_keys:
+            continue
+        seen_transfer_keys.add(key)
+        transfers.append(
+            {
+                "hub": hub,
+                "hub_name": str(raw.get("hub_name") or raw.get("source_name") or _name_for_entity(hub)),
+                "hub_domain": str(raw.get("hub_domain") or raw.get("source_domain") or ""),
+                "target": target,
+                "target_name": str(raw.get("target_name") or raw.get("entity_b_name") or _name_for_entity(target)),
+                "target_domain": str(raw.get("target_domain") or ""),
+                "target_domains": [str(v) for v in (raw.get("target_domains") or [])[:4] if v],
+                "analogs": analogs,
+                "cd_pagerank": _maybe_float(raw.get("cd_pagerank")),
+                "rationale": _text(raw.get("rationale") or raw.get("question") or "", 220),
+            }
+        )
+        if len(transfers) >= _PACKET_MAX_TRANSFERS:
+            break
+
+    bridge_candidates: list[dict[str, Any]] = []
+    seen_bridge_keys: set[tuple[str, str, str]] = set()
+    for raw in list(getattr(result, "bridges_v2", []) or []) + list(getattr(result, "bridges", []) or []):
+        if not isinstance(raw, dict):
+            continue
+        source = str(raw.get("source_entity_id") or raw.get("source") or raw.get("entity_a_id") or "").strip()
+        target = str(raw.get("target_entity_id") or raw.get("target") or raw.get("entity_b_id") or "").strip()
+        if not source or not target or not _touches_scope(source, target):
+            continue
+        bridge_type = str(raw.get("bridge_type") or raw.get("kind") or raw.get("type") or "bridge")
+        key = (source, target, bridge_type)
+        if key in seen_bridge_keys:
+            continue
+        seen_bridge_keys.add(key)
+        bridge_candidates.append(
+            {
+                "source": source,
+                "target": target,
+                "source_name": str(raw.get("source_name") or raw.get("entity_a_name") or _name_for_entity(source)),
+                "target_name": str(raw.get("target_name") or raw.get("entity_b_name") or _name_for_entity(target)),
+                "source_domain": str(raw.get("source_domain") or ""),
+                "target_domain": str(raw.get("target_domain") or ""),
+                "bridge_type": bridge_type,
+                "shared_terms": [str(v) for v in (raw.get("shared_terms") or [])[:4] if v],
+                "rationale": _text(raw.get("rationale") or raw.get("evidence") or raw.get("question") or "", 220),
+            }
+        )
+        if len(bridge_candidates) >= _PACKET_MAX_BRIDGES:
+            break
+
+    fragile_bridges: list[dict[str, Any]] = []
+    for raw in _metric_items("fragile_bridges"):
+        source = str(raw.get("source") or "").strip()
+        target = str(raw.get("target") or "").strip()
+        if not source or not target or not _touches_scope(source, target):
+            continue
+        fragile_bridges.append(
+            {
+                "source": source,
+                "target": target,
+                "source_name": str(raw.get("source_name") or _name_for_entity(source)),
+                "target_name": str(raw.get("target_name") or _name_for_entity(target)),
+                "source_domain": str(raw.get("source_domain") or ""),
+                "target_domain": str(raw.get("target_domain") or ""),
+                "path_count": raw.get("path_count"),
+                "path_entities": [str(v) for v in (raw.get("path_entities") or [])[:5] if v],
+                "evidence": _text(raw.get("evidence") or "", 220),
+            }
+        )
+        if len(fragile_bridges) >= _PACKET_MAX_FRAGILE_BRIDGES:
+            break
+
     # ── weak links (provenance warnings, not gaps) ─────────────────────────
     weak_links: list[dict[str, Any]] = []
     for weak in (getattr(result, "weak_links", []) or []):
@@ -2188,6 +2360,10 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
             and len(entities) < 2
             and len(communities) < 2
             and len(edges) == 0
+            and len(gaps) == 0
+            and len(analogies) == 0
+            and len(transfers) == 0
+            and len(bridge_candidates) == 0
         )
     )
 
@@ -2204,6 +2380,10 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
         "edges": edges,
         "gaps": gaps,
         "signals": signals,
+        "analogies": analogies,
+        "transfers": transfers,
+        "bridges": bridge_candidates,
+        "fragile_bridges": fragile_bridges,
         "weak_links": weak_links,
         "evidence": evidence,
         "evidence_filter": {
@@ -2227,7 +2407,11 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
     return packet
 
 
-def _llm_context_trace_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
+def _llm_context_trace_from_packet(
+    packet: dict[str, Any],
+    *,
+    synthesis_mode: str = "research",
+) -> dict[str, Any]:
     """Small UI-facing receipt for the exact bounded packet sent to synthesis."""
 
     files_by_id: dict[str, dict[str, Any]] = {}
@@ -2277,6 +2461,7 @@ def _llm_context_trace_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
 
     user_prompt = _render_packet_user_prompt(packet)
     research_contract = _research_contract_for_prompt()
+    system_prompt = _system_prompt_for_synthesis_mode(synthesis_mode)
 
     return {
         "packet_version": "graph-insight-v1",
@@ -2288,9 +2473,10 @@ def _llm_context_trace_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "files": files,
         "chunks": chunks,
         "prompt": {
-            "system_chars": len(_SYNTHESIS_SYSTEM_PROMPT),
+            "mode": synthesis_mode,
+            "system_chars": len(system_prompt),
             "user_chars": len(user_prompt),
-            "estimated_tokens": (len(_SYNTHESIS_SYSTEM_PROMPT) + len(user_prompt)) // 4,
+            "estimated_tokens": (len(system_prompt) + len(user_prompt)) // 4,
             "preview": _text(user_prompt, 1200),
         },
         "counts": {
@@ -2301,6 +2487,10 @@ def _llm_context_trace_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
             "edges": len(packet.get("edges") or []),
             "gaps": len(packet.get("gaps") or []),
             "signals": len(packet.get("signals") or []),
+            "analogies": len(packet.get("analogies") or []),
+            "transfers": len(packet.get("transfers") or []),
+            "bridges": len(packet.get("bridges") or []),
+            "fragile_bridges": len(packet.get("fragile_bridges") or []),
             "weak_links": len(packet.get("weak_links") or []),
             "gateways": len((packet.get("graph_hint") or {}).get("gateways") or []),
         },
@@ -2506,6 +2696,72 @@ _IDEATION_SYSTEM_PROMPT = (
 )
 
 
+# ─── Phase 3 — Nuance system prompt (conceptual-cartographer mode) ─────────
+# Selected when discover() is called with synthesis_mode="nuance". It uses the
+# same grounded packet as research/ideation, but asks the model to explain
+# meaning, missingness, and hidden bridges instead of forcing a build plan.
+_NUANCE_SYSTEM_PROMPT = (
+    "You are Polymath's synthesis navigator, a conceptual cartographer for "
+    "the user's corpus. The user is not asking for a code audit or a product "
+    "pitch. They want to understand what the evidence means, what is missing, "
+    "and which bridges are real but easy to miss.\n\n"
+    "ATTENTION WEIGHTS:\n"
+    "- Explore nuance: about 50 percent. Explain shades of meaning, "
+    "competing interpretations, and what is really going on between the "
+    "main concepts.\n"
+    "- Identify gaps: about 30 percent. Name what is absent, underspecified, "
+    "or not yet connected. Treat gap types differently: terminological means "
+    "possible same-concept/different-name; analogy means structural homology; "
+    "transfer means a method may travel across domains; missing_edge means "
+    "the corpus co-mentions areas without asserting a relation.\n"
+    "- Identify bridges: about 20 percent. Surface explicit or graph-derived "
+    "connections whose significance is not obvious at first glance.\n\n"
+    "OUTPUT FORMAT:\n"
+    "- Markdown prose only. Start with `# headline` (<= 140 chars).\n"
+    "- Second line: italic theme `*Theme: tag · tag · tag*` using 2-4 "
+    "concept tags from the packet.\n"
+    "- Third paragraph: one **bolded TL;DR sentence** that states the "
+    "central conceptual read.\n"
+    "- Then 3-6 short sections or paragraphs. Use headings only when they "
+    "help: `## What is really going on`, `## Gaps`, `## Bridges`, or more "
+    "specific concept names are all acceptable.\n"
+    "- Stay under ~900 words unless the packet is unusually rich.\n\n"
+    "NUANCE RULES:\n"
+    "- Every paragraph must name at least one concept from the packet and "
+    "explain its relationship to another concept. Do not merely say that "
+    "things are connected; name the nature of the connection: causal, "
+    "analogical, compositional, temporal, terminological, procedural, "
+    "transferable, or missing.\n"
+    "- Use inline `[1]`, `[2]` citations for claims grounded in numbered "
+    "evidence. Never invent citations.\n"
+    "- You MAY connect two evidence items the corpus never directly "
+    "connects. Label these claims `[INFERENCE]` or `[BRIDGE]`, explain the "
+    "bridge, and keep them distinct from observed evidence.\n"
+    "- You MAY use outside concepts as interpretive lenses, but label them "
+    "`[OUTSIDE LENS]` and do not make current-state factual claims about the "
+    "world outside the corpus.\n"
+    "- When evidence is thin, say so. Offer the most plausible inference and "
+    "one alternative interpretation rather than pretending the graph proves "
+    "more than it does.\n"
+    "- Bold key concepts, not just greppable symbols. If you bold an API, "
+    "method, class, or file name, it must appear verbatim in the packet.\n"
+    "- NEVER output the strings `RELATES_TO`, `MENTIONS`, `PART_OF`, or any "
+    "other ALL_CAPS_UNDERSCORED Neo4j label. Use natural language.\n"
+    "- Avoid empty-shell graph narration. Bad: 'a bridge exists between A "
+    "and B.' Good: 'A functions as a translation layer for B because...'.\n"
+    "- Do not turn the answer into a build plan. If a build implication is "
+    "obvious, mention it briefly as an implication, not as [BUILD IDEA].\n"
+)
+
+
+def _system_prompt_for_synthesis_mode(synthesis_mode: str) -> str:
+    if synthesis_mode == "ideation":
+        return _IDEATION_SYSTEM_PROMPT
+    if synthesis_mode == "nuance":
+        return _NUANCE_SYSTEM_PROMPT
+    return _SYNTHESIS_SYSTEM_PROMPT
+
+
 def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
     """Render the curated synthesis brief as a numbered-evidence reading list."""
 
@@ -2596,7 +2852,7 @@ def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
         lines.append("")
         lines.append(
             "Relationships found across the corpus. Each row gives a "
-            "subject → predicate → object connection with structured "
+            "subject -> predicate -> object connection with structured "
             "supporting fields:\n"
             "  mechanism: the actual chunk text that asserts the edge "
             "(this is what the LLM should paraphrase or quote)\n"
@@ -2664,13 +2920,104 @@ def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
                 f"- {facet.get('name') or '?'} :: object_kind={kind} · domain_type={dom} · family={fam}"
             )
 
+    bridges = compact.get("bridges") or []
+    analogies = compact.get("analogies") or []
+    transfers = compact.get("transfers") or []
+    fragile_bridges = compact.get("fragile_bridges") or []
+    if bridges or analogies or transfers or fragile_bridges:
+        lines.append("")
+        lines.append(
+            "Conceptual bridge material (use this to reason laterally while "
+            "keeping observed evidence and inference labeled):"
+        )
+        for bridge in bridges[:4]:
+            ends = " <-> ".join(
+                value for value in (bridge.get("source"), bridge.get("target")) if value
+            )
+            domains = " / ".join(
+                value
+                for value in (bridge.get("source_domain"), bridge.get("target_domain"))
+                if value
+            )
+            detail = bridge.get("rationale") or ", ".join(bridge.get("shared_terms") or [])
+            suffix = f" ({domains})" if domains else ""
+            lines.append(
+                f"- [BRIDGE:{bridge.get('bridge_type') or 'bridge'}] {ends}{suffix}: {detail or 'explicit cross-domain connector'}"
+            )
+        for analogy in analogies[:4]:
+            ends = " <-> ".join(
+                value for value in (analogy.get("source"), analogy.get("target")) if value
+            )
+            metrics = []
+            if analogy.get("topology_sim") is not None:
+                metrics.append(f"topology_sim={analogy['topology_sim']}")
+            if analogy.get("neighbor_jaccard") is not None:
+                metrics.append(f"neighbor_jaccard={analogy['neighbor_jaccard']}")
+            domains = " / ".join(
+                value
+                for value in (analogy.get("source_domain"), analogy.get("target_domain"))
+                if value
+            )
+            detail = analogy.get("rationale") or "; ".join(metrics)
+            suffix = f" ({domains})" if domains else ""
+            lines.append(f"- [ANALOGY] {ends}{suffix}: {detail or 'structural homolog'}")
+        for transfer in transfers[:4]:
+            analog_bits = [
+                f"{a.get('name')} in {a.get('domain')}"
+                for a in (transfer.get("analogs") or [])[:3]
+                if a.get("name") or a.get("domain")
+            ]
+            targets = transfer.get("target_domains") or [
+                transfer.get("target_domain")
+            ]
+            target_text = ", ".join(str(v) for v in targets if v)
+            analog_text = "; analogs: " + ", ".join(analog_bits) if analog_bits else ""
+            lines.append(
+                f"- [TRANSFER] {transfer.get('hub') or '?'}"
+                f" ({transfer.get('hub_domain') or 'source domain'})"
+                f" -> {target_text or transfer.get('target') or 'target domain'}"
+                f": {transfer.get('rationale') or 'method may transfer across domains'}{analog_text}"
+            )
+        for bridge in fragile_bridges[:3]:
+            ends = " <-> ".join(
+                value for value in (bridge.get("source"), bridge.get("target")) if value
+            )
+            path = " / ".join(bridge.get("path_entities") or [])
+            detail = bridge.get("evidence") or (f"path: {path}" if path else "")
+            lines.append(f"- [FRAGILE BRIDGE] {ends}: {detail or 'articulation edge'}")
+
     gaps = compact.get("gaps") or []
     if gaps:
         lines.append("")
         lines.append("Candidate gaps (hypotheses, not proven):")
         for gap in gaps[:5]:
-            between = " ↔ ".join([b for b in (gap.get("between") or []) if b])
-            lines.append(f"- {between}: {gap.get('q') or ''}")
+            between = " <-> ".join([b for b in (gap.get("between") or []) if b])
+            gap_type = str(gap.get("type") or "missing_edge").upper()
+            metrics = []
+            if gap.get("topology_sim") is not None:
+                metrics.append(f"topology_sim={gap['topology_sim']}")
+            if gap.get("neighbor_jaccard") is not None:
+                metrics.append(f"neighbor_jaccard={gap['neighbor_jaccard']}")
+            if gap.get("cd_pagerank") is not None:
+                metrics.append(f"cd_pagerank={gap['cd_pagerank']}")
+            domains = " / ".join(
+                value
+                for value in (gap.get("source_domain"), gap.get("target_domain"))
+                if value
+            )
+            suffix = f" ({domains})" if domains else ""
+            lines.append(f"- [{gap_type}] {between}{suffix}: {gap.get('q') or ''}")
+            if metrics:
+                lines.append("    metrics: " + " | ".join(metrics))
+            basis = gap.get("basis") or {}
+            basis_bits = []
+            if basis.get("shared_terms"):
+                basis_bits.append("shared_terms=" + ", ".join(basis["shared_terms"]))
+            if basis.get("shared_neighbors"):
+                basis_bits.append("shared_neighbors=" + ", ".join(basis["shared_neighbors"]))
+            if basis_bits or gap.get("support"):
+                support = f"support={gap.get('support')}" if gap.get("support") else ""
+                lines.append("    basis: " + " | ".join([v for v in basis_bits + [support] if v]))
 
     signals = compact.get("signals") or []
     if signals:
@@ -2812,14 +3159,96 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         if not (facets["object_kind"] or facets["domain_type"] or facets["canonical_family"]):
             continue
         entity_facets.append(facets)
+
+    analogies = [
+        {
+            "source": _text(item.get("source_name") or item.get("source") or "", 70),
+            "target": _text(item.get("target_name") or item.get("target") or "", 70),
+            "source_domain": _text(item.get("source_domain") or "", 60),
+            "target_domain": _text(item.get("target_domain") or "", 60),
+            "topology_sim": _maybe_float(item.get("topology_sim")),
+            "neighbor_jaccard": _maybe_float(item.get("neighbor_jaccard")),
+            "rationale": _text(item.get("rationale") or "", 180),
+        }
+        for item in (packet.get("analogies") or [])[:_PACKET_MAX_ANALOGIES]
+        if graph_context_allowed and isinstance(item, dict)
+    ]
+    transfers = [
+        {
+            "hub": _text(item.get("hub_name") or item.get("hub") or "", 70),
+            "hub_domain": _text(item.get("hub_domain") or "", 60),
+            "target": _text(item.get("target_name") or item.get("target") or "", 70),
+            "target_domain": _text(item.get("target_domain") or "", 60),
+            "target_domains": [str(v) for v in (item.get("target_domains") or [])[:4] if v],
+            "analogs": [
+                {
+                    "name": _text(a.get("name") or a.get("entity") or "", 60),
+                    "domain": _text(a.get("domain") or "", 50),
+                    "topology_sim": _maybe_float(a.get("topology_sim")),
+                }
+                for a in (item.get("analogs") or [])[:4]
+                if isinstance(a, dict)
+            ],
+            "cd_pagerank": _maybe_float(item.get("cd_pagerank")),
+            "rationale": _text(item.get("rationale") or "", 180),
+        }
+        for item in (packet.get("transfers") or [])[:_PACKET_MAX_TRANSFERS]
+        if graph_context_allowed and isinstance(item, dict)
+    ]
+    bridges = [
+        {
+            "source": _text(item.get("source_name") or item.get("source") or "", 70),
+            "target": _text(item.get("target_name") or item.get("target") or "", 70),
+            "source_domain": _text(item.get("source_domain") or "", 60),
+            "target_domain": _text(item.get("target_domain") or "", 60),
+            "bridge_type": _text(item.get("bridge_type") or "bridge", 40),
+            "shared_terms": [str(v) for v in (item.get("shared_terms") or [])[:4] if v],
+            "rationale": _text(item.get("rationale") or "", 180),
+        }
+        for item in (packet.get("bridges") or [])[:_PACKET_MAX_BRIDGES]
+        if graph_context_allowed and isinstance(item, dict)
+    ]
+    fragile_bridges = [
+        {
+            "source": _text(item.get("source_name") or item.get("source") or "", 70),
+            "target": _text(item.get("target_name") or item.get("target") or "", 70),
+            "source_domain": _text(item.get("source_domain") or "", 60),
+            "target_domain": _text(item.get("target_domain") or "", 60),
+            "path_count": item.get("path_count"),
+            "path_entities": [str(v) for v in (item.get("path_entities") or [])[:5] if v],
+            "evidence": _text(item.get("evidence") or "", 180),
+        }
+        for item in (packet.get("fragile_bridges") or [])[:_PACKET_MAX_FRAGILE_BRIDGES]
+        if graph_context_allowed and isinstance(item, dict)
+    ]
     gaps = [
         {
             "id": _text(gap.get("gap_id") or f"g{idx}", 24),
+            "type": _text(gap.get("gap_type") or gap.get("type") or "missing_edge", 36),
             "between": [
-                _text(gap.get("cluster_a_label") or gap.get("cluster_a") or "", 50),
-                _text(gap.get("cluster_b_label") or gap.get("cluster_b") or "", 50),
+                _text(
+                    gap.get("cluster_a_label")
+                    or gap.get("entity_a_name")
+                    or gap.get("cluster_a")
+                    or gap.get("entity_a_id")
+                    or "",
+                    50,
+                ),
+                _text(
+                    gap.get("cluster_b_label")
+                    or gap.get("entity_b_name")
+                    or gap.get("cluster_b")
+                    or gap.get("entity_b_id")
+                    or "",
+                    50,
+                ),
             ],
-            "q": _text(gap.get("question") or "", 150),
+            "q": _text(gap.get("question") or "", 220),
+            "source_domain": _text(gap.get("source_domain") or "", 60),
+            "target_domain": _text(gap.get("target_domain") or "", 60),
+            "topology_sim": _maybe_float(gap.get("topology_sim")),
+            "neighbor_jaccard": _maybe_float(gap.get("neighbor_jaccard")),
+            "cd_pagerank": _maybe_float(gap.get("cd_pagerank")),
             "support": _text(gap.get("support_status") or "", 50),
             "basis": {
                 "shared_terms": [
@@ -2894,6 +3323,10 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         "evidence": evidence,
         "edges": edges,
         "entity_facets": entity_facets,
+        "bridges": bridges,
+        "analogies": analogies,
+        "transfers": transfers,
+        "fragile_bridges": fragile_bridges,
         "gateway_focus": gateway_focus,
         "graph_hint": compact_graph_hint,
         "gaps": gaps,
@@ -3202,6 +3635,10 @@ async def _call_llm_synthesis(
                               Same hard constraints (greppable names, no
                               invention) but licenses speculative
                               [SYNTHESIS] combinations across evidence items.
+      "nuance"               — conceptual-cartographer mode using
+                              _NUANCE_SYSTEM_PROMPT. Preserves evidence
+                              grounding while reasoning over gap typology,
+                              analogies, transfers, and bridges.
     """
 
     try:
@@ -3210,14 +3647,10 @@ async def _call_llm_synthesis(
         logger.warning("synthesis llm_service import failed: %s", exc)
         return None, "llm_import_failure"
 
-    # Mode dispatch — research is the default; ideation flips the system
-    # prompt only. Evidence packet, user prompt rendering, and the rest of
-    # the pipeline stay identical. This is intentional: the same retrieval
-    # + enrichment surface should drive both modes; only the framing shifts.
-    if synthesis_mode == "ideation":
-        system_prompt = _IDEATION_SYSTEM_PROMPT
-    else:
-        system_prompt = _SYNTHESIS_SYSTEM_PROMPT
+    # Mode dispatch — research is the default. Evidence packet, user prompt
+    # rendering, and the rest of the pipeline stay identical; only the framing
+    # shifts.
+    system_prompt = _system_prompt_for_synthesis_mode(synthesis_mode)
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -3402,6 +3835,15 @@ def _deterministic_prose_fallback(
     gaps = [
         g for g in (packet.get("gaps") or []) if isinstance(g, dict) and g.get("question")
     ]
+    analogies = [
+        a for a in (packet.get("analogies") or []) if isinstance(a, dict)
+    ]
+    transfers = [
+        t for t in (packet.get("transfers") or []) if isinstance(t, dict)
+    ]
+    bridges = [
+        b for b in (packet.get("bridges") or []) if isinstance(b, dict)
+    ]
 
     blurb = {
         "llm_request_failure": "The synthesis model could not be reached on this turn.",
@@ -3429,14 +3871,46 @@ def _deterministic_prose_fallback(
         for edge in edges[:5]:
             s = edge.get("source_name") or edge.get("source") or "?"
             t = edge.get("target_name") or edge.get("target") or "?"
-            p = edge.get("predicate") or "→"
-            edge_lines.append(f"- {s} —{p}→ {t}")
+            p = edge.get("predicate") or "->"
+            edge_lines.append(f"- {s} --{p}-> {t}")
         paragraphs.append("Selected graph edges:\n" + "\n".join(edge_lines))
 
     if gaps:
-        gap_lines = [f"- {g.get('question')}" for g in gaps[:4] if g.get("question")]
+        gap_lines = [
+            f"- [{g.get('gap_type') or 'missing_edge'}] {g.get('question')}"
+            for g in gaps[:4]
+            if g.get("question")
+        ]
         if gap_lines:
             paragraphs.append("Candidate gaps (hypotheses):\n" + "\n".join(gap_lines))
+
+    if analogies:
+        lines = []
+        for item in analogies[:3]:
+            lines.append(
+                f"- {item.get('source_name') or item.get('source')} <-> "
+                f"{item.get('target_name') or item.get('target')}"
+            )
+        paragraphs.append("Structural analogies surfaced:\n" + "\n".join(lines))
+
+    if transfers:
+        lines = []
+        for item in transfers[:3]:
+            targets = item.get("target_domains") or [item.get("target_domain")]
+            lines.append(
+                f"- {item.get('hub_name') or item.get('hub')} -> "
+                f"{', '.join(str(v) for v in targets if v) or item.get('target_name') or 'target domain'}"
+            )
+        paragraphs.append("Transfer candidates surfaced:\n" + "\n".join(lines))
+
+    if bridges:
+        lines = []
+        for item in bridges[:3]:
+            lines.append(
+                f"- {item.get('source_name') or item.get('source')} <-> "
+                f"{item.get('target_name') or item.get('target')}"
+            )
+        paragraphs.append("Bridge candidates surfaced:\n" + "\n".join(lines))
 
     paragraphs.append(
         "Re-run the query with any cloud model selected to get the woven synthesis."
@@ -3887,6 +4361,25 @@ async def discover(
         result.trace["source_docs"] = retrieved_source_docs
     result.trace = await _hydrate_trace_source_docs(db, result.trace, corpus_id=corpus_id)
 
+    # Nuance mode depends on the detector lists (structural analogies,
+    # transfer candidates, fragile bridges) that live in the cache, not just
+    # the legacy response envelope. Cache-only read: never runs graph metrics
+    # on the interactive path.
+    try:
+        from services.graph.analytics import get_cached_domain_map, get_cached_metrics
+
+        domain_map = await get_cached_domain_map(db, corpus_id)
+        if domain_map is not None:
+            cached_metrics = await get_cached_metrics(
+                db,
+                corpus_id,
+                domain_map.corpus_change_signature,
+            )
+            if cached_metrics is not None:
+                setattr(result, "_packet_metrics", cached_metrics)
+    except Exception as exc:
+        logger.debug("packet metrics cache enrichment skipped: %s", exc)
+
     packet = _build_insight_packet(result, query=query, corpus_id=corpus_id)
     # Pull edge rationale chunks and entity schema-lens facets — these are
     # extraction layers stored on the Neo4j relations and entity nodes that
@@ -3909,7 +4402,10 @@ async def discover(
         result.trace["graph_hint"] = packet.get("graph_hint") or {}
     result.trace = {
         **(result.trace or {}),
-        "llm_context": _llm_context_trace_from_packet(packet),
+        "llm_context": _llm_context_trace_from_packet(
+            packet,
+            synthesis_mode=synthesis_mode,
+        ),
     }
     packet_done_at = _time.perf_counter()
 

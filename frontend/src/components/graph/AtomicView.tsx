@@ -595,7 +595,11 @@ export default function AtomicView({
           "string" && (
           <details className="absolute bottom-4 left-4 right-4 max-h-[40%] bg-white border border-slate-200 rounded-lg shadow-xl overflow-auto">
             <summary className="px-4 py-2 cursor-pointer font-medium text-slate-800 bg-slate-50">
-              {synthesisMode === "ideation" ? "Build idea" : "Synthesis"}
+              {synthesisMode === "ideation"
+                ? "Build idea"
+                : synthesisMode === "nuance"
+                  ? "Nuance"
+                  : "Synthesis"}
               {" · click to expand"}
             </summary>
             <div className="p-4 prose prose-sm max-w-none">

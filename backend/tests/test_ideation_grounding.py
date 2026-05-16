@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from services.graph.orchestrator import (
     _IDEATION_SYSTEM_PROMPT,
+    _NUANCE_SYSTEM_PROMPT,
     _SYNTHESIS_SYSTEM_PROMPT,
+    _system_prompt_for_synthesis_mode,
 )
 
 
@@ -26,6 +28,14 @@ def test_ideation_prompt_exists_and_distinct():
     assert isinstance(_IDEATION_SYSTEM_PROMPT, str)
     assert len(_IDEATION_SYSTEM_PROMPT) > 500
     assert _IDEATION_SYSTEM_PROMPT != _SYNTHESIS_SYSTEM_PROMPT
+
+
+def test_nuance_prompt_exists_and_distinct():
+    """Nuance prompt exists and is distinct from research and ideation."""
+    assert isinstance(_NUANCE_SYSTEM_PROMPT, str)
+    assert len(_NUANCE_SYSTEM_PROMPT) > 500
+    assert _NUANCE_SYSTEM_PROMPT != _SYNTHESIS_SYSTEM_PROMPT
+    assert _NUANCE_SYSTEM_PROMPT != _IDEATION_SYSTEM_PROMPT
 
 
 def test_ideation_prompt_advertises_build_idea_format():
@@ -112,6 +122,29 @@ def test_ideation_demands_concrete_predictions():
     assert "Predict" in _IDEATION_SYSTEM_PROMPT or "predict" in _IDEATION_SYSTEM_PROMPT
 
 
+def test_nuance_prompt_preserves_typology_and_inference_labels():
+    """Nuance mode must tell the model to use gap types and labeled inference."""
+    prompt = _NUANCE_SYSTEM_PROMPT
+    for marker in [
+        "Explore nuance",
+        "Identify gaps",
+        "Identify bridges",
+        "terminological",
+        "analogy",
+        "transfer",
+        "missing_edge",
+        "[INFERENCE]",
+        "[BRIDGE]",
+    ]:
+        assert marker in prompt
+
+
+def test_system_prompt_helper_dispatches_nuance():
+    assert _system_prompt_for_synthesis_mode("research") == _SYNTHESIS_SYSTEM_PROMPT
+    assert _system_prompt_for_synthesis_mode("ideation") == _IDEATION_SYSTEM_PROMPT
+    assert _system_prompt_for_synthesis_mode("nuance") == _NUANCE_SYSTEM_PROMPT
+
+
 # ─── Mode dispatch ──────────────────────────────────────────────────────────
 
 
@@ -150,3 +183,5 @@ def test_graph_discover_request_schema_has_synthesis_mode():
     assert "synthesis_mode" in fields
     # Default must be "research" so every existing client keeps working.
     assert fields["synthesis_mode"].default == "research"
+    req = GraphDiscoverRequest(query="where are the hidden bridges?", synthesis_mode="nuance")
+    assert req.synthesis_mode == "nuance"

@@ -37,6 +37,7 @@ import {
 import { cleanBookLabel } from "../../lib/label-utils";
 import { BrainViewDashboard, type DashboardTab } from "./BrainViewDashboard";
 import { GalaxyBackground } from "./GalaxyBackground";
+import type { GraphSynthesisMode } from "../../types/discover";
 
 // Pt 4 polish: adaptive top-N forceLabel. At 16 books, hardcoded N=20
 // meant every label rendered every frame → overlap storm. The new
@@ -438,7 +439,7 @@ function useQueryGraph(
   corpusIds: string[],
   query: string | undefined,
   model: string | undefined,
-  synthesisMode: "research" | "ideation" = "research",
+  synthesisMode: GraphSynthesisMode = "research",
   validateSynthesis: boolean = false,
 ) {
   const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "error">(
@@ -554,11 +555,11 @@ export function GraphViewer({
   );
   const [agentInput, setAgentInput] = useState<string>(query ?? "");
   const [agentQuery, setAgentQuery] = useState<string | undefined>(query);
-  // Phase 3 — synthesis-mode toggle. "research" (default) gives the
-  // concrete-claim synthesis; "ideation" produces [BUILD IDEA] blocks
-  // (see backend/services/graph/orchestrator._IDEATION_SYSTEM_PROMPT).
+  // Phase 3 — synthesis-mode toggle. "research" (default) gives concrete
+  // claims; "ideation" produces [BUILD IDEA] blocks; "nuance" explores gap
+  // typology, analogies, transfers, and bridges.
   const [synthesisMode, setSynthesisMode] =
-    useState<"research" | "ideation">("research");
+    useState<GraphSynthesisMode>("research");
   // Sprint #2 — opt-in critique + revise loop. When true, the backend
   // runs auditor + editor passes after the draft (2-3× LLM cost).
   // Off by default so the common case stays single-call.
