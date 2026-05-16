@@ -154,9 +154,68 @@ class LLMRelation(BaseModel):
     relation_cue: str = Field(default="", max_length=120)
 
 
+# Pt9c — facts schema for json_schema mode. Mirrors FACT_TYPES in
+# services/ghost_b.py. Keep in sync.
+FactType = Literal[
+    "property",
+    "status",
+    "timestamp",
+    "quantity",
+    "threshold",
+    "category",
+    "tag",
+    "rule_condition",
+    "rule_action",
+]
+
+
+class LLMFact(BaseModel):
+    """Strict-validation view of a fact emitted by Ghost B.
+
+    Pt9c — added so the json_schema mode response_format can declare the
+    facts envelope alongside entities + relations. The build_json_object_prompt
+    has always included a "facts" field in its example shape; this model
+    is what makes it physically enforced when json_schema mode is active.
+    """
+
+    subject: str = Field(min_length=1, max_length=200)
+    fact_type: FactType
+    property_name: str = Field(max_length=80)
+    value: str = Field(max_length=500)
+    unit: str = Field(default="", max_length=40)
+    condition: str = Field(default="", max_length=300)
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence_phrase: str = Field(default="", max_length=500)
+
+
+class ExtractionResponse(BaseModel):
+    """Frozen contract — LLM structured output mirrors this shape exactly.
+
+    The json_schema response_format payload is generated from this model
+    via .model_json_schema() + the _pin_all_required post-processor in
+    ghost_b.py. Adding fields here requires coordinated updates to:
+
+      1. EntityItem / RelationItem / FactItem dataclasses (ghost_b.py)
+      2. _parse() to extract any new field
+      3. neo4j_writer property maps if the field flows to the graph
+
+    Adding a field in isolation strands data: the LLM emits it,
+    _parse() ignores it, the graph never sees it. The entire point of
+    json_schema mode is provider-level constraint without changing
+    downstream contracts.
+    """
+
+    entities: list[LLMEntity] = Field(default_factory=list)
+    relations: list[LLMRelation] = Field(default_factory=list)
+    facts: list[LLMFact] = Field(default_factory=list)
+
+
 __all__ = [
     "EntityType",
     "Predicate",
+    "FactType",
     "LLMEntity",
     "LLMRelation",
+    "LLMFact",
+    "ExtractionResponse",
 ]

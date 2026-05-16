@@ -1028,24 +1028,154 @@ def _lane_supports_json_object(entry: dict) -> bool:
     return model.startswith("openai/") or model.startswith("gpt-")
 
 
+def _lane_supports_json_schema(entry: dict) -> bool:
+    """Pt9c — return True for provider lanes known to honor json_schema mode.
+
+    json_schema (a.k.a. "structured outputs") uses provider-level constrained
+    decoding: the decoder masks any token that would violate the schema as
+    the model generates. Contrast with json_object, which only guarantees
+    valid JSON syntax (not shape).
+
+    Unlike json_object, we do NOT default to True for any provider — this
+    requires explicit opt-in via `extra_params.supports_json_schema` because
+    coverage is uneven across providers and model versions. The verification
+    step is a 5-minute API ping, not training-data familiarity.
+
+    Known-supporting providers (as of 2025):
+      - OpenAI (gpt-4o, gpt-4o-mini, gpt-4-turbo)
+      - DeepSeek V3+ (deepseek-chat, deepseek-reasoner)
+      - Mistral (via tool-use / strict mode)
+      - vLLM with grammar constraints (any model)
+      - Anthropic (via tool-use schema enforcement; not a native response_format)
+
+    For each model, the operator flips `supports_json_schema: true` in the
+    model profile after verifying a one-shot test call succeeds. Defaults
+    to False everywhere so adding a new model can't accidentally turn it on.
+    """
+    extra_params = entry.get("extra_params") or {}
+    explicit = extra_params.get("supports_json_schema")
+    if isinstance(explicit, bool):
+        return explicit
+    if isinstance(explicit, str):
+        return explicit.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
 def _select_extraction_output_mode(
     configured_mode: str | None,
     entry: dict,
     *,
     profile_name: str,
-) -> Literal["json_object", "jsonl"]:
+) -> Literal["json_object", "jsonl", "json_schema"]:
     """Resolve the actual Ghost B output contract for one lane attempt.
 
-    JSONL is the production transport. Legacy config values are still accepted
-    by Settings/env parsing, but foreground extraction no longer switches into
-    JSON-object primary mode based on provider heuristics.
+    JSONL is the production default. json_schema (Pt9c) is opt-in per-model
+    via extra_params.supports_json_schema; when enabled, the LLM is
+    token-masked at generation time to match the ExtractionResponse Pydantic
+    model exactly — eliminating off-vocab leaks at the source rather than
+    catching them post-hoc in Pt8b validation. json_object (legacy) is
+    deprecated for foreground extraction but stays reachable for rescue
+    profiles and as an honest fallback if a provider's json_schema
+    implementation is flaky.
+
+    Rescue profiles stay on JSONL — the rescue prompt is JSONL-shaped and
+    its merge logic with accepted_jsonl_items depends on the line format.
+    Only the "normal" profile path opts into json_schema.
     """
-    _ = (configured_mode, entry, profile_name)
+    if profile_name != "normal":
+        return "jsonl"
+    # Explicit json_schema opt-in wins.
+    if _lane_supports_json_schema(entry):
+        return "json_schema"
+    # configured_mode is a legacy hook — kept callable, but the default
+    # is JSONL across the board unless json_schema is explicitly enabled.
+    _ = configured_mode
     return "jsonl"
 
 
 def _json_object_response_format() -> dict[str, str]:
     return {"type": "json_object"}
+
+
+def _pin_all_required(schema: dict) -> dict:
+    """Pt9c — force `required` to include every key in `properties` and set
+    `additionalProperties: False`, recursively.
+
+    Pydantic's .model_json_schema() emits `required` containing only fields
+    without defaults — fields with `Field(default=...)` are optional from
+    Pydantic's view. But OpenAI's strict json_schema mode rejects schemas
+    where `properties` contains keys not in `required`. The mitigation is to
+    pin every property as required AND set additionalProperties=False at
+    every object level. The model still emits defaults (empty string, empty
+    list) so the runtime behavior matches Pydantic — strict mode only
+    enforces structural completeness.
+
+    Mutates a shallow copy by walking; the input schema dict is not
+    modified.  Returns the modified copy for chaining.
+
+    Coverage:
+      - properties: dict[str, schema] → recurse into each value
+      - $defs / definitions: nested model registry → recurse into each value
+      - items: array element schema → recurse
+      - additionalProperties: nested object schema → recurse (only if dict;
+        we replace booleans on object-typed nodes below)
+      - anyOf / allOf / oneOf: schema lists → recurse into each element
+    """
+    import copy
+
+    def _walk(node):
+        if not isinstance(node, dict):
+            return node
+        # Object schemas: pin required + additionalProperties.
+        if node.get("type") == "object" and isinstance(node.get("properties"), dict):
+            node["required"] = list(node["properties"].keys())
+            node["additionalProperties"] = False
+        # Recurse into all places a nested schema can appear.
+        for key in ("properties", "$defs", "definitions"):
+            children = node.get(key)
+            if isinstance(children, dict):
+                for sub in children.values():
+                    _walk(sub)
+        items = node.get("items")
+        if isinstance(items, dict):
+            _walk(items)
+        addl = node.get("additionalProperties")
+        if isinstance(addl, dict):
+            _walk(addl)
+        for key in ("anyOf", "allOf", "oneOf"):
+            lst = node.get(key)
+            if isinstance(lst, list):
+                for sub in lst:
+                    _walk(sub)
+        return node
+
+    cloned = copy.deepcopy(schema)
+    return _walk(cloned)
+
+
+def _json_schema_response_format() -> dict:
+    """Pt9c — build the json_schema response_format payload from the
+    ExtractionResponse Pydantic model.
+
+    Pydantic is the single source of truth — .model_json_schema() emits a
+    schema that matches what _parse() expects. The _pin_all_required pass
+    adapts it for OpenAI strict mode (and is a no-op for permissive
+    providers like DeepSeek). One source of truth means the schema can
+    never drift from the parser; adding a field to LLMEntity automatically
+    flows into the generated schema with no hand-edits.
+    """
+    from services.ghost_b_schemas import ExtractionResponse
+
+    raw = ExtractionResponse.model_json_schema()
+    pinned = _pin_all_required(raw)
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "ghost_b_extraction",
+            "schema": pinned,
+            "strict": True,
+        },
+    }
 
 
 def build_user_prompt(
@@ -3234,7 +3364,10 @@ async def extract_entities(
             profile_output_mode = (
                 normal_output_mode if profile.name == "normal" else "jsonl"
             )
-            if profile_output_mode == "json_object":
+            # Pt9c — json_schema and json_object both use the JSON-object
+            # prompt builder (single-object response shape) and the same
+            # system message. The response_format payload differs.
+            if profile_output_mode in ("json_object", "json_schema"):
                 prompt = build_json_object_prompt(
                     **{k: v for k, v in profile_kwargs.items() if k != "max_total_lines"},
                     evidence_max_chars=evidence_max_chars,
@@ -3256,13 +3389,18 @@ async def extract_entities(
                     "role": "system",
                     "content": (
                         _JSON_OBJECT_SYSTEM
-                        if profile_output_mode == "json_object"
+                        if profile_output_mode in ("json_object", "json_schema")
                         else _SYSTEM
                     ),
                 },
                 {"role": "user", "content": prompt},
             ]
-            if profile_output_mode == "json_object":
+            # Pt9c — branch on exact mode for response_format because the
+            # payload differs: json_schema sends a full schema spec, while
+            # json_object just sends {"type": "json_object"}.
+            if profile_output_mode == "json_schema":
+                attempt_payload["response_format"] = _json_schema_response_format()
+            elif profile_output_mode == "json_object":
                 attempt_payload["response_format"] = _json_object_response_format()
             attempt_max_tokens = profile.max_tokens
             attempt_payload["max_tokens"] = attempt_max_tokens
@@ -3325,7 +3463,12 @@ async def extract_entities(
                     merged_jsonl_items: list[dict[str, Any]] = []
                     line_cap_exceeded = False
                     empty_after_claimed_items = False
-                    if profile_output_mode == "json_object":
+                    # Pt9c — json_schema produces the same single-JSON-object
+                    # shape as json_object (same _parse_object_with_repair
+                    # path). The provider's constrained decoder guarantees
+                    # validity, but the repair fallback still runs as
+                    # defense-in-depth if something exotic comes back.
+                    if profile_output_mode in ("json_object", "json_schema"):
                         result = _parse_object_with_repair(
                             raw,
                             prompt_task,
@@ -3552,14 +3695,24 @@ async def extract_entities(
                 last_exc = exc
                 last_error_type = exc.__class__.__name__
                 exception_failures += 1
+                # Pt9c — json_schema mode shares the 400/422 retry path
+                # with json_object. Some providers reject malformed
+                # response_format payloads (or unsupported schema features)
+                # with these status codes; we fall through to the rescue
+                # path the same way, accepting one degraded attempt rather
+                # than failing the whole chunk.
                 if (
-                    profile_output_mode == "json_object"
+                    profile_output_mode in ("json_object", "json_schema")
                     and isinstance(exc, httpx.HTTPStatusError)
                     and exc.response is not None
                     and exc.response.status_code in {400, 422}
                     and attempt + 1 < max_attempts
                 ):
-                    last_error_type = "json_object_unsupported"
+                    last_error_type = (
+                        "json_schema_unsupported"
+                        if profile_output_mode == "json_schema"
+                        else "json_object_unsupported"
+                    )
                     call_metrics.append(
                         {
                             "chunk_id": task.chunk_id,
@@ -3594,8 +3747,9 @@ async def extract_entities(
                         error_message=str(exc),
                     )
                     logger.warning(
-                        "GHOST B JSON object mode was rejected by provider "
+                        "GHOST B %s mode was rejected by provider "
                         "chunk_id=%s lane=%d status=%s; switching_to_rescue=True",
+                        profile_output_mode,
                         task.chunk_id,
                         pool_idx,
                         exc.response.status_code,
