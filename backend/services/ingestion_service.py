@@ -332,6 +332,29 @@ class IngestionService:
                 if not existing_entities:
                     new_entities = universal_entities
                     reasons.append("null_entity_schema")
+                elif all(et in universal_entities for et in existing_entities):
+                    # Pt9e — additive extension of entity_schema, mirroring the
+                    # relation logic immediately below. When UNIVERSAL_ENTITY_SCHEMA
+                    # grows (e.g. Pt9a added Software + Standard), every existing
+                    # corpus whose entity_schema is a strict subset of the new
+                    # universal gets the missing terms APPENDED. Strict subset
+                    # check (`all(et in universal_entities)`) protects custom
+                    # schemas — a corpus with `entity_schema=["Gene","Protein"]`
+                    # does NOT match the subset condition (Gene/Protein aren't
+                    # in universal), so its custom vocab is preserved.
+                    #
+                    # Why this is safe under FROZEN_CONFIG_FIELDS: adding terms
+                    # is monotonic. Existing extractions remain valid (their
+                    # types still belong to the new vocab); only new extractions
+                    # gain the option of emitting the added types. The FROZEN
+                    # contract exists to prevent CHANGING the meaning of stored
+                    # extractions — additive extension doesn't do that.
+                    missing_entities = [
+                        et for et in universal_entities if et not in existing_entities
+                    ]
+                    if missing_entities:
+                        new_entities = [*existing_entities, *missing_entities]
+                        reasons.append(f"missing_universal_entities={len(missing_entities)}")
                 if not existing_relations:
                     new_relations = universal_relations
                     reasons.append("null_relation_schema")
