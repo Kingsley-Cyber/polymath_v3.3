@@ -161,14 +161,26 @@ UNIVERSAL_ENTITY_GLOSSES: dict[str, str] = {
     # (no spaces). LLMs occasionally treat embedded commas inside parens as
     # separator boundaries; ultra-tight glosses sidestep that failure mode
     # and shrink the per-chunk extraction prompt by ~75%.
+    #
+    # Pt9g — Every type in UNIVERSAL_ENTITY_SCHEMA MUST have a gloss here.
+    # `_render_vocab_line` falls back to bare-name rendering for missing
+    # entries, which leaves the new type undefined relative to its
+    # neighbors and lets the LLM's training prior dominate. Pt9a added
+    # `Software` and `Standard` to the schema/Literal but forgot to add
+    # glosses here, so every software-flavored entity (TensorFlow, React,
+    # ML Kit) routed to `Product=built offering` instead of `Software`
+    # for three consecutive ingest cycles. Future additions: don't
+    # repeat that. The schema/Literal/gloss triple is the contract.
     "Person":        "human individual",
     "Organization":  "formal group",
     "Location":      "physical place",
     "Event":         "bounded occurrence",
     "Concept":       "abstract idea not a procedure",
     "Method":        "executable procedure",
-    "Product":       "built offering",
+    "Product":       "built offering not Software",
+    "Software":      "library framework runtime API or language",
     "Document":      "authored writing",
+    "Standard":      "protocol specification format or schema",
     "Rule":          "non-legal guideline",
     "Law":           "binding statute",
     "Artifact":      "tangible object not a Product",
