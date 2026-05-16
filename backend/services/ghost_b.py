@@ -1162,11 +1162,11 @@ def build_user_prompt(
         'End the complete extraction with exactly: {"t":"x"}\n'
         "Abbreviations:\n"
         "- t=e entity, t=r relation, t=f fact, t=x finished\n"
-        "- Entity: cn=canonical_name, sf=surface_form, et=entity_type, cf=confidence, qa=query_aliases (optional list of 2-4 search variants), def=definitional_phrase (optional 1-sentence definition pulled from this chunk)\n"
-        "- Relation: sub=subject, pred=predicate, obj=object, ok=object_kind, cf=confidence, ev=evidence_phrase, cue=optional relation trigger\n"
+        "- Entity: cn=canonical_name, sf=surface_form, et=entity_type, ek=object_kind (optional free-form refinement: library/framework/disorder/therapy/protocol/etc), cf=confidence, qa=query_aliases (optional list of 2-4 search variants), def=definitional_phrase (optional 1-sentence definition pulled from this chunk)\n"
+        "- Relation: sub=subject, pred=predicate, obj=object, ok=object_kind (\"entity\"|\"literal\" — distinct from entity ek), cf=confidence, ev=evidence_phrase, cue=optional relation trigger\n"
         "- Fact: sub=subject, ft=fact_type, pn=property_name, val=value, unit=unit, cond=condition, cf=confidence, ev=evidence_phrase\n"
         "Line shapes:\n"
-        f'- Entity line: {{"t":"e","cn":"lowercase no-punct","sf":"verbatim","et":"{entity_type_enum}","cf":0.0,"qa":["abbreviation","alt name"],"def":"one-sentence definition if explicitly stated in this chunk"}}\n'
+        f'- Entity line: {{"t":"e","cn":"lowercase no-punct","sf":"verbatim","et":"{entity_type_enum}","ek":"library|framework|disorder|trait|therapy|protocol|format|... (optional refinement)","cf":0.0,"qa":["abbreviation","alt name"],"def":"one-sentence definition if explicitly stated in this chunk"}}\n'
         f'- Relation line: {{"t":"r","sub":"canonical_name","pred":"{predicate_desc}","obj":"canonical_name or literal","ok":"entity|literal","cf":0.0,"ev":"short source phrase","cue":"trigger"}}\n'
         f"{fact_protocol}"
         '- Finished line: {"t":"x"}\n'
@@ -1300,6 +1300,11 @@ def build_json_object_prompt(
                 "canonical_name": "lowercase no-punct",
                 "surface_form": "verbatim phrase",
                 "entity_type": entity_type_desc,
+                # Pt9b — object_kind: free-form second-axis refinement of
+                # entity_type (e.g. library, framework, app, api, language,
+                # platform, disorder, syndrome, trait, therapy, protocol,
+                # format, specification). Omit if not obvious.
+                "object_kind": "library | framework | disorder | therapy | protocol | format | ... (optional refinement, omit if unsure)",
                 "confidence": 0.0,
                 # Pt 10c — query-facing fields. Both optional. Emit only when
                 # naturally present in the chunk; omit entirely (or set to
@@ -1393,6 +1398,16 @@ class EntityItem:
     # reads pre-Pt-10c Mongo staging) keep working without code changes.
     query_aliases: list[str] = field(default_factory=list)
     definitional_phrase: str = ""
+    # Pt9b — second-axis typed facet. The LLM emits a free-form refinement
+    # (e.g. "library", "framework", "disorder", "therapy", "protocol") that
+    # narrows the entity_type bucket. Default-empty so pre-Pt9b call sites
+    # (worker rehydration from staging, _apply_schema soft-remap fallback,
+    # endpoint completion) all keep working. The graph layer
+    # (neo4j_writer.py:1556+, orchestrator.py:189+) has been expecting this
+    # property; pre-Pt9b only ~1.2% of Entity nodes had it populated via
+    # resolve_facets heuristic name-matching. LLM emission lights up the
+    # remaining 98.8%.
+    object_kind: str = ""
 
 
 @dataclass
@@ -1634,6 +1649,56 @@ def summarize_extraction_batch(
 
 def _entity_key(name: str) -> str:
     return " ".join(str(name or "").lower().split())
+
+
+_OBJECT_KIND_PAREN_RE = re.compile(r"\s*\([^)]*\)")
+
+
+def _normalize_object_kind(raw: str, canon: list[str] | None) -> str:
+    """Pt9b — canonicalize the LLM-emitted entity object_kind facet.
+
+    LLMs are not consistent: "library", "Library", "lib", "library (python)",
+    "Library (Python)", "JS library" all describe the same thing. Without a
+    normalizer, downstream queries like
+    `MATCH (e:Entity) WHERE e.object_kind = "library"` miss most of these.
+
+    Strategy:
+      1. Lowercase + strip parenthetical qualifiers.
+      2. Exact match against the corpus's canonical object_kinds list
+         (populated by SchemaLens from `_DOMAIN_RULES`). Return the canonical
+         spelling so all variants converge.
+      3. Prefix match — "javascript library" → "library" if "library" is in
+         the canonical list.
+      4. Substring match — "open-source library" → "library" if "library"
+         occurs anywhere in the cleaned string AND in the canonical list.
+      5. Fallback: return the cleaned string, bounded to 100 chars. This
+         lets rare-but-valid kinds pass through; the schema_lens widens
+         over time via deterministic merge.
+
+    `canon` is None or empty → cleaned pass-through (no canonical list yet,
+    e.g., first ingest before SchemaLens is built).
+    """
+    cleaned = _OBJECT_KIND_PAREN_RE.sub("", str(raw or "")).strip().lower()
+    if not cleaned:
+        return ""
+    if not canon:
+        return cleaned[:100]
+    canon_lower = {str(c).lower(): str(c) for c in canon if str(c).strip()}
+    # Exact match first.
+    if cleaned in canon_lower:
+        return canon_lower[cleaned]
+    # Prefix match — "javascript library" starts with "library"?
+    # We want the REVERSE — "library" is a prefix of "library (python)".
+    # So check whether cleaned STARTS WITH any canon term.
+    for term_lc, term in canon_lower.items():
+        if cleaned.startswith(term_lc + " ") or cleaned.startswith(term_lc + "-"):
+            return term
+    # Substring match — "open-source library" contains "library".
+    for term_lc, term in canon_lower.items():
+        if f" {term_lc} " in f" {cleaned} ":
+            return term
+    # Pass-through bounded.
+    return cleaned[:100]
 
 
 def _append_validation_status(existing: str | None, status: str) -> str:
@@ -1961,6 +2026,10 @@ def _apply_schema(
                         # soft-remap (only entity_type is being rewritten).
                         query_aliases=list(getattr(e, "query_aliases", []) or []),
                         definitional_phrase=getattr(e, "definitional_phrase", "") or "",
+                        # Pt9b — preserve object_kind across soft-remap.
+                        # entity_type went to sentinel; object_kind still
+                        # holds usable specificity (e.g. "library").
+                        object_kind=getattr(e, "object_kind", "") or "",
                     )
                 )
                 counters["entity_remap_count"] += 1
@@ -2136,6 +2205,19 @@ def _parse(
                 qa_list = [str(a).strip() for a in qa_raw if str(a).strip()][:5]
             else:
                 qa_list = []
+            # Pt9b — object_kind read tolerant of both wire-format keys.
+            # JSON_OBJECT prompts emit "object_kind"; JSONL prompts emit "ek"
+            # (entity-kind) to disambiguate from RelationItem.object_kind
+            # which carries different semantics ("entity"|"literal").
+            # _jsonl_items_to_object already translates "ek" → "object_kind"
+            # in the dict it builds, so reading "object_kind" here is enough.
+            lens_kinds = None
+            if schema_lens is not None:
+                lens_kinds = (
+                    schema_lens.object_kinds
+                    if isinstance(schema_lens, SchemaLens)
+                    else (schema_lens.get("object_kinds") if isinstance(schema_lens, dict) else None)
+                )
             entities.append(
                 EntityItem(
                     canonical_name=e["canonical_name"],
@@ -2144,6 +2226,10 @@ def _parse(
                     confidence=float(e["confidence"]),
                     query_aliases=qa_list,
                     definitional_phrase=str(e.get("definitional_phrase", "") or "").strip()[:200],
+                    object_kind=_normalize_object_kind(
+                        e.get("object_kind") or e.get("e_kind", ""),
+                        lens_kinds,
+                    ),
                 )
             )
         except (KeyError, TypeError, ValueError):
@@ -2247,6 +2333,11 @@ def _parse(
                 surface_form=e.surface_form or "",
                 entity_type=e.entity_type,
                 confidence=float(e.confidence),
+                # Pt9b — include object_kind in Pt8b validation. Free-form
+                # str field (no Literal), so this validates length only and
+                # is bit-for-bit identical to pre-Pt9b validation when the
+                # LLM didn't emit one.
+                object_kind=getattr(e, "object_kind", "") or "",
             )
             strict_entities.append(e)
         except ValidationError as ve:
@@ -2515,6 +2606,11 @@ def _jsonl_items_to_object(items: list[dict], task: ExtractionTask) -> dict:
                 qa_list = []
             def_raw = item.get("def") or item.get("definitional_phrase") or ""
             def_str = str(def_raw).strip()[:200]
+            # Pt9b — `ek` (entity-kind) is the JSONL abbreviation for
+            # object_kind. Distinct from `ok` (which is the relation's
+            # object_kind with "entity"|"literal" semantics — see the
+            # `elif item_type == "r"` branch below). Two different wire
+            # keys for two different semantics avoids prompt confusion.
             data["entities"].append(
                 {
                     "canonical_name": canonical_name,
@@ -2527,6 +2623,9 @@ def _jsonl_items_to_object(items: list[dict], task: ExtractionTask) -> dict:
                     "confidence": _jsonl_confidence(item),
                     "query_aliases": qa_list,
                     "definitional_phrase": def_str,
+                    "object_kind": str(
+                        item.get("ek") or item.get("object_kind") or item.get("e_kind") or ""
+                    ).strip(),
                 }
             )
         elif item_type == "r":

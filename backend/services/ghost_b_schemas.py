@@ -124,6 +124,16 @@ class LLMEntity(BaseModel):
     # Rendered in chat provenance so the LLM gets immediate semantic
     # context about each cited entity.
     definitional_phrase: str = Field(default="", max_length=200)
+    # Pt9b — free-form second-axis facet (library/framework/disorder/...).
+    # Distinct from RelationItem.object_kind (which is "entity"|"literal").
+    # No Literal enforcement because the natural taxonomy is open-ended;
+    # _normalize_object_kind in ghost_b.py canonicalizes variants at parse
+    # time against the corpus's schema_lens.object_kinds list. When/if we
+    # switch to json_schema mode, the wire format key becomes "e_kind" via
+    # Pydantic alias (set when building the schema, not here, so the
+    # Python field name stays `object_kind` matching the graph layer's
+    # property expectation).
+    object_kind: str = Field(default="", max_length=100)
 
 
 class LLMRelation(BaseModel):

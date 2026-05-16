@@ -1297,6 +1297,11 @@ async def write_document_graph(
                     # whichever mention raises the group's confidence high-
                     # water mark and has a non-empty phrase wins.
                     "definitional_phrase": "",
+                    # Pt9b — LLM-emitted object_kind. First non-empty value
+                    # from the highest-confidence mention wins (same policy
+                    # as definitional_phrase). Empty here → fall back to
+                    # resolve_facets() heuristic inference at write time.
+                    "llm_object_kind": "",
                 },
             )
             if entity.entity_type not in group["observed_entity_types"]:
@@ -1311,6 +1316,13 @@ async def write_document_graph(
                 phrase = (getattr(entity, "definitional_phrase", "") or "").strip()
                 if phrase and not group["definitional_phrase"]:
                     group["definitional_phrase"] = phrase[:200]
+                # Pt9b — promote LLM-emitted object_kind from the new
+                # highest-confidence mention. Sticky for the same reason
+                # as definitional_phrase: high-confidence mentions are
+                # closer to ground truth.
+                kind = (getattr(entity, "object_kind", "") or "").strip()
+                if kind and not group["llm_object_kind"]:
+                    group["llm_object_kind"] = kind[:100]
             # Pt 10b — gather context for taxonomy resolution. Dedupe by
             # exact text (same chunk may surface the entity multiple times).
             if (
@@ -1346,6 +1358,15 @@ async def write_document_graph(
         # entities were starved of context and ended up with empty ontology.
         text_context = " ".join(group["text_chunks"])
         ontology = resolve_ontology_metadata(canonical, primary_type, text_context)
+        # Pt9b — LLM-emitted object_kind beats heuristic inference when
+        # present. resolve_facets only fires for 3 entity_types (Artifact,
+        # Product, Document) and only matches ~1.2% of names in practice.
+        # The LLM, having actually read the chunk text, makes better calls.
+        # Fall back to ontology["object_kind"] when the LLM didn't emit one
+        # (older corpora ingested pre-Pt9b, or chunks where the LLM omitted
+        # the optional field).
+        llm_kind = (group.get("llm_object_kind") or "").strip()
+        effective_object_kind = llm_kind or ontology.get("object_kind")
         entity_identity[canonical] = {
             "entity_id": entity_id_from_name(canonical, primary_type),
             "canonical_name": canonical,
@@ -1353,7 +1374,7 @@ async def write_document_graph(
             "primary_entity_type": primary_type,
             "observed_entity_types": observed_types,
             "confidence": group["confidence"],
-            "object_kind": ontology.get("object_kind"),
+            "object_kind": effective_object_kind,
             "object_kind_parent": ontology.get("object_kind_parent"),
             "object_kind_root": ontology.get("object_kind_root"),
             "domain_type": ontology.get("domain_type"),
