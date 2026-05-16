@@ -37,7 +37,9 @@ EntityType = Literal[
     "Concept",
     "Method",
     "Product",
+    "Software",       # Pt9a — libraries, frameworks, apps, APIs, languages, platforms
     "Document",
+    "Standard",       # Pt9a — protocols, specifications, data formats, schemas
     "Rule",
     "Law",
     "Artifact",

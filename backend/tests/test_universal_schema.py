@@ -52,10 +52,15 @@ from services.graph.neo4j_writer import (
 
 
 def test_entity_schema_shape():
-    assert len(UNIVERSAL_ENTITY_SCHEMA) == 12
+    # Pt9a: schema widened from 12 → 14 with `Software` + `Standard`.
+    # Software pulls libraries/frameworks/apps out of the overloaded
+    # `Product` bucket; Standard pulls protocols/specs/formats out of the
+    # overloaded `Concept` bucket. `Rule` and `Law` stay in the Literal
+    # for legacy-corpus compatibility but are de-emphasized in prompts.
+    assert len(UNIVERSAL_ENTITY_SCHEMA) == 14
     assert all(isinstance(t, str) and t.strip() for t in UNIVERSAL_ENTITY_SCHEMA)
-    assert len(set(UNIVERSAL_ENTITY_SCHEMA)) == 12, "entity schema has duplicates"
-    for required in ("Person", "Organization", "Rule", "Law"):
+    assert len(set(UNIVERSAL_ENTITY_SCHEMA)) == 14, "entity schema has duplicates"
+    for required in ("Person", "Organization", "Rule", "Law", "Software", "Standard"):
         assert required in UNIVERSAL_ENTITY_SCHEMA
 
 

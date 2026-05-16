@@ -90,12 +90,14 @@ UNIVERSAL_ENTITY_SCHEMA: list[str] = [
     "Location",       # geographic places, facilities, addresses, regions
     "Event",          # conferences, incidents, meetings, milestones, operations
     "Concept",        # theories, ideas, principles, abstract topics
-    "Method",         # techniques, algorithms, procedures, approaches
-    "Product",        # software systems, hardware, commercial goods, services
-    "Document",       # papers, books, reports, specs, messages
+    "Method",         # techniques, algorithms, procedures, approaches, therapies
+    "Product",        # commercial goods, hardware, non-software services
+    "Software",       # libraries, frameworks, apps, APIs, languages, platforms, engines
+    "Document",       # papers, books, reports, articles, messages
+    "Standard",       # protocols, specifications, data formats, schemas (JSON, HTTP, OpenAPI)
     "Rule",           # SOPs, policies, guidelines, protocols (prescriptive, no legal force)
     "Law",            # statutes, regulations, case citations, treaties, UCMJ / HIPAA / GDPR
-    "Artifact",       # tangible objects, equipment, tools, weapons, code snippets
+    "Artifact",       # tangible objects, equipment, tools, weapons, code snippets, datasets
     "TimeReference",  # dates, periods, deadlines, durations
 ]
 
