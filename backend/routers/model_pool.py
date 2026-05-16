@@ -44,19 +44,26 @@ async def create_entry(
     body: ModelPoolEntryCreate = Body(...),
     current_user: dict = Depends(get_current_user),
 ) -> ModelPoolEntryPublic:
-    entry = await model_pool_service.create(
-        user_id=current_user["user_id"],
-        label=body.label,
-        provider=body.provider,
-        base_url=body.base_url,
-        model_name=body.model_name,
-        api_key=body.api_key,
-        use_shared_key=body.use_shared_key,
-        extra_params=body.extra_params or {},
-        context_length=body.context_length,
-        tags=body.tags or ["chat"],
-        enabled=body.enabled,
-    )
+    # Pt10d — validation errors surface as 422 with a precise hint
+    # rather than a 500 (and rather than silently 400-ing at synthesis
+    # time, which is the failure mode this validator prevents).
+    from services.model_pool import InvalidModelNameError
+    try:
+        entry = await model_pool_service.create(
+            user_id=current_user["user_id"],
+            label=body.label,
+            provider=body.provider,
+            base_url=body.base_url,
+            model_name=body.model_name,
+            api_key=body.api_key,
+            use_shared_key=body.use_shared_key,
+            extra_params=body.extra_params or {},
+            context_length=body.context_length,
+            tags=body.tags or ["chat"],
+            enabled=body.enabled,
+        )
+    except InvalidModelNameError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     return ModelPoolEntryPublic(**entry)
 
 
@@ -66,10 +73,14 @@ async def update_entry(
     body: ModelPoolEntryUpdate = Body(...),
     current_user: dict = Depends(get_current_user),
 ) -> ModelPoolEntryPublic:
+    from services.model_pool import InvalidModelNameError
     patch = body.model_dump(exclude_none=True)
-    entry = await model_pool_service.update(
-        current_user["user_id"], entry_id, patch
-    )
+    try:
+        entry = await model_pool_service.update(
+            current_user["user_id"], entry_id, patch
+        )
+    except InvalidModelNameError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     if not entry:
         raise HTTPException(status_code=404, detail="Pool entry not found")
     return ModelPoolEntryPublic(**entry)

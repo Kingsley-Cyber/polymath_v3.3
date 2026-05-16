@@ -1423,7 +1423,16 @@ def build_user_prompt(
         "teacher, student, human, people, individual) unless the text is defining or "
         "specifying THIS one; generic abstract nouns standing alone (state, system, "
         "time, language, subject, data, object, action, rule) unless the text is treating "
-        "them as a specific named concept. Prefer specific named concepts.\n"
+        "them as a specific named concept; "
+        # Pt10a — bibliographic citations are not entities. Drop them
+        # at the source so they don't pollute the graph as Person /
+        # Document / Concept.
+        "bibliographic citations and reference entries (anything matching "
+        "'Author. Title. Publisher, Year' or 'Author1, Author2 and Author3 ... 1998' "
+        "or appearing under a References / Bibliography heading). "
+        "Author names from citations are also out — only extract a person "
+        "when the chunk discusses them as a subject, not as a cited author. "
+        "Prefer specific named concepts.\n"
         f"{vocab_block}\n"
         f"{lens_block}\n"
         "\n"
@@ -1604,7 +1613,16 @@ def build_json_object_prompt(
         "teacher, student, human, people, individual) unless the text is defining or "
         "specifying THIS one; generic abstract nouns standing alone (state, system, "
         "time, language, subject, data, object, action, rule) unless the text is treating "
-        "them as a specific named concept. Prefer specific named concepts.\n"
+        "them as a specific named concept; "
+        # Pt10a — bibliographic citations are not entities. Drop them
+        # at the source so they don't pollute the graph as Person /
+        # Document / Concept.
+        "bibliographic citations and reference entries (anything matching "
+        "'Author. Title. Publisher, Year' or 'Author1, Author2 and Author3 ... 1998' "
+        "or appearing under a References / Bibliography heading). "
+        "Author names from citations are also out — only extract a person "
+        "when the chunk discusses them as a subject, not as a cited author. "
+        "Prefer specific named concepts.\n"
         f"{vocab_block}\n"
         f"{lens_block}\n"
         "\n"
@@ -1886,6 +1904,60 @@ def _entity_key(name: str) -> str:
 
 
 _OBJECT_KIND_PAREN_RE = re.compile(r"\s*\([^)]*\)")
+
+
+# Pt10a — bibliographic citation detector. Drops entities that look like
+# "Author1, Author2 and Author3. Title. Publisher, Year." which Ghost B
+# was extracting as Person (or worse: Document) when an LLM hit a
+# bibliography page or footnote. Verified failure on Phase5_Luau_v4:
+# the Fowler book's references section produced entities like
+# "Alpert, Brown and Woolf. Design Patterns Smalltalk Companion.
+# Addison-Wesley, 1998." typed as Person.
+#
+# Heuristic (only fires when ALL three conditions hit, so legitimate
+# entities like a Person named "Foo Bar (1998)" don't get caught):
+#   1. Contains a 4-digit year in 1900-2099 range
+#   2. Either matches a publisher keyword OR is >= 8 words long
+#   3. Has at least one period or comma (citation punctuation)
+#
+# The publisher list is intentionally tiny and high-confidence — adding
+# more requires a per-publisher false-positive audit. Generic terms like
+# "Press" or "Books" deliberately excluded.
+_CITATION_YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
+_CITATION_PUBLISHERS = frozenset([
+    "addison-wesley", "addison wesley",
+    "o'reilly", "oreilly", "o reilly",
+    "manning publications", "manning",
+    "wiley", "springer", "packt", "apress",
+    "mit press", "cambridge university press",
+    "oxford university press", "no starch press",
+    "morgan kaufmann", "prentice hall",
+    "mcgraw hill", "mcgraw-hill",
+    "wrox", "pragmatic bookshelf",
+])
+
+
+def _looks_like_citation(canonical_name: str, surface_form: str = "") -> bool:
+    """Pt10a — return True if the entity name pattern-matches a
+    bibliographic citation. Used to drop these before they pollute
+    the graph as Person / Document / Concept entities.
+
+    Defensive: returns False (do NOT drop) on any uncertainty. False
+    negatives are recoverable (a few citation entities slip through);
+    false positives lose real entities.
+    """
+    name = (canonical_name or "").strip()
+    if not name:
+        return False
+    text = f"{name} {surface_form or ''}".lower()
+    if not _CITATION_YEAR_RE.search(text):
+        return False
+    has_punct = "." in name or "," in name
+    if not has_punct:
+        return False
+    long_enough = len(name.split()) >= 8
+    has_publisher = any(pub in text for pub in _CITATION_PUBLISHERS)
+    return has_publisher or long_enough
 
 
 def _normalize_object_kind(raw: str, canon: list[str] | None) -> str:
@@ -2503,8 +2575,21 @@ def _parse(
     # `entity_identity`, so no downstream change is required.
     kept_entities: list[EntityItem] = []
     entity_evidence_drop_count = 0
+    citation_drop_count = 0
     for e in entities:
         surface = e.surface_form or e.canonical_name
+        # Pt10a — bibliographic citation gate. Drops entities that look
+        # like "Author. Title. Publisher, Year." regardless of evidence
+        # validation. The citation MAY pass evidence (the LLM copied
+        # verbatim from a references page) but is still pollution.
+        if _looks_like_citation(e.canonical_name, surface):
+            citation_drop_count += 1
+            logger.warning(
+                "GHOST B citation gate dropped entity chunk_id=%s name=%r",
+                task.chunk_id,
+                (e.canonical_name or "")[:60],
+            )
+            continue
         if _validate_evidence(surface, task.text):
             kept_entities.append(e)
             continue

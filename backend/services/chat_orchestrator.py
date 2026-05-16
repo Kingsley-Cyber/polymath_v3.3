@@ -1008,7 +1008,16 @@ class ChatOrchestrator:
     # rerank + HyDE. Individual overrides on ModelOverrides take precedence.
     _QUERY_PROFILE_PRESETS: dict[str, dict] = {
         "fast": {"retrieval_k": 10, "rerank_enabled": False, "hyde_enabled": False},
-        "balanced": {"retrieval_k": 40, "rerank_enabled": True, "hyde_enabled": False},
+        # Pt10c — balanced now enables HyDE by default. Cross-domain
+        # queries on heterogeneous libraries (e.g. "how does generative
+        # AI apply to urban planning?") were producing wrong-domain
+        # retrieval because the raw query embedding cosine-matched on
+        # surface tokens like "design" instead of conceptual content.
+        # HyDE generates a hypothetical answer first, embeds THAT, then
+        # retrieves — which routes the search to the actually-relevant
+        # documents. The ~1-2s latency cost is acceptable for a
+        # knowledge-graph application where quality > speed.
+        "balanced": {"retrieval_k": 40, "rerank_enabled": True, "hyde_enabled": True},
         "thorough": {"retrieval_k": 60, "rerank_enabled": True, "hyde_enabled": True},
     }
 

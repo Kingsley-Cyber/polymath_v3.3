@@ -33,6 +33,130 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from services.secrets import decrypt, encrypt, mask
 
+
+# Pt10d — model_name validation registry.
+#
+# Two production failures handed us this regression guard:
+#   1. settings.models.query_model_pool entry created with model_name=
+#      "deepseek/admin" — the user mistakenly typed the pool name into
+#      the model field. DeepSeek API returned 400 for every query
+#      synthesis call until manually corrected in Mongo.
+#   2. settings.models.query_model_pool entry created with model_name=
+#      "deepseek/DeepSeek-V4-Flash" — title-case marketing name instead
+#      of the API model id `deepseek-v4-flash`. Same 400 storm.
+#
+# Both look right at first glance ("admin" is a user/pool name; the
+# DeepSeek brand IS spelled "DeepSeek V4 Flash"). The UI accepts any
+# string. The provider rejects at request time, surfacing only as
+# "synthesis model could not be reached" in the chat UI.
+#
+# The validator below catches the dominant failure classes BEFORE the
+# entry is persisted. Per-provider allowlists are intentionally small
+# and high-confidence — adding aliases later is cheap, and false
+# negatives (a valid model rejected by validation) are recoverable via
+# the `extra_params.skip_model_validation: true` escape hatch.
+#
+# Adding a new provider: extend MODEL_NAME_PATTERNS below with a regex
+# that covers the provider's published model identifier scheme.
+
+import re
+
+# Known-good model name regexes per provider (lowercased match).
+# Each pattern matches the part AFTER the `provider/` prefix that
+# LiteLLM strips for routing. Pattern must be the FULL model id —
+# anchored ^ to $.
+MODEL_NAME_PATTERNS: dict[str, list[re.Pattern]] = {
+    "deepseek": [
+        # Production model ids as of 2026-05.
+        re.compile(r"^deepseek/deepseek-(chat|reasoner|v4-flash|v4-pro|v3|coder)$"),
+        re.compile(r"^deepseek-(chat|reasoner|v4-flash|v4-pro|v3|coder)$"),
+    ],
+    "openai": [
+        # GPT family + o-series reasoning + embeddings.
+        re.compile(r"^openai/(gpt-[34]|gpt-4o|gpt-4o-mini|o[134](-mini|-preview)?|text-embedding-3-(small|large))(-\w+)?$"),
+        re.compile(r"^(gpt-[34]|gpt-4o|gpt-4o-mini|o[134](-mini|-preview)?)(-\w+)?$"),
+    ],
+    "anthropic": [
+        re.compile(r"^anthropic/claude-(3|3-5|3-7|4|4-5|4-7)-(opus|sonnet|haiku)(-\d+)?(-\w+)?$"),
+        re.compile(r"^claude-(3|3-5|3-7|4|4-5|4-7)-(opus|sonnet|haiku)(-\d+)?(-\w+)?$"),
+    ],
+    "mistral": [
+        re.compile(r"^mistral/(mistral|codestral|magistral|open-mistral)-\S+$"),
+    ],
+    "siliconflow": [
+        # Permissive — SiliconFlow hosts many third-party models with
+        # vendor/model two-segment ids.
+        re.compile(r"^openai/[\w\-/.]+/[\w\-/.]+$"),
+    ],
+}
+
+
+class InvalidModelNameError(ValueError):
+    """Raised when a model_name doesn't match any known-good pattern
+    for its declared provider. Surfaced as HTTP 422 by the router."""
+
+
+def validate_model_name(provider: str, model_name: str, *, allow_skip: bool = False) -> None:
+    """Pt10d — reject obviously-wrong model_name values at save time.
+
+    Catches the two dominant failure classes:
+      - Pool/user/account name typed where the model id belongs
+        ("admin", "default", "pool-1")
+      - Marketing-style capitalization ("DeepSeek-V4-Flash") instead
+        of API id ("deepseek-v4-flash")
+
+    Bypass via `allow_skip=True` (router can flip this when the entry's
+    extra_params carries `skip_model_validation: true`) so a genuinely
+    novel model doesn't block configuration.
+
+    Args:
+        provider: lowercased provider key (deepseek, openai, etc.)
+        model_name: the model identifier as stored (may include
+            "provider/" prefix; pattern handles both forms)
+        allow_skip: if True, validation is a no-op
+
+    Raises:
+        InvalidModelNameError: with a hint about the canonical form
+    """
+    if allow_skip:
+        return
+    name = (model_name or "").strip()
+    if not name:
+        raise InvalidModelNameError("model_name is required")
+    # Catch the "user typed a pool/account name" failure class —
+    # the dominant production failure observed twice on the same setup.
+    obvious_typos = {"admin", "default", "user", "pool", "deepseek/admin"}
+    if name.lower() in obvious_typos:
+        raise InvalidModelNameError(
+            f"model_name={name!r} looks like a pool/account name rather "
+            f"than a model id. Set it to a real model — e.g. "
+            f"deepseek/deepseek-v4-flash for DeepSeek."
+        )
+    # Catch the "title-case marketing name" failure class — model ids
+    # at every major provider are lowercase. If the lowercased version
+    # matches a pattern but the original doesn't, that's the bug.
+    patterns = MODEL_NAME_PATTERNS.get((provider or "").lower(), [])
+    if patterns:
+        as_lower = name.lower()
+        any_strict = any(p.match(name) for p in patterns)
+        any_lower = any(p.match(as_lower) for p in patterns)
+        if any_lower and not any_strict:
+            raise InvalidModelNameError(
+                f"model_name={name!r} has wrong capitalization for "
+                f"provider={provider!r}. Provider model ids are "
+                f"lowercase. Try {as_lower!r}."
+            )
+        # If neither matched, the name is genuinely unknown — fail.
+        if not any_strict:
+            raise InvalidModelNameError(
+                f"model_name={name!r} is not a known {provider!r} model id. "
+                f"Set extra_params.skip_model_validation=true to bypass "
+                f"if this is a newly-released model not yet in the registry."
+            )
+    # Unknown provider — let it through (we don't enforce on providers
+    # we haven't catalogued). The original 400 from the provider's API
+    # is still the fallback safety net.
+
 logger = logging.getLogger(__name__)
 
 COLLECTION = "model_pool"
@@ -75,6 +199,17 @@ class ModelPoolService:
         enabled: bool = True,
     ) -> dict:
         now = datetime.utcnow()
+        # Pt10d — validate model_name before persistence. Save-time
+        # validation prevents the deepseek/admin and
+        # DeepSeek-V4-Flash failure classes that previously surfaced
+        # only as runtime 400s during synthesis. Bypass available via
+        # extra_params.skip_model_validation=true for novel models.
+        _skip_validation = bool((extra_params or {}).get("skip_model_validation"))
+        validate_model_name(
+            provider=provider,
+            model_name=model_name,
+            allow_skip=_skip_validation,
+        )
         # Persist api_key as ciphertext or empty if using shared
         api_key_enc = encrypt(api_key or "") if (api_key and not use_shared_key) else ""
         doc = {
@@ -103,6 +238,28 @@ class ModelPoolService:
     async def update(
         self, user_id: str, entry_id: str, patch: dict,
     ) -> dict | None:
+        # Pt10d — validate model_name on update too. If the patch is
+        # changing provider OR model_name, re-check; otherwise the
+        # stored values are presumed valid (they passed create-time
+        # validation). Fetch current doc to fill in whichever field
+        # the patch isn't touching.
+        if "model_name" in patch or "provider" in patch:
+            current = await self.col.find_one(
+                {"user_id": user_id, "entry_id": entry_id},
+                {"provider": 1, "model_name": 1, "extra_params": 1, "_id": 0},
+            )
+            if current is not None:
+                effective_provider = (
+                    patch.get("provider", current.get("provider")) or ""
+                ).lower().strip()
+                effective_model = patch.get("model_name", current.get("model_name", ""))
+                effective_extras = patch.get("extra_params") or current.get("extra_params") or {}
+                _skip_validation = bool(effective_extras.get("skip_model_validation"))
+                validate_model_name(
+                    provider=effective_provider,
+                    model_name=effective_model,
+                    allow_skip=_skip_validation,
+                )
         set_fields: dict[str, Any] = {"updated_at": datetime.utcnow()}
         for key in (
             "label", "provider", "model_name", "extra_params",
