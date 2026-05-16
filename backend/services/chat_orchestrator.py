@@ -18,6 +18,7 @@ from models.schemas import (
     ChatRequest,
     ModelConfig,
     ModelOverrides,
+    RetrievalTier,
 )
 from services.context_manager import context_manager
 from services.conversation import conversation_service
@@ -113,6 +114,12 @@ def _compact_source_previews(sources: list[Any] | None) -> list[dict[str, Any]] 
         previews.append(data)
 
     return previews or None
+
+
+def _is_graph_augmented_tier(tier: Any) -> bool:
+    """True only for the Neo4j-backed Graph Augmented retrieval tier."""
+    value = getattr(tier, "value", tier)
+    return value == RetrievalTier.qdrant_mongo_graph.value
 
 
 # Baseline system prompt, applied to every chat turn regardless of reasoning
@@ -303,7 +310,6 @@ class ChatOrchestrator:
         profile_cfg = await self._resolve_query_profile(request, user_id=user_id)
         profile_k = profile_cfg["retrieval_k"]
         profile_rerank = profile_cfg["rerank_enabled"]
-        profile_hyde = profile_cfg["hyde_enabled"]
         query_profile_used = profile_cfg["query_profile"]
         reasoning_mode_used = reasoning_mode or "none"
 
@@ -362,51 +368,27 @@ class ChatOrchestrator:
             )
         sources = retrieval.chunks
 
-        # Pt 10a (Cluster 1) — Fact-centric retrieval, runs in parallel with
-        # the chunk path. Bypasses the reranker. Seed entities come from the
-        # provenance of the just-retrieved chunks (Mode A annotations). v1
-        # filters to fact_type=property for definitional queries; broader
-        # fact_type sets land in week 2.
-        facts: list = []
-        try:
-            from services.retriever.fact_retrieval import fact_retrieval as _fact_retrieval
-
-            seed_entities: list[str] = []
-            for s in sources:
-                for p in (s.provenance or []):
-                    ent = p.get("entity")
-                    if ent and ent not in seed_entities:
-                        seed_entities.append(ent)
-            if seed_entities:
-                facts = await _fact_retrieval.retrieve_facts_for_entities(
-                    entity_names=seed_entities[:12],
-                    corpus_ids=request.corpus_ids,
-                    fact_types=["property"],  # v1: definitional only
-                    limit=8,
-                )
-        except Exception as exc:
-            logger.warning("Fact retrieval skipped: %s", exc)
+        graph_context_enabled = (
+            _is_graph_augmented_tier(retrieval.effective_tier)
+            and settings.NEO4J_ENABLED
+        )
+        facts: list = list(getattr(retrieval, "facts", []) or [])
+        if facts and not graph_context_enabled:
+            logger.warning(
+                "Dropping %d graph facts because effective tier is %s",
+                len(facts),
+                retrieval.effective_tier,
+            )
             facts = []
 
-        # Pt 10d (Cluster 2 — Graph Decoration) — post-retrieval enrichment.
-        # ALWAYS computed (cheap, read-only, try/except → empty fallback)
-        # UNLESS the Pt 10d.1 Facts-answered gate fires (see below). Whether
-        # it reaches the chat prompt depends on the reasoning mode. When the
-        # LLM is already instructed to build the graph itself
-        # (graph_reason / kg_augmented / graphrag_integrated, either as the
-        # main mode or anywhere in reasoning_blend), the decoration is
-        # withheld from the prompt to avoid the "contradict or ignore"
-        # conflict — but it's still computed so the reasoning cascade can
-        # consume it as structured pre-digest input.
-        #
-        # Pt 10d.1 — Facts-answered gate. Definitional queries ("what is X")
-        # get a [Key Facts] block from fact_retrieval that already encodes
-        # the answer. Layering graph arrows on top is redundant signal and
-        # costs ~50-150ms of Neo4j time per turn. When Facts retrieval
-        # returns 3 or more results, skip decoration entirely. Highest-
-        # volume query shape gets the biggest latency win.
+        # Pt 10d (Cluster 2 — Graph Decoration) — graph-tier-only
+        # post-retrieval enrichment. Vector Base and Hybrid never call Neo4j
+        # here. When facts already answer the query, decoration is redundant,
+        # so skip the extra traversal.
         decoration: list = []
-        if len(facts) >= 3:
+        if not graph_context_enabled:
+            decoration = []
+        elif len(facts) >= 3:
             logger.info(
                 "Graph decoration skipped — %d facts answered the query (Pt 10d.1 gate)",
                 len(facts),
@@ -415,7 +397,6 @@ class ChatOrchestrator:
             try:
                 from services.retriever.graph_decoration import (
                     graph_decorator as _graph_decorator,
-                    should_skip_inline_decoration as _should_skip_inline_decoration,
                 )
 
                 # Phase 5b — pass db through so decorate_winners can
@@ -441,7 +422,6 @@ class ChatOrchestrator:
             except Exception as exc:
                 logger.warning("Graph decoration skipped: %s", exc)
                 decoration = []
-                _should_skip_inline_decoration = None  # type: ignore[assignment]
 
         # Trust-signal snapshot — captured here so it carries through to
         # both the `done` SSE frame and the persisted assistant message.

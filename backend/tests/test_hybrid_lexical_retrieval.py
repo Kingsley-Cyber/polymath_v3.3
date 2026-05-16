@@ -1,5 +1,6 @@
-from models.schemas import RetrievalTier, SourceChunk
+from models.schemas import RetrievalTier, SourceChunk, SourceFact
 from services.retriever import (
+    _fact_seed_chunks,
     _has_query_term_overlap,
     _lexical_limit_for,
     _should_drop_low_confidence_rerank,
@@ -17,7 +18,7 @@ def test_speed_profiles_map_to_lexical_budget():
         RetrievalTier.qdrant_mongo,
         retrieval_k=10,
         rerank_enabled=False,
-    ) == 0
+    ) == 6
     assert _lexical_limit_for(
         RetrievalTier.qdrant_mongo,
         retrieval_k=40,
@@ -86,3 +87,49 @@ def test_low_confidence_guard_keeps_exact_term_overlap():
         "what is Chladni",
         rerank_enabled=True,
     )
+
+
+def test_fact_seed_chunks_point_back_to_supporting_chunks():
+    facts = [
+        SourceFact(
+            fact_id="f1",
+            subject="Graph Augmented",
+            fact_type="property",
+            property_name="retrieval_order",
+            value="fact-first",
+            confidence=0.9,
+            evidence_phrase="Graph Augmented starts from facts.",
+            chunk_id="chunk-1",
+            doc_id="doc-1",
+            corpus_id="corpus-1",
+        ),
+        SourceFact(
+            fact_id="f2",
+            subject="Graph Augmented",
+            fact_type="property",
+            property_name="duplicate",
+            value="same chunk",
+            confidence=0.8,
+            chunk_id="chunk-1",
+            doc_id="doc-1",
+            corpus_id="corpus-1",
+        ),
+        SourceFact(
+            fact_id="f3",
+            subject="No source",
+            fact_type="property",
+            property_name="ignored",
+            value="missing chunk",
+            confidence=1.0,
+        ),
+    ]
+
+    chunks = _fact_seed_chunks(facts)
+
+    assert len(chunks) == 1
+    assert chunks[0].chunk_id == "chunk-1"
+    assert chunks[0].parent_id == ""
+    assert chunks[0].source_tier == "graph_fact_seed"
+    assert chunks[0].score > 0.9
+    assert chunks[0].provenance[0]["retriever"] == "neo4j_fact"
+    assert "fact-first" in chunks[0].text

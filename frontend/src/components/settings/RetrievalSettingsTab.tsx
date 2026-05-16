@@ -15,18 +15,18 @@ import type { RetrievalSettings, GlobalSettingsUpdate } from "../../types";
 const RETRIEVAL_TIERS = [
   {
     value: "qdrant_only",
-    label: "Qdrant Only",
-    hint: "Vector search only — fastest",
+    label: "Vector Base",
+    hint: "Qdrant child + summary vectors only",
   },
   {
     value: "qdrant_mongo",
-    label: "Qdrant + Mongo",
-    hint: "Vector search + full-text hydration",
+    label: "Hybrid",
+    hint: "Vector + lexical + summaries + Mongo hydration",
   },
   {
     value: "qdrant_mongo_graph",
-    label: "Qdrant + Mongo + Graph",
-    hint: "All stores — slowest, most context",
+    label: "Graph Augmented",
+    hint: "Fact-first Neo4j seeding plus Hybrid",
   },
 ] as const;
 

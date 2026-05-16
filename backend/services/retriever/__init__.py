@@ -3,15 +3,17 @@ Retriever orchestrator — Phase 5 & 6 query pipeline (spec-locked).
 
 Flow (spec §RETRIEVAL RECIPE):
   [0] Strategy intersection — downgrade tier if any corpus lacks the capability
-  [1] embed query
-  [2] FUNNEL A (summaries, polymath_hrag) [fair-mode skips for multi-corpus]
+  [1] Graph Augmented only: lightweight entity detection -> Neo4j facts
+      -> supporting chunk seeds
+  [2] embed query
+  [3] FUNNEL A (summaries, polymath_hrag) [fair-mode skips for multi-corpus]
     + FUNNEL B (children, polymath_naive)  [per-corpus round-robin: 20 each]
     + lexical MongoDB recall for hydrated tiers (bounded by speed profile)
-  [3] merge & dedupe by parent_id
-  [4] Mode A graph expansion (qdrant_mongo_graph tier + NEO4J_ENABLED only)
-  [5] rerank ONCE on full pool (ms-marco sidecar, fallback: score sort)
-  [6] trim to DEFAULT_RETRIEVAL_K
-  [7] hydrate from MongoDB — parent text + corpus_name + doc_name
+  [4] merge fact seeds + vector + lexical & dedupe by parent_id
+  [5] Mode A graph expansion (qdrant_mongo_graph tier + NEO4J_ENABLED only)
+  [6] rerank ONCE on full pool (ms-marco sidecar, fallback: score sort)
+  [7] trim to DEFAULT_RETRIEVAL_K
+  [8] hydrate from MongoDB — parent text + corpus_name + doc_name
       (hydrate resolves parent_id for Mode A chunks; drops empty-text results)
 
 Cross-corpus constraints (spec §CROSS-CORPUS QUERY CONSTRAINTS):
@@ -26,7 +28,7 @@ from time import perf_counter
 from typing import Any
 
 from config import get_settings
-from models.schemas import RetrievalResult, RetrievalTier, SourceChunk
+from models.schemas import RetrievalResult, RetrievalTier, SourceChunk, SourceFact
 from services.embedder import embed_query
 from services.reranker import reranker_service
 from services.retriever.funnel_a import funnel_a
@@ -37,14 +39,24 @@ from services.retriever.graph_rerank import (
     apply_graph_degree_boost,
     apply_graph_degree_boost_metrics_aware,
 )
+from services.retriever.intent_policy import (
+    QueryNeed,
+    adaptive_funnel_limits,
+    infer_retrieval_intent,
+)
 from services.retriever.merge import merge_pools
 from services.retriever.mode_a import mode_a_expansion
+from services.retriever.ranking_policy import (
+    apply_candidate_weights,
+    select_with_diversity,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 _PER_CORPUS_LIMIT = 20   # spec: 20 per corpus for round-robin
 _SINGLE_CORPUS_LIMIT = 40  # spec §5.9a: retrieve 40 pre-rerank for single-corpus
+_DEFAULT_SUMMARY_LIMIT = 20
 _LOW_CONFIDENCE_RERANK_SCORE = -2.5
 
 
@@ -86,14 +98,12 @@ def _lexical_limit_for(
     retrieval_k: int,
     rerank_enabled: bool,
 ) -> int:
-    """Map the SPEED selector to a small lexical recall budget.
+    """Map the speed/thoroughness selector to a lexical recall budget.
 
-    Fast profile is intentionally vector-only. Balanced/Thorough get lexical
-    candidates that merge into the same reranker pool as vector/graph results.
+    Vector Base stays vector-only. Hybrid and Graph Augmented always keep a
+    small lexical lane, then scale it up as the retrieval pool gets wider.
     """
     if effective_tier == RetrievalTier.qdrant_only:
-        return 0
-    if not rerank_enabled and retrieval_k <= 10:
         return 0
     if retrieval_k >= 60:
         return 18
@@ -149,6 +159,76 @@ def _should_drop_low_confidence_rerank(
     if top_score > _LOW_CONFIDENCE_RERANK_SCORE:
         return False
     return not _has_query_term_overlap(ranked[:10], ranking_query)
+
+
+def _fact_context_text(fact: SourceFact) -> str:
+    """Compact fact text used as reranker-visible evidence for fact seeds."""
+    subject = (fact.subject or "").strip()
+    fact_type = (fact.fact_type or "").strip()
+    prop = (fact.property_name or "").strip()
+    value = (fact.value or "").strip()
+    unit = (fact.unit or "").strip()
+    condition = (fact.condition or "").strip()
+    evidence = (fact.evidence_phrase or "").strip()
+
+    parts: list[str] = []
+    if subject:
+        parts.append(subject)
+    if prop and value:
+        rendered_value = f"{prop} = {value}{(' ' + unit) if unit else ''}"
+        parts.append(rendered_value)
+    elif value:
+        parts.append(f"{fact_type}: {value}{(' ' + unit) if unit else ''}")
+    elif fact_type:
+        parts.append(fact_type)
+    if condition:
+        parts.append(f"when {condition}")
+    if evidence:
+        parts.append(f"Evidence: {evidence}")
+    return ". ".join(p for p in parts if p) or subject or evidence
+
+
+def _fact_seed_chunks(facts: list[SourceFact]) -> list[SourceChunk]:
+    """Convert Neo4j facts into chunk candidates for merge/rerank.
+
+    Facts stay available as structured prompt context, but their supporting
+    chunk_ids also seed the normal evidence path. Hydration later replaces the
+    compact evidence text with the full parent chunk.
+    """
+    chunks: list[SourceChunk] = []
+    seen_chunk_ids: set[str] = set()
+
+    for fact in facts:
+        chunk_id = (fact.chunk_id or "").strip()
+        if not chunk_id or chunk_id in seen_chunk_ids:
+            continue
+        seen_chunk_ids.add(chunk_id)
+        confidence = max(0.0, min(1.0, float(fact.confidence or 0.0)))
+        fact_text = _fact_context_text(fact)
+        chunks.append(
+            SourceChunk(
+                chunk_id=chunk_id,
+                parent_id="",
+                doc_id=fact.doc_id or "",
+                corpus_id=fact.corpus_id or "",
+                text=fact_text,
+                summary=fact_text,
+                score=0.82 + (confidence * 0.18),
+                source_tier="graph_fact_seed",
+                provenance=[
+                    {
+                        "retriever": "neo4j_fact",
+                        "fact_id": fact.fact_id,
+                        "entity": fact.subject,
+                        "confidence": confidence,
+                        "predicate": fact.property_name or fact.fact_type,
+                        "evidence_phrase": fact.evidence_phrase or "",
+                    }
+                ],
+            )
+        )
+
+    return chunks
 
 
 class RetrieverOrchestrator:
@@ -222,6 +302,76 @@ class RetrieverOrchestrator:
         except Exception as exc:
             logger.warning("Corpus existence check failed (%s) — keeping all ids", exc)
             return corpus_ids, []
+
+    async def _retrieve_graph_seed_facts(
+        self,
+        query: str,
+        corpus_ids: list[str] | None,
+    ) -> list[SourceFact]:
+        """Graph-tier fact lane: query entities -> Neo4j facts.
+
+        This is called only after strategy intersection confirms the effective
+        tier is qdrant_mongo_graph. Vector Base and Hybrid never enter this
+        lane.
+        """
+        if not settings.NEO4J_ENABLED or not corpus_ids:
+            return []
+
+        try:
+            from services.graph.graph_query import extract_query_entities
+            from services.ingestion_service import ingestion_service
+            from services.retriever.fact_retrieval import fact_retrieval
+
+            driver = (
+                getattr(ingestion_service, "neo4j_driver", None)
+                or getattr(fact_retrieval, "_driver", None)
+            )
+            if driver is None:
+                return []
+
+            entity_names: list[str] = []
+            seen_entities: set[str] = set()
+            for cid in corpus_ids[:3]:
+                try:
+                    rows = await extract_query_entities(
+                        query,
+                        cid,
+                        driver,
+                        limit_per_token=3,
+                        qdrant=None,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Graph fact seeding: entity detection failed for corpus=%s: %s",
+                        cid,
+                        exc,
+                    )
+                    continue
+                for row in rows:
+                    name = str(row.get("display_name") or "").strip()
+                    key = name.lower()
+                    if name and key not in seen_entities:
+                        entity_names.append(name)
+                        seen_entities.add(key)
+
+            if not entity_names:
+                return []
+
+            facts = await fact_retrieval.retrieve_facts_for_entities(
+                entity_names=entity_names[:12],
+                corpus_ids=corpus_ids,
+                fact_types=None,
+                limit=12,
+            )
+            logger.info(
+                "Graph fact seeding: entities=%d facts=%d",
+                len(entity_names),
+                len(facts),
+            )
+            return facts
+        except Exception as exc:
+            logger.warning("Graph fact seeding skipped: %s", exc)
+            return []
 
     async def _embedding_config_for_query(
         self, corpus_ids: list[str] | None
@@ -356,17 +506,34 @@ class RetrieverOrchestrator:
             else _SINGLE_CORPUS_LIMIT
         )
         rank_query = ranking_query or query
+        retrieval_intent = infer_retrieval_intent(rank_query)
+        summary_base = (
+            top_k_summary
+            if top_k_summary is not None
+            else _DEFAULT_SUMMARY_LIMIT
+        )
+        funnel_limits = adaptive_funnel_limits(
+            retrieval_intent,
+            child_base=single_limit,
+            summary_base=summary_base,
+        )
         logger.info(
-            "Retrieval start: requested_tier=%s corpus_count=%d k=%d rerank=%s thresh=%s",
+            "Retrieval start: requested_tier=%s corpus_count=%d k=%d "
+            "summary_k=%d intent=%s ratios=%.2f/%.2f rerank=%s thresh=%s",
             retrieval_tier,
             len(corpus_ids) if corpus_ids else 0,
-            single_limit,
+            funnel_limits.child_top_k,
+            funnel_limits.summary_top_k,
+            retrieval_intent.need.value,
+            retrieval_intent.child_ratio,
+            retrieval_intent.summary_ratio,
             rerank_enabled,
             similarity_threshold,
         )
         retrieval_started = perf_counter()
         timings: dict[str, float] = {
             "setup": 0.0,
+            "fact_seed": 0.0,
             "embed": 0.0,
             "funnels": 0.0,
             "merge": 0.0,
@@ -381,12 +548,13 @@ class RetrieverOrchestrator:
 
         def _log_timings(status: str, final_count: int) -> None:
             logger.info(
-                "Retrieval timings status=%s total=%.2fs setup=%.2fs embed=%.2fs "
+                "Retrieval timings status=%s total=%.2fs setup=%.2fs fact_seed=%.2fs embed=%.2fs "
                 "funnels=%.2fs merge=%.2fs graph=%.2fs rerank=%.2fs hydrate=%.2fs "
                 "counts=%s final=%d",
                 status,
                 perf_counter() - retrieval_started,
                 timings.get("setup", 0.0),
+                timings.get("fact_seed", 0.0),
                 timings.get("embed", 0.0),
                 timings.get("funnels", 0.0),
                 timings.get("merge", 0.0),
@@ -428,6 +596,16 @@ class RetrieverOrchestrator:
             )
         _add_timing("setup", phase_started)
 
+        seed_facts: list[SourceFact] = []
+        fact_seed_chunks: list[SourceChunk] = []
+        if effective_tier == RetrievalTier.qdrant_mongo_graph and settings.NEO4J_ENABLED:
+            phase_started = perf_counter()
+            seed_facts = await self._retrieve_graph_seed_facts(rank_query, corpus_ids)
+            fact_seed_chunks = _fact_seed_chunks(seed_facts)
+            counts["facts"] = len(seed_facts)
+            counts["fact_seed_chunks"] = len(fact_seed_chunks)
+            _add_timing("fact_seed", phase_started)
+
         # [1] Embed query. Hydrated tiers can still fall back to lexical
         # retrieval if the embedder is down; qdrant_only remains pure vector.
         phase_started = perf_counter()
@@ -455,21 +633,43 @@ class RetrieverOrchestrator:
                     if lexical_limit > 0
                     else []
                 )
-                if lexical:
-                    ranked = (
-                        await reranker_service.rerank(rank_query, lexical)
-                        if rerank_enabled
-                        else sorted(lexical, key=lambda x: x.score, reverse=True)
-                    )
+                fallback_fact_seeds = apply_candidate_weights(
+                    fact_seed_chunks,
+                    intent=retrieval_intent,
+                    tier=effective_tier,
+                )
+                fallback_lexical = apply_candidate_weights(
+                    lexical,
+                    intent=retrieval_intent,
+                    tier=effective_tier,
+                )
+                fallback_pool = merge_pools(fallback_fact_seeds, fallback_lexical)
+                if fallback_pool:
+                    if rerank_enabled:
+                        try:
+                            ranked = await reranker_service.rerank(
+                                rank_query, fallback_pool
+                            )
+                        except Exception as rerank_exc:
+                            logger.warning(
+                                "Fallback reranker failed, score-sorting: %s",
+                                rerank_exc,
+                            )
+                            ranked = sorted(
+                                fallback_pool, key=lambda x: x.score, reverse=True
+                            )
+                    else:
+                        ranked = sorted(fallback_pool, key=lambda x: x.score, reverse=True)
                     effective_final_k = (
                         final_top_k
                         if final_top_k is not None
                         else settings.DEFAULT_RETRIEVAL_K
                     )
                     hydrated = await hydrate_chunks(ranked[:effective_final_k], corpus_ids)
-                    _log_timings("embed_failed_lexical_fallback", len(hydrated))
+                    _log_timings("embed_failed_fallback", len(hydrated))
                     return RetrievalResult(
                         chunks=hydrated,
+                        facts=seed_facts,
                         requested_tier=retrieval_tier,
                         effective_tier=effective_tier,
                         downgrade_reason=downgrade_reason,
@@ -477,6 +677,7 @@ class RetrieverOrchestrator:
             _log_timings("embed_failed_empty", 0)
             return RetrievalResult(
                 chunks=[],
+                facts=seed_facts,
                 requested_tier=retrieval_tier,
                 effective_tier=effective_tier,
                 downgrade_reason=downgrade_reason,
@@ -528,6 +729,7 @@ class RetrieverOrchestrator:
             _log_timings("global_done", len(top))
             return RetrievalResult(
                 chunks=top,
+                facts=seed_facts,
                 requested_tier=retrieval_tier,
                 effective_tier=effective_tier,
                 downgrade_reason=downgrade_reason,
@@ -561,8 +763,13 @@ class RetrieverOrchestrator:
                 funnel_b.search(query_vector, [cid], _b_cols_for(cid), top_k=_PER_CORPUS_LIMIT)
                 for cid in corpus_ids  # type: ignore[union-attr]
             ]
-            # Fair mode in funnel_a auto-skips summaries for multi-corpus (see funnel_a.py)
-            a_kwargs = {"top_k": top_k_summary} if top_k_summary is not None else {}
+            # Fair mode normally skips summaries for multi-corpus. Broad
+            # synthesis queries intentionally keep summaries alive, capped by
+            # the adaptive budget, so overview evidence can compete.
+            a_kwargs = {
+                "top_k": funnel_limits.summary_top_k,
+                "fair_mode": retrieval_intent.need != QueryNeed.BROAD,
+            }
             a_task = funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs)
             lexical_task = lexical_retriever.search(
                 rank_query, corpus_ids, top_k=lexical_limit
@@ -584,11 +791,16 @@ class RetrieverOrchestrator:
             ]
             b_results: list[SourceChunk] = [c for pool in per_corpus_b for c in pool]
         else:
-            a_kwargs = {"top_k": top_k_summary} if top_k_summary is not None else {}
+            a_kwargs = {"top_k": funnel_limits.summary_top_k}
             # Same partial-failure safety as the multi-corpus branch above.
             raw_a, raw_b, raw_lex = await asyncio.gather(
                 funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs),
-                funnel_b.search(query_vector, corpus_ids, b_cols, top_k=single_limit),
+                funnel_b.search(
+                    query_vector,
+                    corpus_ids,
+                    b_cols,
+                    top_k=funnel_limits.child_top_k,
+                ),
                 lexical_retriever.search(rank_query, corpus_ids, top_k=lexical_limit),
                 return_exceptions=True,
             )
@@ -599,20 +811,43 @@ class RetrieverOrchestrator:
         counts["funnel_a"] = len(a_results)
         counts["funnel_b"] = len(b_results)
         counts["lexical"] = len(lexical_results)
+        if fact_seed_chunks:
+            fact_seed_chunks = apply_candidate_weights(
+                fact_seed_chunks,
+                intent=retrieval_intent,
+                tier=effective_tier,
+            )
+        a_results = apply_candidate_weights(
+            a_results,
+            intent=retrieval_intent,
+            tier=effective_tier,
+        )
+        b_results = apply_candidate_weights(
+            b_results,
+            intent=retrieval_intent,
+            tier=effective_tier,
+        )
+        lexical_results = apply_candidate_weights(
+            lexical_results,
+            intent=retrieval_intent,
+            tier=effective_tier,
+        )
 
         def _result(chunks: list[SourceChunk]) -> RetrievalResult:
             return RetrievalResult(
                 chunks=chunks,
+                facts=seed_facts,
                 requested_tier=retrieval_tier,
                 effective_tier=effective_tier,
                 downgrade_reason=downgrade_reason,
             )
 
-        # [4] Merge + dedupe by parent_id. Lexical candidates are deliberately
-        # merged before graph expansion, so exact filename/heading hits can seed
-        # Neo4j context when Graph Augmented is active.
+        # [4] Merge + dedupe by parent_id. Lexical and fact-seeded candidates
+        # are deliberately merged before graph expansion, so exact
+        # filename/heading hits and query-entity facts can seed Neo4j context
+        # when Graph Augmented is active.
         phase_started = perf_counter()
-        merged = merge_pools(a_results, b_results, lexical_results)
+        merged = merge_pools(fact_seed_chunks, a_results, b_results, lexical_results)
         counts["merged_initial"] = len(merged)
         _add_timing("merge", phase_started)
         if not merged:
@@ -759,11 +994,20 @@ class RetrieverOrchestrator:
         effective_final_k = (
             final_top_k if final_top_k is not None else settings.DEFAULT_RETRIEVAL_K
         )
-        candidates = ranked[:effective_final_k]
+        diversity = select_with_diversity(
+            ranked,
+            final_top_k=effective_final_k,
+            intent=retrieval_intent,
+            tier=effective_tier,
+            multi_corpus=multi,
+        )
+        candidates = diversity.candidates
         counts["candidates"] = len(candidates)
+        counts["diversity_added"] = diversity.added
         logger.info(
-            "final_top_k=%d (post-rerank cut, %d candidates available)",
+            "final_top_k=%d diversity_added=%d (post-rerank cut, %d candidates available)",
             effective_final_k,
+            diversity.added,
             len(ranked),
         )
 

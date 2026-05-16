@@ -23,7 +23,7 @@ import json
 import logging
 from enum import Enum
 
-from models.schemas import RetrievalResult, RetrievalTier, SourceChunk
+from models.schemas import RetrievalResult, RetrievalTier, SourceChunk, SourceFact
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +299,8 @@ async def atomic_retrieve(
     )
 
     pools: list[list[SourceChunk]] = []
+    facts: list[SourceFact] = []
+    seen_fact_ids: set[str] = set()
     requested_tier = retrieval_tier
     effective_tier = retrieval_tier
     downgrade_reason: str | None = None
@@ -307,6 +309,12 @@ async def atomic_retrieve(
             logger.warning("atomic_retrieve: sub-query failed: %s", r)
             continue
         pools.append(r.chunks)
+        for fact in getattr(r, "facts", []) or []:
+            key = fact.fact_id or f"{fact.subject}:{fact.chunk_id}"
+            if key in seen_fact_ids:
+                continue
+            seen_fact_ids.add(key)
+            facts.append(fact)
         # If any sub-query triggered a downgrade, preserve that signal
         effective_tier = r.effective_tier
         if r.downgrade_reason and not downgrade_reason:
@@ -315,6 +323,7 @@ async def atomic_retrieve(
     merged = merge_pools(*pools)
     return RetrievalResult(
         chunks=merged,
+        facts=facts,
         requested_tier=requested_tier,
         effective_tier=effective_tier,
         downgrade_reason=downgrade_reason,
