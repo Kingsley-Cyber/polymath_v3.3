@@ -1,7 +1,7 @@
 import pytest
 
 import services.retriever as retriever_module
-from models.schemas import RetrievalTier, SourceChunk
+from models.schemas import RetrievalTier, SourceChunk, SourceFact
 from services.retriever import RetrieverOrchestrator
 
 
@@ -101,6 +101,64 @@ async def test_chat_query_e2e_named_sources_survive_hybrid_pipeline(monkeypatch)
     assert result.effective_tier == RetrievalTier.qdrant_mongo
     assert {"fowler-layering", "gifts-preference"} <= chunk_ids
     assert "child-layering" in chunk_ids
+
+
+@pytest.mark.asyncio
+async def test_chat_query_e2e_hybrid_does_not_enter_graph_lanes(monkeypatch):
+    _install_common_mocks(monkeypatch)
+    monkeypatch.setattr(retriever_module.settings, "NEO4J_ENABLED", True)
+    events: list[str] = []
+
+    async def forbidden_fact_seed(self, query, corpus_ids):
+        del self, query, corpus_ids
+        events.append("fact_seed")
+        return []
+
+    async def fake_a(*_args, **_kwargs):
+        return [_chunk("summary", score=0.70, source_tier="summary")]
+
+    async def fake_b(*_args, **_kwargs):
+        return [_chunk("child", score=0.80)]
+
+    async def fake_lexical(*_args, **_kwargs):
+        return [_chunk("lexical", score=0.78, source_tier="mongo+lexical")]
+
+    async def fake_document_anchor(*_args, **_kwargs):
+        return []
+
+    async def forbidden_expand(*_args, **_kwargs):
+        events.append("graph_expand")
+        return []
+
+    monkeypatch.setattr(
+        RetrieverOrchestrator,
+        "_retrieve_graph_seed_facts",
+        forbidden_fact_seed,
+    )
+    monkeypatch.setattr(retriever_module.funnel_a, "search", fake_a)
+    monkeypatch.setattr(retriever_module.funnel_b, "search", fake_b)
+    monkeypatch.setattr(retriever_module.lexical_retriever, "search", fake_lexical)
+    monkeypatch.setattr(
+        retriever_module.document_anchor_retriever,
+        "search",
+        fake_document_anchor,
+    )
+    monkeypatch.setattr(retriever_module.mode_a_expansion, "expand", forbidden_expand)
+
+    result = await RetrieverOrchestrator().retrieve(
+        query="How should layering inform navigation depth?",
+        corpus_ids=["c1"],
+        retrieval_tier=RetrievalTier.qdrant_mongo,
+        collections=None,
+        retrieval_k=40,
+        rerank_enabled=True,
+        final_top_k=3,
+    )
+
+    assert result.effective_tier == RetrievalTier.qdrant_mongo
+    assert "fact_seed" not in events
+    assert "graph_expand" not in events
+    assert {chunk.chunk_id for chunk in result.chunks} >= {"child", "lexical"}
 
 
 @pytest.mark.asyncio
@@ -223,3 +281,109 @@ async def test_chat_query_e2e_document_anchor_seeds_graph_expansion(monkeypatch)
         "fowler-layering",
         "graph-neighbor",
     }
+
+
+@pytest.mark.asyncio
+async def test_chat_query_e2e_graph_pipeline_order_is_fact_first(monkeypatch):
+    events: list[tuple[str, tuple[str, ...]]] = []
+    monkeypatch.setattr(retriever_module.settings, "NEO4J_ENABLED", True)
+    monkeypatch.setattr(
+        retriever_module.settings,
+        "RETRIEVAL_GRAPH_RERANK_ENABLED",
+        False,
+        raising=False,
+    )
+
+    async def fake_embed_query(_query, _config):
+        events.append(("embed", ()))
+        return [0.1, 0.2, 0.3]
+
+    async def fake_fact_seeds(self, query, corpus_ids):
+        del self, query, corpus_ids
+        events.append(("facts", ()))
+        return [
+            SourceFact(
+                fact_id="fact-1",
+                subject="Layering",
+                fact_type="concept",
+                property_name="separates",
+                value="domain logic and gateways",
+                confidence=0.9,
+                evidence_phrase="Layering separates responsibilities.",
+                chunk_id="fact-seed",
+                doc_id="fowler",
+                corpus_id="c1",
+            )
+        ]
+
+    async def fake_a(*_args, **_kwargs):
+        return [_chunk("summary", score=0.70, source_tier="summary")]
+
+    async def fake_b(*_args, **_kwargs):
+        return [_chunk("child", score=0.74)]
+
+    async def fake_lexical(*_args, **_kwargs):
+        return []
+
+    async def fake_document_anchor(*_args, **_kwargs):
+        return [
+            _chunk(
+                "fowler-layering",
+                score=0.79,
+                source_tier="document_anchor+lexical",
+                doc_id="fowler",
+            )
+        ]
+
+    async def fake_expand(chunks, *_args, **_kwargs):
+        events.append(("expand", tuple(chunk.chunk_id for chunk in chunks)))
+        return [_chunk("graph-neighbor", score=0.77, source_tier="graph_expansion")]
+
+    async def fake_rerank(_query, chunks):
+        events.append(("rerank", tuple(chunk.chunk_id for chunk in chunks)))
+        return sorted(chunks, key=lambda chunk: chunk.score, reverse=True)
+
+    async def fake_hydrate(chunks, _corpus_ids):
+        events.append(("hydrate", tuple(chunk.chunk_id for chunk in chunks)))
+        return list(chunks)
+
+    monkeypatch.setattr(retriever_module, "embed_query", fake_embed_query)
+    monkeypatch.setattr(
+        RetrieverOrchestrator,
+        "_retrieve_graph_seed_facts",
+        fake_fact_seeds,
+    )
+    monkeypatch.setattr(retriever_module.funnel_a, "search", fake_a)
+    monkeypatch.setattr(retriever_module.funnel_b, "search", fake_b)
+    monkeypatch.setattr(retriever_module.lexical_retriever, "search", fake_lexical)
+    monkeypatch.setattr(
+        retriever_module.document_anchor_retriever,
+        "search",
+        fake_document_anchor,
+    )
+    monkeypatch.setattr(retriever_module.mode_a_expansion, "expand", fake_expand)
+    monkeypatch.setattr(retriever_module.reranker_service, "rerank", fake_rerank)
+    monkeypatch.setattr(retriever_module, "hydrate_chunks", fake_hydrate)
+
+    await RetrieverOrchestrator().retrieve(
+        query=(
+            "Based on Fowler's Patterns of Enterprise Application Architecture, "
+            "what does layering imply for UI navigation?"
+        ),
+        corpus_ids=["c1"],
+        retrieval_tier=RetrievalTier.qdrant_mongo_graph,
+        collections=None,
+        retrieval_k=40,
+        rerank_enabled=True,
+        final_top_k=5,
+    )
+
+    event_names = [name for name, _chunk_ids in events]
+    assert event_names.index("facts") < event_names.index("embed")
+    assert event_names.index("expand") < event_names.index("rerank")
+    assert event_names.index("rerank") < event_names.index("hydrate")
+
+    expand_ids = next(ids for name, ids in events if name == "expand")
+    rerank_ids = next(ids for name, ids in events if name == "rerank")
+    assert {"fact-seed", "fowler-layering"} <= set(expand_ids)
+    assert "graph-neighbor" in rerank_ids
