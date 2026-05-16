@@ -772,11 +772,17 @@ function AgentSearchTab(props: AgentSearchTabProps) {
         <button
           onClick={onRun}
           disabled={!canRun}
-          className="mt-2 flex w-full items-center justify-center gap-2 rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest text-zinc-300 hover:border-amber-700 hover:text-amber-300 disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-busy={phase === "loading"}
+          className={
+            "mt-2 flex w-full items-center justify-center gap-2 rounded border px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest disabled:cursor-not-allowed " +
+            (phase === "loading"
+              ? "border-amber-600/60 bg-amber-500/10 text-amber-200"
+              : "border-zinc-800 bg-[#0d0d14] text-zinc-300 hover:border-amber-700 hover:text-amber-300 disabled:opacity-40")
+          }
         >
           {phase === "loading" ? (
             <>
-              <Loader2 className="h-3 w-3 animate-spin" /> running…
+              <Loader2 className="h-3 w-3 animate-spin" /> query accepted
             </>
           ) : (
             <>
@@ -786,7 +792,7 @@ function AgentSearchTab(props: AgentSearchTabProps) {
         </button>
         <div className="mt-1 text-[10px] text-zinc-500 font-mono">
           {phase === "loading"
-            ? "synthesizing across corpora…"
+            ? "building subgraph first, then synthesis prose…"
             : phase === "error"
               ? error || "error"
               : "⌘/Ctrl + Enter to run"}
@@ -993,11 +999,17 @@ function GraphQueryTab({ corpusIds, onSendToChat, model }: GraphQueryTabProps) {
         <button
           onClick={runRefine}
           disabled={!canRefine}
-          className="mt-2 flex w-full items-center justify-center gap-2 rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest text-zinc-300 hover:border-amber-700 hover:text-amber-300 disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-busy={refineLoading}
+          className={
+            "mt-2 flex w-full items-center justify-center gap-2 rounded border px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest disabled:cursor-not-allowed " +
+            (refineLoading
+              ? "border-amber-600/60 bg-amber-500/10 text-amber-200"
+              : "border-zinc-800 bg-[#0d0d14] text-zinc-300 hover:border-amber-700 hover:text-amber-300 disabled:opacity-40")
+          }
         >
           {refineLoading ? (
             <>
-              <Loader2 className="h-3 w-3 animate-spin" /> running…
+              <Loader2 className="h-3 w-3 animate-spin" /> query accepted
             </>
           ) : (
             <>
@@ -1006,11 +1018,13 @@ function GraphQueryTab({ corpusIds, onSendToChat, model }: GraphQueryTabProps) {
           )}
         </button>
         <div className="mt-1 text-[10px] text-zinc-500 font-mono">
-          {refineError
-            ? refineError
-            : refineCached
-              ? "refinement from cache · entities fresh · ⌘/Ctrl + Enter"
-              : "fresh run · cached 24h · ⌘/Ctrl + Enter"}
+          {refineLoading
+            ? "refining phrasings + extracting entities…"
+            : refineError
+              ? refineError
+              : refineCached
+                ? "refinement from cache · entities fresh · ⌘/Ctrl + Enter"
+                : "fresh run · cached 24h · ⌘/Ctrl + Enter"}
         </div>
       </section>
 

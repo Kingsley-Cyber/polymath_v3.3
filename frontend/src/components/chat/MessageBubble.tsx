@@ -77,7 +77,9 @@ export function MessageBubble({
 
       {/* Message Content */}
       <div
-        className={`flex-1 max-w-[85%] ${isUser ? "items-end" : "items-start"}`}
+        className={`flex flex-col flex-1 min-w-0 ${
+          isUser ? "max-w-[85%] items-end" : "max-w-full items-start"
+        }`}
       >
         {/* Thinking Block */}
         {message.thinking && (

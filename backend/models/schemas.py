@@ -34,6 +34,40 @@ for _name, _value in vars(_legacy).items():
         globals()[_name] = _value
 
 
+class ChatRequest(_legacy.ChatRequest):
+    """Current chat request shape.
+
+    The preserved legacy schema is still the base contract, but the live
+    orchestrator also reads Phase 24 fields. Keeping them here prevents a
+    validated request from crashing later with AttributeError.
+    """
+
+    active_skill_ids: list[str] | None = Field(
+        default=None,
+        description="Skill IDs to inject for this chat turn.",
+    )
+    reasoning_cascade: bool | None = Field(
+        default=None,
+        description="Run the optional reasoning-cascade pre-digest for this turn.",
+    )
+
+
+class ChatChunk(_legacy.ChatChunk):
+    """Current SSE chunk shape emitted by the chat orchestrator."""
+
+    chunks_returned: int | None = None
+    strategy_used: str | None = None
+    query_profile_used: str | None = None
+    reasoning_mode_used: str | None = None
+    hyde_applied: bool | None = None
+    agentic_mode_used: bool | None = None
+    downgrade_reason: str | None = None
+    collections_queried: list[str] | None = None
+    skills_used: list[str] | None = None
+    tools_used: list[str] | None = None
+    reasoning_cascade_applied: bool | None = None
+
+
 def _universal_entity_schema() -> list[str]:
     """Lazy accessor for ghost_b.UNIVERSAL_ENTITY_SCHEMA. Importing ghost_b
     eagerly at module load would create a services↔models cycle, so the

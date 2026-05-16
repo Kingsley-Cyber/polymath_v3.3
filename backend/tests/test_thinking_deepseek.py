@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 
 from services.thinking_mapper import apply_thinking_effort
+from services.llm import LLMService
 
 
 # ─── Detection ─────────────────────────────────────────────────────────────
@@ -235,3 +236,77 @@ def test_no_effort_no_thinking_block():
     snapshot = dict(body)
     apply_thinking_effort(body, "deepseek/deepseek-v4-pro", None)
     assert body == snapshot
+
+
+@pytest.mark.asyncio
+async def test_complete_sync_disables_deepseek_v4_thinking_by_default(monkeypatch):
+    """Non-streaming helpers need answer content/JSON. DeepSeek V4 defaults
+    thinking on, so LLMService.complete_sync forces it off unless explicitly
+    overridden by extra_params."""
+    captured: dict = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    class FakeClient:
+        async def post(self, url, json, headers, timeout):  # noqa: A002
+            captured.update(json)
+            return FakeResponse()
+
+    svc = LLMService()
+
+    async def fake_get_client():
+        return FakeClient()
+
+    async def fake_resolve_api_key(_model):
+        return None
+
+    monkeypatch.setattr(svc, "_get_client", fake_get_client)
+    monkeypatch.setattr(svc, "_resolve_api_key", fake_resolve_api_key)
+
+    out = await svc.complete_sync(
+        messages=[{"role": "user", "content": "hi"}],
+        model="deepseek/deepseek-v4-flash",
+    )
+    assert out == "ok"
+    assert captured["thinking"] == {"type": "disabled"}
+
+
+@pytest.mark.asyncio
+async def test_complete_sync_respects_explicit_deepseek_thinking(monkeypatch):
+    captured: dict = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    class FakeClient:
+        async def post(self, url, json, headers, timeout):  # noqa: A002
+            captured.update(json)
+            return FakeResponse()
+
+    svc = LLMService()
+
+    async def fake_get_client():
+        return FakeClient()
+
+    async def fake_resolve_api_key(_model):
+        return None
+
+    monkeypatch.setattr(svc, "_get_client", fake_get_client)
+    monkeypatch.setattr(svc, "_resolve_api_key", fake_resolve_api_key)
+
+    await svc.complete_sync(
+        messages=[{"role": "user", "content": "hi"}],
+        model="deepseek/deepseek-v4-flash",
+        extra_params={"thinking": {"type": "enabled"}, "reasoning_effort": "high"},
+    )
+    assert captured["thinking"] == {"type": "enabled"}
+    assert captured["reasoning_effort"] == "high"

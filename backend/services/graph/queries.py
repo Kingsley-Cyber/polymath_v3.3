@@ -23,6 +23,12 @@ from neo4j import AsyncDriver
 
 logger = logging.getLogger(__name__)
 
+# Brain View is an overview, not a forensic edge dump. Cap the number of
+# high-mention entities per document that participate in the book-to-book
+# bridge traversal so large corpora don't run an all-entities cross product
+# just to draw the first canvas.
+BRAIN_VIEW_BRIDGE_ENTITY_CAP = 64
+
 
 # Pt 7d — Entity stop-list for Brain View bridges.
 #
@@ -136,8 +142,35 @@ WITH d, actual_chunk_count, computed_family,
 WITH d, actual_chunk_count,
      coalesce(d.dominant_family, computed_family) AS dominant_family,
      coalesce(d.dominant_entity_type, computed_type) AS dominant_entity_type
+WITH d, actual_chunk_count, dominant_family, dominant_entity_type,
+     $stop_exact AS stop_exact,
+     $stop_pattern AS stop_pattern,
+     $bridge_entity_cap AS bridge_entity_cap,
+     $corpus_ids AS corpus_ids
 
-// 4. Bridges to other selected anchors via shared entities + RELATES_TO.
+// 3. Pick the top local entities once. The old Brain View traversed every
+//    entity on every document when computing bridges, which made the initial
+//    overview far too expensive for large corpora. For the top-level canvas,
+//    high-mention entities carry the useful signal; drill-down still exposes
+//    the full local neighborhood for a selected book.
+CALL {
+    WITH d, stop_exact, stop_pattern, bridge_entity_cap
+    OPTIONAL MATCH (d)-[:HAS_CHUNK]->(:Chunk)-[:MENTIONS]->(e_seed:Entity)
+    WHERE NOT toLower(coalesce(e_seed.display_name, '')) IN stop_exact
+      AND NOT toLower(coalesce(e_seed.display_name, '')) =~ stop_pattern
+    WITH e_seed, bridge_entity_cap, count(*) AS mentions
+    WHERE e_seed IS NOT NULL
+    ORDER BY mentions DESC
+    WITH collect(e_seed) AS ranked_entities,
+         collect(coalesce(e_seed.display_name, e_seed.entity_id)) AS ranked_names,
+         count(e_seed) AS entity_count,
+         bridge_entity_cap
+    RETURN ranked_entities[..bridge_entity_cap] AS bridge_entities,
+           ranked_names[..8] AS top_entities,
+           entity_count
+}
+
+// 4. Bridges to other selected anchors via the capped entity set + RELATES_TO.
 //    Pt 5 — also collects the relation_family list per bridge so we can
 //    pick a dominant family for edge coloring on the frontend.
 //    Pt 7d — both sides of the bridge are filtered through the entity
@@ -145,62 +178,44 @@ WITH d, actual_chunk_count,
 //    entity_stoplist.json) so structural / generic / type-leak entities
 //    (Index, "this book", Person, users, k, …) don't manufacture spurious
 //    cross-book bridges. Drill-down queries are NOT filtered.
-OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c1:Chunk)-[:MENTIONS]->(e:Entity)
-WHERE NOT toLower(coalesce(e.display_name, '')) IN $stop_exact
-  AND NOT toLower(coalesce(e.display_name, '')) =~ $stop_pattern
-OPTIONAL MATCH (e)-[r:RELATES_TO]->(e2:Entity)<-[:MENTIONS]-(c2:Chunk)<-[:HAS_CHUNK]-(d2:Document)
-WHERE d2.corpus_id IN $corpus_ids
-  AND d2.is_cluster_anchor = true
-  AND d2.doc_id <> d.doc_id
-  AND NOT toLower(coalesce(e2.display_name, '')) IN $stop_exact
-  AND NOT toLower(coalesce(e2.display_name, '')) =~ $stop_pattern
-
-WITH d, actual_chunk_count, dominant_family, dominant_entity_type, d2,
-     count(DISTINCT e) AS shared_entities,
-     count(r) AS edge_count,
-     collect(r.relation_family) AS bridge_families,
-     // Pt 7c: distinct concept names that form this bridge — drives the
-     // on-edge label so users see what connects two books without clicking.
-     collect(DISTINCT coalesce(e.display_name, e.entity_id)) AS shared_entity_names
-WHERE d2 IS NULL OR shared_entities > 0
-
-WITH d, actual_chunk_count, dominant_family, dominant_entity_type,
-     collect(
-        CASE WHEN d2 IS NULL THEN NULL
-             ELSE {
-               target_doc_id: d2.doc_id,
-               target_filename: coalesce(d2.filename, d2.doc_id),
-               target_corpus_id: d2.corpus_id,
-               shared_entities: shared_entities,
-               strength: edge_count,
-               // Pt 5: first non-null relation_family seen between this
-               // pair of books. Drives bridge edge color (EDGE_COLORS_BY_FAMILY).
-               dominant_relation_family: head([f IN bridge_families WHERE f IS NOT NULL]),
-               // Pt 7c: top 3 shared concept names. First-3 distinct (not
-               // ranked); ordering is whatever the Cypher engine emits.
-               top_shared_entities: shared_entity_names[..3]
-             }
-        END
-     ) AS raw_bridges
+CALL {
+    WITH d, bridge_entities, corpus_ids, stop_exact, stop_pattern
+    UNWIND CASE
+        WHEN size(bridge_entities) = 0 THEN [null]
+        ELSE bridge_entities
+    END AS e
+    OPTIONAL MATCH (e)-[r:RELATES_TO]->(e2:Entity)<-[:MENTIONS]-(:Chunk)<-[:HAS_CHUNK]-(d2:Document)
+    WHERE e IS NOT NULL
+      AND d2.corpus_id IN corpus_ids
+      AND d2.is_cluster_anchor = true
+      AND d2.doc_id <> d.doc_id
+      AND NOT toLower(coalesce(e2.display_name, '')) IN stop_exact
+      AND NOT toLower(coalesce(e2.display_name, '')) =~ stop_pattern
+    WITH d2,
+         count(DISTINCT e) AS shared_entities,
+         count(r) AS edge_count,
+         collect(r.relation_family) AS bridge_families,
+         // Pt 7c: distinct concept names that form this bridge — drives the
+         // on-edge label so users see what connects two books without clicking.
+         collect(DISTINCT coalesce(e.display_name, e.entity_id)) AS shared_entity_names
+    WHERE d2 IS NOT NULL AND shared_entities > 0
+    RETURN collect({
+        target_doc_id: d2.doc_id,
+        target_filename: coalesce(d2.filename, d2.doc_id),
+        target_corpus_id: d2.corpus_id,
+        shared_entities: shared_entities,
+        strength: edge_count,
+        // Pt 5: first non-null relation_family seen between this pair of books.
+        dominant_relation_family: head([f IN bridge_families WHERE f IS NOT NULL]),
+        // Pt 7c: top 3 shared concept names.
+        top_shared_entities: shared_entity_names[..3]
+    }) AS raw_bridges
+}
 
 WITH d, actual_chunk_count, dominant_family, dominant_entity_type,
+     coalesce(entity_count, 0) AS entity_count,
+     coalesce(top_entities, []) AS top_entities,
      [b IN raw_bridges WHERE b IS NOT NULL] AS bridges
-
-// Octopus prep — collect up to 8 distinct entity names per anchor so the
-// frontend can spawn them as orbiting satellites. Same stop-list filter
-// as the bridge traversal so we don't surface "Index" / "this book" /
-// generic-type-name junk as orbit tips.
-//
-// Capped via [..8] before aggregation lands; Neo4j won't carry more than
-// 8 entities per doc through the WITH. Worst-case cost: one indexed
-// HAS_CHUNK + MENTIONS walk per anchor — same shape the bridges section
-// already runs, just bounded to 8 distinct emits.
-OPTIONAL MATCH (d)-[:HAS_CHUNK]->(:Chunk)-[:MENTIONS]->(e_top:Entity)
-WHERE NOT toLower(coalesce(e_top.display_name, '')) IN $stop_exact
-  AND NOT toLower(coalesce(e_top.display_name, '')) =~ $stop_pattern
-WITH d, actual_chunk_count, dominant_family, dominant_entity_type, bridges,
-     count(DISTINCT e_top) AS entity_count,
-     collect(DISTINCT coalesce(e_top.display_name, e_top.entity_id))[..8] AS top_entities
 
 RETURN
     d.doc_id          AS doc_id,
@@ -234,6 +249,7 @@ async def get_brain_view(
     corpus_ids: list[str],
     *,
     limit: int = 2000,
+    bridge_entity_cap: int = BRAIN_VIEW_BRIDGE_ENTITY_CAP,
 ) -> dict[str, Any]:
     """Top-level books-as-clusters view.
 
@@ -274,6 +290,7 @@ async def get_brain_view(
                 _BRAIN_VIEW_CYPHER,
                 corpus_ids=list(corpus_ids),
                 limit=int(limit),
+                bridge_entity_cap=max(1, int(bridge_entity_cap)),
                 stop_exact=stop_exact,
                 stop_pattern=stop_pattern,
             )
@@ -346,6 +363,7 @@ async def get_brain_view(
             "total_documents": len(documents),
             "total_bridges": len(flat_bridges),
             "limit_applied": limit,
+            "bridge_entity_cap": max(1, int(bridge_entity_cap)),
         },
     }
 

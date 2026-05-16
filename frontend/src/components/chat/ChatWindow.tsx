@@ -58,7 +58,7 @@ export function ChatWindow() {
       data-testid="response-panel"
       className="flex-1 overflow-y-auto custom-scrollbar bg-bg-secondary"
     >
-      <div className="max-w-3xl mx-auto py-4">
+      <div className="w-full max-w-5xl mx-auto py-4 px-2 sm:px-4">
         {conversationMessages.map((message, index) => (
           <MessageBubble
             key={message.id || index}

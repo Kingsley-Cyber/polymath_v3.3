@@ -596,7 +596,10 @@ async def entity_search(body: EntitySearchRequest = Body(...)) -> EntitySearchRe
     summary="HyDE-style query refinement — returns alternative / opposing / "
             "related phrasings of a user's draft question. Idempotent.",
 )
-async def graph_refine_query(body: dict = Body(...)) -> dict:
+async def graph_refine_query(
+    body: dict = Body(...),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     """Refine a user's draft question into a small structured suggestion set.
 
     Body:
@@ -633,8 +636,48 @@ async def graph_refine_query(body: dict = Body(...)) -> dict:
         raise HTTPException(status_code=400, detail="corpus_ids must be a list")
     corpus_ids = [str(c) for c in corpus_ids]
 
-    model = body.get("model")
+    model_ref = body.get("model")
     force_refresh = bool(body.get("force_refresh") or False)
+    model = model_ref if isinstance(model_ref, str) else None
+    api_base = None
+    api_key = None
+    extra_params = None
+
+    # The frontend sends the same model reference as chat (`pool:<id>` or
+    # `profile:<id>`). LiteLLM cannot execute those opaque ids directly, so
+    # resolve them before calling the helper. If no model was supplied, use
+    # the user's query preference, matching the chat/graph synthesis path.
+    try:
+        from services.query_model_resolver import (
+            resolve as resolve_query_model,
+            resolve_by_entry_id,
+        )
+
+        if model and (model.startswith("pool:") or model.startswith("profile:")):
+            _prefix, _, entry_id = model.partition(":")
+            resolved = await resolve_by_entry_id(current_user["user_id"], entry_id)
+            if resolved:
+                model = resolved.get("model")
+                api_base = resolved.get("api_base")
+                api_key = resolved.get("api_key")
+                extra_params = resolved.get("extra_params") or None
+            else:
+                model = None
+
+        if not model:
+            resolved = await resolve_query_model(current_user["user_id"], "query")
+            if resolved:
+                model = resolved.get("model")
+                api_base = resolved.get("api_base")
+                api_key = resolved.get("api_key")
+                extra_params = resolved.get("extra_params") or None
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "graph refine model resolution failed for %r: %s", model_ref, exc
+        )
+        model = None
 
     from services.query_refinement import refine_query, ensure_cache_index
 
@@ -651,7 +694,10 @@ async def graph_refine_query(body: dict = Body(...)) -> dict:
         db=db,
         question=question,
         corpus_ids=corpus_ids,
-        model=model if isinstance(model, str) else None,
+        model=model,
+        api_base=api_base,
+        api_key=api_key,
+        extra_params=extra_params,
         force_refresh=force_refresh,
         neo4j_driver=neo4j,
     )

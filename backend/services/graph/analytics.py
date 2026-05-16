@@ -1158,7 +1158,7 @@ async def query_scope_entities(
         return set()
 
     from services.embedder import embed_query
-    from services.storage.qdrant_writer import _col_for_corpus
+    from services.storage.qdrant_writer import _col_for_corpus, _collection_layout
 
     try:
         qv = await embed_query(query)
@@ -1168,12 +1168,16 @@ async def query_scope_entities(
 
     collection = _col_for_corpus(corpus_id, "naive")
     try:
-        resp = await qdrant.query_points(
-            collection_name=collection,
-            query=qv,
-            limit=top_k,
-            with_payload=True,
-        )
+        kwargs = {
+            "collection_name": collection,
+            "query": qv,
+            "limit": top_k,
+            "with_payload": True,
+        }
+        has_named, _ = await _collection_layout(qdrant, collection)
+        if has_named:
+            kwargs["using"] = "dense"
+        resp = await qdrant.query_points(**kwargs)
     except Exception as exc:
         logger.warning("query_scope: qdrant search failed (%s) — empty scope", exc)
         return set()
@@ -1237,7 +1241,7 @@ async def query_scope_details(
         return VectorScopeResult()
 
     from services.embedder import embed_query
-    from services.storage.qdrant_writer import _col_for_corpus
+    from services.storage.qdrant_writer import _col_for_corpus, _collection_layout
 
     try:
         qv = await embed_query(query)
@@ -1247,12 +1251,16 @@ async def query_scope_details(
 
     collection = _col_for_corpus(corpus_id, "naive")
     try:
-        resp = await qdrant.query_points(
-            collection_name=collection,
-            query=qv,
-            limit=top_k,
-            with_payload=True,
-        )
+        kwargs = {
+            "collection_name": collection,
+            "query": qv,
+            "limit": top_k,
+            "with_payload": True,
+        }
+        has_named, _ = await _collection_layout(qdrant, collection)
+        if has_named:
+            kwargs["using"] = "dense"
+        resp = await qdrant.query_points(**kwargs)
     except Exception as exc:
         logger.warning("query_scope: qdrant search failed (%s) — empty scope", exc)
         return VectorScopeResult(query_embedding=qv)

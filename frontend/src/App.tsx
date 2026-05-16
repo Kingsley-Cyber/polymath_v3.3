@@ -1,6 +1,6 @@
 // App.tsx - Main application component (3-Pane Deterministic Graph Architecture)
 import { useCallback, useState, useEffect } from "react";
-import { Menu, Network, Share2 } from "lucide-react";
+import { Loader2, Menu, Network, Share2, X } from "lucide-react";
 import { Sidebar } from "./components/chat/Sidebar";
 import { ChatWindow } from "./components/chat/ChatWindow";
 import { ChatInput } from "./components/chat/ChatInput";
@@ -46,6 +46,7 @@ function App() {
   const [graphViewerQuery, setGraphViewerQuery] = useState<string>("");
   const [graphViewerQueryDraft, setGraphViewerQueryDraft] = useState<string>("");
   const [graphViewerRunCount, setGraphViewerRunCount] = useState(0);
+  const [graphViewerQueryRunning, setGraphViewerQueryRunning] = useState(false);
 
   // Pt 7: prefill bridge from GraphViewer's Graph Query tab to ChatInput.
   // When the user clicks a refined chip in the dashboard, GraphViewer
@@ -58,8 +59,20 @@ function App() {
   });
   const handleGraphSendToChat = useCallback((text: string) => {
     setChatPrefill((prev) => ({ text, nonce: prev.nonce + 1 }));
+    setGraphViewerQueryRunning(false);
     setIsGraphViewOpen(false);
   }, []);
+
+  const handleGraphQueryPhaseChange = useCallback(
+    (phase: "idle" | "loading" | "ready" | "error") => {
+      // useQueryGraph reports one initial idle frame before its effect starts.
+      // Keep the submit lock during that handoff so a fast second tap cannot
+      // launch the same graph query again.
+      if (phase === "idle" && graphViewerQuery) return;
+      setGraphViewerQueryRunning(phase === "loading");
+    },
+    [graphViewerQuery],
+  );
 
   const { selectedModel, setSelectedModel, setModels, maxTokens, theme, selectedCorpusIds } =
     useSettingsStore();
@@ -653,6 +666,18 @@ function App() {
       {isGraphViewOpen && (
         <div className="fixed inset-0 z-50 bg-[#0a0a0a]/95">
           <div className="absolute inset-0 flex flex-col">
+            <button
+              type="button"
+              onClick={() => {
+                setIsGraphViewOpen(false);
+                setGraphViewerQueryRunning(false);
+              }}
+              className="absolute left-3 top-3 z-[70] flex h-8 w-8 items-center justify-center rounded border border-zinc-800 bg-zinc-950/85 text-zinc-400 backdrop-blur hover:border-rose-700 hover:text-rose-300"
+              title="Close graph view"
+              aria-label="Close graph view"
+            >
+              <X className="h-4 w-4" />
+            </button>
             {/* GraphViewer fills the canvas area — Phase 4 routes the two
                 new views (constellation, atom) through the same shell. */}
             <div className="flex-1 min-h-0 relative">
@@ -682,10 +707,17 @@ function App() {
                   model={selectedModel || undefined}
                   onRerun={
                     graphViewerMode === "query"
-                      ? () => setGraphViewerRunCount((n) => n + 1)
+                      ? () => {
+                          setGraphViewerQueryRunning(true);
+                          setGraphViewerRunCount((n) => n + 1);
+                        }
                       : undefined
                   }
-                  onClose={() => setIsGraphViewOpen(false)}
+                  onClose={() => {
+                    setIsGraphViewOpen(false);
+                    setGraphViewerQueryRunning(false);
+                  }}
+                  onQueryPhaseChange={handleGraphQueryPhaseChange}
                   onSendToChat={handleGraphSendToChat}
                   key={`gv-${graphViewerMode}-${graphViewerQuery}-${graphViewerRunCount}`}
                 />
@@ -703,7 +735,10 @@ function App() {
                 ).map((opt) => (
                   <button
                     key={opt.id}
-                    onClick={() => setGraphViewerMode(opt.id)}
+                    onClick={() => {
+                      setGraphViewerMode(opt.id);
+                      setGraphViewerQueryRunning(false);
+                    }}
                     className={
                       "px-2.5 py-1 rounded-full transition-colors " +
                       (graphViewerMode === opt.id
@@ -731,12 +766,13 @@ function App() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   const q = graphViewerQueryDraft.trim();
-                  if (!q) return;
+                  if (!q || graphViewerQueryRunning) return;
                   setGraphViewerQuery(q);
                   // Atom view stays in atom mode; otherwise default to
                   // the legacy "query" mode (GraphViewer synthesis flow).
                   if (graphViewerMode !== "atom") {
                     setGraphViewerMode("query");
+                    setGraphViewerQueryRunning(true);
                   }
                   setGraphViewerRunCount((n) => n + 1);
                 }}
@@ -758,11 +794,26 @@ function App() {
                 <button
                   type="submit"
                   disabled={
-                    selectedCorpusIds.length === 0 || !graphViewerQueryDraft.trim()
+                    selectedCorpusIds.length === 0 ||
+                    !graphViewerQueryDraft.trim() ||
+                    graphViewerQueryRunning
                   }
-                  className="text-[10px] uppercase tracking-widest text-zinc-200 hover:text-amber-400 border border-zinc-700 rounded px-3 py-2 font-mono disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-busy={graphViewerQueryRunning}
+                  className={
+                    "flex min-w-28 items-center justify-center gap-2 text-[10px] uppercase tracking-widest border rounded px-3 py-2 font-mono disabled:cursor-not-allowed " +
+                    (graphViewerQueryRunning
+                      ? "border-amber-600/60 bg-amber-500/10 text-amber-200"
+                      : "border-zinc-700 text-zinc-200 hover:text-amber-400 disabled:opacity-40")
+                  }
                 >
-                  Synthesize
+                  {graphViewerQueryRunning ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Running
+                    </>
+                  ) : (
+                    "Synthesize"
+                  )}
                 </button>
                 {(graphViewerMode === "query" || graphViewerMode === "atom") && (
                   <button
@@ -771,6 +822,7 @@ function App() {
                       setGraphViewerMode("brain");
                       setGraphViewerQuery("");
                       setGraphViewerQueryDraft("");
+                      setGraphViewerQueryRunning(false);
                     }}
                     className="text-[10px] uppercase tracking-widest text-zinc-500 hover:text-zinc-200 border border-zinc-800 rounded px-3 py-2 font-mono"
                   >
@@ -778,6 +830,14 @@ function App() {
                   </button>
                 )}
               </form>
+              <div
+                className="max-w-3xl mx-auto mt-1 min-h-4 text-[10px] font-mono text-amber-300/80"
+                aria-live="polite"
+              >
+                {graphViewerQueryRunning
+                  ? "query accepted · building graph subquery + synthesis"
+                  : ""}
+              </div>
             </div>
           </div>
         </div>

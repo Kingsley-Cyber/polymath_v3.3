@@ -353,6 +353,42 @@ async def test_short_query_skips_vector_path():
 
 
 @pytest.mark.asyncio
+async def test_ai_acronym_does_not_match_inside_unrelated_words():
+    """Two-letter acronyms must match as tokens, not substrings.
+
+    Regression for "AI" matching domAIn / grAIned / contAIner in the Graph
+    Query entity panel.
+    """
+    captured = {}
+
+    def on_run(cypher, **kwargs):
+        captured.update(kwargs)
+        return _FakeResult([
+            _row("domain", "Domain Model", 97),
+            _row("lock", "Coarse-Grained Lock", 15),
+            _row("container", "EJB container", 5),
+            _row("ai", "AI", 3),
+            _row("artificial", "Artificial Intelligence", 2),
+        ])
+
+    driver = _FakeDriver(on_run)
+    result = await graph_query.extract_query_entities(
+        "how does ai power chatrooms",
+        "corp-1",
+        driver,
+        qdrant=None,
+    )
+
+    assert captured["exact_short_tokens"] == ["ai"]
+    assert "ai" not in captured["contains_tokens"]
+    ids = [r["entity_id"] for r in result]
+    assert set(ids) == {"ai", "artificial"}
+    assert "domain" not in ids
+    assert "lock" not in ids
+    assert "container" not in ids
+
+
+@pytest.mark.asyncio
 async def test_vector_only_no_tokens():
     """If the query produces no useful tokens (all stop-words) but
     the vector path returns seeds, those vector seeds still surface."""

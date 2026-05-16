@@ -309,6 +309,22 @@ class LLMService:
                     continue
                 body[k] = v
 
+        # Non-streaming helper calls (HyDE, graph synthesis, query refinement,
+        # JSON repair) need concise content, not provider reasoning traces.
+        # DeepSeek V4 defaults thinking ON, which can consume the whole
+        # max_tokens budget and return empty content. Respect explicit
+        # operator params, otherwise force thinking off for helper calls.
+        if "thinking" not in body and "reasoning_effort" not in body:
+            try:
+                from services.thinking_mapper import apply_thinking_effort
+
+                apply_thinking_effort(body, model, "none")
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "thinking_mapper helper default failed (model=%r): %s",
+                    model, exc,
+                )
+
         headers = self._get_headers()
 
         resp = await client.post(

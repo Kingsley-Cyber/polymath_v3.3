@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from models.schemas import ChatAttachment, ChatRequest
+from models.schemas import ChatAttachment, ChatChunk, ChatRequest
 
 
 # ─── ChatAttachment field validation ───────────────────────────────────────
@@ -192,3 +192,35 @@ def test_chat_request_accepts_image_and_text_mix():
     assert len(req.attachments or []) == 2
     kinds = {a.kind for a in (req.attachments or [])}
     assert kinds == {"image", "text"}
+
+
+def test_chat_request_accepts_phase24_orchestration_fields():
+    """The live orchestrator reads these fields after validation. If the
+    schema drops them, chat turns crash at stream time with AttributeError."""
+    req = ChatRequest(
+        message="hi",
+        active_skill_ids=["skill-a"],
+        reasoning_cascade=True,
+    )
+    assert req.active_skill_ids == ["skill-a"]
+    assert req.reasoning_cascade is True
+
+
+def test_chat_done_chunk_keeps_trust_signal_fields():
+    """The frontend renders retrieval trust signals from the done SSE frame."""
+    chunk = ChatChunk(
+        type="done",
+        chunks_returned=3,
+        strategy_used="qdrant_mongo_graph",
+        query_profile_used="balanced",
+        reasoning_mode_used="none",
+        hyde_applied=True,
+        collections_queried=["corpus-a"],
+        skills_used=["Code"],
+        tools_used=["lookup"],
+        reasoning_cascade_applied=False,
+    )
+    dumped = chunk.model_dump()
+    assert dumped["chunks_returned"] == 3
+    assert dumped["strategy_used"] == "qdrant_mongo_graph"
+    assert dumped["collections_queried"] == ["corpus-a"]

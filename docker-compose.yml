@@ -310,7 +310,9 @@ services:
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
     environment:
       HF_HOME: /root/.cache/huggingface
-      MODEL_PATH: /model
+      # Match the embedder pattern: use the HF identifier so the service can
+      # load from HF_HOME even when the host bind at /model is empty/incomplete.
+      MODEL_PATH: cross-encoder/ms-marco-MiniLM-L6-v2
       RERANKER_DEVICE: auto
     deploy:
       resources:

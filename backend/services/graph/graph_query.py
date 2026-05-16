@@ -41,6 +41,16 @@ _STOP_WORDS = frozenset(
     }
 )
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_'\-]{1,}")
+_WORD_BOUNDARY_RE = re.compile(r"[^a-z0-9]+")
+
+# Short acronyms are useful query terms, but they are terrible substring
+# terms. "ai" appears inside "domain", "grained", and "container"; treating
+# it as a raw CONTAINS token makes unrelated entities look relevant.
+_SHORT_TOKEN_EXPANSIONS: dict[str, tuple[str, ...]] = {
+    "ai": ("artificial", "intelligence"),
+    "ml": ("machine", "learning"),
+    "kg": ("knowledge", "graph"),
+}
 
 
 def _tokenize(query: str) -> list[str]:
@@ -50,6 +60,54 @@ def _tokenize(query: str) -> list[str]:
         for t in _TOKEN_RE.findall(query or "")
         if t.lower() not in _STOP_WORDS and len(t) > 1
     ]
+
+
+def _literal_match_terms(tokens: list[str]) -> tuple[list[str], list[str]]:
+    """Split query tokens into safe substring terms and exact short tokens.
+
+    Tokens with three or more chars keep the legacy CONTAINS behavior so
+    morphology still works ("chatroom" vs "chatrooms"). One- and two-letter
+    acronyms must match as standalone tokens, with a tiny phrase expansion for
+    common acronyms such as AI -> artificial/intelligence.
+    """
+    contains_terms: list[str] = []
+    exact_short_terms: list[str] = []
+
+    for token in tokens:
+        t = token.strip().lower()
+        if not t:
+            continue
+        if len(t) <= 2:
+            if t.isalnum():
+                exact_short_terms.append(t)
+            contains_terms.extend(_SHORT_TOKEN_EXPANSIONS.get(t, ()))
+        else:
+            contains_terms.append(t)
+
+    def _dedupe(values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for value in values:
+            if value and value not in seen:
+                out.append(value)
+                seen.add(value)
+        return out
+
+    return _dedupe(contains_terms), _dedupe(exact_short_terms)
+
+
+def _literal_overlap_count(name: str, tokens: list[str]) -> int:
+    """Score literal overlap using the same short-token rules as Cypher."""
+    if not name:
+        return 0
+    name_low = name.lower()
+    contains_terms, exact_short_terms = _literal_match_terms(tokens)
+
+    score = sum(1 for term in contains_terms if term in name_low)
+    if exact_short_terms:
+        words = {w for w in _WORD_BOUNDARY_RE.split(name_low) if w}
+        score += sum(1 for term in exact_short_terms if term in words)
+    return score
 
 
 async def extract_query_entities(
@@ -88,6 +146,7 @@ async def extract_query_entities(
     for downstream tracing.
     """
     tokens = _tokenize(query)
+    contains_tokens, exact_short_tokens = _literal_match_terms(tokens)
 
     # Path B — vector scope (best-effort, additive). Failures return an
     # empty set and we silently fall through to the literal path.
@@ -111,21 +170,30 @@ async def extract_query_entities(
             )
             vector_seed_ids = set()
 
-    if not tokens and not vector_seed_ids:
+    if not contains_tokens and not exact_short_tokens and not vector_seed_ids:
         return []
 
-    # Single Cypher pass — matches via EITHER literal token CONTAINS OR
-    # the vector_seed_ids set. Mention_count comes from the same MENTIONS
-    # subquery. `vector_match` flag rides through so the post-hydrate
-    # scoring can boost vector hits even when their name has no token
-    # overlap (the whole point of the vector path).
+    # Single Cypher pass — matches via EITHER literal terms OR the
+    # vector_seed_ids set. Long terms use CONTAINS. Short acronym terms use
+    # token boundaries so "ai" does not match "domain" / "container".
+    # Mention_count comes from the same MENTIONS subquery. `vector_match` flag
+    # rides through so the post-hydrate scoring can boost vector hits even
+    # when their name has no token overlap (the whole point of the vector path).
     cypher = """
     MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)
+    WITH c, e,
+         toLower(
+           coalesce(e.normalized_name, '') + ' ' +
+           coalesce(e.canonical_name, '') + ' ' +
+           coalesce(e.display_name, '')
+         ) AS name_text
     WHERE (
-        size($tokens) > 0 AND ANY(tok IN $tokens WHERE
-            toLower(coalesce(e.normalized_name, '')) CONTAINS tok OR
-            toLower(coalesce(e.canonical_name, '')) CONTAINS tok OR
-            toLower(coalesce(e.display_name, '')) CONTAINS tok
+        size($contains_tokens) > 0
+        AND ANY(tok IN $contains_tokens WHERE name_text CONTAINS tok)
+    ) OR (
+        size($exact_short_tokens) > 0
+        AND ANY(tok IN $exact_short_tokens WHERE
+            name_text =~ ('.*(^|[^a-z0-9])' + tok + '([^a-z0-9]|$).*')
         )
     ) OR e.entity_id IN $vector_seed_ids
     WITH e, count(DISTINCT c) AS mention_count
@@ -148,7 +216,8 @@ async def extract_query_entities(
         result = await session.run(
             cypher,
             corpus_id=corpus_id,
-            tokens=tokens,
+            contains_tokens=contains_tokens,
+            exact_short_tokens=exact_short_tokens,
             vector_seed_ids=list(vector_seed_ids),
             hard_limit=hard_limit,
         )
@@ -167,11 +236,14 @@ async def extract_query_entities(
     # the entity_id is in the vector seed set. Vector bonus dominates
     # when literal overlap is 0 (synonym/paraphrase case), tokens
     # dominate when both paths matched (high-confidence convergence).
+    filtered_rows: list[dict] = []
     for r in rows:
         name_low = (r.get("display_name") or "").lower()
-        overlap = sum(1 for t in tokens if t in name_low)
+        overlap = _literal_overlap_count(name_low, tokens)
         mentions = r.get("mention_count", 1)
         is_vector = r["entity_id"] in vector_seed_ids
+        if overlap <= 0 and not is_vector:
+            continue
         r["vector_match"] = is_vector
         # Sources: which path identified this seed. Both paths can claim
         # the same entity — that's the strongest signal.
@@ -188,6 +260,11 @@ async def extract_query_entities(
         literal_score = overlap * mentions
         vector_bonus = (0.5 + 0.5 * min(1.0, mentions / 10)) * mentions if is_vector else 0.0
         r["score"] = literal_score + vector_bonus
+        filtered_rows.append(r)
+
+    rows = filtered_rows
+    if not rows:
+        return []
 
     rows.sort(key=lambda r: r["score"], reverse=True)
     # Result cap: the original per-token budget plus headroom for vector

@@ -58,6 +58,7 @@ interface GraphViewerProps {
   query?: string;
   onRerun?: () => void;
   onClose?: () => void;
+  onQueryPhaseChange?: (phase: "idle" | "loading" | "ready" | "error") => void;
   model?: string;
   /** Pt 7: callback fired when the user picks a refined chip / entity in
    *  the Graph Query tab. Parent typically closes the modal and loads
@@ -528,6 +529,7 @@ export function GraphViewer({
   query,
   onRerun,
   onClose,
+  onQueryPhaseChange,
   model,
   onSendToChat,
 }: GraphViewerProps) {
@@ -582,6 +584,10 @@ export function GraphViewer({
     synthesisMode,
     validateSynthesis,
   );
+
+  useEffect(() => {
+    onQueryPhaseChange?.(q.phase);
+  }, [onQueryPhaseChange, q.phase]);
 
   const data = mode === "brain" ? brain.data : q.data;
   const loading = mode === "brain" ? brain.loading : q.phase === "loading";
