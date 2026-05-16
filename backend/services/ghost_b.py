@@ -748,11 +748,38 @@ def _render_schema_lens_block(schema_lens: SchemaLens | dict | None) -> str:
     lines: list[str] = ["\nCorpus schema lens (guidance only; not new output fields):"]
     if lens.corpus_domains:
         lines.append("- likely corpus domains: " + ", ".join(lens.corpus_domains[:8]))
-    if lens.preferred_entity_types:
-        lines.append(
-            "- prefer these approved entity_type values when text supports them: "
-            + ", ".join(lens.preferred_entity_types[:8])
-        )
+    # Pt9f — preferred_entity_types deliberately NOT rendered.
+    #
+    # The original design assumed corpora are topically coherent (one
+    # domain). The lens averaged across matched domain rules and emitted
+    # a "prefer these 8 entity types" guidance line. For single-domain
+    # corpora this was a useful nudge. For heterogeneous libraries —
+    # the actual user case here, 521 books spanning software /
+    # psychology / business / game design / ML / writing / decision
+    # theory — the averaging picks 8 winners, truncates the rest, and
+    # then biases every chunk's extraction toward the corpus-wide
+    # winners regardless of the individual chunk's domain.
+    #
+    # Concrete failure observed: Phase5_Luau_v4 corpus matched 6 domain
+    # rules. The top 8 preferred became [Product, Method, Concept,
+    # Document, Rule, Artifact, Person, Organization] — Software (the
+    # leading entry of software_engineering's domain rule) lost the
+    # cap=8 race to product_prd's Product. Every React / TensorFlow /
+    # MLKit chunk in the corpus then got biased toward Product despite
+    # the universal vocab line containing Software.
+    #
+    # The vocab line ("entity_type one of: Person|...|Software|...")
+    # already enumerates all 14 universal types. The LLM has the full
+    # menu. Dropping the "prefer" line lets the chunk text decide
+    # entity_type without corpus-wide override. Object_kind hints
+    # below STAY because object_kind is open-vocab and the domain-aware
+    # cheat sheet from Pt9d genuinely helps the LLM pick the right
+    # granularity once the bucket is decided.
+    #
+    # preferred_relations renders below — kept for now because relation
+    # vocab is 30 entries with cap=10 (the bias is gentler than the
+    # 14:8 entity_type ratio). Revisit if a relation gets visibly
+    # truncated the same way.
     if lens.preferred_relations:
         lines.append(
             "- prefer these approved predicates when text supports them: "
