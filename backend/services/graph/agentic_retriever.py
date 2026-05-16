@@ -74,6 +74,60 @@ _SELECT_DEEPEN_PROMPT = (
     "verbatim somewhere in the evidence packet."
 )
 
+_SELECT_DEEPEN_RESEARCH_PROMPT = (
+    "You are Polymath's research strategist. Your job is to spot the 1-3 "
+    "entities the analyst needs MORE EVIDENCE about before writing a precise, "
+    "well-supported answer.\n\n"
+    "Rules:\n"
+    "- Prefer entities central to the user's query but thinly supported in the "
+    "current evidence.\n"
+    "- Prefer main thesis entities, under-supported claims, and missing proof "
+    "around the central question.\n"
+    "- Skip entities that are already well-covered. The goal is tighter proof, "
+    "not more noise.\n"
+    "- Only name entities that appear verbatim somewhere in the packet below. "
+    "Do NOT invent new ones.\n\n"
+    "Output ONLY a JSON object, nothing else:\n"
+    "{\n"
+    "  \"entities\": [\"name1\", \"name2\"],\n"
+    "  \"reason\": \"<one sentence on why these close a proof gap>\"\n"
+    "}\n\n"
+    "Maximum 3 entities."
+)
+
+_SELECT_DEEPEN_IDEATION_PROMPT = (
+    "You are Polymath's ideation scout. Your job is to spot the 1-3 bridges, "
+    "gaps, analogies, transfers, or entities that would make the STRONGEST "
+    "NEW IDEA more grounded.\n\n"
+    "Rules:\n"
+    "- Prefer structural components over raw entities. The goal is invention "
+    "ingredients: bridges, gaps, analogies, transfers, and both sides of a "
+    "promising combination.\n"
+    "- For bridges, name BOTH endpoints as `A + B`.\n"
+    "- For gaps, name the two sides as `A + B`.\n"
+    "- For analogies, name source and target as `A + B`.\n"
+    "- For transfers, name the hub and target domain/entity as `A + B`.\n"
+    "- Use a raw entity only when it is the missing ingredient for a stronger "
+    "idea.\n"
+    "- Only name components that appear verbatim somewhere in the packet below. "
+    "Do NOT invent new ones.\n\n"
+    "Output ONLY a JSON object, nothing else:\n"
+    "{\n"
+    "  \"entities\": [\"Identity Map + User Profile\", \"Session Pacing\"],\n"
+    "  \"reason\": \"<one sentence on why these improve the idea material>\"\n"
+    "}\n\n"
+    "Maximum 3 selections."
+)
+
+
+def _select_prompt_for_mode(synthesis_mode: str) -> tuple[str, bool]:
+    mode = (synthesis_mode or "").strip().lower()
+    if mode == "ideation":
+        return _SELECT_DEEPEN_IDEATION_PROMPT, True
+    if mode == "research":
+        return _SELECT_DEEPEN_RESEARCH_PROMPT, False
+    return _SELECT_DEEPEN_PROMPT, False
+
 
 async def select_entities_to_deepen(
     *,
@@ -82,6 +136,7 @@ async def select_entities_to_deepen(
     user_query: str,
     round_index: int,
     creds: dict[str, Any],
+    synthesis_mode: str = "nuance",
     timeout_seconds: float = 30.0,
 ) -> tuple[list[str], Optional[str]]:
     """Ask the LLM which 1-3 entities to deepen this round.
@@ -94,6 +149,11 @@ async def select_entities_to_deepen(
     evidence = (packet.get("evidence") or [])[:12]
     edges = (packet.get("edges") or [])[:10]
     anchors = packet.get("anchors") or []
+    prompt, show_structural = _select_prompt_for_mode(synthesis_mode)
+    bridges = (packet.get("bridges") or [])[:5] if show_structural else []
+    gaps = (packet.get("gaps") or [])[:5] if show_structural else []
+    analogies = (packet.get("analogies") or [])[:5] if show_structural else []
+    transfers = (packet.get("transfers") or [])[:5] if show_structural else []
 
     user_msg_parts: list[str] = [
         f"Round {round_index} of {MAX_ROUNDS}.",
@@ -134,6 +194,66 @@ async def select_entities_to_deepen(
             user_msg_parts.append(f"- {s} {p} {t}")
         user_msg_parts.append("")
 
+    if show_structural:
+        if bridges:
+            user_msg_parts.append("Bridges (source + target):")
+            for item in bridges:
+                if not isinstance(item, dict):
+                    continue
+                s = item.get("source_name") or item.get("source") or "?"
+                t = item.get("target_name") or item.get("target") or "?"
+                kind = item.get("bridge_type") or "bridge"
+                detail = item.get("rationale") or ", ".join(item.get("shared_terms") or [])
+                user_msg_parts.append(f"- {s} + {t} ({kind}): {str(detail)[:180]}")
+            user_msg_parts.append("")
+        if gaps:
+            user_msg_parts.append("Gaps (side A + side B):")
+            for item in gaps:
+                if not isinstance(item, dict):
+                    continue
+                sides = item.get("between") if isinstance(item.get("between"), list) else []
+                a = (
+                    item.get("cluster_a_label")
+                    or item.get("entity_a_name")
+                    or (sides[0] if len(sides) > 0 else "")
+                    or item.get("cluster_a")
+                    or "?"
+                )
+                b = (
+                    item.get("cluster_b_label")
+                    or item.get("entity_b_name")
+                    or (sides[1] if len(sides) > 1 else "")
+                    or item.get("cluster_b")
+                    or "?"
+                )
+                gap_type = item.get("gap_type") or item.get("type") or "gap"
+                question = item.get("question") or item.get("q") or ""
+                user_msg_parts.append(f"- {a} + {b} ({gap_type}): {str(question)[:180]}")
+            user_msg_parts.append("")
+        if analogies:
+            user_msg_parts.append("Analogies (source + target):")
+            for item in analogies:
+                if not isinstance(item, dict):
+                    continue
+                s = item.get("source_name") or item.get("source") or "?"
+                t = item.get("target_name") or item.get("target") or "?"
+                sim = item.get("topology_sim")
+                sim_text = f", topology_sim={sim}" if sim is not None else ""
+                rationale = item.get("rationale") or ""
+                user_msg_parts.append(f"- {s} + {t}{sim_text}: {str(rationale)[:180]}")
+            user_msg_parts.append("")
+        if transfers:
+            user_msg_parts.append("Transfers (hub + target domain/entity):")
+            for item in transfers:
+                if not isinstance(item, dict):
+                    continue
+                hub = item.get("hub_name") or item.get("hub") or "?"
+                targets = item.get("target_domains") or [item.get("target_name") or item.get("target_domain") or item.get("target")]
+                target_text = ", ".join(str(v) for v in targets if v) or "?"
+                rationale = item.get("rationale") or ""
+                user_msg_parts.append(f"- {hub} + {target_text}: {str(rationale)[:180]}")
+            user_msg_parts.append("")
+
     user_msg_parts.append(
         "Which entities would you deepen before the analyst writes the "
         "synthesis? Output JSON only."
@@ -141,7 +261,7 @@ async def select_entities_to_deepen(
     user_msg = "\n".join(user_msg_parts)
 
     messages = [
-        {"role": "system", "content": _SELECT_DEEPEN_PROMPT},
+        {"role": "system", "content": prompt},
         {"role": "user", "content": user_msg},
     ]
     extra: dict[str, Any] = dict(creds.get("extra_params") or {})
@@ -195,9 +315,9 @@ async def select_entities_to_deepen(
         # in the packet. The prompt asks for this but a model might
         # still hallucinate. Cheap O(N) substring check across the
         # evidence + edge text we sent it.
-        if not _entity_appears_in_packet(s, packet):
+        if not _selection_appears_in_packet(s, packet):
             logger.info(
-                "agentic select-deepen: dropping hallucinated entity %r",
+                "agentic select-deepen: dropping hallucinated selection %r",
                 s,
             )
             continue
@@ -233,7 +353,88 @@ def _entity_appears_in_packet(entity_name: str, packet: dict[str, Any]) -> bool:
     for anchor in packet.get("anchors") or []:
         if needle in str(anchor).lower():
             return True
+    structural_fields = {
+        "bridges": (
+            "source",
+            "target",
+            "source_name",
+            "target_name",
+            "bridge_type",
+            "rationale",
+            "shared_terms",
+        ),
+        "gaps": (
+            "cluster_a",
+            "cluster_b",
+            "cluster_a_label",
+            "cluster_b_label",
+            "entity_a_name",
+            "entity_b_name",
+            "question",
+            "gap_type",
+            "type",
+            "between",
+            "source_domain",
+            "target_domain",
+        ),
+        "analogies": (
+            "source",
+            "target",
+            "source_name",
+            "target_name",
+            "source_domain",
+            "target_domain",
+            "rationale",
+        ),
+        "transfers": (
+            "hub",
+            "hub_name",
+            "hub_domain",
+            "target",
+            "target_name",
+            "target_domain",
+            "target_domains",
+            "rationale",
+            "analogs",
+        ),
+    }
+    for section, fields in structural_fields.items():
+        for item in (packet.get(section) or [])[:24]:
+            if not isinstance(item, dict):
+                continue
+            haystack = " ".join(_stringify_structural_value(item.get(field)) for field in fields)
+            if needle in haystack.lower():
+                return True
     return False
+
+
+def _stringify_structural_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        return " ".join(_stringify_structural_value(v) for v in value.values())
+    if isinstance(value, list):
+        return " ".join(_stringify_structural_value(v) for v in value)
+    return str(value)
+
+
+def _split_deepen_selection(selection: str) -> list[str]:
+    raw = str(selection or "").strip()
+    if not raw:
+        return []
+    parts = [
+        part.strip(" \t\r\n`'\"")
+        for part in re.split(r"\s*(?:\+|<->|↔)\s*", raw)
+        if part.strip(" \t\r\n`'\"")
+    ]
+    return parts or [raw]
+
+
+def _selection_appears_in_packet(selection: str, packet: dict[str, Any]) -> bool:
+    parts = _split_deepen_selection(selection)
+    if not parts:
+        return False
+    return all(_entity_appears_in_packet(part, packet) for part in parts)
 
 
 async def run_agentic_loop(
@@ -243,6 +444,7 @@ async def run_agentic_loop(
     creds: dict[str, Any],
     llm_service,
     retrieve_for_entity: Callable[[str], Any],
+    synthesis_mode: str = "nuance",
     max_rounds: int = MAX_ROUNDS,
 ) -> dict[str, Any]:
     """Run the bounded deepening loop. Returns the (merged) packet.
@@ -278,6 +480,7 @@ async def run_agentic_loop(
             user_query=user_query,
             round_index=round_index,
             creds=creds,
+            synthesis_mode=synthesis_mode,
         )
         if not entities:
             logger.info(
@@ -295,35 +498,42 @@ async def run_agentic_loop(
         added_this_round = 0
         deduped_this_round = 0
         for entity in entities:
-            if entity.lower() in deepened_entities:
+            entity_parts = _split_deepen_selection(entity)
+            if not entity_parts:
+                continue
+            if all(part.lower() in deepened_entities for part in entity_parts):
                 # Avoid loop-pumping on the same entity round after round.
                 continue
-            deepened_entities.add(entity.lower())
-            try:
-                new_evidence = await retrieve_for_entity(entity)
-            except Exception as exc:
-                logger.warning(
-                    "agentic loop: retrieve_for_entity(%r) failed: %s",
-                    entity, exc,
-                )
-                continue
-            if not new_evidence:
-                continue
-            for item in new_evidence:
-                if not isinstance(item, dict):
+            for part in entity_parts:
+                if part.lower() in deepened_entities:
                     continue
-                cid = str(item.get("chunk_id") or "")
-                # Dedup against base packet AND prior agentic rounds.
-                # An empty chunk_id (some retrievers may omit it) is
-                # ALWAYS allowed through; we'd rather have a duplicate
-                # than drop unique-but-unidentified content.
-                if cid and cid in seen_chunk_ids:
-                    deduped_this_round += 1
+                deepened_entities.add(part.lower())
+                try:
+                    new_evidence = await retrieve_for_entity(part)
+                except Exception as exc:
+                    logger.warning(
+                        "agentic loop: retrieve_for_entity(%r) failed: %s",
+                        part,
+                        exc,
+                    )
                     continue
-                if cid:
-                    seen_chunk_ids.add(cid)
-                merged_evidence.append(item)
-                added_this_round += 1
+                if not new_evidence:
+                    continue
+                for item in new_evidence:
+                    if not isinstance(item, dict):
+                        continue
+                    cid = str(item.get("chunk_id") or "")
+                    # Dedup against base packet AND prior agentic rounds.
+                    # An empty chunk_id (some retrievers may omit it) is
+                    # ALWAYS allowed through; we'd rather have a duplicate
+                    # than drop unique-but-unidentified content.
+                    if cid and cid in seen_chunk_ids:
+                        deduped_this_round += 1
+                        continue
+                    if cid:
+                        seen_chunk_ids.add(cid)
+                    merged_evidence.append(item)
+                    added_this_round += 1
 
         trace.append({
             "round": round_index,

@@ -9,7 +9,8 @@ Flow (spec §RETRIEVAL RECIPE):
   [3] FUNNEL A (summaries, polymath_hrag) [fair-mode skips for multi-corpus]
     + FUNNEL B (children, polymath_naive)  [per-corpus round-robin: 20 each]
     + lexical MongoDB recall for hydrated tiers (bounded by speed profile)
-  [4] merge fact seeds + vector + lexical & dedupe by parent_id
+    + document-title anchor recall for hydrated tiers
+  [4] merge fact seeds + vector + lexical + document anchors & dedupe by parent_id
   [5] Mode A graph expansion (qdrant_mongo_graph tier + NEO4J_ENABLED only)
   [6] rerank ONCE on full pool (ms-marco sidecar, fallback: score sort)
   [7] trim to DEFAULT_RETRIEVAL_K
@@ -31,19 +32,20 @@ from config import get_settings
 from models.schemas import RetrievalResult, RetrievalTier, SourceChunk, SourceFact
 from services.embedder import embed_query
 from services.reranker import reranker_service
+from services.retriever.document_anchor import document_anchor_retriever
 from services.retriever.funnel_a import funnel_a
 from services.retriever.funnel_b import funnel_b
-from services.retriever.hydrate import hydrate_chunks
-from services.retriever.lexical import _terms, lexical_retriever
 from services.retriever.graph_rerank import (
     apply_graph_degree_boost,
     apply_graph_degree_boost_metrics_aware,
 )
+from services.retriever.hydrate import hydrate_chunks
 from services.retriever.intent_policy import (
     QueryNeed,
     adaptive_funnel_limits,
     infer_retrieval_intent,
 )
+from services.retriever.lexical import _terms, lexical_retriever
 from services.retriever.merge import merge_pools
 from services.retriever.mode_a import mode_a_expansion
 from services.retriever.ranking_policy import (
@@ -110,6 +112,16 @@ def _lexical_limit_for(
     if retrieval_k >= 40:
         return 12
     return 6
+
+
+def _document_anchor_limit_for(effective_tier: RetrievalTier, *, retrieval_k: int) -> int:
+    """Small source-title recall budget for hydrated tiers.
+
+    This is metadata/Mongo-backed recall, so Vector Base must not use it.
+    """
+    if effective_tier == RetrievalTier.qdrant_only:
+        return 0
+    return 8 if retrieval_k >= 40 else 4
 
 
 def _has_query_term_overlap(chunks: list[SourceChunk], query: str) -> bool:
@@ -624,6 +636,10 @@ class RetrieverOrchestrator:
                     retrieval_k=single_limit,
                     rerank_enabled=rerank_enabled,
                 )
+                document_anchor_limit = _document_anchor_limit_for(
+                    effective_tier,
+                    retrieval_k=single_limit,
+                )
                 lexical = (
                     await lexical_retriever.search(
                         rank_query,
@@ -631,6 +647,15 @@ class RetrieverOrchestrator:
                         top_k=lexical_limit,
                     )
                     if lexical_limit > 0
+                    else []
+                )
+                document_anchors = (
+                    await document_anchor_retriever.search(
+                        rank_query,
+                        corpus_ids,
+                        top_k=document_anchor_limit,
+                    )
+                    if document_anchor_limit > 0
                     else []
                 )
                 fallback_fact_seeds = apply_candidate_weights(
@@ -643,7 +668,16 @@ class RetrieverOrchestrator:
                     intent=retrieval_intent,
                     tier=effective_tier,
                 )
-                fallback_pool = merge_pools(fallback_fact_seeds, fallback_lexical)
+                fallback_doc_anchors = apply_candidate_weights(
+                    document_anchors,
+                    intent=retrieval_intent,
+                    tier=effective_tier,
+                )
+                fallback_pool = merge_pools(
+                    fallback_fact_seeds,
+                    fallback_lexical,
+                    fallback_doc_anchors,
+                )
                 if fallback_pool:
                     if rerank_enabled:
                         try:
@@ -740,6 +774,10 @@ class RetrieverOrchestrator:
             retrieval_k=single_limit,
             rerank_enabled=rerank_enabled,
         )
+        document_anchor_limit = _document_anchor_limit_for(
+            effective_tier,
+            retrieval_k=single_limit,
+        )
 
         # [3] Parallel Funnel A + B (+ lexical for hybrid/graph tiers)
         multi = corpus_ids is not None and len(corpus_ids) > 1
@@ -774,17 +812,34 @@ class RetrieverOrchestrator:
             lexical_task = lexical_retriever.search(
                 rank_query, corpus_ids, top_k=lexical_limit
             )
+            document_anchor_task = (
+                document_anchor_retriever.search(
+                    rank_query,
+                    corpus_ids,
+                    top_k=document_anchor_limit,
+                )
+                if document_anchor_limit > 0
+                else asyncio.sleep(0, result=[])
+            )
             # Partial-failure safety: if any single funnel raises (Qdrant
             # timeout, Mongo blip, network drop), we want the OTHER funnels'
             # results to still flow through. `return_exceptions=True`
             # surfaces the exception as a value in the gather result, which
             # `_unwrap` then converts to an empty list with a warning log.
             # Pre-fix: any funnel raise = entire chat/graph query 500.
-            raw_a, raw_lex, *raw_b = await asyncio.gather(
-                a_task, lexical_task, *b_tasks, return_exceptions=True
+            raw_a, raw_lex, raw_doc_anchor, *raw_b = await asyncio.gather(
+                a_task,
+                lexical_task,
+                document_anchor_task,
+                *b_tasks,
+                return_exceptions=True,
             )
             a_results = _unwrap_funnel_result(raw_a, "funnel_a")
             lexical_results = _unwrap_funnel_result(raw_lex, "lexical")
+            document_anchor_results = _unwrap_funnel_result(
+                raw_doc_anchor,
+                "document_anchor",
+            )
             per_corpus_b = [
                 _unwrap_funnel_result(r, f"funnel_b[{i}]")
                 for i, r in enumerate(raw_b)
@@ -793,7 +848,7 @@ class RetrieverOrchestrator:
         else:
             a_kwargs = {"top_k": funnel_limits.summary_top_k}
             # Same partial-failure safety as the multi-corpus branch above.
-            raw_a, raw_b, raw_lex = await asyncio.gather(
+            raw_a, raw_b, raw_lex, raw_doc_anchor = await asyncio.gather(
                 funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs),
                 funnel_b.search(
                     query_vector,
@@ -802,15 +857,29 @@ class RetrieverOrchestrator:
                     top_k=funnel_limits.child_top_k,
                 ),
                 lexical_retriever.search(rank_query, corpus_ids, top_k=lexical_limit),
+                (
+                    document_anchor_retriever.search(
+                        rank_query,
+                        corpus_ids,
+                        top_k=document_anchor_limit,
+                    )
+                    if document_anchor_limit > 0
+                    else asyncio.sleep(0, result=[])
+                ),
                 return_exceptions=True,
             )
             a_results = _unwrap_funnel_result(raw_a, "funnel_a")
             b_results = _unwrap_funnel_result(raw_b, "funnel_b")
             lexical_results = _unwrap_funnel_result(raw_lex, "lexical")
+            document_anchor_results = _unwrap_funnel_result(
+                raw_doc_anchor,
+                "document_anchor",
+            )
         _add_timing("funnels", phase_started)
         counts["funnel_a"] = len(a_results)
         counts["funnel_b"] = len(b_results)
         counts["lexical"] = len(lexical_results)
+        counts["document_anchor"] = len(document_anchor_results)
         if fact_seed_chunks:
             fact_seed_chunks = apply_candidate_weights(
                 fact_seed_chunks,
@@ -832,6 +901,11 @@ class RetrieverOrchestrator:
             intent=retrieval_intent,
             tier=effective_tier,
         )
+        document_anchor_results = apply_candidate_weights(
+            document_anchor_results,
+            intent=retrieval_intent,
+            tier=effective_tier,
+        )
 
         def _result(chunks: list[SourceChunk]) -> RetrievalResult:
             return RetrievalResult(
@@ -847,7 +921,13 @@ class RetrieverOrchestrator:
         # filename/heading hits and query-entity facts can seed Neo4j context
         # when Graph Augmented is active.
         phase_started = perf_counter()
-        merged = merge_pools(fact_seed_chunks, a_results, b_results, lexical_results)
+        merged = merge_pools(
+            fact_seed_chunks,
+            a_results,
+            b_results,
+            lexical_results,
+            document_anchor_results,
+        )
         counts["merged_initial"] = len(merged)
         _add_timing("merge", phase_started)
         if not merged:

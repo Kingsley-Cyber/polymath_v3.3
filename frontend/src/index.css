@@ -168,6 +168,66 @@
         @apply pl-4 py-3 border border-border-minimal text-content-secondary text-sm bg-background-surface mb-4 font-mono;
     }
 
+    .synthesis-body {
+        color: var(--text-secondary);
+        line-height: 1.65;
+    }
+
+    .synthesis-body h1,
+    .synthesis-body h2,
+    .synthesis-body h3 {
+        color: var(--text-primary);
+        font-weight: 700;
+        line-height: 1.25;
+        margin: 0.85rem 0 0.4rem;
+    }
+
+    .synthesis-body h1 {
+        font-size: 0.98rem;
+    }
+
+    .synthesis-body h2 {
+        border-top: 1px solid var(--border-subtle);
+        font-size: 0.86rem;
+        padding-top: 0.7rem;
+    }
+
+    .synthesis-body h3 {
+        font-size: 0.78rem;
+    }
+
+    .synthesis-body p,
+    .synthesis-body ul,
+    .synthesis-body ol {
+        margin: 0.45rem 0;
+    }
+
+    .synthesis-body ul,
+    .synthesis-body ol {
+        padding-left: 1.1rem;
+    }
+
+    .synthesis-body li {
+        margin: 0.25rem 0;
+    }
+
+    .synthesis-body strong {
+        color: var(--text-primary);
+        font-weight: 700;
+    }
+
+    .synthesis-body em {
+        color: var(--text-tertiary);
+        font-style: italic;
+    }
+
+    .synthesis-body code {
+        border: 1px solid var(--border-subtle);
+        background: var(--bg-raised);
+        color: var(--accent-primary);
+        padding: 0.08rem 0.22rem;
+    }
+
     /* Input Area - Pure, stark terminal lines */
     .chat-input-container {
         @apply relative border-t border-border-minimal bg-background-base transition-colors duration-150;

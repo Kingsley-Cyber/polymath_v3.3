@@ -7,6 +7,7 @@ import re
 import sys
 import time as _time
 import types
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
@@ -123,6 +124,7 @@ _PACKET_MAX_ANALOGIES = 4
 _PACKET_MAX_TRANSFERS = 4
 _PACKET_MAX_BRIDGES = 4
 _PACKET_MAX_FRAGILE_BRIDGES = 3
+_PACKET_MAX_TENSIONS = 3
 _PACKET_MAX_EVIDENCE = 6
 _PACKET_EVIDENCE_TEXT_LIMIT = 260
 _PACKET_RETRIEVER_PRE_RERANK_K = 40
@@ -130,6 +132,55 @@ _PACKET_RETRIEVER_RERANK_POOL = 40
 _PACKET_RETRIEVER_GRAPH_EXPANSION = 20
 _PACKET_MAX_GATEWAYS = 5
 _PACKET_MAX_SUPPORTING_STATEMENTS = 4
+
+
+@dataclass(frozen=True)
+class _PacketCaps:
+    entities: int = _PACKET_MAX_ENTITIES
+    communities: int = _PACKET_MAX_COMMUNITIES
+    edges: int = _PACKET_MAX_EDGES
+    gaps: int = _PACKET_MAX_GAPS
+    signals: int = _PACKET_MAX_SIGNALS
+    weak_links: int = _PACKET_MAX_WEAK_LINKS
+    analogies: int = _PACKET_MAX_ANALOGIES
+    transfers: int = _PACKET_MAX_TRANSFERS
+    bridges: int = _PACKET_MAX_BRIDGES
+    fragile_bridges: int = _PACKET_MAX_FRAGILE_BRIDGES
+    tensions: int = _PACKET_MAX_TENSIONS
+    evidence: int = _PACKET_MAX_EVIDENCE
+
+
+_DEFAULT_PACKET_CAPS = _PacketCaps()
+
+
+def _packet_caps_for_mode(synthesis_mode: str = "research") -> _PacketCaps:
+    """Mode-specific prompt budgets.
+
+    Nuance keeps the historical structural caps; its change is interpretive
+    framing plus a little more room for closure/directions.
+    """
+
+    mode = (synthesis_mode or "research").strip().lower()
+    if mode == "research":
+        return _PacketCaps(
+            edges=12,
+            gaps=2,
+            analogies=0,
+            transfers=0,
+            bridges=2,
+            fragile_bridges=0,
+            evidence=12,
+        )
+    if mode == "ideation":
+        return _PacketCaps(
+            edges=10,
+            gaps=6,
+            analogies=5,
+            transfers=5,
+            bridges=6,
+            evidence=5,
+        )
+    return _DEFAULT_PACKET_CAPS
 
 # Synthesis-time LLM budget. Keep the call fast; the packet is bounded so the
 # model has plenty of room without burning the whole turn budget. Longer essay
@@ -140,6 +191,7 @@ _SYNTHESIS_TIMEOUT_SECONDS = 120.0
 # burn extra reasoning tokens before emitting prose; we accept that and keep
 # the cap modest because the output itself is bounded by the prompt.
 _SYNTHESIS_MAX_TOKENS = 1400
+_SYNTHESIS_MAX_TOKENS_NUANCE = 1800
 _SYNTHESIS_TEMPERATURE = 0.55
 _SYNTHESIS_HEADLINE_RE = re.compile(r"^\s*#\s+(.+?)\s*$", re.MULTILINE)
 _SYNTHESIS_CITATION_RE = re.compile(r"\[(\d{1,3})\]")
@@ -159,6 +211,12 @@ _GRAPH_RELEVANCE_STOPWORDS = {
     "query",
     "its",
 }
+
+
+def _synthesis_max_tokens_for_mode(synthesis_mode: str = "research") -> int:
+    if (synthesis_mode or "").strip().lower() == "nuance":
+        return _SYNTHESIS_MAX_TOKENS_NUANCE
+    return _SYNTHESIS_MAX_TOKENS
 
 
 def _text(value: Any, limit: int = 700) -> str:
@@ -1241,6 +1299,7 @@ def _curated_evidence_rows(
     source_docs: list[Any],
     *,
     query: str,
+    max_evidence: int = _PACKET_MAX_EVIDENCE,
 ) -> tuple[list[dict[str, Any]], int, bool, dict[str, int]]:
     """Curate retrieved chunks into the synthesis evidence packet.
 
@@ -1292,7 +1351,8 @@ def _curated_evidence_rows(
     # become inevitable instead of lucky. The second pass fills any remaining
     # slots from the deferred queue (when only one or two docs were anchored,
     # the cap relaxes naturally).
-    diversity_cap = max(2, _PACKET_MAX_EVIDENCE // 3)
+    max_evidence = max(1, int(max_evidence or _PACKET_MAX_EVIDENCE))
+    diversity_cap = max(2, max_evidence // 3)
     accepted: list[tuple[float, int, dict[str, Any], list[str]]] = []
     deferred: list[tuple[float, int, dict[str, Any], list[str]]] = []
     per_doc: dict[str, int] = {}
@@ -1310,12 +1370,12 @@ def _curated_evidence_rows(
             continue
         accepted.append(entry)
         per_doc[doc_key] = per_doc.get(doc_key, 0) + 1
-        if len(accepted) >= _PACKET_MAX_EVIDENCE:
+        if len(accepted) >= max_evidence:
             break
-    if len(accepted) < _PACKET_MAX_EVIDENCE:
+    if len(accepted) < max_evidence:
         for entry in deferred:
             accepted.append(entry)
-            if len(accepted) >= _PACKET_MAX_EVIDENCE:
+            if len(accepted) >= max_evidence:
                 break
 
     # No fallback when only structurally-disqualified chunks were retrieved.
@@ -1404,17 +1464,20 @@ async def _retrieve_packet_source_docs(
     *,
     corpus_id: str,
     query: str,
+    synthesis_mode: str = "research",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Retrieve the evidence packet through the same retriever used by chat."""
 
+    caps = _packet_caps_for_mode(synthesis_mode)
     meta: dict[str, Any] = {
         "source": "shared_chat_retriever",
         "requested_tier": "qdrant_mongo_graph",
-        "final_top_k": _PACKET_MAX_EVIDENCE,
+        "final_top_k": caps.evidence,
         "pre_rerank_k": _PACKET_RETRIEVER_PRE_RERANK_K,
         "rerank_pool": _PACKET_RETRIEVER_RERANK_POOL,
         "neo4j_expansion_cap": _PACKET_RETRIEVER_GRAPH_EXPANSION,
         "chunks": 0,
+        "synthesis_mode": synthesis_mode,
     }
     try:
         from models.schemas import RetrievalTier
@@ -1433,7 +1496,7 @@ async def _retrieve_packet_source_docs(
             similarity_threshold=None,
             neo4j_expansion_cap=_PACKET_RETRIEVER_GRAPH_EXPANSION,
             max_corpora_per_query=1,
-            final_top_k=_PACKET_MAX_EVIDENCE,
+            final_top_k=caps.evidence,
         )
     except Exception as exc:
         logger.warning("graph packet shared retriever failed: %s", exc)
@@ -1452,7 +1515,7 @@ async def _retrieve_packet_source_docs(
     )
     rows = _source_docs_from_retrieval_chunks(
         list(getattr(retrieval, "chunks", []) or []),
-        max_chunks=_PACKET_MAX_EVIDENCE,
+        max_chunks=caps.evidence,
     )
     meta["chunks"] = len(rows)
     hydrated_trace = await _hydrate_trace_source_docs(
@@ -1462,7 +1525,7 @@ async def _retrieve_packet_source_docs(
     )
     hydrated_rows = [
         row for row in (hydrated_trace.get("source_docs") or rows) if isinstance(row, dict)
-    ][:_PACKET_MAX_EVIDENCE]
+    ][: caps.evidence]
     meta["hydrated_chunks"] = len(hydrated_rows)
     return hydrated_rows, meta
 
@@ -1821,7 +1884,13 @@ def _graph_hint_from_packet(packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, Any]:
+def _build_insight_packet(
+    result: Any,
+    query: str,
+    corpus_id: str,
+    *,
+    synthesis_mode: str = "research",
+) -> dict[str, Any]:
     """Assemble the bounded LLM input packet from cached legacy outputs.
 
     Inputs are the legacy DiscoverResult plus the original query/corpus_id.
@@ -1829,6 +1898,7 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
     orchestrator already cached. Hard caps keep the prompt budget small.
     """
 
+    caps = _packet_caps_for_mode(synthesis_mode)
     trace = _coerce_dict(getattr(result, "trace", {}) or {})
     headline_payload = getattr(result, "headline", {}) or {}
     headline_text = (
@@ -1898,12 +1968,12 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
             }
         )
         seen_entity_ids.add(eid)
-        if len(entities) >= _PACKET_MAX_ENTITIES:
+        if len(entities) >= caps.entities:
             break
 
     # If working_entities was sparse, top up from graph nodes by degree so the
     # LLM still has names to anchor to.
-    if len(entities) < _PACKET_MAX_ENTITIES:
+    if len(entities) < caps.entities:
         leftover = [
             (nid, raw)
             for nid, raw in graph_nodes_index.items()
@@ -1911,7 +1981,7 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
             and (not relevance_entity_ids or nid in relevance_entity_ids)
         ]
         leftover.sort(key=lambda kv: float(kv[1].get("degree") or 0), reverse=True)
-        for nid, raw in leftover[: _PACKET_MAX_ENTITIES - len(entities)]:
+        for nid, raw in leftover[: caps.entities - len(entities)]:
             entities.append(
                 {
                     "entity_id": nid,
@@ -1985,7 +2055,7 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
         scoped_groups.values(),
         key=lambda row: (int(row.get("scope_count") or 0), float(row.get("degree") or 0)),
         reverse=True,
-    )[:_PACKET_MAX_COMMUNITIES]:
+    )[: caps.communities]:
         communities.append(
             {
                 "concept_id": str(group.get("concept_id") or ""),
@@ -2027,7 +2097,7 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
                 "role": str(raw.get("role") or raw.get("emphasis") or "context"),
             }
         )
-        if len(edges) >= _PACKET_MAX_EDGES:
+        if len(edges) >= caps.edges:
             break
 
     # ── evidence chunks (with temporal-support detection) ──────────────────
@@ -2039,6 +2109,7 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
     evidence, evidence_rejected, temporal_support, rejection_reasons = _curated_evidence_rows(
         source_docs,
         query=query,
+        max_evidence=caps.evidence,
     )
     evidence_all_rejected = raw_evidence_count > 0 and len(evidence) == 0
     evidence_terms = _evidence_term_index(evidence)
@@ -2053,6 +2124,8 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
         if str(group.get("concept_id") or "").startswith("concept:")
     }
     for gap in (getattr(result, "gaps_v2", []) or []):
+        if len(gaps) >= caps.gaps:
+            break
         if not isinstance(gap, dict):
             continue
         include_gap, support_status = _gap_supported_by_scope(
@@ -2085,13 +2158,13 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
                 "support_status": support_status,
             }
         )
-        if len(gaps) >= _PACKET_MAX_GAPS:
-            break
 
     # ── signals (latent topics — never call them "trends") ─────────────────
     signals: list[dict[str, Any]] = []
     relevance_terms = _graph_relevance_terms(query)
     for topic in (getattr(result, "latent_topics", []) or []):
+        if len(signals) >= caps.signals:
+            break
         if not isinstance(topic, dict):
             continue
         topic_id = str(topic.get("entity_id") or "")
@@ -2122,8 +2195,6 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
                 "rationale": _text(topic.get("rationale") or "", 220),
             }
         )
-        if len(signals) >= _PACKET_MAX_SIGNALS:
-            break
     if not signals:
         source_doc_rows = trace.get("source_docs") or []
         if not isinstance(source_doc_rows, list):
@@ -2135,7 +2206,7 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
                 if isinstance(row, dict) and row.get("doc_id")
             }
         )
-        for group in communities[:_PACKET_MAX_SIGNALS]:
+        for group in communities[: caps.signals]:
             top_entities = [str(e) for e in (group.get("top_entities") or [])[:4] if e]
             mentions = int(group.get("scope_count") or len(top_entities) or 1)
             signal_name = str(group.get("label") or "Query-scoped signal")
@@ -2158,7 +2229,7 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
                     ),
                 }
             )
-            if len(signals) >= _PACKET_MAX_SIGNALS:
+            if len(signals) >= caps.signals:
                 break
 
     # ── conceptual bridge material for nuance / ideation ───────────────────
@@ -2190,6 +2261,8 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
     analogies: list[dict[str, Any]] = []
     seen_analogy_keys: set[tuple[str, str]] = set()
     for raw in list(getattr(result, "analogies", []) or []) + _metric_items("structural_analogies"):
+        if len(analogies) >= caps.analogies:
+            break
         if not isinstance(raw, dict):
             continue
         source = str(raw.get("source") or raw.get("entity_a_id") or raw.get("a") or "").strip()
@@ -2217,12 +2290,12 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
                 "rationale": _text(raw.get("rationale") or raw.get("question") or "", 220),
             }
         )
-        if len(analogies) >= _PACKET_MAX_ANALOGIES:
-            break
 
     transfers: list[dict[str, Any]] = []
     seen_transfer_keys: set[tuple[str, str]] = set()
     for raw in list(getattr(result, "transfers", []) or []) + _metric_items("transfer_candidates"):
+        if len(transfers) >= caps.transfers:
+            break
         if not isinstance(raw, dict):
             continue
         hub = str(raw.get("hub") or raw.get("source") or raw.get("entity_a_id") or "").strip()
@@ -2259,12 +2332,12 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
                 "rationale": _text(raw.get("rationale") or raw.get("question") or "", 220),
             }
         )
-        if len(transfers) >= _PACKET_MAX_TRANSFERS:
-            break
 
     bridge_candidates: list[dict[str, Any]] = []
     seen_bridge_keys: set[tuple[str, str, str]] = set()
     for raw in list(getattr(result, "bridges_v2", []) or []) + list(getattr(result, "bridges", []) or []):
+        if len(bridge_candidates) >= caps.bridges:
+            break
         if not isinstance(raw, dict):
             continue
         source = str(raw.get("source_entity_id") or raw.get("source") or raw.get("entity_a_id") or "").strip()
@@ -2289,11 +2362,11 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
                 "rationale": _text(raw.get("rationale") or raw.get("evidence") or raw.get("question") or "", 220),
             }
         )
-        if len(bridge_candidates) >= _PACKET_MAX_BRIDGES:
-            break
 
     fragile_bridges: list[dict[str, Any]] = []
     for raw in _metric_items("fragile_bridges"):
+        if len(fragile_bridges) >= caps.fragile_bridges:
+            break
         source = str(raw.get("source") or "").strip()
         target = str(raw.get("target") or "").strip()
         if not source or not target or not _touches_scope(source, target):
@@ -2311,12 +2384,12 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
                 "evidence": _text(raw.get("evidence") or "", 220),
             }
         )
-        if len(fragile_bridges) >= _PACKET_MAX_FRAGILE_BRIDGES:
-            break
 
     # ── weak links (provenance warnings, not gaps) ─────────────────────────
     weak_links: list[dict[str, Any]] = []
     for weak in (getattr(result, "weak_links", []) or []):
+        if len(weak_links) >= caps.weak_links:
+            break
         if not isinstance(weak, dict):
             continue
         weak_source = str(weak.get("source") or "")
@@ -2334,8 +2407,43 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
                 "rationale": _text(weak.get("rationale") or weak.get("evidence") or "", 240),
             }
         )
-        if len(weak_links) >= _PACKET_MAX_WEAK_LINKS:
+
+    tensions: list[dict[str, Any]] = []
+    for raw in (getattr(result, "tensions", []) or []):
+        if len(tensions) >= caps.tensions:
             break
+        if not isinstance(raw, dict):
+            continue
+        frames = []
+        for frame in (raw.get("frames") or [])[:3]:
+            if isinstance(frame, dict):
+                frames.append(
+                    {
+                        "label": _text(frame.get("label") or frame.get("name") or "", 40),
+                        "body": _text(
+                            frame.get("body")
+                            or frame.get("summary")
+                            or frame.get("description")
+                            or "",
+                            200,
+                        ),
+                    }
+                )
+            else:
+                frames.append({"label": "", "body": _text(frame, 200)})
+        tensions.append(
+            {
+                "label": _text(raw.get("label") or raw.get("name") or "", 60),
+                "summary": _text(
+                    raw.get("summary")
+                    or raw.get("rationale")
+                    or raw.get("description")
+                    or "",
+                    180,
+                ),
+                "frames": frames,
+            }
+        )
 
     # ── trace stages (already populated by _trace_with_stages) ─────────────
     stages_raw = trace.get("stages") or []
@@ -2373,6 +2481,12 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
         "collections": _qdrant_collections_for_packet(corpus_id),
         "interpretation": _text(getattr(result, "interpretation", "") or "", 480),
         "headline": _text(headline_text, 240),
+        "intent_profile": (
+            getattr(result, "intent_profile", None)
+            if isinstance(getattr(result, "intent_profile", None), dict)
+            else {}
+        )
+        or {},
         "retrieval": trace.get("retrieval_evidence") or {},
         "anchors": anchors,
         "entities": entities,
@@ -2384,6 +2498,7 @@ def _build_insight_packet(result: Any, query: str, corpus_id: str) -> dict[str, 
         "transfers": transfers,
         "bridges": bridge_candidates,
         "fragile_bridges": fragile_bridges,
+        "tensions": tensions,
         "weak_links": weak_links,
         "evidence": evidence,
         "evidence_filter": {
@@ -2459,7 +2574,8 @@ def _llm_context_trace_from_packet(
         key=lambda row: (-int(row.get("chunk_count") or 0), str(row.get("source_label") or "")),
     )
 
-    user_prompt = _render_packet_user_prompt(packet)
+    caps = _packet_caps_for_mode(synthesis_mode)
+    user_prompt = _render_packet_user_prompt(packet, synthesis_mode=synthesis_mode)
     research_contract = _research_contract_for_prompt()
     system_prompt = _system_prompt_for_synthesis_mode(synthesis_mode)
 
@@ -2491,18 +2607,27 @@ def _llm_context_trace_from_packet(
             "transfers": len(packet.get("transfers") or []),
             "bridges": len(packet.get("bridges") or []),
             "fragile_bridges": len(packet.get("fragile_bridges") or []),
+            "tensions": len(packet.get("tensions") or []),
             "weak_links": len(packet.get("weak_links") or []),
             "gateways": len((packet.get("graph_hint") or {}).get("gateways") or []),
         },
         "visibility": {
-            "max_entities": _PACKET_MAX_ENTITIES,
-            "max_evidence_chunks": _PACKET_MAX_EVIDENCE,
+            "max_entities": caps.entities,
+            "max_evidence_chunks": caps.evidence,
+            "mode_caps": {
+                "edges": caps.edges,
+                "gaps": caps.gaps,
+                "bridges": caps.bridges,
+                "analogies": caps.analogies,
+                "transfers": caps.transfers,
+            },
             "evidence_text_limit": _PACKET_EVIDENCE_TEXT_LIMIT,
             "evidence_filter": packet.get("evidence_filter") or {},
             "graph_hint": packet.get("graph_hint") or {},
             "temporal_support": bool(packet.get("temporal_support")),
             "sparse": bool(packet.get("sparse")),
             "claim_levels": research_contract.get("claim_levels") or [],
+            "intent_profile": packet.get("intent_profile") or {},
         },
     }
 
@@ -2564,11 +2689,17 @@ def _humanize_predicate(label: str | None) -> str:
 
 
 _SYNTHESIS_SYSTEM_PROMPT = (
-    "You are Polymath's build analyst. The user wants concrete, specific "
+    "You are Polymath's research analyst. The user wants concrete, specific "
     "insights about their corpus — not vague abstractions or schema "
     "narration. Your job is to state what things ARE, what they DO, and "
-    "how they connect, using the exact names, APIs, file paths, and "
-    "patterns from the evidence packet.\n\n"
+    "how they connect, using exact named concepts, methods, findings, "
+    "APIs, file paths, and patterns from the evidence packet.\n\n"
+    "CURATION LANES:\n"
+    "- THESIS SPINE: prioritize evidence that directly supports the main "
+    "answer to the user's question. Build the through-line here.\n"
+    "- GRAPH EXPLORER: use bridges, gaps, relationships, and context only "
+    "when they complicate, clarify, or open a necessary adjacent point. "
+    "Do not let explorer material drown the thesis spine.\n\n"
     "OUTPUT FORMAT:\n"
     "- Markdown prose only. Start with `# headline` (≤ 140 chars).\n"
     "- Second line: italic theme `*Theme: tag · tag · tag*` — 2-4 short "
@@ -2600,11 +2731,14 @@ _SYNTHESIS_SYSTEM_PROMPT = (
     "Bad: 'The code references Humanoid [2].' "
     "Good: 'The code acquires the Humanoid via WaitForChild() and calls "
     "MoveTo() to drive locomotion [2].'\n"
-    "- Bold ONLY exact, greppable names — API methods, class names, "
-    "file paths, entity names that appear verbatim in the evidence. "
-    "The user must be able to grep their codebase for every bold term. "
-    "If you cannot point to a specific symbol or file, do not bold "
-    "the phrase.\n"
+    "- Bold ONLY exact, searchable names. When the corpus contains code, "
+    "bold specific API names, file paths, classes, and method signatures. "
+    "When the corpus contains books, papers, or prose, bold named "
+    "concepts, methods, findings, and theories — the things a reader "
+    "would grep in code or search for in an index. `Kahneman's System 1` is specific; "
+    "`the author` is not. `cue-craving-response-reward loop` is specific; "
+    "`habit formation` is usually too generic unless the evidence names "
+    "it that way.\n"
     "- If you mention a gap, state it as a SPECIFIC missing "
     "implementation: 'No file calls TweenService:Create() on a "
     "Humanoid property — joint animation is done via manual CFrame "
@@ -2633,66 +2767,92 @@ _SYNTHESIS_SYSTEM_PROMPT = (
 # (grep-able names, no API invention) are preserved from the research prompt
 # so ideation doesn't degrade into hallucinated APIs.
 _IDEATION_SYSTEM_PROMPT = (
-    "You are Polymath's build advisor. The user wants to turn their corpus "
-    "into a buildable game, app, system, or product. Your job is to surface "
-    "concrete IDEAS by combining patterns the corpus contains but never "
-    "explicitly connects.\n\n"
-    "OUTPUT FORMAT — one [BUILD IDEA] block (multiple blocks if multiple "
-    "strong ideas exist, ranked by feasibility):\n\n"
-    "# [BUILD IDEA] <catchy 3-6 word name>\n"
-    "*Theme: tag · tag · tag*\n\n"
-    "**The Hook:** one sentence — what it IS, plain enough for a "
-    "screenshot caption.\n\n"
-    "**The Mechanic:** 2-3 paragraphs explaining how it works "
-    "technically. Bold the exact API/method names that appear in the "
-    "evidence. Cite `[n]` for every claim grounded in evidence.\n\n"
-    "**Corpus Evidence:** bullet list. Each bullet cites a specific "
-    "file/source and what it proves about feasibility. "
-    "Example: '- `Humanoid:MoveTo()` is the canonical locomotion "
-    "primitive (4 files: spider.luau, npc.luau, …) [2][4]'\n\n"
-    "**Build Path:** numbered steps. Each step names the file or "
-    "module that gets touched and the API that gets called. "
-    "Example: '1. Wrap `TweenService:Create()` around `Motor6D.C0` "
-    "in a new `JointTweenService` module.'\n\n"
-    "**Feasibility:** HIGH / MEDIUM / LOW — and one sentence on WHY.\n\n"
-    "**Risk / Gap:** honest assessment. What might fail, what the "
-    "corpus does NOT contain, what you would have to invent.\n\n"
+    "You are Polymath's ideation scout. The user wants to find non-obvious "
+    "connections, transferable methods, theoretical reframes, interventions, "
+    "or buildable applications from their corpus. Your job is to surface "
+    "IDEAS by combining patterns the corpus contains but never explicitly "
+    "connects. Ideation is corpus-grounded, not corpus-limited.\n\n"
+    "CURATION LANES:\n"
+    "- THESIS SPINE: the strongest evidence anchors for the main idea. Use "
+    "these to keep the answer grounded.\n"
+    "- GRAPH EXPLORER: bridges, gaps, analogies, transfers, and edge context "
+    "that can become invention ingredients. Use this lane to create "
+    "non-obvious combinations, but label inference honestly.\n\n"
+    "OUTPUT FORMAT:\n"
+    "- Choose the block type that fits the query. [BUILD IDEA] is one option, "
+    "not the default.\n"
+    "- Use `[BUILD IDEA]` for products, systems, apps, games, or implementation "
+    "directions. Include **The Hook**, **The Mechanic**, **Corpus Evidence**, "
+    "**Build Path**, **Feasibility**, and **Risk / Gap**.\n"
+    "- Use `[METHOD TRANSFER]` when a pattern from one domain applies to "
+    "another. Name the source domain, target domain, transfer mechanism, "
+    "corpus grounding, and risk.\n"
+    "- Use `[THEORETICAL SYNTHESIS]` when two concepts from different fields "
+    "share a structure. State the shared structure, what it implies, and "
+    "where evidence supports or limits it.\n"
+    "- Use `[REFRAME]` when evidence is usually read one way but becomes more "
+    "useful under a different lens. State the old reading, the new reading, "
+    "and what changes.\n"
+    "- Use `[INTERVENTION]` when the corpus suggests an actionable change or "
+    "test. Name the intervention, target behavior/system, evidence model, "
+    "test path, and risk.\n"
+    "- If the query asks for methods, approaches, or ways forward, use "
+    "`[APPROACH]` blocks with **Name**, **Why it fits**, **Corpus grounding**, "
+    "**Gap it fills**, and **Risk**. Open-ended queries may mix block types.\n"
+    "- Rank ideas by: (1) distinct evidence anchors, (2) concreteness of "
+    "files/APIs/concepts cited, (3) novelty of bridge/gap/analogy used, "
+    "(4) clarity of implementation or reasoning path, and (5) honesty about "
+    "risks and gaps.\n"
+    "- Keep the whole answer compact enough for about 1400 output tokens.\n\n"
+    "ALWAYS END WITH `## Way Ahead`:\n"
+    "- This section is NOT limited to corpus content. It uses patterns, gaps, "
+    "and bridges from the evidence as a scaffold to suggest 2-4 concrete "
+    "approaches the user could explore.\n"
+    "- Each approach needs: a **bolded name**, one sentence on what it is and "
+    "why it fits, one sentence connecting it back to corpus evidence, and a "
+    "`[CORPUS]` or `[OUTSIDE]` label. Use `[CORPUS]` only when packet evidence "
+    "directly supports it. Use `[OUTSIDE]` for general knowledge connected "
+    "back to a corpus pattern. `[SYNTHESIS]` and `[TRANSFER]` are allowed when "
+    "the approach is inferred from multiple evidence items or moved across "
+    "domains.\n"
+    "- Rank Way Ahead approaches by evidence anchor count, implementation "
+    "path clarity, and gap-filling potential. A strong `[OUTSIDE]` approach "
+    "with a clear corpus analogy beats a thin `[CORPUS]` approach.\n"
+    "- Cap `## Way Ahead` at about 400 words total. Quality over quantity.\n\n"
     "CREATIVE RULES — this is what separates ideation from research:\n"
-    "- You MAY connect two evidence items that the corpus never "
-    "connects. Label these connections clearly as [SYNTHESIS] in the "
-    "Mechanic paragraph and explain the bridge. The user wants "
-    "buildable ideas, not a literature review.\n"
-    "- Reframe gaps as opportunities. 'No file does X' becomes 'You "
-    "could be the first to implement X because Y and Z are already "
-    "present and would compose into X.'\n"
-    "- Predict outcomes. If pattern A and pattern B exist independently "
-    "in the corpus, state what their combination would produce. Make "
-    "the prediction CONCRETE: name the API surface and the user-facing "
-    "result.\n\n"
-    "HARD CONSTRAINTS — these match the research mode and prevent "
-    "ideation from degrading into hallucination:\n"
-    "- Every **bold** API name, method name, class name, or file name "
-    "MUST appear verbatim in the evidence packet below. The user must "
-    "be able to grep their codebase for every bold term. If you cannot "
-    "point to a specific symbol in the evidence, do not bold the "
-    "phrase.\n"
-    "- NEVER invent APIs, method signatures, file names, or "
-    "class names that are not in the evidence. If you need a new API "
-    "to make the idea work, name it as a [PROPOSED API] in the Build "
-    "Path and say what it would wrap.\n"
-    "- NEVER output the strings `RELATES_TO`, `MENTIONS`, `PART_OF`, or "
-    "any other ALL_CAPS_UNDERSCORED Neo4j label. The prompt below "
-    "humanizes predicates; stay in that register.\n"
-    "- NEVER write empty-shell sentences like 'these are connected', "
-    "'a relationship exists', 'the graph suggests a bridge'. State "
-    "the MECHANISM: 'X calls Y in [2] which produces Z'.\n"
-    "- If the packet is too sparse to support an idea, say so plainly "
-    "and propose ONE smaller idea grounded in what IS present. Do not "
-    "pad.\n"
-    "- Cap each [BUILD IDEA] block at ~1500 words. Multiple ideas: "
-    "rank by feasibility, separate with `---`.\n"
+    "- You MAY connect evidence items the corpus never connects. Label these "
+    "connections clearly as [SYNTHESIS] and explain the bridge. The user wants "
+    "invention ingredients, not a literature review.\n"
+    "- Reframe gaps as opportunities. 'No file does X' becomes 'X is a "
+    "promising next move because Y and Z are already present and compose into "
+    "it.'\n"
+    "- Predict outcomes. If pattern A and pattern B exist independently, state "
+    "what their combination would produce. Make the prediction CONCRETE: name "
+    "the API surface, concept, intervention target, or user-facing result.\n\n"
+    "HARD CONSTRAINTS — these prevent ideation from degrading into "
+    "hallucination:\n"
+    "- Every **bold** API name, method name, class name, file name, named "
+    "concept, method, finding, or theory labeled `[CORPUS]` MUST appear "
+    "verbatim in the evidence packet. The user must be able to grep code or "
+    "search an index for it. If you cannot point to evidence, label it "
+    "`[OUTSIDE]`, `[SYNTHESIS]`, or `[TRANSFER]` instead.\n"
+    "- NEVER invent APIs, method signatures, file names, or class names that "
+    "are not in the evidence. If you need a new API to make the idea work, "
+    "name it as a [PROPOSED API] and say what evidence-backed pattern it "
+    "would wrap.\n"
+    "- NEVER output the strings `RELATES_TO`, `MENTIONS`, `PART_OF`, or any "
+    "other ALL_CAPS_UNDERSCORED Neo4j label. The prompt below humanizes "
+    "predicates; stay in that register.\n"
+    "- NEVER write empty-shell sentences like 'these are connected', 'a "
+    "relationship exists', or 'the graph suggests a bridge'. State the "
+    "MECHANISM: 'X calls Y in [2] which produces Z', or 'X and Y share a "
+    "state-machine structure across [1] and [3]'.\n"
+    "- If the packet is too sparse to support a strong idea, say so plainly "
+    "and give ONE smaller grounded move plus a clearly labeled Way Ahead. Do "
+    "not pad.\n"
     "- Distinguish observed evidence [n] from speculative combinations "
-    "[SYNTHESIS]. Both are allowed; never blend them silently."
+    "[SYNTHESIS], cross-domain movement [TRANSFER], and external options "
+    "[OUTSIDE]. Never blend them silently."
 )
 
 
@@ -2725,7 +2885,20 @@ _NUANCE_SYSTEM_PROMPT = (
     "- Then 3-6 short sections or paragraphs. Use headings only when they "
     "help: `## What is really going on`, `## Gaps`, `## Bridges`, or more "
     "specific concept names are all acceptable.\n"
-    "- Stay under ~900 words unless the packet is unusually rich.\n\n"
+    "- Include a `## Forward Look` section when the packet supports a "
+    "reasonable prediction. Label it `[PREDICTION]`, say what pattern seems "
+    "to be forming, and keep uncertainty explicit.\n"
+    "- End with a `## What This Means For You` section: 2-3 sentences that "
+    "read the user's likely intent behind their query and reconnect them to "
+    "it. Do not be presumptuous; frame it as `If you are trying to figure out "
+    "X, then the evidence suggests...`. This is the regrounding moment.\n"
+    "- End with a `## Directions Worth Exploring` section: 2-4 concrete "
+    "research directions, conceptual frameworks, or emerging trends that "
+    "follow from the synthesis. Each direction needs a bolded name, one "
+    "sentence on why it connects to the inquiry, a corpus anchor `[n]` or "
+    "`[OUTSIDE FRAMEWORK]` label, and a confidence rating "
+    "(high/medium/low). These are not questions; they are orientations.\n"
+    "- Stay under ~1100 words unless the packet is unusually rich.\n\n"
     "NUANCE RULES:\n"
     "- Every paragraph must name at least one concept from the packet and "
     "explain its relationship to another concept. Do not merely say that "
@@ -2751,6 +2924,11 @@ _NUANCE_SYSTEM_PROMPT = (
     "and B.' Good: 'A functions as a translation layer for B because...'.\n"
     "- Do not turn the answer into a build plan. If a build implication is "
     "obvious, mention it briefly as an implication, not as [BUILD IDEA].\n"
+    "- The total synthesis must feel completing, not perpetuating. The user "
+    "should leave feeling answered and oriented, not handed a pile of new "
+    "uncertainties. Prefer directions and leads over Socratic questions. If "
+    "the evidence is thin, say so plainly and offer ONE direction grounded in "
+    "what is present.\n"
 )
 
 
@@ -2762,10 +2940,15 @@ def _system_prompt_for_synthesis_mode(synthesis_mode: str) -> str:
     return _SYNTHESIS_SYSTEM_PROMPT
 
 
-def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
+def _render_packet_user_prompt(
+    packet: dict[str, Any],
+    *,
+    synthesis_mode: str = "research",
+) -> str:
     """Render the curated synthesis brief as a numbered-evidence reading list."""
 
-    compact = _compact_packet_for_prompt(packet)
+    mode = (synthesis_mode or "research").strip().lower()
+    compact = _compact_packet_for_prompt(packet, synthesis_mode=mode)
     evidence = compact.pop("evidence", []) or []
 
     lines: list[str] = []
@@ -2787,6 +2970,28 @@ def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
             "All evidence was rejected by the quality filter; lean on graph "
             "structure and say so plainly."
         )
+    if mode == "research":
+        lines.append(
+            "Curation lanes: THESIS SPINE = evidence that directly answers "
+            "the query; GRAPH EXPLORER = context that clarifies, complicates, "
+            "or opens a necessary adjacent point."
+        )
+    elif mode == "ideation":
+        lines.append(
+            "Curation lanes: THESIS SPINE = strongest grounding evidence; "
+            "GRAPH EXPLORER = bridges, gaps, analogies, transfers, and "
+            "relationships to use as invention ingredients."
+        )
+    elif mode == "nuance":
+        intent = compact.get("intent_profile") or {}
+        if isinstance(intent, dict) and intent.get("intent_type"):
+            confidence = intent.get("confidence")
+            confidence_text = f" (confidence: {confidence})" if confidence is not None else ""
+            rationale = _text(intent.get("rationale") or intent.get("reason") or "", 220)
+            line = f"Detected query intent: {intent.get('intent_type')}{confidence_text}."
+            if rationale:
+                line += f" Rationale: {rationale}"
+            lines.append(line)
 
     docs_in_scope = compact.get("documents_in_scope") or []
     if docs_in_scope:
@@ -2920,6 +3125,20 @@ def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
                 f"- {facet.get('name') or '?'} :: object_kind={kind} · domain_type={dom} · family={fam}"
             )
 
+    tensions = compact.get("tensions") or []
+    if mode == "nuance" and tensions:
+        lines.append("")
+        lines.append("Detected tensions (opposing frames within the corpus):")
+        for tension in tensions[:3]:
+            label = tension.get("label") or "tension"
+            summary = tension.get("summary") or ""
+            lines.append(f"- {label}: {summary}".rstrip(": "))
+            for frame in (tension.get("frames") or [])[:3]:
+                frame_label = frame.get("label") or "frame"
+                body = frame.get("body") or ""
+                if body:
+                    lines.append(f"  - [{frame_label}] {body}")
+
     bridges = compact.get("bridges") or []
     analogies = compact.get("analogies") or []
     transfers = compact.get("transfers") or []
@@ -3032,10 +3251,17 @@ def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
         lines.append("Graph reading lens: " + str(graph_hint["context_hint"]))
 
     lines.append("")
-    lines.append(
-        "Write the synthesis now. Markdown prose only, inline [n] citations, "
-        "no JSON, no card labels."
-    )
+    if mode == "ideation":
+        lines.append(
+            "Write the ideation synthesis now. Markdown only, inline [n] "
+            "citations for corpus-grounded claims, labeled idea blocks, and "
+            "a final ## Way Ahead section. No JSON."
+        )
+    else:
+        lines.append(
+            "Write the synthesis now. Markdown prose only, inline [n] citations, "
+            "no JSON, no card labels."
+        )
     return "\n".join(lines)
 
 
@@ -3067,11 +3293,16 @@ def _source_brief_for_prompt(item: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in brief.items() if value not in ("", [], {}, None)}
 
 
-def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
+def _compact_packet_for_prompt(
+    packet: dict[str, Any],
+    *,
+    synthesis_mode: str = "nuance",
+) -> dict[str, Any]:
+    caps = _packet_caps_for_mode(synthesis_mode)
     evidence_filter = packet.get("evidence_filter") if isinstance(packet.get("evidence_filter"), dict) else {}
     graph_context_allowed = not bool(evidence_filter.get("all_rejected"))
     evidence = []
-    for idx, item in enumerate(packet.get("evidence") or [], start=1):
+    for idx, item in enumerate((packet.get("evidence") or [])[: caps.evidence], start=1):
         if not isinstance(item, dict):
             continue
         brief = _source_brief_for_prompt(item)
@@ -3093,7 +3324,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
             "label": _text(group.get("label") or "", 70),
             "entities": [str(e) for e in (group.get("top_entities") or [])[:4] if e],
         }
-        for group in (packet.get("communities") or [])[:_PACKET_MAX_COMMUNITIES]
+        for group in (packet.get("communities") or [])[: caps.communities]
         if graph_context_allowed and isinstance(group, dict)
     ]
     raw_edges = [
@@ -3123,7 +3354,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
                 else None
             ),
         }
-        for edge in (packet.get("edges") or [])[:_PACKET_MAX_EDGES]
+        for edge in (packet.get("edges") or [])[: caps.edges]
         if graph_context_allowed and isinstance(edge, dict)
     ]
     # Fold synonym-of / canonicalization edges into clusters: A ≡ B ≡ C is
@@ -3147,7 +3378,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
     # domain_type / canonical_family). Only entities with at least one populated
     # facet make it through; bare entities are noise here.
     entity_facets = []
-    for entity in (packet.get("entities") or [])[:12]:
+    for entity in (packet.get("entities") or [])[: caps.entities]:
         if not isinstance(entity, dict):
             continue
         facets = {
@@ -3170,7 +3401,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
             "neighbor_jaccard": _maybe_float(item.get("neighbor_jaccard")),
             "rationale": _text(item.get("rationale") or "", 180),
         }
-        for item in (packet.get("analogies") or [])[:_PACKET_MAX_ANALOGIES]
+        for item in (packet.get("analogies") or [])[: caps.analogies]
         if graph_context_allowed and isinstance(item, dict)
     ]
     transfers = [
@@ -3192,7 +3423,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
             "cd_pagerank": _maybe_float(item.get("cd_pagerank")),
             "rationale": _text(item.get("rationale") or "", 180),
         }
-        for item in (packet.get("transfers") or [])[:_PACKET_MAX_TRANSFERS]
+        for item in (packet.get("transfers") or [])[: caps.transfers]
         if graph_context_allowed and isinstance(item, dict)
     ]
     bridges = [
@@ -3205,7 +3436,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
             "shared_terms": [str(v) for v in (item.get("shared_terms") or [])[:4] if v],
             "rationale": _text(item.get("rationale") or "", 180),
         }
-        for item in (packet.get("bridges") or [])[:_PACKET_MAX_BRIDGES]
+        for item in (packet.get("bridges") or [])[: caps.bridges]
         if graph_context_allowed and isinstance(item, dict)
     ]
     fragile_bridges = [
@@ -3218,7 +3449,23 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
             "path_entities": [str(v) for v in (item.get("path_entities") or [])[:5] if v],
             "evidence": _text(item.get("evidence") or "", 180),
         }
-        for item in (packet.get("fragile_bridges") or [])[:_PACKET_MAX_FRAGILE_BRIDGES]
+        for item in (packet.get("fragile_bridges") or [])[: caps.fragile_bridges]
+        if graph_context_allowed and isinstance(item, dict)
+    ]
+    tensions = [
+        {
+            "label": _text(item.get("label") or "", 60),
+            "summary": _text(item.get("summary") or "", 180),
+            "frames": [
+                {
+                    "label": _text(frame.get("label") or "", 40),
+                    "body": _text(frame.get("body") or "", 200),
+                }
+                for frame in (item.get("frames") or [])[:3]
+                if isinstance(frame, dict)
+            ],
+        }
+        for item in (packet.get("tensions") or [])[: caps.tensions]
         if graph_context_allowed and isinstance(item, dict)
     ]
     gaps = [
@@ -3264,7 +3511,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
                 "anchors": [str(v) for v in (gap.get("anchor_concepts") or [])[:4] if v],
             },
         }
-        for idx, gap in enumerate((packet.get("gaps") or [])[:_PACKET_MAX_GAPS], start=1)
+        for idx, gap in enumerate((packet.get("gaps") or [])[: caps.gaps], start=1)
         if graph_context_allowed and isinstance(gap, dict) and gap.get("question")
     ]
     signals = [
@@ -3273,7 +3520,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
             "name": _text(sig.get("canonical_name") or "", 60),
             "why": _text(sig.get("rationale") or "", 120),
         }
-        for idx, sig in enumerate((packet.get("signals") or [])[:_PACKET_MAX_SIGNALS], start=1)
+        for idx, sig in enumerate((packet.get("signals") or [])[: caps.signals], start=1)
         if graph_context_allowed and isinstance(sig, dict)
     ]
     gateway_focus = [
@@ -3293,7 +3540,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
     }
     warnings = [
         _text(w.get("rationale") or w.get("weakness_type") or "", 120)
-        for w in (packet.get("weak_links") or [])[:_PACKET_MAX_WEAK_LINKS]
+        for w in (packet.get("weak_links") or [])[: caps.weak_links]
         if graph_context_allowed and isinstance(w, dict)
     ]
     return {
@@ -3301,7 +3548,20 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         "retrieval": packet.get("retrieval") or {},
         "temporal": bool(packet.get("temporal_support")),
         "sparse": bool(packet.get("sparse")),
+        "intent_profile": (
+            packet.get("intent_profile")
+            if isinstance(packet.get("intent_profile"), dict)
+            else {}
+        ),
         "research_contract": _research_contract_for_prompt(),
+        "mode_caps": {
+            "evidence": caps.evidence,
+            "edges": caps.edges,
+            "gaps": caps.gaps,
+            "bridges": caps.bridges,
+            "analogies": caps.analogies,
+            "transfers": caps.transfers,
+        },
         "synthesis_priority": {
             "primary": ["bridges", "gaps", "emerging_signals"],
             "themes": "brief framing only",
@@ -3327,6 +3587,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         "analogies": analogies,
         "transfers": transfers,
         "fragile_bridges": fragile_bridges,
+        "tensions": tensions,
         "gateway_focus": gateway_focus,
         "graph_hint": compact_graph_hint,
         "gaps": gaps,
@@ -3574,6 +3835,7 @@ async def _revise_synthesis(
     user_prompt: str,
     problems: list[dict[str, str]],
     creds: dict[str, Any],
+    max_tokens: int = _SYNTHESIS_MAX_TOKENS,
 ) -> tuple[Optional[str], Optional[str]]:
     """Apply the auditor's flagged problems to the draft. Returns
     (revised_markdown, error_reason). On failure, returns (None, reason)
@@ -3597,7 +3859,7 @@ async def _revise_synthesis(
             messages=messages,
             model=creds["model"],
             temperature=0.1,
-            max_tokens=_SYNTHESIS_MAX_TOKENS,
+            max_tokens=max_tokens,
             api_base=creds.get("api_base"),
             api_key=creds.get("api_key"),
             timeout=_SYNTHESIS_TIMEOUT_SECONDS,
@@ -3654,10 +3916,17 @@ async def _call_llm_synthesis(
 
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": _render_packet_user_prompt(packet)},
+        {
+            "role": "user",
+            "content": _render_packet_user_prompt(
+                packet,
+                synthesis_mode=synthesis_mode,
+            ),
+        },
     ]
     creds = await _resolve_graph_model(user_id, model_override)
     extra: dict[str, Any] = dict(creds.get("extra_params") or {})
+    max_tokens = _synthesis_max_tokens_for_mode(synthesis_mode)
     evidence_items = [
         item for item in (packet.get("evidence") or []) if isinstance(item, dict)
     ]
@@ -3679,7 +3948,7 @@ async def _call_llm_synthesis(
             messages=messages,
             model=creds["model"],
             temperature=_SYNTHESIS_TEMPERATURE,
-            max_tokens=_SYNTHESIS_MAX_TOKENS,
+            max_tokens=max_tokens,
             api_base=creds.get("api_base"),
             api_key=creds.get("api_key"),
             timeout=_SYNTHESIS_TIMEOUT_SECONDS,
@@ -3728,9 +3997,10 @@ async def _call_llm_synthesis(
                 llm_service=llm_service,
                 draft_markdown=markdown,
                 user_prompt=messages[1]["content"],
-                problems=problems,
-                creds=creds,
-            )
+            problems=problems,
+            creds=creds,
+            max_tokens=max_tokens,
+        )
             critique_meta["revise_error"] = revise_err
             if revised and not revise_err:
                 # Re-extract headline from the revised draft in case the
@@ -4354,6 +4624,7 @@ async def discover(
         db,
         corpus_id=corpus_id,
         query=query,
+        synthesis_mode=synthesis_mode,
     )
     if isinstance(result.trace, dict):
         result.trace["graph_scope_source_docs"] = legacy_source_docs
@@ -4380,7 +4651,12 @@ async def discover(
     except Exception as exc:
         logger.debug("packet metrics cache enrichment skipped: %s", exc)
 
-    packet = _build_insight_packet(result, query=query, corpus_id=corpus_id)
+    packet = _build_insight_packet(
+        result,
+        query=query,
+        corpus_id=corpus_id,
+        synthesis_mode=synthesis_mode,
+    )
     # Pull edge rationale chunks and entity schema-lens facets — these are
     # extraction layers stored on the Neo4j relations and entity nodes that
     # the legacy packet builder does not surface. Bounded reads: one Cypher
@@ -4400,13 +4676,7 @@ async def discover(
         result.trace["source_docs"] = packet.get("evidence") or []
         result.trace["evidence_filter"] = packet.get("evidence_filter") or {}
         result.trace["graph_hint"] = packet.get("graph_hint") or {}
-    result.trace = {
-        **(result.trace or {}),
-        "llm_context": _llm_context_trace_from_packet(
-            packet,
-            synthesis_mode=synthesis_mode,
-        ),
-    }
+    result.trace = dict(result.trace or {})
     packet_done_at = _time.perf_counter()
 
     # ─── Sprint #3 — agentic deepening loop (opt-in via agentic=True) ────
@@ -4419,9 +4689,11 @@ async def discover(
             from services.graph.agentic_retriever import run_agentic_loop
             from services.llm import llm_service as _llm
             from services.retriever import retriever_orchestrator as _retriever
+            from config import get_settings
             from models.schemas import RetrievalTier
 
             agentic_creds = await _resolve_graph_model(user_id, model_override)
+            settings = get_settings()
 
             # Pick the strongest tier the corpus supports so entity-deepening
             # gets vector + BM25 + Mode A graph expansion + the Sprint #1
@@ -4449,9 +4721,8 @@ async def discover(
                     # pool gives the reranker a chance to find a
                     # semantic match the narrow query would miss).
                     # final_top_k=5 caps the post-rerank output so the
-                    # _PACKET_MAX_EVIDENCE=6 synthesis cap still has
-                    # room for the highest-quality 1-2 chunks from
-                    # the base retrieval pool.
+                    # synthesis packet still has room for high-quality
+                    # chunks from the base retrieval pool.
                     result_inner = await _retriever.retrieve(
                         query=entity_name,
                         corpus_ids=[corpus_id],
@@ -4502,12 +4773,19 @@ async def discover(
                 creds=agentic_creds,
                 llm_service=_llm,
                 retrieve_for_entity=_retrieve_for_entity,
+                synthesis_mode=synthesis_mode,
             )
             if isinstance(result.trace, dict):
                 result.trace["agentic_trace"] = packet.get("agentic_trace") or []
                 result.trace["agentic_rounds_run"] = packet.get("agentic_rounds_run", 0)
         except Exception as exc:
             logger.warning("agentic loop failed, continuing with base packet: %s", exc)
+
+    if isinstance(result.trace, dict):
+        result.trace["llm_context"] = _llm_context_trace_from_packet(
+            packet,
+            synthesis_mode=synthesis_mode,
+        )
 
     llm_payload, fallback_reason = await _call_llm_synthesis(
         packet,
@@ -4763,23 +5041,26 @@ def merge_discover_results(
                 merged_nodes[nid] = _stamp_source(dict(n) if isinstance(n, dict) else n, cid)
             else:
                 _stamp_source(existing, cid)
-        for l in (graph.get("links") or []):
-            k = _link_key(l)
+        for link in (graph.get("links") or []):
+            k = _link_key(link)
             existing = merged_links.get(k)
             if existing is None:
-                merged_links[k] = _stamp_source(dict(l) if isinstance(l, dict) else l, cid)
+                merged_links[k] = _stamp_source(
+                    dict(link) if isinstance(link, dict) else link,
+                    cid,
+                )
             else:
                 _stamp_source(existing, cid)
                 # confidence/weight reinforce
-                if isinstance(existing, dict) and isinstance(l, dict):
+                if isinstance(existing, dict) and isinstance(link, dict):
                     try:
                         existing["confidence"] = max(
                             float(existing.get("confidence") or 0.0),
-                            float(l.get("confidence") or 0.0),
+                            float(link.get("confidence") or 0.0),
                         )
                         existing["weight"] = max(
                             float(existing.get("weight") or 0.0),
-                            float(l.get("weight") or 0.0),
+                            float(link.get("weight") or 0.0),
                         )
                     except Exception:
                         pass
@@ -4798,11 +5079,14 @@ def merge_discover_results(
                 ctx_nodes[nid] = _stamp_source(dict(n) if isinstance(n, dict) else n, cid)
             else:
                 _stamp_source(existing, cid)
-        for l in (ctx.get("links") or []):
-            k = _link_key(l)
+        for link in (ctx.get("links") or []):
+            k = _link_key(link)
             existing = ctx_links.get(k)
             if existing is None:
-                ctx_links[k] = _stamp_source(dict(l) if isinstance(l, dict) else l, cid)
+                ctx_links[k] = _stamp_source(
+                    dict(link) if isinstance(link, dict) else link,
+                    cid,
+                )
             else:
                 _stamp_source(existing, cid)
 

@@ -12,16 +12,17 @@ from services.graph.orchestrator import (
     _build_insight_packet,
     _build_subgraph_payload,
     _build_weak_links,
-    _call_llm_synthesis,
     _compact_packet_for_prompt,
     _context_graph_from_result,
     _curated_evidence_rows,
     _deterministic_prose_fallback,
     _llm_context_trace_from_packet,
+    _render_packet_user_prompt,
     _should_skip_synthesis,
     _source_docs_from_retrieval_chunks,
     _source_label_from_row,
     _sync_headline_from_auto_synthesis,
+    _synthesis_max_tokens_for_mode,
     _synthesis_sources_from_packet,
 )
 
@@ -617,6 +618,145 @@ def test_compact_packet_preserves_nuance_bridge_typology():
     assert compact["transfers"][0]["target_domains"] == ["course design"]
     assert compact["bridges"][0]["bridge_type"] == "cross_domain"
     assert compact["fragile_bridges"][0]["path_count"] == 1
+
+
+def test_nuance_packet_threads_tensions_and_intent_profile():
+    result = _packet_result_fixture()
+    result.intent_profile = {
+        "intent_type": "orientation",
+        "confidence": 0.82,
+        "rationale": "The query asks why the movement loop matters.",
+    }
+    result.tensions = [
+        {
+            "label": "Pacing versus mastery",
+            "summary": "The corpus balances fast onboarding against durable skill.",
+            "frames": [
+                {
+                    "label": "pacing",
+                    "body": "Reduce friction so players continue.",
+                },
+                {
+                    "label": "mastery",
+                    "body": "Keep enough failure for learning to stick.",
+                },
+            ],
+        }
+    ]
+
+    packet = _build_insight_packet(
+        result,
+        query="Why does the obby loop matter to me?",
+        corpus_id="c1",
+        synthesis_mode="nuance",
+    )
+    compact = _compact_packet_for_prompt(packet, synthesis_mode="nuance")
+    prompt = _render_packet_user_prompt(packet, synthesis_mode="nuance")
+
+    assert packet["intent_profile"]["intent_type"] == "orientation"
+    assert packet["tensions"][0]["label"] == "Pacing versus mastery"
+    assert compact["intent_profile"]["confidence"] == 0.82
+    assert compact["tensions"][0]["frames"][0]["label"] == "pacing"
+    assert "Detected query intent: orientation" in prompt
+    assert "Detected tensions" in prompt
+    assert "Pacing versus mastery" in prompt
+
+
+def _packet_with_many_prompt_items():
+    return {
+        "query": "compare options",
+        "evidence_filter": {},
+        "evidence": [
+            {
+                "evidence_id": f"e{i}",
+                "chunk_id": f"c{i}",
+                "doc_id": f"d{i}",
+                "source": {"label": f"Doc {i}"},
+                "text": f"Evidence {i}",
+            }
+            for i in range(15)
+        ],
+        "communities": [],
+        "entities": [],
+        "edges": [
+            {"source_name": f"S{i}", "target_name": f"T{i}", "predicate": "supports"}
+            for i in range(15)
+        ],
+        "gaps": [
+            {
+                "gap_id": f"g{i}",
+                "gap_type": "missing_edge",
+                "cluster_a_label": f"A{i}",
+                "cluster_b_label": f"B{i}",
+                "question": f"What connects A{i} and B{i}?",
+            }
+            for i in range(8)
+        ],
+        "bridges": [
+            {
+                "source_name": f"Bridge A{i}",
+                "target_name": f"Bridge B{i}",
+                "bridge_type": "cross_domain",
+            }
+            for i in range(8)
+        ],
+        "analogies": [
+            {"source_name": f"Analogy A{i}", "target_name": f"Analogy B{i}"}
+            for i in range(8)
+        ],
+        "transfers": [
+            {"hub_name": f"Transfer Hub {i}", "target_domains": [f"Domain {i}"]}
+            for i in range(8)
+        ],
+    }
+
+
+def test_compact_packet_uses_research_caps():
+    compact = _compact_packet_for_prompt(
+        _packet_with_many_prompt_items(),
+        synthesis_mode="research",
+    )
+
+    assert len(compact["evidence"]) == 12
+    assert len(compact["edges"]) == 12
+    assert len(compact["gaps"]) == 2
+    assert len(compact["bridges"]) == 2
+    assert compact["analogies"] == []
+    assert compact["transfers"] == []
+
+
+def test_compact_packet_uses_ideation_caps():
+    compact = _compact_packet_for_prompt(
+        _packet_with_many_prompt_items(),
+        synthesis_mode="ideation",
+    )
+
+    assert len(compact["evidence"]) == 5
+    assert len(compact["edges"]) == 10
+    assert len(compact["gaps"]) == 6
+    assert len(compact["bridges"]) == 6
+    assert len(compact["analogies"]) == 5
+    assert len(compact["transfers"]) == 5
+
+
+def test_compact_packet_keeps_nuance_default_caps():
+    compact = _compact_packet_for_prompt(
+        _packet_with_many_prompt_items(),
+        synthesis_mode="nuance",
+    )
+
+    assert len(compact["evidence"]) == 6
+    assert len(compact["edges"]) == 14
+    assert len(compact["gaps"]) == 3
+    assert len(compact["bridges"]) == 4
+    assert len(compact["analogies"]) == 4
+    assert len(compact["transfers"]) == 4
+
+
+def test_nuance_uses_larger_synthesis_token_budget_only_for_nuance():
+    assert _synthesis_max_tokens_for_mode("research") == 1400
+    assert _synthesis_max_tokens_for_mode("ideation") == 1400
+    assert _synthesis_max_tokens_for_mode("nuance") == 1800
 
 
 def test_insight_packet_marks_sparse_when_evidence_missing():

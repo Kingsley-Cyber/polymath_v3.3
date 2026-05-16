@@ -43,6 +43,30 @@ def test_ideation_prompt_advertises_build_idea_format():
     assert "[BUILD IDEA]" in _IDEATION_SYSTEM_PROMPT
 
 
+def test_ideation_prompt_supports_full_idea_type_spectrum():
+    """Ideation is broader than product-build suggestions."""
+    for block_type in [
+        "[BUILD IDEA]",
+        "[METHOD TRANSFER]",
+        "[THEORETICAL SYNTHESIS]",
+        "[REFRAME]",
+        "[INTERVENTION]",
+        "[APPROACH]",
+    ]:
+        assert block_type in _IDEATION_SYSTEM_PROMPT
+    assert "## Way Ahead" in _IDEATION_SYSTEM_PROMPT
+    assert "[CORPUS]" in _IDEATION_SYSTEM_PROMPT
+    assert "[OUTSIDE]" in _IDEATION_SYSTEM_PROMPT
+
+
+def test_ideation_prompt_ranks_ideas_by_grounding_and_novelty():
+    prompt = _IDEATION_SYSTEM_PROMPT
+    assert "Rank ideas by" in prompt
+    assert "distinct evidence anchors" in prompt
+    assert "novelty of bridge/gap/analogy" in prompt
+    assert "about 1400 output tokens" in prompt
+
+
 def test_ideation_prompt_has_required_sections():
     """The Hook / Mechanic / Corpus Evidence / Build Path / Feasibility /
     Risk sections must be specified so the LLM produces consistent output."""
@@ -135,6 +159,12 @@ def test_nuance_prompt_preserves_typology_and_inference_labels():
         "missing_edge",
         "[INFERENCE]",
         "[BRIDGE]",
+        "## Forward Look",
+        "## What This Means For You",
+        "## Directions Worth Exploring",
+        "[PREDICTION]",
+        "[OUTSIDE FRAMEWORK]",
+        "answered and oriented",
     ]:
         assert marker in prompt
 
