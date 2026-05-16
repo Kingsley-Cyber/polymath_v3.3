@@ -3,6 +3,7 @@ import pytest
 from services.conversation import conversation_service
 from services.retriever.document_anchor import (
     _chunk_search_terms,
+    _doc_labels,
     _score_doc_match,
     document_anchor_retriever,
 )
@@ -68,6 +69,21 @@ def test_document_title_match_scores_embedded_book_title():
     assert _score_doc_match(query, "Patterns of Enterprise Application Architecture") >= 0.95
     assert _score_doc_match(query, "Gifts Differing") >= 0.95
     assert _score_doc_match(query, "Unrelated Gardening Handbook") == 0.0
+
+
+def test_document_labels_extract_short_title_from_long_archive_filename():
+    doc = {
+        "filename": (
+            "Gifts Differing_ Understanding Personality Type - The -- Myers, "
+            "I_B_;Myers, P_B_ -- London, 2010 -- John Murray Press -- "
+            "9781473643796 -- Anna's Archive.md"
+        )
+    }
+
+    labels = _doc_labels(doc)
+
+    assert "Gifts Differing" in labels
+    assert "Gifts Differing Understanding Personality Type" in labels
 
 
 def test_document_title_match_does_not_trigger_on_generic_topic_overlap():
@@ -149,3 +165,4 @@ async def test_document_anchor_retriever_returns_chunks_from_named_books(monkeyp
 
     assert {chunk.doc_id for chunk in chunks} == {"fowler", "gifts"}
     assert all(chunk.source_tier == "document_anchor+lexical" for chunk in chunks)
+    assert all(chunk.text.startswith("Document: ") for chunk in chunks)

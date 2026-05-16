@@ -124,12 +124,35 @@ def _metadata_values(blob: Any, *keys: str) -> list[str]:
     return values
 
 
+def _label_variants(value: Any) -> list[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    base = re.sub(r"\.[a-zA-Z0-9]{1,8}$", "", raw).strip()
+    variants = [raw, base]
+    cleaned = re.sub(r"[_;]+", " ", base)
+    variants.append(cleaned)
+    for sep in (" -- ", " — ", " – ", " - ", ": "):
+        if sep in base:
+            variants.append(base.split(sep, 1)[0].strip())
+        if sep in cleaned:
+            variants.append(cleaned.split(sep, 1)[0].strip())
+    if "_" in base:
+        variants.append(base.split("_", 1)[0].strip())
+
+    out: list[str] = []
+    for item in variants:
+        text = re.sub(r"\s+", " ", str(item or "")).strip(" -_")
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
 def _doc_labels(doc: dict[str, Any]) -> list[str]:
     labels: list[str] = []
-    titles = [
+    title_sources = [
         doc.get("title"),
         doc.get("filename"),
-        re.sub(r"\.[a-zA-Z0-9]{1,8}$", "", str(doc.get("filename") or "")),
         _metadata_value(doc.get("metadata"), "title", "book_title", "name"),
         _metadata_value(doc.get("document_metadata"), "title", "book_title", "name"),
         _metadata_value(doc.get("source_metadata"), "title", "book_title", "name"),
@@ -143,6 +166,12 @@ def _doc_labels(doc: dict[str, Any]) -> list[str]:
         authors.extend(
             _metadata_values(blob, "author", "authors", "creator", "creators")
         )
+
+    titles: list[str] = []
+    for source in title_sources:
+        for variant in _label_variants(source):
+            if variant not in titles:
+                titles.append(variant)
 
     for value in titles:
         text = str(value or "").strip()
@@ -216,6 +245,15 @@ def _chunk_search_terms(query: str, anchor_terms: set[str]) -> list[str]:
     return terms[:14] or raw_terms[:14]
 
 
+def _candidate_text(row: dict[str, Any], document_label: str) -> str:
+    body = str(row.get("text") or "")
+    heading = " / ".join(str(part) for part in (row.get("heading_path") or []))
+    prefix = f"Document: {document_label}"
+    if heading:
+        prefix += f"\nHeading: {heading}"
+    return f"{prefix}\n{body}".strip()
+
+
 class DocumentAnchorRetriever:
     """Mongo-backed source-title recall for Hybrid and Graph Augmented tiers."""
 
@@ -263,7 +301,7 @@ class DocumentAnchorRetriever:
                         parent_id=str(row.get("parent_id") or ""),
                         doc_id=str(row.get("doc_id") or doc.get("doc_id") or ""),
                         corpus_id=str(row.get("corpus_id") or doc.get("corpus_id") or ""),
-                        text=str(row.get("text") or ""),
+                        text=_candidate_text(row, label),
                         summary=None,
                         score=round(score, 4),
                         source_tier="document_anchor+lexical",

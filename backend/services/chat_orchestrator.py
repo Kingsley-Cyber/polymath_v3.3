@@ -73,6 +73,42 @@ def _hyde_failure_key(model: str | None, api_base: str | None) -> str:
     return f"{api_base or '(litellm)'}::{model or '(default)'}"
 
 
+_HYDE_SOURCE_CONSTRAINT_MARKERS = (
+    "retrieved excerpts",
+    "provided excerpts",
+    "provided context",
+    "direct textual support",
+    "direct support",
+    "distinguish direct",
+    "distinguish textual",
+    "verbatim",
+    "quote",
+    "quoted",
+    "cite",
+    "citation",
+)
+
+
+def _should_skip_hyde_for_query(query: str) -> bool:
+    """Avoid query rewriting when the user is auditing source support.
+
+    HyDE is valuable for broad cross-domain discovery, but source-constrained
+    questions need the original wording preserved. A hypothetical answer can
+    accidentally smuggle in the very bridge the user is asking us to verify.
+    """
+    text = (query or "").lower()
+    if not text:
+        return False
+    if any(marker in text for marker in _HYDE_SOURCE_CONSTRAINT_MARKERS):
+        return True
+    return ("based on" in text or "according to" in text) and (
+        "inferred" in text
+        or "textual" in text
+        or "evidence" in text
+        or "support" in text
+    )
+
+
 def _clip_source_text(value: Any, max_chars: int) -> str | None:
     """Return a bounded text preview for persisted source snippets."""
     if value is None:
@@ -1142,6 +1178,12 @@ class ChatOrchestrator:
         """
         overrides = request.overrides
         if not (overrides and overrides.hyde_enabled):
+            return request.message, False
+        if _should_skip_hyde_for_query(request.message):
+            logger.info(
+                "HyDE skipped for source-constrained query: '%s'",
+                request.message[:80],
+            )
             return request.message, False
 
         hyde_model = (overrides.hyde_model if overrides else None) or settings.HYDE_MODEL

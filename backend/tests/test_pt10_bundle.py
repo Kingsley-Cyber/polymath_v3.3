@@ -98,7 +98,7 @@ def _install_stubs_if_missing() -> None:
 _install_stubs_if_missing()
 
 
-import pytest
+import pytest  # noqa: E402
 
 
 # ── Pt10a — citation entity filter ──────────────────────────────────
@@ -161,7 +161,10 @@ def test_empty_input_safe():
 # ── Pt10c — HyDE default ────────────────────────────────────────────
 
 
-from services.chat_orchestrator import ChatOrchestrator  # noqa: E402
+from services.chat_orchestrator import (  # noqa: E402
+    ChatOrchestrator,
+    _should_skip_hyde_for_query,
+)
 
 
 def test_balanced_profile_has_hyde_enabled():
@@ -183,6 +186,21 @@ def test_thorough_profile_unchanged():
     presets = ChatOrchestrator._QUERY_PROFILE_PRESETS
     assert presets["thorough"]["hyde_enabled"] is True
     assert presets["thorough"]["retrieval_k"] == 60
+
+
+def test_hyde_skips_source_constrained_direct_support_queries():
+    query = (
+        "Based on the retrieved excerpts from Fowler's Patterns of Enterprise "
+        "Application Architecture and Myers/Briggs' Gifts Differing, identify "
+        "any defensible intersection. Distinguish direct textual support from "
+        "inferred design recommendations."
+    )
+    assert _should_skip_hyde_for_query(query) is True
+
+
+def test_hyde_stays_available_for_open_cross_domain_discovery():
+    query = "How could generative AI methods apply to urban planning?"
+    assert _should_skip_hyde_for_query(query) is False
 
 
 # ── Pt10d — model_name validation ───────────────────────────────────

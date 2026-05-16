@@ -23,6 +23,25 @@ def _provenance_retrievers(chunk: SourceChunk) -> set[str]:
     return values
 
 
+def _document_anchor_confidence(chunk: SourceChunk) -> float:
+    best = 0.0
+    source_tier = (chunk.source_tier or "").lower()
+    if "document_anchor" in source_tier:
+        best = 0.75
+    for item in chunk.provenance or []:
+        if item.get("retriever") != "document_anchor":
+            continue
+        try:
+            best = max(best, float(item.get("document_score") or 0.0))
+        except (TypeError, ValueError):
+            continue
+    return best
+
+
+def _is_confident_document_anchor(chunk: SourceChunk) -> bool:
+    return _document_anchor_confidence(chunk) >= 0.75
+
+
 def candidate_kind(chunk: SourceChunk) -> str:
     """Classify a candidate by retrieval lane."""
     source_tier = (chunk.source_tier or "").lower()
@@ -137,6 +156,24 @@ def select_with_diversity(
     selected_parents = {chunk.parent_id or chunk.chunk_id for chunk in selected}
 
     added = 0
+
+    # Source-constrained queries can produce high-confidence document-anchor
+    # candidates that cross-encoders still demote because the candidate text is
+    # narrow. Let at most two through when the document-title match was strong.
+    for candidate in ranked[final_top_k:]:
+        if added >= max_extra:
+            break
+        if not _is_confident_document_anchor(candidate):
+            continue
+        identity = _candidate_identity(candidate)
+        parent_key = candidate.parent_id or candidate.chunk_id
+        if identity in selected_identities or parent_key in selected_parents:
+            continue
+        selected.append(candidate)
+        selected_identities.add(identity)
+        selected_parents.add(parent_key)
+        added += 1
+
     for candidate in ranked[final_top_k:]:
         if added >= max_extra:
             break

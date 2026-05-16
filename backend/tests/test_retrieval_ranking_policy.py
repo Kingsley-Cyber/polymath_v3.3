@@ -96,6 +96,37 @@ def test_diversity_skips_weak_or_duplicate_candidates():
     assert [c.chunk_id for c in result.candidates] == ["c1", "c2"]
 
 
+def test_diversity_includes_high_confidence_document_anchor_candidate():
+    intent = infer_retrieval_intent("compare evidence from two named books")
+    ranked = [
+        _chunk("c1", score=0.80, parent_id="p1", doc_id="d1"),
+        _chunk("c2", score=-1.00, parent_id="p2", doc_id="d2"),
+        _chunk(
+            "anchor",
+            score=-6.00,
+            parent_id="p3",
+            doc_id="d3",
+            source_tier="document_anchor+lexical",
+            provenance=[
+                {
+                    "retriever": "document_anchor",
+                    "document_score": 0.98,
+                }
+            ],
+        ),
+    ]
+
+    result = select_with_diversity(
+        ranked,
+        final_top_k=2,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+    )
+
+    assert result.added == 1
+    assert [c.chunk_id for c in result.candidates] == ["c1", "c2", "anchor"]
+
+
 def test_vector_base_does_not_expand_final_sources_for_diversity():
     intent = infer_retrieval_intent("summarize themes across documents")
     ranked = [
