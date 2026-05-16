@@ -43,6 +43,15 @@ services:
       LOCAL_EMBEDDER_ENABLED: "true"
       LOCAL_RERANKER_ENABLED: "true"
       EMBED_DEVICE: mps
+      # Mac Studio safety defaults: Docker Desktop's VM has a hard memory cap,
+      # while MLX/docling/Ollama share host unified memory outside the VM.
+      INGEST_MAX_ACTIVE_JOBS: ${APPLE_INGEST_MAX_ACTIVE_JOBS:-4}
+      INGEST_MAX_PARSE_JOBS: ${APPLE_INGEST_MAX_PARSE_JOBS:-1}
+      INGEST_MAX_MODEL_PHASE_DOCS: ${APPLE_INGEST_MAX_MODEL_PHASE_DOCS:-1}
+      GRAPH_CACHE_WARMUP_DEBOUNCE_SECONDS: ${APPLE_GRAPH_CACHE_WARMUP_DEBOUNCE_SECONDS:-300}
+      EMBEDDER_MEMORY_GUARD_ENABLED: ${APPLE_EMBEDDER_MEMORY_GUARD_ENABLED:-true}
+      EMBEDDER_MIN_FREE_MB: ${APPLE_EMBEDDER_MIN_FREE_MB:-2048}
+      EMBEDDER_MEMORY_GUARD_MAX_WAIT_SECONDS: ${APPLE_EMBEDDER_MEMORY_GUARD_MAX_WAIT_SECONDS:-300}
 
   # MCP container also needs the embedder/reranker (same retarget).
   mcp:
@@ -53,3 +62,4 @@ services:
       RERANKER_URL: http://host.docker.internal:8081
       DOCLING_URL: http://host.docker.internal:8500
       RERANKER_SCORE_SCALE: cosine
+      INGEST_MAX_ACTIVE_JOBS: ${APPLE_INGEST_MAX_ACTIVE_JOBS:-4}

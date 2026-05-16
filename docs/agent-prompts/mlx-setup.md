@@ -36,7 +36,8 @@ Step 2 — Install the host-native MLX sidecars.
     - reject non-Darwin / non-arm64 hosts
     - stage code to ~/PolymathRuntime/apple_ml_services/
     - install a uv venv with the pinned requirements
-    - pre-pull the two MLX model repos into ~/PolymathRuntime/volumes/hf-cache
+    - pre-pull mlx-community/Qwen3-Embedding-0.6B-mxfp8 and
+      jinaai/jina-reranker-v3-mlx into ~/PolymathRuntime/volumes/hf-cache
     - install the LaunchAgent (auto-restart)
     - smoke /info, /health, /health on ports 8082, 8081, 8500
 
@@ -45,10 +46,10 @@ Step 3 — Bring up Docker with the Apple MLX override.
 
 Step 4 — Run the end-to-end smoke.
   bash scripts/smoke_apple_mlx.sh
-  The reranker ordering check must pass. If it returns zeroes, the
-  Jina v3 MLPProjector did not load — read the inline scaffold note in
-  scripts/apple_ml_services/reranker_mlx/main.py and fix _load_model()
-  before continuing.
+  The reranker readiness and ordering checks must pass. /info.ready must
+  be true, /rerank must return results[{index,score,text}], and the two
+  object-pattern documents must outrank the lemonade document. If any of
+  that fails, stop before ingestion; the Apple reranker is not trustworthy.
 
 Step 5 — Verify env wiring inside the backend container.
   docker exec polymath_v33-backend-1 sh -c '
@@ -72,10 +73,13 @@ Constraints you must respect:
     you also re-ingest every corpus — Qdrant collections are dimension-
     locked.
   • Never push to main; commit on a feature branch.
-  • Treat scripts/apple_ml_services/{embedder_mlx,reranker_mlx,
-    docling_svc}/main.py as scaffolds. If the user has working
-    Mac Studio implementations of any of those, prefer their code over
-    the scaffold.
+  • Treat the repo's Apple sidecars as canonical by default. The installer
+    refreshes host copies on each run unless
+    POLYMATH_APPLE_MLX_PROTECT_HOST_SIDECARS=1 is explicitly set.
+  • The reranker uses Jina's official MLX implementation from
+    jinaai/jina-reranker-v3-mlx. Do not replace it with a zero-score
+    scaffold or a hand-written projector unless you prove the smoke test
+    still passes.
   • The reranker MUST run with RERANKER_SCORE_SCALE=cosine. The override
     sets it; do not strip it.
   • Do not use the DeepSeek API directly — only via LiteLLM.
@@ -84,6 +88,7 @@ Constraints you must respect:
 
 What "done" looks like:
   • smoke_apple_mlx.sh passes including the rerank ordering assertion
+  • curl http://localhost:8081/info shows ready=true and score_scale=cosine
   • backend container reports (healthy)
   • a sample ingest of one small markdown file completes with
     write_state {m=Y, q=Y, n=Y, v=Y} on the resulting document

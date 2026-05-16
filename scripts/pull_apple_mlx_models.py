@@ -7,7 +7,7 @@ into a one-time install step.
 
 Models pulled:
     mlx-community/Qwen3-Embedding-0.6B-mxfp8       (embeddings, 1024-dim)
-    mlx-community/jina-reranker-v3-4bit-mxfp4      (reranker, cosine scores)
+    jinaai/jina-reranker-v3-mlx                    (reranker, cosine scores)
 
 HF_HOME respected; defaults to ~/PolymathRuntime/volumes/hf-cache when
 called from install_apple_mlx_runtime.sh.
@@ -29,7 +29,7 @@ from pathlib import Path
 # Models. If you swap to different MLX quantizations, list them here.
 MODELS: list[str] = [
     "mlx-community/Qwen3-Embedding-0.6B-mxfp8",
-    "mlx-community/jina-reranker-v3-4bit-mxfp4",
+    "jinaai/jina-reranker-v3-mlx",
 ]
 
 
@@ -77,6 +77,7 @@ def main() -> int:
                     "*.txt",
                     "*.safetensors",
                     "*.npz",
+                    "rerank.py",
                     "tokenizer*",
                     "merges.txt",
                     "vocab.json",

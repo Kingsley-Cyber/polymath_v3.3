@@ -21,6 +21,14 @@ curl -fsS "${EMBED}/embeddings" \
 step "reranker /health"
 curl -fsS "${RERANK}/health" | jq .
 
+step "reranker /info readiness"
+RERANK_INFO=$(curl -fsS "${RERANK}/info")
+echo "${RERANK_INFO}" | jq .
+if [[ "$(echo "${RERANK_INFO}" | jq -r '.ready')" != "true" ]]; then
+  echo "  ✗ reranker is not ready; refusing to accept fallback/zero-score mode" >&2
+  exit 1
+fi
+
 step "reranker /rerank — ordering check (relevant doc must score highest)"
 RESPONSE=$(curl -fsS "${RERANK}/rerank" \
   -H "Content-Type: application/json" \
@@ -35,15 +43,24 @@ RESPONSE=$(curl -fsS "${RERANK}/rerank" \
 echo "${RESPONSE}" | jq .
 
 # Score 0 + 2 should both exceed score 1 if the model is loaded properly.
-DOC0=$(echo "${RESPONSE}" | jq '.scores[0]')
-DOC1=$(echo "${RESPONSE}" | jq '.scores[1]')
-DOC2=$(echo "${RESPONSE}" | jq '.scores[2]')
+if ! echo "${RESPONSE}" | jq -e '
+  (.results | type == "array") and
+  (.results | length == 3) and
+  all(.results[]; has("index") and has("score") and has("text"))
+' >/dev/null; then
+  echo "  ✗ reranker response does not match backend contract: expected results[{index,score,text}]" >&2
+  exit 1
+fi
+
+DOC0=$(echo "${RESPONSE}" | jq '.results[] | select(.index == 0) | .score')
+DOC1=$(echo "${RESPONSE}" | jq '.results[] | select(.index == 1) | .score')
+DOC2=$(echo "${RESPONSE}" | jq '.results[] | select(.index == 2) | .score')
 echo "  doc0=${DOC0} doc1=${DOC1} doc2=${DOC2}"
 if awk "BEGIN{ exit !( ${DOC0} > ${DOC1} && ${DOC2} > ${DOC1} ) }"; then
   echo "  ✓ relevance ordering correct"
 else
   echo "  ✗ ranker did not separate relevant from irrelevant — projector may not be loaded"
-  echo "    (scaffold mode returns zeroes; replace reranker_mlx/main.py)"
+  exit 1
 fi
 
 step "docling /health"

@@ -34,8 +34,37 @@ import os
 import re
 import time
 import uuid
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Callable
+
+from config import get_settings
+from models.schemas import IngestionConfig, IngestJobResponse, SourceTier, WriteState
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from qdrant_client import AsyncQdrantClient
+from services.embedder import embed_batch
+from services.ghost_a import SummaryResult, SummaryTask, summarize_parents
+from services.ghost_b import (
+    EntityItem,
+    ExtractionBatchReport,
+    ExtractionFailureItem,
+    ExtractionResult,
+    ExtractionTask,
+    FactItem,
+    RelationItem,
+    SchemaContext,
+    extract_entities,
+)
+from services.ingestion import docling_adapter, tier_chunker
+from services.ingestion.schema_lens import get_or_create_schema_lens
+from services.ingestion.section_classifier import (
+    ChunkKind,
+    is_noisy,
+    should_skip_ghost_b,
+)
+from services.secrets import decrypt as _decrypt_api_key
+from services.storage import mongo_reader, mongo_writer, qdrant_writer
+from services.storage.qdrant_writer import retrieve_schema_for_chunk
 
 
 # Pt 10e — filename sanitizer.
@@ -78,36 +107,6 @@ def _sanitize_filename(name: str) -> str:
         return f"{cleaned}{ext}" if ext else cleaned
     except Exception:
         return name
-
-from config import get_settings
-from models.schemas import IngestionConfig, IngestJobResponse, SourceTier, WriteState
-from motor.motor_asyncio import AsyncIOMotorDatabase
-from qdrant_client import AsyncQdrantClient
-from services.embedder import embed_batch
-from dataclasses import asdict, dataclass, field
-
-from services.ghost_a import SummaryResult, SummaryTask, summarize_parents
-from services.ghost_b import (
-    EntityItem,
-    ExtractionBatchReport,
-    ExtractionFailureItem,
-    ExtractionResult,
-    ExtractionTask,
-    FactItem,
-    RelationItem,
-    SchemaContext,
-    extract_entities,
-)
-from services.ingestion import docling_adapter, tier_chunker
-from services.ingestion.schema_lens import get_or_create_schema_lens
-from services.ingestion.section_classifier import (
-    ChunkKind,
-    is_noisy,
-    should_skip_ghost_b,
-)
-from services.secrets import decrypt as _decrypt_api_key
-from services.storage import mongo_reader, mongo_writer, qdrant_writer
-from services.storage.qdrant_writer import retrieve_schema_for_chunk
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -1570,7 +1569,7 @@ async def run_ingest_job(
     # Load live corpus + build effective config (Phase 21). The `corpus` doc
     # carries unmasked ciphertext for embed_api_key / pool api_keys; worker
     # downstream helpers decrypt at dispatch time.
-    from services.ingestion_service import build_effective_config, freeze_snapshot
+    from services.ingestion_service import build_effective_config
 
     corpus_doc = await mongo_reader.get_corpus(db, corpus_id)
     if corpus_doc is None:
@@ -2096,23 +2095,31 @@ async def run_ingest_job(
         # gaps) activate without an explicit /api/graph/cache/rebuild
         # call. Debounced per-corpus: a 50-doc batch ingest produces
         # exactly one rebuild ~30s after the last doc finishes.
-        try:
-            from services.graph.cache_warmup import (
-                schedule_metrics_warmup_after_ingest,
-            )
+        if settings.GRAPH_CACHE_WARMUP_ENABLED:
+            try:
+                from services.graph.cache_warmup import (
+                    schedule_metrics_warmup_after_ingest,
+                )
 
-            schedule_metrics_warmup_after_ingest(
-                qdrant=qdrant_client,
-                neo4j_driver=neo4j_driver,
-                db=db,
-                corpus_id=corpus_id,
-            )
-        except Exception as exc:
-            logger.warning(
-                "phase=auto_warm doc=%s corpus=%s schedule_failed: %s",
+                schedule_metrics_warmup_after_ingest(
+                    qdrant=qdrant_client,
+                    neo4j_driver=neo4j_driver,
+                    db=db,
+                    corpus_id=corpus_id,
+                    debounce_seconds=settings.GRAPH_CACHE_WARMUP_DEBOUNCE_SECONDS,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "phase=auto_warm doc=%s corpus=%s schedule_failed: %s",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    exc,
+                )
+        else:
+            logger.info(
+                "phase=auto_warm doc=%s corpus=%s skipped disabled_by_config",
                 doc_id[:12],
                 corpus_id[:8],
-                exc,
             )
 
         # GOTCHAS #70 — drop ghost_b_staging after the graph has landed

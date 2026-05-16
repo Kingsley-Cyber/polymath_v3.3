@@ -5,8 +5,8 @@ matching the contract of the in-cluster embedder service so the rest of
 Polymath doesn't notice the swap.
 
 Wire spec (matches backend expectations):
-  GET  /info       → {"model": "...", "dimension": 1024, "device": "mps"}
-  GET  /health     → {"status": "ok"}
+  GET  /info       → model metadata + unified-memory telemetry
+  GET  /health     → status + unified-memory telemetry
   POST /embeddings → OpenAI shape {data: [{embedding: [...], index: i}, ...]}
 
 NOTE — IMPLEMENTATION SCAFFOLD
@@ -65,6 +65,44 @@ _model: Any = None
 _tokenizer: Any = None
 
 
+def _memory_status() -> dict[str, Any]:
+    try:
+        import psutil
+
+        mem = psutil.virtual_memory()
+        available_mb = int(mem.available // (1024 * 1024))
+        total_mb = int(mem.total // (1024 * 1024))
+        used_percent = round(float(mem.percent), 1)
+        if used_percent >= 92 or available_mb < 1024:
+            pressure = "critical"
+        elif used_percent >= 85 or available_mb < 2048:
+            pressure = "high"
+        elif used_percent >= 75:
+            pressure = "moderate"
+        else:
+            pressure = "ok"
+        return {
+            # Names mirror the Docker CUDA sidecar contract. On Apple Silicon
+            # this is unified system memory, not discrete VRAM.
+            "gpu_free_mb": available_mb,
+            "gpu_total_mb": total_mb,
+            "memory_available_mb": available_mb,
+            "memory_total_mb": total_mb,
+            "memory_used_percent": used_percent,
+            "memory_pressure": pressure,
+        }
+    except Exception as exc:
+        logger.warning("memory telemetry unavailable: %s", exc)
+        return {
+            "gpu_free_mb": None,
+            "gpu_total_mb": None,
+            "memory_available_mb": None,
+            "memory_total_mb": None,
+            "memory_used_percent": None,
+            "memory_pressure": "unknown",
+        }
+
+
 def _load_model() -> None:
     """Load Qwen3 embedding model via mlx-embeddings.
 
@@ -103,12 +141,17 @@ async def info() -> dict:
         "max_length": MAX_LENGTH,
         "batch_size": BATCH_SIZE,
         "ready": _model is not None,
+        **_memory_status(),
     }
 
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok" if _model is not None else "loading"}
+    memory = _memory_status()
+    status = "ok" if _model is not None else "loading"
+    if _model is not None and memory.get("memory_pressure") == "critical":
+        status = "degraded"
+    return {"status": status, **memory}
 
 
 @app.post("/embeddings", response_model=EmbeddingsResponse)

@@ -446,11 +446,13 @@ async def _embed_batch_local(
 ) -> list[list[float]]:
     """Local embedder sidecar — Docker sentence-transformers service."""
     settings = get_settings()
-    url = f"{settings.EMBEDDER_URL}/embeddings"
+    base_url = settings.EMBEDDER_URL.rstrip("/")
+    url = f"{base_url}/embeddings"
     vectors: list[list[float]] = []
 
     async with httpx.AsyncClient(timeout=_LOCAL_TIMEOUT) as client:
         for i in range(0, len(texts), _BATCH_SIZE):
+            await _wait_for_local_embedder_memory(client=client, base_url=base_url)
             batch = texts[i : i + _BATCH_SIZE]
             batch_vectors = await _embed_local_batch_with_split(
                 client=client,
@@ -461,6 +463,70 @@ async def _embed_batch_local(
             vectors.extend(batch_vectors)
 
     return vectors
+
+
+async def _wait_for_local_embedder_memory(
+    *,
+    client: httpx.AsyncClient,
+    base_url: str,
+) -> None:
+    """Backpressure local embedding when a host-native sidecar reports pressure."""
+    settings = get_settings()
+    if not settings.EMBEDDER_MEMORY_GUARD_ENABLED:
+        return
+
+    min_free_mb = int(settings.EMBEDDER_MIN_FREE_MB or 0)
+    max_wait = float(settings.EMBEDDER_MEMORY_GUARD_MAX_WAIT_SECONDS or 0.0)
+    poll = float(settings.EMBEDDER_MEMORY_GUARD_POLL_SECONDS or 5.0)
+    deadline = time.monotonic() + max_wait
+    last_reason = ""
+
+    while True:
+        try:
+            resp = await client.get(f"{base_url}/health", timeout=5.0)
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as exc:
+            logger.warning(
+                "Local embedder memory guard could not read /health; continuing: %s",
+                exc,
+            )
+            return
+
+        free_mb = payload.get("gpu_free_mb")
+        if free_mb is None:
+            free_mb = payload.get("memory_available_mb")
+        try:
+            free_mb_int = int(free_mb) if free_mb is not None else None
+        except (TypeError, ValueError):
+            free_mb_int = None
+
+        pressure = str(payload.get("memory_pressure") or "").lower()
+        low_free = min_free_mb > 0 and free_mb_int is not None and free_mb_int < min_free_mb
+        critical = pressure == "critical"
+        if not low_free and not critical:
+            return
+
+        reasons: list[str] = []
+        if critical:
+            reasons.append("memory_pressure=critical")
+        if low_free:
+            reasons.append(f"free_mb={free_mb_int} below minimum {min_free_mb}")
+        last_reason = "; ".join(reasons)
+
+        remaining = deadline - time.monotonic()
+        if max_wait <= 0 or remaining <= 0:
+            raise RuntimeError(
+                "Local embedder memory guard blocked the batch: "
+                f"{last_reason or 'memory pressure too high'}"
+            )
+        sleep_for = min(poll, remaining)
+        logger.warning(
+            "Local embedder memory guard waiting %.1fs: %s",
+            sleep_for,
+            last_reason,
+        )
+        await asyncio.sleep(sleep_for)
 
 
 async def _embed_local_batch_with_split(

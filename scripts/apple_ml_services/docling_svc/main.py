@@ -6,7 +6,7 @@ ship the docling Docker container; it's lighter to run alongside the
 MLX sidecars under the same LaunchAgent.
 
 Wire spec — matches the docling sidecar shape backend already calls:
-  GET  /health → {"status": "ok"}
+  GET  /health → status + unified-memory telemetry
   POST /parse  → multipart upload of (file, mime), returns docling JSON
 
 NOTE — IMPLEMENTATION SCAFFOLD
@@ -22,6 +22,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 
@@ -33,9 +34,57 @@ MAX_UPLOAD_MB = int(os.environ.get("DOCLING_MAX_UPLOAD_MB", "150"))
 app = FastAPI(title="Polymath Apple Docling Sidecar", version="0.1.0")
 
 
+def _memory_status() -> dict[str, Any]:
+    try:
+        import psutil
+
+        mem = psutil.virtual_memory()
+        available_mb = int(mem.available // (1024 * 1024))
+        total_mb = int(mem.total // (1024 * 1024))
+        used_percent = round(float(mem.percent), 1)
+        if used_percent >= 92 or available_mb < 1024:
+            pressure = "critical"
+        elif used_percent >= 85 or available_mb < 2048:
+            pressure = "high"
+        elif used_percent >= 75:
+            pressure = "moderate"
+        else:
+            pressure = "ok"
+        return {
+            "gpu_free_mb": available_mb,
+            "gpu_total_mb": total_mb,
+            "memory_available_mb": available_mb,
+            "memory_total_mb": total_mb,
+            "memory_used_percent": used_percent,
+            "memory_pressure": pressure,
+        }
+    except Exception as exc:
+        logger.warning("memory telemetry unavailable: %s", exc)
+        return {
+            "gpu_free_mb": None,
+            "gpu_total_mb": None,
+            "memory_available_mb": None,
+            "memory_total_mb": None,
+            "memory_used_percent": None,
+            "memory_pressure": "unknown",
+        }
+
+
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok"}
+    memory = _memory_status()
+    status = "degraded" if memory.get("memory_pressure") == "critical" else "ok"
+    return {"status": status, **memory}
+
+
+@app.get("/info")
+async def info() -> dict:
+    return {
+        "service": "docling",
+        "device": "cpu",
+        "max_upload_mb": MAX_UPLOAD_MB,
+        **_memory_status(),
+    }
 
 
 @app.post("/parse")

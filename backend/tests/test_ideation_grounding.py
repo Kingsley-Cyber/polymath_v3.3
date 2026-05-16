@@ -135,6 +135,14 @@ def test_nuance_prompt_preserves_typology_and_inference_labels():
         "missing_edge",
         "[INFERENCE]",
         "[BRIDGE]",
+        "[ALT]",
+        "[MISSING CONCEPT]",
+        "[OUTSIDE FRAMEWORK]",
+        "[PREDICTION]",
+        "## Forward Look",
+        "3+ concepts",
+        "THESIS SPINE",
+        "GRAPH EXPLORER",
     ]:
         assert marker in prompt
 

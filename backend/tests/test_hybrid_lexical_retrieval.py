@@ -86,3 +86,23 @@ def test_low_confidence_guard_keeps_exact_term_overlap():
         "what is Chladni",
         rerank_enabled=True,
     )
+
+
+def test_low_confidence_guard_skips_cosine_reranker_scores():
+    ranked = [
+        SourceChunk(
+            chunk_id="c1",
+            parent_id="p1",
+            doc_id="d1",
+            corpus_id="corpus",
+            text="weighted regression and out-of-the-money option glossary",
+            score=0.03,
+            source_tier="chunk",
+        )
+    ]
+    assert not _should_drop_low_confidence_rerank(
+        ranked,
+        "what is chldani",
+        rerank_enabled=True,
+        score_scale="cosine",
+    )

@@ -135,15 +135,21 @@ def _should_drop_low_confidence_rerank(
     ranking_query: str,
     *,
     rerank_enabled: bool,
+    score_scale: str | None = None,
 ) -> bool:
     """Drop reranked results when the whole pool looks unrelated.
 
     The ms-marco cross-encoder returns raw logits. Strongly negative top scores
-    are a useful "this is probably irrelevant" signal. We only act on that
-    signal when none of the top candidates contains a meaningful term from the
-    original user query, which preserves exact-match/file-heading retrieval.
+    are a useful "this is probably irrelevant" signal. Cosine rerankers do not
+    have that negative-logit region, so the guard is skipped when configured for
+    cosine scores. We only act on the logit signal when none of the top
+    candidates contains a meaningful term from the original user query, which
+    preserves exact-match/file-heading retrieval.
     """
     if not rerank_enabled or not ranked:
+        return False
+    scale = (score_scale or settings.RERANKER_SCORE_SCALE).lower()
+    if scale != "logit":
         return False
     top_score = ranked[0].score
     if top_score > _LOW_CONFIDENCE_RERANK_SCORE:

@@ -133,34 +133,62 @@ ChatGPT-style reading flow.
 > or Linux Docker Engine, 32 GB RAM, fast SSD. The system runs lighter than
 > this — see "Cross-device setup" below for slimmed configs.
 
+### Windows full install
+
+Install these first:
+
+- Git for Windows
+- Docker Desktop with the WSL2 backend enabled
+- A current NVIDIA driver if you are using the default local embedder/reranker/parser profiles
+- Python 3.11 only if you want the bootstrap script to pre-stage Hugging Face models
+- Hugging Face CLI for model downloads:
+
+```powershell
+py -m pip install -U "huggingface_hub[hf_xet]"
+```
+
 ```bash
 # 1. Clone
 git clone https://github.com/Kingsley-Cyber/polymath_v3.3.git
 cd polymath_v3.3
+```
 
+```powershell
 # 2. Bootstrap runtime folders, .env, secrets, and bind-mounted config
-# Windows PowerShell:
 .\scripts\bootstrap-runtime.ps1 -GenerateSecrets -StageModels
+```
 
-# Linux/macOS:
+```bash
+# Linux:
 bash scripts/bootstrap-runtime.sh --generate-secrets --stage-models
+```
 
+```text
 # 3. Edit .env and add at least one synthesis provider key, or configure Ollama.
 # OPENAI_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY /
 # GEMINI_API_KEY / OPENROUTER_API_KEY are all supported.
+```
 
+```powershell
 # 4. Verify install shape before starting containers
-.\scripts\check-install.ps1      # Windows
-bash scripts/check-install.sh    # Linux/macOS
+.\scripts\check-install.ps1
 
 # 5. Bring it up
 docker compose up -d --build
 docker compose ps
 
 # 6. Probe running services and open the app
-.\scripts\check-install.ps1 -CheckRunning      # Windows
-bash scripts/check-install.sh --check-running  # Linux/macOS
-open http://localhost:3000
+.\scripts\check-install.ps1 -CheckRunning
+Start-Process http://localhost:3000
+```
+
+Linux is the same flow with the Bash scripts:
+
+```bash
+bash scripts/check-install.sh
+docker compose up -d --build
+bash scripts/check-install.sh --check-running
+xdg-open http://localhost:3000
 ```
 
 The bootstrap scripts do the production-critical setup that Docker Compose
@@ -215,8 +243,8 @@ POLYMATH_MODELS_ROOT=/mnt/fast-ssd/polymath/models
 
 Same as workstation. Add `restart: always` to backend/frontend in
 `docker-compose.override.yml` and put it behind a reverse proxy (Cloudflare
-Tunnel, Caddy, Traefik). The included Cloudflare config publishes
-`kingsleylab.xyz` — you'll want your own.
+Tunnel, Caddy, Traefik). The included Cloudflare profile reads your local
+`./.cloudflared/config.yml`, so each deployment supplies its own hostnames.
 
 ### Apple Silicon (M1 / M2 / M3 / M4 / Pro / Max / Ultra)
 
@@ -248,7 +276,8 @@ your corpus. Don't mix dimensions in the same Qdrant collection.
 The repo ships an end-to-end installer that stages three host-native FastAPI
 sidecars (embedder, reranker, docling), pre-pulls the MLX model weights
 (~1.5–3 GB), wires a LaunchAgent for auto-restart, and adds a Docker compose
-override that points the backend at the host services. **One command:**
+override that points the backend at the host services. This is the path to use
+for an M1/M2/M3/M4 Studio or mini.
 
 ```bash
 # from repo root, on a Darwin/arm64 host
@@ -270,23 +299,33 @@ What the installer does:
 | venv | `uv` + `requirements.txt` |
 | **model pull** | `pull_apple_mlx_models.py` warms `~/PolymathRuntime/volumes/hf-cache` with the two MLX repos so first ingest doesn't stall |
 | LaunchAgent | `~/Library/LaunchAgents/com.polymath.apple-ml.plist` with `RunAtLoad` + `KeepAlive` |
-| smoke | curls `/info`, `/health`, `/health` for embedder/reranker/docling |
+| smoke | checks embedder/docling health and requires a real reranker ordering pass |
 
-Models pulled (CC BY-NC 4.0 for the reranker — fine for personal/research):
+Models pulled:
 - `mlx-community/Qwen3-Embedding-0.6B-mxfp8` — 1024-dim embeddings (matches Docker default)
-- `mlx-community/jina-reranker-v3-4bit-mxfp4` — cosine reranker
+- `jinaai/jina-reranker-v3-mlx` — official MLX Jina v3 reranker with `MLXReranker`, `rerank.py`, and `projector.safetensors`
+
+The Jina MLX reranker is CC BY-NC 4.0. That is fine for personal/research use;
+check the model license before commercial deployment.
 
 **Critical env knob set by the override**: `RERANKER_SCORE_SCALE=cosine`. Jina v3
-returns cosine in 0..1, not logits. Without this, the retriever's negative-logit
-"low confidence" guard discards every result.
+returns cosine scores, not MS MARCO-style logits. The backend reads this setting
+and disables the negative-logit low-confidence guard for the Apple profile.
 
-**Implementation note on the sidecars**: the wire contracts (`/info`, `/health`,
-`/embeddings`, `/rerank`, `/parse`) are stable. The internal model loading inside
-`scripts/apple_ml_services/{embedder_mlx,reranker_mlx,docling_svc}/main.py` is
-shipped as a working scaffold — if you have a tuned MLX implementation
-(specifically the hand-built `MLPProjector` for Jina v3), drop it in and the
-rest of the stack is unaffected. See `GOTCHAS.md § "Ghost B + DeepSeek
-thinking-mode"` and the inline `REPLACE THIS BODY` markers for what changes.
+The smoke test is intentionally strict: `/info.ready` must be true, `/rerank`
+must return backend-compatible `results[{index,score,text}]`, and the relevant
+documents must outrank an irrelevant one. If that fails, do not ingest yet.
+
+For a 32 GB Mac Studio, the override also sets safer defaults:
+
+```bash
+INGEST_MAX_ACTIVE_JOBS=4
+INGEST_MAX_PARSE_JOBS=1
+INGEST_MAX_MODEL_PHASE_DOCS=1
+GRAPH_CACHE_WARMUP_DEBOUNCE_SECONDS=300
+EMBEDDER_MEMORY_GUARD_ENABLED=true
+EMBEDDER_MIN_FREE_MB=2048
+```
 
 Logs / ops:
 ```bash
@@ -296,8 +335,8 @@ launchctl bootout    gui/$(id -u)/com.polymath.apple-ml     # stop
 ```
 
 MLX is significantly faster than CPU on Apple Silicon for both embedding and
-reranking. The unified-memory architecture means batch sizes that are tight on
-discrete GPUs (8GB+) run comfortably here.
+reranking. Unified memory is still one shared pool, so keep local Ollama models
+small during ingestion and watch memory pressure.
 
 **Mac mini / Claude handoff prompt:**
 
@@ -425,10 +464,15 @@ INGEST_MAX_PARSE_JOBS=8
 LOCAL_EMBED_BATCH_SIZE=64
 EMBED_BATCH_SIZE=64
 
-# Cloudflare tunnel (optional — for kingsleylab.xyz-style publishing)
-CLOUDFLARE_TUNNEL_TOKEN=...
+# Reranker score scale. Leave logit for the default Docker cross-encoder.
+# The Apple MLX override sets this to cosine.
+RERANKER_SCORE_SCALE=logit
+
+# Cloudflare tunnel (optional). Credentials/config live in ./.cloudflared/
+# and are gitignored; only the public MCP URL belongs in .env.
 MCP_PUBLIC_URL=https://mcp.example.com
 MCP_API_KEY=<openssl rand -hex 32>
+MCP_REQUIRE_AUTH=true
 ```
 
 **Ghost B (entity / relation extractor) — read this if you change the model:**
@@ -458,6 +502,61 @@ Mongo + Qdrant write so vector RAG works for them. Tally per doc lives on
 
 ---
 
+## Cloudflare Tunnel
+
+Cloudflare is optional. The compose profile uses a **locally managed tunnel**
+mounted from `./.cloudflared/`; that directory is gitignored because it contains
+credentials. There is no committed tunnel token.
+
+One-time setup from the repo root:
+
+```powershell
+# Windows host CLI install
+winget install Cloudflare.cloudflared
+
+cloudflared tunnel login
+cloudflared tunnel create polymath-v33
+cloudflared tunnel route dns polymath-v33 rag.example.com
+cloudflared tunnel route dns polymath-v33 api.example.com
+cloudflared tunnel route dns polymath-v33 mcp.example.com
+
+New-Item -ItemType Directory -Force .cloudflared
+Copy-Item "$env:USERPROFILE\.cloudflared\<tunnel-id>.json" .cloudflared\
+Copy-Item "$env:USERPROFILE\.cloudflared\cert.pem" .cloudflared\
+```
+
+Create `./.cloudflared/config.yml`:
+
+```yaml
+tunnel: <tunnel-id-or-name>
+credentials-file: /etc/cloudflared/<tunnel-id>.json
+no-autoupdate: true
+
+ingress:
+  - hostname: rag.example.com
+    service: http://frontend:80
+  - hostname: api.example.com
+    service: http://backend:8000
+  - hostname: mcp.example.com
+    service: http://mcp:8765
+  - service: http_status:404
+```
+
+Then set the MCP public URL and start the profile:
+
+```powershell
+# .env
+MCP_PUBLIC_URL=https://mcp.example.com
+MCP_REQUIRE_AUTH=true
+
+docker compose --profile mcp --profile cloudflare up -d --build
+```
+
+If you only publish the UI/API, omit the `mcp` hostname and start with
+`docker compose --profile cloudflare up -d --build`.
+
+---
+
 ## Common operations
 
 | Task | Command |
@@ -473,7 +572,7 @@ Mongo + Qdrant write so vector RAG works for them. Tally per doc lives on
 | Open Neo4j browser | http://localhost:7474 |
 | Open Qdrant dashboard | http://localhost:6333/dashboard |
 | Start MCP sidecar | `docker compose --profile mcp up -d --build mcp` |
-| Start Cloudflare tunnel | `docker compose --profile cloudflare up -d cloudflared` |
+| Start Cloudflare tunnel | `docker compose --profile mcp --profile cloudflare up -d --build` |
 | Export portable archive | `.\scripts\export-runtime.ps1 -Destination E:\PolymathRuntime-export -IncludeEnv -Archive` |
 | Import portable archive | `.\scripts\import-runtime.ps1 -Source E:\PolymathRuntime-export.zip -IncludeEnv` |
 | Run backend tests | `cd backend && python -m pytest tests/graph -q` |
@@ -574,8 +673,11 @@ YOUR JOB
 
 2. Match to one of these adaptation paths and explain the trade-offs:
    - NVIDIA workstation: as-is.
-   - Apple Silicon: embedder/reranker/ollama leave Docker; run on host
-     using MLX or Ollama; backend points at host.docker.internal:11434.
+   - Apple Silicon: core services stay in Docker; embedder/reranker/docling
+     run host-native via `scripts/install_apple_mlx_runtime.sh`, and the
+     backend uses `docker-compose.apple-mlx.yml` to reach
+     `host.docker.internal:8082/8081/8500`. Ollama may also run on the host
+     at `host.docker.internal:11434` for local chat models.
    - AMD ROCm: replace nvidia GPU spec with kfd/dri device passthrough;
      swap torch wheel to ROCm.
    - CPU-only: strip GPU services; use cloud embeddings via LiteLLM
@@ -595,6 +697,8 @@ YOUR JOB
    - First docker compose up
    - Verifying all 11 services are healthy
    - Opening http://localhost:3000 and running their first ingest+query
+   - Optional Cloudflare Tunnel setup with local `./.cloudflared/config.yml`
+     and `docker compose --profile mcp --profile cloudflare up -d --build`
 
 4. Do not make assumptions. If hardware/software details aren't given,
    ask one tight clarifying question per round (max 3 rounds). After 3
@@ -628,6 +732,7 @@ Built by Kingsley (`@Kingsley-Cyber`).
 
 - **Embedding:** [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B)
 - **Reranking:** [cross-encoder/ms-marco-MiniLM-L6-v2](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2)
+- **Apple MLX reranking:** [jinaai/jina-reranker-v3-mlx](https://huggingface.co/jinaai/jina-reranker-v3-mlx)
 - **PDF parsing:** [Docling](https://github.com/DS4SD/docling)
 - **LLM routing:** [LiteLLM](https://github.com/BerriAI/litellm)
 - **Graph:** [Neo4j Community](https://neo4j.com/) + Apache Pulsar (async)

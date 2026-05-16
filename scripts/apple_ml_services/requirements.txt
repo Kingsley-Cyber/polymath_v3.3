@@ -16,6 +16,7 @@ sentencepiece>=0.2.0
 
 # HuggingFace cache + hub (model pull, not inference)
 huggingface_hub>=0.26.0
+safetensors>=0.4.0
 
 # Docling host-native sidecar (CPU on macOS)
 docling>=2.90.0
@@ -25,3 +26,4 @@ docling-core>=2.0.0
 numpy>=2.0.0
 pydantic>=2.9.0
 httpx>=0.27.0
+psutil>=6.1.0

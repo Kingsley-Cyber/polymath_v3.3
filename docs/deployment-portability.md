@@ -211,22 +211,45 @@ rather than by raw-copying database internals while services are running.
 ## Cloudflare Tunnel
 
 The compose-managed Cloudflare container is profile-gated so it never starts
-unless you ask for it.
+unless you ask for it. It uses a locally managed tunnel config mounted from
+`./.cloudflared/`; that directory is gitignored because it contains
+`cert.pem`, the tunnel credentials JSON, and `config.yml`.
 
 `.env`:
 
 ```bash
-CLOUDFLARE_TUNNEL_TOKEN=<token from Cloudflare Zero Trust>
 MCP_PUBLIC_URL=https://mcp.example.com
+MCP_REQUIRE_AUTH=true
 ```
 
-In Cloudflare Zero Trust, configure public hostnames to route to compose service
-names on the tunnel network:
+One-time host setup:
 
-```text
-app.example.com -> http://frontend:80
-api.example.com -> http://backend:8000
-mcp.example.com -> http://mcp:8765
+```bash
+cloudflared tunnel login
+cloudflared tunnel create polymath-v33
+cloudflared tunnel route dns polymath-v33 app.example.com
+cloudflared tunnel route dns polymath-v33 api.example.com
+cloudflared tunnel route dns polymath-v33 mcp.example.com
+mkdir -p .cloudflared
+cp ~/.cloudflared/<tunnel-id>.json .cloudflared/
+cp ~/.cloudflared/cert.pem .cloudflared/
+```
+
+Create `./.cloudflared/config.yml`:
+
+```yaml
+tunnel: <tunnel-id-or-name>
+credentials-file: /etc/cloudflared/<tunnel-id>.json
+no-autoupdate: true
+
+ingress:
+  - hostname: app.example.com
+    service: http://frontend:80
+  - hostname: api.example.com
+    service: http://backend:8000
+  - hostname: mcp.example.com
+    service: http://mcp:8765
+  - service: http_status:404
 ```
 
 Start:
@@ -236,8 +259,7 @@ docker compose --profile mcp --profile cloudflare up -d --build
 ```
 
 If you already have an external `cloudflared-tunnel` container using the same
-tunnel token, stop it first so two tunnel clients do not fight for the same
-routes.
+tunnel, stop it first so two tunnel clients do not fight for the same routes.
 
 ## What Must Stay The Same Across Devices
 

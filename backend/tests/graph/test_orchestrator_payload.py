@@ -12,12 +12,12 @@ from services.graph.orchestrator import (
     _build_insight_packet,
     _build_subgraph_payload,
     _build_weak_links,
-    _call_llm_synthesis,
     _compact_packet_for_prompt,
     _context_graph_from_result,
     _curated_evidence_rows,
     _deterministic_prose_fallback,
     _llm_context_trace_from_packet,
+    _render_packet_user_prompt,
     _should_skip_synthesis,
     _source_docs_from_retrieval_chunks,
     _source_label_from_row,
@@ -617,6 +617,132 @@ def test_compact_packet_preserves_nuance_bridge_typology():
     assert compact["transfers"][0]["target_domains"] == ["course design"]
     assert compact["bridges"][0]["bridge_type"] == "cross_domain"
     assert compact["fragile_bridges"][0]["path_count"] == 1
+
+
+def test_compact_packet_builds_dual_curation_lanes():
+    packet = {
+        "query": "HOW DOES A KNOWLEDGE GRAPH DATABASE AFFECT THE COUNCIL?",
+        "evidence": [
+            {
+                "evidence_id": "e1",
+                "source": {"label": "Module_Complete.txt"},
+                "summary": (
+                    "The Council uses a knowledge graph to capture signal mapping, "
+                    "session pacing, and module outputs."
+                ),
+                "text": (
+                    "Phase 2 writes implicit choice, Phase 3 records construct "
+                    "pattern, and later phases feed the me book output loop."
+                ),
+            }
+        ],
+        "communities": [
+            {
+                "label": "MLKit ML Kit Android",
+                "top_entities": ["MLKit", "Android", "iOS"],
+            },
+            {
+                "label": "Domain Model Java Data",
+                "top_entities": ["Domain Model", "Java Data"],
+            },
+            {
+                "label": "SIGNAL MAPPING Construct Pattern",
+                "top_entities": ["Signal Mapping", "Construct Pattern", "Implicit Choice"],
+            },
+            {
+                "label": "Session Pacing Phase 2",
+                "top_entities": ["Session Pacing", "Phase 2", "partial node write"],
+            },
+        ],
+        "edges": [
+            {
+                "source_name": "The Council",
+                "predicate": "depends_on",
+                "target_name": "knowledge graph",
+                "confidence": 0.9,
+            },
+            {
+                "source_name": "knowledge graph",
+                "predicate": "uses",
+                "target_name": "signal schema",
+                "confidence": 0.9,
+            },
+            {
+                "source_name": "Signal Mapping",
+                "predicate": "produces",
+                "target_name": "Construct Pattern",
+                "confidence": 0.9,
+            },
+            {
+                "source_name": "Session Pacing",
+                "predicate": "produces",
+                "target_name": "partial node write",
+                "confidence": 0.9,
+            },
+            {
+                "source_name": "The Council",
+                "predicate": "uses",
+                "target_name": "MLKit",
+                "confidence": 0.5,
+            },
+        ],
+        "entities": [
+            {"canonical_name": "The Council", "object_kind": "ProductSurface"},
+            {"canonical_name": "knowledge graph", "object_kind": "DataModel"},
+            {"canonical_name": "Signal Mapping", "object_kind": "SignalLayer"},
+        ],
+        "evidence_filter": {},
+    }
+
+    compact = _compact_packet_for_prompt(packet)
+    dual = compact["dual_curation"]
+    thesis_labels = " | ".join(item["label"] for item in dual["thesis_spine"])
+    explorer_labels = " | ".join(item["label"] for item in dual["graph_explorer"])
+    thesis_labels_lc = thesis_labels.lower()
+
+    assert "knowledge graph" in thesis_labels_lc
+    assert "signal mapping" in thesis_labels_lc
+    assert "session pacing" in thesis_labels_lc
+    assert "MLKit" not in thesis_labels
+    assert "Domain Model Java Data" not in thesis_labels
+    assert "MLKit" in explorer_labels or "Domain Model Java Data" in explorer_labels
+
+    prompt = _render_packet_user_prompt(packet, synthesis_mode="nuance")
+    assert "DUAL CURATION LANES" in prompt
+    assert "THESIS SPINE:" in prompt
+    assert "GRAPH EXPLORER:" in prompt
+    assert "Build the answer from THESIS SPINE" in prompt
+
+
+def test_gap_prompt_renders_metric_decision_rule():
+    packet = {
+        "query": "What is the hidden bridge?",
+        "evidence": [],
+        "communities": [],
+        "edges": [],
+        "entities": [],
+        "evidence_filter": {},
+        "gaps": [
+            {
+                "gap_id": "g1",
+                "gap_type": "analogy",
+                "cluster_a_label": "Identity Map",
+                "cluster_b_label": "Memory Palace",
+                "question": "If these organize identity similarly, what follows?",
+                "topology_sim": 0.7349,
+                "neighbor_jaccard": 0.083,
+                "support_status": "both_query_clusters",
+            }
+        ],
+    }
+
+    prompt = _render_packet_user_prompt(packet)
+
+    assert "Read topology_sim + neighbor_jaccard together" in prompt
+    assert "both above 0.7 -> likely terminological" in prompt
+    assert "topology_sim above 0.6 with neighbor_jaccard below 0.2 -> likely analogy" in prompt
+    assert "low on both -> missing_edge" in prompt
+    assert "Override these defaults when the evidence contradicts" in prompt
 
 
 def test_insight_packet_marks_sparse_when_evidence_missing():

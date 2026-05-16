@@ -236,3 +236,66 @@ async def test_legacy_mode_values_coerced_in_dispatcher():
         local_mock.return_value = [[0.0] * 1024]
         await embedder.embed_batch(["x"], mode="local_st", expected_dim=1024)
     local_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_local_embedder_memory_guard_blocks_critical_pressure(monkeypatch):
+    settings = MagicMock(
+        EMBEDDER_MEMORY_GUARD_ENABLED=True,
+        EMBEDDER_MIN_FREE_MB=2048,
+        EMBEDDER_MEMORY_GUARD_MAX_WAIT_SECONDS=0.0,
+        EMBEDDER_MEMORY_GUARD_POLL_SECONDS=0.5,
+    )
+    monkeypatch.setattr(embedder, "get_settings", lambda: settings)
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "memory_pressure": "critical",
+                "gpu_free_mb": 512,
+                "gpu_total_mb": 32768,
+            }
+
+    class _Client:
+        async def get(self, url, timeout=None):
+            return _Response()
+
+    with pytest.raises(RuntimeError, match="memory guard blocked"):
+        await embedder._wait_for_local_embedder_memory(
+            client=_Client(),
+            base_url="http://embedder",
+        )
+
+
+@pytest.mark.asyncio
+async def test_local_embedder_memory_guard_allows_healthy_pressure(monkeypatch):
+    settings = MagicMock(
+        EMBEDDER_MEMORY_GUARD_ENABLED=True,
+        EMBEDDER_MIN_FREE_MB=2048,
+        EMBEDDER_MEMORY_GUARD_MAX_WAIT_SECONDS=0.0,
+        EMBEDDER_MEMORY_GUARD_POLL_SECONDS=0.5,
+    )
+    monkeypatch.setattr(embedder, "get_settings", lambda: settings)
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "memory_pressure": "ok",
+                "gpu_free_mb": 8192,
+                "gpu_total_mb": 32768,
+            }
+
+    class _Client:
+        async def get(self, url, timeout=None):
+            return _Response()
+
+    await embedder._wait_for_local_embedder_memory(
+        client=_Client(),
+        base_url="http://embedder",
+    )

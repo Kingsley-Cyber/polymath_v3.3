@@ -1,19 +1,15 @@
-"""Apple Silicon MLX reranker sidecar — Jina v3 cross-encoder, host-native.
+"""Apple Silicon MLX reranker sidecar — Jina v3, host-native.
 
 Wire spec (matches backend expectations):
-  GET  /health → {"status": "ok"}
-  POST /rerank → {"scores": [float, ...]} aligned to the input documents
+  GET  /health → status + unified-memory telemetry
+  GET  /info   → readiness + score scale + unified-memory telemetry
+  POST /rerank → {"results": [{"index", "score", "text"}, ...]}
 
-NOTE — IMPLEMENTATION SCAFFOLD
-Jina-reranker-v3 ships as a Qwen3 trunk + a custom 2-layer MLP projector
-that maps pooled embeddings to a single relevance scalar. Current
-mlx-embeddings cannot load the projector's quantized weights
-automatically, so the verified Mac Studio implementation builds an
-MLPProjector by hand and loads only the trunk through mlx-embeddings.
-
-This file gives you the FastAPI shape + a placeholder forward pass.
-**Replace the _load_model() and _score_pairs() bodies with your
-verified Mac Studio implementation** — the wire contract stays the same.
+This wrapper uses Jina's official MLX implementation from
+`jinaai/jina-reranker-v3-mlx`, including its projector.safetensors loader.
+It deliberately does not return placeholder zero scores. If the official
+reranker cannot load, `/info.ready` is false and `/rerank` returns 503 so
+the installer smoke test catches the issue before real retrieval traffic.
 
 CRITICAL — score scale: this model returns COSINE scores (0..1), not
 logits. The backend must run with RERANKER_SCORE_SCALE=cosine, otherwise
@@ -30,8 +26,10 @@ Required env:
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -40,10 +38,15 @@ from pydantic import BaseModel
 logger = logging.getLogger("reranker_mlx")
 logging.basicConfig(level=logging.INFO)
 
-MODEL_ID = "mlx-community/jina-reranker-v3-4bit-mxfp4"
+MODEL_ID = "jinaai/jina-reranker-v3-mlx"
 BATCH_SIZE = int(os.environ.get("RERANKER_BATCH_SIZE", "16"))
 MAX_DOC_CHARS = int(os.environ.get("RERANKER_MAX_DOC_CHARS", "6000"))
 MAX_QUERY_CHARS = int(os.environ.get("RERANKER_MAX_QUERY_CHARS", "2000"))
+ALLOW_DOWNLOADS = os.environ.get("RERANKER_ALLOW_DOWNLOADS", "1").lower() not in {
+    "0",
+    "false",
+    "no",
+}
 
 
 class RerankRequest(BaseModel):
@@ -52,51 +55,125 @@ class RerankRequest(BaseModel):
     top_k: int | None = None
 
 
+class RankedResult(BaseModel):
+    index: int
+    score: float
+    text: str
+
+
 class RerankResponse(BaseModel):
-    scores: list[float]
+    results: list[RankedResult]
     model: str = MODEL_ID
 
 
 app = FastAPI(title="Polymath Apple MLX Reranker (Jina v3)", version="0.1.0")
-_model: Any = None
-_projector: Any = None
-_tokenizer: Any = None
+_reranker: Any = None
+_model_dir: str | None = None
+_load_error: str | None = None
+
+
+def _memory_status() -> dict[str, Any]:
+    try:
+        import psutil
+
+        mem = psutil.virtual_memory()
+        available_mb = int(mem.available // (1024 * 1024))
+        total_mb = int(mem.total // (1024 * 1024))
+        used_percent = round(float(mem.percent), 1)
+        if used_percent >= 92 or available_mb < 1024:
+            pressure = "critical"
+        elif used_percent >= 85 or available_mb < 2048:
+            pressure = "high"
+        elif used_percent >= 75:
+            pressure = "moderate"
+        else:
+            pressure = "ok"
+        return {
+            "gpu_free_mb": available_mb,
+            "gpu_total_mb": total_mb,
+            "memory_available_mb": available_mb,
+            "memory_total_mb": total_mb,
+            "memory_used_percent": used_percent,
+            "memory_pressure": pressure,
+        }
+    except Exception as exc:
+        logger.warning("memory telemetry unavailable: %s", exc)
+        return {
+            "gpu_free_mb": None,
+            "gpu_total_mb": None,
+            "memory_available_mb": None,
+            "memory_total_mb": None,
+            "memory_used_percent": None,
+            "memory_pressure": "unknown",
+        }
+
+
+def _resolve_model_dir() -> Path:
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError as exc:
+        raise RuntimeError(
+            "huggingface_hub not installed. uv pip install -r requirements.txt"
+        ) from exc
+
+    cache_dir = os.environ.get("HF_HOME")
+    return Path(
+        snapshot_download(
+            repo_id=MODEL_ID,
+            cache_dir=cache_dir,
+            local_files_only=not ALLOW_DOWNLOADS,
+            allow_patterns=[
+                "*.json",
+                "*.txt",
+                "*.safetensors",
+                "rerank.py",
+                "tokenizer*",
+                "merges.txt",
+                "vocab.json",
+            ],
+        )
+    )
+
+
+def _load_mlx_reranker_class(model_dir: Path) -> Any:
+    module_path = model_dir / "rerank.py"
+    if not module_path.exists():
+        raise RuntimeError(f"official rerank.py missing from {model_dir}")
+
+    spec = importlib.util.spec_from_file_location(
+        "jina_reranker_v3_mlx_official",
+        module_path,
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not import official rerank.py from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    reranker_cls = getattr(module, "MLXReranker", None)
+    if reranker_cls is None:
+        raise RuntimeError("official rerank.py does not expose MLXReranker")
+    return reranker_cls
 
 
 def _load_model() -> None:
-    """Load Jina v3 trunk + hand-built MLP projector.
-
-    REPLACE THIS BODY with your verified Mac Studio implementation.
-    The Mac Studio code:
-      1. Loads the Qwen3 trunk via mlx_embeddings.utils.load(MODEL_ID).
-      2. Reads model.safetensors metadata for the projector weights
-         (keys typically: 'projector.0.weight', 'projector.0.bias',
-                          'projector.2.weight', 'projector.2.bias').
-      3. Constructs an MLPProjector(mlx.nn.Module) with shape
-         [hidden_dim → hidden_dim → 1], loads the weights, freezes it.
-      4. Stores both as module-level globals.
-    """
-    global _model, _projector, _tokenizer
-    if _model is not None:
+    """Load Jina's official MLX reranker implementation."""
+    global _reranker, _model_dir, _load_error
+    if _reranker is not None:
         return
 
-    try:
-        from mlx_embeddings.utils import load
-    except ImportError as exc:
-        raise RuntimeError(
-            "mlx-embeddings not installed. uv pip install -r requirements.txt"
-        ) from exc
+    logger.info("resolving Jina v3 MLX reranker %s", MODEL_ID)
+    model_dir = _resolve_model_dir()
+    projector_path = model_dir / "projector.safetensors"
+    if not projector_path.exists():
+        raise RuntimeError(f"projector.safetensors missing from {model_dir}")
 
-    logger.info("loading Jina v3 trunk %s", MODEL_ID)
-    _model, _tokenizer = load(MODEL_ID)
-
-    # Projector — REPLACE with your hand-built MLPProjector load
-    _projector = None
-    logger.warning(
-        "reranker scaffold active: MLPProjector not loaded. "
-        "Replace _load_model() with the verified Mac Studio implementation. "
-        "/rerank will return zeroes until then."
+    reranker_cls = _load_mlx_reranker_class(model_dir)
+    logger.info("loading Jina v3 MLX reranker from %s", model_dir)
+    _reranker = reranker_cls(
+        model_path=str(model_dir),
+        projector_path=str(projector_path),
     )
+    _model_dir = str(model_dir)
+    _load_error = None
 
 
 @app.on_event("startup")
@@ -104,12 +181,20 @@ async def _startup() -> None:
     try:
         _load_model()
     except Exception as exc:
+        global _load_error
+        _load_error = str(exc)
         logger.exception("startup model load failed: %s", exc)
 
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok" if _model is not None else "loading"}
+    memory = _memory_status()
+    status = "ok" if _reranker is not None else "loading"
+    if _load_error and _reranker is None:
+        status = "error"
+    if _reranker is not None and memory.get("memory_pressure") == "critical":
+        status = "degraded"
+    return {"status": status, "ready": _reranker is not None, **memory}
 
 
 @app.get("/info")
@@ -120,47 +205,32 @@ async def info() -> dict:
         "batch_size": BATCH_SIZE,
         "max_doc_chars": MAX_DOC_CHARS,
         "max_query_chars": MAX_QUERY_CHARS,
-        "ready": _model is not None and _projector is not None,
+        "ready": _reranker is not None,
+        "model_dir": _model_dir,
+        "load_error": _load_error,
+        **_memory_status(),
     }
 
 
-def _score_pairs(query: str, documents: list[str]) -> list[float]:
-    """Return cosine scores aligned to documents.
-
-    REPLACE with your verified Mac Studio implementation. Reference shape:
-      pairs = [(query[:MAX_QUERY_CHARS], d[:MAX_DOC_CHARS]) for d in documents]
-      toks  = _tokenizer(pairs, padding=True, truncation=True, return_tensors="np")
-      hidden = _model(toks["input_ids"], attention_mask=toks["attention_mask"]).last_hidden_state
-      pooled = hidden[:, 0, :]                    # CLS pooling for Jina v3
-      scores = _projector(pooled).reshape(-1)     # [N] cosine in 0..1
-      return scores.tolist()
-    """
-    if _projector is None:
-        # Scaffold mode: explicit zeroes signal misconfiguration to the
-        # retriever rather than randomising relevance order.
-        logger.warning("returning zero scores (scaffold mode)")
-        return [0.0] * len(documents)
-
+def _rank_pairs(query: str, documents: list[str], top_k: int | None) -> list[RankedResult]:
+    if _reranker is None:
+        raise HTTPException(status_code=503, detail="reranker is not ready")
     try:
-        import numpy as np
-
-        pairs = [
-            (query[:MAX_QUERY_CHARS], (doc or "")[:MAX_DOC_CHARS])
-            for doc in documents
-        ]
-        toks = _tokenizer(
-            pairs,
-            padding=True,
-            truncation=True,
-            return_tensors="np",
+        safe_query = (query or "")[:MAX_QUERY_CHARS]
+        safe_documents = [(doc or "")[:MAX_DOC_CHARS] for doc in documents]
+        raw_results = _reranker.rerank(
+            safe_query,
+            safe_documents,
+            top_n=top_k,
         )
-        out = _model(toks["input_ids"], attention_mask=toks["attention_mask"])
-        # Pool the CLS token (index 0) — replace with the pooling your
-        # verified implementation uses if different.
-        hidden = np.asarray(out.last_hidden_state)
-        pooled = hidden[:, 0, :]
-        scores = _projector(pooled).reshape(-1)
-        return [float(s) for s in scores]
+        return [
+            RankedResult(
+                index=int(item["index"]),
+                score=float(item["relevance_score"]),
+                text=documents[int(item["index"])],
+            )
+            for item in raw_results
+        ]
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"rerank failed: {exc}")
 
@@ -168,11 +238,13 @@ def _score_pairs(query: str, documents: list[str]) -> list[float]:
 @app.post("/rerank", response_model=RerankResponse)
 async def rerank(req: RerankRequest) -> RerankResponse:
     if not req.documents:
-        return RerankResponse(scores=[])
-    if _model is None:
+        return RerankResponse(results=[])
+    if _reranker is None:
         try:
             _load_model()
         except Exception as exc:
+            global _load_error
+            _load_error = str(exc)
             raise HTTPException(status_code=503, detail=f"model load failed: {exc}")
-    scores = _score_pairs(req.query, req.documents)
-    return RerankResponse(scores=scores)
+    results = _rank_pairs(req.query, req.documents, req.top_k)
+    return RerankResponse(results=results)

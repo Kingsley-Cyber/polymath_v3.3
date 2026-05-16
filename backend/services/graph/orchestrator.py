@@ -130,6 +130,8 @@ _PACKET_RETRIEVER_RERANK_POOL = 40
 _PACKET_RETRIEVER_GRAPH_EXPANSION = 20
 _PACKET_MAX_GATEWAYS = 5
 _PACKET_MAX_SUPPORTING_STATEMENTS = 4
+_PACKET_MAX_THESIS_SPINE = 5
+_PACKET_MAX_GRAPH_EXPLORER = 5
 
 # Synthesis-time LLM budget. Keep the call fast; the packet is bounded so the
 # model has plenty of room without burning the whole turn budget. Longer essay
@@ -158,6 +160,60 @@ _GRAPH_RELEVANCE_STOPWORDS = {
     "corpus",
     "query",
     "its",
+}
+_CURATION_MECHANISM_TERMS = {
+    "apply",
+    "applies",
+    "capture",
+    "captures",
+    "depend",
+    "depends",
+    "emit",
+    "emits",
+    "feed",
+    "feeds",
+    "generate",
+    "generates",
+    "implement",
+    "implements",
+    "map",
+    "maps",
+    "part",
+    "persist",
+    "persists",
+    "produce",
+    "produces",
+    "route",
+    "routes",
+    "store",
+    "stores",
+    "use",
+    "uses",
+    "write",
+    "writes",
+}
+_CURATION_NOISE_PHRASES = {
+    "active record",
+    "client session state",
+    "data mapper",
+    "domain model",
+    "enterprise application",
+    "java data",
+    "server session state",
+}
+_CURATION_NOISE_TERMS = {
+    "android",
+    "api",
+    "backend",
+    "client",
+    "frontend",
+    "ios",
+    "java",
+    "mlkit",
+    "platform",
+    "sdk",
+    "server",
+    "unknown",
 }
 
 
@@ -847,6 +903,501 @@ def _query_terms_for_evidence(query: str) -> set[str]:
 
 def _terms_from_values(*values: Any) -> set[str]:
     return _query_terms_for_evidence(" ".join(str(value or "") for value in values))
+
+
+def _curation_query_terms(query: str) -> set[str]:
+    terms = _query_terms_for_evidence(query)
+    query_lc = (query or "").lower()
+    if "knowledge graph" in query_lc or "kg" in terms:
+        terms.update({"knowledge", "graph", "kg"})
+    if "database" in terms or "db" in terms:
+        terms.update({"database", "db", "sqlite"})
+    return terms
+
+
+def _curation_unique(values: list[Any], limit: int = 6) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        text = _text(value, 70)
+        key = text.lower()
+        if not text or key in seen or text == "?":
+            continue
+        seen.add(key)
+        out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _curation_evidence_hits(candidate_terms: set[str], evidence: list[dict[str, Any]]) -> int:
+    if not candidate_terms:
+        return 0
+    useful_terms = {
+        term
+        for term in candidate_terms
+        if len(term) >= 3 and term not in _CURATION_NOISE_TERMS
+    }
+    if not useful_terms:
+        return 0
+    hits = 0
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        source = item.get("source") if isinstance(item.get("source"), dict) else {}
+        haystack = " ".join(
+            str(value or "")
+            for value in (
+                item.get("summary"),
+                item.get("text"),
+                source.get("label"),
+                source.get("title"),
+            )
+        ).lower()
+        if any(term in haystack for term in useful_terms):
+            hits += 1
+    return min(hits, 3)
+
+
+def _curation_direct_evidence_hit(text: str, evidence: list[dict[str, Any]]) -> bool:
+    needle = _text(text, 80).lower()
+    if not needle:
+        return False
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        source = item.get("source") if isinstance(item.get("source"), dict) else {}
+        haystack = " ".join(
+            str(value or "")
+            for value in (
+                item.get("summary"),
+                item.get("text"),
+                source.get("label"),
+                source.get("title"),
+            )
+        ).lower()
+        if needle in haystack:
+            return True
+    return False
+
+
+def _curation_label_evidence_hits(label: str, evidence: list[dict[str, Any]]) -> int:
+    label_text = _text(label, 80).lower()
+    label_terms = {
+        term
+        for term in _terms_from_values(label_text)
+        if len(term) >= 3 and term not in _CURATION_NOISE_TERMS
+    }
+    if not label_text and not label_terms:
+        return 0
+    hits = 0
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        source = item.get("source") if isinstance(item.get("source"), dict) else {}
+        haystack = " ".join(
+            str(value or "")
+            for value in (
+                item.get("summary"),
+                item.get("text"),
+                source.get("label"),
+                source.get("title"),
+            )
+        ).lower()
+        if label_text and label_text in haystack:
+            hits += 1
+        elif label_terms and all(term in haystack for term in label_terms):
+            hits += 1
+    return min(hits, 3)
+
+
+def _curation_is_unsupported_noise(
+    text: str,
+    *,
+    query_terms: set[str],
+    evidence: list[dict[str, Any]],
+) -> bool:
+    terms = _terms_from_values(text)
+    noisy_terms = (terms & _CURATION_NOISE_TERMS) - query_terms
+    return bool(noisy_terms) and not _curation_direct_evidence_hit(text, evidence)
+
+
+def _curation_noise_penalty(
+    text: str,
+    *,
+    query_terms: set[str],
+    evidence_hits: int,
+    mechanism_hits: int,
+) -> float:
+    lowered = text.lower()
+    penalty = 0.0
+    if not lowered.strip() or lowered.strip() == "unknown":
+        penalty += 4.0
+    for phrase in _CURATION_NOISE_PHRASES:
+        if phrase in lowered and not (set(phrase.split()) & query_terms):
+            penalty += 2.0
+    noisy_terms = {
+        term
+        for term in _CURATION_NOISE_TERMS
+        if re.search(rf"\b{re.escape(term)}\b", lowered)
+        and term not in query_terms
+    }
+    if noisy_terms:
+        penalty += 1.5 + (0.5 * min(len(noisy_terms), 3))
+    if evidence_hits:
+        penalty *= 0.55
+    if mechanism_hits >= 2:
+        penalty *= 0.7
+    return penalty
+
+
+def _dual_curation_lanes_for_prompt(
+    *,
+    query: str,
+    groups: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    entity_facets: list[dict[str, Any]],
+    evidence: list[dict[str, Any]],
+    bridges: list[dict[str, Any]],
+    analogies: list[dict[str, Any]],
+    transfers: list[dict[str, Any]],
+    fragile_bridges: list[dict[str, Any]],
+    gaps: list[dict[str, Any]],
+    signals: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build two bounded prompt lanes: thesis spine and graph explorer.
+
+    Thesis candidates explain the query's mechanism. Explorer candidates keep
+    surprising or weakly related graph material available for [ALT], [BRIDGE],
+    [TRANSFER], and [MISSING CONCEPT] work without letting it steer the answer.
+    """
+
+    query_terms = _curation_query_terms(query)
+    entity_facet_terms = {
+        _text(facet.get("name") or "", 70).lower(): facet
+        for facet in entity_facets
+        if isinstance(facet, dict) and facet.get("name")
+    }
+    candidates: list[dict[str, Any]] = []
+
+    def add_candidate(
+        *,
+        label: Any,
+        concepts: list[Any],
+        why: Any,
+        source: str,
+        mechanism_hits: int = 0,
+        force_explorer: bool = False,
+    ) -> None:
+        label_text = _text(label, 80)
+        concept_list = _curation_unique(concepts, limit=6)
+        why_text = _text(why, 190)
+        if not label_text and not concept_list:
+            return
+        text = " ".join([label_text, " ".join(concept_list), why_text])
+        terms = _terms_from_values(text)
+        label_terms = _terms_from_values(label_text)
+        query_hits = len(terms & query_terms)
+        evidence_hits = _curation_evidence_hits(terms, evidence)
+        label_query_hits = len(label_terms & query_terms)
+        label_evidence_hits = _curation_label_evidence_hits(label_text, evidence)
+        specific_terms = len({term for term in terms if term not in _CURATION_NOISE_TERMS})
+        facet_bonus = 0.0
+        if label_text.lower() in entity_facet_terms:
+            facet = entity_facet_terms[label_text.lower()]
+            if facet.get("object_kind") or facet.get("domain_type") or facet.get("canonical_family"):
+                facet_bonus = 0.8
+        noise = _curation_noise_penalty(
+            text,
+            query_terms=query_terms,
+            evidence_hits=evidence_hits,
+            mechanism_hits=mechanism_hits,
+        )
+        noisy_label_terms = (label_terms & _CURATION_NOISE_TERMS) - query_terms
+        if noisy_label_terms and not _curation_direct_evidence_hit(label_text, evidence):
+            noise += 2.5
+        unsupported_endpoint_penalty = (
+            2.0
+            if (
+                source == "edge_cluster"
+                and label_query_hits == 0
+                and label_evidence_hits == 0
+                and mechanism_hits <= 1
+            )
+            else 0.0
+        )
+        score = (
+            (query_hits * 2.4)
+            + (label_query_hits * 1.2)
+            + (evidence_hits * 2.2)
+            + (label_evidence_hits * 1.4)
+            + (mechanism_hits * 1.35)
+            + min(len(concept_list), 5) * 0.35
+            + min(specific_terms, 8) * 0.08
+            + facet_bonus
+            - noise
+            - unsupported_endpoint_penalty
+        )
+        if force_explorer:
+            score += 0.6
+        candidates.append(
+            {
+                "label": label_text or (concept_list[0] if concept_list else "candidate"),
+                "concepts": concept_list[:5],
+                "why": why_text,
+                "source": source,
+                "score": round(score, 3),
+                "query_hits": query_hits,
+                "label_query_hits": label_query_hits,
+                "evidence_hits": evidence_hits,
+                "label_evidence_hits": label_evidence_hits,
+                "mechanism_hits": mechanism_hits,
+                "noise": round(noise, 3),
+                "force_explorer": force_explorer,
+            }
+        )
+
+    edge_clusters: dict[str, dict[str, Any]] = {}
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        s = _text(edge.get("s") or "", 80)
+        t = _text(edge.get("t") or "", 80)
+        predicate = _text(edge.get("p") or "", 50)
+        if not s or not t:
+            continue
+        predicate_terms = _terms_from_values(predicate)
+        mechanism_hit = bool(predicate_terms & _CURATION_MECHANISM_TERMS)
+        edge_statement = f"{s} {_humanize_predicate(predicate)} {t}" if predicate else f"{s} connects to {t}"
+        for focal, neighbor in ((s, t), (t, s)):
+            if (
+                _curation_is_unsupported_noise(
+                    neighbor,
+                    query_terms=query_terms,
+                    evidence=evidence,
+                )
+                and not _curation_is_unsupported_noise(
+                    focal,
+                    query_terms=query_terms,
+                    evidence=evidence,
+                )
+            ):
+                continue
+            key = focal.lower()
+            cluster = edge_clusters.setdefault(
+                key,
+                {
+                    "label": focal,
+                    "neighbors": [],
+                    "relations": [],
+                    "mechanism_hits": 0,
+                },
+            )
+            cluster["neighbors"].append(neighbor)
+            if predicate:
+                cluster["relations"].append(edge_statement)
+            if mechanism_hit:
+                cluster["mechanism_hits"] += 1
+
+    for cluster in edge_clusters.values():
+        relations = _curation_unique(cluster.get("relations") or [], limit=3)
+        add_candidate(
+            label=cluster.get("label") or "",
+            concepts=[cluster.get("label")] + list(cluster.get("neighbors") or []),
+            why="; ".join(relations) or "connected by selected graph edges",
+            source="edge_cluster",
+            mechanism_hits=int(cluster.get("mechanism_hits") or 0),
+        )
+
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        entities = [str(e) for e in (group.get("entities") or []) if e]
+        group_terms = _terms_from_values(group.get("label"), *entities)
+        mechanism_hits = sum(
+            1
+            for edge in edges
+            if group_terms
+            and (
+                group_terms
+                & _terms_from_values(edge.get("s"), edge.get("p"), edge.get("t"))
+            )
+        )
+        add_candidate(
+            label=group.get("label") or "",
+            concepts=entities,
+            why=f"query-scoped group containing {', '.join(entities[:4])}"
+            if entities
+            else "query-scoped concept group",
+            source="group",
+            mechanism_hits=min(mechanism_hits, 4),
+        )
+
+    for sig in signals:
+        if not isinstance(sig, dict):
+            continue
+        add_candidate(
+            label=sig.get("name") or "",
+            concepts=[sig.get("name") or ""],
+            why=sig.get("why") or "emerging signal candidate",
+            source="signal",
+            mechanism_hits=1,
+        )
+
+    for bridge in bridges:
+        add_candidate(
+            label=f"{bridge.get('source') or '?'} <-> {bridge.get('target') or '?'}",
+            concepts=[bridge.get("source"), bridge.get("target")],
+            why=bridge.get("rationale")
+            or ", ".join(bridge.get("shared_terms") or [])
+            or "bridge candidate",
+            source="bridge",
+            mechanism_hits=1,
+            force_explorer=True,
+        )
+    for analogy in analogies:
+        add_candidate(
+            label=f"{analogy.get('source') or '?'} <-> {analogy.get('target') or '?'}",
+            concepts=[analogy.get("source"), analogy.get("target")],
+            why=analogy.get("rationale") or "structural analogy candidate",
+            source="analogy",
+            force_explorer=True,
+        )
+    for transfer in transfers:
+        target_domains = transfer.get("target_domains") or [transfer.get("target_domain")]
+        add_candidate(
+            label=f"{transfer.get('hub') or '?'} -> {', '.join(str(v) for v in target_domains if v)}",
+            concepts=[transfer.get("hub"), transfer.get("target"), *target_domains],
+            why=transfer.get("rationale") or "transfer candidate",
+            source="transfer",
+            mechanism_hits=1,
+            force_explorer=True,
+        )
+    for bridge in fragile_bridges:
+        add_candidate(
+            label=f"{bridge.get('source') or '?'} <-> {bridge.get('target') or '?'}",
+            concepts=[bridge.get("source"), bridge.get("target"), *(bridge.get("path_entities") or [])],
+            why=bridge.get("evidence") or "fragile bridge candidate",
+            source="fragile_bridge",
+            force_explorer=True,
+        )
+    for gap in gaps:
+        add_candidate(
+            label=" <-> ".join([str(v) for v in (gap.get("between") or []) if v]),
+            concepts=[str(v) for v in (gap.get("between") or []) if v],
+            why=gap.get("q") or "candidate gap",
+            source=f"gap:{gap.get('type') or 'missing_edge'}",
+            force_explorer=True,
+        )
+
+    def candidate_key(candidate: dict[str, Any]) -> str:
+        return re.sub(r"\W+", " ", str(candidate.get("label") or "").lower()).strip()
+
+    unique: dict[str, dict[str, Any]] = {}
+    for candidate in candidates:
+        key = candidate_key(candidate)
+        if not key:
+            continue
+        existing = unique.get(key)
+        if existing is None or float(candidate.get("score") or 0) > float(existing.get("score") or 0):
+            unique[key] = candidate
+    ranked = sorted(
+        unique.values(),
+        key=lambda item: (
+            float(item.get("score") or 0),
+            int(item.get("evidence_hits") or 0),
+            int(item.get("mechanism_hits") or 0),
+        ),
+        reverse=True,
+    )
+
+    thesis: list[dict[str, Any]] = []
+    used_keys: set[str] = set()
+    for candidate in ranked:
+        if candidate.get("force_explorer"):
+            continue
+        score = float(candidate.get("score") or 0)
+        unsupported_edge_endpoint = (
+            candidate.get("source") == "edge_cluster"
+            and int(candidate.get("label_query_hits") or 0) == 0
+            and int(candidate.get("label_evidence_hits") or 0) == 0
+            and int(candidate.get("mechanism_hits") or 0) < 2
+        )
+        if unsupported_edge_endpoint and thesis:
+            continue
+        if score < 1.5 and thesis:
+            continue
+        if candidate.get("noise") and score < 4.0:
+            continue
+        key = candidate_key(candidate)
+        thesis.append(
+            {
+                "label": candidate.get("label") or "",
+                "concepts": candidate.get("concepts") or [],
+                "why": candidate.get("why") or "",
+            }
+        )
+        used_keys.add(key)
+        if len(thesis) >= _PACKET_MAX_THESIS_SPINE:
+            break
+
+    if not thesis:
+        for candidate in [
+            item for item in ranked if not item.get("force_explorer")
+        ][:_PACKET_MAX_THESIS_SPINE]:
+            key = candidate_key(candidate)
+            thesis.append(
+                {
+                    "label": candidate.get("label") or "",
+                    "concepts": candidate.get("concepts") or [],
+                    "why": candidate.get("why") or "",
+                }
+            )
+            used_keys.add(key)
+
+    explorer_ranked = sorted(
+        (
+            candidate
+            for candidate in ranked
+            if candidate_key(candidate) not in used_keys
+        ),
+        key=lambda item: (
+            bool(item.get("force_explorer")),
+            float(item.get("noise") or 0),
+            float(item.get("score") or 0),
+        ),
+        reverse=True,
+    )
+    explorer: list[dict[str, Any]] = []
+    for candidate in explorer_ranked:
+        if len(explorer) >= _PACKET_MAX_GRAPH_EXPLORER:
+            break
+        use = "mine for alternatives, bridges, analogies, or missing concepts"
+        if float(candidate.get("noise") or 0) >= 2.0:
+            use = "peripheral or noisy neighbor; use only if it sharpens an [ALT] or analogy"
+        elif candidate.get("force_explorer"):
+            use = "lateral graph material; keep subordinate to the thesis spine"
+        explorer.append(
+            {
+                "label": candidate.get("label") or "",
+                "concepts": candidate.get("concepts") or [],
+                "why": candidate.get("why") or "",
+                "use": use,
+            }
+        )
+
+    if not thesis and not explorer:
+        return {}
+    return {
+        "thesis_spine": thesis,
+        "graph_explorer": explorer,
+        "use_rule": (
+            "Build the answer from THESIS SPINE. Mine GRAPH EXPLORER for "
+            "[ALT], [BRIDGE], [TRANSFER], [MISSING CONCEPT], and "
+            "[PREDICTION]. Do not let GRAPH EXPLORER override the thesis "
+            "unless it changes the interpretation."
+        ),
+    }
 
 
 def _evidence_term_index(rows: list[dict[str, Any]]) -> set[str]:
@@ -2459,7 +3010,7 @@ def _llm_context_trace_from_packet(
         key=lambda row: (-int(row.get("chunk_count") or 0), str(row.get("source_label") or "")),
     )
 
-    user_prompt = _render_packet_user_prompt(packet)
+    user_prompt = _render_packet_user_prompt(packet, synthesis_mode=synthesis_mode)
     research_contract = _research_contract_for_prompt()
     system_prompt = _system_prompt_for_synthesis_mode(synthesis_mode)
 
@@ -2743,6 +3294,39 @@ _NUANCE_SYSTEM_PROMPT = (
     "- When evidence is thin, say so. Offer the most plausible inference and "
     "one alternative interpretation rather than pretending the graph proves "
     "more than it does.\n"
+    "- If the packet includes THESIS SPINE and GRAPH EXPLORER lanes, build "
+    "the main answer from THESIS SPINE. Use GRAPH EXPLORER only for `[ALT]`, "
+    "`[BRIDGE]`, `[TRANSFER]`, `[MISSING CONCEPT]`, and `[PREDICTION]` work "
+    "unless it changes the central interpretation.\n"
+    "- For every gap you identify, offer at least two interpretations: the "
+    "most likely reading AND one plausible alternative. Label the alternative "
+    "`[ALT]`. This forces the reader to see the evidence as contested rather "
+    "than settled.\n\n"
+    "PATTERN COMPLETION — [MISSING CONCEPT]:\n"
+    "- When the evidence presents 3+ concepts that form a recognizable but "
+    "incomplete structure (a triad with only two vertices named, a causal "
+    "chain missing its middle link, a feedback loop lacking its brake, a "
+    "taxonomy missing an obvious category, a dialectic with thesis and "
+    "synthesis but no antithesis), name the missing concept.\n"
+    "- Label it `[MISSING CONCEPT]`. This concept WILL NOT appear in the "
+    "evidence — that is the point. You are identifying the negative space "
+    "in the pattern.\n"
+    "- Requirements:\n"
+    "  1. Name the 3+ existing concepts that form the incomplete pattern.\n"
+    "  2. State the pattern type (triad, chain, loop, taxonomy, dialectic, "
+    "spectrum, matrix, pipeline stage, etc.).\n"
+    "  3. Name the missing concept and explain why the pattern structurally "
+    "requires it — not why it would be nice to have, but why the pattern "
+    "is incoherent without it.\n"
+    "  4. If the missing concept exists in a known framework outside the "
+    "corpus, name the framework. Label this `[OUTSIDE FRAMEWORK]`.\n"
+    "- Constraint: do not invent a `[MISSING CONCEPT]` for pairs. Three or "
+    "more existing concepts must anchor the pattern before you can claim "
+    "something is missing. A pair with a gap is a `[MISSING_EDGE]`, not a "
+    "`[MISSING CONCEPT]`.\n"
+    "- Limit: at most 2 `[MISSING CONCEPT]` claims per synthesis. Quality "
+    "over quantity — one genuinely acute missing concept is worth more "
+    "than three speculative ones.\n\n"
     "- Bold key concepts, not just greppable symbols. If you bold an API, "
     "method, class, or file name, it must appear verbatim in the packet.\n"
     "- NEVER output the strings `RELATES_TO`, `MENTIONS`, `PART_OF`, or any "
@@ -2751,6 +3335,12 @@ _NUANCE_SYSTEM_PROMPT = (
     "and B.' Good: 'A functions as a translation layer for B because...'.\n"
     "- Do not turn the answer into a build plan. If a build implication is "
     "obvious, mention it briefly as an implication, not as [BUILD IDEA].\n"
+    "- End with a `## Forward Look` section: 2-3 sentences predicting what "
+    "these patterns imply about where the system or ideas are heading. "
+    "Label this as `[PREDICTION]`. Ground it in the evidence but extend "
+    "beyond it. This is the one place where you are encouraged to be "
+    "speculative — the user wants to know what happens next, not just "
+    "what is true now.\n"
 )
 
 
@@ -2762,7 +3352,11 @@ def _system_prompt_for_synthesis_mode(synthesis_mode: str) -> str:
     return _SYNTHESIS_SYSTEM_PROMPT
 
 
-def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
+def _render_packet_user_prompt(
+    packet: dict[str, Any],
+    *,
+    synthesis_mode: str = "research",
+) -> str:
     """Render the curated synthesis brief as a numbered-evidence reading list."""
 
     compact = _compact_packet_for_prompt(packet)
@@ -2787,6 +3381,36 @@ def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
             "All evidence was rejected by the quality filter; lean on graph "
             "structure and say so plainly."
         )
+
+    dual_curation = compact.get("dual_curation") or {}
+    thesis_spine = dual_curation.get("thesis_spine") or []
+    graph_explorer = dual_curation.get("graph_explorer") or []
+    if synthesis_mode == "nuance" and (thesis_spine or graph_explorer):
+        lines.append("")
+        lines.append(
+            "DUAL CURATION LANES — use these differently. THESIS SPINE is "
+            "the main causal/mechanistic structure. GRAPH EXPLORER preserves "
+            "nearby, surprising, or weakly related material for nuance only."
+        )
+        if thesis_spine:
+            lines.append("THESIS SPINE:")
+            for item in thesis_spine[:_PACKET_MAX_THESIS_SPINE]:
+                concepts = ", ".join(item.get("concepts") or [])
+                suffix = f" — {item.get('why')}" if item.get("why") else ""
+                concept_text = f" ({concepts})" if concepts else ""
+                lines.append(f"- {item.get('label') or 'candidate'}{concept_text}{suffix}")
+        if graph_explorer:
+            lines.append("GRAPH EXPLORER:")
+            for item in graph_explorer[:_PACKET_MAX_GRAPH_EXPLORER]:
+                concepts = ", ".join(item.get("concepts") or [])
+                suffix = f" — {item.get('why')}" if item.get("why") else ""
+                use = f" Use: {item.get('use')}" if item.get("use") else ""
+                concept_text = f" ({concepts})" if concepts else ""
+                lines.append(
+                    f"- {item.get('label') or 'candidate'}{concept_text}{suffix}.{use}"
+                )
+        if dual_curation.get("use_rule"):
+            lines.append("USE RULE: " + str(dual_curation["use_rule"]))
 
     docs_in_scope = compact.get("documents_in_scope") or []
     if docs_in_scope:
@@ -2989,7 +3613,15 @@ def _render_packet_user_prompt(packet: dict[str, Any]) -> str:
     gaps = compact.get("gaps") or []
     if gaps:
         lines.append("")
-        lines.append("Candidate gaps (hypotheses, not proven):")
+        lines.append(
+            "Candidate gaps (hypotheses, not proven). "
+            "Read topology_sim + neighbor_jaccard together: "
+            "both above 0.7 -> likely terminological (same concept, different name); "
+            "topology_sim above 0.6 with neighbor_jaccard below 0.2 -> likely analogy "
+            "(structural homolog, different domains); "
+            "low on both -> missing_edge (co-mentioned, never related). "
+            "Override these defaults when the evidence contradicts."
+        )
         for gap in gaps[:5]:
             between = " <-> ".join([b for b in (gap.get("between") or []) if b])
             gap_type = str(gap.get("type") or "missing_edge").upper()
@@ -3296,6 +3928,23 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         for w in (packet.get("weak_links") or [])[:_PACKET_MAX_WEAK_LINKS]
         if graph_context_allowed and isinstance(w, dict)
     ]
+    dual_curation = (
+        _dual_curation_lanes_for_prompt(
+            query=str(packet.get("query") or ""),
+            groups=groups,
+            edges=edges,
+            entity_facets=entity_facets,
+            evidence=evidence,
+            bridges=bridges,
+            analogies=analogies,
+            transfers=transfers,
+            fragile_bridges=fragile_bridges,
+            gaps=gaps,
+            signals=signals,
+        )
+        if graph_context_allowed
+        else {}
+    )
     return {
         "q": packet.get("query") or "",
         "retrieval": packet.get("retrieval") or {},
@@ -3332,6 +3981,7 @@ def _compact_packet_for_prompt(packet: dict[str, Any]) -> dict[str, Any]:
         "gaps": gaps,
         "signals": signals,
         "warnings": warnings,
+        "dual_curation": dual_curation,
         "filter": evidence_filter,
         "quality_gate": (
             "graph context withheld because all candidate chunks failed the evidence-quality filter"
@@ -3654,7 +4304,7 @@ async def _call_llm_synthesis(
 
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": _render_packet_user_prompt(packet)},
+        {"role": "user", "content": _render_packet_user_prompt(packet, synthesis_mode=synthesis_mode)},
     ]
     creds = await _resolve_graph_model(user_id, model_override)
     extra: dict[str, Any] = dict(creds.get("extra_params") or {})
@@ -4420,6 +5070,7 @@ async def discover(
             from services.llm import llm_service as _llm
             from services.retriever import retriever_orchestrator as _retriever
             from models.schemas import RetrievalTier
+            from config import settings as app_settings
 
             agentic_creds = await _resolve_graph_model(user_id, model_override)
 
@@ -4429,7 +5080,7 @@ async def discover(
             # qdrant_mongo when Neo4j is disabled.
             agentic_tier = (
                 RetrievalTier.qdrant_mongo_graph
-                if settings.NEO4J_ENABLED
+                if app_settings.NEO4J_ENABLED
                 else RetrievalTier.qdrant_mongo
             )
 
@@ -4763,23 +5414,26 @@ def merge_discover_results(
                 merged_nodes[nid] = _stamp_source(dict(n) if isinstance(n, dict) else n, cid)
             else:
                 _stamp_source(existing, cid)
-        for l in (graph.get("links") or []):
-            k = _link_key(l)
+        for link in (graph.get("links") or []):
+            k = _link_key(link)
             existing = merged_links.get(k)
             if existing is None:
-                merged_links[k] = _stamp_source(dict(l) if isinstance(l, dict) else l, cid)
+                merged_links[k] = _stamp_source(
+                    dict(link) if isinstance(link, dict) else link,
+                    cid,
+                )
             else:
                 _stamp_source(existing, cid)
                 # confidence/weight reinforce
-                if isinstance(existing, dict) and isinstance(l, dict):
+                if isinstance(existing, dict) and isinstance(link, dict):
                     try:
                         existing["confidence"] = max(
                             float(existing.get("confidence") or 0.0),
-                            float(l.get("confidence") or 0.0),
+                            float(link.get("confidence") or 0.0),
                         )
                         existing["weight"] = max(
                             float(existing.get("weight") or 0.0),
-                            float(l.get("weight") or 0.0),
+                            float(link.get("weight") or 0.0),
                         )
                     except Exception:
                         pass
@@ -4798,11 +5452,14 @@ def merge_discover_results(
                 ctx_nodes[nid] = _stamp_source(dict(n) if isinstance(n, dict) else n, cid)
             else:
                 _stamp_source(existing, cid)
-        for l in (ctx.get("links") or []):
-            k = _link_key(l)
+        for link in (ctx.get("links") or []):
+            k = _link_key(link)
             existing = ctx_links.get(k)
             if existing is None:
-                ctx_links[k] = _stamp_source(dict(l) if isinstance(l, dict) else l, cid)
+                ctx_links[k] = _stamp_source(
+                    dict(link) if isinstance(link, dict) else link,
+                    cid,
+                )
             else:
                 _stamp_source(existing, cid)
 

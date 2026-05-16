@@ -148,6 +148,54 @@ class Settings(BaseSettings):
             "Requests over this cap fail fast with 429 instead of holding uploaded bytes."
         ),
     )
+    GRAPH_CACHE_WARMUP_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "When true, schedule a debounced graph analytics cache rebuild after "
+            "successful ingest writes. Disable or lengthen the debounce during "
+            "resource-constrained bulk ingest."
+        ),
+    )
+    GRAPH_CACHE_WARMUP_DEBOUNCE_SECONDS: float = Field(
+        default=30.0,
+        ge=0.0,
+        le=3600.0,
+        description=(
+            "Seconds to wait after the latest ingest completion before auto-warming "
+            "graph analytics caches."
+        ),
+    )
+    EMBEDDER_MEMORY_GUARD_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "When true, local embedding waits or fails before sending a batch if "
+            "the embedder /health reports low free memory or critical pressure."
+        ),
+    )
+    EMBEDDER_MIN_FREE_MB: int = Field(
+        default=0,
+        ge=0,
+        le=262144,
+        description=(
+            "Minimum free MB required by the local embedder memory guard. "
+            "0 disables the free-memory threshold."
+        ),
+    )
+    EMBEDDER_MEMORY_GUARD_MAX_WAIT_SECONDS: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=3600.0,
+        description=(
+            "How long local embedding should wait for memory pressure to clear "
+            "before failing the batch. 0 means fail immediately."
+        ),
+    )
+    EMBEDDER_MEMORY_GUARD_POLL_SECONDS: float = Field(
+        default=5.0,
+        ge=0.5,
+        le=60.0,
+        description="Polling interval for the local embedder memory guard.",
+    )
 
     # === LOCAL MODELS DIR ===
     MODELS_DIR: str = Field(
@@ -163,6 +211,15 @@ class Settings(BaseSettings):
     LOCAL_RERANKER_ENABLED: bool = Field(
         default=False,
         description="Whether the local Docker reranker profile is expected to be running.",
+    )
+    RERANKER_SCORE_SCALE: Literal["logit", "cosine"] = Field(
+        default="logit",
+        description=(
+            "Score scale returned by the active reranker. The standard "
+            "cross-encoder returns logits; the Apple MLX Jina v3 reranker "
+            "returns cosine similarities, so low-confidence logit guards "
+            "must be disabled for that profile."
+        ),
     )
 
     # === AUTOMATION ===
