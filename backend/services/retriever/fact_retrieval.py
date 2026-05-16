@@ -69,7 +69,6 @@ class FactRetrieval:
 
         cypher = """
         MATCH (e:Entity)-[:HAS_FACT]->(f:Fact)
-        OPTIONAL MATCH (f)<-[:SUPPORTS_FACT]-(c:Chunk)
         WHERE (
               toLower(coalesce(e.display_name, ''))    IN $entity_names_lc
            OR toLower(coalesce(e.canonical_name, ''))  IN $entity_names_lc
@@ -80,6 +79,7 @@ class FactRetrieval:
             cypher += "  AND f.corpus_id IN $corpus_ids\n"
         if fact_types:
             cypher += "  AND f.fact_type IN $fact_types\n"
+        cypher += "        OPTIONAL MATCH (f)<-[:SUPPORTS_FACT]-(c:Chunk)\n"
         cypher += """
         RETURN
             f.fact_id         AS fact_id,
