@@ -3,6 +3,8 @@
 # Invoked by the LaunchAgent (com.polymath.apple-ml).
 #
 # Tunables (override via env or the LaunchAgent plist):
+#   APPLE_MLX_EMBED_MODEL_ID          default mlx-community/Qwen3-Embedding-0.6B-mxfp8
+#   APPLE_MLX_RERANKER_MODEL_ID       default mlx-community/jina-reranker-v3-4bit-mxfp4
 #   EMBEDDER_HOST / EMBEDDER_PORT     default 0.0.0.0 / 8082
 #   RERANKER_HOST / RERANKER_PORT     default 0.0.0.0 / 8081
 #   DOCLING_HOST  / DOCLING_PORT      default 0.0.0.0 / 8500
@@ -15,7 +17,8 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="${HOME}/PolymathRuntime/logs"
+RUNTIME_ROOT="${POLYMATH_DOCKER_DATA_ROOT:-${HOME}/PolymathRuntime}"
+LOG_DIR="${RUNTIME_ROOT}/logs"
 mkdir -p "${LOG_DIR}"
 
 # Prefer the venv installed by install_apple_mlx_runtime.sh
@@ -33,6 +36,14 @@ export RERANKER_HOST="${RERANKER_HOST:-0.0.0.0}"
 export RERANKER_PORT="${RERANKER_PORT:-8081}"
 export DOCLING_HOST="${DOCLING_HOST:-0.0.0.0}"
 export DOCLING_PORT="${DOCLING_PORT:-8500}"
+export HF_HOME="${HF_HOME:-${RUNTIME_ROOT}/volumes/hf-cache}"
+export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
+export DOCLING_ARTIFACTS_PATH="${DOCLING_ARTIFACTS_PATH:-${RUNTIME_ROOT}/volumes/docling/models}"
+
+export APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID:-mlx-community/Qwen3-Embedding-0.6B-mxfp8}"
+export APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID:-mlx-community/jina-reranker-v3-4bit-mxfp4}"
+export EMBEDDER_MODEL_NAME="${EMBEDDER_MODEL_NAME:-Qwen3-Embedding-0.6B}"
+export RERANKER_SCORE_SCALE="${RERANKER_SCORE_SCALE:-cosine}"
 
 export EMBED_BATCH_SIZE="${EMBED_BATCH_SIZE:-8}"
 export EMBED_MAX_LENGTH="${EMBED_MAX_LENGTH:-512}"
@@ -68,7 +79,17 @@ PID_FILES=(
   "${LOG_DIR}/reranker.pid"
   "${LOG_DIR}/docling.pid"
 )
-trap 'echo "[apple-ml] supervisor signalled, exiting"; exit 0' INT TERM
+
+stop_children() {
+  for pid_file in "${PID_FILES[@]}"; do
+    [[ -f "${pid_file}" ]] || continue
+    pid="$(cat "${pid_file}" 2>/dev/null || echo)"
+    [[ -n "${pid}" ]] || continue
+    kill "${pid}" 2>/dev/null || true
+  done
+}
+
+trap 'echo "[apple-ml] supervisor signalled, stopping sidecars"; stop_children; exit 0' INT TERM
 while true; do
   for pid_file in "${PID_FILES[@]}"; do
     [[ -f "${pid_file}" ]] || continue
@@ -78,6 +99,7 @@ while true; do
     fi
     if ! kill -0 "${pid}" 2>/dev/null; then
       echo "[apple-ml] sidecar pid=${pid} (${pid_file##*/}) exited; bubbling up to launchd"
+      stop_children
       exit 1
     fi
   done

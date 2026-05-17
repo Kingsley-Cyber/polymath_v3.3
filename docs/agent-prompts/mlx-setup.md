@@ -23,34 +23,32 @@ Architecture you'll use:
   • Backend is retargeted at the host services via
     docker-compose.apple-mlx.yml.
 
-Run these in order. After each step, confirm it succeeded before
-moving to the next. If a step fails, stop and surface the error
-verbatim — do not paper over it.
+Run the one-shot setup:
 
-Step 1 — Generate secrets and bootstrap the runtime layout.
-  bash scripts/bootstrap-runtime.sh --generate-secrets --stage-models
+  bash scripts/setup_apple_mlx.sh
 
-Step 2 — Install the host-native MLX sidecars.
-  bash scripts/install_apple_mlx_runtime.sh
-  This will:
+This will:
     - reject non-Darwin / non-arm64 hosts
+    - generate secrets and bootstrap the runtime layout
     - stage code to ~/PolymathRuntime/apple_ml_services/
     - install a uv venv with the pinned requirements
-    - pre-pull the two MLX model repos into ~/PolymathRuntime/volumes/hf-cache
+    - pre-pull and verify the two MLX model repos into ~/PolymathRuntime/volumes/hf-cache
     - install the LaunchAgent (auto-restart)
-    - smoke /info, /health, /health on ports 8082, 8081, 8500
+    - bring up Docker with docker-compose.apple-mlx.yml
+    - verify backend env wiring
+    - smoke /embeddings, /rerank, and /health on ports 8082, 8081, 8500
 
-Step 3 — Bring up Docker with the Apple MLX override.
+If you need to run the phases manually instead:
+  bash scripts/bootstrap-runtime.sh --generate-secrets --compose-profiles mcp
+  bash scripts/install_apple_mlx_runtime.sh
   docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build
-
-Step 4 — Run the end-to-end smoke.
   bash scripts/smoke_apple_mlx.sh
-  The reranker ordering check must pass. If it returns zeroes, the
-  Jina v3 MLPProjector did not load — read the inline scaffold note in
-  scripts/apple_ml_services/reranker_mlx/main.py and fix _load_model()
-  before continuing.
 
-Step 5 — Verify env wiring inside the backend container.
+The reranker ordering check must pass. If it returns zeroes or does not
+separate the pattern-related docs from the lemonade doc, the MLX reranker
+is not deployed correctly.
+
+Manual env wiring check inside the backend container:
   docker exec polymath_v33-backend-1 sh -c '
     echo EMBEDDER_URL=$EMBEDDER_URL
     echo RERANKER_URL=$RERANKER_URL
@@ -61,7 +59,7 @@ Step 5 — Verify env wiring inside the backend container.
   point at the in-cluster service names, the override didn't apply —
   re-run docker compose with both -f flags.
 
-Step 6 — Health check the full stack.
+Health check the full stack.
   docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml ps
   All five core services (backend, mongodb, qdrant, neo4j, litellm)
   must be (healthy). Embedder/reranker/docling will NOT appear because
@@ -72,10 +70,10 @@ Constraints you must respect:
     you also re-ingest every corpus — Qdrant collections are dimension-
     locked.
   • Never push to main; commit on a feature branch.
-  • Treat scripts/apple_ml_services/{embedder_mlx,reranker_mlx,
-    docling_svc}/main.py as scaffolds. If the user has working
-    Mac Studio implementations of any of those, prefer their code over
-    the scaffold.
+  • setup_apple_mlx.sh overwrites host sidecar files after backing up prior
+    copies under ~/PolymathRuntime/logs/apple_ml_services_backups/. Use
+    --preserve-host-sidecars only when the user explicitly wants to keep
+    hand-edited host implementations.
   • The reranker MUST run with RERANKER_SCORE_SCALE=cosine. The override
     sets it; do not strip it.
   • Do not use the DeepSeek API directly — only via LiteLLM.
@@ -104,7 +102,9 @@ What "done" looks like:
 
 - Constraint deep-dive: `GOTCHAS.md § "Apple Silicon hybrid profile"`
 - Compose override: `docker-compose.apple-mlx.yml`
+- One-shot setup: `scripts/setup_apple_mlx.sh`
 - Installer source: `scripts/install_apple_mlx_runtime.sh`
 - Model pull: `scripts/pull_apple_mlx_models.py`
+- Runtime smoke: `scripts/verify_apple_mlx_runtime.py`
 - Sidecars: `scripts/apple_ml_services/{embedder_mlx,reranker_mlx,docling_svc}/main.py`
 - Smoke: `scripts/smoke_apple_mlx.sh`

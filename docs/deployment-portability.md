@@ -21,6 +21,16 @@ Linux/macOS:
 bash scripts/bootstrap-runtime.sh --generate-secrets --stage-models
 ```
 
+Apple Silicon MLX profile:
+
+```bash
+bash scripts/setup_apple_mlx.sh
+```
+
+Use the MLX setup command instead of `--stage-models`; it downloads and
+verifies the Apple-native MLX embedding/reranking models and points Docker at
+the host-native sidecars.
+
 Then verify before starting containers:
 
 ```powershell

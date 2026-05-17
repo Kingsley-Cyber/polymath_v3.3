@@ -48,7 +48,8 @@ _MAX_PERSISTED_WEB_SOURCE_PREVIEWS = 6
 _MAX_PERSISTED_SOURCE_TEXT_CHARS = 900
 _MAX_PERSISTED_SOURCE_SUMMARY_CHARS = 500
 _MAX_TOOL_CALLS_PER_TURN = 3
-_MAX_WEB_SEARCH_RESULTS_PER_CALL = 2
+_MAX_WEB_SEARCH_CALLS_PER_TURN = 1
+_MAX_WEB_SEARCH_RESULTS_PER_CALL = 6
 
 
 def _hyde_failure_key(model: str | None, api_base: str | None) -> str:
@@ -151,6 +152,75 @@ def _append_deduped_web_sources(existing: list[Any], pending: list[Any]) -> list
             seen.add(key)
         merged.append(source)
     return merged
+
+
+def _web_chunk_content_preview(chunk: Any, *, max_chars: int = 1600) -> str:
+    text = str(getattr(chunk, "text", "") or "")
+    marker = "\nContent: "
+    if marker in text:
+        text = text.split(marker, 1)[1]
+    return text[:max_chars].strip()
+
+
+def _tool_schema_name(schema: dict[str, Any]) -> str:
+    fn = schema.get("function") if isinstance(schema, dict) else None
+    return str((fn or {}).get("name") or "")
+
+
+def _tool_call_name(call: dict[str, Any]) -> str:
+    fn = call.get("function") if isinstance(call, dict) else None
+    return str((fn or {}).get("name") or "")
+
+
+def _available_tool_schemas(
+    tool_schemas: list[dict[str, Any]],
+    *,
+    web_search_call_count: int,
+) -> list[dict[str, Any]]:
+    if web_search_call_count < _MAX_WEB_SEARCH_CALLS_PER_TURN:
+        return tool_schemas
+    return [
+        schema
+        for schema in tool_schemas
+        if _tool_schema_name(schema) != "web_search"
+    ]
+
+
+def _limit_tool_calls_for_turn(
+    tool_calls: list[dict[str, Any]],
+    *,
+    remaining_tool_calls: int,
+    web_search_call_count: int,
+) -> tuple[list[dict[str, Any]], int, bool, bool]:
+    """Keep one web_search call per turn while preserving other tools."""
+    allowed: list[dict[str, Any]] = []
+    selected_web_search_calls = 0
+    dropped_for_tool_limit = False
+    dropped_for_web_limit = False
+    remaining_web_search_calls = max(
+        0,
+        _MAX_WEB_SEARCH_CALLS_PER_TURN - web_search_call_count,
+    )
+
+    for call in tool_calls:
+        if len(allowed) >= remaining_tool_calls:
+            dropped_for_tool_limit = True
+            continue
+
+        if _tool_call_name(call) == "web_search":
+            if selected_web_search_calls >= remaining_web_search_calls:
+                dropped_for_web_limit = True
+                continue
+            selected_web_search_calls += 1
+
+        allowed.append(call)
+
+    return (
+        allowed,
+        selected_web_search_calls,
+        dropped_for_tool_limit,
+        dropped_for_web_limit,
+    )
 
 
 def _compact_source_previews(sources: list[Any] | None) -> list[dict[str, Any]] | None:
@@ -617,8 +687,17 @@ class ChatOrchestrator:
                         "the corpus chunks do not contain enough current or "
                         "external information. Search with the user's wording "
                         "or a concise refinement that preserves the user's "
-                        "technical anchors and acronyms. Do not search a "
-                        "single ambiguous word. Cite URLs when using web facts."
+                        "technical anchors and acronyms. Do not include local "
+                        "corpus names, file names, or internal project labels "
+                        "in the search query. Prefer practical sources such as "
+                        "official docs, vendor/developer blogs, framework docs, "
+                        "and production guides unless the user asks for papers. "
+                        "Do not search a "
+                        "single ambiguous word. Make at most one web_search "
+                        "call; the server fetches a wider candidate pool and "
+                        "applies freshness filters, social/source-specific "
+                        "variants, and page-text reranking. Cite URLs when "
+                        "using web facts."
                     ),
                     "auto_selected": True,
                 }
@@ -830,6 +909,7 @@ class ChatOrchestrator:
 
         # === START ReAct LOOP ===
         tool_call_count = 0
+        web_search_call_count = 0
         tool_limit_reached = False
         react_messages: list[dict] = []
 
@@ -905,6 +985,10 @@ class ChatOrchestrator:
                         break
             if react_messages:
                 message_dicts.extend(react_messages)
+            active_tool_schemas = _available_tool_schemas(
+                tool_schemas,
+                web_search_call_count=web_search_call_count,
+            )
 
             assistant_content = ""
             assistant_thinking = ""
@@ -923,7 +1007,7 @@ class ChatOrchestrator:
                     messages=message_dicts,
                     model=model_used,
                     overrides=request.overrides,
-                    tools=tool_schemas,
+                    tools=active_tool_schemas or None,
                     **profile_creds,
                 ):
                     if first_token_at is None and (
@@ -965,9 +1049,25 @@ class ChatOrchestrator:
                 break
 
             remaining_tool_calls = _MAX_TOOL_CALLS_PER_TURN - tool_call_count
-            if len(tool_calls) > remaining_tool_calls:
-                tool_calls = tool_calls[:remaining_tool_calls]
+            (
+                tool_calls,
+                selected_web_search_calls,
+                dropped_for_tool_limit,
+                dropped_for_web_limit,
+            ) = _limit_tool_calls_for_turn(
+                tool_calls,
+                remaining_tool_calls=remaining_tool_calls,
+                web_search_call_count=web_search_call_count,
+            )
+            if dropped_for_tool_limit:
                 tool_limit_reached = True
+            if dropped_for_web_limit:
+                logger.info(
+                    "Dropped extra web_search tool call(s); limit is %d per turn",
+                    _MAX_WEB_SEARCH_CALLS_PER_TURN,
+                )
+            if not tool_calls:
+                break
 
             # Announce tool execution before running — lets the UI show "⚙ Running: <tool>"
             yield build_sse_chunk(
@@ -988,6 +1088,7 @@ class ChatOrchestrator:
 
             # If we have tool calls, execute them
             tool_call_count += len(tool_calls)
+            web_search_call_count += selected_web_search_calls
             tool_limit_reached = tool_limit_reached or (
                 tool_call_count >= _MAX_TOOL_CALLS_PER_TURN
             )
@@ -1753,8 +1854,16 @@ class ChatOrchestrator:
                             "contain enough current or external information. "
                             "Use the user's exact query or a concise refinement "
                             "that preserves the user's technical anchors and "
-                            "acronyms. Do not search isolated generic words. "
-                            "Returns titles, URLs, and snippets."
+                            "acronyms. Do not include local corpus names, file "
+                            "names, or internal project labels in the search "
+                            "query. Prefer official docs, vendor/developer blogs, "
+                            "framework docs, and production guides unless the "
+                            "user asks for papers. Do not search isolated generic "
+                            "words. Call this at most once per turn. The server "
+                            "runs three controlled searches with five results "
+                            "each when social/practical coverage is useful, reads "
+                            "pages when possible, reranks them locally, and "
+                            "returns up to six results."
                         ),
                         "parameters": {
                             "type": "object",
@@ -1767,7 +1876,9 @@ class ChatOrchestrator:
                                     "type": "integer",
                                     "minimum": 1,
                                     "maximum": _MAX_WEB_SEARCH_RESULTS_PER_CALL,
-                                    "description": "Maximum number of web results.",
+                                    "description": (
+                                        "Maximum final reranked web results to return."
+                                    ),
                                 },
                             },
                             "required": ["query"],
@@ -1832,6 +1943,7 @@ class ChatOrchestrator:
         try:
             from services.web_freshness import (
                 live_web_search,
+                infer_web_search_time_range,
                 refine_tool_search_query,
                 rerank_web_source_chunks,
                 web_hits_to_source_chunks,
@@ -1845,14 +1957,20 @@ class ChatOrchestrator:
                 max_results,
                 int(settings.LIVE_WEB_SEARCH_CANDIDATE_RESULTS or max_results),
             )
-            hits = await live_web_search._search_searxng(
+            time_range = infer_web_search_time_range(query[:300])
+            hits = await live_web_search._search_searxng_pool(
                 query[:300],
                 max_results=candidate_limit,
+                time_range=time_range,
             )
+            fetched: dict[str, str] = {}
+            if settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES:
+                fetched = await live_web_search._fetch_pages(hits)
             candidate_chunks = web_hits_to_source_chunks(
                 hits,
+                fetched_markdown=fetched,
                 search_query=query[:300],
-                max_chars=1600,
+                max_chars=int(settings.OBSCURA_MAX_CHARS or 4000),
             )
             chunks = await rerank_web_source_chunks(
                 query[:300],
@@ -1860,11 +1978,26 @@ class ChatOrchestrator:
                 limit=max_results,
             )
             hits_by_url = {hit.url: hit for hit in hits}
-            selected_hits = [
-                hits_by_url.get(str((chunk.metadata or {}).get("url") or chunk.doc_id))
-                for chunk in chunks
-            ]
-            selected_hits = [hit for hit in selected_hits if hit is not None]
+            result_items = []
+            for chunk in chunks:
+                url = str((chunk.metadata or {}).get("url") or chunk.doc_id)
+                hit = hits_by_url.get(url)
+                result_items.append(
+                    {
+                        "title": (hit.title if hit else chunk.doc_name),
+                        "url": url,
+                        "content": _web_chunk_content_preview(chunk),
+                        "snippet": (hit.snippet[:700] if hit else ""),
+                        "published_date": (
+                            hit.published_date if hit else (chunk.metadata or {}).get("published_date")
+                        ),
+                        "search_query": (chunk.metadata or {}).get("search_query"),
+                        "time_range": (chunk.metadata or {}).get("time_range"),
+                        "full_page_fetched": bool(
+                            (chunk.metadata or {}).get("full_page_fetched")
+                        ),
+                    }
+                )
             if request is not None and chunks:
                 pending = list(getattr(request, "_pending_tool_sources", []) or [])
                 pending = _append_deduped_web_sources(pending, chunks)
@@ -1876,15 +2009,11 @@ class ChatOrchestrator:
                     "candidate_results": len(hits),
                     "reranked_results": len(chunks),
                     "ranked_by": settings.RERANKER_MODEL,
-                    "results": [
-                        {
-                            "title": hit.title,
-                            "url": hit.url,
-                            "snippet": hit.snippet[:700],
-                            "published_date": hit.published_date,
-                        }
-                        for hit in selected_hits
-                    ],
+                    "freshness_time_range": time_range,
+                    "full_page_fetch_enabled": bool(
+                        settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES
+                    ),
+                    "results": result_items,
                     "note": (
                         "Use these only when relevant. Cite the URL for any "
                         "claim that depends on web results."

@@ -19,16 +19,297 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from bs4 import BeautifulSoup
 
 from config import get_settings
 from models.schemas import SourceChunk
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MAX_RESULTS = 2
-_DEFAULT_CANDIDATE_RESULTS = 14
+_DEFAULT_MAX_RESULTS = 6
+_DEFAULT_CANDIDATE_RESULTS = 15
+_WEB_SEARCH_RESULTS_PER_QUERY = 5
 _DEFAULT_OBSCURA_MAX_CHARS = 4000
 _DEFAULT_MAX_RELATED_TERMS = 5
+_WEB_FETCH_USER_AGENT = (
+    "PolymathWebRetriever/1.0 (+https://localhost; local user initiated search)"
+)
+
+_RESEARCH_DOMAINS = (
+    "arxiv.org",
+    "doi.org",
+    "aclanthology.org",
+    "semanticscholar.org",
+    "researchgate.net",
+    "paperswithcode.com",
+    "openreview.net",
+    "ieee.org",
+    "springer.com",
+    "sciencedirect.com",
+    "nature.com",
+)
+
+_SOCIAL_DOMAINS = (
+    "reddit.com",
+    "x.com",
+    "twitter.com",
+)
+
+_RESEARCH_QUERY_MARKERS = (
+    "academic",
+    "arxiv",
+    "benchmark",
+    "evaluation",
+    "literature",
+    "paper",
+    "papers",
+    "research",
+    "study",
+    "studies",
+    "survey",
+)
+
+_SOCIAL_QUERY_MARKERS = (
+    "adoption",
+    "best",
+    "community",
+    "deploy",
+    "deployment",
+    "field",
+    "implementation",
+    "production",
+    "reddit",
+    "social",
+    "twitter",
+    "x.com",
+    "x/twitter",
+    "way ahead",
+    "what people",
+    "what works",
+)
+
+_MODEL_REGISTRY_QUERY_MARKERS = (
+    "ai model",
+    "embedding model",
+    "gguf",
+    "hugging face",
+    "huggingface",
+    "llm",
+    "local model",
+    "model",
+    "models",
+    "ollama",
+    "on-device",
+    "onnx",
+    "quantized",
+    "reranker",
+    "small language model",
+    "slm",
+    "vram",
+)
+
+_NEWS_QUERY_MARKERS = (
+    "breaking",
+    "headline",
+    "headlines",
+    "market news",
+    "news",
+    "press release",
+    "today",
+)
+
+_FINANCE_QUERY_MARKERS = (
+    "10-k",
+    "10q",
+    "10-q",
+    "8-k",
+    "analyst",
+    "bitcoin",
+    "crypto",
+    "earnings",
+    "equity",
+    "fed",
+    "filing",
+    "finance",
+    "financial",
+    "inflation",
+    "market",
+    "markets",
+    "option",
+    "options",
+    "polymarket",
+    "prediction market",
+    "sec",
+    "shares",
+    "stock",
+    "stocks",
+    "ticker",
+    "trading",
+    "treasury",
+)
+
+_TECH_IMPLEMENTATION_QUERY_MARKERS = (
+    "api",
+    "aws",
+    "code",
+    "coding",
+    "developer",
+    "development",
+    "docker",
+    "docs",
+    "documentation",
+    "flutter",
+    "framework",
+    "github",
+    "implementation",
+    "ios",
+    "javascript",
+    "library",
+    "mdn",
+    "next.js",
+    "node",
+    "package",
+    "python",
+    "react",
+    "sdk",
+    "swift",
+    "typescript",
+)
+
+_GAME_DEV_QUERY_MARKERS = (
+    "aigamedev",
+    "game ai",
+    "game dev",
+    "gamedev",
+    "godot",
+    "luau",
+    "roblox",
+    "unity",
+    "unreal",
+)
+
+_ROBLOX_QUERY_MARKERS = (
+    "datastore",
+    "devforum",
+    "instance",
+    "luau",
+    "remoteevent",
+    "remotefunction",
+    "roblox",
+    "roblox studio",
+    "rbx",
+    "ugc",
+)
+
+_AI_MEDIA_QUERY_MARKERS = (
+    "ai media",
+    "ai video",
+    "civitai",
+    "cogvideox",
+    "comfyui",
+    "controlnet",
+    "fal.ai",
+    "framepack",
+    "hunyuan",
+    "hunyuanvideo",
+    "lora",
+    "ltx video",
+    "ltx-video",
+    "replicate",
+    "stable diffusion",
+    "stablediffusion",
+    "tensor rt",
+    "tensorrt",
+    "video generation",
+    "wan 2.1",
+    "wan2.1",
+    "workflow",
+)
+
+_CREATOR_ECONOMY_QUERY_MARKERS = (
+    "acquire.com",
+    "asset marketplace",
+    "creator economy",
+    "gumroad",
+    "indie hacker",
+    "indiehackers",
+    "make money",
+    "market analysis",
+    "marketplace",
+    "monetization",
+    "opportunity discovery",
+    "product hunt",
+    "producthunt",
+    "rolimons",
+    "side hustle",
+    "trend discovery",
+    "ugc",
+    "what sells",
+)
+
+_VIDEO_QUERY_MARKERS = (
+    "conference talk",
+    "demo",
+    "tutorial",
+    "video",
+    "walkthrough",
+    "wwdc",
+    "youtube",
+)
+
+_CYBER_QUERY_MARKERS = (
+    "cisa",
+    "cve",
+    "exploit",
+    "nist",
+    "nvd",
+    "owasp",
+    "security",
+    "vulnerability",
+    "vulnerabilities",
+)
+
+_EXPLICIT_X_QUERY_MARKERS = (
+    "twitter",
+    "x.com",
+    "x/twitter",
+)
+
+_NON_FINANCE_ACRONYMS = {
+    "AI",
+    "API",
+    "CPU",
+    "GPU",
+    "HTTP",
+    "JSON",
+    "LLM",
+    "MLX",
+    "NPU",
+    "RAG",
+    "RAM",
+    "SDK",
+    "UGC",
+    "VRAM",
+}
+
+_MAX_WEB_SEARCH_QUERY_VARIANTS = 6
+
+_PROTECTED_QUERY_TERMS = (
+    "cpu",
+    "gpu",
+    "npu",
+    "vram",
+    "ram",
+    "gb",
+    "mb",
+    "4gb",
+    "8gb",
+    "16gb",
+    "32gb",
+    "android",
+    "ios",
+    "iphone",
+)
 
 _EXPLICIT_WEB_MARKERS = (
     "latest",
@@ -147,6 +428,8 @@ class WebSearchHit:
     score: float
     engines: tuple[str, ...] = ()
     published_date: str | None = None
+    search_query: str | None = None
+    time_range: str | None = None
 
 
 def _normalized_text(value: str) -> str:
@@ -250,6 +533,495 @@ def build_search_query(
     return base[:300]
 
 
+def infer_web_search_time_range(query: str) -> str | None:
+    """Return a SearXNG time_range for queries that clearly need freshness."""
+    text = _normalized_text(query)
+    tokens = _term_tokens(query)
+    if not text:
+        return None
+
+    if (
+        "today" in tokens
+        or "yesterday" in tokens
+        or "this week" in text
+        or "last week" in text
+    ):
+        return "day"
+
+    if any(
+        marker in text
+        for marker in (
+            "breaking change",
+            "changelog",
+            "cve",
+            "latest",
+            "earnings",
+            "market news",
+            "market sentiment",
+            "release notes",
+            "security advisory",
+            "this month",
+        )
+    ):
+        return "month"
+
+    has_current_language = any(
+        marker in text
+        for marker in (
+            "as of",
+            "current",
+            "currently",
+            "recent",
+            "this year",
+            "up to date",
+            "up-to-date",
+            "way ahead",
+        )
+    )
+    has_recent_year = bool(re.search(r"\b202[4-9]\b", text))
+    if has_current_language or has_recent_year or _contains_marker(text, _FAST_MOVING_TECH_MARKERS):
+        return "year"
+
+    return None
+
+
+def _query_should_include_social_sources(query: str) -> bool:
+    text = _normalized_text(query)
+    if not text or _query_prefers_research(query):
+        return False
+    if _contains_marker(text, _SOCIAL_QUERY_MARKERS):
+        return True
+    return bool(
+        _contains_marker(text, _EXPLICIT_WEB_MARKERS)
+        and _contains_marker(text, _FAST_MOVING_TECH_MARKERS)
+    )
+
+
+def _query_should_include_model_registry_sources(query: str) -> bool:
+    text = _normalized_text(query)
+    if not text or _query_prefers_research(query):
+        return False
+    return _contains_marker(text, _MODEL_REGISTRY_QUERY_MARKERS)
+
+
+def _looks_like_finance_query(query: str) -> bool:
+    text = _normalized_text(query)
+    tokens = _term_tokens(query)
+    finance_tokens = {
+        marker
+        for marker in _FINANCE_QUERY_MARKERS
+        if " " not in marker and marker not in {"market", "option", "options"}
+    }
+    if tokens & finance_tokens:
+        return True
+    if any(
+        phrase in text
+        for phrase in (
+            "crypto market",
+            "market data",
+            "market news",
+            "market sentiment",
+            "prediction market",
+            "stock market",
+        )
+    ):
+        return True
+
+    # Keep this intentionally conservative so acronyms like "AI" do not turn
+    # every technical query into a finance/news query.
+    ticker = re.search(r"\b[A-Z]{2,5}\b", query)
+    if ticker and ticker.group(0) in _NON_FINANCE_ACRONYMS:
+        return False
+    return bool(
+        ticker
+        and re.search(
+            r"\b(stock|stocks|earnings|calls?|puts?|options?|shares?|price|market)\b",
+            text,
+        )
+    )
+
+
+def _query_should_include_news_sources(query: str) -> bool:
+    text = _normalized_text(query)
+    if _contains_marker(text, _NEWS_QUERY_MARKERS):
+        return True
+    return bool(
+        _looks_like_finance_query(query)
+        or (
+            _contains_marker(text, _EXPLICIT_WEB_MARKERS)
+            and _contains_marker(text, _FAST_MOVING_TECH_MARKERS)
+        )
+    )
+
+
+def _query_should_include_implementation_sources(query: str) -> bool:
+    text = _normalized_text(query)
+    return bool(
+        _contains_marker(text, _TECH_IMPLEMENTATION_QUERY_MARKERS)
+        or _contains_marker(text, _GAME_DEV_QUERY_MARKERS)
+    )
+
+
+def _looks_like_roblox_query(query: str) -> bool:
+    return _contains_marker(_normalized_text(query), _ROBLOX_QUERY_MARKERS)
+
+
+def _looks_like_ai_media_query(query: str) -> bool:
+    return _contains_marker(_normalized_text(query), _AI_MEDIA_QUERY_MARKERS)
+
+
+def _looks_like_creator_economy_query(query: str) -> bool:
+    text = _normalized_text(query)
+    return bool(
+        _contains_marker(text, _CREATOR_ECONOMY_QUERY_MARKERS)
+        or (_contains_marker(text, _GAME_DEV_QUERY_MARKERS) and "market" in text)
+    )
+
+
+def _query_should_include_video_sources(query: str) -> bool:
+    text = _normalized_text(query)
+    return bool(
+        _contains_marker(text, _VIDEO_QUERY_MARKERS)
+        or _looks_like_roblox_query(query)
+        or _looks_like_ai_media_query(query)
+        or _looks_like_creator_economy_query(query)
+    )
+
+
+def _looks_like_cyber_query(query: str) -> bool:
+    return _contains_marker(_normalized_text(query), _CYBER_QUERY_MARKERS)
+
+
+def _query_mentions_x(query: str) -> bool:
+    return _contains_marker(_normalized_text(query), _EXPLICIT_X_QUERY_MARKERS)
+
+
+def _build_model_registry_queries(query: str) -> list[str]:
+    """Build short Hugging Face Hub queries; its engine is tag/slug oriented."""
+
+    text = _normalized_text(query)
+    candidates: list[str] = []
+
+    if "liquid" in text or "lfm" in text:
+        candidates.append("LiquidAI LFM2")
+    if "bonsai" in text:
+        candidates.append("Bonsai 8B")
+    if "llama" in text:
+        candidates.append("Llama GGUF")
+    if "gemma" in text:
+        candidates.append("Gemma GGUF")
+    if "qwen" in text:
+        candidates.append("Qwen GGUF")
+    if "phi" in text:
+        candidates.append("Phi GGUF")
+    if "mistral" in text:
+        candidates.append("Mistral GGUF")
+    if "smollm" in text or "smol lm" in text:
+        candidates.append("SmolLM")
+    if "tinyllama" in text or "tiny llama" in text:
+        candidates.append("TinyLlama")
+    if "wan" in text:
+        candidates.append("Wan video")
+    if "ltx" in text:
+        candidates.append("LTX Video")
+    if "hunyuan" in text:
+        candidates.append("HunyuanVideo")
+    if "framepack" in text:
+        candidates.append("FramePack")
+    if "cogvideox" in text or "cogvideo" in text:
+        candidates.append("CogVideoX")
+
+    if any(marker in text for marker in ("mobile", "on-device", "on device", "edge")):
+        candidates.append("mobile llm")
+    if "small language model" in text or "slm" in text:
+        candidates.append("small language model")
+    if any(marker in text for marker in ("gguf", "quantized", "4gb", "vram")):
+        candidates.append("GGUF small LLM")
+    if not candidates:
+        candidates.append(query)
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in candidates:
+        normalized = _normalized_text(item)
+        if normalized and normalized not in seen:
+            unique.append(item)
+            seen.add(normalized)
+    return unique[:3]
+
+
+def _build_cyber_database_query(query: str) -> str:
+    """Build a compact NVD query; NVD keyword search is very literal."""
+
+    tokens = [
+        token
+        for token in _RELATED_TERM_TOKEN_RE.findall(query.lower())
+        if token
+        and token not in _RELATED_TERM_STOPWORDS
+        and token
+        not in {
+            "cisa",
+            "cve",
+            "nist",
+            "nvd",
+            "owasp",
+            "security",
+            "vulnerability",
+            "vulnerabilities",
+        }
+    ]
+    compact = " ".join(tokens[:6]).strip()
+    return compact or query
+
+
+def _append_query_variant(queries: list[str], variant: str) -> None:
+    if len(queries) >= _MAX_WEB_SEARCH_QUERY_VARIANTS:
+        return
+    variant = re.sub(r"\s+", " ", variant.strip())
+    if variant:
+        queries.append(variant)
+
+
+def build_web_search_queries(query: str) -> list[str]:
+    """Build one primary query plus bounded source-specific variants."""
+    base = build_search_query(query)
+    if not base:
+        return []
+
+    queries = [base]
+    lower = base.lower()
+    if not lower.startswith("!") and _query_should_include_model_registry_sources(base):
+        for item in _build_model_registry_queries(base):
+            _append_query_variant(queries, f"!hfm {item}")
+
+    if _looks_like_finance_query(base):
+        _append_query_variant(queries, f"!reu {base}")
+        _append_query_variant(queries, f"!bin {base}")
+        _append_query_variant(queries, f"!ddn {base}")
+        _append_query_variant(queries, f"!red {base}")
+        if "polymarket" in lower or "prediction market" in lower:
+            _append_query_variant(queries, f"{base} site:polymarket.com")
+        if "sec" in lower or "filing" in lower or "10-k" in lower or "8-k" in lower:
+            _append_query_variant(queries, f"{base} site:sec.gov")
+
+    elif _query_prefers_research(base):
+        _append_query_variant(queries, f"!arx {base}")
+        _append_query_variant(queries, f"!sem {base}")
+        _append_query_variant(queries, f"!oa {base}")
+
+    if _looks_like_creator_economy_query(base):
+        if _looks_like_roblox_query(base):
+            _append_query_variant(queries, f"{base} site:rolimons.com")
+            _append_query_variant(queries, f"{base} site:devforum.roblox.com")
+        _append_query_variant(queries, f"!red {base}")
+        _append_query_variant(queries, f"!yt {base} trend analysis")
+        _append_query_variant(queries, f"{base} site:gumroad.com")
+        _append_query_variant(queries, f"{base} site:producthunt.com")
+        _append_query_variant(queries, f"{base} site:indiehackers.com")
+
+    elif _looks_like_roblox_query(base):
+        _append_query_variant(queries, f"{base} site:create.roblox.com/docs")
+        _append_query_variant(queries, f"{base} site:devforum.roblox.com")
+        _append_query_variant(queries, f"!gh roblox luau {base}")
+        _append_query_variant(queries, f"!yt roblox {base} tutorial")
+        _append_query_variant(queries, f"!red roblox {base}")
+
+    elif _looks_like_ai_media_query(base):
+        for item in _build_model_registry_queries(base):
+            _append_query_variant(queries, f"!hfm {item}")
+        _append_query_variant(queries, f"!gh ComfyUI {base}")
+        _append_query_variant(queries, f"{base} site:civitai.com")
+        _append_query_variant(queries, f"{base} site:replicate.com")
+        _append_query_variant(queries, f"{base} site:fal.ai")
+        _append_query_variant(queries, f"!yt {base} workflow tutorial")
+        _append_query_variant(queries, f"!red {base}")
+
+    elif _looks_like_cyber_query(base):
+        _append_query_variant(queries, f"!nvd {_build_cyber_database_query(base)}")
+        _append_query_variant(queries, f"{base} site:cisa.gov")
+        _append_query_variant(queries, f"{base} site:owasp.org")
+        _append_query_variant(queries, f"!gh {base}")
+
+    if "react" in lower:
+        _append_query_variant(queries, f"{base} site:react.dev")
+        _append_query_variant(queries, f"!mdn {base}")
+    if any(marker in lower for marker in ("javascript", "typescript", "web api", "css", "html", "mdn")):
+        _append_query_variant(queries, f"!mdn {base}")
+    if any(marker in lower for marker in ("ios", "swift", "swiftui", "xcode", "wwdc")):
+        _append_query_variant(queries, f"{base} site:developer.apple.com")
+        _append_query_variant(queries, f"!yt WWDC {base}")
+    if "android" in lower or "kotlin" in lower:
+        _append_query_variant(queries, f"{base} site:developer.android.com")
+    if "flutter" in lower or "dart" in lower:
+        _append_query_variant(queries, f"{base} site:docs.flutter.dev")
+        _append_query_variant(queries, f"{base} site:pub.dev")
+    if "docker" in lower:
+        _append_query_variant(queries, f"{base} site:docs.docker.com")
+    if "aws" in lower or "lambda" in lower:
+        _append_query_variant(queries, f"{base} site:docs.aws.amazon.com")
+
+    if _query_should_include_implementation_sources(base):
+        _append_query_variant(queries, f"!gh {base}")
+        _append_query_variant(queries, f"!hn {base}")
+        _append_query_variant(queries, f"!so {base}")
+        if _contains_marker(lower, _GAME_DEV_QUERY_MARKERS):
+            _append_query_variant(queries, f"!gdse {base}")
+
+    if "site:" not in lower and _query_should_include_social_sources(base):
+        _append_query_variant(queries, f"!red {base}")
+        _append_query_variant(queries, f"!hn {base}")
+        _append_query_variant(queries, f"!lem {base}")
+
+    if _query_should_include_video_sources(base):
+        _append_query_variant(queries, f"!yt {base}")
+
+    if "site:" not in lower and _query_mentions_x(base):
+        _append_query_variant(queries, f"{base} site:x.com OR site:twitter.com")
+
+    if (
+        not _looks_like_finance_query(base)
+        and not _query_prefers_research(base)
+        and _query_should_include_news_sources(base)
+    ):
+        _append_query_variant(queries, f"!bin {base}")
+        _append_query_variant(queries, f"!gn {base}")
+        _append_query_variant(queries, f"!ddn {base}")
+
+    if _contains_marker(lower, _GAME_DEV_QUERY_MARKERS):
+        if "unity" in lower:
+            _append_query_variant(queries, f"{base} site:docs.unity3d.com")
+        if "unreal" in lower:
+            _append_query_variant(queries, f"{base} site:dev.epicgames.com/documentation")
+        if "godot" in lower:
+            _append_query_variant(queries, f"{base} site:docs.godotengine.org")
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in queries:
+        normalized = _normalized_text(item)
+        if not normalized or normalized in seen:
+            continue
+        unique.append(item[:300])
+        seen.add(normalized)
+        if len(unique) >= _MAX_WEB_SEARCH_QUERY_VARIANTS:
+            break
+    return unique
+
+
+def _variant_allowed_domains(query: str) -> tuple[str, ...]:
+    text = query.lower()
+    if text.startswith("!hf") or text.startswith("!hfm"):
+        return ("huggingface.co",)
+    if text.startswith("!red"):
+        return ("reddit.com",)
+    if text.startswith("!hn"):
+        return ("news.ycombinator.com",)
+    if text.startswith("!gh"):
+        return ("github.com",)
+    if text.startswith("!ghc"):
+        return ("github.com",)
+    if text.startswith("!arx"):
+        return ("arxiv.org",)
+    if text.startswith("!reu"):
+        return ("reuters.com",)
+    if text.startswith("!so") or text.startswith("!sx"):
+        return ("stackoverflow.com", "stackexchange.com")
+    if text.startswith("!gdse"):
+        return ("gamedev.stackexchange.com", "stackexchange.com")
+    if text.startswith("!yt"):
+        return ("youtube.com", "youtu.be")
+    if text.startswith("!yp") or text.startswith("!ppd"):
+        return ("piped.video", "srv.piped.video")
+    if text.startswith("!mdn"):
+        return ("developer.mozilla.org",)
+    if text.startswith("!nvd"):
+        return ("nvd.nist.gov",)
+    if "site:reddit.com" in text:
+        return ("reddit.com",)
+    if "site:x.com" in text or "site:twitter.com" in text:
+        return ("x.com", "twitter.com")
+    if "site:polymarket.com" in text:
+        return ("polymarket.com",)
+    if "site:rolimons.com" in text:
+        return ("rolimons.com",)
+    if "site:devforum.roblox.com" in text:
+        return ("devforum.roblox.com",)
+    if "site:create.roblox.com" in text:
+        return ("create.roblox.com",)
+    if "site:civitai.com" in text:
+        return ("civitai.com",)
+    if "site:replicate.com" in text:
+        return ("replicate.com",)
+    if "site:fal.ai" in text:
+        return ("fal.ai",)
+    if "site:producthunt.com" in text:
+        return ("producthunt.com",)
+    if "site:indiehackers.com" in text:
+        return ("indiehackers.com",)
+    if "site:gumroad.com" in text:
+        return ("gumroad.com",)
+    if "site:sec.gov" in text:
+        return ("sec.gov",)
+    if "site:cisa.gov" in text:
+        return ("cisa.gov",)
+    if "site:owasp.org" in text:
+        return ("owasp.org",)
+    if "site:react.dev" in text:
+        return ("react.dev",)
+    if "site:developer.apple.com" in text:
+        return ("developer.apple.com",)
+    if "site:developer.android.com" in text:
+        return ("developer.android.com",)
+    if "site:docs.flutter.dev" in text:
+        return ("docs.flutter.dev",)
+    if "site:pub.dev" in text:
+        return ("pub.dev",)
+    if "site:docs.docker.com" in text:
+        return ("docs.docker.com",)
+    if "site:docs.aws.amazon.com" in text:
+        return ("docs.aws.amazon.com",)
+    if "site:docs.unity3d.com" in text:
+        return ("docs.unity3d.com",)
+    if "site:dev.epicgames.com" in text:
+        return ("dev.epicgames.com",)
+    if "site:docs.godotengine.org" in text:
+        return ("docs.godotengine.org",)
+    return ()
+
+
+def _is_x_post_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    domain = _web_domain(url)
+    if domain not in {"x.com", "twitter.com"}:
+        return False
+    return bool(re.search(r"/status(?:es)?/\d+", parsed.path))
+
+
+def _is_reddit_thread_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    if not _is_social_domain(_web_domain(url)):
+        return False
+    return "/comments/" in parsed.path
+
+
+def _is_low_quality_web_hit(hit: WebSearchHit) -> bool:
+    domain = _web_domain(hit.url)
+    title = (hit.title or "").strip().lower()
+    if domain in {"x.com", "twitter.com"}:
+        return not _is_x_post_url(hit.url)
+    if domain.endswith("reddit.com"):
+        return not _is_reddit_thread_url(hit.url)
+    if title in {"x", "twitter", "reddit"} or " / x" in title:
+        return True
+    return False
+
+
 def refine_tool_search_query(
     tool_query: str,
     original_query: str | None = None,
@@ -289,6 +1061,14 @@ def refine_tool_search_query(
     if acronyms:
         tool_query = f"{tool_query} {' '.join(acronyms[:4])}"
 
+    missing_protected_terms = [
+        token
+        for token in original_tokens
+        if token in _PROTECTED_QUERY_TERMS and token not in tool_tokens
+    ]
+    if missing_protected_terms:
+        tool_query = f"{tool_query} {' '.join(missing_protected_terms[:4])}"
+
     return tool_query[:300]
 
 
@@ -300,7 +1080,145 @@ def _valid_web_url(url: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-def parse_searxng_results(payload: dict[str, Any], max_results: int) -> list[WebSearchHit]:
+def _web_domain(url: str) -> str:
+    try:
+        host = urlparse(url).netloc.lower()
+    except Exception:
+        return ""
+    if "@" in host:
+        host = host.rsplit("@", 1)[-1]
+    host = host.split(":", 1)[0].strip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
+def _is_research_domain(domain: str) -> bool:
+    return any(domain == d or domain.endswith(f".{d}") for d in _RESEARCH_DOMAINS)
+
+
+def _is_social_domain(domain: str) -> bool:
+    return any(domain == d or domain.endswith(f".{d}") for d in _SOCIAL_DOMAINS)
+
+
+def _query_prefers_research(query: str) -> bool:
+    tokens = set(_term_tokens(query))
+    return any(marker in tokens for marker in _RESEARCH_QUERY_MARKERS)
+
+
+def _is_research_source(chunk: SourceChunk) -> bool:
+    metadata = chunk.metadata or {}
+    url = str(metadata.get("url") or chunk.doc_id or "")
+    domain = _web_domain(url)
+    title = (chunk.doc_name or "").lower()
+    if _is_research_domain(domain):
+        return True
+    return "arxiv" in title or "research paper" in title or url.lower().endswith(".pdf")
+
+
+def _is_social_source(chunk: SourceChunk) -> bool:
+    metadata = chunk.metadata or {}
+    url = str(metadata.get("url") or chunk.doc_id or "")
+    return _is_social_domain(_web_domain(url))
+
+
+def _practical_research_limit(limit: int) -> int:
+    return 2 if limit >= 5 else 1
+
+
+def _diversify_web_source_chunks(
+    query: str,
+    ranked: list[SourceChunk],
+    *,
+    limit: int,
+) -> list[SourceChunk]:
+    """Keep final web context source-diverse after semantic reranking.
+
+    The reranker is relevance-only, so practical deployment questions can get
+    crowded by near-duplicate academic pages. Keep the highest-ranked result
+    from each domain first, and cap research/paper sources to one unless the
+    user explicitly asked for research literature.
+    """
+    if len(ranked) <= limit:
+        return ranked[:limit]
+
+    allow_research_stack = _query_prefers_research(query)
+    research_limit = limit if allow_research_stack else _practical_research_limit(limit)
+    selected: list[SourceChunk] = []
+    deferred: list[SourceChunk] = []
+    seen_domains: set[str] = set()
+    research_count = 0
+
+    for chunk in ranked:
+        metadata = chunk.metadata or {}
+        domain = _web_domain(str(metadata.get("url") or chunk.doc_id or ""))
+        research = _is_research_source(chunk)
+        duplicate_domain = bool(domain and domain in seen_domains)
+        too_much_research = research and research_count >= research_limit
+
+        if duplicate_domain or too_much_research:
+            deferred.append(chunk)
+            continue
+
+        selected.append(chunk)
+        if domain:
+            seen_domains.add(domain)
+        if research:
+            research_count += 1
+        if len(selected) >= limit:
+            break
+
+    for chunk in deferred:
+        if chunk in selected:
+            continue
+        selected.append(chunk)
+        if len(selected) >= limit:
+            break
+
+    if (
+        _query_should_include_social_sources(query)
+        and selected
+        and not any(_is_social_source(chunk) for chunk in selected)
+    ):
+        social_candidate = next(
+            (chunk for chunk in ranked if _is_social_source(chunk)),
+            None,
+        )
+        if social_candidate and social_candidate not in selected:
+            if len(selected) < limit:
+                selected.append(social_candidate)
+            else:
+                selected[-1] = social_candidate
+    return selected[:limit]
+
+
+def _extract_webpage_text(html_text: str, *, max_chars: int) -> str | None:
+    soup = BeautifulSoup(html_text, "html.parser")
+    for tag in soup(["script", "style", "noscript", "svg", "nav", "footer"]):
+        tag.decompose()
+
+    candidates = []
+    for selector in ("main", "article"):
+        candidates.extend(soup.select(selector))
+    root = max(candidates, key=lambda node: len(node.get_text(" ", strip=True)), default=soup)
+
+    parts: list[str] = []
+    if soup.title and soup.title.string:
+        parts.append(soup.title.string)
+    text = root.get_text(" ", strip=True)
+    if text:
+        parts.append(text)
+    cleaned = re.sub(r"\s+", " ", " ".join(parts)).strip()
+    if len(cleaned) < 200:
+        return None
+    return cleaned[:max_chars]
+
+
+def parse_searxng_results(
+    payload: dict[str, Any],
+    max_results: int,
+    *,
+    search_query: str | None = None,
+    time_range: str | None = None,
+) -> list[WebSearchHit]:
     """Normalize SearXNG JSON into bounded, deduped hits."""
     seen: set[str] = set()
     hits: list[WebSearchHit] = []
@@ -339,6 +1257,8 @@ def parse_searxng_results(payload: dict[str, Any], max_results: int) -> list[Web
                     if raw.get("publishedDate")
                     else None
                 ),
+                search_query=search_query,
+                time_range=time_range,
             )
         )
         seen.add(url)
@@ -369,12 +1289,14 @@ def web_hits_to_source_chunks(
         body = page_text or hit.snippet or "(No snippet returned.)"
         engines = ", ".join(hit.engines) if hit.engines else "unknown"
         published = f"\nPublished: {hit.published_date}" if hit.published_date else ""
+        hit_query = hit.search_query or search_query or ""
         text = (
             f"Live web result fetched_at={now}\n"
             f"Title: {hit.title}\n"
             f"URL: {hit.url}{published}\n"
             f"Engines: {engines}\n"
-            f"Search query: {search_query or ''}\n"
+            f"Search query: {hit_query}\n"
+            f"Freshness filter: {hit.time_range or 'none'}\n"
             f"Corpus expansion terms: {', '.join(expanded_terms) if expanded_terms else 'none'}\n"
             f"Content: {body}"
         )
@@ -395,7 +1317,8 @@ def web_hits_to_source_chunks(
                     "rank": rank,
                     "published_date": hit.published_date,
                     "source": "searxng",
-                    "search_query": search_query,
+                    "search_query": hit_query,
+                    "time_range": hit.time_range,
                     "expanded_terms": expanded_terms,
                     "full_page_fetched": bool(page_text),
                 },
@@ -435,7 +1358,7 @@ async def rerank_web_source_chunks(
     except Exception as exc:
         logger.warning("live web rerank failed, using search order: %s", exc)
         ranked = sorted(chunks, key=lambda chunk: chunk.score, reverse=True)
-    return ranked[:limit]
+    return _diversify_web_source_chunks(query, ranked, limit=limit)
 
 
 class LiveWebSearch:
@@ -465,9 +1388,11 @@ class LiveWebSearch:
                     or _DEFAULT_CANDIDATE_RESULTS
                 ),
             )
-            hits = await self._search_searxng(
+            time_range = infer_web_search_time_range(search_query)
+            hits = await self._search_searxng_pool(
                 search_query,
                 max_results=candidate_limit,
+                time_range=time_range,
             )
         except Exception as exc:
             logger.info("live web search skipped: %s", exc)
@@ -476,8 +1401,8 @@ class LiveWebSearch:
             return []
 
         fetched: dict[str, str] = {}
-        if settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES and settings.OBSCURA_COMMAND:
-            fetched = await self._fetch_pages_with_obscura(hits)
+        if settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES:
+            fetched = await self._fetch_pages(hits)
         candidate_chunks = web_hits_to_source_chunks(
             hits,
             fetched_markdown=fetched,
@@ -500,11 +1425,98 @@ class LiveWebSearch:
         )
         return selected
 
+    async def _search_searxng_pool(
+        self,
+        query: str,
+        *,
+        max_results: int | None = None,
+        time_range: str | None = None,
+    ) -> list[WebSearchHit]:
+        candidate_limit = max(1, int(max_results or _DEFAULT_CANDIDATE_RESULTS))
+        queries = build_web_search_queries(query)
+        if not queries:
+            return []
+
+        if len(queries) == 1:
+            return await self._search_searxng(
+                queries[0],
+                max_results=candidate_limit,
+                time_range=time_range,
+            )
+
+        per_query_limit = min(_WEB_SEARCH_RESULTS_PER_QUERY, candidate_limit)
+        tasks = []
+        for variant in queries:
+            variant_time_range = (
+                None
+                if variant.lower().startswith(("!hf", "!hfm", "!nvd"))
+                else time_range
+            )
+            tasks.append(
+                self._search_searxng(
+                    variant,
+                    max_results=per_query_limit,
+                    time_range=variant_time_range,
+                )
+            )
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        hit_lists: list[list[WebSearchHit]] = []
+        for variant, result in zip(queries, results):
+            if not isinstance(result, list):
+                continue
+            allowed_domains = _variant_allowed_domains(variant)
+            result = [
+                hit
+                for hit in result
+                if not _is_low_quality_web_hit(hit)
+            ]
+            if allowed_domains:
+                result = [
+                    hit
+                    for hit in result
+                    if any(
+                        _web_domain(hit.url) == domain
+                        or _web_domain(hit.url).endswith(f".{domain}")
+                        for domain in allowed_domains
+                    )
+                ]
+            hit_lists.append(result)
+        if not hit_lists:
+            return []
+
+        base_hits = hit_lists[0]
+        social_hit_lists = hit_lists[1:]
+        seen: set[str] = set()
+        merged: list[WebSearchHit] = []
+
+        def add_hits(items: list[WebSearchHit], limit: int | None = None) -> None:
+            for hit in items[:limit]:
+                if not hit.url or hit.url in seen:
+                    continue
+                seen.add(hit.url)
+                merged.append(hit)
+
+        reserved_variant_slots = sum(1 for hits in social_hit_lists if hits)
+        base_primary_limit = min(
+            _WEB_SEARCH_RESULTS_PER_QUERY,
+            max(1, candidate_limit - reserved_variant_slots),
+        )
+        add_hits(base_hits, base_primary_limit)
+        for social_hits in social_hit_lists:
+            add_hits(social_hits, per_query_limit)
+        for hit_list in hit_lists:
+            if len(merged) >= candidate_limit:
+                break
+            add_hits(hit_list)
+
+        return merged[:candidate_limit]
+
     async def _search_searxng(
         self,
         query: str,
         *,
         max_results: int | None = None,
+        time_range: str | None = None,
     ) -> list[WebSearchHit]:
         settings = get_settings()
         base_url = settings.SEARXNG_URL.rstrip("/")
@@ -514,8 +1526,10 @@ class LiveWebSearch:
             "language": "en",
             "safesearch": "1",
         }
-        if settings.SEARXNG_ENGINES:
+        if settings.SEARXNG_ENGINES and not query.lstrip().startswith("!"):
             params["engines"] = settings.SEARXNG_ENGINES
+        if time_range:
+            params["time_range"] = time_range
         timeout = httpx.Timeout(settings.SEARXNG_TIMEOUT_SECONDS, connect=2.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             response = await client.get(f"{base_url}/search", params=params)
@@ -531,18 +1545,62 @@ class LiveWebSearch:
         return parse_searxng_results(
             payload,
             int(candidate_limit or _DEFAULT_CANDIDATE_RESULTS),
+            search_query=query,
+            time_range=time_range,
         )
 
-    async def _fetch_pages_with_obscura(
+    async def _fetch_pages(
         self,
         hits: list[WebSearchHit],
     ) -> dict[str, str]:
+        tasks = [self._fetch_one_page(hit.url) for hit in hits]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         fetched: dict[str, str] = {}
-        for hit in hits:
-            text = await self._fetch_one_with_obscura(hit.url)
-            if text:
-                fetched[hit.url] = text
+        for hit, result in zip(hits, results):
+            if isinstance(result, str) and result.strip():
+                fetched[hit.url] = result.strip()
         return fetched
+
+    async def _fetch_one_page(self, url: str) -> str | None:
+        settings = get_settings()
+        if settings.OBSCURA_COMMAND:
+            text = await self._fetch_one_with_obscura(url)
+            if text:
+                return text
+        return await self._fetch_one_with_httpx(url)
+
+    async def _fetch_one_with_httpx(self, url: str) -> str | None:
+        settings = get_settings()
+        timeout_seconds = min(float(settings.OBSCURA_TIMEOUT_SECONDS or 10.0), 8.0)
+        timeout = httpx.Timeout(timeout_seconds, connect=2.0)
+        headers = {"User-Agent": _WEB_FETCH_USER_AGENT}
+        try:
+            async with httpx.AsyncClient(
+                timeout=timeout,
+                follow_redirects=True,
+                headers=headers,
+            ) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+        except Exception as exc:
+            logger.debug("HTTP page fetch failed for %s: %s", url, exc)
+            return None
+
+        content_type = response.headers.get("content-type", "").lower()
+        if (
+            content_type
+            and "text/html" not in content_type
+            and "text/plain" not in content_type
+            and "application/xhtml" not in content_type
+        ):
+            return None
+        if "text/plain" in content_type:
+            text = re.sub(r"\s+", " ", response.text).strip()
+            return text[: settings.OBSCURA_MAX_CHARS] if len(text) >= 200 else None
+        return _extract_webpage_text(
+            response.text,
+            max_chars=int(settings.OBSCURA_MAX_CHARS or _DEFAULT_OBSCURA_MAX_CHARS),
+        )
 
     async def _fetch_one_with_obscura(self, url: str) -> str | None:
         settings = get_settings()

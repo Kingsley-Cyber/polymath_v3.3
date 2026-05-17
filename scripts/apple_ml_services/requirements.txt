@@ -2,20 +2,22 @@
 # Installed via uv into ~/PolymathRuntime/apple_ml_services/.venv.
 
 # MLX runtime + model loaders
-mlx>=0.30.0
+mlx>=0.31.0
 mlx-lm>=0.30.0
-mlx-embeddings>=0.0.6
+mlx-embeddings>=0.1.0,<0.2.0
 
 # FastAPI sidecars
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
+python-multipart>=0.0.20
 
 # Tokenization shared with the model loaders
 tokenizers>=0.20.0
 sentencepiece>=0.2.0
 
 # HuggingFace cache + hub (model pull, not inference)
-huggingface_hub>=0.26.0
+huggingface_hub>=0.36.0
+hf_xet>=1.1.0
 
 # Docling host-native sidecar (CPU on macOS)
 docling>=2.90.0

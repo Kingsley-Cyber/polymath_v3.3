@@ -1,26 +1,17 @@
-"""Apple Silicon MLX reranker sidecar — Jina v3 cross-encoder, host-native.
+"""Apple Silicon MLX reranker sidecar - Jina v3 cosine reranker, host-native.
 
 Wire spec (matches backend expectations):
   GET  /health → {"status": "ok"}
   POST /rerank → {"scores": [float, ...]} aligned to the input documents
 
-NOTE — IMPLEMENTATION SCAFFOLD
-Jina-reranker-v3 ships as a Qwen3 trunk + a custom 2-layer MLP projector
-that maps pooled embeddings to a single relevance scalar. Current
-mlx-embeddings cannot load the projector's quantized weights
-automatically, so the verified Mac Studio implementation builds an
-MLPProjector by hand and loads only the trunk through mlx-embeddings.
-
-This file gives you the FastAPI shape + a placeholder forward pass.
-**Replace the _load_model() and _score_pairs() bodies with your
-verified Mac Studio implementation** — the wire contract stays the same.
-
-CRITICAL — score scale: this model returns COSINE scores (0..1), not
-logits. The backend must run with RERANKER_SCORE_SCALE=cosine, otherwise
-the negative-logit "low confidence" guard in the retriever throws away
-every result. The docker-compose.apple-mlx.yml override sets this for you.
+The MLX model card exposes Jina v3 through mlx-embeddings: generate
+normalised text embeddings, then score query/document pairs with the dot
+product. That gives cosine-like scores instead of cross-encoder logits.
+The docker-compose.apple-mlx.yml override sets RERANKER_SCORE_SCALE=cosine
+so the backend does not apply logit-only low-confidence guards.
 
 Required env:
+  APPLE_MLX_RERANKER_MODEL_ID default mlx-community/jina-reranker-v3-4bit-mxfp4
   RERANKER_PORT             default 8081 (set by start.sh)
   RERANKER_BATCH_SIZE       default 16
   RERANKER_MAX_DOC_CHARS    default 6000
@@ -40,7 +31,10 @@ from pydantic import BaseModel
 logger = logging.getLogger("reranker_mlx")
 logging.basicConfig(level=logging.INFO)
 
-MODEL_ID = "mlx-community/jina-reranker-v3-4bit-mxfp4"
+MODEL_ID = os.environ.get(
+    "APPLE_MLX_RERANKER_MODEL_ID",
+    os.environ.get("RERANKER_MODEL_ID", "mlx-community/jina-reranker-v3-4bit-mxfp4"),
+)
 BATCH_SIZE = int(os.environ.get("RERANKER_BATCH_SIZE", "16"))
 MAX_DOC_CHARS = int(os.environ.get("RERANKER_MAX_DOC_CHARS", "6000"))
 MAX_QUERY_CHARS = int(os.environ.get("RERANKER_MAX_QUERY_CHARS", "2000"))
@@ -59,44 +53,112 @@ class RerankResponse(BaseModel):
 
 app = FastAPI(title="Polymath Apple MLX Reranker (Jina v3)", version="0.1.0")
 _model: Any = None
-_projector: Any = None
 _tokenizer: Any = None
+_generate: Any = None
+
+
+def _import_mlx_embeddings() -> tuple[Any, Any]:
+    try:
+        from mlx_embeddings import generate, load
+
+        return load, generate
+    except ImportError:
+        try:
+            from mlx_embeddings.utils import generate, load
+
+            return load, generate
+        except ImportError as exc:
+            raise RuntimeError(
+                "mlx-embeddings not installed. Run scripts/install_apple_mlx_runtime.sh"
+            ) from exc
 
 
 def _load_model() -> None:
-    """Load Jina v3 trunk + hand-built MLP projector.
-
-    REPLACE THIS BODY with your verified Mac Studio implementation.
-    The Mac Studio code:
-      1. Loads the Qwen3 trunk via mlx_embeddings.utils.load(MODEL_ID).
-      2. Reads model.safetensors metadata for the projector weights
-         (keys typically: 'projector.0.weight', 'projector.0.bias',
-                          'projector.2.weight', 'projector.2.bias').
-      3. Constructs an MLPProjector(mlx.nn.Module) with shape
-         [hidden_dim → hidden_dim → 1], loads the weights, freezes it.
-      4. Stores both as module-level globals.
-    """
-    global _model, _projector, _tokenizer
+    """Load the MLX reranker model through mlx-embeddings."""
+    global _generate, _model, _tokenizer
     if _model is not None:
         return
 
-    try:
-        from mlx_embeddings.utils import load
-    except ImportError as exc:
-        raise RuntimeError(
-            "mlx-embeddings not installed. uv pip install -r requirements.txt"
-        ) from exc
+    load, generate = _import_mlx_embeddings()
 
-    logger.info("loading Jina v3 trunk %s", MODEL_ID)
+    logger.info("loading Jina v3 MLX reranker %s", MODEL_ID)
     _model, _tokenizer = load(MODEL_ID)
+    _generate = generate
+    logger.info("reranker ready")
 
-    # Projector — REPLACE with your hand-built MLPProjector load
-    _projector = None
-    logger.warning(
-        "reranker scaffold active: MLPProjector not loaded. "
-        "Replace _load_model() with the verified Mac Studio implementation. "
-        "/rerank will return zeroes until then."
+
+def _as_numpy(value: Any) -> Any:
+    import numpy as np
+
+    try:
+        import mlx.core as mx
+
+        mx.eval(value)
+    except Exception:
+        pass
+    return np.asarray(value)
+
+
+def _extract_embeddings(output: Any) -> Any:
+    if hasattr(output, "text_embeds"):
+        return _as_numpy(output.text_embeds)
+    if hasattr(output, "sentence_embedding"):
+        return _as_numpy(output.sentence_embedding)
+    if hasattr(output, "pooler_output"):
+        return _as_numpy(output.pooler_output)
+    if isinstance(output, dict):
+        for key in ("text_embeds", "sentence_embedding", "pooler_output"):
+            if key in output:
+                return _as_numpy(output[key])
+    raise RuntimeError(
+        "MLX reranker returned an unrecognised output; expected text_embeds, "
+        "sentence_embedding, or pooler_output."
     )
+
+
+def _normalise_rows(vectors: Any) -> Any:
+    import numpy as np
+
+    arr = np.asarray(vectors, dtype=np.float32)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    norms = np.where(norms > 0, norms, 1.0)
+    return arr / norms
+
+
+def _encode_batch(texts: list[str]) -> Any:
+    if _model is None or _tokenizer is None:
+        _load_model()
+
+    if _generate is not None:
+        try:
+            output = _generate(_model, _tokenizer, texts=texts)
+            return _normalise_rows(_extract_embeddings(output))
+        except TypeError:
+            output = _generate(_model, _tokenizer, texts)
+            return _normalise_rows(_extract_embeddings(output))
+        except Exception as exc:
+            logger.warning("mlx-embeddings.generate failed; falling back to direct call: %s", exc)
+
+    try:
+        toks = _tokenizer(texts, padding=True, truncation=True, return_tensors="np")
+        try:
+            result = _model(toks["input_ids"], attention_mask=toks.get("attention_mask"))
+        except TypeError:
+            result = _model(toks["input_ids"])
+        return _normalise_rows(_extract_embeddings(result))
+    except Exception as exc:
+        raise RuntimeError(f"reranker embedding failed: {exc}") from exc
+
+
+def _encode_texts(texts: list[str]) -> Any:
+    import numpy as np
+
+    batches = []
+    for start in range(0, len(texts), max(1, BATCH_SIZE)):
+        batches.append(_encode_batch(texts[start : start + BATCH_SIZE]))
+    return np.vstack(batches)
 
 
 @app.on_event("startup")
@@ -109,7 +171,9 @@ async def _startup() -> None:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok" if _model is not None else "loading"}
+    if _model is None:
+        raise HTTPException(status_code=503, detail="model is not loaded")
+    return {"status": "ok", "model": MODEL_ID, "device": "mps"}
 
 
 @app.get("/info")
@@ -120,47 +184,20 @@ async def info() -> dict:
         "batch_size": BATCH_SIZE,
         "max_doc_chars": MAX_DOC_CHARS,
         "max_query_chars": MAX_QUERY_CHARS,
-        "ready": _model is not None and _projector is not None,
+        "ready": _model is not None,
     }
 
 
 def _score_pairs(query: str, documents: list[str]) -> list[float]:
-    """Return cosine scores aligned to documents.
-
-    REPLACE with your verified Mac Studio implementation. Reference shape:
-      pairs = [(query[:MAX_QUERY_CHARS], d[:MAX_DOC_CHARS]) for d in documents]
-      toks  = _tokenizer(pairs, padding=True, truncation=True, return_tensors="np")
-      hidden = _model(toks["input_ids"], attention_mask=toks["attention_mask"]).last_hidden_state
-      pooled = hidden[:, 0, :]                    # CLS pooling for Jina v3
-      scores = _projector(pooled).reshape(-1)     # [N] cosine in 0..1
-      return scores.tolist()
-    """
-    if _projector is None:
-        # Scaffold mode: explicit zeroes signal misconfiguration to the
-        # retriever rather than randomising relevance order.
-        logger.warning("returning zero scores (scaffold mode)")
-        return [0.0] * len(documents)
-
+    """Return cosine scores aligned to documents."""
     try:
-        import numpy as np
-
-        pairs = [
-            (query[:MAX_QUERY_CHARS], (doc or "")[:MAX_DOC_CHARS])
-            for doc in documents
-        ]
-        toks = _tokenizer(
-            pairs,
-            padding=True,
-            truncation=True,
-            return_tensors="np",
-        )
-        out = _model(toks["input_ids"], attention_mask=toks["attention_mask"])
-        # Pool the CLS token (index 0) — replace with the pooling your
-        # verified implementation uses if different.
-        hidden = np.asarray(out.last_hidden_state)
-        pooled = hidden[:, 0, :]
-        scores = _projector(pooled).reshape(-1)
-        return [float(s) for s in scores]
+        query_text = (query or "")[:MAX_QUERY_CHARS]
+        doc_texts = [(doc or "")[:MAX_DOC_CHARS] for doc in documents]
+        vectors = _encode_texts([query_text] + doc_texts)
+        query_vec = vectors[0]
+        doc_vecs = vectors[1:]
+        scores = doc_vecs @ query_vec
+        return [float(score) for score in scores.tolist()]
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"rerank failed: {exc}")
 

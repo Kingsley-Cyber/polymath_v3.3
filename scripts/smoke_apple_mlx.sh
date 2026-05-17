@@ -4,49 +4,16 @@
 
 set -euo pipefail
 
-EMBED="${EMBEDDER_URL:-http://localhost:8082}"
-RERANK="${RERANKER_URL:-http://localhost:8081}"
-DOCLING="${DOCLING_URL:-http://localhost:8500}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-step() { printf "\n→ %s\n" "$1"; }
-
-step "embedder /info"
-curl -fsS "${EMBED}/info" | jq .
-
-step "embedder /embeddings (1 input)"
-curl -fsS "${EMBED}/embeddings" \
-  -H "Content-Type: application/json" \
-  -d '{"input":["hello polymath"]}' | jq '.data[0] | {dim: (.embedding | length), index}'
-
-step "reranker /health"
-curl -fsS "${RERANK}/health" | jq .
-
-step "reranker /rerank — ordering check (relevant doc must score highest)"
-RESPONSE=$(curl -fsS "${RERANK}/rerank" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "object-oriented design pattern",
-    "documents": [
-      "The decorator pattern adds responsibilities to objects dynamically.",
-      "Lemonade recipe: lemons, water, sugar, ice.",
-      "Composite pattern lets clients treat individual objects and compositions uniformly."
-    ]
-  }')
-echo "${RESPONSE}" | jq .
-
-# Score 0 + 2 should both exceed score 1 if the model is loaded properly.
-DOC0=$(echo "${RESPONSE}" | jq '.scores[0]')
-DOC1=$(echo "${RESPONSE}" | jq '.scores[1]')
-DOC2=$(echo "${RESPONSE}" | jq '.scores[2]')
-echo "  doc0=${DOC0} doc1=${DOC1} doc2=${DOC2}"
-if awk "BEGIN{ exit !( ${DOC0} > ${DOC1} && ${DOC2} > ${DOC1} ) }"; then
-  echo "  ✓ relevance ordering correct"
-else
-  echo "  ✗ ranker did not separate relevant from irrelevant — projector may not be loaded"
-  echo "    (scaffold mode returns zeroes; replace reranker_mlx/main.py)"
+PY="${PYTHON:-python3}"
+if [[ -x "${POLYMATH_DOCKER_DATA_ROOT:-${HOME}/PolymathRuntime}/apple_ml_services/.venv/bin/python" ]]; then
+  PY="${POLYMATH_DOCKER_DATA_ROOT:-${HOME}/PolymathRuntime}/apple_ml_services/.venv/bin/python"
 fi
 
-step "docling /health"
-curl -fsS "${DOCLING}/health" | jq .
-
-step "all checks done"
+"${PY}" "${REPO_ROOT}/scripts/verify_apple_mlx_runtime.py" \
+  --embedder-url "${EMBEDDER_URL:-http://localhost:8082}" \
+  --reranker-url "${RERANKER_URL:-http://localhost:8081}" \
+  --docling-url "${DOCLING_URL:-http://localhost:8500}" \
+  --wait "${APPLE_MLX_SMOKE_WAIT:-30}"

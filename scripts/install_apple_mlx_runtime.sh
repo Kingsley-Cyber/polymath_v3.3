@@ -5,9 +5,9 @@
 #   1. Verifies host is Darwin/arm64.
 #   2. Stages scripts/apple_ml_services/ into ~/PolymathRuntime/apple_ml_services/
 #   3. Creates a uv-managed venv with requirements.txt
-#   4. Pre-warms the HuggingFace cache with the MLX model weights
+#   4. Pre-warms and verifies the HuggingFace cache with the MLX model weights
 #   5. Writes a LaunchAgent (com.polymath.apple-ml) and bootstraps it
-#   6. Smoke-tests each endpoint
+#   6. Smoke-tests embeddings, reranking, and docling health
 #
 # Usage (run from repo root on macOS):
 #   bash scripts/install_apple_mlx_runtime.sh
@@ -33,6 +33,8 @@ SERVICES_DIR="${RUNTIME_ROOT}/apple_ml_services"
 LOG_DIR="${RUNTIME_ROOT}/logs"
 LAUNCH_AGENT_NAME="com.polymath.apple-ml"
 LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LAUNCH_AGENT_NAME}.plist"
+APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID:-mlx-community/Qwen3-Embedding-0.6B-mxfp8}"
+APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID:-mlx-community/jina-reranker-v3-4bit-mxfp4}"
 
 echo "[apple-mlx] runtime root : ${RUNTIME_ROOT}"
 echo "[apple-mlx] services     : ${SERVICES_DIR}"
@@ -41,30 +43,33 @@ echo "[apple-mlx] launch agent : ${LAUNCH_AGENT_PATH}"
 mkdir -p "${SERVICES_DIR}" "${LOG_DIR}" "${RUNTIME_ROOT}/models" "${RUNTIME_ROOT}/volumes/hf-cache"
 
 # ── 2. Stage code ────────────────────────────────────────────────────
-# The three sidecar main.py files are explicitly EXCLUDED from rsync when
-# a verified host copy is already in place. The repo ships them as
-# scaffolds — the verified Mac Studio implementation (notably the
-# hand-built MLPProjector for Jina v3, which mlx-embeddings can't load
-# automatically) lives only on the host. Without these excludes, every
-# re-run of this installer would clobber working host code with the
-# scaffold and silently break retrieval — see GOTCHAS §81. Override by
-# deleting the host file first if you really want a fresh sync.
 EXCLUDES=(
   '.venv'
   '__pycache__'
   '*.pyc'
 )
-PROTECT_RELS=(
+SIDECAR_RELS=(
   'embedder_mlx/main.py'
   'reranker_mlx/main.py'
   'docling_svc/main.py'
 )
-for rel in "${PROTECT_RELS[@]}"; do
-  if [[ -f "${SERVICES_DIR}/${rel}" ]]; then
-    EXCLUDES+=("${rel}")
-    echo "[apple-mlx] protecting verified host file: ${rel}"
-  fi
-done
+if [[ "${POLYMATH_APPLE_MLX_PRESERVE_HOST:-0}" == "1" ]]; then
+  for rel in "${SIDECAR_RELS[@]}"; do
+    if [[ -f "${SERVICES_DIR}/${rel}" ]]; then
+      EXCLUDES+=("${rel}")
+      echo "[apple-mlx] preserving host file: ${rel}"
+    fi
+  done
+else
+  backup_dir="${LOG_DIR}/apple_ml_services_backups/$(date +%Y%m%d-%H%M%S)"
+  for rel in "${SIDECAR_RELS[@]}"; do
+    if [[ -f "${SERVICES_DIR}/${rel}" ]] && ! cmp -s "${REPO_ROOT}/scripts/apple_ml_services/${rel}" "${SERVICES_DIR}/${rel}"; then
+      mkdir -p "${backup_dir}/$(dirname "${rel}")"
+      cp "${SERVICES_DIR}/${rel}" "${backup_dir}/${rel}"
+      echo "[apple-mlx] backed up prior host file: ${backup_dir}/${rel}"
+    fi
+  done
+fi
 
 echo "[apple-mlx] syncing source from repo → runtime"
 RSYNC_EXCLUDES=()
@@ -93,8 +98,17 @@ deactivate
 
 # ── 4. Pre-warm HuggingFace model cache ──────────────────────────────
 echo "[apple-mlx] pre-pulling MLX model weights (this can take a while on first run)"
+APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID}" \
+APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID}" \
 HF_HOME="${RUNTIME_ROOT}/volumes/hf-cache" \
+HF_HUB_CACHE="${RUNTIME_ROOT}/volumes/hf-cache/hub" \
 "${SERVICES_DIR}/.venv/bin/python" "${REPO_ROOT}/scripts/pull_apple_mlx_models.py"
+
+APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID}" \
+APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID}" \
+HF_HOME="${RUNTIME_ROOT}/volumes/hf-cache" \
+HF_HUB_CACHE="${RUNTIME_ROOT}/volumes/hf-cache/hub" \
+"${SERVICES_DIR}/.venv/bin/python" "${REPO_ROOT}/scripts/pull_apple_mlx_models.py" --check-only
 
 # ── 5. LaunchAgent ───────────────────────────────────────────────────
 mkdir -p "${HOME}/Library/LaunchAgents"
@@ -120,8 +134,16 @@ cat > "${LAUNCH_AGENT_PATH}" <<PLIST
     <dict>
         <key>HF_HOME</key>
         <string>${RUNTIME_ROOT}/volumes/hf-cache</string>
+        <key>HF_HUB_CACHE</key>
+        <string>${RUNTIME_ROOT}/volumes/hf-cache/hub</string>
         <key>POLYMATH_DOCKER_DATA_ROOT</key>
         <string>${RUNTIME_ROOT}</string>
+        <key>APPLE_MLX_EMBED_MODEL_ID</key>
+        <string>${APPLE_MLX_EMBED_MODEL_ID}</string>
+        <key>APPLE_MLX_RERANKER_MODEL_ID</key>
+        <string>${APPLE_MLX_RERANKER_MODEL_ID}</string>
+        <key>RERANKER_SCORE_SCALE</key>
+        <string>cosine</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -140,20 +162,7 @@ launchctl kickstart -k "gui/$(id -u)/${LAUNCH_AGENT_NAME}"
 
 # ── 6. Smoke ─────────────────────────────────────────────────────────
 echo "[apple-mlx] waiting up to 90s for sidecars to come up"
-deadline=$((SECONDS + 90))
-for endpoint in \
-  "http://localhost:8082/info" \
-  "http://localhost:8081/health" \
-  "http://localhost:8500/health"; do
-  while ! curl -sf "${endpoint}" >/dev/null; do
-    if (( SECONDS >= deadline )); then
-      echo "ERROR: ${endpoint} did not become healthy in 90s. Check ${LOG_DIR}/apple_ml_services.err.log" >&2
-      exit 1
-    fi
-    sleep 2
-  done
-  echo "  ok: ${endpoint}"
-done
+"${SERVICES_DIR}/.venv/bin/python" "${REPO_ROOT}/scripts/verify_apple_mlx_runtime.py" --wait 90
 
 echo
 echo "[apple-mlx] installed. Now bring up Docker with the override:"

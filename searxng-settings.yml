@@ -21,8 +21,475 @@ server:
 ui:
   static_use_hash: true
 
+categories_as_tabs:
+  general:
+  news:
+  finance:
+  stocks:
+  crypto:
+  market data:
+  creator economy:
+  ai media:
+  game dev:
+  cyber:
+  mobile:
+  tech news:
+  it:
+  repos:
+  packages:
+  science:
+  social media:
+  videos:
+  map:
+
 outgoing:
   request_timeout: 6.0
   max_request_timeout: 10.0
   pool_connections: 100
   pool_maxsize: 20
+
+# Full-spectrum source catalog. The backend still sends targeted source bangs
+# for specialized lanes; this catalog makes those lanes available in SearXNG.
+engines:
+  # Core/general baselines.
+  - name: google
+    engine: google
+    shortcut: g
+    categories: [general]
+    weight: 1.2
+    timeout: 6.0
+    disabled: false
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    categories: [general]
+    weight: 1.2
+    timeout: 6.0
+    disabled: false
+
+  - name: brave
+    engine: brave
+    shortcut: br
+    categories: [general]
+    weight: 1.0
+    timeout: 6.0
+    disabled: false
+
+  - name: mojeek
+    engine: mojeek
+    shortcut: mjk
+    categories: [general]
+    weight: 0.8
+    timeout: 6.0
+    disabled: false
+
+  # Long-running reference sources.
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    categories: [general]
+    display_type: ["infobox", "list"]
+    weight: 2.0
+    timeout: 4.0
+    disabled: false
+
+  - name: wikidata
+    engine: wikidata
+    shortcut: wd
+    categories: [general]
+    display_type: ["infobox", "list"]
+    weight: 2.0
+    timeout: 4.0
+    disabled: false
+
+  # News and market-moving sources.
+  - name: bing news
+    engine: bing_news
+    shortcut: bin
+    categories: [news, finance, stocks, crypto, market data]
+    weight: 2.5
+    timeout: 5.0
+    disabled: false
+
+  - name: google news
+    engine: google_news
+    shortcut: gn
+    categories: [news, tech news, finance, stocks, crypto]
+    weight: 2.3
+    timeout: 5.0
+    disabled: false
+
+  - name: duckduckgo news
+    engine: duckduckgo_extra
+    ddg_category: news
+    shortcut: ddn
+    categories: [news, tech news, finance, stocks, crypto]
+    weight: 1.7
+    timeout: 5.0
+    disabled: false
+
+  - name: reuters
+    engine: reuters
+    shortcut: reu
+    categories: [news, finance, stocks, crypto, market data]
+    sort_order: display_date:desc
+    weight: 3.0
+    timeout: 5.0
+    disabled: false
+
+  # Social/meta sources. Reddit/HN/Lemmy use public APIs and return real post
+  # or discussion content; X/Twitter is intentionally not configured because
+  # current SearXNG has no native reliable engine for it.
+  - name: reddit
+    engine: reddit
+    shortcut: red
+    categories: [social media, finance, stocks, crypto, tech news]
+    page_size: 25
+    weight: 2.4
+    timeout: 5.0
+    disabled: false
+
+  - name: hackernews
+    engine: hackernews
+    shortcut: hn
+    categories: [tech news, it, social media, news]
+    weight: 2.4
+    timeout: 5.0
+    disabled: false
+
+  - name: lemmy posts
+    engine: lemmy
+    lemmy_type: Posts
+    shortcut: lem
+    categories: [social media, tech news]
+    weight: 1.2
+    timeout: 5.0
+    disabled: false
+
+  - name: stackexchange
+    engine: stackexchange
+    shortcut: sx
+    categories: [it, tech news]
+    weight: 1.8
+    timeout: 5.0
+    disabled: false
+
+  - name: stackoverflow
+    engine: stackexchange
+    api_site: stackoverflow
+    shortcut: so
+    categories: [it, tech news]
+    weight: 2.5
+    timeout: 5.0
+    disabled: false
+
+  - name: gamedev stackexchange
+    engine: stackexchange
+    api_site: gamedev
+    shortcut: gdse
+    categories: [it, game dev]
+    weight: 2.2
+    timeout: 5.0
+    disabled: false
+
+  - name: mastodon hashtags
+    engine: mastodon
+    mastodon_type: hashtags
+    base_url: https://mastodon.social
+    shortcut: mah
+    categories: [social media]
+    weight: 0.8
+    timeout: 5.0
+    disabled: false
+
+  # Academic/meta research.
+  - name: huggingface
+    engine: huggingface
+    huggingface_endpoint: models
+    shortcut: hf
+    categories: [it, repos]
+    weight: 3.0
+    timeout: 5.0
+    disabled: false
+
+  - name: huggingface models
+    engine: huggingface
+    huggingface_endpoint: models
+    shortcut: hfm
+    categories: [it, repos]
+    weight: 3.0
+    timeout: 5.0
+    disabled: false
+
+  - name: huggingface datasets
+    engine: huggingface
+    huggingface_endpoint: datasets
+    shortcut: hfd
+    categories: [it, repos]
+    timeout: 5.0
+    disabled: true
+
+  - name: arxiv
+    engine: arxiv
+    shortcut: arx
+    categories: [science, it]
+    weight: 2.5
+    timeout: 4.0
+    disabled: false
+
+  - name: semantic scholar
+    engine: semantic_scholar
+    shortcut: sem
+    categories: [science]
+    weight: 2.4
+    timeout: 6.0
+    disabled: false
+
+  - name: openalex
+    engine: openalex
+    shortcut: oa
+    categories: [science]
+    weight: 2.0
+    timeout: 6.0
+    disabled: false
+
+  - name: google scholar
+    engine: google_scholar
+    shortcut: gs
+    categories: [science]
+    weight: 1.6
+    timeout: 6.0
+    disabled: false
+
+  - name: crossref
+    engine: crossref
+    shortcut: xref
+    categories: [science]
+    weight: 1.2
+    timeout: 8.0
+    disabled: false
+
+  - name: pubmed
+    engine: pubmed
+    shortcut: pub
+    categories: [science]
+    weight: 1.5
+    timeout: 6.0
+    disabled: false
+
+  # Implementation and package ecosystems.
+  - name: github
+    engine: github
+    shortcut: gh
+    categories: [it, repos, game dev, ai media]
+    weight: 2.0
+    timeout: 5.0
+    disabled: false
+
+  - name: github code
+    engine: github_code
+    shortcut: ghc
+    categories: [it, repos]
+    weight: 1.6
+    timeout: 6.0
+    inactive: false
+    disabled: false
+    ghc_auth:
+      type: "none"
+      token: ""
+
+  - name: gitlab
+    engine: gitlab
+    base_url: https://gitlab.com
+    shortcut: gl
+    categories: [it, repos]
+    weight: 1.0
+    timeout: 6.0
+    disabled: false
+
+  - name: sourcehut
+    engine: sourcehut
+    shortcut: srht
+    categories: [it, repos]
+    weight: 0.8
+    timeout: 6.0
+    disabled: false
+
+  - name: mdn
+    shortcut: mdn
+    engine: json_engine
+    categories: [it]
+    paging: true
+    search_url: https://developer.mozilla.org/api/v1/search?q={query}&page={pageno}
+    results_query: documents
+    url_query: mdn_url
+    url_prefix: https://developer.mozilla.org
+    title_query: title
+    content_query: summary
+    weight: 2.5
+    timeout: 5.0
+    disabled: false
+
+  - name: npm
+    engine: npm
+    shortcut: npm
+    categories: [it, packages]
+    weight: 1.3
+    timeout: 5.0
+    disabled: false
+
+  - name: pypi
+    engine: pypi
+    shortcut: pypi
+    categories: [it, packages]
+    weight: 1.3
+    timeout: 5.0
+    disabled: false
+
+  - name: crates.io
+    engine: crates
+    shortcut: crates
+    categories: [it, packages]
+    weight: 1.0
+    timeout: 6.0
+    disabled: false
+
+  - name: ollama
+    engine: ollama
+    shortcut: ollama
+    categories: [it, repos]
+    weight: 2.0
+    timeout: 5.0
+    disabled: false
+
+  - name: docker hub
+    engine: docker_hub
+    shortcut: dh
+    categories: [it, packages]
+    weight: 1.5
+    timeout: 5.0
+    disabled: false
+
+  # Video/tutorial/workflow discovery. YouTube is the default; Piped is a
+  # privacy-friendly fallback. Invidious and Tube Archivist need a configured
+  # instance/token, so they stay documented but disabled.
+  - name: youtube
+    engine: youtube_noapi
+    shortcut: yt
+    categories: [videos, tech news, game dev, ai media, creator economy]
+    weight: 2.4
+    timeout: 6.0
+    disabled: false
+
+  - name: piped
+    engine: piped
+    shortcut: yp
+    categories: [videos, tech news, game dev, ai media, creator economy]
+    piped_filter: videos
+    frontend_url: https://srv.piped.video
+    backend_url:
+      - https://pipedapi.ducks.party
+      - https://pipedapi.kavin.rocks
+    weight: 1.5
+    timeout: 5.0
+    inactive: false
+    disabled: false
+
+  # Local/maps/reference extras.
+  - name: openlibrary
+    engine: openlibrary
+    shortcut: ol
+    categories: [general]
+    weight: 1.0
+    timeout: 8.0
+    disabled: false
+
+  - name: openstreetmap
+    engine: openstreetmap
+    shortcut: osm
+    categories: [map]
+    weight: 1.5
+    timeout: 5.0
+    disabled: false
+
+  - name: radio browser
+    engine: radio_browser
+    shortcut: rb
+    disabled: true
+
+hostnames:
+  low_priority:
+    - '(.*\.)?medium\.com$'
+    - '(.*\.)?linkedin\.com$'
+    - '(.*\.)?quora\.com$'
+    - '(.*\.)?facebook\.com$'
+    - '(.*\.)?instagram\.com$'
+    - '(.*\.)?tiktok\.com$'
+    - '(.*\.)?twitter\.com$'
+    - '(.*\.)?x\.com$'
+    - '(.*\.)?stocktwits\.com$'
+  high_priority:
+    - '(.*\.)?wikipedia\.org$'
+    - '(.*\.)?wikidata\.org$'
+    - '(.*\.)?developer\.mozilla\.org$'
+    - '(.*\.)?react\.dev$'
+    - '(.*\.)?developer\.apple\.com$'
+    - '(.*\.)?developer\.android\.com$'
+    - '(.*\.)?docs\.flutter\.dev$'
+    - '(.*\.)?pub\.dev$'
+    - '(.*\.)?docs\.docker\.com$'
+    - '(.*\.)?docs\.aws\.amazon\.com$'
+    - '(.*\.)?create\.roblox\.com$'
+    - '(.*\.)?devforum\.roblox\.com$'
+    - '(.*\.)?docs\.unity3d\.com$'
+    - '(.*\.)?docs\.godotengine\.org$'
+    - '(.*\.)?dev\.epicgames\.com$'
+    - '(.*\.)?docs\.unrealengine\.com$'
+    - '(.*\.)?huggingface\.co$'
+    - '(.*\.)?civitai\.com$'
+    - '(.*\.)?replicate\.com$'
+    - '(.*\.)?fal\.ai$'
+    - '(.*\.)?openrouter\.ai$'
+    - '(.*\.)?arxiv\.org$'
+    - '(.*\.)?paperswithcode\.com$'
+    - '(.*\.)?semanticscholar\.org$'
+    - '(.*\.)?openalex\.org$'
+    - '(.*\.)?pubmed\.ncbi\.nlm\.nih\.gov$'
+    - '(.*\.)?github\.com$'
+    - '(.*\.)?gitlab\.com$'
+    - '(.*\.)?ollama\.com$'
+    - '(.*\.)?hub\.docker\.com$'
+    - '(.*\.)?nvd\.nist\.gov$'
+    - '(.*\.)?cisa\.gov$'
+    - '(.*\.)?owasp\.org$'
+    - '(.*\.)?reuters\.com$'
+    - '(.*\.)?bloomberg\.com$'
+    - '(.*\.)?wsj\.com$'
+    - '(.*\.)?ft\.com$'
+    - '(.*\.)?cnbc\.com$'
+    - '(.*\.)?marketwatch\.com$'
+    - '(.*\.)?investopedia\.com$'
+    - '(.*\.)?seekingalpha\.com$'
+    - '(.*\.)?finance\.yahoo\.com$'
+    - '(.*\.)?investor\.msn\.com$'
+    - '(.*\.)?sec\.gov$'
+    - '(.*\.)?polymarket\.com$'
+    - '(.*\.)?rolimons\.com$'
+    - '(.*\.)?coingecko\.com$'
+    - '(.*\.)?coinmarketcap\.com$'
+    - '(.*\.)?tradingview\.com$'
+    - '(.*\.)?finviz\.com$'
+    - '(.*\.)?gumroad\.com$'
+    - '(.*\.)?producthunt\.com$'
+    - '(.*\.)?indiehackers\.com$'
+    - '(.*\.)?acquire\.com$'
+    - '(.*\.)?news\.google\.com$'
+    - '(.*\.)?aimagazine\.com$'
+    - '(.*\.)?sciencedaily\.com$'
+    - '(.*\.)?youtube\.com$'
+    - '(.*\.)?youtu\.be$'
+    - 'news\.ycombinator\.com$'
+    - '(.*\.)?reddit\.com$'
+    - '(.*\.)?stackoverflow\.com$'
+    - '(.*\.)?stackexchange\.com$'

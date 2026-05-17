@@ -395,11 +395,12 @@ class ContextManager:
         decoration: Optional[list] = None,
     ) -> str:
         """
-        Build the RAG-augmented prompt with spec-compliant [Source: ...] headers.
+        Build the RAG-augmented prompt from retrieved local sources.
 
-        Format per spec:
-          [Source: "{corpus_name}", Document: "{doc_name}"]
-          <parent chunk text>
+        Internal corpus names stay out of the model-facing prompt. The frontend
+        still receives them in the structured `sources` payload, but the model
+        only needs document/title attribution; leaking collection names such as
+        scratch-project corpora can distract synthesis and web-query choices.
 
         Multi-corpus synthesis instruction is injected when >1 corpus selected.
 
@@ -450,7 +451,6 @@ class ContextManager:
             # removed as redundant.
             passages: list[str] = []
             for s in sources:
-                corpus_label = s.corpus_name or s.corpus_id or "Unknown"
                 doc_label = s.doc_name or s.doc_id or "Unknown"
 
                 # Code lane (Phase 2) — code chunks render as
@@ -462,7 +462,7 @@ class ContextManager:
                 if code_lane_skills.is_code_source(s):
                     passages.append(
                         code_lane_skills.format_code_source(
-                            s, corpus_label=corpus_label, doc_label=doc_label,
+                            s, corpus_label="", doc_label=doc_label,
                         )
                     )
                     continue
@@ -471,7 +471,6 @@ class ContextManager:
                 attribution = f'from "{doc_label}"'
                 if section:
                     attribution += f" §{section}"
-                attribution += f' in "{corpus_label}"'
                 # Phase 16.1 — graph provenance: bridging entity + confidence.
                 # Pt 10a (Cluster 5) — ontology-aware citation context. Each
                 # provenance entry may carry domain_type, canonical_family,

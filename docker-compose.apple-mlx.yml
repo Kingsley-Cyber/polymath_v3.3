@@ -6,13 +6,14 @@
 # Docker stack reaches it over `host.docker.internal`.
 #
 # Use:
+#   bash scripts/setup_apple_mlx.sh
+#
+# Manual Docker start after host services are installed:
 #   docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build
 #
 # Prerequisite — host services running:
 #   bash scripts/install_apple_mlx_runtime.sh
-#   curl http://localhost:8082/info     # embedder up
-#   curl http://localhost:8081/health   # reranker up
-#   curl http://localhost:8500/health   # docling up
+#   bash scripts/smoke_apple_mlx.sh
 #
 # This override:
 #   * Disables the in-cluster embedder, reranker, and docling services
@@ -40,6 +41,8 @@ services:
       RERANKER_URL: http://host.docker.internal:8081
       DOCLING_URL: http://host.docker.internal:8500
       RERANKER_SCORE_SCALE: cosine
+      RERANKER_MODEL: mlx-community/jina-reranker-v3-4bit-mxfp4
+      EMBEDDER_MODEL_NAME: Qwen3-Embedding-0.6B
       LOCAL_EMBEDDER_ENABLED: "true"
       LOCAL_RERANKER_ENABLED: "true"
       EMBED_DEVICE: mps
@@ -53,3 +56,5 @@ services:
       RERANKER_URL: http://host.docker.internal:8081
       DOCLING_URL: http://host.docker.internal:8500
       RERANKER_SCORE_SCALE: cosine
+      RERANKER_MODEL: mlx-community/jina-reranker-v3-4bit-mxfp4
+      EMBEDDER_MODEL_NAME: Qwen3-Embedding-0.6B

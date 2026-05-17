@@ -642,7 +642,7 @@ class Settings(BaseSettings):
         description="HTTP timeout for the opt-in chat SearXNG request.",
     )
     LIVE_WEB_SEARCH_MAX_RESULTS: int = Field(
-        default=2,
+        default=6,
         ge=1,
         le=10,
         description=(
@@ -651,7 +651,7 @@ class Settings(BaseSettings):
         ),
     )
     LIVE_WEB_SEARCH_CANDIDATE_RESULTS: int = Field(
-        default=14,
+        default=15,
         ge=1,
         le=20,
         description=(
@@ -670,11 +670,11 @@ class Settings(BaseSettings):
         ),
     )
     LIVE_WEB_SEARCH_FETCH_FULL_PAGES: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "When true and OBSCURA_COMMAND is configured, fetch top live-web "
-            "results with Obscura and inject rendered markdown instead of "
-            "search snippets. Disabled by default to avoid a hard dependency."
+            "When true, fetch top live-web result pages and inject cleaned page "
+            "text instead of only SearXNG snippets. If OBSCURA_COMMAND is set, "
+            "Obscura is used; otherwise Polymath uses its native HTML fetcher."
         ),
     )
     OBSCURA_COMMAND: str = Field(
@@ -682,7 +682,8 @@ class Settings(BaseSettings):
         description=(
             "Optional Obscura CLI command path. When set with "
             "LIVE_WEB_SEARCH_FETCH_FULL_PAGES=true, Polymath runs "
-            "`obscura fetch <url> --dump markdown` for top search results."
+            "`obscura fetch <url> --dump markdown`; otherwise native HTML "
+            "fetching is used."
         ),
     )
     OBSCURA_TIMEOUT_SECONDS: float = Field(

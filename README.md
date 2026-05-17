@@ -145,6 +145,9 @@ cd polymath_v3.3
 # Linux/macOS:
 bash scripts/bootstrap-runtime.sh --generate-secrets --stage-models
 
+# Apple Silicon MLX instead:
+bash scripts/setup_apple_mlx.sh
+
 # 3. Edit .env and add at least one synthesis provider key, or configure Ollama.
 # OPENAI_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY /
 # GEMINI_API_KEY / OPENROUTER_API_KEY are all supported.
@@ -247,19 +250,17 @@ your corpus. Don't mix dimensions in the same Qdrant collection.
 
 The repo ships an end-to-end installer that stages three host-native FastAPI
 sidecars (embedder, reranker, docling), pre-pulls the MLX model weights
-(~1.5–3 GB), wires a LaunchAgent for auto-restart, and adds a Docker compose
-override that points the backend at the host services. **One command:**
+(~1 GB), wires a LaunchAgent for auto-restart, starts Docker with the Apple
+override, and runs a real embedding/reranking smoke. **One command:**
 
 ```bash
 # from repo root, on a Darwin/arm64 host
-bash scripts/install_apple_mlx_runtime.sh
-
-# then bring up Docker with the override
-docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build
-
-# verify
-bash scripts/smoke_apple_mlx.sh
+bash scripts/setup_apple_mlx.sh
 ```
+
+Manual mode is still available: run `bash scripts/install_apple_mlx_runtime.sh`,
+then `docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build`,
+then `bash scripts/smoke_apple_mlx.sh`.
 
 What the installer does:
 
@@ -268,9 +269,9 @@ What the installer does:
 | platform gate | hard-rejects non-Darwin / non-arm64 hosts |
 | stage code | `rsync` to `~/PolymathRuntime/apple_ml_services/` |
 | venv | `uv` + `requirements.txt` |
-| **model pull** | `pull_apple_mlx_models.py` warms `~/PolymathRuntime/volumes/hf-cache` with the two MLX repos so first ingest doesn't stall |
+| **model pull** | `pull_apple_mlx_models.py` warms and verifies `~/PolymathRuntime/volumes/hf-cache`, then writes `polymath-apple-mlx-models.json` |
 | LaunchAgent | `~/Library/LaunchAgents/com.polymath.apple-ml.plist` with `RunAtLoad` + `KeepAlive` |
-| smoke | curls `/info`, `/health`, `/health` for embedder/reranker/docling |
+| smoke | checks `/embeddings` returns 1024-d vectors and `/rerank` separates relevant docs from an irrelevant one |
 
 Models pulled (CC BY-NC 4.0 for the reranker — fine for personal/research):
 - `mlx-community/Qwen3-Embedding-0.6B-mxfp8` — 1024-dim embeddings (matches Docker default)
@@ -281,12 +282,10 @@ returns cosine in 0..1, not logits. Without this, the retriever's negative-logit
 "low confidence" guard discards every result.
 
 **Implementation note on the sidecars**: the wire contracts (`/info`, `/health`,
-`/embeddings`, `/rerank`, `/parse`) are stable. The internal model loading inside
-`scripts/apple_ml_services/{embedder_mlx,reranker_mlx,docling_svc}/main.py` is
-shipped as a working scaffold — if you have a tuned MLX implementation
-(specifically the hand-built `MLPProjector` for Jina v3), drop it in and the
-rest of the stack is unaffected. See `GOTCHAS.md § "Ghost B + DeepSeek
-thinking-mode"` and the inline `REPLACE THIS BODY` markers for what changes.
+`/embeddings`, `/rerank`, `/parse`) are stable. The embedder and reranker now
+load the MLX models directly through `mlx-embeddings`; the reranker scores by
+embedding the query and candidate documents and taking the cosine/dot-product
+similarity advertised by the MLX model card.
 
 Logs / ops:
 ```bash
@@ -464,6 +463,7 @@ Mongo + Qdrant write so vector RAG works for them. Tally per doc lives on
 |---|---|
 | Fresh bootstrap (Windows) | `.\scripts\bootstrap-runtime.ps1 -GenerateSecrets -StageModels` |
 | Fresh bootstrap (Linux/macOS) | `bash scripts/bootstrap-runtime.sh --generate-secrets --stage-models` |
+| Fresh bootstrap (Apple Silicon MLX) | `bash scripts/setup_apple_mlx.sh` |
 | Validate install | `.\scripts\check-install.ps1` or `bash scripts/check-install.sh` |
 | Bring up | `docker compose up -d --build` |
 | Bring down | `docker compose down` |

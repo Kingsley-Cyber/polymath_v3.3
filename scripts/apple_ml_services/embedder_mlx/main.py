@@ -1,4 +1,4 @@
-"""Apple Silicon MLX embedder sidecar — FastAPI, host-native.
+"""Apple Silicon MLX embedder sidecar - FastAPI, host-native.
 
 Mounts an OpenAI-compatible /embeddings endpoint plus /info and /health,
 matching the contract of the in-cluster embedder service so the rest of
@@ -9,15 +9,8 @@ Wire spec (matches backend expectations):
   GET  /health     → {"status": "ok"}
   POST /embeddings → OpenAI shape {data: [{embedding: [...], index: i}, ...]}
 
-NOTE — IMPLEMENTATION SCAFFOLD
-This file structure + endpoint shapes are correct. The actual MLX model
-loading and forward-pass code below is a working starting point that you
-should replace with your verified Mac Studio implementation if you've
-already tuned batch size / pooling / normalization for your specific
-quantization. Both implementations honor the same HTTP contract, so the
-rest of the stack is unaffected by the swap.
-
 Required env:
+  APPLE_MLX_EMBED_MODEL_ID default mlx-community/Qwen3-Embedding-0.6B-mxfp8
   EMBEDDER_PORT          default 8082 (set by start.sh)
   EMBED_MAX_LENGTH       default 512
   EMBED_BATCH_SIZE       default 8
@@ -36,7 +29,11 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger("embedder_mlx")
 logging.basicConfig(level=logging.INFO)
 
-MODEL_ID = "mlx-community/Qwen3-Embedding-0.6B-mxfp8"
+MODEL_ID = os.environ.get(
+    "APPLE_MLX_EMBED_MODEL_ID",
+    os.environ.get("EMBED_MODEL_ID", "mlx-community/Qwen3-Embedding-0.6B-mxfp8"),
+)
+MODEL_NAME = os.environ.get("EMBEDDER_MODEL_NAME", "Qwen3-Embedding-0.6B")
 EMBED_DIM = 1024
 MAX_LENGTH = int(os.environ.get("EMBED_MAX_LENGTH", "512"))
 BATCH_SIZE = int(os.environ.get("EMBED_BATCH_SIZE", "8"))
@@ -63,6 +60,23 @@ class EmbeddingsResponse(BaseModel):
 app = FastAPI(title="Polymath Apple MLX Embedder", version="0.1.0")
 _model: Any = None
 _tokenizer: Any = None
+_generate: Any = None
+
+
+def _import_mlx_embeddings() -> tuple[Any, Any]:
+    try:
+        from mlx_embeddings import generate, load
+
+        return load, generate
+    except ImportError:
+        try:
+            from mlx_embeddings.utils import generate, load
+
+            return load, generate
+        except ImportError as exc:
+            raise RuntimeError(
+                "mlx-embeddings not installed. Run scripts/install_apple_mlx_runtime.sh"
+            ) from exc
 
 
 def _load_model() -> None:
@@ -71,19 +85,100 @@ def _load_model() -> None:
     The mlx-embeddings library is the lightweight wrapper around mlx that
     exposes pooled sentence embeddings for Qwen3 / BGE / E5 families.
     """
-    global _model, _tokenizer
+    global _generate, _model, _tokenizer
     if _model is not None:
         return
-    try:
-        from mlx_embeddings.utils import load
-    except ImportError as exc:
-        raise RuntimeError(
-            "mlx-embeddings not installed. uv pip install -r requirements.txt"
-        ) from exc
+    load, generate = _import_mlx_embeddings()
 
     logger.info("loading %s", MODEL_ID)
     _model, _tokenizer = load(MODEL_ID)
+    _generate = generate
     logger.info("model ready (dim=%d, max_len=%d)", EMBED_DIM, MAX_LENGTH)
+
+
+def _as_numpy(value: Any) -> Any:
+    import numpy as np
+
+    try:
+        import mlx.core as mx
+
+        mx.eval(value)
+    except Exception:
+        pass
+    return np.asarray(value)
+
+
+def _extract_embeddings(output: Any) -> Any:
+    if hasattr(output, "text_embeds"):
+        return _as_numpy(output.text_embeds)
+    if hasattr(output, "sentence_embedding"):
+        return _as_numpy(output.sentence_embedding)
+    if hasattr(output, "pooler_output"):
+        return _as_numpy(output.pooler_output)
+    if isinstance(output, dict):
+        for key in ("text_embeds", "sentence_embedding", "pooler_output"):
+            if key in output:
+                return _as_numpy(output[key])
+    raise RuntimeError(
+        "MLX embedder returned an unrecognised output; expected text_embeds, "
+        "sentence_embedding, or pooler_output."
+    )
+
+
+def _normalise_rows(vectors: Any) -> Any:
+    import numpy as np
+
+    arr = np.asarray(vectors, dtype=np.float32)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    norms = np.where(norms > 0, norms, 1.0)
+    return arr / norms
+
+
+def _encode_batch(inputs: list[str]) -> Any:
+    if _model is None or _tokenizer is None:
+        _load_model()
+
+    if _generate is not None:
+        try:
+            output = _generate(_model, _tokenizer, texts=inputs)
+            return _normalise_rows(_extract_embeddings(output))
+        except TypeError:
+            output = _generate(_model, _tokenizer, inputs)
+            return _normalise_rows(_extract_embeddings(output))
+        except Exception as exc:
+            logger.warning("mlx-embeddings.generate failed; falling back to direct call: %s", exc)
+
+    try:
+        toks = _tokenizer(
+            inputs,
+            padding=True,
+            truncation=True,
+            max_length=MAX_LENGTH,
+            return_tensors="np",
+        )
+        try:
+            result = _model(toks["input_ids"], attention_mask=toks.get("attention_mask"))
+        except TypeError:
+            result = _model(toks["input_ids"])
+        return _normalise_rows(_extract_embeddings(result))
+    except Exception as exc:
+        raise RuntimeError(f"embedding failed: {exc}") from exc
+
+
+def _encode_texts(inputs: list[str]) -> Any:
+    import numpy as np
+
+    batches = []
+    for start in range(0, len(inputs), max(1, BATCH_SIZE)):
+        batches.append(_encode_batch(inputs[start : start + BATCH_SIZE]))
+    embeddings_np = np.vstack(batches)
+    if embeddings_np.shape[1] != EMBED_DIM:
+        raise RuntimeError(
+            f"embedding dimension mismatch: expected {EMBED_DIM}, got {embeddings_np.shape[1]}"
+        )
+    return embeddings_np
 
 
 @app.on_event("startup")
@@ -98,6 +193,7 @@ async def _startup() -> None:
 async def info() -> dict:
     return {
         "model": MODEL_ID,
+        "model_name": MODEL_NAME,
         "dimension": EMBED_DIM,
         "device": "mps",
         "max_length": MAX_LENGTH,
@@ -108,7 +204,9 @@ async def info() -> dict:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok" if _model is not None else "loading"}
+    if _model is None:
+        raise HTTPException(status_code=503, detail="model is not loaded")
+    return {"status": "ok", "model": MODEL_ID, "device": "mps"}
 
 
 @app.post("/embeddings", response_model=EmbeddingsResponse)
@@ -123,37 +221,8 @@ async def embeddings(req: EmbeddingsRequest) -> EmbeddingsResponse:
     if not inputs:
         raise HTTPException(status_code=400, detail="input is empty")
 
-    # ── REPLACE THIS BLOCK with your verified Mac Studio implementation ──
-    # The mlx-embeddings .generate / .encode API has shifted across
-    # versions; the canonical pattern is:
-    #     toks = _tokenizer(inputs, padding=True, truncation=True,
-    #                       max_length=MAX_LENGTH, return_tensors="np")
-    #     out  = _model(toks["input_ids"], attention_mask=toks["attention_mask"])
-    #     emb  = out.text_embeds  # already L2-normalized for Qwen3
-    # The exact attribute (pooler_output / sentence_embedding /
-    # text_embeds) depends on the version of mlx-embeddings installed.
-    # Keep the response shape identical to OpenAI so backend consumers
-    # don't change.
     try:
-        import numpy as np
-
-        toks = _tokenizer(
-            inputs,
-            padding=True,
-            truncation=True,
-            max_length=MAX_LENGTH,
-            return_tensors="np",
-        )
-        result = _model(toks["input_ids"], attention_mask=toks["attention_mask"])
-        if hasattr(result, "text_embeds"):
-            embeddings_np = np.asarray(result.text_embeds)
-        elif hasattr(result, "sentence_embedding"):
-            embeddings_np = np.asarray(result.sentence_embedding)
-        else:
-            raise RuntimeError(
-                "Embedder returned an unrecognised output. Update embedder_mlx/main.py "
-                "to extract the right attribute for your installed mlx-embeddings."
-            )
+        embeddings_np = _encode_texts(inputs)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"embedding failed: {exc}")
 
@@ -162,5 +231,5 @@ async def embeddings(req: EmbeddingsRequest) -> EmbeddingsResponse:
             EmbeddingItem(embedding=embeddings_np[i].tolist(), index=i)
             for i in range(len(inputs))
         ],
-        model=MODEL_ID,
+        model=MODEL_NAME,
     )
