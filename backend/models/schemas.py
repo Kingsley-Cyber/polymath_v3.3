@@ -37,6 +37,7 @@ for _name, _value in vars(_legacy).items():
 class ModelOverrides(_legacy.ModelOverrides):
     """Current per-request override shape."""
 
+    max_tokens: int | None = Field(default=None, ge=1, le=384000)
     web_search_enabled: bool | None = Field(
         default=None,
         description=(
@@ -44,6 +45,12 @@ class ModelOverrides(_legacy.ModelOverrides):
             "configured SearXNG instance. Off/None keeps chat corpus-only."
         ),
     )
+
+
+class ModelConfig(_legacy.ModelConfig):
+    """Current persisted conversation model config shape."""
+
+    max_tokens: int = Field(default=2048, ge=1, le=384000)
 
 
 class ChatRequest(_legacy.ChatRequest):

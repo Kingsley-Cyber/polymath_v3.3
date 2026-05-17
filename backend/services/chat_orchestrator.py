@@ -47,6 +47,8 @@ _MAX_PERSISTED_SOURCE_PREVIEWS = 10
 _MAX_PERSISTED_WEB_SOURCE_PREVIEWS = 4
 _MAX_PERSISTED_SOURCE_TEXT_CHARS = 900
 _MAX_PERSISTED_SOURCE_SUMMARY_CHARS = 500
+_MAX_TOOL_CALLS_PER_TURN = 3
+_MAX_WEB_SEARCH_RESULTS_PER_CALL = 2
 
 
 def _hyde_failure_key(model: str | None, api_base: str | None) -> str:
@@ -826,7 +828,6 @@ class ChatOrchestrator:
         tools, tool_schemas = await self._load_tools(request)
 
         # === START ReAct LOOP ===
-        MAX_TOOL_CALLS = 5
         tool_call_count = 0
         tool_limit_reached = False
         react_messages: list[dict] = []
@@ -853,7 +854,7 @@ class ChatOrchestrator:
             )
             return
 
-        while tool_call_count < MAX_TOOL_CALLS:
+        while tool_call_count < _MAX_TOOL_CALLS_PER_TURN:
             # Convert messages to dict format for LLM. Baseline system prompt
             # (Phase 23) is prepended every turn so style/length/anti-list
             # guidance survives regardless of whether reasoning mode is set.
@@ -962,6 +963,11 @@ class ChatOrchestrator:
             if not tool_calls:
                 break
 
+            remaining_tool_calls = _MAX_TOOL_CALLS_PER_TURN - tool_call_count
+            if len(tool_calls) > remaining_tool_calls:
+                tool_calls = tool_calls[:remaining_tool_calls]
+                tool_limit_reached = True
+
             # Announce tool execution before running — lets the UI show "⚙ Running: <tool>"
             yield build_sse_chunk(
                 ChatChunk(
@@ -981,7 +987,9 @@ class ChatOrchestrator:
 
             # If we have tool calls, execute them
             tool_call_count += len(tool_calls)
-            tool_limit_reached = tool_call_count >= MAX_TOOL_CALLS
+            tool_limit_reached = tool_limit_reached or (
+                tool_call_count >= _MAX_TOOL_CALLS_PER_TURN
+            )
             tool_results = await self._execute_tools(tool_calls, tools, request)
 
             # Emit tool results — paired 1:1 with the start event
@@ -1755,7 +1763,7 @@ class ChatOrchestrator:
                                 "max_results": {
                                     "type": "integer",
                                     "minimum": 1,
-                                    "maximum": 4,
+                                    "maximum": _MAX_WEB_SEARCH_RESULTS_PER_CALL,
                                     "description": "Maximum number of web results.",
                                 },
                             },
@@ -1811,10 +1819,12 @@ class ChatOrchestrator:
         if not query:
             return json.dumps({"error": "query is required"})
         try:
-            max_results = int(args.get("max_results") or 4)
+            max_results = int(
+                args.get("max_results") or _MAX_WEB_SEARCH_RESULTS_PER_CALL
+            )
         except (TypeError, ValueError):
-            max_results = 4
-        max_results = max(1, min(max_results, 4))
+            max_results = _MAX_WEB_SEARCH_RESULTS_PER_CALL
+        max_results = max(1, min(max_results, _MAX_WEB_SEARCH_RESULTS_PER_CALL))
 
         try:
             from services.web_freshness import (

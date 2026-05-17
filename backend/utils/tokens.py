@@ -291,6 +291,25 @@ def estimate_attachment_tokens(
     return total
 
 
+def _normalized_model_name(model: str) -> str:
+    return (model or "").split("/")[-1].lower()
+
+
+def _lookup_model_limit(model: str, limits: dict[str, int], default: int) -> int:
+    model_name = _normalized_model_name(model)
+
+    if model_name in limits:
+        return limits[model_name]
+
+    # Match provider-prefixed or provider-suffixed aliases conservatively.
+    for known_model, limit in limits.items():
+        known = known_model.lower()
+        if model_name.startswith(known) or known in model_name:
+            return limit
+
+    return default
+
+
 def get_model_context_limit(model: str) -> int:
     """
     Get the context window limit for a known model.
@@ -301,10 +320,11 @@ def get_model_context_limit(model: str) -> int:
     Returns:
         Context window size in tokens, or default 4096 if unknown
     """
-    model_name = model.split("/")[-1] if "/" in model else model
-
     # Known model context limits
     CONTEXT_LIMITS = {
+        # DeepSeek
+        # User/provider advertised capability for the active v4 flash profile.
+        "deepseek-v4-flash": 1_000_000,
         # OpenAI models
         "gpt-4": 8192,
         "gpt-4-32k": 32768,
@@ -332,14 +352,25 @@ def get_model_context_limit(model: str) -> int:
         "nomic-embed-text": 8192,
     }
 
-    # Try exact match first
-    if model_name in CONTEXT_LIMITS:
-        return CONTEXT_LIMITS[model_name]
+    return _lookup_model_limit(model, CONTEXT_LIMITS, 4096)
 
-    # Try prefix match
-    for known_model, limit in CONTEXT_LIMITS.items():
-        if model_name.startswith(known_model.split(":")[0]):
-            return limit
 
-    # Default fallback
-    return 4096
+def get_model_output_limit(model: str) -> int:
+    """Return the provider-advertised maximum output tokens when known."""
+
+    OUTPUT_LIMITS = {
+        # DeepSeek
+        # User/provider advertised maximum for the active v4 flash profile.
+        "deepseek-v4-flash": 384_000,
+        # Common OpenAI caps. These are intentionally broad guardrails only;
+        # providers remain the source of truth and may enforce stricter limits.
+        "gpt-4": 8192,
+        "gpt-4-32k": 8192,
+        "gpt-4-turbo": 4096,
+        "gpt-4o": 16_384,
+        "gpt-4o-mini": 16_384,
+        "gpt-3.5-turbo": 4096,
+        "gpt-3.5-turbo-16k": 4096,
+    }
+
+    return _lookup_model_limit(model, OUTPUT_LIMITS, 32_000)

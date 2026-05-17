@@ -98,7 +98,13 @@ class LLMService:
             if overrides.top_p is not None:
                 body["top_p"] = overrides.top_p
             if overrides.max_tokens is not None:
-                body["max_tokens"] = overrides.max_tokens
+                try:
+                    from utils.tokens import get_model_output_limit
+
+                    output_limit = get_model_output_limit(overrides.model or model)
+                    body["max_tokens"] = min(overrides.max_tokens, output_limit)
+                except Exception:
+                    body["max_tokens"] = overrides.max_tokens
             if overrides.model is not None:
                 body["model"] = overrides.model
 
