@@ -172,6 +172,15 @@ def _tool_call_name(call: dict[str, Any]) -> str:
     return str((fn or {}).get("name") or "")
 
 
+def _is_web_search_enabled_for_request(request: ChatRequest) -> bool:
+    """True when this turn should expose the native web_search tool."""
+    return bool(
+        settings.LIVE_WEB_SEARCH_ENABLED
+        and request.overrides
+        and getattr(request.overrides, "web_search_enabled", None)
+    )
+
+
 def _available_tool_schemas(
     tool_schemas: list[dict[str, Any]],
     *,
@@ -359,6 +368,7 @@ class ChatOrchestrator:
             if (request.overrides and request.overrides.agentic_mode is not None)
             else settings.AGENTIC_MODE_ENABLED
         )
+        web_search_enabled = _is_web_search_enabled_for_request(request)
         if user_id and (
             model_used.startswith("profile:") or model_used.startswith("pool:")
         ):
@@ -410,9 +420,14 @@ class ChatOrchestrator:
         ):
             # Phase 24 — tool selection drives the auto-fallback to the
             # agentic pool entry. The legacy agentic toggle is gone; whether
-            # the user has tools active is now the trigger. Phase 24 perf —
-            # resolver imported at module-level.
-            kind = "agentic" if (request.selected_tools or agentic_on_request) else "query"
+            # the user has tools active is now the trigger. Live web is also
+            # a native tool-call path, so a Web-enabled turn must use the
+            # same tool-capable routing.
+            kind = (
+                "agentic"
+                if (request.selected_tools or web_search_enabled or agentic_on_request)
+                else "query"
+            )
             qres = await resolve_query_model_kind(user_id, kind)
             if qres:
                 model_used = qres["model"]
@@ -587,11 +602,6 @@ class ChatOrchestrator:
         # tool instead of pre-searching. This keeps the first context grounded
         # in corpus chunks, then lets the model decide whether current outside
         # context is actually needed.
-        web_search_enabled = bool(
-            settings.LIVE_WEB_SEARCH_ENABLED
-            and request.overrides
-            and getattr(request.overrides, "web_search_enabled", None)
-        )
         web_sources: list = []
 
         # Trust-signal snapshot — captured here so it carries through to
@@ -1818,11 +1828,7 @@ class ChatOrchestrator:
         the result on `request._tools_preloaded`. We reuse it here instead
         of issuing a duplicate Mongo round-trip.
         """
-        web_search_enabled = bool(
-            settings.LIVE_WEB_SEARCH_ENABLED
-            and request.overrides
-            and getattr(request.overrides, "web_search_enabled", None)
-        )
+        web_search_enabled = _is_web_search_enabled_for_request(request)
         if not request.selected_tools and not web_search_enabled:
             return [], []
 
