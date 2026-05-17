@@ -52,12 +52,12 @@ export const NODE_COLORS: Record<PolymathNodeKind, string> = {
   Event: "#f97316",         // orange
   Method: "#10b981",        // emerald
   Product: "#06b6d4",       // cyan
-  Document: "#64748b",      // slate (de-emphasized — entity-type Document refs)
+  Document: "#e5e7eb",      // silver — document refs must stay visible on black
   Rule: "#6366f1",          // indigo
   Law: "#ef4444",           // red
   Artifact: "#84cc16",      // lime
   TimeReference: "#3b82f6", // blue
-  Other: "#94a3b8",         // slate-400 fallback
+  Other: "#cbd5e1",         // slate-300 fallback
 };
 
 // =============== NODE SIZES ===============

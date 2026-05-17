@@ -569,12 +569,12 @@ export function GraphViewer({
   // Pt 6: re-settle FA2 layout briefly after the user releases a dragged
   // node. Off by default; user toggles in the Layout section of the dashboard.
   const [settleAfterDrag, setSettleAfterDrag] = useState(false);
-  // Pt 7: tab selection in the sidebar + Agent Search tab's local input.
+  // Pt 7: tab selection in the sidebar + Graph Query tab's local input.
   // `agentInput` is what the user types; `agentQuery` is what useQueryGraph
   // actually consumes (only promoted when the user hits Run). This way
   // every keystroke doesn't refire the query.
   const [activeTab, setActiveTab] = useState<DashboardTab>(
-    mode === "query" ? "agent" : "brain",
+    "agent",
   );
   const [agentInput, setAgentInput] = useState<string>(query ?? "");
   const [agentQuery, setAgentQuery] = useState<string | undefined>(query);
@@ -694,8 +694,28 @@ export function GraphViewer({
     if (!found) return null;
     return {
       id: selectedId,
-      display_name: String((found as any).display_name || selectedId),
-      source_corpora: ((found as any).source_corpora || []) as string[],
+      display_name: String(
+        (found as any).display_name || (found as any).label || selectedId,
+      ),
+      source_corpora: (Array.isArray((found as any).source_corpora)
+        ? (found as any).source_corpora
+        : (found as any).source_corpus
+          ? [(found as any).source_corpus]
+          : []) as string[],
+      source_corpus: (found as any).source_corpus,
+      nodeKind: (found as any).nodeKind,
+      kind: (found as any).kind,
+      entity_type: (found as any).entity_type,
+      dominant_entity_type: (found as any).dominant_entity_type,
+      dominant_relation_family: (found as any).dominant_relation_family,
+      primary_doc_id: (found as any).primary_doc_id,
+      bridge_count: (found as any).bridge_count,
+      chunk_count: (found as any).chunk_count,
+      parent_count: (found as any).parent_count,
+      entity_count: (found as any).entity_count,
+      top_entities: Array.isArray((found as any).top_entities)
+        ? (found as any).top_entities
+        : [],
     };
   }, [selectedId, data]);
 

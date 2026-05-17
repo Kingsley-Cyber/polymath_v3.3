@@ -22,14 +22,8 @@ import {
   CORPUS_COLORS,
   EDGE_STYLES,
   DEFAULT_EDGE_STYLE,
+  getEdgeStyleByFamily,
   getCommunityColor,
-  // EDGE_COLORS_BY_FAMILY, colorForFamily, colorForEntityType, and
-  // RelationFamily were used by the old dominant_family / dominant_
-  // relation_family color paths. The constellation refactor replaced
-  // those with a deterministic corpus-hash hue for nodes and a single
-  // violet (EDGE_STYLES.bridges_to) with opacity-by-strength for edges,
-  // so those imports are no longer needed here. Left in sigma-constants
-  // exports so other surfaces can still use them.
   type PolymathNodeKind,
 } from "./sigma-constants";
 
@@ -75,10 +69,20 @@ export interface SigmaEdgeAttributes {
   type?: string;
   curvature?: number;
   predicate?: string;
+  relation_family?: string | null;
+  dominant_relation_family?: string | null;
   weight?: number;
   confidence?: number;
   source_corpora?: string[];
   source_corpus?: string;
+  source_doc_id?: string;
+  target_doc_id?: string;
+  source_corpus_id?: string;
+  target_corpus_id?: string;
+  source_label?: string;
+  target_label?: string;
+  shared_entities?: number;
+  top_shared_entities?: string[];
   dangling?: boolean;
   hidden?: boolean;
   zIndex?: number;
@@ -105,6 +109,11 @@ export interface PolymathRawNode {
   primary_doc_id?: string;
   bridge_doc_ids?: string[];
   per_doc_mentions?: Record<string, number>;
+  /** Optional pre-baked offset from a parent anchor. Used by compact
+   *  book-satellite placement; values are graph-space offsets, not
+   *  absolute viewport pixels. */
+  x?: number;
+  y?: number;
   kind?: "book";
   is_cluster_anchor?: boolean;
   /** Optional pre-cleaned label (e.g. "Title -- Author" from cleanBookLabel)
@@ -130,6 +139,12 @@ export interface PolymathRawEdge {
   confidence?: number;
   source_corpora?: string[];
   source_corpus?: string;
+  source_doc_id?: string;
+  target_doc_id?: string;
+  source_corpus_id?: string;
+  target_corpus_id?: string;
+  source_label?: string;
+  target_label?: string;
   dangling?: boolean;
   cross_cluster?: boolean;
   // Pt 7c: Brain View bridges carry the top shared concept names from
@@ -166,6 +181,14 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`;
 }
 
+function edgeEndpointId(value: unknown): string {
+  if (value && typeof value === "object") {
+    const obj = value as { id?: unknown; key?: unknown };
+    return String(obj.id ?? obj.key ?? "");
+  }
+  return String(value ?? "");
+}
+
 // Scale node size down as graph density grows so the visual hierarchy
 // stays readable when the canvas has 10k+ nodes.
 function getScaledNodeSize(baseSize: number, nodeCount: number): number {
@@ -183,6 +206,44 @@ function colorForCorpus(corpora: string[] | undefined): string {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
   return CORPUS_COLORS[h % CORPUS_COLORS.length];
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const hue = (((h % 360) + 360) % 360) / 60;
+  const sat = Math.max(0, Math.min(100, s)) / 100;
+  const light = Math.max(0, Math.min(100, l)) / 100;
+  const c = (1 - Math.abs(2 * light - 1)) * sat;
+  const x = c * (1 - Math.abs((hue % 2) - 1));
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (hue < 1) {
+    r = c;
+    g = x;
+  } else if (hue < 2) {
+    r = x;
+    g = c;
+  } else if (hue < 3) {
+    g = c;
+    b = x;
+  } else if (hue < 4) {
+    g = x;
+    b = c;
+  } else if (hue < 5) {
+    r = x;
+    b = c;
+  } else {
+    r = c;
+    b = x;
+  }
+
+  const m = light - c / 2;
+  const toHex = (v: number) =>
+    Math.round((v + m) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
 function pickNodeColor(
@@ -211,7 +272,7 @@ function pickNodeColor(
       // brightness tiers, keeping the hue identity stable.
       const bridges = Math.max(0, Number((raw as any).bridge_count ?? 0));
       const l = 42 + (bridges % 5) * 7; // 42%, 49%, 56%, 63%, 70%
-      return `hsl(${h}, 72%, ${l}%)`;
+      return hslToHex(h, 72, l);
     }
     return NODE_COLORS.Book;
   }
@@ -367,8 +428,8 @@ export function polymathToGraphology(
       // anchor center to land it in tight orbit around the book. This
       // is much more compact than the scattered-cloud `leafJitter`
       // fallback, so satellites read as tentacle tips, not as drifters.
-      const offsetX = typeof (raw as any).x === "number" ? (raw as any).x : 0;
-      const offsetY = typeof (raw as any).y === "number" ? (raw as any).y : 0;
+      const offsetX = typeof raw.x === "number" ? raw.x : 0;
+      const offsetY = typeof raw.y === "number" ? raw.y : 0;
       x = cx + offsetX + (Math.random() - 0.5) * 4;
       y = cy + offsetY + (Math.random() - 0.5) * 4;
     } else {
@@ -417,31 +478,39 @@ export function polymathToGraphology(
   const strongBridges = bridgeLinks.filter(
     (b) => (b.weight ?? 0) >= minStrength,
   );
-  const perSourceCount = new Map<string, number>();
+  const perEndpointCount = new Map<string, number>();
   strongBridges.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
   const cappedBridges: PolymathRawEdge[] = [];
   for (const rel of strongBridges) {
-    const s = String(rel.source);
-    const used = perSourceCount.get(s) ?? 0;
-    if (used >= maxPerBook) continue;
+    const s = edgeEndpointId(rel.source);
+    const t = edgeEndpointId(rel.target);
+    const sourceUsed = perEndpointCount.get(s) ?? 0;
+    const targetUsed = perEndpointCount.get(t) ?? 0;
+    if (sourceUsed >= maxPerBook || targetUsed >= maxPerBook) continue;
     cappedBridges.push(rel);
-    perSourceCount.set(s, used + 1);
+    perEndpointCount.set(s, sourceUsed + 1);
+    perEndpointCount.set(t, targetUsed + 1);
   }
   const linksToRender: PolymathRawEdge[] = [...cappedBridges, ...otherLinks];
 
   linksToRender.forEach((rel, i) => {
-    const s = String(typeof rel.source === "object" ? (rel as any).source.id : rel.source);
-    const t = String(typeof rel.target === "object" ? (rel as any).target.id : rel.target);
+    const s = edgeEndpointId(rel.source);
+    const t = edgeEndpointId(rel.target);
     if (!graph.hasNode(s) || !graph.hasNode(t) || s === t) return;
     if (graph.hasEdge(s, t)) return;
     const styleKey = String(rel.predicate || rel.relation_family || "").toLowerCase();
     const style = EDGE_STYLES[styleKey] || DEFAULT_EDGE_STYLE;
+    const relationFamily =
+      rel.dominant_relation_family || rel.relation_family || null;
+    const familyStyle = getEdgeStyleByFamily(relationFamily, rel.predicate);
     // Curvature jitter prevents perfectly-overlapping double edges.
     const curvature = 0.12 + Math.random() * 0.08;
-    let color = style.color;
+    let color = relationFamily
+      ? hexToRgba(familyStyle.color, familyStyle.opacity)
+      : style.color;
     if (rel.dangling) {
       color = "#d97706"; // amber for dangling edges (target outside loaded set)
-    } else if (
+    } else if (!relationFamily &&
       Array.isArray(rel.source_corpora) &&
       rel.source_corpora.length > 1
     ) {
@@ -449,18 +518,19 @@ export function polymathToGraphology(
       color = "#a78bfa";
     }
     // Brain View bridges carry a `weight` = shared-entity strength from
-    // /api/graph/brain-view. ONE color (EDGE_STYLES.bridges_to violet)
-    // for every book-to-book bridge, with opacity carrying the signal:
-    // faint = weak connection, bright = strong. The old
-    // dominant_relation_family branch produced mostly-gray edges
-    // because that field wasn't reliably populated upstream.
-    let size = edgeBaseSize * style.sizeMultiplier;
+    // /api/graph/brain-view. If the backend provides a dominant relation
+    // family, color the bridge semantically while opacity carries bridge
+    // strength: faint = weak connection, bright = strong.
+    let size = edgeBaseSize * (relationFamily ? familyStyle.size : style.sizeMultiplier);
     let edgeLabel: string | undefined;
     if (rel.predicate === "bridges_to" && typeof rel.weight === "number") {
       const strength = Math.max(0, rel.weight);
-      size = Math.min(0.3 + strength * 0.04, 1.2);
-      const opacity = Math.max(0.12, Math.min(0.9, 0.12 + strength * 0.06));
-      color = hexToRgba(EDGE_STYLES.bridges_to.color, opacity);
+      size = Math.min(0.35 + strength * 0.05, 1.8);
+      const opacity = Math.max(0.16, Math.min(0.92, 0.14 + strength * 0.06));
+      const bridgeColor = relationFamily
+        ? familyStyle.color
+        : EDGE_STYLES.bridges_to.color;
+      color = hexToRgba(bridgeColor, opacity);
       // On-edge concept label: strongest shared entity name with
       // "+N more" overflow suffix so users see what two books share
       // at a glance. Only show on stronger bridges (≥3 shared) so
@@ -481,10 +551,20 @@ export function polymathToGraphology(
       type: "curved",
       curvature,
       predicate: rel.predicate,
+      relation_family: rel.relation_family,
+      dominant_relation_family: relationFamily,
       weight: rel.weight,
       confidence: rel.confidence,
       source_corpora: rel.source_corpora || [],
       source_corpus: rel.source_corpus,
+      source_doc_id: rel.source_doc_id,
+      target_doc_id: rel.target_doc_id,
+      source_corpus_id: rel.source_corpus_id,
+      target_corpus_id: rel.target_corpus_id,
+      source_label: rel.source_label,
+      target_label: rel.target_label,
+      shared_entities: rel.shared_entities,
+      top_shared_entities: rel.top_shared_entities,
       dangling: Boolean(rel.dangling),
       label: edgeLabel,
     });

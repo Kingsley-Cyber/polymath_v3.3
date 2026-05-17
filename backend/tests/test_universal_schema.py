@@ -1427,6 +1427,9 @@ def test_related_to_refinement_uses_evidence_and_source_predicate():
 def test_entity_aliases_canonicalize_before_id_generation():
     assert canonicalize_entity_name("Open AI Inc.") == "openai"
     assert entity_id_from_name("Open AI Inc.", "Organization") == "entity:openai"
+    assert canonicalize_entity_name("MLKIT") == "ml kit"
+    assert canonicalize_entity_name("ML Kit") == "ml kit"
+    assert entity_id_from_name("MLKit", "Software") == "entity:ml-kit"
 
 
 def test_entity_id_collapses_type_splits():

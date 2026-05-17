@@ -37,6 +37,10 @@ import type {
 } from "../../lib/api";
 import * as api from "../../lib/api";
 import { cleanBookLabel } from "../../lib/label-utils";
+import {
+  EDGE_COLORS_BY_FAMILY,
+  type RelationFamily,
+} from "../../lib/sigma-constants";
 import type { GraphSynthesisMode } from "../../types/discover";
 
 export type DashboardTab = "brain" | "agent" | "graph-query";
@@ -52,6 +56,18 @@ interface SelectedDisplay {
   id: string;
   display_name: string;
   source_corpora: string[];
+  source_corpus?: string;
+  nodeKind?: string;
+  kind?: string;
+  entity_type?: string;
+  dominant_entity_type?: string;
+  dominant_relation_family?: string;
+  primary_doc_id?: string;
+  bridge_count?: number;
+  chunk_count?: number;
+  parent_count?: number;
+  entity_count?: number;
+  top_entities?: string[];
 }
 
 export interface BrainViewDashboardProps {
@@ -146,6 +162,43 @@ function statusDot(s: string | undefined): string {
   if (s === "ready") return "bg-emerald-400";
   if (s === "warming") return "bg-amber-400 animate-pulse";
   return "bg-rose-500";
+}
+
+const RELATION_LEGEND_ENTRIES = Object.entries(EDGE_COLORS_BY_FAMILY) as Array<
+  [RelationFamily, string]
+>;
+
+function endpointId(value: unknown): string {
+  if (value && typeof value === "object") {
+    const obj = value as { id?: unknown; key?: unknown };
+    return String(obj.id ?? obj.key ?? "");
+  }
+  return String(value ?? "");
+}
+
+function relationFamily(edge: any): string {
+  return String(
+    edge?.dominant_relation_family ||
+      edge?.relation_family ||
+      (edge?.predicate === "bridges_to" ? "WeakAssociation" : "") ||
+      "WeakAssociation",
+  );
+}
+
+function relationColor(edge: any): string {
+  const family = relationFamily(edge) as RelationFamily;
+  return EDGE_COLORS_BY_FAMILY[family] ?? EDGE_COLORS_BY_FAMILY.WeakAssociation;
+}
+
+function relationLabel(edge: any): string {
+  const predicate = String(edge?.predicate || "related_to");
+  if (predicate === "bridges_to") return "bridge";
+  return predicate.replace(/_/g, " ");
+}
+
+function nodeLabel(data: { nodes: any[] }, id: string, fallback?: string): string {
+  const node = (data.nodes || []).find((n: any) => String(n.id) === String(id));
+  return String(node?.display_name || node?.label || fallback || id).trim();
 }
 
 export function BrainViewDashboard(props: BrainViewDashboardProps) {
@@ -314,8 +367,8 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
       <div className="flex items-stretch border-b border-zinc-900 px-1.5 pt-1.5 pb-0 gap-0.5">
         {([
           { id: "brain", label: "Brain" },
-          { id: "agent", label: "Agent Search" },
-          { id: "graph-query", label: "Graph Query" },
+          { id: "agent", label: "Graph Query" },
+          { id: "graph-query", label: "Refine" },
         ] as const).map((t) => (
           <button
             key={t.id}
@@ -355,6 +408,30 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                   {selectedDisplay.source_corpora.length} corpora
                 </div>
               )}
+              <div className="mt-2 ml-4 flex flex-wrap gap-1">
+                {[
+                  selectedDisplay.nodeKind || selectedDisplay.kind,
+                  selectedDisplay.entity_type || selectedDisplay.dominant_entity_type,
+                  selectedDisplay.dominant_relation_family,
+                  typeof selectedDisplay.bridge_count === "number"
+                    ? `${selectedDisplay.bridge_count} bridges`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .map((item) => (
+                    <span
+                      key={String(item)}
+                      className="rounded border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[10px] text-zinc-400"
+                    >
+                      {String(item)}
+                    </span>
+                  ))}
+              </div>
+              {(selectedDisplay.top_entities?.length || 0) > 0 && (
+                <div className="mt-2 ml-4 line-clamp-2 text-[10px] leading-relaxed text-zinc-500">
+                  {selectedDisplay.top_entities?.slice(0, 5).join(" · ")}
+                </div>
+              )}
               <button
                 onClick={onClearSelection}
                 className="mt-2 ml-4 rounded px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-white/10 hover:text-zinc-50"
@@ -372,20 +449,16 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
             selecting a node previously only showed its name. */}
         {selectedDisplay && data && (
           <section className="mt-3">
-            <SectionLabel>Connections</SectionLabel>
-            <ul className="space-y-1 font-mono text-[11px] max-h-48 overflow-auto">
+            <SectionLabel>Evidence Inspector</SectionLabel>
+            <ul className="space-y-1.5 font-mono text-[11px] max-h-56 overflow-auto pr-1 custom-scroll">
               {(() => {
                 const selId = String(selectedDisplay.id);
                 const rels = (data.links || []).filter((l: any) => {
                   // Edges arrive either flat (source: "id") or hydrated
                   // (source: {id}) depending on the renderer pass. Handle
                   // both shapes so this works in every code path.
-                  const s = String(
-                    typeof l.source === "object" ? l.source?.id : l.source,
-                  );
-                  const t = String(
-                    typeof l.target === "object" ? l.target?.id : l.target,
-                  );
+                  const s = endpointId(l.source);
+                  const t = endpointId(l.target);
                   return s === selId || t === selId;
                 });
                 if (rels.length === 0) {
@@ -396,39 +469,55 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                   );
                 }
                 return rels.slice(0, 25).map((l: any, i: number) => {
-                  const s = String(
-                    typeof l.source === "object" ? l.source?.id : l.source,
-                  );
-                  const t = String(
-                    typeof l.target === "object" ? l.target?.id : l.target,
-                  );
+                  const s = endpointId(l.source);
+                  const t = endpointId(l.target);
                   const isSource = s === selId;
                   const nid = isSource ? t : s;
-                  const node = (data.nodes || []).find(
-                    (n: any) => String(n.id) === String(nid),
-                  );
-                  const name =
-                    node?.display_name ||
-                    node?.label ||
-                    String(nid).slice(0, 20);
+                  const explicitLabel = isSource ? l.target_label : l.source_label;
+                  const name = nodeLabel(data, nid, explicitLabel);
+                  const family = relationFamily(l);
+                  const shared = Array.isArray(l.top_shared_entities)
+                    ? l.top_shared_entities.slice(0, 3)
+                    : [];
                   return (
                     <li
                       key={`${nid}-${i}`}
-                      className="flex items-center gap-2 text-zinc-300"
+                      className="rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 text-zinc-300"
                     >
-                      <span className="text-zinc-500" title={isSource ? "outgoing" : "incoming"}>
-                        {isSource ? "→" : "←"}
-                      </span>
-                      <span className="truncate flex-1" title={name}>
-                        {name}
-                      </span>
-                      {l.predicate && l.predicate !== "bridges_to" && (
-                        <span className="text-[10px] px-1 rounded bg-zinc-800 text-zinc-400">
-                          {l.predicate}
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: relationColor(l) }}
+                        />
+                        <span
+                          className="text-zinc-500"
+                          title={isSource ? "outgoing" : "incoming"}
+                        >
+                          {isSource ? "→" : "←"}
                         </span>
-                      )}
-                      {typeof l.weight === "number" && (
-                        <span className="text-zinc-600">({l.weight})</span>
+                        <span className="min-w-0 flex-1 truncate" title={name}>
+                          {name}
+                        </span>
+                        <span className="shrink-0 rounded bg-zinc-900 px-1 text-[10px] text-zinc-500">
+                          {relationLabel(l)}
+                        </span>
+                      </div>
+                      <div className="mt-1 ml-7 flex flex-wrap items-center gap-1 text-[10px] text-zinc-500">
+                        <span>{family}</span>
+                        {typeof l.weight === "number" && (
+                          <span>strength {l.weight}</span>
+                        )}
+                        {typeof l.confidence === "number" && (
+                          <span>{Math.round(l.confidence * 100)}% conf</span>
+                        )}
+                      </div>
+                      {shared.length > 0 && (
+                        <div className="mt-1 ml-7 truncate text-[10px] text-zinc-400">
+                          {shared.join(" · ")}
+                          {typeof l.shared_entities === "number" &&
+                            l.shared_entities > shared.length &&
+                            ` +${l.shared_entities - shared.length}`}
+                        </div>
                       )}
                     </li>
                   );
@@ -550,6 +639,27 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                 (click to swap)
               </span>
             </button>
+          </section>
+        )}
+
+        {activeTab === "brain" && mode === "brain" && (
+          <section>
+            <SectionLabel>Relation Legend</SectionLabel>
+            <div className="grid grid-cols-2 gap-1.5 rounded border border-zinc-800 bg-[#0d0d14] p-2">
+              {RELATION_LEGEND_ENTRIES.map(([family, color]) => (
+                <div
+                  key={family}
+                  className="flex min-w-0 items-center gap-1.5 text-[10px] font-mono text-zinc-400"
+                  title={`${family} relations`}
+                >
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className="truncate">{family}</span>
+                </div>
+              ))}
+            </div>
           </section>
         )}
 
@@ -710,117 +820,138 @@ function AgentSearchTab(props: AgentSearchTabProps) {
     onValidateSynthesisChange,
   } = props;
   const canRun = phase !== "loading" && query.trim().length > 0;
+  const modeOptions: Array<{
+    id: GraphSynthesisMode;
+    label: string;
+    meta: string;
+  }> = [
+    { id: "research", label: "Research", meta: "evidence" },
+    { id: "nuance", label: "Nuance", meta: "tension" },
+    { id: "ideation", label: "Ideation", meta: "build" },
+  ];
   return (
     <>
-      <section>
-        <div className="flex items-center justify-between gap-2">
-          <SectionLabel>Ask</SectionLabel>
+      <section className="rounded-lg border border-amber-500/25 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.14),transparent_45%),linear-gradient(135deg,rgba(24,24,27,0.98),rgba(9,9,14,0.98))] p-3 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <SectionLabel>Query Graph</SectionLabel>
+            <div className="mt-1 text-[11px] text-zinc-400">
+              Nodes · edges · synthesis
+            </div>
+          </div>
+          <div
+            className={
+              "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-technical " +
+              (phase === "loading"
+                ? "border-amber-500/50 bg-amber-500/10 text-amber-200"
+                : phase === "ready"
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                  : phase === "error"
+                    ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
+                    : "border-zinc-800 bg-zinc-950/70 text-zinc-500")
+            }
+          >
+            {phase === "loading"
+              ? "running"
+              : phase === "ready"
+                ? "ready"
+                : phase === "error"
+                  ? "error"
+                  : "idle"}
+          </div>
+        </div>
+        <div className="space-y-3">
           {onSynthesisModeChange && (
             <div
               role="radiogroup"
               aria-label="Synthesis mode"
-              className="inline-flex rounded-full bg-zinc-900 p-0.5 text-[9px] font-mono uppercase tracking-wider"
+              className="grid grid-cols-3 gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950/75 p-1"
             >
-              <button
-                type="button"
-                role="radio"
-                aria-checked={synthesisMode === "research"}
-                onClick={() => onSynthesisModeChange("research")}
-                title="Faithful synthesis grounded in evidence."
-                className={
-                  "px-1.5 py-0.5 rounded-full transition-colors " +
-                  (synthesisMode === "research"
-                    ? "bg-amber-600 text-zinc-100"
-                    : "text-zinc-500 hover:text-zinc-300")
-                }
-              >
-                research
-              </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={synthesisMode === "nuance"}
-                onClick={() => onSynthesisModeChange("nuance")}
-                title="Conceptual exploration of gaps, analogies, transfers, and bridges."
-                className={
-                  "px-1.5 py-0.5 rounded-full transition-colors " +
-                  (synthesisMode === "nuance"
-                    ? "bg-amber-600 text-zinc-100"
-                    : "text-zinc-500 hover:text-zinc-300")
-                }
-              >
-                nuance
-              </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={synthesisMode === "ideation"}
-                onClick={() => onSynthesisModeChange("ideation")}
-                title="Speculative [BUILD IDEA] output grounded in corpus APIs."
-                className={
-                  "px-1.5 py-0.5 rounded-full transition-colors " +
-                  (synthesisMode === "ideation"
-                    ? "bg-amber-600 text-zinc-100"
-                    : "text-zinc-500 hover:text-zinc-300")
-                }
-              >
-                ideation
-              </button>
+              {modeOptions.map((opt) => {
+                const active = synthesisMode === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => onSynthesisModeChange(opt.id)}
+                    className={
+                      "rounded-md border px-2 py-2 text-left transition-all " +
+                      (active
+                        ? "border-amber-400/70 bg-amber-500/15 text-amber-100 shadow-[0_0_18px_rgba(245,158,11,0.16)]"
+                        : "border-transparent bg-zinc-900/60 text-zinc-500 hover:border-zinc-700 hover:text-zinc-200")
+                    }
+                  >
+                    <span className="block text-[11px] font-semibold">
+                      {opt.label}
+                    </span>
+                    <span
+                      className={
+                        "mt-0.5 block text-[9px] font-technical " +
+                        (active ? "text-amber-300/80" : "text-zinc-600")
+                      }
+                    >
+                      {opt.meta}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
-        </div>
-        <textarea
-          rows={3}
-          value={query}
-          onChange={(e) => onChange(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canRun) {
-              e.preventDefault();
-              onRun();
+          <textarea
+            rows={4}
+            value={query}
+            onChange={(e) => onChange(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canRun) {
+                e.preventDefault();
+                onRun();
+              }
+            }}
+            placeholder={
+              synthesisMode === "ideation"
+                ? "What could I build from this corpus?"
+                : synthesisMode === "nuance"
+                  ? "Where is the conceptual tension or hidden bridge?"
+                  : "What does my library think about...?"
             }
-          }}
-          placeholder={
-            synthesisMode === "ideation"
-              ? "What could I build from this corpus?"
-              : synthesisMode === "nuance"
-                ? "Where is the conceptual tension or hidden bridge?"
-              : "What does my library think about…?"
-          }
-          className="w-full resize-none rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 font-mono text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-amber-700 focus:outline-none"
-        />
-        <button
-          onClick={onRun}
-          disabled={!canRun}
-          aria-busy={phase === "loading"}
-          className={
-            "mt-2 flex w-full items-center justify-center gap-2 rounded border px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest disabled:cursor-not-allowed " +
-            (phase === "loading"
-              ? "border-amber-600/60 bg-amber-500/10 text-amber-200"
-              : "border-zinc-800 bg-[#0d0d14] text-zinc-300 hover:border-amber-700 hover:text-amber-300 disabled:opacity-40")
-          }
-        >
-          {phase === "loading" ? (
-            <>
-              <Loader2 className="h-3 w-3 animate-spin" /> query accepted
-            </>
-          ) : (
-            <>
-              <Zap className="h-3 w-3" /> run query
-            </>
-          )}
-        </button>
-        <div className="mt-1 text-[10px] text-zinc-500 font-mono">
-          {phase === "loading"
-            ? "building subgraph first, then synthesis prose…"
-            : phase === "error"
-              ? error || "error"
-              : "⌘/Ctrl + Enter to run"}
+            className="w-full resize-none rounded-md border border-zinc-800 bg-[#09090f] px-3 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/70 focus:outline-none focus:ring-1 focus:ring-amber-500/20"
+          />
+          <button
+            onClick={onRun}
+            disabled={!canRun}
+            aria-busy={phase === "loading"}
+            className={
+              "flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed " +
+              (phase === "loading"
+                ? "border-amber-500/60 bg-amber-500/15 text-amber-100"
+                : "border-amber-500/35 bg-amber-500/10 text-amber-100 hover:border-amber-400/70 hover:bg-amber-500/20 disabled:border-zinc-800 disabled:bg-zinc-900/60 disabled:text-zinc-600")
+            }
+          >
+            {phase === "loading" ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Building Graph
+              </>
+            ) : (
+              <>
+                <Zap className="h-3.5 w-3.5" /> Run Graph Query
+              </>
+            )}
+          </button>
+          <div className="min-h-4 text-[10px] text-zinc-500">
+            {phase === "loading"
+              ? "Building query nodes, edges, and synthesis..."
+              : phase === "error"
+                ? error || "error"
+                : ""}
+          </div>
         </div>
 
         {onValidateSynthesisChange && (
           <label
             className={
-              "mt-2 flex items-center gap-2 cursor-pointer select-none text-[10px] font-mono uppercase tracking-wider " +
+              "mt-2 flex items-center gap-2 cursor-pointer select-none text-[10px] font-technical " +
               (validateSynthesis ? "text-amber-300" : "text-zinc-500 hover:text-zinc-300")
             }
             title="Run a second auditor + editor pass to catch fabricated terms, missing citations, and shell sentences. Costs ~3× the tokens of a normal query (draft + critique + revise calls)."
@@ -832,10 +963,10 @@ function AgentSearchTab(props: AgentSearchTabProps) {
               className="accent-amber-600"
             />
             <span className="flex items-center gap-1.5">
-              <span>validate · draft → critique → revise</span>
+              <span>validate · draft - critique - revise</span>
               <span
                 className={
-                  "px-1 py-px rounded-sm text-[9px] tracking-widest " +
+                  "px-1 py-px rounded-sm text-[9px] " +
                   (validateSynthesis
                     ? "bg-amber-900/40 text-amber-200 border border-amber-700/40"
                     : "bg-zinc-800 text-zinc-500 border border-zinc-700")

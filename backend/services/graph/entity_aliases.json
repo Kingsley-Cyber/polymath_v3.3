@@ -25,6 +25,7 @@
   "on device ai": ["on-device ai", "on device artificial intelligence", "on-device artificial intelligence"],
   "react native": ["react-native", "rn"],
   "claude api": ["claude-api", "anthropic api"],
+  "ml kit": ["mlkit", "ml-kit", "MLKit", "MLKIT"],
   "lfm2.5 thinking": ["lfm25 thinking", "lfm 2.5 thinking", "lfm-2.5-thinking"],
   "llama 3.2 1b": ["llama 32 1b", "llama-3.2-1b"],
   "llama 3.2 3b": ["llama 32 3b", "llama-3.2-3b"],
