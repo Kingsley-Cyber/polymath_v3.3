@@ -25,7 +25,8 @@ from models.schemas import SourceChunk
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MAX_RESULTS = 4
+_DEFAULT_MAX_RESULTS = 2
+_DEFAULT_CANDIDATE_RESULTS = 14
 _DEFAULT_OBSCURA_MAX_CHARS = 4000
 _DEFAULT_MAX_RELATED_TERMS = 5
 
@@ -410,6 +411,33 @@ def web_hits_to_source_chunks(
     return chunks
 
 
+async def rerank_web_source_chunks(
+    query: str,
+    chunks: list[SourceChunk],
+    *,
+    limit: int,
+) -> list[SourceChunk]:
+    """Rank live-web candidate snippets with the same local reranker as RAG.
+
+    SearXNG order is useful recall, not final relevance. We fetch a wider web
+    candidate pool, ask Qwen/MLX to rank the snippets against the user's query,
+    and only pass the top few websites to the model. If the sidecar is down,
+    the reranker client falls back to source score order.
+    """
+
+    if not chunks:
+        return []
+    limit = max(1, min(int(limit or len(chunks)), len(chunks)))
+    try:
+        from services.reranker import reranker_service
+
+        ranked = await reranker_service.rerank(query, chunks)
+    except Exception as exc:
+        logger.warning("live web rerank failed, using search order: %s", exc)
+        ranked = sorted(chunks, key=lambda chunk: chunk.score, reverse=True)
+    return ranked[:limit]
+
+
 class LiveWebSearch:
     async def maybe_search(
         self,
@@ -426,7 +454,21 @@ class LiveWebSearch:
         expanded_terms = select_related_search_terms(query, related_terms)
         search_query = build_search_query(query, expanded_terms)
         try:
-            hits = await self._search_searxng(search_query)
+            candidate_limit = max(
+                int(settings.LIVE_WEB_SEARCH_MAX_RESULTS or _DEFAULT_MAX_RESULTS),
+                int(
+                    getattr(
+                        settings,
+                        "LIVE_WEB_SEARCH_CANDIDATE_RESULTS",
+                        _DEFAULT_CANDIDATE_RESULTS,
+                    )
+                    or _DEFAULT_CANDIDATE_RESULTS
+                ),
+            )
+            hits = await self._search_searxng(
+                search_query,
+                max_results=candidate_limit,
+            )
         except Exception as exc:
             logger.info("live web search skipped: %s", exc)
             return []
@@ -436,22 +478,34 @@ class LiveWebSearch:
         fetched: dict[str, str] = {}
         if settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES and settings.OBSCURA_COMMAND:
             fetched = await self._fetch_pages_with_obscura(hits)
-        logger.info(
-            "live web search appended %d result(s) for query=%r search_query=%r corpus_sources=%d",
-            len(hits),
-            query[:120],
-            search_query[:240],
-            len(corpus_sources or []),
-        )
-        return web_hits_to_source_chunks(
+        candidate_chunks = web_hits_to_source_chunks(
             hits,
             fetched_markdown=fetched,
             search_query=search_query,
             expanded_terms=expanded_terms,
             max_chars=settings.OBSCURA_MAX_CHARS,
         )
+        selected = await rerank_web_source_chunks(
+            search_query,
+            candidate_chunks,
+            limit=int(settings.LIVE_WEB_SEARCH_MAX_RESULTS or _DEFAULT_MAX_RESULTS),
+        )
+        logger.info(
+            "live web search reranked %d candidate(s) to %d result(s) for query=%r search_query=%r corpus_sources=%d",
+            len(hits),
+            len(selected),
+            query[:120],
+            search_query[:240],
+            len(corpus_sources or []),
+        )
+        return selected
 
-    async def _search_searxng(self, query: str) -> list[WebSearchHit]:
+    async def _search_searxng(
+        self,
+        query: str,
+        *,
+        max_results: int | None = None,
+    ) -> list[WebSearchHit]:
         settings = get_settings()
         base_url = settings.SEARXNG_URL.rstrip("/")
         params = {
@@ -467,9 +521,16 @@ class LiveWebSearch:
             response = await client.get(f"{base_url}/search", params=params)
             response.raise_for_status()
             payload = response.json()
+        candidate_limit = max_results
+        if candidate_limit is None:
+            candidate_limit = getattr(
+                settings,
+                "LIVE_WEB_SEARCH_CANDIDATE_RESULTS",
+                _DEFAULT_CANDIDATE_RESULTS,
+            )
         return parse_searxng_results(
             payload,
-            settings.LIVE_WEB_SEARCH_MAX_RESULTS or _DEFAULT_MAX_RESULTS,
+            int(candidate_limit or _DEFAULT_CANDIDATE_RESULTS),
         )
 
     async def _fetch_pages_with_obscura(

@@ -1,7 +1,10 @@
+import pytest
+
 from services.web_freshness import (
     build_search_query,
     parse_searxng_results,
     refine_tool_search_query,
+    rerank_web_source_chunks,
     select_related_search_terms,
     web_hits_to_source_chunks,
 )
@@ -131,3 +134,54 @@ def test_web_hits_become_source_chunks_with_url_context():
     assert "URL: https://pytorch.org/docs/stable/index.html" in chunks[0].text
     assert "Search query: pytorch docs latest" in chunks[0].text
     assert chunks[0].metadata["url"] == "https://pytorch.org/docs/stable/index.html"
+
+
+@pytest.mark.asyncio
+async def test_rerank_web_source_chunks_uses_local_reranker(monkeypatch):
+    hits = parse_searxng_results(
+        {
+            "results": [
+                {
+                    "title": "Dictionary small",
+                    "url": "https://example.com/small",
+                    "content": "Small means little in size.",
+                },
+                {
+                    "title": "Mobile RAG SLM deployment",
+                    "url": "https://example.com/mobile-rag",
+                    "content": "On-device RAG combines a small language model with local retrieval.",
+                },
+                {
+                    "title": "Running shoes",
+                    "url": "https://example.com/shoes",
+                    "content": "Running shoe catalog.",
+                },
+            ]
+        },
+        max_results=14,
+    )
+    chunks = web_hits_to_source_chunks(hits, search_query="mobile RAG SLM")
+
+    async def fake_rerank(query, pool):
+        assert query == "mobile RAG SLM"
+        by_url = {chunk.metadata["url"]: chunk.model_copy() for chunk in pool}
+        ranked = [
+            by_url["https://example.com/mobile-rag"],
+            by_url["https://example.com/small"],
+            by_url["https://example.com/shoes"],
+        ]
+        for score, chunk in zip((9.5, -7.0, -11.0), ranked):
+            chunk.score = score
+        return ranked
+
+    import services.reranker as reranker_module
+
+    monkeypatch.setattr(reranker_module.reranker_service, "rerank", fake_rerank)
+
+    ranked = await rerank_web_source_chunks("mobile RAG SLM", chunks, limit=2)
+
+    assert [chunk.metadata["url"] for chunk in ranked] == [
+        "https://example.com/mobile-rag",
+        "https://example.com/small",
+    ]
+    assert ranked[0].score == 9.5

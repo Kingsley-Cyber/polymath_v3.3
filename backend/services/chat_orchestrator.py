@@ -44,7 +44,7 @@ settings = get_settings()
 HYDE_FAILURE_TTL_SECONDS = 600.0
 _HYDE_FAILURE_CACHE: dict[str, float] = {}
 _MAX_PERSISTED_SOURCE_PREVIEWS = 10
-_MAX_PERSISTED_WEB_SOURCE_PREVIEWS = 4
+_MAX_PERSISTED_WEB_SOURCE_PREVIEWS = 6
 _MAX_PERSISTED_SOURCE_TEXT_CHARS = 900
 _MAX_PERSISTED_SOURCE_SUMMARY_CHARS = 500
 _MAX_TOOL_CALLS_PER_TURN = 3
@@ -1833,6 +1833,7 @@ class ChatOrchestrator:
             from services.web_freshness import (
                 live_web_search,
                 refine_tool_search_query,
+                rerank_web_source_chunks,
                 web_hits_to_source_chunks,
             )
 
@@ -1840,13 +1841,30 @@ class ChatOrchestrator:
                 query,
                 request.message if request is not None else None,
             )
-            hits = await live_web_search._search_searxng(query[:300])
-            hits = hits[:max_results]
-            chunks = web_hits_to_source_chunks(
+            candidate_limit = max(
+                max_results,
+                int(settings.LIVE_WEB_SEARCH_CANDIDATE_RESULTS or max_results),
+            )
+            hits = await live_web_search._search_searxng(
+                query[:300],
+                max_results=candidate_limit,
+            )
+            candidate_chunks = web_hits_to_source_chunks(
                 hits,
                 search_query=query[:300],
                 max_chars=1600,
             )
+            chunks = await rerank_web_source_chunks(
+                query[:300],
+                candidate_chunks,
+                limit=max_results,
+            )
+            hits_by_url = {hit.url: hit for hit in hits}
+            selected_hits = [
+                hits_by_url.get(str((chunk.metadata or {}).get("url") or chunk.doc_id))
+                for chunk in chunks
+            ]
+            selected_hits = [hit for hit in selected_hits if hit is not None]
             if request is not None and chunks:
                 pending = list(getattr(request, "_pending_tool_sources", []) or [])
                 pending = _append_deduped_web_sources(pending, chunks)
@@ -1855,6 +1873,9 @@ class ChatOrchestrator:
             return json.dumps(
                 {
                     "query": query[:300],
+                    "candidate_results": len(hits),
+                    "reranked_results": len(chunks),
+                    "ranked_by": settings.RERANKER_MODEL,
                     "results": [
                         {
                             "title": hit.title,
@@ -1862,7 +1883,7 @@ class ChatOrchestrator:
                             "snippet": hit.snippet[:700],
                             "published_date": hit.published_date,
                         }
-                        for hit in hits
+                        for hit in selected_hits
                     ],
                     "note": (
                         "Use these only when relevant. Cite the URL for any "

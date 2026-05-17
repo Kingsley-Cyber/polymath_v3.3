@@ -642,10 +642,23 @@ class Settings(BaseSettings):
         description="HTTP timeout for the opt-in chat SearXNG request.",
     )
     LIVE_WEB_SEARCH_MAX_RESULTS: int = Field(
-        default=4,
+        default=2,
         ge=1,
         le=10,
-        description="Maximum live-web search results appended to one chat turn.",
+        description=(
+            "Maximum reranked live-web results returned to the model for one "
+            "web_search tool call."
+        ),
+    )
+    LIVE_WEB_SEARCH_CANDIDATE_RESULTS: int = Field(
+        default=14,
+        ge=1,
+        le=20,
+        description=(
+            "Number of raw SearXNG candidates fetched before local reranking. "
+            "Keep this above LIVE_WEB_SEARCH_MAX_RESULTS so the reranker can "
+            "select the best websites instead of trusting search-engine order."
+        ),
     )
     LIVE_WEB_QUERY_EXPANSION_TIMEOUT_SECONDS: float = Field(
         default=2.0,
