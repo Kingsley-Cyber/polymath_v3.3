@@ -34,6 +34,7 @@ const DEFAULT_SETTINGS: Omit<SettingsState, "selectedModel"> = {
   graphFinalSources: 8,
   graphReranker: true,
   hydeEnabled: false,
+  webSearchEnabled: false,
   rerankingEnabled: true,
   selectedCollectionIds: [],
   retrievalTier: "qdrant_mongo",
@@ -106,6 +107,7 @@ interface SettingsStore extends SettingsState {
   toggleSkill: (skillId: string) => void;
   toggleReasoningCascade: () => void;
   toggleHyDE: () => void;
+  toggleWebSearch: () => void;
   toggleReranking: () => void;
   toggleAgenticMode: () => Promise<void>;
   setAgenticModel: (model: string) => Promise<void>;
@@ -173,6 +175,9 @@ export const useSettingsStore = create<SettingsStore>()(
         }),
 
       toggleHyDE: () => set((state) => ({ hydeEnabled: !state.hydeEnabled })),
+
+      toggleWebSearch: () =>
+        set((state) => ({ webSearchEnabled: !state.webSearchEnabled })),
 
       toggleReranking: () =>
         set((state) => ({ rerankingEnabled: !state.rerankingEnabled })),
@@ -462,6 +467,7 @@ export const useSettingsStore = create<SettingsStore>()(
         topP: state.topP,
         maxTokens: state.maxTokens,
         hydeEnabled: state.hydeEnabled,
+        webSearchEnabled: state.webSearchEnabled,
         rerankingEnabled: state.rerankingEnabled,
         reasoningMode: state.reasoningMode,
         searchMode: state.searchMode,

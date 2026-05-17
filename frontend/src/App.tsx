@@ -13,8 +13,6 @@ import { SearchModeSelector } from "./components/chat/SearchModeSelector";
 import { QueryProfileSelector } from "./components/chat/QueryProfileSelector";
 import { RetrievalTierSelector } from "./components/chat/RetrievalTierSelector";
 import { GraphViewer } from "./components/graph/GraphViewer";
-import ConstellationCanvas from "./components/graph/ConstellationCanvas";
-import AtomicView from "./components/graph/AtomicView";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { LoginView } from "./components/auth/LoginView";
 import { IngestionDashboard } from "./components/ingestion/IngestionDashboard";
@@ -33,16 +31,11 @@ function App() {
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [pipelineStatus, setPipelineStatus] = useState<string>("");
 
-  // PR 4 — graph viewer mode + query state. Brain mode renders the
-  // multi-corpus supernode overview; query mode runs Mission Control
-  // synthesis against the selected corpora and plays the entry animation.
-  // Phase 4 — adds "constellation" (one dot per document, calling the
-  // by-document overview endpoint) and "atom" (concentric synthesis +
-  // seeds + evidence + bridges + gaps, calling discoverGraph + queryGraph
-  // in parallel).
-  const [graphViewerMode, setGraphViewerMode] = useState<
-    "brain" | "query" | "constellation" | "atom"
-  >("brain");
+  // Brain mode renders the corpus overview; query mode renders the custom
+  // graph result for the user's question as query-specific nodes and edges.
+  const [graphViewerMode, setGraphViewerMode] = useState<"brain" | "query">(
+    "brain",
+  );
   const [graphViewerQuery, setGraphViewerQuery] = useState<string>("");
   const [graphViewerQueryDraft, setGraphViewerQueryDraft] = useState<string>("");
   const [graphViewerRunCount, setGraphViewerRunCount] = useState(0);
@@ -292,6 +285,7 @@ function App() {
           temperature: settings.temperature,
           max_tokens: settings.maxTokens,
           hyde_enabled: settings.hydeEnabled ? true : undefined,
+          web_search_enabled: settings.webSearchEnabled ? true : undefined,
           collection_ids: settings.selectedCollectionIds,
           // Phase 14.1 — agentic override (per-request)
           agentic_mode: settings.agenticModeEnabled || undefined,
@@ -701,88 +695,34 @@ function App() {
             >
               <X className="h-4 w-4" />
             </button>
-            {/* GraphViewer fills the canvas area — Phase 4 routes the two
-                new views (constellation, atom) through the same shell. */}
+            {/* GraphViewer fills the canvas area. Graph questions always
+                route to query mode so the response becomes graph nodes and
+                edges rather than a separate visual mode. */}
             <div className="flex-1 min-h-0 relative">
-              {graphViewerMode === "constellation" ? (
-                <ConstellationCanvas
-                  corpusIds={selectedCorpusIds}
-                  onSelectDoc={() => {}}
-                />
-              ) : graphViewerMode === "atom" && graphViewerQuery ? (
-                <AtomicView
-                  corpusIds={selectedCorpusIds}
-                  query={graphViewerQuery}
-                  model={selectedModel || undefined}
-                />
-              ) : graphViewerMode === "atom" ? (
-                <div className="flex h-full items-center justify-center text-zinc-500 text-sm font-mono">
-                  Type a question below to render the atomic view.
-                </div>
-              ) : (
-                <GraphViewer
-                  // Narrow back to GraphViewer's "brain" | "query" union.
-                  // The constellation / atom modes are handled by earlier
-                  // ternary branches and never reach this fallback.
-                  mode={(graphViewerMode === "query" ? "query" : "brain") as "brain" | "query"}
-                  corpusIds={selectedCorpusIds}
-                  query={graphViewerMode === "query" ? graphViewerQuery : undefined}
-                  model={selectedModel || undefined}
-                  onRerun={
-                    graphViewerMode === "query"
-                      ? () => {
-                          setGraphViewerQueryRunning(true);
-                          setGraphViewerRunCount((n) => n + 1);
-                        }
-                      : undefined
-                  }
-                  onClose={() => {
-                    setIsGraphViewOpen(false);
-                    setGraphViewerQueryRunning(false);
-                  }}
-                  onQueryPhaseChange={handleGraphQueryPhaseChange}
-                  onSendToChat={handleGraphSendToChat}
-                  key={`gv-${graphViewerMode}-${graphViewerQuery}-${graphViewerRunCount}`}
-                />
-              )}
-              {/* View-mode picker — pill row at the top-right. Brain is the
-                  default; Constellation gives book-level overview; Atom
-                  gives the concentric query-result view. */}
-              <div className="absolute top-3 right-3 flex gap-1 bg-zinc-900/85 backdrop-blur border border-zinc-800 rounded-full p-0.5 text-[10px] font-mono uppercase tracking-wider">
-                {(
-                  [
-                    { id: "brain", label: "Brain" },
-                    { id: "constellation", label: "Constellation" },
-                    { id: "atom", label: "Atom" },
-                  ] as const
-                ).map((opt) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => {
-                      setGraphViewerMode(opt.id);
-                      setGraphViewerQueryRunning(false);
-                    }}
-                    className={
-                      "px-2.5 py-1 rounded-full transition-colors " +
-                      (graphViewerMode === opt.id
-                        ? "bg-amber-600 text-zinc-100"
-                        : "text-zinc-500 hover:text-zinc-200")
-                    }
-                    title={
-                      opt.id === "constellation"
-                        ? "One dot per document — overview of every book in the selected corpora."
-                        : opt.id === "atom"
-                          ? "Concentric synthesis + seeds + evidence + bridges + gaps for the current query."
-                          : "Multi-corpus supernode brain view."
-                    }
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+              <GraphViewer
+                mode={graphViewerMode}
+                corpusIds={selectedCorpusIds}
+                query={graphViewerMode === "query" ? graphViewerQuery : undefined}
+                model={selectedModel || undefined}
+                onRerun={
+                  graphViewerMode === "query"
+                    ? () => {
+                        setGraphViewerQueryRunning(true);
+                        setGraphViewerRunCount((n) => n + 1);
+                      }
+                    : undefined
+                }
+                onClose={() => {
+                  setIsGraphViewOpen(false);
+                  setGraphViewerQueryRunning(false);
+                }}
+                onQueryPhaseChange={handleGraphQueryPhaseChange}
+                onSendToChat={handleGraphSendToChat}
+                key={`gv-${graphViewerMode}-${graphViewerQuery}-${graphViewerRunCount}`}
+              />
             </div>
-            {/* Query input bar — bottom-center, switches mode between
-                brain and query. PR 4 of the multi-corpus rollout. */}
+            {/* Query input bar — bottom-center, switches from overview to the
+                query graph renderer. */}
             <div className="border-t border-zinc-800 bg-zinc-950/90 backdrop-blur p-3 z-50">
               <form
                 className="max-w-3xl mx-auto flex items-center gap-2"
@@ -791,12 +731,8 @@ function App() {
                   const q = graphViewerQueryDraft.trim();
                   if (!q || graphViewerQueryRunning) return;
                   setGraphViewerQuery(q);
-                  // Atom view stays in atom mode; otherwise default to
-                  // the legacy "query" mode (GraphViewer synthesis flow).
-                  if (graphViewerMode !== "atom") {
-                    setGraphViewerMode("query");
-                    setGraphViewerQueryRunning(true);
-                  }
+                  setGraphViewerMode("query");
+                  setGraphViewerQueryRunning(true);
                   setGraphViewerRunCount((n) => n + 1);
                 }}
               >
@@ -808,8 +744,8 @@ function App() {
                     selectedCorpusIds.length === 0
                       ? "Select a corpus first…"
                       : graphViewerMode === "query"
-                      ? "Ask another question across selected corpora…"
-                      : "Ask the graph: how does X relate to Y across corpora?"
+                        ? "Ask another question across selected corpora…"
+                        : "Ask the graph: how does X relate to Y across corpora?"
                   }
                   disabled={selectedCorpusIds.length === 0}
                   className="flex-1 bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-amber-700 font-mono"
@@ -832,13 +768,13 @@ function App() {
                   {graphViewerQueryRunning ? (
                     <>
                       <Loader2 className="h-3 w-3 animate-spin" />
-                      Running
+                      Building
                     </>
                   ) : (
-                    "Synthesize"
+                    "Build Graph"
                   )}
                 </button>
-                {(graphViewerMode === "query" || graphViewerMode === "atom") && (
+                {graphViewerMode === "query" && (
                   <button
                     type="button"
                     onClick={() => {
@@ -858,7 +794,7 @@ function App() {
                 aria-live="polite"
               >
                 {graphViewerQueryRunning
-                  ? "query accepted · building graph subquery + synthesis"
+                  ? "query accepted · building query graph + synthesis"
                   : ""}
               </div>
             </div>

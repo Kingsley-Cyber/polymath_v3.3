@@ -446,6 +446,7 @@ class LLMService:
                 # Track thinking state for models that use <think> tags
                 in_thinking = False
                 buffer = ""
+                pending_tool_calls: dict[int, dict[str, Any]] = {}
 
                 # Stream the response
                 async for line in response.aiter_lines():
@@ -467,12 +468,62 @@ class LLMService:
                             # Extract token from choices
                             choices = chunk.get("choices", [])
                             if choices:
-                                delta = choices[0].get("delta", {})
+                                choice = choices[0]
+                                delta = choice.get("delta", {})
+                                finish_reason = choice.get("finish_reason")
                                 tool_calls = delta.get("tool_calls")
 
-                                # Handle tool calls first - they are exclusive
+                                # Handle streaming tool-call deltas first.
+                                # OpenAI-compatible providers usually send
+                                # arguments in fragments; emit only once the
+                                # provider marks the assistant turn complete.
                                 if tool_calls:
-                                    yield {"tool_calls": tool_calls}
+                                    for tool_call in tool_calls:
+                                        index = int(
+                                            tool_call.get(
+                                                "index",
+                                                len(pending_tool_calls),
+                                            )
+                                        )
+                                        current = pending_tool_calls.setdefault(
+                                            index,
+                                            {
+                                                "id": "",
+                                                "type": "function",
+                                                "function": {
+                                                    "name": "",
+                                                    "arguments": "",
+                                                },
+                                            },
+                                        )
+                                        if tool_call.get("id"):
+                                            current["id"] = tool_call["id"]
+                                        if tool_call.get("type"):
+                                            current["type"] = tool_call["type"]
+
+                                        fn_delta = tool_call.get("function") or {}
+                                        current_fn = current.setdefault(
+                                            "function",
+                                            {"name": "", "arguments": ""},
+                                        )
+                                        if fn_delta.get("name"):
+                                            current_fn["name"] += fn_delta["name"]
+                                        if fn_delta.get("arguments"):
+                                            current_fn["arguments"] += fn_delta[
+                                                "arguments"
+                                            ]
+
+                                    if finish_reason != "tool_calls":
+                                        continue
+
+                                if finish_reason == "tool_calls" and pending_tool_calls:
+                                    yield {
+                                        "tool_calls": [
+                                            pending_tool_calls[i]
+                                            for i in sorted(pending_tool_calls)
+                                        ]
+                                    }
+                                    pending_tool_calls = {}
                                     continue
 
                                 # Check for thinking content (Claude 3.7, etc.)

@@ -462,6 +462,16 @@ class ChatOrchestrator:
                 logger.warning("Graph decoration skipped: %s", exc)
                 decoration = []
 
+        # Opt-in live web lane. When enabled, expose a model-callable search
+        # tool instead of pre-searching. This keeps the first context grounded
+        # in corpus chunks, then lets the model decide whether current outside
+        # context is actually needed.
+        web_search_enabled = bool(
+            request.overrides
+            and getattr(request.overrides, "web_search_enabled", None)
+        )
+        web_sources: list = []
+
         # Trust-signal snapshot — captured here so it carries through to
         # both the `done` SSE frame and the persisted assistant message.
         # `agentic_on_request` was resolved earlier (line ~80) and reflects
@@ -474,7 +484,7 @@ class ChatOrchestrator:
         # Phase 24 — trust signal renamed in spirit. The agentic toggle is
         # gone; "agentic-mode-used" now means tool-calling was active this
         # turn, not merely that a tool-capable model exists in settings.
-        agentic_mode_used = bool(request.selected_tools)
+        agentic_mode_used = bool(request.selected_tools or web_search_enabled)
         # Corpus IDs scoped for this turn — None on the request becomes []
         # on the message so the FE state-derivation can treat empty as
         # "NO_RAG" without an extra falsy check.
@@ -544,6 +554,22 @@ class ChatOrchestrator:
             }
             for s in skills_loaded
         ]
+        if web_search_enabled:
+            active_skills_dicts.append(
+                {
+                    "name": "Live Web Search",
+                    "slash_command": "/web",
+                    "instructions": (
+                        "The user enabled live web search for this turn. You "
+                        "have access to a web_search tool. Use it only when "
+                        "the corpus chunks do not contain enough current or "
+                        "external information. Search with the user's wording "
+                        "or a concise refinement, and cite URLs when using "
+                        "web facts."
+                    ),
+                    "auto_selected": True,
+                }
+            )
         if active_skills_dicts:
             logger.info(
                 "Skills active: %s",
@@ -561,6 +587,8 @@ class ChatOrchestrator:
                     "…" if len(inst) > 400 else "",
                 )
         active_tool_names: list[str] = [t.name for t in tools_loaded]
+        if web_search_enabled:
+            active_tool_names.append("web_search")
         # Cache the loaded tools so _load_tools below doesn't repeat the
         # Mongo round-trip. Stash on `request` (mutates the Pydantic model
         # via __dict__ since it's the simplest hand-off; the field isn't
@@ -621,8 +649,9 @@ class ChatOrchestrator:
         # a /code-* skill manually. The skill flows through the standard
         # active_skills_dicts envelope — no special rendering path.
         from services.code_lane_skills import maybe_inject_code_skill
+        skill_count_before_code_lane = len(active_skills_dicts)
         active_skills_dicts = maybe_inject_code_skill(sources, active_skills_dicts)
-        if active_skills_dicts and len(active_skills_dicts) > len(skills_loaded):
+        if active_skills_dicts and len(active_skills_dicts) > skill_count_before_code_lane:
             auto = active_skills_dicts[-1]
             if auto.get("auto_selected"):
                 logger.info("Code lane: auto-injected skill %s", auto["name"])
@@ -749,6 +778,7 @@ class ChatOrchestrator:
         # === START ReAct LOOP ===
         MAX_TOOL_CALLS = 5
         tool_call_count = 0
+        react_messages: list[dict] = []
 
         # Persist the RAW user message, not the RAG-augmented one. The object
         # `user_message.content` was overwritten above with the full augmented
@@ -812,6 +842,8 @@ class ChatOrchestrator:
                             "content": content_blocks,
                         }
                         break
+            if react_messages:
+                message_dicts.extend(react_messages)
 
             assistant_content = ""
             assistant_thinking = ""
@@ -890,7 +922,7 @@ class ChatOrchestrator:
 
             # If we have tool calls, execute them
             tool_call_count += len(tool_calls)
-            tool_results = await self._execute_tools(tool_calls, tools)
+            tool_results = await self._execute_tools(tool_calls, tools, request)
 
             # Emit tool results — paired 1:1 with the start event
             yield build_sse_chunk(
@@ -910,8 +942,55 @@ class ChatOrchestrator:
             )
 
             # Append tool results to message history and continue loop
-            for result in tool_results:
-                trimmed_messages.append(ChatMessage(role="tool", content=result))
+            assistant_tool_calls: list[dict] = []
+            for i, call in enumerate(tool_calls):
+                call_id = call.get("id") or f"call_{tool_call_count}_{i}"
+                fn = call.get("function") or {}
+                assistant_tool_calls.append(
+                    {
+                        "id": call_id,
+                        "type": call.get("type") or "function",
+                        "function": {
+                            "name": fn.get("name") or "",
+                            "arguments": fn.get("arguments") or "{}",
+                        },
+                    }
+                )
+            react_messages.append(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": assistant_tool_calls,
+                }
+            )
+            for i, (call, result) in enumerate(zip(tool_calls, tool_results)):
+                fn = call.get("function") or {}
+                react_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": (
+                            call.get("id")
+                            or assistant_tool_calls[min(i, len(assistant_tool_calls) - 1)][
+                                "id"
+                            ]
+                        ),
+                        "name": fn.get("name") or "",
+                        "content": result,
+                    }
+                )
+
+            pending_tool_sources = getattr(request, "_pending_tool_sources", [])
+            if pending_tool_sources:
+                sources = [*sources, *pending_tool_sources]
+                chunks_returned = len(sources)
+                object.__setattr__(request, "_pending_tool_sources", [])
+                yield build_sse_chunk(
+                    ChatChunk(
+                        type="sources",
+                        sources=sources,
+                        conversation_id=str(conversation_id),
+                    )
+                )
 
         # === END ReAct LOOP ===
 
@@ -1489,12 +1568,18 @@ class ChatOrchestrator:
         the result on `request._tools_preloaded`. We reuse it here instead
         of issuing a duplicate Mongo round-trip.
         """
-        if not request.selected_tools:
+        web_search_enabled = bool(
+            request.overrides
+            and getattr(request.overrides, "web_search_enabled", None)
+        )
+        if not request.selected_tools and not web_search_enabled:
             return [], []
 
         preloaded = getattr(request, "_tools_preloaded", None)
-        tools = preloaded if preloaded is not None else (
-            await tool_registry.get_tools_by_ids(request.selected_tools)
+        tools = (
+            preloaded
+            if preloaded is not None
+            else await tool_registry.get_tools_by_ids(request.selected_tools or [])
         )
         tool_schemas = [
             {
@@ -1507,25 +1592,126 @@ class ChatOrchestrator:
             }
             for t in tools
         ]
+        if web_search_enabled:
+            tool_schemas.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "description": (
+                            "Search the live web when the corpus chunks do not "
+                            "contain enough current or external information. "
+                            "Use the user's exact query or a concise refinement. "
+                            "Returns titles, URLs, and snippets."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "The web search query to run.",
+                                },
+                                "max_results": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 4,
+                                    "description": "Maximum number of web results.",
+                                },
+                            },
+                            "required": ["query"],
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+            )
         return tools, tool_schemas
 
-    async def _execute_tools(self, tool_calls: list, tools: list) -> list[str]:
+    async def _execute_tools(
+        self,
+        tool_calls: list,
+        tools: list,
+        request: ChatRequest | None = None,
+    ) -> list[str]:
         """Execute tool calls and return results."""
         results = []
         for call in tool_calls:
             tool_name = call.get("function", {}).get("name")
+            try:
+                args = json.loads(call.get("function", {}).get("arguments", "{}"))
+            except Exception as e:
+                results.append(f"Error parsing tool arguments for {tool_name}: {e}")
+                continue
+
+            if tool_name == "web_search":
+                results.append(await self._execute_web_search_tool(args, request))
+                continue
+
             tool = next((t for t in tools if t.name == tool_name), None)
             if not tool:
                 results.append(f"Error: Tool '{tool_name}' not found.")
                 continue
 
             try:
-                args = json.loads(call.get("function", {}).get("arguments", "{}"))
                 result = tool_registry.execute_tool(tool.code, tool.name, args)
                 results.append(str(result))
             except Exception as e:
                 results.append(f"Error executing tool {tool_name}: {e}")
         return results
+
+    async def _execute_web_search_tool(
+        self,
+        args: dict,
+        request: ChatRequest | None = None,
+    ) -> str:
+        query = " ".join(str(args.get("query") or "").split()).strip()
+        if not query:
+            return json.dumps({"error": "query is required"})
+        try:
+            max_results = int(args.get("max_results") or 4)
+        except (TypeError, ValueError):
+            max_results = 4
+        max_results = max(1, min(max_results, 4))
+
+        try:
+            from services.web_freshness import (
+                live_web_search,
+                web_hits_to_source_chunks,
+            )
+
+            hits = await live_web_search._search_searxng(query[:300])
+            hits = hits[:max_results]
+            chunks = web_hits_to_source_chunks(
+                hits,
+                search_query=query[:300],
+                max_chars=1600,
+            )
+            if request is not None and chunks:
+                pending = list(getattr(request, "_pending_tool_sources", []) or [])
+                pending.extend(chunks)
+                object.__setattr__(request, "_pending_tool_sources", pending)
+
+            return json.dumps(
+                {
+                    "query": query[:300],
+                    "results": [
+                        {
+                            "title": hit.title,
+                            "url": hit.url,
+                            "snippet": hit.snippet[:700],
+                            "published_date": hit.published_date,
+                        }
+                        for hit in hits
+                    ],
+                    "note": (
+                        "Use these only when relevant. Cite the URL for any "
+                        "claim that depends on web results."
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        except Exception as e:
+            logger.warning("web_search tool failed: %s", e)
+            return json.dumps({"error": f"web_search failed: {e}"})
 
 
 # Global instance

@@ -2,7 +2,7 @@
 // Phase 24: agentic toggle KILLED. Tool selection itself activates the
 // ReAct loop; auto-fallback to the agentic pool entry happens silently
 // when the chat model can't tool-call. Reasoning Cascade added.
-import { Brain, Telescope } from "lucide-react";
+import { Brain, Globe2, Telescope } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useQueryModelPoolStore } from "../../stores/queryModelPoolStore";
 import { ActivatorSelector } from "./ActivatorSelector";
@@ -15,6 +15,8 @@ export function ToggleBar({ className = "" }: ToggleBarProps) {
   const {
     hydeEnabled,
     toggleHyDE,
+    webSearchEnabled,
+    toggleWebSearch,
     reasoningCascadeEnabled,
     toggleReasoningCascade,
     selectedToolIds,
@@ -56,6 +58,15 @@ export function ToggleBar({ className = "" }: ToggleBarProps) {
         isActive={reasoningCascadeEnabled}
         onClick={toggleReasoningCascade}
         activeColor="bg-accent-secondary"
+      />
+
+      <ToggleButton
+        icon={Globe2}
+        label="Web"
+        description="Opt in to live web context through local SearXNG for this chat turn"
+        isActive={webSearchEnabled}
+        onClick={toggleWebSearch}
+        activeColor="bg-accent-main"
       />
 
       {selectedToolIds.length > 0 && fallbackLabel && (

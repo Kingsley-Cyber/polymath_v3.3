@@ -34,6 +34,18 @@ for _name, _value in vars(_legacy).items():
         globals()[_name] = _value
 
 
+class ModelOverrides(_legacy.ModelOverrides):
+    """Current per-request override shape."""
+
+    web_search_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "When true, this chat turn may append live web results from the "
+            "configured SearXNG instance. Off/None keeps chat corpus-only."
+        ),
+    )
+
+
 class ChatRequest(_legacy.ChatRequest):
     """Current chat request shape.
 
@@ -49,6 +61,10 @@ class ChatRequest(_legacy.ChatRequest):
     reasoning_cascade: bool | None = Field(
         default=None,
         description="Run the optional reasoning-cascade pre-digest for this turn.",
+    )
+    overrides: ModelOverrides | None = Field(
+        default=None,
+        description="Per-request model, retrieval, reasoning, and web-search overrides.",
     )
 
 

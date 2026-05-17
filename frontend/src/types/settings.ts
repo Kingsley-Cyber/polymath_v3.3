@@ -278,6 +278,7 @@ export interface RAGSettings {
   graphFinalSources: number;
   graphReranker: boolean;
   hydeEnabled: boolean;
+  webSearchEnabled: boolean;
   rerankingEnabled: boolean;
   /** Phase 15 — one of the 12 curated mode keys (see REASONING_MODES). */
   reasoningMode: string;

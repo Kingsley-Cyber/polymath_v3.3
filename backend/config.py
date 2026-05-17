@@ -602,6 +602,71 @@ class Settings(BaseSettings):
             "None / False, base decoration unchanged."
         ),
     )
+    LIVE_WEB_SEARCH_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Server capability for the opt-in chat Web toggle. When the user "
+            "enables Web for a turn, chat may append bounded SearXNG results "
+            "as additive context. False disables the lane globally."
+        ),
+    )
+    SEARXNG_URL: str = Field(
+        default="http://localhost:8080",
+        description="Base URL for the SearXNG instance used by opt-in chat web search.",
+    )
+    SEARXNG_ENGINES: str = Field(
+        default="google,bing,duckduckgo,brave",
+        description="Comma-separated SearXNG engines requested for opt-in chat web search.",
+    )
+    SEARXNG_TIMEOUT_SECONDS: float = Field(
+        default=6.0,
+        ge=1.0,
+        le=30.0,
+        description="HTTP timeout for the opt-in chat SearXNG request.",
+    )
+    LIVE_WEB_SEARCH_MAX_RESULTS: int = Field(
+        default=4,
+        ge=1,
+        le=10,
+        description="Maximum live-web search results appended to one chat turn.",
+    )
+    LIVE_WEB_QUERY_EXPANSION_TIMEOUT_SECONDS: float = Field(
+        default=2.0,
+        ge=0.25,
+        le=10.0,
+        description=(
+            "Best-effort time budget for borrowing graph-query-associated "
+            "concept terms to improve the opt-in live-web search query."
+        ),
+    )
+    LIVE_WEB_SEARCH_FETCH_FULL_PAGES: bool = Field(
+        default=False,
+        description=(
+            "When true and OBSCURA_COMMAND is configured, fetch top live-web "
+            "results with Obscura and inject rendered markdown instead of "
+            "search snippets. Disabled by default to avoid a hard dependency."
+        ),
+    )
+    OBSCURA_COMMAND: str = Field(
+        default="",
+        description=(
+            "Optional Obscura CLI command path. When set with "
+            "LIVE_WEB_SEARCH_FETCH_FULL_PAGES=true, Polymath runs "
+            "`obscura fetch <url> --dump markdown` for top search results."
+        ),
+    )
+    OBSCURA_TIMEOUT_SECONDS: float = Field(
+        default=10.0,
+        ge=2.0,
+        le=60.0,
+        description="Wall-clock timeout for one optional Obscura page fetch.",
+    )
+    OBSCURA_MAX_CHARS: int = Field(
+        default=4000,
+        ge=500,
+        le=20000,
+        description="Maximum rendered markdown characters kept per Obscura result.",
+    )
     GRAPHIFY_AUGMENT_CODE_LANE: bool = Field(
         default=False,
         description=(
