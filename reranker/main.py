@@ -1,23 +1,28 @@
 """
-Reranker service — sentence-transformers cross-encoder
-Replaces llama.cpp approach (incompatible with BERT cross-encoders)
-Model: cross-encoder/ms-marco-MiniLM-L6-v2
+Reranker service — sentence-transformers CrossEncoder sidecar.
+
+Default model: Qwen/Qwen3-Reranker-0.6B. Override with RERANKER_MODEL or
+MODEL_PATH. The wire API remains stable so backend retrieval logic keeps using
+the same /rerank contract regardless of the loaded model.
 """
 
-import os
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import List
 
+import torch
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sentence_transformers import CrossEncoder
-import torch
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MODEL_PATH = os.getenv("MODEL_PATH", "/models/ms-marco-MiniLM-L6-v2")
+DEFAULT_RERANKER_MODEL = "Qwen/Qwen3-Reranker-0.6B"
+MODEL_PATH = (
+    os.getenv("RERANKER_MODEL") or os.getenv("MODEL_PATH") or DEFAULT_RERANKER_MODEL
+)
 REQUESTED_DEVICE = os.getenv("RERANKER_DEVICE", "auto").strip().lower()
 
 model: CrossEncoder = None
@@ -56,7 +61,9 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             last_self_test_error = str(exc)
             errors.append(f"{device}: {exc}")
-            logger.exception("Reranker failed on %s; trying fallback if available", device)
+            logger.exception(
+                "Reranker failed on %s; trying fallback if available", device
+            )
             if device == "cuda" and torch.cuda.is_available():
                 try:
                     torch.cuda.empty_cache()
@@ -121,6 +128,17 @@ def health():
     }
 
 
+@app.get("/info")
+def info():
+    """Return model metadata so orchestrators can verify the loaded model
+    and score scale without triggering a forward pass.
+    """
+    return {
+        "model": MODEL_PATH,
+        "score_scale": "cosine" if "cosine" in MODEL_PATH.lower() else "logit",
+    }
+
+
 @app.post("/rerank", response_model=RerankResponse)
 def rerank(req: RerankRequest):
     if model is None:
@@ -133,10 +151,15 @@ def rerank(req: RerankRequest):
         scores = model.predict(pairs).tolist()
     except Exception as exc:
         logger.exception("Reranker prediction failed")
-        raise HTTPException(status_code=503, detail=f"Reranker prediction failed: {exc}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"Reranker prediction failed: {exc}"
+        ) from exc
 
     ranked = sorted(
-        [{"index": i, "score": scores[i], "text": req.documents[i]} for i in range(len(req.documents))],
+        [
+            {"index": i, "score": scores[i], "text": req.documents[i]}
+            for i in range(len(req.documents))
+        ],
         key=lambda x: x["score"],
         reverse=True,
     )

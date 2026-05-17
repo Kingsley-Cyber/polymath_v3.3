@@ -1,16 +1,16 @@
 """
 Reranker client — HTTP wrapper for the reranker sidecar.
 
-Sidecar: cross-encoder/ms-marco-MiniLM-L6-v2 at http://reranker:8080/rerank.
+Sidecar: sentence-transformers CrossEncoder at http://reranker:8080/rerank.
 Falls back to score-sort if the service is unavailable.
 
-Phase 4.5 — code-chunk bypass. The MS MARCO cross-encoder is trained on
-prose Q&A and systematically demotes code-shaped chunks (Luau function
-bodies look like noise to its scoring head). When `RERANKER_BYPASS_CODE`
-is on, the pool is partitioned: prose chunks go through the cross-encoder
-as before, code chunks keep their pre-rerank scores (vector + BM25 fused).
-Both halves are min-max normalized to [0,1] independently before merge
-so the cross-encoder's wider score range doesn't crowd code out.
+Phase 4.5 — code-chunk bypass. Some prose-oriented cross-encoders demote
+code-shaped chunks (Luau function bodies look like noise to the scoring head).
+When `RERANKER_BYPASS_CODE` is on, the pool is partitioned: prose chunks go
+through the cross-encoder, code chunks keep their pre-rerank scores
+(vector + BM25 fused). Both halves are min-max normalized to [0,1]
+independently before merge so the cross-encoder's wider score range does not
+crowd code out.
 """
 import logging
 from typing import List
@@ -46,8 +46,39 @@ def _minmax_inplace(pool: List[SourceChunk]) -> None:
         c.score = (c.score - lo) / span
 
 
+def _ranked_chunks_from_response(
+    pool: List[SourceChunk],
+    data: dict,
+) -> List[SourceChunk]:
+    """Convert supported reranker sidecar response shapes into ranked chunks.
+
+    Docker sentence-transformers sidecar:
+      {"results": [{"index": 0, "score": 7.1, "text": "..."}]}
+
+    Apple MLX scaffold:
+      {"scores": [0.91, 0.12, ...]}  # aligned to input documents
+    """
+    if isinstance(data.get("results"), list):
+        reranked: list[SourceChunk] = []
+        for item in data["results"]:
+            chunk = pool[int(item["index"])].model_copy()
+            chunk.score = float(item["score"])
+            reranked.append(chunk)
+        return reranked
+
+    if isinstance(data.get("scores"), list):
+        scored: list[SourceChunk] = []
+        for index, score in enumerate(data["scores"][: len(pool)]):
+            chunk = pool[index].model_copy()
+            chunk.score = float(score)
+            scored.append(chunk)
+        return sorted(scored, key=lambda c: c.score, reverse=True)
+
+    raise ValueError("Unsupported reranker response shape")
+
+
 class RerankerService:
-    """HTTP client for the ms-marco cross-encoder reranker sidecar."""
+    """HTTP client for the configured cross-encoder reranker sidecar."""
 
     def __init__(self) -> None:
         self._settings = get_settings()
@@ -134,12 +165,7 @@ class RerankerService:
                 resp.raise_for_status()
                 data = resp.json()
 
-            reranked: list[SourceChunk] = []
-            for item in data["results"]:
-                chunk = pool[item["index"]].model_copy()
-                chunk.score = float(item["score"])
-                reranked.append(chunk)
-            return reranked
+            return _ranked_chunks_from_response(pool, data)
 
         except Exception as exc:
             logger.warning(

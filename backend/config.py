@@ -160,6 +160,24 @@ class Settings(BaseSettings):
         default="http://reranker:8080",
         description="Reranker service URL (sentence-transformers cross-encoder)",
     )
+    RERANKER_MODEL: str = Field(
+        default="Qwen/Qwen3-Reranker-0.6B",
+        description="Reranker model loaded by the local sidecar.",
+    )
+    RERANKER_SCORE_SCALE: Literal["logit", "cosine", "probability"] = Field(
+        default="logit",
+        description=(
+            "Score scale returned by the reranker. logit supports negative "
+            "low-confidence thresholds; cosine/probability are bounded 0..1."
+        ),
+    )
+    RERANKER_LOW_CONFIDENCE_THRESHOLD: float = Field(
+        default=-2.5,
+        description=(
+            "Top-score cutoff for dropping unrelated rerank results when "
+            "RERANKER_SCORE_SCALE=logit and no query terms overlap."
+        ),
+    )
     LOCAL_RERANKER_ENABLED: bool = Field(
         default=False,
         description="Whether the local Docker reranker profile is expected to be running.",
@@ -522,14 +540,13 @@ class Settings(BaseSettings):
     RERANKER_BYPASS_CODE: bool = Field(
         default=True,
         description=(
-            "Code-aware reranking. The default cross-encoder "
-            "(ms-marco-MiniLM-L6-v2) is prose-trained and systematically "
-            "demotes code-shaped chunks. When True, chunks with chunk_kind=code "
+            "Code-aware reranking. Some cross-encoders systematically demote "
+            "code-shaped chunks. When True, chunks with chunk_kind=code "
             "(detected via the `language` field) bypass the cross-encoder and "
             "keep their pre-rerank score; prose chunks are reranked normally. "
             "Both pools are min-max normalized before merge so neither side "
             "crowds the other out. Flip False if you swap to a code-aware "
-            "reranker like jinaai/jina-reranker-v2-base-code."
+            "reranker and live probes show code scores are reliable."
         ),
     )
     RETRIEVAL_GRAPH_RERANK_ENABLED: bool = Field(

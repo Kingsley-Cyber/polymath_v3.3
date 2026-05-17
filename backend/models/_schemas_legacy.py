@@ -579,7 +579,7 @@ class RetrievalSettings(BaseModel):
     )
     top_k_child: int = Field(default=60, ge=1, le=100)
     top_k_summary: int = Field(default=20, ge=0, le=100)
-    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
+    reranker_model: str = "Qwen/Qwen3-Reranker-0.6B"
     rerank_top_n: int = Field(default=40, ge=1, le=200)
     rerank_enabled: bool = True
     similarity_threshold: float = Field(default=0.0, ge=0.0, le=1.0)

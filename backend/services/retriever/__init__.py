@@ -59,7 +59,6 @@ settings = get_settings()
 _PER_CORPUS_LIMIT = 20   # spec: 20 per corpus for round-robin
 _SINGLE_CORPUS_LIMIT = 40  # spec §5.9a: retrieve 40 pre-rerank for single-corpus
 _DEFAULT_SUMMARY_LIMIT = 20
-_LOW_CONFIDENCE_RERANK_SCORE = -2.5
 
 
 def _unwrap_funnel_result(
@@ -157,18 +156,28 @@ def _should_drop_low_confidence_rerank(
     ranking_query: str,
     *,
     rerank_enabled: bool,
+    score_scale: str | None = None,
+    low_confidence_threshold: float | None = None,
 ) -> bool:
     """Drop reranked results when the whole pool looks unrelated.
 
-    The ms-marco cross-encoder returns raw logits. Strongly negative top scores
-    are a useful "this is probably irrelevant" signal. We only act on that
-    signal when none of the top candidates contains a meaningful term from the
-    original user query, which preserves exact-match/file-heading retrieval.
+    Raw-logit cross-encoders can use strongly negative top scores as a useful
+    "probably irrelevant" signal. Bounded score scales such as cosine or
+    probability cannot use the same threshold, so this guard is disabled for
+    those providers and term overlap + ordinary ranking handles selection.
     """
     if not rerank_enabled or not ranked:
         return False
+    scale = (score_scale or settings.RERANKER_SCORE_SCALE or "logit").lower()
+    if scale != "logit":
+        return False
+    threshold = (
+        low_confidence_threshold
+        if low_confidence_threshold is not None
+        else settings.RERANKER_LOW_CONFIDENCE_THRESHOLD
+    )
     top_score = ranked[0].score
-    if top_score > _LOW_CONFIDENCE_RERANK_SCORE:
+    if top_score > threshold:
         return False
     return not _has_query_term_overlap(ranked[:10], ranking_query)
 
@@ -1080,6 +1089,8 @@ class RetrieverOrchestrator:
             ranked,
             rank_query,
             rerank_enabled=rerank_enabled,
+            score_scale=settings.RERANKER_SCORE_SCALE,
+            low_confidence_threshold=settings.RERANKER_LOW_CONFIDENCE_THRESHOLD,
         ):
             counts["low_confidence_dropped"] = len(ranked)
             logger.info(

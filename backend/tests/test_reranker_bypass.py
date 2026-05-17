@@ -19,7 +19,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from services.reranker import RerankerService, _is_code_chunk, _minmax_inplace
+from services.reranker import (
+    RerankerService,
+    _is_code_chunk,
+    _minmax_inplace,
+    _ranked_chunks_from_response,
+)
 from models.schemas import SourceChunk
 
 
@@ -73,6 +78,27 @@ def test_minmax_inplace_single_element():
     pool = [_chunk(score=0.42)]
     _minmax_inplace(pool)
     assert pool[0].score == 1.0  # single → collapsed to top
+
+
+# ─── Sidecar response shape adapters ───────────────────────────────────────
+
+def test_ranked_chunks_from_results_response():
+    pool = [_chunk(chunk_id="a"), _chunk(chunk_id="b")]
+    out = _ranked_chunks_from_response(
+        pool,
+        {"results": [{"index": 1, "score": 7.5}, {"index": 0, "score": -2.0}]},
+    )
+
+    assert [c.chunk_id for c in out] == ["b", "a"]
+    assert [c.score for c in out] == [7.5, -2.0]
+
+
+def test_ranked_chunks_from_scores_response_sorts_for_mlx_shape():
+    pool = [_chunk(chunk_id="a"), _chunk(chunk_id="b"), _chunk(chunk_id="c")]
+    out = _ranked_chunks_from_response(pool, {"scores": [0.2, 0.9, 0.1]})
+
+    assert [c.chunk_id for c in out] == ["b", "a", "c"]
+    assert [c.score for c in out] == [0.9, 0.2, 0.1]
 
 
 # ─── RerankerService.rerank ─────────────────────────────────────────────────

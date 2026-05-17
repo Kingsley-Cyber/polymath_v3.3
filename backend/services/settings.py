@@ -129,7 +129,7 @@ class SettingsService:
                 default_tier="qdrant_mongo",
                 top_k_child=60,
                 top_k_summary=20,
-                reranker_model="cross-encoder/ms-marco-MiniLM-L6-v2",
+                reranker_model=c.RERANKER_MODEL,
                 rerank_top_n=40,
                 rerank_enabled=True,
                 similarity_threshold=0.0,
