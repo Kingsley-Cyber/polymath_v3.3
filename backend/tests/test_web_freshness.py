@@ -1,6 +1,7 @@
 from services.web_freshness import (
     build_search_query,
     parse_searxng_results,
+    refine_tool_search_query,
     select_related_search_terms,
     web_hits_to_source_chunks,
 )
@@ -23,6 +24,24 @@ def test_search_query_ignores_graph_related_terms_when_supplied():
     )
 
     assert query == "the narrative constructions and chatroom data concepts"
+
+
+def test_refine_tool_search_query_replaces_tiny_ambiguous_query():
+    query = refine_tool_search_query(
+        "small",
+        "what is the current way ahead for AI small language models on mobile RAG",
+    )
+
+    assert query == "what is the current way ahead for AI small language models on mobile RAG"
+
+
+def test_refine_tool_search_query_preserves_user_acronyms():
+    query = refine_tool_search_query(
+        "on-device language model deployment mobile",
+        "what is the current way ahead for AI small language models on mobile RAG",
+    )
+
+    assert query == "on-device language model deployment mobile AI RAG"
 
 
 def test_related_search_terms_are_bounded_and_deduped():

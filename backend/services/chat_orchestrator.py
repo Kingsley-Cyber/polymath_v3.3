@@ -616,8 +616,9 @@ class ChatOrchestrator:
                         "have access to a web_search tool. Use it only when "
                         "the corpus chunks do not contain enough current or "
                         "external information. Search with the user's wording "
-                        "or a concise refinement, and cite URLs when using "
-                        "web facts."
+                        "or a concise refinement that preserves the user's "
+                        "technical anchors and acronyms. Do not search a "
+                        "single ambiguous word. Cite URLs when using web facts."
                     ),
                     "auto_selected": True,
                 }
@@ -1750,7 +1751,9 @@ class ChatOrchestrator:
                         "description": (
                             "Search the live web when the corpus chunks do not "
                             "contain enough current or external information. "
-                            "Use the user's exact query or a concise refinement. "
+                            "Use the user's exact query or a concise refinement "
+                            "that preserves the user's technical anchors and "
+                            "acronyms. Do not search isolated generic words. "
                             "Returns titles, URLs, and snippets."
                         ),
                         "parameters": {
@@ -1829,9 +1832,14 @@ class ChatOrchestrator:
         try:
             from services.web_freshness import (
                 live_web_search,
+                refine_tool_search_query,
                 web_hits_to_source_chunks,
             )
 
+            query = refine_tool_search_query(
+                query,
+                request.message if request is not None else None,
+            )
             hits = await live_web_search._search_searxng(query[:300])
             hits = hits[:max_results]
             chunks = web_hits_to_source_chunks(

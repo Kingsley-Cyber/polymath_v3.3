@@ -249,6 +249,48 @@ def build_search_query(
     return base[:300]
 
 
+def refine_tool_search_query(
+    tool_query: str,
+    original_query: str | None = None,
+) -> str:
+    """Keep model-authored web queries anchored to the user's actual ask.
+
+    This does not filter results or rewrite good refinements. It only catches
+    the failure mode where the model sends a tiny ambiguous query such as
+    "small" or "on device" for a richer user question.
+    """
+    tool_query = re.sub(r"\s+", " ", str(tool_query or "").strip())
+    original_query = re.sub(r"\s+", " ", str(original_query or "").strip())
+
+    if not original_query:
+        return tool_query[:300]
+    if not tool_query:
+        return original_query[:300]
+
+    tool_tokens = _term_tokens(tool_query)
+    original_tokens = _term_tokens(original_query)
+    if not original_tokens:
+        return tool_query[:300]
+
+    # If the model over-compresses a rich question into a short fragment, use
+    # the original wording. SearXNG is especially prone to brand/dictionary
+    # hits on fragments like "small" and "on".
+    if len(tool_tokens) <= 2 and len(original_tokens) >= 4:
+        return original_query[:300]
+
+    # Preserve important acronyms from the user's question. If the user asks
+    # about RAG/SLMs/FTS5/etc., the search query should keep those anchors.
+    acronyms = [
+        token
+        for token in re.findall(r"\b[A-Z][A-Z0-9.+#-]{1,}\b", original_query)
+        if token.lower() not in {t.lower() for t in tool_tokens}
+    ]
+    if acronyms:
+        tool_query = f"{tool_query} {' '.join(acronyms[:4])}"
+
+    return tool_query[:300]
+
+
 def _valid_web_url(url: str) -> bool:
     try:
         parsed = urlparse(url)
