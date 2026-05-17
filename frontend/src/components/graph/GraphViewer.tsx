@@ -18,7 +18,6 @@ import {
   useRef,
   useState,
 } from "react";
-import ReactMarkdown from "react-markdown";
 import {
   Loader2,
   Maximize2,
@@ -34,6 +33,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import {
   polymathToGraphology,
   type ColorMode,
+  type GraphLodMode,
 } from "../../lib/polymath-graph-adapter";
 import { cleanBookLabel } from "../../lib/label-utils";
 import { BrainViewDashboard, type DashboardTab } from "./BrainViewDashboard";
@@ -66,7 +66,42 @@ interface GraphViewerProps {
    *  the Graph Query tab. Parent typically closes the modal and loads
    *  the text into the chat input. */
   onSendToChat?: (text: string) => void;
+  onOpenAtomic?: (text: string, mode?: GraphSynthesisMode) => void;
 }
+
+type GraphPayload = {
+  nodes: any[];
+  links: any[];
+  lodMode?: GraphLodMode;
+  rawNodeCount?: number;
+  rawEdgeCount?: number;
+};
+
+export type RenderedGraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  sourceLabel: string;
+  targetLabel: string;
+  predicate?: string;
+  relationFamily?: string | null;
+  dominantRelationFamily?: string | null;
+  confidence?: number;
+  weight?: number;
+  sharedEntities?: number;
+  topSharedEntities?: string[];
+  sourceDocId?: string;
+  targetDocId?: string;
+  color?: string;
+};
+
+type RenderedGraphStats = {
+  visibleNodes: number;
+  totalNodes: number;
+  visibleEdges: number;
+  totalEdges: number;
+  lodMode?: GraphLodMode;
+};
 
 // Books-as-clusters drill: we only ever drill into a book (no concept-
 // community drill anymore — that was the domains mode that's been retired).
@@ -86,10 +121,7 @@ function useBrainGraph(
   corpusIds: string[],
   drill: DrillFrame | null,
 ) {
-  const [data, setData] = useState<{
-    nodes: any[];
-    links: any[];
-  } | null>(null);
+  const [data, setData] = useState<GraphPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cacheWarming, setCacheWarming] = useState<string[]>([]);
@@ -225,6 +257,9 @@ function useBrainGraph(
         setData({
           nodes: dedupedNodes,
           links: [...memberEdges, ...intraEdges, ...bridgeEdges],
+          lodMode: "satellites",
+          rawNodeCount: dedupedNodes.length,
+          rawEdgeCount: memberEdges.length + intraEdges.length + bridgeEdges.length,
         });
         setCacheWarming([]);
         return;
@@ -242,14 +277,92 @@ function useBrainGraph(
       const sortedDocs = [...bv.documents].sort(
         (a, b) => (b.bridge_count || 0) - (a.bridge_count || 0),
       );
+      const docById = new Map(sortedDocs.map((d) => [d.doc_id, d]));
+      const lodMode: GraphLodMode =
+        sortedDocs.length >= 5000
+          ? "clusters"
+          : sortedDocs.length >= 1000
+            ? "books"
+            : "satellites";
       const topN = adaptiveTopN(sortedDocs.length);
+
+      if (lodMode === "clusters") {
+        const corpusGroups = new Map<string, any>();
+        for (const d of sortedDocs) {
+          const g =
+            corpusGroups.get(d.corpus_id) ||
+            {
+              id: `corpus:${d.corpus_id}`,
+              display_name: `Corpus ${d.corpus_id.slice(0, 8)}`,
+              label: d.corpus_id.slice(0, 8),
+              supernode_type: "domain",
+              source_corpus: d.corpus_id,
+              source_corpora: [d.corpus_id],
+              mention_count: 0,
+              bridge_count: 0,
+              entity_count: 0,
+              top_entities: [] as string[],
+              forceLabel: true,
+            };
+          g.mention_count += 1;
+          g.bridge_count += d.bridge_count || 0;
+          g.entity_count += d.entity_count || 0;
+          g.top_entities = Array.from(
+            new Set([...(g.top_entities || []), ...(d.top_entities || [])]),
+          ).slice(0, 10);
+          corpusGroups.set(d.corpus_id, g);
+        }
+
+        const aggregate = new Map<string, any>();
+        for (const b of bv.bridges || []) {
+          const source = b.source_corpus_id;
+          const target = b.target_corpus_id;
+          if (!source || !target || source === target) continue;
+          const key = [source, target].sort().join("::");
+          const prev =
+            aggregate.get(key) ||
+            {
+              source: `corpus:${source}`,
+              target: `corpus:${target}`,
+              predicate: "bridges_to",
+              weight: 0,
+              shared_entities: 0,
+              confidence: 0,
+              dominant_relation_family: b.dominant_relation_family,
+              top_shared_entities: [] as string[],
+            };
+          prev.weight += b.strength || 0;
+          prev.shared_entities += b.shared_entities || 0;
+          prev.confidence = Math.max(
+            prev.confidence || 0,
+            Math.min(1, (b.shared_entities || 0) / 12),
+          );
+          prev.top_shared_entities = Array.from(
+            new Set([
+              ...(prev.top_shared_entities || []),
+              ...(b.top_shared_entities || []),
+            ]),
+          ).slice(0, 3);
+          aggregate.set(key, prev);
+        }
+
+        setData({
+          nodes: Array.from(corpusGroups.values()),
+          links: Array.from(aggregate.values()),
+          lodMode,
+          rawNodeCount: sortedDocs.length,
+          rawEdgeCount: bv.bridges.length,
+        });
+        setCacheWarming([]);
+        return;
+      }
 
       // Octopus / spotlight mode. The top SPOTLIGHT_COUNT docs by bridge
       // count grow satellites (orbiting Entity nodes). The long tail stays
       // as plain head-only anchors so the canvas doesn't drown in dots.
       // 100 docs × 8 satellites = 800 satellite nodes max — well within
       // sigma's smooth-render budget.
-      const SPOTLIGHT_COUNT = 100;
+      const SPOTLIGHT_COUNT = lodMode === "satellites" ? 100 : 0;
       const SAT_ORBIT_R = 28; // initial orbit radius (FA2 will adjust)
 
       const anchorNodes: any[] = [];
@@ -345,10 +458,23 @@ function useBrainGraph(
         // users see what links two books without clicking.
         top_shared_entities: b.top_shared_entities || [],
         shared_entities: b.shared_entities,
+        source_doc_id: b.source,
+        target_doc_id: b.target,
+        source_label:
+          docById.get(b.source)?.filename ||
+          docById.get(b.source)?.label ||
+          b.source.slice(0, 8),
+        target_label:
+          docById.get(b.target)?.filename ||
+          docById.get(b.target)?.label ||
+          b.target.slice(0, 8),
       }));
       setData({
         nodes: [...anchorNodes, ...satelliteNodes],
         links: [...bridgeLinks, ...satelliteEdges],
+        lodMode,
+        rawNodeCount: sortedDocs.length,
+        rawEdgeCount: bv.bridges.length,
       });
       setCacheWarming([]);
     } catch (e) {
@@ -453,7 +579,7 @@ function useQueryGraph(
   const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "error">(
     "idle",
   );
-  const [data, setData] = useState<{ nodes: any[]; links: any[] } | null>(null);
+  const [data, setData] = useState<GraphPayload | null>(null);
   const [seedIds, setSeedIds] = useState<Set<string>>(new Set());
   const [hubIds, setHubIds] = useState<Set<string>>(new Set());
   const [bridgeIds, setBridgeIds] = useState<Set<string>>(new Set());
@@ -499,7 +625,12 @@ function useQueryGraph(
           new Set<string>((sub.bridges || []).map((b: any) => String(b.entity_id))),
         );
         setGaps(sub.gaps || []);
-        setData({ nodes: sub.nodes || [], links: sub.links || [] });
+        setData({
+          nodes: sub.nodes || [],
+          links: sub.links || [],
+          rawNodeCount: (sub.nodes || []).length,
+          rawEdgeCount: (sub.links || []).length,
+        });
         setPhase("ready");
         const synth = await synthP;
         if (cancel) return;
@@ -556,19 +687,13 @@ export function GraphViewer({
   onQueryPhaseChange,
   model,
   onSendToChat,
+  onOpenAtomic,
 }: GraphViewerProps) {
-  const [colorMode, setColorMode] = useState<ColorMode>("community");
+  const colorMode: ColorMode = "community";
   const [drillStack, setDrillStack] = useState<DrillFrame[]>([]);
   const [hoveredName, setHoveredName] = useState<string | null>(null);
   // Pt 5: right sidebar dashboard collapse state.
   const [dashboardCollapsed, setDashboardCollapsed] = useState(false);
-  // Pt 6: bridge filter knobs (driven by dashboard sliders). Defaults match
-  // the Pt 5 hardcoded behavior so the canvas looks the same on load.
-  const [minBridgeStrength, setMinBridgeStrength] = useState(2);
-  const [maxBridgesPerBook, setMaxBridgesPerBook] = useState(3);
-  // Pt 6: re-settle FA2 layout briefly after the user releases a dragged
-  // node. Off by default; user toggles in the Layout section of the dashboard.
-  const [settleAfterDrag, setSettleAfterDrag] = useState(false);
   // Pt 7: tab selection in the sidebar + Agent Search tab's local input.
   // `agentInput` is what the user types; `agentQuery` is what useQueryGraph
   // actually consumes (only promoted when the user hits Run). This way
@@ -587,6 +712,13 @@ export function GraphViewer({
   // runs auditor + editor passes after the draft (2-3× LLM cost).
   // Off by default so the common case stays single-call.
   const [validateSynthesis, setValidateSynthesis] = useState<boolean>(false);
+  const [renderedStats, setRenderedStats] = useState<RenderedGraphStats>({
+    visibleNodes: 0,
+    totalNodes: 0,
+    visibleEdges: 0,
+    totalEdges: 0,
+  });
+  const [renderedEdges, setRenderedEdges] = useState<RenderedGraphEdge[]>([]);
   const drillStackRef = useRef(drillStack);
   drillStackRef.current = drillStack;
 
@@ -643,8 +775,52 @@ export function GraphViewer({
       setHoveredName(found ? String(found.display_name || id) : id);
     },
     onDoubleClickNode: handleDoubleClickNode,
-    settleAfterDrag,
+    settleAfterDrag: false,
   });
+
+  const captureRenderedGraph = useCallback(
+    (graph: ReturnType<typeof polymathToGraphology>, payload: GraphPayload) => {
+      const edges: RenderedGraphEdge[] = [];
+      graph.forEachEdge((edgeId, attrs: any, source, target) => {
+        const sourceAttrs: any = graph.getNodeAttributes(source);
+        const targetAttrs: any = graph.getNodeAttributes(target);
+        edges.push({
+          id: edgeId,
+          source,
+          target,
+          sourceLabel:
+            attrs.source_label ||
+            sourceAttrs.display_name ||
+            sourceAttrs.label ||
+            source,
+          targetLabel:
+            attrs.target_label ||
+            targetAttrs.display_name ||
+            targetAttrs.label ||
+            target,
+          predicate: attrs.predicate,
+          relationFamily: attrs.relation_family,
+          dominantRelationFamily: attrs.dominant_relation_family,
+          confidence: attrs.confidence,
+          weight: attrs.weight,
+          sharedEntities: attrs.shared_entities,
+          topSharedEntities: attrs.top_shared_entities || [],
+          sourceDocId: attrs.source_doc_id,
+          targetDocId: attrs.target_doc_id,
+          color: attrs.color,
+        });
+      });
+      setRenderedEdges(edges);
+      setRenderedStats({
+        visibleNodes: graph.order,
+        totalNodes: payload.nodes.length,
+        visibleEdges: graph.size,
+        totalEdges: payload.links.length,
+        lodMode: payload.lodMode,
+      });
+    },
+    [],
+  );
 
   // Push new data into sigma when it lands.
   useEffect(() => {
@@ -657,47 +833,30 @@ export function GraphViewer({
       seedIds,
       hubIds,
       bridgeIds,
-      minBridgeStrength,
-      maxBridgesPerBook,
+      lodMode: data.lodMode,
     });
+    captureRenderedGraph(newGraph, data);
     sigma.setGraph(newGraph);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run on data change
-  }, [data, mode, q.seedIds, q.hubIds, q.bridgeIds, minBridgeStrength, maxBridgesPerBook]);
-
-  // Apply colorMode toggle without rebuilding graph.
-  useEffect(() => {
-    const sigmaInst = sigma.sigmaRef.current;
-    const g = (sigmaInst as any)?.getGraph?.();
-    if (!sigmaInst || !g || g.order === 0 || !data) return;
-    // Easiest correct path: rebuild the graph with new colorMode. The
-    // adapter is fast enough that this stays under a few ms even for
-    // overview payloads (~80 nodes).
-    const seedIds = mode === "query" ? q.seedIds : new Set<string>();
-    const hubIds = mode === "query" ? q.hubIds : new Set<string>();
-    const bridgeIds = mode === "query" ? q.bridgeIds : new Set<string>();
-    const newGraph = polymathToGraphology(data.nodes, data.links, {
-      colorMode,
-      seedIds,
-      hubIds,
-      bridgeIds,
-      minBridgeStrength,
-      maxBridgesPerBook,
-    });
-    sigma.setGraph(newGraph);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- triggered only on colorMode flip
-  }, [colorMode]);
+  }, [captureRenderedGraph, data, mode, q.seedIds, q.hubIds, q.bridgeIds]);
 
   const selectedId = sigma.selectedNode;
+  const selectedEdge = sigma.selectedEdge;
   const selectedDisplay = useMemo(() => {
     if (!selectedId || !data) return null;
     const found = (data.nodes || []).find((n: any) => String(n.id) === selectedId);
     if (!found) return null;
     return {
+      ...found,
       id: selectedId,
       display_name: String((found as any).display_name || selectedId),
       source_corpora: ((found as any).source_corpora || []) as string[],
     };
   }, [selectedId, data]);
+  const selectedEdgeDisplay = useMemo(
+    () => renderedEdges.find((edge) => edge.id === selectedEdge) || null,
+    [renderedEdges, selectedEdge],
+  );
 
   // ── Render ──
 
@@ -788,67 +947,6 @@ export function GraphViewer({
             className="absolute inset-0 z-10 cursor-grab active:cursor-grabbing"
           />
         </div>
-        {mode === "query" && q.synthesis && (
-          <div className="w-[40%] min-w-[320px] max-w-[640px] border-l border-zinc-900 bg-[#08080d]/90 backdrop-blur overflow-y-auto z-10">
-            <div className="p-4 space-y-3">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono">
-                synthesis
-              </div>
-              <div className="prose prose-invert prose-sm max-w-none">
-                <ReactMarkdown>{q.synthesis.markdown}</ReactMarkdown>
-              </div>
-              {q.synthesis.sources && q.synthesis.sources.length > 0 && (
-                <div className="border-t border-zinc-900 pt-3">
-                  <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono mb-2">
-                    sources ({q.synthesis.sources.length})
-                  </div>
-                  <ol className="text-xs text-zinc-400 space-y-1 list-decimal list-inside">
-                    {q.synthesis.sources.map((s: any, i: number) => (
-                      <li key={s.chunk_id || i} className="truncate" title={s.snippet}>
-                        {s.source_label || s.doc_id || s.chunk_id}
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              )}
-              {q.gaps && q.gaps.length > 0 && (
-                <div className="border-t border-zinc-900 pt-3">
-                  <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono mb-2">
-                    gaps detected ({q.gaps.length})
-                  </div>
-                  <ul className="text-xs text-zinc-400 space-y-1">
-                    {q.gaps.slice(0, 8).map((g: any, i: number) => (
-                      <li key={i}>
-                        <span className="text-zinc-300">{g.entity_a_name}</span>{" "}
-                        ↔{" "}
-                        <span className="text-zinc-300">{g.entity_b_name}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {q.synthesis.perCorpus && q.synthesis.perCorpus.length > 1 && (
-                <details className="border-t border-zinc-900 pt-3">
-                  <summary className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono cursor-pointer">
-                    per-corpus syntheses ({q.synthesis.perCorpus.length})
-                  </summary>
-                  <div className="mt-2 space-y-3">
-                    {q.synthesis.perCorpus.map((p) => (
-                      <div key={p.corpus_id}>
-                        <div className="text-xs font-mono text-amber-400 mb-1">
-                          {p.corpus_id.slice(0, 8)}
-                        </div>
-                        <div className="prose prose-invert prose-sm max-w-none text-zinc-300">
-                          <ReactMarkdown>{p.markdown}</ReactMarkdown>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
-            </div>
-          </div>
-        )}
       </div>{/* end absolute inset-0 flex */}
 
       {/* Bottom-right control cluster — same layout as GitNexus */}
@@ -918,16 +1016,6 @@ export function GraphViewer({
         cacheStatuses={mode === "brain" ? brain.cacheStatuses : {}}
         rebuildingIds={mode === "brain" ? brain.rebuildingIds : new Set()}
         onRebuild={mode === "brain" ? brain.triggerRebuild : async () => {}}
-        colorMode={colorMode}
-        onColorModeToggle={() =>
-          setColorMode((m) => (m === "community" ? "corpus" : "community"))
-        }
-        minBridgeStrength={minBridgeStrength}
-        onMinBridgeStrengthChange={setMinBridgeStrength}
-        maxBridgesPerBook={maxBridgesPerBook}
-        onMaxBridgesPerBookChange={setMaxBridgesPerBook}
-        settleAfterDrag={settleAfterDrag}
-        onSettleAfterDragToggle={() => setSettleAfterDrag((v) => !v)}
         activeTab={activeTab}
         onActiveTabChange={setActiveTab}
         agentQuery={agentInput}
@@ -937,6 +1025,7 @@ export function GraphViewer({
         onSynthesisModeChange={setSynthesisMode}
         validateSynthesis={validateSynthesis}
         onValidateSynthesisChange={setValidateSynthesis}
+        agentSources={q.synthesis?.sources ?? []}
         agentPhase={q.phase}
         agentError={q.error}
         agentSynthesisMarkdown={q.synthesis?.markdown ?? null}
@@ -951,14 +1040,19 @@ export function GraphViewer({
           .map((n: any) => String(n.display_name || n.id))}
         agentGaps={q.gaps as any}
         onSendToChat={onSendToChat}
+        onOpenAtomic={onOpenAtomic}
         model={model}
         onRerun={onRerun}
         onClose={onClose}
         selectedDisplay={selectedDisplay}
-        onClearSelection={() => sigma.setSelectedNode(null)}
+        selectedEdge={selectedEdgeDisplay}
+        renderedEdges={renderedEdges}
+        renderedStats={renderedStats}
+        onClearSelection={() => {
+          sigma.setSelectedNode(null);
+          sigma.setSelectedEdge(null);
+        }}
         isLayoutRunning={sigma.isLayoutRunning}
-        startLayout={sigma.startLayout}
-        stopLayout={sigma.stopLayout}
       />
     </div>
   );

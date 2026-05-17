@@ -75,6 +75,8 @@ const brightenColor = (hex: string, factor: number): string => {
 interface UseSigmaOptions {
   onNodeClick?: (nodeId: string) => void;
   onNodeHover?: (nodeId: string | null) => void;
+  onEdgeClick?: (edgeId: string | null) => void;
+  onEdgeHover?: (edgeId: string | null) => void;
   onStageClick?: () => void;
   onDoubleClickNode?: (nodeId: string) => void;
   highlightedNodeIds?: Set<string>;
@@ -96,6 +98,8 @@ interface UseSigmaReturn {
   stopLayout: () => void;
   selectedNode: string | null;
   setSelectedNode: (nodeId: string | null) => void;
+  selectedEdge: string | null;
+  setSelectedEdge: (edgeId: string | null) => void;
   refreshHighlights: () => void;
 }
 
@@ -152,6 +156,8 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
   > | null>(null);
   const layoutRef = useRef<FA2Layout | null>(null);
   const selectedNodeRef = useRef<string | null>(null);
+  const selectedEdgeRef = useRef<string | null>(null);
+  const hoveredEdgeRef = useRef<string | null>(null);
   const highlightedRef = useRef<Set<string>>(new Set());
   const layoutTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draggedRef = useRef<string | null>(null);
@@ -159,6 +165,7 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
   const optionsRef = useRef(options);
   const [isLayoutRunning, setIsLayoutRunning] = useState(false);
   const [selectedNode, setSelectedNodeState] = useState<string | null>(null);
+  const [selectedEdge, setSelectedEdgeState] = useState<string | null>(null);
 
   // Keep options live without re-binding sigma on each render.
   useEffect(() => {
@@ -169,11 +176,30 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
 
   const setSelectedNode = useCallback((nodeId: string | null) => {
     selectedNodeRef.current = nodeId;
+    if (nodeId) {
+      selectedEdgeRef.current = null;
+      setSelectedEdgeState(null);
+    }
     setSelectedNodeState(nodeId);
     const sigma = sigmaRef.current;
     if (!sigma) return;
     // Tiny camera nudge to force edge re-render (Sigma edge cache workaround
     // — verbatim from GitNexus useSigma).
+    const camera = sigma.getCamera();
+    const currentRatio = camera.ratio;
+    camera.animate({ ratio: currentRatio * 1.0001 }, { duration: 50 });
+    sigma.refresh();
+  }, []);
+
+  const setSelectedEdge = useCallback((edgeId: string | null) => {
+    selectedEdgeRef.current = edgeId;
+    if (edgeId) {
+      selectedNodeRef.current = null;
+      setSelectedNodeState(null);
+    }
+    setSelectedEdgeState(edgeId);
+    const sigma = sigmaRef.current;
+    if (!sigma) return;
     const camera = sigma.getCamera();
     const currentRatio = camera.ratio;
     camera.animate({ ratio: currentRatio * 1.0001 }, { duration: 50 });
@@ -205,6 +231,12 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       edgeProgramClasses: {
         curved: EdgeCurveProgram,
       },
+      renderEdgeLabels: true,
+      edgeLabelColor: { color: "#e4e4ed" },
+      edgeLabelSize: 10,
+      edgeLabelFont:
+        "Inter, JetBrains Mono, ui-sans-serif, system-ui, sans-serif",
+      edgeLabelWeight: "500",
 
       // Custom hover renderer — dark pill with colored border + glow ring
       // around the node. Verbatim signature from GitNexus.
@@ -272,6 +304,7 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
           return res;
         }
         const sel = selectedNodeRef.current;
+        const selectedEdge = selectedEdgeRef.current;
         const highlighted = highlightedRef.current;
         const hasHighlights = highlighted.size > 0;
         const isQueryHighlighted = highlighted.has(node);
@@ -286,6 +319,25 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
             res.color = dimColor(data.color, 0.2);
             res.size = (data.size || 8) * 0.5;
             res.zIndex = 0;
+          }
+          return res;
+        }
+
+        if (selectedEdge && !sel) {
+          const g = graphRef.current;
+          if (g && g.hasEdge(selectedEdge)) {
+            const [source, target] = g.extremities(selectedEdge);
+            const isEndpoint = node === source || node === target;
+            if (isEndpoint) {
+              res.color = brightenColor(data.color, 1.2);
+              res.size = (data.size || 8) * 1.2;
+              res.zIndex = 2;
+              res.forceLabel = true;
+            } else {
+              res.color = dimColor(data.color, 0.22);
+              res.size = (data.size || 8) * 0.65;
+              res.zIndex = 0;
+            }
           }
           return res;
         }
@@ -337,8 +389,14 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       edgeReducer: (edge: string, data: any) => {
         const res = { ...data };
         const sel = selectedNodeRef.current;
+        const selectedEdge = selectedEdgeRef.current;
+        const hoveredEdge = hoveredEdgeRef.current;
         const highlighted = highlightedRef.current;
         const hasHighlights = highlighted.size > 0;
+        const shouldShowLabel = edge === selectedEdge || edge === hoveredEdge;
+        if (!shouldShowLabel) {
+          res.label = undefined;
+        }
 
         if (hasHighlights && !sel) {
           const g = graphRef.current;
@@ -372,12 +430,37 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
               res.color = brightenColor(data.color, 1.5);
               res.size = Math.max(3, (data.size || 1) * 4);
               res.zIndex = 2;
+              res.label = data.label;
             } else {
               res.color = dimColor(data.color, 0.1);
               res.size = 0.3;
               res.zIndex = 0;
+              res.label = undefined;
             }
           }
+          return res;
+        }
+
+        if (selectedEdge) {
+          if (edge === selectedEdge) {
+            res.color = brightenColor(data.color, 1.55);
+            res.size = Math.max(3, (data.size || 1) * 3.5);
+            res.zIndex = 3;
+            res.label = data.label;
+          } else {
+            res.color = dimColor(data.color, 0.12);
+            res.size = 0.25;
+            res.zIndex = 0;
+            res.label = undefined;
+          }
+          return res;
+        }
+
+        if (hoveredEdge && edge === hoveredEdge) {
+          res.color = brightenColor(data.color, 1.35);
+          res.size = Math.max(2, (data.size || 1) * 2);
+          res.zIndex = 2;
+          res.label = data.label;
         }
         return res;
       },
@@ -431,11 +514,18 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
         isDraggingRef.current = false;
         return;
       }
+      setSelectedEdge(null);
       setSelectedNode(node);
       optionsRef.current.onNodeClick?.(node);
     });
+    sigma.on("clickEdge", ({ edge, event }: any) => {
+      event?.preventSigmaDefault?.();
+      setSelectedEdge(edge);
+      optionsRef.current.onEdgeClick?.(edge);
+    });
     sigma.on("clickStage", () => {
       setSelectedNode(null);
+      setSelectedEdge(null);
       optionsRef.current.onStageClick?.();
     });
     sigma.on("doubleClickNode", ({ node, event }: any) => {
@@ -448,6 +538,18 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
     });
     sigma.on("leaveNode", () => {
       optionsRef.current.onNodeHover?.(null);
+      if (containerRef.current) containerRef.current.style.cursor = "grab";
+    });
+    sigma.on("enterEdge", ({ edge }: any) => {
+      hoveredEdgeRef.current = edge;
+      optionsRef.current.onEdgeHover?.(edge);
+      sigmaRef.current?.refresh();
+      if (containerRef.current) containerRef.current.style.cursor = "pointer";
+    });
+    sigma.on("leaveEdge", () => {
+      hoveredEdgeRef.current = null;
+      optionsRef.current.onEdgeHover?.(null);
+      sigmaRef.current?.refresh();
       if (containerRef.current) containerRef.current.style.cursor = "grab";
     });
 
@@ -524,7 +626,7 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       sigmaRef.current = null;
       graphRef.current = null;
     };
-  }, [setSelectedNode]);
+  }, [setSelectedEdge, setSelectedNode]);
 
   // Run ForceAtlas2 layout — verbatim from GitNexus useSigma.
   // Pt 6: refactored to take an optional duration override so the
@@ -624,10 +726,11 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       }
       sigma.setGraph(newGraph);
       setSelectedNode(null);
+      setSelectedEdge(null);
       runLayout(newGraph);
       sigma.getCamera().animatedReset({ duration: 500 });
     },
-    [runLayout, setSelectedNode],
+    [runLayout, setSelectedEdge, setSelectedNode],
   );
 
   const focusNode = useCallback((nodeId: string) => {
@@ -660,7 +763,8 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
   const resetZoom = useCallback(() => {
     sigmaRef.current?.getCamera().animatedReset({ duration: 300 });
     setSelectedNode(null);
-  }, [setSelectedNode]);
+    setSelectedEdge(null);
+  }, [setSelectedEdge, setSelectedNode]);
 
   const startLayout = useCallback(() => {
     const graph = graphRef.current;
@@ -706,6 +810,8 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
     stopLayout,
     selectedNode,
     setSelectedNode,
+    selectedEdge,
+    setSelectedEdge,
     refreshHighlights,
   };
 };

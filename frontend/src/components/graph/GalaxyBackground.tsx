@@ -254,7 +254,11 @@ function computeFamilyNebulae(g: Graph): NebulaPatch[] {
     const acc = groups.get(fam) ?? { xs: [], ys: [], color: "" };
     acc.xs.push(x);
     acc.ys.push(y);
-    // Take the first non-empty color we see — they're all the same family.
+    // Book anchors use a black fill; use their semantic accent for nebulae
+    // so family/domain clustering still reads behind the structural dots.
+    if (!acc.color && typeof attrs.accent_color === "string") {
+      acc.color = attrs.accent_color;
+    }
     if (!acc.color && typeof attrs.color === "string") acc.color = attrs.color;
     if (!acc.color) acc.color = colorForFamily(fam === "__none__" ? null : fam);
     groups.set(fam, acc);

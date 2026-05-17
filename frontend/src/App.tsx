@@ -24,6 +24,7 @@ import { useAuthStore } from "./stores/authStore";
 import { useIngestionQueueStore } from "./stores/ingestionQueueStore";
 import * as api from "./lib/api";
 import type { ChatMessage, ChatRequest, Collection } from "./types";
+import type { GraphSynthesisMode } from "./types/discover";
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -47,6 +48,8 @@ function App() {
   const [graphViewerQueryDraft, setGraphViewerQueryDraft] = useState<string>("");
   const [graphViewerRunCount, setGraphViewerRunCount] = useState(0);
   const [graphViewerQueryRunning, setGraphViewerQueryRunning] = useState(false);
+  const [graphViewerSynthesisMode, setGraphViewerSynthesisMode] =
+    useState<GraphSynthesisMode>("research");
 
   // Pt 7: prefill bridge from GraphViewer's Graph Query tab to ChatInput.
   // When the user clicks a refined chip in the dashboard, GraphViewer
@@ -62,6 +65,19 @@ function App() {
     setGraphViewerQueryRunning(false);
     setIsGraphViewOpen(false);
   }, []);
+  const handleGraphOpenAtomic = useCallback(
+    (text: string, mode: GraphSynthesisMode = "research") => {
+      const next = text.trim();
+      if (!next) return;
+      setGraphViewerQuery(next);
+      setGraphViewerQueryDraft(next);
+      setGraphViewerSynthesisMode(mode);
+      setGraphViewerMode("atom");
+      setGraphViewerQueryRunning(false);
+      setGraphViewerRunCount((n) => n + 1);
+    },
+    [],
+  );
 
   const handleGraphQueryPhaseChange = useCallback(
     (phase: "idle" | "loading" | "ready" | "error") => {
@@ -713,6 +729,7 @@ function App() {
                 <AtomicView
                   corpusIds={selectedCorpusIds}
                   query={graphViewerQuery}
+                  synthesisMode={graphViewerSynthesisMode}
                   model={selectedModel || undefined}
                 />
               ) : graphViewerMode === "atom" ? (
@@ -742,13 +759,14 @@ function App() {
                   }}
                   onQueryPhaseChange={handleGraphQueryPhaseChange}
                   onSendToChat={handleGraphSendToChat}
+                  onOpenAtomic={handleGraphOpenAtomic}
                   key={`gv-${graphViewerMode}-${graphViewerQuery}-${graphViewerRunCount}`}
                 />
               )}
               {/* View-mode picker — pill row at the top-right. Brain is the
                   default; Constellation gives book-level overview; Atom
                   gives the concentric query-result view. */}
-              <div className="absolute top-3 right-3 flex gap-1 bg-zinc-900/85 backdrop-blur border border-zinc-800 rounded-full p-0.5 text-[10px] font-mono uppercase tracking-wider">
+              <div className="absolute top-3 right-3 z-[80] flex gap-1 bg-zinc-900/85 backdrop-blur border border-zinc-800 rounded-full p-0.5 text-[10px] font-mono uppercase tracking-wider">
                 {(
                   [
                     { id: "brain", label: "Brain" },
@@ -784,6 +802,30 @@ function App() {
             {/* Query input bar — bottom-center, switches mode between
                 brain and query. PR 4 of the multi-corpus rollout. */}
             <div className="border-t border-zinc-800 bg-zinc-950/90 backdrop-blur p-3 z-50">
+              {(graphViewerMode === "atom" || graphViewerMode === "query") && (
+                <div className="mx-auto mb-2 flex max-w-3xl items-center justify-between gap-2">
+                  <div className="text-[10px] font-mono uppercase tracking-widest text-zinc-600">
+                    synthesis mode
+                  </div>
+                  <div className="inline-flex rounded-full border border-zinc-800 bg-zinc-900 p-0.5 text-[10px] font-mono uppercase tracking-wider">
+                    {(["research", "nuance", "ideation"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setGraphViewerSynthesisMode(mode)}
+                        className={
+                          "rounded-full px-2 py-1 transition-colors " +
+                          (graphViewerSynthesisMode === mode
+                            ? "bg-amber-600 text-zinc-100"
+                            : "text-zinc-500 hover:text-zinc-200")
+                        }
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <form
                 className="max-w-3xl mx-auto flex items-center gap-2"
                 onSubmit={(e) => {

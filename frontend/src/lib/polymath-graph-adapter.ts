@@ -22,6 +22,9 @@ import {
   CORPUS_COLORS,
   EDGE_STYLES,
   DEFAULT_EDGE_STYLE,
+  getEdgeStyleByFamily,
+  colorForFamily,
+  colorForEntityType,
   getCommunityColor,
   // EDGE_COLORS_BY_FAMILY, colorForFamily, colorForEntityType, and
   // RelationFamily were used by the old dominant_family / dominant_
@@ -66,6 +69,17 @@ export interface SigmaNodeAttributes {
   highlighted?: boolean;
   forceLabel?: boolean;
   mass?: number;
+  dominant_family?: string | null;
+  dominant_entity_type?: string | null;
+  accent_color?: string;
+  bridge_count?: number;
+  chunk_count?: number;
+  parent_count?: number;
+  entity_count?: number;
+  filename?: string | null;
+  ghost_b_success_rate?: number | null;
+  ghost_b_extracted?: number | null;
+  ghost_b_total?: number | null;
 }
 
 export interface SigmaEdgeAttributes {
@@ -74,10 +88,18 @@ export interface SigmaEdgeAttributes {
   type?: string;
   curvature?: number;
   predicate?: string;
+  relation_family?: string | null;
+  dominant_relation_family?: string | null;
   weight?: number;
   confidence?: number;
+  shared_entities?: number;
+  top_shared_entities?: string[];
   source_corpora?: string[];
   source_corpus?: string;
+  source_doc_id?: string;
+  target_doc_id?: string;
+  source_label?: string;
+  target_label?: string;
   dangling?: boolean;
   hidden?: boolean;
   zIndex?: number;
@@ -115,18 +137,31 @@ export interface PolymathRawNode {
   /** Brain View bridge count, used by sigma-constants::nodeReducer to scale
    *  Book anchor size logarithmically (well-connected books read larger). */
   bridge_count?: number;
+  chunk_count?: number;
+  parent_count?: number;
+  entity_count?: number;
+  filename?: string | null;
+  dominant_family?: string | null;
+  dominant_entity_type?: string | null;
+  ghost_b_success_rate?: number | null;
+  ghost_b_extracted?: number | null;
+  ghost_b_total?: number | null;
 }
 
 export interface PolymathRawEdge {
   source: string;
   target: string;
   predicate?: string;
-  relation_family?: string;
   // Pt 5: dominant_relation_family is computed in the Brain View Cypher
   // and used to color bridge edges via EDGE_COLORS_BY_FAMILY.
   dominant_relation_family?: string | null;
+  relation_family?: string | null;
   weight?: number;
   confidence?: number;
+  source_doc_id?: string;
+  target_doc_id?: string;
+  source_label?: string;
+  target_label?: string;
   source_corpora?: string[];
   source_corpus?: string;
   dangling?: boolean;
@@ -139,6 +174,8 @@ export interface PolymathRawEdge {
   shared_entities?: number;
 }
 
+export type GraphLodMode = "satellites" | "books" | "clusters";
+
 export interface BuildOpts {
   colorMode: ColorMode;
   seedIds?: Set<string>;
@@ -147,10 +184,11 @@ export interface BuildOpts {
   /** Optional cluster centroids per concept_id / domain key, lets the
    *  adapter cluster-position entity-level nodes around their parent. */
   clusterCenters?: Map<string, { x: number; y: number }>;
-  /** Pt 6: dashboard-controlled bridge filter knobs. Override the static
-   *  Pt 5 defaults so the user can crank the slider live. */
+  /** Optional bridge visibility overrides. Omitted in the app shell so LOD
+   *  controls this automatically instead of exposing manual sliders. */
   minBridgeStrength?: number;
   maxBridgesPerBook?: number;
+  lodMode?: GraphLodMode;
 }
 
 // Convert "#rrggbb" → "rgba(r,g,b,a)". Lets us bake opacity into edge
@@ -189,31 +227,13 @@ function pickNodeColor(
   raw: PolymathRawNode,
   colorMode: ColorMode,
 ): string {
-  // Constellation aesthetic — Books are colored by a deterministic hash
-  // of their corpus_id so same-corpus books cluster visually as a single
-  // hue. Within a corpus, lightness varies with bridge_count so books
-  // aren't clones — well-connected hubs read brighter than leaf books.
-  //
-  // Replaces the dominant_family / dominant_entity_type chain (those
-  // fields aren't reliably populated upstream and produced mostly-amber
-  // graphs).
   if (kind === "Book") {
-    const corpusId = String(
-      (raw as any).source_corpus || raw.source_corpora?.[0] || "",
-    );
-    if (corpusId) {
-      let h = 0;
-      for (const ch of corpusId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-      h = h % 360;
-      // Lightness ramp drives within-corpus differentiation. 5 buckets
-      // means a corpus with many books still produces ≤5 distinct
-      // brightness tiers, keeping the hue identity stable.
-      const bridges = Math.max(0, Number((raw as any).bridge_count ?? 0));
-      const l = 42 + (bridges % 5) * 7; // 42%, 49%, 56%, 63%, 70%
-      return `hsl(${h}, 72%, ${l}%)`;
-    }
-    return NODE_COLORS.Book;
+    // PRD: corpus/document-level anchors read as black structural points.
+    // Their semantic family still survives as `accent_color` for halos,
+    // legends, and selected/hover affordances.
+    return "#050508";
   }
+  // Non-book nodes keep the existing community/corpus/entity palette.
   if (colorMode === "corpus") {
     return colorForCorpus(raw.source_corpora);
   }
@@ -403,16 +423,23 @@ export function polymathToGraphology(
     else otherLinks.push(rel);
   }
   // Filter weak bridges then sort each source's outbound bridges by weight
-  // desc, keeping only the top MAX_BRIDGES_PER_BOOK. Pt 6: thresholds are
-  // now overridable via opts so the dashboard slider can crank them live.
+  // desc. LOD adjusts the automatic cap so large graph maps stay readable
+  // without exposing manual bridge-filter controls in the dashboard.
+  const lodMode = opts.lodMode ?? "satellites";
   const minStrength =
     typeof opts.minBridgeStrength === "number"
       ? opts.minBridgeStrength
-      : MIN_BRIDGE_STRENGTH_DEFAULT;
+      : lodMode === "clusters"
+        ? 4
+        : MIN_BRIDGE_STRENGTH_DEFAULT;
   const maxPerBook =
     typeof opts.maxBridgesPerBook === "number"
       ? opts.maxBridgesPerBook
-      : MAX_BRIDGES_PER_BOOK_DEFAULT;
+      : lodMode === "clusters"
+        ? 2
+        : lodMode === "books"
+          ? 4
+          : MAX_BRIDGES_PER_BOOK_DEFAULT;
   const strongBridges = bridgeLinks.filter(
     (b) => (b.weight ?? 0) >= minStrength,
   );
@@ -435,9 +462,12 @@ export function polymathToGraphology(
     if (graph.hasEdge(s, t)) return;
     const styleKey = String(rel.predicate || rel.relation_family || "").toLowerCase();
     const style = EDGE_STYLES[styleKey] || DEFAULT_EDGE_STYLE;
+    const relationFamily =
+      rel.dominant_relation_family || rel.relation_family || null;
+    const familyStyle = getEdgeStyleByFamily(relationFamily, rel.predicate);
     // Curvature jitter prevents perfectly-overlapping double edges.
     const curvature = 0.12 + Math.random() * 0.08;
-    let color = style.color;
+    let color = relationFamily ? familyStyle.color : style.color;
     if (rel.dangling) {
       color = "#d97706"; // amber for dangling edges (target outside loaded set)
     } else if (
@@ -457,9 +487,9 @@ export function polymathToGraphology(
     let edgeLabel: string | undefined;
     if (rel.predicate === "bridges_to" && typeof rel.weight === "number") {
       const strength = Math.max(0, rel.weight);
-      size = Math.min(0.3 + strength * 0.04, 1.2);
+      size = Math.min(0.35 + strength * 0.05, 1.8);
       const opacity = Math.max(0.12, Math.min(0.9, 0.12 + strength * 0.06));
-      color = hexToRgba(EDGE_STYLES.bridges_to.color, opacity);
+      color = hexToRgba(familyStyle.color, opacity);
       // On-edge concept label: strongest shared entity name with
       // "+N more" overflow suffix so users see what two books share
       // at a glance. Only show on stronger bridges (≥3 shared) so
@@ -482,8 +512,16 @@ export function polymathToGraphology(
       predicate: rel.predicate,
       weight: rel.weight,
       confidence: rel.confidence,
+      relation_family: rel.relation_family,
+      dominant_relation_family: rel.dominant_relation_family,
+      shared_entities: rel.shared_entities,
+      top_shared_entities: rel.top_shared_entities || [],
       source_corpora: rel.source_corpora || [],
       source_corpus: rel.source_corpus,
+      source_doc_id: rel.source_doc_id,
+      target_doc_id: rel.target_doc_id,
+      source_label: rel.source_label,
+      target_label: rel.target_label,
       dangling: Boolean(rel.dangling),
       label: edgeLabel,
     });
@@ -519,6 +557,12 @@ function addNodeToGraph(
   const baseSize = NODE_SIZES[kind] || 4;
   const scaledSize = getScaledNodeSize(baseSize, totalCount);
   const color = pickNodeColor(kind, raw, opts.colorMode);
+  const accentColor =
+    kind === "Book"
+      ? raw.dominant_family
+        ? colorForFamily(raw.dominant_family)
+        : colorForEntityType(raw.dominant_entity_type)
+      : color;
   // Sizing for leaf entities should weigh `total_mentions` (book mode) or
   // `mention_count` (overview / drill / query). Supernodes already get a
   // big kind-derived base so we just nudge by mention.
@@ -530,6 +574,14 @@ function addNodeToGraph(
     kind === "Domain" || kind === "Concept" || kind === "Book"
       ? 0
       : Math.min(6, Math.log2((mentionWeight || 1) + 1) * 1.5);
+  const bookBoost =
+    kind === "Book"
+      ? Math.min(
+          9,
+          Math.log2(Number(raw.bridge_count || 0) + 1) * 1.4 +
+            Math.log10(Number(raw.chunk_count || raw.mention_count || 1) + 1) * 0.8,
+        )
+      : 0;
   // Pt 3 polish:
   //   • `raw.label` (pre-cleaned by cleanBookLabel) wins over display_name.
   //   • `raw.forceLabel` boolean (Brain View top-N tagging) overrides the
@@ -554,7 +606,7 @@ function addNodeToGraph(
   graph.addNode(raw.id, {
     x,
     y,
-    size: scaledSize + mentionBoost,
+    size: scaledSize + mentionBoost + bookBoost,
     color,
     label: renderedLabel,
     nodeKind: kind,
@@ -567,7 +619,16 @@ function addNodeToGraph(
     hidden: false,
     forceLabel,
     mass,
-    // Carried for sigma-constants::nodeReducer star-field sizing.
-    bridge_count: (raw as PolymathRawNode).bridge_count,
+    dominant_family: raw.dominant_family,
+    dominant_entity_type: raw.dominant_entity_type,
+    accent_color: accentColor,
+    bridge_count: raw.bridge_count,
+    chunk_count: raw.chunk_count,
+    parent_count: raw.parent_count,
+    entity_count: raw.entity_count,
+    filename: raw.filename,
+    ghost_b_success_rate: raw.ghost_b_success_rate,
+    ghost_b_extracted: raw.ghost_b_extracted,
+    ghost_b_total: raw.ghost_b_total,
   } as any);
 }

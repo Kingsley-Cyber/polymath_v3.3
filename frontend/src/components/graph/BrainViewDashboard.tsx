@@ -21,8 +21,6 @@ import {
   Loader2,
   PanelRightClose,
   PanelRightOpen,
-  Pause,
-  Play,
   Send,
   Sparkles,
   X,
@@ -37,6 +35,8 @@ import type {
 } from "../../lib/api";
 import * as api from "../../lib/api";
 import { cleanBookLabel } from "../../lib/label-utils";
+import { EDGE_COLORS_BY_FAMILY } from "../../lib/sigma-constants";
+import type { DocExtractionItem } from "../../types";
 import type { GraphSynthesisMode } from "../../types/discover";
 
 export type DashboardTab = "brain" | "agent" | "graph-query";
@@ -52,6 +52,50 @@ interface SelectedDisplay {
   id: string;
   display_name: string;
   source_corpora: string[];
+  source_corpus?: string;
+  kind?: string;
+  nodeKind?: string;
+  filename?: string | null;
+  label?: string;
+  bridge_count?: number;
+  chunk_count?: number;
+  parent_count?: number;
+  entity_count?: number;
+  top_entities?: string[];
+  dominant_family?: string | null;
+  dominant_entity_type?: string | null;
+  ghost_b_success_rate?: number | null;
+  ghost_b_extracted?: number | null;
+  ghost_b_total?: number | null;
+  primary_doc_id?: string;
+  entity_type?: string;
+  accent_color?: string;
+}
+
+type RenderedGraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  sourceLabel: string;
+  targetLabel: string;
+  predicate?: string;
+  relationFamily?: string | null;
+  dominantRelationFamily?: string | null;
+  confidence?: number;
+  weight?: number;
+  sharedEntities?: number;
+  topSharedEntities?: string[];
+  sourceDocId?: string;
+  targetDocId?: string;
+  color?: string;
+};
+
+type RenderedGraphStats = {
+  visibleNodes: number;
+  totalNodes: number;
+  visibleEdges: number;
+  totalEdges: number;
+  lodMode?: "satellites" | "books" | "clusters";
 }
 
 export interface BrainViewDashboardProps {
@@ -72,20 +116,6 @@ export interface BrainViewDashboardProps {
   cacheStatuses: Record<string, CacheStatus>;
   rebuildingIds: Set<string>;
   onRebuild: (ids: string[]) => Promise<void> | void;
-
-  // Color mode (brain only)
-  colorMode: "community" | "corpus";
-  onColorModeToggle: () => void;
-
-  // Pt 6: bridge filter knobs (brain mode only)
-  minBridgeStrength: number;
-  onMinBridgeStrengthChange: (n: number) => void;
-  maxBridgesPerBook: number;
-  onMaxBridgesPerBookChange: (n: number) => void;
-
-  // Pt 6: settle-restart-after-drag toggle
-  settleAfterDrag: boolean;
-  onSettleAfterDragToggle: () => void;
 
   // Pt 7: tab + Agent / Graph Query content
   activeTab: DashboardTab;
@@ -111,8 +141,15 @@ export interface BrainViewDashboardProps {
   // Adds 2-3× latency/tokens; surfaced as a small checkbox in the tab.
   validateSynthesis?: boolean;
   onValidateSynthesisChange?: (v: boolean) => void;
+  agentSources?: Array<{
+    source_label?: string;
+    doc_id?: string;
+    chunk_id?: string;
+    snippet?: string;
+  }>;
   // Pt 7: Graph Query tab — send a refined chip back to the chat
   onSendToChat?: (text: string) => void;
+  onOpenAtomic?: (text: string, mode?: GraphSynthesisMode) => void;
   /** Pt 7: model id passed through to api.refineQuery so the LLM call
    *  uses the user's currently-selected chat model. Required by LiteLLM
    *  (rejects empty model in the body). */
@@ -126,12 +163,13 @@ export interface BrainViewDashboardProps {
 
   // Selection info
   selectedDisplay: SelectedDisplay | null;
+  selectedEdge?: RenderedGraphEdge | null;
+  renderedEdges?: RenderedGraphEdge[];
+  renderedStats?: RenderedGraphStats;
   onClearSelection: () => void;
 
   // Layout state
   isLayoutRunning: boolean;
-  startLayout: () => void;
-  stopLayout: () => void;
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -161,14 +199,6 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     cacheStatuses,
     rebuildingIds,
     onRebuild,
-    colorMode,
-    onColorModeToggle,
-    minBridgeStrength,
-    onMinBridgeStrengthChange,
-    maxBridgesPerBook,
-    onMaxBridgesPerBookChange,
-    settleAfterDrag,
-    onSettleAfterDragToggle,
     activeTab,
     onActiveTabChange,
     agentQuery,
@@ -185,15 +215,18 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     onSynthesisModeChange,
     validateSynthesis,
     onValidateSynthesisChange,
+    agentSources,
     onSendToChat,
+    onOpenAtomic,
     model,
     onRerun,
     onClose,
     selectedDisplay,
+    selectedEdge,
+    renderedEdges,
+    renderedStats,
     onClearSelection,
     isLayoutRunning,
-    startLayout,
-    stopLayout,
   } = props;
 
   // Drag-resize state. Persists across renders within the component
@@ -291,9 +324,15 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
             </div>
             <div className="text-xs text-zinc-300 font-mono mt-0.5 truncate">
               {corpusIds.length} corpora
-              {data && (
+              {data && renderedStats && (
                 <span className="text-zinc-500">
-                  {" "}· {data.nodes.length}n · {data.links.length}e
+                  {" "}· {renderedStats.visibleNodes}/{renderedStats.totalNodes}n ·{" "}
+                  {renderedStats.visibleEdges}/{renderedStats.totalEdges}e
+                </span>
+              )}
+              {renderedStats?.lodMode && (
+                <span className="ml-1 text-zinc-600">
+                  · {renderedStats.lodMode}
                 </span>
               )}
             </div>
@@ -333,109 +372,16 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
 
       {/* Scrollable body */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
-        {/* Persistent Selection card — visible on every tab, sits at the
-            top of the body so clicking a node in the canvas always shows
-            its info regardless of which tab is active. */}
-        {selectedDisplay && (
-          <section>
-            <SectionLabel>Selection</SectionLabel>
-            <div className="rounded-lg border border-violet-500/30 bg-violet-500/10 p-2">
-              <div className="flex items-start gap-2 min-w-0">
-                <div className="h-2 w-2 animate-pulse rounded-full bg-violet-300 mt-1.5 shrink-0" />
-                <div
-                  className="font-mono text-xs text-zinc-100 break-words min-w-0 flex-1"
-                  title={selectedDisplay.display_name}
-                >
-                  {cleanBookLabel(selectedDisplay.display_name) ||
-                    selectedDisplay.display_name}
-                </div>
-              </div>
-              {selectedDisplay.source_corpora.length > 0 && (
-                <div className="mt-1 ml-4 text-[10px] text-zinc-400 font-mono">
-                  {selectedDisplay.source_corpora.length} corpora
-                </div>
-              )}
-              <button
-                onClick={onClearSelection}
-                className="mt-2 ml-4 rounded px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-white/10 hover:text-zinc-50"
-              >
-                Clear
-              </button>
-            </div>
-          </section>
-        )}
-
-        {/* Connections — answers "how is this node connected to others?"
-            Reads the rendered graph payload (data.links + data.nodes) and
-            lists each edge incident to the selected node with direction,
-            predicate, and weight. Closes the "dead-end click" gap where
-            selecting a node previously only showed its name. */}
-        {selectedDisplay && data && (
-          <section className="mt-3">
-            <SectionLabel>Connections</SectionLabel>
-            <ul className="space-y-1 font-mono text-[11px] max-h-48 overflow-auto">
-              {(() => {
-                const selId = String(selectedDisplay.id);
-                const rels = (data.links || []).filter((l: any) => {
-                  // Edges arrive either flat (source: "id") or hydrated
-                  // (source: {id}) depending on the renderer pass. Handle
-                  // both shapes so this works in every code path.
-                  const s = String(
-                    typeof l.source === "object" ? l.source?.id : l.source,
-                  );
-                  const t = String(
-                    typeof l.target === "object" ? l.target?.id : l.target,
-                  );
-                  return s === selId || t === selId;
-                });
-                if (rels.length === 0) {
-                  return (
-                    <li className="text-zinc-600 italic">
-                      No visible connections
-                    </li>
-                  );
-                }
-                return rels.slice(0, 25).map((l: any, i: number) => {
-                  const s = String(
-                    typeof l.source === "object" ? l.source?.id : l.source,
-                  );
-                  const t = String(
-                    typeof l.target === "object" ? l.target?.id : l.target,
-                  );
-                  const isSource = s === selId;
-                  const nid = isSource ? t : s;
-                  const node = (data.nodes || []).find(
-                    (n: any) => String(n.id) === String(nid),
-                  );
-                  const name =
-                    node?.display_name ||
-                    node?.label ||
-                    String(nid).slice(0, 20);
-                  return (
-                    <li
-                      key={`${nid}-${i}`}
-                      className="flex items-center gap-2 text-zinc-300"
-                    >
-                      <span className="text-zinc-500" title={isSource ? "outgoing" : "incoming"}>
-                        {isSource ? "→" : "←"}
-                      </span>
-                      <span className="truncate flex-1" title={name}>
-                        {name}
-                      </span>
-                      {l.predicate && l.predicate !== "bridges_to" && (
-                        <span className="text-[10px] px-1 rounded bg-zinc-800 text-zinc-400">
-                          {l.predicate}
-                        </span>
-                      )}
-                      {typeof l.weight === "number" && (
-                        <span className="text-zinc-600">({l.weight})</span>
-                      )}
-                    </li>
-                  );
-                });
-              })()}
-            </ul>
-          </section>
+        {activeTab === "brain" && (selectedDisplay || selectedEdge) && (
+          <EvidenceInspector
+            selectedNode={selectedDisplay}
+            selectedEdge={selectedEdge || null}
+            renderedEdges={renderedEdges || []}
+            sources={agentSources || []}
+            onClear={onClearSelection}
+            onSendToChat={onSendToChat}
+            onOpenAtomic={onOpenAtomic}
+          />
         )}
 
         {/* Pt 7: Agent Search tab content — input + run + synthesis chips. */}
@@ -455,6 +401,8 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
             onSynthesisModeChange={onSynthesisModeChange}
             validateSynthesis={validateSynthesis}
             onValidateSynthesisChange={onValidateSynthesisChange}
+            sources={agentSources || []}
+            onOpenAtomic={onOpenAtomic}
           />
         )}
 
@@ -463,6 +411,7 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           <GraphQueryTab
             corpusIds={corpusIds}
             onSendToChat={onSendToChat}
+            onOpenAtomic={onOpenAtomic}
             model={model}
           />
         )}
@@ -499,9 +448,6 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           </section>
         )}
 
-        {/* Selection card was moved up — now persistent across all tabs
-            (rendered above the tab-specific content). Removed from here. */}
-
         {/* Cache health — brain mode + brain tab only */}
         {activeTab === "brain" && mode === "brain" && cacheWarming.length > 0 && (
           <section>
@@ -537,111 +483,25 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           </section>
         )}
 
-        {/* Color mode — brain tab only */}
         {activeTab === "brain" && mode === "brain" && (
           <section>
-            <SectionLabel>Color Scheme</SectionLabel>
-            <button
-              className="w-full rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 text-left text-[11px] font-mono uppercase tracking-widest text-zinc-300 hover:border-amber-700 hover:text-amber-300"
-              onClick={onColorModeToggle}
-            >
-              {colorMode}
-              <span className="ml-2 text-zinc-500 normal-case tracking-normal">
-                (click to swap)
-              </span>
-            </button>
-          </section>
-        )}
-
-        {/* Pt 6: Bridge filters — brain tab only. Sliders let the user
-            tune which bridges show without re-fetching from backend. */}
-        {activeTab === "brain" && mode === "brain" && (
-          <section>
-            <SectionLabel>Bridge Filters</SectionLabel>
-            <div className="space-y-2.5">
-              <label className="block">
-                <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-widest text-zinc-400">
-                  <span>min strength</span>
-                  <span className="text-amber-300">{minBridgeStrength}</span>
+            <SectionLabel>Relation Legend</SectionLabel>
+            <div className="grid grid-cols-2 gap-1.5 font-mono text-[10px]">
+              {Object.entries(EDGE_COLORS_BY_FAMILY).map(([family, color]) => (
+                <div
+                  key={family}
+                  className="flex min-w-0 items-center gap-1.5 text-zinc-400"
+                  title={family}
+                >
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className="truncate">{family}</span>
                 </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={20}
-                  step={1}
-                  value={minBridgeStrength}
-                  onChange={(e) =>
-                    onMinBridgeStrengthChange(Number(e.currentTarget.value))
-                  }
-                  className="mt-1 w-full accent-amber-400"
-                />
-                <div className="mt-0.5 text-[10px] text-zinc-500 font-mono">
-                  hide bridges with fewer shared entities
-                </div>
-              </label>
-              <label className="block">
-                <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-widest text-zinc-400">
-                  <span>top-N per book</span>
-                  <span className="text-amber-300">{maxBridgesPerBook}</span>
-                </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={10}
-                  step={1}
-                  value={maxBridgesPerBook}
-                  onChange={(e) =>
-                    onMaxBridgesPerBookChange(Number(e.currentTarget.value))
-                  }
-                  className="mt-1 w-full accent-amber-400"
-                />
-                <div className="mt-0.5 text-[10px] text-zinc-500 font-mono">
-                  keep only strongest N bridges per book
-                </div>
-              </label>
+              ))}
             </div>
           </section>
-        )}
-
-        {/* Layout controls — brain tab only (Agent + Graph Query tabs have
-            their own panels and don't need pan/zoom-style layout knobs). */}
-        {activeTab === "brain" && (
-          <section>
-          <SectionLabel>Layout</SectionLabel>
-          <button
-            onClick={isLayoutRunning ? stopLayout : startLayout}
-            className={`flex w-full items-center gap-2 rounded border px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest ${
-              isLayoutRunning
-                ? "border-violet-500 bg-violet-500/20 text-violet-100"
-                : "border-zinc-800 bg-[#0d0d14] text-zinc-300 hover:border-amber-700 hover:text-amber-300"
-            }`}
-          >
-            {isLayoutRunning ? (
-              <>
-                <Pause className="h-3 w-3" /> pause settling
-              </>
-            ) : (
-              <>
-                <Play className="h-3 w-3" /> run layout
-              </>
-            )}
-          </button>
-          {/* Pt 6: settle-after-drag toggle. When ON, FA2 re-runs for ~5s
-              after the user releases a dragged book so neighbors re-arrange
-              around the new position. */}
-          <label className="mt-2 flex items-center gap-2 font-mono text-[11px] text-zinc-300 cursor-pointer">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 accent-amber-400 cursor-pointer"
-              checked={settleAfterDrag}
-              onChange={onSettleAfterDragToggle}
-            />
-            <span>re-settle after drag</span>
-          </label>
-          <div className="mt-1 ml-5 text-[10px] text-zinc-500 font-mono">
-            restart layout briefly after releasing a node
-          </div>
-        </section>
         )}
 
         {/* Query mode actions — only on the legacy Query mode (different
@@ -663,6 +523,336 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           header strip (above). One escape action, surfaced where the
           user lands first when entering the graph view. */}
     </aside>
+  );
+}
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Evidence Inspector
+// ────────────────────────────────────────────────────────────────────────
+
+function compactName(value: string | undefined | null): string {
+  const clean = cleanBookLabel(String(value || "")) || String(value || "");
+  return clean.length > 52 ? clean.slice(0, 51) + "…" : clean;
+}
+
+function numberText(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toLocaleString()
+    : "0";
+}
+
+function EvidenceInspector({
+  selectedNode,
+  selectedEdge,
+  renderedEdges,
+  sources,
+  onClear,
+  onSendToChat,
+  onOpenAtomic,
+}: {
+  selectedNode: SelectedDisplay | null;
+  selectedEdge: RenderedGraphEdge | null;
+  renderedEdges: RenderedGraphEdge[];
+  sources: Array<{
+    source_label?: string;
+    doc_id?: string;
+    chunk_id?: string;
+    snippet?: string;
+  }>;
+  onClear: () => void;
+  onSendToChat?: (text: string) => void;
+  onOpenAtomic?: (text: string, mode?: GraphSynthesisMode) => void;
+}) {
+  const [chunksOpen, setChunksOpen] = useState(false);
+  const [chunksLoading, setChunksLoading] = useState(false);
+  const [chunkRows, setChunkRows] = useState<DocExtractionItem[]>([]);
+  const [chunkError, setChunkError] = useState<string | null>(null);
+
+  const nodeId = selectedNode?.id || "";
+  const docId = nodeId.startsWith("book:") ? nodeId.slice(5) : undefined;
+  const corpusId =
+    selectedNode?.source_corpus || selectedNode?.source_corpora?.[0] || "";
+  const incidentEdges = selectedNode
+    ? renderedEdges.filter(
+        (edge) => edge.source === selectedNode.id || edge.target === selectedNode.id,
+      )
+    : [];
+  const relationFamilies = Array.from(
+    new Set(
+      (selectedEdge ? [selectedEdge] : incidentEdges)
+        .map((edge) => edge.dominantRelationFamily || edge.relationFamily)
+        .filter(Boolean) as string[],
+    ),
+  );
+  const topShared = Array.from(
+    new Set([
+      ...(selectedEdge?.topSharedEntities || []),
+      ...((selectedNode?.top_entities || []) as string[]),
+      ...incidentEdges.flatMap((edge) => edge.topSharedEntities || []),
+    ]),
+  ).slice(0, 8);
+  const matchedSources = sources.filter((source) => {
+    if (!docId) return true;
+    return source.doc_id === docId;
+  });
+
+  const title = selectedEdge
+    ? `${compactName(selectedEdge.sourceLabel)} -> ${compactName(
+        selectedEdge.targetLabel,
+      )}`
+    : compactName(selectedNode?.display_name || selectedNode?.id);
+  const why = selectedEdge
+    ? `This bridge connects two document anchors through ${numberText(
+        selectedEdge.sharedEntities,
+      )} shared entities and ${numberText(
+        selectedEdge.weight,
+      )} relation-path hits. Its dominant family is ${
+        selectedEdge.dominantRelationFamily || selectedEdge.relationFamily || "unknown"
+      }.`
+    : selectedNode?.kind === "book" || selectedNode?.nodeKind === "Book"
+      ? `This document anchor contributes ${numberText(
+          selectedNode.chunk_count,
+        )} chunks, ${numberText(
+          selectedNode.entity_count,
+        )} extracted entities, and ${numberText(
+          selectedNode.bridge_count,
+        )} visible bridge opportunities to the corpus map.`
+      : `This node is connected to ${numberText(
+          incidentEdges.length,
+        )} visible relation edges in the rendered graph. Its current role is visual context, not a new retrieval/ranking signal.`;
+
+  const loadChunks = useCallback(async () => {
+    setChunksOpen((v) => !v);
+    if (!docId || !corpusId || chunkRows.length > 0 || chunksLoading) return;
+    setChunksLoading(true);
+    setChunkError(null);
+    try {
+      const rows = await api.getDocExtraction(corpusId, docId);
+      setChunkRows(rows);
+    } catch (e) {
+      setChunkError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setChunksLoading(false);
+    }
+  }, [chunkRows.length, chunksLoading, corpusId, docId]);
+
+  const sendText = selectedEdge
+    ? `Explain the bridge between ${selectedEdge.sourceLabel} and ${selectedEdge.targetLabel}.`
+    : selectedNode?.display_name || "";
+  const nuanceText = selectedEdge
+    ? `Where is the nuance in the bridge between ${selectedEdge.sourceLabel} and ${selectedEdge.targetLabel}?`
+    : `Where is the nuance around ${selectedNode?.display_name || "this graph node"}?`;
+
+  return (
+    <section>
+      <SectionLabel>Evidence Inspector</SectionLabel>
+      <div className="rounded border border-zinc-800 bg-[#0d0d14] p-2.5">
+        <div className="flex items-start gap-2">
+          <span
+            className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
+            style={{
+              backgroundColor:
+                selectedEdge?.color || selectedNode?.accent_color || "#a78bfa",
+            }}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="break-words font-mono text-xs text-zinc-100">
+              {title || "Selection"}
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-widest text-zinc-500 font-mono">
+              {selectedEdge ? "bridge edge" : selectedNode?.entity_type || "node"}
+            </div>
+          </div>
+          <button
+            onClick={onClear}
+            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
+          >
+            Clear
+          </button>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 font-mono text-[10px] text-zinc-400">
+          <Metric label="Relation" value={relationFamilies[0] || "mixed"} />
+          <Metric
+            label="Strength"
+            value={numberText(selectedEdge?.weight ?? selectedNode?.bridge_count)}
+          />
+          <Metric
+            label="Sources"
+            value={
+              selectedEdge
+                ? "2 docs"
+                : `${selectedNode?.source_corpora?.length || 0} corpora`
+            }
+          />
+          <Metric
+            label="Ghost B"
+            value={
+              selectedNode?.ghost_b_total
+                ? `${selectedNode.ghost_b_extracted || 0}/${selectedNode.ghost_b_total}`
+                : "not loaded"
+            }
+          />
+        </div>
+
+        <InspectorBlock title="Why This Matters">
+          <p>{why}</p>
+        </InspectorBlock>
+
+        <InspectorBlock title="Top Shared Entities">
+          {topShared.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {topShared.map((name) => (
+                <span
+                  key={name}
+                  className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300"
+                  title={name}
+                >
+                  {name.length > 24 ? name.slice(0, 23) + "…" : name}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p>No shared-entity labels in the rendered payload.</p>
+          )}
+        </InspectorBlock>
+
+        <InspectorBlock title="Source Documents">
+          <ul className="space-y-1 font-mono text-[10px] text-zinc-400">
+            {selectedEdge ? (
+              <>
+                <li className="truncate" title={selectedEdge.sourceLabel}>
+                  {selectedEdge.sourceLabel}
+                </li>
+                <li className="truncate" title={selectedEdge.targetLabel}>
+                  {selectedEdge.targetLabel}
+                </li>
+              </>
+            ) : (
+              <li className="truncate" title={selectedNode?.filename || selectedNode?.display_name}>
+                {selectedNode?.filename || selectedNode?.display_name || "Unknown document"}
+              </li>
+            )}
+          </ul>
+        </InspectorBlock>
+
+        <InspectorBlock title="Evidence Phrases / Facts">
+          <p>
+            Ghost B evidence phrases and extracted facts are not part of this
+            rendered graph payload yet, so the inspector shows relation
+            families, bridge entities, source docs, and chunk ids without
+            changing retrieval or synthesis behavior.
+          </p>
+        </InspectorBlock>
+
+        {matchedSources.length > 0 && (
+          <InspectorBlock title={`Query Sources (${matchedSources.length})`}>
+            <ul className="space-y-1.5">
+              {matchedSources.slice(0, 5).map((source, index) => (
+                <li
+                  key={source.chunk_id || index}
+                  className="rounded border border-zinc-900 bg-black/20 px-2 py-1"
+                >
+                  <div className="truncate font-mono text-[10px] text-zinc-300">
+                    {source.source_label || source.doc_id || source.chunk_id}
+                  </div>
+                  {source.snippet && (
+                    <div className="mt-0.5 line-clamp-2 text-[10px] leading-relaxed text-zinc-500">
+                      {source.snippet}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </InspectorBlock>
+        )}
+
+        <div className="mt-3 grid grid-cols-1 gap-1.5">
+          <button
+            onClick={() => sendText && onSendToChat?.(sendText)}
+            disabled={!onSendToChat || !sendText}
+            className="flex items-center justify-center gap-2 rounded border border-zinc-700 px-2 py-1.5 font-mono text-[10px] uppercase tracking-widest text-zinc-300 hover:border-amber-700 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Send className="h-3 w-3" /> Send to Chat
+          </button>
+          <button
+            onClick={() => onOpenAtomic?.(nuanceText, "nuance")}
+            disabled={!onOpenAtomic}
+            className="flex items-center justify-center gap-2 rounded border border-zinc-700 px-2 py-1.5 font-mono text-[10px] uppercase tracking-widest text-zinc-300 hover:border-amber-700 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Zap className="h-3 w-3" /> Run Nuance
+          </button>
+          <button
+            onClick={loadChunks}
+            disabled={!docId || !corpusId}
+            className="flex items-center justify-center gap-2 rounded border border-zinc-700 px-2 py-1.5 font-mono text-[10px] uppercase tracking-widest text-zinc-300 hover:border-amber-700 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Sparkles className="h-3 w-3" /> Show Supporting Chunks
+          </button>
+        </div>
+
+        {chunksOpen && (
+          <div className="mt-2 max-h-40 overflow-y-auto border-t border-zinc-900 pt-2">
+            {chunksLoading && (
+              <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+                <Loader2 className="h-3 w-3 animate-spin" /> loading chunks
+              </div>
+            )}
+            {chunkError && (
+              <div className="text-[10px] text-rose-300">{chunkError}</div>
+            )}
+            {!chunksLoading && !chunkError && chunkRows.length === 0 && (
+              <div className="text-[10px] text-zinc-600">
+                No chunk extraction rows loaded.
+              </div>
+            )}
+            <ul className="space-y-1 font-mono text-[10px] text-zinc-400">
+              {chunkRows.slice(0, 30).map((row) => (
+                <li
+                  key={row.chunk_id}
+                  className="flex items-center justify-between gap-2"
+                  title={row.chunk_id}
+                >
+                  <span className="truncate">{row.chunk_id}</span>
+                  <span className="shrink-0 text-zinc-600">
+                    {row.entity_count}e/{row.relation_count}r
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded border border-zinc-900 bg-black/20 px-2 py-1">
+      <div className="uppercase tracking-widest text-zinc-600">{label}</div>
+      <div className="mt-0.5 truncate text-zinc-300" title={value}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function InspectorBlock({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mt-3">
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-zinc-600">
+        {title}
+      </div>
+      <div className="text-[11px] leading-relaxed text-zinc-400">{children}</div>
+    </div>
   );
 }
 
@@ -690,6 +880,13 @@ interface AgentSearchTabProps {
   onSynthesisModeChange?: (m: GraphSynthesisMode) => void;
   validateSynthesis?: boolean;
   onValidateSynthesisChange?: (v: boolean) => void;
+  sources?: Array<{
+    source_label?: string;
+    doc_id?: string;
+    chunk_id?: string;
+    snippet?: string;
+  }>;
+  onOpenAtomic?: (text: string, mode?: GraphSynthesisMode) => void;
 }
 
 function AgentSearchTab(props: AgentSearchTabProps) {
@@ -708,6 +905,8 @@ function AgentSearchTab(props: AgentSearchTabProps) {
     onSynthesisModeChange,
     validateSynthesis = false,
     onValidateSynthesisChange,
+    sources = [],
+    onOpenAtomic,
   } = props;
   const canRun = phase !== "loading" && query.trim().length > 0;
   return (
@@ -809,6 +1008,13 @@ function AgentSearchTab(props: AgentSearchTabProps) {
             </>
           )}
         </button>
+        <button
+          onClick={() => onOpenAtomic?.(query, synthesisMode)}
+          disabled={!onOpenAtomic || query.trim().length === 0}
+          className="mt-1.5 flex w-full items-center justify-center gap-2 rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest text-zinc-300 hover:border-cyan-700 hover:text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Sparkles className="h-3 w-3" /> open atom
+        </button>
         <div className="mt-1 text-[10px] text-zinc-500 font-mono">
           {phase === "loading"
             ? "building subgraph first, then synthesis prose…"
@@ -860,6 +1066,30 @@ function AgentSearchTab(props: AgentSearchTabProps) {
           <div className="synthesis-body rounded border border-zinc-800 bg-[#0d0d14] px-2.5 py-2 text-xs text-zinc-200 leading-relaxed max-h-[40vh] overflow-y-auto">
             <ReactMarkdown>{synthesisMarkdown}</ReactMarkdown>
           </div>
+        </section>
+      )}
+
+      {phase === "ready" && sources.length > 0 && (
+        <section>
+          <SectionLabel>Sources ({sources.length})</SectionLabel>
+          <ol className="space-y-1.5 font-mono text-[11px] text-zinc-400">
+            {sources.slice(0, 10).map((source, i) => (
+              <li
+                key={source.chunk_id || i}
+                className="rounded border border-zinc-900 bg-[#0d0d14] px-2 py-1"
+                title={source.snippet}
+              >
+                <div className="truncate text-zinc-300">
+                  {source.source_label || source.doc_id || source.chunk_id}
+                </div>
+                {source.snippet && (
+                  <div className="mt-0.5 line-clamp-2 text-[10px] leading-relaxed text-zinc-500">
+                    {source.snippet}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ol>
         </section>
       )}
 
@@ -942,10 +1172,16 @@ function ChipList({
 interface GraphQueryTabProps {
   corpusIds: string[];
   onSendToChat?: (text: string) => void;
+  onOpenAtomic?: (text: string, mode?: GraphSynthesisMode) => void;
   model?: string;
 }
 
-function GraphQueryTab({ corpusIds, onSendToChat, model }: GraphQueryTabProps) {
+function GraphQueryTab({
+  corpusIds,
+  onSendToChat,
+  onOpenAtomic,
+  model,
+}: GraphQueryTabProps) {
   // Pt 7b: ONE input drives both HyDE refinement AND entity extraction.
   // The question is the all-purpose entity search — typing it surfaces:
   //   • alternative / opposing / related question chips (LLM-driven, cached)
@@ -1041,6 +1277,13 @@ function GraphQueryTab({ corpusIds, onSendToChat, model }: GraphQueryTabProps) {
               <Sparkles className="h-3 w-3" /> run
             </>
           )}
+        </button>
+        <button
+          onClick={() => onOpenAtomic?.(refineQ, "research")}
+          disabled={!onOpenAtomic || refineQ.trim().length === 0}
+          className="mt-1.5 flex w-full items-center justify-center gap-2 rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest text-zinc-300 hover:border-cyan-700 hover:text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Sparkles className="h-3 w-3" /> open atom
         </button>
         <div className="mt-1 text-[10px] text-zinc-500 font-mono">
           {refineLoading
