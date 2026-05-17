@@ -229,12 +229,6 @@ POLYMATH_SYSTEM_PROMPT = (
     "across sources. Do not cite in every sentence.\n"
     "- Skip preambles ('Based on the provided context…', 'Great question…'). "
     "Start with the answer.\n"
-    "- Do not narrate your process ('The user is asking…', 'Let me search…', "
-    "'I found…'). Reasoning can be separate; the final answer is only the "
-    "answer.\n"
-    "- When corpus context and web results are both available, synthesize them "
-    "into a practical answer. If evidence is thin, say what is known, give the "
-    "best low-confidence direction, and name the missing evidence.\n"
     "- If the context doesn't contain the answer, say so in one sentence. "
     "Don't invent, don't pad.\n"
     "\n"
@@ -914,8 +908,6 @@ class ChatOrchestrator:
             assistant_content = ""
             assistant_thinking = ""
             tool_calls = []
-            content_chunks_to_emit: list[str] = []
-            buffer_tool_enabled_content = bool(tool_schemas)
 
             # Perf instrumentation — measure TTFT (time to first token),
             # stream duration, and post-stream tail so we can tell an LLM
@@ -950,16 +942,13 @@ class ChatOrchestrator:
                         )
                     elif chunk.get("content"):
                         assistant_content += chunk["content"]
-                        if buffer_tool_enabled_content:
-                            content_chunks_to_emit.append(chunk["content"])
-                        else:
-                            yield build_sse_chunk(
-                                ChatChunk(
-                                    type="token",
-                                    content=chunk["content"],
-                                    conversation_id=str(conversation_id),
-                                )
+                        yield build_sse_chunk(
+                            ChatChunk(
+                                type="token",
+                                content=chunk["content"],
+                                conversation_id=str(conversation_id),
                             )
+                        )
 
             except Exception as e:
                 logger.error(f"Error during LLM streaming: {e}")
@@ -972,14 +961,6 @@ class ChatOrchestrator:
 
             # If no tool calls, this is the final response
             if not tool_calls:
-                for content in content_chunks_to_emit:
-                    yield build_sse_chunk(
-                        ChatChunk(
-                            type="token",
-                            content=content,
-                            conversation_id=str(conversation_id),
-                        )
-                    )
                 break
 
             remaining_tool_calls = _MAX_TOOL_CALLS_PER_TURN - tool_call_count
@@ -1045,11 +1026,7 @@ class ChatOrchestrator:
                 )
             assistant_tool_message = {
                 "role": "assistant",
-                # Some providers emit "I'll search..." or similar pre-tool
-                # prose alongside a tool call. Keep that out of both the user
-                # stream and the follow-up synthesis context so it cannot
-                # become the visible answer.
-                "content": None,
+                "content": assistant_content or None,
                 "tool_calls": assistant_tool_calls,
             }
             if assistant_thinking.strip():
@@ -1107,10 +1084,7 @@ class ChatOrchestrator:
                     "role": "user",
                     "content": (
                         "Use the gathered corpus and tool results above to answer "
-                        "the original question now. Return only the final answer. "
-                        "Do not describe your search process, tool usage, or what "
-                        "the context does not cover unless that limitation changes "
-                        "the answer. Do not call any more tools."
+                        "the original question now. Do not call any more tools."
                     ),
                 },
             ]
