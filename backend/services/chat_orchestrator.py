@@ -38,32 +38,13 @@ from services.settings import settings_service
 from utils.streaming import build_sse_chunk
 from utils.tokens import count_tokens
 
-# Phase 24 perf — track fire-and-forget background tasks (Mongo writes that
-# don't need to block the SSE stream). Strong refs prevent asyncio GC from
-# killing them mid-flight; entries clear themselves via add_done_callback.
-_BG_TASKS: set[asyncio.Task] = set()
-
-
-def _fire_and_forget(coro) -> None:
-    """Schedule a coroutine off the SSE critical path. Logs failures."""
-    task = asyncio.create_task(coro)
-    _BG_TASKS.add(task)
-
-    def _on_done(t: asyncio.Task) -> None:
-        _BG_TASKS.discard(t)
-        if not t.cancelled():
-            exc = t.exception()
-            if exc:
-                logger.warning("background task failed: %s", exc)
-
-    task.add_done_callback(_on_done)
-
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 HYDE_FAILURE_TTL_SECONDS = 600.0
 _HYDE_FAILURE_CACHE: dict[str, float] = {}
 _MAX_PERSISTED_SOURCE_PREVIEWS = 10
+_MAX_PERSISTED_WEB_SOURCE_PREVIEWS = 4
 _MAX_PERSISTED_SOURCE_TEXT_CHARS = 900
 _MAX_PERSISTED_SOURCE_SUMMARY_CHARS = 500
 
@@ -119,23 +100,75 @@ def _clip_source_text(value: Any, max_chars: int) -> str | None:
     return text[: max_chars - 1].rstrip() + "…"
 
 
+def _source_to_dict(source: Any) -> dict[str, Any] | None:
+    if hasattr(source, "model_dump"):
+        return source.model_dump(mode="json")
+    if isinstance(source, dict):
+        return dict(source)
+    return None
+
+
+def _source_metadata(data: dict[str, Any]) -> dict[str, Any]:
+    metadata = data.get("metadata")
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _is_web_source_data(data: dict[str, Any]) -> bool:
+    return (
+        data.get("source_tier") == "web_search"
+        or data.get("corpus_id") == "live-web"
+        or str(data.get("chunk_id") or "").startswith("web:")
+    )
+
+
+def _web_source_key(source: Any) -> str | None:
+    data = _source_to_dict(source)
+    if not data or not _is_web_source_data(data):
+        return None
+    metadata = _source_metadata(data)
+    key = metadata.get("url") or data.get("doc_id") or data.get("chunk_id")
+    return str(key).strip() if key else None
+
+
+def _append_deduped_web_sources(existing: list[Any], pending: list[Any]) -> list[Any]:
+    """Append web/tool sources while keeping one entry per URL."""
+    if not pending:
+        return existing
+
+    seen = {
+        key
+        for source in existing
+        if (key := _web_source_key(source))
+    }
+    merged = list(existing)
+    for source in pending:
+        key = _web_source_key(source)
+        if key:
+            if key in seen:
+                continue
+            seen.add(key)
+        merged.append(source)
+    return merged
+
+
 def _compact_source_previews(sources: list[Any] | None) -> list[dict[str, Any]] | None:
     """Persist small source previews so reloaded chat messages keep citations.
 
     Full hydrated chunks can be large, especially with parent-document RAG. The
-    frontend only needs enough text to make a reloaded RetrievalBadge useful,
-    so we cap count and text length before saving to MongoDB.
+    frontend only needs enough text to make a reloaded RetrievalBadge useful.
+    Web sources are retained deliberately instead of being clipped out by a
+    full corpus chunk list.
     """
     if not sources:
         return None
 
-    previews: list[dict[str, Any]] = []
-    for source in sources[:_MAX_PERSISTED_SOURCE_PREVIEWS]:
-        if hasattr(source, "model_dump"):
-            data = source.model_dump(mode="json")
-        elif isinstance(source, dict):
-            data = dict(source)
-        else:
+    corpus_previews: list[dict[str, Any]] = []
+    web_previews: list[dict[str, Any]] = []
+    seen_web_keys: set[str] = set()
+
+    for source in sources:
+        data = _source_to_dict(source)
+        if data is None:
             continue
 
         data["text"] = _clip_source_text(
@@ -147,7 +180,23 @@ def _compact_source_previews(sources: list[Any] | None) -> list[dict[str, Any]] 
             )
         if isinstance(data.get("provenance"), list):
             data["provenance"] = data["provenance"][:5]
-        previews.append(data)
+
+        if _is_web_source_data(data):
+            key = _web_source_key(data)
+            if key and key in seen_web_keys:
+                continue
+            if key:
+                seen_web_keys.add(key)
+            if len(web_previews) < _MAX_PERSISTED_WEB_SOURCE_PREVIEWS:
+                web_previews.append(data)
+            continue
+
+        if len(corpus_previews) < _MAX_PERSISTED_SOURCE_PREVIEWS:
+            corpus_previews.append(data)
+
+    web_slots = min(len(web_previews), _MAX_PERSISTED_SOURCE_PREVIEWS)
+    corpus_slots = max(0, _MAX_PERSISTED_SOURCE_PREVIEWS - web_slots)
+    previews = corpus_previews[:corpus_slots] + web_previews[:web_slots]
 
     return previews or None
 
@@ -467,7 +516,8 @@ class ChatOrchestrator:
         # in corpus chunks, then lets the model decide whether current outside
         # context is actually needed.
         web_search_enabled = bool(
-            request.overrides
+            settings.LIVE_WEB_SEARCH_ENABLED
+            and request.overrides
             and getattr(request.overrides, "web_search_enabled", None)
         )
         web_sources: list = []
@@ -778,6 +828,7 @@ class ChatOrchestrator:
         # === START ReAct LOOP ===
         MAX_TOOL_CALLS = 5
         tool_call_count = 0
+        tool_limit_reached = False
         react_messages: list[dict] = []
 
         # Persist the RAW user message, not the RAG-augmented one. The object
@@ -787,12 +838,20 @@ class ChatOrchestrator:
         # turn's retrieved chunks as "user input", compounding bloat. Rebuild
         # a clean ChatMessage from request.message so Mongo stores only what
         # the user typed.
-        _fire_and_forget(
-            conversation_service.append_message(
-                conversation_id,
-                self._create_user_message(request.message, model_used),
-            )
+        user_saved = await conversation_service.append_message(
+            str(conversation_id),
+            self._create_user_message(request.message, model_used),
         )
+        if not user_saved:
+            logger.error("Failed to persist user message for %s", conversation_id)
+            yield build_sse_chunk(
+                ChatChunk(
+                    type="error",
+                    content="Failed to save the user message. Please retry.",
+                    conversation_id=str(conversation_id),
+                )
+            )
+            return
 
         while tool_call_count < MAX_TOOL_CALLS:
             # Convert messages to dict format for LLM. Baseline system prompt
@@ -922,6 +981,7 @@ class ChatOrchestrator:
 
             # If we have tool calls, execute them
             tool_call_count += len(tool_calls)
+            tool_limit_reached = tool_call_count >= MAX_TOOL_CALLS
             tool_results = await self._execute_tools(tool_calls, tools, request)
 
             # Emit tool results — paired 1:1 with the start event
@@ -986,7 +1046,10 @@ class ChatOrchestrator:
 
             pending_tool_sources = getattr(request, "_pending_tool_sources", [])
             if pending_tool_sources:
-                sources = [*sources, *pending_tool_sources]
+                sources = _append_deduped_web_sources(
+                    list(sources or []),
+                    list(pending_tool_sources),
+                )
                 chunks_returned = len(sources)
                 object.__setattr__(request, "_pending_tool_sources", [])
                 yield build_sse_chunk(
@@ -999,7 +1062,9 @@ class ChatOrchestrator:
 
         # === END ReAct LOOP ===
 
-        if not assistant_content.strip() and react_messages:
+        if react_messages and (tool_limit_reached or not assistant_content.strip()):
+            if tool_limit_reached:
+                assistant_content = ""
             final_messages: list[dict] = [
                 {"role": "system", "content": POLYMATH_SYSTEM_PROMPT},
                 *(
@@ -1048,6 +1113,20 @@ class ChatOrchestrator:
                 )
                 return
 
+        if not assistant_content.strip():
+            logger.error("LLM returned an empty assistant response for %s", conversation_id)
+            yield build_sse_chunk(
+                ChatChunk(
+                    type="error",
+                    content=(
+                        "The model did not return an answer after retrieval. "
+                        "Please retry the question."
+                    ),
+                    conversation_id=str(conversation_id),
+                )
+            )
+            return
+
         # Phase 15 — self_correct review pass:
         # draft has streamed; now ask the LLM to review. If errors found,
         # emit the critique as a `thinking` chunk, then stream the revision
@@ -1089,15 +1168,8 @@ class ChatOrchestrator:
         skills_used_names = [s["name"] for s in active_skills_dicts]
         reasoning_cascade_applied = bool(analysis_text)
 
-        # Phase 24 perf — fire-and-forget the assistant-message save. The
-        # save includes count_tokens (cold-start: 1-4s), Mongo insert + update
-        # (~50ms). Awaiting all that before the done frame meant the user
-        # sat 2-4s after the last token before seeing "complete". Now: yield
-        # done immediately, persist in background. Tradeoff: if the worker
-        # process dies in <500ms after yield, the assistant message is lost.
-        # Acceptable — happens essentially never.
-        _fire_and_forget(
-            self._save_assistant_message(
+        try:
+            await self._save_assistant_message(
                 conversation_id,
                 assistant_content,
                 assistant_thinking if assistant_thinking else None,
@@ -1116,7 +1188,19 @@ class ChatOrchestrator:
                 reasoning_cascade_applied=reasoning_cascade_applied,
                 sources=sources,
             )
-        )
+        except Exception as exc:
+            logger.error("Failed to persist assistant message for %s: %s", conversation_id, exc)
+            yield build_sse_chunk(
+                ChatChunk(
+                    type="error",
+                    content=(
+                        "The answer was generated, but the backend could not "
+                        "save it. Please retry."
+                    ),
+                    conversation_id=str(conversation_id),
+                )
+            )
+            return
 
         # Step 9: Send completion chunk — carries trust-signal fields so the
         # live UI renders the RetrievalBadge without waiting for a reload.
@@ -1609,9 +1693,11 @@ class ChatOrchestrator:
             reasoning_cascade_applied=reasoning_cascade_applied,
         )
 
-        await conversation_service.append_message(
+        saved = await conversation_service.append_message(
             str(conversation_id), assistant_message
         )
+        if not saved:
+            raise RuntimeError("conversation_service.append_message returned False")
         return assistant_message
 
     async def _load_tools(self, request: ChatRequest) -> tuple[list, list[dict]]:
@@ -1623,7 +1709,8 @@ class ChatOrchestrator:
         of issuing a duplicate Mongo round-trip.
         """
         web_search_enabled = bool(
-            request.overrides
+            settings.LIVE_WEB_SEARCH_ENABLED
+            and request.overrides
             and getattr(request.overrides, "web_search_enabled", None)
         )
         if not request.selected_tools and not web_search_enabled:
@@ -1717,6 +1804,9 @@ class ChatOrchestrator:
         args: dict,
         request: ChatRequest | None = None,
     ) -> str:
+        if not settings.LIVE_WEB_SEARCH_ENABLED:
+            return json.dumps({"error": "web_search is disabled by the server"})
+
         query = " ".join(str(args.get("query") or "").split()).strip()
         if not query:
             return json.dumps({"error": "query is required"})
@@ -1741,7 +1831,7 @@ class ChatOrchestrator:
             )
             if request is not None and chunks:
                 pending = list(getattr(request, "_pending_tool_sources", []) or [])
-                pending.extend(chunks)
+                pending = _append_deduped_web_sources(pending, chunks)
                 object.__setattr__(request, "_pending_tool_sources", pending)
 
             return json.dumps(
