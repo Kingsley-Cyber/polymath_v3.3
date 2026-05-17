@@ -956,13 +956,18 @@ class ChatOrchestrator:
                         },
                     }
                 )
-            react_messages.append(
-                {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": assistant_tool_calls,
-                }
-            )
+            assistant_tool_message = {
+                "role": "assistant",
+                "content": assistant_content or None,
+                "tool_calls": assistant_tool_calls,
+            }
+            if assistant_thinking.strip():
+                # DeepSeek-style thinking models require prior assistant
+                # reasoning_content to be echoed when continuing after a
+                # tool call. Without this, LiteLLM/provider rejects the
+                # follow-up and the streamed answer never gets persisted.
+                assistant_tool_message["reasoning_content"] = assistant_thinking
+            react_messages.append(assistant_tool_message)
             for i, (call, result) in enumerate(zip(tool_calls, tool_results)):
                 fn = call.get("function") or {}
                 react_messages.append(
@@ -993,6 +998,55 @@ class ChatOrchestrator:
                 )
 
         # === END ReAct LOOP ===
+
+        if not assistant_content.strip() and react_messages:
+            final_messages: list[dict] = [
+                {"role": "system", "content": POLYMATH_SYSTEM_PROMPT},
+                *(
+                    {"role": msg.role, "content": msg.content}
+                    for msg in trimmed_messages
+                ),
+                *react_messages,
+                {
+                    "role": "user",
+                    "content": (
+                        "Use the gathered corpus and tool results above to answer "
+                        "the original question now. Do not call any more tools."
+                    ),
+                },
+            ]
+            try:
+                async for chunk in llm_service.stream_chat(
+                    messages=final_messages,
+                    model=model_used,
+                    overrides=request.overrides,
+                    tools=None,
+                    **profile_creds,
+                ):
+                    if chunk.get("thinking"):
+                        assistant_thinking += chunk["thinking"]
+                        yield build_sse_chunk(
+                            ChatChunk(
+                                type="thinking",
+                                thinking=chunk["thinking"],
+                                conversation_id=str(conversation_id),
+                            )
+                        )
+                    elif chunk.get("content"):
+                        assistant_content += chunk["content"]
+                        yield build_sse_chunk(
+                            ChatChunk(
+                                type="token",
+                                content=chunk["content"],
+                                conversation_id=str(conversation_id),
+                            )
+                        )
+            except Exception as e:
+                logger.error(f"Error during final no-tool LLM streaming: {e}")
+                yield build_sse_chunk(
+                    ChatChunk(type="error", content=f"LLM streaming error: {e}")
+                )
+                return
 
         # Phase 15 — self_correct review pass:
         # draft has streamed; now ask the LLM to review. If errors found,
