@@ -590,7 +590,7 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen bg-bg-base text-text-primary overflow-hidden font-mono selection:bg-accent-main/30">
+    <div className="flex h-screen bg-bg-base text-text-primary overflow-hidden selection:bg-accent-main/30">
       {/* 1. LEFT PANE: Directory / Explorer */}
       <Sidebar
         isOpen={sidebarOpen}

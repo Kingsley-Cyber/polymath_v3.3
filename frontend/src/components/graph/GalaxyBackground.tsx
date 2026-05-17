@@ -14,10 +14,9 @@
  *      when the layout-running state flips false). Per-frame cost is just
  *      drawing N radial-gradient circles where N = number of families.
  *
- *   3. **Book glow halos** — a soft radial-gradient halo painted at each
- *      Book anchor's screen position every frame (cheap O(visible-books)
- *      pass, gradient fill on 2D canvas — no WebGL shader needed). Gives
- *      the "stars in the night sky" feel without a custom NodeProgram.
+ * Book glow halos are intentionally not drawn here anymore. Book cores,
+ * halos, and breathing intensity are handled by Sigma's WebGL
+ * BookGlowProgram so this canvas remains atmospheric and cheap.
  *
  * The canvas is `position: absolute` filling the sigma container, with
  * `pointer-events: none` so all interaction passes through to sigma.
@@ -100,8 +99,8 @@ export function GalaxyBackground({
     nebulaeRef.current = computeFamilyNebulae(g);
   }, [isLayoutRunning, sigmaRef]);
 
-  // Attach a per-frame painter to sigma's afterRender event so the dust +
-  // nebulae + book halos repaint in lockstep with the main canvas.
+  // Attach a painter to sigma's afterRender event so the dust + nebulae
+  // repaint in lockstep with the main canvas.
   useEffect(() => {
     const sigma = sigmaRef.current;
     const canvas = canvasRef.current;
@@ -128,6 +127,7 @@ export function GalaxyBackground({
       const dim = (sigma as any).getDimensions?.();
       if (!dim) return;
       ctx.clearRect(0, 0, dim.width, dim.height);
+      const time = performance.now() * 0.001;
 
       // ── 1. Family nebulae (translucent radial gradients) ────────────────
       for (const n of nebulaeRef.current) {
@@ -162,38 +162,12 @@ export function GalaxyBackground({
         const p = sigma.graphToViewport({ x: d.x, y: d.y });
         if (p.x < -10 || p.x > dim.width + 10) continue;
         if (p.y < -10 || p.y > dim.height + 10) continue;
-        ctx.fillStyle = `rgba(255, 255, 255, ${(d.alpha * dustAlphaScale).toFixed(3)})`;
+        const twinkle =
+          0.86 + Math.sin(time * 1.7 + d.x * 0.01 + d.y * 0.006) * 0.14;
+        ctx.fillStyle = `rgba(255, 255, 255, ${(d.alpha * dustAlphaScale * twinkle).toFixed(3)})`;
         ctx.beginPath();
         ctx.arc(p.x, p.y, d.size, 0, Math.PI * 2);
         ctx.fill();
-      }
-
-      // ── 3. Book glow halos (Pt 6 cheap bloom) ───────────────────────────
-      // For each Book anchor we draw a soft radial-gradient halo around its
-      // screen position. Cost: O(visible books) gradient fills per frame.
-      // Falls back gracefully when the graph is empty.
-      const g = (sigma as any).getGraph?.() as Graph | undefined;
-      if (g && g.order > 0) {
-        g.forEachNode((id, attrs: any) => {
-          if (!isBookAnchor(id, attrs)) return;
-          const p = sigma.graphToViewport({ x: attrs.x, y: attrs.y });
-          if (p.x < -40 || p.x > dim.width + 40) return;
-          if (p.y < -40 || p.y > dim.height + 40) return;
-          const baseSize = Number(attrs.size) || 7;
-          // Halo radius grows with node size; sigma's actual rendered size
-          // is roughly `size * scale-factor`, but the camera ratio already
-          // accounts for zoom so we just lean on baseSize.
-          const haloR = baseSize * 3.2;
-          const color = String(attrs.color || "#f59e0b");
-          const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, haloR);
-          grad.addColorStop(0, hexWithAlpha(color, 0.55));
-          grad.addColorStop(0.4, hexWithAlpha(color, 0.18));
-          grad.addColorStop(1, hexWithAlpha(color, 0));
-          ctx.fillStyle = grad;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, haloR, 0, Math.PI * 2);
-          ctx.fill();
-        });
       }
     };
 

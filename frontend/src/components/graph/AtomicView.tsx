@@ -24,6 +24,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { discoverGraph, queryGraph } from "../../lib/api";
+import { graphColors, nodeFillColor } from "../../lib/graph-colors";
 import { useSettingsStore } from "../../stores/settingsStore";
 import type {
   GraphBridge,
@@ -49,6 +50,10 @@ interface AtomicNode {
   orbit: number;
   x?: number;
   y?: number;
+  radius?: number;
+  labelBox?: LabelBox;
+  labelVisible?: boolean;
+  displayLabel?: string;
 }
 
 interface AtomicEdge {
@@ -56,6 +61,19 @@ interface AtomicEdge {
   target: string;
   kind: "supports" | "mentions" | "bridges" | "gap";
 }
+
+interface LabelBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+type PlacedAtomicNode = AtomicNode & {
+  x: number;
+  y: number;
+  radius: number;
+};
 
 type Props = {
   /**
@@ -80,63 +98,87 @@ type Props = {
   onSelectSeed?: (entityId: string) => void;
 };
 
-// Color palette for entity types — matches the existing app convention.
-const ENTITY_TYPE_COLOR: Record<string, string> = {
-  Person: "#3B82F6",
-  Organization: "#10B981",
-  Method: "#8B5CF6",
-  Product: "#F59E0B",
-  Concept: "#EC4899",
-  Document: "#6B7280",
-  Artifact: "#0EA5E9",
-  RobloxService: "#DC2626",
-  RobloxClass: "#7C3AED",
-  RobloxNetworkPrimitive: "#EA580C",
-  LuauDataType: "#0891B2",
-};
+const LABEL_FONT = "11px Inter, ui-sans-serif, system-ui, sans-serif";
+const NUCLEUS_FONT = "13px Inter, ui-sans-serif, system-ui, sans-serif";
+const LABEL_HEIGHT = 16;
+const LABEL_GAP = 12;
+const HIT_PADDING = 8;
+const EDGE_HIT_RADIUS = 7;
 
-// Amber accent for cross-corpus bridges — same hue family as the
-// view-mode toggle so users learn "amber = cross-corpus" once.
-const CROSS_CORPUS_COLOR = "#F59E0B";
+function nodeRadius(type: AtomicNode["type"]): number {
+  if (type === "synthesis") return 38;
+  if (type === "seed") return 18;
+  if (type === "bridge") return 12;
+  if (type === "gap") return 11;
+  return 8;
+}
 
-// Per-corpus HSL hash (matches ConstellationCanvas) so the same
-// corpus_id renders in the same hue everywhere in the app.
-const CORPUS_HUE = (corpusId: string): number => {
-  let h = 0;
-  for (const ch of corpusId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return h % 360;
-};
-const corpusColor = (corpusId: string): string =>
-  `hsl(${CORPUS_HUE(corpusId)}, 65%, 50%)`;
+function compactLabel(label: string, type: AtomicNode["type"]): string {
+  const limit = type === "gap" ? 34 : type === "bridge" ? 26 : 28;
+  if (label.length <= limit) return label;
+  return `${label.slice(0, Math.max(0, limit - 1))}…`;
+}
 
-/**
- * Returns the fill color for a node given its entity_type and its
- * source-corpus provenance.
- *
- * - Cross-corpus (>1 source_corpora): amber, signalling the entity
- *   bridges corpora — this is the highest-value signal on the canvas
- *   for multi-corpus queries.
- * - Single-corpus + known entity_type: entity-type color (preserves
- *   existing palette).
- * - Single-corpus + unknown entity_type: the corpus's own HSL hash so
- *   the user can still trace provenance back to a specific corpus.
- * - No provenance info: muted slate fallback.
- */
-const nodeFillColor = (
-  entityType: string | undefined,
-  sourceCorpora: string[] | undefined,
-): string => {
-  if (sourceCorpora && sourceCorpora.length > 1) {
-    return CROSS_CORPUS_COLOR;
+function getMeasureContext(): CanvasRenderingContext2D | null {
+  if (typeof document === "undefined") return null;
+  const canvas = document.createElement("canvas");
+  return canvas.getContext("2d");
+}
+
+function measureLabel(
+  ctx: CanvasRenderingContext2D | null,
+  label: string,
+): number {
+  if (!ctx) return label.length * 6.4 + 16;
+  ctx.font = LABEL_FONT;
+  return ctx.measureText(label).width + 16;
+}
+
+function labelBoxForNode(node: PlacedAtomicNode): LabelBox | undefined {
+  if (!node.labelVisible || !node.displayLabel || node.type === "synthesis") {
+    return undefined;
   }
-  if (entityType && ENTITY_TYPE_COLOR[entityType]) {
-    return ENTITY_TYPE_COLOR[entityType];
-  }
-  if (sourceCorpora && sourceCorpora.length === 1) {
-    return corpusColor(sourceCorpora[0]);
-  }
-  return "#64748B";
-};
+  const w = node.labelBox?.w ?? node.displayLabel.length * 6.4 + 16;
+  return {
+    x: node.x - w / 2,
+    y: node.y + node.radius + LABEL_GAP - LABEL_HEIGHT / 2,
+    w,
+    h: LABEL_HEIGHT,
+  };
+}
+
+function boxesOverlap(a: LabelBox, b: LabelBox, pad = 4): boolean {
+  return !(
+    a.x + a.w + pad < b.x ||
+    b.x + b.w + pad < a.x ||
+    a.y + a.h + pad < b.y ||
+    b.y + b.h + pad < a.y
+  );
+}
+
+function pointInBox(x: number, y: number, box: LabelBox): boolean {
+  return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
+}
+
+function edgeKey(edge: AtomicEdge): string {
+  return `${edge.source}->${edge.target}:${edge.kind}`;
+}
+
+function distanceToSegment(
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): number {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
 
 export default function AtomicView({
   corpusIds,
@@ -161,6 +203,7 @@ export default function AtomicView({
   const [synthError, setSynthError] = useState<string | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [hoveredNode, setHoveredNode] = useState<AtomicNode | null>(null);
+  const [hoveredEdgeKey, setHoveredEdgeKey] = useState<string | null>(null);
 
   // Resize observer.
   useEffect(() => {
@@ -358,36 +401,103 @@ export default function AtomicView({
     return { nodes, edges };
   }, [synthesis, synthError, queryData]);
 
-  // Position nodes on concentric orbits.
-  const placedNodes = useMemo(() => {
-    if (size.w === 0) return nodes;
+  // Position nodes on concentric orbits with label-aware angular demand.
+  const placedNodes = useMemo<PlacedAtomicNode[]>(() => {
+    if (size.w === 0) return [];
     const cx = size.w / 2;
     const cy = size.h / 2;
     const maxR = Math.min(size.w, size.h) * 0.42;
     const orbits = [0, maxR * 0.25, maxR * 0.45, maxR * 0.7, maxR * 0.92];
+    const measureCtx = getMeasureContext();
 
     const byOrbit: Record<number, AtomicNode[]> = { 0: [], 1: [], 2: [], 3: [], 4: [] };
     for (const n of nodes) byOrbit[n.orbit].push(n);
 
-    const placed: AtomicNode[] = [];
+    const placed: PlacedAtomicNode[] = [];
     for (const orbit of [0, 1, 2, 3, 4] as const) {
       const ring = byOrbit[orbit];
       if (orbit === 0) {
         // Nucleus is centered.
-        ring.forEach((n) => placed.push({ ...n, x: cx, y: cy }));
+        ring.forEach((n) =>
+          placed.push({
+            ...n,
+            x: cx,
+            y: cy,
+            radius: nodeRadius(n.type),
+            labelVisible: true,
+            displayLabel: compactLabel(n.label, n.type),
+          }),
+        );
         continue;
       }
-      const angleStep = (Math.PI * 2) / Math.max(ring.length, 1);
-      const r = orbits[orbit];
-      ring.forEach((n, i) => {
-        const angle = i * angleStep - Math.PI / 2;
-        placed.push({
-          ...n,
-          x: cx + Math.cos(angle) * r,
-          y: cy + Math.sin(angle) * r,
+      if (ring.length === 0) continue;
+
+      const baseR = orbits[orbit];
+      const measured = ring.map((n) => {
+        const radius = nodeRadius(n.type);
+        const displayLabel = compactLabel(n.label, n.type);
+        const labelVisible = n.type !== "evidence";
+        const labelW = labelVisible ? measureLabel(measureCtx, displayLabel) : radius * 2 + 14;
+        return { node: n, radius, displayLabel, labelVisible, labelW };
+      });
+      const demandFor = (labelW: number, radius: number, r: number) => {
+        const linear = Math.max(labelW, radius * 2 + 18);
+        return Math.min(Math.PI * 0.8, Math.atan2(linear / 2, Math.max(r, 1)) * 2 + 0.08);
+      };
+      const totalDemand = measured.reduce(
+        (sum, m) => sum + demandFor(m.labelW, m.radius, baseR),
+        0,
+      );
+      const lanes = Math.max(1, Math.min(3, Math.ceil(totalDemand / (Math.PI * 2 * 0.86))));
+      const laneGap = Math.max(22, Math.min(34, maxR * 0.08));
+      const laneOffsets =
+        lanes === 1 ? [0] : lanes === 2 ? [-0.5, 0.5] : [-1, 0, 1];
+
+      laneOffsets.forEach((offset, laneIndex) => {
+        const group = measured.filter((_, i) => i % lanes === laneIndex);
+        if (group.length === 0) return;
+        const r = Math.max(maxR * 0.18, Math.min(maxR * 0.98, baseR + offset * laneGap));
+        const demands = group.map((m) => demandFor(m.labelW, m.radius, r));
+        const total = demands.reduce((sum, d) => sum + d, 0);
+        const sparseArc = group.length <= 4 ? Math.PI * 1.35 : Math.PI * 2;
+        const usableArc = total < sparseArc ? sparseArc : Math.PI * 2;
+        const extra = Math.max(0, (usableArc - total) / group.length);
+        let angle = -Math.PI / 2 - usableArc / 2 + extra / 2;
+        group.forEach((m, i) => {
+          const center = angle + demands[i] / 2;
+          angle += demands[i] + extra;
+          const x = cx + Math.cos(center) * r;
+          const y = cy + Math.sin(center) * r;
+          const baseLabelBox = m.labelVisible
+            ? { x: 0, y: 0, w: m.labelW, h: LABEL_HEIGHT }
+            : undefined;
+          placed.push({
+            ...m.node,
+            x,
+            y,
+            radius: m.radius,
+            labelVisible: m.labelVisible,
+            displayLabel: m.displayLabel,
+            labelBox: baseLabelBox,
+          });
         });
       });
     }
+
+    // Hide lower-priority labels that would collide after lane packing.
+    const accepted: LabelBox[] = [];
+    for (const n of placed) {
+      const box = labelBoxForNode(n);
+      if (!box) continue;
+      if (accepted.some((existing) => boxesOverlap(existing, box))) {
+        n.labelVisible = false;
+        n.labelBox = undefined;
+        continue;
+      }
+      n.labelBox = box;
+      accepted.push(box);
+    }
+
     return placed;
   }, [nodes, size.w, size.h]);
 
@@ -403,14 +513,14 @@ export default function AtomicView({
     if (!ctx) return;
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
-    ctx.fillStyle = "#FAFAF7";
+    ctx.fillStyle = graphColors.atomic.background;
     ctx.fillRect(0, 0, size.w, size.h);
 
     // Orbital rings (faint dashed).
     const cx = size.w / 2;
     const cy = size.h / 2;
     const maxR = Math.min(size.w, size.h) * 0.42;
-    ctx.strokeStyle = "#E2E8F0";
+    ctx.strokeStyle = graphColors.atomic.ring;
     ctx.setLineDash([4, 8]);
     for (const r of [maxR * 0.25, maxR * 0.45, maxR * 0.7, maxR * 0.92]) {
       ctx.beginPath();
@@ -435,23 +545,30 @@ export default function AtomicView({
       ) {
         continue;
       }
+      const isEdgeHover = edgeKey(e) === hoveredEdgeKey;
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
       ctx.lineTo(t.x, t.y);
       if (e.kind === "gap") {
-        ctx.strokeStyle = "#FCA5A5";
-        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = graphColors.relation.gap;
+        ctx.lineWidth = isEdgeHover ? 2.4 : 1.2;
         ctx.setLineDash([3, 5]);
       } else if (e.kind === "supports") {
-        ctx.strokeStyle = "#94A3B8";
-        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = graphColors.relation.supports;
+        ctx.lineWidth = isEdgeHover ? 2.8 : 1.6;
+        ctx.setLineDash([]);
+      } else if (e.kind === "bridges") {
+        ctx.strokeStyle = graphColors.relation.bridges;
+        ctx.lineWidth = isEdgeHover ? 2.4 : 1.1;
         ctx.setLineDash([]);
       } else {
-        ctx.strokeStyle = "#CBD5E1";
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = graphColors.relation.mentions;
+        ctx.lineWidth = isEdgeHover ? 2.2 : 1;
         ctx.setLineDash([]);
       }
+      ctx.globalAlpha = isEdgeHover ? 0.95 : 0.72;
       ctx.stroke();
+      ctx.globalAlpha = 1;
       ctx.setLineDash([]);
     }
 
@@ -459,13 +576,7 @@ export default function AtomicView({
     for (const n of placedNodes) {
       if (n.x == null || n.y == null) continue;
       const isHover = hoveredNode?.id === n.id;
-      const size_px = (() => {
-        if (n.type === "synthesis") return 38;
-        if (n.type === "seed") return 18;
-        if (n.type === "bridge") return 12;
-        if (n.type === "gap") return 11;
-        return 8; // evidence
-      })();
+      const size_px = n.radius;
       ctx.beginPath();
       ctx.arc(n.x, n.y, size_px, 0, Math.PI * 2);
       // Color dispatch — seeds and bridges flow through nodeFillColor
@@ -476,36 +587,41 @@ export default function AtomicView({
       const crossCorpus =
         Array.isArray(n.sourceCorpora) && n.sourceCorpora.length > 1;
       if (n.type === "synthesis") {
-        ctx.fillStyle = "#1E293B";
+        ctx.fillStyle = graphColors.atomic.nucleus;
       } else if (n.type === "seed") {
         ctx.fillStyle = provColor;
       } else if (n.type === "bridge") {
         // Bridges keep their light fill (so they read as connectors)
         // but get a vivid stroke colored by provenance.
-        ctx.fillStyle = crossCorpus ? "#FEF3C7" : "#F1F5F9";
+        ctx.fillStyle = crossCorpus
+          ? graphColors.atomic.crossCorpusBridgeFill
+          : graphColors.atomic.bridgeFill;
       } else if (n.type === "gap") {
-        ctx.fillStyle = "#FEF2F2";
+        ctx.fillStyle = graphColors.atomic.gapFill;
       } else {
-        ctx.fillStyle = "#F8FAFC";
+        ctx.fillStyle = graphColors.atomic.evidence;
       }
       ctx.fill();
       ctx.strokeStyle =
         n.type === "gap"
-          ? "#EF4444"
+          ? graphColors.relation.gap
           : n.type === "synthesis"
-            ? "#0F172A"
+            ? graphColors.atomic.nucleusStroke
             : n.type === "seed"
               ? provColor
               : n.type === "bridge"
                 ? provColor
-                : "#94A3B8";
+                : graphColors.relation.supports;
       ctx.lineWidth = isHover ? 3 : crossCorpus ? 2.5 : 1.5;
       ctx.stroke();
 
       // Labels for everything but evidence (which is dense).
-      if (n.type !== "evidence") {
-        ctx.fillStyle = n.type === "synthesis" ? "#FAFAF7" : "#1E293B";
-        ctx.font = `${n.type === "synthesis" ? 13 : 11}px ui-sans-serif, system-ui`;
+      if (n.type !== "evidence" && n.labelVisible) {
+        ctx.fillStyle =
+          n.type === "synthesis"
+            ? graphColors.atomic.background
+            : graphColors.atomic.label;
+        ctx.font = n.type === "synthesis" ? NUCLEUS_FONT : LABEL_FONT;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         if (n.type === "synthesis") {
@@ -528,11 +644,11 @@ export default function AtomicView({
             ctx.fillText(line, n.x!, n.y! + (i - 0.5) * 14),
           );
         } else {
-          ctx.fillText(n.label, n.x!, n.y! + size_px + 12);
+          ctx.fillText(n.displayLabel || n.label, n.x!, n.y! + size_px + LABEL_GAP);
         }
       }
     }
-  }, [placedNodes, edges, hoveredNode, size.w, size.h]);
+  }, [placedNodes, edges, hoveredNode, hoveredEdgeKey, size.w, size.h]);
 
   // Hit testing.
   const hitTest = (
@@ -544,19 +660,32 @@ export default function AtomicView({
     for (let i = placedNodes.length - 1; i >= 0; i--) {
       const n = placedNodes[i];
       if (n.x == null || n.y == null) continue;
-      const r =
-        n.type === "synthesis"
-          ? 38
-          : n.type === "seed"
-            ? 18
-            : n.type === "bridge"
-              ? 12
-              : n.type === "gap"
-                ? 11
-                : 8;
+      if (n.labelBox && pointInBox(mx, my, n.labelBox)) return n;
+      const r = Math.max(n.radius + HIT_PADDING, n.type === "evidence" ? 13 : n.radius);
       const dx = n.x - mx;
       const dy = n.y - my;
       if (dx * dx + dy * dy <= r * r) return n;
+    }
+    return null;
+  };
+
+  const edgeHitTest = (
+    evt: React.MouseEvent<HTMLCanvasElement>,
+  ): string | null => {
+    const rect = evt.currentTarget.getBoundingClientRect();
+    const mx = evt.clientX - rect.left;
+    const my = evt.clientY - rect.top;
+    const byId = new Map<string, PlacedAtomicNode>(
+      placedNodes.map((n) => [n.id, n]),
+    );
+    for (let i = edges.length - 1; i >= 0; i--) {
+      const e = edges[i];
+      const s = byId.get(e.source);
+      const t = byId.get(e.target);
+      if (!s || !t) continue;
+      if (distanceToSegment(mx, my, s.x, s.y, t.x, t.y) <= EDGE_HIT_RADIUS) {
+        return edgeKey(e);
+      }
     }
     return null;
   };
@@ -569,13 +698,26 @@ export default function AtomicView({
     }
   };
 
+  const handleMouseMove = (evt: React.MouseEvent<HTMLCanvasElement>) => {
+    const n = hitTest(evt);
+    setHoveredNode(n);
+    setHoveredEdgeKey(n ? null : edgeHitTest(evt));
+  };
+
+  const hoveredEdge = hoveredEdgeKey
+    ? edges.find((edge) => edgeKey(edge) === hoveredEdgeKey) || null
+    : null;
+
   return (
     <div className="relative w-full h-full">
       <canvas
         ref={canvasRef}
         className="absolute inset-0 cursor-pointer"
-        onMouseMove={(e) => setHoveredNode(hitTest(e))}
-        onMouseLeave={() => setHoveredNode(null)}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => {
+          setHoveredNode(null);
+          setHoveredEdgeKey(null);
+        }}
         onClick={handleClick}
       />
 
@@ -591,7 +733,7 @@ export default function AtomicView({
         <div className="absolute bottom-4 left-4 flex items-center gap-2 bg-white/95 border border-slate-200 rounded px-2.5 py-1 text-[11px] font-mono text-slate-700 shadow-sm">
           <span
             className="inline-block w-2.5 h-2.5 rounded-full"
-            style={{ background: CROSS_CORPUS_COLOR }}
+            style={{ background: graphColors.state.crossCorpus }}
             aria-hidden
           />
           <span>cross-corpus entity</span>
@@ -604,6 +746,24 @@ export default function AtomicView({
         <div className="absolute top-4 right-4 max-w-md bg-slate-900 text-slate-100 text-xs rounded p-3 shadow-lg">
           <div className="font-medium mb-1">{hoveredNode.label}</div>
           <div className="text-slate-300">{hoveredNode.hover}</div>
+        </div>
+      )}
+
+      {!hoveredNode && hoveredEdge && (
+        <div className="absolute top-4 right-4 max-w-sm bg-slate-900 text-slate-100 text-xs rounded p-3 shadow-lg">
+          <div className="font-medium mb-1">
+            {hoveredEdge.kind === "gap"
+              ? "Missing connection"
+              : hoveredEdge.kind === "bridges"
+                ? "Bridge relationship"
+                : hoveredEdge.kind === "supports"
+                  ? "Synthesis support"
+                  : "Mention relationship"}
+          </div>
+          <div className="text-slate-300">
+            {hoveredEdge.source.replace(/^[^:]+:/, "")} {"->"}{" "}
+            {hoveredEdge.target.replace(/^[^:]+:/, "")}
+          </div>
         </div>
       )}
 

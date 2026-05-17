@@ -212,7 +212,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
         // distinct from the canvas behind it when the sidebar is open,
         // so it reads as opaque even on themes where bg-base is close
         // to the page-content color.
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-bg-base border-r border-border-minimal flex flex-col transition-transform duration-150 font-mono select-none shadow-xl lg:shadow-none ${
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-bg-base border-r border-border-minimal flex flex-col transition-transform duration-150 select-none shadow-xl lg:shadow-none ${
           isOpen
             ? "translate-x-0 ring-1 ring-accent-main/10 lg:ring-0"
             : "-translate-x-full lg:translate-x-0"

@@ -857,8 +857,8 @@ function AgentSearchTab(props: AgentSearchTabProps) {
                 ? "Nuance"
                 : "Synthesis"}
           </SectionLabel>
-          <div className="synthesis-body rounded border border-zinc-800 bg-[#0d0d14] px-2.5 py-2 text-xs text-zinc-200 leading-relaxed max-h-[40vh] overflow-y-auto">
-            <ReactMarkdown>{synthesisMarkdown}</ReactMarkdown>
+          <div className="rounded border border-zinc-800 bg-[#0d0d14] px-3 py-3 synthesis-body custom-scroll max-h-[55vh] overflow-y-auto">
+            <ReactMarkdown>{synthesisMarkdown || ""}</ReactMarkdown>
           </div>
         </section>
       )}

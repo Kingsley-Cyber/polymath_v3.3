@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./styles/typography.css";
 
 @theme {
     /* Deterministic Protocol Graph Theme Mapping */
@@ -14,8 +15,8 @@
     --color-border-minimal: var(--border-subtle);
 
     /* Typography - Intentional Minimalism & Terminal Graph Logic */
-    --font-sans: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
-    --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+    --font-sans: var(--font-ui);
+    --font-mono: var(--font-technical);
 
     /* Reset Shadows for brutalist/flat/graph design */
     --shadow-sm: none;
@@ -141,7 +142,7 @@
     body {
         @apply antialiased transition-colors duration-0;
         font-family: var(--font-sans);
-        letter-spacing: -0.02em;
+        letter-spacing: 0;
     }
 }
 
@@ -405,4 +406,103 @@
             transform: scale(1) translateY(0);
         }
     }
+}
+
+/* ── Synthesis markdown rendering ── */
+.synthesis-body {
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: #a1a1aa;
+}
+.synthesis-body h1 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e4e4e7;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.01em;
+}
+.synthesis-body h2 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #d4d4d8;
+  margin-top: 1rem;
+  margin-bottom: 0.35rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid #27272a;
+}
+.synthesis-body h3 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #fbbf24;
+  margin-top: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+.synthesis-body p {
+  margin-bottom: 0.6rem;
+}
+.synthesis-body strong {
+  color: #fbbf24;
+  font-weight: 600;
+}
+.synthesis-body em {
+  color: #d4d4d8;
+  font-style: italic;
+}
+.synthesis-body ol {
+  list-style: none;
+  counter-reset: synth-counter;
+  padding-left: 0;
+  margin-bottom: 0.75rem;
+}
+.synthesis-body ol > li {
+  counter-increment: synth-counter;
+  position: relative;
+  padding-left: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+.synthesis-body ol > li::before {
+  content: counter(synth-counter) ".";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: #f59e0b;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.7rem;
+  line-height: 1.6;
+}
+.synthesis-body ul {
+  list-style-type: disc;
+  padding-left: 1.25rem;
+  margin-bottom: 0.75rem;
+  color: #a1a1aa;
+}
+.synthesis-body ul > li {
+  margin-bottom: 0.35rem;
+}
+.synthesis-body code {
+  background: #27272a;
+  color: #fbbf24;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  font-size: 0.7rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.synthesis-body blockquote {
+  border-left: 2px solid #f59e0b;
+  padding-left: 0.75rem;
+  margin-left: 0;
+  margin-bottom: 0.75rem;
+  color: #d4d4d8;
+  font-style: italic;
+}
+.synthesis-body a {
+  color: #fbbf24;
+  text-decoration: underline;
+  text-decoration-color: #78350f;
+}
+.synthesis-body hr {
+  border: 0;
+  border-top: 1px solid #27272a;
+  margin: 1rem 0;
 }

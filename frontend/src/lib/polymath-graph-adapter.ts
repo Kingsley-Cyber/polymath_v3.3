@@ -48,6 +48,7 @@ const MIN_BRIDGE_STRENGTH_DEFAULT = 2;
 export interface SigmaNodeAttributes {
   x: number;
   y: number;
+  type?: string;
   size: number;
   color: string;
   label: string;
@@ -554,6 +555,7 @@ function addNodeToGraph(
   graph.addNode(raw.id, {
     x,
     y,
+    ...(kind === "Book" ? { type: "bookGlow" } : {}),
     size: scaledSize + mentionBoost,
     color,
     label: renderedLabel,

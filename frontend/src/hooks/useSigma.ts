@@ -20,10 +20,12 @@ import FA2Layout from "graphology-layout-forceatlas2/worker";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import noverlap from "graphology-layout-noverlap";
 import EdgeCurveProgram from "@sigma/edge-curve";
+import BookGlowProgram from "../lib/sigma-programs/BookGlowProgram";
 import type {
   SigmaNodeAttributes,
   SigmaEdgeAttributes,
 } from "../lib/polymath-graph-adapter";
+import { MOTION } from "../lib/design-tokens";
 
 // ── Color helpers (verbatim from GitNexus useSigma.ts) ────────────────────
 
@@ -157,6 +159,7 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
   const draggedRef = useRef<string | null>(null);
   const isDraggingRef = useRef(false);
   const optionsRef = useRef(options);
+  const ambientSyncRef = useRef<(() => void) | null>(null);
   const [isLayoutRunning, setIsLayoutRunning] = useState(false);
   const [selectedNode, setSelectedNodeState] = useState<string | null>(null);
 
@@ -200,6 +203,9 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
 
       defaultNodeColor: "#6b7280",
       defaultEdgeColor: "#2a2a3a",
+      nodeProgramClasses: {
+        bookGlow: BookGlowProgram,
+      },
 
       defaultEdgeType: "curved",
       edgeProgramClasses: {
@@ -526,6 +532,69 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
     };
   }, [setSelectedNode]);
 
+  // Controlled ambient graph motion: BookGlowProgram uses a time uniform, so
+  // settled graphs need a low-cadence render pulse. Guard it carefully so the
+  // effect stays quiet on reduced-motion, hidden tabs, and offscreen canvases.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof window === "undefined") return;
+
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let onscreen = true;
+    let timer: number | null = null;
+
+    const shouldAnimate = () =>
+      !media.matches &&
+      document.visibilityState === "visible" &&
+      onscreen &&
+      Boolean(graphRef.current?.order);
+
+    const stop = () => {
+      if (timer == null) return;
+      window.clearInterval(timer);
+      timer = null;
+    };
+
+    const sync = () => {
+      if (!shouldAnimate()) {
+        stop();
+        return;
+      }
+      if (timer != null) return;
+      timer = window.setInterval(() => {
+        if (!shouldAnimate()) {
+          stop();
+          return;
+        }
+        sigmaRef.current?.scheduleRender();
+      }, Math.round(1000 / MOTION.ambientGraphFps));
+    };
+    ambientSyncRef.current = sync;
+
+    const visibilityHandler = () => sync();
+    const mediaHandler = () => sync();
+    document.addEventListener("visibilitychange", visibilityHandler);
+    media.addEventListener?.("change", mediaHandler);
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        onscreen = Boolean(entry?.isIntersecting);
+        sync();
+      },
+      { threshold: 0.05 },
+    );
+    observer.observe(container);
+    sync();
+
+    return () => {
+      ambientSyncRef.current = null;
+      stop();
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", visibilityHandler);
+      media.removeEventListener?.("change", mediaHandler);
+    };
+  }, []);
+
   // Run ForceAtlas2 layout — verbatim from GitNexus useSigma.
   // Pt 6: refactored to take an optional duration override so the
   // settle-after-drag handler can request a short 5s settle while the
@@ -625,6 +694,7 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       sigma.setGraph(newGraph);
       setSelectedNode(null);
       runLayout(newGraph);
+      ambientSyncRef.current?.();
       sigma.getCamera().animatedReset({ duration: 500 });
     },
     [runLayout, setSelectedNode],
