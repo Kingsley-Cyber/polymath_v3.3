@@ -8,19 +8,24 @@ import {
   Copy,
   Check,
   Brain,
+  Loader2,
+  Search,
   TerminalSquare,
 } from "lucide-react";
 import type { ChatMessage } from "../../types";
+import type { StreamingToolActivity } from "../../stores/chatStore";
 import { RetrievalBadge } from "./RetrievalBadge";
 
 interface MessageBubbleProps {
   message: ChatMessage;
   isStreaming?: boolean;
+  toolActivity?: StreamingToolActivity[];
 }
 
 export function MessageBubble({
   message,
   isStreaming = false,
+  toolActivity = [],
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [thinkingOpen, setThinkingOpen] = useState(true);
@@ -103,6 +108,10 @@ export function MessageBubble({
           </details>
         )}
 
+        {!isUser && toolActivity.length > 0 && (
+          <ToolActivityPanel activities={toolActivity} />
+        )}
+
         {/* Bubble */}
         <div
           className={`
@@ -170,4 +179,48 @@ export function MessageBubble({
       </div>
     </div>
   );
+}
+
+function ToolActivityPanel({
+  activities,
+}: {
+  activities: StreamingToolActivity[];
+}) {
+  return (
+    <div className="mb-2 w-full max-w-xl border border-border-minimal bg-bg-base px-3 py-2 font-mono text-[10px] text-content-secondary transition-none rounded-none">
+      <div className="mb-1.5 flex items-center justify-between gap-3 text-[9px] font-bold uppercase tracking-widest text-content-tertiary">
+        <span>[TOOL_ACTIVITY]</span>
+        <span>{activities.some((a) => a.status === "running") ? "RUNNING" : "DONE"}</span>
+      </div>
+      <div className="space-y-1">
+        {activities.map((activity) => {
+          const isRunning = activity.status === "running";
+          return (
+            <div
+              key={activity.id}
+              className="flex items-center gap-2 text-content-secondary"
+            >
+              {isRunning ? (
+                <Loader2 className="h-3 w-3 shrink-0 animate-spin text-accent-main" />
+              ) : (
+                <Check className="h-3 w-3 shrink-0 text-emerald-400" />
+              )}
+              <Search className="h-3 w-3 shrink-0 text-content-tertiary" />
+              <span className="font-bold uppercase tracking-wider text-content-primary">
+                {formatToolName(activity.name)}
+              </span>
+              <span className="text-content-tertiary">
+                {isRunning ? "searching" : "complete"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function formatToolName(name: string): string {
+  if (name === "web_search") return "WEB SEARCH";
+  return name.replace(/_/g, " ").toUpperCase();
 }

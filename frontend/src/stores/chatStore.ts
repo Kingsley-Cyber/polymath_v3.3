@@ -7,6 +7,13 @@ import type {
   SourceChunk,
 } from "../types";
 
+export interface StreamingToolActivity {
+  id: string;
+  name: string;
+  status: "running" | "done";
+  detail?: string;
+}
+
 interface ChatState {
   // Conversations
   conversations: Conversation[];
@@ -25,6 +32,7 @@ interface ChatState {
   error: string | null;
   streamingContent: string;
   streamingThinking: string;
+  streamingToolActivity: StreamingToolActivity[];
   /** Sources captured from the SSE `sources` frame during a stream.
    *  Reset on each `startStreaming`; consumed when finalizing the
    *  assistant message so the RetrievalBadge expand panel has chunks. */
@@ -46,6 +54,8 @@ interface ChatState {
   addMessage: (conversationId: string, message: ChatMessage) => void;
   updateStreamingContent: (content: string) => void;
   updateStreamingThinking: (thinking: string) => void;
+  addStreamingToolActivity: (activity: StreamingToolActivity) => void;
+  completeStreamingToolActivity: (name: string, detail?: string) => void;
   setStreamingSources: (sources: SourceChunk[]) => void;
   finalizeStreamingMessage: (
     conversationId: string,
@@ -86,6 +96,7 @@ export const useChatStore = create<ChatState>()((set) => ({
   error: null,
   streamingContent: "",
   streamingThinking: "",
+  streamingToolActivity: [],
   streamingSources: [],
   tokensUsed: null,
   tokensMax: null,
@@ -147,6 +158,41 @@ export const useChatStore = create<ChatState>()((set) => ({
       streamingThinking: state.streamingThinking + thinking,
     })),
 
+  addStreamingToolActivity: (activity) =>
+    set((state) => ({
+      streamingToolActivity: [...state.streamingToolActivity, activity],
+    })),
+
+  completeStreamingToolActivity: (name, detail) =>
+    set((state) => {
+      const targetIndex = state.streamingToolActivity.findIndex(
+        (activity) => activity.name === name && activity.status === "running",
+      );
+
+      if (targetIndex === -1) {
+        return {
+          streamingToolActivity: [
+            ...state.streamingToolActivity,
+            {
+              id: `${name}-${Date.now()}`,
+              name,
+              status: "done",
+              detail,
+            },
+          ],
+        };
+      }
+
+      return {
+        streamingToolActivity: state.streamingToolActivity.map(
+          (activity, index) =>
+            index === targetIndex
+              ? { ...activity, status: "done", detail }
+              : activity,
+        ),
+      };
+    }),
+
   setStreamingSources: (sources) => set({ streamingSources: sources }),
 
   finalizeStreamingMessage: (conversationId, message) =>
@@ -154,6 +200,7 @@ export const useChatStore = create<ChatState>()((set) => ({
       isStreaming: false,
       streamingContent: "",
       streamingThinking: "",
+      streamingToolActivity: [],
       streamingSources: [],
       messages: {
         ...state.messages,
@@ -180,6 +227,7 @@ export const useChatStore = create<ChatState>()((set) => ({
       isLoading: true,
       streamingContent: "",
       streamingThinking: "",
+      streamingToolActivity: [],
       streamingSources: [],
     }),
 

@@ -394,21 +394,26 @@ function App() {
                 break;
               }
               case "tool_call_start": {
-                // Render inline as an italic status line within the assistant message
+                // Keep tool activity out of the assistant answer text. The
+                // live MessageBubble renders this in a separate status lane.
                 try {
                   const calls = JSON.parse(event.content || "[]") as Array<{
                     name: string;
                     args?: string;
                   }>;
                   for (const c of calls) {
-                    chat.updateStreamingContent(
-                      `\n\n*⚙ Running: \`${c.name}(${c.args ?? ""})\`*\n\n`,
-                    );
+                    chat.addStreamingToolActivity({
+                      id: crypto.randomUUID(),
+                      name: c.name || "tool",
+                      status: "running",
+                    });
                   }
                 } catch {
-                  chat.updateStreamingContent(
-                    `\n\n*⚙ Running tool…*\n\n`,
-                  );
+                  chat.addStreamingToolActivity({
+                    id: crypto.randomUUID(),
+                    name: "tool",
+                    status: "running",
+                  });
                 }
                 break;
               }
@@ -419,16 +424,10 @@ function App() {
                     result: string;
                   }>;
                   for (const r of results) {
-                    const preview =
-                      r.result.length > 200
-                        ? `${r.result.slice(0, 200)}…`
-                        : r.result;
-                    chat.updateStreamingContent(
-                      `\n\n*✓ ${r.name} → ${preview}*\n\n`,
-                    );
+                    chat.completeStreamingToolActivity(r.name || "tool");
                   }
                 } catch {
-                  chat.updateStreamingContent(`\n\n*✓ Tool complete*\n\n`);
+                  chat.completeStreamingToolActivity("tool");
                 }
                 break;
               }
