@@ -8,8 +8,10 @@
 # All functions are async. Import: from services.conversation import conversation_service
 
 import logging
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urlparse
 
 from bson import ObjectId
 from config import get_settings
@@ -432,6 +434,58 @@ class ConversationService:
         except Exception as e:
             logger.error(f"Failed to count messages for {conversation_id}: {e}")
             return 0
+
+    async def get_recent_web_source_urls(
+        self,
+        conversation_id: str,
+        *,
+        limit_messages: int = 24,
+    ) -> set[str]:
+        """Return URLs from persisted compact web source previews.
+
+        Sources are stored as generic dict previews. Web URLs live primarily
+        under `source.metadata.url`, with `source.doc_id` as a fallback for
+        older compact previews.
+        """
+
+        def _valid_url(value: object) -> str | None:
+            url = str(value or "").strip()
+            try:
+                parsed = urlparse(url)
+            except Exception:
+                return None
+            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                return url
+            return None
+
+        try:
+            obj_id = ObjectId(conversation_id)
+            cursor = (
+                self.messages_collection.find(
+                    {"conversation_id": obj_id, "sources": {"$exists": True}},
+                    projection={"sources": 1, "_id": 0},
+                )
+                .sort("created_at", -1)
+                .limit(max(1, int(limit_messages)))
+            )
+            urls: set[str] = set()
+            async for doc in cursor:
+                for source in doc.get("sources") or []:
+                    if not isinstance(source, Mapping):
+                        continue
+                    metadata = source.get("metadata") or {}
+                    if isinstance(metadata, Mapping):
+                        url = _valid_url(metadata.get("url"))
+                        if url:
+                            urls.add(url)
+                            continue
+                    url = _valid_url(source.get("doc_id"))
+                    if url:
+                        urls.add(url)
+            return urls
+        except Exception as e:
+            logger.debug("Failed to collect prior web source URLs: %s", e)
+            return set()
 
     # ------------------------------------------------------------------ #
     # Health                                                               #

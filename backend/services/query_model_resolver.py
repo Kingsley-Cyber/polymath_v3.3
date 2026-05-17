@@ -6,7 +6,8 @@ Resolves three kinds of references at chat time:
   1. Explicit  `pool:<entry_id>` or `profile:<entry_id>` model strings
      (from a stored chat turn or per-request override).
   2. The user's HyDE default  (settings.models.hyde.pool_entry_id).
-  3. The user's agentic default (settings.models.agentic.pool_entry_id).
+  3. The user's agentic/utility/reasoning defaults
+     (settings.models.<role>.pool_entry_id).
 
 Lookups prefer the new unified pool at `settings.models.query_model_pool`.
 On miss, the resolver falls through to the legacy per-collection stores
@@ -24,13 +25,14 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
-Kind = Literal["hyde", "agentic", "query", "reasoning"]
+Kind = Literal["hyde", "agentic", "query", "reasoning", "utility"]
 
 _KIND_TO_POOL_FIELD = {
     "hyde": "hyde",
     "agentic": "agentic",
     # Phase 24 — reasoning cascade analyst model
     "reasoning": "reasoning",
+    "utility": "utility",
 }
 
 
@@ -103,8 +105,7 @@ async def resolve_by_entry_id(
 
 
 async def resolve(user_id: str | None, kind: Kind) -> dict | None:
-    """Resolve the user's preferred pool entry for `kind` ('hyde' | 'agentic'
-    | 'query').
+    """Resolve the user's preferred pool entry for `kind`.
 
     Precedence chain (Sprint 3):
       (a) settings.models.<kind>.pool_entry_id  — new unified pool
@@ -117,8 +118,8 @@ async def resolve(user_id: str | None, kind: Kind) -> dict | None:
     if not user_id:
         return None
 
-    # Only hyde/agentic have explicit pool_entry_id fields in ModelsConfig;
-    # a "query" default isn't part of the new shape, but Phase F stored one.
+    # Role sections have explicit pool_entry_id fields in ModelsConfig; a
+    # "query" default isn't part of the new shape, but Phase F stored one.
     if kind in _KIND_TO_POOL_FIELD:
         from services.settings import settings_service
 

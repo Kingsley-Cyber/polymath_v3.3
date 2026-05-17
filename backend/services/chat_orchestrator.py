@@ -1977,34 +1977,25 @@ class ChatOrchestrator:
                 max_results=candidate_limit,
                 time_range=time_range,
             )
-            fetched: dict[str, str] = {}
-            fetch_stats: list[dict[str, Any]] = []
-            hits_to_fetch = []
-            fetch_limit = 0
-            if settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES:
-                fetch_limit = min(
-                    int(
-                        getattr(
-                            settings,
-                            "LIVE_WEB_FETCH_MAX_PAGES",
-                            max_results,
-                        )
-                        or max_results
-                    ),
-                    max_results,
-                    len(hits),
+            prior_web_urls: set[str] = set()
+            if request is not None and request.conversation_id:
+                prior_web_urls = await conversation_service.get_recent_web_source_urls(
+                    request.conversation_id
                 )
-                hits_to_fetch = await live_web_search._select_hits_for_extraction(
-                    search_query,
-                    hits,
-                    limit=fetch_limit,
+            fetched, fetch_stats, hits_to_fetch, web_pipeline = (
+                await live_web_search._fetch_pages_for_search(
+                    search_query=search_query,
+                    hits=hits,
+                    max_results=max_results,
+                    prior_web_urls=prior_web_urls,
                 )
-                fetched, fetch_stats = await live_web_search._fetch_pages_with_stats(
-                    hits_to_fetch
-                )
+            )
+            fetch_limit = len(hits_to_fetch)
+            fetch_stats_by_url = {str(item.get("url")): item for item in fetch_stats}
             candidate_chunks = web_hits_to_source_chunks(
                 hits,
                 fetched_markdown=fetched,
+                fetch_stats_by_url=fetch_stats_by_url,
                 search_query=search_query,
                 max_chars=int(settings.OBSCURA_MAX_CHARS or 4000),
             )
@@ -2032,6 +2023,11 @@ class ChatOrchestrator:
                         "full_page_fetched": bool(
                             (chunk.metadata or {}).get("full_page_fetched")
                         ),
+                        "evidence_mode": (chunk.metadata or {}).get("evidence_mode"),
+                        "fetch_status": (chunk.metadata or {}).get("fetch_status"),
+                        "fetch_method": (chunk.metadata or {}).get("fetch_method"),
+                        "cache_hit": bool((chunk.metadata or {}).get("cache_hit")),
+                        "web_content_untrusted": True,
                     }
                 )
             if request is not None and chunks:
@@ -2089,8 +2085,9 @@ class ChatOrchestrator:
                 "final_result_limit": max_results,
                 "ranked_by": settings.RERANKER_MODEL,
             }
+            pipeline.update(web_pipeline)
             logger.info(
-                "web_search pipeline query=%r candidates=%d fetch_attempts=%d fetch_successes=%d final=%d time_range=%r js_rendered=%s",
+                "web_search pipeline query=%r candidates=%d fetch_attempts=%d fetch_successes=%d final=%d time_range=%r js_rendered=%s snippet_only=%s",
                 search_query,
                 len(hits),
                 len(hits_to_fetch),
@@ -2098,6 +2095,7 @@ class ChatOrchestrator:
                 len(chunks),
                 time_range,
                 pipeline["js_render"]["rendered"],
+                pipeline.get("snippet_only"),
             )
 
             return json.dumps(

@@ -380,6 +380,11 @@ class ReasoningConfig(BaseModel):
     pool_entry_id: str | None = None
 
 
+class UtilityConfig(BaseModel):
+    default_enabled: bool = False
+    pool_entry_id: str | None = None
+
+
 class ModelsConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -387,6 +392,7 @@ class ModelsConfig(BaseModel):
     hyde: HydeConfig = Field(default_factory=HydeConfig)
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
     reasoning: ReasoningConfig = Field(default_factory=ReasoningConfig)
+    utility: UtilityConfig = Field(default_factory=UtilityConfig)
 
 
 class OllamaBulkAddRequest(BaseModel):

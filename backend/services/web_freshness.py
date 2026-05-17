@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
 import re
 import shlex
@@ -24,6 +25,7 @@ from bs4 import BeautifulSoup
 
 from config import get_settings
 from models.schemas import SourceChunk
+from services.web_cache import web_cache
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,9 @@ _DEFAULT_OBSCURA_DOMAINS = (
     "tradingview.com",
 )
 _FETCH_CACHE_MAX_ITEMS = 512
+_WEB_CACHE_SCHEMA_VERSION = "live-web-v2"
+_WEB_SEARCH_CACHE_TTL_SECONDS = 600
+_WEB_EXTRACTION_VERSION = "page-text-v2"
 
 _RESEARCH_DOMAINS = (
     "arxiv.org",
@@ -442,6 +447,7 @@ class WebSearchHit:
     published_date: str | None = None
     search_query: str | None = None
     time_range: str | None = None
+    from_cache: bool = False
 
 
 @dataclass
@@ -458,8 +464,22 @@ class _PageFetchResult:
     status: str
     chars: int = 0
     from_cache: bool = False
+    cache_layer: str | None = None
     obscura_attempted: bool = False
     js_rendered: bool = False
+
+
+@dataclass(frozen=True)
+class SnippetSufficiency:
+    sufficient: bool
+    score: float
+    reason: str
+    useful_snippet_chars: int
+    top3_snippet_chars: int
+    useful_snippet_count: int
+    distinct_domains: int
+    query_coverage: float
+    stronger_evidence_required: bool
 
 
 _PAGE_FETCH_CACHE: dict[str, _PageFetchCacheEntry] = {}
@@ -1180,9 +1200,90 @@ def _web_domain(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
-def _page_fetch_cache_key(url: str, *, fetcher: str, max_chars: int) -> str:
-    domain = _web_domain(url)
-    return sha1(f"{url}|{domain}|{fetcher}|{max_chars}".encode("utf-8")).hexdigest()
+def _stable_hash(payload: dict[str, Any]) -> str:
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _web_cache_key(kind: str, payload: dict[str, Any]) -> str:
+    return f"polymath:web:{_WEB_CACHE_SCHEMA_VERSION}:{kind}:{_stable_hash(payload)}"
+
+
+def _search_cache_key(
+    query: str,
+    *,
+    engines: str | None,
+    time_range: str | None,
+    candidate_limit: int,
+) -> str:
+    return _web_cache_key(
+        "search",
+        {
+            "query": _normalized_text(query),
+            "engines": _normalized_text(engines or ""),
+            "time_range": time_range or "",
+            "candidate_limit": int(candidate_limit),
+            "parser_version": "searxng-results-v2",
+        },
+    )
+
+
+def _serialize_hit(hit: WebSearchHit) -> dict[str, Any]:
+    return {
+        "title": hit.title,
+        "url": hit.url,
+        "snippet": hit.snippet,
+        "score": hit.score,
+        "engines": list(hit.engines),
+        "published_date": hit.published_date,
+        "search_query": hit.search_query,
+        "time_range": hit.time_range,
+    }
+
+
+def _deserialize_hit(raw: dict[str, Any], *, from_cache: bool) -> WebSearchHit | None:
+    if not isinstance(raw, dict):
+        return None
+    url = str(raw.get("url") or "")
+    if not _valid_web_url(url):
+        return None
+    engines_raw = raw.get("engines") or ()
+    engines = tuple(str(v) for v in engines_raw if v) if isinstance(engines_raw, list) else ()
+    try:
+        score = float(raw.get("score") or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    return WebSearchHit(
+        title=str(raw.get("title") or url)[:180],
+        url=url,
+        snippet=str(raw.get("snippet") or "")[:1200],
+        score=score,
+        engines=engines,
+        published_date=str(raw.get("published_date")) if raw.get("published_date") else None,
+        search_query=str(raw.get("search_query")) if raw.get("search_query") else None,
+        time_range=str(raw.get("time_range")) if raw.get("time_range") else None,
+        from_cache=from_cache,
+    )
+
+
+def _page_fetch_cache_key(
+    url: str,
+    *,
+    fetcher: str,
+    max_chars: int,
+    obscura_domains: str | None = None,
+) -> str:
+    return _web_cache_key(
+        "page",
+        {
+            "url": url.strip(),
+            "domain": _web_domain(url),
+            "fetcher": _normalized_text(fetcher),
+            "max_chars": int(max_chars),
+            "obscura_domains": _normalized_text(obscura_domains or ""),
+            "extraction_version": _WEB_EXTRACTION_VERSION,
+        },
+    )
 
 
 def _get_page_fetch_cache(key: str) -> str | None:
@@ -1207,6 +1308,41 @@ def _put_page_fetch_cache(key: str, text: str, *, ttl_seconds: int) -> None:
     _PAGE_FETCH_CACHE[key] = _PageFetchCacheEntry(
         expires_at=time.monotonic() + ttl_seconds,
         text=text,
+    )
+
+
+async def _get_page_fetch_cache_async(key: str) -> tuple[str | None, str | None]:
+    cached = _get_page_fetch_cache(key)
+    if cached:
+        return cached, "memory"
+    payload = await web_cache.get_json(key)
+    if not payload:
+        return None, None
+    if payload.get("schema_version") != _WEB_CACHE_SCHEMA_VERSION:
+        return None, None
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        return None, None
+    ttl = int(payload.get("ttl_seconds") or 60)
+    _put_page_fetch_cache(key, text, ttl_seconds=max(1, min(ttl, 300)))
+    return text, "redis"
+
+
+async def _put_page_fetch_cache_async(
+    key: str,
+    text: str,
+    *,
+    ttl_seconds: int,
+) -> None:
+    _put_page_fetch_cache(key, text, ttl_seconds=ttl_seconds)
+    await web_cache.set_json(
+        key,
+        {
+            "schema_version": _WEB_CACHE_SCHEMA_VERSION,
+            "text": text,
+            "ttl_seconds": ttl_seconds,
+        },
+        ttl_seconds=ttl_seconds,
     )
 
 
@@ -1274,6 +1410,33 @@ def _domain_matches(domain: str, allowed: set[str]) -> bool:
     return any(domain == item or domain.endswith(f".{item}") for item in allowed)
 
 
+def _obscura_command_args(
+    command: str | None,
+    *,
+    url: str,
+    timeout_seconds: float,
+) -> list[str] | None:
+    if not command or not command.strip():
+        return None
+    try:
+        base = shlex.split(command)
+    except ValueError as exc:
+        logger.warning("Invalid OBSCURA_COMMAND %r: %s", command, exc)
+        return None
+    if not base:
+        return None
+    return [
+        *base,
+        "fetch",
+        url,
+        "--dump",
+        "markdown",
+        "--quiet",
+        "--timeout",
+        str(int(timeout_seconds)),
+    ]
+
+
 def _is_research_domain(domain: str) -> bool:
     return any(domain == d or domain.endswith(f".{d}") for d in _RESEARCH_DOMAINS)
 
@@ -1301,6 +1464,133 @@ def _is_social_source(chunk: SourceChunk) -> bool:
     metadata = chunk.metadata or {}
     url = str(metadata.get("url") or chunk.doc_id or "")
     return _is_social_domain(_web_domain(url))
+
+
+_SOURCE_VERIFICATION_QUERY_MARKERS = (
+    "according to",
+    "cite",
+    "citation",
+    "exact",
+    "official",
+    "primary source",
+    "quote",
+    "source",
+    "verify",
+    "verbatim",
+)
+
+
+def _query_requires_stronger_web_evidence(query: str) -> bool:
+    text = _normalized_text(query)
+    return bool(
+        _contains_marker(text, _SOURCE_VERIFICATION_QUERY_MARKERS)
+        or _contains_marker(text, _TECH_IMPLEMENTATION_QUERY_MARKERS)
+        or _contains_marker(text, _CYBER_QUERY_MARKERS)
+    )
+
+
+def _useful_snippet_text(hit: WebSearchHit) -> str:
+    snippet = _strip_html(hit.snippet or "")
+    lower = snippet.lower()
+    if not snippet or len(snippet) < 40:
+        return ""
+    if lower in {"no results found", "no description available"}:
+        return ""
+    if lower.count("...") >= 5 and len(snippet) < 180:
+        return ""
+    return snippet
+
+
+def assess_snippet_sufficiency(
+    query: str,
+    hits: list[WebSearchHit],
+) -> SnippetSufficiency:
+    """Deterministically decide whether snippets are enough context.
+
+    This deliberately stays heuristic and testable. Stronger source-sensitive
+    queries can still pass, but only with richer snippets, more domains, and
+    better coverage of the user's terms.
+    """
+
+    if not hits:
+        return SnippetSufficiency(
+            sufficient=False,
+            score=0.0,
+            reason="no_hits",
+            useful_snippet_chars=0,
+            top3_snippet_chars=0,
+            useful_snippet_count=0,
+            distinct_domains=0,
+            query_coverage=0.0,
+            stronger_evidence_required=_query_requires_stronger_web_evidence(query),
+        )
+
+    useful: list[tuple[WebSearchHit, str]] = [
+        (hit, snippet)
+        for hit in hits
+        if (snippet := _useful_snippet_text(hit))
+    ]
+    distinct_domains = len({_web_domain(hit.url) for hit, _ in useful if hit.url})
+    snippet_lengths = sorted((len(snippet) for _, snippet in useful), reverse=True)
+    total_chars = sum(min(length, 800) for length in snippet_lengths)
+    top3_chars = sum(snippet_lengths[:3])
+
+    query_terms = {
+        token
+        for token in _term_tokens(query)
+        if len(token) >= 3 and token not in _RELATED_TERM_STOPWORDS
+    }
+    covered_terms: set[str] = set()
+    combined = " ".join(f"{hit.title} {snippet}" for hit, snippet in useful).lower()
+    for token in query_terms:
+        if token in combined:
+            covered_terms.add(token)
+    denominator = min(max(len(query_terms), 1), 8)
+    coverage = min(1.0, len(covered_terms) / denominator)
+
+    stronger = _query_requires_stronger_web_evidence(query)
+    char_score = min(1.0, total_chars / (1800 if stronger else 950))
+    top3_score = min(1.0, top3_chars / (1200 if stronger else 600))
+    domain_score = min(1.0, distinct_domains / (3 if stronger else 2))
+    count_score = min(1.0, len(useful) / (4 if stronger else 3))
+    coverage_score = min(1.0, coverage / (0.7 if stronger else 0.45))
+    score = round(
+        (
+            char_score * 0.25
+            + top3_score * 0.25
+            + domain_score * 0.2
+            + count_score * 0.1
+            + coverage_score * 0.2
+        ),
+        3,
+    )
+
+    if stronger and any(marker in _normalized_text(query) for marker in ("exact", "quote", "verbatim")):
+        return SnippetSufficiency(
+            sufficient=False,
+            score=score,
+            reason="exact_source_request_requires_page_fetch",
+            useful_snippet_chars=total_chars,
+            top3_snippet_chars=top3_chars,
+            useful_snippet_count=len(useful),
+            distinct_domains=distinct_domains,
+            query_coverage=round(coverage, 3),
+            stronger_evidence_required=True,
+        )
+
+    sufficient = score >= (0.88 if stronger else 0.78)
+    reason = "sufficient_snippets" if sufficient else "thin_or_low_coverage_snippets"
+    return SnippetSufficiency(
+        sufficient=sufficient,
+        score=score,
+        reason=reason,
+        useful_snippet_chars=total_chars,
+        top3_snippet_chars=top3_chars,
+        useful_snippet_count=len(useful),
+        distinct_domains=distinct_domains,
+        query_coverage=round(coverage, 3),
+        stronger_evidence_required=stronger,
+    )
 
 
 def _practical_research_limit(limit: int) -> int:
@@ -1499,18 +1789,30 @@ def web_hits_to_source_chunks(
     hits: list[WebSearchHit],
     *,
     fetched_markdown: dict[str, str] | None = None,
+    fetch_stats_by_url: dict[str, dict[str, Any]] | None = None,
     search_query: str | None = None,
     expanded_terms: list[str] | None = None,
     max_chars: int = _DEFAULT_OBSCURA_MAX_CHARS,
 ) -> list[SourceChunk]:
     fetched_markdown = fetched_markdown or {}
+    fetch_stats_by_url = fetch_stats_by_url or {}
     expanded_terms = expanded_terms or []
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     chunks: list[SourceChunk] = []
     for rank, hit in enumerate(hits, start=1):
         digest = _web_source_id(hit.url)
         page_text = fetched_markdown.get(hit.url, "").strip()
+        fetch_stat = fetch_stats_by_url.get(hit.url) or {}
         body = page_text or hit.snippet or "(No snippet returned.)"
+        fetch_status = str(fetch_stat.get("status") or ("ok" if page_text else "snippet_only"))
+        fetch_method = str(fetch_stat.get("method") or ("full_page" if page_text else "snippet"))
+        evidence_mode = (
+            "full_page"
+            if page_text
+            else "snippet_fetch_failed"
+            if fetch_status not in {"snippet_only", "ok"}
+            else "snippet_only"
+        )
         engines = ", ".join(hit.engines) if hit.engines else "unknown"
         published = f"\nPublished: {hit.published_date}" if hit.published_date else ""
         hit_query = hit.search_query or search_query or ""
@@ -1521,6 +1823,8 @@ def web_hits_to_source_chunks(
             f"Engines: {engines}\n"
             f"Search query: {hit_query}\n"
             f"Freshness filter: {hit.time_range or 'none'}\n"
+            f"Evidence mode: {evidence_mode}\n"
+            f"Fetch status: {fetch_status}\n"
             f"Corpus expansion terms: {', '.join(expanded_terms) if expanded_terms else 'none'}\n"
             f"Content: {body}"
         )
@@ -1545,6 +1849,22 @@ def web_hits_to_source_chunks(
                     "time_range": hit.time_range,
                     "expanded_terms": expanded_terms,
                     "full_page_fetched": bool(page_text),
+                    "evidence_mode": evidence_mode,
+                    "fetch_method": fetch_method,
+                    "fetch_status": fetch_status,
+                    "fetch_failed": (
+                        bool(fetch_stat)
+                        and not page_text
+                        and fetch_status
+                        not in {"ok", "cache_hit", "snippet_only"}
+                    ),
+                    "cache_hit": bool(hit.from_cache or fetch_stat.get("from_cache")),
+                    "search_cache_hit": bool(hit.from_cache),
+                    "page_cache_hit": bool(fetch_stat.get("from_cache")),
+                    "cache_layer": fetch_stat.get("cache_layer"),
+                    "obscura_attempted": bool(fetch_stat.get("obscura_attempted")),
+                    "js_rendered": bool(fetch_stat.get("js_rendered")),
+                    "web_content_untrusted": True,
                 },
                 provenance=[
                     {
@@ -1586,6 +1906,108 @@ async def rerank_web_source_chunks(
 
 
 class LiveWebSearch:
+    async def _fetch_pages_for_search(
+        self,
+        *,
+        search_query: str,
+        hits: list[WebSearchHit],
+        max_results: int,
+        prior_web_urls: set[str] | None = None,
+    ) -> tuple[dict[str, str], list[dict[str, Any]], list[WebSearchHit], dict[str, Any]]:
+        settings = get_settings()
+        sufficiency = assess_snippet_sufficiency(search_query, hits)
+        telemetry: dict[str, Any] = {
+            "cache_schema_version": _WEB_CACHE_SCHEMA_VERSION,
+            "redis_search_cache_hit": any(hit.from_cache for hit in hits),
+            "redis_search_cache_hit_count": sum(1 for hit in hits if hit.from_cache),
+            "snippet_only": False,
+            "snippet_sufficiency_score": sufficiency.score,
+            "snippet_sufficiency_reason": sufficiency.reason,
+            "snippet_sufficiency": {
+                "useful_snippet_chars": sufficiency.useful_snippet_chars,
+                "top3_snippet_chars": sufficiency.top3_snippet_chars,
+                "useful_snippet_count": sufficiency.useful_snippet_count,
+                "distinct_domains": sufficiency.distinct_domains,
+                "query_coverage": sufficiency.query_coverage,
+                "stronger_evidence_required": sufficiency.stronger_evidence_required,
+            },
+            "selected_full_page_urls": [],
+            "skipped_full_page_fetch_reason": None,
+            "conversation_url_dedupe_count": 0,
+            "skipped_fetch_existing_url_count": 0,
+            "duplicate_url_same_turn_count": 0,
+            "redis_page_cache_hit": False,
+            "redis_page_cache_hit_count": 0,
+            "avg_pages_fetched": 0.0,
+            "obscura_attempt_rate": 0.0,
+            "obscura_success_rate": 0.0,
+            "snippet_sufficiency_pass_rate": 1.0 if sufficiency.sufficient else 0.0,
+        }
+
+        if not getattr(settings, "LIVE_WEB_SEARCH_FETCH_FULL_PAGES", False):
+            telemetry["skipped_full_page_fetch_reason"] = "full_page_fetch_disabled"
+            return {}, [], [], telemetry
+
+        if sufficiency.sufficient:
+            telemetry["snippet_only"] = True
+            telemetry["skipped_full_page_fetch_reason"] = sufficiency.reason
+            return {}, [], [], telemetry
+
+        fetch_limit = min(
+            int(getattr(settings, "LIVE_WEB_FETCH_MAX_PAGES", max_results) or max_results),
+            max_results,
+            len(hits),
+        )
+        hits_to_fetch = await self._select_hits_for_extraction(
+            search_query,
+            hits,
+            limit=fetch_limit,
+        )
+
+        prior = prior_web_urls or set()
+        selected: list[WebSearchHit] = []
+        seen: set[str] = set()
+        for hit in hits_to_fetch:
+            if hit.url in seen:
+                telemetry["duplicate_url_same_turn_count"] += 1
+                continue
+            seen.add(hit.url)
+            if hit.url in prior:
+                telemetry["conversation_url_dedupe_count"] += 1
+                telemetry["skipped_fetch_existing_url_count"] += 1
+                continue
+            selected.append(hit)
+
+        telemetry["selected_full_page_urls"] = [hit.url for hit in selected]
+        if hits_to_fetch and not selected:
+            telemetry["skipped_full_page_fetch_reason"] = "all_selected_urls_seen_before"
+
+        fetched, fetch_stats = await self._fetch_pages_with_stats(selected)
+        attempted_stats = [item for item in fetch_stats if item.get("method") != "skipped"]
+        attempts = len(attempted_stats)
+        successes = sum(1 for item in attempted_stats if item.get("chars", 0) > 0)
+        obscura_attempts = sum(1 for item in attempted_stats if item.get("obscura_attempted"))
+        obscura_successes = sum(1 for item in attempted_stats if item.get("js_rendered"))
+        telemetry["redis_page_cache_hit"] = any(
+            item.get("from_cache") and item.get("cache_layer") == "redis"
+            for item in fetch_stats
+        )
+        telemetry["redis_page_cache_hit_count"] = sum(
+            1
+            for item in fetch_stats
+            if item.get("from_cache") and item.get("cache_layer") == "redis"
+        )
+        telemetry["avg_pages_fetched"] = round(successes / attempts, 3) if attempts else 0.0
+        telemetry["obscura_attempt_rate"] = (
+            round(obscura_attempts / attempts, 3) if attempts else 0.0
+        )
+        telemetry["obscura_success_rate"] = (
+            round(obscura_successes / obscura_attempts, 3)
+            if obscura_attempts
+            else 0.0
+        )
+        return fetched, fetch_stats, selected, telemetry
+
     async def maybe_search(
         self,
         *,
@@ -1624,25 +2046,16 @@ class LiveWebSearch:
         if not hits:
             return []
 
-        fetched: dict[str, str] = {}
-        if settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES:
-            fetch_limit = min(
-                int(
-                    getattr(settings, "LIVE_WEB_FETCH_MAX_PAGES", _DEFAULT_FETCH_MAX_PAGES)
-                    or _DEFAULT_FETCH_MAX_PAGES
-                ),
-                int(settings.LIVE_WEB_SEARCH_MAX_RESULTS or _DEFAULT_MAX_RESULTS),
-                len(hits),
-            )
-            hits_to_fetch = await self._select_hits_for_extraction(
-                search_query,
-                hits,
-                limit=fetch_limit,
-            )
-            fetched = await self._fetch_pages(hits_to_fetch)
+        fetched, fetch_stats, _hits_to_fetch, pipeline = await self._fetch_pages_for_search(
+            search_query=search_query,
+            hits=hits,
+            max_results=int(settings.LIVE_WEB_SEARCH_MAX_RESULTS or _DEFAULT_MAX_RESULTS),
+        )
+        fetch_stats_by_url = {str(item.get("url")): item for item in fetch_stats}
         candidate_chunks = web_hits_to_source_chunks(
             hits,
             fetched_markdown=fetched,
+            fetch_stats_by_url=fetch_stats_by_url,
             search_query=search_query,
             expanded_terms=expanded_terms,
             max_chars=settings.OBSCURA_MAX_CHARS,
@@ -1653,12 +2066,13 @@ class LiveWebSearch:
             limit=int(settings.LIVE_WEB_SEARCH_MAX_RESULTS or _DEFAULT_MAX_RESULTS),
         )
         logger.info(
-            "live web search reranked %d candidate(s) to %d result(s) for query=%r search_query=%r corpus_sources=%d",
+            "live web search reranked %d candidate(s) to %d result(s) for query=%r search_query=%r corpus_sources=%d snippet_only=%s",
             len(hits),
             len(selected),
             query[:120],
             search_query[:240],
             len(corpus_sources or []),
+            pipeline.get("snippet_only"),
         )
         return selected
 
@@ -1767,11 +2181,6 @@ class LiveWebSearch:
             params["engines"] = settings.SEARXNG_ENGINES
         if time_range:
             params["time_range"] = time_range
-        timeout = httpx.Timeout(settings.SEARXNG_TIMEOUT_SECONDS, connect=2.0)
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            response = await client.get(f"{base_url}/search", params=params)
-            response.raise_for_status()
-            payload = response.json()
         candidate_limit = max_results
         if candidate_limit is None:
             candidate_limit = getattr(
@@ -1779,12 +2188,44 @@ class LiveWebSearch:
                 "LIVE_WEB_SEARCH_CANDIDATE_RESULTS",
                 _DEFAULT_CANDIDATE_RESULTS,
             )
-        return parse_searxng_results(
+        candidate_limit = int(candidate_limit or _DEFAULT_CANDIDATE_RESULTS)
+        cache_key = _search_cache_key(
+            query,
+            engines=params.get("engines"),
+            time_range=time_range,
+            candidate_limit=candidate_limit,
+        )
+        cached_payload = await web_cache.get_json(cache_key)
+        if cached_payload and cached_payload.get("schema_version") == _WEB_CACHE_SCHEMA_VERSION:
+            cached_hits = [
+                hit
+                for raw in (cached_payload.get("hits") or [])
+                if isinstance(raw, dict)
+                if (hit := _deserialize_hit(raw, from_cache=True)) is not None
+            ]
+            if cached_hits:
+                return cached_hits[:candidate_limit]
+
+        timeout = httpx.Timeout(settings.SEARXNG_TIMEOUT_SECONDS, connect=2.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            response = await client.get(f"{base_url}/search", params=params)
+            response.raise_for_status()
+            payload = response.json()
+        hits = parse_searxng_results(
             payload,
-            int(candidate_limit or _DEFAULT_CANDIDATE_RESULTS),
+            candidate_limit,
             search_query=query,
             time_range=time_range,
         )
+        await web_cache.set_json(
+            cache_key,
+            {
+                "schema_version": _WEB_CACHE_SCHEMA_VERSION,
+                "hits": [_serialize_hit(hit) for hit in hits],
+            },
+            ttl_seconds=_WEB_SEARCH_CACHE_TTL_SECONDS,
+        )
+        return hits
 
     async def _select_hits_for_extraction(
         self,
@@ -1830,11 +2271,67 @@ class LiveWebSearch:
         self,
         hits: list[WebSearchHit],
     ) -> tuple[dict[str, str], list[dict[str, Any]]]:
-        tasks = [self._fetch_one_page_with_stats(hit.url) for hit in hits]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        unique_hits: list[WebSearchHit] = []
+        duplicate_stats: list[dict[str, Any]] = []
+        seen_urls: set[str] = set()
+        for hit in hits:
+            if hit.url in seen_urls:
+                duplicate_stats.append(
+                    {
+                        "url": hit.url,
+                        "domain": _web_domain(hit.url),
+                        "method": "skipped",
+                        "status": "duplicate_url_same_turn",
+                        "chars": 0,
+                        "from_cache": False,
+                        "cache_layer": None,
+                        "obscura_attempted": False,
+                        "js_rendered": False,
+                    }
+                )
+                continue
+            seen_urls.add(hit.url)
+            unique_hits.append(hit)
+
+        by_domain: dict[str, list[WebSearchHit]] = {}
+        for hit in unique_hits:
+            by_domain.setdefault(_web_domain(hit.url), []).append(hit)
+
+        async def fetch_domain_group(group: list[WebSearchHit]) -> list[tuple[WebSearchHit, Any]]:
+            group_results: list[tuple[WebSearchHit, Any]] = []
+            for hit in group:
+                try:
+                    result = await self._fetch_one_page_with_stats(hit.url)
+                except Exception as exc:
+                    result = exc
+                group_results.append((hit, result))
+            return group_results
+
+        grouped = await asyncio.gather(
+            *(fetch_domain_group(group) for group in by_domain.values()),
+            return_exceptions=True,
+        )
         fetched: dict[str, str] = {}
-        stats: list[dict[str, Any]] = []
-        for hit, result in zip(hits, results):
+        stats: list[dict[str, Any]] = list(duplicate_stats)
+        pairs: list[tuple[WebSearchHit, Any]] = []
+        for item in grouped:
+            if isinstance(item, list):
+                pairs.extend(item)
+            else:
+                stats.append(
+                    {
+                        "url": "",
+                        "domain": "",
+                        "method": "error",
+                        "status": str(item)[:180],
+                        "chars": 0,
+                        "from_cache": False,
+                        "cache_layer": None,
+                        "obscura_attempted": False,
+                        "js_rendered": False,
+                    }
+                )
+        for hit, result in pairs:
             if isinstance(result, _PageFetchResult):
                 if result.text and result.text.strip():
                     fetched[hit.url] = result.text.strip()
@@ -1846,6 +2343,7 @@ class LiveWebSearch:
                         "status": result.status,
                         "chars": result.chars,
                         "from_cache": result.from_cache,
+                        "cache_layer": result.cache_layer,
                         "obscura_attempted": result.obscura_attempted,
                         "js_rendered": result.js_rendered,
                     }
@@ -1859,6 +2357,7 @@ class LiveWebSearch:
                     "status": str(result)[:180],
                     "chars": 0,
                     "from_cache": False,
+                    "cache_layer": None,
                     "obscura_attempted": False,
                     "js_rendered": False,
                 }
@@ -1877,8 +2376,9 @@ class LiveWebSearch:
             url,
             fetcher=fetcher,
             max_chars=max_chars,
+            obscura_domains=str(getattr(settings, "LIVE_WEB_OBSCURA_DOMAINS", "") or ""),
         )
-        cached = _get_page_fetch_cache(cache_key)
+        cached, cache_layer = await _get_page_fetch_cache_async(cache_key)
         if cached:
             return _PageFetchResult(
                 url=url,
@@ -1887,6 +2387,7 @@ class LiveWebSearch:
                 status="cache_hit",
                 chars=len(cached),
                 from_cache=True,
+                cache_layer=cache_layer,
             )
 
         text = await self._fetch_one_with_raw_adapter(url)
@@ -1901,12 +2402,13 @@ class LiveWebSearch:
             method = "obscura_js" if text else "failed"
         if text:
             text = text[:max_chars]
-            _put_page_fetch_cache(
+            ttl_seconds = int(
+                getattr(settings, "LIVE_WEB_FETCH_CACHE_TTL_SECONDS", 900) or 0
+            )
+            await _put_page_fetch_cache_async(
                 cache_key,
                 text,
-                ttl_seconds=int(
-                    getattr(settings, "LIVE_WEB_FETCH_CACHE_TTL_SECONDS", 900) or 0
-                ),
+                ttl_seconds=ttl_seconds,
             )
             return _PageFetchResult(
                 url=url,
@@ -1921,7 +2423,11 @@ class LiveWebSearch:
             url=url,
             text=None,
             method="failed",
-            status="no_extractable_text",
+            status=(
+                "obscura_failed_or_empty"
+                if obscura_attempted
+                else "no_extractable_text"
+            ),
             obscura_attempted=obscura_attempted,
         )
 
@@ -2002,19 +2508,13 @@ class LiveWebSearch:
 
     async def _fetch_one_with_obscura(self, url: str) -> str | None:
         settings = get_settings()
-        command = shlex.split(settings.OBSCURA_COMMAND)
-        if not command:
+        args = _obscura_command_args(
+            settings.OBSCURA_COMMAND,
+            url=url,
+            timeout_seconds=float(settings.OBSCURA_TIMEOUT_SECONDS or 10.0),
+        )
+        if not args:
             return None
-        args = [
-            *command,
-            "fetch",
-            url,
-            "--dump",
-            "markdown",
-            "--quiet",
-            "--timeout",
-            str(int(settings.OBSCURA_TIMEOUT_SECONDS)),
-        ]
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -2029,6 +2529,8 @@ class LiveWebSearch:
             logger.debug("Obscura fetch failed for %s: %s", url, exc)
             return None
         if proc.returncode != 0:
+            stderr = _stderr.decode("utf-8", errors="replace").strip()
+            logger.debug("Obscura fetch exited %s for %s: %s", proc.returncode, url, stderr[:300])
             return None
         text = stdout.decode("utf-8", errors="replace").strip()
         return text[: settings.OBSCURA_MAX_CHARS] if text else None

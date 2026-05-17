@@ -1,11 +1,18 @@
+import asyncio
+
 import pytest
 from types import SimpleNamespace
 
 from services.web_freshness import (
+    _PAGE_FETCH_CACHE,
+    _PageFetchResult,
+    _WEB_CACHE_SCHEMA_VERSION,
+    _obscura_command_args,
     _query_should_include_social_sources,
     _diversify_web_source_chunks,
     _extract_webpage_text,
     _raw_source_candidate_urls,
+    assess_snippet_sufficiency,
     build_web_search_queries,
     build_search_query,
     infer_web_search_time_range,
@@ -276,6 +283,115 @@ def test_web_hits_become_source_chunks_with_url_context():
     assert "Freshness filter: month" in chunks[0].text
     assert chunks[0].metadata["url"] == "https://pytorch.org/docs/stable/index.html"
     assert chunks[0].metadata["time_range"] == "month"
+    assert chunks[0].metadata["evidence_mode"] == "snippet_only"
+    assert chunks[0].metadata["web_content_untrusted"] is True
+
+
+def test_fetch_failed_metadata_keeps_relevant_snippet_source():
+    hits = parse_searxng_results(
+        {
+            "results": [
+                {
+                    "title": "Static extraction fails",
+                    "url": "https://example.com/page",
+                    "content": "A useful snippet survives even when page fetch fails.",
+                }
+            ]
+        },
+        max_results=1,
+    )
+
+    chunks = web_hits_to_source_chunks(
+        hits,
+        fetch_stats_by_url={
+            "https://example.com/page": {
+                "url": "https://example.com/page",
+                "method": "failed",
+                "status": "no_extractable_text",
+                "chars": 0,
+                "from_cache": False,
+            }
+        },
+    )
+
+    assert "A useful snippet survives" in chunks[0].text
+    assert chunks[0].metadata["evidence_mode"] == "snippet_fetch_failed"
+    assert chunks[0].metadata["fetch_failed"] is True
+
+
+def _long_snippet(prefix: str) -> str:
+    return (
+        f"{prefix} current mobile RAG deployment guidance uses local retrieval, "
+        "small language model context windows, on-device embeddings, latency "
+        "budgets, and production constraints. "
+    ) * 5
+
+
+def test_snippet_sufficiency_passes_for_rich_diverse_snippets():
+    hits = parse_searxng_results(
+        {
+            "results": [
+                {
+                    "title": "Mobile RAG deployment",
+                    "url": "https://example.com/a",
+                    "content": _long_snippet("Guide A"),
+                },
+                {
+                    "title": "On-device retrieval",
+                    "url": "https://docs.example.org/b",
+                    "content": _long_snippet("Guide B"),
+                },
+                {
+                    "title": "Small model production notes",
+                    "url": "https://blog.example.net/c",
+                    "content": _long_snippet("Guide C"),
+                },
+            ]
+        },
+        max_results=3,
+    )
+
+    sufficiency = assess_snippet_sufficiency(
+        "current mobile RAG deployment small language model",
+        hits,
+    )
+
+    assert sufficiency.sufficient is True
+    assert sufficiency.score >= 0.78
+    assert sufficiency.distinct_domains == 3
+
+
+def test_snippet_sufficiency_requires_page_fetch_for_exact_quotes():
+    hits = parse_searxng_results(
+        {
+            "results": [
+                {
+                    "title": "Official docs",
+                    "url": "https://docs.example.com/a",
+                    "content": _long_snippet("Official"),
+                },
+                {
+                    "title": "Reference",
+                    "url": "https://reference.example.org/b",
+                    "content": _long_snippet("Reference"),
+                },
+                {
+                    "title": "Manual",
+                    "url": "https://manual.example.net/c",
+                    "content": _long_snippet("Manual"),
+                },
+            ]
+        },
+        max_results=3,
+    )
+
+    sufficiency = assess_snippet_sufficiency(
+        "quote the exact official API documentation",
+        hits,
+    )
+
+    assert sufficiency.sufficient is False
+    assert sufficiency.reason == "exact_source_request_requires_page_fetch"
 
 
 @pytest.mark.asyncio
@@ -529,6 +645,149 @@ async def test_search_pool_mixes_social_variants(monkeypatch):
     assert all(call[1] == 5 for call in calls)
 
 
+@pytest.mark.asyncio
+async def test_searxng_search_uses_redis_cache_hit(monkeypatch):
+    settings = SimpleNamespace(
+        SEARXNG_URL="http://searxng:8080",
+        SEARXNG_ENGINES="duckduckgo",
+        SEARXNG_TIMEOUT_SECONDS=5.0,
+        LIVE_WEB_SEARCH_CANDIDATE_RESULTS=5,
+    )
+
+    class FakeCache:
+        async def get_json(self, _key):
+            return {
+                "schema_version": _WEB_CACHE_SCHEMA_VERSION,
+                "hits": [
+                    {
+                        "title": "Cached result",
+                        "url": "https://example.com/cached",
+                        "snippet": "Cached normalized snippet.",
+                        "score": 2.0,
+                        "engines": ["duckduckgo"],
+                    }
+                ],
+            }
+
+        async def set_json(self, *_args, **_kwargs):
+            raise AssertionError("cache hits should not write")
+
+    monkeypatch.setattr("services.web_freshness.get_settings", lambda: settings)
+    monkeypatch.setattr("services.web_freshness.web_cache", FakeCache())
+
+    hits = await live_web_search._search_searxng("cached query", max_results=5)
+
+    assert len(hits) == 1
+    assert hits[0].url == "https://example.com/cached"
+    assert hits[0].from_cache is True
+
+
+@pytest.mark.asyncio
+async def test_snippet_sufficient_search_skips_page_fetch(monkeypatch):
+    settings = SimpleNamespace(
+        LIVE_WEB_SEARCH_FETCH_FULL_PAGES=True,
+        LIVE_WEB_FETCH_MAX_PAGES=6,
+    )
+    hits = parse_searxng_results(
+        {
+            "results": [
+                {
+                    "title": "A",
+                    "url": "https://a.example.com/guide",
+                    "content": _long_snippet("A"),
+                },
+                {
+                    "title": "B",
+                    "url": "https://b.example.com/guide",
+                    "content": _long_snippet("B"),
+                },
+                {
+                    "title": "C",
+                    "url": "https://c.example.com/guide",
+                    "content": _long_snippet("C"),
+                },
+            ]
+        },
+        max_results=3,
+    )
+
+    async def forbidden_fetch(_hits):
+        raise AssertionError("snippet-sufficient queries must not fetch pages")
+
+    monkeypatch.setattr("services.web_freshness.get_settings", lambda: settings)
+    monkeypatch.setattr(live_web_search, "_fetch_pages_with_stats", forbidden_fetch)
+
+    fetched, stats, selected, telemetry = await live_web_search._fetch_pages_for_search(
+        search_query="current mobile RAG deployment small language model",
+        hits=hits,
+        max_results=3,
+    )
+
+    assert fetched == {}
+    assert stats == []
+    assert selected == []
+    assert telemetry["snippet_only"] is True
+    assert telemetry["skipped_full_page_fetch_reason"] == "sufficient_snippets"
+
+
+@pytest.mark.asyncio
+async def test_prior_url_dedupe_skips_full_page_refetch(monkeypatch):
+    settings = SimpleNamespace(
+        LIVE_WEB_SEARCH_FETCH_FULL_PAGES=True,
+        LIVE_WEB_FETCH_MAX_PAGES=2,
+    )
+    hits = parse_searxng_results(
+        {
+            "results": [
+                {
+                    "title": "Seen",
+                    "url": "https://example.com/seen",
+                    "content": "thin snippet",
+                },
+                {
+                    "title": "New",
+                    "url": "https://example.org/new",
+                    "content": "thin snippet",
+                },
+            ]
+        },
+        max_results=2,
+    )
+
+    async def fake_fetch(selected):
+        assert [hit.url for hit in selected] == ["https://example.org/new"]
+        return (
+            {"https://example.org/new": "Fetched page text."},
+            [
+                {
+                    "url": "https://example.org/new",
+                    "method": "static_http",
+                    "status": "ok",
+                    "chars": 18,
+                    "from_cache": False,
+                    "cache_layer": None,
+                    "obscura_attempted": False,
+                    "js_rendered": False,
+                }
+            ],
+        )
+
+    monkeypatch.setattr("services.web_freshness.get_settings", lambda: settings)
+    monkeypatch.setattr(live_web_search, "_fetch_pages_with_stats", fake_fetch)
+
+    fetched, _stats, selected, telemetry = await live_web_search._fetch_pages_for_search(
+        search_query="latest example source",
+        hits=hits,
+        max_results=2,
+        prior_web_urls={"https://example.com/seen"},
+    )
+
+    assert fetched == {"https://example.org/new": "Fetched page text."}
+    assert [hit.url for hit in selected] == ["https://example.org/new"]
+    assert telemetry["conversation_url_dedupe_count"] == 1
+    assert telemetry["skipped_fetch_existing_url_count"] == 1
+
+
 def test_extract_webpage_text_prefers_article_body():
     text = _extract_webpage_text(
         """
@@ -646,3 +905,163 @@ async def test_fetch_one_page_uses_obscura_only_after_static_failure(monkeypatch
 
     assert text == "Rendered https://www.producthunt.com/products/opencutai-video"
     assert calls == ["static", "static", "obscura"]
+
+
+@pytest.mark.asyncio
+async def test_page_fetch_uses_redis_cache_before_network(monkeypatch):
+    _PAGE_FETCH_CACHE.clear()
+    settings = SimpleNamespace(
+        OBSCURA_COMMAND="",
+        LIVE_WEB_PAGE_FETCHER="auto",
+        LIVE_WEB_OBSCURA_DOMAINS="producthunt.com",
+        LIVE_WEB_FETCH_CACHE_TTL_SECONDS=900,
+        OBSCURA_TIMEOUT_SECONDS=10.0,
+        OBSCURA_MAX_CHARS=4000,
+    )
+
+    class FakeCache:
+        async def get_json(self, _key):
+            return {
+                "schema_version": _WEB_CACHE_SCHEMA_VERSION,
+                "text": "Cached page text from Redis.",
+                "ttl_seconds": 900,
+            }
+
+        async def set_json(self, *_args, **_kwargs):
+            raise AssertionError("cache hits should not write")
+
+    async def forbidden_fetch(_url):
+        raise AssertionError("cache hit should not hit network")
+
+    monkeypatch.setattr("services.web_freshness.get_settings", lambda: settings)
+    monkeypatch.setattr("services.web_freshness.web_cache", FakeCache())
+    monkeypatch.setattr(live_web_search, "_fetch_one_with_raw_adapter", forbidden_fetch)
+    monkeypatch.setattr(live_web_search, "_fetch_one_with_httpx", forbidden_fetch)
+
+    result = await live_web_search._fetch_one_page_with_stats("https://example.com/docs")
+
+    assert result.text == "Cached page text from Redis."
+    assert result.from_cache is True
+    assert result.cache_layer == "redis"
+
+
+@pytest.mark.asyncio
+async def test_fetch_pages_runs_same_domain_sequentially(monkeypatch):
+    running = 0
+    max_running = 0
+    calls = []
+
+    async def fake_fetch(url):
+        nonlocal running, max_running
+        running += 1
+        max_running = max(max_running, running)
+        calls.append(("start", url))
+        await asyncio.sleep(0)
+        running -= 1
+        calls.append(("end", url))
+        return _PageFetchResult(
+            url=url,
+            text=f"text {url}",
+            method="static_http",
+            status="ok",
+            chars=20,
+            from_cache=False,
+            cache_layer=None,
+            obscura_attempted=False,
+            js_rendered=False,
+        )
+
+    monkeypatch.setattr(live_web_search, "_fetch_one_page_with_stats", fake_fetch)
+    hits = parse_searxng_results(
+        {
+            "results": [
+                {"title": "One", "url": "https://example.com/one", "content": "x"},
+                {"title": "Two", "url": "https://example.com/two", "content": "x"},
+            ]
+        },
+        max_results=2,
+    )
+
+    fetched, stats = await live_web_search._fetch_pages_with_stats(hits)
+
+    assert max_running == 1
+    assert list(fetched) == ["https://example.com/one", "https://example.com/two"]
+    assert [item["status"] for item in stats] == ["ok", "ok"]
+    assert calls == [
+        ("start", "https://example.com/one"),
+        ("end", "https://example.com/one"),
+        ("start", "https://example.com/two"),
+        ("end", "https://example.com/two"),
+    ]
+
+
+def test_obscura_policy_requires_command_and_allowlisted_domain(monkeypatch):
+    disabled = SimpleNamespace(
+        OBSCURA_COMMAND="",
+        LIVE_WEB_OBSCURA_DOMAINS="producthunt.com",
+    )
+    disallowed = SimpleNamespace(
+        OBSCURA_COMMAND="obscura",
+        LIVE_WEB_OBSCURA_DOMAINS="producthunt.com",
+    )
+    allowed = SimpleNamespace(
+        OBSCURA_COMMAND="obscura",
+        LIVE_WEB_OBSCURA_DOMAINS="producthunt.com",
+    )
+
+    monkeypatch.setattr("services.web_freshness.get_settings", lambda: disabled)
+    assert live_web_search._should_try_obscura("https://www.producthunt.com/p/x") is False
+
+    monkeypatch.setattr("services.web_freshness.get_settings", lambda: disallowed)
+    assert live_web_search._should_try_obscura("https://example.com/x") is False
+
+    monkeypatch.setattr("services.web_freshness.get_settings", lambda: allowed)
+    assert live_web_search._should_try_obscura("https://www.producthunt.com/p/x") is True
+
+
+def test_obscura_command_args_are_validated_and_bounded():
+    args = _obscura_command_args(
+        "obscura",
+        url="https://example.com/page",
+        timeout_seconds=7.5,
+    )
+
+    assert args == [
+        "obscura",
+        "fetch",
+        "https://example.com/page",
+        "--dump",
+        "markdown",
+        "--quiet",
+        "--timeout",
+        "7",
+    ]
+    assert _obscura_command_args("", url="https://example.com", timeout_seconds=5) is None
+    assert _obscura_command_args('"unterminated', url="https://example.com", timeout_seconds=5) is None
+
+
+@pytest.mark.asyncio
+async def test_obscura_failure_has_explicit_fetch_status(monkeypatch):
+    settings = SimpleNamespace(
+        OBSCURA_COMMAND="obscura",
+        LIVE_WEB_PAGE_FETCHER="auto",
+        LIVE_WEB_OBSCURA_DOMAINS="producthunt.com",
+        LIVE_WEB_FETCH_CACHE_TTL_SECONDS=0,
+        OBSCURA_TIMEOUT_SECONDS=10.0,
+        OBSCURA_MAX_CHARS=4000,
+    )
+
+    async def empty(_url):
+        return None
+
+    monkeypatch.setattr("services.web_freshness.get_settings", lambda: settings)
+    monkeypatch.setattr(live_web_search, "_fetch_one_with_raw_adapter", empty)
+    monkeypatch.setattr(live_web_search, "_fetch_one_with_httpx", empty)
+    monkeypatch.setattr(live_web_search, "_fetch_one_with_obscura", empty)
+
+    result = await live_web_search._fetch_one_page_with_stats(
+        "https://www.producthunt.com/products/example"
+    )
+
+    assert result.obscura_attempted is True
+    assert result.status == "obscura_failed_or_empty"

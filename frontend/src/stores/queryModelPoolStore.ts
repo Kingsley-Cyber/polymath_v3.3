@@ -19,6 +19,7 @@ import type {
   ModelsConfig,
   QueryModelPoolEntry,
   ReasoningConfig,
+  UtilityConfig,
 } from "../types";
 
 const EMPTY_CONFIG: ModelsConfig = {
@@ -27,6 +28,7 @@ const EMPTY_CONFIG: ModelsConfig = {
   agentic: { default_enabled: false, pool_entry_id: null },
   // Phase 24 — Reasoning Cascade target. Disabled + unset by default.
   reasoning: { default_enabled: false, pool_entry_id: null },
+  utility: { default_enabled: false, pool_entry_id: null },
 };
 
 interface QueryModelPoolState {
@@ -42,6 +44,7 @@ interface QueryModelPoolState {
   patchHyde: (patch: Partial<HydeConfig>) => void;
   patchAgentic: (patch: Partial<AgenticConfig>) => void;
   patchReasoning: (patch: Partial<ReasoningConfig>) => void;
+  patchUtility: (patch: Partial<UtilityConfig>) => void;
   /** Append an entry locally. Dirty until save(). */
   addEntry: (entry: QueryModelPoolEntry) => void;
   /** Toggle an entry's `enabled` flag. */
@@ -95,6 +98,15 @@ export const useQueryModelPoolStore = create<QueryModelPoolState>()(
           config: {
             ...s.config,
             reasoning: { ...(s.config.reasoning || { default_enabled: false, pool_entry_id: null }), ...patch },
+          },
+          dirty: true,
+        })),
+
+      patchUtility: (patch) =>
+        set((s) => ({
+          config: {
+            ...s.config,
+            utility: { ...(s.config.utility || { default_enabled: false, pool_entry_id: null }), ...patch },
           },
           dirty: true,
         })),

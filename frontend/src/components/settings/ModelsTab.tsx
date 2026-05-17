@@ -1,12 +1,13 @@
 // Sprint 4B — Unified Models tab.
 //
-// One tab, four stacked sections, one save button:
+// One tab, role sections, one save button:
 //   1. Query Model Pool  — add cloud / add Ollama, chip list with delete + toggle
 //   2. HyDE              — enable toggle + pool-entry dropdown
 //   3. Agentic           — enable toggle + pool-entry dropdown
-//   4. API Keys (Shared) — collapsible, mounts existing ApiKeysTab as-is
+//   4. Utility           — fast helper model for small deterministic tasks
+//   5. API Keys (Shared) — collapsible, mounts existing ApiKeysTab as-is
 //
-// "Save Models Settings" POSTs pool + hyde + agentic to
+// "Save Models Settings" POSTs pool + model-role settings to
 // /api/settings/models. API Keys has its OWN save flow inside ApiKeysTab —
 // the helper text makes the split explicit.
 
@@ -586,6 +587,45 @@ function ReasoningSection() {
   );
 }
 
+function UtilitySection() {
+  const { config, patchUtility } = useQueryModelPoolStore();
+  const utility = config.utility || {
+    default_enabled: false,
+    pool_entry_id: null,
+  };
+  return (
+    <div className="bg-[#2a2a2a] border border-white/5 rounded-lg p-5 space-y-3">
+      <h3 className="text-[15px] font-semibold text-white flex items-center gap-2">
+        <Cpu size={16} className="text-cyan-300" />
+        Utility Model — Fast Helper
+      </h3>
+      <p className="text-[12px] text-gray-500 leading-relaxed">
+        Future helper services use this for small deterministic jobs such as
+        intent checks, query cleanup, or compact source triage. Pick a cheap,
+        low-latency model rather than a deep reasoning model.
+      </p>
+      <label className="flex items-center gap-2 text-[12px] text-gray-300">
+        <input
+          type="checkbox"
+          checked={utility.default_enabled}
+          onChange={(e) => patchUtility({ default_enabled: e.target.checked })}
+          className="accent-accent-main"
+        />
+        Enable utility helpers by default when a feature opts in
+      </label>
+      <div className="flex items-center gap-3">
+        <div className="text-[11px] uppercase tracking-widest text-gray-500 w-24">
+          Model
+        </div>
+        <PoolDropdown
+          value={utility.pool_entry_id}
+          onChange={(v) => patchUtility({ pool_entry_id: v })}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ── Shared API Keys (collapsible, optional) ──────────────────────────────
 
 function SharedApiKeysSection() {
@@ -660,9 +700,10 @@ export function ModelsTab() {
       <div>
         <h2 className="text-xl font-semibold text-white mb-2">Models</h2>
         <p className="text-[13px] text-gray-500">
-          Every chat model lives here. The chat dropdown, HyDE, and Agentic
-          all read from the pool. One save covers pool + HyDE + Agentic —
-          API Keys has its own save inside its collapsible section.
+          Every chat model lives here. The chat dropdown, HyDE, Agentic,
+          Reasoning, and Utility roles all read from the pool. One save covers
+          the pool and model roles — API Keys has its own save inside its
+          collapsible section.
         </p>
       </div>
 
@@ -684,6 +725,7 @@ export function ModelsTab() {
       <HydeSection />
       <AgenticSection />
       <ReasoningSection />
+      <UtilitySection />
       <SharedApiKeysSection />
 
       {/* Sticky save bar */}

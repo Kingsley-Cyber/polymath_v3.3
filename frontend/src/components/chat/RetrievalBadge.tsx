@@ -42,9 +42,11 @@ const REASON_LABELS: Record<string, string> = {
 
 function deriveState(message: ChatMessage): BadgeState {
   const corpora = message.collections_queried ?? [];
-  if (corpora.length === 0) return "NO_RAG";
+  const hasSources = (message.sources ?? []).length > 0;
+  const usedWeb = (message.tools_used ?? []).includes("web_search");
+  if (corpora.length === 0 && !hasSources && !usedWeb) return "NO_RAG";
   // Strict zero — retrieval fired but returned nothing.
-  if (message.chunks_returned === 0) return "RAG_EMPTY";
+  if (message.chunks_returned === 0 && !hasSources) return "RAG_EMPTY";
   // chunks_returned > 0 OR undefined (legacy message): both → grounded.
   return "RAG_GROUNDED";
 }
@@ -62,6 +64,48 @@ function humanizeSpeed(raw: string | undefined): string | null {
 function humanizeReason(raw: string | undefined): string | null {
   if (!raw) return null;
   return REASON_LABELS[raw] ?? raw;
+}
+
+function sourceMetadata(source: SourceChunk): Record<string, unknown> {
+  return source.metadata && typeof source.metadata === "object"
+    ? source.metadata
+    : {};
+}
+
+function isWebSource(source: SourceChunk): boolean {
+  const metadata = sourceMetadata(source);
+  return source.source_tier === "web_search" || typeof metadata.url === "string";
+}
+
+function asText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function webEvidenceLabel(source: SourceChunk): string | null {
+  const metadata = sourceMetadata(source);
+  const mode = asText(metadata.evidence_mode);
+  if (mode === "full_page") return "full page";
+  if (mode === "snippet_fetch_failed") return "snippet, fetch failed";
+  if (mode === "snippet_only") return "snippet";
+  if (metadata.full_page_fetched === true) return "full page";
+  return isWebSource(source) ? "web" : null;
+}
+
+function summarizeWebSources(sources: SourceChunk[]): {
+  total: number;
+  fullPage: number;
+  snippetOnly: number;
+  rendered: number;
+  cacheHits: number;
+} {
+  const web = sources.filter(isWebSource);
+  return {
+    total: web.length,
+    fullPage: web.filter((s) => sourceMetadata(s).full_page_fetched === true).length,
+    snippetOnly: web.filter((s) => sourceMetadata(s).evidence_mode === "snippet_only").length,
+    rendered: web.filter((s) => sourceMetadata(s).js_rendered === true).length,
+    cacheHits: web.filter((s) => sourceMetadata(s).cache_hit === true).length,
+  };
 }
 
 export function RetrievalBadge({ message }: RetrievalBadgeProps) {
@@ -84,6 +128,9 @@ export function RetrievalBadge({ message }: RetrievalBadgeProps) {
   const tools = message.tools_used ?? [];
   const agentic = !!message.agentic_mode_used && tools.length > 0;
   const reasoning = !!message.reasoning_cascade_applied;
+  const sources = message.sources ?? [];
+  const webSummary = summarizeWebSources(sources);
+  const webUsed = tools.includes("web_search") || webSummary.total > 0;
 
   // ── Compose visible label ───────────────────────────────────────────
   let label: string;
@@ -99,6 +146,7 @@ export function RetrievalBadge({ message }: RetrievalBadgeProps) {
     if (speed) parts.push(speed);
     if (reasonMode && reasonMode !== "Off") parts.push(reasonMode);
     if (hyde) parts.push("HyDE");
+    if (webUsed) parts.push("Web");
     if (agentic) parts.push("Agentic");
     label = parts.join(" · ");
   }
@@ -200,6 +248,19 @@ export function RetrievalBadge({ message }: RetrievalBadgeProps) {
               {tools.length > 0 ? tools.join(", ") : "none"}
             </span>
 
+            {webUsed && (
+              <>
+                <span className="text-content-tertiary tracking-widest uppercase text-[9.5px]">
+                  web
+                </span>
+                <span className="text-content-primary break-words">
+                  {webSummary.total > 0
+                    ? `${webSummary.total} sources · ${webSummary.fullPage} full page · ${webSummary.snippetOnly} snippet · ${webSummary.rendered} rendered · ${webSummary.cacheHits} cached`
+                    : "tool used"}
+                </span>
+              </>
+            )}
+
             {/* Phase 24 — Reasoning cascade row */}
             <span className="text-content-tertiary tracking-widest uppercase text-[9.5px]">
               cascade
@@ -231,7 +292,7 @@ export function RetrievalBadge({ message }: RetrievalBadgeProps) {
 
           {/* ── Chunks list LAST (largest visual, scrollable) ────── */}
           {state === "RAG_GROUNDED" && (
-            <ChunksList sources={message.sources ?? []} />
+            <ChunksList sources={sources} />
           )}
         </div>
       )}
@@ -243,8 +304,7 @@ function ChunksList({ sources }: { sources: SourceChunk[] }) {
   if (sources.length === 0) {
     return (
       <div className="px-2 py-1.5 text-content-tertiary italic">
-        Chunk text not available (reloaded message — backend persists count
-        only, not chunk bodies).
+        Source previews are not available for this older message.
       </div>
     );
   }
@@ -255,6 +315,9 @@ function ChunksList({ sources }: { sources: SourceChunk[] }) {
           key={s.chunk_id ?? i}
           className="px-2.5 py-2 hover:bg-bg-surface/40 transition-colors"
         >
+          {isWebSource(s) && (
+            <WebSourceLine source={s} />
+          )}
           <div className="flex items-center justify-between gap-2 text-[9.5px] tracking-widest uppercase text-content-tertiary">
             <span className="truncate">
               {s.doc_name ?? s.doc_id.slice(0, 12)}
@@ -269,6 +332,36 @@ function ChunksList({ sources }: { sources: SourceChunk[] }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function WebSourceLine({ source }: { source: SourceChunk }) {
+  const metadata = sourceMetadata(source);
+  const url = asText(metadata.url) ?? source.doc_id;
+  const evidence = webEvidenceLabel(source);
+  const status = asText(metadata.fetch_status);
+  const cache = metadata.cache_hit === true ? "cached" : null;
+  const rendered = metadata.js_rendered === true ? "rendered" : null;
+  const pieces = [evidence, status, cache, rendered].filter(Boolean);
+  return (
+    <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9.5px]">
+      <span className="px-1.5 py-0.5 border border-cyan-400/30 text-cyan-300 uppercase tracking-widest">
+        web
+      </span>
+      {pieces.length > 0 && (
+        <span className="text-content-tertiary">{pieces.join(" · ")}</span>
+      )}
+      {url && (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="text-accent-secondary hover:underline break-all"
+        >
+          {url}
+        </a>
+      )}
     </div>
   );
 }

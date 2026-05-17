@@ -39,11 +39,17 @@ export interface ReasoningConfig {
   pool_entry_id: string | null;
 }
 
+export interface UtilityConfig {
+  default_enabled: boolean;
+  pool_entry_id: string | null;
+}
+
 export interface ModelsConfig {
   query_model_pool: QueryModelPoolEntry[];
   hyde: HydeConfig;
   agentic: AgenticConfig;
   reasoning: ReasoningConfig;
+  utility: UtilityConfig;
 }
 
 /** Structured provider preset. Carries the LiteLLM prefix explicitly so the

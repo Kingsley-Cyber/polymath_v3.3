@@ -165,6 +165,21 @@ async def test_hyde_pool_entry_id_validates_against_pool():
 
 
 @pytest.mark.asyncio
+async def test_utility_pool_entry_id_validates_against_pool():
+    await _setup()
+    user = _u()
+    try:
+        with pytest.raises(ValueError, match="utility.pool_entry_id"):
+            await settings_service.update_models(user, ModelsConfig(
+                query_model_pool=[],
+                utility={"default_enabled": True, "pool_entry_id": "ghost-entry"},
+            ).model_dump())
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
 async def test_ollama_bulk_add_dedupes_by_model_name():
     await _setup()
     user = _u()
@@ -203,6 +218,32 @@ async def test_delete_pool_entry_nulls_hyde_reference():
         after = await settings_service.delete_pool_entry(user, "ent-to-delete")
         assert after.query_model_pool == []
         assert after.hyde.pool_entry_id is None
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
+async def test_delete_pool_entry_nulls_utility_reference():
+    await _setup()
+    user = _u()
+    try:
+        await settings_service.update_models(user, ModelsConfig(
+            query_model_pool=[{
+                "entry_id": "utility-delete",
+                "label": "utility helper",
+                "provider": "openai",
+                "base_url": "https://api.openai.com/v1",
+                "api_key_ciphertext": "sk-x",
+                "model_name": "gpt-4o-mini",
+                "source": "cloud",
+            }],
+            utility={"default_enabled": True, "pool_entry_id": "utility-delete"},
+        ).model_dump())
+        after = await settings_service.delete_pool_entry(user, "utility-delete")
+        assert after.query_model_pool == []
+        assert after.utility.pool_entry_id is None
+        assert after.utility.default_enabled is True
     finally:
         await _cleanup(user)
         await _teardown()
@@ -288,6 +329,55 @@ async def test_resolver_pool_entry_returns_decrypted_key():
         assert resolved["model"].endswith("Qwen/Qwen3-Embedding-0.6B")
         assert resolved["api_base"] == "https://api.siliconflow.cn/v1"
         assert resolved["api_key"] == "sk-resolved-plaintext"
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
+async def test_resolver_utility_role_returns_configured_pool_entry():
+    from services import query_model_resolver
+
+    await _setup()
+    user = _u()
+    try:
+        await settings_service.update_models(user, ModelsConfig(
+            query_model_pool=[{
+                "entry_id": "ent-utility",
+                "label": "Fast utility",
+                "provider": "openai",
+                "base_url": "https://api.openai.com/v1",
+                "api_key_ciphertext": "sk-utility-plaintext",
+                "model_name": "gpt-4o-mini",
+                "source": "cloud",
+            }],
+            utility={"default_enabled": True, "pool_entry_id": "ent-utility"},
+        ).model_dump())
+
+        resolved = await query_model_resolver.resolve(user, "utility")
+
+        assert resolved is not None
+        assert resolved["model"] == "openai/gpt-4o-mini"
+        assert resolved["api_base"] == "https://api.openai.com/v1"
+        assert resolved["api_key"] == "sk-utility-plaintext"
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
+async def test_resolver_utility_role_miss_returns_none():
+    from services import query_model_resolver
+
+    await _setup()
+    user = _u()
+    try:
+        await settings_service.update_models(user, ModelsConfig(
+            query_model_pool=[],
+            utility={"default_enabled": False, "pool_entry_id": None},
+        ).model_dump())
+
+        assert await query_model_resolver.resolve(user, "utility") is None
     finally:
         await _cleanup(user)
         await _teardown()

@@ -202,6 +202,7 @@ export interface SourceChunk {
   corpus_name?: string | null;
   doc_name?: string | null;
   heading_path?: string[] | null;
+  metadata?: Record<string, unknown> | null;
   /** Phase 16.1 — graph expansion provenance (Mode A / Mode B only) */
   provenance?: GraphProvenance[] | null;
 }
@@ -269,9 +270,8 @@ export interface ChatMessage {
   tools_used?: string[];
   reasoning_cascade_applied?: boolean;
   /** Source chunks captured from the SSE `sources` frame and attached on
-   *  finalize. Populated for the live message; absent on reload (the
-   *  backend doesn't persist chunk text on the message itself — only
-   *  the count via chunks_returned). */
+   *  finalize. The backend now persists compact source previews, so reloads
+   *  can still show source receipts even when full chunk bodies are compacted. */
   sources?: SourceChunk[];
 }
 

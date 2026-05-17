@@ -35,6 +35,10 @@ function summarizeToolResultDetail(name: string, result: string): string | undef
         final_reranked_results?: number;
         ranked_by?: string;
         freshness_time_range?: string | null;
+        snippet_only?: boolean;
+        snippet_sufficiency_score?: number;
+        redis_search_cache_hit?: boolean;
+        redis_page_cache_hit?: boolean;
         js_render?: { attempted?: boolean; rendered?: boolean };
       };
     };
@@ -47,7 +51,13 @@ function summarizeToolResultDetail(name: string, result: string): string | undef
       : p.js_render?.attempted
         ? " · js tried"
         : "";
-    return `candidates ${p.candidate_results ?? 0} → fetched ${p.full_page_fetch_successes ?? 0}/${p.full_page_fetch_attempts ?? 0} → final ${p.final_reranked_results ?? 0}${freshness}${js}`;
+    const snippet = p.snippet_only
+      ? ` · snippets enough ${p.snippet_sufficiency_score ?? ""}`.trimEnd()
+      : "";
+    const cache = p.redis_search_cache_hit || p.redis_page_cache_hit
+      ? " · cache hit"
+      : "";
+    return `candidates ${p.candidate_results ?? 0} → fetched ${p.full_page_fetch_successes ?? 0}/${p.full_page_fetch_attempts ?? 0} → final ${p.final_reranked_results ?? 0}${freshness}${snippet}${cache}${js}`;
   } catch {
     return undefined;
   }

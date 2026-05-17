@@ -308,10 +308,9 @@ class SettingsService:
           - `query_model_pool[]` entries have their `api_key_ciphertext`
             resolved: plaintext → encrypt(); "[set]" / None / "" → preserve
             the existing ciphertext at that entry_id (matched by id).
-          - `hyde.pool_entry_id` and `agentic.pool_entry_id` are validated
-            against the POST-update pool — if the referenced entry_id does
-            not exist in the new list, the write is rejected with
-            ValueError (caller maps to HTTP 400).
+          - role `pool_entry_id` fields are validated against the POST-update
+            pool — if the referenced entry_id does not exist in the new list,
+            the write is rejected with ValueError (caller maps to HTTP 400).
           - Entire models subdoc is replaced atomically; callers send the
             full desired pool shape.
         """
@@ -350,13 +349,13 @@ class SettingsService:
                 entry_dict["api_key_ciphertext"] = encrypt(new_val)
             resolved_pool.append(entry_dict)
 
-        # Validate hyde / agentic / reasoning references against the
-        # post-update pool. (Phase 24 added the reasoning section.)
+        # Validate role references against the post-update pool.
         valid_ids = {e["entry_id"] for e in resolved_pool}
         for section_name, section_val in (
             ("hyde", incoming.hyde),
             ("agentic", incoming.agentic),
             ("reasoning", incoming.reasoning),
+            ("utility", incoming.utility),
         ):
             pid = section_val.pool_entry_id
             if pid and pid not in valid_ids:
@@ -371,6 +370,7 @@ class SettingsService:
             "agentic": incoming.agentic.model_dump(),
             # Phase 24 — Reasoning Cascade target.
             "reasoning": incoming.reasoning.model_dump(),
+            "utility": incoming.utility.model_dump(),
         }
         await self._db["settings"].update_one(
             {"user_id": user_id},
@@ -380,12 +380,13 @@ class SettingsService:
         # Phase 24 perf — invalidate cache so next get_settings sees the write.
         self._invalidate_cache(user_id)
         logger.info(
-            "models updated user=%s pool=%d hyde=%s agentic=%s reasoning=%s",
+            "models updated user=%s pool=%d hyde=%s agentic=%s reasoning=%s utility=%s",
             user_id,
             len(resolved_pool),
             incoming.hyde.pool_entry_id or "-",
             incoming.agentic.pool_entry_id or "-",
             incoming.reasoning.pool_entry_id or "-",
+            incoming.utility.pool_entry_id or "-",
         )
 
         # Return the masked view (same shape as GET) for router response
@@ -408,7 +409,7 @@ class SettingsService:
             for e in pool
             if isinstance(e, dict) and e.get("provider") == "ollama"
         }
-        now = datetime.utcnow()
+        now = datetime.utcnow().isoformat()
         added = 0
         for name in model_names:
             name = (name or "").strip()
@@ -437,6 +438,8 @@ class SettingsService:
                 "query_model_pool": pool,
                 "hyde": current.get("hyde") or {},
                 "agentic": current.get("agentic") or {},
+                "reasoning": current.get("reasoning") or {},
+                "utility": current.get("utility") or {},
             })
         # Write back (no re-encryption; we only appended ollama entries)
         await self._db["settings"].update_one(
@@ -452,7 +455,7 @@ class SettingsService:
         return await self._masked_models(user_id)
 
     async def delete_pool_entry(self, user_id: str, entry_id: str) -> ModelsConfig:
-        """Remove one pool entry. If removal orphans hyde/agentic/reasoning
+        """Remove one pool entry. If removal orphans a role-specific
         pool_entry_id, that field is nulled silently (the resolver will
         fall through to the legacy chain)."""
         current = await self.get_models_raw(user_id)
@@ -463,12 +466,15 @@ class SettingsService:
         hyde = dict(current.get("hyde") or {})
         agentic = dict(current.get("agentic") or {})
         reasoning = dict(current.get("reasoning") or {})
+        utility = dict(current.get("utility") or {})
         if hyde.get("pool_entry_id") == entry_id:
             hyde["pool_entry_id"] = None
         if agentic.get("pool_entry_id") == entry_id:
             agentic["pool_entry_id"] = None
         if reasoning.get("pool_entry_id") == entry_id:
             reasoning["pool_entry_id"] = None
+        if utility.get("pool_entry_id") == entry_id:
+            utility["pool_entry_id"] = None
         await self._db["settings"].update_one(
             {"user_id": user_id},
             {"$set": {
@@ -476,6 +482,7 @@ class SettingsService:
                 "models.hyde": hyde,
                 "models.agentic": agentic,
                 "models.reasoning": reasoning,
+                "models.utility": utility,
             }},
             upsert=True,
         )
@@ -494,7 +501,7 @@ class SettingsService:
     async def migrate_legacy_model_stores(self, user_id: str) -> dict:
         """Collapse Phase 19.3 `model_profiles` + Phase E `model_pool`
         collections + Phase F `user_query_preferences` into
-        settings.models.query_model_pool[] + hyde/agentic.
+        settings.models.query_model_pool[] + hyde/agentic/utility defaults.
 
         Idempotent. Keyed by `settings.models_migrated` flag — second call
         is a no-op. Legacy collections are NEVER deleted (guardrail).
@@ -521,7 +528,7 @@ class SettingsService:
 
         new_pool: list[dict] = []
         seen_ids: set[str] = set()
-        now = datetime.utcnow()
+        now = datetime.utcnow().isoformat()
 
         # 1. Phase E `model_pool` → new pool (provider / api_key / all fields map)
         async for row in self._db["model_pool"].find({"user_id": user_id}):
@@ -595,6 +602,7 @@ class SettingsService:
             # Phase 24 — Reasoning Cascade target. Migration leaves this empty;
             # user picks an entry in Settings → Models when they want it.
             "reasoning": {"default_enabled": False, "pool_entry_id": None},
+            "utility": {"default_enabled": False, "pool_entry_id": None},
         }
         await self._db["settings"].update_one(
             {"user_id": user_id},
