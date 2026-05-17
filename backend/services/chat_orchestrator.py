@@ -402,6 +402,7 @@ class ChatOrchestrator:
                 neo4j_expansion_cap=profile_cfg["neo4j_expansion_cap"],
                 max_corpora_per_query=profile_cfg["max_corpora_per_query"],
                 final_top_k=profile_cfg["final_top_k"],
+                fact_seed_limit=profile_cfg["fact_seed_limit"],
                 search_mode=resolved_mode,
             )
         sources = retrieval.chunks
@@ -1046,7 +1047,7 @@ class ChatOrchestrator:
         Resolve Query Profile into concrete knobs. Returns a dict:
           retrieval_k, rerank_enabled, hyde_enabled,
           top_k_summary, rerank_top_n, similarity_threshold,
-          neo4j_expansion_cap, max_corpora_per_query
+          neo4j_expansion_cap, max_corpora_per_query, fact_seed_limit
 
         Priority per knob:
           1. explicit per-request override on ModelOverrides
@@ -1073,6 +1074,7 @@ class ChatOrchestrator:
             "neo4j_expansion_cap": None,
             "max_corpora_per_query": None,
             "final_top_k": None,
+            "fact_seed_limit": None,
         }
 
         saved_retrieval_settings = None
@@ -1107,6 +1109,7 @@ class ChatOrchestrator:
                         "neo4j_expansion_cap": rs.neo4j_expansion_cap,
                         "max_corpora_per_query": rs.max_corpora_per_query,
                         "final_top_k": rs.final_top_k,
+                        "fact_seed_limit": getattr(rs, "fact_seed_limit", 12),
                     }
                 )
                 logger.info(
@@ -1138,6 +1141,20 @@ class ChatOrchestrator:
             if (overrides and overrides.hyde_enabled is not None)
             else preset["hyde_enabled"]
         )
+
+        if overrides is not None:
+            for key in (
+                "top_k_summary",
+                "rerank_top_n",
+                "similarity_threshold",
+                "neo4j_expansion_cap",
+                "max_corpora_per_query",
+                "final_top_k",
+                "fact_seed_limit",
+            ):
+                value = getattr(overrides, key, None)
+                if value is not None:
+                    extras[key] = value
 
         # Mirror the HyDE decision onto request.overrides so _apply_hyde
         # sees the resolved value (preserves existing call contract).

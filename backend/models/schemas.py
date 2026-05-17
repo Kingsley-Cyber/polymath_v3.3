@@ -375,6 +375,7 @@ class ChatLLMSettings(_legacy.ChatLLMSettings):
 
 
 class RetrievalSettings(_legacy.RetrievalSettings):
+    top_k_summary: int = Field(default=20, ge=0, le=100)
     max_corpora_per_query: int = Field(default=32, ge=1, le=100)
     final_top_k: int = Field(default=8, ge=1, le=50)
 
@@ -718,6 +719,12 @@ class GraphQueryRequest(BaseModel):
     )
     limit: int = Field(
         default=50, ge=1, le=200, description="Max nodes in returned subgraph"
+    )
+    seed_limit_per_token: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Seed entity budget per query token before graph expansion",
     )
 
     @model_validator(mode="before")

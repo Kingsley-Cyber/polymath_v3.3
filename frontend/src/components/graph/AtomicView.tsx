@@ -24,6 +24,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { discoverGraph, queryGraph } from "../../lib/api";
+import { useSettingsStore } from "../../stores/settingsStore";
 import type {
   GraphBridge,
   GraphGap,
@@ -144,6 +145,13 @@ export default function AtomicView({
   model,
   onSelectSeed,
 }: Props) {
+  const graphQuerySeedEntities = useSettingsStore(
+    (state) => state.graphQuerySeedEntities,
+  );
+  const graphQueryMaxHops = useSettingsStore((state) => state.graphQueryMaxHops);
+  const graphQueryNodeLimit = useSettingsStore(
+    (state) => state.graphQueryNodeLimit,
+  );
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [queryData, setQueryData] = useState<GraphQueryResult | null>(null);
@@ -180,7 +188,9 @@ export default function AtomicView({
     setQueryError(null);
 
     // graph/query — fast (Cypher only). Surface seeds/bridges/gaps ASAP.
-    queryGraph(corpusIds, query, 2)
+    queryGraph(corpusIds, query, graphQueryMaxHops, graphQueryNodeLimit, {
+      seedLimitPerToken: graphQuerySeedEntities,
+    })
       .then((res) => {
         if (cancelled) return;
         setQueryData(res);
@@ -213,7 +223,15 @@ export default function AtomicView({
     return () => {
       cancelled = true;
     };
-  }, [corpusIds.join(","), query, synthesisMode, model]);
+  }, [
+    corpusIds.join(","),
+    query,
+    synthesisMode,
+    model,
+    graphQuerySeedEntities,
+    graphQueryMaxHops,
+    graphQueryNodeLimit,
+  ]);
 
   // Build the atomic node graph from whatever has arrived so far.
   const { nodes, edges } = useMemo(() => {

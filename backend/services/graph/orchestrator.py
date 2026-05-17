@@ -167,7 +167,7 @@ def _packet_caps_for_mode(synthesis_mode: str = "research") -> _PacketCaps:
             gaps=2,
             analogies=0,
             transfers=0,
-            bridges=2,
+            bridges=4,
             fragile_bridges=0,
             evidence=12,
         )
@@ -178,7 +178,7 @@ def _packet_caps_for_mode(synthesis_mode: str = "research") -> _PacketCaps:
             analogies=5,
             transfers=5,
             bridges=6,
-            evidence=5,
+            evidence=6,
         )
     return _DEFAULT_PACKET_CAPS
 

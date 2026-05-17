@@ -280,6 +280,13 @@ export interface ChatOverrides extends Partial<ModelConfig> {
   query_profile?: "fast" | "balanced" | "thorough" | "custom";
   retrieval_k?: number;
   rerank_enabled?: boolean;
+  top_k_summary?: number;
+  rerank_top_n?: number;
+  similarity_threshold?: number;
+  neo4j_expansion_cap?: number;
+  max_corpora_per_query?: number;
+  final_top_k?: number;
+  fact_seed_limit?: number;
   /** Phase 27 — search-mode dispatch. "auto" lets the backend infer
    *  local vs global from query shape; "local" forces the full
    *  vector+BM25+graph+rerank+hydrate path; "global" returns
@@ -320,10 +327,10 @@ export const QUERY_PROFILES: QueryProfileOption[] = [
   {
     key: "balanced",
     label: "Balanced",
-    description: "Default. 40 vector candidates plus bounded lexical recall, reranker on, HyDE off. Good quality-latency tradeoff for most questions.",
+    description: "Default. Balanced retrieval profile with reranker on and backend HyDE available unless the source-audit guard skips it.",
     retrieval_k: 40,
     rerank_enabled: true,
-    hyde_enabled: false,
+    hyde_enabled: true,
     approxLatency: "~2-8s",
   },
   {
@@ -338,7 +345,7 @@ export const QUERY_PROFILES: QueryProfileOption[] = [
   {
     key: "custom",
     label: "Custom",
-    description: "Your saved Retrieval Settings drive every knob — top-K, rerank, similarity threshold, etc. HyDE still controlled by its own toggle.",
+    description: "Your saved Retrieval Settings drive the gather and final-source shape. Match sensitivity stays off.",
     retrieval_k: 0, // display-only; actual value comes from user settings
     rerank_enabled: true,
     hyde_enabled: false,

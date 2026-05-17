@@ -154,6 +154,24 @@ export interface RetrievalSettings {
   neo4j_expansion_cap: number;
   // Phase 24 — Final K (chunks to LLM, post-rerank). Custom profile only.
   final_top_k: number;
+  fact_seed_limit: number;
+  vector_child_chunks: number;
+  vector_summaries: number;
+  vector_final_sources: number;
+  vector_reranker: boolean;
+  hybrid_child_chunks: number;
+  hybrid_summaries: number;
+  hybrid_final_sources: number;
+  hybrid_reranker: boolean;
+  graph_child_chunks: number;
+  graph_summaries: number;
+  graph_fact_seeds: number;
+  graph_expansion: number;
+  graph_final_sources: number;
+  graph_reranker: boolean;
+  graph_query_seed_entities: number;
+  graph_query_max_hops: number;
+  graph_query_node_limit: number;
 }
 
 export type ModalGpuTier = "T4" | "L4" | "A10G" | "L40S" | "A100" | "H100";
@@ -238,6 +256,27 @@ export interface Collection {
 
 export interface RAGSettings {
   retrievalK: number;
+  retrievalSummaryK: number;
+  retrievalFinalK: number;
+  retrievalFactSeedLimit: number;
+  retrievalGraphExpansion: number;
+  graphQuerySeedEntities: number;
+  graphQueryMaxHops: number;
+  graphQueryNodeLimit: number;
+  vectorChildChunks: number;
+  vectorSummaries: number;
+  vectorFinalSources: number;
+  vectorReranker: boolean;
+  hybridChildChunks: number;
+  hybridSummaries: number;
+  hybridFinalSources: number;
+  hybridReranker: boolean;
+  graphChildChunks: number;
+  graphSummaries: number;
+  graphFactSeeds: number;
+  graphExpansion: number;
+  graphFinalSources: number;
+  graphReranker: boolean;
   hydeEnabled: boolean;
   rerankingEnabled: boolean;
   /** Phase 15 — one of the 12 curated mode keys (see REASONING_MODES). */

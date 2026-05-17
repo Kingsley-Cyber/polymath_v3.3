@@ -67,6 +67,48 @@ class ModelOverrides(BaseModel):
         default=None,
         description="Per-request reranker switch. When False, retriever skips the cross-encoder call and sorts by vector score. Fixes the previously-dead UI toggle.",
     )
+    top_k_summary: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Per-request summary-vector gather budget.",
+    )
+    rerank_top_n: int | None = Field(
+        default=None,
+        ge=1,
+        le=200,
+        description="Per-request candidate pool size sent to the reranker.",
+    )
+    similarity_threshold: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Per-request hard score gate. 0 disables the gate.",
+    )
+    neo4j_expansion_cap: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Per-request Graph Augmented expansion cap.",
+    )
+    max_corpora_per_query: int | None = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description="Per-request cap on the number of corpora included in retrieval.",
+    )
+    final_top_k: int | None = Field(
+        default=None,
+        ge=1,
+        le=50,
+        description="Per-request number of final source chunks sent to the LLM.",
+    )
+    fact_seed_limit: int | None = Field(
+        default=None,
+        ge=0,
+        le=50,
+        description="Per-request Graph Augmented fact seed budget.",
+    )
     search_mode: str | None = Field(
         default=None,
         description=(
@@ -535,14 +577,32 @@ class RetrievalSettings(BaseModel):
     default_tier: Literal["qdrant_only", "qdrant_mongo", "qdrant_mongo_graph"] = (
         "qdrant_mongo"
     )
-    top_k_child: int = Field(default=30, ge=1, le=100)
-    top_k_summary: int = Field(default=10, ge=1, le=50)
+    top_k_child: int = Field(default=60, ge=1, le=100)
+    top_k_summary: int = Field(default=20, ge=0, le=100)
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L6-v2"
     rerank_top_n: int = Field(default=40, ge=1, le=200)
     rerank_enabled: bool = True
-    similarity_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+    similarity_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
     max_corpora_per_query: int = Field(default=3, ge=1, le=10)
-    neo4j_expansion_cap: int = Field(default=20, ge=0, le=100)
+    neo4j_expansion_cap: int = Field(default=24, ge=0, le=100)
+    fact_seed_limit: int = Field(default=12, ge=0, le=50)
+    vector_child_chunks: int = Field(default=70, ge=1, le=150)
+    vector_summaries: int = Field(default=30, ge=0, le=100)
+    vector_final_sources: int = Field(default=12, ge=1, le=50)
+    vector_reranker: bool = True
+    hybrid_child_chunks: int = Field(default=60, ge=1, le=150)
+    hybrid_summaries: int = Field(default=20, ge=0, le=100)
+    hybrid_final_sources: int = Field(default=8, ge=1, le=50)
+    hybrid_reranker: bool = True
+    graph_child_chunks: int = Field(default=60, ge=1, le=150)
+    graph_summaries: int = Field(default=20, ge=0, le=100)
+    graph_fact_seeds: int = Field(default=12, ge=0, le=50)
+    graph_expansion: int = Field(default=24, ge=0, le=100)
+    graph_final_sources: int = Field(default=8, ge=1, le=50)
+    graph_reranker: bool = True
+    graph_query_seed_entities: int = Field(default=3, ge=1, le=10)
+    graph_query_max_hops: int = Field(default=2, ge=1, le=3)
+    graph_query_node_limit: int = Field(default=80, ge=1, le=200)
 
 
 class GlobalSettings(BaseModel):
@@ -1170,6 +1230,12 @@ class GraphQueryRequest(BaseModel):
     )
     limit: int = Field(
         default=50, ge=1, le=200, description="Max nodes in returned subgraph"
+    )
+    seed_limit_per_token: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Seed entity budget per query token before graph expansion",
     )
 
 

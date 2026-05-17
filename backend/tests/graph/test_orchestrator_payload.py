@@ -720,7 +720,7 @@ def test_compact_packet_uses_research_caps():
     assert len(compact["evidence"]) == 12
     assert len(compact["edges"]) == 12
     assert len(compact["gaps"]) == 2
-    assert len(compact["bridges"]) == 2
+    assert len(compact["bridges"]) == 4
     assert compact["analogies"] == []
     assert compact["transfers"] == []
 
@@ -731,7 +731,7 @@ def test_compact_packet_uses_ideation_caps():
         synthesis_mode="ideation",
     )
 
-    assert len(compact["evidence"]) == 5
+    assert len(compact["evidence"]) == 6
     assert len(compact["edges"]) == 10
     assert len(compact["gaps"]) == 6
     assert len(compact["bridges"]) == 6

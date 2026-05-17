@@ -11,7 +11,28 @@ const DEFAULT_SETTINGS: Omit<SettingsState, "selectedModel"> = {
   maxTokens: 2048,
 
   // RAG Settings
-  retrievalK: 5,
+  retrievalK: 60,
+  retrievalSummaryK: 20,
+  retrievalFinalK: 8,
+  retrievalFactSeedLimit: 12,
+  retrievalGraphExpansion: 24,
+  graphQuerySeedEntities: 3,
+  graphQueryMaxHops: 2,
+  graphQueryNodeLimit: 80,
+  vectorChildChunks: 70,
+  vectorSummaries: 30,
+  vectorFinalSources: 12,
+  vectorReranker: true,
+  hybridChildChunks: 60,
+  hybridSummaries: 20,
+  hybridFinalSources: 8,
+  hybridReranker: true,
+  graphChildChunks: 60,
+  graphSummaries: 20,
+  graphFactSeeds: 12,
+  graphExpansion: 24,
+  graphFinalSources: 8,
+  graphReranker: true,
   hydeEnabled: false,
   rerankingEnabled: true,
   selectedCollectionIds: [],
@@ -304,6 +325,48 @@ export const useSettingsStore = create<SettingsStore>()(
             retrievalTier:
               tierMap[s.retrieval.default_tier] ?? get().retrievalTier,
             retrievalK: s.retrieval.top_k_child ?? get().retrievalK,
+            retrievalSummaryK:
+              s.retrieval.top_k_summary ?? get().retrievalSummaryK,
+            retrievalFinalK: s.retrieval.final_top_k ?? get().retrievalFinalK,
+            retrievalFactSeedLimit:
+              s.retrieval.fact_seed_limit ?? get().retrievalFactSeedLimit,
+            retrievalGraphExpansion:
+              s.retrieval.neo4j_expansion_cap ?? get().retrievalGraphExpansion,
+            graphQuerySeedEntities:
+              s.retrieval.graph_query_seed_entities ??
+              get().graphQuerySeedEntities,
+            graphQueryMaxHops:
+              s.retrieval.graph_query_max_hops ?? get().graphQueryMaxHops,
+            graphQueryNodeLimit:
+              s.retrieval.graph_query_node_limit ?? get().graphQueryNodeLimit,
+            vectorChildChunks:
+              s.retrieval.vector_child_chunks ?? get().vectorChildChunks,
+            vectorSummaries:
+              s.retrieval.vector_summaries ?? get().vectorSummaries,
+            vectorFinalSources:
+              s.retrieval.vector_final_sources ?? get().vectorFinalSources,
+            vectorReranker:
+              s.retrieval.vector_reranker ?? get().vectorReranker,
+            hybridChildChunks:
+              s.retrieval.hybrid_child_chunks ?? get().hybridChildChunks,
+            hybridSummaries:
+              s.retrieval.hybrid_summaries ?? get().hybridSummaries,
+            hybridFinalSources:
+              s.retrieval.hybrid_final_sources ?? get().hybridFinalSources,
+            hybridReranker:
+              s.retrieval.hybrid_reranker ?? get().hybridReranker,
+            graphChildChunks:
+              s.retrieval.graph_child_chunks ?? get().graphChildChunks,
+            graphSummaries:
+              s.retrieval.graph_summaries ?? get().graphSummaries,
+            graphFactSeeds:
+              s.retrieval.graph_fact_seeds ?? get().graphFactSeeds,
+            graphExpansion:
+              s.retrieval.graph_expansion ?? get().graphExpansion,
+            graphFinalSources:
+              s.retrieval.graph_final_sources ?? get().graphFinalSources,
+            graphReranker:
+              s.retrieval.graph_reranker ?? get().graphReranker,
             rerankingEnabled:
               s.retrieval.rerank_enabled ?? get().rerankingEnabled,
 
@@ -410,6 +473,28 @@ export const useSettingsStore = create<SettingsStore>()(
         selectedModel: state.selectedModel,
         selectedToolIds: state.selectedToolIds,
         retrievalTier: state.retrievalTier,
+        retrievalK: state.retrievalK,
+        retrievalSummaryK: state.retrievalSummaryK,
+        retrievalFinalK: state.retrievalFinalK,
+        retrievalFactSeedLimit: state.retrievalFactSeedLimit,
+        retrievalGraphExpansion: state.retrievalGraphExpansion,
+        graphQuerySeedEntities: state.graphQuerySeedEntities,
+        graphQueryMaxHops: state.graphQueryMaxHops,
+        graphQueryNodeLimit: state.graphQueryNodeLimit,
+        vectorChildChunks: state.vectorChildChunks,
+        vectorSummaries: state.vectorSummaries,
+        vectorFinalSources: state.vectorFinalSources,
+        vectorReranker: state.vectorReranker,
+        hybridChildChunks: state.hybridChildChunks,
+        hybridSummaries: state.hybridSummaries,
+        hybridFinalSources: state.hybridFinalSources,
+        hybridReranker: state.hybridReranker,
+        graphChildChunks: state.graphChildChunks,
+        graphSummaries: state.graphSummaries,
+        graphFactSeeds: state.graphFactSeeds,
+        graphExpansion: state.graphExpansion,
+        graphFinalSources: state.graphFinalSources,
+        graphReranker: state.graphReranker,
         selectedCorpusIds: state.selectedCorpusIds,
         agenticModeEnabled: state.agenticModeEnabled,
         agenticModel: state.agenticModel,

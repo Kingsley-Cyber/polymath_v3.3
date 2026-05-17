@@ -219,7 +219,7 @@ class Settings(BaseSettings):
         default=5, description="Default number of chunks to retrieve"
     )
     SIMILARITY_THRESHOLD: float = Field(
-        default=0.7, description="Minimum similarity score for retrieval"
+        default=0.0, description="Minimum similarity score for retrieval; 0 disables the hard score gate"
     )
 
     # === QDRANT COLLECTION NAMES ===

@@ -93,10 +93,8 @@ export function QueryProfileSelector() {
             })}
           </div>
           <div className="text-[9px] text-content-tertiary px-2 py-1.5 border-t border-border-minimal mt-1 leading-snug">
-            <span className="text-accent-main font-bold">Final K</span> from
-            Settings → Retrieval controls chunks sent to the LLM for every
-            speed. Pick <span className="text-accent-main font-bold">Custom</span>{" "}
-            to apply the other retrieval sliders.
+            Settings → Retrieval controls the core gather and final-source
+            shape for the selected tier.
           </div>
         </div>
       )}

@@ -247,7 +247,13 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
             )
 
     async def _run_one(cid: str):
-        seeds = await extract_query_entities(body.query, cid, driver, qdrant=qdrant)
+        seeds = await extract_query_entities(
+            body.query,
+            cid,
+            driver,
+            limit_per_token=body.seed_limit_per_token,
+            qdrant=qdrant,
+        )
         if not seeds:
             return cid, {"nodes": [], "links": [], "bridges": [], "gaps": [], "seeds": []}
         seed_ids = [s["entity_id"] for s in seeds]

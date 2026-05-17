@@ -641,6 +641,7 @@ export async function queryGraph(
   query: string,
   maxHops: number = 2,
   limit: number = 50,
+  opts: { seedLimitPerToken?: number } = {},
 ): Promise<GraphQueryResult> {
   return fetchJSON("/graph/query", {
     method: "POST",
@@ -649,6 +650,7 @@ export async function queryGraph(
       query,
       max_hops: maxHops,
       limit,
+      seed_limit_per_token: opts.seedLimitPerToken,
     }),
   });
 }

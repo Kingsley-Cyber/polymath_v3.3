@@ -253,6 +253,29 @@ function App() {
 
       const hydeRequested =
         settings.hydeEnabled || settings.queryProfile === "thorough";
+      const retrievalConfig =
+        settings.retrievalTier === "qdrant_only"
+          ? {
+              retrieval_k: settings.vectorChildChunks,
+              top_k_summary: settings.vectorSummaries,
+              final_top_k: settings.vectorFinalSources,
+              rerank_enabled: settings.vectorReranker,
+            }
+          : settings.retrievalTier === "qdrant_mongo_graph"
+          ? {
+              retrieval_k: settings.graphChildChunks,
+              top_k_summary: settings.graphSummaries,
+              final_top_k: settings.graphFinalSources,
+              rerank_enabled: settings.graphReranker,
+              fact_seed_limit: settings.graphFactSeeds,
+              neo4j_expansion_cap: settings.graphExpansion,
+            }
+          : {
+              retrieval_k: settings.hybridChildChunks,
+              top_k_summary: settings.hybridSummaries,
+              final_top_k: settings.hybridFinalSources,
+              rerank_enabled: settings.hybridReranker,
+            };
 
       const request: ChatRequest = {
         conversation_id: cid,
@@ -320,12 +343,12 @@ function App() {
             settings.queryProfile && settings.queryProfile !== "balanced"
               ? settings.queryProfile
               : undefined,
-          // rerank_enabled: explicit toggle from store overrides the profile preset.
-          // settings.rerankingEnabled is a boolean in store; only send when it
-          // diverges from the profile's expected value (let backend resolver
-          // fill in the default most of the time).
-          rerank_enabled:
-            settings.rerankingEnabled === false ? false : undefined,
+          // Tier-specific retrieval shape. These are the core gather/filter
+          // factors from Settings → Retrieval. Match sensitivity is kept off
+          // deliberately so ranking stays relative instead of deleting weak
+          // bridge candidates before the reranker sees them.
+          ...retrievalConfig,
+          similarity_threshold: 0,
         },
         selected_tools: settings.selectedToolIds,
         // Phase 24 — Skills + Reasoning Cascade

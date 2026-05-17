@@ -319,6 +319,7 @@ class RetrieverOrchestrator:
         self,
         query: str,
         corpus_ids: list[str] | None,
+        fact_seed_limit: int | None = None,
     ) -> list[SourceFact]:
         """Graph-tier fact lane: query entities -> Neo4j facts.
 
@@ -369,11 +370,15 @@ class RetrieverOrchestrator:
             if not entity_names:
                 return []
 
+            limit = max(0, min(int(fact_seed_limit or 12), 50))
+            if limit <= 0:
+                return []
+
             facts = await fact_retrieval.retrieve_facts_for_entities(
-                entity_names=entity_names[:12],
+                entity_names=entity_names[:limit],
                 corpus_ids=corpus_ids,
                 fact_types=None,
-                limit=12,
+                limit=limit,
             )
             logger.info(
                 "Graph fact seeding: entities=%d facts=%d",
@@ -488,6 +493,7 @@ class RetrieverOrchestrator:
         similarity_threshold: float | None = None,
         neo4j_expansion_cap: int | None = None,
         max_corpora_per_query: int | None = None,
+        fact_seed_limit: int | None = None,
         # Phase 24 — Final K (chunks fed to LLM after rerank). When None,
         # falls back to settings.DEFAULT_RETRIEVAL_K (the legacy hardcoded 5).
         final_top_k: int | None = None,
@@ -612,7 +618,11 @@ class RetrieverOrchestrator:
         fact_seed_chunks: list[SourceChunk] = []
         if effective_tier == RetrievalTier.qdrant_mongo_graph and settings.NEO4J_ENABLED:
             phase_started = perf_counter()
-            seed_facts = await self._retrieve_graph_seed_facts(rank_query, corpus_ids)
+            seed_facts = await self._retrieve_graph_seed_facts(
+                rank_query,
+                corpus_ids,
+                fact_seed_limit=fact_seed_limit,
+            )
             fact_seed_chunks = _fact_seed_chunks(seed_facts)
             counts["facts"] = len(seed_facts)
             counts["fact_seed_chunks"] = len(fact_seed_chunks)

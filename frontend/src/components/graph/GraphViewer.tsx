@@ -30,6 +30,7 @@ import {
 
 import * as api from "../../lib/api";
 import { useSigma } from "../../hooks/useSigma";
+import { useSettingsStore } from "../../stores/settingsStore";
 import {
   polymathToGraphology,
   type ColorMode,
@@ -442,6 +443,13 @@ function useQueryGraph(
   synthesisMode: GraphSynthesisMode = "research",
   validateSynthesis: boolean = false,
 ) {
+  const graphQuerySeedEntities = useSettingsStore(
+    (state) => state.graphQuerySeedEntities,
+  );
+  const graphQueryMaxHops = useSettingsStore((state) => state.graphQueryMaxHops);
+  const graphQueryNodeLimit = useSettingsStore(
+    (state) => state.graphQueryNodeLimit,
+  );
   const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "error">(
     "idle",
   );
@@ -464,7 +472,13 @@ function useQueryGraph(
       setPhase("loading");
       setError(null);
       try {
-        const subgraphP = api.queryGraph(corpusIds, query, 2, 50);
+        const subgraphP = api.queryGraph(
+          corpusIds,
+          query,
+          graphQueryMaxHops,
+          graphQueryNodeLimit,
+          { seedLimitPerToken: graphQuerySeedEntities },
+        );
         const synthP = api.discoverGraph({
           corpus_ids: corpusIds as any,
           query,
@@ -508,7 +522,16 @@ function useQueryGraph(
     return () => {
       cancel = true;
     };
-  }, [corpusIds, query, model, synthesisMode, validateSynthesis]);
+  }, [
+    corpusIds,
+    query,
+    model,
+    synthesisMode,
+    validateSynthesis,
+    graphQuerySeedEntities,
+    graphQueryMaxHops,
+    graphQueryNodeLimit,
+  ]);
 
   return {
     phase,
