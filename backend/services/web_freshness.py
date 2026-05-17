@@ -29,7 +29,7 @@ from services.web_cache import web_cache
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MAX_RESULTS = 6
+_DEFAULT_MAX_RESULTS = 7
 _DEFAULT_CANDIDATE_RESULTS = 15
 _WEB_SEARCH_RESULTS_PER_QUERY = 5
 _DEFAULT_OBSCURA_MAX_CHARS = 4000
@@ -290,6 +290,41 @@ _EXPLICIT_X_QUERY_MARKERS = (
     "twitter",
     "x.com",
     "x/twitter",
+)
+
+_JOB_QUERY_MARKERS = (
+    "apply",
+    "career",
+    "careers",
+    "hiring",
+    "interview",
+    "job",
+    "jobs",
+    "recruiter",
+    "resume",
+    "salary",
+)
+
+_JOB_BOARD_DOMAINS = {
+    "dice.com",
+    "glassdoor.com",
+    "indeed.com",
+    "linkedin.com",
+    "monster.com",
+    "talent.com",
+    "wellfound.com",
+    "ziprecruiter.com",
+}
+
+_JOB_HIT_TITLE_MARKERS = (
+    "apply",
+    "career",
+    "developer",
+    "engineer",
+    "hiring",
+    "job",
+    "jobs",
+    "salary",
 )
 
 _NON_FINANCE_ACRONYMS = {
@@ -1131,6 +1166,43 @@ def _is_low_quality_web_hit(hit: WebSearchHit) -> bool:
     return False
 
 
+def _looks_like_job_search_query(query: str) -> bool:
+    return bool(set(_term_tokens(query)) & set(_JOB_QUERY_MARKERS))
+
+
+def _is_job_listing_hit(hit: WebSearchHit) -> bool:
+    domain = _web_domain(hit.url)
+    title = _normalized_text(hit.title or "")
+    if any(domain == item or domain.endswith(f".{item}") for item in _JOB_BOARD_DOMAINS):
+        return True
+    if "/jobs" in (urlparse(hit.url).path or "").lower():
+        return True
+    return any(marker in title for marker in _JOB_HIT_TITLE_MARKERS) and any(
+        marker in title for marker in ("job", "jobs", "hiring", "salary", "apply")
+    )
+
+
+def _is_low_quality_web_hit_for_query(hit: WebSearchHit, query: str) -> bool:
+    if _is_low_quality_web_hit(hit):
+        return True
+    return _is_job_listing_hit(hit) and not _looks_like_job_search_query(query)
+
+
+def _explicit_web_search_target(original_query: str) -> str | None:
+    patterns = (
+        r"\b(?:search|look up|find)\s+(?:the\s+)?(?:live\s+)?(?:web\s+)?(?:search\s+)?for\s*:?\s*(?P<target>[^.?!]+)",
+        r"\bsearch\s+query\s*:?\s*(?P<target>[^.?!]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, original_query, flags=re.IGNORECASE)
+        if not match:
+            continue
+        target = re.sub(r"\s+", " ", match.group("target").strip(" :;-"))
+        if len(_term_tokens(target)) >= 3:
+            return target[:300]
+    return None
+
+
 def refine_tool_search_query(
     tool_query: str,
     original_query: str | None = None,
@@ -1153,6 +1225,16 @@ def refine_tool_search_query(
     original_tokens = _term_tokens(original_query)
     if not original_tokens:
         return tool_query[:300]
+
+    explicit_target = _explicit_web_search_target(original_query)
+    if explicit_target:
+        target_tokens = set(_term_tokens(explicit_target))
+        if target_tokens:
+            if set(tool_tokens).issubset(target_tokens):
+                return explicit_target[:300]
+            overlap = target_tokens & set(tool_tokens)
+            if len(overlap) / len(target_tokens) >= 0.67:
+                return explicit_target[:300]
 
     # If the model over-compresses a rich question into a short fragment, use
     # the original wording. SearXNG is especially prone to brand/dictionary
@@ -2089,11 +2171,16 @@ class LiveWebSearch:
             return []
 
         if len(queries) == 1:
-            return await self._search_searxng(
+            result = await self._search_searxng(
                 queries[0],
                 max_results=candidate_limit,
                 time_range=time_range,
             )
+            return [
+                hit
+                for hit in result
+                if not _is_low_quality_web_hit_for_query(hit, query)
+            ]
 
         per_query_limit = min(_WEB_SEARCH_RESULTS_PER_QUERY, candidate_limit)
         tasks = []
@@ -2119,7 +2206,7 @@ class LiveWebSearch:
             result = [
                 hit
                 for hit in result
-                if not _is_low_quality_web_hit(hit)
+                if not _is_low_quality_web_hit_for_query(hit, query)
             ]
             if allowed_domains:
                 result = [
@@ -2236,6 +2323,13 @@ class LiveWebSearch:
     ) -> list[WebSearchHit]:
         if not hits or limit <= 0:
             return []
+        filtered_hits = [
+            hit
+            for hit in hits
+            if not _is_low_quality_web_hit_for_query(hit, query)
+        ]
+        if filtered_hits:
+            hits = filtered_hits
         if len(hits) <= limit:
             return hits
         snippet_chunks = web_hits_to_source_chunks(

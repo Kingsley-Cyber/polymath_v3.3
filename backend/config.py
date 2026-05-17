@@ -649,7 +649,7 @@ class Settings(BaseSettings):
         description="HTTP timeout for the opt-in chat SearXNG request.",
     )
     LIVE_WEB_SEARCH_MAX_RESULTS: int = Field(
-        default=6,
+        default=7,
         ge=1,
         le=10,
         description=(
@@ -668,12 +668,12 @@ class Settings(BaseSettings):
         ),
     )
     LIVE_WEB_QUERY_EXPANSION_TIMEOUT_SECONDS: float = Field(
-        default=2.0,
+        default=4.0,
         ge=0.25,
         le=10.0,
         description=(
-            "Best-effort time budget for borrowing graph-query-associated "
-            "concept terms to improve the opt-in live-web search query."
+            "Best-effort time budget for the Utility model to improve the "
+            "opt-in live-web search query."
         ),
     )
     LIVE_WEB_SEARCH_FETCH_FULL_PAGES: bool = Field(

@@ -5,7 +5,9 @@ os.environ.setdefault("AUTH_SECRET_KEY", "test-auth-secret-key")
 os.environ.setdefault("DEFAULT_ADMIN_PASSWORD", "test-admin-password")
 
 from services.chat_orchestrator import (
+    _MAX_WEB_SEARCH_RESULTS_PER_CALL,
     _available_tool_schemas,
+    _looks_like_raw_tool_request_content,
     _limit_tool_calls_for_turn,
 )
 
@@ -75,3 +77,22 @@ def test_limit_tool_calls_still_reports_global_tool_limit():
     assert web_calls == 0
     assert dropped_for_tool_limit is True
     assert dropped_for_web_limit is False
+
+
+def test_raw_dsml_tool_request_text_is_detected():
+    content = (
+        '<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name="web_search">'
+        '<｜｜DSML｜｜parameter name="query">Roblox RemoteEvent</｜｜DSML｜｜parameter>'
+    )
+
+    assert _looks_like_raw_tool_request_content(content) is True
+
+
+def test_normal_answer_with_web_search_words_is_not_raw_tool_request():
+    content = "The web_search result says Roblox RemoteEvents need server validation."
+
+    assert _looks_like_raw_tool_request_content(content) is False
+
+
+def test_web_search_result_cap_is_seven_sources():
+    assert _MAX_WEB_SEARCH_RESULTS_PER_CALL == 7

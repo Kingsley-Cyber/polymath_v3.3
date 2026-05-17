@@ -7,6 +7,7 @@ from services.web_freshness import (
     _PAGE_FETCH_CACHE,
     _PageFetchResult,
     _WEB_CACHE_SCHEMA_VERSION,
+    WebSearchHit,
     _obscura_command_args,
     _query_should_include_social_sources,
     _diversify_web_source_chunks,
@@ -116,6 +117,38 @@ def test_build_web_search_queries_adds_direct_roblox_api_doc_variant():
     )
 
 
+@pytest.mark.asyncio
+async def test_non_job_security_query_filters_job_board_hits(monkeypatch):
+    async def fake_search(query, *, max_results=None, time_range=None):
+        return [
+            WebSearchHit(
+                title="Roblox Game Developer (Lua/Luau) - Talent.com",
+                url="https://in.talent.com/view?id=619535012565228642",
+                snippet="Hiring Roblox game developer with Lua experience.",
+                score=9.0,
+                search_query=query,
+            ),
+            WebSearchHit(
+                title="Client sided hitbox security - Developer Forum | Roblox",
+                url="https://devforum.roblox.com/t/client-sided-hitbox-security/4540739",
+                snippet="Validate client requests on the server with sanity checks.",
+                score=8.0,
+                search_query=query,
+            ),
+        ]
+
+    monkeypatch.setattr(live_web_search, "_search_searxng", fake_search)
+
+    hits = await live_web_search._search_searxng_pool(
+        "Roblox RemoteEvent security server client validation",
+        max_results=6,
+    )
+
+    assert hits
+    assert all("talent.com" not in hit.url for hit in hits)
+    assert any("devforum.roblox.com" in hit.url for hit in hits)
+
+
 def test_build_web_search_queries_adds_ai_video_variants():
     queries = build_web_search_queries(
         "ComfyUI WAN 2.1 local AI video workflow RTX 4090"
@@ -191,6 +224,28 @@ def test_refine_tool_search_query_preserves_hardware_terms():
 
     assert "vram" in query.lower()
     assert "4gb" in query.lower()
+
+
+def test_refine_tool_search_query_uses_explicit_search_target():
+    query = refine_tool_search_query(
+        "Roblox RemoteEvent security server client validation RAG",
+        (
+            "With Web enabled, run one live web search for: Roblox RemoteEvent "
+            "security server client validation. Use retrieved local RAG context "
+            "plus web results."
+        ),
+    )
+
+    assert query == "Roblox RemoteEvent security server client validation"
+
+
+def test_refine_tool_search_query_preserves_rag_when_target_mentions_rag():
+    query = refine_tool_search_query(
+        "mobile RAG options",
+        "Search query: mobile RAG deployment options for 4GB VRAM.",
+    )
+
+    assert query == "mobile RAG deployment options for 4GB VRAM"
 
 
 def test_related_search_terms_are_bounded_and_deduped():

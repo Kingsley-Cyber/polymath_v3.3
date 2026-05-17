@@ -44,12 +44,20 @@ settings = get_settings()
 HYDE_FAILURE_TTL_SECONDS = 600.0
 _HYDE_FAILURE_CACHE: dict[str, float] = {}
 _MAX_PERSISTED_SOURCE_PREVIEWS = 10
-_MAX_PERSISTED_WEB_SOURCE_PREVIEWS = 6
+_MAX_PERSISTED_WEB_SOURCE_PREVIEWS = 7
 _MAX_PERSISTED_SOURCE_TEXT_CHARS = 900
 _MAX_PERSISTED_SOURCE_SUMMARY_CHARS = 500
 _MAX_TOOL_CALLS_PER_TURN = 3
 _MAX_WEB_SEARCH_CALLS_PER_TURN = 1
-_MAX_WEB_SEARCH_RESULTS_PER_CALL = 6
+_MAX_WEB_SEARCH_RESULTS_PER_CALL = 7
+_RAW_TOOL_REQUEST_MARKERS = (
+    "<｜｜dsml｜｜tool_calls",
+    "<tool_calls",
+    "tool_calls>",
+    "invoke name=",
+    "\"tool_calls\"",
+    "'tool_calls'",
+)
 
 
 def _hyde_failure_key(model: str | None, api_base: str | None) -> str:
@@ -170,6 +178,21 @@ def _tool_schema_name(schema: dict[str, Any]) -> str:
 def _tool_call_name(call: dict[str, Any]) -> str:
     fn = call.get("function") if isinstance(call, dict) else None
     return str((fn or {}).get("name") or "")
+
+
+def _looks_like_raw_tool_request_content(content: str) -> bool:
+    """Detect tool-call syntax leaked as text without parsing/executing it."""
+    text = (content or "").strip().lower()
+    if not text:
+        return False
+    if any(marker in text for marker in _RAW_TOOL_REQUEST_MARKERS):
+        return True
+    return "web_search" in text and (
+        "<" in text
+        or "{" in text
+        or "invoke" in text
+        or "parameter" in text
+    )
 
 
 def _is_web_search_enabled_for_request(request: ChatRequest) -> bool:
@@ -351,6 +374,12 @@ class ChatOrchestrator:
             model_config,
             existing_messages,
         ) = await self._load_or_create_conversation(request)
+        object.__setattr__(request, "_user_id", user_id)
+        object.__setattr__(
+            request,
+            "_recent_chat_messages",
+            list(existing_messages[-6:] if existing_messages else []),
+        )
 
         # Step 2: Get model to use
         model_used = self._get_model_to_use(request, model_config)
@@ -1077,6 +1106,14 @@ class ChatOrchestrator:
 
             # If no tool calls, this is the final response
             if not tool_calls:
+                if _looks_like_raw_tool_request_content(assistant_content):
+                    logger.info(
+                        "Suppressed raw tool-call syntax in assistant content; "
+                        "forcing final no-tool answer for %s",
+                        conversation_id,
+                    )
+                    assistant_content = ""
+                    tool_limit_reached = True
                 break
 
             remaining_tool_calls = _MAX_TOOL_CALLS_PER_TURN - tool_call_count
@@ -1217,7 +1254,9 @@ class ChatOrchestrator:
                     "role": "user",
                     "content": (
                         "Use the gathered corpus and tool results above to answer "
-                        "the original question now. Do not call any more tools."
+                        "the original question now. Do not call any more tools, "
+                        "and do not write tool-call syntax, XML, JSON, or DSML. "
+                        "Write only the user-facing answer."
                     ),
                 },
             ]
@@ -1890,7 +1929,7 @@ class ChatOrchestrator:
                             "runs three controlled searches with five results "
                             "each when social/practical coverage is useful, reads "
                             "pages when possible, reranks them locally, and "
-                            "returns up to six results."
+                            "returns up to seven results."
                         ),
                         "parameters": {
                             "type": "object",
@@ -1978,15 +2017,18 @@ class ChatOrchestrator:
             from services.web_freshness import (
                 live_web_search,
                 infer_web_search_time_range,
-                refine_tool_search_query,
                 rerank_web_source_chunks,
                 web_hits_to_source_chunks,
             )
+            from services.web_query_enrichment import enrich_web_search_query
 
-            query = refine_tool_search_query(
-                query,
-                request.message if request is not None else None,
+            enrichment = await enrich_web_search_query(
+                tool_query=query,
+                original_query=request.message if request is not None else None,
+                user_id=getattr(request, "_user_id", None),
+                recent_messages=getattr(request, "_recent_chat_messages", None),
             )
+            query = enrichment.query
             search_query = query[:300]
             candidate_limit = max(
                 max_results,
@@ -2105,10 +2147,25 @@ class ChatOrchestrator:
                 "final_reranked_results": len(chunks),
                 "final_result_limit": max_results,
                 "ranked_by": settings.RERANKER_MODEL,
+                "utility_query_enrichment": {
+                    "attempted": enrichment.attempted,
+                    "applied": enrichment.applied,
+                    "model": enrichment.model,
+                    "base_query": enrichment.base_query,
+                    "prompt_version": enrichment.prompt_version,
+                    "duration_ms": enrichment.duration_ms,
+                    "fallback_reason": enrichment.fallback_reason,
+                },
             }
             pipeline.update(web_pipeline)
             logger.info(
-                "web_search pipeline query=%r candidates=%d fetch_attempts=%d fetch_successes=%d final=%d time_range=%r js_rendered=%s snippet_only=%s",
+                (
+                    "web_search pipeline query=%r candidates=%d "
+                    "fetch_attempts=%d fetch_successes=%d final=%d "
+                    "time_range=%r js_rendered=%s snippet_only=%s "
+                    "redis_search_cache_hit=%s redis_page_cache_hit=%s "
+                    "utility_attempted=%s utility_applied=%s"
+                ),
                 search_query,
                 len(hits),
                 len(hits_to_fetch),
@@ -2117,6 +2174,10 @@ class ChatOrchestrator:
                 time_range,
                 pipeline["js_render"]["rendered"],
                 pipeline.get("snippet_only"),
+                pipeline.get("redis_search_cache_hit"),
+                pipeline.get("redis_page_cache_hit"),
+                enrichment.attempted,
+                enrichment.applied,
             )
 
             return json.dumps(
