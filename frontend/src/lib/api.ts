@@ -35,6 +35,7 @@ import type {
   GraphQueryResult,
   DiscourseGraphResponse,
   EntitySearchResponse,
+  GraphNodeInsightResponse,
   GraphAnalyzeRequest,
   GraphAnalyzeResponse,
   ApiKeysPublic,
@@ -958,6 +959,34 @@ export async function entitySearch(
       corpus_ids: opts.corpusIds ?? null,
       limit: opts.limit ?? 20,
       hydrate: opts.hydrate ?? true,
+    }),
+  });
+}
+
+/**
+ * POST /api/graph/node-insight — read-only semantic neighborhood lookup.
+ * Used by graph node clicks to map vector-nearest passages/documents/entities
+ * beside the explicit graph edges. Does not mutate the graph.
+ */
+export async function getGraphNodeInsight(body: {
+  corpusIds: string[];
+  nodeId: string;
+  label: string;
+  entityType?: string | null;
+  nodeKind?: string | null;
+  topEntities?: string[];
+  limit?: number;
+}): Promise<GraphNodeInsightResponse> {
+  return fetchJSON("/graph/node-insight", {
+    method: "POST",
+    body: JSON.stringify({
+      corpus_ids: body.corpusIds,
+      node_id: body.nodeId,
+      label: body.label,
+      entity_type: body.entityType ?? null,
+      node_kind: body.nodeKind ?? null,
+      top_entities: body.topEntities ?? [],
+      limit: body.limit ?? 8,
     }),
   });
 }

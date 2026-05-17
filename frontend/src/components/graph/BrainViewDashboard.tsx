@@ -41,6 +41,7 @@ import {
   EDGE_COLORS_BY_FAMILY,
   type RelationFamily,
 } from "../../lib/sigma-constants";
+import type { GraphNodeInsightResponse } from "../../types/chat";
 import type { GraphSynthesisMode } from "../../types/discover";
 
 export type DashboardTab = "brain" | "agent" | "graph-query";
@@ -252,7 +253,14 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
   // Drag-resize state. Persists across renders within the component
   // instance; resets to default when the dashboard remounts.
   const [width, setWidth] = useState<number>(SIDEBAR_DEFAULT_W);
+  const [nodeInsight, setNodeInsight] =
+    useState<GraphNodeInsightResponse | null>(null);
+  const [nodeInsightPhase, setNodeInsightPhase] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [nodeInsightError, setNodeInsightError] = useState<string | null>(null);
   const draggingRef = useRef<{ startX: number; startW: number } | null>(null);
+  const insightRequestRef = useRef(0);
 
   const onResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -288,6 +296,56 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
       window.removeEventListener("mouseup", onUp);
     };
   }, []);
+
+  useEffect(() => {
+    const requestId = ++insightRequestRef.current;
+    if (!selectedDisplay || corpusIds.length === 0) {
+      setNodeInsight(null);
+      setNodeInsightPhase("idle");
+      setNodeInsightError(null);
+      return;
+    }
+
+    setNodeInsight(null);
+    setNodeInsightPhase("loading");
+    setNodeInsightError(null);
+
+    api
+      .getGraphNodeInsight({
+        corpusIds,
+        nodeId: selectedDisplay.id,
+        label:
+          cleanBookLabel(selectedDisplay.display_name) ||
+          selectedDisplay.display_name,
+        entityType:
+          selectedDisplay.entity_type ||
+          selectedDisplay.dominant_entity_type ||
+          null,
+        nodeKind: selectedDisplay.nodeKind || selectedDisplay.kind || null,
+        topEntities: selectedDisplay.top_entities || [],
+        limit: 8,
+      })
+      .then((res) => {
+        if (requestId !== insightRequestRef.current) return;
+        setNodeInsight(res);
+        setNodeInsightPhase("ready");
+      })
+      .catch((err) => {
+        if (requestId !== insightRequestRef.current) return;
+        setNodeInsight(null);
+        setNodeInsightPhase("error");
+        setNodeInsightError(err instanceof Error ? err.message : String(err));
+      });
+  }, [
+    corpusIds,
+    selectedDisplay?.id,
+    selectedDisplay?.display_name,
+    selectedDisplay?.entity_type,
+    selectedDisplay?.dominant_entity_type,
+    selectedDisplay?.nodeKind,
+    selectedDisplay?.kind,
+    selectedDisplay?.top_entities,
+  ]);
 
   if (collapsed) {
     return (
@@ -524,6 +582,99 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                 });
               })()}
             </ul>
+          </section>
+        )}
+
+        {selectedDisplay && (
+          <section className="mt-3">
+            <SectionLabel>Semantic Map</SectionLabel>
+            <div className="rounded border border-cyan-500/20 bg-cyan-500/[0.035] p-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 truncate text-[11px] text-zinc-300">
+                  vector neighbors · read-only
+                </div>
+                <div
+                  className={
+                    "shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-mono " +
+                    (nodeInsightPhase === "loading"
+                      ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-200"
+                      : nodeInsightPhase === "ready"
+                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                        : nodeInsightPhase === "error"
+                          ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
+                          : "border-zinc-800 bg-zinc-950/70 text-zinc-500")
+                  }
+                >
+                  {nodeInsightPhase}
+                </div>
+              </div>
+
+              {nodeInsightPhase === "loading" && (
+                <div className="mt-2 text-[10px] text-zinc-500">
+                  searching nearby passages and documents…
+                </div>
+              )}
+
+              {nodeInsightPhase === "error" && (
+                <div className="mt-2 text-[10px] text-rose-300">
+                  {nodeInsightError || "semantic lookup failed"}
+                </div>
+              )}
+
+              {nodeInsightPhase === "ready" && nodeInsight && (
+                <div className="mt-2">
+                  {nodeInsight.related_entities.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-1.5">
+                      {nodeInsight.related_entities.slice(0, 8).map((entity) => {
+                        const confidence =
+                          typeof entity.confidence === "number"
+                            ? Math.round(entity.confidence * 100)
+                            : null;
+                        return (
+                          <div
+                            key={`${entity.name}-${entity.predicate || ""}`}
+                            className="rounded border border-cyan-700/30 bg-[#0d0d14] px-2 py-1.5"
+                            title={[
+                              entity.predicate,
+                              entity.relation_family,
+                              confidence != null ? `${confidence}%` : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 truncate text-[11px] font-semibold text-cyan-100">
+                                {entity.name}
+                              </div>
+                              {entity.count > 1 && (
+                                <div className="shrink-0 rounded bg-cyan-500/10 px-1.5 py-0.5 text-[9px] text-cyan-300">
+                                  {entity.count}x
+                                </div>
+                              )}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-1 text-[9px] text-zinc-500">
+                              {entity.relation_family && (
+                                <span>{entity.relation_family}</span>
+                              )}
+                              {entity.predicate && (
+                                <span>{entity.predicate.replace(/_/g, " ")}</span>
+                              )}
+                              {confidence != null && confidence > 0 && (
+                                <span>{confidence}%</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-zinc-500">
+                      No entity associations found.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </section>
         )}
 

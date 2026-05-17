@@ -212,6 +212,32 @@ export interface EntitySearchResponse {
   neo4j_enabled: boolean;
 }
 
+export interface GraphNodeInsightDocument {
+  doc_id: string;
+  doc_name: string;
+  corpus_id: string;
+  corpus_name: string;
+  count: number;
+  best_score: number;
+}
+
+export interface GraphNodeInsightRelatedEntity {
+  name: string;
+  predicate?: string;
+  relation_family?: string;
+  confidence?: number;
+  count: number;
+}
+
+export interface GraphNodeInsightResponse {
+  query: string;
+  chunks: SourceChunk[];
+  documents: GraphNodeInsightDocument[];
+  related_entities: GraphNodeInsightRelatedEntity[];
+  effective_tier: string;
+  downgrade_reason?: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -269,6 +295,8 @@ export interface ModelConfig {
 
 export interface ChatOverrides extends Partial<ModelConfig> {
   hyde_enabled?: boolean;
+  /** Opt-in live web context for this turn. Omit/false keeps chat corpus-only. */
+  web_search_enabled?: boolean;
   collection_ids?: string[];
   agentic_mode?: boolean;
   agentic_model?: string;

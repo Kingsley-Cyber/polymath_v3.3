@@ -29,10 +29,15 @@ from models.schemas import (
     GraphDiscoverSessionDetail,
     GraphResumeCandidateRequest,
     GraphResumeCandidateResponse,
+    GraphNodeInsightDocument,
+    GraphNodeInsightRelatedEntity,
+    GraphNodeInsightRequest,
+    GraphNodeInsightResponse,
     GraphSuggestionsResponse,
     GraphQueryRequest,
     GraphQueryResponse,
     RelationEdge,
+    RetrievalTier,
 )
 from services.ingestion_service import ingestion_service
 
@@ -587,6 +592,159 @@ async def entity_search(body: EntitySearchRequest = Body(...)) -> EntitySearchRe
             )
 
     return EntitySearchResponse(chunks=chunks, neo4j_enabled=True)
+
+
+def _node_insight_query(body: GraphNodeInsightRequest) -> str:
+    parts = [body.label]
+    if body.entity_type:
+        parts.append(body.entity_type)
+    elif body.node_kind:
+        parts.append(body.node_kind)
+    parts.extend([t for t in body.top_entities[:6] if t])
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for part in parts:
+        cleaned = " ".join(str(part).split())
+        key = cleaned.lower()
+        if not cleaned or key in seen:
+            continue
+        seen.add(key)
+        out.append(cleaned)
+    return " ".join(out)
+
+
+def _node_insight_documents(chunks) -> list[GraphNodeInsightDocument]:
+    grouped: dict[tuple[str, str], dict] = {}
+    for chunk in chunks:
+        key = (chunk.doc_id or "", chunk.corpus_id or "")
+        item = grouped.setdefault(
+            key,
+            {
+                "doc_id": chunk.doc_id or "",
+                "doc_name": chunk.doc_name or chunk.doc_id or "",
+                "corpus_id": chunk.corpus_id or "",
+                "corpus_name": chunk.corpus_name or chunk.corpus_id or "",
+                "count": 0,
+                "best_score": 0.0,
+            },
+        )
+        item["count"] += 1
+        item["best_score"] = max(float(item["best_score"]), float(chunk.score or 0.0))
+        if chunk.doc_name:
+            item["doc_name"] = chunk.doc_name
+        if chunk.corpus_name:
+            item["corpus_name"] = chunk.corpus_name
+
+    docs = [GraphNodeInsightDocument(**item) for item in grouped.values()]
+    docs.sort(key=lambda d: (d.best_score, d.count), reverse=True)
+    return docs
+
+
+def _node_insight_related_entities(
+    chunks,
+    selected_label: str,
+) -> list[GraphNodeInsightRelatedEntity]:
+    def clean_entity_name(value) -> str:
+        name = " ".join(str(value or "").split()).strip()
+        if not name:
+            return ""
+        lowered = name.lower()
+        if "\n" in str(value) or "```" in name or len(name) > 80:
+            return ""
+        if lowered.startswith(("chunk:", "doc:", "parent:", "corpus:")):
+            return ""
+        if lowered.startswith("entity:"):
+            name = name.split(":", 1)[1].replace("-", " ").strip()
+        # Avoid raw UUID/hash-looking values. Cards should be human labels.
+        compact = name.replace("-", "").replace("_", "")
+        if len(compact) >= 16 and all(ch in "0123456789abcdefABCDEF" for ch in compact):
+            return ""
+        return name
+
+    selected = selected_label.strip().lower()
+    grouped: dict[str, dict] = {}
+    for chunk in chunks:
+        for prov in chunk.provenance or []:
+            name = clean_entity_name(
+                prov.get("entity")
+                or prov.get("canonical_name")
+                or prov.get("via_entity")
+                or prov.get("neighbor_entity")
+                or prov.get("seed_entity")
+            )
+            if not name or name.lower() == selected:
+                continue
+            key = name.lower()
+            item = grouped.setdefault(
+                key,
+                {
+                    "name": name,
+                    "predicate": str(prov.get("predicate") or ""),
+                    "relation_family": str(prov.get("relation_family") or ""),
+                    "confidence": 0.0,
+                    "count": 0,
+                },
+            )
+            item["count"] += 1
+            try:
+                item["confidence"] = max(
+                    float(item["confidence"]),
+                    float(prov.get("confidence") or 0.0),
+                )
+            except (TypeError, ValueError):
+                pass
+            if prov.get("predicate"):
+                item["predicate"] = str(prov.get("predicate"))
+            if prov.get("relation_family"):
+                item["relation_family"] = str(prov.get("relation_family"))
+
+    entities = [GraphNodeInsightRelatedEntity(**item) for item in grouped.values()]
+    entities.sort(key=lambda e: (e.count, e.confidence), reverse=True)
+    return entities[:12]
+
+
+@discovery_router.post(
+    "/node-insight",
+    response_model=GraphNodeInsightResponse,
+    summary="Read-only semantic neighborhood lookup for a clicked graph node",
+)
+async def graph_node_insight(
+    body: GraphNodeInsightRequest = Body(...),
+    current_user: dict = Depends(get_current_user),
+) -> GraphNodeInsightResponse:
+    if not body.corpus_ids:
+        raise HTTPException(status_code=400, detail="corpus_ids is required")
+
+    from services.retriever import retriever_orchestrator
+
+    query = _node_insight_query(body)
+    retrieval = await retriever_orchestrator.retrieve(
+        query=query,
+        corpus_ids=body.corpus_ids,
+        retrieval_tier=RetrievalTier.qdrant_mongo_graph,
+        collections=None,
+        retrieval_k=max(24, body.limit * 4),
+        rerank_enabled=False,
+        ranking_query=query,
+        top_k_summary=4,
+        rerank_top_n=body.limit,
+        similarity_threshold=0.0,
+        neo4j_expansion_cap=12,
+        final_top_k=body.limit,
+        fact_seed_limit=4,
+        search_mode="local",
+    )
+
+    chunks = list(retrieval.chunks or [])[: body.limit]
+    return GraphNodeInsightResponse(
+        query=query,
+        chunks=chunks,
+        documents=_node_insight_documents(chunks),
+        related_entities=_node_insight_related_entities(chunks, body.label),
+        effective_tier=str(getattr(retrieval.effective_tier, "value", retrieval.effective_tier)),
+        downgrade_reason=retrieval.downgrade_reason,
+    )
 
 
 # ────────────────────────────────────────────────────────────────────────────

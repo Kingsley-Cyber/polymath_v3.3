@@ -739,6 +739,51 @@ class GraphQueryRequest(BaseModel):
         return values
 
 
+class GraphNodeInsightRequest(BaseModel):
+    """POST /api/graph/node-insight body.
+
+    Read-only semantic neighborhood lookup for a clicked graph node. This is
+    intentionally analysis-only: vector neighbors and provenance are returned
+    to the UI, but no candidate edge is written back to Neo4j.
+    """
+
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    corpus_ids: list[str] = Field(default_factory=list)
+    node_id: str = Field(..., min_length=1)
+    label: str = Field(..., min_length=1)
+    entity_type: str | None = None
+    node_kind: str | None = None
+    top_entities: list[str] = Field(default_factory=list)
+    limit: int = Field(default=8, ge=1, le=16)
+
+
+class GraphNodeInsightDocument(BaseModel):
+    doc_id: str = ""
+    doc_name: str = ""
+    corpus_id: str = ""
+    corpus_name: str = ""
+    count: int = 0
+    best_score: float = 0.0
+
+
+class GraphNodeInsightRelatedEntity(BaseModel):
+    name: str
+    predicate: str = ""
+    relation_family: str = ""
+    confidence: float = 0.0
+    count: int = 0
+
+
+class GraphNodeInsightResponse(BaseModel):
+    query: str
+    chunks: list[SourceChunk] = Field(default_factory=list)
+    documents: list[GraphNodeInsightDocument] = Field(default_factory=list)
+    related_entities: list[GraphNodeInsightRelatedEntity] = Field(default_factory=list)
+    effective_tier: str = ""
+    downgrade_reason: str | None = None
+
+
 class GraphSuggestionItem(BaseModel):
     model_config = ConfigDict(extra="allow")
 
