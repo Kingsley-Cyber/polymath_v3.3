@@ -5,12 +5,19 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, validator
-from pydantic_settings import BaseSettings
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
+
+    model_config = SettingsConfigDict(
+        env_file="../.env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",
+    )
 
     # === DATABASES ===
     MONGODB_URI: str = Field(
@@ -1102,22 +1109,16 @@ class Settings(BaseSettings):
         ),
     )
 
-    class Config:
-        """Pydantic config."""
-
-        env_file = "../.env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-        extra = "ignore"
-
-    @validator("LITELLM_MASTER_KEY")
+    @field_validator("LITELLM_MASTER_KEY")
+    @classmethod
     def validate_litellm_key(cls, v):
         """Validate that LITELLM_MASTER_KEY is not empty."""
         if not v or not v.strip():
             raise ValueError("LITELLM_MASTER_KEY is required and cannot be empty")
         return v
 
-    @validator("AUTH_SECRET_KEY")
+    @field_validator("AUTH_SECRET_KEY")
+    @classmethod
     def validate_auth_secret_key(cls, v):
         """
         Phase 17 W1.1 — reject empty or the legacy dev sentinel.
@@ -1135,7 +1136,8 @@ class Settings(BaseSettings):
             )
         return v
 
-    @validator("DEFAULT_ADMIN_PASSWORD")
+    @field_validator("DEFAULT_ADMIN_PASSWORD")
+    @classmethod
     def validate_default_admin_password(cls, v):
         """
         Phase 17 W1.1 — reject empty or the legacy 'changeme' sentinel.

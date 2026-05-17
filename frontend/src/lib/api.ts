@@ -50,6 +50,7 @@ import type {
   ModelPoolListResponse,
   ModelPoolTestResult,
 } from "../types";
+import { useAuthStore } from "../stores/authStore";
 
 const API_BASE = "/api";
 
@@ -84,9 +85,7 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     // 401 interceptor — token expired or invalid, force re-login (UT-004)
-    // Dynamic import avoids circular dep at module load; getState() for non-React context
     if (response.status === 401) {
-      const { useAuthStore } = await import("../stores/authStore");
       useAuthStore.getState().clearAuth();
       throw new Error("Session expired. Please log in again.");
     }
@@ -536,7 +535,6 @@ export async function uploadDocumentToCorpus(
 
   if (!response.ok) {
     if (response.status === 401) {
-      const { useAuthStore } = await import("../stores/authStore");
       useAuthStore.getState().clearAuth();
       throw new Error("Session expired. Please log in again.");
     }
