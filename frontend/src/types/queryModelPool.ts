@@ -52,6 +52,15 @@ export interface ModelsConfig {
   utility: UtilityConfig;
 }
 
+export interface UtilityModelTestResult {
+  ok: boolean;
+  status: string;
+  model: string | null;
+  latency_ms: number;
+  output_preview?: string | null;
+  error?: string | null;
+}
+
 /** Structured provider preset. Carries the LiteLLM prefix explicitly so the
  * UI can compose `{litellm_provider}/{example_model}` at select time — the
  * prefix is what LiteLLM's wildcard router matches on. `kwargs` merges into

@@ -395,6 +395,15 @@ class ModelsConfig(BaseModel):
     utility: UtilityConfig = Field(default_factory=UtilityConfig)
 
 
+class UtilityModelTestResult(BaseModel):
+    ok: bool
+    status: str
+    model: str | None = None
+    latency_ms: int
+    output_preview: str | None = None
+    error: str | None = None
+
+
 class OllamaBulkAddRequest(BaseModel):
     model_names: list[str] = Field(default_factory=list)
 

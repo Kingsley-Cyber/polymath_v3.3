@@ -34,6 +34,7 @@ export function ToggleBar({ className = "" }: ToggleBarProps) {
       ? fallbackEntry.model_name.split("/").slice(1).join("/")
       : fallbackEntry.model_name
     : null;
+  const toolRouteActive = selectedToolIds.length > 0 || webSearchEnabled;
 
   return (
     <div
@@ -69,10 +70,10 @@ export function ToggleBar({ className = "" }: ToggleBarProps) {
         activeColor="bg-accent-main"
       />
 
-      {selectedToolIds.length > 0 && fallbackLabel && (
+      {toolRouteActive && fallbackLabel && (
         <span
           className="text-[9px] font-bold uppercase tracking-widest text-amber-300/80 border border-amber-500/30 bg-amber-950/20 px-1.5 py-0.5"
-          title={`Tools active — auto-routing to ${fallbackLabel} for tool support`}
+          title={`Tools/Web active — auto-routing to ${fallbackLabel} for native tool support`}
         >
           AUTO: {fallbackLabel}
         </span>

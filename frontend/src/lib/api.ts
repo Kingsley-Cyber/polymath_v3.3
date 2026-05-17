@@ -1399,6 +1399,10 @@ export async function updateModelsSettings(
   return fetchJSON("/settings/models", { method: "POST", body: JSON.stringify(config) });
 }
 
+export async function testUtilityModel(): Promise<import("../types").UtilityModelTestResult> {
+  return fetchJSON("/settings/models/utility/test", { method: "POST" });
+}
+
 export async function deletePoolEntry(entryId: string): Promise<import("../types").ModelsConfig> {
   return fetchJSON(`/settings/models/pool/${encodeURIComponent(entryId)}`, { method: "DELETE" });
 }

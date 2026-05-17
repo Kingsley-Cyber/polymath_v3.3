@@ -381,3 +381,60 @@ async def test_resolver_utility_role_miss_returns_none():
     finally:
         await _cleanup(user)
         await _teardown()
+
+
+@pytest.mark.asyncio
+async def test_utility_model_test_endpoint_uses_configured_utility_role(monkeypatch):
+    from routers import settings as settings_router
+
+    seen: dict[str, object] = {}
+
+    async def fake_resolve(user_id, kind):
+        seen["resolve"] = (user_id, kind)
+        return {
+            "model": "openai/glm-5-turbo",
+            "api_base": "https://api.z.ai/api/coding/paas/v4",
+            "api_key": "sk-test",
+            "extra_params": {"seed": 1},
+        }
+
+    async def fake_complete_sync(**kwargs):
+        seen["llm"] = kwargs
+        return "POLYMATH_UTILITY_OK"
+
+    monkeypatch.setattr(settings_router, "resolve_query_model_kind", fake_resolve)
+    monkeypatch.setattr(settings_router.llm_service, "complete_sync", fake_complete_sync)
+
+    result = await settings_router.test_utility_model_connection(
+        current_user={"user_id": "user-utility-test"}
+    )
+
+    assert result.ok is True
+    assert result.status == "ok"
+    assert result.model == "openai/glm-5-turbo"
+    assert result.output_preview == "POLYMATH_UTILITY_OK"
+    assert seen["resolve"] == ("user-utility-test", "utility")
+    llm_call = seen["llm"]
+    assert llm_call["model"] == "openai/glm-5-turbo"
+    assert llm_call["api_base"] == "https://api.z.ai/api/coding/paas/v4"
+    assert llm_call["api_key"] == "sk-test"
+    assert llm_call["temperature"] == 0.0
+    assert llm_call["max_tokens"] == 24
+
+
+@pytest.mark.asyncio
+async def test_utility_model_test_endpoint_handles_missing_utility_role(monkeypatch):
+    from routers import settings as settings_router
+
+    async def fake_resolve(_user_id, _kind):
+        return None
+
+    monkeypatch.setattr(settings_router, "resolve_query_model_kind", fake_resolve)
+
+    result = await settings_router.test_utility_model_connection(
+        current_user={"user_id": "user-utility-test"}
+    )
+
+    assert result.ok is False
+    assert result.status == "not_configured"
+    assert result.model is None

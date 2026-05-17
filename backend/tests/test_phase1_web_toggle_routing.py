@@ -48,7 +48,10 @@ async def test_web_toggle_routes_to_agentic_model_and_continues_after_reasoning_
     request = ChatRequest(
         message="What changed in OpenAI model routing today?",
         corpus_ids=[],
-        overrides=ModelOverrides(web_search_enabled=True),
+        overrides=ModelOverrides(
+            model="openai/base-query",
+            web_search_enabled=True,
+        ),
     )
 
     async def fake_load_or_create(_request):
@@ -177,6 +180,7 @@ async def test_web_toggle_routes_to_agentic_model_and_continues_after_reasoning_
 
     assert _is_web_search_enabled_for_request(request) is True
     assert resolver_kinds == ["agentic"]
+    assert request.overrides.model == "openai/agentic-tools"
     assert stream_calls[0]["model"] == "openai/agentic-tools"
     assert stream_calls[1]["model"] == "openai/agentic-tools"
     assert [schema["function"]["name"] for schema in stream_calls[0]["tools"]] == [

@@ -369,6 +369,9 @@ class ChatOrchestrator:
             else settings.AGENTIC_MODE_ENABLED
         )
         web_search_enabled = _is_web_search_enabled_for_request(request)
+        tool_route_active = bool(
+            request.selected_tools or web_search_enabled or agentic_on_request
+        )
         if user_id and (
             model_used.startswith("profile:") or model_used.startswith("pool:")
         ):
@@ -407,28 +410,16 @@ class ChatOrchestrator:
             if request.overrides is not None:
                 request.overrides.model = model_used
 
-        # Phase F — fallback resolution: when no explicit prefix or override
-        # is in play, look up the user's query prefs and substitute the chosen
-        # pool entry's full credentials. Skipped when the user already gave
-        # an explicit pool:/profile: choice or set request.overrides.model.
-        if (
-            user_id
-            and not profile_creds
-            and not (model_used.startswith("pool:") or model_used.startswith("profile:"))
-            and not (request.overrides and request.overrides.model)
-            and model_used in (settings.DEFAULT_COMPLETION_MODEL, settings.AGENTIC_MODEL)
-        ):
-            # Phase 24 — tool selection drives the auto-fallback to the
-            # agentic pool entry. The legacy agentic toggle is gone; whether
-            # the user has tools active is now the trigger. Live web is also
-            # a native tool-call path, so a Web-enabled turn must use the
-            # same tool-capable routing.
-            kind = (
-                "agentic"
-                if (request.selected_tools or web_search_enabled or agentic_on_request)
-                else "query"
+        # Phase F — role resolution. Tool/Web turns must route through the
+        # tool-capable role even when the chat dropdown sent an explicit
+        # overrides.model. Query prefs still stay conservative for normal
+        # no-tool chat turns.
+        if tool_route_active:
+            qres = (
+                await resolve_query_model_kind(user_id, "agentic")
+                if user_id
+                else None
             )
-            qres = await resolve_query_model_kind(user_id, kind)
             if qres:
                 model_used = qres["model"]
                 profile_creds = {
@@ -438,8 +429,38 @@ class ChatOrchestrator:
                 }
                 logger.info(
                     "Phase F query prefs resolution: user=%s kind=%s → %s",
-                    user_id, kind, model_used,
+                    user_id, "agentic", model_used,
                 )
+            else:
+                model_used = settings.AGENTIC_MODEL
+                profile_creds = {}
+                logger.info(
+                    "Agentic env fallback resolution: user=%s kind=agentic → %s",
+                    user_id or "-", model_used,
+                )
+
+        elif (
+            user_id
+            and not profile_creds
+            and not (model_used.startswith("pool:") or model_used.startswith("profile:"))
+            and not (request.overrides and request.overrides.model)
+            and model_used in (settings.DEFAULT_COMPLETION_MODEL, settings.AGENTIC_MODEL)
+        ):
+            qres = await resolve_query_model_kind(user_id, "query")
+            if qres:
+                model_used = qres["model"]
+                profile_creds = {
+                    "api_base": qres["api_base"],
+                    "api_key": qres["api_key"],
+                    "extra_params": qres["extra_params"] or None,
+                }
+                logger.info(
+                    "Phase F query prefs resolution: user=%s kind=%s → %s",
+                    user_id, "query", model_used,
+                )
+
+        if request.overrides is not None:
+            request.overrides.model = model_used
 
         # Phase 29 — vision-capability pre-flight. If the user attached
         # images but picked a non-vision model, the LLM call will 4xx

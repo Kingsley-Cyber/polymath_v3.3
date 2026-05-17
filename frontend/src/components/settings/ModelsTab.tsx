@@ -33,6 +33,7 @@ import type {
   OllamaInstalledModel,
   PoolProvider,
   QueryModelPoolEntry,
+  UtilityModelTestResult,
 } from "../../types";
 import { POOL_PROVIDER_PRESETS, composeModelString } from "../../types";
 import { ApiKeysTab } from "./ApiKeysTab";
@@ -588,11 +589,34 @@ function ReasoningSection() {
 }
 
 function UtilitySection() {
-  const { config, patchUtility } = useQueryModelPoolStore();
+  const { config, dirty, patchUtility } = useQueryModelPoolStore();
   const utility = config.utility || {
     default_enabled: false,
     pool_entry_id: null,
   };
+  const [testingUtility, setTestingUtility] = useState(false);
+  const [testResult, setTestResult] = useState<UtilityModelTestResult | null>(
+    null,
+  );
+
+  const handleTestUtility = async () => {
+    setTestingUtility(true);
+    setTestResult(null);
+    try {
+      setTestResult(await api.testUtilityModel());
+    } catch (e) {
+      setTestResult({
+        ok: false,
+        status: "request_failed",
+        model: null,
+        latency_ms: 0,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setTestingUtility(false);
+    }
+  };
+
   return (
     <div className="bg-[#2a2a2a] border border-white/5 rounded-lg p-5 space-y-3">
       <h3 className="text-[15px] font-semibold text-white flex items-center gap-2">
@@ -621,6 +645,31 @@ function UtilitySection() {
           value={utility.pool_entry_id}
           onChange={(v) => patchUtility({ pool_entry_id: v })}
         />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={handleTestUtility}
+          disabled={!utility.pool_entry_id || dirty || testingUtility}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-cyan-500/50 bg-cyan-500/10 text-cyan-200 text-[11px] font-semibold uppercase tracking-widest hover:bg-cyan-500/15 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {testingUtility ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <CheckCircle className="w-3.5 h-3.5" />
+          )}
+          Test Utility
+        </button>
+        {testResult && (
+          <div
+            className={`text-[11px] font-mono ${
+              testResult.ok ? "text-green-400" : "text-red-300"
+            }`}
+          >
+            {testResult.ok
+              ? `OK · ${testResult.latency_ms} ms · ${testResult.output_preview || testResult.model || "response"}`
+              : `${testResult.status}: ${testResult.error || "failed"}`}
+          </div>
+        )}
       </div>
     </div>
   );

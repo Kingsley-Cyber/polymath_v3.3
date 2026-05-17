@@ -12,6 +12,7 @@ Endpoints:
 """
 
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -22,9 +23,12 @@ from models.schemas import (
     GlobalSettingsUpdate,
     ModelsConfig,
     OllamaBulkAddRequest,
+    UtilityModelTestResult,
 )
 from routers.auth import get_current_user
 from services.health_service import health_service
+from services.llm import llm_service
+from services.query_model_resolver import resolve as resolve_query_model_kind
 from services.secrets import KNOWN_PROVIDERS
 from services.settings import settings_service
 
@@ -64,6 +68,89 @@ async def save_models(
             status_code=400,
             detail={"error": "invalid_models_config", "reason": str(exc)},
         ) from exc
+
+
+@router.post("/models/utility/test", response_model=UtilityModelTestResult)
+async def test_utility_model_connection(
+    current_user: dict = Depends(get_current_user),
+) -> UtilityModelTestResult:
+    """Run a tiny deterministic call through the configured Utility model."""
+
+    started = time.perf_counter()
+    resolved = await resolve_query_model_kind(current_user["user_id"], "utility")
+
+    def latency() -> int:
+        return int((time.perf_counter() - started) * 1000)
+
+    if not resolved:
+        return UtilityModelTestResult(
+            ok=False,
+            status="not_configured",
+            latency_ms=latency(),
+            error="Utility model is not configured.",
+        )
+
+    model = str(resolved.get("model") or "").strip()
+    if not model:
+        return UtilityModelTestResult(
+            ok=False,
+            status="invalid_config",
+            latency_ms=latency(),
+            error="Utility model entry is missing a model name.",
+        )
+
+    try:
+        output = await llm_service.complete_sync(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a Polymath model-pool connection tester. "
+                        "Follow the user's instruction exactly."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Return exactly this text and nothing else: "
+                        "POLYMATH_UTILITY_OK"
+                    ),
+                },
+            ],
+            model=model,
+            temperature=0.0,
+            max_tokens=24,
+            api_base=resolved.get("api_base"),
+            api_key=resolved.get("api_key"),
+            extra_params=resolved.get("extra_params") or {},
+            timeout=45.0,
+        )
+    except Exception as exc:
+        return UtilityModelTestResult(
+            ok=False,
+            status="error",
+            model=model,
+            latency_ms=latency(),
+            error=f"{type(exc).__name__}: {str(exc)[:300]}",
+        )
+
+    preview = " ".join(str(output or "").split())[:160] or None
+    if not preview:
+        return UtilityModelTestResult(
+            ok=False,
+            status="empty_response",
+            model=model,
+            latency_ms=latency(),
+            error="Utility model returned an empty response.",
+        )
+
+    return UtilityModelTestResult(
+        ok=True,
+        status="ok",
+        model=model,
+        latency_ms=latency(),
+        output_preview=preview,
+    )
 
 
 @router.post("/models/ollama/add", response_model=ModelsConfig)
