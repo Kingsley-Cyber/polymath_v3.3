@@ -6,8 +6,8 @@
  *
  *   • Multi-corpus data fetch (Brain View domains/books, Query View)
  *   • Cache-warming poll
- *   • UI chrome: corpus pill stats, color/view toggles, breadcrumb,
- *     hover tooltip, selection bar, controls cluster, prose pane
+ *   • UI chrome: corpus stats, breadcrumb, hover tooltip, selection bar,
+ *     controls cluster, and dashboard wiring
  *   • Drill stack management (concept community drill, book drill)
  */
 
@@ -92,6 +92,8 @@ export type RenderedGraphEdge = {
   topSharedEntities?: string[];
   sourceDocId?: string;
   targetDocId?: string;
+  sourceCorpusId?: string;
+  targetCorpusId?: string;
   color?: string;
 };
 
@@ -257,7 +259,6 @@ function useBrainGraph(
         setData({
           nodes: dedupedNodes,
           links: [...memberEdges, ...intraEdges, ...bridgeEdges],
-          lodMode: "satellites",
           rawNodeCount: dedupedNodes.length,
           rawEdgeCount: memberEdges.length + intraEdges.length + bridgeEdges.length,
         });
@@ -278,10 +279,11 @@ function useBrainGraph(
         (a, b) => (b.bridge_count || 0) - (a.bridge_count || 0),
       );
       const docById = new Map(sortedDocs.map((d) => [d.doc_id, d]));
+      const totalDocuments = bv.meta?.total_documents ?? sortedDocs.length;
       const lodMode: GraphLodMode =
-        sortedDocs.length >= 5000
+        totalDocuments >= 5000
           ? "clusters"
-          : sortedDocs.length >= 1000
+          : totalDocuments >= 1000
             ? "books"
             : "satellites";
       const topN = adaptiveTopN(sortedDocs.length);
@@ -350,7 +352,7 @@ function useBrainGraph(
           nodes: Array.from(corpusGroups.values()),
           links: Array.from(aggregate.values()),
           lodMode,
-          rawNodeCount: sortedDocs.length,
+          rawNodeCount: totalDocuments,
           rawEdgeCount: bv.bridges.length,
         });
         setCacheWarming([]);
@@ -460,6 +462,8 @@ function useBrainGraph(
         shared_entities: b.shared_entities,
         source_doc_id: b.source,
         target_doc_id: b.target,
+        source_corpus_id: b.source_corpus_id,
+        target_corpus_id: b.target_corpus_id,
         source_label:
           docById.get(b.source)?.filename ||
           docById.get(b.source)?.label ||
@@ -473,7 +477,7 @@ function useBrainGraph(
         nodes: [...anchorNodes, ...satelliteNodes],
         links: [...bridgeLinks, ...satelliteEdges],
         lodMode,
-        rawNodeCount: sortedDocs.length,
+        rawNodeCount: totalDocuments,
         rawEdgeCount: bv.bridges.length,
       });
       setCacheWarming([]);
@@ -807,15 +811,30 @@ export function GraphViewer({
           topSharedEntities: attrs.top_shared_entities || [],
           sourceDocId: attrs.source_doc_id,
           targetDocId: attrs.target_doc_id,
+          sourceCorpusId: attrs.source_corpus_id,
+          targetCorpusId: attrs.target_corpus_id,
           color: attrs.color,
         });
       });
+      const isBrainPayload = Boolean(payload.lodMode);
+      const visibleBridgeEdges = edges.filter(
+        (edge) => edge.predicate === "bridges_to",
+      ).length;
+      let visibleStructuralNodes = graph.order;
+      if (isBrainPayload) {
+        visibleStructuralNodes = 0;
+        graph.forEachNode((nodeId, attrs: any) => {
+          if (attrs.nodeKind === "Book" || String(nodeId).startsWith("corpus:")) {
+            visibleStructuralNodes += 1;
+          }
+        });
+      }
       setRenderedEdges(edges);
       setRenderedStats({
-        visibleNodes: graph.order,
-        totalNodes: payload.nodes.length,
-        visibleEdges: graph.size,
-        totalEdges: payload.links.length,
+        visibleNodes: visibleStructuralNodes,
+        totalNodes: payload.rawNodeCount ?? payload.nodes.length,
+        visibleEdges: isBrainPayload ? visibleBridgeEdges : graph.size,
+        totalEdges: payload.rawEdgeCount ?? payload.links.length,
         lodMode: payload.lodMode,
       });
     },
@@ -930,7 +949,7 @@ export function GraphViewer({
         </div>
       )}
 
-      {/* Sigma canvas + optional prose pane */}
+      {/* Sigma canvas */}
       <div className="absolute inset-0 flex">
         <div className="relative flex-1 min-w-0">
           {/* Pt 6: Galaxy background canvas — dust particles + family

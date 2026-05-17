@@ -92,7 +92,6 @@ interface UseSigmaReturn {
   zoomIn: () => void;
   zoomOut: () => void;
   resetZoom: () => void;
-  focusNode: (nodeId: string) => void;
   isLayoutRunning: boolean;
   startLayout: () => void;
   stopLayout: () => void;
@@ -100,7 +99,6 @@ interface UseSigmaReturn {
   setSelectedNode: (nodeId: string | null) => void;
   selectedEdge: string | null;
   setSelectedEdge: (edgeId: string | null) => void;
-  refreshHighlights: () => void;
 }
 
 // ── ForceAtlas2 + noverlap settings (verbatim from GitNexus) ─────────────
@@ -733,25 +731,6 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
     [runLayout, setSelectedEdge, setSelectedNode],
   );
 
-  const focusNode = useCallback((nodeId: string) => {
-    const sigma = sigmaRef.current;
-    const graph = graphRef.current;
-    if (!sigma || !graph || !graph.hasNode(nodeId)) return;
-    const alreadySelected = selectedNodeRef.current === nodeId;
-    selectedNodeRef.current = nodeId;
-    setSelectedNodeState(nodeId);
-    if (!alreadySelected) {
-      const nodeAttrs = graph.getNodeAttributes(nodeId);
-      sigma
-        .getCamera()
-        .animate(
-          { x: nodeAttrs.x, y: nodeAttrs.y, ratio: 0.15 },
-          { duration: 400 },
-        );
-    }
-    sigma.refresh();
-  }, []);
-
   const zoomIn = useCallback(() => {
     sigmaRef.current?.getCamera().animatedZoom({ duration: 200 });
   }, []);
@@ -793,10 +772,6 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
     }
   }, []);
 
-  const refreshHighlights = useCallback(() => {
-    sigmaRef.current?.refresh();
-  }, []);
-
   return {
     containerRef,
     sigmaRef,
@@ -804,7 +779,6 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
     zoomIn,
     zoomOut,
     resetZoom,
-    focusNode,
     isLayoutRunning,
     startLayout,
     stopLayout,
@@ -812,6 +786,5 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
     setSelectedNode,
     selectedEdge,
     setSelectedEdge,
-    refreshHighlights,
   };
 };

@@ -15,7 +15,7 @@
  * width. Pt 5 of the Brain View refactor.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   Loader2,
@@ -87,6 +87,8 @@ type RenderedGraphEdge = {
   topSharedEntities?: string[];
   sourceDocId?: string;
   targetDocId?: string;
+  sourceCorpusId?: string;
+  targetCorpusId?: string;
   color?: string;
 };
 
@@ -566,13 +568,68 @@ function EvidenceInspector({
 }) {
   const [chunksOpen, setChunksOpen] = useState(false);
   const [chunksLoading, setChunksLoading] = useState(false);
-  const [chunkRows, setChunkRows] = useState<DocExtractionItem[]>([]);
+  const [chunkRows, setChunkRows] = useState<
+    Array<DocExtractionItem & { docLabel?: string }>
+  >([]);
   const [chunkError, setChunkError] = useState<string | null>(null);
 
   const nodeId = selectedNode?.id || "";
   const docId = nodeId.startsWith("book:") ? nodeId.slice(5) : undefined;
   const corpusId =
     selectedNode?.source_corpus || selectedNode?.source_corpora?.[0] || "";
+  const selectionKey = selectedEdge
+    ? `edge:${selectedEdge.id}`
+    : selectedNode
+      ? `node:${selectedNode.id}`
+      : "none";
+  const supportDocs = useMemo(() => {
+    const rows: Array<{ docId: string; corpusId: string; label: string }> = [];
+    if (selectedEdge) {
+      if (selectedEdge.sourceDocId && selectedEdge.sourceCorpusId) {
+        rows.push({
+          docId: selectedEdge.sourceDocId,
+          corpusId: selectedEdge.sourceCorpusId,
+          label: selectedEdge.sourceLabel,
+        });
+      }
+      if (
+        selectedEdge.targetDocId &&
+        selectedEdge.targetCorpusId &&
+        selectedEdge.targetDocId !== selectedEdge.sourceDocId
+      ) {
+        rows.push({
+          docId: selectedEdge.targetDocId,
+          corpusId: selectedEdge.targetCorpusId,
+          label: selectedEdge.targetLabel,
+        });
+      }
+    } else if (docId && corpusId) {
+      rows.push({
+        docId,
+        corpusId,
+        label: selectedNode?.filename || selectedNode?.display_name || docId,
+      });
+    }
+    return rows;
+  }, [
+    corpusId,
+    docId,
+    selectedEdge,
+    selectedNode?.display_name,
+    selectedNode?.filename,
+  ]);
+  const supportDocIds = useMemo(
+    () => new Set(supportDocs.map((doc) => doc.docId)),
+    [supportDocs],
+  );
+
+  useEffect(() => {
+    setChunksOpen(false);
+    setChunksLoading(false);
+    setChunkRows([]);
+    setChunkError(null);
+  }, [selectionKey]);
+
   const incidentEdges = selectedNode
     ? renderedEdges.filter(
         (edge) => edge.source === selectedNode.id || edge.target === selectedNode.id,
@@ -593,8 +650,8 @@ function EvidenceInspector({
     ]),
   ).slice(0, 8);
   const matchedSources = sources.filter((source) => {
-    if (!docId) return true;
-    return source.doc_id === docId;
+    if (supportDocIds.size === 0 || !source.doc_id) return false;
+    return supportDocIds.has(source.doc_id);
   });
 
   const title = selectedEdge
@@ -624,18 +681,23 @@ function EvidenceInspector({
 
   const loadChunks = useCallback(async () => {
     setChunksOpen((v) => !v);
-    if (!docId || !corpusId || chunkRows.length > 0 || chunksLoading) return;
+    if (supportDocs.length === 0 || chunkRows.length > 0 || chunksLoading) return;
     setChunksLoading(true);
     setChunkError(null);
     try {
-      const rows = await api.getDocExtraction(corpusId, docId);
-      setChunkRows(rows);
+      const rows = await Promise.all(
+        supportDocs.map(async (doc) => {
+          const docRows = await api.getDocExtraction(doc.corpusId, doc.docId);
+          return docRows.map((row) => ({ ...row, docLabel: doc.label }));
+        }),
+      );
+      setChunkRows(rows.flat());
     } catch (e) {
       setChunkError(e instanceof Error ? e.message : String(e));
     } finally {
       setChunksLoading(false);
     }
-  }, [chunkRows.length, chunksLoading, corpusId, docId]);
+  }, [chunkRows.length, chunksLoading, supportDocs]);
 
   const sendText = selectedEdge
     ? `Explain the bridge between ${selectedEdge.sourceLabel} and ${selectedEdge.targetLabel}.`
@@ -682,7 +744,9 @@ function EvidenceInspector({
             label="Sources"
             value={
               selectedEdge
-                ? "2 docs"
+                ? supportDocs.length > 0
+                  ? `${supportDocs.length} docs`
+                  : "aggregate"
                 : `${selectedNode?.source_corpora?.length || 0} corpora`
             }
           />
@@ -718,16 +782,33 @@ function EvidenceInspector({
           )}
         </InspectorBlock>
 
-        <InspectorBlock title="Source Documents">
+        <InspectorBlock
+          title={
+            selectedEdge && supportDocs.length === 0
+              ? "Endpoints"
+              : "Source Documents"
+          }
+        >
           <ul className="space-y-1 font-mono text-[10px] text-zinc-400">
             {selectedEdge ? (
               <>
-                <li className="truncate" title={selectedEdge.sourceLabel}>
-                  {selectedEdge.sourceLabel}
-                </li>
-                <li className="truncate" title={selectedEdge.targetLabel}>
-                  {selectedEdge.targetLabel}
-                </li>
+                {(supportDocs.length
+                  ? supportDocs
+                  : [
+                      {
+                        docId: selectedEdge.sourceDocId || selectedEdge.source,
+                        label: selectedEdge.sourceLabel,
+                      },
+                      {
+                        docId: selectedEdge.targetDocId || selectedEdge.target,
+                        label: selectedEdge.targetLabel,
+                      },
+                    ]
+                ).map((doc) => (
+                  <li key={doc.docId} className="truncate" title={doc.label}>
+                    {doc.label}
+                  </li>
+                ))}
               </>
             ) : (
               <li className="truncate" title={selectedNode?.filename || selectedNode?.display_name}>
@@ -785,7 +866,7 @@ function EvidenceInspector({
           </button>
           <button
             onClick={loadChunks}
-            disabled={!docId || !corpusId}
+            disabled={supportDocs.length === 0}
             className="flex items-center justify-center gap-2 rounded border border-zinc-700 px-2 py-1.5 font-mono text-[10px] uppercase tracking-widest text-zinc-300 hover:border-amber-700 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Sparkles className="h-3 w-3" /> Show Supporting Chunks
@@ -814,7 +895,10 @@ function EvidenceInspector({
                   className="flex items-center justify-between gap-2"
                   title={row.chunk_id}
                 >
-                  <span className="truncate">{row.chunk_id}</span>
+                  <span className="truncate">
+                    {row.docLabel ? `${compactName(row.docLabel)} · ` : ""}
+                    {row.chunk_id}
+                  </span>
                   <span className="shrink-0 text-zinc-600">
                     {row.entity_count}e/{row.relation_count}r
                   </span>
@@ -1157,8 +1241,7 @@ function ChipList({
 // ────────────────────────────────────────────────────────────────────────
 // Pt 7 — Graph Query tab. Two subsections in one tab:
 //   (a) Entity-type search — filter the corpora's entities by type +
-//       substring. Results are clickable; clicking sends to chat or
-//       just shows the entity name (TODO: highlight on canvas).
+//       substring. Results are clickable and send the entity text to chat.
 //   (b) HyDE refinement — user types a draft question, hits "Refine",
 //       gets back three structured chip lists (alternative phrasings /
 //       opposing framings / related questions). Each chip is clickable
@@ -1199,7 +1282,6 @@ function GraphQueryTab({
 
   const canRefine =
     !refineLoading && refineQ.trim().length > 0 && corpusIds.length > 0;
-  void model; // marker for the lint that model affects the cache key
 
   const runRefine = useCallback(async () => {
     if (!canRefine) return;

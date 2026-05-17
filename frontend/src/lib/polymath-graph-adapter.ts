@@ -26,26 +26,14 @@ import {
   colorForFamily,
   colorForEntityType,
   getCommunityColor,
-  // EDGE_COLORS_BY_FAMILY, colorForFamily, colorForEntityType, and
-  // RelationFamily were used by the old dominant_family / dominant_
-  // relation_family color paths. The constellation refactor replaced
-  // those with a deterministic corpus-hash hue for nodes and a single
-  // violet (EDGE_STYLES.bridges_to) with opacity-by-strength for edges,
-  // so those imports are no longer needed here. Left in sigma-constants
-  // exports so other surfaces can still use them.
   type PolymathNodeKind,
 } from "./sigma-constants";
 
-// Pt 5: cap how many outbound bridges any single book can show. Prevents
-// hub-books from creating a web that swamps the canvas; long-tail bridges
-// drop off the visible graph but stay in the payload.
-// Pt 6: now overridable via BuildOpts.maxBridgesPerBook so the dashboard
-// slider can dial the cap up/down at runtime.
+// Cap how many visible bridge edges any single book/corpus endpoint can show.
+// Long-tail bridges stay in the payload for total counts, but do not render.
 const MAX_BRIDGES_PER_BOOK_DEFAULT = 3;
 
-// Pt 5: hide bridges below this shared-entity strength at the top-level
-// brain view. They're still in the API response — just not rendered.
-// Pt 6: overridable via BuildOpts.minBridgeStrength.
+// Hide very weak bridges at the visualization layer only.
 const MIN_BRIDGE_STRENGTH_DEFAULT = 2;
 
 export interface SigmaNodeAttributes {
@@ -98,6 +86,8 @@ export interface SigmaEdgeAttributes {
   source_corpus?: string;
   source_doc_id?: string;
   target_doc_id?: string;
+  source_corpus_id?: string;
+  target_corpus_id?: string;
   source_label?: string;
   target_label?: string;
   dangling?: boolean;
@@ -164,6 +154,8 @@ export interface PolymathRawEdge {
   target_label?: string;
   source_corpora?: string[];
   source_corpus?: string;
+  source_corpus_id?: string;
+  target_corpus_id?: string;
   dangling?: boolean;
   cross_cluster?: boolean;
   // Pt 7c: Brain View bridges carry the top shared concept names from
@@ -185,7 +177,7 @@ export interface BuildOpts {
    *  adapter cluster-position entity-level nodes around their parent. */
   clusterCenters?: Map<string, { x: number; y: number }>;
   /** Optional bridge visibility overrides. Omitted in the app shell so LOD
-   *  controls this automatically instead of exposing manual sliders. */
+   *  controls this automatically. */
   minBridgeStrength?: number;
   maxBridgesPerBook?: number;
   lodMode?: GraphLodMode;
@@ -402,15 +394,11 @@ export function polymathToGraphology(
   //    distinct color + size multiplier so the mesh of relationships is
   //    visually parseable rather than a uniform gray cloud.
   //
-  // Pt 5 polish — galaxy aesthetic for bridges_to:
-  //   • Filter weight<MIN_BRIDGE_STRENGTH (=2) — drops 1-shared-entity
-  //     noise that wasn't carrying signal anyway.
-  //   • Cap to MAX_BRIDGES_PER_BOOK (=3) per source — strongest bridges
-  //     only, sorted by weight desc. Hub-books no longer web out.
-  //   • Color by dominant_relation_family from the backend (Pt 5 Cypher
-  //     extension) → semantic edge color (Operational=blue, Causal=amber,
-  //     Conflict=red, etc.) instead of all-violet.
-  //   • Thinner size: max ~1.8px ("thin spaghetti" per user spec).
+  // Visualization-only bridge policy:
+  //   • filter weak bridges at the canvas layer
+  //   • cap strongest bridges per endpoint so hubs do not web out
+  //   • color by dominant_relation_family while opacity carries strength
+  //   • keep all backend payload counts available for visible/total UI
   const edgeBaseSize = n > 20000 ? 0.4 : n > 5000 ? 0.6 : 1.0;
 
   // Pre-process Brain View bridges so we can apply the strength filter +
@@ -443,15 +431,18 @@ export function polymathToGraphology(
   const strongBridges = bridgeLinks.filter(
     (b) => (b.weight ?? 0) >= minStrength,
   );
-  const perSourceCount = new Map<string, number>();
+  const perEndpointCount = new Map<string, number>();
   strongBridges.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
   const cappedBridges: PolymathRawEdge[] = [];
   for (const rel of strongBridges) {
     const s = String(rel.source);
-    const used = perSourceCount.get(s) ?? 0;
-    if (used >= maxPerBook) continue;
+    const t = String(rel.target);
+    const sourceUsed = perEndpointCount.get(s) ?? 0;
+    const targetUsed = perEndpointCount.get(t) ?? 0;
+    if (sourceUsed >= maxPerBook || targetUsed >= maxPerBook) continue;
     cappedBridges.push(rel);
-    perSourceCount.set(s, used + 1);
+    perEndpointCount.set(s, sourceUsed + 1);
+    perEndpointCount.set(t, targetUsed + 1);
   }
   const linksToRender: PolymathRawEdge[] = [...cappedBridges, ...otherLinks];
 
@@ -477,12 +468,6 @@ export function polymathToGraphology(
       // Cross-corpus edge — mix the style color with violet to signal "bridge."
       color = "#a78bfa";
     }
-    // Brain View bridges carry a `weight` = shared-entity strength from
-    // /api/graph/brain-view. ONE color (EDGE_STYLES.bridges_to violet)
-    // for every book-to-book bridge, with opacity carrying the signal:
-    // faint = weak connection, bright = strong. The old
-    // dominant_relation_family branch produced mostly-gray edges
-    // because that field wasn't reliably populated upstream.
     let size = edgeBaseSize * style.sizeMultiplier;
     let edgeLabel: string | undefined;
     if (rel.predicate === "bridges_to" && typeof rel.weight === "number") {
@@ -520,6 +505,8 @@ export function polymathToGraphology(
       source_corpus: rel.source_corpus,
       source_doc_id: rel.source_doc_id,
       target_doc_id: rel.target_doc_id,
+      source_corpus_id: rel.source_corpus_id,
+      target_corpus_id: rel.target_corpus_id,
       source_label: rel.source_label,
       target_label: rel.target_label,
       dangling: Boolean(rel.dangling),
