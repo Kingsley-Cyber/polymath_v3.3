@@ -23,6 +23,36 @@ import { useIngestionQueueStore } from "./stores/ingestionQueueStore";
 import * as api from "./lib/api";
 import type { ChatMessage, ChatRequest, Collection } from "./types";
 
+function summarizeToolResultDetail(name: string, result: string): string | undefined {
+  if (name !== "web_search") return undefined;
+  try {
+    const parsed = JSON.parse(result) as {
+      error?: string;
+      pipeline?: {
+        candidate_results?: number;
+        full_page_fetch_attempts?: number;
+        full_page_fetch_successes?: number;
+        final_reranked_results?: number;
+        ranked_by?: string;
+        freshness_time_range?: string | null;
+        js_render?: { attempted?: boolean; rendered?: boolean };
+      };
+    };
+    if (parsed.error) return parsed.error;
+    const p = parsed.pipeline;
+    if (!p) return undefined;
+    const freshness = p.freshness_time_range ? ` · ${p.freshness_time_range}` : "";
+    const js = p.js_render?.rendered
+      ? " · js rendered"
+      : p.js_render?.attempted
+        ? " · js tried"
+        : "";
+    return `candidates ${p.candidate_results ?? 0} → fetched ${p.full_page_fetch_successes ?? 0}/${p.full_page_fetch_attempts ?? 0} → final ${p.final_reranked_results ?? 0}${freshness}${js}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isGraphViewOpen, setIsGraphViewOpen] = useState(false);
@@ -424,7 +454,10 @@ function App() {
                     result: string;
                   }>;
                   for (const r of results) {
-                    chat.completeStreamingToolActivity(r.name || "tool");
+                    chat.completeStreamingToolActivity(
+                      r.name || "tool",
+                      summarizeToolResultDetail(r.name || "tool", r.result || ""),
+                    );
                   }
                 } catch {
                   chat.completeStreamingToolActivity("tool");

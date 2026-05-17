@@ -226,7 +226,7 @@ class Settings(BaseSettings):
         default=4096, description="Maximum context window tokens"
     )
     MAX_COMPLETION_TOKENS: int = Field(
-        default=2048, description="Maximum completion tokens"
+        default=16384, description="Maximum completion tokens"
     )
     RESERVE_TOKENS: int = Field(
         default=500, description="Tokens reserved for system prompt and response"
@@ -674,7 +674,46 @@ class Settings(BaseSettings):
         description=(
             "When true, fetch top live-web result pages and inject cleaned page "
             "text instead of only SearXNG snippets. If OBSCURA_COMMAND is set, "
-            "Obscura is used; otherwise Polymath uses its native HTML fetcher."
+            "Obscura may be used as an allowlisted fallback after static "
+            "extraction fails."
+        ),
+    )
+    LIVE_WEB_FETCH_MAX_PAGES: int = Field(
+        default=6,
+        ge=1,
+        le=10,
+        description=(
+            "Maximum live-web URLs to full-fetch after snippet reranking. "
+            "Search can collect a wider pool, but extraction stays bounded so "
+            "web search does not become a turn-latency bottleneck."
+        ),
+    )
+    LIVE_WEB_PAGE_FETCHER: str = Field(
+        default="auto",
+        description=(
+            "Static full-page extraction backend for live web results: native, "
+            "trafilatura, or auto. Auto uses Trafilatura when installed and "
+            "falls back to native httpx + BeautifulSoup."
+        ),
+    )
+    LIVE_WEB_OBSCURA_DOMAINS: str = Field(
+        default=(
+            "civitai.com,create.roblox.com,gumroad.com,polymarket.com,"
+            "producthunt.com,rolimons.com,tradingview.com"
+        ),
+        description=(
+            "Comma-separated domains where the optional Obscura JS renderer may "
+            "run after raw/source and static extraction fail. Empty disables "
+            "Obscura fallback even when OBSCURA_COMMAND is set."
+        ),
+    )
+    LIVE_WEB_FETCH_CACHE_TTL_SECONDS: int = Field(
+        default=900,
+        ge=0,
+        le=86400,
+        description=(
+            "In-process TTL for successful live-web page extraction results. "
+            "Set 0 to disable."
         ),
     )
     OBSCURA_COMMAND: str = Field(

@@ -1935,7 +1935,14 @@ class ChatOrchestrator:
         if not settings.LIVE_WEB_SEARCH_ENABLED:
             return json.dumps({"error": "web_search is disabled by the server"})
 
-        query = " ".join(str(args.get("query") or "").split()).strip()
+        raw_query_arg = args.get("query")
+        query = " ".join(str(raw_query_arg or "").split()).strip()
+        if (
+            request is not None
+            and request.message
+            and (not query or query.lower() in {"true", "false", "null", "none"})
+        ):
+            query = " ".join(request.message.split()).strip()
         if not query:
             return json.dumps({"error": "query is required"})
         try:
@@ -1959,27 +1966,50 @@ class ChatOrchestrator:
                 query,
                 request.message if request is not None else None,
             )
+            search_query = query[:300]
             candidate_limit = max(
                 max_results,
                 int(settings.LIVE_WEB_SEARCH_CANDIDATE_RESULTS or max_results),
             )
-            time_range = infer_web_search_time_range(query[:300])
+            time_range = infer_web_search_time_range(search_query)
             hits = await live_web_search._search_searxng_pool(
-                query[:300],
+                search_query,
                 max_results=candidate_limit,
                 time_range=time_range,
             )
             fetched: dict[str, str] = {}
+            fetch_stats: list[dict[str, Any]] = []
+            hits_to_fetch = []
+            fetch_limit = 0
             if settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES:
-                fetched = await live_web_search._fetch_pages(hits)
+                fetch_limit = min(
+                    int(
+                        getattr(
+                            settings,
+                            "LIVE_WEB_FETCH_MAX_PAGES",
+                            max_results,
+                        )
+                        or max_results
+                    ),
+                    max_results,
+                    len(hits),
+                )
+                hits_to_fetch = await live_web_search._select_hits_for_extraction(
+                    search_query,
+                    hits,
+                    limit=fetch_limit,
+                )
+                fetched, fetch_stats = await live_web_search._fetch_pages_with_stats(
+                    hits_to_fetch
+                )
             candidate_chunks = web_hits_to_source_chunks(
                 hits,
                 fetched_markdown=fetched,
-                search_query=query[:300],
+                search_query=search_query,
                 max_chars=int(settings.OBSCURA_MAX_CHARS or 4000),
             )
             chunks = await rerank_web_source_chunks(
-                query[:300],
+                search_query,
                 candidate_chunks,
                 limit=max_results,
             )
@@ -2009,9 +2039,70 @@ class ChatOrchestrator:
                 pending = _append_deduped_web_sources(pending, chunks)
                 object.__setattr__(request, "_pending_tool_sources", pending)
 
+            search_queries = sorted(
+                {
+                    str(hit.search_query or search_query)
+                    for hit in hits
+                    if str(hit.search_query or search_query).strip()
+                }
+            )
+            obscura_domains = [
+                domain.strip()
+                for domain in str(
+                    getattr(settings, "LIVE_WEB_OBSCURA_DOMAINS", "") or ""
+                ).split(",")
+                if domain.strip()
+            ]
+            pipeline = {
+                "web_search_calls_this_turn": 1,
+                "web_search_call_limit": _MAX_WEB_SEARCH_CALLS_PER_TURN,
+                "candidate_limit_requested": candidate_limit,
+                "candidate_results": len(hits),
+                "search_queries": search_queries[:12],
+                "freshness_time_range": time_range,
+                "snippet_rerank_applied": bool(
+                    settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES
+                    and len(hits) > len(hits_to_fetch)
+                    and bool(hits_to_fetch)
+                ),
+                "snippet_rerank_fetch_limit": fetch_limit,
+                "full_page_fetch_enabled": bool(
+                    settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES
+                ),
+                "full_page_fetch_attempts": len(hits_to_fetch),
+                "full_page_fetch_successes": len(fetched),
+                "fetcher": getattr(settings, "LIVE_WEB_PAGE_FETCHER", "auto"),
+                "fetches": fetch_stats[:10],
+                "js_render": {
+                    "configured": bool(settings.OBSCURA_COMMAND),
+                    "policy": "allowlisted fallback after static extraction fails",
+                    "allowlisted_domains": obscura_domains,
+                    "attempted": any(
+                        bool(item.get("obscura_attempted")) for item in fetch_stats
+                    ),
+                    "rendered": any(
+                        bool(item.get("js_rendered")) for item in fetch_stats
+                    ),
+                },
+                "final_chunk_candidates": len(candidate_chunks),
+                "final_reranked_results": len(chunks),
+                "final_result_limit": max_results,
+                "ranked_by": settings.RERANKER_MODEL,
+            }
+            logger.info(
+                "web_search pipeline query=%r candidates=%d fetch_attempts=%d fetch_successes=%d final=%d time_range=%r js_rendered=%s",
+                search_query,
+                len(hits),
+                len(hits_to_fetch),
+                len(fetched),
+                len(chunks),
+                time_range,
+                pipeline["js_render"]["rendered"],
+            )
+
             return json.dumps(
                 {
-                    "query": query[:300],
+                    "query": search_query,
                     "candidate_results": len(hits),
                     "reranked_results": len(chunks),
                     "ranked_by": settings.RERANKER_MODEL,
@@ -2019,6 +2110,7 @@ class ChatOrchestrator:
                     "full_page_fetch_enabled": bool(
                         settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES
                     ),
+                    "pipeline": pipeline,
                     "results": result_items,
                     "note": (
                         "Use these only when relevant. Cite the URL for any "

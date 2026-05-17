@@ -12,6 +12,7 @@ import html
 import logging
 import re
 import shlex
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha1
@@ -30,10 +31,21 @@ _DEFAULT_MAX_RESULTS = 6
 _DEFAULT_CANDIDATE_RESULTS = 15
 _WEB_SEARCH_RESULTS_PER_QUERY = 5
 _DEFAULT_OBSCURA_MAX_CHARS = 4000
+_DEFAULT_FETCH_MAX_PAGES = 6
 _DEFAULT_MAX_RELATED_TERMS = 5
 _WEB_FETCH_USER_AGENT = (
     "PolymathWebRetriever/1.0 (+https://localhost; local user initiated search)"
 )
+_DEFAULT_OBSCURA_DOMAINS = (
+    "civitai.com",
+    "create.roblox.com",
+    "gumroad.com",
+    "polymarket.com",
+    "producthunt.com",
+    "rolimons.com",
+    "tradingview.com",
+)
+_FETCH_CACHE_MAX_ITEMS = 512
 
 _RESEARCH_DOMAINS = (
     "arxiv.org",
@@ -432,6 +444,27 @@ class WebSearchHit:
     time_range: str | None = None
 
 
+@dataclass
+class _PageFetchCacheEntry:
+    expires_at: float
+    text: str
+
+
+@dataclass
+class _PageFetchResult:
+    url: str
+    text: str | None
+    method: str
+    status: str
+    chars: int = 0
+    from_cache: bool = False
+    obscura_attempted: bool = False
+    js_rendered: bool = False
+
+
+_PAGE_FETCH_CACHE: dict[str, _PageFetchCacheEntry] = {}
+
+
 def _normalized_text(value: str) -> str:
     return re.sub(r"\s+", " ", value.strip().lower())
 
@@ -774,6 +807,58 @@ def _build_cyber_database_query(query: str) -> str:
     return compact or query
 
 
+def _build_roblox_creator_doc_queries(query: str) -> list[str]:
+    """Build direct Creator Docs searches for named Roblox APIs/classes."""
+
+    text = _normalized_text(query)
+    mappings = (
+        ("remoteevent", "RemoteEvent"),
+        ("remote function", "RemoteFunction"),
+        ("remotefunction", "RemoteFunction"),
+        ("datastore", "DataStoreService"),
+        ("data store", "DataStoreService"),
+        ("humanoid", "Humanoid"),
+        ("tweenservice", "TweenService"),
+        ("tween service", "TweenService"),
+        ("runservice", "RunService"),
+        ("run service", "RunService"),
+        ("players service", "Players"),
+        ("proximityprompt", "ProximityPrompt"),
+        ("proximity prompt", "ProximityPrompt"),
+    )
+    variants: list[str] = []
+    seen: set[str] = set()
+    for marker, class_name in mappings:
+        if marker not in text or class_name in seen:
+            continue
+        variants.append(
+            f"{class_name} site:create.roblox.com/docs/reference/engine/classes/{class_name}"
+        )
+        seen.add(class_name)
+        if len(variants) >= 2:
+            break
+    return variants
+
+
+def _append_explicit_source_variants(queries: list[str], base: str) -> None:
+    """Honor source names the user explicitly put in the query."""
+
+    lower = base.lower()
+    explicit_sites = (
+        (("product hunt", "producthunt"), "producthunt.com"),
+        (("gumroad",), "gumroad.com"),
+        (("polymarket",), "polymarket.com"),
+        (("rolimons",), "rolimons.com"),
+        (("civitai",), "civitai.com"),
+        (("replicate",), "replicate.com"),
+        (("fal.ai", "fal ai"), "fal.ai"),
+        (("indie hackers", "indiehackers"), "indiehackers.com"),
+    )
+    for markers, domain in explicit_sites:
+        if any(marker in lower for marker in markers):
+            _append_query_variant(queries, f"{base} site:{domain}")
+
+
 def _append_query_variant(queries: list[str], variant: str) -> None:
     if len(queries) >= _MAX_WEB_SEARCH_QUERY_VARIANTS:
         return
@@ -793,6 +878,8 @@ def build_web_search_queries(query: str) -> list[str]:
     if not lower.startswith("!") and _query_should_include_model_registry_sources(base):
         for item in _build_model_registry_queries(base):
             _append_query_variant(queries, f"!hfm {item}")
+
+    _append_explicit_source_variants(queries, base)
 
     if _looks_like_finance_query(base):
         _append_query_variant(queries, f"!reu {base}")
@@ -820,6 +907,8 @@ def build_web_search_queries(query: str) -> list[str]:
         _append_query_variant(queries, f"{base} site:indiehackers.com")
 
     elif _looks_like_roblox_query(base):
+        for item in _build_roblox_creator_doc_queries(base):
+            _append_query_variant(queries, item)
         _append_query_variant(queries, f"{base} site:create.roblox.com/docs")
         _append_query_variant(queries, f"{base} site:devforum.roblox.com")
         _append_query_variant(queries, f"!gh roblox luau {base}")
@@ -1091,6 +1180,100 @@ def _web_domain(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+def _page_fetch_cache_key(url: str, *, fetcher: str, max_chars: int) -> str:
+    domain = _web_domain(url)
+    return sha1(f"{url}|{domain}|{fetcher}|{max_chars}".encode("utf-8")).hexdigest()
+
+
+def _get_page_fetch_cache(key: str) -> str | None:
+    entry = _PAGE_FETCH_CACHE.get(key)
+    if not entry:
+        return None
+    if entry.expires_at <= time.monotonic():
+        _PAGE_FETCH_CACHE.pop(key, None)
+        return None
+    return entry.text
+
+
+def _put_page_fetch_cache(key: str, text: str, *, ttl_seconds: int) -> None:
+    if ttl_seconds <= 0 or not text:
+        return
+    if len(_PAGE_FETCH_CACHE) >= _FETCH_CACHE_MAX_ITEMS:
+        oldest_key = min(
+            _PAGE_FETCH_CACHE,
+            key=lambda item: _PAGE_FETCH_CACHE[item].expires_at,
+        )
+        _PAGE_FETCH_CACHE.pop(oldest_key, None)
+    _PAGE_FETCH_CACHE[key] = _PageFetchCacheEntry(
+        expires_at=time.monotonic() + ttl_seconds,
+        text=text,
+    )
+
+
+def _raw_source_candidate_urls(url: str) -> list[str]:
+    """Return deterministic raw/API URLs for known source-backed pages."""
+
+    parsed = urlparse(url)
+    domain = _web_domain(url)
+    path = parsed.path.strip("/")
+
+    if domain == "create.roblox.com" and path.startswith("docs/"):
+        docs_path = path.removeprefix("docs/").strip("/")
+        if docs_path.startswith("reference/engine/classes/"):
+            parts = docs_path.split("/")
+            if len(parts) > 4:
+                docs_path = "/".join(parts[:4])
+            return [
+                "https://raw.githubusercontent.com/Roblox/creator-docs/main/"
+                f"content/en-us/{docs_path}.yaml"
+            ]
+        return [
+            "https://raw.githubusercontent.com/Roblox/creator-docs/main/"
+            f"content/en-us/{docs_path}.md"
+        ]
+
+    if domain == "github.com":
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) >= 5 and parts[2] == "blob":
+            owner, repo, branch = parts[0], parts[1], parts[3]
+            file_path = "/".join(parts[4:])
+            return [
+                f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{file_path}"
+            ]
+        if len(parts) >= 2:
+            owner, repo = parts[0], parts[1]
+            return [
+                f"https://raw.githubusercontent.com/{owner}/{repo}/main/README.md",
+                f"https://raw.githubusercontent.com/{owner}/{repo}/master/README.md",
+            ]
+
+    if domain == "huggingface.co":
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) >= 2 and parts[0] not in {"models", "datasets", "spaces"}:
+            repo_id = "/".join(parts[:2])
+            return [f"https://huggingface.co/{repo_id}/raw/main/README.md"]
+        if len(parts) >= 3 and parts[0] in {"models", "datasets", "spaces"}:
+            repo_id = "/".join(parts[1:3])
+            return [f"https://huggingface.co/{repo_id}/raw/main/README.md"]
+
+    return []
+
+
+def _parse_domain_list(value: str | None) -> set[str]:
+    if value is None:
+        return set(_DEFAULT_OBSCURA_DOMAINS)
+    domains = {
+        item.strip().lower().removeprefix("www.")
+        for item in value.split(",")
+        if item.strip()
+    }
+    return domains
+
+
+def _domain_matches(domain: str, allowed: set[str]) -> bool:
+    return any(domain == item or domain.endswith(f".{item}") for item in allowed)
+
+
 def _is_research_domain(domain: str) -> bool:
     return any(domain == d or domain.endswith(f".{d}") for d in _RESEARCH_DOMAINS)
 
@@ -1210,6 +1393,47 @@ def _extract_webpage_text(html_text: str, *, max_chars: int) -> str | None:
     if len(cleaned) < 200:
         return None
     return cleaned[:max_chars]
+
+
+def _extract_with_trafilatura(
+    html_text: str,
+    *,
+    url: str,
+    max_chars: int,
+) -> str | None:
+    try:
+        import trafilatura
+    except Exception:
+        return None
+    try:
+        extracted = trafilatura.extract(
+            html_text,
+            url=url,
+            output_format="markdown",
+            include_comments=False,
+            include_tables=True,
+        )
+    except Exception as exc:
+        logger.debug("Trafilatura extraction failed for %s: %s", url, exc)
+        return None
+    cleaned = re.sub(r"\s+", " ", extracted or "").strip()
+    if len(cleaned) < 200:
+        return None
+    return cleaned[:max_chars]
+
+
+def _extract_static_page_text(
+    html_text: str,
+    *,
+    url: str,
+    max_chars: int,
+    fetcher: str,
+) -> str | None:
+    if fetcher in {"auto", "trafilatura"}:
+        text = _extract_with_trafilatura(html_text, url=url, max_chars=max_chars)
+        if text:
+            return text
+    return _extract_webpage_text(html_text, max_chars=max_chars)
 
 
 def parse_searxng_results(
@@ -1402,7 +1626,20 @@ class LiveWebSearch:
 
         fetched: dict[str, str] = {}
         if settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES:
-            fetched = await self._fetch_pages(hits)
+            fetch_limit = min(
+                int(
+                    getattr(settings, "LIVE_WEB_FETCH_MAX_PAGES", _DEFAULT_FETCH_MAX_PAGES)
+                    or _DEFAULT_FETCH_MAX_PAGES
+                ),
+                int(settings.LIVE_WEB_SEARCH_MAX_RESULTS or _DEFAULT_MAX_RESULTS),
+                len(hits),
+            )
+            hits_to_fetch = await self._select_hits_for_extraction(
+                search_query,
+                hits,
+                limit=fetch_limit,
+            )
+            fetched = await self._fetch_pages(hits_to_fetch)
         candidate_chunks = web_hits_to_source_chunks(
             hits,
             fetched_markdown=fetched,
@@ -1549,25 +1786,183 @@ class LiveWebSearch:
             time_range=time_range,
         )
 
+    async def _select_hits_for_extraction(
+        self,
+        query: str,
+        hits: list[WebSearchHit],
+        *,
+        limit: int,
+    ) -> list[WebSearchHit]:
+        if not hits or limit <= 0:
+            return []
+        if len(hits) <= limit:
+            return hits
+        snippet_chunks = web_hits_to_source_chunks(
+            hits,
+            search_query=query,
+            max_chars=1200,
+        )
+        ranked = await rerank_web_source_chunks(
+            query,
+            snippet_chunks,
+            limit=limit,
+        )
+        by_url = {hit.url: hit for hit in hits}
+        selected = [
+            by_url[chunk.metadata["url"]]
+            for chunk in ranked
+            if (chunk.metadata or {}).get("url") in by_url
+        ]
+        if len(selected) >= limit:
+            return selected[:limit]
+        seen = {hit.url for hit in selected}
+        selected.extend(hit for hit in hits if hit.url not in seen)
+        return selected[:limit]
+
     async def _fetch_pages(
         self,
         hits: list[WebSearchHit],
     ) -> dict[str, str]:
-        tasks = [self._fetch_one_page(hit.url) for hit in hits]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        fetched: dict[str, str] = {}
-        for hit, result in zip(hits, results):
-            if isinstance(result, str) and result.strip():
-                fetched[hit.url] = result.strip()
+        fetched, _stats = await self._fetch_pages_with_stats(hits)
         return fetched
 
+    async def _fetch_pages_with_stats(
+        self,
+        hits: list[WebSearchHit],
+    ) -> tuple[dict[str, str], list[dict[str, Any]]]:
+        tasks = [self._fetch_one_page_with_stats(hit.url) for hit in hits]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        fetched: dict[str, str] = {}
+        stats: list[dict[str, Any]] = []
+        for hit, result in zip(hits, results):
+            if isinstance(result, _PageFetchResult):
+                if result.text and result.text.strip():
+                    fetched[hit.url] = result.text.strip()
+                stats.append(
+                    {
+                        "url": hit.url,
+                        "domain": _web_domain(hit.url),
+                        "method": result.method,
+                        "status": result.status,
+                        "chars": result.chars,
+                        "from_cache": result.from_cache,
+                        "obscura_attempted": result.obscura_attempted,
+                        "js_rendered": result.js_rendered,
+                    }
+                )
+                continue
+            stats.append(
+                {
+                    "url": hit.url,
+                    "domain": _web_domain(hit.url),
+                    "method": "error",
+                    "status": str(result)[:180],
+                    "chars": 0,
+                    "from_cache": False,
+                    "obscura_attempted": False,
+                    "js_rendered": False,
+                }
+            )
+        return fetched, stats
+
     async def _fetch_one_page(self, url: str) -> str | None:
+        result = await self._fetch_one_page_with_stats(url)
+        return result.text
+
+    async def _fetch_one_page_with_stats(self, url: str) -> _PageFetchResult:
         settings = get_settings()
-        if settings.OBSCURA_COMMAND:
+        fetcher = str(getattr(settings, "LIVE_WEB_PAGE_FETCHER", "auto") or "auto")
+        max_chars = int(settings.OBSCURA_MAX_CHARS or _DEFAULT_OBSCURA_MAX_CHARS)
+        cache_key = _page_fetch_cache_key(
+            url,
+            fetcher=fetcher,
+            max_chars=max_chars,
+        )
+        cached = _get_page_fetch_cache(cache_key)
+        if cached:
+            return _PageFetchResult(
+                url=url,
+                text=cached,
+                method="cache",
+                status="cache_hit",
+                chars=len(cached),
+                from_cache=True,
+            )
+
+        text = await self._fetch_one_with_raw_adapter(url)
+        method = "raw_adapter"
+        obscura_attempted = False
+        if not text:
+            text = await self._fetch_one_with_httpx(url)
+            method = "static_http"
+        if not text and self._should_try_obscura(url):
+            obscura_attempted = True
             text = await self._fetch_one_with_obscura(url)
+            method = "obscura_js" if text else "failed"
+        if text:
+            text = text[:max_chars]
+            _put_page_fetch_cache(
+                cache_key,
+                text,
+                ttl_seconds=int(
+                    getattr(settings, "LIVE_WEB_FETCH_CACHE_TTL_SECONDS", 900) or 0
+                ),
+            )
+            return _PageFetchResult(
+                url=url,
+                text=text,
+                method=method,
+                status="ok",
+                chars=len(text),
+                obscura_attempted=obscura_attempted,
+                js_rendered=method == "obscura_js",
+            )
+        return _PageFetchResult(
+            url=url,
+            text=None,
+            method="failed",
+            status="no_extractable_text",
+            obscura_attempted=obscura_attempted,
+        )
+
+    def _should_try_obscura(self, url: str) -> bool:
+        settings = get_settings()
+        if not settings.OBSCURA_COMMAND:
+            return False
+        allowed = _parse_domain_list(
+            getattr(settings, "LIVE_WEB_OBSCURA_DOMAINS", None)
+        )
+        return bool(allowed and _domain_matches(_web_domain(url), allowed))
+
+    async def _fetch_one_with_raw_adapter(self, url: str) -> str | None:
+        for raw_url in _raw_source_candidate_urls(url):
+            text = await self._fetch_raw_text_url(raw_url)
             if text:
                 return text
-        return await self._fetch_one_with_httpx(url)
+        return None
+
+    async def _fetch_raw_text_url(self, url: str) -> str | None:
+        settings = get_settings()
+        timeout_seconds = min(float(settings.OBSCURA_TIMEOUT_SECONDS or 10.0), 6.0)
+        timeout = httpx.Timeout(timeout_seconds, connect=2.0)
+        headers = {"User-Agent": _WEB_FETCH_USER_AGENT}
+        try:
+            async with httpx.AsyncClient(
+                timeout=timeout,
+                follow_redirects=True,
+                headers=headers,
+            ) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+        except Exception as exc:
+            logger.debug("Raw source fetch failed for %s: %s", url, exc)
+            return None
+
+        text = re.sub(r"\s+", " ", response.text).strip()
+        if len(text) < 80:
+            return None
+        max_chars = int(settings.OBSCURA_MAX_CHARS or _DEFAULT_OBSCURA_MAX_CHARS)
+        return text[:max_chars]
 
     async def _fetch_one_with_httpx(self, url: str) -> str | None:
         settings = get_settings()
@@ -1597,9 +1992,12 @@ class LiveWebSearch:
         if "text/plain" in content_type:
             text = re.sub(r"\s+", " ", response.text).strip()
             return text[: settings.OBSCURA_MAX_CHARS] if len(text) >= 200 else None
-        return _extract_webpage_text(
+        fetcher = str(getattr(settings, "LIVE_WEB_PAGE_FETCHER", "auto") or "auto")
+        return _extract_static_page_text(
             response.text,
+            url=url,
             max_chars=int(settings.OBSCURA_MAX_CHARS or _DEFAULT_OBSCURA_MAX_CHARS),
+            fetcher=fetcher.strip().lower(),
         )
 
     async def _fetch_one_with_obscura(self, url: str) -> str | None:

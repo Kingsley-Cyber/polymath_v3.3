@@ -551,7 +551,7 @@ class ChatLLMSettings(BaseModel):
 
     default_chat_model: str = "ollama/llama3.2:3b"
     max_context_tokens: int = 4096
-    max_completion_tokens: int = 2048
+    max_completion_tokens: int = 16384
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=0.9, ge=0.0, le=1.0)
     # Agentic mode (Phase 14.1)

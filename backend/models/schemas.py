@@ -50,7 +50,7 @@ class ModelOverrides(_legacy.ModelOverrides):
 class ModelConfig(_legacy.ModelConfig):
     """Current persisted conversation model config shape."""
 
-    max_tokens: int = Field(default=2048, ge=1, le=384000)
+    max_tokens: int = Field(default=16384, ge=1, le=384000)
 
 
 class ChatRequest(_legacy.ChatRequest):

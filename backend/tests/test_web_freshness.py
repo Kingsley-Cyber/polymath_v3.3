@@ -1,9 +1,11 @@
 import pytest
+from types import SimpleNamespace
 
 from services.web_freshness import (
     _query_should_include_social_sources,
     _diversify_web_source_chunks,
     _extract_webpage_text,
+    _raw_source_candidate_urls,
     build_web_search_queries,
     build_search_query,
     infer_web_search_time_range,
@@ -98,6 +100,15 @@ def test_build_web_search_queries_adds_roblox_domain_variants():
     assert "!red roblox make roblox inventory system" in queries
 
 
+def test_build_web_search_queries_adds_direct_roblox_api_doc_variant():
+    queries = build_web_search_queries("Roblox RemoteEvent security server client")
+
+    assert (
+        "RemoteEvent site:create.roblox.com/docs/reference/engine/classes/RemoteEvent"
+        in queries
+    )
+
+
 def test_build_web_search_queries_adds_ai_video_variants():
     queries = build_web_search_queries(
         "ComfyUI WAN 2.1 local AI video workflow RTX 4090"
@@ -118,6 +129,16 @@ def test_build_web_search_queries_adds_creator_economy_variants():
     assert "!red Roblox UGC market trends" in queries
     assert "!yt Roblox UGC market trends trend analysis" in queries
     assert not any(query.startswith("!reu ") for query in queries)
+
+
+def test_build_web_search_queries_preserves_explicit_marketplace_sources():
+    queries = build_web_search_queries(
+        "AI video tool market demand Product Hunt Gumroad Polymarket"
+    )
+
+    assert any("site:producthunt.com" in query for query in queries)
+    assert any("site:gumroad.com" in query for query in queries)
+    assert any("site:polymarket.com" in query for query in queries)
 
 
 def test_build_web_search_queries_adds_cyber_variants():
@@ -532,3 +553,96 @@ def test_extract_webpage_text_prefers_article_body():
     assert "Mobile deployment guide" in text
     assert "Deploying small models on device" in text
     assert "home docs blog" not in text
+
+
+def test_raw_source_candidate_urls_map_creator_docs_to_github_raw():
+    urls = _raw_source_candidate_urls(
+        "https://create.roblox.com/docs/reference/engine/classes/RemoteEvent"
+    )
+
+    assert urls == [
+        "https://raw.githubusercontent.com/Roblox/creator-docs/main/"
+        "content/en-us/reference/engine/classes/RemoteEvent.yaml"
+    ]
+
+
+def test_raw_source_candidate_urls_map_creator_docs_member_to_parent_yaml():
+    urls = _raw_source_candidate_urls(
+        "https://create.roblox.com/docs/reference/engine/classes/RemoteEvent/OnServerEvent"
+    )
+
+    assert urls == [
+        "https://raw.githubusercontent.com/Roblox/creator-docs/main/"
+        "content/en-us/reference/engine/classes/RemoteEvent.yaml"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_one_page_uses_static_before_allowlisted_obscura(monkeypatch):
+    settings = SimpleNamespace(
+        OBSCURA_COMMAND="obscura",
+        LIVE_WEB_PAGE_FETCHER="auto",
+        LIVE_WEB_OBSCURA_DOMAINS="producthunt.com",
+        LIVE_WEB_FETCH_CACHE_TTL_SECONDS=0,
+        OBSCURA_TIMEOUT_SECONDS=10.0,
+        OBSCURA_MAX_CHARS=4000,
+    )
+    calls = []
+
+    async def fake_raw(url):
+        calls.append(("raw", url))
+        return None
+
+    async def fake_httpx(url):
+        calls.append(("httpx", url))
+        return "Static extraction result."
+
+    async def fake_obscura(url):
+        calls.append(("obscura", url))
+        return "Obscura extraction result."
+
+    monkeypatch.setattr("services.web_freshness.get_settings", lambda: settings)
+    monkeypatch.setattr(live_web_search, "_fetch_one_with_raw_adapter", fake_raw)
+    monkeypatch.setattr(live_web_search, "_fetch_one_with_httpx", fake_httpx)
+    monkeypatch.setattr(live_web_search, "_fetch_one_with_obscura", fake_obscura)
+
+    text = await live_web_search._fetch_one_page("https://example.com/docs")
+
+    assert text == "Static extraction result."
+    assert calls == [
+        ("raw", "https://example.com/docs"),
+        ("httpx", "https://example.com/docs"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_one_page_uses_obscura_only_after_static_failure(monkeypatch):
+    settings = SimpleNamespace(
+        OBSCURA_COMMAND="obscura",
+        LIVE_WEB_PAGE_FETCHER="auto",
+        LIVE_WEB_OBSCURA_DOMAINS="producthunt.com",
+        LIVE_WEB_FETCH_CACHE_TTL_SECONDS=0,
+        OBSCURA_TIMEOUT_SECONDS=10.0,
+        OBSCURA_MAX_CHARS=4000,
+    )
+    calls = []
+
+    async def fake_empty(_url):
+        calls.append("static")
+        return None
+
+    async def fake_obscura(url):
+        calls.append("obscura")
+        return f"Rendered {url}"
+
+    monkeypatch.setattr("services.web_freshness.get_settings", lambda: settings)
+    monkeypatch.setattr(live_web_search, "_fetch_one_with_raw_adapter", fake_empty)
+    monkeypatch.setattr(live_web_search, "_fetch_one_with_httpx", fake_empty)
+    monkeypatch.setattr(live_web_search, "_fetch_one_with_obscura", fake_obscura)
+
+    text = await live_web_search._fetch_one_page(
+        "https://www.producthunt.com/products/opencutai-video"
+    )
+
+    assert text == "Rendered https://www.producthunt.com/products/opencutai-video"
+    assert calls == ["static", "static", "obscura"]

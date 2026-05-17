@@ -507,6 +507,10 @@ services:
       LIVE_WEB_SEARCH_CANDIDATE_RESULTS: ${LIVE_WEB_SEARCH_CANDIDATE_RESULTS:-15}
       LIVE_WEB_QUERY_EXPANSION_TIMEOUT_SECONDS: ${LIVE_WEB_QUERY_EXPANSION_TIMEOUT_SECONDS:-2.0}
       LIVE_WEB_SEARCH_FETCH_FULL_PAGES: ${LIVE_WEB_SEARCH_FETCH_FULL_PAGES:-true}
+      LIVE_WEB_FETCH_MAX_PAGES: ${LIVE_WEB_FETCH_MAX_PAGES:-6}
+      LIVE_WEB_PAGE_FETCHER: ${LIVE_WEB_PAGE_FETCHER:-auto}
+      LIVE_WEB_OBSCURA_DOMAINS: ${LIVE_WEB_OBSCURA_DOMAINS:-civitai.com,create.roblox.com,gumroad.com,polymarket.com,producthunt.com,rolimons.com,tradingview.com}
+      LIVE_WEB_FETCH_CACHE_TTL_SECONDS: ${LIVE_WEB_FETCH_CACHE_TTL_SECONDS:-900}
       OBSCURA_COMMAND: ${OBSCURA_COMMAND:-}
       OBSCURA_TIMEOUT_SECONDS: ${OBSCURA_TIMEOUT_SECONDS:-10.0}
       OBSCURA_MAX_CHARS: ${OBSCURA_MAX_CHARS:-4000}
@@ -529,6 +533,7 @@ services:
       # Leave blank so LiteLLM/Mistral can be the active chat path without
       # making host-native Ollama a required service.
       DEFAULT_COMPLETION_MODEL: ${DEFAULT_COMPLETION_MODEL:-}
+      MAX_COMPLETION_TOKENS: ${MAX_COMPLETION_TOKENS:-16384}
       # Phase 14.1 — Agentic mode defaults (user-overridable at runtime).
       # Leave blank unless this deployment intentionally requires Ollama.
       AGENTIC_MODE_ENABLED: ${AGENTIC_MODE_ENABLED:-false}

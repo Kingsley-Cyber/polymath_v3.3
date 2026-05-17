@@ -44,6 +44,8 @@ transformers==4.36.2
 # === Document Parsing ===
 pypdf==4.2.0
 beautifulsoup4==4.12.3
+# Live-web static page extraction. Used before any JS-rendering fallback.
+trafilatura>=1.8.0,<2.0.0
 # Universal catch-all via unstructured partitioner (docx, pptx, xlsx, epub, odt, rtf, ...)
 unstructured==0.12.6
 python-docx==1.1.0

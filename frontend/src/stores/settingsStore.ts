@@ -4,11 +4,13 @@ import { persist } from "zustand/middleware";
 import type { SettingsState, Tool, ModelInfo, Skill } from "../types";
 import * as api from "../lib/api";
 
+const DEFAULT_MAX_TOKENS = 16384;
+
 const DEFAULT_SETTINGS: Omit<SettingsState, "selectedModel"> = {
   // Model Settings
   temperature: 0.7,
   topP: 0.9,
-  maxTokens: 2048,
+  maxTokens: DEFAULT_MAX_TOKENS,
 
   // RAG Settings
   retrievalK: 60,
@@ -191,7 +193,7 @@ export const useSettingsStore = create<SettingsStore>()(
             chat: {
               default_chat_model: state.selectedModel || "",
               max_context_tokens: state.maxTokens,
-              max_completion_tokens: 2048,
+              max_completion_tokens: state.maxTokens,
               temperature: state.temperature,
               top_p: state.topP,
               agentic_mode_enabled: next,
@@ -215,7 +217,7 @@ export const useSettingsStore = create<SettingsStore>()(
             chat: {
               default_chat_model: state.selectedModel || "",
               max_context_tokens: state.maxTokens,
-              max_completion_tokens: 2048,
+              max_completion_tokens: state.maxTokens,
               temperature: state.temperature,
               top_p: state.topP,
               agentic_mode_enabled: state.agenticModeEnabled,
@@ -274,7 +276,7 @@ export const useSettingsStore = create<SettingsStore>()(
             chat: {
               default_chat_model: state.selectedModel || "",
               max_context_tokens: state.maxTokens,
-              max_completion_tokens: 2048,
+              max_completion_tokens: state.maxTokens,
               temperature: state.temperature,
               top_p: state.topP,
               agentic_mode_enabled: state.agenticModeEnabled,
@@ -324,7 +326,10 @@ export const useSettingsStore = create<SettingsStore>()(
               get().selectedModel || s.chat.default_chat_model || "",
             temperature: s.chat.temperature ?? get().temperature,
             topP: s.chat.top_p ?? get().topP,
-            maxTokens: s.chat.max_context_tokens ?? get().maxTokens,
+            maxTokens: Math.max(
+              s.chat.max_completion_tokens ?? 0,
+              get().maxTokens,
+            ),
 
             // Retrieval defaults — sync API → store on first load
             retrievalTier:

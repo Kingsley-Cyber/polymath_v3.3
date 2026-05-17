@@ -198,20 +198,27 @@ function ToolActivityPanel({
           return (
             <div
               key={activity.id}
-              className="flex items-center gap-2 text-content-secondary"
+              className="text-content-secondary"
             >
-              {isRunning ? (
-                <Loader2 className="h-3 w-3 shrink-0 animate-spin text-accent-main" />
-              ) : (
-                <Check className="h-3 w-3 shrink-0 text-emerald-400" />
+              <div className="flex items-center gap-2">
+                {isRunning ? (
+                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-accent-main" />
+                ) : (
+                  <Check className="h-3 w-3 shrink-0 text-emerald-400" />
+                )}
+                <Search className="h-3 w-3 shrink-0 text-content-tertiary" />
+                <span className="font-bold uppercase tracking-wider text-content-primary">
+                  {formatToolName(activity.name)}
+                </span>
+                <span className="text-content-tertiary">
+                  {isRunning ? "searching" : "complete"}
+                </span>
+              </div>
+              {activity.detail && (
+                <div className="ml-10 mt-0.5 break-words text-[9px] text-content-tertiary">
+                  {activity.detail}
+                </div>
               )}
-              <Search className="h-3 w-3 shrink-0 text-content-tertiary" />
-              <span className="font-bold uppercase tracking-wider text-content-primary">
-                {formatToolName(activity.name)}
-              </span>
-              <span className="text-content-tertiary">
-                {isRunning ? "searching" : "complete"}
-              </span>
             </div>
           );
         })}
