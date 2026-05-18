@@ -5,7 +5,7 @@
 # DataFolder. Default uses C:\PolymathRuntime because Docker Desktop can map C:
 # reliably on Windows. If Docker Desktop maps your E: drive correctly, override
 # with POLYMATH_DOCKER_DATA_ROOT=E:/PolymathRuntime.
-#   C:\PolymathRuntime\volumes\{mongodb,qdrant,neo4j,redis,ollama,n8n,docling,hf-cache,llama.cpp}
+#   C:\PolymathRuntime\volumes\{mongodb,qdrant,neo4j,redis,n8n,docling,hf-cache,llama.cpp}
 #   C:\PolymathRuntime\models\{Qwen3-Embedding-0.6B,Qwen3-Reranker-0.6B-Q8_0-GGUF}
 # Override with POLYMATH_DOCKER_DATA_ROOT / POLYMATH_MODELS_ROOT if needed.
 
@@ -160,55 +160,6 @@ services:
   # ============================================================
   # AI SERVICES
   # ============================================================
-
-  ollama:
-    <<: *default-logging
-    image: ollama/ollama:latest
-    profiles: ["local-llm"]
-    # Host port 11434 is kept free for the native Windows Ollama app. The
-    # compose Ollama stays reachable on the Docker network at ollama:11434
-    # (backend + LiteLLM use the internal hostname). To talk to the compose
-    # Ollama from the host, run `docker compose exec ollama ollama …`.
-    # ports:
-    #   - "11434:11434"
-    volumes:
-      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/ollama:/root/.ollama"
-      - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}:/models:ro"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 20s
-    restart: unless-stopped
-
-  # One-shot: pulls default models into ollama after it's healthy
-  # Run manually: docker compose run --rm ollama-pull
-  ollama-pull:
-    image: ollama/ollama:latest
-    profiles: ["setup", "local-llm"]
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        echo "=== Pulling nomic-embed-text (768d embeddings) ==="
-        ollama pull nomic-embed-text
-        echo "=== Pulling qwen3:0.6b (default chat model) ==="
-        ollama pull qwen3:0.6b
-        echo "=== Models available ==="
-        ollama list
-    volumes:
-      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/ollama:/root/.ollama"
-    network_mode: "service:ollama"
-    depends_on:
-      ollama:
-        condition: service_healthy
 
   litellm:
     # Pinned — later LiteLLM tags (including main-stable, main-latest) require
@@ -516,9 +467,9 @@ services:
       NEO4J_ENABLED: ${NEO4J_ENABLED:-false}
       LITELLM_URL: http://litellm:4000
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
-      # Use the host's native Ollama (your 20 pulled models) via Docker
-      # Desktop's host.docker.internal bridge. The compose Ollama container
-      # is kept running but empty — it's a fallback only.
+      # Use host-native Ollama via Docker Desktop's host.docker.internal
+      # bridge when local Ollama models are enabled. There is intentionally
+      # no Docker Ollama service in this compose file.
       OLLAMA_URL: http://host.docker.internal:11434
       REDIS_URL: redis://redis:6379
       RERANKER_URL: http://reranker:8080

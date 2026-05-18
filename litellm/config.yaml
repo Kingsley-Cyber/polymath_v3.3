@@ -12,8 +12,8 @@ model_list:
       api_key: "none"
 
   # Ollama local models - wildcard pattern
-  # Routes to the HOST's native Ollama (20 pulled models) via Docker Desktop's
-  # host.docker.internal bridge. The compose Ollama container is empty.
+  # Routes to host-native Ollama via Docker Desktop's host.docker.internal
+  # bridge. There is intentionally no Docker Ollama service in compose.
   - model_name: "ollama/*"
     litellm_params:
       model: "ollama/*"

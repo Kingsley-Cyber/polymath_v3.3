@@ -101,10 +101,11 @@ It tries to behave like a research assistant who has actually read the corpus.
    └──────────────────────────────────────────────────────────┘
 ```
 
-**Eleven services**, one Docker Compose file. Three persistent data stores
-(Mongo / Qdrant / Neo4j), one LLM gateway (LiteLLM), three local GPU services
-(embedder, reranker, docling), one queue (Redis), and the app itself
-(backend + frontend).
+One Docker Compose file runs the core app services: three persistent data
+stores (Mongo / Qdrant / Neo4j), one LLM gateway (LiteLLM), local model
+sidecars as needed (embedder, llama.cpp reranker, docling), one queue
+(Redis), web search (SearXNG), and the app itself (backend + frontend).
+Ollama is host-native only; it is not shipped as a Docker service.
 
 ---
 
@@ -234,8 +235,8 @@ Apple GPUs are **not** accessible from Docker Desktop. Two adaptation paths:
 **Option A — Ollama on the host, everything else in Docker:**
 
 ```yaml
-# Remove embedder, reranker, ollama from docker-compose
-# Run them on macOS host using MLX:
+# Remove embedder/reranker from Docker or use the Apple MLX override.
+# Ollama is already host-native only:
 brew install ollama
 ollama pull nomic-embed-text          # embedding
 ollama pull qwen2.5:14b-instruct      # synthesis
@@ -563,10 +564,11 @@ You are setting up the Polymath RAG v3.3 stack
 
 CONTEXT
 The reference rig is x86_64 Linux/Windows + NVIDIA GPU + Docker Desktop /
-Docker Engine. The stack has 11 Docker services: mongodb, qdrant, neo4j,
-redis, ollama, litellm, embedder (Qwen3-Embedding-0.6B, 1024d, GPU),
-reranker (llama.cpp Qwen3-Reranker-0.6B Q8 GGUF), docling, backend (FastAPI), frontend
-(React+Vite). Data is bind-mounted to a host-side root
+Docker Engine. The core Docker stack includes mongodb, qdrant, neo4j, redis,
+searxng, litellm, embedder (Qwen3-Embedding-0.6B, 1024d, GPU), reranker
+(llama.cpp Qwen3-Reranker-0.6B Q8 GGUF), docling, backend (FastAPI), frontend
+(React+Vite), plus optional profile services such as MCP/n8n/admin tools.
+Data is bind-mounted to a host-side root
 (POLYMATH_DOCKER_DATA_ROOT, default C:/PolymathRuntime). LLM routing is
 wildcard via LiteLLM — any cloud key in .env works.
 
@@ -581,8 +583,9 @@ YOUR JOB
 
 2. Match to one of these adaptation paths and explain the trade-offs:
    - NVIDIA workstation: as-is.
-   - Apple Silicon: embedder/reranker/ollama leave Docker; run on host
-     using MLX or Ollama; backend points at host.docker.internal:11434.
+   - Apple Silicon: embedder/reranker leave Docker; use the MLX host
+     sidecars. Ollama remains host-native; backend points at
+     host.docker.internal:11434 when local chat models are used.
    - AMD ROCm: replace nvidia GPU spec with kfd/dri device passthrough;
      swap torch wheel to ROCm.
    - CPU-only: strip GPU services; use cloud embeddings via LiteLLM
