@@ -267,6 +267,23 @@ def _format_utility_web_trace(web_result: str) -> str | None:
     )
 
 
+def _format_web_planner_trace(plan: Any) -> str:
+    """Human-readable trace for the dedicated web planner model."""
+    args = getattr(plan, "args", {}) or {}
+    return (
+        "[Web planner native tool trace]\n"
+        f"model: {getattr(plan, 'model', None) or 'not configured'}\n"
+        f"prompt_version: {getattr(plan, 'prompt_version', 'unknown')}\n"
+        f"attempted: {str(bool(getattr(plan, 'attempted', False))).lower()} | "
+        f"native_tool_call: {str(bool(getattr(plan, 'native_tool_call', False))).lower()} | "
+        f"fallback: {getattr(plan, 'fallback_reason', None) or 'none'}\n"
+        f"context: {getattr(plan, 'history_user_messages_used', 0)} prior user message(s)\n"
+        f"query: {_clip_trace_value(args.get('query'), 260)}\n"
+        f"max_results: {args.get('max_results') or _MAX_WEB_SEARCH_RESULTS_PER_CALL}\n"
+        f"duration_ms: {getattr(plan, 'duration_ms', 0)}"
+    )
+
+
 def _format_model_api_trace(
     *,
     name: str,
@@ -306,6 +323,44 @@ def _tool_schema_name(schema: dict[str, Any]) -> str:
 def _tool_call_name(call: dict[str, Any]) -> str:
     fn = call.get("function") if isinstance(call, dict) else None
     return str((fn or {}).get("name") or "")
+
+
+def _web_search_tool_schema() -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": (
+                "Search the live web when the user explicitly enables the Web "
+                "toggle or when a tool-capable turn needs current/external "
+                "information. Use a concise query that preserves the user's "
+                "technical anchors and acronyms. Do not include local corpus "
+                "names, file names, or internal project labels. Prefer official "
+                "docs, vendor/developer blogs, framework docs, and production "
+                "guides unless the user asks for papers. Do not search isolated "
+                "generic words. The server runs controlled SearXNG searches, "
+                "fetches pages when useful, reranks locally, and returns up to "
+                "seven results."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The web search query to run.",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": _MAX_WEB_SEARCH_RESULTS_PER_CALL,
+                        "description": "Maximum final reranked web results to return.",
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    }
 
 
 def _looks_like_raw_tool_request_content(content: str) -> bool:
@@ -553,8 +608,13 @@ class ChatOrchestrator:
             else settings.AGENTIC_MODE_ENABLED
         )
         web_search_enabled = _is_web_search_enabled_for_request(request)
+        web_only_tool_route = bool(
+            web_search_enabled
+            and not request.selected_tools
+            and not agentic_on_request
+        )
         tool_route_active = bool(
-            request.selected_tools or web_search_enabled or agentic_on_request
+            request.selected_tools or agentic_on_request
         )
         if user_id and (
             model_used.startswith("profile:") or model_used.startswith("pool:")
@@ -594,10 +654,10 @@ class ChatOrchestrator:
             if request.overrides is not None:
                 request.overrides.model = model_used
 
-        # Phase F — role resolution. Tool/Web turns must route through the
-        # tool-capable role even when the chat dropdown sent an explicit
-        # overrides.model. Query prefs still stay conservative for normal
-        # no-tool chat turns.
+        # Phase F — role resolution. User-selected tools and explicit agentic
+        # mode still route the answer stream through the tool-capable role.
+        # Web-only turns use a separate dedicated planner model for the native
+        # web_search call, then keep the final answer on the selected chat model.
         if tool_route_active:
             qres = (
                 await resolve_query_model_kind(user_id, "agentic")
@@ -654,7 +714,7 @@ class ChatOrchestrator:
                 "Resolved the final chat model before retrieval and tool "
                 "execution."
             ),
-            metadata={"model": model_used},
+            metadata={"model": model_used, "web_planner_split": web_only_tool_route},
         )
 
         # Phase 29 — vision-capability pre-flight. If the user attached
@@ -943,10 +1003,50 @@ class ChatOrchestrator:
             )
 
         if web_search_enabled:
-            web_args = {
-                "query": request.message,
-                "max_results": _MAX_WEB_SEARCH_RESULTS_PER_CALL,
-            }
+            from services.web_tool_planner import plan_web_search_tool_call
+
+            yield _record_trace_event(
+                lane="model_call",
+                title="Web planner tool-call model",
+                status="running",
+                content=_format_model_api_trace(
+                    name="Web planner tool-call model",
+                    model="agentic role or AGENTIC_MODEL",
+                    status="starting",
+                    purpose=(
+                        "Create exactly one native web_search tool call from "
+                        "the current query and up to two prior user turns."
+                    ),
+                ),
+                metadata={"model_role": "agentic"},
+            )
+            plan = await plan_web_search_tool_call(
+                current_query=request.message,
+                user_id=user_id,
+                recent_messages=list(existing_messages[-6:] if existing_messages else []),
+                tool_schema=_web_search_tool_schema(),
+                max_results=_MAX_WEB_SEARCH_RESULTS_PER_CALL,
+            )
+            yield _record_trace_event(
+                lane="model_call",
+                title="Web planner tool-call model",
+                status="done" if plan.native_tool_call else "fallback",
+                content=_format_web_planner_trace(plan),
+                metadata={
+                    "model": plan.model,
+                    "duration_ms": plan.duration_ms,
+                    "native_tool_call": plan.native_tool_call,
+                    "fallback_reason": plan.fallback_reason,
+                },
+            )
+            web_args = dict(plan.args)
+            web_args["max_results"] = max(
+                1,
+                min(
+                    int(web_args.get("max_results") or _MAX_WEB_SEARCH_RESULTS_PER_CALL),
+                    _MAX_WEB_SEARCH_RESULTS_PER_CALL,
+                ),
+            )
             web_call = {
                 "id": "server_web_search_1",
                 "type": "function",
@@ -956,22 +1056,42 @@ class ChatOrchestrator:
                 },
             }
             logger.info(
-                "mandatory web_search prelude starting query=%r max_results=%d",
-                request.message[:160],
-                _MAX_WEB_SEARCH_RESULTS_PER_CALL,
+                (
+                    "mandatory web_search prelude starting planner_model=%r "
+                    "native_tool_call=%s query=%r max_results=%d"
+                ),
+                plan.model,
+                plan.native_tool_call,
+                str(web_args.get("query") or "")[:160],
+                web_args["max_results"],
+            )
+            object.__setattr__(request, "_skip_web_query_enrichment", True)
+            object.__setattr__(
+                request,
+                "_web_query_planner",
+                {
+                    "attempted": plan.attempted,
+                    "native_tool_call": plan.native_tool_call,
+                    "model": plan.model,
+                    "prompt_version": plan.prompt_version,
+                    "duration_ms": plan.duration_ms,
+                    "history_user_messages_used": plan.history_user_messages_used,
+                    "fallback_reason": plan.fallback_reason,
+                },
             )
             yield _record_trace_event(
                 lane="tool_call",
                 title="Native web_search tool call",
                 status="running",
                 content=(
-                    "Server queued the mandatory native web_search call "
-                    "because the user Web toggle is on."
+                    "Server stored the dedicated planner's native web_search "
+                    "tool call before executing it."
                 ),
                 metadata={
                     "tool_name": "web_search",
                     "args": web_args,
                     "stored_before_execution": True,
+                    "planned_by_model": plan.model,
                 },
             )
             yield build_sse_chunk(
@@ -988,33 +1108,8 @@ class ChatOrchestrator:
                     conversation_id=str(conversation_id),
                 )
             )
-            utility_start = perf_counter()
-            yield _record_trace_event(
-                lane="model_call",
-                title="Utility web query helper",
-                status="running",
-                content=_format_model_api_trace(
-                    name="Utility web query helper",
-                    model="utility role (GLM when configured)",
-                    status="starting",
-                    purpose=(
-                        "Rewrite the mandatory web_search query using "
-                        "the current query and up to two prior user turns."
-                    ),
-                ),
-                metadata={"model_role": "utility"},
-            )
             web_result = await self._execute_web_search_tool(web_args, request)
             logger.info("mandatory web_search prelude completed")
-            utility_trace = _format_utility_web_trace(web_result)
-            if utility_trace:
-                yield _record_trace_event(
-                    lane="model_call",
-                    title="Utility web query helper",
-                    status="done",
-                    content=utility_trace,
-                    metadata={"duration_s": perf_counter() - utility_start},
-                )
             yield build_sse_chunk(
                 ChatChunk(
                     type="tool_result",
@@ -2448,49 +2543,7 @@ class ChatOrchestrator:
             for t in tools
         ]
         if web_search_enabled:
-            tool_schemas.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "web_search",
-                        "description": (
-                            "Search the live web when the corpus chunks do not "
-                            "contain enough current or external information. "
-                            "Use the user's exact query or a concise refinement "
-                            "that preserves the user's technical anchors and "
-                            "acronyms. Do not include local corpus names, file "
-                            "names, or internal project labels in the search "
-                            "query. Prefer official docs, vendor/developer blogs, "
-                            "framework docs, and production guides unless the "
-                            "user asks for papers. Do not search isolated generic "
-                            "words. Call this at most once per turn. The server "
-                            "runs three controlled searches with five results "
-                            "each when social/practical coverage is useful, reads "
-                            "pages when possible, reranks them locally, and "
-                            "returns up to seven results."
-                        ),
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "query": {
-                                    "type": "string",
-                                    "description": "The web search query to run.",
-                                },
-                                "max_results": {
-                                    "type": "integer",
-                                    "minimum": 1,
-                                    "maximum": _MAX_WEB_SEARCH_RESULTS_PER_CALL,
-                                    "description": (
-                                        "Maximum final reranked web results to return."
-                                    ),
-                                },
-                            },
-                            "required": ["query"],
-                            "additionalProperties": False,
-                        },
-                    },
-                }
-            )
+            tool_schemas.append(_web_search_tool_schema())
         return tools, tool_schemas
 
     async def _execute_tools(
@@ -2555,17 +2608,43 @@ class ChatOrchestrator:
             from services.web_freshness import (
                 live_web_search,
                 infer_web_search_time_range,
+                refine_tool_search_query,
                 rerank_web_source_chunks,
                 web_hits_to_source_chunks,
             )
-            from services.web_query_enrichment import enrich_web_search_query
-
-            enrichment = await enrich_web_search_query(
-                tool_query=query,
-                original_query=request.message if request is not None else None,
-                user_id=getattr(request, "_user_id", None),
-                recent_messages=getattr(request, "_recent_chat_messages", None),
+            from services.web_query_enrichment import (
+                WebQueryEnrichmentResult,
+                enrich_web_search_query,
             )
+
+            skip_enrichment = bool(
+                request is not None
+                and getattr(request, "_skip_web_query_enrichment", False)
+            )
+            if skip_enrichment:
+                base_query = refine_tool_search_query(
+                    query,
+                    request.message if request is not None else None,
+                )
+                enrichment = WebQueryEnrichmentResult(
+                    query=base_query,
+                    base_query=base_query,
+                    applied=False,
+                    attempted=False,
+                    model=(
+                        (getattr(request, "_web_query_planner", {}) or {}).get("model")
+                        if request is not None
+                        else None
+                    ),
+                    fallback_reason="native_web_planner_query_used",
+                )
+            else:
+                enrichment = await enrich_web_search_query(
+                    tool_query=query,
+                    original_query=request.message if request is not None else None,
+                    user_id=getattr(request, "_user_id", None),
+                    recent_messages=getattr(request, "_recent_chat_messages", None),
+                )
             query = enrichment.query
             search_query = query[:300]
             candidate_limit = max(
@@ -2695,6 +2774,11 @@ class ChatOrchestrator:
                     "history_user_messages_used": enrichment.history_user_messages_used,
                     "fallback_reason": enrichment.fallback_reason,
                 },
+                "web_query_planner": (
+                    getattr(request, "_web_query_planner", None)
+                    if request is not None
+                    else None
+                ),
             }
             pipeline.update(web_pipeline)
             logger.info(
@@ -2704,7 +2788,7 @@ class ChatOrchestrator:
                     "time_range=%r js_rendered=%s snippet_only=%s "
                     "redis_search_cache_hit=%s redis_page_cache_hit=%s "
                     "utility_attempted=%s utility_applied=%s "
-                    "utility_history_user_messages=%s"
+                    "utility_history_user_messages=%s planner_native_tool=%s"
                 ),
                 search_query,
                 len(hits),
@@ -2719,6 +2803,7 @@ class ChatOrchestrator:
                 enrichment.attempted,
                 enrichment.applied,
                 enrichment.history_user_messages_used,
+                bool((pipeline.get("web_query_planner") or {}).get("native_tool_call")),
             )
 
             return json.dumps(

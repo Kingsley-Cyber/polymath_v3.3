@@ -20,6 +20,7 @@ from models.schemas import (  # noqa: E402
 from services import chat_orchestrator as co  # noqa: E402
 from services import web_freshness as wf  # noqa: E402
 from services import web_query_enrichment as wqe  # noqa: E402
+from services import web_tool_planner as wtp  # noqa: E402
 from services.chat_orchestrator import ChatOrchestrator  # noqa: E402
 from services.web_freshness import WebSearchHit  # noqa: E402
 
@@ -76,7 +77,7 @@ async def _fast_query_profile(_request, user_id=None):
 
 
 @pytest.mark.asyncio
-async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
+async def test_web_toggle_on_runs_mandatory_planner_to_web_to_rerank_pipeline(
     monkeypatch,
 ):
     monkeypatch.setattr(co.settings, "LIVE_WEB_SEARCH_ENABLED", True, raising=False)
@@ -136,39 +137,34 @@ async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
     ]
     request = ChatRequest(
         message=(
-            "With Web enabled, verify Polymath web retrieval uses the utility "
-            "model and final seven sources."
+            "With Web enabled, verify Polymath web retrieval uses the dedicated "
+            "web planner and final seven sources."
         ),
         corpus_ids=["corpus-a"],
         overrides=ModelOverrides(
-            model="openai/base-query",
+            model="deepseek/deepseek-v4-flash",
             web_search_enabled=True,
         ),
     )
 
     async def fake_load_or_create(_request):
-        return conversation_id, ModelConfig(model="openai/base-query"), existing_messages
+        return conversation_id, ModelConfig(model="deepseek/deepseek-v4-flash"), existing_messages
 
     async def fake_orchestrator_resolve(user_id, kind):
-        route_resolutions.append((user_id, kind))
-        if kind == "agentic":
-            return {
-                "model": "deepseek/deepseek-v4-flash",
-                "api_base": None,
-                "api_key": None,
-                "extra_params": {},
-            }
-        return None
+        raise AssertionError("Web-only final chat route should not resolve agentic")
 
-    async def fake_utility_resolve(user_id, kind):
-        utility_resolutions.append((user_id, kind))
-        assert kind == "utility"
+    async def fake_planner_resolve(user_id, kind):
+        route_resolutions.append((user_id, kind))
+        assert kind == "agentic"
         return {
             "model": "openai/glm-5-turbo",
             "api_base": "https://api.z.ai/api/coding/paas/v4",
             "api_key": "test-key",
             "extra_params": {},
         }
+
+    async def fake_utility_resolve(*_args, **_kwargs):
+        raise AssertionError("Mandatory web prelude should not use Utility rewrite")
 
     async def fake_apply_hyde(_request, user_id=None, hyde_explicit=False):
         return _request.message, False
@@ -183,11 +179,32 @@ async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
             effective_tier=RetrievalTier.qdrant_mongo,
         )
 
-    async def fake_utility_complete(messages, **kwargs):
-        steps.append("utility_glm")
-        captured["utility_messages"] = messages
-        captured["utility_kwargs"] = kwargs
-        return "Polymath web retrieval utility model final seven sources Obscura SearXNG"
+    async def fake_planner_complete_tool_calls(messages, **kwargs):
+        steps.append("planner_glm")
+        captured["planner_messages"] = messages
+        captured["planner_kwargs"] = kwargs
+        return {
+            "tool_calls": [
+                {
+                    "id": "planner_web_1",
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "arguments": json.dumps(
+                            {
+                                "query": (
+                                    "Polymath web retrieval planner final seven "
+                                    "sources Obscura SearXNG"
+                                ),
+                                "max_results": 7,
+                            }
+                        ),
+                    },
+                }
+            ],
+            "content": "",
+            "finish_reason": "tool_calls",
+        }
 
     async def fake_search_searxng_pool(query, *, max_results=None, time_range=None):
         steps.append("searxng")
@@ -319,8 +336,9 @@ async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
     monkeypatch.setattr(orchestrator, "_trim_history", fake_trim)
     monkeypatch.setattr(orchestrator, "_save_assistant_message", fake_save_assistant_message)
     monkeypatch.setattr(co, "resolve_query_model_kind", fake_orchestrator_resolve)
+    monkeypatch.setattr(wtp, "resolve_query_model_kind", fake_planner_resolve)
     monkeypatch.setattr(wqe, "resolve_query_model_kind", fake_utility_resolve)
-    monkeypatch.setattr(wqe.llm_service, "complete_sync", fake_utility_complete)
+    monkeypatch.setattr(wtp.llm_service, "complete_tool_calls", fake_planner_complete_tool_calls)
     monkeypatch.setattr(wf.live_web_search, "_search_searxng_pool", fake_search_searxng_pool)
     monkeypatch.setattr(wf.live_web_search, "_fetch_pages_for_search", fake_fetch_pages_for_search)
     monkeypatch.setattr(wf, "rerank_web_source_chunks", fake_rerank_web_source_chunks)
@@ -342,7 +360,7 @@ async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
 
     assert steps == [
         "local_rag",
-        "utility_glm",
+        "planner_glm",
         "searxng",
         "fetch_obscura",
         "rerank_web",
@@ -350,24 +368,28 @@ async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
         "final_deepseek",
     ]
     assert route_resolutions == [("user-1", "agentic")]
-    assert utility_resolutions == [("user-1", "utility")]
+    assert utility_resolutions == []
     assert request.overrides.model == "deepseek/deepseek-v4-flash"
     assert captured["rag_kwargs"]["ranking_query"] == request.message
 
-    utility_prompt = captured["utility_messages"][1]["content"]
-    assert "Current user request:" in utility_prompt
-    assert request.message in utility_prompt
-    assert "previous_user: Prior context one: inspect SearXNG YAML and Obscura." in utility_prompt
-    assert "previous_user: Prior context two: GLM should enrich the web query." in utility_prompt
-    assert "Oldest unrelated corpus question" not in utility_prompt
-    assert "Assistant text must not enter query rewrite" not in utility_prompt
-    assert captured["utility_kwargs"]["model"] == "openai/glm-5-turbo"
-    assert captured["utility_kwargs"]["api_base"] == "https://api.z.ai/api/coding/paas/v4"
-    assert captured["utility_kwargs"]["temperature"] == 0
-    assert captured["utility_kwargs"]["max_tokens"] == 40
+    planner_prompt = captured["planner_messages"][1]["content"]
+    assert "Current user request:" in planner_prompt
+    assert request.message in planner_prompt
+    assert "previous_user: Prior context one: inspect SearXNG YAML and Obscura." in planner_prompt
+    assert "previous_user: Prior context two: GLM should enrich the web query." in planner_prompt
+    assert "Oldest unrelated corpus question" not in planner_prompt
+    assert "Assistant text must not enter query rewrite" not in planner_prompt
+    assert captured["planner_kwargs"]["model"] == "openai/glm-5-turbo"
+    assert captured["planner_kwargs"]["api_base"] == "https://api.z.ai/api/coding/paas/v4"
+    assert captured["planner_kwargs"]["tools"][0]["function"]["name"] == "web_search"
+    assert captured["planner_kwargs"]["tool_choice"]["function"]["name"] == "web_search"
+    planner_overrides = captured["planner_kwargs"]["overrides"]
+    assert planner_overrides.temperature == 0
+    assert planner_overrides.max_tokens == 96
+    assert planner_overrides.thinking_effort == "none"
 
     assert captured["searxng"]["query"] == (
-        "Polymath web retrieval utility model final seven sources Obscura SearXNG"
+        "Polymath web retrieval planner final seven sources Obscura SearXNG"
     )
     assert captured["searxng"]["max_results"] == 12
     assert captured["fetch"]["max_results"] == 7
@@ -391,29 +413,23 @@ async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
     assert event_types.index("budget") < event_types.index("token")
     assert event_types[-1] == "done"
     assert "Local RAG retrieval" in trace_titles
+    assert "Web planner tool-call model" in trace_titles
     assert "Native web_search tool call" in trace_titles
-    assert "Utility web query helper" in trace_titles
+    assert "Utility web query helper" not in trace_titles
     assert "web_search tool result" in trace_titles
     assert "Chat model stream" in trace_titles
 
-    utility_trace_event = next(
+    planner_trace_event = next(
         event
         for event in trace_events
-        if event["title"] == "Utility web query helper" and event["status"] == "done"
+        if event["title"] == "Web planner tool-call model" and event["status"] == "done"
     )
-    utility_trace = utility_trace_event["content"]
-    assert "[Utility web query trace]" in utility_trace
-    assert "model: openai/glm-5-turbo" in utility_trace
-    assert "context: 2 prior user message(s)" in utility_trace
-    assert (
-        "base_query: With Web enabled, verify Polymath web retrieval uses the utility "
-        "model and final seven sources"
-    ) in utility_trace
-    assert (
-        "final_query: Polymath web retrieval utility model final seven sources Obscura SearXNG"
-    ) in utility_trace
-    assert "reranked=7/7" in utility_trace
-    assert "obscura: configured=true, attempted=true, rendered=true" in utility_trace
+    planner_trace = planner_trace_event["content"]
+    assert "[Web planner native tool trace]" in planner_trace
+    assert "model: openai/glm-5-turbo" in planner_trace
+    assert "native_tool_call: true" in planner_trace
+    assert "context: 2 prior user message(s)" in planner_trace
+    assert "query: Polymath web retrieval planner final seven sources Obscura SearXNG" in planner_trace
 
     tool_event = events[event_types.index("tool_result")]
     tool_payload = json.loads(tool_event["content"])[0]
@@ -428,10 +444,16 @@ async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
     assert pipeline["js_render"]["configured"] is True
     assert pipeline["js_render"]["attempted"] is True
     assert pipeline["js_render"]["rendered"] is True
-    assert pipeline["utility_query_enrichment"]["attempted"] is True
-    assert pipeline["utility_query_enrichment"]["applied"] is True
+    assert pipeline["utility_query_enrichment"]["attempted"] is False
+    assert pipeline["utility_query_enrichment"]["applied"] is False
     assert pipeline["utility_query_enrichment"]["model"] == "openai/glm-5-turbo"
-    assert pipeline["utility_query_enrichment"]["history_user_messages_used"] == 2
+    assert pipeline["utility_query_enrichment"]["fallback_reason"] == (
+        "native_web_planner_query_used"
+    )
+    assert pipeline["web_query_planner"]["attempted"] is True
+    assert pipeline["web_query_planner"]["native_tool_call"] is True
+    assert pipeline["web_query_planner"]["model"] == "openai/glm-5-turbo"
+    assert pipeline["web_query_planner"]["history_user_messages_used"] == 2
 
     sources_event = events[event_types.index("sources")]
     assert len(sources_event["sources"]) == 8
@@ -553,6 +575,7 @@ async def test_web_toggle_off_is_pure_rag_and_does_not_call_web_or_utility(
     monkeypatch.setattr(orchestrator, "_trim_history", fake_trim)
     monkeypatch.setattr(orchestrator, "_save_assistant_message", fake_save_assistant_message)
     monkeypatch.setattr(co, "resolve_query_model_kind", fake_resolve_query_model_kind)
+    monkeypatch.setattr(wtp, "resolve_query_model_kind", fake_resolve_query_model_kind)
     monkeypatch.setattr(wqe, "resolve_query_model_kind", fake_resolve_query_model_kind)
     monkeypatch.setattr(co.retriever_orchestrator, "retrieve", fake_retrieve)
     monkeypatch.setattr(co.conversation_service, "append_message", fake_append_message)

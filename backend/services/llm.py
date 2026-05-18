@@ -366,6 +366,74 @@ class LLMService:
             return f"[reasoning-model fallback — finish_reason={finish}]\n{tail}"
         return ""
 
+    async def complete_tool_calls(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        model: str | None = None,
+        overrides: ModelOverrides | None = None,
+        tools: list[dict] | None = None,
+        tool_choice: dict | str | None = None,
+        api_base: str | None = None,
+        api_key: str | None = None,
+        extra_params: dict | None = None,
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """Run a non-streaming native tool-call request through LiteLLM.
+
+        This is for bounded planner/helper calls where the caller wants the
+        provider's native ``tool_calls`` object, not text that we parse as JSON.
+        """
+        model = model or self._default_model
+        url = f"{self._base_url}/chat/completions"
+        body = self._build_request_body(
+            messages,
+            model,
+            overrides,
+            stream=False,
+            tools=tools,
+        )
+        if tool_choice is not None:
+            body["tool_choice"] = tool_choice
+
+        resolved_key = api_key or await self._resolve_api_key(model)
+        if resolved_key:
+            body["api_key"] = resolved_key
+        if api_base:
+            body["api_base"] = api_base
+        if extra_params:
+            for key, value in extra_params.items():
+                if key in {
+                    "model",
+                    "messages",
+                    "stream",
+                    "tools",
+                    "tool_choice",
+                }:
+                    continue
+                body[key] = value
+
+        client = await self._get_client()
+        resp = await client.post(
+            url,
+            json=body,
+            headers=self._get_headers(),
+            timeout=httpx.Timeout(timeout, connect=min(10.0, timeout)),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        choices = data.get("choices") or []
+        if not choices:
+            return {"tool_calls": [], "content": "", "reasoning_content": ""}
+
+        message = choices[0].get("message") or {}
+        return {
+            "tool_calls": message.get("tool_calls") or [],
+            "content": message.get("content") or "",
+            "reasoning_content": message.get("reasoning_content") or "",
+            "finish_reason": choices[0].get("finish_reason"),
+        }
+
     async def stream_chat(
         self,
         # Phase 29 — message content may be a plain string (text-only)

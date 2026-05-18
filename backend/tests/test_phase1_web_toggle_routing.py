@@ -18,6 +18,7 @@ from models.schemas import (  # noqa: E402
     SourceChunk,
 )
 from services import chat_orchestrator as co  # noqa: E402
+from services import web_tool_planner as wtp  # noqa: E402
 from services.chat_orchestrator import (  # noqa: E402
     ChatOrchestrator,
     _is_web_search_enabled_for_request,
@@ -30,7 +31,7 @@ def _parse_sse(frame: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_web_toggle_routes_to_agentic_model_and_runs_deterministic_web_tool_prelude(
+async def test_web_toggle_uses_dedicated_planner_and_keeps_final_chat_model(
     monkeypatch,
 ):
     monkeypatch.setattr(co.settings, "LIVE_WEB_SEARCH_ENABLED", True, raising=False)
@@ -68,6 +69,27 @@ async def test_web_toggle_routes_to_agentic_model_and_runs_deterministic_web_too
                 "extra_params": {},
             }
         return None
+
+    async def fake_complete_tool_calls(messages, **kwargs):
+        return {
+            "tool_calls": [
+                {
+                    "id": "planner_web_1",
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "arguments": json.dumps(
+                            {
+                                "query": "OpenAI model routing latest changes",
+                                "max_results": 7,
+                            }
+                        ),
+                    },
+                }
+            ],
+            "content": "",
+            "finish_reason": "tool_calls",
+        }
 
     async def fake_query_profile(_request, user_id=None):
         return {
@@ -165,6 +187,8 @@ async def test_web_toggle_routes_to_agentic_model_and_runs_deterministic_web_too
     monkeypatch.setattr(orchestrator, "_execute_web_search_tool", fake_execute_web_search_tool)
     monkeypatch.setattr(orchestrator, "_save_assistant_message", fake_save_assistant_message)
     monkeypatch.setattr(co, "resolve_query_model_kind", fake_resolve_query_model_kind)
+    monkeypatch.setattr(wtp, "resolve_query_model_kind", fake_resolve_query_model_kind)
+    monkeypatch.setattr(wtp.llm_service, "complete_tool_calls", fake_complete_tool_calls)
     monkeypatch.setattr(co.retriever_orchestrator, "retrieve", fake_retrieve)
     monkeypatch.setattr(co.tool_registry, "get_tools_by_ids", fake_get_tools_by_ids)
     monkeypatch.setattr(co.conversation_service, "append_message", fake_append_message)
@@ -182,8 +206,8 @@ async def test_web_toggle_routes_to_agentic_model_and_runs_deterministic_web_too
 
     assert _is_web_search_enabled_for_request(request) is True
     assert resolver_kinds == ["agentic"]
-    assert request.overrides.model == "openai/agentic-tools"
-    assert stream_calls[0]["model"] == "openai/agentic-tools"
+    assert request.overrides.model == "openai/base-query"
+    assert stream_calls[0]["model"] == "openai/base-query"
     assert stream_calls[0]["tools"] is None
 
     continuation_messages = stream_calls[0]["messages"]
@@ -196,7 +220,7 @@ async def test_web_toggle_routes_to_agentic_model_and_runs_deterministic_web_too
     assert assistant_tool_message["tool_calls"][0]["function"]["name"] == "web_search"
     assert tool_result_message["tool_call_id"] == "server_web_search_1"
     assert web_args == [
-        {"query": "What changed in OpenAI model routing today?", "max_results": 7}
+        {"query": "OpenAI model routing latest changes", "max_results": 7}
     ]
 
     event_types = [event["type"] for event in events]
@@ -206,7 +230,7 @@ async def test_web_toggle_routes_to_agentic_model_and_runs_deterministic_web_too
     assert "token" in event_types
     done = events[-1]
     assert done["type"] == "done"
-    assert done["model_used"] == "openai/agentic-tools"
+    assert done["model_used"] == "openai/base-query"
     assert done["agentic_mode_used"] is True
     assert done["tools_used"] == ["web_search"]
     assert saved_assistant["content"] == "Final answer after checking the live web."
