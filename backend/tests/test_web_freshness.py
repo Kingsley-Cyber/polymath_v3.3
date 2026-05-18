@@ -500,6 +500,46 @@ async def test_rerank_web_source_chunks_uses_local_reranker(monkeypatch):
     assert ranked[0].score == 9.5
 
 
+@pytest.mark.asyncio
+async def test_rerank_web_source_chunks_clips_payload_but_returns_full_text(monkeypatch):
+    hits = parse_searxng_results(
+        {
+            "results": [
+                {
+                    "title": "Large page",
+                    "url": "https://example.com/large",
+                    "content": "short snippet",
+                }
+            ]
+        },
+        max_results=1,
+    )
+    full_body = "A" * 5000
+    chunks = web_hits_to_source_chunks(
+        hits,
+        fetched_markdown={"https://example.com/large": full_body},
+        search_query="large page",
+        max_chars=5000,
+    )
+    captured: dict = {}
+
+    async def fake_rerank(_query, pool):
+        captured["text_len"] = len(pool[0].text)
+        ranked = [pool[0].model_copy()]
+        ranked[0].score = 4.2
+        return ranked
+
+    import services.reranker as reranker_module
+
+    monkeypatch.setattr(reranker_module.reranker_service, "rerank", fake_rerank)
+
+    ranked = await rerank_web_source_chunks("large page", chunks, limit=1)
+
+    assert captured["text_len"] <= 1200
+    assert len(ranked[0].text) > 4000
+    assert ranked[0].score == 4.2
+
+
 def test_diversify_web_source_chunks_caps_research_for_practical_queries():
     hits = parse_searxng_results(
         {

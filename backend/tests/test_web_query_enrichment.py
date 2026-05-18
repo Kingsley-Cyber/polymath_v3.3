@@ -50,7 +50,7 @@ async def test_utility_enrichment_uses_recent_chat_and_preserves_query_anchors(
     assert captured["resolved"] == ("user-1", "utility")
     assert captured["kwargs"]["model"] == "openai/glm-5-turbo"
     assert captured["kwargs"]["temperature"] == 0
-    assert captured["kwargs"]["max_tokens"] == 48
+    assert captured["kwargs"]["max_tokens"] == 40
     assert "We are reviewing Roblox security" in captured["messages"][1]["content"]
     assert "Server authority matters" not in captured["messages"][1]["content"]
     assert result.attempted is True
@@ -153,10 +153,94 @@ async def test_utility_enrichment_uses_latest_two_prior_user_messages_only(
     )
 
     prompt = captured["prompt"]
-    assert "latest two prior user turns" in prompt
+    assert "Recent user context:" in prompt
     assert "previous_user: previous Roblox exploit concern" in prompt
     assert "previous_user: latest RemoteEvent validation concern" in prompt
     assert "oldest unrelated corpus question" not in prompt
     assert "assistant content should be skipped" not in prompt
     assert result.history_user_messages_used == 2
     assert result.attempted is True
+
+
+@pytest.mark.asyncio
+async def test_utility_enrichment_accepts_contextual_psychogat_cifar_query(
+    monkeypatch,
+):
+    async def fake_resolve(_user_id, _kind):
+        return {
+            "model": "openai/glm-5-turbo",
+            "api_base": "https://api.z.ai/api/coding/paas/v4",
+            "api_key": "test-key",
+            "extra_params": {},
+        }
+
+    async def fake_complete_sync(*_args, **_kwargs):
+        return (
+            "PsychoGAT CIFAR-10 dataset patterns 2x performance modification "
+            "enterprise applications 90% accuracy"
+        )
+
+    monkeypatch.setattr(wqe, "resolve_query_model_kind", fake_resolve)
+    monkeypatch.setattr(wqe.llm_service, "complete_sync", fake_complete_sync)
+
+    result = await wqe.enrich_web_search_query(
+        tool_query=(
+            "Using the retrieved RAG sources, explain whether PsychoGAT, "
+            "CIFAR-10 dataset patterns, 2x performance, requires "
+            "modification, 90%, and enterprise applications connect directly."
+        ),
+        original_query=(
+            "What evidence is missing or weak in the retrieved sources for "
+            "PsychoGAT, CIFAR-10 dataset patterns, 2x performance, requires "
+            "modification, 90%, and enterprise applications?"
+        ),
+        user_id="user-1",
+        recent_messages=[
+            SimpleNamespace(role="user", content="Use CIFAR-10 dataset patterns."),
+            SimpleNamespace(role="user", content="PsychoGAT is the main anchor."),
+        ],
+    )
+
+    assert result.attempted is True
+    assert result.applied is True
+    assert result.fallback_reason is None
+    assert "PsychoGAT CIFAR-10" in result.query
+
+
+@pytest.mark.asyncio
+async def test_utility_enrichment_accepts_concise_roblox_security_query(
+    monkeypatch,
+):
+    async def fake_resolve(_user_id, _kind):
+        return {
+            "model": "openai/glm-5-turbo",
+            "api_base": "https://api.z.ai/api/coding/paas/v4",
+            "api_key": "test-key",
+            "extra_params": {},
+        }
+
+    async def fake_complete_sync(*_args, **_kwargs):
+        return "Roblox RemoteEvent validation patterns security best practices Luau"
+
+    monkeypatch.setattr(wqe, "resolve_query_model_kind", fake_resolve)
+    monkeypatch.setattr(wqe.llm_service, "complete_sync", fake_complete_sync)
+
+    result = await wqe.enrich_web_search_query(
+        tool_query=(
+            "Use the selected Luau corpus to explain the RemoteEvent validation "
+            "patterns. With Web enabled, check current Roblox RemoteEvent "
+            "security guidance and compare it to the retrieved corpus evidence."
+        ),
+        original_query=(
+            "Use the selected Luau corpus to explain the RemoteEvent validation "
+            "patterns. With Web enabled, check current Roblox RemoteEvent "
+            "security guidance and compare it to the retrieved corpus evidence."
+        ),
+        user_id="user-1",
+        recent_messages=[],
+    )
+
+    assert result.attempted is True
+    assert result.applied is True
+    assert result.fallback_reason is None
+    assert result.query == "Roblox RemoteEvent validation patterns security best practices Luau"

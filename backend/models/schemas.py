@@ -78,6 +78,10 @@ class ChatRequest(_legacy.ChatRequest):
 class ChatChunk(_legacy.ChatChunk):
     """Current SSE chunk shape emitted by the chat orchestrator."""
 
+    trace_event: dict[str, Any] | None = Field(
+        default=None,
+        description="Structured execution trace lane event for durable UI logs.",
+    )
     chunks_returned: int | None = None
     strategy_used: str | None = None
     query_profile_used: str | None = None
@@ -94,6 +98,7 @@ class ChatChunk(_legacy.ChatChunk):
 class ChatMessage(_legacy.ChatMessage):
     """Current persisted chat message shape."""
 
+    trace_events: list[dict[str, Any]] = Field(default_factory=list)
     chunks_returned: int | None = None
     strategy_used: str | None = None
     query_profile_used: str | None = None
@@ -105,6 +110,16 @@ class ChatMessage(_legacy.ChatMessage):
     tools_used: list[str] = Field(default_factory=list)
     reasoning_cascade_applied: bool | None = None
     sources: list[dict[str, Any]] | None = None
+
+
+class Conversation(_legacy.Conversation):
+    """Current conversation response shape with current message fields."""
+
+    model_config_conversation: ModelConfig = Field(
+        default_factory=ModelConfig,
+        alias="model_config",
+    )
+    messages: list[ChatMessage] = Field(default_factory=list)
 
 
 def _universal_entity_schema() -> list[str]:

@@ -267,6 +267,29 @@ def _format_utility_web_trace(web_result: str) -> str | None:
     )
 
 
+def _format_model_api_trace(
+    *,
+    name: str,
+    model: str | None,
+    status: str,
+    purpose: str,
+    duration_s: float | None = None,
+    detail: str | None = None,
+) -> str:
+    lines = [
+        "[Model API call]",
+        f"name: {name}",
+        f"model: {model or 'resolved at runtime'}",
+        f"status: {status}",
+        f"purpose: {purpose}",
+    ]
+    if duration_s is not None:
+        lines.append(f"duration_s: {duration_s:.2f}")
+    if detail:
+        lines.append(f"detail: {_clip_trace_value(detail, 320)}")
+    return "\n".join(lines)
+
+
 def _web_chunk_content_preview(chunk: Any, *, max_chars: int = 1600) -> str:
     text = str(getattr(chunk, "text", "") or "")
     marker = "\nContent: "
@@ -472,6 +495,33 @@ class ChatOrchestrator:
         start_time = datetime.utcnow()
         trimming_applied = False
         trimming_details = ""
+        trace_events: list[dict[str, Any]] = []
+
+        def _record_trace_event(
+            *,
+            lane: str,
+            title: str,
+            status: str,
+            content: str = "",
+            metadata: dict[str, Any] | None = None,
+        ) -> str:
+            event = {
+                "id": f"trace-{len(trace_events) + 1}",
+                "lane": lane,
+                "title": title,
+                "status": status,
+                "content": content,
+                "timestamp": datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
+                "metadata": metadata or {},
+            }
+            trace_events.append(event)
+            return build_sse_chunk(
+                ChatChunk(
+                    type="trace_event",
+                    trace_event=event,
+                    conversation_id=str(conversation_id),
+                )
+            )
 
         # Step 1: Load or create conversation
         (
@@ -596,6 +646,17 @@ class ChatOrchestrator:
         if request.overrides is not None:
             request.overrides.model = model_used
 
+        yield _record_trace_event(
+            lane="model_call",
+            title="Chat model route",
+            status="done",
+            content=(
+                "Resolved the final chat model before retrieval and tool "
+                "execution."
+            ),
+            metadata={"model": model_used},
+        )
+
         # Phase 29 — vision-capability pre-flight. If the user attached
         # images but picked a non-vision model, the LLM call will 4xx
         # mid-stream and surface as a generic transport error. Catch
@@ -643,11 +704,77 @@ class ChatOrchestrator:
         # Phase 17 — HyDE: when enabled, generate a hypothetical answer and
         # use IT as the retrieval query. Answers tend to embed closer to
         # answer-shaped chunks than questions do. Graceful fallback on failure.
+        hyde_trace_enabled = bool(request.overrides and request.overrides.hyde_enabled)
+        if hyde_trace_enabled:
+            hyde_model_trace = (
+                request.overrides.hyde_model
+                if request.overrides
+                else None
+            ) or settings.HYDE_MODEL
+            yield _record_trace_event(
+                lane="model_call",
+                title="HyDE query helper",
+                status="running",
+                content=_format_model_api_trace(
+                    name="HyDE query helper",
+                    model=hyde_model_trace,
+                    status="starting",
+                    purpose=(
+                        "Generate a hypothetical answer used only as the "
+                        "local RAG retrieval query."
+                    ),
+                ),
+                metadata={"model": hyde_model_trace},
+            )
+        hyde_start = perf_counter()
         retrieval_query, hyde_applied = await self._apply_hyde(
             request,
             user_id=user_id,
             hyde_explicit=bool(profile_cfg.get("hyde_explicit", False)),
         )
+        if hyde_trace_enabled:
+            yield _record_trace_event(
+                lane="model_call",
+                title="HyDE query helper",
+                status="done" if hyde_applied else "skipped",
+                content=_format_model_api_trace(
+                    name="HyDE query helper",
+                    model=hyde_model_trace,
+                    status="finished" if hyde_applied else "skipped_or_fallback",
+                    purpose=(
+                        "Generate a hypothetical answer used only as the "
+                        "local RAG retrieval query."
+                    ),
+                    duration_s=perf_counter() - hyde_start,
+                    detail=(
+                        "HyDE applied"
+                        if hyde_applied
+                        else "Raw user query was used for retrieval."
+                    ),
+                ),
+                metadata={
+                    "model": hyde_model_trace,
+                    "duration_s": perf_counter() - hyde_start,
+                    "applied": hyde_applied,
+                },
+            )
+
+        yield _record_trace_event(
+            lane="retrieval",
+            title="Local RAG retrieval",
+            status="running",
+            content=(
+                "Starting corpus retrieval before any web-search merge. "
+                f"query={_clip_trace_value(retrieval_query, 220)}"
+            ),
+            metadata={
+                "retrieval_k": profile_k,
+                "rerank_enabled": profile_rerank,
+                "query_profile": query_profile_used,
+                "hyde_applied": hyde_applied,
+            },
+        )
+        rag_start = perf_counter()
 
         # Step 3.5: Retrieval Pipeline
         #   atomic mode: decompose query → fan-out retrieval → merge
@@ -697,6 +824,26 @@ class ChatOrchestrator:
                 search_mode=resolved_mode,
             )
         sources = _dedupe_sources_for_context(retrieval.chunks)
+        effective_tier_for_trace = getattr(
+            retrieval.effective_tier,
+            "value",
+            retrieval.effective_tier,
+        )
+        yield _record_trace_event(
+            lane="retrieval",
+            title="Local RAG retrieval",
+            status="done",
+            content=(
+                "Corpus retrieval finished. "
+                f"raw_chunks={len(retrieval.chunks or [])} "
+                f"deduped_context_chunks={len(sources or [])}"
+            ),
+            metadata={
+                "duration_s": perf_counter() - rag_start,
+                "effective_tier": str(effective_tier_for_trace),
+                "chunks": len(sources or []),
+            },
+        )
 
         graph_context_enabled = (
             _is_graph_augmented_tier(retrieval.effective_tier)
@@ -765,7 +912,6 @@ class ChatOrchestrator:
         prefetched_react_messages: list[dict] = []
         prefetched_tool_call_count = 0
         prefetched_web_search_call_count = 0
-        pre_model_trace_parts: list[str] = []
 
         # Trust-signal snapshot — captured here so it carries through to
         # both the `done` SSE frame and the persisted assistant message.
@@ -814,6 +960,20 @@ class ChatOrchestrator:
                 request.message[:160],
                 _MAX_WEB_SEARCH_RESULTS_PER_CALL,
             )
+            yield _record_trace_event(
+                lane="tool_call",
+                title="Native web_search tool call",
+                status="running",
+                content=(
+                    "Server queued the mandatory native web_search call "
+                    "because the user Web toggle is on."
+                ),
+                metadata={
+                    "tool_name": "web_search",
+                    "args": web_args,
+                    "stored_before_execution": True,
+                },
+            )
             yield build_sse_chunk(
                 ChatChunk(
                     type="tool_call_start",
@@ -828,17 +988,32 @@ class ChatOrchestrator:
                     conversation_id=str(conversation_id),
                 )
             )
+            utility_start = perf_counter()
+            yield _record_trace_event(
+                lane="model_call",
+                title="Utility web query helper",
+                status="running",
+                content=_format_model_api_trace(
+                    name="Utility web query helper",
+                    model="utility role (GLM when configured)",
+                    status="starting",
+                    purpose=(
+                        "Rewrite the mandatory web_search query using "
+                        "the current query and up to two prior user turns."
+                    ),
+                ),
+                metadata={"model_role": "utility"},
+            )
             web_result = await self._execute_web_search_tool(web_args, request)
             logger.info("mandatory web_search prelude completed")
             utility_trace = _format_utility_web_trace(web_result)
             if utility_trace:
-                pre_model_trace_parts.append(utility_trace)
-                yield build_sse_chunk(
-                    ChatChunk(
-                        type="thinking",
-                        thinking=f"{utility_trace}\n\n",
-                        conversation_id=str(conversation_id),
-                    )
+                yield _record_trace_event(
+                    lane="model_call",
+                    title="Utility web query helper",
+                    status="done",
+                    content=utility_trace,
+                    metadata={"duration_s": perf_counter() - utility_start},
                 )
             yield build_sse_chunk(
                 ChatChunk(
@@ -849,6 +1024,15 @@ class ChatOrchestrator:
                     conversation_id=str(conversation_id),
                 )
             )
+            yield _record_trace_event(
+                lane="tool_result",
+                title="web_search tool result",
+                status="done",
+                content=(
+                    "Native web_search returned results and pipeline telemetry."
+                ),
+                metadata={"tool_name": "web_search"},
+            )
             prefetched_tool_call_count = 1
             prefetched_web_search_call_count = 1
             prefetched_react_messages.extend(
@@ -857,6 +1041,10 @@ class ChatOrchestrator:
                         "role": "assistant",
                         "content": None,
                         "tool_calls": [web_call],
+                        "reasoning_content": (
+                            "Server executed the mandatory web_search step "
+                            "before the final answer."
+                        ),
                     },
                     {
                         "role": "tool",
@@ -1251,6 +1439,29 @@ class ChatOrchestrator:
             stream_end: float | None = None
 
             # Step 7: Stream LLM response
+            yield _record_trace_event(
+                lane="model_call",
+                title="Chat model stream",
+                status="running",
+                content=_format_model_api_trace(
+                    name="Chat model stream",
+                    model=model_used,
+                    status="starting",
+                    purpose=(
+                        "Generate the assistant response using the "
+                        "retrieved RAG context and any completed tool results."
+                    ),
+                    detail=(
+                        f"messages={len(message_dicts)} "
+                        f"tools={'yes' if active_tool_schemas else 'no'}"
+                    ),
+                ),
+                metadata={
+                    "model": model_used,
+                    "messages": len(message_dicts),
+                    "tools_enabled": bool(active_tool_schemas),
+                },
+            )
             try:
                 async for chunk in llm_service.stream_chat(
                     messages=message_dicts,
@@ -1286,12 +1497,46 @@ class ChatOrchestrator:
 
             except Exception as e:
                 logger.error(f"Error during LLM streaming: {e}")
+                yield _record_trace_event(
+                    lane="model_call",
+                    title="Chat model stream",
+                    status="error",
+                    content=f"LLM streaming error: {e}",
+                    metadata={"model": model_used},
+                )
                 yield build_sse_chunk(
                     ChatChunk(type="error", content=f"LLM streaming error: {e}")
                 )
                 return
 
             stream_end = perf_counter()
+            yield _record_trace_event(
+                lane="model_call",
+                title="Chat model stream",
+                status="done",
+                content=_format_model_api_trace(
+                    name="Chat model stream",
+                    model=model_used,
+                    status="finished",
+                    purpose=(
+                        "Generate the assistant response using the "
+                        "retrieved RAG context and any completed tool results."
+                    ),
+                    duration_s=stream_end - stream_start,
+                    detail=(
+                        f"content_chars={len(assistant_content)} "
+                        f"thinking_chars={len(assistant_thinking)} "
+                        f"tool_calls={len(tool_calls)}"
+                    ),
+                ),
+                metadata={
+                    "model": model_used,
+                    "duration_s": stream_end - stream_start,
+                    "content_chars": len(assistant_content),
+                    "thinking_chars": len(assistant_thinking),
+                    "tool_calls": len(tool_calls),
+                },
+            )
 
             # If no tool calls, this is the final response
             if not tool_calls:
@@ -1327,18 +1572,27 @@ class ChatOrchestrator:
                 break
 
             # Announce tool execution before running — lets the UI show "⚙ Running: <tool>"
+            tool_call_summaries = [
+                {
+                    "name": c.get("function", {}).get("name", ""),
+                    "args": c.get("function", {}).get("arguments", "{}"),
+                }
+                for c in tool_calls
+            ]
+            yield _record_trace_event(
+                lane="tool_call",
+                title="Native tool call",
+                status="running",
+                content=json.dumps(tool_call_summaries),
+                metadata={
+                    "tool_count": len(tool_call_summaries),
+                    "stored_before_execution": True,
+                },
+            )
             yield build_sse_chunk(
                 ChatChunk(
                     type="tool_call_start",
-                    content=json.dumps(
-                        [
-                            {
-                                "name": c.get("function", {}).get("name", ""),
-                                "args": c.get("function", {}).get("arguments", "{}"),
-                            }
-                            for c in tool_calls
-                        ]
-                    ),
+                    content=json.dumps(tool_call_summaries),
                     conversation_id=str(conversation_id),
                 )
             )
@@ -1352,20 +1606,34 @@ class ChatOrchestrator:
             tool_results = await self._execute_tools(tool_calls, tools, request)
 
             # Emit tool results — paired 1:1 with the start event
+            tool_result_summaries = [
+                {
+                    "name": c.get("function", {}).get("name", ""),
+                    "result": r,
+                }
+                for c, r in zip(tool_calls, tool_results)
+            ]
             yield build_sse_chunk(
                 ChatChunk(
                     type="tool_result",
-                    content=json.dumps(
-                        [
-                            {
-                                "name": c.get("function", {}).get("name", ""),
-                                "result": r,
-                            }
-                            for c, r in zip(tool_calls, tool_results)
-                        ]
-                    ),
+                    content=json.dumps(tool_result_summaries),
                     conversation_id=str(conversation_id),
                 )
+            )
+            yield _record_trace_event(
+                lane="tool_result",
+                title="Native tool result",
+                status="done",
+                content=json.dumps(
+                    [
+                        {
+                            "name": item["name"],
+                            "result_preview": _clip_trace_value(item["result"], 500),
+                        }
+                        for item in tool_result_summaries
+                    ]
+                ),
+                metadata={"tool_count": len(tool_result_summaries)},
             )
 
             # Append tool results to message history and continue loop
@@ -1452,6 +1720,27 @@ class ChatOrchestrator:
                 },
             ]
             try:
+                final_stream_start = perf_counter()
+                yield _record_trace_event(
+                    lane="model_call",
+                    title="Chat model final stream",
+                    status="running",
+                    content=_format_model_api_trace(
+                        name="Chat model final no-tool stream",
+                        model=model_used,
+                        status="starting",
+                        purpose=(
+                            "Force a user-facing answer after tool "
+                            "activity without allowing more tool calls."
+                        ),
+                        detail=f"messages={len(final_messages)} tools=no",
+                    ),
+                    metadata={
+                        "model": model_used,
+                        "messages": len(final_messages),
+                        "tools_enabled": False,
+                    },
+                )
                 async for chunk in llm_service.stream_chat(
                     messages=final_messages,
                     model=model_used,
@@ -1477,8 +1766,41 @@ class ChatOrchestrator:
                                 conversation_id=str(conversation_id),
                             )
                         )
+                final_duration_s = perf_counter() - final_stream_start
+                yield _record_trace_event(
+                    lane="model_call",
+                    title="Chat model final stream",
+                    status="done",
+                    content=_format_model_api_trace(
+                        name="Chat model final no-tool stream",
+                        model=model_used,
+                        status="finished",
+                        purpose=(
+                            "Force a user-facing answer after tool "
+                            "activity without allowing more tool calls."
+                        ),
+                        duration_s=final_duration_s,
+                        detail=(
+                            f"content_chars={len(assistant_content)} "
+                            f"thinking_chars={len(assistant_thinking)}"
+                        ),
+                    ),
+                    metadata={
+                        "model": model_used,
+                        "duration_s": final_duration_s,
+                        "content_chars": len(assistant_content),
+                        "thinking_chars": len(assistant_thinking),
+                    },
+                )
             except Exception as e:
                 logger.error(f"Error during final no-tool LLM streaming: {e}")
+                yield _record_trace_event(
+                    lane="model_call",
+                    title="Chat model final stream",
+                    status="error",
+                    content=f"LLM streaming error: {e}",
+                    metadata={"model": model_used},
+                )
                 yield build_sse_chunk(
                     ChatChunk(type="error", content=f"LLM streaming error: {e}")
                 )
@@ -1486,6 +1808,13 @@ class ChatOrchestrator:
 
         if not assistant_content.strip():
             logger.error("LLM returned an empty assistant response for %s", conversation_id)
+            yield _record_trace_event(
+                lane="final",
+                title="Assistant final answer",
+                status="error",
+                content="The model returned no user-facing answer after retrieval.",
+                metadata={"model": model_used},
+            )
             yield build_sse_chunk(
                 ChatChunk(
                     type="error",
@@ -1538,14 +1867,23 @@ class ChatOrchestrator:
         # Phase 24 — collect skill/tool/reasoning trust signals for this turn
         skills_used_names = [s["name"] for s in active_skills_dicts]
         reasoning_cascade_applied = bool(analysis_text)
+        yield _record_trace_event(
+            lane="final",
+            title="Assistant final answer",
+            status="done",
+            content=(
+                "Final answer assembled and ready to persist. "
+                f"content_chars={len(assistant_content)}"
+            ),
+            metadata={
+                "model": model_used,
+                "content_chars": len(assistant_content),
+                "trace_events": len(trace_events) + 1,
+            },
+        )
 
         try:
-            thinking_parts = [
-                part.strip()
-                for part in [*pre_model_trace_parts, assistant_thinking or ""]
-                if part and part.strip()
-            ]
-            thinking_to_save = "\n\n".join(thinking_parts) if thinking_parts else None
+            thinking_to_save = assistant_thinking.strip() or None
             await self._save_assistant_message(
                 conversation_id,
                 assistant_content,
@@ -1564,6 +1902,7 @@ class ChatOrchestrator:
                 tools_used=active_tool_names,
                 reasoning_cascade_applied=reasoning_cascade_applied,
                 sources=sources,
+                trace_events=trace_events,
             )
         except Exception as exc:
             logger.error("Failed to persist assistant message for %s: %s", conversation_id, exc)
@@ -2046,12 +2385,14 @@ class ChatOrchestrator:
         tools_used: list[str] | None = None,
         reasoning_cascade_applied: bool = False,
         sources: list[Any] | None = None,
+        trace_events: list[dict[str, Any]] | None = None,
     ) -> ChatMessage:
         """Saves the assistant's final message to the database."""
         assistant_message = ChatMessage(
             role="assistant",
             content=content,
             thinking=thinking,
+            trace_events=trace_events or [],
             model_used=model,
             token_count=count_tokens(content, model),
             created_at=datetime.utcnow(),

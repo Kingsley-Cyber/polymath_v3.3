@@ -13,6 +13,7 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import type { ChatMessage } from "../../types";
+import type { TraceEvent } from "../../types";
 import type { StreamingToolActivity } from "../../stores/chatStore";
 import { RetrievalBadge } from "./RetrievalBadge";
 
@@ -29,6 +30,7 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [thinkingOpen, setThinkingOpen] = useState(true);
+  const [traceOpen, setTraceOpen] = useState(true);
   const isUser = message.role === "user";
 
   const handleCopy = async () => {
@@ -86,6 +88,15 @@ export function MessageBubble({
           isUser ? "max-w-[85%] items-end" : "max-w-full items-start"
         }`}
       >
+        {!isUser && message.trace_events && message.trace_events.length > 0 && (
+          <TracePanel
+            events={message.trace_events}
+            open={traceOpen}
+            isStreaming={isStreaming}
+            onToggle={setTraceOpen}
+          />
+        )}
+
         {/* Thinking Block */}
         {message.thinking && (
           <details
@@ -181,6 +192,76 @@ export function MessageBubble({
   );
 }
 
+function TracePanel({
+  events,
+  open,
+  isStreaming,
+  onToggle,
+}: {
+  events: TraceEvent[];
+  open: boolean;
+  isStreaming: boolean;
+  onToggle: (open: boolean) => void;
+}) {
+  const active =
+    isStreaming && events.some((event) => event.status === "running");
+
+  return (
+    <details
+      open={open}
+      onToggle={(e) => onToggle((e.target as HTMLDetailsElement).open)}
+      className="mb-2 w-full max-w-3xl group/trace"
+    >
+      <summary className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold tracking-widest uppercase text-content-tertiary bg-bg-surface border border-border-minimal transition-none rounded-none cursor-pointer hover:text-content-primary hover:border-content-tertiary select-none list-none">
+        <TerminalSquare className="w-3.5 h-3.5" />
+        <span>[TRACE_LOG]</span>
+        <span className="text-content-tertiary/70">
+          {active ? "RUNNING" : "DONE"}
+        </span>
+        <span className="ml-auto text-content-tertiary/60 group-hover/trace:text-content-secondary">
+          {open ? "COLLAPSE [-]" : "EXPAND [+]"}
+        </span>
+      </summary>
+      <div className="mt-1 max-h-72 overflow-y-auto custom-scrollbar border border-border-minimal bg-bg-base p-2 font-mono text-[10px] text-content-secondary transition-none rounded-none">
+        <div className="space-y-2">
+          {events.map((event) => (
+            <TraceEventRow key={event.id} event={event} />
+          ))}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function TraceEventRow({ event }: { event: TraceEvent }) {
+  const statusClass =
+    event.status === "error"
+      ? "text-error"
+      : event.status === "running"
+        ? "text-accent-main"
+        : event.status === "skipped"
+          ? "text-content-tertiary"
+          : "text-emerald-400";
+
+  return (
+    <div className="border-l border-border-minimal pl-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] font-bold uppercase tracking-widest">
+        <span className="text-content-primary">{event.title}</span>
+        <span className={statusClass}>{event.status || "event"}</span>
+        <span className="text-content-tertiary">{event.lane}</span>
+        <span className="text-content-tertiary/70">
+          {formatTraceTime(event.timestamp)}
+        </span>
+      </div>
+      {event.content && (
+        <div className="mt-1 whitespace-pre-wrap break-words text-content-secondary">
+          {event.content}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToolActivityPanel({
   activities,
 }: {
@@ -230,4 +311,14 @@ function ToolActivityPanel({
 function formatToolName(name: string): string {
   if (name === "web_search") return "WEB SEARCH";
   return name.replace(/_/g, " ").toUpperCase();
+}
+
+function formatTraceTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }

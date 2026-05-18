@@ -14,6 +14,7 @@ export function ChatWindow() {
     isStreaming,
     streamingContent,
     streamingThinking,
+    streamingTraceEvents,
     streamingToolActivity,
     isLoading,
   } = useChatStore();
@@ -25,7 +26,13 @@ export function ChatWindow() {
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conversationMessages, streamingContent, streamingThinking, streamingToolActivity]);
+  }, [
+    conversationMessages,
+    streamingContent,
+    streamingThinking,
+    streamingTraceEvents,
+    streamingToolActivity,
+  ]);
 
   // Empty state
   if (conversationMessages.length === 0 && !isLoading) {
@@ -72,6 +79,7 @@ export function ChatWindow() {
         {isStreaming &&
           (streamingContent ||
             streamingThinking ||
+            streamingTraceEvents.length > 0 ||
             streamingToolActivity.length > 0) && (
           <MessageBubble
             message={{
@@ -79,6 +87,7 @@ export function ChatWindow() {
               role: "assistant",
               content: streamingContent,
               thinking: streamingThinking || undefined,
+              trace_events: streamingTraceEvents,
               created_at: new Date().toISOString(),
             }}
             isStreaming={true}

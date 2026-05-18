@@ -364,7 +364,7 @@ async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
     assert captured["utility_kwargs"]["model"] == "openai/glm-5-turbo"
     assert captured["utility_kwargs"]["api_base"] == "https://api.z.ai/api/coding/paas/v4"
     assert captured["utility_kwargs"]["temperature"] == 0
-    assert captured["utility_kwargs"]["max_tokens"] == 48
+    assert captured["utility_kwargs"]["max_tokens"] == 40
 
     assert captured["searxng"]["query"] == (
         "Polymath web retrieval utility model final seven sources Obscura SearXNG"
@@ -379,15 +379,29 @@ async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
     }
 
     event_types = [event["type"] for event in events]
+    trace_events = [
+        event["trace_event"]
+        for event in events
+        if event["type"] == "trace_event"
+    ]
+    trace_titles = [event["title"] for event in trace_events]
     assert event_types.index("tool_call_start") < event_types.index("tool_result")
-    assert event_types.index("tool_call_start") < event_types.index("thinking")
-    assert event_types.index("thinking") < event_types.index("tool_result")
     assert event_types.index("tool_result") < event_types.index("sources")
     assert event_types.index("sources") < event_types.index("budget")
     assert event_types.index("budget") < event_types.index("token")
     assert event_types[-1] == "done"
+    assert "Local RAG retrieval" in trace_titles
+    assert "Native web_search tool call" in trace_titles
+    assert "Utility web query helper" in trace_titles
+    assert "web_search tool result" in trace_titles
+    assert "Chat model stream" in trace_titles
 
-    utility_trace = events[event_types.index("thinking")]["thinking"]
+    utility_trace_event = next(
+        event
+        for event in trace_events
+        if event["title"] == "Utility web query helper" and event["status"] == "done"
+    )
+    utility_trace = utility_trace_event["content"]
     assert "[Utility web query trace]" in utility_trace
     assert "model: openai/glm-5-turbo" in utility_trace
     assert "context: 2 prior user message(s)" in utility_trace
@@ -436,6 +450,7 @@ async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
         msg for msg in final_stream["messages"] if msg.get("role") == "tool"
     )
     assert assistant_tool_message["tool_calls"][0]["function"]["name"] == "web_search"
+    assert "reasoning_content" in assistant_tool_message
     assert tool_result_message["tool_call_id"] == "server_web_search_1"
 
     done = events[-1]
@@ -444,7 +459,8 @@ async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
     assert done["tools_used"] == ["web_search"]
     assert saved_assistant["chunks_returned"] == 8
     assert saved_assistant["sources"] == captured["prompt_sources"]
-    assert saved_assistant["thinking"] == utility_trace.strip()
+    assert saved_assistant["thinking"] is None
+    assert saved_assistant["trace_events"] == trace_events
 
 
 @pytest.mark.asyncio

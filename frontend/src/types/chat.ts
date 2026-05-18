@@ -244,6 +244,7 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   thinking?: string;
+  trace_events?: TraceEvent[];
   model_used?: string;
   token_count?: number;
   created_at: string;
@@ -273,6 +274,25 @@ export interface ChatMessage {
    *  finalize. The backend now persists compact source previews, so reloads
    *  can still show source receipts even when full chunk bodies are compacted. */
   sources?: SourceChunk[];
+}
+
+export interface TraceEvent {
+  id: string;
+  lane:
+    | "reasoning"
+    | "model_call"
+    | "retrieval"
+    | "plan"
+    | "tool_call"
+    | "tool_result"
+    | "warning"
+    | "final"
+    | string;
+  title: string;
+  status?: "running" | "done" | "error" | "skipped" | string;
+  content?: string;
+  timestamp: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface Conversation {
@@ -433,9 +453,11 @@ export interface SSEEvent {
     | "sources"
     | "tool_call_start"
     | "tool_result"
+    | "trace_event"
     | "tier_downgraded";
   content: string | null;
   thinking?: string;
+  trace_event?: TraceEvent;
   conversation_id?: string;
   model_used?: string;
   trimming_applied?: boolean;

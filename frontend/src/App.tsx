@@ -393,6 +393,36 @@ function App() {
         reasoning_cascade: settings.reasoningCascadeEnabled || undefined,
       };
 
+      const preserveStreamingFailure = (errorMessage: string) => {
+        chat.setError(errorMessage);
+        const state = useChatStore.getState();
+        const hasPartialAssistant =
+          Boolean(state.streamingContent) ||
+          Boolean(state.streamingThinking) ||
+          state.streamingTraceEvents.length > 0 ||
+          state.streamingToolActivity.length > 0 ||
+          state.streamingSources.length > 0;
+
+        if (!cid || !hasPartialAssistant) {
+          chat.stopStreaming();
+          return;
+        }
+
+        chat.finalizeStreamingMessage(cid, {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content:
+            state.streamingContent ||
+            `Stream failed before the final answer.\n\n[ERROR] ${errorMessage}`,
+          thinking: state.streamingThinking || undefined,
+          trace_events: state.streamingTraceEvents,
+          model_used: request.overrides?.model || settings.selectedModel,
+          created_at: new Date().toISOString(),
+          collections_queried: settings.selectedCorpusIds,
+          sources: state.streamingSources,
+        });
+      };
+
       try {
         await api.streamChat(
           request,
@@ -404,6 +434,11 @@ function App() {
               case "thinking":
                 if (event.thinking)
                   chat.updateStreamingThinking(event.thinking);
+                break;
+              case "trace_event":
+                if (event.trace_event) {
+                  chat.addStreamingTraceEvent(event.trace_event);
+                }
                 break;
               case "trimming":
                 console.log("[TRIM]", event.content || event.trimming_details);
@@ -475,8 +510,7 @@ function App() {
                 break;
               }
               case "error":
-                chat.setError(event.content || "An error occurred");
-                chat.stopStreaming();
+                preserveStreamingFailure(event.content || "An error occurred");
                 break;
               case "done": {
                 const state = useChatStore.getState();
@@ -489,6 +523,7 @@ function App() {
                   role: "assistant",
                   content: state.streamingContent,
                   thinking: state.streamingThinking || undefined,
+                  trace_events: state.streamingTraceEvents,
                   model_used: event.model_used,
                   created_at: new Date().toISOString(),
                   trimming_applied: event.trimming_applied,
@@ -512,13 +547,13 @@ function App() {
             }
           },
           (err) => {
-            chat.setError(err.message);
-            chat.stopStreaming();
+            preserveStreamingFailure(err.message);
           },
         );
       } catch (err) {
-        chat.setError(err instanceof Error ? err.message : "Unknown error");
-        chat.stopStreaming();
+        preserveStreamingFailure(
+          err instanceof Error ? err.message : "Unknown error",
+        );
       }
     },
     [],

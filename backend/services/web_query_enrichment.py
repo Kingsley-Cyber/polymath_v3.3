@@ -20,10 +20,10 @@ from services.web_freshness import refine_tool_search_query
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "web-query-enrichment-v1"
+PROMPT_VERSION = "web-query-enrichment-v2"
 _MAX_CONTEXT_MESSAGES_SCAN = 8
 _MAX_RECENT_USER_MESSAGES = 2
-_MAX_HISTORY_CHARS = 1200
+_MAX_HISTORY_CHARS = 640
 _MAX_QUERY_CHARS = 220
 _MAX_QUERY_TERMS = 18
 _MIN_QUERY_TERMS = 3
@@ -46,26 +46,54 @@ _UNSAFE_OUTPUT_MARKERS = (
 _LOW_SIGNAL_TERMS = {
     "about",
     "after",
+    "and",
     "answer",
+    "analysis",
     "based",
+    "check",
+    "compare",
+    "concept",
+    "concepts",
+    "connect",
+    "corpus",
+    "current",
+    "directly",
     "enabled",
+    "evidence",
+    "explain",
     "find",
     "for",
     "from",
+    "guidance",
+    "it",
+    "missing",
     "live",
     "local",
     "look",
+    "need",
     "one",
+    "practical",
     "query",
     "rag",
+    "retrieved",
     "results",
     "run",
     "search",
+    "selected",
     "sentence",
+    "sources",
+    "support",
     "the",
     "then",
+    "to",
     "use",
+    "using",
+    "weak",
     "web",
+    "what",
+    "where",
+    "which",
+    "would",
     "with",
 }
 
@@ -84,11 +112,12 @@ class WebQueryEnrichmentResult:
 
 
 def _query_terms(text: str) -> list[str]:
-    return [
-        token
-        for token in re.findall(r"[a-z0-9][a-z0-9.+#-]{1,}", text.lower())
-        if token not in _LOW_SIGNAL_TERMS
-    ]
+    terms: list[str] = []
+    for token in re.findall(r"[a-z0-9][a-z0-9.+#-]{1,}", text.lower()):
+        token = token.strip(".;:!?")
+        if token and token not in _LOW_SIGNAL_TERMS:
+            terms.append(token)
+    return terms
 
 
 def _message_field(message: Any, field: str) -> str:
@@ -207,16 +236,17 @@ async def enrich_web_search_query(
 
     model = resolved.get("model")
     history, history_count = _compact_recent_user_history(recent_messages)
+    current_request = (original_query or "").strip()[:600]
+    native_query = base_query[:260]
     prompt = (
-        "Rewrite the web search query for SearXNG.\n"
-        "Use the current user request, the native tool query, and at most the "
-        "two most recent previous user messages only to preserve meaning.\n"
-        "Return exactly one plain search query. Do not answer the question. "
-        "Do not use JSON, quotes, bullets, URLs, or tool syntax. Keep important "
-        "proper nouns, acronyms, product names, and technical terms.\n\n"
-        f"Current user request:\n{(original_query or '').strip()[:900]}\n\n"
-        f"Native tool query:\n{base_query}\n\n"
-        f"Recent user context (latest two prior user turns):\n{history or '(none)'}"
+        "Rewrite one search-engine query for SearXNG.\n"
+        "The current request is primary. Recent user context is only for "
+        "disambiguation. Do not decide whether to search and do not answer.\n"
+        "Return one plain query only: no JSON, bullets, quotes, URLs, or tool syntax.\n"
+        "Keep key proper nouns, acronyms, product names, and technical terms.\n\n"
+        f"Current user request:\n{current_request}\n\n"
+        f"Native tool query:\n{native_query}\n\n"
+        f"Recent user context:\n{history or '(none)'}"
     )
     timeout = max(
         0.25,
@@ -243,7 +273,7 @@ async def enrich_web_search_query(
             ],
             model=model,
             temperature=0,
-            max_tokens=48,
+            max_tokens=40,
             api_base=resolved.get("api_base"),
             api_key=resolved.get("api_key"),
             extra_params=resolved.get("extra_params") or None,

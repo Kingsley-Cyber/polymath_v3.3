@@ -33,6 +33,7 @@ _DEFAULT_MAX_RESULTS = 7
 _DEFAULT_CANDIDATE_RESULTS = 15
 _WEB_SEARCH_RESULTS_PER_QUERY = 5
 _DEFAULT_OBSCURA_MAX_CHARS = 4000
+_WEB_RERANK_TEXT_MAX_CHARS = 1200
 _DEFAULT_FETCH_MAX_PAGES = 6
 _DEFAULT_MAX_RELATED_TERMS = 5
 _WEB_FETCH_USER_AGENT = (
@@ -1980,7 +1981,22 @@ async def rerank_web_source_chunks(
     try:
         from services.reranker import reranker_service
 
-        ranked = await reranker_service.rerank(query, chunks)
+        original_by_id = {chunk.chunk_id: chunk for chunk in chunks}
+        clipped_chunks: list[SourceChunk] = []
+        for chunk in chunks:
+            rerank_chunk = chunk.model_copy()
+            rerank_chunk.text = rerank_chunk.text[:_WEB_RERANK_TEXT_MAX_CHARS]
+            clipped_chunks.append(rerank_chunk)
+
+        reranked_clipped = await reranker_service.rerank(query, clipped_chunks)
+        ranked = []
+        for clipped in reranked_clipped:
+            original = original_by_id.get(clipped.chunk_id)
+            if original is None:
+                continue
+            restored = original.model_copy()
+            restored.score = clipped.score
+            ranked.append(restored)
     except Exception as exc:
         logger.warning("live web rerank failed, using search order: %s", exc)
         ranked = sorted(chunks, key=lambda chunk: chunk.score, reverse=True)

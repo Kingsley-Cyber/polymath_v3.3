@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   CorpusResponse,
   SourceChunk,
+  TraceEvent,
 } from "../types";
 
 export interface StreamingToolActivity {
@@ -32,6 +33,7 @@ interface ChatState {
   error: string | null;
   streamingContent: string;
   streamingThinking: string;
+  streamingTraceEvents: TraceEvent[];
   streamingToolActivity: StreamingToolActivity[];
   /** Sources captured from the SSE `sources` frame during a stream.
    *  Reset on each `startStreaming`; consumed when finalizing the
@@ -54,6 +56,7 @@ interface ChatState {
   addMessage: (conversationId: string, message: ChatMessage) => void;
   updateStreamingContent: (content: string) => void;
   updateStreamingThinking: (thinking: string) => void;
+  addStreamingTraceEvent: (event: TraceEvent) => void;
   addStreamingToolActivity: (activity: StreamingToolActivity) => void;
   completeStreamingToolActivity: (name: string, detail?: string) => void;
   setStreamingSources: (sources: SourceChunk[]) => void;
@@ -96,6 +99,7 @@ export const useChatStore = create<ChatState>()((set) => ({
   error: null,
   streamingContent: "",
   streamingThinking: "",
+  streamingTraceEvents: [],
   streamingToolActivity: [],
   streamingSources: [],
   tokensUsed: null,
@@ -158,6 +162,11 @@ export const useChatStore = create<ChatState>()((set) => ({
       streamingThinking: state.streamingThinking + thinking,
     })),
 
+  addStreamingTraceEvent: (event) =>
+    set((state) => ({
+      streamingTraceEvents: [...state.streamingTraceEvents, event],
+    })),
+
   addStreamingToolActivity: (activity) =>
     set((state) => ({
       streamingToolActivity: [...state.streamingToolActivity, activity],
@@ -200,6 +209,7 @@ export const useChatStore = create<ChatState>()((set) => ({
       isStreaming: false,
       streamingContent: "",
       streamingThinking: "",
+      streamingTraceEvents: [],
       streamingToolActivity: [],
       streamingSources: [],
       messages: {
@@ -227,11 +237,21 @@ export const useChatStore = create<ChatState>()((set) => ({
       isLoading: true,
       streamingContent: "",
       streamingThinking: "",
+      streamingTraceEvents: [],
       streamingToolActivity: [],
       streamingSources: [],
     }),
 
-  stopStreaming: () => set({ isStreaming: false, isLoading: false }),
+  stopStreaming: () =>
+    set({
+      isStreaming: false,
+      isLoading: false,
+      streamingContent: "",
+      streamingThinking: "",
+      streamingTraceEvents: [],
+      streamingToolActivity: [],
+      streamingSources: [],
+    }),
 
   clearStreamingContent: () => set({ streamingContent: "" }),
 
