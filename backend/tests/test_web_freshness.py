@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 from types import SimpleNamespace
@@ -8,6 +9,8 @@ from services.web_freshness import (
     _PageFetchResult,
     _WEB_CACHE_SCHEMA_VERSION,
     WebSearchHit,
+    _extract_json3_caption_text,
+    _extract_vtt_caption_text,
     _obscura_command_args,
     _query_should_include_social_sources,
     _is_low_quality_web_hit_for_query,
@@ -157,6 +160,79 @@ def test_build_web_search_queries_adds_direct_roblox_api_doc_variant():
     assert (
         "RemoteEvent site:create.roblox.com/docs/reference/engine/classes/RemoteEvent"
         in queries
+    )
+
+
+def test_build_web_search_queries_skips_video_for_official_roblox_docs_query():
+    queries = build_web_search_queries(
+        "Roblox RemoteEvent OnServerEvent validation security official docs"
+    )
+
+    assert (
+        "RemoteEvent site:create.roblox.com/docs/reference/engine/classes/RemoteEvent"
+        in queries
+    )
+    assert (
+        "Roblox RemoteEvent OnServerEvent validation security official docs "
+        "site:create.roblox.com/docs"
+        in queries
+    )
+    assert all(not query.startswith("!yt") for query in queries)
+    assert all(not query.startswith("!red") for query in queries)
+
+
+def test_primary_source_query_keeps_video_but_filters_missing_term_overview_hits():
+    query = "Roblox RemoteEvent OnServerEvent validation security official docs"
+
+    assert not _is_low_quality_web_hit_for_query(
+        WebSearchHit(
+            title="Remote Events (One-Way Communication) - YouTube",
+            url="https://www.youtube.com/watch?v=rxBldFKWaTc",
+            snippet="Remote events tutorial.",
+            score=1.0,
+            engines=("searxng",),
+            search_query=query,
+        ),
+        query,
+    )
+    assert _is_low_quality_web_hit_for_query(
+        WebSearchHit(
+            title="Overview | Documentation - Roblox Creator Hub",
+            url="https://create.roblox.com/docs",
+            snippet=(
+                "Create on Roblox. Learn with documentation and resources. "
+                "Missing: RemoteEvent OnServerEvent security"
+            ),
+            score=1.0,
+            engines=("searxng",),
+            search_query=query,
+        ),
+        query,
+    )
+
+
+def test_caption_extractors_return_readable_text():
+    json3 = {
+        "events": [
+            {"segs": [{"utf8": "Validate "}, {"utf8": "on the server."}]},
+            {"segs": [{"utf8": "Validate on the server."}]},
+            {"segs": [{"utf8": "Never trust the client."}]},
+        ]
+    }
+    vtt = """WEBVTT
+
+00:00:00.000 --> 00:00:01.000
+Validate <b>RemoteEvents</b> server-side.
+
+00:00:01.000 --> 00:00:02.000
+Never trust the client.
+"""
+
+    assert _extract_json3_caption_text(json.dumps(json3)) == (
+        "Validate on the server. Never trust the client."
+    )
+    assert _extract_vtt_caption_text(vtt) == (
+        "Validate RemoteEvents server-side. Never trust the client."
     )
 
 

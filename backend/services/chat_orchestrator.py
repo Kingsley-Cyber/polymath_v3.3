@@ -306,6 +306,122 @@ def _format_web_query_builder_trace(plan: Any) -> str:
     )
 
 
+def _format_web_retrieval_decision_trace(
+    web_result: str,
+) -> tuple[str, dict[str, Any]] | None:
+    """Summarize observable web retrieval decisions for the UI trace lane.
+
+    This is intentionally not hidden chain-of-thought. It exposes the bounded,
+    deterministic decisions Polymath made while searching: snippet sufficiency,
+    page-fetch choice, Obscura usage, reranking, and selected evidence.
+    """
+    try:
+        payload = json.loads(web_result)
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or payload.get("error"):
+        return None
+    pipeline = payload.get("pipeline")
+    if not isinstance(pipeline, dict):
+        return None
+
+    sufficiency = (
+        pipeline.get("snippet_sufficiency")
+        if isinstance(pipeline.get("snippet_sufficiency"), dict)
+        else {}
+    )
+    fetches = pipeline.get("fetches") if isinstance(pipeline.get("fetches"), list) else []
+    results = payload.get("results") if isinstance(payload.get("results"), list) else []
+    selected_urls = (
+        pipeline.get("selected_full_page_urls")
+        if isinstance(pipeline.get("selected_full_page_urls"), list)
+        else []
+    )
+    search_queries = (
+        pipeline.get("search_queries")
+        if isinstance(pipeline.get("search_queries"), list)
+        else [payload.get("query")]
+    )
+    js_render = (
+        pipeline.get("js_render") if isinstance(pipeline.get("js_render"), dict) else {}
+    )
+
+    method_counts: dict[str, int] = {}
+    for item in fetches:
+        if not isinstance(item, dict):
+            continue
+        method = str(item.get("method") or item.get("status") or "unknown")
+        method_counts[method] = method_counts.get(method, 0) + 1
+    method_summary = ", ".join(
+        f"{method}={count}" for method, count in sorted(method_counts.items())
+    )
+
+    top_sources: list[str] = []
+    for item in results[:3]:
+        if not isinstance(item, dict):
+            continue
+        title = _clip_trace_value(item.get("title"), 90)
+        url = _clip_trace_value(item.get("url"), 120)
+        fetch_method = item.get("fetch_method") or (
+            "snippet" if not item.get("full_page_fetched") else "page"
+        )
+        top_sources.append(f"- {title} [{fetch_method}] {url}")
+
+    snippet_only = bool(pipeline.get("snippet_only"))
+    fetch_attempts = pipeline.get("full_page_fetch_attempts") or 0
+    fetch_successes = pipeline.get("full_page_fetch_successes") or 0
+    final_results = (
+        pipeline.get("final_reranked_results")
+        or payload.get("reranked_results")
+        or 0
+    )
+    final_limit = pipeline.get("final_result_limit") or _MAX_WEB_SEARCH_RESULTS_PER_CALL
+
+    content = (
+        "[Web retrieval decision trace]\n"
+        f"query: {_clip_trace_value(payload.get('query'), 260)}\n"
+        f"search_queries: {_clip_trace_value('; '.join(str(q) for q in search_queries if q), 320)}\n"
+        f"candidates: {pipeline.get('candidate_results') or payload.get('candidate_results') or 0} "
+        f"of requested {pipeline.get('candidate_limit_requested') or 'unknown'}\n"
+        f"snippet_decision: {'use_snippets_only' if snippet_only else 'fetch_pages_or_enrich_snippets'} "
+        f"| score={pipeline.get('snippet_sufficiency_score', 'unknown')} "
+        f"| reason={pipeline.get('snippet_sufficiency_reason') or pipeline.get('skipped_full_page_fetch_reason') or 'unknown'}\n"
+        f"snippet_evidence: useful_chars={sufficiency.get('useful_snippet_chars', 'unknown')}, "
+        f"top3_chars={sufficiency.get('top3_snippet_chars', 'unknown')}, "
+        f"useful_count={sufficiency.get('useful_snippet_count', 'unknown')}, "
+        f"domains={sufficiency.get('distinct_domains', 'unknown')}, "
+        f"query_coverage={sufficiency.get('query_coverage', 'unknown')}, "
+        f"stronger_evidence_required={str(bool(sufficiency.get('stronger_evidence_required'))).lower()}\n"
+        f"page_fetch: attempts={fetch_attempts}, successes={fetch_successes}, "
+        f"selected_urls={len(selected_urls)}, skipped_reason={pipeline.get('skipped_full_page_fetch_reason') or 'none'}\n"
+        f"fetch_methods: {method_summary or 'none'}\n"
+        f"obscura: configured={str(bool(js_render.get('configured'))).lower()}, "
+        f"attempted={str(bool(js_render.get('attempted'))).lower()}, "
+        f"rendered={str(bool(js_render.get('rendered'))).lower()}\n"
+        f"reranker: {pipeline.get('ranked_by') or payload.get('ranked_by') or 'unknown'} "
+        f"selected={final_results}/{final_limit}\n"
+        "top_selected_sources:\n"
+        f"{chr(10).join(top_sources) if top_sources else '- none'}"
+    )
+    metadata = {
+        "query": payload.get("query"),
+        "candidate_results": pipeline.get("candidate_results")
+        or payload.get("candidate_results"),
+        "snippet_only": snippet_only,
+        "snippet_sufficiency_score": pipeline.get("snippet_sufficiency_score"),
+        "snippet_sufficiency_reason": pipeline.get("snippet_sufficiency_reason"),
+        "full_page_fetch_attempts": fetch_attempts,
+        "full_page_fetch_successes": fetch_successes,
+        "obscura_attempted": bool(js_render.get("attempted")),
+        "obscura_rendered": bool(js_render.get("rendered")),
+        "ranked_by": pipeline.get("ranked_by") or payload.get("ranked_by"),
+        "final_reranked_results": final_results,
+        "final_result_limit": final_limit,
+        "raw_chain_of_thought": False,
+    }
+    return content, metadata
+
+
 def _format_model_api_trace(
     *,
     name: str,
@@ -1120,8 +1236,33 @@ class ChatOrchestrator:
                     conversation_id=str(conversation_id),
                 )
             )
+            yield _record_trace_event(
+                lane="reasoning",
+                title="Web retrieval controller",
+                status="running",
+                content=(
+                    "Searching SearXNG, checking whether snippets are enough, "
+                    "fetching full pages when needed, then reranking evidence."
+                ),
+                metadata={
+                    "tool_name": "web_search",
+                    "query": web_args.get("query"),
+                    "max_results": web_args.get("max_results"),
+                    "raw_chain_of_thought": False,
+                },
+            )
             web_result = await self._execute_web_search_tool(web_args, request)
             logger.info("mandatory web_search prelude completed")
+            decision_trace = _format_web_retrieval_decision_trace(web_result)
+            if decision_trace is not None:
+                decision_content, decision_metadata = decision_trace
+                yield _record_trace_event(
+                    lane="reasoning",
+                    title="Web retrieval decision trace",
+                    status="done",
+                    content=decision_content,
+                    metadata=decision_metadata,
+                )
             yield build_sse_chunk(
                 ChatChunk(
                     type="tool_result",
@@ -2076,8 +2217,18 @@ class ChatOrchestrator:
         # retrieves — which routes the search to the actually-relevant
         # documents. The ~1-2s latency cost is acceptable for a
         # knowledge-graph application where quality > speed.
-        "balanced": {"retrieval_k": 40, "rerank_enabled": True, "hyde_enabled": True},
-        "thorough": {"retrieval_k": 60, "rerank_enabled": True, "hyde_enabled": True},
+        "balanced": {
+            "retrieval_k": 40,
+            "rerank_enabled": True,
+            "hyde_enabled": True,
+            "rerank_top_n": 24,
+        },
+        "thorough": {
+            "retrieval_k": 60,
+            "rerank_enabled": True,
+            "hyde_enabled": True,
+            "rerank_top_n": 32,
+        },
     }
 
     async def _resolve_query_profile(
@@ -2164,6 +2315,10 @@ class ChatOrchestrator:
             preset = self._QUERY_PROFILE_PRESETS.get(
                 profile_key, self._QUERY_PROFILE_PRESETS["balanced"]
             )
+
+        for key in extras:
+            if extras[key] is None and key in preset:
+                extras[key] = preset[key]
 
         # Per-request overrides win on the three classic knobs
         retrieval_k = (

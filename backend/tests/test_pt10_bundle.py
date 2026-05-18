@@ -175,6 +175,7 @@ def test_balanced_profile_has_hyde_enabled():
     overloaded surface tokens like 'design'."""
     presets = ChatOrchestrator._QUERY_PROFILE_PRESETS
     assert presets["balanced"]["hyde_enabled"] is True
+    assert presets["balanced"]["rerank_top_n"] == 24
 
 
 def test_fast_profile_still_has_hyde_disabled():
@@ -188,6 +189,25 @@ def test_thorough_profile_unchanged():
     presets = ChatOrchestrator._QUERY_PROFILE_PRESETS
     assert presets["thorough"]["hyde_enabled"] is True
     assert presets["thorough"]["retrieval_k"] == 60
+    assert presets["thorough"]["rerank_top_n"] == 32
+
+
+@pytest.mark.asyncio
+async def test_profile_rerank_caps_resolve_from_presets():
+    orchestrator = ChatOrchestrator()
+
+    balanced = await orchestrator._resolve_query_profile(
+        ChatRequest(message="remoteevent validation")
+    )
+    thorough = await orchestrator._resolve_query_profile(
+        ChatRequest(
+            message="remoteevent validation",
+            overrides=ModelOverrides(query_profile="thorough"),
+        )
+    )
+
+    assert balanced["rerank_top_n"] == 24
+    assert thorough["rerank_top_n"] == 32
 
 
 def test_hyde_skips_source_constrained_direct_support_queries():

@@ -32,6 +32,11 @@ export function MessageBubble({
   const [thinkingOpen, setThinkingOpen] = useState(true);
   const [traceOpen, setTraceOpen] = useState(true);
   const isUser = message.role === "user";
+  const visibleToolActivity = isUser
+    ? []
+    : toolActivity.length > 0
+      ? toolActivity
+      : deriveToolActivityFromTraceEvents(message.trace_events);
 
   const handleCopy = async () => {
     try {
@@ -119,8 +124,8 @@ export function MessageBubble({
           </details>
         )}
 
-        {!isUser && toolActivity.length > 0 && (
-          <ToolActivityPanel activities={toolActivity} />
+        {!isUser && visibleToolActivity.length > 0 && (
+          <ToolActivityPanel activities={visibleToolActivity} />
         )}
 
         {/* Bubble */}
@@ -190,6 +195,47 @@ export function MessageBubble({
       </div>
     </div>
   );
+}
+
+function deriveToolActivityFromTraceEvents(
+  events?: TraceEvent[],
+): StreamingToolActivity[] {
+  if (!events || events.length === 0) return [];
+
+  const activityByName = new Map<string, StreamingToolActivity>();
+
+  for (const event of events) {
+    if (event.lane !== "tool_call" && event.lane !== "tool_result") {
+      continue;
+    }
+
+    const metadataToolName =
+      typeof event.metadata?.tool_name === "string"
+        ? event.metadata.tool_name
+        : undefined;
+    const name = metadataToolName || toolNameFromTraceTitle(event.title);
+    if (!name) continue;
+
+    const current = activityByName.get(name);
+    const isResult = event.lane === "tool_result";
+    const status =
+      isResult || event.status === "done" ? "done" : "running";
+    const detail = event.content || current?.detail;
+
+    activityByName.set(name, {
+      id: current?.id || `${name}-${event.id}`,
+      name,
+      status: current?.status === "done" ? "done" : status,
+      detail,
+    });
+  }
+
+  return Array.from(activityByName.values());
+}
+
+function toolNameFromTraceTitle(title: string): string | undefined {
+  const match = title.match(/\b([a-zA-Z][a-zA-Z0-9_-]*)\s+tool\b/);
+  return match?.[1];
 }
 
 function TracePanel({

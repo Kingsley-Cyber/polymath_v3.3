@@ -95,6 +95,7 @@ passlib[bcrypt]==1.7.4
 # (pip pulls 4.x on fresh installs). Pin the underlying lib to the 3.x line.
 bcrypt<4.0
 slowapi==0.1.9
+yt-dlp>=2024.8.6
 
 # NOTE: MCP SDK lives in backend/requirements.mcp.txt (used only by Dockerfile.mcp).
 # Kept separate because mcp>=1.2 requires anyio>=4, which conflicts with this

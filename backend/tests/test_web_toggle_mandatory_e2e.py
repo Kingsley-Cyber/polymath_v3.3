@@ -230,6 +230,16 @@ async def test_web_toggle_on_runs_deterministic_builder_to_web_to_rerank_pipelin
         telemetry = {
             "selected_full_page_urls": [hit.url for hit in selected],
             "snippet_only": False,
+            "snippet_sufficiency_score": 0.31,
+            "snippet_sufficiency_reason": "insufficient_query_coverage",
+            "snippet_sufficiency": {
+                "useful_snippet_chars": 860,
+                "top3_snippet_chars": 520,
+                "useful_snippet_count": 4,
+                "distinct_domains": 3,
+                "query_coverage": 0.38,
+                "stronger_evidence_required": True,
+            },
             "redis_search_cache_hit": False,
             "redis_page_cache_hit": False,
             "obscura_attempt_rate": 0.25,
@@ -357,6 +367,8 @@ async def test_web_toggle_on_runs_deterministic_builder_to_web_to_rerank_pipelin
     assert "Deterministic web query builder" in trace_titles
     assert "Web planner tool-call model" not in trace_titles
     assert "Native web_search tool call" in trace_titles
+    assert "Web retrieval controller" in trace_titles
+    assert "Web retrieval decision trace" in trace_titles
     assert "Utility web query helper" not in trace_titles
     assert "web_search tool result" in trace_titles
     assert "Chat model stream" in trace_titles
@@ -372,6 +384,21 @@ async def test_web_toggle_on_runs_deterministic_builder_to_web_to_rerank_pipelin
     assert "context: 2 prior user message(s) scanned" in builder_trace
     assert "context_terms_used: none" in builder_trace
     assert "query: Polymath web retrieval Obscura SearXNG reranking final seven sources" in builder_trace
+
+    decision_trace_event = next(
+        event
+        for event in trace_events
+        if event["title"] == "Web retrieval decision trace" and event["status"] == "done"
+    )
+    decision_trace = decision_trace_event["content"]
+    assert "[Web retrieval decision trace]" in decision_trace
+    assert "snippet_decision: fetch_pages_or_enrich_snippets" in decision_trace
+    assert "score=0.31" in decision_trace
+    assert "reason=insufficient_query_coverage" in decision_trace
+    assert "page_fetch: attempts=4, successes=4" in decision_trace
+    assert "obscura: configured=true, attempted=true, rendered=true" in decision_trace
+    assert "reranker:" in decision_trace
+    assert decision_trace_event["metadata"]["raw_chain_of_thought"] is False
 
     tool_event = events[event_types.index("tool_result")]
     tool_payload = json.loads(tool_event["content"])[0]

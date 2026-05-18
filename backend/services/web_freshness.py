@@ -51,7 +51,7 @@ _DEFAULT_OBSCURA_DOMAINS = (
 _FETCH_CACHE_MAX_ITEMS = 512
 _WEB_CACHE_SCHEMA_VERSION = "live-web-v2"
 _WEB_SEARCH_CACHE_TTL_SECONDS = 600
-_WEB_EXTRACTION_VERSION = "page-text-v2"
+_WEB_EXTRACTION_VERSION = "page-text-v3-ytdlp"
 
 _RESEARCH_DOMAINS = (
     "arxiv.org",
@@ -71,6 +71,11 @@ _SOCIAL_DOMAINS = (
     "reddit.com",
     "x.com",
     "twitter.com",
+)
+
+_VIDEO_DOMAINS = (
+    "youtube.com",
+    "youtu.be",
 )
 
 _RESEARCH_QUERY_MARKERS = (
@@ -773,11 +778,30 @@ def _looks_like_creator_economy_query(query: str) -> bool:
 
 def _query_should_include_video_sources(query: str) -> bool:
     text = _normalized_text(query)
+    if _query_prefers_primary_sources(query):
+        return False
     return bool(
         _contains_marker(text, _VIDEO_QUERY_MARKERS)
         or _looks_like_roblox_query(query)
         or _looks_like_ai_media_query(query)
         or _looks_like_creator_economy_query(query)
+    )
+
+
+def _query_prefers_primary_sources(query: str) -> bool:
+    text = _normalized_text(query)
+    return _contains_marker(
+        text,
+        (
+            "cite",
+            "citation",
+            "docs",
+            "documentation",
+            "official",
+            "primary source",
+            "source",
+            "sources",
+        ),
     )
 
 
@@ -972,8 +996,9 @@ def build_web_search_queries(query: str) -> list[str]:
         _append_query_variant(queries, f"{base} site:create.roblox.com/docs")
         _append_query_variant(queries, f"{base} site:devforum.roblox.com")
         _append_query_variant(queries, f"!gh roblox luau {base}")
-        _append_query_variant(queries, f"!yt roblox {base} tutorial")
-        _append_query_variant(queries, f"!red roblox {base}")
+        if not _query_prefers_primary_sources(base):
+            _append_query_variant(queries, f"!yt roblox {base} tutorial")
+            _append_query_variant(queries, f"!red roblox {base}")
 
     elif _looks_like_ai_media_query(base):
         for item in _build_model_registry_queries(base):
@@ -1227,15 +1252,81 @@ def _hit_matches_distinctive_query_tokens(hit: WebSearchHit, query: str) -> bool
         for value in (hit.title, hit.snippet, hit.url)
     )
     hit_tokens = _term_tokens(haystack)
+    if "remoteevent" in distinctive and (
+        "remoteevents" in hit_tokens or {"remote", "events"} <= hit_tokens
+    ):
+        return True
     return bool(distinctive & hit_tokens)
 
 
 def _is_low_quality_web_hit_for_query(hit: WebSearchHit, query: str) -> bool:
     if _is_low_quality_web_hit(hit):
         return True
+    domain = _web_domain(hit.url)
+    if _query_prefers_primary_sources(query) and _is_social_domain(domain):
+        return True
+    if (
+        _query_prefers_primary_sources(query)
+        and "missing:" in str(hit.snippet or "").lower()
+        and not (
+            {"remoteevent", "onserverevent", "security", "validation"}
+            & _term_tokens(hit.title or "")
+        )
+    ):
+        return True
     if not _hit_matches_distinctive_query_tokens(hit, query):
         return True
     return _is_job_listing_hit(hit) and not _looks_like_job_search_query(query)
+
+
+def _is_video_domain(domain: str) -> bool:
+    return any(domain == item or domain.endswith(f".{item}") for item in _VIDEO_DOMAINS)
+
+
+def _extract_json3_caption_text(raw: str) -> str:
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return ""
+    lines: list[str] = []
+    for event in payload.get("events") or []:
+        if not isinstance(event, dict):
+            continue
+        text = "".join(
+            str(seg.get("utf8") or "")
+            for seg in event.get("segs") or []
+            if isinstance(seg, dict)
+        )
+        text = html.unescape(re.sub(r"\s+", " ", text)).strip()
+        if text:
+            lines.append(text)
+    return _dedupe_caption_lines(lines)
+
+
+def _extract_vtt_caption_text(raw: str) -> str:
+    lines: list[str] = []
+    for line in raw.splitlines():
+        cleaned = line.strip()
+        if not cleaned or cleaned.upper().startswith("WEBVTT"):
+            continue
+        if "-->" in cleaned or re.fullmatch(r"\d+", cleaned):
+            continue
+        cleaned = re.sub(r"<[^>]+>", "", cleaned)
+        cleaned = html.unescape(re.sub(r"\s+", " ", cleaned)).strip()
+        if cleaned:
+            lines.append(cleaned)
+    return _dedupe_caption_lines(lines)
+
+
+def _dedupe_caption_lines(lines: list[str]) -> str:
+    deduped: list[str] = []
+    previous = ""
+    for line in lines:
+        if line == previous:
+            continue
+        deduped.append(line)
+        previous = line
+    return " ".join(deduped)
 
 
 def _explicit_web_search_target(original_query: str) -> str | None:
@@ -2549,8 +2640,14 @@ class LiveWebSearch:
                 cache_layer=cache_layer,
             )
 
-        text = await self._fetch_one_with_raw_adapter(url)
-        method = "raw_adapter"
+        text = None
+        method = "failed"
+        if _is_video_domain(_web_domain(url)):
+            text = await self._fetch_one_with_ytdlp(url)
+            method = "yt_dlp" if text else "failed"
+        if not text:
+            text = await self._fetch_one_with_raw_adapter(url)
+            method = "raw_adapter"
         obscura_attempted = False
         if not text:
             text = await self._fetch_one_with_httpx(url)
@@ -2693,6 +2790,112 @@ class LiveWebSearch:
             return None
         text = stdout.decode("utf-8", errors="replace").strip()
         return text[: settings.OBSCURA_MAX_CHARS] if text else None
+
+    async def _fetch_one_with_ytdlp(self, url: str) -> str | None:
+        """Extract useful YouTube metadata/transcripts with yt-dlp when available."""
+        settings = get_settings()
+        max_chars = int(settings.OBSCURA_MAX_CHARS or _DEFAULT_OBSCURA_MAX_CHARS)
+        timeout_seconds = min(float(settings.OBSCURA_TIMEOUT_SECONDS or 10.0), 12.0)
+        try:
+            import yt_dlp  # type: ignore
+        except Exception as exc:
+            logger.debug("yt-dlp unavailable for %s: %s", url, exc)
+            return None
+
+        def extract_info() -> dict[str, Any] | None:
+            options = {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "noplaylist": True,
+                "socket_timeout": timeout_seconds,
+                "extract_flat": False,
+            }
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=False)
+                return info if isinstance(info, dict) else None
+
+        try:
+            info = await asyncio.wait_for(
+                asyncio.to_thread(extract_info),
+                timeout=timeout_seconds + 3,
+            )
+        except Exception as exc:
+            logger.debug("yt-dlp extract failed for %s: %s", url, exc)
+            return None
+        if not info:
+            return None
+
+        title = str(info.get("title") or "").strip()
+        channel = str(info.get("channel") or info.get("uploader") or "").strip()
+        upload_date = str(info.get("upload_date") or "").strip()
+        duration = info.get("duration")
+        description = re.sub(r"\s+", " ", str(info.get("description") or "")).strip()
+        caption = await self._fetch_ytdlp_caption_text(info, timeout_seconds=timeout_seconds)
+
+        parts = [
+            f"Title: {title}" if title else "",
+            f"Channel: {channel}" if channel else "",
+            f"Upload date: {upload_date}" if upload_date else "",
+            f"Duration seconds: {duration}" if duration else "",
+            f"Description: {description[:1200]}" if description else "",
+            f"Transcript: {caption}" if caption else "",
+        ]
+        text = "\n".join(part for part in parts if part).strip()
+        return text[:max_chars] if len(text) >= 120 else None
+
+    async def _fetch_ytdlp_caption_text(
+        self,
+        info: dict[str, Any],
+        *,
+        timeout_seconds: float,
+    ) -> str:
+        track = self._select_ytdlp_caption_track(info)
+        if not track:
+            return ""
+        url = str(track.get("url") or "")
+        if not _valid_web_url(url):
+            return ""
+        ext = str(track.get("ext") or "").lower()
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(timeout_seconds, connect=2.0),
+                follow_redirects=True,
+                headers={"User-Agent": _WEB_FETCH_USER_AGENT},
+            ) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+        except Exception as exc:
+            logger.debug("yt-dlp caption fetch failed: %s", exc)
+            return ""
+        raw = response.text
+        if ext == "json3" or raw.lstrip().startswith("{"):
+            return _extract_json3_caption_text(raw)[:2500]
+        return _extract_vtt_caption_text(raw)[:2500]
+
+    def _select_ytdlp_caption_track(self, info: dict[str, Any]) -> dict[str, Any] | None:
+        for group_name in ("subtitles", "automatic_captions"):
+            group = info.get(group_name)
+            if not isinstance(group, dict):
+                continue
+            language_keys = [
+                key
+                for key in group
+                if str(key).lower() in {"en", "en-us", "en-gb"}
+            ] or [key for key in group if str(key).lower().startswith("en")]
+            for language in language_keys:
+                tracks = group.get(language)
+                if not isinstance(tracks, list):
+                    continue
+                for preferred_ext in ("json3", "vtt", "srv3", "ttml"):
+                    for track in tracks:
+                        if (
+                            isinstance(track, dict)
+                            and str(track.get("ext") or "").lower() == preferred_ext
+                            and track.get("url")
+                        ):
+                            return track
+        return None
 
 
 live_web_search = LiveWebSearch()

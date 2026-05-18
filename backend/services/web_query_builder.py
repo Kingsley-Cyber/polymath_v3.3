@@ -100,6 +100,10 @@ _STOPWORDS = frozenset(
         "working",
         "you",
         "focus",
+        "current",
+        "local",
+        "corpus",
+        "phase",
     }
 )
 
@@ -351,6 +355,19 @@ def _apply_domain_completion(terms: list[str]) -> list[str]:
     return _dedupe_terms(terms + additions)
 
 
+def _apply_high_signal_query_shape(terms: list[str]) -> list[str]:
+    keys = {_token_key(term) for term in terms}
+    if "remoteevent" not in keys:
+        return terms
+    if not (keys & _SECURITY_MARKERS or "validation" in keys):
+        return terms
+
+    shaped = ["Roblox", "RemoteEvent", "OnServerEvent", "validation", "security"]
+    if keys & {"official", "docs", "documentation", "guidance"}:
+        shaped.extend(["official", "docs"])
+    return _dedupe_terms(shaped)
+
+
 def build_web_search_query(
     *,
     current_query: str,
@@ -364,6 +381,7 @@ def build_web_search_query(
     ctx_terms = _context_terms(terms, history)
     rag_terms = _rag_terms(terms, rag_sources)
     terms = _apply_domain_completion(terms + list(ctx_terms) + list(rag_terms))
+    terms = _apply_high_signal_query_shape(terms)
 
     if terms:
         query = " ".join(terms)

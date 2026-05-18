@@ -27,7 +27,7 @@ def test_builder_uses_prior_user_context_only_for_disambiguation():
         rag_sources=[],
     )
 
-    assert query == "RemoteEvent validation patterns Roblox Luau security server-side"
+    assert query == "Roblox RemoteEvent OnServerEvent validation security"
     assert rag_terms == ()
     assert context_terms == ("Roblox", "Luau", "security", "server-side")
     assert history_count == 2
@@ -43,7 +43,26 @@ def test_builder_does_not_pollute_query_with_irrelevant_high_scoring_rag():
         ],
     )
 
-    assert query == "RemoteEvent validation patterns Roblox Luau security"
+    assert query == "Roblox RemoteEvent OnServerEvent validation security"
+    assert rag_terms == ()
+    assert context_terms == ()
+    assert history_count == 0
+
+
+def test_builder_strips_local_corpus_language_from_remoteevent_web_query():
+    query, rag_terms, context_terms, history_count = build_web_search_query(
+        current_query=(
+            "For Roblox Luau, what are the safest RemoteEvent validation "
+            "patterns? Use current official guidance and my local Phase5 corpus."
+        ),
+        recent_messages=[],
+        rag_sources=[],
+    )
+
+    assert query == "Roblox RemoteEvent OnServerEvent validation security official docs"
+    assert "local" not in query.lower()
+    assert "corpus" not in query.lower()
+    assert "Phase5" not in query
     assert rag_terms == ()
     assert context_terms == ()
     assert history_count == 0

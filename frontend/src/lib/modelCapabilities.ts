@@ -157,7 +157,7 @@ const VISION_PATTERNS: ReadonlyArray<RegExp> = [
   // Qwen-VL
   /qwen[\d.]*-vl/,
   // Llama vision (3.2-vision, 3.2-90b-vision-instruct, 4-maverick, 4-scout)
-  /llama[\w.\-]*(vision|maverick|scout)/,
+  /llama[\w.-]*(vision|maverick|scout)/,
 ];
 
 /**
