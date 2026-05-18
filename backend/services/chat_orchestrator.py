@@ -206,6 +206,67 @@ def _dedupe_sources_for_context(sources: list[Any] | None) -> list[Any]:
     return deduped
 
 
+def _clip_trace_value(value: Any, max_chars: int = 180) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "..."
+
+
+def _format_utility_web_trace(web_result: str) -> str | None:
+    """Build a human-readable trace for the Utility web-query helper.
+
+    This is intentionally structured telemetry, not a raw hidden chain of
+    thought. It lets the UI show which helper model ran, what query it chose,
+    how much history it used, and how the web lane followed through.
+    """
+    try:
+        payload = json.loads(web_result)
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or payload.get("error"):
+        return None
+    pipeline = payload.get("pipeline")
+    if not isinstance(pipeline, dict):
+        return None
+    utility = pipeline.get("utility_query_enrichment")
+    if not isinstance(utility, dict):
+        return None
+
+    model = utility.get("model") or "not configured"
+    attempted = bool(utility.get("attempted"))
+    applied = bool(utility.get("applied"))
+    fallback = utility.get("fallback_reason") or "none"
+    history_count = utility.get("history_user_messages_used") or 0
+    duration_ms = utility.get("duration_ms") or 0
+    base_query = _clip_trace_value(utility.get("base_query"))
+    final_query = _clip_trace_value(payload.get("query"))
+    js_render = pipeline.get("js_render") if isinstance(pipeline.get("js_render"), dict) else {}
+    fetch_attempts = pipeline.get("full_page_fetch_attempts") or 0
+    fetch_successes = pipeline.get("full_page_fetch_successes") or 0
+    final_results = pipeline.get("final_reranked_results") or 0
+    final_limit = pipeline.get("final_result_limit") or _MAX_WEB_SEARCH_RESULTS_PER_CALL
+
+    return (
+        "[Utility web query trace]\n"
+        f"model: {model}\n"
+        f"prompt_version: {utility.get('prompt_version') or 'unknown'}\n"
+        f"attempted: {str(attempted).lower()} | applied: {str(applied).lower()} | "
+        f"fallback: {fallback}\n"
+        f"context: {history_count} prior user message(s)\n"
+        f"base_query: {base_query}\n"
+        f"final_query: {final_query}\n"
+        f"duration_ms: {duration_ms}\n"
+        f"web_followthrough: candidates={pipeline.get('candidate_results') or 0}, "
+        f"fetches={fetch_attempts}/{fetch_successes}, "
+        f"reranked={final_results}/{final_limit}, "
+        f"ranked_by={pipeline.get('ranked_by') or 'unknown'}\n"
+        f"obscura: configured={str(bool(js_render.get('configured'))).lower()}, "
+        f"attempted={str(bool(js_render.get('attempted'))).lower()}, "
+        f"rendered={str(bool(js_render.get('rendered'))).lower()}"
+    )
+
+
 def _web_chunk_content_preview(chunk: Any, *, max_chars: int = 1600) -> str:
     text = str(getattr(chunk, "text", "") or "")
     marker = "\nContent: "
@@ -704,6 +765,7 @@ class ChatOrchestrator:
         prefetched_react_messages: list[dict] = []
         prefetched_tool_call_count = 0
         prefetched_web_search_call_count = 0
+        pre_model_trace_parts: list[str] = []
 
         # Trust-signal snapshot — captured here so it carries through to
         # both the `done` SSE frame and the persisted assistant message.
@@ -768,6 +830,16 @@ class ChatOrchestrator:
             )
             web_result = await self._execute_web_search_tool(web_args, request)
             logger.info("mandatory web_search prelude completed")
+            utility_trace = _format_utility_web_trace(web_result)
+            if utility_trace:
+                pre_model_trace_parts.append(utility_trace)
+                yield build_sse_chunk(
+                    ChatChunk(
+                        type="thinking",
+                        thinking=f"{utility_trace}\n\n",
+                        conversation_id=str(conversation_id),
+                    )
+                )
             yield build_sse_chunk(
                 ChatChunk(
                     type="tool_result",
@@ -1468,10 +1540,16 @@ class ChatOrchestrator:
         reasoning_cascade_applied = bool(analysis_text)
 
         try:
+            thinking_parts = [
+                part.strip()
+                for part in [*pre_model_trace_parts, assistant_thinking or ""]
+                if part and part.strip()
+            ]
+            thinking_to_save = "\n\n".join(thinking_parts) if thinking_parts else None
             await self._save_assistant_message(
                 conversation_id,
                 assistant_content,
-                assistant_thinking if assistant_thinking else None,
+                thinking_to_save,
                 model_used,
                 trimming_applied,
                 chunks_returned=chunks_returned,

@@ -380,10 +380,26 @@ async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
 
     event_types = [event["type"] for event in events]
     assert event_types.index("tool_call_start") < event_types.index("tool_result")
+    assert event_types.index("tool_call_start") < event_types.index("thinking")
+    assert event_types.index("thinking") < event_types.index("tool_result")
     assert event_types.index("tool_result") < event_types.index("sources")
     assert event_types.index("sources") < event_types.index("budget")
     assert event_types.index("budget") < event_types.index("token")
     assert event_types[-1] == "done"
+
+    utility_trace = events[event_types.index("thinking")]["thinking"]
+    assert "[Utility web query trace]" in utility_trace
+    assert "model: openai/glm-5-turbo" in utility_trace
+    assert "context: 2 prior user message(s)" in utility_trace
+    assert (
+        "base_query: With Web enabled, verify Polymath web retrieval uses the utility "
+        "model and final seven sources"
+    ) in utility_trace
+    assert (
+        "final_query: Polymath web retrieval utility model final seven sources Obscura SearXNG"
+    ) in utility_trace
+    assert "reranked=7/7" in utility_trace
+    assert "obscura: configured=true, attempted=true, rendered=true" in utility_trace
 
     tool_event = events[event_types.index("tool_result")]
     tool_payload = json.loads(tool_event["content"])[0]
@@ -428,6 +444,7 @@ async def test_web_toggle_on_runs_mandatory_utility_to_web_to_rerank_pipeline(
     assert done["tools_used"] == ["web_search"]
     assert saved_assistant["chunks_returned"] == 8
     assert saved_assistant["sources"] == captured["prompt_sources"]
+    assert saved_assistant["thinking"] == utility_trace.strip()
 
 
 @pytest.mark.asyncio
