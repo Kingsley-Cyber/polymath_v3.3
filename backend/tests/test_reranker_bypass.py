@@ -93,6 +93,38 @@ def test_ranked_chunks_from_results_response():
     assert [c.score for c in out] == [7.5, -2.0]
 
 
+def test_ranked_chunks_from_llamacpp_relevance_score_response():
+    pool = [_chunk(chunk_id="a"), _chunk(chunk_id="b")]
+    out = _ranked_chunks_from_response(
+        pool,
+        {
+            "results": [
+                {"index": 1, "relevance_score": 8.25},
+                {"index": 0, "relevance_score": -1.5},
+            ]
+        },
+    )
+
+    assert [c.chunk_id for c in out] == ["b", "a"]
+    assert [c.score for c in out] == [8.25, -1.5]
+
+
+def test_ranked_chunks_from_openai_style_data_response():
+    pool = [_chunk(chunk_id="a"), _chunk(chunk_id="b")]
+    out = _ranked_chunks_from_response(
+        pool,
+        {
+            "data": [
+                {"document_index": 0, "score": 2.25},
+                {"document_index": 1, "score": -3.0},
+            ]
+        },
+    )
+
+    assert [c.chunk_id for c in out] == ["a", "b"]
+    assert [c.score for c in out] == [2.25, -3.0]
+
+
 def test_ranked_chunks_from_scores_response_sorts_for_mlx_shape():
     pool = [_chunk(chunk_id="a"), _chunk(chunk_id="b"), _chunk(chunk_id="c")]
     out = _ranked_chunks_from_response(pool, {"scores": [0.2, 0.9, 0.1]})

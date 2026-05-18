@@ -1,7 +1,7 @@
 """
 Reranker client — HTTP wrapper for the reranker sidecar.
 
-Sidecar: sentence-transformers CrossEncoder at http://reranker:8080/rerank.
+Sidecar: llama.cpp reranking server at http://reranker:8080/rerank by default.
 Falls back to score-sort if the service is unavailable.
 
 Phase 4.5 — code-chunk bypass. Some prose-oriented cross-encoders demote
@@ -52,17 +52,40 @@ def _ranked_chunks_from_response(
 ) -> List[SourceChunk]:
     """Convert supported reranker sidecar response shapes into ranked chunks.
 
-    Docker sentence-transformers sidecar:
+    llama.cpp / Jina-style sidecar:
+      {"results": [{"index": 0, "relevance_score": 7.1, ...}]}
+
+    Legacy Docker sentence-transformers sidecar:
       {"results": [{"index": 0, "score": 7.1, "text": "..."}]}
 
     Apple MLX scaffold:
       {"scores": [0.91, 0.12, ...]}  # aligned to input documents
     """
-    if isinstance(data.get("results"), list):
+    def _item_index(item: dict) -> int:
+        if "index" in item:
+            return int(item["index"])
+        if "document_index" in item:
+            return int(item["document_index"])
+        raise KeyError("index")
+
+    def _item_score(item: dict) -> float:
+        if "score" in item:
+            return float(item["score"])
+        if "relevance_score" in item:
+            return float(item["relevance_score"])
+        raise KeyError("score")
+
+    ranked_items = data.get("results")
+    if not isinstance(ranked_items, list):
+        ranked_items = data.get("data")
+
+    if isinstance(ranked_items, list):
         reranked: list[SourceChunk] = []
-        for item in data["results"]:
-            chunk = pool[int(item["index"])].model_copy()
-            chunk.score = float(item["score"])
+        for item in ranked_items:
+            if not isinstance(item, dict):
+                continue
+            chunk = pool[_item_index(item)].model_copy()
+            chunk.score = _item_score(item)
             reranked.append(chunk)
         return reranked
 
@@ -78,14 +101,14 @@ def _ranked_chunks_from_response(
 
 
 class RerankerService:
-    """HTTP client for the configured cross-encoder reranker sidecar."""
+    """HTTP client for the configured reranker sidecar."""
 
     def __init__(self) -> None:
         self._settings = get_settings()
 
     async def rerank(self, query: str, candidate_pool: List[SourceChunk]) -> List[SourceChunk]:
         """
-        Rerank candidates against the query using the cross-encoder sidecar.
+        Rerank candidates against the query using the configured sidecar.
         Falls back to vector-score sort if the sidecar is unreachable or returns an error.
 
         Phase 4.5: when `RERANKER_BYPASS_CODE` is enabled (default True),
@@ -148,7 +171,7 @@ class RerankerService:
         return merged
 
     async def _rerank_pool(self, query: str, pool: List[SourceChunk]) -> List[SourceChunk]:
-        """Send a single pool through the cross-encoder sidecar. Falls
+        """Send a single pool through the reranker sidecar. Falls
         back to vector-score sort on HTTP failure."""
         if not pool:
             return []

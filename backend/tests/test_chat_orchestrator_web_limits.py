@@ -6,10 +6,12 @@ os.environ.setdefault("DEFAULT_ADMIN_PASSWORD", "test-admin-password")
 
 from services.chat_orchestrator import (
     _MAX_WEB_SEARCH_RESULTS_PER_CALL,
+    _append_deduped_web_sources,
     _available_tool_schemas,
     _looks_like_raw_tool_request_content,
     _limit_tool_calls_for_turn,
 )
+from models.schemas import SourceChunk
 
 
 def _tool_call(name: str, call_id: str) -> dict:
@@ -96,3 +98,39 @@ def test_normal_answer_with_web_search_words_is_not_raw_tool_request():
 
 def test_web_search_result_cap_is_seven_sources():
     assert _MAX_WEB_SEARCH_RESULTS_PER_CALL == 7
+
+
+def _source_chunk(chunk_id: str, source_tier: str, *, url: str | None = None) -> SourceChunk:
+    return SourceChunk(
+        chunk_id=chunk_id,
+        parent_id=f"{chunk_id}-parent",
+        doc_id=url or f"{chunk_id}-doc",
+        corpus_id="live-web" if source_tier == "web_search" else "corpus-1",
+        text=f"{chunk_id} text",
+        score=1.0,
+        source_tier=source_tier,
+        metadata={"url": url} if url else {},
+    )
+
+
+def test_pending_web_sources_merge_with_local_rag_and_dedupe_urls():
+    local_rag = [_source_chunk("local-1", "qdrant_only")]
+    pending_web = [
+        _source_chunk("web-1", "web_search", url="https://example.test/security"),
+        _source_chunk("web-dup", "web_search", url="https://example.test/security"),
+        _source_chunk("web-2", "web_search", url="https://example.test/docs"),
+    ]
+
+    merged = _append_deduped_web_sources(local_rag, pending_web)
+
+    assert [chunk.source_tier for chunk in merged] == [
+        "qdrant_only",
+        "web_search",
+        "web_search",
+    ]
+    assert len(merged) == 3
+    assert merged[0].chunk_id == "local-1"
+    assert {chunk.metadata.get("url") for chunk in merged if chunk.source_tier == "web_search"} == {
+        "https://example.test/security",
+        "https://example.test/docs",
+    }

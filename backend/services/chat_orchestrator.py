@@ -2154,6 +2154,7 @@ class ChatOrchestrator:
                     "base_query": enrichment.base_query,
                     "prompt_version": enrichment.prompt_version,
                     "duration_ms": enrichment.duration_ms,
+                    "history_user_messages_used": enrichment.history_user_messages_used,
                     "fallback_reason": enrichment.fallback_reason,
                 },
             }
@@ -2164,7 +2165,8 @@ class ChatOrchestrator:
                     "fetch_attempts=%d fetch_successes=%d final=%d "
                     "time_range=%r js_rendered=%s snippet_only=%s "
                     "redis_search_cache_hit=%s redis_page_cache_hit=%s "
-                    "utility_attempted=%s utility_applied=%s"
+                    "utility_attempted=%s utility_applied=%s "
+                    "utility_history_user_messages=%s"
                 ),
                 search_query,
                 len(hits),
@@ -2178,6 +2180,7 @@ class ChatOrchestrator:
                 pipeline.get("redis_page_cache_hit"),
                 enrichment.attempted,
                 enrichment.applied,
+                enrichment.history_user_messages_used,
             )
 
             return json.dumps(

@@ -21,7 +21,8 @@ from services.web_freshness import refine_tool_search_query
 logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "web-query-enrichment-v1"
-_MAX_HISTORY_MESSAGES = 4
+_MAX_CONTEXT_MESSAGES_SCAN = 8
+_MAX_RECENT_USER_MESSAGES = 2
 _MAX_HISTORY_CHARS = 1200
 _MAX_QUERY_CHARS = 220
 _MAX_QUERY_TERMS = 18
@@ -78,6 +79,7 @@ class WebQueryEnrichmentResult:
     model: str | None = None
     prompt_version: str = PROMPT_VERSION
     duration_ms: int = 0
+    history_user_messages_used: int = 0
     fallback_reason: str | None = None
 
 
@@ -95,25 +97,29 @@ def _message_field(message: Any, field: str) -> str:
     return str(getattr(message, field, "") or "")
 
 
-def _compact_recent_history(messages: list[Any] | None) -> str:
+def _compact_recent_user_history(messages: list[Any] | None) -> tuple[str, int]:
     if not messages:
-        return ""
+        return "", 0
     lines: list[str] = []
     total = 0
-    for message in list(messages)[-_MAX_HISTORY_MESSAGES:]:
+    user_messages: list[str] = []
+    for message in reversed(list(messages)[-_MAX_CONTEXT_MESSAGES_SCAN:]):
         role = _message_field(message, "role").strip().lower() or "message"
-        if role not in {"user", "assistant"}:
+        if role != "user":
             continue
         content = re.sub(r"\s+", " ", _message_field(message, "content")).strip()
         if not content:
             continue
-        content = content[:320]
-        line = f"{role}: {content}"
+        user_messages.append(content[:320])
+        if len(user_messages) >= _MAX_RECENT_USER_MESSAGES:
+            break
+    for content in reversed(user_messages):
+        line = f"previous_user: {content}"
         total += len(line)
         if total > _MAX_HISTORY_CHARS:
             break
         lines.append(line)
-    return "\n".join(lines)
+    return "\n".join(lines), len(lines)
 
 
 def _sanitize_query_candidate(raw: str) -> str:
@@ -153,6 +159,7 @@ def _fallback(
     reason: str,
     model: str | None = None,
     attempted: bool = False,
+    history_user_messages_used: int = 0,
     started_at: float | None = None,
 ) -> WebQueryEnrichmentResult:
     duration_ms = 0
@@ -165,6 +172,7 @@ def _fallback(
         attempted=attempted,
         model=model,
         duration_ms=duration_ms,
+        history_user_messages_used=history_user_messages_used,
         fallback_reason=reason,
     )
 
@@ -198,17 +206,17 @@ async def enrich_web_search_query(
         return _fallback(base_query, reason="utility_not_configured", started_at=started_at)
 
     model = resolved.get("model")
-    history = _compact_recent_history(recent_messages)
+    history, history_count = _compact_recent_user_history(recent_messages)
     prompt = (
         "Rewrite the web search query for SearXNG.\n"
-        "Use the current user request, the native tool query, and the compact "
-        "recent chat context only to preserve meaning.\n"
+        "Use the current user request, the native tool query, and at most the "
+        "two most recent previous user messages only to preserve meaning.\n"
         "Return exactly one plain search query. Do not answer the question. "
         "Do not use JSON, quotes, bullets, URLs, or tool syntax. Keep important "
         "proper nouns, acronyms, product names, and technical terms.\n\n"
         f"Current user request:\n{(original_query or '').strip()[:900]}\n\n"
         f"Native tool query:\n{base_query}\n\n"
-        f"Recent chat context:\n{history or '(none)'}"
+        f"Recent user context (latest two prior user turns):\n{history or '(none)'}"
     )
     timeout = max(
         0.25,
@@ -253,6 +261,7 @@ async def enrich_web_search_query(
             reason="utility_call_failed",
             model=model,
             attempted=True,
+            history_user_messages_used=history_count,
             started_at=started_at,
         )
 
@@ -270,6 +279,7 @@ async def enrich_web_search_query(
             reason="unsafe_or_low_overlap_output",
             model=model,
             attempted=True,
+            history_user_messages_used=history_count,
             started_at=started_at,
         )
 
@@ -277,12 +287,17 @@ async def enrich_web_search_query(
     duration_ms = int((perf_counter() - started_at) * 1000)
     applied = final_query != base_query
     logger.info(
-        "utility_web_query_enrichment attempted=True applied=%s model=%s base=%r final=%r duration_ms=%d prompt_version=%s",
+        (
+            "utility_web_query_enrichment attempted=True applied=%s model=%s "
+            "base=%r final=%r duration_ms=%d history_user_messages_used=%d "
+            "prompt_version=%s"
+        ),
         applied,
         model,
         base_query[:160],
         final_query[:160],
         duration_ms,
+        history_count,
         PROMPT_VERSION,
     )
     return WebQueryEnrichmentResult(
@@ -292,4 +307,5 @@ async def enrich_web_search_query(
         attempted=True,
         model=model,
         duration_ms=duration_ms,
+        history_user_messages_used=history_count,
     )

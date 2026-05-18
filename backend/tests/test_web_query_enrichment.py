@@ -52,8 +52,10 @@ async def test_utility_enrichment_uses_recent_chat_and_preserves_query_anchors(
     assert captured["kwargs"]["temperature"] == 0
     assert captured["kwargs"]["max_tokens"] == 48
     assert "We are reviewing Roblox security" in captured["messages"][1]["content"]
+    assert "Server authority matters" not in captured["messages"][1]["content"]
     assert result.attempted is True
     assert result.applied is True
+    assert result.history_user_messages_used == 1
     assert result.model == "openai/glm-5-turbo"
     assert "Roblox RemoteEvent" in result.query
     assert "RAG" not in result.query
@@ -82,6 +84,7 @@ async def test_utility_enrichment_falls_back_when_utility_is_not_configured(
     assert result.query == "Roblox RemoteEvent security server validation"
     assert result.attempted is False
     assert result.applied is False
+    assert result.history_user_messages_used == 0
     assert result.fallback_reason == "utility_not_configured"
 
 
@@ -111,4 +114,49 @@ async def test_utility_enrichment_rejects_low_overlap_or_tool_syntax(monkeypatch
     assert result.query == "Roblox RemoteEvent security server client validation"
     assert result.attempted is True
     assert result.applied is False
+    assert result.history_user_messages_used == 0
     assert result.fallback_reason == "unsafe_or_low_overlap_output"
+
+
+@pytest.mark.asyncio
+async def test_utility_enrichment_uses_latest_two_prior_user_messages_only(
+    monkeypatch,
+):
+    captured: dict = {}
+
+    async def fake_resolve(_user_id, _kind):
+        return {
+            "model": "openai/glm-5-turbo",
+            "api_base": None,
+            "api_key": None,
+            "extra_params": {},
+        }
+
+    async def fake_complete_sync(messages, **_kwargs):
+        captured["prompt"] = messages[1]["content"]
+        return "Roblox RemoteEvent security server validation"
+
+    monkeypatch.setattr(wqe, "resolve_query_model_kind", fake_resolve)
+    monkeypatch.setattr(wqe.llm_service, "complete_sync", fake_complete_sync)
+
+    result = await wqe.enrich_web_search_query(
+        tool_query="Roblox RemoteEvent security server validation",
+        original_query="Search for Roblox RemoteEvent security server validation.",
+        user_id="user-1",
+        recent_messages=[
+            SimpleNamespace(role="user", content="oldest unrelated corpus question"),
+            SimpleNamespace(role="assistant", content="assistant content should be skipped"),
+            SimpleNamespace(role="user", content="previous Roblox exploit concern"),
+            SimpleNamespace(role="assistant", content="another assistant message skipped"),
+            SimpleNamespace(role="user", content="latest RemoteEvent validation concern"),
+        ],
+    )
+
+    prompt = captured["prompt"]
+    assert "latest two prior user turns" in prompt
+    assert "previous_user: previous Roblox exploit concern" in prompt
+    assert "previous_user: latest RemoteEvent validation concern" in prompt
+    assert "oldest unrelated corpus question" not in prompt
+    assert "assistant content should be skipped" not in prompt
+    assert result.history_user_messages_used == 2
+    assert result.attempted is True

@@ -91,8 +91,8 @@ It tries to behave like a research assistant who has actually read the corpus.
 
    ┌─────────────────────────────┐   ┌─────────────────────────┐
    │   Embedder  (port 8082)     │   │  Reranker (port 8081)   │
-   │   Qwen3-Embedding-0.6B      │   │  ms-marco-MiniLM-L6-v2  │
-   │   1024d, GPU                │   │  cross-encoder, GPU     │
+   │   Qwen3-Embedding-0.6B      │   │  Qwen3-Reranker Q8 GGUF │
+   │   1024d, GPU                │   │  llama.cpp / Qwen3 Q8   │
    └─────────────────────────────┘   └─────────────────────────┘
 
    ┌──────────────────────────────────────────────────────────┐
@@ -192,8 +192,14 @@ docling    Up 25 seconds (healthy)
 mcp        Up 20 seconds (healthy)
 ```
 
-If `embedder` or `reranker` is restarting → 99% of the time it's the model
-files not being where the volume mount expects. See "Local model staging."
+If `embedder` is restarting → 99% of the time it's the model files not being
+where the volume mount expects. If `reranker` is restarting, check that the
+llama.cpp image can download or read
+`ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf`.
+The Docker llama.cpp path returns bounded `0..1` relevance scores, so its
+default `RERANKER_SCORE_SCALE` is `probability`. Its default runtime is also
+kept lean for local installs: one 4k context slot, no prompt RAM cache, and
+model sleep after four idle minutes. See "Local model staging."
 
 ---
 
@@ -491,9 +497,10 @@ Mongo + Qdrant write so vector RAG works for them. Tally per doc lives on
   big fast. Putting them inside the WSL VHDX or Docker's own data folder
   will balloon disk usage with no rotation.
 - **Pre-stage local models before first run.** The embedder and reranker
-  expect their model files at the volume mount path. Letting them download
-  on first run inside the container is slow and prone to network-flake
-  failures.
+  can read model files from the volume mount path. The Docker reranker also
+  supports llama.cpp's Hugging Face download path and persists it under
+  `POLYMATH_DOCKER_DATA_ROOT/volumes/hf-cache`, but pre-staging avoids
+  first-run network failures.
 - **Pick one cloud provider for synthesis to start.** DeepSeek V4-Flash is
   a strong default for its price-to-reasoning ratio, but any provider works
   through the wildcard LiteLLM router. Test one, then add others.
@@ -535,7 +542,7 @@ polymath_v3.3/
 │       │   └── graph/        DiscoveryPanel (Mission Control)
 │       └── stores/           Zustand state
 ├── embedder/                 GPU embedder service (Qwen3 1024d)
-├── reranker/                 GPU reranker service (cross-encoder)
+├── reranker/                 Legacy Python reranker service; Docker uses llama.cpp by default
 ├── docling_svc/              PDF/DOCX → markdown service
 ├── litellm/config.yaml       wildcard LLM router config
 └── docker-compose.yml        all 11 services
@@ -558,7 +565,7 @@ CONTEXT
 The reference rig is x86_64 Linux/Windows + NVIDIA GPU + Docker Desktop /
 Docker Engine. The stack has 11 Docker services: mongodb, qdrant, neo4j,
 redis, ollama, litellm, embedder (Qwen3-Embedding-0.6B, 1024d, GPU),
-reranker (ms-marco-MiniLM-L6-v2, GPU), docling, backend (FastAPI), frontend
+reranker (llama.cpp Qwen3-Reranker-0.6B Q8 GGUF), docling, backend (FastAPI), frontend
 (React+Vite). Data is bind-mounted to a host-side root
 (POLYMATH_DOCKER_DATA_ROOT, default C:/PolymathRuntime). LLM routing is
 wildcard via LiteLLM — any cloud key in .env works.
@@ -627,7 +634,7 @@ they have available.
 Built by Kingsley (`@Kingsley-Cyber`).
 
 - **Embedding:** [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B)
-- **Reranking:** [cross-encoder/ms-marco-MiniLM-L6-v2](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2)
+- **Reranking:** [Qwen3-Reranker-0.6B Q8 GGUF](https://huggingface.co/ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF) served by [llama.cpp](https://github.com/ggml-org/llama.cpp)
 - **PDF parsing:** [Docling](https://github.com/DS4SD/docling)
 - **LLM routing:** [LiteLLM](https://github.com/BerriAI/litellm)
 - **Graph:** [Neo4j Community](https://neo4j.com/) + Apache Pulsar (async)

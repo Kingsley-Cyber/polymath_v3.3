@@ -165,14 +165,14 @@ class Settings(BaseSettings):
     # === RERANKER ===
     RERANKER_URL: str = Field(
         default="http://reranker:8080",
-        description="Reranker service URL (sentence-transformers cross-encoder)",
+        description="Reranker service URL (llama.cpp, MLX, or compatible sidecar).",
     )
     RERANKER_MODEL: str = Field(
-        default="Qwen/Qwen3-Reranker-0.6B",
+        default="qwen3-reranker-0.6b-q8_0",
         description="Reranker model loaded by the local sidecar.",
     )
     RERANKER_SCORE_SCALE: Literal["logit", "cosine", "probability"] = Field(
-        default="logit",
+        default="probability",
         description=(
             "Score scale returned by the reranker. logit supports negative "
             "low-confidence thresholds; cosine/probability are bounded 0..1."

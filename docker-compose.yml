@@ -5,8 +5,8 @@
 # DataFolder. Default uses C:\PolymathRuntime because Docker Desktop can map C:
 # reliably on Windows. If Docker Desktop maps your E: drive correctly, override
 # with POLYMATH_DOCKER_DATA_ROOT=E:/PolymathRuntime.
-#   C:\PolymathRuntime\volumes\{mongodb,qdrant,neo4j,redis,ollama,n8n,docling,hf-cache}
-#   C:\PolymathRuntime\models\{Qwen3-Embedding-0.6B,Qwen3-Reranker-0.6B}
+#   C:\PolymathRuntime\volumes\{mongodb,qdrant,neo4j,redis,ollama,n8n,docling,hf-cache,llama.cpp}
+#   C:\PolymathRuntime\models\{Qwen3-Embedding-0.6B,Qwen3-Reranker-0.6B-Q8_0-GGUF}
 # Override with POLYMATH_DOCKER_DATA_ROOT / POLYMATH_MODELS_ROOT if needed.
 
 # Cap container logs at 30 MB total (3 files × 10 MB) to prevent the WSL2 vhdx
@@ -317,27 +317,54 @@ services:
     restart: unless-stopped
 
   # ============================================================
-  # RERANKER — sentence-transformers cross-encoder
-  # Model: Qwen/Qwen3-Reranker-0.6B by default (override RERANKER_MODEL)
+  # RERANKER — llama.cpp reranking server
+  # Model: ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF by default.
   # API: POST http://reranker:8080/rerank
-  # Note: llama.cpp cannot run BERT cross-encoders — custom service required
+  # Windows/Linux NVIDIA default uses server-cuda. CPU or non-CUDA installs can
+  # set LLAMA_CPP_SERVER_IMAGE=ghcr.io/ggml-org/llama.cpp:server and
+  # LLAMA_RERANKER_GPU_LAYERS=0.
   # ============================================================
   reranker:
     <<: *default-logging
-    build: ./reranker
+    image: ${LLAMA_CPP_SERVER_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
     profiles: ["local-rerank"]
     ports:
       - "8081:8080"
+    command:
+      - --hf-repo
+      - ${LLAMA_RERANKER_HF_REPO:-ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF}
+      - --hf-file
+      - ${LLAMA_RERANKER_HF_FILE:-qwen3-reranker-0.6b-q8_0.gguf}
+      - --embedding
+      - --pooling
+      - rank
+      - --reranking
+      - --alias
+      - ${RERANKER_MODEL:-qwen3-reranker-0.6b-q8_0}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --n-gpu-layers
+      - ${LLAMA_RERANKER_GPU_LAYERS:-99}
+      - --ctx-size
+      - ${LLAMA_RERANKER_CTX_SIZE:-4096}
+      - --parallel
+      - ${LLAMA_RERANKER_PARALLEL:-1}
+      - --batch-size
+      - ${LLAMA_RERANKER_BATCH_SIZE:-512}
+      - --cache-ram
+      - ${LLAMA_RERANKER_CACHE_RAM_MB:-0}
+      - --no-cache-idle-slots
+      - --sleep-idle-seconds
+      - ${LLAMA_RERANKER_SLEEP_IDLE_SECONDS:-240}
     volumes:
-      - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}/Qwen3-Reranker-0.6B:/model:ro"
+      - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}/Qwen3-Reranker-0.6B-Q8_0-GGUF:/models:ro"
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/llama.cpp:/root/.cache/llama.cpp"
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/root/.cache/huggingface"
     environment:
       HF_HOME: /root/.cache/huggingface
-      # Match the embedder pattern: use the HF identifier so the service can
-      # load from HF_HOME even when the host bind at /model is empty/incomplete.
-      RERANKER_MODEL: ${RERANKER_MODEL:-Qwen/Qwen3-Reranker-0.6B}
-      MODEL_PATH: ${RERANKER_MODEL:-Qwen/Qwen3-Reranker-0.6B}
-      RERANKER_DEVICE: auto
+      LLAMA_CACHE: /root/.cache/llama.cpp
     deploy:
       resources:
         reservations:
@@ -495,8 +522,8 @@ services:
       OLLAMA_URL: http://host.docker.internal:11434
       REDIS_URL: redis://redis:6379
       RERANKER_URL: http://reranker:8080
-      RERANKER_MODEL: ${RERANKER_MODEL:-Qwen/Qwen3-Reranker-0.6B}
-      RERANKER_SCORE_SCALE: ${RERANKER_SCORE_SCALE:-logit}
+      RERANKER_MODEL: ${RERANKER_MODEL:-qwen3-reranker-0.6b-q8_0}
+      RERANKER_SCORE_SCALE: ${RERANKER_SCORE_SCALE:-probability}
       RERANKER_LOW_CONFIDENCE_THRESHOLD: ${RERANKER_LOW_CONFIDENCE_THRESHOLD:--2.5}
       EMBEDDER_URL: http://embedder:80
       LIVE_WEB_SEARCH_ENABLED: ${LIVE_WEB_SEARCH_ENABLED:-true}
@@ -638,8 +665,8 @@ services:
       OLLAMA_URL: http://host.docker.internal:11434
       REDIS_URL: redis://redis:6379
       RERANKER_URL: http://reranker:8080
-      RERANKER_MODEL: ${RERANKER_MODEL:-Qwen/Qwen3-Reranker-0.6B}
-      RERANKER_SCORE_SCALE: ${RERANKER_SCORE_SCALE:-logit}
+      RERANKER_MODEL: ${RERANKER_MODEL:-qwen3-reranker-0.6b-q8_0}
+      RERANKER_SCORE_SCALE: ${RERANKER_SCORE_SCALE:-probability}
       RERANKER_LOW_CONFIDENCE_THRESHOLD: ${RERANKER_LOW_CONFIDENCE_THRESHOLD:--2.5}
       EMBEDDER_URL: http://embedder:80
       # Auth — reuse the backend's JWT secret so tokens issued by /api/auth
