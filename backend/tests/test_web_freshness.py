@@ -98,6 +98,16 @@ def test_build_web_search_queries_adds_research_variants():
     assert "!sem mobile RAG research papers 2026" in queries
 
 
+def test_build_web_search_queries_adds_research_variants_for_dataset_queries():
+    queries = build_web_search_queries(
+        "PsychoGAT CIFAR-10 dataset enterprise applications"
+    )
+
+    assert queries[0] == "PsychoGAT CIFAR-10 dataset enterprise applications"
+    assert "!arx PsychoGAT CIFAR-10 dataset enterprise applications" in queries
+    assert "!sem PsychoGAT CIFAR-10 dataset enterprise applications" in queries
+
+
 def test_build_web_search_queries_adds_roblox_domain_variants():
     queries = build_web_search_queries("make roblox inventory system")
 
