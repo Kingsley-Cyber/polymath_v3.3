@@ -2,6 +2,8 @@
 # Polymath RAG v3.3 - FastAPI Backend
 # Python 3.11 with async support
 
+FROM h4ckf0r0day/obscura:latest AS obscura
+
 FROM python:3.11-slim AS base
 
 # Prevent Python from writing .pyc files and enable unbuffered output.
@@ -26,6 +28,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
+
+# Optional JS-rendered page fetcher for the live web lane. The compose file
+# enables it by default through OBSCURA_COMMAND=/usr/local/bin/obscura.
+COPY --from=obscura /obscura /usr/local/bin/obscura
+COPY --from=obscura /obscura-worker /usr/local/bin/obscura-worker
 
 # Pt 11 — pre-warm tree-sitter grammars used by the code lane so the first
 # ingest in a fresh container doesn't pay the per-language download cost

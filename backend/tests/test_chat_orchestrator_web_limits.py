@@ -147,3 +147,25 @@ def test_source_context_dedupes_exact_duplicate_chunk_cards():
     deduped = _dedupe_sources_for_context(sources)
 
     assert [chunk.chunk_id for chunk in deduped] == ["local-1", "local-2"]
+
+
+def test_source_context_dedupes_same_document_identical_text_chunks():
+    duplicate_text = (
+        "RemoteEvent validation must happen on the server. Never trust client "
+        "arguments; verify type, ownership, rate limits, and allowed state."
+    )
+    sources = [
+        _source_chunk("local-1", "qdrant_mongo"),
+        _source_chunk("local-2", "qdrant_mongo"),
+        _source_chunk("local-3", "qdrant_mongo"),
+    ]
+    sources[0].doc_id = "same-doc"
+    sources[1].doc_id = "same-doc"
+    sources[2].doc_id = "other-doc"
+    sources[0].text = duplicate_text
+    sources[1].text = duplicate_text
+    sources[2].text = duplicate_text
+
+    deduped = _dedupe_sources_for_context(sources)
+
+    assert [chunk.chunk_id for chunk in deduped] == ["local-1", "local-3"]

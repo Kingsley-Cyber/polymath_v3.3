@@ -186,20 +186,40 @@ def _source_identity_key(source: Any) -> str | None:
     return f"text:{text}" if text else None
 
 
+def _source_exact_text_key(source: Any) -> str | None:
+    """Deduplicate same-document chunks that hydrate to identical text."""
+    data = _source_to_dict(source)
+    if not data or _is_web_source_data(data):
+        return None
+    text = " ".join(str(data.get("text") or "").split())
+    if len(text) < 80:
+        return None
+    corpus_id = str(data.get("corpus_id") or "").strip()
+    doc_id = str(data.get("doc_id") or "").strip()
+    return f"text:{corpus_id}:{doc_id}:{len(text)}:{text[:512]}"
+
+
 def _dedupe_sources_for_context(sources: list[Any] | None) -> list[Any]:
     """Preserve order while removing exact duplicate source cards."""
     if not sources:
         return []
     deduped: list[Any] = []
     seen: set[str] = set()
+    seen_exact_text: set[str] = set()
     duplicates = 0
     for source in sources:
         key = _source_identity_key(source)
         if key and key in seen:
             duplicates += 1
             continue
+        text_key = _source_exact_text_key(source)
+        if text_key and text_key in seen_exact_text:
+            duplicates += 1
+            continue
         if key:
             seen.add(key)
+        if text_key:
+            seen_exact_text.add(text_key)
         deduped.append(source)
     if duplicates:
         logger.info("source dedupe removed %d duplicate source card(s)", duplicates)
