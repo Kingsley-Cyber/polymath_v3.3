@@ -267,17 +267,19 @@ def _format_utility_web_trace(web_result: str) -> str | None:
     )
 
 
-def _format_web_planner_trace(plan: Any) -> str:
-    """Human-readable trace for the dedicated web planner model."""
+def _format_web_query_builder_trace(plan: Any) -> str:
+    """Human-readable trace for deterministic Web-toggle query construction."""
     args = getattr(plan, "args", {}) or {}
+    context_terms = ", ".join(getattr(plan, "context_terms_used", ()) or ())
+    rag_terms = ", ".join(getattr(plan, "rag_terms_used", ()) or ())
     return (
-        "[Web planner native tool trace]\n"
-        f"model: {getattr(plan, 'model', None) or 'not configured'}\n"
+        "[Deterministic web query trace]\n"
+        f"strategy: {getattr(plan, 'strategy', 'deterministic')}\n"
         f"prompt_version: {getattr(plan, 'prompt_version', 'unknown')}\n"
-        f"attempted: {str(bool(getattr(plan, 'attempted', False))).lower()} | "
-        f"native_tool_call: {str(bool(getattr(plan, 'native_tool_call', False))).lower()} | "
-        f"fallback: {getattr(plan, 'fallback_reason', None) or 'none'}\n"
-        f"context: {getattr(plan, 'history_user_messages_used', 0)} prior user message(s)\n"
+        "model: none\n"
+        f"context: {getattr(plan, 'history_user_messages_used', 0)} prior user message(s) scanned\n"
+        f"context_terms_used: {context_terms or 'none'}\n"
+        f"rag_terms_used: {rag_terms or 'none'}\n"
         f"query: {_clip_trace_value(args.get('query'), 260)}\n"
         f"max_results: {args.get('max_results') or _MAX_WEB_SEARCH_RESULTS_PER_CALL}\n"
         f"duration_ms: {getattr(plan, 'duration_ms', 0)}"
@@ -966,8 +968,8 @@ class ChatOrchestrator:
         # call it, which made the UI toggle mean "may search" instead of
         # "will search". The prelude below keeps the native tool-call shape
         # (assistant tool_call + tool result) while guaranteeing the backend
-        # runs GLM query enrichment, SearXNG, page fetch, rerank, and source
-        # merge once per Web-enabled turn.
+        # runs deterministic query construction, SearXNG, page fetch, rerank,
+        # and source merge once per Web-enabled turn.
         web_sources: list = []
         prefetched_react_messages: list[dict] = []
         prefetched_tool_call_count = 0
@@ -1003,40 +1005,26 @@ class ChatOrchestrator:
             )
 
         if web_search_enabled:
-            from services.web_tool_planner import plan_web_search_tool_call
+            from services.web_query_builder import build_web_search_tool_call
 
-            yield _record_trace_event(
-                lane="model_call",
-                title="Web planner tool-call model",
-                status="running",
-                content=_format_model_api_trace(
-                    name="Web planner tool-call model",
-                    model="agentic role or AGENTIC_MODEL",
-                    status="starting",
-                    purpose=(
-                        "Create exactly one native web_search tool call from "
-                        "the current query and up to two prior user turns."
-                    ),
-                ),
-                metadata={"model_role": "agentic"},
-            )
-            plan = await plan_web_search_tool_call(
+            plan = build_web_search_tool_call(
                 current_query=request.message,
-                user_id=user_id,
                 recent_messages=list(existing_messages[-6:] if existing_messages else []),
-                tool_schema=_web_search_tool_schema(),
+                rag_sources=sources,
                 max_results=_MAX_WEB_SEARCH_RESULTS_PER_CALL,
             )
             yield _record_trace_event(
-                lane="model_call",
-                title="Web planner tool-call model",
-                status="done" if plan.native_tool_call else "fallback",
-                content=_format_web_planner_trace(plan),
+                lane="planning",
+                title="Deterministic web query builder",
+                status="done",
+                content=_format_web_query_builder_trace(plan),
                 metadata={
-                    "model": plan.model,
+                    "model": None,
                     "duration_ms": plan.duration_ms,
-                    "native_tool_call": plan.native_tool_call,
-                    "fallback_reason": plan.fallback_reason,
+                    "strategy": plan.strategy,
+                    "history_user_messages_used": plan.history_user_messages_used,
+                    "context_terms_used": list(plan.context_terms_used),
+                    "rag_terms_used": list(plan.rag_terms_used),
                 },
             )
             web_args = dict(plan.args)
@@ -1057,41 +1045,45 @@ class ChatOrchestrator:
             }
             logger.info(
                 (
-                    "mandatory web_search prelude starting planner_model=%r "
-                    "native_tool_call=%s query=%r max_results=%d"
+                    "mandatory web_search prelude starting deterministic_query=%r "
+                    "max_results=%d context_terms=%s rag_terms=%s"
                 ),
-                plan.model,
-                plan.native_tool_call,
                 str(web_args.get("query") or "")[:160],
                 web_args["max_results"],
+                list(plan.context_terms_used),
+                list(plan.rag_terms_used),
             )
             object.__setattr__(request, "_skip_web_query_enrichment", True)
             object.__setattr__(
                 request,
-                "_web_query_planner",
+                "_web_query_builder",
                 {
                     "attempted": plan.attempted,
-                    "native_tool_call": plan.native_tool_call,
-                    "model": plan.model,
+                    "model": None,
                     "prompt_version": plan.prompt_version,
                     "duration_ms": plan.duration_ms,
                     "history_user_messages_used": plan.history_user_messages_used,
                     "fallback_reason": plan.fallback_reason,
+                    "strategy": plan.strategy,
+                    "context_terms_used": list(plan.context_terms_used),
+                    "rag_terms_used": list(plan.rag_terms_used),
                 },
             )
+            object.__setattr__(request, "_web_query_planner", None)
             yield _record_trace_event(
                 lane="tool_call",
                 title="Native web_search tool call",
                 status="running",
                 content=(
-                    "Server stored the dedicated planner's native web_search "
-                    "tool call before executing it."
+                    "Server stored a deterministic web_search tool call before "
+                    "executing it."
                 ),
                 metadata={
                     "tool_name": "web_search",
                     "args": web_args,
                     "stored_before_execution": True,
-                    "planned_by_model": plan.model,
+                    "planned_by_model": None,
+                    "planned_by": "deterministic_web_query_builder",
                 },
             )
             yield build_sse_chunk(
@@ -2626,17 +2618,31 @@ class ChatOrchestrator:
                     query,
                     request.message if request is not None else None,
                 )
+                builder_meta = (
+                    getattr(request, "_web_query_builder", None)
+                    if request is not None
+                    else None
+                )
+                planner_meta = (
+                    getattr(request, "_web_query_planner", None)
+                    if request is not None
+                    else None
+                )
                 enrichment = WebQueryEnrichmentResult(
                     query=base_query,
                     base_query=base_query,
                     applied=False,
                     attempted=False,
                     model=(
-                        (getattr(request, "_web_query_planner", {}) or {}).get("model")
-                        if request is not None
-                        else None
+                        (builder_meta or {}).get("model")
+                        if builder_meta is not None
+                        else (planner_meta or {}).get("model")
                     ),
-                    fallback_reason="native_web_planner_query_used",
+                    fallback_reason=(
+                        "deterministic_web_query_builder_used"
+                        if builder_meta is not None
+                        else "native_web_planner_query_used"
+                    ),
                 )
             else:
                 enrichment = await enrich_web_search_query(
@@ -2779,6 +2785,11 @@ class ChatOrchestrator:
                     if request is not None
                     else None
                 ),
+                "web_query_builder": (
+                    getattr(request, "_web_query_builder", None)
+                    if request is not None
+                    else None
+                ),
             }
             pipeline.update(web_pipeline)
             logger.info(
@@ -2788,7 +2799,8 @@ class ChatOrchestrator:
                     "time_range=%r js_rendered=%s snippet_only=%s "
                     "redis_search_cache_hit=%s redis_page_cache_hit=%s "
                     "utility_attempted=%s utility_applied=%s "
-                    "utility_history_user_messages=%s planner_native_tool=%s"
+                    "utility_history_user_messages=%s planner_native_tool=%s "
+                    "deterministic_web_builder=%s"
                 ),
                 search_query,
                 len(hits),
@@ -2804,6 +2816,7 @@ class ChatOrchestrator:
                 enrichment.applied,
                 enrichment.history_user_messages_used,
                 bool((pipeline.get("web_query_planner") or {}).get("native_tool_call")),
+                bool((pipeline.get("web_query_builder") or {}).get("attempted")),
             )
 
             return json.dumps(

@@ -18,7 +18,6 @@ from models.schemas import (  # noqa: E402
     SourceChunk,
 )
 from services import chat_orchestrator as co  # noqa: E402
-from services import web_tool_planner as wtp  # noqa: E402
 from services.chat_orchestrator import (  # noqa: E402
     ChatOrchestrator,
     _is_web_search_enabled_for_request,
@@ -31,7 +30,7 @@ def _parse_sse(frame: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_web_toggle_uses_dedicated_planner_and_keeps_final_chat_model(
+async def test_web_toggle_uses_deterministic_builder_and_keeps_final_chat_model(
     monkeypatch,
 ):
     monkeypatch.setattr(co.settings, "LIVE_WEB_SEARCH_ENABLED", True, raising=False)
@@ -42,7 +41,6 @@ async def test_web_toggle_uses_dedicated_planner_and_keeps_final_chat_model(
 
     orchestrator = ChatOrchestrator()
     conversation_id = ObjectId()
-    resolver_kinds: list[str] = []
     stream_calls: list[dict] = []
     saved_assistant: dict = {}
     web_args: list[dict] = []
@@ -59,37 +57,8 @@ async def test_web_toggle_uses_dedicated_planner_and_keeps_final_chat_model(
     async def fake_load_or_create(_request):
         return conversation_id, ModelConfig(model="openai/base-query"), []
 
-    async def fake_resolve_query_model_kind(user_id, kind):
-        resolver_kinds.append(kind)
-        if kind == "agentic":
-            return {
-                "model": "openai/agentic-tools",
-                "api_base": None,
-                "api_key": None,
-                "extra_params": {},
-            }
-        return None
-
-    async def fake_complete_tool_calls(messages, **kwargs):
-        return {
-            "tool_calls": [
-                {
-                    "id": "planner_web_1",
-                    "type": "function",
-                    "function": {
-                        "name": "web_search",
-                        "arguments": json.dumps(
-                            {
-                                "query": "OpenAI model routing latest changes",
-                                "max_results": 7,
-                            }
-                        ),
-                    },
-                }
-            ],
-            "content": "",
-            "finish_reason": "tool_calls",
-        }
+    async def fail_resolve_query_model_kind(*_args, **_kwargs):
+        raise AssertionError("Web toggle should not resolve a planner model")
 
     async def fake_query_profile(_request, user_id=None):
         return {
@@ -186,9 +155,7 @@ async def test_web_toggle_uses_dedicated_planner_and_keeps_final_chat_model(
     monkeypatch.setattr(orchestrator, "_trim_history", fake_trim)
     monkeypatch.setattr(orchestrator, "_execute_web_search_tool", fake_execute_web_search_tool)
     monkeypatch.setattr(orchestrator, "_save_assistant_message", fake_save_assistant_message)
-    monkeypatch.setattr(co, "resolve_query_model_kind", fake_resolve_query_model_kind)
-    monkeypatch.setattr(wtp, "resolve_query_model_kind", fake_resolve_query_model_kind)
-    monkeypatch.setattr(wtp.llm_service, "complete_tool_calls", fake_complete_tool_calls)
+    monkeypatch.setattr(co, "resolve_query_model_kind", fail_resolve_query_model_kind)
     monkeypatch.setattr(co.retriever_orchestrator, "retrieve", fake_retrieve)
     monkeypatch.setattr(co.tool_registry, "get_tools_by_ids", fake_get_tools_by_ids)
     monkeypatch.setattr(co.conversation_service, "append_message", fake_append_message)
@@ -205,7 +172,6 @@ async def test_web_toggle_uses_dedicated_planner_and_keeps_final_chat_model(
     ]
 
     assert _is_web_search_enabled_for_request(request) is True
-    assert resolver_kinds == ["agentic"]
     assert request.overrides.model == "openai/base-query"
     assert stream_calls[0]["model"] == "openai/base-query"
     assert stream_calls[0]["tools"] is None
@@ -220,7 +186,7 @@ async def test_web_toggle_uses_dedicated_planner_and_keeps_final_chat_model(
     assert assistant_tool_message["tool_calls"][0]["function"]["name"] == "web_search"
     assert tool_result_message["tool_call_id"] == "server_web_search_1"
     assert web_args == [
-        {"query": "OpenAI model routing latest changes", "max_results": 7}
+        {"query": "changed OpenAI model routing today", "max_results": 7}
     ]
 
     event_types = [event["type"] for event in events]
