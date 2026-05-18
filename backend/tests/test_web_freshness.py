@@ -10,6 +10,7 @@ from services.web_freshness import (
     WebSearchHit,
     _obscura_command_args,
     _query_should_include_social_sources,
+    _is_low_quality_web_hit_for_query,
     _diversify_web_source_chunks,
     _extract_webpage_text,
     _raw_source_candidate_urls,
@@ -106,6 +107,38 @@ def test_build_web_search_queries_adds_research_variants_for_dataset_queries():
     assert queries[0] == "PsychoGAT CIFAR-10 dataset enterprise applications"
     assert "!arx PsychoGAT CIFAR-10 dataset enterprise applications" in queries
     assert "!sem PsychoGAT CIFAR-10 dataset enterprise applications" in queries
+
+
+def test_low_quality_filter_drops_hits_without_distinctive_query_overlap():
+    hit = WebSearchHit(
+        title="Tu hogar, tu templo: guia para crear un espacio zen",
+        url="https://example.test/espacio-zen",
+        snippet="Ideas faciles para relajarte despues del trabajo.",
+        score=1.0,
+        engines=("searxng",),
+        search_query="PsychoGAT CIFAR-10 dataset enterprise applications",
+    )
+
+    assert _is_low_quality_web_hit_for_query(
+        hit,
+        "PsychoGAT CIFAR-10 dataset enterprise applications",
+    )
+
+
+def test_low_quality_filter_keeps_hits_with_distinctive_query_overlap():
+    hit = WebSearchHit(
+        title="Power of Diversity: Data-Free Black-Box Attack",
+        url="https://doi.org/10.1609/example",
+        snippet="The evaluation includes CIFAR-10 and related dataset benchmarks.",
+        score=1.0,
+        engines=("searxng",),
+        search_query="PsychoGAT CIFAR-10 dataset enterprise applications",
+    )
+
+    assert not _is_low_quality_web_hit_for_query(
+        hit,
+        "PsychoGAT CIFAR-10 dataset enterprise applications",
+    )
 
 
 def test_build_web_search_queries_adds_roblox_domain_variants():

@@ -1187,8 +1187,53 @@ def _is_job_listing_hit(hit: WebSearchHit) -> bool:
     )
 
 
+_BROAD_QUERY_OVERLAP_TERMS = frozenset(
+    {
+        "application",
+        "applications",
+        "dataset",
+        "datasets",
+        "enterprise",
+        "example",
+        "guide",
+        "latest",
+        "model",
+        "patterns",
+        "security",
+        "system",
+        "systems",
+        "today",
+        "validation",
+    }
+)
+
+
+def _distinctive_query_tokens(query: str) -> set[str]:
+    tokens = _term_tokens(query)
+    return {
+        token
+        for token in tokens
+        if token not in _BROAD_QUERY_OVERLAP_TERMS
+        and (len(token) >= 6 or any(ch.isdigit() for ch in token) or "-" in token)
+    }
+
+
+def _hit_matches_distinctive_query_tokens(hit: WebSearchHit, query: str) -> bool:
+    distinctive = _distinctive_query_tokens(query)
+    if not distinctive:
+        return True
+    haystack = " ".join(
+        str(value or "")
+        for value in (hit.title, hit.snippet, hit.url)
+    )
+    hit_tokens = _term_tokens(haystack)
+    return bool(distinctive & hit_tokens)
+
+
 def _is_low_quality_web_hit_for_query(hit: WebSearchHit, query: str) -> bool:
     if _is_low_quality_web_hit(hit):
+        return True
+    if not _hit_matches_distinctive_query_tokens(hit, query):
         return True
     return _is_job_listing_hit(hit) and not _looks_like_job_search_query(query)
 
