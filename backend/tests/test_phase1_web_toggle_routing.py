@@ -30,7 +30,7 @@ def _parse_sse(frame: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_web_toggle_uses_deterministic_builder_and_keeps_final_chat_model(
+async def test_web_toggle_uses_agentic_web_loop_and_keeps_final_chat_model(
     monkeypatch,
 ):
     monkeypatch.setattr(co.settings, "LIVE_WEB_SEARCH_ENABLED", True, raising=False)
@@ -144,8 +144,29 @@ async def test_web_toggle_uses_deterministic_builder_and_keeps_final_chat_model(
                 "messages": messages,
                 "model": model,
                 "tools": tools,
+                "tool_choice": kwargs.get("tool_choice"),
             }
         )
+        if len(stream_calls) == 1:
+            assert tools is not None
+            yield {
+                "tool_calls": [
+                    {
+                        "id": "call_web_1",
+                        "type": "function",
+                        "function": {
+                            "name": "web_search",
+                            "arguments": json.dumps(
+                                {
+                                    "query": "OpenAI model routing today",
+                                    "max_results": 7,
+                                }
+                            ),
+                        },
+                    }
+                ]
+            }
+            return
         yield {"content": "Final answer after checking the live web."}
 
     monkeypatch.setattr(orchestrator, "_load_or_create_conversation", fake_load_or_create)
@@ -174,9 +195,16 @@ async def test_web_toggle_uses_deterministic_builder_and_keeps_final_chat_model(
     assert _is_web_search_enabled_for_request(request) is True
     assert request.overrides.model == "openai/base-query"
     assert stream_calls[0]["model"] == "openai/base-query"
-    assert stream_calls[0]["tools"] is None
+    assert [tool["function"]["name"] for tool in stream_calls[0]["tools"]] == [
+        "web_search",
+        "fetch_page",
+        "response",
+    ]
+    assert stream_calls[0]["tool_choice"] is None
+    assert stream_calls[1]["tools"] is not None
+    assert stream_calls[1]["tool_choice"] is None
 
-    continuation_messages = stream_calls[0]["messages"]
+    continuation_messages = stream_calls[1]["messages"]
     assistant_tool_message = next(
         msg for msg in continuation_messages if msg.get("role") == "assistant"
     )
@@ -184,9 +212,9 @@ async def test_web_toggle_uses_deterministic_builder_and_keeps_final_chat_model(
         msg for msg in continuation_messages if msg.get("role") == "tool"
     )
     assert assistant_tool_message["tool_calls"][0]["function"]["name"] == "web_search"
-    assert tool_result_message["tool_call_id"] == "server_web_search_1"
+    assert tool_result_message["tool_call_id"] == "call_web_1"
     assert web_args == [
-        {"query": "changed OpenAI model routing today", "max_results": 7}
+        {"query": "OpenAI model routing today", "max_results": 7}
     ]
 
     event_types = [event["type"] for event in events]

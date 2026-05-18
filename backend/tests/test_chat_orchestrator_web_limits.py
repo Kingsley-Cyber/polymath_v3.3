@@ -5,9 +5,11 @@ os.environ.setdefault("AUTH_SECRET_KEY", "test-auth-secret-key")
 os.environ.setdefault("DEFAULT_ADMIN_PASSWORD", "test-admin-password")
 
 from services.chat_orchestrator import (
+    _MAX_WEB_SEARCH_CALLS_PER_TURN,
     _MAX_WEB_SEARCH_RESULTS_PER_CALL,
     _append_deduped_web_sources,
     _available_tool_schemas,
+    _cap_web_sources_for_turn,
     _dedupe_sources_for_context,
     _looks_like_raw_tool_request_content,
     _limit_tool_calls_for_turn,
@@ -30,34 +32,52 @@ def _tool_schema(name: str) -> dict:
     }
 
 
-def test_limit_tool_calls_allows_only_one_web_search_per_turn():
+def test_limit_tool_calls_allows_bounded_web_searches_per_turn():
     calls = [
         _tool_call("web_search", "web_1"),
         _tool_call("web_search", "web_2"),
+        _tool_call("web_search", "web_3"),
+        _tool_call("web_search", "web_4"),
         _tool_call("calculator", "calc_1"),
     ]
 
     allowed, web_calls, dropped_for_tool_limit, dropped_for_web_limit = (
         _limit_tool_calls_for_turn(
             calls,
-            remaining_tool_calls=3,
+            remaining_tool_calls=5,
             web_search_call_count=0,
         )
     )
 
     assert [call["function"]["name"] for call in allowed] == [
         "web_search",
+        "web_search",
+        "web_search",
         "calculator",
     ]
-    assert web_calls == 1
+    assert web_calls == _MAX_WEB_SEARCH_CALLS_PER_TURN
     assert dropped_for_tool_limit is False
     assert dropped_for_web_limit is True
 
 
-def test_available_tool_schemas_remove_web_after_one_search():
+def test_available_tool_schemas_keep_web_until_search_limit():
     schemas = [_tool_schema("web_search"), _tool_schema("calculator")]
 
     available = _available_tool_schemas(schemas, web_search_call_count=1)
+
+    assert [schema["function"]["name"] for schema in available] == [
+        "web_search",
+        "calculator",
+    ]
+
+
+def test_available_tool_schemas_remove_web_after_search_limit():
+    schemas = [_tool_schema("web_search"), _tool_schema("calculator")]
+
+    available = _available_tool_schemas(
+        schemas,
+        web_search_call_count=_MAX_WEB_SEARCH_CALLS_PER_TURN,
+    )
 
     assert [schema["function"]["name"] for schema in available] == ["calculator"]
 
@@ -135,6 +155,20 @@ def test_pending_web_sources_merge_with_local_rag_and_dedupe_urls():
         "https://example.test/security",
         "https://example.test/docs",
     }
+
+
+def test_turn_web_sources_are_capped_to_seven_across_multiple_searches():
+    local_rag = [_source_chunk("local-1", "qdrant_only")]
+    web_sources = [
+        _source_chunk(f"web-{i}", "web_search", url=f"https://example.test/{i}")
+        for i in range(10)
+    ]
+
+    capped = _cap_web_sources_for_turn(local_rag + web_sources)
+
+    assert capped[0].chunk_id == "local-1"
+    assert sum(chunk.source_tier == "web_search" for chunk in capped) == 7
+    assert [chunk.chunk_id for chunk in capped[-2:]] == ["web-5", "web-6"]
 
 
 def test_source_context_dedupes_exact_duplicate_chunk_cards():

@@ -447,6 +447,7 @@ class LLMService:
         overrides: ModelOverrides | None = None,
         tools: list[dict] | None = None,
         *,
+        tool_choice: dict | str | None = None,
         api_base: str | None = None,
         api_key: str | None = None,
         extra_params: dict | None = None,
@@ -459,6 +460,8 @@ class LLMService:
             model: Model name in provider/model format (uses default if None)
             overrides: Optional model parameter overrides
             tools: Optional list of tool schemas for function calling
+            tool_choice: Optional native tool-choice directive for providers
+                     that support forced/required tool selection.
             api_base: Phase 19.3 — per-call base URL (profile override). Forwarded
                       to LiteLLM as `api_base` in the request body.
             api_key: Phase 19.3 — per-call plaintext API key (profile override).
@@ -481,6 +484,8 @@ class LLMService:
         body = self._build_request_body(
             messages, model, overrides, stream=True, tools=tools
         )
+        if tool_choice is not None:
+            body["tool_choice"] = tool_choice
         # Phase 19.3 — explicit profile api_key wins over auto-resolved.
         # Falls back to per-user Mongo key (Phase 19.2) when profile key absent.
         resolved_key = api_key or await self._resolve_api_key(model)
@@ -490,7 +495,7 @@ class LLMService:
             body["api_base"] = api_base
         if extra_params:
             for _k, _v in extra_params.items():
-                if _k not in ("model", "messages", "stream", "tools"):
+                if _k not in ("model", "messages", "stream", "tools", "tool_choice"):
                     body[_k] = _v
         headers = self._get_headers()
 

@@ -19,6 +19,7 @@ from models.schemas import (
     ModelConfig,
     ModelOverrides,
     RetrievalTier,
+    SourceChunk,
 )
 from services.context_manager import context_manager
 from services.conversation import conversation_service
@@ -47,8 +48,8 @@ _MAX_PERSISTED_SOURCE_PREVIEWS = 10
 _MAX_PERSISTED_WEB_SOURCE_PREVIEWS = 7
 _MAX_PERSISTED_SOURCE_TEXT_CHARS = 900
 _MAX_PERSISTED_SOURCE_SUMMARY_CHARS = 500
-_MAX_TOOL_CALLS_PER_TURN = 3
-_MAX_WEB_SEARCH_CALLS_PER_TURN = 1
+_MAX_TOOL_CALLS_PER_TURN = 5
+_MAX_WEB_SEARCH_CALLS_PER_TURN = 3
 _MAX_WEB_SEARCH_RESULTS_PER_CALL = 7
 _RAW_TOOL_REQUEST_MARKERS = (
     "<｜｜dsml｜｜tool_calls",
@@ -162,6 +163,20 @@ def _append_deduped_web_sources(existing: list[Any], pending: list[Any]) -> list
     return merged
 
 
+def _cap_web_sources_for_turn(sources: list[Any]) -> list[Any]:
+    """Keep at most seven web source cards for a chat turn."""
+    capped: list[Any] = []
+    web_count = 0
+    for source in sources:
+        data = _source_to_dict(source)
+        if data and _is_web_source_data(data):
+            if web_count >= _MAX_PERSISTED_WEB_SOURCE_PREVIEWS:
+                continue
+            web_count += 1
+        capped.append(source)
+    return capped
+
+
 def _source_identity_key(source: Any) -> str | None:
     """Stable key for exact source-card dedupe.
 
@@ -231,79 +246,6 @@ def _clip_trace_value(value: Any, max_chars: int = 180) -> str:
     if len(text) <= max_chars:
         return text
     return text[: max_chars - 1].rstrip() + "..."
-
-
-def _format_utility_web_trace(web_result: str) -> str | None:
-    """Build a human-readable trace for the Utility web-query helper.
-
-    This is intentionally structured telemetry, not a raw hidden chain of
-    thought. It lets the UI show which helper model ran, what query it chose,
-    how much history it used, and how the web lane followed through.
-    """
-    try:
-        payload = json.loads(web_result)
-    except Exception:
-        return None
-    if not isinstance(payload, dict) or payload.get("error"):
-        return None
-    pipeline = payload.get("pipeline")
-    if not isinstance(pipeline, dict):
-        return None
-    utility = pipeline.get("utility_query_enrichment")
-    if not isinstance(utility, dict):
-        return None
-
-    model = utility.get("model") or "not configured"
-    attempted = bool(utility.get("attempted"))
-    applied = bool(utility.get("applied"))
-    fallback = utility.get("fallback_reason") or "none"
-    history_count = utility.get("history_user_messages_used") or 0
-    duration_ms = utility.get("duration_ms") or 0
-    base_query = _clip_trace_value(utility.get("base_query"))
-    final_query = _clip_trace_value(payload.get("query"))
-    js_render = pipeline.get("js_render") if isinstance(pipeline.get("js_render"), dict) else {}
-    fetch_attempts = pipeline.get("full_page_fetch_attempts") or 0
-    fetch_successes = pipeline.get("full_page_fetch_successes") or 0
-    final_results = pipeline.get("final_reranked_results") or 0
-    final_limit = pipeline.get("final_result_limit") or _MAX_WEB_SEARCH_RESULTS_PER_CALL
-
-    return (
-        "[Utility web query trace]\n"
-        f"model: {model}\n"
-        f"prompt_version: {utility.get('prompt_version') or 'unknown'}\n"
-        f"attempted: {str(attempted).lower()} | applied: {str(applied).lower()} | "
-        f"fallback: {fallback}\n"
-        f"context: {history_count} prior user message(s)\n"
-        f"base_query: {base_query}\n"
-        f"final_query: {final_query}\n"
-        f"duration_ms: {duration_ms}\n"
-        f"web_followthrough: candidates={pipeline.get('candidate_results') or 0}, "
-        f"fetches={fetch_attempts}/{fetch_successes}, "
-        f"reranked={final_results}/{final_limit}, "
-        f"ranked_by={pipeline.get('ranked_by') or 'unknown'}\n"
-        f"obscura: configured={str(bool(js_render.get('configured'))).lower()}, "
-        f"attempted={str(bool(js_render.get('attempted'))).lower()}, "
-        f"rendered={str(bool(js_render.get('rendered'))).lower()}"
-    )
-
-
-def _format_web_query_builder_trace(plan: Any) -> str:
-    """Human-readable trace for deterministic Web-toggle query construction."""
-    args = getattr(plan, "args", {}) or {}
-    context_terms = ", ".join(getattr(plan, "context_terms_used", ()) or ())
-    rag_terms = ", ".join(getattr(plan, "rag_terms_used", ()) or ())
-    return (
-        "[Deterministic web query trace]\n"
-        f"strategy: {getattr(plan, 'strategy', 'deterministic')}\n"
-        f"prompt_version: {getattr(plan, 'prompt_version', 'unknown')}\n"
-        "model: none\n"
-        f"context: {getattr(plan, 'history_user_messages_used', 0)} prior user message(s) scanned\n"
-        f"context_terms_used: {context_terms or 'none'}\n"
-        f"rag_terms_used: {rag_terms or 'none'}\n"
-        f"query: {_clip_trace_value(args.get('query'), 260)}\n"
-        f"max_results: {args.get('max_results') or _MAX_WEB_SEARCH_RESULTS_PER_CALL}\n"
-        f"duration_ms: {getattr(plan, 'duration_ms', 0)}"
-    )
 
 
 def _format_web_retrieval_decision_trace(
@@ -469,16 +411,22 @@ def _web_search_tool_schema() -> dict[str, Any]:
         "function": {
             "name": "web_search",
             "description": (
-                "Search the live web when the user explicitly enables the Web "
-                "toggle or when a tool-capable turn needs current/external "
-                "information. Use a concise query that preserves the user's "
-                "technical anchors and acronyms. Do not include local corpus "
-                "names, file names, or internal project labels. Prefer official "
-                "docs, vendor/developer blogs, framework docs, and production "
-                "guides unless the user asks for papers. Do not search isolated "
-                "generic words. The server runs controlled SearXNG searches, "
-                "fetches pages when useful, reranks locally, and returns up to "
-                "seven results."
+                "Search the live web. When the Web toggle is enabled, call this "
+                "before giving the final answer, then inspect the returned "
+                "snippets, fetched-page evidence, domains, and telemetry. If the "
+                "evidence is not sufficient, call web_search again with a refined "
+                "query or call fetch_page for a specific URL. Query rules: use "
+                "keywords, names, exact phrases, model/version numbers, dates, "
+                "and domains; do not write a natural-language question; omit "
+                "filler such as what/who/tell me/find information; use 3-10 "
+                "high-signal terms. Preserve the user's technical anchors and "
+                "acronyms. Do not include local corpus names, file names, or "
+                "internal project labels. Prefer official docs, vendor/developer "
+                "blogs, framework docs, and production guides unless the user "
+                "asks for papers. The server executes controlled SearXNG search, "
+                "deterministic page fetching including Obscura fallback for "
+                "niche JS-render cases, and local reranking to at most seven "
+                "results."
             ),
             "parameters": {
                 "type": "object",
@@ -499,6 +447,91 @@ def _web_search_tool_schema() -> dict[str, Any]:
             },
         },
     }
+
+
+def _fetch_page_tool_schema() -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "fetch_page",
+            "description": (
+                "Fetch one specific URL when search snippets are not enough. "
+                "Use this for pages you need to inspect more deeply, especially "
+                "JS-heavy pages where Obscura may be needed. The runtime decides "
+                "deterministically whether raw HTTP, static extraction, yt-dlp, "
+                "or Obscura is appropriate; the model only chooses the URL and "
+                "why it is needed."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The http(s) URL to fetch.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": (
+                            "Brief reason this full page is needed, such as "
+                            "official docs, missing detail, JS-rendered page, "
+                            "or source verification."
+                        ),
+                    },
+                },
+                "required": ["url"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
+def _response_tool_schema() -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "response",
+            "description": (
+                "Finish the turn once you have enough RAG and/or web evidence. "
+                "Call this only after required web searching is complete when "
+                "the Web toggle is enabled. The text must be the complete "
+                "user-facing answer, not JSON or tool syntax."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The final answer to show the user.",
+                    },
+                },
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
+def _extract_response_tool_text(
+    tool_calls: list[dict[str, Any]],
+) -> tuple[str | None, dict[str, Any] | None, list[dict[str, Any]]]:
+    remaining: list[dict[str, Any]] = []
+    response_call: dict[str, Any] | None = None
+    response_text: str | None = None
+    for call in tool_calls:
+        if _tool_call_name(call) != "response":
+            remaining.append(call)
+            continue
+        if response_call is not None:
+            continue
+        response_call = call
+        try:
+            args = json.loads((call.get("function") or {}).get("arguments") or "{}")
+        except Exception:
+            args = {}
+        text = str(args.get("text") or "").strip()
+        if text:
+            response_text = text
+    return response_text, response_call, remaining
 
 
 def _looks_like_raw_tool_request_content(content: str) -> bool:
@@ -545,7 +578,7 @@ def _limit_tool_calls_for_turn(
     remaining_tool_calls: int,
     web_search_call_count: int,
 ) -> tuple[list[dict[str, Any]], int, bool, bool]:
-    """Keep one web_search call per turn while preserving other tools."""
+    """Keep bounded web_search calls per turn while preserving other tools."""
     allowed: list[dict[str, Any]] = []
     selected_web_search_calls = 0
     dropped_for_tool_limit = False
@@ -794,8 +827,8 @@ class ChatOrchestrator:
 
         # Phase F — role resolution. User-selected tools and explicit agentic
         # mode still route the answer stream through the tool-capable role.
-        # Web-only turns use a separate dedicated planner model for the native
-        # web_search call, then keep the final answer on the selected chat model.
+        # Web-only turns keep the selected chat model and expose the native
+        # web tools directly so the chat model owns query/refine/sufficiency.
         if tool_route_active:
             qres = (
                 await resolve_query_model_kind(user_id, "agentic")
@@ -1098,19 +1131,6 @@ class ChatOrchestrator:
                 logger.warning("Graph decoration skipped: %s", exc)
                 decoration = []
 
-        # Opt-in live web lane. When enabled, execute one deterministic
-        # web_search tool step before the final answer. Earlier versions only
-        # exposed the native tool schema and let the model decide whether to
-        # call it, which made the UI toggle mean "may search" instead of
-        # "will search". The prelude below keeps the native tool-call shape
-        # (assistant tool_call + tool result) while guaranteeing the backend
-        # runs deterministic query construction, SearXNG, page fetch, rerank,
-        # and source merge once per Web-enabled turn.
-        web_sources: list = []
-        prefetched_react_messages: list[dict] = []
-        prefetched_tool_call_count = 0
-        prefetched_web_search_call_count = 0
-
         # Trust-signal snapshot — captured here so it carries through to
         # both the `done` SSE frame and the persisted assistant message.
         # `agentic_on_request` was resolved earlier (line ~80) and reflects
@@ -1141,183 +1161,29 @@ class ChatOrchestrator:
             )
 
         if web_search_enabled:
-            from services.web_query_builder import build_web_search_tool_call
-
-            plan = build_web_search_tool_call(
-                current_query=request.message,
-                recent_messages=list(existing_messages[-6:] if existing_messages else []),
-                rag_sources=sources,
-                max_results=_MAX_WEB_SEARCH_RESULTS_PER_CALL,
-            )
-            yield _record_trace_event(
-                lane="planning",
-                title="Deterministic web query builder",
-                status="done",
-                content=_format_web_query_builder_trace(plan),
-                metadata={
-                    "model": None,
-                    "duration_ms": plan.duration_ms,
-                    "strategy": plan.strategy,
-                    "history_user_messages_used": plan.history_user_messages_used,
-                    "context_terms_used": list(plan.context_terms_used),
-                    "rag_terms_used": list(plan.rag_terms_used),
-                },
-            )
-            web_args = dict(plan.args)
-            web_args["max_results"] = max(
-                1,
-                min(
-                    int(web_args.get("max_results") or _MAX_WEB_SEARCH_RESULTS_PER_CALL),
-                    _MAX_WEB_SEARCH_RESULTS_PER_CALL,
-                ),
-            )
-            web_call = {
-                "id": "server_web_search_1",
-                "type": "function",
-                "function": {
-                    "name": "web_search",
-                    "arguments": json.dumps(web_args),
-                },
-            }
-            logger.info(
-                (
-                    "mandatory web_search prelude starting deterministic_query=%r "
-                    "max_results=%d context_terms=%s rag_terms=%s"
-                ),
-                str(web_args.get("query") or "")[:160],
-                web_args["max_results"],
-                list(plan.context_terms_used),
-                list(plan.rag_terms_used),
-            )
             object.__setattr__(request, "_skip_web_query_enrichment", True)
-            object.__setattr__(
-                request,
-                "_web_query_builder",
-                {
-                    "attempted": plan.attempted,
-                    "model": None,
-                    "prompt_version": plan.prompt_version,
-                    "duration_ms": plan.duration_ms,
-                    "history_user_messages_used": plan.history_user_messages_used,
-                    "fallback_reason": plan.fallback_reason,
-                    "strategy": plan.strategy,
-                    "context_terms_used": list(plan.context_terms_used),
-                    "rag_terms_used": list(plan.rag_terms_used),
-                },
-            )
+            object.__setattr__(request, "_web_query_builder", None)
             object.__setattr__(request, "_web_query_planner", None)
             yield _record_trace_event(
-                lane="tool_call",
-                title="Native web_search tool call",
-                status="running",
+                lane="planning",
+                title="Agentic web loop ready",
+                status="done",
                 content=(
-                    "Server stored a deterministic web_search tool call before "
-                    "executing it."
+                    "Web toggle is enabled. Local RAG has been loaded into the "
+                    "prompt, and the chat model must call native web_search "
+                    "before the final response. The model decides whether the "
+                    "returned evidence is sufficient, whether to refine the "
+                    "query, and whether to fetch a specific page. Obscura is "
+                    "used deterministically inside fetch_page/web_search when "
+                    "the runtime policy says a JS-render fallback is needed."
                 ),
                 metadata={
-                    "tool_name": "web_search",
-                    "args": web_args,
-                    "stored_before_execution": True,
-                    "planned_by_model": None,
-                    "planned_by": "deterministic_web_query_builder",
-                },
-            )
-            yield build_sse_chunk(
-                ChatChunk(
-                    type="tool_call_start",
-                    content=json.dumps(
-                        [
-                            {
-                                "name": "web_search",
-                                "args": web_call["function"]["arguments"],
-                            }
-                        ]
-                    ),
-                    conversation_id=str(conversation_id),
-                )
-            )
-            yield _record_trace_event(
-                lane="reasoning",
-                title="Web retrieval controller",
-                status="running",
-                content=(
-                    "Searching SearXNG, checking whether snippets are enough, "
-                    "fetching full pages when needed, then reranking evidence."
-                ),
-                metadata={
-                    "tool_name": "web_search",
-                    "query": web_args.get("query"),
-                    "max_results": web_args.get("max_results"),
+                    "web_search_required_before_final": True,
+                    "max_web_search_calls": _MAX_WEB_SEARCH_CALLS_PER_TURN,
+                    "max_tool_calls": _MAX_TOOL_CALLS_PER_TURN,
                     "raw_chain_of_thought": False,
                 },
             )
-            web_result = await self._execute_web_search_tool(web_args, request)
-            logger.info("mandatory web_search prelude completed")
-            decision_trace = _format_web_retrieval_decision_trace(web_result)
-            if decision_trace is not None:
-                decision_content, decision_metadata = decision_trace
-                yield _record_trace_event(
-                    lane="reasoning",
-                    title="Web retrieval decision trace",
-                    status="done",
-                    content=decision_content,
-                    metadata=decision_metadata,
-                )
-            yield build_sse_chunk(
-                ChatChunk(
-                    type="tool_result",
-                    content=json.dumps(
-                        [{"name": "web_search", "result": web_result}]
-                    ),
-                    conversation_id=str(conversation_id),
-                )
-            )
-            yield _record_trace_event(
-                lane="tool_result",
-                title="web_search tool result",
-                status="done",
-                content=(
-                    "Native web_search returned results and pipeline telemetry."
-                ),
-                metadata={"tool_name": "web_search"},
-            )
-            prefetched_tool_call_count = 1
-            prefetched_web_search_call_count = 1
-            prefetched_react_messages.extend(
-                [
-                    {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [web_call],
-                        "reasoning_content": (
-                            "Server executed the mandatory web_search step "
-                            "before the final answer."
-                        ),
-                    },
-                    {
-                        "role": "tool",
-                        "tool_call_id": web_call["id"],
-                        "name": "web_search",
-                        "content": web_result,
-                    },
-                ]
-            )
-            pending_tool_sources = getattr(request, "_pending_tool_sources", [])
-            if pending_tool_sources:
-                web_sources = list(pending_tool_sources)
-                sources = _dedupe_sources_for_context(
-                    _append_deduped_web_sources(
-                        list(sources or []),
-                        web_sources,
-                    )
-                )
-                chunks_returned = len(sources)
-                object.__setattr__(request, "_pending_tool_sources", [])
-                logger.info(
-                    "mandatory web_search merged sources local_plus_web=%d web_added=%d",
-                    chunks_returned,
-                    len(web_sources),
-                )
 
         if sources:
             yield build_sse_chunk(
@@ -1378,11 +1244,18 @@ class ChatOrchestrator:
                     "name": "Live Web Search",
                     "slash_command": "/web",
                     "instructions": (
-                        "The user enabled live web search for this turn. You "
-                        "are using a search that was already executed as a controlled native "
-                        "web_search tool step before this answer. Use the "
-                        "supplied web sources only when relevant, cite URLs for "
-                        "web-backed facts, and do not call web_search again."
+                        "The user enabled live web search for this turn. First "
+                        "read the local RAG context already present in this "
+                        "prompt, then call the native web_search tool at least "
+                        "once before giving the final answer. Write concise "
+                        "keyword queries, inspect the returned snippets, page "
+                        "fetch evidence, domains, and telemetry, and decide "
+                        "whether the evidence is sufficient. If not sufficient, "
+                        "call web_search again with a refined query or call "
+                        "fetch_page for a specific URL. Use response only when "
+                        "you have enough information to answer. Cite URLs for "
+                        "web-backed facts. Do not expose raw tool JSON or XML "
+                        "as prose."
                     ),
                     "auto_selected": True,
                 }
@@ -1406,6 +1279,7 @@ class ChatOrchestrator:
         active_tool_names: list[str] = [t.name for t in tools_loaded]
         if web_search_enabled:
             active_tool_names.append("web_search")
+            active_tool_names.append("fetch_page")
         # Cache the loaded tools so _load_tools below doesn't repeat the
         # Mongo round-trip. Stash on `request` (mutates the Pydantic model
         # via __dict__ since it's the simplest hand-off; the field isn't
@@ -1593,10 +1467,12 @@ class ChatOrchestrator:
         tools, tool_schemas = await self._load_tools(request)
 
         # === START ReAct LOOP ===
-        tool_call_count = prefetched_tool_call_count
-        web_search_call_count = prefetched_web_search_call_count
+        tool_call_count = 0
+        web_search_call_count = 0
         tool_limit_reached = False
-        react_messages: list[dict] = list(prefetched_react_messages)
+        react_messages: list[dict] = []
+        tools_used_names: list[str] = []
+        web_required_retry_count = 0
 
         # Persist the RAW user message, not the RAG-augmented one. The object
         # `user_message.content` was overwritten above with the full augmented
@@ -1678,6 +1554,9 @@ class ChatOrchestrator:
             assistant_content = ""
             assistant_thinking = ""
             tool_calls = []
+            suppress_content_until_web = bool(
+                web_search_enabled and web_search_call_count == 0
+            )
 
             # Perf instrumentation — measure TTFT (time to first token),
             # stream duration, and post-stream tail so we can tell an LLM
@@ -1708,6 +1587,9 @@ class ChatOrchestrator:
                     "model": model_used,
                     "messages": len(message_dicts),
                     "tools_enabled": bool(active_tool_schemas),
+                    "web_search_required_before_final": bool(
+                        web_search_enabled and web_search_call_count == 0
+                    ),
                 },
             )
             try:
@@ -1735,13 +1617,14 @@ class ChatOrchestrator:
                         )
                     elif chunk.get("content"):
                         assistant_content += chunk["content"]
-                        yield build_sse_chunk(
-                            ChatChunk(
-                                type="token",
-                                content=chunk["content"],
-                                conversation_id=str(conversation_id),
+                        if not suppress_content_until_web:
+                            yield build_sse_chunk(
+                                ChatChunk(
+                                    type="token",
+                                    content=chunk["content"],
+                                    conversation_id=str(conversation_id),
+                                )
                             )
-                        )
 
             except Exception as e:
                 logger.error(f"Error during LLM streaming: {e}")
@@ -1788,6 +1671,60 @@ class ChatOrchestrator:
 
             # If no tool calls, this is the final response
             if not tool_calls:
+                if web_search_enabled and web_search_call_count == 0:
+                    web_required_retry_count += 1
+                    logger.info(
+                        "Web-enabled turn attempted final answer before web_search; retry=%d",
+                        web_required_retry_count,
+                    )
+                    if web_required_retry_count > 1:
+                        yield _record_trace_event(
+                            lane="tool_call",
+                            title="Required web_search missing",
+                            status="error",
+                            content=(
+                                "The model attempted to answer without calling "
+                                "web_search even though the Web toggle is enabled."
+                            ),
+                            metadata={"web_search_required_before_final": True},
+                        )
+                        yield build_sse_chunk(
+                            ChatChunk(
+                                type="error",
+                                content=(
+                                    "Web is enabled, but the model did not call "
+                                    "web_search before answering. Please retry the "
+                                    "turn or choose a tool-capable model."
+                                ),
+                                conversation_id=str(conversation_id),
+                            )
+                        )
+                        return
+                    if assistant_content.strip() or assistant_thinking.strip():
+                        react_messages.append(
+                            {
+                                "role": "assistant",
+                                "content": assistant_content.strip() or None,
+                                **(
+                                    {"reasoning_content": assistant_thinking}
+                                    if assistant_thinking.strip()
+                                    else {}
+                                ),
+                            }
+                        )
+                    react_messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "The Web toggle is enabled for this turn. Call "
+                                "the native web_search tool now with a concise "
+                                "keyword query before any final answer."
+                            ),
+                        }
+                    )
+                    assistant_content = ""
+                    assistant_thinking = ""
+                    continue
                 if _looks_like_raw_tool_request_content(assistant_content):
                     logger.info(
                         "Suppressed raw tool-call syntax in assistant content; "
@@ -1818,6 +1755,80 @@ class ChatOrchestrator:
                 )
             if not tool_calls:
                 break
+
+            response_text, response_call, non_response_tool_calls = (
+                _extract_response_tool_text(tool_calls)
+            )
+            if response_call is not None and not non_response_tool_calls:
+                if web_search_enabled and web_search_call_count == 0:
+                    web_required_retry_count += 1
+                    if web_required_retry_count > 1:
+                        yield _record_trace_event(
+                            lane="tool_call",
+                            title="Required web_search missing",
+                            status="error",
+                            content=(
+                                "The model called response() before web_search "
+                                "twice while Web was enabled."
+                            ),
+                            metadata={"web_search_required_before_final": True},
+                        )
+                        yield build_sse_chunk(
+                            ChatChunk(
+                                type="error",
+                                content=(
+                                    "Web is enabled, but the model called response "
+                                    "before web_search. Please retry the turn or "
+                                    "choose a tool-capable model."
+                                ),
+                                conversation_id=str(conversation_id),
+                            )
+                        )
+                        return
+                    react_messages.append(
+                        {
+                            "role": "assistant",
+                            "content": assistant_content or None,
+                            "tool_calls": [
+                                {
+                                    "id": response_call.get("id") or "response_before_web",
+                                    "type": response_call.get("type") or "function",
+                                    "function": response_call.get("function") or {},
+                                }
+                            ],
+                        }
+                    )
+                    react_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": response_call.get("id") or "response_before_web",
+                            "name": "response",
+                            "content": (
+                                "Rejected: Web is enabled, so call web_search "
+                                "before response."
+                            ),
+                        }
+                    )
+                    continue
+                if response_text:
+                    assistant_content = response_text
+                    yield _record_trace_event(
+                        lane="final",
+                        title="response tool",
+                        status="done",
+                        content="Model called response() to terminate the agentic loop.",
+                        metadata={"tool_name": "response"},
+                    )
+                    yield build_sse_chunk(
+                        ChatChunk(
+                            type="token",
+                            content=response_text,
+                            conversation_id=str(conversation_id),
+                        )
+                    )
+                    break
+            if response_call is not None:
+                tool_calls = non_response_tool_calls
 
             # Announce tool execution before running — lets the UI show "⚙ Running: <tool>"
             tool_call_summaries = [
@@ -1852,6 +1863,10 @@ class ChatOrchestrator:
                 tool_call_count >= _MAX_TOOL_CALLS_PER_TURN
             )
             tool_results = await self._execute_tools(tool_calls, tools, request)
+            for call in tool_calls:
+                name = _tool_call_name(call)
+                if name and name not in tools_used_names:
+                    tools_used_names.append(name)
 
             # Emit tool results — paired 1:1 with the start event
             tool_result_summaries = [
@@ -1868,6 +1883,18 @@ class ChatOrchestrator:
                     conversation_id=str(conversation_id),
                 )
             )
+            for call, result in zip(tool_calls, tool_results):
+                if _tool_call_name(call) == "web_search":
+                    decision_trace = _format_web_retrieval_decision_trace(result)
+                    if decision_trace is not None:
+                        decision_content, decision_metadata = decision_trace
+                        yield _record_trace_event(
+                            lane="reasoning",
+                            title="Web retrieval decision trace",
+                            status="done",
+                            content=decision_content,
+                            metadata=decision_metadata,
+                        )
             yield _record_trace_event(
                 lane="tool_result",
                 title="Native tool result",
@@ -1930,9 +1957,11 @@ class ChatOrchestrator:
             pending_tool_sources = getattr(request, "_pending_tool_sources", [])
             if pending_tool_sources:
                 sources = _dedupe_sources_for_context(
-                    _append_deduped_web_sources(
-                        list(sources or []),
-                        list(pending_tool_sources),
+                    _cap_web_sources_for_turn(
+                        _append_deduped_web_sources(
+                            list(sources or []),
+                            list(pending_tool_sources),
+                        )
                     )
                 )
                 chunks_returned = len(sources)
@@ -2114,6 +2143,7 @@ class ChatOrchestrator:
 
         # Phase 24 — collect skill/tool/reasoning trust signals for this turn
         skills_used_names = [s["name"] for s in active_skills_dicts]
+        final_tools_used = list(tools_used_names)
         reasoning_cascade_applied = bool(analysis_text)
         yield _record_trace_event(
             lane="final",
@@ -2147,7 +2177,7 @@ class ChatOrchestrator:
                 downgrade_reason=downgrade_reason,
                 collections_queried=collections_queried_for_msg,
                 skills_used=skills_used_names,
-                tools_used=active_tool_names,
+                tools_used=final_tools_used,
                 reasoning_cascade_applied=reasoning_cascade_applied,
                 sources=sources,
                 trace_events=trace_events,
@@ -2182,7 +2212,7 @@ class ChatOrchestrator:
                 downgrade_reason=downgrade_reason,
                 collections_queried=collections_queried_for_msg,
                 skills_used=skills_used_names,
-                tools_used=active_tool_names,
+                tools_used=final_tools_used,
                 reasoning_cascade_applied=reasoning_cascade_applied,
             )
         )
@@ -2711,6 +2741,9 @@ class ChatOrchestrator:
         ]
         if web_search_enabled:
             tool_schemas.append(_web_search_tool_schema())
+            tool_schemas.append(_fetch_page_tool_schema())
+        if tool_schemas:
+            tool_schemas.append(_response_tool_schema())
         return tools, tool_schemas
 
     async def _execute_tools(
@@ -2731,6 +2764,12 @@ class ChatOrchestrator:
 
             if tool_name == "web_search":
                 results.append(await self._execute_web_search_tool(args, request))
+                continue
+            if tool_name == "fetch_page":
+                results.append(await self._execute_fetch_page_tool(args, request))
+                continue
+            if tool_name == "response":
+                results.append(json.dumps({"ok": True, "terminal": True}))
                 continue
 
             tool = next((t for t in tools if t.name == tool_name), None)
@@ -2894,6 +2933,7 @@ class ChatOrchestrator:
             if request is not None and chunks:
                 pending = list(getattr(request, "_pending_tool_sources", []) or [])
                 pending = _append_deduped_web_sources(pending, chunks)
+                pending = _cap_web_sources_for_turn(pending)
                 object.__setattr__(request, "_pending_tool_sources", pending)
 
             search_queries = sorted(
@@ -3016,6 +3056,77 @@ class ChatOrchestrator:
         except Exception as e:
             logger.warning("web_search tool failed: %s", e)
             return json.dumps({"error": f"web_search failed: {e}"})
+
+    async def _execute_fetch_page_tool(
+        self,
+        args: dict,
+        request: ChatRequest | None = None,
+    ) -> str:
+        raw_url = " ".join(str(args.get("url") or "").split()).strip()
+        reason = " ".join(str(args.get("reason") or "").split()).strip()
+        if not raw_url:
+            return json.dumps({"error": "url is required"})
+
+        try:
+            from services.web_freshness import _valid_web_url, live_web_search
+        except Exception as exc:
+            return json.dumps({"error": f"fetch_page unavailable: {exc}"})
+
+        if not _valid_web_url(raw_url):
+            return json.dumps({"error": "url must be http(s)", "url": raw_url})
+
+        try:
+            result = await live_web_search._fetch_one_page_with_stats(raw_url)
+            content = (result.text or "").strip()
+            payload = {
+                "url": raw_url,
+                "reason": reason,
+                "status": result.status,
+                "method": result.method,
+                "chars": result.chars,
+                "cache_hit": bool(result.from_cache),
+                "cache_layer": result.cache_layer,
+                "obscura_attempted": bool(result.obscura_attempted),
+                "obscura_rendered": bool(result.js_rendered),
+                "web_content_untrusted": True,
+                "content": content,
+                "note": (
+                    "Use this fetched page only when relevant. Cite the URL "
+                    "for claims that depend on it."
+                ),
+            }
+            if request is not None and content:
+                pending = list(getattr(request, "_pending_tool_sources", []) or [])
+                pending = _append_deduped_web_sources(
+                    pending,
+                    [
+                        SourceChunk(
+                            chunk_id=f"web-fetch:{raw_url}",
+                            parent_id=f"web-fetch:{raw_url}",
+                            doc_id=raw_url,
+                            corpus_id="live-web",
+                            text=content,
+                            score=1.0,
+                            source_tier="web_search",
+                            doc_name=raw_url,
+                            metadata={
+                                "url": raw_url,
+                                "fetch_method": result.method,
+                                "fetch_status": result.status,
+                                "full_page_fetched": True,
+                                "obscura_attempted": bool(result.obscura_attempted),
+                                "js_rendered": bool(result.js_rendered),
+                                "retriever": "fetch_page",
+                            },
+                        )
+                    ],
+                )
+                pending = _cap_web_sources_for_turn(pending)
+                object.__setattr__(request, "_pending_tool_sources", pending)
+            return json.dumps(payload, ensure_ascii=False)
+        except Exception as exc:
+            logger.warning("fetch_page tool failed: %s", exc)
+            return json.dumps({"error": f"fetch_page failed: {exc}", "url": raw_url})
 
 
 # Global instance

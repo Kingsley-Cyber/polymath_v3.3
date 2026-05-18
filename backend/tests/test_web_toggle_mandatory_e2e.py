@@ -21,7 +21,7 @@ from services import chat_orchestrator as co  # noqa: E402
 from services import web_freshness as wf  # noqa: E402
 from services import web_query_enrichment as wqe  # noqa: E402
 from services.chat_orchestrator import ChatOrchestrator  # noqa: E402
-from services.web_freshness import WebSearchHit  # noqa: E402
+from services.web_freshness import _PageFetchResult, WebSearchHit  # noqa: E402
 
 
 def _parse_sse(frame: str) -> dict:
@@ -76,7 +76,7 @@ async def _fast_query_profile(_request, user_id=None):
 
 
 @pytest.mark.asyncio
-async def test_web_toggle_on_runs_deterministic_builder_to_web_to_rerank_pipeline(
+async def test_web_toggle_on_runs_agentic_rag_web_loop_to_rerank_pipeline(
     monkeypatch,
 ):
     monkeypatch.setattr(co.settings, "LIVE_WEB_SEARCH_ENABLED", True, raising=False)
@@ -272,14 +272,51 @@ async def test_web_toggle_on_runs_deterministic_builder_to_web_to_rerank_pipelin
         captured["prompt_query"] = kwargs["query"]
         return f"AUGMENTED PROMPT\n{kwargs['query']}"
 
+    stream_invocations: list[dict] = []
+
     async def fake_stream_chat(*, messages, model, overrides, tools=None, **kwargs):
-        steps.append("final_deepseek")
-        captured["final_stream"] = {
+        invocation = {
             "messages": messages,
             "model": model,
             "tools": tools,
+            "tool_choice": kwargs.get("tool_choice"),
             "overrides_model": overrides.model if overrides else None,
         }
+        stream_invocations.append(invocation)
+        steps.append("deepseek_tool_loop" if len(stream_invocations) == 1 else "final_deepseek")
+        if len(stream_invocations) == 1:
+            captured["first_stream"] = invocation
+        else:
+            captured["final_stream"] = invocation
+        if len(stream_invocations) == 1:
+            assert tools is not None
+            yield {
+                "thinking": (
+                    "RAG context may not be enough for current web guidance; "
+                    "I need official/live evidence before answering."
+                )
+            }
+            yield {
+                "tool_calls": [
+                    {
+                        "id": "call_web_1",
+                        "type": "function",
+                        "function": {
+                            "name": "web_search",
+                            "arguments": json.dumps(
+                                {
+                                    "query": (
+                                        "Polymath web retrieval Obscura SearXNG "
+                                        "reranking final seven sources"
+                                    ),
+                                    "max_results": 7,
+                                }
+                            ),
+                        },
+                    }
+                ]
+            }
+            return
         yield {"content": "Final answer using local RAG plus seven web sources."}
 
     async def fake_save_assistant_message(
@@ -329,10 +366,11 @@ async def test_web_toggle_on_runs_deterministic_builder_to_web_to_rerank_pipelin
 
     assert steps == [
         "local_rag",
+        "augment_prompt_with_rag_and_web",
+        "deepseek_tool_loop",
         "searxng",
         "fetch_obscura",
         "rerank_web",
-        "augment_prompt_with_rag_and_web",
         "final_deepseek",
     ]
     assert utility_resolutions == []
@@ -358,32 +396,28 @@ async def test_web_toggle_on_runs_deterministic_builder_to_web_to_rerank_pipelin
         if event["type"] == "trace_event"
     ]
     trace_titles = [event["title"] for event in trace_events]
-    assert event_types.index("tool_call_start") < event_types.index("tool_result")
-    assert event_types.index("tool_result") < event_types.index("sources")
     assert event_types.index("sources") < event_types.index("budget")
-    assert event_types.index("budget") < event_types.index("token")
+    assert event_types.index("budget") < event_types.index("tool_call_start")
+    assert event_types.index("tool_call_start") < event_types.index("tool_result")
+    assert event_types.index("tool_result") < event_types.index("token")
     assert event_types[-1] == "done"
     assert "Local RAG retrieval" in trace_titles
-    assert "Deterministic web query builder" in trace_titles
+    assert "Agentic web loop ready" in trace_titles
+    assert "Deterministic web query builder" not in trace_titles
     assert "Web planner tool-call model" not in trace_titles
-    assert "Native web_search tool call" in trace_titles
-    assert "Web retrieval controller" in trace_titles
+    assert "Native tool call" in trace_titles
     assert "Web retrieval decision trace" in trace_titles
     assert "Utility web query helper" not in trace_titles
-    assert "web_search tool result" in trace_titles
+    assert "Native tool result" in trace_titles
     assert "Chat model stream" in trace_titles
 
-    builder_trace_event = next(
+    ready_trace_event = next(
         event
         for event in trace_events
-        if event["title"] == "Deterministic web query builder" and event["status"] == "done"
+        if event["title"] == "Agentic web loop ready" and event["status"] == "done"
     )
-    builder_trace = builder_trace_event["content"]
-    assert "[Deterministic web query trace]" in builder_trace
-    assert "model: none" in builder_trace
-    assert "context: 2 prior user message(s) scanned" in builder_trace
-    assert "context_terms_used: none" in builder_trace
-    assert "query: Polymath web retrieval Obscura SearXNG reranking final seven sources" in builder_trace
+    assert ready_trace_event["metadata"]["web_search_required_before_final"] is True
+    assert ready_trace_event["metadata"]["max_web_search_calls"] == 3
 
     decision_trace_event = next(
         event
@@ -417,25 +451,33 @@ async def test_web_toggle_on_runs_deterministic_builder_to_web_to_rerank_pipelin
     assert pipeline["utility_query_enrichment"]["applied"] is False
     assert pipeline["utility_query_enrichment"]["model"] is None
     assert pipeline["utility_query_enrichment"]["fallback_reason"] == (
-        "deterministic_web_query_builder_used"
+        "native_web_planner_query_used"
     )
     assert pipeline["web_query_planner"] is None
-    assert pipeline["web_query_builder"]["attempted"] is True
-    assert pipeline["web_query_builder"]["model"] is None
-    assert pipeline["web_query_builder"]["strategy"] == "deterministic"
-    assert pipeline["web_query_builder"]["history_user_messages_used"] == 2
-    assert pipeline["web_query_builder"]["context_terms_used"] == []
+    assert pipeline["web_query_builder"] is None
 
-    sources_event = events[event_types.index("sources")]
+    sources_events = [event for event in events if event["type"] == "sources"]
+    assert len(sources_events) == 2
+    sources_event = sources_events[-1]
     assert len(sources_event["sources"]) == 8
     assert [source["chunk_id"] for source in sources_event["sources"][:1]] == ["local-1"]
     assert sum(source["corpus_id"] == "live-web" for source in sources_event["sources"]) == 7
-    assert len(captured["prompt_sources"]) == 8
+    assert len(captured["prompt_sources"]) == 1
+
+    first_stream = captured["first_stream"]
+    assert first_stream["model"] == "deepseek/deepseek-v4-flash"
+    assert first_stream["tool_choice"] is None
+    assert [tool["function"]["name"] for tool in first_stream["tools"]] == [
+        "web_search",
+        "fetch_page",
+        "response",
+    ]
 
     final_stream = captured["final_stream"]
     assert final_stream["model"] == "deepseek/deepseek-v4-flash"
     assert final_stream["overrides_model"] == "deepseek/deepseek-v4-flash"
-    assert final_stream["tools"] is None
+    assert final_stream["tools"] is not None
+    assert final_stream["tool_choice"] is None
     assistant_tool_message = next(
         msg for msg in final_stream["messages"] if msg.get("tool_calls")
     )
@@ -444,16 +486,64 @@ async def test_web_toggle_on_runs_deterministic_builder_to_web_to_rerank_pipelin
     )
     assert assistant_tool_message["tool_calls"][0]["function"]["name"] == "web_search"
     assert "reasoning_content" in assistant_tool_message
-    assert tool_result_message["tool_call_id"] == "server_web_search_1"
+    assert tool_result_message["tool_call_id"] == "call_web_1"
 
     done = events[-1]
     assert done["model_used"] == "deepseek/deepseek-v4-flash"
     assert done["agentic_mode_used"] is True
     assert done["tools_used"] == ["web_search"]
     assert saved_assistant["chunks_returned"] == 8
-    assert saved_assistant["sources"] == captured["prompt_sources"]
+    assert len(saved_assistant["sources"]) == 8
     assert saved_assistant["thinking"] is None
     assert saved_assistant["trace_events"] == trace_events
+
+
+@pytest.mark.asyncio
+async def test_fetch_page_tool_records_obscura_rendered_page(monkeypatch):
+    orchestrator = ChatOrchestrator()
+    request = ChatRequest(
+        message="Fetch this JS-rendered page.",
+        corpus_ids=["corpus-a"],
+        overrides=ModelOverrides(web_search_enabled=True),
+    )
+
+    async def fake_fetch_one_page_with_stats(url):
+        return _PageFetchResult(
+            url=url,
+            text="Rendered JS page text with evidence for the answer.",
+            method="obscura_js",
+            status="ok",
+            chars=49,
+            obscura_attempted=True,
+            js_rendered=True,
+        )
+
+    monkeypatch.setattr(
+        wf.live_web_search,
+        "_fetch_one_page_with_stats",
+        fake_fetch_one_page_with_stats,
+    )
+
+    result = await orchestrator._execute_fetch_page_tool(
+        {
+            "url": "https://example-js.test/article",
+            "reason": "snippet points to a JS-rendered source",
+        },
+        request,
+    )
+
+    payload = json.loads(result)
+    assert payload["method"] == "obscura_js"
+    assert payload["obscura_attempted"] is True
+    assert payload["obscura_rendered"] is True
+    assert payload["web_content_untrusted"] is True
+    assert "Rendered JS page text" in payload["content"]
+
+    pending_sources = getattr(request, "_pending_tool_sources")
+    assert len(pending_sources) == 1
+    assert pending_sources[0].corpus_id == "live-web"
+    assert pending_sources[0].metadata["retriever"] == "fetch_page"
+    assert pending_sources[0].metadata["js_rendered"] is True
 
 
 @pytest.mark.asyncio
