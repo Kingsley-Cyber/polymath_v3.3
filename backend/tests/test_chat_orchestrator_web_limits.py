@@ -8,6 +8,7 @@ from services.chat_orchestrator import (
     _MAX_WEB_SEARCH_RESULTS_PER_CALL,
     _append_deduped_web_sources,
     _available_tool_schemas,
+    _dedupe_sources_for_context,
     _looks_like_raw_tool_request_content,
     _limit_tool_calls_for_turn,
 )
@@ -134,3 +135,15 @@ def test_pending_web_sources_merge_with_local_rag_and_dedupe_urls():
         "https://example.test/security",
         "https://example.test/docs",
     }
+
+
+def test_source_context_dedupes_exact_duplicate_chunk_cards():
+    sources = [
+        _source_chunk("local-1", "qdrant_only"),
+        _source_chunk("local-1", "qdrant_mongo_graph"),
+        _source_chunk("local-2", "qdrant_only"),
+    ]
+
+    deduped = _dedupe_sources_for_context(sources)
+
+    assert [chunk.chunk_id for chunk in deduped] == ["local-1", "local-2"]

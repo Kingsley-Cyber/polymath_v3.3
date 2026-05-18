@@ -162,6 +162,50 @@ def _append_deduped_web_sources(existing: list[Any], pending: list[Any]) -> list
     return merged
 
 
+def _source_identity_key(source: Any) -> str | None:
+    """Stable key for exact source-card dedupe.
+
+    This intentionally does not collapse every chunk from the same document:
+    two different sections can both be useful evidence. It does remove the
+    same chunk/source card when it enters through multiple retrieval lanes.
+    """
+    data = _source_to_dict(source)
+    if not data:
+        return None
+    if _is_web_source_data(data):
+        web_key = _web_source_key(data)
+        return f"web:{web_key}" if web_key else None
+    chunk_id = str(data.get("chunk_id") or "").strip()
+    if chunk_id:
+        return f"chunk:{chunk_id}"
+    parent_id = str(data.get("parent_id") or "").strip()
+    doc_id = str(data.get("doc_id") or "").strip()
+    if parent_id or doc_id:
+        return f"parent:{doc_id}:{parent_id}"
+    text = " ".join(str(data.get("text") or "").split())[:240]
+    return f"text:{text}" if text else None
+
+
+def _dedupe_sources_for_context(sources: list[Any] | None) -> list[Any]:
+    """Preserve order while removing exact duplicate source cards."""
+    if not sources:
+        return []
+    deduped: list[Any] = []
+    seen: set[str] = set()
+    duplicates = 0
+    for source in sources:
+        key = _source_identity_key(source)
+        if key and key in seen:
+            duplicates += 1
+            continue
+        if key:
+            seen.add(key)
+        deduped.append(source)
+    if duplicates:
+        logger.info("source dedupe removed %d duplicate source card(s)", duplicates)
+    return deduped
+
+
 def _web_chunk_content_preview(chunk: Any, *, max_chars: int = 1600) -> str:
     text = str(getattr(chunk, "text", "") or "")
     marker = "\nContent: "
@@ -591,7 +635,7 @@ class ChatOrchestrator:
                 fact_seed_limit=profile_cfg["fact_seed_limit"],
                 search_mode=resolved_mode,
             )
-        sources = retrieval.chunks
+        sources = _dedupe_sources_for_context(retrieval.chunks)
 
         graph_context_enabled = (
             _is_graph_augmented_tier(retrieval.effective_tier)
@@ -648,11 +692,18 @@ class ChatOrchestrator:
                 logger.warning("Graph decoration skipped: %s", exc)
                 decoration = []
 
-        # Opt-in live web lane. When enabled, expose a model-callable search
-        # tool instead of pre-searching. This keeps the first context grounded
-        # in corpus chunks, then lets the model decide whether current outside
-        # context is actually needed.
+        # Opt-in live web lane. When enabled, execute one deterministic
+        # web_search tool step before the final answer. Earlier versions only
+        # exposed the native tool schema and let the model decide whether to
+        # call it, which made the UI toggle mean "may search" instead of
+        # "will search". The prelude below keeps the native tool-call shape
+        # (assistant tool_call + tool result) while guaranteeing the backend
+        # runs GLM query enrichment, SearXNG, page fetch, rerank, and source
+        # merge once per Web-enabled turn.
         web_sources: list = []
+        prefetched_react_messages: list[dict] = []
+        prefetched_tool_call_count = 0
+        prefetched_web_search_call_count = 0
 
         # Trust-signal snapshot — captured here so it carries through to
         # both the `done` SSE frame and the persisted assistant message.
@@ -682,6 +733,83 @@ class ChatOrchestrator:
                     conversation_id=str(conversation_id),
                 )
             )
+
+        if web_search_enabled:
+            web_args = {
+                "query": request.message,
+                "max_results": _MAX_WEB_SEARCH_RESULTS_PER_CALL,
+            }
+            web_call = {
+                "id": "server_web_search_1",
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "arguments": json.dumps(web_args),
+                },
+            }
+            logger.info(
+                "mandatory web_search prelude starting query=%r max_results=%d",
+                request.message[:160],
+                _MAX_WEB_SEARCH_RESULTS_PER_CALL,
+            )
+            yield build_sse_chunk(
+                ChatChunk(
+                    type="tool_call_start",
+                    content=json.dumps(
+                        [
+                            {
+                                "name": "web_search",
+                                "args": web_call["function"]["arguments"],
+                            }
+                        ]
+                    ),
+                    conversation_id=str(conversation_id),
+                )
+            )
+            web_result = await self._execute_web_search_tool(web_args, request)
+            logger.info("mandatory web_search prelude completed")
+            yield build_sse_chunk(
+                ChatChunk(
+                    type="tool_result",
+                    content=json.dumps(
+                        [{"name": "web_search", "result": web_result}]
+                    ),
+                    conversation_id=str(conversation_id),
+                )
+            )
+            prefetched_tool_call_count = 1
+            prefetched_web_search_call_count = 1
+            prefetched_react_messages.extend(
+                [
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [web_call],
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": web_call["id"],
+                        "name": "web_search",
+                        "content": web_result,
+                    },
+                ]
+            )
+            pending_tool_sources = getattr(request, "_pending_tool_sources", [])
+            if pending_tool_sources:
+                web_sources = list(pending_tool_sources)
+                sources = _dedupe_sources_for_context(
+                    _append_deduped_web_sources(
+                        list(sources or []),
+                        web_sources,
+                    )
+                )
+                chunks_returned = len(sources)
+                object.__setattr__(request, "_pending_tool_sources", [])
+                logger.info(
+                    "mandatory web_search merged sources local_plus_web=%d web_added=%d",
+                    chunks_returned,
+                    len(web_sources),
+                )
 
         if sources:
             yield build_sse_chunk(
@@ -743,21 +871,10 @@ class ChatOrchestrator:
                     "slash_command": "/web",
                     "instructions": (
                         "The user enabled live web search for this turn. You "
-                        "have access to a web_search tool. Use it only when "
-                        "the corpus chunks do not contain enough current or "
-                        "external information. Search with the user's wording "
-                        "or a concise refinement that preserves the user's "
-                        "technical anchors and acronyms. Do not include local "
-                        "corpus names, file names, or internal project labels "
-                        "in the search query. Prefer practical sources such as "
-                        "official docs, vendor/developer blogs, framework docs, "
-                        "and production guides unless the user asks for papers. "
-                        "Do not search a "
-                        "single ambiguous word. Make at most one web_search "
-                        "call; the server fetches a wider candidate pool and "
-                        "applies freshness filters, social/source-specific "
-                        "variants, and page-text reranking. Cite URLs when "
-                        "using web facts."
+                        "are using a search that was already executed as a controlled native "
+                        "web_search tool step before this answer. Use the "
+                        "supplied web sources only when relevant, cite URLs for "
+                        "web-backed facts, and do not call web_search again."
                     ),
                     "auto_selected": True,
                 }
@@ -968,10 +1085,10 @@ class ChatOrchestrator:
         tools, tool_schemas = await self._load_tools(request)
 
         # === START ReAct LOOP ===
-        tool_call_count = 0
-        web_search_call_count = 0
+        tool_call_count = prefetched_tool_call_count
+        web_search_call_count = prefetched_web_search_call_count
         tool_limit_reached = False
-        react_messages: list[dict] = []
+        react_messages: list[dict] = list(prefetched_react_messages)
 
         # Persist the RAW user message, not the RAG-augmented one. The object
         # `user_message.content` was overwritten above with the full augmented
@@ -1224,9 +1341,11 @@ class ChatOrchestrator:
 
             pending_tool_sources = getattr(request, "_pending_tool_sources", [])
             if pending_tool_sources:
-                sources = _append_deduped_web_sources(
-                    list(sources or []),
-                    list(pending_tool_sources),
+                sources = _dedupe_sources_for_context(
+                    _append_deduped_web_sources(
+                        list(sources or []),
+                        list(pending_tool_sources),
+                    )
                 )
                 chunks_returned = len(sources)
                 object.__setattr__(request, "_pending_tool_sources", [])

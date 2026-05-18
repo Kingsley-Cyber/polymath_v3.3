@@ -15,6 +15,7 @@ from models.schemas import (  # noqa: E402
     ModelOverrides,
     RetrievalResult,
     RetrievalTier,
+    SourceChunk,
 )
 from services import chat_orchestrator as co  # noqa: E402
 from services.chat_orchestrator import (  # noqa: E402
@@ -29,7 +30,7 @@ def _parse_sse(frame: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_web_toggle_routes_to_agentic_model_and_continues_after_reasoning_tool_call(
+async def test_web_toggle_routes_to_agentic_model_and_runs_deterministic_web_tool_prelude(
     monkeypatch,
 ):
     monkeypatch.setattr(co.settings, "LIVE_WEB_SEARCH_ENABLED", True, raising=False)
@@ -105,6 +106,22 @@ async def test_web_toggle_routes_to_agentic_model_and_continues_after_reasoning_
 
     async def fake_execute_web_search_tool(args, request=None):
         web_args.append(args)
+        object.__setattr__(
+            request,
+            "_pending_tool_sources",
+            [
+                SourceChunk(
+                    chunk_id="web-1",
+                    parent_id="web-1",
+                    doc_id="https://example.test",
+                    corpus_id="live-web",
+                    text="OpenAI update source",
+                    score=0.9,
+                    source_tier="web_search",
+                    metadata={"url": "https://example.test"},
+                )
+            ],
+        )
         return json.dumps(
             {
                 "query": args["query"],
@@ -138,21 +155,6 @@ async def test_web_toggle_routes_to_agentic_model_and_continues_after_reasoning_
                 "tools": tools,
             }
         )
-        if len(stream_calls) == 1:
-            yield {"thinking": "Need a current source before answering."}
-            yield {
-                "tool_calls": [
-                    {
-                        "id": "call_web_1",
-                        "type": "function",
-                        "function": {
-                            "name": "web_search",
-                            "arguments": '{"query":"OpenAI model routing"}',
-                        },
-                    }
-                ]
-            }
-            return
         yield {"content": "Final answer after checking the live web."}
 
     monkeypatch.setattr(orchestrator, "_load_or_create_conversation", fake_load_or_create)
@@ -182,12 +184,9 @@ async def test_web_toggle_routes_to_agentic_model_and_continues_after_reasoning_
     assert resolver_kinds == ["agentic"]
     assert request.overrides.model == "openai/agentic-tools"
     assert stream_calls[0]["model"] == "openai/agentic-tools"
-    assert stream_calls[1]["model"] == "openai/agentic-tools"
-    assert [schema["function"]["name"] for schema in stream_calls[0]["tools"]] == [
-        "web_search"
-    ]
+    assert stream_calls[0]["tools"] is None
 
-    continuation_messages = stream_calls[1]["messages"]
+    continuation_messages = stream_calls[0]["messages"]
     assistant_tool_message = next(
         msg for msg in continuation_messages if msg.get("role") == "assistant"
     )
@@ -195,17 +194,15 @@ async def test_web_toggle_routes_to_agentic_model_and_continues_after_reasoning_
         msg for msg in continuation_messages if msg.get("role") == "tool"
     )
     assert assistant_tool_message["tool_calls"][0]["function"]["name"] == "web_search"
-    assert (
-        assistant_tool_message["reasoning_content"]
-        == "Need a current source before answering."
-    )
-    assert tool_result_message["tool_call_id"] == "call_web_1"
-    assert web_args == [{"query": "OpenAI model routing"}]
+    assert tool_result_message["tool_call_id"] == "server_web_search_1"
+    assert web_args == [
+        {"query": "What changed in OpenAI model routing today?", "max_results": 7}
+    ]
 
     event_types = [event["type"] for event in events]
-    assert "thinking" in event_types
     assert "tool_call_start" in event_types
     assert "tool_result" in event_types
+    assert "sources" in event_types
     assert "token" in event_types
     done = events[-1]
     assert done["type"] == "done"
