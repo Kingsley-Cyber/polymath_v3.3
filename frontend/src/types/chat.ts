@@ -245,6 +245,7 @@ export interface ChatMessage {
   content: string;
   thinking?: string;
   trace_events?: TraceEvent[];
+  process_timeline?: ProcessTimelineItem[];
   model_used?: string;
   token_count?: number;
   created_at: string;
@@ -274,6 +275,17 @@ export interface ChatMessage {
    *  finalize. The backend now persists compact source previews, so reloads
    *  can still show source receipts even when full chunk bodies are compacted. */
   sources?: SourceChunk[];
+}
+
+export interface ProcessTimelineItem {
+  id: string;
+  kind: "trace" | "reasoning" | "tool";
+  title: string;
+  status?: "running" | "done" | "error" | "skipped" | string;
+  content?: string;
+  detail?: string;
+  timestamp: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface TraceEvent {

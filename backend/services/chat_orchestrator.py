@@ -687,10 +687,41 @@ POLYMATH_SYSTEM_PROMPT = (
     "Start with the answer.\n"
     "- If the context doesn't contain the answer, say so in one sentence. "
     "Don't invent, don't pad.\n"
+    "- Use markdown for scanability: short paragraphs, meaningful headings "
+    "when the answer has sections, bold key terms sparingly, and compact "
+    "bullets for grouped facts.\n"
+    "- Avoid one large stream block. If an answer is longer than six "
+    "sentences, break it into 2-4 short sections with bolded headers or "
+    "small markdown headings.\n"
+    "- Use tables only when comparing options, sources, statuses, or tradeoffs. "
+    "Keep table cells short.\n"
+    "- Put install/run commands in fenced shell blocks so the UI can render "
+    "them as command cards.\n"
     "\n"
     "Sound like a smart friend explaining, not a research assistant producing "
     "a report."
 )
+
+
+def _build_polymath_system_prompt(now: datetime | None = None) -> str:
+    current = now or datetime.now().astimezone()
+    current_date = current.strftime("%Y-%m-%d")
+    current_tz = current.tzname() or "local time"
+    return (
+        f"{POLYMATH_SYSTEM_PROMPT}\n"
+        "\n"
+        "Date and source freshness:\n"
+        f"- Today's date is {current_date} ({current_tz}). Interpret relative "
+        "dates like today, latest, recent, current, yesterday, and last year "
+        "against this date.\n"
+        "- When live Web is enabled and the question may have changed over "
+        "time, prefer current or recently updated primary sources where "
+        "available. Add years, versions, release names, domains, or update "
+        "terms to web queries when they improve precision.\n"
+        "- Do not reject older sources when they are primary, historical, or "
+        "the user is asking about stable theory. For evidence claims, separate "
+        "what was actually read from what only appeared in a snippet."
+    )
 
 
 class ChatOrchestrator:
@@ -722,6 +753,7 @@ class ChatOrchestrator:
         trimming_applied = False
         trimming_details = ""
         trace_events: list[dict[str, Any]] = []
+        system_prompt = _build_polymath_system_prompt()
 
         def _record_trace_event(
             *,
@@ -1501,7 +1533,7 @@ class ChatOrchestrator:
             # (Phase 23) is prepended every turn so style/length/anti-list
             # guidance survives regardless of whether reasoning mode is set.
             message_dicts: list[dict] = [
-                {"role": "system", "content": POLYMATH_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 *(
                     {"role": msg.role, "content": msg.content}
                     for msg in trimmed_messages
@@ -1980,7 +2012,7 @@ class ChatOrchestrator:
             if tool_limit_reached:
                 assistant_content = ""
             final_messages: list[dict] = [
-                {"role": "system", "content": POLYMATH_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 *(
                     {"role": msg.role, "content": msg.content}
                     for msg in trimmed_messages

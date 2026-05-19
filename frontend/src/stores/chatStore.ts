@@ -4,6 +4,7 @@ import type {
   Conversation,
   ChatMessage,
   CorpusResponse,
+  ProcessTimelineItem,
   SourceChunk,
   TraceEvent,
 } from "../types";
@@ -35,6 +36,7 @@ interface ChatState {
   streamingThinking: string;
   streamingTraceEvents: TraceEvent[];
   streamingToolActivity: StreamingToolActivity[];
+  streamingProcessTimeline: ProcessTimelineItem[];
   /** Sources captured from the SSE `sources` frame during a stream.
    *  Reset on each `startStreaming`; consumed when finalizing the
    *  assistant message so the RetrievalBadge expand panel has chunks. */
@@ -101,6 +103,7 @@ export const useChatStore = create<ChatState>()((set) => ({
   streamingThinking: "",
   streamingTraceEvents: [],
   streamingToolActivity: [],
+  streamingProcessTimeline: [],
   streamingSources: [],
   tokensUsed: null,
   tokensMax: null,
@@ -158,19 +161,75 @@ export const useChatStore = create<ChatState>()((set) => ({
     })),
 
   updateStreamingThinking: (thinking) =>
-    set((state) => ({
-      streamingThinking: state.streamingThinking + thinking,
-    })),
+    set((state) => {
+      const timeline = [...state.streamingProcessTimeline];
+      const last = timeline[timeline.length - 1];
+      if (last?.kind === "reasoning" && last.status === "running") {
+        timeline[timeline.length - 1] = {
+          ...last,
+          content: `${last.content || ""}${thinking}`,
+        };
+      } else {
+        for (let i = 0; i < timeline.length; i += 1) {
+          if (timeline[i].status === "running") {
+            timeline[i] = { ...timeline[i], status: "done" };
+          }
+        }
+        timeline.push({
+          id: `reasoning-${Date.now()}-${timeline.length}`,
+          kind: "reasoning",
+          title: "Reasoning trace",
+          status: "running",
+          content: thinking,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      return {
+        streamingThinking: state.streamingThinking + thinking,
+        streamingProcessTimeline: timeline,
+      };
+    }),
 
   addStreamingTraceEvent: (event) =>
-    set((state) => ({
-      streamingTraceEvents: [...state.streamingTraceEvents, event],
-    })),
+    set((state) => {
+      const timeline = state.streamingProcessTimeline.map((item) =>
+        item.status === "running"
+          ? { ...item, status: "done" }
+          : item,
+      );
+      timeline.push({
+        id: `trace-${event.id}`,
+        kind: "trace",
+        title: event.title,
+        status: event.status,
+        content: event.content,
+        timestamp: event.timestamp,
+        metadata: event.metadata,
+      });
+      return {
+        streamingTraceEvents: [...state.streamingTraceEvents, event],
+        streamingProcessTimeline: timeline,
+      };
+    }),
 
   addStreamingToolActivity: (activity) =>
-    set((state) => ({
-      streamingToolActivity: [...state.streamingToolActivity, activity],
-    })),
+    set((state) => {
+      const timeline = state.streamingProcessTimeline.map((item) =>
+        item.status === "running" ? { ...item, status: "done" } : item,
+      );
+      timeline.push({
+        id: activity.id,
+        kind: "tool",
+        title: formatToolActivityTitle(activity.name),
+        status: "running",
+        detail: activity.detail,
+        timestamp: new Date().toISOString(),
+      });
+      return {
+        streamingToolActivity: [...state.streamingToolActivity, activity],
+        streamingProcessTimeline: timeline,
+      };
+    }),
 
   completeStreamingToolActivity: (name, detail) =>
     set((state) => {
@@ -179,14 +238,26 @@ export const useChatStore = create<ChatState>()((set) => ({
       );
 
       if (targetIndex === -1) {
+        const id = `${name}-${Date.now()}`;
         return {
           streamingToolActivity: [
             ...state.streamingToolActivity,
             {
-              id: `${name}-${Date.now()}`,
+              id,
               name,
               status: "done",
               detail,
+            },
+          ],
+          streamingProcessTimeline: [
+            ...state.streamingProcessTimeline,
+            {
+              id,
+              kind: "tool",
+              title: formatToolActivityTitle(name),
+              status: "done",
+              detail,
+              timestamp: new Date().toISOString(),
             },
           ],
         };
@@ -196,8 +267,17 @@ export const useChatStore = create<ChatState>()((set) => ({
         streamingToolActivity: state.streamingToolActivity.map(
           (activity, index) =>
             index === targetIndex
-              ? { ...activity, status: "done", detail }
+              ? {
+                  ...activity,
+                  status: "done",
+                  detail: mergeToolDetails(activity.detail, detail),
+                }
               : activity,
+        ),
+        streamingProcessTimeline: state.streamingProcessTimeline.map((item) =>
+          item.id === state.streamingToolActivity[targetIndex].id
+            ? { ...item, status: "done", detail: mergeToolDetails(item.detail, detail) }
+            : item,
         ),
       };
     }),
@@ -211,6 +291,7 @@ export const useChatStore = create<ChatState>()((set) => ({
       streamingThinking: "",
       streamingTraceEvents: [],
       streamingToolActivity: [],
+      streamingProcessTimeline: [],
       streamingSources: [],
       messages: {
         ...state.messages,
@@ -239,6 +320,7 @@ export const useChatStore = create<ChatState>()((set) => ({
       streamingThinking: "",
       streamingTraceEvents: [],
       streamingToolActivity: [],
+      streamingProcessTimeline: [],
       streamingSources: [],
     }),
 
@@ -250,6 +332,7 @@ export const useChatStore = create<ChatState>()((set) => ({
       streamingThinking: "",
       streamingTraceEvents: [],
       streamingToolActivity: [],
+      streamingProcessTimeline: [],
       streamingSources: [],
     }),
 
@@ -266,3 +349,20 @@ export const useChatStore = create<ChatState>()((set) => ({
   setPendingPrompt: (text) => set({ pendingPrompt: text }),
   clearPendingPrompt: () => set({ pendingPrompt: null }),
 }));
+
+function formatToolActivityTitle(name: string): string {
+  if (name === "web_search") return "Web search";
+  if (name === "fetch_page") return "Fetch page";
+  return name.replace(/_/g, " ");
+}
+
+function mergeToolDetails(
+  before: string | undefined,
+  after: string | undefined,
+): string | undefined {
+  const parts = [
+    before ? `request\n${before}` : "",
+    after ? `result\n${after}` : "",
+  ].filter(Boolean);
+  return parts.join("\n\n") || undefined;
+}

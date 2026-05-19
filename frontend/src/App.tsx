@@ -24,10 +24,15 @@ import * as api from "./lib/api";
 import type { ChatMessage, ChatRequest, Collection } from "./types";
 
 function summarizeToolResultDetail(name: string, result: string): string | undefined {
-  if (name !== "web_search") return undefined;
   try {
     const parsed = JSON.parse(result) as {
       error?: string;
+      url?: string;
+      query?: string;
+      method?: string;
+      title?: string;
+      chars?: number;
+      status?: string;
       pipeline?: {
         candidate_results?: number;
         full_page_fetch_attempts?: number;
@@ -43,6 +48,17 @@ function summarizeToolResultDetail(name: string, result: string): string | undef
       };
     };
     if (parsed.error) return parsed.error;
+    if (name === "fetch_page") {
+      const lines = [
+        parsed.url ? `url: ${parsed.url}` : "",
+        parsed.title ? `title: ${parsed.title}` : "",
+        parsed.method ? `method: ${parsed.method}` : "",
+        parsed.status ? `status: ${parsed.status}` : "",
+        typeof parsed.chars === "number" ? `chars: ${parsed.chars}` : "",
+      ].filter(Boolean);
+      return lines.join("\n") || undefined;
+    }
+    if (name !== "web_search") return undefined;
     const p = parsed.pipeline;
     if (!p) return undefined;
     const freshness = p.freshness_time_range ? ` · ${p.freshness_time_range}` : "";
@@ -60,6 +76,32 @@ function summarizeToolResultDetail(name: string, result: string): string | undef
     return `candidates ${p.candidate_results ?? 0} → fetched ${p.full_page_fetch_successes ?? 0}/${p.full_page_fetch_attempts ?? 0} → final ${p.final_reranked_results ?? 0}${freshness}${snippet}${cache}${js}`;
   } catch {
     return undefined;
+  }
+}
+
+function summarizeToolStartDetail(
+  name: string,
+  args?: string,
+): string | undefined {
+  if (!args) return undefined;
+  try {
+    const parsed = JSON.parse(args) as {
+      query?: string;
+      max_results?: number;
+      url?: string;
+      reason?: string;
+    };
+    const lines = [
+      parsed.query ? `query: ${parsed.query}` : "",
+      parsed.url ? `url: ${parsed.url}` : "",
+      parsed.reason ? `reason: ${parsed.reason}` : "",
+      typeof parsed.max_results === "number"
+        ? `max_results: ${parsed.max_results}`
+        : "",
+    ].filter(Boolean);
+    return lines.join("\n") || undefined;
+  } catch {
+    return name === "tool" ? undefined : args;
   }
 }
 
@@ -401,6 +443,7 @@ function App() {
           Boolean(state.streamingThinking) ||
           state.streamingTraceEvents.length > 0 ||
           state.streamingToolActivity.length > 0 ||
+          state.streamingProcessTimeline.length > 0 ||
           state.streamingSources.length > 0;
 
         if (!cid || !hasPartialAssistant) {
@@ -416,6 +459,7 @@ function App() {
             `Stream failed before the final answer.\n\n[ERROR] ${errorMessage}`,
           thinking: state.streamingThinking || undefined,
           trace_events: state.streamingTraceEvents,
+          process_timeline: state.streamingProcessTimeline,
           model_used: request.overrides?.model || settings.selectedModel,
           created_at: new Date().toISOString(),
           collections_queried: settings.selectedCorpusIds,
@@ -481,6 +525,10 @@ function App() {
                       id: crypto.randomUUID(),
                       name: c.name || "tool",
                       status: "running",
+                      detail: summarizeToolStartDetail(
+                        c.name || "tool",
+                        c.args,
+                      ),
                     });
                   }
                 } catch {
@@ -524,6 +572,7 @@ function App() {
                   content: state.streamingContent,
                   thinking: state.streamingThinking || undefined,
                   trace_events: state.streamingTraceEvents,
+                  process_timeline: state.streamingProcessTimeline,
                   model_used: event.model_used,
                   created_at: new Date().toISOString(),
                   trimming_applied: event.trimming_applied,
