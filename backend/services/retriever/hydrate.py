@@ -159,3 +159,89 @@ async def hydrate_chunks(
         len(doc_ids),
     )
     return hydrated
+
+
+async def hydrate_rerank_texts(
+    chunks: List[SourceChunk], corpus_ids: Optional[List[str]] = None
+) -> List[SourceChunk]:
+    """Replace Qdrant display snippets with full child text before reranking.
+
+    Existing Qdrant payloads may carry compact ``chunk_text`` snippets for
+    fast display. The reranker needs the full retrieval unit, especially for
+    table chunks where the exact matching row can land after the display
+    snippet. This pass reads from Mongo ``chunks`` only and does not hydrate to
+    parent text, so reranker inputs remain child-sized.
+    """
+    if not chunks:
+        return []
+
+    db = conversation_service._db
+    if db is None:
+        logger.warning("DB not connected — cannot hydrate reranker texts.")
+        return chunks
+
+    chunk_ids = [
+        c.chunk_id
+        for c in chunks
+        if c.chunk_id and not c.chunk_id.endswith("_summary")
+    ]
+    if not chunk_ids:
+        return chunks
+
+    query: dict = {"chunk_id": {"$in": chunk_ids}}
+    if corpus_ids:
+        query["corpus_id"] = {"$in": corpus_ids}
+
+    try:
+        records = await db["chunks"].find(
+            query,
+            {
+                "_id": 0,
+                "chunk_id": 1,
+                "text": 1,
+                "parent_id": 1,
+                "doc_id": 1,
+                "corpus_id": 1,
+                "chunk_kind": 1,
+                "heading_path": 1,
+                "language": 1,
+                "metadata": 1,
+            },
+        ).to_list(length=None)
+    except Exception as exc:
+        logger.warning("Reranker text hydration failed: %s", exc)
+        return chunks
+
+    by_id = {str(r.get("chunk_id")): r for r in records if r.get("chunk_id")}
+    if not by_id:
+        return chunks
+
+    hydrated: List[SourceChunk] = []
+    replaced = 0
+    for chunk in chunks:
+        copied = chunk.model_copy()
+        record = by_id.get(copied.chunk_id)
+        if record and record.get("text"):
+            original_len = len(copied.text or "")
+            copied.text = str(record["text"])
+            if len(copied.text) > original_len:
+                replaced += 1
+            copied.parent_id = record.get("parent_id") or copied.parent_id
+            copied.doc_id = record.get("doc_id") or copied.doc_id
+            copied.corpus_id = record.get("corpus_id") or copied.corpus_id
+            copied.chunk_kind = record.get("chunk_kind") or copied.chunk_kind
+            if not copied.heading_path and record.get("heading_path"):
+                copied.heading_path = record["heading_path"]
+            if not copied.language and record.get("language"):
+                copied.language = record["language"]
+            if not copied.metadata and record.get("metadata"):
+                copied.metadata = record["metadata"] or {}
+        hydrated.append(copied)
+
+    if replaced:
+        logger.info(
+            "Reranker text hydration replaced %d/%d candidate snippets",
+            replaced,
+            len(chunks),
+        )
+    return hydrated

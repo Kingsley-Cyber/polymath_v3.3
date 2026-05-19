@@ -39,7 +39,7 @@ from services.retriever.graph_rerank import (
     apply_graph_degree_boost,
     apply_graph_degree_boost_metrics_aware,
 )
-from services.retriever.hydrate import hydrate_chunks
+from services.retriever.hydrate import hydrate_chunks, hydrate_rerank_texts
 from services.retriever.intent_policy import (
     QueryNeed,
     adaptive_funnel_limits,
@@ -180,6 +180,35 @@ def _should_drop_low_confidence_rerank(
     if top_score > threshold:
         return False
     return not _has_query_term_overlap(ranked[:10], ranking_query)
+
+
+def _trim_bounded_rerank_tail(
+    ranked: list[SourceChunk],
+    *,
+    rerank_enabled: bool,
+    score_scale: str | None = None,
+) -> list[SourceChunk]:
+    """Drop near-zero bounded rerank tails after strong matches.
+
+    With probability/cosine-style rerankers, top hits can be very strong while
+    unrelated candidates still occupy the remaining final_top_k slots with
+    scores near zero. final_top_k is a cap, not a requirement to feed junk to
+    the LLM. Leave low-confidence pools untouched so difficult queries can
+    still return their best available evidence.
+    """
+    if not rerank_enabled or len(ranked) <= 1:
+        return ranked
+    scale = (score_scale or settings.RERANKER_SCORE_SCALE or "logit").lower()
+    if scale not in {"probability", "cosine"}:
+        return ranked
+
+    top_score = float(ranked[0].score or 0.0)
+    if top_score < 0.50:
+        return ranked
+
+    floor = max(0.05, top_score * 0.20)
+    trimmed = [chunk for chunk in ranked if float(chunk.score or 0.0) >= floor]
+    return trimmed or ranked[:1]
 
 
 def _fact_context_text(fact: SourceFact) -> str:
@@ -1069,6 +1098,11 @@ class RetrieverOrchestrator:
                 len(pre_sorted) - rerank_top_n,
             )
 
+        if effective_tier in (RetrievalTier.qdrant_mongo, RetrievalTier.qdrant_mongo_graph):
+            phase_started = perf_counter()
+            merged = await hydrate_rerank_texts(merged, corpus_ids)
+            _add_timing("rerank_text_hydrate", phase_started)
+
         # [6] Rerank ONCE on full pool (Phase 18 — skippable per-request)
         if not rerank_enabled:
             logger.info("Reranker skipped by override — score-sorting directly")
@@ -1102,6 +1136,24 @@ class RetrieverOrchestrator:
             )
             _log_timings("empty_low_confidence_rerank", 0)
             return _result([])
+
+        trimmed_ranked = _trim_bounded_rerank_tail(
+            ranked,
+            rerank_enabled=rerank_enabled,
+            score_scale=settings.RERANKER_SCORE_SCALE,
+        )
+        if len(trimmed_ranked) != len(ranked):
+            logger.info(
+                "Bounded rerank tail trim: %d → %d candidates "
+                "(top_score=%.3f scale=%s)",
+                len(ranked),
+                len(trimmed_ranked),
+                ranked[0].score if ranked else 0.0,
+                settings.RERANKER_SCORE_SCALE,
+            )
+            counts["rerank_tail_trimmed"] = len(ranked) - len(trimmed_ranked)
+            ranked = trimmed_ranked
+            counts["ranked"] = len(ranked)
 
         # Phase 24 — final_top_k (Custom profile slider) overrides the
         # legacy DEFAULT_RETRIEVAL_K env cap. Never silently swap models or

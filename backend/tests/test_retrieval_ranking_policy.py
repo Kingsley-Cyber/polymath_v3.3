@@ -1,5 +1,6 @@
 from models.schemas import RetrievalTier, SourceChunk
 from services.retriever.intent_policy import infer_retrieval_intent
+from services.retriever import _trim_bounded_rerank_tail
 from services.retriever.ranking_policy import (
     apply_candidate_weights,
     candidate_kind,
@@ -144,3 +145,49 @@ def test_vector_base_does_not_expand_final_sources_for_diversity():
 
     assert result.added == 0
     assert [c.chunk_id for c in result.candidates] == ["c1", "c2"]
+
+
+def test_probability_rerank_tail_trim_drops_near_zero_fillers():
+    ranked = [
+        _chunk("strong", score=0.94),
+        _chunk("good", score=0.64),
+        _chunk("junk", score=0.004),
+    ]
+
+    trimmed = _trim_bounded_rerank_tail(
+        ranked,
+        rerank_enabled=True,
+        score_scale="probability",
+    )
+
+    assert [c.chunk_id for c in trimmed] == ["strong", "good"]
+
+
+def test_probability_rerank_tail_trim_keeps_low_confidence_pool():
+    ranked = [
+        _chunk("weak-best", score=0.22),
+        _chunk("weak-next", score=0.03),
+    ]
+
+    trimmed = _trim_bounded_rerank_tail(
+        ranked,
+        rerank_enabled=True,
+        score_scale="probability",
+    )
+
+    assert trimmed == ranked
+
+
+def test_logit_rerank_tail_trim_is_disabled():
+    ranked = [
+        _chunk("strong", score=4.0),
+        _chunk("negative", score=-3.0),
+    ]
+
+    trimmed = _trim_bounded_rerank_tail(
+        ranked,
+        rerank_enabled=True,
+        score_scale="logit",
+    )
+
+    assert trimmed == ranked

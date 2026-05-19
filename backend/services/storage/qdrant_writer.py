@@ -535,7 +535,7 @@ async def upsert_children(
             "chunk_type": "child",
             "source_tier": c["source_tier"],
             "heading_path": c.get("heading_path"),
-            "chunk_text": c["text"][:512],
+            "chunk_text": c["text"],
             "user_id": c.get("user_id", ""),
             # Semantic role (body / toc / bibliography / … / code). Default
             # retrieval excludes non-body via a `must_not` filter on this
@@ -615,7 +615,7 @@ async def upsert_summaries(
             "chunk_type": "summary",
             "source_tier": p["source_tier"],
             "heading_path": p.get("heading_path"),
-            "chunk_text": p["summary"][:512],
+            "chunk_text": p["summary"],
             "user_id": p.get("user_id", ""),
             "chunk_kind": p.get("chunk_kind", "body"),
             "language": p.get("language"),

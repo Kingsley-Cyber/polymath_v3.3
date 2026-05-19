@@ -1266,9 +1266,8 @@ def _searchable_text(chunk) -> str:
     chunk body uses local aliases. Prose chunks pass through unchanged.
 
     The augmented text is ONLY fed to the sparse encoder. The Qdrant
-    payload still carries `chunk.text[:512]` for display, and hydrate.py
-    still replaces chunk.text with the full Mongo body at retrieval —
-    nothing the LLM sees changes here.
+    payload carries the unaugmented chunk text, and hydrate.py can still
+    replace chunk.text with the full Mongo parent body at retrieval.
     """
     base = getattr(chunk, "text", "") or ""
     meta = getattr(chunk, "metadata", None) or {}
