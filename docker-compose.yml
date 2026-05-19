@@ -304,6 +304,8 @@ services:
       - ${LLAMA_RERANKER_PARALLEL:-1}
       - --batch-size
       - ${LLAMA_RERANKER_BATCH_SIZE:-512}
+      - --ubatch-size
+      - ${LLAMA_RERANKER_UBATCH_SIZE:-512}
       - --cache-ram
       - ${LLAMA_RERANKER_CACHE_RAM_MB:-0}
       - --no-cache-idle-slots

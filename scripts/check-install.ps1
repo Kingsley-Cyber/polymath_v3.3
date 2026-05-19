@@ -133,7 +133,7 @@ $modelRoot = if ($envMap.ContainsKey("POLYMATH_MODELS_ROOT")) {
     Join-Path $RuntimeRoot "models"
 }
 
-foreach ($model in @("Qwen3-Embedding-0.6B", "ms-marco-MiniLM-L6-v2")) {
+foreach ($model in @("Qwen3-Embedding-0.6B", "Qwen3-Reranker-0.6B-Q8_0-GGUF")) {
     $path = Join-Path $modelRoot $model
     if (Test-Path -LiteralPath $path) {
         Add-Ok "Found model directory $path"

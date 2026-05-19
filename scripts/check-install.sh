@@ -136,7 +136,7 @@ if [[ -z "$models_root" ]]; then
   models_root="$runtime_root/models"
 fi
 
-for model in Qwen3-Embedding-0.6B ms-marco-MiniLM-L6-v2; do
+for model in Qwen3-Embedding-0.6B Qwen3-Reranker-0.6B-Q8_0-GGUF; do
   if [[ -d "$models_root/$model" ]]; then
     ok "Found model directory $models_root/$model"
   else

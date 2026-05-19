@@ -225,7 +225,7 @@ if (-not $SkipDockerCheck) {
 if ($StageModels) {
     Write-Step "Downloading local embedding and reranker models"
     Invoke-HfDownload -Model "Qwen/Qwen3-Embedding-0.6B" -Destination (Join-Path $modelsRoot "Qwen3-Embedding-0.6B")
-    Invoke-HfDownload -Model "cross-encoder/ms-marco-MiniLM-L6-v2" -Destination (Join-Path $modelsRoot "ms-marco-MiniLM-L6-v2")
+    Invoke-HfDownload -Model "ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF" -Destination (Join-Path $modelsRoot "Qwen3-Reranker-0.6B-Q8_0-GGUF")
 } else {
     Write-Host "Skipping model downloads. Re-run with -StageModels when ready."
 }

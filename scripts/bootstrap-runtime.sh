@@ -18,7 +18,7 @@ Options:
   --compose-profiles LIST  Compose profiles to enable. Default: local-embed,local-rerank,local-parser,mcp
   --generate-secrets      Fill missing CHANGE_ME secrets in .env
   --force-secrets         Regenerate secrets even when values already exist
-  --stage-models          Download Qwen3-Embedding-0.6B and ms-marco-MiniLM-L6-v2
+  --stage-models          Download Qwen3-Embedding-0.6B and Qwen3-Reranker-0.6B-Q8_0-GGUF
   --skip-docker-check     Do not run docker compose config --quiet
   --dry-run               Print intended work without writing files
   -h, --help              Show this help
@@ -240,7 +240,7 @@ fi
 if [[ "$stage_models" == "1" ]]; then
   step "Downloading local embedding and reranker models"
   hf_download "Qwen/Qwen3-Embedding-0.6B" "$models_root/Qwen3-Embedding-0.6B"
-  hf_download "cross-encoder/ms-marco-MiniLM-L6-v2" "$models_root/ms-marco-MiniLM-L6-v2"
+  hf_download "ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF" "$models_root/Qwen3-Reranker-0.6B-Q8_0-GGUF"
 else
   echo "Skipping model downloads. Re-run with --stage-models when ready."
 fi

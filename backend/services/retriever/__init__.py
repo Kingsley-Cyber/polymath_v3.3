@@ -12,7 +12,7 @@ Flow (spec §RETRIEVAL RECIPE):
     + document-title anchor recall for hydrated tiers
   [4] merge fact seeds + vector + lexical + document anchors & dedupe by parent_id
   [5] Mode A graph expansion (qdrant_mongo_graph tier + NEO4J_ENABLED only)
-  [6] rerank ONCE on full pool (ms-marco sidecar, fallback: score sort)
+  [6] rerank ONCE on full pool (Qwen3 reranker sidecar, fallback: score sort)
   [7] trim to DEFAULT_RETRIEVAL_K
   [8] hydrate from MongoDB — parent text + corpus_name + doc_name
       (hydrate resolves parent_id for Mode A chunks; drops empty-text results)

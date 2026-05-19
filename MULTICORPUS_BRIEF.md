@@ -51,7 +51,7 @@
 | Auth | (n/a) | Custom Mongo-backed bearer-token auth in `services/auth.py`. `get_current_user` from `routers/auth.py`. **Users have no `email` field** — only `{_id, username, hashed_password, created_at}`. |
 | Frontend | (n/a) | React/Vite at `https://kingsleylab.xyz`. CORS allows localhost:3000/5173 + the prod hosts. |
 
-**Models everywhere:** Qwen3-Embedding-0.6B at 1024 dims (ingest + query). Reranker `cross-encoder/ms-marco-MiniLM-L6-v2`. LLMs via LiteLLM proxy (`settings.LITELLM_URL`, `settings.LITELLM_MASTER_KEY`).
+**Models everywhere:** Qwen3-Embedding-0.6B at 1024 dims (ingest + query). Reranker `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF` via llama.cpp. LLMs via LiteLLM proxy (`settings.LITELLM_URL`, `settings.LITELLM_MASTER_KEY`).
 
 **Hard rule from CLAUDE.md:** never mix 0.6B and 4B vectors in one Qdrant collection. Multi-corpus retrieval = querying multiple per-corpus collections, NOT merging them at the storage layer.
 
