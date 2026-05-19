@@ -388,19 +388,19 @@ export const QUERY_PROFILES: QueryProfileOption[] = [
   {
     key: "balanced",
     label: "Balanced",
-    description: "Default. Balanced retrieval profile with reranker on and backend HyDE available unless the source-audit guard skips it.",
+    description: "Default. Balanced retrieval profile with reranker on. HyDE only runs when the HyDE toggle is on.",
     retrieval_k: 40,
     rerank_enabled: true,
-    hyde_enabled: true,
+    hyde_enabled: false,
     approxLatency: "~2-8s",
   },
   {
     key: "thorough",
     label: "Thorough",
-    description: "Full pipeline. 60 vector candidates plus deeper lexical recall, reranker on, HyDE on. Best for ambiguous or open-ended questions.",
+    description: "Full retrieval pipeline. 60 vector candidates plus deeper lexical recall and reranker on. HyDE only runs when toggled.",
     retrieval_k: 60,
     rerank_enabled: true,
-    hyde_enabled: true,
+    hyde_enabled: false,
     approxLatency: "~8-30s",
   },
   {

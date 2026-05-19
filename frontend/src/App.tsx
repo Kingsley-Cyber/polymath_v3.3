@@ -326,8 +326,6 @@ function App() {
       chat.addMessage(cid, userMessage);
       chat.startStreaming();
 
-      const hydeRequested =
-        settings.hydeEnabled || settings.queryProfile === "thorough";
       const retrievalConfig =
         settings.retrievalTier === "qdrant_only"
           ? {
@@ -366,7 +364,9 @@ function App() {
           model: settings.selectedModel,
           temperature: settings.temperature,
           max_tokens: settings.maxTokens,
-          hyde_enabled: settings.hydeEnabled ? true : undefined,
+          // The visible HyDE toggle is authoritative. Send false explicitly so
+          // backend query-profile defaults cannot silently turn HyDE on.
+          hyde_enabled: settings.hydeEnabled,
           web_search_enabled: settings.webSearchEnabled ? true : undefined,
           collection_ids: settings.selectedCollectionIds,
           // Phase 14.1 — agentic override (per-request)
@@ -409,7 +409,7 @@ function App() {
           // Empty string shadows Phase F pool resolution, so we send undefined
           // when no explicit per-request model is set.
           hyde_model:
-            hydeRequested && settings.hydeModel
+            settings.hydeEnabled && settings.hydeModel
               ? settings.hydeModel
               : undefined,
           // Phase 18 — Query Profile speed preset (backend resolver expands

@@ -1,6 +1,7 @@
 // QueryProfileSelector.tsx (Phase 18)
 // Per-query speed preset picker in the ToggleBar. Picks one of 3 profiles
-// (fast | balanced | thorough) that bundles retrieval_k + rerank + HyDE.
+// (fast | balanced | thorough) that bundles retrieval width + rerank.
+// HyDE is controlled only by the visible HyDE toggle.
 // Read at App.tsx.handleSend and injected into overrides.query_profile.
 
 import { useState, useRef, useEffect } from "react";
@@ -85,7 +86,7 @@ export function QueryProfileSelector() {
                         ? "uses your Retrieval Settings"
                         : `k=${profile.retrieval_k} · lexical=${
                             profile.key === "fast" ? "off" : profile.key === "thorough" ? "deep" : "on"
-                          } · rerank=${profile.rerank_enabled ? "on" : "off"} · hyde=${profile.hyde_enabled ? "on" : "off"}`}
+                          } · rerank=${profile.rerank_enabled ? "on" : "off"}`}
                     </div>
                   </div>
                 </button>
