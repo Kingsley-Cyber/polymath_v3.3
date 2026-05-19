@@ -1,6 +1,6 @@
 :root {
-  --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-technical: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+  --font-ui: var(--font-family-prose);
+  --font-technical: var(--font-family-mono);
 }
 
 .font-technical {

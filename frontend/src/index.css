@@ -1,5 +1,50 @@
+@import url('https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 @import "./styles/typography.css";
+
+:root {
+    /* Colors — these are the agent-zero dark theme */
+    --color-background: #131313;
+    --color-chat-background: #212121;
+    --color-text: #ffffff;
+    --color-text-muted: #d4d4d4e4;
+    --color-primary: #737a81;
+    --color-message-text: #e0e0e0;
+    --color-border: #444444a8;
+    --color-panel: #1a1a1a;
+    --color-highlight: #2b5ab9;
+    --color-error: #e72323;
+    --color-warning: #e79c23;
+
+    /* Spacing */
+    --spacing-xxs: 0.15rem;
+    --spacing-xs: 0.3125rem;
+    --spacing-sm: 0.625rem;
+    --spacing-md: 1rem;
+    --spacing-lg: 1.5rem;
+
+    /* Type */
+    --font-size-smaller: 0.7rem;
+    --font-size-small: 0.8rem;
+    --font-size-base: 0.95rem;
+    --font-size-large: 1.15rem;
+    --font-family-prose: 'Rubik', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-family-mono: 'Roboto Mono', Consolas, Monaco, monospace;
+
+    /* Existing Tailwind token aliases */
+    --bg-base: var(--color-background);
+    --bg-surface: var(--color-chat-background);
+    --bg-raised: var(--color-panel);
+    --text-primary: var(--color-text);
+    --text-secondary: var(--color-message-text);
+    --text-tertiary: var(--color-text-muted);
+    --text-muted: var(--color-text-muted);
+    --accent-primary: var(--color-primary);
+    --accent-secondary: var(--color-highlight);
+    --border-subtle: var(--color-border);
+    --font-ui: var(--font-family-prose);
+    --font-technical: var(--font-family-mono);
+}
 
 @theme {
     /* Deterministic Protocol Graph Theme Mapping */
@@ -26,18 +71,18 @@
 }
 
 @layer base {
-    /* 1. AYU MIRAGE -> Reinterpreted as Obsidian Graph Protocol */
+    /* 1. AYU MIRAGE -> Agent-zero document chrome */
     :root,
     .theme-ayu-mirage {
-        --bg-base: #0f0f11;
-        --bg-surface: #141416;
-        --bg-raised: #1c1c1f;
-        --text-primary: #ededee;
-        --text-secondary: #b8b8bd;  /* was #88888b — bumped from ~5.4:1 to ~9:1 contrast */
-        --text-tertiary: #888890;   /* was #4a4a4d — was failing WCAG AA (~2.4:1), now ~5:1 */
-        --accent-primary: #b366ff; /* Obsidian Purple Link */
-        --accent-secondary: #4d94ff; /* Obsidian Blue Node */
-        --border-subtle: #2c2c30;
+        --bg-base: var(--color-background);
+        --bg-surface: var(--color-chat-background);
+        --bg-raised: var(--color-panel);
+        --text-primary: var(--color-text);
+        --text-secondary: var(--color-message-text);
+        --text-tertiary: var(--color-text-muted);
+        --accent-primary: var(--color-primary);
+        --accent-secondary: var(--color-highlight);
+        --border-subtle: var(--color-border);
 
         background-color: var(--bg-base);
         color: var(--text-primary);
@@ -141,7 +186,9 @@
 
     body {
         @apply antialiased transition-colors duration-0;
-        font-family: var(--font-sans);
+        background-color: var(--color-background);
+        color: var(--color-text);
+        font-family: var(--font-family-prose);
         letter-spacing: 0;
     }
 }
@@ -160,33 +207,76 @@
         @apply bg-background-surface backdrop-blur-none border border-border-minimal;
     }
 
-    /* Message Bubbles - Designed like graph nodes/metadata blocks */
-    .message-user {
-        @apply pl-4 py-3 border border-border-minimal border-l-4 border-l-accent-main text-content-primary text-sm tracking-tight bg-background-base mb-4 uppercase;
+    .chat-history,
+    [class*="chat-container"],
+    [class*="message-list"] {
+        background-color: var(--color-chat-background);
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 0 var(--spacing-lg);
     }
 
-    .message-assistant {
-        @apply pl-4 pr-5 py-4 border border-border-minimal text-content-secondary bg-background-surface mb-4;
-        font-family: var(--font-ui);
-        border-radius: 0.5rem;
+    /* Message Bubbles - asymmetric agent-zero chrome */
+    .message-user {
+        color: var(--color-text);
+        display: flex;
+        justify-content: flex-end;
+        margin: 0 0 var(--spacing-lg) 0;
+        width: 100%;
+    }
+
+    .message-user .message-text,
+    [data-role="user"] .message-text {
+        background-color: #2d2d2d;
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+        padding: var(--spacing-sm) var(--spacing-md);
+        display: inline-block;
+        max-width: 80%;
+        margin-left: auto;
+        color: var(--color-text);
+        font-family: var(--font-family-prose);
+        font-size: var(--font-size-base);
+        line-height: 1.5;
+        text-transform: none;
+    }
+
+    .message-assistant,
+    .message-tool,
+    .message-system,
+    [data-role="assistant"],
+    [data-role="tool"],
+    [data-role="system"] {
+        background-color: transparent;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        padding: 0;
+        margin: 0 0 var(--spacing-lg) 0;
+        color: var(--color-message-text);
+        font-family: var(--font-family-prose);
+        font-size: var(--font-size-base);
+        line-height: 1.6;
     }
 
     .synthesis-body {
-        color: var(--text-secondary);
-        font-family: var(--font-ui);
-        font-size: 16px;
-        line-height: 1.76;
+        color: var(--color-message-text);
+        font-family: var(--font-family-prose);
+        font-size: var(--font-size-base);
+        line-height: 1.6;
         max-width: 82ch;
     }
 
     .synthesis-body h1,
     .synthesis-body h2,
     .synthesis-body h3 {
-        color: var(--text-primary);
-        font-weight: 800;
+        border-bottom: 1px solid var(--color-primary);
+        color: var(--color-text);
+        font-weight: 600;
         line-height: 1.25;
         letter-spacing: 0;
-        margin: 1rem 0 0.45rem;
+        margin: var(--spacing-lg) 0 var(--spacing-sm);
+        padding-bottom: var(--spacing-xs);
     }
 
     .synthesis-body > :first-child {
@@ -198,9 +288,7 @@
     }
 
     .synthesis-body h2 {
-        border-left: 3px solid var(--accent-primary);
         font-size: 1.14rem;
-        padding-left: 0.55rem;
     }
 
     .synthesis-body h3 {
@@ -984,4 +1072,79 @@
   border: 0;
   border-top: 1px solid #27272a;
   margin: 1rem 0;
+}
+
+/* Agent-zero assistant prose rhythm: assistant output is document text, not a card. */
+.message-assistant .message-text {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  color: var(--color-message-text);
+  font-family: var(--font-family-prose);
+  font-size: var(--font-size-base);
+  line-height: 1.6;
+  padding: 0;
+}
+
+.message-assistant p { margin: 0 0 var(--spacing-sm) 0; }
+.message-assistant p:last-child { margin-bottom: 0; }
+
+.message-assistant h1,
+.message-assistant h2,
+.message-assistant h3 {
+  border-bottom: 1px solid var(--color-primary);
+  border-left: 0;
+  color: var(--color-text);
+  font-weight: 600;
+  margin-top: var(--spacing-lg);
+  margin-bottom: var(--spacing-sm);
+  padding-bottom: var(--spacing-xs);
+  padding-left: 0;
+}
+
+.message-assistant ul,
+.message-assistant ol {
+  margin: 0 0 var(--spacing-sm) 0;
+  padding-left: var(--spacing-lg);
+}
+
+.message-assistant li {
+  line-height: 1.5;
+  margin-bottom: 0.25rem;
+}
+
+.message-assistant code {
+  background-color: rgba(255, 255, 255, 0.05);
+  border: none;
+  border-radius: 3px;
+  color: var(--color-message-text);
+  font-family: var(--font-family-mono);
+  font-size: 0.85em;
+  padding: 0.1em 0.3em;
+}
+
+.message-assistant pre {
+  background-color: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  margin: var(--spacing-sm) 0;
+  overflow-x: auto;
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+
+.message-assistant pre code {
+  background: none;
+  border: none;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  padding: 0;
+}
+
+.message-assistant blockquote {
+  background: transparent;
+  border-left: 3px solid var(--color-primary);
+  color: var(--color-text-muted);
+  font-style: normal;
+  margin: var(--spacing-sm) 0;
+  padding: 0 0 0 var(--spacing-md);
 }

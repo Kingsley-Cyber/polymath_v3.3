@@ -3,7 +3,6 @@ import { useEffect, useRef, useState, type DependencyList } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  User,
   AlertTriangle,
   Clock,
   Copy,
@@ -118,29 +117,15 @@ export function MessageBubble({
   return (
     <div
       className={`
-        group flex gap-3 px-4 py-4
-        ${isUser ? "flex-row-reverse" : "flex-row"}
+        group flex w-full
+        ${isUser ? "justify-end" : "justify-start"}
         animate-fade-in
       `}
     >
-      {/* Avatar */}
-      <div
-        className={`
-          flex-shrink-0 w-8 h-8 border flex items-center justify-center transition-none rounded-none
-          ${isUser ? "bg-accent-main/10 border-accent-main text-accent-main" : "bg-bg-surface border-border-minimal text-content-secondary"}
-        `}
-      >
-        {isUser ? (
-          <User className="w-4 h-4" />
-        ) : (
-          <TerminalSquare className="w-4 h-4" />
-        )}
-      </div>
-
       {/* Message Content */}
       <div
         className={`flex flex-col flex-1 min-w-0 ${
-          isUser ? "max-w-[85%] items-end" : "max-w-full items-start"
+          isUser ? "items-end" : "items-start"
         }`}
       >
         {hasProcessTimeline && (
@@ -184,19 +169,22 @@ export function MessageBubble({
 
         {/* Bubble */}
         <div
+          data-role={message.role}
           className={`
             relative group/bubble
-            ${isUser ? "message-user" : "message-assistant w-full max-w-4xl"}
+            ${isUser ? "message-user" : "message-assistant w-full max-w-[82ch]"}
           `}
         >
           {/* Content with Markdown and brutalist formatting */}
           <div
             className={
-              isUser ? "break-words" : "synthesis-body break-words"
+              isUser
+                ? "message-text whitespace-pre-wrap break-words"
+                : "message-text synthesis-body break-words"
             }
           >
             {isUser ? (
-              <span className="whitespace-pre-wrap">{message.content}</span>
+              message.content
             ) : (
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
@@ -215,9 +203,8 @@ export function MessageBubble({
             <button
               onClick={handleCopy}
               className="
-                absolute -right-10 top-2 p-1 border border-border-minimal bg-bg-surface
-                text-content-tertiary hover:text-accent-main hover:border-accent-main
-                opacity-0 group-hover/bubble:opacity-100 transition-none rounded-none
+                absolute -right-8 top-0 p-1 text-content-tertiary
+                opacity-0 transition-opacity hover:text-accent-main group-hover/bubble:opacity-100
               "
               title="Copy message"
             >
@@ -299,12 +286,7 @@ function deriveToolActivityFromTraceEvents(
 const markdownComponents: Components = {
   code({ className, children, ...props }) {
     const raw = String(children).replace(/\n$/, "");
-    const language = getCodeLanguage(className);
     const block = raw.includes("\n") || Boolean(className);
-
-    if (block && isCommandCode(raw, language)) {
-      return <CommandCard command={raw} language={language || "shell"} />;
-    }
 
     if (block) {
       return (
@@ -317,10 +299,7 @@ const markdownComponents: Components = {
     }
 
     return (
-      <code
-        className={isCommandLine(raw) ? "pm-command-chip" : "pm-inline-code"}
-        {...props}
-      >
+      <code className="pm-inline-code" {...props}>
         {children}
       </code>
     );
@@ -329,77 +308,6 @@ const markdownComponents: Components = {
     return <>{children}</>;
   },
 };
-
-function CommandCard({
-  command,
-  language,
-}: {
-  command: string;
-  language: string;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  const copyCommand = async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
-    } catch (err) {
-      console.error("Failed to copy command:", err);
-    }
-  };
-
-  return (
-    <div className="pm-command-card">
-      <div className="pm-command-card-header">
-        <span className="pm-command-card-dot" />
-        <span className="pm-command-card-title">{language || "command"}</span>
-        <button
-          type="button"
-          onClick={copyCommand}
-          className="pm-command-card-copy"
-          title="Copy command"
-        >
-          {copied ? (
-            <Check className="h-3.5 w-3.5" />
-          ) : (
-            <Copy className="h-3.5 w-3.5" />
-          )}
-          <span>{copied ? "COPIED" : "COPY"}</span>
-        </button>
-      </div>
-      <pre className="pm-command-card-body">
-        <code>{command}</code>
-      </pre>
-    </div>
-  );
-}
-
-function getCodeLanguage(className: string | undefined): string {
-  const match = /language-([\w-]+)/.exec(className || "");
-  return match?.[1]?.toLowerCase() || "";
-}
-
-function isCommandCode(raw: string, language: string): boolean {
-  const shellLanguages = new Set([
-    "bash",
-    "sh",
-    "shell",
-    "zsh",
-    "powershell",
-    "ps1",
-    "console",
-    "terminal",
-  ]);
-  return shellLanguages.has(language) || isCommandLine(raw);
-}
-
-function isCommandLine(raw: string): boolean {
-  const line = raw.trim().split(/\r?\n/)[0] || "";
-  return /^(?:[$>]\s*)?(?:npm|pnpm|yarn|bun|npx|node|python|py|pip|uv|git|docker(?:\s+compose)?|curl|wget|cargo|rustup|go|make|cmake|pytest|ruff|black|mypy|poetry|pipx|ollama|llama-server)\b/i.test(
-    line,
-  );
-}
 
 function toolNameFromTraceTitle(title: string): string | undefined {
   const match = title.match(/\b([a-zA-Z][a-zA-Z0-9_-]*)\s+tool\b/);
