@@ -1,5 +1,5 @@
 // FileAttachment.tsx - File attachment display and upload component
-import { X, Upload, Loader2 } from "lucide-react";
+import { X, Upload } from "lucide-react";
 
 interface FileAttachmentProps {
   file: File;
@@ -23,21 +23,21 @@ export function FileAttachment({
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
   };
 
-  const getFileIcon = () => {
+  const getFileTag = () => {
     const type = file.type;
-    if (type.startsWith("image/")) return "🖼️";
-    if (type.includes("pdf")) return "📄";
-    if (type.includes("text")) return "📝";
-    if (type.includes("json")) return "📋";
-    return "📎";
+    if (type.startsWith("image/")) return "IMG";
+    if (type.includes("pdf")) return "PDF";
+    if (type.includes("text")) return "TXT";
+    if (type.includes("json")) return "JSN";
+    return "FIL";
   };
 
   return (
     <div
       className="relative flex items-center gap-2 px-3 py-2 bg-bg-tertiary border border-border rounded-lg group"
     >
-      {/* File Icon */}
-      <span className="text-lg">{getFileIcon()}</span>
+      {/* File type tag */}
+      <span className="status-badge status-badge-inf">{`<${getFileTag()}>`}</span>
 
       {/* File Info */}
       <div className="flex-1 min-w-0">
@@ -55,7 +55,7 @@ export function FileAttachment({
       {/* Upload Progress or Remove Button */}
       {isUploading ? (
         <div className="flex items-center gap-2">
-          <Loader2 className="w-4 h-4 animate-spin text-primary" />
+          <span className="status-badge status-badge-gen">{"<GEN>"}</span>
           {uploadProgress !== undefined && (
             <div className="w-16 h-1 bg-border rounded-full overflow-hidden">
               <div

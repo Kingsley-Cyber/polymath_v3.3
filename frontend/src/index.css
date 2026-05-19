@@ -1142,9 +1142,191 @@
 
 .message-assistant blockquote {
   background: transparent;
-  border-left: 3px solid var(--color-primary);
+  border-left: 0;
   color: var(--color-text-muted);
   font-style: normal;
   margin: var(--spacing-sm) 0;
   padding: 0 0 0 var(--spacing-md);
+}
+
+.message-assistant table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: var(--spacing-sm) 0;
+  font-size: 0.9em;
+}
+
+.message-assistant th,
+.message-assistant td {
+  text-align: left;
+  padding: 0.4rem var(--spacing-sm);
+  border: none;
+}
+
+.message-assistant th {
+  color: var(--color-primary);
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.message-assistant tr:nth-child(even) td {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.process-group {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin: var(--spacing-sm) 0;
+  background-color: rgba(0, 0, 0, 0.15);
+}
+
+.process-group-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  cursor: pointer;
+  width: 100%;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.disclosure-caret {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 5px 0 5px 8px;
+  border-color: transparent transparent transparent var(--color-primary);
+  transition: transform 0.2s ease-out;
+  flex: 0 0 auto;
+}
+
+.expanded .disclosure-caret {
+  transform: rotate(90deg);
+}
+
+.collapsible {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease-out;
+}
+
+.collapsible > .content {
+  overflow: hidden;
+}
+
+.collapsible.expanded {
+  grid-template-rows: 1fr;
+}
+
+.status-badge {
+  display: inline-block;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-smaller);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.status-badge-gen { background: #2b5ab9; color: #fff; }
+.status-badge-use { background: #737a81; color: #fff; }
+.status-badge-exe { background: #5d9c4e; color: #fff; }
+.status-badge-www { background: #4a90e2; color: #fff; }
+.status-badge-res { background: #888;    color: #fff; }
+.status-badge-wrn { background: #e79c23; color: #131313; }
+.status-badge-err { background: #e72323; color: #fff; }
+.status-badge-inf { background: var(--color-border); color: var(--color-text-muted); }
+
+@keyframes message-arrive {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.message-assistant,
+.message-user {
+  animation: message-arrive 0.2s ease-out;
+}
+
+/* Phase 2 border audit enforcement. The allowed exceptions are restored below. */
+#root :where(*) {
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+#root :where(.border, .border-x, .border-y, .border-t, .border-r, .border-b, .border-l, [class*="border-"]) {
+  border-color: transparent !important;
+  border-width: 0 !important;
+}
+
+#root :where(
+  .glass,
+  .glass-dark,
+  .pm-process-list,
+  .pm-process-list details + details,
+  .pm-process-body,
+  .pm-process-row + .pm-process-row,
+  .pm-process-row-content,
+  .pm-tool-text-lines code,
+  .pm-tool-kv code,
+  .pm-tool-grid > div,
+  .pm-tool-sources,
+  .pm-tool-decision,
+  .pm-inline-code,
+  .pm-command-chip,
+  .pm-command-card,
+  .pm-command-card-header,
+  .pm-command-card-copy,
+  .chat-input-container,
+  .toggle,
+  .dropdown-menu,
+  .input-brutalist,
+  .synthesis-body blockquote,
+  .synthesis-body hr
+) {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+#root .message-user .message-text,
+#root [data-role="user"] .message-text {
+  border: 1px solid var(--color-border) !important;
+}
+
+#root .message-assistant pre,
+#root .pm-code-block {
+  border: 1px solid var(--color-border) !important;
+}
+
+#root .process-group {
+  border: 1px solid var(--color-border) !important;
+}
+
+#root .message-assistant h1,
+#root .message-assistant h2,
+#root .message-assistant h3 {
+  border-bottom: 1px solid var(--color-primary) !important;
+}
+
+#root .message-assistant th {
+  border-bottom: 1px solid var(--color-border) !important;
+}
+
+#root .disclosure-caret {
+  border-style: solid !important;
+  border-width: 5px 0 5px 8px !important;
+  border-color: transparent transparent transparent var(--color-primary) !important;
+}
+
+#root .pm-process-body,
+#root .pm-process-row-content,
+#root .pm-tool-sources,
+#root .pm-tool-decision {
+  max-height: none;
 }

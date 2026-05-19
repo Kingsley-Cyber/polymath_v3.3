@@ -1,6 +1,6 @@
 // App.tsx - Main application component (3-Pane Deterministic Graph Architecture)
 import { useCallback, useState, useEffect } from "react";
-import { Loader2, Menu, Network, Share2, X } from "lucide-react";
+import { Menu, Network, Share2, X } from "lucide-react";
 import { Sidebar } from "./components/chat/Sidebar";
 import { ChatWindow } from "./components/chat/ChatWindow";
 import { ChatInput } from "./components/chat/ChatInput";
@@ -500,7 +500,7 @@ function App() {
                 const msg =
                   event.content ||
                   "Retrieval tier downgraded (strategy intersection).";
-                chat.updateStreamingContent(`\n\n*⚠ ${msg}*\n\n`);
+                chat.updateStreamingContent(`\n\n**<WRN>:** ${msg}\n\n`);
                 break;
               }
               case "sources": {
@@ -893,7 +893,9 @@ function App() {
                 >
                   {graphViewerQueryRunning ? (
                     <>
-                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <span className="status-badge status-badge-gen">
+                        {"<GEN>"}
+                      </span>
                       Building
                     </>
                   ) : (

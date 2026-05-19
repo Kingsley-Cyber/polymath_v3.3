@@ -3,14 +3,9 @@ import { useEffect, useRef, useState, type DependencyList } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  AlertTriangle,
   Clock,
   Copy,
   Check,
-  Brain,
-  Loader2,
-  Search,
-  TerminalSquare,
 } from "lucide-react";
 import type { ChatMessage } from "../../types";
 import type { ProcessTimelineItem } from "../../types";
@@ -105,8 +100,8 @@ export function MessageBubble({
   // Trimming warning component
   if (message.trimming_applied) {
     return (
-      <div className="flex items-center gap-2 px-3 py-1.5 mx-4 my-2 bg-error/10 border border-error transition-none rounded-none">
-        <AlertTriangle className="w-3.5 h-3.5 text-error flex-shrink-0" />
+      <div className="flex items-center gap-2 px-3 py-1.5 mx-4 my-2 bg-error/10 transition-none rounded-none">
+        <StatusBadge tag="WRN" tone="wrn" />
         <span className="text-[10px] font-bold tracking-widest uppercase text-error">
           [SYSTEM_WARN] Context trimmed to fit token constraint
         </span>
@@ -238,8 +233,8 @@ export function MessageBubble({
           {message.token_count && <span>[{message.token_count} TOKENS]</span>}
 
           {/* Trust signal — always rendered for assistant messages so the
-              ⚪ "training data only" state is visible even when no corpus
-              was scoped. data-testid preserved for existing Playwright. */}
+              training-data-only state is visible even when no corpus was
+              scoped. data-testid preserved for existing Playwright. */}
           {!isUser && <RetrievalBadge message={message} />}
         </div>
       </div>
@@ -340,7 +335,7 @@ function ProcessTimeline({
   };
 
   return (
-    <div className="pm-process-list mb-2 w-full max-w-3xl">
+    <div className="mb-2 w-full max-w-[82ch]">
       {groups.map((group, index) => {
         const active = group.id === activeId;
         const open = active || manualOpenIds.has(group.id);
@@ -378,14 +373,7 @@ function ProcessTimelineCard({
     group.items[group.items.length - 1]?.detail,
     open,
   ], active);
-  const statusClass =
-    group.status === "error"
-      ? "text-error"
-      : active
-        ? "text-accent-main"
-        : group.status === "skipped"
-          ? "text-content-tertiary"
-          : "text-emerald-400";
+  const statusBadge = badgeForStatus(active ? "running" : group.status);
 
   useEffect(() => {
     if (!open || active) return;
@@ -397,48 +385,44 @@ function ProcessTimelineCard({
   }, [active, bodyRef, group.id, open]);
 
   return (
-    <details
-      open={open}
-      onToggle={(e) => {
-        if (active) return;
-        onToggle((e.target as HTMLDetailsElement).open);
-      }}
-      className="group/process w-full"
-    >
-      <summary className="pm-process-summary">
-        <span className="pm-process-caret">{open ? "▾" : "▸"}</span>
-        <span className={`pm-process-kind pm-process-kind-${group.kind}`}>
-          {group.kindLabel}
-        </span>
-        <span className="pm-process-title">{group.title}</span>
-        {active ? (
-          <GeneratingIndicator
-            label={group.kind === "gen" ? "THINKING" : "RUNNING"}
-          />
-        ) : (
-          <span className={statusClass}>{group.status || "done"}</span>
-        )}
-        <span className="pm-process-count">
-          {String(index + 1).padStart(2, "0")} · {group.items.length}
-        </span>
-      </summary>
-      <div
-        ref={bodyRef}
-        className="pm-process-body custom-scrollbar"
+    <div className={`process-group w-full ${open ? "expanded" : ""}`}>
+      <button
+        type="button"
+        className="process-group-header"
+        aria-expanded={open}
+        onClick={() => {
+          if (!active) onToggle(!open);
+        }}
       >
-        {group.kind === "exe" ? (
-          <ToolTranscript group={group} />
-        ) : (
-          group.items.map((item, itemIndex) => (
-            <ProcessTimelineRow
-              key={item.id}
-              item={item}
-              index={itemIndex}
-            />
-          ))
-        )}
+        <span className="disclosure-caret" aria-hidden="true" />
+        <StatusBadge tag={group.kindLabel} tone={toneForTag(group.kindLabel)} />
+        <span className="pm-process-title">{group.title}</span>
+        {active ? <GeneratingIndicator label={group.kind === "gen" ? "THINKING" : "RUNNING"} /> : <StatusBadge {...statusBadge} />}
+        <span className="pm-process-count">
+          {String(index + 1).padStart(2, "0")} / {group.items.length}
+        </span>
+      </button>
+      <div className={`collapsible ${open ? "expanded" : ""}`}>
+        <div className="content">
+          <div
+            ref={bodyRef}
+            className="pm-process-body custom-scrollbar"
+          >
+            {group.kind === "exe" ? (
+              <ToolTranscript group={group} />
+            ) : (
+              group.items.map((item, itemIndex) => (
+                <ProcessTimelineRow
+                  key={item.id}
+                  item={item}
+                  index={itemIndex}
+                />
+              ))
+            )}
+          </div>
+        </div>
       </div>
-    </details>
+    </div>
   );
 }
 
@@ -477,9 +461,7 @@ function ProcessTimelineRow({
       <span className="pm-process-row-index">
         {String(index + 1).padStart(2, "0")}
       </span>
-      <span className={`pm-process-row-label pm-process-row-label-${rowLabel.toLowerCase()}`}>
-        {rowLabel}
-      </span>
+      <StatusBadge tag={rowLabel} tone={toneForTag(rowLabel)} />
       <div className="min-w-0 flex-1">
         <div className="pm-process-row-title">{item.title}</div>
         {content && (
@@ -512,7 +494,10 @@ function ToolTranscript({ group }: { group: ProcessGroup }) {
   return (
     <div className={`pm-tool-transcript pm-tool-transcript-${transcript.kind.toLowerCase()}`}>
       <div className="pm-tool-transcript-head">
-        <span className="pm-tool-transcript-kind">{transcript.kind}</span>
+        <StatusBadge
+          tag={transcript.kind === "WEB" ? "WWW" : "EXE"}
+          tone={transcript.kind === "WEB" ? "www" : "exe"}
+        />
         <span className="pm-tool-transcript-title">{transcript.title}</span>
       </div>
       {transcript.document && (
@@ -858,7 +843,7 @@ function compactProcessTimeline(items: ProcessTimelineItem[]): ProcessGroup[] {
     current = {
       id: `${kind}-${groups.length}-${items.length}`,
       kind,
-      kindLabel: kind === "setup" ? "SYS" : kind === "gen" ? "GEN" : kind === "warn" ? "WRN" : "EXE",
+      kindLabel: kind === "setup" ? "USE" : kind === "gen" ? "GEN" : kind === "warn" ? "WRN" : "EXE",
       title,
       status: "done",
       items: [],
@@ -954,42 +939,44 @@ function TracePanel({
   ]);
 
   return (
-    <details
-      open={open}
-      onToggle={(e) => onToggle((e.target as HTMLDetailsElement).open)}
-      className="mb-2 w-full max-w-3xl group/trace"
-    >
-      <summary className="flex items-center gap-2 px-3 py-2 text-[11px] font-bold tracking-widest uppercase text-content-tertiary bg-bg-surface border border-border-minimal transition-none rounded-none cursor-pointer hover:text-content-primary hover:border-content-tertiary select-none list-none">
-        <TerminalSquare className="w-3.5 h-3.5" />
-        <span>[TRACE_LOG]</span>
-        {active ? (
-          <GeneratingIndicator />
-        ) : (
-          <span className="text-content-tertiary/70">DONE</span>
-        )}
-        <span className="ml-auto text-content-tertiary/60 group-hover/trace:text-content-secondary">
-          {open ? "COLLAPSE [-]" : "EXPAND [+]"}
-        </span>
-      </summary>
-      <div
-        ref={bodyRef}
-        className="mt-1 max-h-72 overflow-y-auto custom-scrollbar border border-border-minimal bg-bg-base p-3 font-mono text-[12px] leading-6 text-content-secondary transition-none rounded-none"
+    <div className={`process-group mb-2 w-full max-w-[82ch] ${open ? "expanded" : ""}`}>
+      <button
+        type="button"
+        className="process-group-header"
+        aria-expanded={open}
+        onClick={() => onToggle(!open)}
       >
-        <div className="space-y-2">
-          {active && (
-            <div className="flex items-center gap-2 border-l border-accent-main pl-2 text-[9px] font-bold uppercase tracking-widest text-accent-main">
-              <GeneratingIndicator label="STREAMING" />
-              <span className="text-content-tertiary">
-                model and tool trace is updating live
-              </span>
+        <span className="disclosure-caret" aria-hidden="true" />
+        <StatusBadge tag="INF" tone="inf" />
+        <span className="pm-process-title">Trace log</span>
+        {active ? <GeneratingIndicator /> : <StatusBadge tag="RES" tone="res" />}
+        <span className="ml-auto text-content-tertiary/60">
+          {open ? "Collapse" : "Expand"}
+        </span>
+      </button>
+      <div className={`collapsible ${open ? "expanded" : ""}`}>
+        <div className="content">
+          <div
+            ref={bodyRef}
+            className="mt-2 overflow-y-auto custom-scrollbar bg-bg-base p-3 font-mono text-[12px] leading-6 text-content-secondary transition-none rounded-none"
+          >
+            <div className="space-y-2">
+              {active && (
+                <div className="flex items-center gap-2 text-[9px] font-bold uppercase tracking-widest text-accent-main">
+                  <GeneratingIndicator label="STREAMING" />
+                  <span className="text-content-tertiary">
+                    model and tool trace is updating live
+                  </span>
+                </div>
+              )}
+              {events.map((event) => (
+                <TraceEventRow key={event.id} event={event} />
+              ))}
             </div>
-          )}
-          {events.map((event) => (
-            <TraceEventRow key={event.id} event={event} />
-          ))}
+          </div>
         </div>
       </div>
-    </details>
+    </div>
   );
 }
 
@@ -1007,70 +994,89 @@ function ReasoningPanel({
   const bodyRef = useAutoScroll<HTMLDivElement>([thinking]);
 
   return (
-    <details
-      open={open}
-      onToggle={(e) => onToggle((e.target as HTMLDetailsElement).open)}
-      className="mb-2 w-full max-w-3xl group/thinking"
-    >
-      <summary className="flex items-center gap-2 px-3 py-2 text-[11px] font-bold tracking-widest uppercase text-content-tertiary bg-bg-surface border border-border-minimal transition-none rounded-none cursor-pointer hover:text-content-primary hover:border-content-tertiary select-none list-none">
-        <Brain className="w-3.5 h-3.5" />
-        <span>[REASONING_TRACE]</span>
-        {active ? (
-          <GeneratingIndicator label="THINKING" />
-        ) : (
-          <span className="text-content-tertiary/70">DONE</span>
-        )}
-        <span className="ml-auto text-content-tertiary/60 group-hover/thinking:text-content-secondary">
-          {open ? "COLLAPSE [-]" : "EXPAND [+]"}
-        </span>
-      </summary>
-      <div
-        ref={bodyRef}
-        className="mt-1 max-h-56 overflow-y-auto custom-scrollbar border border-border-minimal bg-bg-base px-3 py-2 font-mono text-[12px] leading-6 text-content-secondary transition-none rounded-none whitespace-pre-wrap break-words"
+    <div className={`process-group mb-2 w-full max-w-[82ch] ${open ? "expanded" : ""}`}>
+      <button
+        type="button"
+        className="process-group-header"
+        aria-expanded={open}
+        onClick={() => onToggle(!open)}
       >
-        {thinking}
+        <span className="disclosure-caret" aria-hidden="true" />
+        <StatusBadge tag="GEN" tone="gen" />
+        <span className="pm-process-title">Reasoning trace</span>
+        {active ? <GeneratingIndicator label="THINKING" /> : <StatusBadge tag="RES" tone="res" />}
+        <span className="ml-auto text-content-tertiary/60">
+          {open ? "Collapse" : "Expand"}
+        </span>
+      </button>
+      <div className={`collapsible ${open ? "expanded" : ""}`}>
+        <div className="content">
+          <div
+            ref={bodyRef}
+            className="mt-2 overflow-y-auto custom-scrollbar bg-bg-base px-3 py-2 font-mono text-[12px] leading-6 text-content-secondary transition-none rounded-none whitespace-pre-wrap break-words"
+          >
+            {thinking}
+          </div>
+        </div>
       </div>
-    </details>
+    </div>
   );
 }
 
-function GeneratingIndicator({ label = "GENERATING" }: { label?: string }) {
+type StatusTone =
+  | "gen"
+  | "use"
+  | "exe"
+  | "www"
+  | "res"
+  | "wrn"
+  | "err"
+  | "inf";
+
+function StatusBadge({ tag, tone }: { tag: string; tone: StatusTone }) {
   return (
-    <span
-      className="inline-flex items-center gap-1 text-accent-main"
-      aria-label={label.toLowerCase()}
-    >
-      <span>{label}</span>
-      <span className="inline-flex items-center gap-0.5" aria-hidden="true">
-        <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-duration:900ms]" />
-        <span
-          className="h-1 w-1 animate-bounce rounded-full bg-current [animation-duration:900ms]"
-          style={{ animationDelay: "120ms" }}
-        />
-        <span
-          className="h-1 w-1 animate-bounce rounded-full bg-current [animation-duration:900ms]"
-          style={{ animationDelay: "240ms" }}
-        />
-      </span>
+    <span className={`status-badge status-badge-${tone}`}>
+      {`<${tag}>`}
     </span>
   );
 }
 
+function toneForTag(tag: string): StatusTone {
+  const normalized = tag.toLowerCase();
+  if (normalized === "gen") return "gen";
+  if (normalized === "use") return "use";
+  if (normalized === "exe") return "exe";
+  if (normalized === "www" || normalized === "web") return "www";
+  if (normalized === "res" || normalized === "done") return "res";
+  if (normalized === "wrn" || normalized === "warn") return "wrn";
+  if (normalized === "err" || normalized === "error") return "err";
+  return "inf";
+}
+
+function badgeForStatus(status: string | undefined): {
+  tag: string;
+  tone: StatusTone;
+} {
+  if (status === "error") return { tag: "ERR", tone: "err" };
+  if (status === "skipped") return { tag: "WRN", tone: "wrn" };
+  if (status === "running") return { tag: "GEN", tone: "gen" };
+  return { tag: "RES", tone: "res" };
+}
+
+function GeneratingIndicator({ label = "GENERATING" }: { label?: string }) {
+  const upper = label.toUpperCase();
+  const tag = upper.includes("RUN") ? "EXE" : "GEN";
+  return <StatusBadge tag={tag} tone={tag === "EXE" ? "exe" : "gen"} />;
+}
+
 function TraceEventRow({ event }: { event: TraceEvent }) {
-  const statusClass =
-    event.status === "error"
-      ? "text-error"
-      : event.status === "running"
-        ? "text-accent-main"
-        : event.status === "skipped"
-          ? "text-content-tertiary"
-          : "text-emerald-400";
+  const statusBadge = badgeForStatus(event.status);
 
   return (
-    <div className="border-l border-border-minimal pl-2">
+    <div className="pl-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] font-bold uppercase tracking-widest">
+        <StatusBadge {...statusBadge} />
         <span className="text-content-primary">{event.title}</span>
-        <span className={statusClass}>{event.status || "event"}</span>
         <span className="text-content-tertiary">{event.lane}</span>
         <span className="text-content-tertiary/70">
           {formatTraceTime(event.timestamp)}
@@ -1101,59 +1107,63 @@ function ToolActivityPanel({
   const running = activities.some((activity) => activity.status === "running");
 
   return (
-    <details
-      open={open}
-      onToggle={(e) => onToggle((e.target as HTMLDetailsElement).open)}
-      className="mb-2 w-full max-w-3xl group/tool"
-    >
-      <summary className="flex items-center gap-2 border border-border-minimal bg-bg-surface px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-content-tertiary transition-none rounded-none cursor-pointer hover:text-content-primary hover:border-content-tertiary select-none list-none">
-        <span>[TOOL_ACTIVITY]</span>
-        {running ? (
-          <GeneratingIndicator label="RUNNING" />
-        ) : (
-          <span className="text-content-tertiary/70">DONE</span>
-        )}
-        <span className="ml-auto text-content-tertiary/60 group-hover/tool:text-content-secondary">
-          {open ? "COLLAPSE [-]" : "EXPAND [+]"}
-        </span>
-      </summary>
-      <div
-        ref={bodyRef}
-        className="mt-1 max-h-48 overflow-y-auto custom-scrollbar border border-border-minimal bg-bg-base px-3 py-2 font-mono text-[12px] leading-6 text-content-secondary transition-none rounded-none"
+    <div className={`process-group mb-2 w-full max-w-[82ch] ${open ? "expanded" : ""}`}>
+      <button
+        type="button"
+        className="process-group-header"
+        aria-expanded={open}
+        onClick={() => onToggle(!open)}
       >
-        <div className="space-y-1">
-        {activities.map((activity) => {
-          const isRunning = activity.status === "running";
-          return (
-            <div
-              key={activity.id}
-              className="text-content-secondary"
-            >
-              <div className="flex items-center gap-2">
-                {isRunning ? (
-                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-accent-main" />
-                ) : (
-                  <Check className="h-3 w-3 shrink-0 text-emerald-400" />
-                )}
-                <Search className="h-3 w-3 shrink-0 text-content-tertiary" />
-                <span className="font-bold uppercase tracking-wider text-content-primary">
-                  {formatToolName(activity.name)}
-                </span>
-                <span className="text-content-tertiary">
-                  {isRunning ? "searching" : "complete"}
-                </span>
-              </div>
-              {activity.detail && (
-                <div className="ml-10 mt-1 max-h-28 overflow-y-auto custom-scrollbar break-all border border-border-minimal bg-bg-surface p-2 text-[11px] leading-5 text-content-tertiary">
-                  {activity.detail}
-                </div>
-              )}
+        <span className="disclosure-caret" aria-hidden="true" />
+        <StatusBadge tag="EXE" tone="exe" />
+        <span className="pm-process-title">Tool activity</span>
+        {running ? <GeneratingIndicator label="RUNNING" /> : <StatusBadge tag="RES" tone="res" />}
+        <span className="ml-auto text-content-tertiary/60">
+          {open ? "Collapse" : "Expand"}
+        </span>
+      </button>
+      <div className={`collapsible ${open ? "expanded" : ""}`}>
+        <div className="content">
+          <div
+            ref={bodyRef}
+            className="mt-2 overflow-y-auto custom-scrollbar bg-bg-base px-3 py-2 font-mono text-[12px] leading-6 text-content-secondary transition-none rounded-none"
+          >
+            <div className="space-y-1">
+              {activities.map((activity) => {
+                const isRunning = activity.status === "running";
+                const toolTone = activity.name === "web_search" ? "www" : "exe";
+                const toolTag = activity.name === "web_search" ? "WWW" : "EXE";
+                return (
+                  <div
+                    key={activity.id}
+                    className="text-content-secondary"
+                  >
+                    <div className="flex items-center gap-2">
+                      <StatusBadge tag={toolTag} tone={toolTone} />
+                      <StatusBadge
+                        tag={isRunning ? "GEN" : "RES"}
+                        tone={isRunning ? "gen" : "res"}
+                      />
+                      <span className="font-bold uppercase tracking-wider text-content-primary">
+                        {formatToolName(activity.name)}
+                      </span>
+                      <span className="text-content-tertiary">
+                        {isRunning ? "running" : "complete"}
+                      </span>
+                    </div>
+                    {activity.detail && (
+                      <div className="ml-10 mt-1 overflow-y-auto custom-scrollbar break-all bg-bg-surface p-2 text-[11px] leading-5 text-content-tertiary">
+                        {activity.detail}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+          </div>
         </div>
       </div>
-    </details>
+    </div>
   );
 }
 

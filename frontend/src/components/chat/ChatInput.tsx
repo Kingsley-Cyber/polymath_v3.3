@@ -9,14 +9,10 @@ import {
   type DragEvent,
 } from "react";
 import {
-  AlertTriangle,
   Paperclip,
   FolderUp,
   CornerDownLeft,
   X,
-  FileText,
-  Loader2,
-  TerminalSquare,
   Wrench,
   Sparkles,
 } from "lucide-react";
@@ -81,6 +77,20 @@ interface ChatInputProps {
    *  Each call should use a fresh object so equality changes even when
    *  the text is identical to the last prefill — { text, nonce }. */
   prefill?: { text: string; nonce: number };
+}
+
+function StatusTag({
+  tag,
+  tone,
+}: {
+  tag: string;
+  tone: "gen" | "use" | "wrn" | "inf";
+}) {
+  return (
+    <span className={`status-badge status-badge-${tone}`}>
+      {`<${tag}>`}
+    </span>
+  );
 }
 
 export function ChatInput({
@@ -447,7 +457,7 @@ export function ChatInput({
           <ModelSelector />
           <ThinkingEffortSelector />
           <div className="hidden sm:flex items-center gap-1.5 opacity-70 pl-2 border-l border-border-minimal">
-            <TerminalSquare className="w-3 h-3 text-content-secondary" />
+            <span className="status-badge status-badge-use">{"<USE>"}</span>
             <span className="text-[9px] uppercase tracking-[0.2em] text-content-secondary font-bold">
               I/O Panel
             </span>
@@ -501,7 +511,7 @@ export function ChatInput({
             send so the user fixes it without a server round-trip. */}
         {visionMismatch && (
           <div className="mx-3 mt-2 flex items-start gap-2 px-3 py-2 rounded-none border border-amber-700/50 bg-amber-900/15 text-amber-300">
-            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+            <StatusTag tag="WRN" tone="wrn" />
             <div className="text-[10px] font-mono tracking-wider leading-snug">
               <div className="font-bold uppercase mb-0.5">
                 Selected model has no vision support
@@ -522,7 +532,7 @@ export function ChatInput({
                 key={`${file.name}-${index}`}
                 className="flex items-center gap-2 px-2 py-1 bg-bg-surface border border-border-minimal group transition-none hover:border-accent-main"
               >
-                <FileText className="w-3 h-3 text-accent-secondary" />
+                <StatusTag tag="FIL" tone="inf" />
                 <span className="text-[10px] text-content-primary truncate max-w-[150px] font-bold">
                   {file.name}
                 </span>
@@ -543,7 +553,7 @@ export function ChatInput({
 
         {/* Input Area */}
         <div className="flex items-end gap-2 p-3">
-          {/* 📎 Paperclip — PER-TURN multimodal attachments. Images go
+          {/* Paperclip — PER-TURN multimodal attachments. Images go
               into the LLM call as image_url blocks; text files inline
               into the augmented prompt. Capped at 4 files / 20 MB each.
               Does NOT persist anything into a corpus. */}
@@ -561,13 +571,13 @@ export function ChatInput({
             title="Per-turn attachment — images + text files inlined into THIS message only. Not saved to any corpus. Max 4 files / 20 MB each."
           >
             {uploading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <StatusTag tag="GEN" tone="gen" />
             ) : (
               <Paperclip className="w-4 h-4" />
             )}
           </button>
 
-          {/* 📁 Folder up — CORPUS INGEST. Walks every file in the
+          {/* Folder up — CORPUS INGEST. Walks every file in the
               picked folder and pushes them through the full ingestion
               pipeline (Docling parse → Ghost A summary → Ghost B
               extraction → Qdrant + Neo4j writes). Permanent — files
@@ -748,7 +758,7 @@ export function ChatInput({
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <StatusTag tag="GEN" tone="gen" />
                   <span>PROCESS...</span>
                 </>
               ) : (

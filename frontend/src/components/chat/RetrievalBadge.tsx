@@ -10,7 +10,6 @@
 // labels stay above the fold even when chunk text is long.
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
 import type { ChatMessage, SourceChunk } from "../../types";
 import { useChatStore } from "../../stores/chatStore";
 
@@ -108,6 +107,20 @@ function summarizeWebSources(sources: SourceChunk[]): {
   };
 }
 
+function StatusTag({
+  tag,
+  tone,
+}: {
+  tag: string;
+  tone: "inf" | "wrn" | "res" | "www";
+}) {
+  return (
+    <span className={`status-badge status-badge-${tone}`}>
+      {`<${tag}>`}
+    </span>
+  );
+}
+
 export function RetrievalBadge({ message }: RetrievalBadgeProps) {
   const [open, setOpen] = useState(false);
   const corpora = useChatStore((s) => s.corpora);
@@ -134,13 +147,19 @@ export function RetrievalBadge({ message }: RetrievalBadgeProps) {
 
   // ── Compose visible label ───────────────────────────────────────────
   let label: string;
+  let tag: "INF" | "WRN" | "RES";
+  let tone: "inf" | "wrn" | "res";
   if (state === "NO_RAG") {
-    label = "⚪ TRAINING DATA ONLY";
+    label = "Training data only";
+    tag = "INF";
+    tone = "inf";
   } else if (state === "RAG_EMPTY") {
     const tail = strategy ? ` · ${strategy}` : "";
-    label = `🟡 RAG · 0 chunks${tail} · training fallback`;
+    label = `RAG · 0 chunks${tail} · training fallback`;
+    tag = "WRN";
+    tone = "wrn";
   } else {
-    const parts: string[] = ["🟢 RAG"];
+    const parts: string[] = ["RAG"];
     if (chunkCountKnown) parts.push(`${message.chunks_returned} chunks`);
     if (strategy) parts.push(strategy);
     if (speed) parts.push(speed);
@@ -149,15 +168,17 @@ export function RetrievalBadge({ message }: RetrievalBadgeProps) {
     if (webUsed) parts.push("Web");
     if (agentic) parts.push("Agentic");
     label = parts.join(" · ");
+    tag = "RES";
+    tone = "res";
   }
 
   // Color palette per state (per spec)
   const palette =
     state === "RAG_GROUNDED"
-      ? "text-emerald-400 border-emerald-400/30 bg-emerald-400/5 hover:bg-emerald-400/10"
+      ? "text-emerald-400 bg-emerald-400/5 hover:bg-emerald-400/10"
       : state === "RAG_EMPTY"
-        ? "text-amber-400 border-amber-400/30 bg-amber-400/5 hover:bg-amber-400/10"
-        : "text-content-tertiary border-border-minimal hover:border-content-secondary";
+        ? "text-amber-400 bg-amber-400/5 hover:bg-amber-400/10"
+        : "text-content-tertiary";
 
   // Tooltip = full label so narrow viewports that truncate still surface it
   const tooltip = open ? "Click to collapse" : label;
@@ -172,20 +193,17 @@ export function RetrievalBadge({ message }: RetrievalBadgeProps) {
         onClick={() => setOpen(!open)}
         title={tooltip}
         aria-expanded={open}
-        className={`inline-flex items-center gap-1 px-1.5 py-0.5 border text-[9px] font-bold tracking-widest uppercase transition-colors ${palette}`}
+        className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold tracking-widest uppercase transition-colors ${palette} ${open ? "expanded" : ""}`}
       >
-        {open ? (
-          <ChevronDown className="w-2.5 h-2.5 shrink-0" />
-        ) : (
-          <ChevronRight className="w-2.5 h-2.5 shrink-0" />
-        )}
+        <span className="disclosure-caret" aria-hidden="true" />
+        <StatusTag tag={tag} tone={tone} />
         <span className="truncate max-w-[280px] sm:max-w-none">{label}</span>
       </button>
 
       {open && (
-        <div className="mt-1 w-full max-w-[528px] border border-border-minimal bg-bg-base text-[10.5px] font-mono text-content-secondary normal-case tracking-normal">
+        <div className="process-group mt-1 w-full max-w-[528px] bg-bg-base text-[10.5px] font-mono text-content-secondary normal-case tracking-normal">
           {/* ── Metadata top (small + dense) ─────────────────────── */}
-          <div className="px-2.5 py-2 border-b border-border-minimal grid grid-cols-[88px_1fr] gap-x-2.5 gap-y-1">
+          <div className="px-2.5 py-2 grid grid-cols-[88px_1fr] gap-x-2.5 gap-y-1">
             <span className="text-content-tertiary tracking-widest uppercase text-[9.5px]">
               corpora
             </span>
@@ -346,9 +364,7 @@ function WebSourceLine({ source }: { source: SourceChunk }) {
   const pieces = [evidence, status, cache, rendered].filter(Boolean);
   return (
     <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9.5px]">
-      <span className="px-1.5 py-0.5 border border-cyan-400/30 text-cyan-300 uppercase tracking-widest">
-        web
-      </span>
+      <StatusTag tag="WWW" tone="www" />
       {pieces.length > 0 && (
         <span className="text-content-tertiary">{pieces.join(" · ")}</span>
       )}
