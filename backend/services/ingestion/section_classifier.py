@@ -39,6 +39,7 @@ class ChunkKind:
     FRONT_MATTER = "front_matter"
     BACK_MATTER = "back_matter"
     CODE = "code"
+    TABLE = "table"
 
 
 ALL_KINDS: tuple[str, ...] = (
@@ -50,13 +51,15 @@ ALL_KINDS: tuple[str, ...] = (
     ChunkKind.FRONT_MATTER,
     ChunkKind.BACK_MATTER,
     ChunkKind.CODE,
+    ChunkKind.TABLE,
 )
 
 # Kinds the default retrieval filter excludes. CODE is first-class
-# retrievable content (programming-textbook listings, source files) and
-# is kept alongside BODY. The retriever also keeps any chunk where
+# retrievable content (programming-textbook listings, source files), and TABLE
+# is first-class structured evidence. Both are kept alongside BODY. The
+# retriever also keeps any chunk where
 # `chunk_kind` is missing entirely (legacy data).
-_RETRIEVABLE: tuple[str, ...] = (ChunkKind.BODY, ChunkKind.CODE)
+_RETRIEVABLE: tuple[str, ...] = (ChunkKind.BODY, ChunkKind.CODE, ChunkKind.TABLE)
 NOISY_KINDS: tuple[str, ...] = tuple(k for k in ALL_KINDS if k not in _RETRIEVABLE)
 
 # Kinds for which Ghost B extraction is skipped at ingest. CODE joins the

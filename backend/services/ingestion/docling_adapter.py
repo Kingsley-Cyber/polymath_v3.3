@@ -36,6 +36,11 @@ DOCLING_URL = os.getenv("DOCLING_URL", "http://docling:8500")
 # Sidecar timeout. OCR is disabled; this mainly protects large layout parses
 # for non-PDF formats and unusual PDFs routed to Docling without OCR.
 DOCLING_TIMEOUT_SECONDS = float(os.getenv("DOCLING_TIMEOUT_SECONDS", "600"))
+DOCLING_SIDECAR_POLICY = os.getenv("DOCLING_SIDECAR_POLICY", "auto").strip().lower()
+DOCLING_AUTO_UNLOAD_AFTER_PARSE = (
+    os.getenv("DOCLING_AUTO_UNLOAD_AFTER_PARSE", "false").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 
 _PLAIN_TEXT_MIMES = {"text/plain"}
 _PLAIN_TEXT_EXTS = {".txt", ".text", ".log"}
@@ -149,6 +154,41 @@ def _looks_like_html(filename: str, mime: str) -> bool:
     return (mime or "").lower() in _HTML_MIMES or _extension(filename) in _HTML_EXTS
 
 
+def _looks_like_code(filename: str) -> bool:
+    basename = Path(filename or "").name.lower()
+    return basename in _CODE_FILENAME_TO_LANGUAGE or _extension(filename) in _CODE_EXT_TO_LANGUAGE
+
+
+def docling_sidecar_needed(filename: str, mime: str) -> bool:
+    """True only for formats that cannot use the local parser path."""
+    if _looks_like_code(filename):
+        return False
+    if _looks_like_pdf(filename, mime):
+        return False
+    if _looks_like_markdown(filename, mime):
+        return False
+    if _looks_like_html(filename, mime):
+        return False
+    if _looks_like_plain_text(filename, mime):
+        return False
+    return True
+
+
+def parser_strategy(filename: str, mime: str) -> str:
+    """Human-readable parse lane for diagnostics and tests."""
+    if _looks_like_code(filename):
+        return "local_code"
+    if _looks_like_pdf(filename, mime):
+        return "local_pdf_fast_text"
+    if _looks_like_markdown(filename, mime):
+        return "local_markdown"
+    if _looks_like_html(filename, mime):
+        return "local_html"
+    if _looks_like_plain_text(filename, mime):
+        return "local_text"
+    return "docling_sidecar"
+
+
 @dataclass
 class Section:
     heading_path: list[str]
@@ -157,6 +197,9 @@ class Section:
     level: int | None = None
     # Code lane: language tag (e.g. "python", "luau"); None for prose sections.
     language: str | None = None
+    # Structured element metadata. Used by local markdown/table parsing while
+    # keeping sidecar-produced prose/code sections backward-compatible.
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -196,6 +239,137 @@ def _looks_like_plain_text(filename: str, mime: str) -> bool:
 
 _FENCE_OPEN_RE = re.compile(r"^```([a-zA-Z0-9_+\-]*)\s*$")
 _FENCE_CLOSE_RE = re.compile(r"^```\s*$")
+_HEADING_ANCHOR_RE = re.compile(r"\s*\{#[^\n}]*\}\s*$")
+_TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-{3,}:?$")
+_TABLE_CAPTION_RE = re.compile(
+    r"^(?:table|tbl\.?)\s*[\w.\-]+(?:\s*[:.\-]\s+|\s+).+",
+    re.IGNORECASE,
+)
+
+
+def _split_markdown_table_row(line: str) -> list[str]:
+    """Split a GitHub-style pipe table row into cleaned cells."""
+    row = (line or "").strip()
+    if row.startswith("|"):
+        row = row[1:]
+    if row.endswith("|"):
+        row = row[:-1]
+    return [
+        cell.replace(r"\|", "|").strip()
+        for cell in re.split(r"(?<!\\)\|", row)
+    ]
+
+
+def _clean_heading_title(title: str) -> str:
+    """Strip markdown anchor IDs from visible heading metadata."""
+    return _HEADING_ANCHOR_RE.sub("", title or "").strip()
+
+
+def _is_markdown_table_separator(line: str) -> bool:
+    cells = _split_markdown_table_row(line)
+    if len(cells) < 2:
+        return False
+    return all(_TABLE_SEPARATOR_CELL_RE.match(cell.strip()) for cell in cells)
+
+
+def _is_markdown_table_start(lines: list[str], index: int) -> bool:
+    if index + 1 >= len(lines):
+        return False
+    header = lines[index]
+    separator = lines[index + 1]
+    if "|" not in header or "|" not in separator:
+        return False
+    header_cells = _split_markdown_table_row(header)
+    if len([cell for cell in header_cells if cell.strip()]) < 2:
+        return False
+    if not _is_markdown_table_separator(separator):
+        return False
+    separator_cells = _split_markdown_table_row(separator)
+    return len(separator_cells) == len(header_cells)
+
+
+def _consume_markdown_table(
+    lines: list[str],
+    index: int,
+) -> tuple[list[str], list[str], list[list[str]], int]:
+    """Return raw table lines, columns, rows, and next index."""
+    raw_lines = [lines[index], lines[index + 1]]
+    columns = _split_markdown_table_row(lines[index])
+    rows: list[list[str]] = []
+    j = index + 2
+    while j < len(lines):
+        row_line = lines[j]
+        if not row_line.strip() or "|" not in row_line:
+            break
+        cells = _split_markdown_table_row(row_line)
+        if len(cells) < 2:
+            break
+        raw_lines.append(row_line)
+        rows.append(cells)
+        j += 1
+    return raw_lines, columns, rows, j
+
+
+def _pop_table_caption(paragraph: list[str]) -> str:
+    """Detach an immediate `Table N. ...` caption from the prose buffer."""
+    if not paragraph:
+        return ""
+    i = len(paragraph) - 1
+    while i >= 0 and not paragraph[i].strip():
+        i -= 1
+    if i < 0:
+        return ""
+    candidate = paragraph[i].strip()
+    if len(candidate) > 240 or not _TABLE_CAPTION_RE.match(candidate):
+        return ""
+    del paragraph[i:]
+    while paragraph and not paragraph[-1].strip():
+        paragraph.pop()
+    return candidate
+
+
+def _table_label(caption: str, table_index: int) -> str:
+    if caption:
+        match = re.match(r"^((?:table|tbl\.?)\s*[\w.\-]+)", caption, re.IGNORECASE)
+        if match:
+            return match.group(1).replace("tbl.", "Table").strip()
+    return f"Table {table_index}"
+
+
+def _linearize_markdown_table(
+    *,
+    heading_path: list[str],
+    caption: str,
+    table_index: int,
+    columns: list[str],
+    rows: list[list[str]],
+) -> str:
+    """Render a markdown table as row-wise text for embeddings and extraction."""
+    cleaned_columns = [
+        re.sub(r"\s+", " ", col).strip() or f"column_{i + 1}"
+        for i, col in enumerate(columns)
+    ]
+    lines: list[str] = [f"Table: {_table_label(caption, table_index)}"]
+    if heading_path:
+        lines.append(f"Section: {' > '.join(heading_path)}")
+    if caption:
+        lines.append(f"Caption: {caption}")
+    lines.append(f"Columns: {' | '.join(cleaned_columns)}")
+    lines.append("")
+
+    for row_idx, row in enumerate(rows, start=1):
+        padded = list(row[: len(cleaned_columns)])
+        if len(padded) < len(cleaned_columns):
+            padded.extend([""] * (len(cleaned_columns) - len(padded)))
+        pairs = []
+        for col, cell in zip(cleaned_columns, padded):
+            value = re.sub(r"\s+", " ", cell).strip()
+            if value:
+                pairs.append(f"{col}={value}")
+        if pairs:
+            lines.append(f"Row {row_idx}: " + "; ".join(pairs))
+
+    return "\n".join(lines).strip()
 
 
 def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
@@ -214,6 +388,7 @@ def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
     paragraph: list[str] = []
     h1_count = 0
     h2_count = 0
+    table_count = 0
 
     def flush_paragraph() -> None:
         nonlocal paragraph
@@ -257,6 +432,38 @@ def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
             i = j
             continue
 
+        if _is_markdown_table_start(lines, i):
+            caption = _pop_table_caption(paragraph)
+            flush_paragraph()
+            table_count += 1
+            _raw_lines, columns, rows, j = _consume_markdown_table(lines, i)
+            metadata = {
+                "table_index": table_count,
+                "caption": caption,
+                "columns": [
+                    re.sub(r"\s+", " ", col).strip() or f"column_{idx + 1}"
+                    for idx, col in enumerate(columns)
+                ],
+                "row_count": len(rows),
+                "source_format": "markdown_pipe_table",
+            }
+            sections.append(
+                Section(
+                    heading_path=list(current_path),
+                    text=_linearize_markdown_table(
+                        heading_path=list(current_path),
+                        caption=caption,
+                        table_index=table_count,
+                        columns=columns,
+                        rows=rows,
+                    ),
+                    element_type="table",
+                    metadata=metadata,
+                )
+            )
+            i = j
+            continue
+
         match = re.match(r"^(#{1,6})\s+(.+?)\s*#*\s*$", line.strip())
         if not match:
             paragraph.append(line)
@@ -265,7 +472,7 @@ def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
 
         flush_paragraph()
         level = len(match.group(1))
-        title = match.group(2).strip()
+        title = _clean_heading_title(match.group(2).strip())
         if not title:
             i += 1
             continue
@@ -316,14 +523,20 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
     if _looks_like_markdown(filename, mime):
         markdown = raw_bytes.decode("utf-8", errors="replace")
         sections, h1, h2 = _markdown_sections(markdown)
-        has_structure = (h1 + h2) > 0
+        has_tables = any(s.element_type == "table" for s in sections)
+        has_structure = (h1 + h2) > 0 or has_tables
+        source_tier = (
+            SourceTier.tier_a
+            if (h1 + h2) > 0
+            else SourceTier.tier_b if has_tables else SourceTier.tier_c
+        )
         return DoclingParseResult(
             text=markdown,
             markdown=markdown,
             sections=sections,
             pages=None,
             has_structure=has_structure,
-            source_tier=SourceTier.tier_a if has_structure else SourceTier.tier_c,
+            source_tier=source_tier,
             h1_count=h1,
             h2_count=h2,
             source_format="local_markdown",
@@ -337,15 +550,21 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
         raw_bytes, filename, mime
     )
     text = aug_bytes.decode("utf-8", errors="replace")
-    sections, h1, h2 = _markdown_sections(text) if augmented else ([], 0, 0)
-    has_structure = augmented and (h1 + h2) > 0
+    sections, h1, h2 = _markdown_sections(text)
+    has_tables = any(s.element_type == "table" for s in sections)
+    has_structure = (augmented and (h1 + h2) > 0) or has_tables
+    source_tier = (
+        SourceTier.tier_b_plus
+        if augmented and (h1 + h2) > 0
+        else SourceTier.tier_b if has_tables else SourceTier.tier_c
+    )
     return DoclingParseResult(
         text=text,
         markdown=text,
         sections=sections,
         pages=None,
         has_structure=has_structure,
-        source_tier=SourceTier.tier_b_plus if has_structure else SourceTier.tier_c,
+        source_tier=source_tier,
         h1_count=h1,
         h2_count=h2,
         source_format="local_text",
@@ -491,6 +710,31 @@ def _fast_pdf_text_is_usable(result: DoclingParseResult) -> bool:
     )
 
 
+def _sidecar_disabled() -> bool:
+    return DOCLING_SIDECAR_POLICY in {"0", "false", "off", "disabled", "none", "local"}
+
+
+def _docling_required_error(filename: str, mime: str) -> RuntimeError:
+    return RuntimeError(
+        "This upload needs the Docling sidecar because it is not markdown, "
+        "plain text, code, HTML, or a fast-text PDF. Current parse strategy "
+        f"for {filename!r} ({mime or 'unknown MIME'}) is docling_sidecar. "
+        "Start it with `docker compose --profile local-parser up -d docling`, "
+        "set DOCLING_SIDECAR_POLICY=auto, or convert the file to .md/.txt."
+    )
+
+
+async def unload_docling_sidecar() -> dict:
+    """Ask the sidecar to release the heavy converter immediately."""
+    async with httpx.AsyncClient(
+        base_url=DOCLING_URL,
+        timeout=httpx.Timeout(10.0, connect=3.0),
+    ) as client:
+        resp = await client.post("/unload")
+        resp.raise_for_status()
+        return resp.json()
+
+
 async def parse_document(
     raw_bytes: bytes,
     filename: str,
@@ -558,25 +802,35 @@ async def parse_document(
         raw_bytes, filename, mime
     )
 
+    if _sidecar_disabled():
+        raise _docling_required_error(filename, mime)
+
     files = {"file": (aug_filename, aug_bytes, aug_mime)}
     data = {"do_ocr": "false"}
 
-    async with httpx.AsyncClient(
-        base_url=DOCLING_URL,
-        timeout=httpx.Timeout(DOCLING_TIMEOUT_SECONDS, connect=30.0),
-    ) as client:
-        try:
-            resp = await client.post("/parse", files=files, data=data)
-        except httpx.RequestError as exc:
-            raise RuntimeError(
-                "Docling parser sidecar is unavailable. Markdown, text, HTML, "
-                "and digital PDFs parse locally; this file type needs the "
-                "`local-parser` profile. Start it with "
-                "`docker compose --profile local-parser up -d docling`, or "
-                "convert the file to .md/.txt before ingest."
-            ) from exc
-        resp.raise_for_status()
-        payload = resp.json()
+    try:
+        async with httpx.AsyncClient(
+            base_url=DOCLING_URL,
+            timeout=httpx.Timeout(DOCLING_TIMEOUT_SECONDS, connect=30.0),
+        ) as client:
+            try:
+                resp = await client.post("/parse", files=files, data=data)
+            except httpx.RequestError as exc:
+                raise RuntimeError(
+                    "Docling parser sidecar is unavailable. Markdown, text, HTML, "
+                    "and digital PDFs parse locally; this file type needs the "
+                    "`local-parser` profile. Start it with "
+                    "`docker compose --profile local-parser up -d docling`, or "
+                    "convert the file to .md/.txt before ingest."
+                ) from exc
+            resp.raise_for_status()
+            payload = resp.json()
+    finally:
+        if DOCLING_AUTO_UNLOAD_AFTER_PARSE:
+            try:
+                await unload_docling_sidecar()
+            except Exception as exc:
+                logger.debug("Docling sidecar auto-unload failed: %s", exc)
 
     sections = [
         Section(
@@ -584,6 +838,8 @@ async def parse_document(
             text=s.get("text", "") or "",
             element_type=s.get("element_type", "paragraph"),
             level=s.get("level"),
+            language=s.get("language"),
+            metadata=s.get("metadata") or {},
         )
         for s in payload.get("sections", [])
     ]

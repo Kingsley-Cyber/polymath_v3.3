@@ -248,6 +248,7 @@ class LexicalRetriever:
                         summary=None,
                         score=float(hit.score or 0.0),
                         source_tier=f"{payload.get('source_tier') or 'chunk'}+lexical",
+                        chunk_kind=payload.get("chunk_kind", "body"),
                         heading_path=payload.get("heading_path") or None,
                         language=payload.get("language"),
                         metadata=payload.get("metadata") or {},
@@ -273,6 +274,9 @@ class LexicalRetriever:
             "text": 1,
             "heading_path": 1,
             "source_tier": 1,
+            "chunk_kind": 1,
+            "language": 1,
+            "metadata": 1,
             "score": {"$meta": "textScore"},
         }
         # Same default-noise filter as the Qdrant funnels (funnel_a / funnel_b):
@@ -348,6 +352,9 @@ class LexicalRetriever:
                     "text": 1,
                     "heading_path": 1,
                     "source_tier": 1,
+                    "chunk_kind": 1,
+                    "language": 1,
+                    "metadata": 1,
                 },
             )
             .limit(max(top_k * 4, 20))
@@ -377,6 +384,7 @@ class LexicalRetriever:
             summary=None,
             score=float(score),
             source_tier=f"{row.get('source_tier') or 'chunk'}+lexical",
+            chunk_kind=str(row.get("chunk_kind") or "body"),
             heading_path=row.get("heading_path") or None,
             language=row.get("language"),
             metadata=row.get("metadata") or {},

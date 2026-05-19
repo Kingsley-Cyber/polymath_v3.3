@@ -199,6 +199,7 @@ export interface SourceChunk {
   summary?: string | null;
   score: number;
   source_tier: string;
+  chunk_kind?: string | null;
   corpus_name?: string | null;
   doc_name?: string | null;
   heading_path?: string[] | null;

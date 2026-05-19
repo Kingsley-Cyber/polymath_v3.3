@@ -747,6 +747,8 @@ async def _run_ghosts_parallel(
                 doc_id=c.doc_id,
                 corpus_id=c.corpus_id,
                 text=c.text,
+                chunk_kind=getattr(c, "chunk_kind", None) or ChunkKind.BODY,
+                metadata=getattr(c, "metadata", None) or {},
             )
             for c in body_children
         ]

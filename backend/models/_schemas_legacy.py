@@ -1023,6 +1023,7 @@ class SourceChunk(BaseModel):
     summary: str | None = None
     score: float
     source_tier: str
+    chunk_kind: str = "body"
     corpus_name: str | None = None  # populated during hydration from corpora collection
     doc_name: str | None = None  # basename of source_path, populated during hydration
     heading_path: list[str] | None = (

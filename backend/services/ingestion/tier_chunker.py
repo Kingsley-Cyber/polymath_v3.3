@@ -166,11 +166,15 @@ _MARKUP_NOISE_PATTERNS: tuple[tuple["re.Pattern[str]", str], ...] = (
     # Pandoc fenced div open: `::: {.section …}` (eats the trailing whitespace
     # so the fence doesn't leave a blank line behind).
     (re.compile(r":::\s*\{[^\n}]*\}\s*"), ""),
+    # Pandoc fenced div bare open: `::: Para` / `::: section`.
+    (re.compile(r"^\s*:::\s+[A-Za-z][\w .:\-]*\s*$", re.MULTILINE), ""),
     # Pandoc fenced div close: a line containing only `:::` (one or more).
     (re.compile(r"^\s*:::+\s*$", re.MULTILINE), ""),
     # Pandoc bracketed anchors / pagebreak markers:
     #   []{#anchor .class aria-label="…" role="…"}
     (re.compile(r"\[\]\{[^\n}]*\}"), ""),
+    # Pandoc inline spans: `[visible text]{.class}` — keep the visible text.
+    (re.compile(r"\[([^\]\n]+)\]\{[^\n}]*\}"), r"\1"),
     # Heading / section anchors: `# Title {#anchor}` or `# {#anchor}`.
     (re.compile(r"\s*\{#[^\n}]*\}"), ""),
     # Image markdown — drop entirely. Includes the alt-text, which is rarely
@@ -206,6 +210,17 @@ def _scrub_markup_noise(text: str) -> str:
     return cleaned.strip()
 
 
+def _clean_heading_segment(text: str) -> str:
+    return _scrub_markup_noise(text or "")
+
+
+def _clean_heading_path(path: list[str] | None) -> list[str] | None:
+    if not path:
+        return path
+    cleaned = [_clean_heading_segment(str(part)).strip() for part in path]
+    return [part for part in cleaned if part]
+
+
 def _hard_split_oversize(chunks: list[str], max_tokens: int) -> list[str]:
     """Last-line-of-defense split for chunks that exceed `max_tokens`.
 
@@ -239,6 +254,47 @@ def _hard_split_oversize(chunks: list[str], max_tokens: int) -> list[str]:
             "tier_chunker hard-split: %d/%d chunks force-broken at max_tokens=%d",
             over_count, len(chunks), max_tokens,
         )
+    return out
+
+
+def _coalesce_small_child_texts(
+    texts: list[str],
+    *,
+    child_min_tokens: int,
+    child_max_tokens: int,
+) -> list[str]:
+    """Merge tiny child texts without violating the child max-token contract."""
+    if child_min_tokens <= 0 or len(texts) <= 1:
+        return texts
+    out: list[str] = []
+    i = 0
+    while i < len(texts):
+        current = texts[i].strip()
+        if not current:
+            i += 1
+            continue
+        if _count_tokens(current) >= child_min_tokens:
+            out.append(current)
+            i += 1
+            continue
+
+        if out:
+            prev_combined = f"{out[-1]}\n\n{current}"
+            if _count_tokens(prev_combined) <= child_max_tokens:
+                out[-1] = prev_combined
+                i += 1
+                continue
+
+        if i + 1 < len(texts):
+            next_text = texts[i + 1].strip()
+            next_combined = f"{current}\n\n{next_text}" if next_text else current
+            if next_text and _count_tokens(next_combined) <= child_max_tokens:
+                out.append(next_combined)
+                i += 2
+                continue
+
+        out.append(current)
+        i += 1
     return out
 
 
@@ -330,8 +386,8 @@ def _split_at_boundary(
     return _apply_overlap(chunks, overlap_tokens)
 
 
-_Block = tuple[list[str] | None, str, str, str | None]
-# 4-tuple: (heading_path, text, chunk_kind, language)
+_Block = tuple[list[str] | None, str, str, str | None, dict]
+# 5-tuple: (heading_path, text, chunk_kind, language, metadata)
 
 
 def _coalesce_small_blocks(
@@ -358,9 +414,9 @@ def _coalesce_small_blocks(
     if not blocks:
         return blocks
     out: list[_Block] = []
-    cur_path, cur_text, cur_kind, cur_lang = blocks[0]
+    cur_path, cur_text, cur_kind, cur_lang, cur_meta = blocks[0]
     merges = 0
-    for next_path, next_text, next_kind, next_lang in blocks[1:]:
+    for next_path, next_text, next_kind, next_lang, next_meta in blocks[1:]:
         if cur_kind == ChunkKind.BODY and next_kind == ChunkKind.BODY:
             cur_tok = _count_tokens(cur_text)
             if cur_tok < min_parent_tokens:
@@ -370,11 +426,11 @@ def _coalesce_small_blocks(
                     cur_text = combined
                     merges += 1
                     continue
-        out.append((cur_path, cur_text, cur_kind, cur_lang))
-        cur_path, cur_text, cur_kind, cur_lang = (
-            next_path, next_text, next_kind, next_lang,
+        out.append((cur_path, cur_text, cur_kind, cur_lang, cur_meta))
+        cur_path, cur_text, cur_kind, cur_lang, cur_meta = (
+            next_path, next_text, next_kind, next_lang, next_meta,
         )
-    out.append((cur_path, cur_text, cur_kind, cur_lang))
+    out.append((cur_path, cur_text, cur_kind, cur_lang, cur_meta))
     if merges > 0:
         logger.info(
             "tier_chunker coalesce: %d/%d blocks merged (input=%d, output=%d)",
@@ -384,11 +440,12 @@ def _coalesce_small_blocks(
 
 
 def _sections_to_parent_blocks(parse_sections) -> list[_Block]:
-    """Fold the docling section walk into 4-tuple blocks.
+    """Fold the docling section walk into 5-tuple blocks.
 
-    Returns list[(heading_path, text, chunk_kind, language)]:
+    Returns list[(heading_path, text, chunk_kind, language, metadata)]:
       - section_heading starts a new BODY block (heading text becomes first line).
-      - paragraph / list / table sections accumulate into the current BODY block.
+      - paragraph / list sections accumulate into the current BODY block.
+      - table sections flush the BODY buffer and emit their own TABLE block.
       - code_block sections flush the BODY buffer and emit their own CODE block
         carrying the language tag. The chunker routes CODE blocks through
         code_splitter.pack() instead of the prose sentence/token splitters.
@@ -397,18 +454,21 @@ def _sections_to_parent_blocks(parse_sections) -> list[_Block]:
     current_path: list[str] | None = None
     current_buf: list[str] = []
 
-    def flush_body():
+    def flush_body(*, drop_heading_only: bool = False):
         nonlocal current_buf
         if current_buf:
+            if drop_heading_only and len(current_buf) == 1 and re.match(r"^#{1,6}\s+\S", current_buf[0].strip()):
+                current_buf = []
+                return
             text = "\n\n".join(current_buf).strip()
             if text:
-                blocks.append((current_path, text, ChunkKind.BODY, None))
+                blocks.append((_clean_heading_path(current_path), text, ChunkKind.BODY, None, {}))
             current_buf = []
 
     for sec in parse_sections:
         if sec.element_type == "section_heading":
             flush_body()
-            current_path = list(sec.heading_path or [])
+            current_path = _clean_heading_path(list(sec.heading_path or [])) or []
             # Render the heading itself as the first line of the next BODY
             # block so downstream summarizers/embedders see the title.
             level = sec.level or 1
@@ -417,16 +477,95 @@ def _sections_to_parent_blocks(parse_sections) -> list[_Block]:
             # Code lane: emit the fenced block as its own CODE-kind block
             # under the active heading path. Don't fold into BODY.
             flush_body()
-            code_path = list(current_path) if current_path else list(sec.heading_path or [])
-            blocks.append((code_path, sec.text, ChunkKind.CODE, sec.language))
+            code_path = _clean_heading_path(list(current_path) if current_path else list(sec.heading_path or []))
+            blocks.append((code_path, sec.text, ChunkKind.CODE, sec.language, getattr(sec, "metadata", None) or {}))
+        elif sec.element_type == "table":
+            flush_body(drop_heading_only=True)
+            table_path = _clean_heading_path(list(current_path) if current_path else list(sec.heading_path or []))
+            blocks.append((table_path, sec.text, ChunkKind.TABLE, None, getattr(sec, "metadata", None) or {}))
         else:
-            # Paragraph / list / table chunk → accumulate into BODY buffer.
+            # Paragraph / list chunk → accumulate into BODY buffer.
             if current_path is None and sec.heading_path:
-                current_path = list(sec.heading_path)
+                current_path = _clean_heading_path(list(sec.heading_path or [])) or []
             current_buf.append(sec.text)
 
     flush_body()
     return blocks
+
+
+def _split_table_rows_for_children(
+    table_text: str,
+    metadata: dict | None,
+    *,
+    child_target_tokens: int,
+    child_max_tokens: int,
+) -> list[tuple[str, dict]]:
+    """Split a linearized table by row groups, repeating table context.
+
+    The local markdown parser emits:
+      Table: ...
+      Section: ...
+      Caption: ...
+      Columns: ...
+
+      Row 1: ...
+
+    For large tables, boundary splitting can cut through rows. This helper
+    keeps rows intact where possible and repeats the header context so each
+    child is independently meaningful to the embedder, reranker, and Ghost B.
+    """
+    meta = dict(metadata or {})
+    lines = [line.rstrip() for line in (table_text or "").splitlines()]
+    first_row = next(
+        (idx for idx, line in enumerate(lines) if re.match(r"^Row\s+\d+:", line)),
+        None,
+    )
+    if first_row is None:
+        return [(table_text.strip(), meta)] if table_text.strip() else []
+
+    header_lines = [line for line in lines[:first_row] if line.strip()]
+    row_lines = [line for line in lines[first_row:] if line.strip()]
+    if not row_lines:
+        return [(table_text.strip(), meta)] if table_text.strip() else []
+
+    max_tokens = max(1, child_max_tokens)
+    target_tokens = max(1, min(child_target_tokens, child_max_tokens))
+    groups: list[tuple[str, dict]] = []
+    buf: list[str] = []
+
+    def row_number(row_line: str) -> int | None:
+        match = re.match(r"^Row\s+(\d+):", row_line)
+        return int(match.group(1)) if match else None
+
+    def render(candidate_rows: list[str]) -> str:
+        return "\n".join(header_lines + [""] + candidate_rows).strip()
+
+    def flush() -> None:
+        nonlocal buf
+        if not buf:
+            return
+        group_meta = dict(meta)
+        numbers = [n for n in (row_number(row) for row in buf) if n is not None]
+        if numbers:
+            group_meta["row_start"] = min(numbers)
+            group_meta["row_end"] = max(numbers)
+        groups.append((render(buf), group_meta))
+        buf = []
+
+    for row in row_lines:
+        candidate = buf + [row]
+        candidate_tokens = _count_tokens(render(candidate))
+        if buf and candidate_tokens > target_tokens:
+            flush()
+        if _count_tokens(render([row])) > max_tokens:
+            # A single oversized row is rare. Keep it whole for provenance;
+            # _make_children will still enforce the hard cap as a safety net.
+            buf = [row]
+            flush()
+            continue
+        buf.append(row)
+    flush()
+    return groups
 
 
 def _make_children(
@@ -439,10 +578,13 @@ def _make_children(
     child_index: int,
     *,
     child_target_tokens: int,
+    child_min_tokens: int = 128,
     child_max_tokens: int = 700,
     page_start: int | None = None,
     page_end: int | None = None,
     chunk_kind: str = ChunkKind.BODY,
+    language: str | None = None,
+    metadata: dict | None = None,
 ) -> tuple[list[ChildChunk], int]:
     texts = _split_at_boundary(parent_text, child_target_tokens) or [parent_text.strip()]
     # Hard cap: any child still over `child_max_tokens` after the boundary
@@ -450,6 +592,11 @@ def _make_children(
     # force-broken at exact token boundaries so the embedder doesn't silently
     # truncate at its 1024 ceiling.
     texts = _hard_split_oversize(texts, child_max_tokens)
+    texts = _coalesce_small_child_texts(
+        texts,
+        child_min_tokens=child_min_tokens,
+        child_max_tokens=child_max_tokens,
+    )
     children: list[ChildChunk] = []
     for ct in texts:
         if not ct.strip():
@@ -467,6 +614,8 @@ def _make_children(
                 page_start=page_start,
                 page_end=page_end,
                 chunk_kind=chunk_kind,
+                language=language,
+                metadata=dict(metadata or {}),
             )
         )
         child_index += 1
@@ -601,7 +750,7 @@ def _emit_code_parents(
     parents: list[ParentChunk] = []
     children: list[ChildChunk] = []
 
-    for heading_path, text, kind, language in blocks:
+    for heading_path, text, kind, language, _metadata in blocks:
         if kind != ChunkKind.CODE:
             continue
         if not text or not text.strip():
@@ -707,6 +856,7 @@ def chunk(
                 sec.text,
                 ChunkKind.CODE,
                 sec.language or getattr(parse_result, "language", None),
+                getattr(sec, "metadata", None) or {},
             ))
         code_parents, code_children, parent_idx, child_idx = _emit_code_parents(
             code_blocks,
@@ -747,6 +897,7 @@ def chunk(
                 tier_value,
                 child_idx,
                 child_target_tokens=policy.child_target_tokens,
+                child_min_tokens=policy.child_min_tokens,
                 child_max_tokens=policy.child_max_tokens,
                 page_start=page_start,
                 page_end=page_end,
@@ -774,15 +925,15 @@ def chunk(
         # tiers but possible on malformed input), fall back to markdown.
         if not blocks and (parse_result.markdown or parse_result.text):
             md = parse_result.markdown or parse_result.text
-            blocks = [(None, md.strip(), ChunkKind.BODY, None)]
+            blocks = [(None, md.strip(), ChunkKind.BODY, None, {})]
         # Scrub markup noise per BODY section. CODE blocks keep their fences
         # and original whitespace verbatim — scrubbing would mangle backticks
         # and the AST round-trip the language tag is part of.
         blocks = [
-            (hp, _scrub_markup_noise(t) if k == ChunkKind.BODY else t, k, lang)
-            for hp, t, k, lang in blocks if t
+            (hp, _scrub_markup_noise(t) if k == ChunkKind.BODY else t, k, lang, meta)
+            for hp, t, k, lang, meta in blocks if t
         ]
-        blocks = [(hp, t, k, lang) for hp, t, k, lang in blocks if t]
+        blocks = [(hp, t, k, lang, meta) for hp, t, k, lang, meta in blocks if t]
 
         # Phase K — adaptive coalesce: merge consecutive small BODY sections
         # so heading-heavy docs don't explode into hundreds of tiny parents.
@@ -807,29 +958,47 @@ def chunk(
         parents.extend(code_parents)
         all_children.extend(code_children)
 
-        for heading_path, section_text, block_kind, _block_lang in blocks:
+        for heading_path, section_text, block_kind, _block_lang, block_meta in blocks:
             if block_kind == ChunkKind.CODE:
                 continue  # already handled by _emit_code_parents above
             if not section_text.strip():
                 continue
-            if _count_tokens(section_text) > policy.parent_max_tokens:
+            if block_kind == ChunkKind.TABLE:
+                sub_texts_with_meta = _split_table_rows_for_children(
+                    section_text,
+                    block_meta,
+                    child_target_tokens=policy.child_target_tokens,
+                    child_max_tokens=policy.child_max_tokens,
+                )
+            elif _count_tokens(section_text) > policy.parent_max_tokens:
                 sub_texts = _split_at_boundary(
                     section_text,
                     policy.parent_target_tokens,
                     overlap_tokens=policy.parent_overlap_tokens,
                 )
+                sub_texts_with_meta = [(text, {}) for text in sub_texts]
             else:
-                sub_texts = [section_text]
+                sub_texts_with_meta = [(section_text, {})]
 
             # Heading-bound tiers normally classify by heading text alone —
             # passing sub_text lets content-fallback fire when the heading
             # itself is missing (rare but possible on malformed inputs).
-            kind = classify_chunk(heading_path, " ".join(sub_texts) if sub_texts else None)
-            for sub_text in sub_texts:
+            sub_texts_for_classify = [text for text, _meta in sub_texts_with_meta]
+            kind = (
+                ChunkKind.TABLE
+                if block_kind == ChunkKind.TABLE
+                else classify_chunk(
+                    heading_path,
+                    " ".join(sub_texts_for_classify) if sub_texts_for_classify else None,
+                )
+            )
+            for sub_text, sub_meta in sub_texts_with_meta:
                 if not sub_text.strip():
                     continue
                 parent_id = f"{doc_id}_parent_{parent_idx:04d}"
                 parent_idx += 1
+                metadata = dict(block_meta or {})
+                metadata.update(sub_meta or {})
                 p_children, child_idx = _make_children(
                     parent_id,
                     doc_id,
@@ -839,8 +1008,10 @@ def chunk(
                     tier_value,
                     child_idx,
                     child_target_tokens=policy.child_target_tokens,
+                    child_min_tokens=policy.child_min_tokens,
                     child_max_tokens=policy.child_max_tokens,
                     chunk_kind=kind,
+                    metadata=metadata,
                 )
                 parents.append(
                     ParentChunk(
@@ -852,6 +1023,7 @@ def chunk(
                         source_tier=tier_value,
                         children=p_children,
                         chunk_kind=kind,
+                        metadata=metadata,
                     )
                 )
                 all_children.extend(p_children)
@@ -883,6 +1055,7 @@ def chunk(
                 tier_value,
                 child_idx,
                 child_target_tokens=policy.child_target_tokens,
+                child_min_tokens=policy.child_min_tokens,
                 child_max_tokens=policy.child_max_tokens,
                 chunk_kind=kind,
             )

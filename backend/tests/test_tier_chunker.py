@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from models.schemas import IngestionConfig, SourceTier
 from services.ingestion import tier_chunker
+from services.ingestion.docling_adapter import _markdown_sections, _parse_local_text_document
 
 
 def _parse_result(*, source_tier: SourceTier, text: str = "", pages=None):
@@ -104,6 +105,21 @@ def test_scrub_strips_pandoc_div_fences():
     assert "Real body text here." in cleaned
 
 
+def test_scrub_strips_bare_pandoc_div_fences():
+    raw = "::: Para\nReal body text here.\n:::"
+    cleaned = tier_chunker._scrub_markup_noise(raw)
+    assert "::: Para" not in cleaned
+    assert ":::" not in cleaned
+    assert cleaned == "Real body text here."
+
+
+def test_scrub_preserves_visible_text_from_inline_spans():
+    raw = "The system uses [Qwen3-Embedding]{.product} for vectors."
+    cleaned = tier_chunker._scrub_markup_noise(raw)
+    assert cleaned == "The system uses Qwen3-Embedding for vectors."
+    assert "{.product}" not in cleaned
+
+
 def test_scrub_strips_pandoc_anchors_and_pagebreaks():
     raw = '[]{#b05.xhtml_Page_1219 .pagebreak aria-label="1219" role="doc-pagebreak"}Index {#b05.xhtml_index1}'
     cleaned = tier_chunker._scrub_markup_noise(raw)
@@ -146,6 +162,27 @@ def test_scrub_idempotent():
     assert once == twice
 
 
+def test_local_markdown_heading_anchor_is_removed_from_heading_path():
+    md = "# Embedding Pipeline {#embedding-pipeline}\n\nBody text."
+    sections, _, _ = _markdown_sections(md)
+    assert sections[0].heading_path == ["Embedding Pipeline"]
+    assert sections[1].heading_path == ["Embedding Pipeline"]
+
+
+def test_sections_to_blocks_strips_heading_anchor_metadata():
+    sections = [
+        _section(
+            "Embedding Pipeline {#embedding-pipeline}",
+            element_type="section_heading",
+            heading_path=["Embedding Pipeline {#embedding-pipeline}"],
+            level=1,
+        ),
+        _section("Body text.", element_type="paragraph", heading_path=["Embedding Pipeline {#embedding-pipeline}"]),
+    ]
+    blocks = tier_chunker._sections_to_parent_blocks(sections)
+    assert blocks[0][0] == ["Embedding Pipeline"]
+
+
 def test_hard_split_breaks_oversize_chunk():
     # A single 2000-token blob with no paragraph breaks — the boundary
     # splitter would leave it intact; the hard-split must break it at the
@@ -173,6 +210,47 @@ def test_hard_split_handles_multiple_chunks_mixed_sizes():
     assert len(out) >= 5
 
 
+def test_child_min_coalesce_prefers_previous_without_exceeding_max():
+    long_enough = ("alpha " * 120).strip()
+    tiny = "tail"
+    out = tier_chunker._coalesce_small_child_texts(
+        [long_enough, tiny],
+        child_min_tokens=50,
+        child_max_tokens=200,
+    )
+    assert len(out) == 1
+    assert "tail" in out[0]
+    assert tier_chunker._count_tokens(out[0]) <= 200
+
+
+def test_child_min_coalesce_uses_next_when_previous_would_exceed_max():
+    near_max = ("alpha " * 200).strip()
+    tiny = "short"
+    next_text = ("beta " * 40).strip()
+    out = tier_chunker._coalesce_small_child_texts(
+        [near_max, tiny, next_text],
+        child_min_tokens=50,
+        child_max_tokens=200,
+    )
+    assert len(out) == 2
+    assert out[0] == near_max
+    assert out[1].startswith("short")
+    assert "beta" in out[1]
+    assert all(tier_chunker._count_tokens(text) <= 200 for text in out)
+
+
+def test_child_min_coalesce_leaves_tiny_when_both_neighbors_exceed_max():
+    near_max_a = ("alpha " * 200).strip()
+    tiny = ("short " * 10).strip()
+    near_max_b = ("beta " * 200).strip()
+    out = tier_chunker._coalesce_small_child_texts(
+        [near_max_a, tiny, near_max_b],
+        child_min_tokens=50,
+        child_max_tokens=200,
+    )
+    assert out == [near_max_a, tiny, near_max_b]
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Code lane (Phase 1) — code-file ingest, markdown fence routing, AST
 # packing, embedder-safety contract, and metadata propagation.
@@ -181,13 +259,14 @@ def test_hard_split_handles_multiple_chunks_mixed_sizes():
 from services.ingestion.section_classifier import ChunkKind  # noqa: E402
 
 
-def _section(text, *, element_type="paragraph", heading_path=None, language=None, level=None):
+def _section(text, *, element_type="paragraph", heading_path=None, language=None, level=None, metadata=None):
     return SimpleNamespace(
         heading_path=heading_path or [],
         text=text,
         element_type=element_type,
         level=level,
         language=language,
+        metadata=metadata or {},
     )
 
 
@@ -308,9 +387,9 @@ def test_tier_a_markdown_with_code_fence_emits_code_parent(monkeypatch):
 
 def test_coalesce_does_not_merge_code_into_prose():
     blocks = [
-        (["sec"], "prose one " * 10, ChunkKind.BODY, None),
-        (["sec"], "```python\ndef f(): pass\n```", ChunkKind.CODE, "python"),
-        (["sec"], "prose two " * 10, ChunkKind.BODY, None),
+        (["sec"], "prose one " * 10, ChunkKind.BODY, None, {}),
+        (["sec"], "```python\ndef f(): pass\n```", ChunkKind.CODE, "python", {}),
+        (["sec"], "prose two " * 10, ChunkKind.BODY, None, {}),
     ]
     out = tier_chunker._coalesce_small_blocks(
         blocks, min_parent_tokens=1000, max_parent_tokens=4000
@@ -338,6 +417,132 @@ def test_sections_to_parent_blocks_emits_code_blocks():
     languages = [b[3] for b in blocks]
     assert ChunkKind.CODE in kinds
     assert "python" in languages
+
+
+def test_markdown_sections_detects_pipe_table_with_caption():
+    md = """# Evaluation Results
+
+Intro paragraph before the table.
+
+Table 2. Double Qwen performance on MeetingBank.
+
+| Component | Model | Size | Role |
+| --- | --- | ---: | --- |
+| Embedder | Qwen3-Embedding-0.6B | 0.6B | vector embeddings |
+| Reranker | Qwen3-Reranker-0.6B | 0.6B | cross-encoder reranking |
+
+After table prose.
+"""
+    sections, h1, h2 = _markdown_sections(md)
+
+    assert h1 == 1
+    assert h2 == 0
+    assert [s.element_type for s in sections] == [
+        "section_heading",
+        "paragraph",
+        "table",
+        "paragraph",
+    ]
+    table = sections[2]
+    assert table.heading_path == ["Evaluation Results"]
+    assert table.metadata["caption"] == "Table 2. Double Qwen performance on MeetingBank."
+    assert table.metadata["columns"] == ["Component", "Model", "Size", "Role"]
+    assert table.metadata["row_count"] == 2
+    assert "Columns: Component | Model | Size | Role" in table.text
+    assert "Model=Qwen3-Embedding-0.6B" in table.text
+    assert "Model=Qwen3-Reranker-0.6B" in table.text
+
+
+def test_table_section_emits_table_parent_and_child_metadata():
+    md = """# Evaluation Results
+
+Table 2. Double Qwen performance on MeetingBank.
+
+| Component | Model | Size | Role |
+| --- | --- | ---: | --- |
+| Embedder | Qwen3-Embedding-0.6B | 0.6B | vector embeddings |
+| Reranker | Qwen3-Reranker-0.6B | 0.6B | cross-encoder reranking |
+"""
+    sections, _, _ = _markdown_sections(md)
+    pr = SimpleNamespace(
+        source_tier=SourceTier.tier_a,
+        text=md,
+        markdown=md,
+        sections=sections,
+        pages=None,
+        injected_headers_audit=[],
+        language=None,
+        filename="double-qwen.md",
+    )
+
+    parents, children, _ = tier_chunker.chunk(pr, doc_id="doc_table", corpus_id="corpus")
+
+    table_parents = [p for p in parents if p.chunk_kind == ChunkKind.TABLE]
+    table_children = [c for c in children if c.chunk_kind == ChunkKind.TABLE]
+    assert len(table_parents) == 1
+    assert len(table_children) == 1
+    assert table_parents[0].metadata["columns"] == ["Component", "Model", "Size", "Role"]
+    assert table_parents[0].metadata["row_count"] == 2
+    assert table_children[0].metadata["caption"].startswith("Table 2.")
+    assert table_children[0].metadata["row_start"] == 1
+    assert table_children[0].metadata["row_end"] == 2
+    assert "Row 2: Component=Reranker" in table_children[0].text
+
+
+def test_plain_text_table_promotes_to_section_aware_tier():
+    text = """Table 1. Double Qwen roles.
+
+| Component | Model |
+| --- | --- |
+| Embedder | Qwen3-Embedding-0.6B |
+| Reranker | Qwen3-Reranker-0.6B |
+"""
+    parsed = _parse_local_text_document(text.encode("utf-8"), "notes.txt", "text/plain")
+
+    assert parsed is not None
+    assert parsed.source_tier == SourceTier.tier_b
+    assert parsed.has_structure is True
+    assert any(s.element_type == "table" for s in parsed.sections)
+
+
+def test_large_table_splits_by_row_group_and_repeats_context():
+    rows = "\n".join(
+        f"| Metric {i} | Qwen3-Embedding-0.6B | Qwen3-Reranker-0.6B | {i * 2}.5 |"
+        for i in range(1, 18)
+    )
+    md = f"""# Evaluation Results
+
+Table 3. Double Qwen metric comparison.
+
+| Metric | Embedder | Reranker | Score |
+| --- | --- | --- | ---: |
+{rows}
+"""
+    sections, _, _ = _markdown_sections(md)
+    cfg = IngestionConfig(
+        parent_chunk_tokens={"min_tokens": 100, "target_tokens": 220, "max_tokens": 700},
+        child_chunk_tokens={"min_tokens": 100, "target_tokens": 200, "max_tokens": 500},
+        chunk_overlap=0,
+    )
+    pr = SimpleNamespace(
+        source_tier=SourceTier.tier_a,
+        text=md,
+        markdown=md,
+        sections=sections,
+        pages=None,
+        injected_headers_audit=[],
+        language=None,
+        filename="large-table.md",
+    )
+
+    parents, children, _ = tier_chunker.chunk(pr, doc_id="doc_large_table", corpus_id="corpus", config=cfg)
+    table_children = [c for c in children if c.chunk_kind == ChunkKind.TABLE]
+
+    assert len(table_children) > 1
+    assert all("Columns: Metric | Embedder | Reranker | Score" in c.text for c in table_children)
+    assert table_children[0].metadata["row_start"] == 1
+    assert table_children[-1].metadata["row_end"] == 17
+    assert all(c.metadata["caption"] == "Table 3. Double Qwen metric comparison." for c in table_children)
 
 
 def test_chunk_kind_filters_through_parent_dataclass():

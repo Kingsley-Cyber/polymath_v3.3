@@ -149,6 +149,7 @@ class FunnelA:
                         summary=chunk_text,
                         score=hit.score,
                         source_tier=payload.get("source_tier", "summary"),
+                        chunk_kind=payload.get("chunk_kind", "body"),
                         heading_path=payload.get("heading_path") or None,
                         language=payload.get("language"),
                         metadata=payload.get("metadata") or {},

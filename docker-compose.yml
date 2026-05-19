@@ -525,10 +525,16 @@ services:
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD}
       # Public MCP URL is surfaced by /api/mcp/info for Settings -> MCP snippets.
-      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
-      # Phase 7.6 — Docling sidecar (parser replacement for unstructured/regex)
-      DOCLING_URL: http://docling:8500
-      # GHOST B — 0.0 disables self-reported-confidence filter (glosses + schema
+        MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
+        # Phase 7.6 — Docling sidecar (parser replacement for unstructured/regex)
+        DOCLING_URL: http://docling:8500
+        # auto: use Docling only for formats that need layout parsing.
+        # off/local: never call Docling; MD/TXT/HTML/code/PDF-fast-text still work.
+        DOCLING_SIDECAR_POLICY: ${DOCLING_SIDECAR_POLICY:-auto}
+        # Default false: keep converter warm during a batch, then rely on
+        # DOCLING_IDLE_UNLOAD_SECONDS. Set true for one-off memory-sensitive parses.
+        DOCLING_AUTO_UNLOAD_AFTER_PARSE: ${DOCLING_AUTO_UNLOAD_AFTER_PARSE:-false}
+        # GHOST B — 0.0 disables self-reported-confidence filter (glosses + schema
       # are the real quality levers). Raise per-model after eyeballing its distribution.
       ENTITY_CONFIDENCE_THRESHOLD: ${ENTITY_CONFIDENCE_THRESHOLD:-0.0}
       EXTRACTION_MAX_TOKENS: ${EXTRACTION_MAX_TOKENS:-6144}

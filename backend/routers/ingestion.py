@@ -741,6 +741,22 @@ async def ingestion_health(
     }
 
 
+@router.post("/ingestion/docling/unload")
+async def unload_docling(
+    current_user: dict = Depends(get_current_user),
+):
+    """Release the optional Docling sidecar's heavy converter immediately."""
+    from services.ingestion import docling_adapter
+
+    try:
+        return await docling_adapter.unload_docling_sidecar()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Docling sidecar unload unavailable: {_safe_ingest_error(exc)}",
+        ) from exc
+
+
 @router.post("/corpora/{corpus_id}/graph-cache/warm")
 async def warm_graph_cache(
     corpus_id: str,

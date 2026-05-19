@@ -54,10 +54,13 @@ async def hydrate_chunks(
             ).to_list(length=None)
             pid_map = {r["chunk_id"]: r.get("parent_id", "") for r in chunk_records}
             did_map = {r["chunk_id"]: r.get("doc_id", "") for r in chunk_records}
+            kind_map = {r["chunk_id"]: r.get("chunk_kind", "") for r in chunk_records}
             for chunk in orphans:
                 chunk.parent_id = pid_map.get(chunk.chunk_id, "") or ""
                 if not chunk.doc_id:
                     chunk.doc_id = did_map.get(chunk.chunk_id, "") or ""
+                if not getattr(chunk, "chunk_kind", "") or chunk.chunk_kind == "body":
+                    chunk.chunk_kind = kind_map.get(chunk.chunk_id, "") or chunk.chunk_kind
             logger.debug(
                 "Pass 0: resolved parent_id for %d orphan chunks", len(orphans)
             )
@@ -118,6 +121,8 @@ async def hydrate_chunks(
                 # (e.g. Mode A graph expansion produced empty-text chunks).
                 if not chunk.heading_path and pc.get("heading_path"):
                     chunk.heading_path = pc["heading_path"]
+                if (not getattr(chunk, "chunk_kind", "") or chunk.chunk_kind == "body") and pc.get("chunk_kind"):
+                    chunk.chunk_kind = pc["chunk_kind"]
                 # Code lane (Phase 1) — propagate language + AST metadata
                 # from the parent Mongo record. Mode A / Mode B chunks
                 # arrive empty-shaped (no Qdrant payload) so this is the

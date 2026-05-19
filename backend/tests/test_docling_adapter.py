@@ -31,6 +31,47 @@ def adapter():
     return docling_adapter
 
 
+def test_parser_strategy_keeps_md_txt_and_query_runtime_off_docling(adapter):
+    assert adapter.parser_strategy("notes.md", "text/markdown") == "local_markdown"
+    assert adapter.parser_strategy("notes.txt", "text/plain") == "local_text"
+    assert adapter.parser_strategy("book.pdf", "application/pdf") == "local_pdf_fast_text"
+    assert adapter.parser_strategy("plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") == "docling_sidecar"
+    assert adapter.docling_sidecar_needed("notes.md", "text/markdown") is False
+    assert adapter.docling_sidecar_needed("notes.txt", "text/plain") is False
+    assert adapter.docling_sidecar_needed("plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") is True
+
+
+@pytest.mark.asyncio
+async def test_markdown_does_not_touch_docling_sidecar(adapter, monkeypatch):
+    async def fail_post(*_args, **_kwargs):  # pragma: no cover - should never run
+        raise AssertionError("Docling sidecar should not be called for markdown")
+
+    monkeypatch.setattr(adapter.httpx.AsyncClient, "post", fail_post, raising=False)
+
+    result = await adapter.parse_document(
+        raw_bytes=b"# Local\n\n| A | B |\n| --- | --- |\n| x | y |\n",
+        filename="local.md",
+        mime="text/markdown",
+        do_ocr=False,
+    )
+
+    assert result.source_format == "local_markdown"
+    assert any(section.element_type == "table" for section in result.sections)
+
+
+@pytest.mark.asyncio
+async def test_docling_policy_off_fails_only_for_sidecar_formats(adapter, monkeypatch):
+    monkeypatch.setattr(adapter, "DOCLING_SIDECAR_POLICY", "off")
+
+    with pytest.raises(RuntimeError, match="needs the Docling sidecar"):
+        await adapter.parse_document(
+            raw_bytes=b"fake docx",
+            filename="plan.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            do_ocr=False,
+        )
+
+
 @pytest.mark.asyncio
 async def test_pdf_with_ocr_disabled_uses_fast_text_path(adapter, monkeypatch):
     """PDF + do_ocr=False bypasses Docling and uses local pypdf extraction."""

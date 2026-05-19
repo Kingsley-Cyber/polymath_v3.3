@@ -23,6 +23,7 @@ import asyncio
 import gc
 import logging
 import os
+import re
 import threading
 import time
 from io import BytesIO
@@ -33,7 +34,7 @@ from typing import Any
 os.environ.setdefault("DOCLING_OCR_ENABLED", "false")
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -50,6 +51,10 @@ from docling.document_converter import (
     DocumentStream,
     PdfFormatOption,
 )
+try:
+    from docling_core.types.doc.document import TableItem
+except Exception:  # pragma: no cover - docling version compatibility
+    TableItem = None  # type: ignore[assignment]
 
 try:
     import torch
@@ -76,6 +81,7 @@ class Section(BaseModel):
     text: str
     element_type: str  # "section_heading" | "paragraph" | "list_item" | ...
     level: int | None = None  # heading level when element_type == "section_heading"
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ParseResponse(BaseModel):
@@ -168,6 +174,113 @@ def _schedule_idle_unload() -> None:
     _unload_task = asyncio.create_task(_unload_after_idle(_last_used))
 
 
+_HEADING_ANCHOR_RE = re.compile(r"\s*\{#[^\n}]*\}\s*$")
+_TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-{3,}:?$")
+
+
+def _label_value(item: Any) -> str:
+    raw = getattr(item, "label", None)
+    if raw is None:
+        return ""
+    value = getattr(raw, "value", None) or getattr(raw, "name", None) or str(raw)
+    return str(value).lower()
+
+
+def _clean_heading_text(text: str) -> str:
+    return _HEADING_ANCHOR_RE.sub("", text or "").strip()
+
+
+def _ref_text(value: Any) -> str:
+    return str(getattr(value, "cref", "") or getattr(value, "$ref", "") or "")
+
+
+def _is_table_item(item: Any) -> bool:
+    if TableItem is not None and isinstance(item, TableItem):
+        return True
+    return _label_value(item) == "table" or type(item).__name__.lower() == "tableitem"
+
+
+def _is_inside_table(item: Any) -> bool:
+    self_ref = str(getattr(item, "self_ref", "") or "")
+    parent_ref = _ref_text(getattr(item, "parent", None))
+    return "/tables/" in self_ref or "/tables/" in parent_ref
+
+
+def _split_markdown_table_row(line: str) -> list[str]:
+    row = (line or "").strip()
+    if row.startswith("|"):
+        row = row[1:]
+    if row.endswith("|"):
+        row = row[:-1]
+    return [cell.replace(r"\|", "|").strip() for cell in re.split(r"(?<!\\)\|", row)]
+
+
+def _is_markdown_table_separator(line: str) -> bool:
+    cells = _split_markdown_table_row(line)
+    return len(cells) >= 2 and all(_TABLE_SEPARATOR_CELL_RE.match(cell.strip()) for cell in cells)
+
+
+def _table_markdown_to_rows(markdown: str) -> tuple[list[str], list[list[str]]]:
+    lines = [line.strip() for line in (markdown or "").splitlines() if line.strip()]
+    for idx in range(0, max(0, len(lines) - 1)):
+        if "|" not in lines[idx] or "|" not in lines[idx + 1]:
+            continue
+        columns = _split_markdown_table_row(lines[idx])
+        if len([c for c in columns if c]) < 2 or not _is_markdown_table_separator(lines[idx + 1]):
+            continue
+        rows: list[list[str]] = []
+        for line in lines[idx + 2:]:
+            if "|" not in line:
+                break
+            cells = _split_markdown_table_row(line)
+            if len(cells) < 2:
+                break
+            rows.append(cells)
+        return columns, rows
+    return [], []
+
+
+def _linearize_table_markdown(
+    *,
+    markdown: str,
+    heading_path: list[str],
+    table_index: int,
+) -> tuple[str, dict[str, Any]]:
+    columns, rows = _table_markdown_to_rows(markdown)
+    clean_columns = [
+        re.sub(r"\s+", " ", col).strip() or f"column_{idx + 1}"
+        for idx, col in enumerate(columns)
+    ]
+    metadata: dict[str, Any] = {
+        "table_index": table_index,
+        "caption": "",
+        "columns": clean_columns,
+        "row_count": len(rows),
+        "source_format": "docling_table",
+    }
+    if not clean_columns or not rows:
+        return (markdown or "").strip(), metadata
+
+    lines: list[str] = [f"Table: Table {table_index}"]
+    if heading_path:
+        lines.append(f"Section: {' > '.join(heading_path)}")
+    lines.append(f"Columns: {' | '.join(clean_columns)}")
+    lines.append("")
+
+    for row_idx, row in enumerate(rows, start=1):
+        padded = list(row[: len(clean_columns)])
+        if len(padded) < len(clean_columns):
+            padded.extend([""] * (len(clean_columns) - len(padded)))
+        pairs = []
+        for column, cell in zip(clean_columns, padded):
+            value = re.sub(r"\s+", " ", cell).strip()
+            if value:
+                pairs.append(f"{column}={value}")
+        if pairs:
+            lines.append(f"Row {row_idx}: " + "; ".join(pairs))
+    return "\n".join(lines).strip(), metadata
+
+
 async def _convert_bytes(raw: bytes, filename: str, do_ocr: bool):
     global _active_conversions, _last_used
     if do_ocr:
@@ -199,6 +312,27 @@ async def health() -> dict[str, Any]:
     }
 
 
+@app.post("/unload")
+async def unload() -> dict[str, Any]:
+    """Release the heavy Docling converter immediately when idle."""
+    if _active_conversions > 0:
+        return {
+            "status": "busy",
+            "converter_loaded": _converter is not None,
+            "active_conversions": _active_conversions,
+            **_gpu_memory(),
+        }
+    was_loaded = _converter is not None
+    if was_loaded:
+        _release_converter()
+    return {
+        "status": "unloaded" if was_loaded else "already_unloaded",
+        "converter_loaded": _converter is not None,
+        "active_conversions": _active_conversions,
+        **_gpu_memory(),
+    }
+
+
 def _walk_sections(doc) -> tuple[list[Section], int, int]:
     """Walk the DoclingDocument and assemble flat (heading_path, text, type)
     records by accumulating paragraph/list text under the most recent heading
@@ -208,6 +342,7 @@ def _walk_sections(doc) -> tuple[list[Section], int, int]:
     sections: list[Section] = []
     path: list[tuple[int, str]] = []  # (level, title)
     h1 = h2 = 0
+    table_count = 0
 
     buf: list[str] = []
 
@@ -227,17 +362,62 @@ def _walk_sections(doc) -> tuple[list[Section], int, int]:
         )
         buf.clear()
 
-    # Docling exposes typed lists via doc.texts in document order. iterate_items
-    # walks the body tree but we want every textual element including those
-    # tucked under groups/list containers.
-    for item in getattr(doc, "texts", []) or []:
-        label = (getattr(item, "label", None) or "").lower()
+    def ordered_items():
+        iterator = getattr(doc, "iterate_items", None)
+        if callable(iterator):
+            try:
+                yield from iterator(with_groups=False)
+                return
+            except TypeError:
+                yield from iterator()
+                return
+        for text_item in getattr(doc, "texts", []) or []:
+            yield text_item, 0
+
+    for item, traversal_level in ordered_items():
+        if _is_table_item(item):
+            table_markdown = ""
+            export = getattr(item, "export_to_markdown", None)
+            if callable(export):
+                try:
+                    table_markdown = export(doc=doc)
+                except TypeError:
+                    table_markdown = export()
+                except Exception:
+                    table_markdown = ""
+            table_markdown = (table_markdown or "").strip()
+            if table_markdown:
+                flush()
+                table_count += 1
+                heading_path = [_clean_heading_text(t) for _, t in path if _clean_heading_text(t)]
+                table_text, metadata = _linearize_table_markdown(
+                    markdown=table_markdown,
+                    heading_path=heading_path,
+                    table_index=table_count,
+                )
+                sections.append(
+                    Section(
+                        heading_path=heading_path,
+                        text=table_text,
+                        element_type="table",
+                        metadata=metadata,
+                    )
+                )
+            continue
+
+        if _is_inside_table(item):
+            continue
+
+        label = _label_value(item)
         text = (getattr(item, "text", "") or "").strip()
         if not text:
             continue
 
         if label == "section_header" or label == "title":
-            level = int(getattr(item, "level", 1) or 1)
+            text = _clean_heading_text(text)
+            if not text:
+                continue
+            level = int(getattr(item, "level", traversal_level or 1) or 1)
             if label == "title":
                 level = 1
             flush()

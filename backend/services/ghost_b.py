@@ -1267,6 +1267,29 @@ def _json_schema_response_format() -> dict:
     }
 
 
+def _render_table_extraction_rules(
+    chunk_kind: str | None,
+    metadata: dict | None,
+) -> str:
+    if str(chunk_kind or "").lower() != "table":
+        return ""
+    meta = metadata or {}
+    columns = [
+        str(col).strip()
+        for col in (meta.get("columns") or [])
+        if str(col).strip()
+    ][:12]
+    column_hint = f" Columns: {', '.join(columns)}." if columns else ""
+    return (
+        "Table chunk rules:\n"
+        f"- Treat each Row N line as structured evidence.{column_hint}\n"
+        "- Use row labels or named row values as subjects when possible.\n"
+        "- Use column headers as property_name, predicate context, or fact value labels.\n"
+        "- Do not extract table numbers, captions, or column headers as standalone entities.\n"
+        "- Prefer facts for numeric, categorical, size, status, score, threshold, and comparison cells.\n"
+    )
+
+
 def build_user_prompt(
     *,
     chunk_id: str,
@@ -1282,6 +1305,8 @@ def build_user_prompt(
     enable_facts: bool | None = None,
     max_facts: int | None = None,
     max_total_lines: int | None = None,
+    chunk_kind: str | None = None,
+    metadata: dict | None = None,
 ) -> str:
     """Render the per-chunk extraction user prompt, with optional schema constraints.
 
@@ -1381,6 +1406,7 @@ def build_user_prompt(
             "- fact evidence_phrase must be a short exact phrase from text\n"
             "- drop vague or low-value facts\n"
         )
+    table_rules = _render_table_extraction_rules(chunk_kind, metadata)
 
     return (
         f"Extract {target}. Output JSONL only: one self-contained JSON object per line.\n"
@@ -1399,6 +1425,7 @@ def build_user_prompt(
         "Rules:\n"
         f"- max {entity_cap} entities, max {relation_cap} relations\n"
         f"{fact_rules}"
+        f"{table_rules}"
         "- compact JSONL, no prose/markdown/duplicates; omit null or empty fields\n"
         "- canonical_name: lowercase, strip punctuation\n"
         "- confidence in [0,1]; drop low-confidence entries\n"
@@ -1457,6 +1484,8 @@ def build_json_object_prompt(
     max_facts: int | None = None,
     evidence_max_chars: int | None = None,
     fact_value_max_chars: int | None = None,
+    chunk_kind: str | None = None,
+    metadata: dict | None = None,
 ) -> str:
     """Render the strict JSON-object primary extraction prompt.
 
@@ -1534,6 +1563,7 @@ def build_json_object_prompt(
         if facts_enabled and fact_cap > 0
         else "- facts must be []\n"
     )
+    table_rules = _render_table_extraction_rules(chunk_kind, metadata)
     shape = {
         "schema_version": "polymath.extract.v2",
         "entities": [
@@ -1592,6 +1622,7 @@ def build_json_object_prompt(
         f"- relations: max {relation_cap}; predicate from allowed vocabulary; "
         "subject must match an entity canonical_name\n"
         f"{fact_rule}"
+        f"{table_rules}"
         f"- evidence_phrase <= {evidence_cap} chars and must be an exact phrase from TEXT\n"
         "- if evidence_phrase contains a newline, escape it as \\n or rewrite it as one sentence\n"
         "- confidence in [0,1]; drop low-confidence or redundant items\n"
@@ -1637,6 +1668,8 @@ class ExtractionTask:
     doc_id: str
     corpus_id: str
     text: str  # child chunk text only
+    chunk_kind: str = "body"
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -3109,6 +3142,8 @@ def build_rescue_prompt(
     failure_reason: str | None = None,
     enable_facts: bool | None = None,
     max_facts: int | None = None,
+    chunk_kind: str | None = None,
+    metadata: dict | None = None,
     **_: Any,
 ) -> str:
     """Single bounded repair/resume prompt after a foreground contract violation."""
@@ -3144,6 +3179,7 @@ def build_rescue_prompt(
         fact_rule = (
             f"- Max {fact_limit} facts; include facts only when they are high-value and evidence-backed.\n"
         )
+    table_rules = _render_table_extraction_rules(chunk_kind, metadata)
     return (
         "REPAIR MODE: the previous JSONL extraction was incomplete, malformed, capped, or failed validation.\n"
         f"Failure reason: {failure_reason or 'contract_violation'}.\n"
@@ -3158,6 +3194,7 @@ def build_rescue_prompt(
         f"Limits: max {max_total_lines} item lines, max {max_entities} entities, "
         f"max {max_relations} relations.\n"
         f"{fact_rule}"
+        f"{table_rules}"
         f'Entity: {{"t":"e","cn":"lowercase no-punct","sf":"verbatim","et":"{entity_vocab_text}","cf":0.0}}\n'
         f'Relation: {{"t":"r","sub":"canonical_name","pred":"{relation_vocab_text}","obj":"canonical_name or literal","ok":"entity|literal","cf":0.0,"ev":"exact short phrase","cue":"trigger"}}\n'
         f"{fact_protocol}"
@@ -3360,6 +3397,8 @@ async def extract_entities(
             doc_id=task.doc_id,
             corpus_id=task.corpus_id,
             text=bounded_text,
+            chunk_kind=task.chunk_kind,
+            metadata=dict(task.metadata or {}),
         )
         if input_truncated:
             logger.warning(
@@ -3390,6 +3429,8 @@ async def extract_entities(
             "enable_facts": facts_enabled,
             "max_facts": max_facts,
             "max_total_lines": max_total_lines,
+            "chunk_kind": prompt_task.chunk_kind,
+            "metadata": prompt_task.metadata,
         }
         normal_output_mode = _select_extraction_output_mode(
             output_mode_setting,
@@ -3441,11 +3482,22 @@ async def extract_entities(
         for _k, _v in (entry.get("extra_params") or {}).items():
             if _k not in ("model", "messages", "response_format"):
                 payload_base[_k] = _v
-        # DeepSeek v4-flash/v4-pro default thinking-mode ON: reasoning tokens
-        # consume the entire output budget before any JSONL content emits.
-        # Force thinking off for extraction; explicit operator overrides via
-        # the corpus extra_params escape hatch take precedence.
-        if str(entry["model"]).startswith("deepseek/") and "thinking" not in payload_base:
+        model_name = str(entry["model"])
+        base_url = str(entry.get("base_url") or "")
+        model_key = model_name.lower()
+        base_url_key = base_url.lower()
+        # DeepSeek v4-flash/v4-pro and MiMo reasoning variants can default
+        # thinking-mode ON: reasoning tokens consume the output budget before
+        # JSONL content emits. Force thinking off for extraction; explicit
+        # operator overrides via corpus extra_params take precedence.
+        if (
+            (
+                model_key.startswith("deepseek/")
+                or "mimo" in model_key
+                or "xiaomimimo" in base_url_key
+            )
+            and "thinking" not in payload_base
+        ):
             payload_base["thinking"] = {"type": "disabled"}
 
         # Bounded foreground state machine:
