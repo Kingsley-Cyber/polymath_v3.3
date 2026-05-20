@@ -30,6 +30,8 @@ type PoolPreset = {
   base_url: string;
   example_model: string;
   default_max_concurrent?: number;
+  example_models?: string[];
+  model_dropdown_only?: boolean;
   kwargs?: Record<string, unknown>;
 };
 
@@ -87,6 +89,10 @@ export function IngestionModelPool({
 
   const canAdd = draft.model.trim().length > 0;
   const rowDisabled = !editing || readOnly;
+  const selectedPreset = presets.find((p) => p.id === draft.provider_preset);
+  const lockedModelOptions = selectedPreset?.model_dropdown_only
+    ? selectedPreset.example_models ?? []
+    : [];
 
   const commit = () => {
     if (!canAdd) return;
@@ -292,20 +298,45 @@ export function IngestionModelPool({
             placeholder="base_url (blank = default)"
             className="flex-1 min-w-[140px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono placeholder:text-content-tertiary"
           />
-          <input
-            ref={modelInputRef}
-            type="text"
-            value={draft.model}
-            onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                commit();
-              }
-            }}
-            placeholder={modelPlaceholder}
-            className="flex-1 min-w-[130px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono placeholder:text-content-tertiary"
-          />
+          {lockedModelOptions.length > 0 ? (
+            <select
+              value={draft.model}
+              onChange={(e) => setDraft({ ...draft, model: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commit();
+                }
+              }}
+              className="flex-1 min-w-[130px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono"
+              title="Approved MiMo extraction models"
+            >
+              {lockedModelOptions.map((model) => (
+                <option
+                  key={model}
+                  value={composeModel(draft.provider_preset, model)}
+                  className="bg-[#0b0c10] text-white"
+                >
+                  {model}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              ref={modelInputRef}
+              type="text"
+              value={draft.model}
+              onChange={(e) => setDraft({ ...draft, model: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commit();
+                }
+              }}
+              placeholder={modelPlaceholder}
+              className="flex-1 min-w-[130px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono placeholder:text-content-tertiary"
+            />
+          )}
           <input
             type="number"
             min={1}

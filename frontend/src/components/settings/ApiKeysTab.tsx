@@ -92,9 +92,9 @@ const PROVIDER_LABELS: Record<string, ProviderMeta> = {
   },
   mimo: {
     label: "Xiaomi MiMo",
-    placeholder: "(api.xiaomimimo.com key)",
+    placeholder: "(token-plan-sgp.xiaomimimo.com key)",
     group: "chat",
-    routing: "via LiteLLM proxy as api_key — overrides .env MIMO_API_KEY",
+    routing: "via LiteLLM proxy as api_key — corpus MiMo preset uses token-plan SGP",
   },
   "mimo-coding": {
     label: "Xiaomi MiMo Coding",

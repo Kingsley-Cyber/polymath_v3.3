@@ -19,7 +19,7 @@
 
 // =============== NODE KINDS ===============
 //
-// Two supernode kinds (Domain, Concept) for Mission Control, twelve
+// Two supernode kinds (Domain, Concept) for Mission Control, fourteen
 // entity-level kinds matching backend ENTITY_TYPE_PRIORITY, plus `Book`
 // for Document anchors and `Other` as the typed-fallback bucket.
 export type PolymathNodeKind =
@@ -32,7 +32,9 @@ export type PolymathNodeKind =
   | "Event"
   | "Method"
   | "Product"
+  | "Software"
   | "Document"
+  | "Standard"
   | "Rule"
   | "Law"
   | "Artifact"
@@ -52,7 +54,9 @@ export const NODE_COLORS: Record<PolymathNodeKind, string> = {
   Event: "#f97316",         // orange
   Method: "#10b981",        // emerald
   Product: "#06b6d4",       // cyan
+  Software: "#60a5fa",      // blue
   Document: "#e5e7eb",      // silver — document refs must stay visible on black
+  Standard: "#14b8a6",      // teal
   Rule: "#6366f1",          // indigo
   Law: "#ef4444",           // red
   Artifact: "#84cc16",      // lime
@@ -84,7 +88,9 @@ export const NODE_SIZES: Record<PolymathNodeKind, number> = {
   Event: 8,
   Method: 9,
   Product: 8,
+  Software: 8,
   Document: 6,
+  Standard: 7,
   Rule: 7,
   Law: 7,
   Artifact: 7,
@@ -106,7 +112,9 @@ export const NODE_MASSES: Record<PolymathNodeKind, number> = {
   Event: 16,
   Method: 18,
   Product: 17,
+  Software: 17,
   Document: 10,
+  Standard: 14,
   Rule: 15,
   Law: 15,
   Artifact: 12,
@@ -296,7 +304,9 @@ export function inferNodeKind(node: any): PolymathNodeKind {
     case "Event": return "Event";
     case "Method": return "Method";
     case "Product": return "Product";
+    case "Software": return "Software";
     case "Document": return "Document";
+    case "Standard": return "Standard";
     case "Rule": return "Rule";
     case "Law": return "Law";
     case "Artifact": return "Artifact";

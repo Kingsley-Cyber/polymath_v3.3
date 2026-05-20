@@ -275,18 +275,21 @@ async def test_multiple_providers_in_one_corpus():
                 ],
                 "extraction_models": [
                     {"provider_preset": "zai", "model": "glm-4-plus"},
+                    {"provider_preset": "mimo", "model": "mimo-v2.5"},
                 ],
             },
         }
     )
     svc = _make_service(db)
     result = await svc.migrate_bare_model_names()
-    assert result["pool_entries_patched"] == 3
+    assert result["pool_entries_patched"] == 4
     cfg = db.corpora.docs[0]["default_ingestion_config"]
     assert cfg["summary_models"][0]["model"] == "openai/gpt-4o"
     assert cfg["summary_models"][1]["model"] == "groq/llama-3.3-70b-versatile"
     # Z.AI rides the openai litellm provider (custom base_url at runtime).
     assert cfg["extraction_models"][0]["model"] == "openai/glm-4-plus"
+    # MiMo's SGP endpoint is also OpenAI-compatible and routed via api_base.
+    assert cfg["extraction_models"][1]["model"] == "openai/mimo-v2.5"
 
 
 @pytest.mark.asyncio

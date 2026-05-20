@@ -64,6 +64,8 @@ ENTITY_TYPE_PRIORITY = [
     "Product",
     "Artifact",
     "Method",
+    "Software",
+    "Standard",
     "Concept",
     "TimeReference",
     SchemaContext.ENTITY_SENTINEL,
@@ -599,7 +601,7 @@ def resolve_primary_entity_type(
     for candidate in ENTITY_TYPE_PRIORITY:
         if candidate in observed:
             return candidate
-    return "Concept"
+    return SchemaContext.ENTITY_SENTINEL
 
 
 @lru_cache(maxsize=1)

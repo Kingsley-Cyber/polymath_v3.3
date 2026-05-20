@@ -88,6 +88,8 @@ export interface PoolProviderPreset {
    * OpenRouter's hundreds of models).
    */
   example_models?: string[];
+  /** When true, render example_models as the only selectable model choices. */
+  model_dropdown_only?: boolean;
   kwargs?: Record<string, unknown>;
 }
 
@@ -164,6 +166,19 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
   // OpenAI-compatible providers — litellm_provider="openai" but custom base_url.
   // Model name stored as `openai/<model>`; LiteLLM routes via the openai
   // provider using the per-entry api_base.
+  {
+    id: "mimo",
+    name: "Xiaomi MiMo (SGP)",
+    litellm_provider: "openai",
+    base_url: "https://token-plan-sgp.xiaomimimo.com/v1",
+    example_model: "mimo-v2.5",
+    example_models: ["mimo-v2.5", "mimo-v2-pro"],
+    model_dropdown_only: true,
+    default_max_concurrent: 45,
+    kwargs: {
+      thinking: { type: "disabled" },
+    },
+  },
   {
     id: "siliconflow",
     name: "SiliconFlow",

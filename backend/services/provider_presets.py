@@ -27,6 +27,7 @@ PROVIDER_PRESET_PREFIX: dict[str, str] = {
     "moonshot": "openai",
     "together": "together_ai",
     "xai": "xai",
+    "mimo": "openai",
     "siliconflow": "openai",
     "zai": "openai",
     "openrouter": "openrouter",

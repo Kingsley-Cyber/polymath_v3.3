@@ -38,6 +38,7 @@ from services.ghost_b import (
     normalize_relation_predicate_alias,
 )
 from services.graph.neo4j_writer import (
+    ENTITY_TYPE_PRIORITY,
     ONTOLOGY_VERSION,
     canonicalize_entity_name,
     entity_id_from_name,
@@ -641,6 +642,7 @@ async def test_deepseek_auto_uses_jsonl_payload_on_primary(monkeypatch):
     )
 
     assert len(calls) == 1
+    assert calls[0]["thinking"] == {"type": "disabled"}
     assert "response_format" not in calls[0]
     assert "Output EXACTLY one JSON object per line" in calls[0]["messages"][0]["content"]
     assert "Output JSONL only" in calls[0]["messages"][1]["content"]
@@ -650,6 +652,105 @@ async def test_deepseek_auto_uses_jsonl_payload_on_primary(monkeypatch):
     assert report.results and report.results[0].entities[0].canonical_name == "alpha"
     assert report.metrics["attempt_count"] == 1
     assert report.metrics["completion_tokens"] == 30
+
+
+@pytest.mark.asyncio
+async def test_mimo_auto_disables_thinking_for_extraction(monkeypatch):
+    calls: list[dict] = []
+    content = "\n".join(
+        [
+            '{"t":"e","cn":"mimo","sf":"MiMo","et":"Concept","cf":0.95}',
+            '{"t":"x"}',
+        ]
+    )
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "usage": {"total_tokens": 120, "prompt_tokens": 90, "completion_tokens": 30},
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": content}}
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            calls.append(json)
+            return FakeResponse()
+
+    fake_settings = SimpleNamespace(
+        ENTITY_CONFIDENCE_THRESHOLD=0.0,
+        SCHEMA_INLINE_LIMIT=30,
+        SCHEMA_RETRIEVAL_TOP_K=10,
+        EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_OUTPUT_MODE="auto",
+        EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK=12,
+        EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK=4,
+        EXTRACTION_EVIDENCE_MAX_CHARS=120,
+        EXTRACTION_FACT_VALUE_MAX_CHARS=160,
+        EXTRACTION_RESCUE_MAX_TOKENS=900,
+        EXTRACTION_ENABLE_FACTS=False,
+        EXTRACTION_MAX_FACTS_PER_CHUNK=5,
+        EXTRACTION_JSONL_MAX_CALLS=2,
+        EXTRACTION_FOREGROUND_MAX_CALLS=2,
+        EXTRACTION_JSONL_DEBUG_RAW=False,
+        EXTRACTION_MAX_INPUT_TOKENS=700,
+        EXTRACTION_MAX_TOTAL_LINES=20,
+        EXTRACTION_RESCUE_MAX_TOTAL_LINES=16,
+        EXTRACTION_MAX_ENTITIES_PER_CHUNK=14,
+        EXTRACTION_MAX_RELATIONS_PER_CHUNK=20,
+        EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK=8,
+        LITELLM_MASTER_KEY="test-key",
+        LITELLM_URL="http://litellm",
+        DEFAULT_COMPLETION_MODEL="test-model",
+        EXTRACTION_MAX_CONCURRENT=1,
+        EXTRACTION_GLOBAL_MAX_CONCURRENT=180,
+        EXTRACTION_FAILURE_PAUSE_PERCENT=100.0,
+        EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS=20,
+    )
+    monkeypatch.setattr(ghost_b, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    report = await ghost_b.extract_entities(
+        [
+            ExtractionTask(
+                chunk_id="c1",
+                doc_id="d1",
+                corpus_id="corp1",
+                text="MiMo is a compact test concept.",
+            )
+        ],
+        pool=[{
+            "model": "openai/mimo-v2.5",
+            "base_url": "https://token-plan-sgp.xiaomimimo.com/v1",
+            "api_key": None,
+            "max_concurrent": 1,
+            "extra_params": {},
+        }],
+        return_report=True,
+        enable_facts=False,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["thinking"] == {"type": "disabled"}
+    assert "response_format" not in calls[0]
+    assert "Output JSONL only" in calls[0]["messages"][1]["content"]
+    assert report.results and report.results[0].entities[0].canonical_name == "mimo"
+    assert report.metrics["attempt_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -1448,6 +1549,53 @@ def test_primary_entity_type_uses_curated_override_then_observed_types():
     assert resolve_primary_entity_type(
         "OpenAI", ["Concept", "Organization"]
     ) == "Organization"
+
+
+def test_primary_entity_type_priority_covers_universal_schema():
+    missing = [t for t in UNIVERSAL_ENTITY_SCHEMA if t not in ENTITY_TYPE_PRIORITY]
+    assert missing == []
+
+
+@pytest.mark.parametrize("entity_type", UNIVERSAL_ENTITY_SCHEMA)
+def test_primary_entity_type_resolves_single_universal_type(entity_type):
+    assert (
+        resolve_primary_entity_type(f"schema resolver smoke {entity_type}", [entity_type])
+        == entity_type
+    )
+
+
+def test_primary_entity_type_keeps_software_and_standard_above_concept():
+    assert (
+        resolve_primary_entity_type("schema resolver smoke software", ["Concept", "Software"])
+        == "Software"
+    )
+    assert (
+        resolve_primary_entity_type("schema resolver smoke standard", ["Concept", "Standard"])
+        == "Standard"
+    )
+    assert (
+        resolve_primary_entity_type("schema resolver smoke product", ["Software", "Product"])
+        == "Product"
+    )
+    assert (
+        resolve_primary_entity_type("schema resolver smoke document", ["Standard", "Document"])
+        == "Document"
+    )
+
+
+def test_primary_entity_type_unknown_or_empty_falls_back_to_other():
+    assert (
+        resolve_primary_entity_type("schema resolver smoke unknown", ["Unknown"])
+        == SchemaContext.ENTITY_SENTINEL
+    )
+    assert (
+        resolve_primary_entity_type("schema resolver smoke empty", [])
+        == SchemaContext.ENTITY_SENTINEL
+    )
+    assert (
+        resolve_primary_entity_type("schema resolver smoke other", [SchemaContext.ENTITY_SENTINEL])
+        == SchemaContext.ENTITY_SENTINEL
+    )
 
 
 def test_object_kind_facets_infer_library():

@@ -202,6 +202,28 @@ function nodeLabel(data: { nodes: any[] }, id: string, fallback?: string): strin
   return String(node?.display_name || node?.label || fallback || id).trim();
 }
 
+function selectionBadgeItems(selected: SelectedDisplay): string[] {
+  const items = [
+    selected.nodeKind || selected.kind,
+    selected.entity_type || selected.dominant_entity_type,
+    selected.dominant_relation_family,
+    typeof selected.bridge_count === "number"
+      ? `${selected.bridge_count} bridges`
+      : null,
+  ];
+  const seen = new Set<string>();
+  return items
+    .filter(Boolean)
+    .map((item) => String(item).trim())
+    .filter((item) => {
+      if (!item) return false;
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
 export function BrainViewDashboard(props: BrainViewDashboardProps) {
   const {
     collapsed,
@@ -467,21 +489,13 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                 </div>
               )}
               <div className="mt-2 ml-4 flex flex-wrap gap-1">
-                {[
-                  selectedDisplay.nodeKind || selectedDisplay.kind,
-                  selectedDisplay.entity_type || selectedDisplay.dominant_entity_type,
-                  selectedDisplay.dominant_relation_family,
-                  typeof selectedDisplay.bridge_count === "number"
-                    ? `${selectedDisplay.bridge_count} bridges`
-                    : null,
-                ]
-                  .filter(Boolean)
+                {selectionBadgeItems(selectedDisplay)
                   .map((item) => (
                     <span
-                      key={String(item)}
+                      key={item}
                       className="rounded border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[10px] text-zinc-400"
                     >
-                      {String(item)}
+                      {item}
                     </span>
                   ))}
               </div>
