@@ -1,3 +1,4 @@
+import hashlib
 from unittest.mock import AsyncMock
 
 import pytest
@@ -85,3 +86,15 @@ async def test_payload_index_retries_transient_failure(monkeypatch):
     )
 
     assert client.create_calls == 2
+
+
+def test_payload_text_contract_marks_full_text_not_preview():
+    text = "Row 4: Event-driven processing uses Amazon SQS + AWS Lambda."
+
+    contract = qdrant_writer.payload_text_contract(text)
+
+    assert contract == {
+        "text_len": len(text),
+        "text_hash": hashlib.sha1(text.encode("utf-8")).hexdigest(),
+        "is_truncated": False,
+    }

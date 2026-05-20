@@ -4,8 +4,8 @@ Three modes:
   - `local`: existing default. Funnel A (summaries) + Funnel B (children)
     + lexical, merge, rerank, hydrate to full text. The LLM sees verbatim
     chunk content. Best for specific questions, debugging, citations.
-  - `global`: Funnel A ONLY (summaries), feed the summary text to the LLM
-    directly without hydrating to full parent text. ~50 summaries fit in
+  - `global`: Funnel A ONLY (summaries), hydrate canonical summary text from
+    Mongo, then feed summaries to the LLM without hydrating full parent text. ~50 summaries fit in
     one context window where ~5 full chunks would, so this powers
     "what are the main themes?" type corpus-level queries that the
     local path can't answer at all (it returns evidence, never overview).

@@ -9,7 +9,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from models.schemas import SourceChunk
 from services.conversation import conversation_service
-from services.retriever.hydrate import hydrate_rerank_texts
+from services.retriever.hydrate import (
+    hydrate_rerank_texts,
+    hydrate_summary_rerank_texts,
+)
 
 
 class _FakeCursor:
@@ -41,12 +44,36 @@ class _FakeCollection:
 
 
 class _FakeDb:
-    def __init__(self, records: list[dict]):
+    def __init__(self, records: list[dict], documents: list[dict] | None = None):
         self.chunks = _FakeCollection(records)
+        self.documents = _FakeDocumentsCollection(documents or [])
 
     def __getitem__(self, name):
-        assert name == "chunks"
-        return self.chunks
+        if name == "chunks":
+            return self.chunks
+        if name == "documents":
+            return self.documents
+        raise AssertionError(name)
+
+
+class _FakeDocumentsCollection:
+    def __init__(self, records: list[dict]):
+        self._records = records
+        self.query = None
+        self.projection = None
+
+    def find(self, query, projection):
+        self.query = query
+        self.projection = projection
+        doc_ids = set(query.get("doc_id", {}).get("$in", []))
+        corpora = set(query.get("corpus_id", {}).get("$in", []))
+        records = [
+            record
+            for record in self._records
+            if (not doc_ids or record.get("doc_id") in doc_ids)
+            and (not corpora or record.get("corpus_id") in corpora)
+        ]
+        return _FakeCursor(records)
 
 
 def _chunk(chunk_id: str, text: str) -> SourceChunk:
@@ -105,3 +132,40 @@ async def test_hydrate_rerank_texts_leaves_summary_candidates_alone(monkeypatch)
 
     assert hydrated == original
     assert fake_db.chunks.query is None
+
+
+@pytest.mark.asyncio
+async def test_hydrate_summary_rerank_texts_replaces_summary_snippet(monkeypatch):
+    full_summary = (
+        "Table 1 maps event-driven processing to Amazon SQS + AWS Lambda "
+        "because the queue decouples producers and Lambda scales consumers."
+    )
+    fake_db = _FakeDb(
+        [],
+        documents=[
+            {
+                "doc_id": "doc-1",
+                "corpus_id": "corpus-1",
+                "parent_chunks": [
+                    {
+                        "parent_id": "parent-1",
+                        "summary": full_summary,
+                        "heading_path": ["AWS Decision Chart"],
+                        "chunk_kind": "table",
+                        "metadata": {"table_index": 1},
+                    }
+                ],
+            }
+        ],
+    )
+    monkeypatch.setattr(conversation_service, "_db", fake_db)
+
+    original = [_chunk("parent-1_summary", "Table 1 maps event-driven")]
+    hydrated = await hydrate_summary_rerank_texts(original, ["corpus-1"])
+
+    assert hydrated[0].text == full_summary
+    assert hydrated[0].summary == full_summary
+    assert hydrated[0].heading_path == ["AWS Decision Chart"]
+    assert hydrated[0].chunk_kind == "table"
+    assert hydrated[0].metadata == {"table_index": 1}
+    assert original[0].text == "Table 1 maps event-driven"

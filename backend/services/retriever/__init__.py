@@ -39,7 +39,11 @@ from services.retriever.graph_rerank import (
     apply_graph_degree_boost,
     apply_graph_degree_boost_metrics_aware,
 )
-from services.retriever.hydrate import hydrate_chunks, hydrate_rerank_texts
+from services.retriever.hydrate import (
+    hydrate_chunks,
+    hydrate_rerank_texts,
+    hydrate_summary_rerank_texts,
+)
 from services.retriever.intent_policy import (
     QueryNeed,
     adaptive_funnel_limits,
@@ -769,10 +773,9 @@ class RetrieverOrchestrator:
         a_cols, b_cols = self._resolve_collections(effective_tier, corpus_ids, collections)
 
         # ─── Phase 27 — Global mode short-circuit ─────────────────────────
-        # Funnel A only. Summary chunks are returned verbatim (no merge
-        # with children, no graph expansion, no hydration to parent text)
-        # because the WHOLE POINT of global mode is to feed summaries to
-        # the LLM as the synthesis substrate. Hydrating would defeat the
+        # Funnel A only. Summary chunks are hydrated to canonical Mongo
+        # summaries, then returned without merging children, graph expansion,
+        # or hydration to full parent text. Parent hydration would defeat the
         # token-density advantage that makes "50 summaries instead of 5
         # chunks" work.
         if search_mode == "global":
@@ -790,6 +793,12 @@ class RetrieverOrchestrator:
             # vector similarity, but the cross-encoder catches mismatches
             # between query intent and summary phrasing. Honored when the
             # caller explicitly passes rerank_enabled=True.
+            phase_started = perf_counter()
+            a_results_global = await hydrate_summary_rerank_texts(
+                a_results_global,
+                corpus_ids,
+            )
+            _add_timing("rerank_text_hydrate", phase_started)
             if rerank_enabled and a_results_global:
                 try:
                     a_results_global = await reranker_service.rerank(
@@ -802,6 +811,24 @@ class RetrieverOrchestrator:
                     a_results_global = sorted(
                         a_results_global, key=lambda c: c.score, reverse=True,
                     )
+                trimmed_global = _trim_bounded_rerank_tail(
+                    a_results_global,
+                    rerank_enabled=True,
+                    score_scale=settings.RERANKER_SCORE_SCALE,
+                )
+                if len(trimmed_global) != len(a_results_global):
+                    logger.info(
+                        "Global bounded rerank tail trim: %d → %d candidates "
+                        "(top_score=%.3f scale=%s)",
+                        len(a_results_global),
+                        len(trimmed_global),
+                        a_results_global[0].score if a_results_global else 0.0,
+                        settings.RERANKER_SCORE_SCALE,
+                    )
+                    counts["global_rerank_tail_trimmed"] = (
+                        len(a_results_global) - len(trimmed_global)
+                    )
+                    a_results_global = trimmed_global
             effective_global_k = (
                 final_top_k
                 if final_top_k is not None

@@ -2051,13 +2051,15 @@ def web_hits_to_source_chunks(
             f"Corpus expansion terms: {', '.join(expanded_terms) if expanded_terms else 'none'}\n"
             f"Content: {body}"
         )
+        text_limit = max(int(max_chars or _DEFAULT_OBSCURA_MAX_CHARS), 1200)
+        text_truncated = len(text) > text_limit
         chunks.append(
             SourceChunk(
                 chunk_id=f"web:{digest}",
                 parent_id=f"web:{digest}",
                 doc_id=hit.url,
                 corpus_id="live-web",
-                text=text[: max(max_chars, 1200)],
+                text=text[:text_limit],
                 score=max(0.05, 1.0 - (rank - 1) * 0.08),
                 source_tier="web_search",
                 corpus_name="Live Web",
@@ -2075,6 +2077,11 @@ def web_hits_to_source_chunks(
                     "evidence_mode": evidence_mode,
                     "fetch_method": fetch_method,
                     "fetch_status": fetch_status,
+                    "content_chars": len(body),
+                    "source_text_chars": len(text),
+                    "source_text_max_chars": text_limit,
+                    "content_truncated": text_truncated,
+                    "rerank_text_max_chars": _WEB_RERANK_TEXT_MAX_CHARS,
                     "fetch_failed": (
                         bool(fetch_stat)
                         and not page_text

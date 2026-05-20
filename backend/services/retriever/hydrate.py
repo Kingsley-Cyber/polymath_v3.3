@@ -245,3 +245,112 @@ async def hydrate_rerank_texts(
             len(chunks),
         )
     return hydrated
+
+
+async def hydrate_summary_rerank_texts(
+    chunks: List[SourceChunk], corpus_ids: Optional[List[str]] = None
+) -> List[SourceChunk]:
+    """Replace Qdrant summary snippets with full Mongo summaries.
+
+    Global search mode intentionally works over summaries rather than parent
+    bodies. Existing Qdrant summary payloads may still be preview-sized, so
+    reranking global candidates should read the canonical summary from Mongo
+    before ranking.
+    """
+    if not chunks:
+        return []
+
+    db = conversation_service._db
+    if db is None:
+        logger.warning("DB not connected — cannot hydrate summary reranker texts.")
+        return chunks
+
+    summary_refs: list[tuple[str, str]] = []
+    doc_ids: set[str] = set()
+    for chunk in chunks:
+        chunk_id = chunk.chunk_id or ""
+        parent_id = chunk.parent_id or (
+            chunk_id.removesuffix("_summary") if chunk_id.endswith("_summary") else ""
+        )
+        if not parent_id:
+            continue
+        summary_refs.append((chunk.doc_id or "", parent_id))
+        if chunk.doc_id:
+            doc_ids.add(chunk.doc_id)
+    if not summary_refs:
+        return chunks
+
+    query: dict = {}
+    if doc_ids:
+        query["doc_id"] = {"$in": list(doc_ids)}
+    if corpus_ids:
+        query["corpus_id"] = {"$in": corpus_ids}
+    if not query:
+        return chunks
+
+    try:
+        docs = await db["documents"].find(
+            query,
+            {
+                "_id": 0,
+                "doc_id": 1,
+                "corpus_id": 1,
+                "parent_chunks.parent_id": 1,
+                "parent_chunks.summary": 1,
+                "parent_chunks.heading_path": 1,
+                "parent_chunks.chunk_kind": 1,
+                "parent_chunks.metadata": 1,
+            },
+        ).to_list(length=None)
+    except Exception as exc:
+        logger.warning("Summary reranker text hydration failed: %s", exc)
+        return chunks
+
+    by_doc_parent: dict[tuple[str, str], dict] = {}
+    by_parent: dict[str, dict] = {}
+    for doc in docs:
+        doc_id = str(doc.get("doc_id") or "")
+        for parent in doc.get("parent_chunks", []) or []:
+            parent_id = str(parent.get("parent_id") or "")
+            summary = str(parent.get("summary") or "")
+            if not parent_id or not summary:
+                continue
+            by_doc_parent[(doc_id, parent_id)] = parent
+            by_parent[parent_id] = parent
+
+    if not by_doc_parent and not by_parent:
+        return chunks
+
+    hydrated: List[SourceChunk] = []
+    replaced = 0
+    for chunk in chunks:
+        copied = chunk.model_copy()
+        chunk_id = copied.chunk_id or ""
+        parent_id = copied.parent_id or (
+            chunk_id.removesuffix("_summary") if chunk_id.endswith("_summary") else ""
+        )
+        record = by_doc_parent.get((copied.doc_id or "", parent_id)) or by_parent.get(parent_id)
+        if record and record.get("summary"):
+            original_len = len(copied.text or "")
+            summary = str(record["summary"])
+            copied.text = summary
+            copied.summary = summary
+            if len(summary) > original_len:
+                replaced += 1
+            if not copied.parent_id:
+                copied.parent_id = parent_id
+            if not copied.heading_path and record.get("heading_path"):
+                copied.heading_path = record["heading_path"]
+            if (not copied.chunk_kind or copied.chunk_kind == "body") and record.get("chunk_kind"):
+                copied.chunk_kind = record["chunk_kind"]
+            if not copied.metadata and record.get("metadata"):
+                copied.metadata = record["metadata"] or {}
+        hydrated.append(copied)
+
+    if replaced:
+        logger.info(
+            "Summary reranker text hydration replaced %d/%d candidate snippets",
+            replaced,
+            len(chunks),
+        )
+    return hydrated

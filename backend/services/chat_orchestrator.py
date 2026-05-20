@@ -2965,6 +2965,13 @@ class ChatOrchestrator:
                         "fetch_status": (chunk.metadata or {}).get("fetch_status"),
                         "fetch_method": (chunk.metadata or {}).get("fetch_method"),
                         "cache_hit": bool((chunk.metadata or {}).get("cache_hit")),
+                        "content_chars": (chunk.metadata or {}).get("content_chars"),
+                        "source_text_chars": (chunk.metadata or {}).get("source_text_chars"),
+                        "source_text_max_chars": (chunk.metadata or {}).get("source_text_max_chars"),
+                        "content_truncated": bool(
+                            (chunk.metadata or {}).get("content_truncated")
+                        ),
+                        "rerank_text_max_chars": (chunk.metadata or {}).get("rerank_text_max_chars"),
                         "web_content_untrusted": True,
                     }
                 )
@@ -3122,6 +3129,10 @@ class ChatOrchestrator:
                 "status": result.status,
                 "method": result.method,
                 "chars": result.chars,
+                "content_truncated": bool(
+                    result.text and result.chars >= int(settings.OBSCURA_MAX_CHARS or 4000)
+                ),
+                "source_text_max_chars": int(settings.OBSCURA_MAX_CHARS or 4000),
                 "cache_hit": bool(result.from_cache),
                 "cache_layer": result.cache_layer,
                 "obscura_attempted": bool(result.obscura_attempted),
@@ -3152,6 +3163,13 @@ class ChatOrchestrator:
                                 "fetch_method": result.method,
                                 "fetch_status": result.status,
                                 "full_page_fetched": True,
+                                "content_chars": result.chars,
+                                "source_text_chars": result.chars,
+                                "source_text_max_chars": int(settings.OBSCURA_MAX_CHARS or 4000),
+                                "content_truncated": bool(
+                                    result.text
+                                    and result.chars >= int(settings.OBSCURA_MAX_CHARS or 4000)
+                                ),
                                 "obscura_attempted": bool(result.obscura_attempted),
                                 "js_rendered": bool(result.js_rendered),
                                 "retriever": "fetch_page",

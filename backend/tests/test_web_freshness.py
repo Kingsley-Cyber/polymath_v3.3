@@ -657,6 +657,9 @@ async def test_rerank_web_source_chunks_clips_payload_but_returns_full_text(monk
     assert captured["text_len"] <= 1200
     assert len(ranked[0].text) > 4000
     assert ranked[0].score == 4.2
+    assert ranked[0].metadata["content_truncated"] is True
+    assert ranked[0].metadata["source_text_max_chars"] == 5000
+    assert ranked[0].metadata["rerank_text_max_chars"] == 1200
 
 
 def test_diversify_web_source_chunks_caps_research_for_practical_queries():

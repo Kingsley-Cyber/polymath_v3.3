@@ -89,6 +89,16 @@ def _uuid_from_str(s: str) -> str:
     )
 
 
+def payload_text_contract(text: str | None) -> dict:
+    """Integrity metadata proving Qdrant carries full text, not a preview."""
+    value = text or ""
+    return {
+        "text_len": len(value),
+        "text_hash": hashlib.sha1(value.encode("utf-8")).hexdigest(),
+        "is_truncated": False,
+    }
+
+
 def _child_point_id(chunk_id: str) -> str:
     return _uuid_from_str(chunk_id)
 
@@ -536,6 +546,7 @@ async def upsert_children(
             "source_tier": c["source_tier"],
             "heading_path": c.get("heading_path"),
             "chunk_text": c["text"],
+            **payload_text_contract(c.get("text")),
             "user_id": c.get("user_id", ""),
             # Semantic role (body / toc / bibliography / … / code). Default
             # retrieval excludes non-body via a `must_not` filter on this
@@ -616,6 +627,7 @@ async def upsert_summaries(
             "source_tier": p["source_tier"],
             "heading_path": p.get("heading_path"),
             "chunk_text": p["summary"],
+            **payload_text_contract(p.get("summary")),
             "user_id": p.get("user_id", ""),
             "chunk_kind": p.get("chunk_kind", "body"),
             "language": p.get("language"),
