@@ -177,6 +177,7 @@ _CURATED_PROVIDER_MODELS: dict[str, list[str]] = {
     # z.ai GLM Coding endpoint. Route prefix is "glm-coding", NOT "zai".
     # GLM is wired for thinking-mode dispatch in Phase 28 (commit 2ef7cc2).
     "glm-coding": [
+        "glm-5.1",
         "glm-4.6", "glm-4.5", "glm-4-plus",
         "glm-5", "glm-5-air",
         # Vision variants

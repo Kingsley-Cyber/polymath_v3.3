@@ -30,6 +30,7 @@ PROVIDER_PRESET_PREFIX: dict[str, str] = {
     "mimo": "openai",
     "siliconflow": "openai",
     "zai": "openai",
+    "glm-coding": "openai",
     "openrouter": "openrouter",
     "ollama": "ollama",
     "custom": "openai",

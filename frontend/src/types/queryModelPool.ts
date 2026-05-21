@@ -197,6 +197,19 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
     example_model: "glm-4-plus",
   },
   {
+    id: "glm-coding",
+    name: "Z.AI GLM Coding",
+    litellm_provider: "openai",
+    base_url: "https://api.z.ai/api/coding/paas/v4",
+    example_model: "glm-5.1",
+    example_models: ["glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7"],
+    kwargs: {
+      thinking: {
+        type: "disabled",
+      },
+    },
+  },
+  {
     id: "openrouter",
     name: "OpenRouter",
     litellm_provider: "openrouter",
