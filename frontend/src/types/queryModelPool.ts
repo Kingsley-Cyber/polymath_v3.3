@@ -21,6 +21,7 @@ export interface QueryModelPoolEntry {
   source: PoolSource;
   enabled: boolean;
   created_at: string;
+  extra_params?: Record<string, unknown>;
 }
 
 export interface HydeConfig {

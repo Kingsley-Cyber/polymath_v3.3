@@ -35,7 +35,7 @@ import type {
   QueryModelPoolEntry,
   UtilityModelTestResult,
 } from "../../types";
-import { POOL_PROVIDER_PRESETS, composeModelString } from "../../types";
+import { POOL_PROVIDER_PRESETS, composeModelString, findPreset } from "../../types";
 import { ApiKeysTab } from "./ApiKeysTab";
 
 
@@ -69,7 +69,9 @@ function PoolSection() {
     setBaseUrl(p?.base_url || "");
     // Compose `{litellm_provider}/{example_model}` so the stored model_name
     // carries the LiteLLM prefix. Only overwrite when the user hasn't typed yet.
-    if (!modelName && p && p.litellm_provider && p.example_model) {
+    if (p?.model_dropdown_only && p.example_model) {
+      setModelName(composeModelString(id, p.example_model));
+    } else if (!modelName && p && p.litellm_provider && p.example_model) {
       setModelName(composeModelString(id, p.example_model));
     } else if (!modelName) {
       setModelName(p?.example_model || "");
@@ -86,6 +88,7 @@ function PoolSection() {
     // prefixed. OpenAI-compatible model IDs can contain slashes.
     const bare = modelName.trim();
     const composedModel = composeModelString(provider, bare);
+    const preset = findPreset(provider);
     const entry: QueryModelPoolEntry = {
       entry_id: newEntryId(),
       label: label.trim() || `${provider} · ${composedModel}`,
@@ -96,6 +99,7 @@ function PoolSection() {
       source: "cloud",
       enabled: true,
       created_at: new Date().toISOString(),
+      extra_params: preset?.kwargs || {},
     };
     addEntry(entry);
     setFlashId(entry.entry_id);
@@ -105,6 +109,7 @@ function PoolSection() {
     setLabel("");
     setTimeout(() => modelInputRef.current?.focus(), 0);
   };
+  const selectedPreset = findPreset(provider);
 
   return (
     <div className="bg-[#2a2a2a] border border-white/5 rounded-lg p-5 space-y-4">
@@ -196,25 +201,42 @@ function PoolSection() {
             placeholder="base_url"
             className="flex-1 min-w-[180px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600"
           />
-          <input
-            ref={modelInputRef}
-            type="text"
-            list={
-              POOL_PROVIDER_PRESETS.find((p) => p.id === provider)?.example_models
-                ? `models-${provider}`
-                : undefined
-            }
-            value={modelName}
-            onChange={(e) => setModelName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                handleAddCloud();
+          {selectedPreset?.model_dropdown_only ? (
+            <select
+              value={modelName}
+              onChange={(e) => setModelName(e.target.value)}
+              className="flex-1 min-w-[160px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono"
+            >
+              {(selectedPreset.example_models || [selectedPreset.example_model]).map((m) => {
+                const value = composeModelString(provider, m);
+                return (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                );
+              })}
+            </select>
+          ) : (
+            <input
+              ref={modelInputRef}
+              type="text"
+              list={
+                selectedPreset?.example_models
+                  ? `models-${provider}`
+                  : undefined
               }
-            }}
-            placeholder="model name"
-            className="flex-1 min-w-[160px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600"
-          />
+              value={modelName}
+              onChange={(e) => setModelName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAddCloud();
+                }
+              }}
+              placeholder="model name"
+              className="flex-1 min-w-[160px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600"
+            />
+          )}
           {/* Datalist suggestions surface every preset's example_models so a
               provider switch immediately offers the curated shortlist. The
               input itself stays free-text — typing a custom model still works. */}

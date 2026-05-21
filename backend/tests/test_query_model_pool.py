@@ -25,6 +25,7 @@ import pytest
 
 from models.schemas import ModelsConfig
 from services.conversation import conversation_service
+from services.query_prefs import query_prefs_service
 from services.secrets import decrypt
 from services.settings import settings_service
 
@@ -51,6 +52,7 @@ async def _setup():
     test_ghost_b_staging.py."""
     await conversation_service.connect()
     settings_service.attach(conversation_service._db)
+    query_prefs_service.attach(conversation_service._db)
 
 
 async def _teardown():
@@ -108,7 +110,42 @@ async def test_ollama_entry_has_no_api_key_and_correct_source():
 
 
 @pytest.mark.asyncio
-async def test_empty_models_pool_gets_visible_chat_default_entry():
+async def test_missing_models_pool_gets_visible_chat_default_entry():
+    await _setup()
+    user = _u()
+    try:
+        db = conversation_service._db
+        await db["settings"].insert_one({
+            "user_id": user,
+            "chat": {"default_chat_model": "deepseek/deepseek-v4-flash"},
+            "retrieval": {},
+            "models": {
+                "hyde": {"default_enabled": False, "pool_entry_id": None},
+                "agentic": {"default_enabled": False, "pool_entry_id": None},
+                "reasoning": {"default_enabled": False, "pool_entry_id": None},
+                "utility": {"default_enabled": False, "pool_entry_id": None},
+            },
+            "models_migrated": True,
+        })
+
+        settings = await settings_service.get_settings(user)
+
+        assert len(settings.models.query_model_pool) == 1
+        entry = settings.models.query_model_pool[0]
+        assert entry.entry_id == "system-default-chat"
+        assert entry.provider == "deepseek"
+        assert entry.model_name == "deepseek/deepseek-v4-flash"
+        assert entry.enabled is True
+
+        raw = await settings_service.get_models_raw(user)
+        assert raw["query_model_pool"][0]["entry_id"] == "system-default-chat"
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
+async def test_explicit_empty_models_pool_does_not_backfill_default_entry():
     await _setup()
     user = _u()
     try:
@@ -129,15 +166,9 @@ async def test_empty_models_pool_gets_visible_chat_default_entry():
 
         settings = await settings_service.get_settings(user)
 
-        assert len(settings.models.query_model_pool) == 1
-        entry = settings.models.query_model_pool[0]
-        assert entry.entry_id == "system-default-chat"
-        assert entry.provider == "deepseek"
-        assert entry.model_name == "deepseek/deepseek-v4-flash"
-        assert entry.enabled is True
-
+        assert settings.models.query_model_pool == []
         raw = await settings_service.get_models_raw(user)
-        assert raw["query_model_pool"][0]["entry_id"] == "system-default-chat"
+        assert raw["query_model_pool"] == []
     finally:
         await _cleanup(user)
         await _teardown()
@@ -365,6 +396,42 @@ async def test_resolver_pool_entry_returns_decrypted_key():
         assert resolved["model"].endswith("Qwen/Qwen3-Embedding-0.6B")
         assert resolved["api_base"] == "https://api.siliconflow.cn/v1"
         assert resolved["api_key"] == "sk-resolved-plaintext"
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
+async def test_resolver_pool_entry_uses_shared_provider_key_when_entry_key_blank():
+    from services import query_model_resolver
+
+    await _setup()
+    user = _u()
+    try:
+        await settings_service.update_api_keys(user, {"mimo": "sk-shared-mimo"})
+        await settings_service.update_models(user, ModelsConfig(
+            query_model_pool=[{
+                "entry_id": "ent-mimo-shared",
+                "label": "MiMo shared key",
+                "provider": "mimo",
+                "base_url": "https://token-plan-sgp.xiaomimimo.com/v1",
+                "api_key_ciphertext": None,
+                "model_name": "openai/mimo-v2.5",
+                "source": "cloud",
+                "enabled": True,
+                "extra_params": {"thinking": {"type": "disabled"}},
+            }],
+        ).model_dump())
+
+        resolved = await query_model_resolver.resolve_by_entry_id(
+            user, "ent-mimo-shared"
+        )
+
+        assert resolved is not None
+        assert resolved["model"] == "openai/mimo-v2.5"
+        assert resolved["api_base"] == "https://token-plan-sgp.xiaomimimo.com/v1"
+        assert resolved["api_key"] == "sk-shared-mimo"
+        assert resolved["extra_params"] == {"thinking": {"type": "disabled"}}
     finally:
         await _cleanup(user)
         await _teardown()

@@ -280,7 +280,16 @@ class SettingsService:
         This creates one editable pool row so frontend selection and backend
         resolution share the same source of truth again.
         """
-        pool = list(models_raw.get("query_model_pool") or [])
+        if "query_model_pool" in models_raw:
+            # The pool exists, even if it is intentionally empty. Do not
+            # resurrect the default chat model after a user deletes the last
+            # pool entry; that makes Settings feel non-responsive and can
+            # route graph synthesis back to a provider the user removed.
+            pool = list(models_raw.get("query_model_pool") or [])
+            if not pool:
+                return models_raw
+        else:
+            pool = []
         if pool:
             return models_raw
 

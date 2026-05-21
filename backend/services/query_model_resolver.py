@@ -36,6 +36,35 @@ _KIND_TO_POOL_FIELD = {
 }
 
 
+async def _shared_api_key_for_entry(
+    user_id: str,
+    entry: dict,
+    model_name: str,
+) -> str | None:
+    """Return the user's shared key for a model-pool entry when the entry
+    itself does not carry a per-entry key.
+
+    The Models UI explicitly says blank per-entry keys fall back to the API
+    Keys registry. Keep that promise here. Prefer the UI provider id
+    (`mimo`, `siliconflow`, etc.) because OpenAI-compatible providers often
+    store `model_name` as `openai/<model>` while their key is stored under the
+    provider preset, not under `openai`.
+    """
+
+    from services.settings import settings_service
+
+    keys = await settings_service.get_plaintext_keys_for_llm(user_id)
+    provider = str(entry.get("provider") or "").strip().lower()
+    if provider and keys.get(provider):
+        return keys[provider]
+
+    model_prefix = (model_name.split("/", 1)[0] if "/" in model_name else "").lower()
+    if model_prefix and keys.get(model_prefix):
+        return keys[model_prefix]
+
+    return None
+
+
 async def resolve_by_entry_id(
     user_id: str | None, entry_id: str
 ) -> dict | None:
@@ -60,15 +89,18 @@ async def resolve_by_entry_id(
     for entry in (raw.get("query_model_pool") or []):
         if not isinstance(entry, dict) or entry.get("entry_id") != entry_id:
             continue
+        model_name = str(entry.get("model_name") or "").strip()
         ct = entry.get("api_key_ciphertext")
         plaintext = decrypt(ct) if ct else None
+        if not plaintext:
+            plaintext = await _shared_api_key_for_entry(user_id, entry, model_name)
         base_url = entry.get("base_url")
         # Ollama entries have no base_url; worker falls through to env default.
         return {
-            "model": _prefix(entry.get("model_name", "")),
+            "model": _prefix(model_name),
             "api_base": base_url,
             "api_key": plaintext,
-            "extra_params": {},
+            "extra_params": entry.get("extra_params") or {},
         }
 
     # 2. Legacy model_pool (Phase E)
