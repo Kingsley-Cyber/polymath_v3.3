@@ -371,6 +371,78 @@ async def test_resolver_pool_entry_returns_decrypted_key():
 
 
 @pytest.mark.asyncio
+async def test_resolver_query_role_falls_back_to_first_enabled_pool_entry():
+    from services import query_model_resolver
+
+    await _setup()
+    user = _u()
+    try:
+        await settings_service.update_models(user, ModelsConfig(
+            query_model_pool=[{
+                "entry_id": "ent-query-default",
+                "label": "Query default",
+                "provider": "deepseek",
+                "base_url": "https://api.deepseek.com/v1",
+                "api_key_ciphertext": "sk-query-plaintext",
+                "model_name": "deepseek-v4-flash",
+                "source": "cloud",
+                "enabled": True,
+            }],
+        ).model_dump())
+
+        resolved = await query_model_resolver.resolve(user, "query")
+
+        assert resolved is not None
+        assert resolved["model"] == "openai/deepseek-v4-flash"
+        assert resolved["api_base"] == "https://api.deepseek.com/v1"
+        assert resolved["api_key"] == "sk-query-plaintext"
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
+async def test_resolver_query_role_skips_disabled_pool_entries():
+    from services import query_model_resolver
+
+    await _setup()
+    user = _u()
+    try:
+        await settings_service.update_models(user, ModelsConfig(
+            query_model_pool=[
+                {
+                    "entry_id": "ent-disabled",
+                    "label": "Disabled",
+                    "provider": "openai",
+                    "base_url": "https://api.openai.com/v1",
+                    "api_key_ciphertext": "sk-disabled",
+                    "model_name": "gpt-4o-mini",
+                    "source": "cloud",
+                    "enabled": False,
+                },
+                {
+                    "entry_id": "ent-enabled",
+                    "label": "Enabled",
+                    "provider": "openai",
+                    "base_url": "https://api.openai.com/v1",
+                    "api_key_ciphertext": "sk-enabled",
+                    "model_name": "gpt-4o-mini",
+                    "source": "cloud",
+                    "enabled": True,
+                },
+            ],
+        ).model_dump())
+
+        resolved = await query_model_resolver.resolve(user, "query")
+
+        assert resolved is not None
+        assert resolved["api_key"] == "sk-enabled"
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
 async def test_resolver_utility_role_returns_configured_pool_entry():
     from services import query_model_resolver
 

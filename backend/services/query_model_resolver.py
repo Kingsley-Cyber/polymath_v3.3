@@ -149,4 +149,29 @@ async def resolve(user_id: str | None, kind: Kind) -> dict | None:
             if result:
                 return result
 
+    # Sprint 3 follow-up — "query" is the default answer/synthesis lane,
+    # but unlike hyde/agentic/reasoning/utility it has no role section with
+    # an explicit pool_entry_id. Chat normally sends the selected
+    # `pool:<id>` per request; graph synthesis can receive a stale browser
+    # selection after the pool is edited. In that case, fall back to the
+    # current enabled query pool entry instead of handing LiteLLM a null
+    # "(default)" model, which produces a 400 and a deterministic fallback.
+    if kind == "query":
+        from services.settings import settings_service
+
+        raw = await settings_service.get_models_raw(user_id)
+        enabled_entries = [
+            entry
+            for entry in (raw.get("query_model_pool") or [])
+            if isinstance(entry, dict)
+            and entry.get("entry_id")
+            and entry.get("enabled", True)
+        ]
+        if enabled_entries:
+            result = await resolve_by_entry_id(
+                user_id, str(enabled_entries[0]["entry_id"])
+            )
+            if result:
+                return result
+
     return None
