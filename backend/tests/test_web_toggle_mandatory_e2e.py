@@ -154,7 +154,7 @@ async def test_web_toggle_on_runs_agentic_rag_web_loop_to_rerank_pipeline(
     async def fake_utility_resolve(*_args, **_kwargs):
         raise AssertionError("Mandatory web prelude should not use Utility rewrite")
 
-    async def fake_apply_hyde(_request, user_id=None, hyde_explicit=False):
+    async def fake_apply_hyde(_request, user_id=None, hyde_explicit=False, **_kwargs):
         return _request.message, False
 
     async def fake_retrieve(**kwargs):
@@ -167,7 +167,7 @@ async def test_web_toggle_on_runs_agentic_rag_web_loop_to_rerank_pipeline(
             effective_tier=RetrievalTier.qdrant_mongo,
         )
 
-    async def fake_search_searxng_pool(query, *, max_results=None, time_range=None):
+    async def fake_search_live_web_pool(query, *, max_results=None, time_range=None):
         steps.append("searxng")
         captured["searxng"] = {
             "query": query,
@@ -186,6 +186,9 @@ async def test_web_toggle_on_runs_agentic_rag_web_loop_to_rerank_pipeline(
         hits,
         max_results,
         prior_web_urls=None,
+        fetch_depth="normal",
+        youtube_transcripts_enabled=True,
+        max_fetch_pages=None,
     ):
         steps.append("fetch_obscura")
         captured["fetch"] = {
@@ -193,6 +196,9 @@ async def test_web_toggle_on_runs_agentic_rag_web_loop_to_rerank_pipeline(
             "hit_count": len(hits),
             "max_results": max_results,
             "prior_web_urls": set(prior_web_urls or set()),
+            "fetch_depth": fetch_depth,
+            "youtube_transcripts_enabled": youtube_transcripts_enabled,
+            "max_fetch_pages": max_fetch_pages,
         }
         selected = hits[:4]
         fetched = {
@@ -345,7 +351,7 @@ async def test_web_toggle_on_runs_agentic_rag_web_loop_to_rerank_pipeline(
     monkeypatch.setattr(orchestrator, "_save_assistant_message", fake_save_assistant_message)
     monkeypatch.setattr(co, "resolve_query_model_kind", fake_orchestrator_resolve)
     monkeypatch.setattr(wqe, "resolve_query_model_kind", fake_utility_resolve)
-    monkeypatch.setattr(wf.live_web_search, "_search_searxng_pool", fake_search_searxng_pool)
+    monkeypatch.setattr(wf.live_web_search, "_search_live_web_pool", fake_search_live_web_pool)
     monkeypatch.setattr(wf.live_web_search, "_fetch_pages_for_search", fake_fetch_pages_for_search)
     monkeypatch.setattr(wf, "rerank_web_source_chunks", fake_rerank_web_source_chunks)
     monkeypatch.setattr(co.retriever_orchestrator, "retrieve", fake_retrieve)
@@ -383,6 +389,9 @@ async def test_web_toggle_on_runs_agentic_rag_web_loop_to_rerank_pipeline(
     assert captured["searxng"]["max_results"] == 12
     assert captured["fetch"]["max_results"] == 7
     assert captured["fetch"]["hit_count"] == 10
+    assert captured["fetch"]["fetch_depth"] == "normal"
+    assert captured["fetch"]["youtube_transcripts_enabled"] is True
+    assert captured["fetch"]["max_fetch_pages"] == 4
     assert captured["rerank"] == {
         "query": captured["searxng"]["query"],
         "candidate_count": 10,
@@ -444,6 +453,10 @@ async def test_web_toggle_on_runs_agentic_rag_web_loop_to_rerank_pipeline(
     assert pipeline["final_reranked_results"] == 7
     assert pipeline["candidate_limit_requested"] == 12
     assert pipeline["candidate_results"] == 10
+    assert pipeline["fetch_depth"] == "normal"
+    assert pipeline["research_mode"] is False
+    assert pipeline["youtube_transcripts_enabled"] is True
+    assert pipeline["search_health"] == "ok"
     assert pipeline["js_render"]["configured"] is True
     assert pipeline["js_render"]["attempted"] is True
     assert pipeline["js_render"]["rendered"] is True
@@ -487,6 +500,14 @@ async def test_web_toggle_on_runs_agentic_rag_web_loop_to_rerank_pipeline(
     assert assistant_tool_message["tool_calls"][0]["function"]["name"] == "web_search"
     assert "reasoning_content" in assistant_tool_message
     assert tool_result_message["tool_call_id"] == "call_web_1"
+    evidence_message = next(
+        msg
+        for msg in final_stream["messages"]
+        if msg.get("role") == "user"
+        and "[EVIDENCE PACKET]" in str(msg.get("content") or "")
+    )
+    assert "Web health: ok" in evidence_message["content"]
+    assert "Obscura: rendered" in evidence_message["content"]
 
     done = events[-1]
     assert done["model_used"] == "deepseek/deepseek-v4-flash"
@@ -507,7 +528,7 @@ async def test_fetch_page_tool_records_obscura_rendered_page(monkeypatch):
         overrides=ModelOverrides(web_search_enabled=True),
     )
 
-    async def fake_fetch_one_page_with_stats(url):
+    async def fake_fetch_one_page_with_stats(url, **_kwargs):
         return _PageFetchResult(
             url=url,
             text="Rendered JS page text with evidence for the answer.",
@@ -574,7 +595,7 @@ async def test_web_toggle_off_is_pure_rag_and_does_not_call_web_or_utility(
     async def fake_resolve_query_model_kind(*_args, **_kwargs):
         raise AssertionError("Web-off explicit model route should not resolve agentic/utility")
 
-    async def fake_apply_hyde(_request, user_id=None, hyde_explicit=False):
+    async def fake_apply_hyde(_request, user_id=None, hyde_explicit=False, **_kwargs):
         return _request.message, False
 
     async def fake_retrieve(**kwargs):

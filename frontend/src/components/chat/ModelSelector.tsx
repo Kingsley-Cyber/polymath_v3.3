@@ -121,12 +121,24 @@ export function ModelSelector() {
           (p) => `pool:${p.entry_id}` === selectedModel,
         )
       : undefined;
+  const firstEnabledEntry = grouped[0]?.entries[0];
+
+  useEffect(() => {
+    if (!firstEnabledEntry) return;
+    if (!selectedModel) {
+      setSelectedModel(`pool:${firstEnabledEntry.entry_id}`);
+      return;
+    }
+    if (selectedModel.startsWith("pool:") && !activePoolEntry) {
+      setSelectedModel(`pool:${firstEnabledEntry.entry_id}`);
+    }
+  }, [activePoolEntry, firstEnabledEntry, selectedModel, setSelectedModel]);
 
   const displayLabel = activePoolEntry
     ? activePoolEntry.label
     : selectedModel
       ? selectedModel.startsWith("pool:") || selectedModel.startsWith("profile:")
-        ? selectedModel
+        ? "[NO_MODEL]"
         : (selectedModel.split("/").pop() ?? selectedModel)
       : "[NO_MODEL]";
 

@@ -249,6 +249,7 @@ class LexicalRetriever:
                         score=float(hit.score or 0.0),
                         source_tier=f"{payload.get('source_tier') or 'chunk'}+lexical",
                         chunk_kind=payload.get("chunk_kind", "body"),
+                        doc_name=payload.get("doc_name") or payload.get("filename"),
                         heading_path=payload.get("heading_path") or None,
                         language=payload.get("language"),
                         metadata=payload.get("metadata") or {},

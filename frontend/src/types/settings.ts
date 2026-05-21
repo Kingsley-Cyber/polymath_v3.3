@@ -279,6 +279,10 @@ export interface RAGSettings {
   graphReranker: boolean;
   hydeEnabled: boolean;
   webSearchEnabled: boolean;
+  webFetchDepth: "snippets" | "normal" | "deep";
+  webResearchMode: boolean;
+  webYoutubeTranscripts: boolean;
+  webMaxSources: number;
   rerankingEnabled: boolean;
   /** Phase 15 — one of the 12 curated mode keys (see REASONING_MODES). */
   reasoningMode: string;

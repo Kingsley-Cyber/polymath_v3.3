@@ -14,6 +14,7 @@ graphify-out/cache/
 !.env.example
 # Personal scratch — session notes, ad-hoc smoke runs, etc.
 backend/TEST/
+A0_2/
 .DS_Store
 Thumbs.db
 

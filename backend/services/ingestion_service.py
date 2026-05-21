@@ -1168,11 +1168,9 @@ class IngestionService:
         # 2. Delete Neo4j nodes if enabled
         if self._settings.NEO4J_ENABLED and self._neo4j:
             try:
-                async with self._neo4j.session() as session:
-                    await session.run(
-                        "MATCH (n {corpus_id: $corpus_id}) DETACH DELETE n",
-                        corpus_id=corpus_id,
-                    )
+                from services.graph.neo4j_writer import delete_corpus_graph
+
+                await delete_corpus_graph(self._neo4j, corpus_id=corpus_id)
             except Exception:
                 logger.warning("Failed to delete Neo4j nodes for corpus %s", corpus_id)
 
@@ -1225,13 +1223,13 @@ class IngestionService:
         # 2. Neo4j — delete Entity and Mention nodes attached to this doc.
         if self._settings.NEO4J_ENABLED and self._neo4j:
             try:
-                async with self._neo4j.session() as session:
-                    await session.run(
-                        "MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id}) "
-                        "DETACH DELETE n",
-                        doc_id=doc_id,
-                        corpus_id=corpus_id,
-                    )
+                from services.graph.neo4j_writer import delete_document_graph
+
+                await delete_document_graph(
+                    self._neo4j,
+                    corpus_id=corpus_id,
+                    doc_id=doc_id,
+                )
             except Exception:
                 logger.warning(
                     "Neo4j per-doc delete failed for doc %s", doc_id[:12]

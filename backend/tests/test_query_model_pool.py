@@ -108,6 +108,42 @@ async def test_ollama_entry_has_no_api_key_and_correct_source():
 
 
 @pytest.mark.asyncio
+async def test_empty_models_pool_gets_visible_chat_default_entry():
+    await _setup()
+    user = _u()
+    try:
+        db = conversation_service._db
+        await db["settings"].insert_one({
+            "user_id": user,
+            "chat": {"default_chat_model": "deepseek/deepseek-v4-flash"},
+            "retrieval": {},
+            "models": {
+                "query_model_pool": [],
+                "hyde": {"default_enabled": False, "pool_entry_id": None},
+                "agentic": {"default_enabled": False, "pool_entry_id": None},
+                "reasoning": {"default_enabled": False, "pool_entry_id": None},
+                "utility": {"default_enabled": False, "pool_entry_id": None},
+            },
+            "models_migrated": True,
+        })
+
+        settings = await settings_service.get_settings(user)
+
+        assert len(settings.models.query_model_pool) == 1
+        entry = settings.models.query_model_pool[0]
+        assert entry.entry_id == "system-default-chat"
+        assert entry.provider == "deepseek"
+        assert entry.model_name == "deepseek/deepseek-v4-flash"
+        assert entry.enabled is True
+
+        raw = await settings_service.get_models_raw(user)
+        assert raw["query_model_pool"][0]["entry_id"] == "system-default-chat"
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
 async def test_set_sentinel_preserves_existing_ciphertext():
     await _setup()
     user = _u()

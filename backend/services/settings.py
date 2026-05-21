@@ -38,12 +38,32 @@ logger = logging.getLogger(__name__)
 # Sentinel written on update payloads to mean "preserve existing ciphertext".
 # Same semantics as ingestion pool keys in ingestion_service._enc.
 _MASK_SENTINEL = "[set]"
+_DEFAULT_CHAT_ENTRY_ID = "system-default-chat"
 
 # Sections that users CAN modify via PUT /api/settings
 _MUTABLE_SECTIONS = {"chat", "retrieval", "modal", "models"}
 
 # Sections that are always read from config.py (env vars) — never stored in MongoDB
 _IMMUTABLE_SECTIONS = {"infrastructure"}
+
+
+def _provider_from_model_id(model: str) -> str:
+    """Infer the pool provider for a provider-prefixed LiteLLM model id."""
+    raw = (model or "").strip()
+    if "/" in raw:
+        prefix = raw.split("/", 1)[0].lower()
+        if prefix == "gemini":
+            return "google"
+        return prefix
+    if ":" in raw:
+        return "ollama"
+    return "custom"
+
+
+def _model_label(model: str) -> str:
+    """Human-readable compact label for generated default pool entries."""
+    tail = (model or "").split("/", 1)[-1]
+    return tail.replace("_", " ").replace("-", " ").title() or "Model"
 
 
 class SettingsService:
@@ -220,6 +240,11 @@ class SettingsService:
         retrieval = RetrievalSettings(**doc.get("retrieval", {}))
         modal_cfg = ModalDeploySettings(**doc.get("modal", {}))
         models_raw = doc.get("models", {}) or {}
+        models_raw = await self._ensure_default_chat_pool_entry(
+            user_id=user_id,
+            chat=chat,
+            models_raw=models_raw,
+        )
         # Mask api_key ciphertext on the out-path — the frontend NEVER sees
         # Fernet tokens. "[set]" sentinel signals "key present" to the UI.
         for entry in models_raw.get("query_model_pool", []) or []:
@@ -240,6 +265,59 @@ class SettingsService:
         # Phase 24 perf — cache the assembled result
         self._settings_cache[user_id] = (now, result)
         return result
+
+    async def _ensure_default_chat_pool_entry(
+        self,
+        *,
+        user_id: str,
+        chat: ChatLLMSettings,
+        models_raw: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Backfill a visible chat entry when the unified pool is empty.
+
+        Older installs can still answer through `chat.default_chat_model` or
+        DEFAULT_COMPLETION_MODEL while Settings -> Models shows no entries.
+        This creates one editable pool row so frontend selection and backend
+        resolution share the same source of truth again.
+        """
+        pool = list(models_raw.get("query_model_pool") or [])
+        if pool:
+            return models_raw
+
+        model = (chat.default_chat_model or self._config.DEFAULT_COMPLETION_MODEL or "").strip()
+        if not model:
+            return models_raw
+
+        provider = _provider_from_model_id(model)
+        entry = QueryModelPoolEntry(
+            entry_id=_DEFAULT_CHAT_ENTRY_ID,
+            label=f"Chat Default: {_model_label(model)}",
+            provider=provider,
+            base_url=None,
+            api_key_ciphertext=None,
+            model_name=model,
+            source="ollama" if provider == "ollama" else "cloud",
+            enabled=True,
+        ).model_dump()
+
+        next_models = {
+            "query_model_pool": [entry],
+            "hyde": dict(models_raw.get("hyde") or {}),
+            "agentic": dict(models_raw.get("agentic") or {}),
+            "reasoning": dict(models_raw.get("reasoning") or {}),
+            "utility": dict(models_raw.get("utility") or {}),
+        }
+        await self._db["settings"].update_one(
+            {"user_id": user_id},
+            {"$set": {"models": next_models, "models_migrated": True}},
+            upsert=True,
+        )
+        logger.info(
+            "models default chat entry backfilled user=%s model=%s",
+            user_id,
+            model,
+        )
+        return next_models
 
     async def update_system_modal(
         self,

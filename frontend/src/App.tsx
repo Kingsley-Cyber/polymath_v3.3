@@ -17,6 +17,7 @@ import { SettingsModal } from "./components/settings/SettingsModal";
 import { LoginView } from "./components/auth/LoginView";
 import { IngestionDashboard } from "./components/ingestion/IngestionDashboard";
 import { useSettingsStore } from "./stores/settingsStore";
+import { useQueryModelPoolStore } from "./stores/queryModelPoolStore";
 import { useChatStore } from "./stores/chatStore";
 import { useAuthStore } from "./stores/authStore";
 import { useIngestionQueueStore } from "./stores/ingestionQueueStore";
@@ -368,6 +369,19 @@ function App() {
           // backend query-profile defaults cannot silently turn HyDE on.
           hyde_enabled: settings.hydeEnabled,
           web_search_enabled: settings.webSearchEnabled ? true : undefined,
+          web_fetch_depth: settings.webSearchEnabled
+            ? settings.webFetchDepth
+            : undefined,
+          web_research_mode:
+            settings.webSearchEnabled && settings.webResearchMode
+              ? true
+              : undefined,
+          web_youtube_transcripts: settings.webSearchEnabled
+            ? settings.webYoutubeTranscripts
+            : undefined,
+          web_max_sources: settings.webSearchEnabled
+            ? settings.webMaxSources
+            : undefined,
           collection_ids: settings.selectedCollectionIds,
           // Phase 14.1 — agentic override (per-request)
           agentic_mode: settings.agenticModeEnabled || undefined,
@@ -405,13 +419,12 @@ function App() {
             settings.thinkingEffort && settings.thinkingEffort !== "auto"
               ? settings.thinkingEffort
               : undefined,
-          // Phase 17 — HyDE per-request model (only when HyDE toggle is on).
-          // Empty string shadows Phase F pool resolution, so we send undefined
-          // when no explicit per-request model is set.
-          hyde_model:
-            settings.hydeEnabled && settings.hydeModel
-              ? settings.hydeModel
-              : undefined,
+          // Phase 17/24 — HyDE model routing lives on the backend:
+          // Settings -> Models -> HyDE wins when configured; otherwise the
+          // helper inherits the active chat model for this turn. Do not send
+          // the legacy flat chat.hyde_model here, because it would shadow the
+          // dedicated HyDE card and make the visible chat selector lie.
+          hyde_model: undefined,
           // Phase 18 — Query Profile speed preset (backend resolver expands
           // the preset into retrieval_k/rerank/hyde defaults). Individual
           // overrides (retrieval_k, rerank_enabled) can still win if set.
@@ -630,6 +643,7 @@ function App() {
     loadCollections();
     loadModels();
     useSettingsStore.getState().loadFromAPI();
+    useQueryModelPoolStore.getState().load();
   }, [authChecked, isAuthenticated]);
 
   // Apply deterministic theme mapping to document root

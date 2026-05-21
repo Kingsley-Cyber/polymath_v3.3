@@ -150,6 +150,7 @@ class FunnelA:
                         score=hit.score,
                         source_tier=payload.get("source_tier", "summary"),
                         chunk_kind=payload.get("chunk_kind", "body"),
+                        doc_name=payload.get("doc_name") or payload.get("filename"),
                         heading_path=payload.get("heading_path") or None,
                         language=payload.get("language"),
                         metadata=payload.get("metadata") or {},

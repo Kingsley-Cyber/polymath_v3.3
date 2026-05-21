@@ -75,7 +75,7 @@ async def test_web_toggle_uses_agentic_web_loop_and_keeps_final_chat_model(
             "fact_seed_limit": 0,
         }
 
-    async def fake_apply_hyde(_request, user_id=None, hyde_explicit=False):
+    async def fake_apply_hyde(_request, user_id=None, hyde_explicit=False, **_kwargs):
         return _request.message, False
 
     async def fake_retrieve(**_kwargs):

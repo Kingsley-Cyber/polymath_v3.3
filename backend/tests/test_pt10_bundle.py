@@ -305,6 +305,47 @@ async def test_source_constrained_explicit_hyde_toggle_is_honored(monkeypatch):
     assert calls["count"] == 1
 
 
+@pytest.mark.asyncio
+async def test_hyde_without_dedicated_model_inherits_active_chat_model(monkeypatch):
+    request = ChatRequest(
+        message="How could retrieval tables improve AWS architecture study notes?",
+        overrides=ModelOverrides(
+            hyde_enabled=True,
+            model="deepseek/deepseek-v4-flash",
+        ),
+    )
+    orchestrator = ChatOrchestrator()
+    calls = {"model": None}
+
+    async def no_hyde_pool(_user_id, kind):
+        assert kind == "hyde"
+        return None
+
+    async def fake_complete_sync(**kwargs):
+        calls["model"] = kwargs.get("model")
+        return "A hypothetical AWS architecture answer for retrieval."
+
+    monkeypatch.setattr(chat_orchestrator_module, "resolve_query_model_kind", no_hyde_pool)
+    monkeypatch.setattr(chat_orchestrator_module.settings, "HYDE_MODEL", "env/hyde")
+    monkeypatch.setattr(
+        chat_orchestrator_module.llm_service,
+        "complete_sync",
+        fake_complete_sync,
+    )
+    chat_orchestrator_module._HYDE_FAILURE_CACHE.clear()
+
+    retrieval_query, applied = await orchestrator._apply_hyde(
+        request,
+        user_id="user-1",
+        hyde_explicit=True,
+        fallback_model=request.overrides.model,
+    )
+
+    assert retrieval_query == "A hypothetical AWS architecture answer for retrieval."
+    assert applied is True
+    assert calls["model"] == "deepseek/deepseek-v4-flash"
+
+
 # ── Pt10d — model_name validation ───────────────────────────────────
 
 

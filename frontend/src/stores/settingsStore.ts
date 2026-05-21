@@ -37,6 +37,10 @@ const DEFAULT_SETTINGS: Omit<SettingsState, "selectedModel"> = {
   graphReranker: true,
   hydeEnabled: false,
   webSearchEnabled: false,
+  webFetchDepth: "normal",
+  webResearchMode: false,
+  webYoutubeTranscripts: true,
+  webMaxSources: 9,
   rerankingEnabled: true,
   selectedCollectionIds: [],
   retrievalTier: "qdrant_mongo",
@@ -110,6 +114,10 @@ interface SettingsStore extends SettingsState {
   toggleReasoningCascade: () => void;
   toggleHyDE: () => void;
   toggleWebSearch: () => void;
+  setWebFetchDepth: (depth: SettingsState["webFetchDepth"]) => void;
+  toggleWebResearchMode: () => void;
+  toggleWebYoutubeTranscripts: () => void;
+  setWebMaxSources: (value: number) => void;
   toggleReranking: () => void;
   toggleAgenticMode: () => Promise<void>;
   setAgenticModel: (model: string) => Promise<void>;
@@ -180,6 +188,21 @@ export const useSettingsStore = create<SettingsStore>()(
 
       toggleWebSearch: () =>
         set((state) => ({ webSearchEnabled: !state.webSearchEnabled })),
+
+      setWebFetchDepth: (depth) => set({ webFetchDepth: depth }),
+
+      toggleWebResearchMode: () =>
+        set((state) => ({ webResearchMode: !state.webResearchMode })),
+
+      toggleWebYoutubeTranscripts: () =>
+        set((state) => ({
+          webYoutubeTranscripts: !state.webYoutubeTranscripts,
+        })),
+
+      setWebMaxSources: (value) =>
+        set({
+          webMaxSources: Math.max(3, Math.min(Number(value) || 9, 20)),
+        }),
 
       toggleReranking: () =>
         set((state) => ({ rerankingEnabled: !state.rerankingEnabled })),
@@ -473,6 +496,10 @@ export const useSettingsStore = create<SettingsStore>()(
         maxTokens: state.maxTokens,
         hydeEnabled: state.hydeEnabled,
         webSearchEnabled: state.webSearchEnabled,
+        webFetchDepth: state.webFetchDepth,
+        webResearchMode: state.webResearchMode,
+        webYoutubeTranscripts: state.webYoutubeTranscripts,
+        webMaxSources: state.webMaxSources,
         rerankingEnabled: state.rerankingEnabled,
         reasoningMode: state.reasoningMode,
         searchMode: state.searchMode,

@@ -45,6 +45,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.eligible_for_synthesis)",
     # Bridge detection across multi-corpus selections — replaces full-graph scans.
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.corpus_ids)",
+    "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.evidence_doc_ids)",
     # MENTIONS scoping — fast bridge lookup when shared entity spans books.
     "CREATE INDEX IF NOT EXISTS FOR ()-[m:MENTIONS]-() ON (m.corpus_id)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[m:MENTIONS]-() ON (m.doc_id)",

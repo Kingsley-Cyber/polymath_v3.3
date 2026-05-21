@@ -1200,6 +1200,151 @@ async def _upsert_relation(
         )
 
 
+async def _delete_orphan_entities(session) -> None:
+    """Remove Entity nodes that no longer have chunk evidence."""
+    await session.run(
+        """
+        MATCH (e:Entity)
+        WHERE NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }
+        DETACH DELETE e
+        """
+    )
+
+
+async def _prune_relates_to_for_document(
+    session,
+    *,
+    corpus_id: str,
+    doc_id: str,
+) -> None:
+    """Remove one document's support from RELATES_TO provenance arrays.
+
+    Entity nodes are global and RELATES_TO edges can be supported by multiple
+    documents. Deleting a document should therefore prune only that document's
+    evidence, then delete the relationship when no corpus still supports it.
+    """
+    await session.run(
+        """
+        MATCH (c:Chunk {doc_id: $doc_id, corpus_id: $corpus_id})
+        WITH collect(DISTINCT c.chunk_id) AS chunk_ids,
+             [did IN collect(DISTINCT c.doc_id) WHERE did IS NOT NULL] AS found_doc_ids
+        WITH chunk_ids,
+             CASE WHEN size(found_doc_ids) = 0 THEN [$doc_id] ELSE found_doc_ids END AS doc_ids
+        MATCH ()-[r:RELATES_TO]->()
+        WHERE any(chunk_id IN coalesce(r.evidence_chunk_ids, []) WHERE chunk_id IN chunk_ids)
+           OR any(rel_doc_id IN coalesce(r.evidence_doc_ids, []) WHERE rel_doc_id IN doc_ids)
+           OR r.latest_doc_id IN doc_ids
+        SET r.evidence_chunk_ids = [
+                chunk_id IN coalesce(r.evidence_chunk_ids, [])
+                WHERE NOT chunk_id IN chunk_ids
+            ],
+            r.evidence_doc_ids = [
+                rel_doc_id IN coalesce(r.evidence_doc_ids, [])
+                WHERE NOT rel_doc_id IN doc_ids
+            ],
+            r.latest_doc_id = CASE
+                WHEN r.latest_doc_id IN doc_ids THEN NULL
+                ELSE r.latest_doc_id
+            END
+        WITH r
+        OPTIONAL MATCH (remaining:Chunk {corpus_id: $corpus_id})
+        WHERE remaining.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+        WITH r, count(remaining) AS remaining_corpus_support
+        SET r.corpus_ids = CASE
+            WHEN remaining_corpus_support = 0 THEN [
+                cid IN coalesce(r.corpus_ids, [])
+                WHERE cid <> $corpus_id
+            ]
+            ELSE coalesce(r.corpus_ids, [])
+        END
+        WITH r
+        WHERE size(coalesce(r.corpus_ids, [])) = 0
+        DELETE r
+        """,
+        corpus_id=corpus_id,
+        doc_id=doc_id,
+    )
+
+
+async def _prune_relates_to_for_corpus(
+    session,
+    *,
+    corpus_id: str,
+) -> None:
+    """Remove an entire corpus from RELATES_TO provenance arrays."""
+    await session.run(
+        """
+        MATCH (c:Chunk {corpus_id: $corpus_id})
+        WITH collect(DISTINCT c.chunk_id) AS chunk_ids,
+             [did IN collect(DISTINCT c.doc_id) WHERE did IS NOT NULL] AS doc_ids
+        MATCH ()-[r:RELATES_TO]->()
+        WHERE $corpus_id IN coalesce(r.corpus_ids, [])
+        SET r.corpus_ids = [
+                cid IN coalesce(r.corpus_ids, [])
+                WHERE cid <> $corpus_id
+            ],
+            r.evidence_chunk_ids = [
+                chunk_id IN coalesce(r.evidence_chunk_ids, [])
+                WHERE NOT chunk_id IN chunk_ids
+            ],
+            r.evidence_doc_ids = [
+                rel_doc_id IN coalesce(r.evidence_doc_ids, [])
+                WHERE NOT rel_doc_id IN doc_ids
+            ],
+            r.latest_doc_id = CASE
+                WHEN r.latest_doc_id IN doc_ids THEN NULL
+                ELSE r.latest_doc_id
+            END
+        WITH r
+        WHERE size(coalesce(r.corpus_ids, [])) = 0
+        DELETE r
+        """,
+        corpus_id=corpus_id,
+    )
+
+
+async def delete_document_graph(
+    driver: AsyncDriver,
+    *,
+    corpus_id: str,
+    doc_id: str,
+) -> None:
+    """Delete Neo4j graph state for one document and prune shared edges."""
+    async with driver.session() as session:
+        await _prune_relates_to_for_document(
+            session,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+        )
+        await session.run(
+            """
+            MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})
+            DETACH DELETE n
+            """,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+        )
+        await _delete_orphan_entities(session)
+
+
+async def delete_corpus_graph(
+    driver: AsyncDriver,
+    *,
+    corpus_id: str,
+) -> None:
+    """Delete Neo4j graph state for one corpus and prune shared edges."""
+    async with driver.session() as session:
+        await _prune_relates_to_for_corpus(session, corpus_id=corpus_id)
+        await session.run(
+            """
+            MATCH (n {corpus_id: $corpus_id})
+            DETACH DELETE n
+            """,
+            corpus_id=corpus_id,
+        )
+        await _delete_orphan_entities(session)
+
+
 async def write_document_graph(
     driver: AsyncDriver,
     doc_id: str,
@@ -1507,6 +1652,7 @@ async def write_document_graph(
                 "relation_cue": relation.relation_cue,
                 "confidence": relation.confidence,
                 "chunk_id": r.chunk_id,
+                "doc_id": r.doc_id or doc_id,
             })
 
     fact_rows: list[dict] = []
@@ -1663,6 +1809,16 @@ async def write_document_graph(
                     WHEN row.chunk_id IN r.evidence_chunk_ids THEN r.evidence_chunk_ids
                     ELSE r.evidence_chunk_ids + [row.chunk_id]
                 END
+                SET r.evidence_doc_ids = CASE
+                    WHEN row.doc_id IS NULL OR row.doc_id = '' THEN coalesce(r.evidence_doc_ids, [])
+                    WHEN r.evidence_doc_ids IS NULL THEN [row.doc_id]
+                    WHEN row.doc_id IN r.evidence_doc_ids THEN r.evidence_doc_ids
+                    ELSE r.evidence_doc_ids + [row.doc_id]
+                END,
+                    r.latest_doc_id = CASE
+                        WHEN row.doc_id IS NULL OR row.doc_id = '' THEN r.latest_doc_id
+                        ELSE row.doc_id
+                    END
                 SET r.evidence_phrases = CASE
                     WHEN row.evidence_phrase IS NULL OR row.evidence_phrase = '' THEN coalesce(r.evidence_phrases, [])
                     WHEN r.evidence_phrases IS NULL THEN [row.evidence_phrase]

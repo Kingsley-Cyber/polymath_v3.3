@@ -9,12 +9,16 @@ from services.chat_orchestrator import (
     _MAX_WEB_SEARCH_RESULTS_PER_CALL,
     _append_deduped_web_sources,
     _available_tool_schemas,
+    _annotate_web_evidence_scores,
+    _build_backend_retry_query,
     _cap_web_sources_for_turn,
+    _classify_web_evidence_sufficiency,
     _dedupe_sources_for_context,
     _looks_like_raw_tool_request_content,
     _limit_tool_calls_for_turn,
+    _resolve_web_evidence_options,
 )
-from models.schemas import SourceChunk
+from models.schemas import ChatRequest, ModelOverrides, SourceChunk
 
 
 def _tool_call(name: str, call_id: str) -> dict:
@@ -117,8 +121,8 @@ def test_normal_answer_with_web_search_words_is_not_raw_tool_request():
     assert _looks_like_raw_tool_request_content(content) is False
 
 
-def test_web_search_result_cap_is_seven_sources():
-    assert _MAX_WEB_SEARCH_RESULTS_PER_CALL == 7
+def test_web_search_result_cap_supports_user_source_budget():
+    assert _MAX_WEB_SEARCH_RESULTS_PER_CALL == 20
 
 
 def _source_chunk(chunk_id: str, source_tier: str, *, url: str | None = None) -> SourceChunk:
@@ -157,18 +161,101 @@ def test_pending_web_sources_merge_with_local_rag_and_dedupe_urls():
     }
 
 
-def test_turn_web_sources_are_capped_to_seven_across_multiple_searches():
+def test_turn_web_sources_are_capped_across_multiple_searches():
     local_rag = [_source_chunk("local-1", "qdrant_only")]
     web_sources = [
         _source_chunk(f"web-{i}", "web_search", url=f"https://example.test/{i}")
-        for i in range(10)
+        for i in range(25)
     ]
 
     capped = _cap_web_sources_for_turn(local_rag + web_sources)
 
     assert capped[0].chunk_id == "local-1"
-    assert sum(chunk.source_tier == "web_search" for chunk in capped) == 7
-    assert [chunk.chunk_id for chunk in capped[-2:]] == ["web-5", "web-6"]
+    assert sum(chunk.source_tier == "web_search" for chunk in capped) == 20
+    assert [chunk.chunk_id for chunk in capped[-2:]] == ["web-18", "web-19"]
+
+
+def test_web_evidence_options_default_to_normal_bounded_packet():
+    request = ChatRequest(message="test", overrides=ModelOverrides(web_search_enabled=True))
+
+    options = _resolve_web_evidence_options(request)
+
+    assert options["fetch_depth"] == "normal"
+    assert options["research_mode"] is False
+    assert options["youtube_transcripts"] is True
+    assert options["max_sources"] == 9
+
+
+def test_web_evidence_options_research_promotes_normal_to_deep_and_doubles_sources():
+    request = ChatRequest(
+        message="test",
+        overrides=ModelOverrides(
+            web_search_enabled=True,
+            web_fetch_depth="normal",
+            web_research_mode=True,
+            web_max_sources=8,
+        ),
+    )
+
+    options = _resolve_web_evidence_options(request)
+
+    assert options["fetch_depth"] == "deep"
+    assert options["research_mode"] is True
+    assert options["max_sources"] == 16
+
+
+def test_evidence_sufficiency_grades_empty_web_as_insufficient():
+    grade = _classify_web_evidence_sufficiency(
+        chunks=[],
+        scores=[],
+        engine_errors=[],
+        pipeline={"full_page_fetch_successes": 0, "snippet_sufficiency_score": 0.0},
+    )
+
+    assert grade["grade"] == "insufficient"
+    assert grade["reason"] == "no_final_web_sources"
+
+
+def test_evidence_scoring_attaches_relevance_completeness_intent_and_diversity():
+    chunk = _source_chunk(
+        "web-score",
+        "web_search",
+        url="https://create.roblox.com/docs/reference/engine/classes/GenerationService",
+    )
+    chunk.doc_name = "GenerationService"
+    chunk.text = (
+        "Title: GenerationService Content: GenerationService provides Roblox "
+        "generation APIs and reference documentation."
+    )
+    chunk.metadata.update(
+        {
+            "url": chunk.doc_id,
+            "source_type": "webpage",
+            "evidence_mode": "full_page",
+            "fetch_method": "raw_adapter",
+        }
+    )
+
+    scores = _annotate_web_evidence_scores(
+        "Roblox GenerationService API official docs",
+        [chunk],
+    )
+
+    assert scores[0]["final"] > 0.7
+    assert scores[0]["completeness"] == 0.92
+    assert scores[0]["intent_fit"] >= 0.9
+    assert chunk.metadata["evidence_score"]["final"] == scores[0]["final"]
+
+
+def test_backend_retry_query_keeps_entities_and_adds_official_docs_when_needed():
+    retry = _build_backend_retry_query(
+        search_query="Roblox GenerationService",
+        original_query="Roblox APIs such as GenerationService official docs",
+    )
+
+    assert retry is not None
+    assert "GenerationService" in retry
+    assert "official" in retry.lower()
 
 
 def test_source_context_dedupes_exact_duplicate_chunk_cards():

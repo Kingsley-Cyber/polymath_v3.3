@@ -20,6 +20,26 @@ from services.conversation import conversation_service
 logger = logging.getLogger(__name__)
 
 
+def _basename(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return Path(text.replace("\\", "/")).name.strip()
+
+
+def _document_display_name(doc: dict) -> str:
+    """Human label for source attribution.
+
+    Uploads persist ``filename`` but usually do not have ``source_path``.
+    Prefer the portable upload label, then optional titles, then a path basename.
+    """
+    for key in ("filename", "title", "doc_title"):
+        value = str(doc.get(key) or "").strip()
+        if value:
+            return value
+    return _basename(doc.get("source_path")) or str(doc.get("doc_id") or "").strip()
+
+
 async def hydrate_chunks(
     chunks: List[SourceChunk], corpus_ids: Optional[List[str]] = None
 ) -> List[SourceChunk]:
@@ -86,6 +106,7 @@ async def hydrate_chunks(
     for doc in docs:
         did = doc.get("doc_id", "")
         doc_meta[did] = {
+            "doc_name": _document_display_name(doc),
             "source_path": doc.get("source_path", ""),
             "corpus_id": doc.get("corpus_id", ""),
         }
@@ -135,8 +156,7 @@ async def hydrate_chunks(
                     chunk.metadata = pc["metadata"] or {}
 
             meta = doc_meta.get(chunk.doc_id, {})
-            sp = meta.get("source_path", "")
-            chunk.doc_name = Path(sp).name if sp else chunk.doc_id
+            chunk.doc_name = meta.get("doc_name") or chunk.doc_id
 
         chunk.corpus_name = (
             corpus_name_map.get(chunk.corpus_id, "") or chunk.corpus_id
@@ -295,6 +315,10 @@ async def hydrate_summary_rerank_texts(
                 "_id": 0,
                 "doc_id": 1,
                 "corpus_id": 1,
+                "filename": 1,
+                "title": 1,
+                "doc_title": 1,
+                "source_path": 1,
                 "parent_chunks.parent_id": 1,
                 "parent_chunks.summary": 1,
                 "parent_chunks.heading_path": 1,
@@ -308,8 +332,10 @@ async def hydrate_summary_rerank_texts(
 
     by_doc_parent: dict[tuple[str, str], dict] = {}
     by_parent: dict[str, dict] = {}
+    doc_names: dict[str, str] = {}
     for doc in docs:
         doc_id = str(doc.get("doc_id") or "")
+        doc_names[doc_id] = _document_display_name(doc)
         for parent in doc.get("parent_chunks", []) or []:
             parent_id = str(parent.get("parent_id") or "")
             summary = str(parent.get("summary") or "")
@@ -325,6 +351,8 @@ async def hydrate_summary_rerank_texts(
     replaced = 0
     for chunk in chunks:
         copied = chunk.model_copy()
+        if not copied.doc_name:
+            copied.doc_name = doc_names.get(copied.doc_id or "") or copied.doc_name
         chunk_id = copied.chunk_id or ""
         parent_id = copied.parent_id or (
             chunk_id.removesuffix("_summary") if chunk_id.endswith("_summary") else ""

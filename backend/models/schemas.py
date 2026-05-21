@@ -45,6 +45,31 @@ class ModelOverrides(_legacy.ModelOverrides):
             "configured SearXNG instance. Off/None keeps chat corpus-only."
         ),
     )
+    web_fetch_depth: Literal["snippets", "normal", "deep"] | None = Field(
+        default=None,
+        description=(
+            "Per-turn live-web fetch depth. snippets keeps search snippets only; "
+            "normal allows raw/static page extraction; deep also allows the "
+            "Obscura JS-render fallback for allowlisted domains."
+        ),
+    )
+    web_research_mode: bool | None = Field(
+        default=None,
+        description="When true, expand bounded web budgets for deeper research turns.",
+    )
+    web_youtube_transcripts: bool | None = Field(
+        default=None,
+        description=(
+            "When true, YouTube URLs may be fetched as transcript evidence via "
+            "yt-dlp without downloading video."
+        ),
+    )
+    web_max_sources: int | None = Field(
+        default=None,
+        ge=3,
+        le=20,
+        description="Maximum web evidence sources requested for this turn.",
+    )
 
 
 class ModelConfig(_legacy.ModelConfig):

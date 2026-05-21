@@ -639,7 +639,7 @@ class Settings(BaseSettings):
         description="Base URL for the SearXNG instance used by opt-in chat web search.",
     )
     SEARXNG_ENGINES: str = Field(
-        default="google,bing,duckduckgo,brave",
+        default="duckduckgo,bing,mojeek,wikipedia",
         description="Comma-separated SearXNG engines requested for opt-in chat web search.",
     )
     SEARXNG_TIMEOUT_SECONDS: float = Field(
@@ -648,10 +648,27 @@ class Settings(BaseSettings):
         le=30.0,
         description="HTTP timeout for the opt-in chat SearXNG request.",
     )
+    STRACT_SEARCH_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Enable Stract's no-key JSON search API as a free independent-index "
+            "lane alongside SearXNG for opt-in chat web search."
+        ),
+    )
+    STRACT_SEARCH_URL: str = Field(
+        default="https://stract.com/beta/api/search",
+        description="Stract JSON search endpoint used by the free live-web search pool.",
+    )
+    STRACT_SEARCH_TIMEOUT_SECONDS: float = Field(
+        default=4.0,
+        ge=1.0,
+        le=20.0,
+        description="HTTP timeout for one Stract search request.",
+    )
     LIVE_WEB_SEARCH_MAX_RESULTS: int = Field(
         default=7,
         ge=1,
-        le=10,
+        le=20,
         description=(
             "Maximum reranked live-web results returned to the model for one "
             "web_search tool call."
@@ -660,7 +677,7 @@ class Settings(BaseSettings):
     LIVE_WEB_SEARCH_CANDIDATE_RESULTS: int = Field(
         default=15,
         ge=1,
-        le=20,
+        le=40,
         description=(
             "Number of raw SearXNG candidates fetched before local reranking. "
             "Keep this above LIVE_WEB_SEARCH_MAX_RESULTS so the reranker can "
@@ -688,7 +705,7 @@ class Settings(BaseSettings):
     LIVE_WEB_FETCH_MAX_PAGES: int = Field(
         default=6,
         ge=1,
-        le=10,
+        le=20,
         description=(
             "Maximum live-web URLs to full-fetch after snippet reranking. "
             "Search can collect a wider pool, but extraction stays bounded so "
@@ -743,6 +760,25 @@ class Settings(BaseSettings):
         ge=500,
         le=20000,
         description="Maximum rendered markdown characters kept per Obscura result.",
+    )
+    LIVE_WEB_VIDEO_TRANSCRIPT_MIN_CHARS: int = Field(
+        default=80,
+        ge=0,
+        le=2000,
+        description=(
+            "Minimum useful YouTube transcript evidence length. Shorter "
+            "metadata-only results fall back to snippet-only evidence."
+        ),
+    )
+    LIVE_WEB_VIDEO_TRANSCRIPT_MAX_CHARS: int = Field(
+        default=12000,
+        ge=500,
+        le=50000,
+        description=(
+            "Maximum characters kept from one YouTube metadata/transcript "
+            "fetch. Separate from OBSCURA_MAX_CHARS because transcripts are "
+            "a distinct evidence type."
+        ),
     )
     GRAPHIFY_AUGMENT_CODE_LANE: bool = Field(
         default=False,

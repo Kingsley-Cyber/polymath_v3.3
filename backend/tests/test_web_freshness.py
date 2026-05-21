@@ -15,6 +15,7 @@ from services.web_freshness import (
     _query_should_include_social_sources,
     _is_low_quality_web_hit_for_query,
     _diversify_web_source_chunks,
+    _extract_static_page_text,
     _extract_webpage_text,
     _raw_source_candidate_urls,
     assess_snippet_sufficiency,
@@ -22,6 +23,7 @@ from services.web_freshness import (
     build_search_query,
     infer_web_search_time_range,
     parse_searxng_results,
+    parse_stract_results,
     refine_tool_search_query,
     rerank_web_source_chunks,
     select_related_search_terms,
@@ -163,6 +165,16 @@ def test_build_web_search_queries_adds_direct_roblox_api_doc_variant():
     )
 
 
+def test_build_web_search_queries_adds_dynamic_roblox_service_doc_variant():
+    queries = build_web_search_queries("Roblox APIs such as GenerationService")
+
+    assert (
+        "GenerationService "
+        "site:create.roblox.com/docs/reference/engine/classes/GenerationService"
+        in queries
+    )
+
+
 def test_build_web_search_queries_skips_video_for_official_roblox_docs_query():
     queries = build_web_search_queries(
         "Roblox RemoteEvent OnServerEvent validation security official docs"
@@ -266,6 +278,89 @@ async def test_non_job_security_query_filters_job_board_hits(monkeypatch):
     assert hits
     assert all("talent.com" not in hit.url for hit in hits)
     assert any("devforum.roblox.com" in hit.url for hit in hits)
+
+
+@pytest.mark.asyncio
+async def test_live_web_pool_merges_stract_and_searxng(monkeypatch):
+    settings = SimpleNamespace(STRACT_SEARCH_ENABLED=True)
+
+    async def fake_stract(query, *, max_results=None, time_range=None):
+        return [
+            WebSearchHit(
+                title="Stract result",
+                url="https://stract.example/result",
+                snippet="Independent index result.",
+                score=1.0,
+                engines=("stract",),
+                search_query=query,
+                provider="stract",
+            )
+        ]
+
+    async def fake_searxng(query, *, max_results=None, time_range=None):
+        return [
+            WebSearchHit(
+                title="SearXNG result",
+                url="https://searxng.example/result",
+                snippet="Meta-search result.",
+                score=1.0,
+                engines=("duckduckgo",),
+                search_query=query,
+                provider="searxng",
+            )
+        ]
+
+    async def fake_wikipedia(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr("services.web_freshness.get_settings", lambda: settings)
+    monkeypatch.setattr(live_web_search, "_search_stract_pool", fake_stract)
+    monkeypatch.setattr(live_web_search, "_search_searxng_pool", fake_searxng)
+    monkeypatch.setattr(live_web_search, "_search_wikipedia_entities", fake_wikipedia)
+
+    hits = await live_web_search._search_live_web_pool(
+        "AWS Lambda event driven processing",
+        max_results=5,
+    )
+
+    assert [hit.provider for hit in hits] == ["stract", "searxng"]
+
+
+@pytest.mark.asyncio
+async def test_live_web_pool_falls_back_when_stract_fails(monkeypatch):
+    settings = SimpleNamespace(STRACT_SEARCH_ENABLED=True)
+
+    async def fake_stract(_query, *, max_results=None, time_range=None):
+        raise RuntimeError("Stract unavailable")
+
+    async def fake_searxng(query, *, max_results=None, time_range=None):
+        return [
+            WebSearchHit(
+                title="SearXNG result",
+                url="https://searxng.example/result",
+                snippet="Meta-search result.",
+                score=1.0,
+                engines=("bing",),
+                search_query=query,
+                provider="searxng",
+            )
+        ]
+
+    async def fake_wikipedia(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr("services.web_freshness.get_settings", lambda: settings)
+    monkeypatch.setattr(live_web_search, "_search_stract_pool", fake_stract)
+    monkeypatch.setattr(live_web_search, "_search_searxng_pool", fake_searxng)
+    monkeypatch.setattr(live_web_search, "_search_wikipedia_entities", fake_wikipedia)
+
+    hits = await live_web_search._search_live_web_pool(
+        "AWS Lambda event driven processing",
+        max_results=5,
+    )
+
+    assert len(hits) == 1
+    assert hits[0].provider == "searxng"
 
 
 def test_build_web_search_queries_adds_ai_video_variants():
@@ -426,6 +521,37 @@ def test_parse_searxng_results_dedupes_and_strips_html():
     assert hits[0].title == "Swift 6"
     assert hits[0].snippet == "Latest language notes"
     assert hits[0].engines == ("duckduckgo", "bing")
+
+
+def test_parse_stract_results_normalizes_webpages():
+    hits = parse_stract_results(
+        {
+            "_type": "websites",
+            "webpages": [
+                {
+                    "title": "AWS Lambda event-driven architectures",
+                    "url": "https://docs.aws.amazon.com/lambda/latest/dg/concepts-event-driven-architectures.html",
+                    "snippet": {
+                        "date": "2026-01-02",
+                        "text": {
+                            "fragments": [
+                                {"kind": "normal", "text": "Lambda runs code"},
+                                {"kind": "highlighted", "text": "in response to events."},
+                            ]
+                        },
+                    },
+                }
+            ],
+        },
+        max_results=5,
+        search_query="AWS Lambda event driven processing",
+    )
+
+    assert len(hits) == 1
+    assert hits[0].provider == "stract"
+    assert hits[0].engines == ("stract",)
+    assert "response to events" in hits[0].snippet
+    assert hits[0].published_date == "2026-01-02"
 
 
 def test_web_hits_become_source_chunks_with_url_context():
@@ -971,7 +1097,9 @@ async def test_prior_url_dedupe_skips_full_page_refetch(monkeypatch):
         max_results=2,
     )
 
-    async def fake_fetch(selected):
+    async def fake_fetch(selected, **kwargs):
+        assert kwargs["allow_obscura"] is True
+        assert kwargs["youtube_transcripts_enabled"] is True
         assert [hit.url for hit in selected] == ["https://example.org/new"]
         return (
             {"https://example.org/new": "Fetched page text."},
@@ -1005,6 +1133,80 @@ async def test_prior_url_dedupe_skips_full_page_refetch(monkeypatch):
     assert telemetry["skipped_fetch_existing_url_count"] == 1
 
 
+@pytest.mark.asyncio
+async def test_fetch_pages_for_search_respects_depth_and_youtube_flags(monkeypatch):
+    settings = SimpleNamespace(
+        LIVE_WEB_SEARCH_FETCH_FULL_PAGES=True,
+        LIVE_WEB_FETCH_MAX_PAGES=3,
+    )
+    hits = parse_searxng_results(
+        {
+            "results": [
+                {
+                    "title": "Thin",
+                    "url": "https://www.youtube.com/watch?v=abc12345678",
+                    "content": "short",
+                },
+                {
+                    "title": "Page",
+                    "url": "https://example.org/page",
+                    "content": "short",
+                },
+            ]
+        },
+        max_results=2,
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_fetch(selected, **kwargs):
+        captured["selected"] = [hit.url for hit in selected]
+        captured["allow_obscura"] = kwargs["allow_obscura"]
+        captured["youtube_transcripts_enabled"] = kwargs["youtube_transcripts_enabled"]
+        return {}, []
+
+    monkeypatch.setattr("services.web_freshness.get_settings", lambda: settings)
+    monkeypatch.setattr(live_web_search, "_fetch_pages_with_stats", fake_fetch)
+
+    _fetched, _stats, selected, telemetry = await live_web_search._fetch_pages_for_search(
+        search_query="specific thin query requiring page evidence",
+        hits=hits,
+        max_results=2,
+        fetch_depth="normal",
+        youtube_transcripts_enabled=False,
+        max_fetch_pages=2,
+    )
+
+    assert [hit.url for hit in selected] == captured["selected"]
+    assert captured["allow_obscura"] is False
+    assert captured["youtube_transcripts_enabled"] is False
+    assert telemetry["fetch_depth"] == "normal"
+    assert telemetry["youtube_transcripts_enabled"] is False
+
+
+def test_parse_searxng_results_attaches_engine_errors():
+    hits = parse_searxng_results(
+        {
+            "unresponsive_engines": [
+                ["google", "parser error"],
+                {"engine": "brave", "error": "Too many requests"},
+            ],
+            "results": [
+                {
+                    "title": "Result",
+                    "url": "https://example.org",
+                    "content": "content",
+                }
+            ],
+        },
+        max_results=1,
+    )
+
+    assert hits[0].engine_errors == (
+        "google: parser error",
+        "brave: Too many requests",
+    )
+
+
 def test_extract_webpage_text_prefers_article_body():
     text = _extract_webpage_text(
         """
@@ -1031,6 +1233,50 @@ def test_extract_webpage_text_prefers_article_body():
     assert "home docs blog" not in text
 
 
+def test_static_extractor_falls_back_to_next_data_for_js_docs():
+    payload = {
+        "props": {
+            "pageProps": {
+                "locale": "es-es",
+                "data": {
+                    "title": "GenerationService",
+                    "description": "Service for generating content in Roblox experiences.",
+                    "contentDirFilePath": "reference/engine/classes/GenerationService.yaml",
+                    "apiReference": {
+                        "name": "GenerationService",
+                        "type": "Class",
+                        "summary": "Provides APIs for generation workflows.",
+                        "description": "GenerationService exposes controlled generation features.",
+                        "methods": [
+                            {
+                                "name": "GenerateAsync",
+                                "summary": "Starts a generation request.",
+                                "parameters": [{"name": "prompt"}],
+                            }
+                        ],
+                    },
+                },
+            }
+        }
+    }
+    html = (
+        "<html><head><title>Roblox docs</title></head><body>"
+        f"<script id=\"__NEXT_DATA__\" type=\"application/json\">{json.dumps(payload)}</script>"
+        "</body></html>"
+    )
+
+    text = _extract_static_page_text(
+        html,
+        url="https://create.roblox.com/docs/es-es/reference/engine/classes/GenerationService",
+        max_chars=2000,
+        fetcher="auto",
+    )
+
+    assert text is not None
+    assert "API name: GenerationService" in text
+    assert "GenerateAsync(prompt)" in text
+
+
 def test_raw_source_candidate_urls_map_creator_docs_to_github_raw():
     urls = _raw_source_candidate_urls(
         "https://create.roblox.com/docs/reference/engine/classes/RemoteEvent"
@@ -1039,6 +1285,17 @@ def test_raw_source_candidate_urls_map_creator_docs_to_github_raw():
     assert urls == [
         "https://raw.githubusercontent.com/Roblox/creator-docs/main/"
         "content/en-us/reference/engine/classes/RemoteEvent.yaml"
+    ]
+
+
+def test_raw_source_candidate_urls_strip_creator_docs_locale():
+    urls = _raw_source_candidate_urls(
+        "https://create.roblox.com/docs/es-es/reference/engine/classes/GenerationService"
+    )
+
+    assert urls == [
+        "https://raw.githubusercontent.com/Roblox/creator-docs/main/"
+        "content/en-us/reference/engine/classes/GenerationService.yaml"
     ]
 
 
@@ -1168,7 +1425,7 @@ async def test_fetch_pages_runs_same_domain_sequentially(monkeypatch):
     max_running = 0
     calls = []
 
-    async def fake_fetch(url):
+    async def fake_fetch(url, **_kwargs):
         nonlocal running, max_running
         running += 1
         max_running = max(max_running, running)

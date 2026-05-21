@@ -33,6 +33,8 @@ _DEFAULT_MAX_RESULTS = 7
 _DEFAULT_CANDIDATE_RESULTS = 15
 _WEB_SEARCH_RESULTS_PER_QUERY = 5
 _DEFAULT_OBSCURA_MAX_CHARS = 4000
+_DEFAULT_VIDEO_TRANSCRIPT_MAX_CHARS = 12000
+_DEFAULT_VIDEO_TRANSCRIPT_MIN_CHARS = 80
 _WEB_RERANK_TEXT_MAX_CHARS = 1200
 _DEFAULT_FETCH_MAX_PAGES = 6
 _DEFAULT_MAX_RELATED_TERMS = 5
@@ -51,7 +53,7 @@ _DEFAULT_OBSCURA_DOMAINS = (
 _FETCH_CACHE_MAX_ITEMS = 512
 _WEB_CACHE_SCHEMA_VERSION = "live-web-v2"
 _WEB_SEARCH_CACHE_TTL_SECONDS = 600
-_WEB_EXTRACTION_VERSION = "page-text-v3-ytdlp"
+_WEB_EXTRACTION_VERSION = "page-text-v4-evidence"
 
 _RESEARCH_DOMAINS = (
     "arxiv.org",
@@ -227,6 +229,9 @@ _ROBLOX_QUERY_MARKERS = (
     "rbx",
     "ugc",
 )
+
+_ROBLOX_LOCALE_RE = re.compile(r"^[a-z]{2}(?:-[a-z]{2})?$", re.IGNORECASE)
+_ROBLOX_PASCAL_API_RE = re.compile(r"\b[A-Z][A-Za-z0-9]*(?:Service)\b")
 
 _AI_MEDIA_QUERY_MARKERS = (
     "ai media",
@@ -493,6 +498,8 @@ class WebSearchHit:
     search_query: str | None = None
     time_range: str | None = None
     from_cache: bool = False
+    provider: str = "searxng"
+    engine_errors: tuple[str, ...] = ()
 
 
 @dataclass
@@ -512,6 +519,9 @@ class _PageFetchResult:
     cache_layer: str | None = None
     obscura_attempted: bool = False
     js_rendered: bool = False
+    obscura_skipped_reason: str | None = None
+    source_type: str | None = None
+    transcript_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -906,6 +916,8 @@ def _build_roblox_creator_doc_queries(query: str) -> list[str]:
         ("tween service", "TweenService"),
         ("runservice", "RunService"),
         ("run service", "RunService"),
+        ("generationservice", "GenerationService"),
+        ("generation service", "GenerationService"),
         ("players service", "Players"),
         ("proximityprompt", "ProximityPrompt"),
         ("proximity prompt", "ProximityPrompt"),
@@ -921,6 +933,16 @@ def _build_roblox_creator_doc_queries(query: str) -> list[str]:
         seen.add(class_name)
         if len(variants) >= 2:
             break
+    if len(variants) < 2:
+        for class_name in _ROBLOX_PASCAL_API_RE.findall(query):
+            if class_name in seen:
+                continue
+            variants.append(
+                f"{class_name} site:create.roblox.com/docs/reference/engine/classes/{class_name}"
+            )
+            seen.add(class_name)
+            if len(variants) >= 2:
+                break
     return variants
 
 
@@ -1461,6 +1483,8 @@ def _serialize_hit(hit: WebSearchHit) -> dict[str, Any]:
         "published_date": hit.published_date,
         "search_query": hit.search_query,
         "time_range": hit.time_range,
+        "provider": hit.provider,
+        "engine_errors": list(hit.engine_errors),
     }
 
 
@@ -1486,6 +1510,8 @@ def _deserialize_hit(raw: dict[str, Any], *, from_cache: bool) -> WebSearchHit |
         search_query=str(raw.get("search_query")) if raw.get("search_query") else None,
         time_range=str(raw.get("time_range")) if raw.get("time_range") else None,
         from_cache=from_cache,
+        provider=str(raw.get("provider") or "searxng"),
+        engine_errors=tuple(str(v) for v in (raw.get("engine_errors") or []) if v),
     )
 
 
@@ -1577,7 +1603,16 @@ def _raw_source_candidate_urls(url: str) -> list[str]:
     path = parsed.path.strip("/")
 
     if domain == "create.roblox.com" and path.startswith("docs/"):
-        docs_path = path.removeprefix("docs/").strip("/")
+        docs_parts = [
+            part
+            for part in path.removeprefix("docs/").strip("/").split("/")
+            if part
+        ]
+        if docs_parts and _ROBLOX_LOCALE_RE.fullmatch(docs_parts[0]):
+            docs_parts = docs_parts[1:]
+        docs_path = "/".join(docs_parts)
+        if not docs_path:
+            return []
         if docs_path.startswith("reference/engine/classes/"):
             parts = docs_path.split("/")
             if len(parts) > 4:
@@ -1638,6 +1673,7 @@ def _obscura_command_args(
     *,
     url: str,
     timeout_seconds: float,
+    dump: str = "markdown",
 ) -> list[str] | None:
     if not command or not command.strip():
         return None
@@ -1653,7 +1689,7 @@ def _obscura_command_args(
         "fetch",
         url,
         "--dump",
-        "markdown",
+        dump,
         "--quiet",
         "--timeout",
         str(int(timeout_seconds)),
@@ -1908,6 +1944,113 @@ def _extract_webpage_text(html_text: str, *, max_chars: int) -> str | None:
     return cleaned[:max_chars]
 
 
+def _compact_json_value(value: Any, *, max_len: int = 1000) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, str):
+        return re.sub(r"\s+", " ", value).strip()[:max_len]
+    if isinstance(value, list):
+        parts = [
+            _compact_json_value(item, max_len=120)
+            for item in value[:20]
+            if not isinstance(item, dict)
+        ]
+        return ", ".join(part for part in parts if part)[:max_len]
+    return ""
+
+
+def _append_evidence_line(parts: list[str], label: str, value: Any) -> None:
+    text = _compact_json_value(value)
+    if text:
+        parts.append(f"{label}: {text}")
+
+
+def _extract_next_data_text(
+    html_text: str,
+    *,
+    url: str,
+    max_chars: int,
+) -> str | None:
+    """Extract useful text from Next.js payloads when visible DOM is empty."""
+    soup = BeautifulSoup(html_text, "html.parser")
+    script = soup.find("script", id="__NEXT_DATA__")
+    raw = script.string or script.get_text() if script else ""
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    props = payload.get("props")
+    page_props = props.get("pageProps") if isinstance(props, dict) else None
+    data = page_props.get("data") if isinstance(page_props, dict) else None
+    if not isinstance(data, dict):
+        return None
+
+    parts: list[str] = []
+    _append_evidence_line(parts, "Title", data.get("title"))
+    _append_evidence_line(parts, "Description", data.get("description"))
+    _append_evidence_line(parts, "Source path", data.get("contentDirFilePath"))
+    if isinstance(page_props, dict):
+        _append_evidence_line(parts, "Locale", page_props.get("locale"))
+
+    api_reference = data.get("apiReference")
+    if isinstance(api_reference, dict):
+        _append_evidence_line(parts, "API name", api_reference.get("name"))
+        _append_evidence_line(parts, "API type", api_reference.get("type"))
+        _append_evidence_line(parts, "Summary", api_reference.get("summary"))
+        _append_evidence_line(parts, "Details", api_reference.get("description"))
+        for label, key in (
+            ("Properties", "properties"),
+            ("Methods", "methods"),
+            ("Events", "events"),
+            ("Callbacks", "callbacks"),
+        ):
+            members = api_reference.get(key)
+            if not isinstance(members, list):
+                continue
+            rendered: list[str] = []
+            for member in members[:12]:
+                if not isinstance(member, dict):
+                    continue
+                name = _compact_json_value(member.get("name"), max_len=120)
+                if not name:
+                    continue
+                summary = _compact_json_value(member.get("summary"), max_len=180)
+                params = member.get("parameters")
+                if isinstance(params, list):
+                    names = [
+                        _compact_json_value(param.get("name"), max_len=50)
+                        for param in params
+                        if isinstance(param, dict)
+                    ]
+                    names = [name for name in names if name]
+                else:
+                    names = []
+                entry = f"{name}({', '.join(names)})" if names else name
+                if summary:
+                    entry += f" - {summary}"
+                rendered.append(entry)
+            if rendered:
+                parts.append(f"{label}: {' | '.join(rendered)}")
+    else:
+        headings = data.get("headings")
+        if isinstance(headings, list):
+            names = [
+                _compact_json_value(item.get("title") or item.get("text"), max_len=90)
+                for item in headings
+                if isinstance(item, dict)
+            ]
+            names = [name for name in names if name]
+            if names:
+                parts.append(f"Headings: {', '.join(names[:20])}")
+
+    text = "\n".join(dict.fromkeys(parts)).strip()
+    return text[:max_chars] if len(text) >= 80 else None
+
+
 def _extract_with_trafilatura(
     html_text: str,
     *,
@@ -1946,7 +2089,27 @@ def _extract_static_page_text(
         text = _extract_with_trafilatura(html_text, url=url, max_chars=max_chars)
         if text:
             return text
-    return _extract_webpage_text(html_text, max_chars=max_chars)
+    text = _extract_webpage_text(html_text, max_chars=max_chars)
+    if text:
+        return text
+    return _extract_next_data_text(html_text, url=url, max_chars=max_chars)
+
+
+def _searxng_engine_errors(payload: dict[str, Any]) -> tuple[str, ...]:
+    errors: list[str] = []
+    for item in payload.get("unresponsive_engines") or []:
+        if isinstance(item, (list, tuple)) and item:
+            engine = str(item[0])
+            reason = str(item[1]) if len(item) > 1 else "unresponsive"
+            errors.append(f"{engine}: {reason}")
+        elif isinstance(item, dict):
+            engine = str(item.get("engine") or item.get("name") or "engine")
+            reason = str(item.get("error") or item.get("reason") or "unresponsive")
+            errors.append(f"{engine}: {reason}")
+        elif item:
+            errors.append(str(item))
+    return tuple(dict.fromkeys(errors))
+
 
 
 def parse_searxng_results(
@@ -1959,6 +2122,7 @@ def parse_searxng_results(
     """Normalize SearXNG JSON into bounded, deduped hits."""
     seen: set[str] = set()
     hits: list[WebSearchHit] = []
+    engine_errors = _searxng_engine_errors(payload)
     for raw in payload.get("results") or []:
         if not isinstance(raw, dict):
             continue
@@ -1996,12 +2160,123 @@ def parse_searxng_results(
                 ),
                 search_query=search_query,
                 time_range=time_range,
+                provider="searxng",
+                engine_errors=engine_errors,
             )
         )
         seen.add(url)
         if len(hits) >= max_results:
             break
     return hits
+
+
+def _stract_snippet_text(raw_snippet: Any) -> tuple[str, str | None]:
+    """Return readable Stract snippet text plus optional date."""
+    if not isinstance(raw_snippet, dict):
+        return _strip_html(str(raw_snippet or "")), None
+    published = raw_snippet.get("date")
+    text = raw_snippet.get("text")
+    if isinstance(text, dict):
+        fragments = text.get("fragments")
+        if isinstance(fragments, list):
+            parts = [
+                str(fragment.get("text") or "")
+                for fragment in fragments
+                if isinstance(fragment, dict) and fragment.get("text")
+            ]
+            return _strip_html(" ".join(parts)), str(published) if published else None
+    return _strip_html(str(raw_snippet.get("text") or "")), (
+        str(published) if published else None
+    )
+
+
+def parse_stract_results(
+    payload: dict[str, Any],
+    max_results: int,
+    *,
+    search_query: str | None = None,
+    time_range: str | None = None,
+) -> list[WebSearchHit]:
+    """Normalize Stract search JSON into bounded, deduped hits."""
+    webpages = payload.get("webpages")
+    if webpages is None and isinstance(payload.get("value"), dict):
+        webpages = payload["value"].get("webpages")
+    if webpages is None and isinstance(payload.get("websites"), dict):
+        webpages = payload["websites"].get("webpages")
+    if webpages is None:
+        webpages = payload.get("results")
+
+    seen: set[str] = set()
+    hits: list[WebSearchHit] = []
+    for raw in webpages or []:
+        if not isinstance(raw, dict):
+            continue
+        url = str(raw.get("url") or "").strip()
+        if not _valid_web_url(url) or url in seen:
+            continue
+        title = _strip_html(str(raw.get("title") or raw.get("prettyUrl") or url))
+        snippet, published_date = _stract_snippet_text(raw.get("snippet"))
+        if not snippet:
+            snippet = _strip_html(str(raw.get("description") or raw.get("content") or ""))
+        if not title and not snippet:
+            continue
+        hits.append(
+            WebSearchHit(
+                title=title[:180],
+                url=url,
+                snippet=snippet[:1200],
+                score=max(0.05, 1.0 - len(hits) * 0.05),
+                engines=("stract",),
+                published_date=published_date,
+                search_query=search_query,
+                time_range=time_range,
+                provider="stract",
+            )
+        )
+        seen.add(url)
+        if len(hits) >= max_results:
+            break
+    return hits
+
+
+def _merge_web_hit_lists(
+    hit_lists: list[list[WebSearchHit]],
+    limit: int,
+) -> list[WebSearchHit]:
+    """Round-robin merge provider results while deduping URLs."""
+    if not hit_lists or limit <= 0:
+        return []
+    seen: set[str] = set()
+    merged: list[WebSearchHit] = []
+    max_len = max((len(items) for items in hit_lists), default=0)
+    for index in range(max_len):
+        for items in hit_lists:
+            if index >= len(items):
+                continue
+            hit = items[index]
+            if not hit.url or hit.url in seen:
+                continue
+            seen.add(hit.url)
+            merged.append(hit)
+            if len(merged) >= limit:
+                return merged
+    return merged
+
+
+def _build_wikipedia_entity_queries(query: str) -> list[str]:
+    cleaned = re.sub(r"\b(site:[^\s]+|official docs?|tutorials?)\b", " ", query, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ?.")
+    variants: list[str] = []
+    if 2 <= len(cleaned) <= 80:
+        variants.append(cleaned)
+    titled = re.findall(r"\b[A-Z][A-Za-z0-9.,'-]*(?:\s+[A-Z][A-Za-z0-9.,'-]*){0,5}", query)
+    for item in titled:
+        item = re.sub(r"\s+", " ", item).strip(" ,.")
+        if 2 <= len(item) <= 80 and item not in variants:
+            variants.append(item)
+        if len(variants) >= 3:
+            break
+    return variants[:3]
 
 
 def _web_source_id(url: str) -> str:
@@ -2037,13 +2312,19 @@ def web_hits_to_source_chunks(
             else "snippet_only"
         )
         engines = ", ".join(hit.engines) if hit.engines else "unknown"
+        provider = hit.provider or "searxng"
+        source_type = str(fetch_stat.get("source_type") or ("video" if _is_video_domain(_web_domain(hit.url)) else "webpage"))
+        transcript_status = fetch_stat.get("transcript_status")
+        engine_errors = list(hit.engine_errors)
         published = f"\nPublished: {hit.published_date}" if hit.published_date else ""
         hit_query = hit.search_query or search_query or ""
         text = (
             f"Live web result fetched_at={now}\n"
             f"Title: {hit.title}\n"
             f"URL: {hit.url}{published}\n"
+            f"Search provider: {provider}\n"
             f"Engines: {engines}\n"
+            f"Source type: {source_type}\n"
             f"Search query: {hit_query}\n"
             f"Freshness filter: {hit.time_range or 'none'}\n"
             f"Evidence mode: {evidence_mode}\n"
@@ -2067,9 +2348,11 @@ def web_hits_to_source_chunks(
                 metadata={
                     "url": hit.url,
                     "engines": list(hit.engines),
+                    "engine_errors": engine_errors,
                     "rank": rank,
                     "published_date": hit.published_date,
-                    "source": "searxng",
+                    "source": provider,
+                    "search_provider": provider,
                     "search_query": hit_query,
                     "time_range": hit.time_range,
                     "expanded_terms": expanded_terms,
@@ -2077,6 +2360,8 @@ def web_hits_to_source_chunks(
                     "evidence_mode": evidence_mode,
                     "fetch_method": fetch_method,
                     "fetch_status": fetch_status,
+                    "source_type": source_type,
+                    "transcript_status": transcript_status,
                     "content_chars": len(body),
                     "source_text_chars": len(text),
                     "source_text_max_chars": text_limit,
@@ -2093,6 +2378,7 @@ def web_hits_to_source_chunks(
                     "page_cache_hit": bool(fetch_stat.get("from_cache")),
                     "cache_layer": fetch_stat.get("cache_layer"),
                     "obscura_attempted": bool(fetch_stat.get("obscura_attempted")),
+                    "obscura_skipped_reason": fetch_stat.get("obscura_skipped_reason"),
                     "js_rendered": bool(fetch_stat.get("js_rendered")),
                     "web_content_untrusted": True,
                 },
@@ -2101,6 +2387,7 @@ def web_hits_to_source_chunks(
                         "retriever": "live_web_search",
                         "url": hit.url,
                         "engines": list(hit.engines),
+                        "provider": provider,
                     }
                 ],
             )
@@ -2158,11 +2445,19 @@ class LiveWebSearch:
         hits: list[WebSearchHit],
         max_results: int,
         prior_web_urls: set[str] | None = None,
+        fetch_depth: str = "deep",
+        youtube_transcripts_enabled: bool = True,
+        max_fetch_pages: int | None = None,
     ) -> tuple[dict[str, str], list[dict[str, Any]], list[WebSearchHit], dict[str, Any]]:
         settings = get_settings()
+        fetch_depth = (fetch_depth or "deep").strip().lower()
+        if fetch_depth not in {"snippets", "normal", "deep"}:
+            fetch_depth = "deep"
         sufficiency = assess_snippet_sufficiency(search_query, hits)
         telemetry: dict[str, Any] = {
             "cache_schema_version": _WEB_CACHE_SCHEMA_VERSION,
+            "fetch_depth": fetch_depth,
+            "youtube_transcripts_enabled": bool(youtube_transcripts_enabled),
             "redis_search_cache_hit": any(hit.from_cache for hit in hits),
             "redis_search_cache_hit_count": sum(1 for hit in hits if hit.from_cache),
             "snippet_only": False,
@@ -2193,13 +2488,23 @@ class LiveWebSearch:
             telemetry["skipped_full_page_fetch_reason"] = "full_page_fetch_disabled"
             return {}, [], [], telemetry
 
+        if fetch_depth == "snippets":
+            telemetry["snippet_only"] = True
+            telemetry["skipped_full_page_fetch_reason"] = "fetch_depth_snippets"
+            return {}, [], [], telemetry
+
         if sufficiency.sufficient:
             telemetry["snippet_only"] = True
             telemetry["skipped_full_page_fetch_reason"] = sufficiency.reason
             return {}, [], [], telemetry
 
+        configured_fetch_limit = (
+            max_fetch_pages
+            if max_fetch_pages is not None
+            else int(getattr(settings, "LIVE_WEB_FETCH_MAX_PAGES", max_results) or max_results)
+        )
         fetch_limit = min(
-            int(getattr(settings, "LIVE_WEB_FETCH_MAX_PAGES", max_results) or max_results),
+            int(configured_fetch_limit or max_results),
             max_results,
             len(hits),
         )
@@ -2227,7 +2532,11 @@ class LiveWebSearch:
         if hits_to_fetch and not selected:
             telemetry["skipped_full_page_fetch_reason"] = "all_selected_urls_seen_before"
 
-        fetched, fetch_stats = await self._fetch_pages_with_stats(selected)
+        fetched, fetch_stats = await self._fetch_pages_with_stats(
+            selected,
+            allow_obscura=fetch_depth == "deep",
+            youtube_transcripts_enabled=youtube_transcripts_enabled,
+        )
         attempted_stats = [item for item in fetch_stats if item.get("method") != "skipped"]
         attempts = len(attempted_stats)
         successes = sum(1 for item in attempted_stats if item.get("chars", 0) > 0)
@@ -2250,6 +2559,15 @@ class LiveWebSearch:
             round(obscura_successes / obscura_attempts, 3)
             if obscura_attempts
             else 0.0
+        )
+        skipped_reasons = [
+            str(item.get("obscura_skipped_reason"))
+            for item in attempted_stats
+            if item.get("obscura_skipped_reason")
+        ]
+        telemetry["obscura_skipped_reasons"] = list(dict.fromkeys(skipped_reasons))
+        telemetry["youtube_transcript_successes"] = sum(
+            1 for item in attempted_stats if item.get("transcript_status") == "ok"
         )
         return fetched, fetch_stats, selected, telemetry
 
@@ -2280,7 +2598,7 @@ class LiveWebSearch:
                 ),
             )
             time_range = infer_web_search_time_range(search_query)
-            hits = await self._search_searxng_pool(
+            hits = await self._search_live_web_pool(
                 search_query,
                 max_results=candidate_limit,
                 time_range=time_range,
@@ -2320,6 +2638,141 @@ class LiveWebSearch:
             pipeline.get("snippet_only"),
         )
         return selected
+
+    async def _search_live_web_pool(
+        self,
+        query: str,
+        *,
+        max_results: int | None = None,
+        time_range: str | None = None,
+    ) -> list[WebSearchHit]:
+        """Search free live-web lanes in parallel and merge usable results."""
+        settings = get_settings()
+        candidate_limit = max(1, int(max_results or _DEFAULT_CANDIDATE_RESULTS))
+        tasks: list[tuple[str, asyncio.Task[list[WebSearchHit]]]] = []
+        if getattr(settings, "STRACT_SEARCH_ENABLED", True):
+            tasks.append(
+                (
+                    "stract",
+                    asyncio.create_task(
+                        self._search_stract_pool(
+                            query,
+                            max_results=candidate_limit,
+                            time_range=time_range,
+                        )
+                    ),
+                )
+            )
+        tasks.append(
+            (
+                "wikipedia",
+                asyncio.create_task(
+                    self._search_wikipedia_entities(
+                        query,
+                        max_results=min(3, candidate_limit),
+                    )
+                ),
+            )
+        )
+        tasks.append(
+            (
+                "searxng",
+                asyncio.create_task(
+                    self._search_searxng_pool(
+                        query,
+                        max_results=candidate_limit,
+                        time_range=time_range,
+                    )
+                ),
+            )
+        )
+
+        results = await asyncio.gather(
+            *(task for _provider, task in tasks),
+            return_exceptions=True,
+        )
+        hit_lists: list[list[WebSearchHit]] = []
+        for (provider, _task), result in zip(tasks, results):
+            if isinstance(result, Exception):
+                logger.info("live web provider %s skipped: %s", provider, result)
+                continue
+            if result:
+                hit_lists.append(result)
+        return _merge_web_hit_lists(hit_lists, candidate_limit)
+
+    async def _search_wikipedia_entities(
+        self,
+        query: str,
+        *,
+        max_results: int = 2,
+    ) -> list[WebSearchHit]:
+        variants = _build_wikipedia_entity_queries(query)
+        if not variants or max_results <= 0:
+            return []
+        headers = {"User-Agent": _WEB_FETCH_USER_AGENT}
+        hits: list[WebSearchHit] = []
+        seen: set[str] = set()
+        timeout = httpx.Timeout(6.0, connect=2.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
+            for variant in variants:
+                if len(hits) >= max_results:
+                    break
+                titles: list[str] = []
+                try:
+                    response = await client.get(
+                        "https://en.wikipedia.org/w/api.php",
+                        params={
+                            "action": "opensearch",
+                            "search": variant,
+                            "limit": max_results,
+                            "namespace": 0,
+                            "format": "json",
+                        },
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                    if isinstance(payload, list) and len(payload) >= 2 and isinstance(payload[1], list):
+                        titles = [str(title) for title in payload[1] if title]
+                except Exception as exc:
+                    logger.debug("Wikipedia OpenSearch failed for %r: %s", variant, exc)
+                    titles = [variant]
+
+                for title in titles[:max_results]:
+                    if len(hits) >= max_results:
+                        break
+                    slug = title.replace(" ", "_")
+                    try:
+                        summary = await client.get(
+                            f"https://en.wikipedia.org/api/rest_v1/page/summary/{slug}"
+                        )
+                        summary.raise_for_status()
+                        data = summary.json()
+                    except Exception as exc:
+                        logger.debug("Wikipedia summary failed for %r: %s", title, exc)
+                        continue
+                    page_url = str(
+                        ((data.get("content_urls") or {}).get("desktop") or {}).get("page")
+                        or f"https://en.wikipedia.org/wiki/{slug}"
+                    )
+                    if not _valid_web_url(page_url) or page_url in seen:
+                        continue
+                    extract = _strip_html(str(data.get("extract") or ""))
+                    page_title = _strip_html(str(data.get("title") or title))
+                    if len(extract) < 40:
+                        continue
+                    hits.append(
+                        WebSearchHit(
+                            title=page_title[:180],
+                            url=page_url,
+                            snippet=extract[:1200],
+                            score=max(0.1, 0.95 - len(hits) * 0.08),
+                            engines=("wikipedia_api",),
+                            search_query=variant,
+                            provider="wikipedia",
+                        )
+                    )
+                    seen.add(page_url)
+        return hits
 
     async def _search_searxng_pool(
         self,
@@ -2412,6 +2865,59 @@ class LiveWebSearch:
 
         return merged[:candidate_limit]
 
+    async def _search_stract_pool(
+        self,
+        query: str,
+        *,
+        max_results: int | None = None,
+        time_range: str | None = None,
+    ) -> list[WebSearchHit]:
+        candidate_limit = max(1, int(max_results or _DEFAULT_CANDIDATE_RESULTS))
+        queries = [
+            variant
+            for variant in build_web_search_queries(query)
+            if not variant.lstrip().startswith("!")
+        ]
+        if not queries:
+            return []
+
+        per_query_limit = (
+            candidate_limit
+            if len(queries) == 1
+            else min(_WEB_SEARCH_RESULTS_PER_QUERY, candidate_limit)
+        )
+        tasks = [
+            self._search_stract(
+                variant,
+                max_results=per_query_limit,
+                time_range=time_range,
+            )
+            for variant in queries
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        hit_lists: list[list[WebSearchHit]] = []
+        for variant, result in zip(queries, results):
+            if not isinstance(result, list):
+                continue
+            allowed_domains = _variant_allowed_domains(variant)
+            result = [
+                hit
+                for hit in result
+                if not _is_low_quality_web_hit_for_query(hit, query)
+            ]
+            if allowed_domains:
+                result = [
+                    hit
+                    for hit in result
+                    if any(
+                        _web_domain(hit.url) == domain
+                        or _web_domain(hit.url).endswith(f".{domain}")
+                        for domain in allowed_domains
+                    )
+                ]
+            hit_lists.append(result)
+        return _merge_web_hit_lists(hit_lists, candidate_limit)
+
     async def _search_searxng(
         self,
         query: str,
@@ -2477,6 +2983,70 @@ class LiveWebSearch:
         )
         return hits
 
+    async def _search_stract(
+        self,
+        query: str,
+        *,
+        max_results: int | None = None,
+        time_range: str | None = None,
+    ) -> list[WebSearchHit]:
+        settings = get_settings()
+        candidate_limit = int(max_results or _DEFAULT_CANDIDATE_RESULTS)
+        candidate_limit = max(1, min(candidate_limit, 100))
+        cache_key = _search_cache_key(
+            query,
+            engines="stract",
+            time_range=time_range,
+            candidate_limit=candidate_limit,
+        )
+        cached_payload = await web_cache.get_json(cache_key)
+        if cached_payload and cached_payload.get("schema_version") == _WEB_CACHE_SCHEMA_VERSION:
+            cached_hits = [
+                hit
+                for raw in (cached_payload.get("hits") or [])
+                if isinstance(raw, dict)
+                if (hit := _deserialize_hit(raw, from_cache=True)) is not None
+            ]
+            if cached_hits:
+                return cached_hits[:candidate_limit]
+
+        payload = {
+            "query": query,
+            "numResults": candidate_limit,
+            "safeSearch": True,
+            "flattenResponse": True,
+            "returnRankingSignals": False,
+            "returnStructuredData": False,
+            "countResultsExact": False,
+        }
+        timeout = httpx.Timeout(
+            float(getattr(settings, "STRACT_SEARCH_TIMEOUT_SECONDS", 4.0) or 4.0),
+            connect=2.0,
+        )
+        endpoint = str(
+            getattr(settings, "STRACT_SEARCH_URL", "https://stract.com/beta/api/search")
+            or "https://stract.com/beta/api/search"
+        ).strip()
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            response = await client.post(endpoint, json=payload)
+            response.raise_for_status()
+            response_payload = response.json()
+        hits = parse_stract_results(
+            response_payload,
+            candidate_limit,
+            search_query=query,
+            time_range=time_range,
+        )
+        await web_cache.set_json(
+            cache_key,
+            {
+                "schema_version": _WEB_CACHE_SCHEMA_VERSION,
+                "hits": [_serialize_hit(hit) for hit in hits],
+            },
+            ttl_seconds=_WEB_SEARCH_CACHE_TTL_SECONDS,
+        )
+        return hits
+
     async def _select_hits_for_extraction(
         self,
         query: str,
@@ -2527,6 +3097,9 @@ class LiveWebSearch:
     async def _fetch_pages_with_stats(
         self,
         hits: list[WebSearchHit],
+        *,
+        allow_obscura: bool = True,
+        youtube_transcripts_enabled: bool = True,
     ) -> tuple[dict[str, str], list[dict[str, Any]]]:
         unique_hits: list[WebSearchHit] = []
         duplicate_stats: list[dict[str, Any]] = []
@@ -2544,6 +3117,9 @@ class LiveWebSearch:
                         "cache_layer": None,
                         "obscura_attempted": False,
                         "js_rendered": False,
+                        "obscura_skipped_reason": None,
+                        "source_type": "webpage",
+                        "transcript_status": None,
                     }
                 )
                 continue
@@ -2558,7 +3134,11 @@ class LiveWebSearch:
             group_results: list[tuple[WebSearchHit, Any]] = []
             for hit in group:
                 try:
-                    result = await self._fetch_one_page_with_stats(hit.url)
+                    result = await self._fetch_one_page_with_stats(
+                        hit.url,
+                        allow_obscura=allow_obscura,
+                        youtube_transcripts_enabled=youtube_transcripts_enabled,
+                    )
                 except Exception as exc:
                     result = exc
                 group_results.append((hit, result))
@@ -2586,6 +3166,9 @@ class LiveWebSearch:
                         "cache_layer": None,
                         "obscura_attempted": False,
                         "js_rendered": False,
+                        "obscura_skipped_reason": None,
+                        "source_type": "webpage",
+                        "transcript_status": None,
                     }
                 )
         for hit, result in pairs:
@@ -2603,6 +3186,9 @@ class LiveWebSearch:
                         "cache_layer": result.cache_layer,
                         "obscura_attempted": result.obscura_attempted,
                         "js_rendered": result.js_rendered,
+                        "obscura_skipped_reason": result.obscura_skipped_reason,
+                        "source_type": result.source_type,
+                        "transcript_status": result.transcript_status,
                     }
                 )
                 continue
@@ -2617,6 +3203,9 @@ class LiveWebSearch:
                     "cache_layer": None,
                     "obscura_attempted": False,
                     "js_rendered": False,
+                    "obscura_skipped_reason": None,
+                    "source_type": "webpage",
+                    "transcript_status": None,
                 }
             )
         return fetched, stats
@@ -2625,7 +3214,13 @@ class LiveWebSearch:
         result = await self._fetch_one_page_with_stats(url)
         return result.text
 
-    async def _fetch_one_page_with_stats(self, url: str) -> _PageFetchResult:
+    async def _fetch_one_page_with_stats(
+        self,
+        url: str,
+        *,
+        allow_obscura: bool = True,
+        youtube_transcripts_enabled: bool = True,
+    ) -> _PageFetchResult:
         settings = get_settings()
         fetcher = str(getattr(settings, "LIVE_WEB_PAGE_FETCHER", "auto") or "auto")
         max_chars = int(settings.OBSCURA_MAX_CHARS or _DEFAULT_OBSCURA_MAX_CHARS)
@@ -2645,24 +3240,35 @@ class LiveWebSearch:
                 chars=len(cached),
                 from_cache=True,
                 cache_layer=cache_layer,
+                source_type="webpage",
             )
 
         text = None
         method = "failed"
-        if _is_video_domain(_web_domain(url)):
+        source_type = "video" if _is_video_domain(_web_domain(url)) else "webpage"
+        transcript_status = None
+        if source_type == "video" and youtube_transcripts_enabled:
             text = await self._fetch_one_with_ytdlp(url)
             method = "yt_dlp" if text else "failed"
+            transcript_status = "ok" if text else "unavailable"
+        elif source_type == "video":
+            transcript_status = "disabled"
         if not text:
             text = await self._fetch_one_with_raw_adapter(url)
             method = "raw_adapter"
         obscura_attempted = False
+        obscura_skipped_reason = None
         if not text:
             text = await self._fetch_one_with_httpx(url)
             method = "static_http"
-        if not text and self._should_try_obscura(url):
+        if not text and allow_obscura and self._should_try_obscura(url):
             obscura_attempted = True
             text = await self._fetch_one_with_obscura(url)
             method = "obscura_js" if text else "failed"
+        elif not text and not allow_obscura and self._should_try_obscura(url):
+            obscura_skipped_reason = "fetch_depth_not_deep"
+        elif not text and settings.OBSCURA_COMMAND:
+            obscura_skipped_reason = "domain_not_allowlisted"
         if text:
             text = text[:max_chars]
             ttl_seconds = int(
@@ -2681,6 +3287,9 @@ class LiveWebSearch:
                 chars=len(text),
                 obscura_attempted=obscura_attempted,
                 js_rendered=method == "obscura_js",
+                obscura_skipped_reason=obscura_skipped_reason,
+                source_type=source_type,
+                transcript_status=transcript_status,
             )
         return _PageFetchResult(
             url=url,
@@ -2692,6 +3301,9 @@ class LiveWebSearch:
                 else "no_extractable_text"
             ),
             obscura_attempted=obscura_attempted,
+            obscura_skipped_reason=obscura_skipped_reason,
+            source_type=source_type,
+            transcript_status=transcript_status,
         )
 
     def _should_try_obscura(self, url: str) -> bool:
@@ -2770,11 +3382,26 @@ class LiveWebSearch:
         )
 
     async def _fetch_one_with_obscura(self, url: str) -> str | None:
+        text = await self._run_obscura_fetch(url, dump="markdown")
+        if text:
+            return text
+        html_text = await self._run_obscura_fetch(url, dump="html")
+        if not html_text:
+            return None
+        settings = get_settings()
+        return _extract_next_data_text(
+            html_text,
+            url=url,
+            max_chars=int(settings.OBSCURA_MAX_CHARS or _DEFAULT_OBSCURA_MAX_CHARS),
+        )
+
+    async def _run_obscura_fetch(self, url: str, *, dump: str) -> str | None:
         settings = get_settings()
         args = _obscura_command_args(
             settings.OBSCURA_COMMAND,
             url=url,
             timeout_seconds=float(settings.OBSCURA_TIMEOUT_SECONDS or 10.0),
+            dump=dump,
         )
         if not args:
             return None
@@ -2789,19 +3416,36 @@ class LiveWebSearch:
                 timeout=settings.OBSCURA_TIMEOUT_SECONDS + 2,
             )
         except Exception as exc:
-            logger.debug("Obscura fetch failed for %s: %s", url, exc)
+            logger.debug("Obscura %s fetch failed for %s: %s", dump, url, exc)
             return None
         if proc.returncode != 0:
             stderr = _stderr.decode("utf-8", errors="replace").strip()
-            logger.debug("Obscura fetch exited %s for %s: %s", proc.returncode, url, stderr[:300])
+            logger.debug(
+                "Obscura %s fetch exited %s for %s: %s",
+                dump,
+                proc.returncode,
+                url,
+                stderr[:300],
+            )
             return None
         text = stdout.decode("utf-8", errors="replace").strip()
-        return text[: settings.OBSCURA_MAX_CHARS] if text else None
+        if not text:
+            return None
+        if dump == "html":
+            return text
+        return text[: settings.OBSCURA_MAX_CHARS]
 
     async def _fetch_one_with_ytdlp(self, url: str) -> str | None:
         """Extract useful YouTube metadata/transcripts with yt-dlp when available."""
         settings = get_settings()
-        max_chars = int(settings.OBSCURA_MAX_CHARS or _DEFAULT_OBSCURA_MAX_CHARS)
+        max_chars = int(
+            getattr(settings, "LIVE_WEB_VIDEO_TRANSCRIPT_MAX_CHARS", _DEFAULT_VIDEO_TRANSCRIPT_MAX_CHARS)
+            or _DEFAULT_VIDEO_TRANSCRIPT_MAX_CHARS
+        )
+        min_chars = int(
+            getattr(settings, "LIVE_WEB_VIDEO_TRANSCRIPT_MIN_CHARS", _DEFAULT_VIDEO_TRANSCRIPT_MIN_CHARS)
+            or _DEFAULT_VIDEO_TRANSCRIPT_MIN_CHARS
+        )
         timeout_seconds = min(float(settings.OBSCURA_TIMEOUT_SECONDS or 10.0), 12.0)
         try:
             import yt_dlp  # type: ignore
@@ -2849,7 +3493,7 @@ class LiveWebSearch:
             f"Transcript: {caption}" if caption else "",
         ]
         text = "\n".join(part for part in parts if part).strip()
-        return text[:max_chars] if len(text) >= 120 else None
+        return text[:max_chars] if len(text) >= min_chars else None
 
     async def _fetch_ytdlp_caption_text(
         self,

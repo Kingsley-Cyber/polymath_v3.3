@@ -540,6 +540,8 @@ async def upsert_children(
         {
             "corpus_id": c["corpus_id"],
             "doc_id": c["doc_id"],
+            "filename": c.get("filename") or c.get("doc_name") or "",
+            "doc_name": c.get("doc_name") or c.get("filename") or "",
             "chunk_id": c["chunk_id"],
             "parent_id": c["parent_id"],
             "chunk_type": "child",
@@ -621,6 +623,8 @@ async def upsert_summaries(
         {
             "corpus_id": p["corpus_id"],
             "doc_id": p["doc_id"],
+            "filename": p.get("filename") or p.get("doc_name") or "",
+            "doc_name": p.get("doc_name") or p.get("filename") or "",
             "chunk_id": f"{p['parent_id']}_summary",
             "parent_id": p["parent_id"],
             "chunk_type": "summary",

@@ -6,9 +6,11 @@
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime
 from time import perf_counter
 from typing import Any, AsyncGenerator
+from urllib.parse import urlparse
 
 from bson import ObjectId
 from config import get_settings
@@ -45,12 +47,13 @@ settings = get_settings()
 HYDE_FAILURE_TTL_SECONDS = 600.0
 _HYDE_FAILURE_CACHE: dict[str, float] = {}
 _MAX_PERSISTED_SOURCE_PREVIEWS = 10
-_MAX_PERSISTED_WEB_SOURCE_PREVIEWS = 7
+_MAX_PERSISTED_WEB_SOURCE_PREVIEWS = 20
 _MAX_PERSISTED_SOURCE_TEXT_CHARS = 900
 _MAX_PERSISTED_SOURCE_SUMMARY_CHARS = 500
 _MAX_TOOL_CALLS_PER_TURN = 5
 _MAX_WEB_SEARCH_CALLS_PER_TURN = 3
-_MAX_WEB_SEARCH_RESULTS_PER_CALL = 7
+_MAX_WEB_SEARCH_RESULTS_PER_CALL = 20
+_DEFAULT_EVIDENCE_MAX_SOURCES = 9
 _RAW_TOOL_REQUEST_MARKERS = (
     "<｜｜dsml｜｜tool_calls",
     "<tool_calls",
@@ -164,7 +167,7 @@ def _append_deduped_web_sources(existing: list[Any], pending: list[Any]) -> list
 
 
 def _cap_web_sources_for_turn(sources: list[Any]) -> list[Any]:
-    """Keep at most seven web source cards for a chat turn."""
+    """Keep web source cards bounded across repeated web searches in one turn."""
     capped: list[Any] = []
     web_count = 0
     for source in sources:
@@ -175,6 +178,556 @@ def _cap_web_sources_for_turn(sources: list[Any]) -> list[Any]:
             web_count += 1
         capped.append(source)
     return capped
+
+
+def _safe_int(value: Any, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(parsed, maximum))
+
+
+def _resolve_web_evidence_options(request: ChatRequest | None) -> dict[str, Any]:
+    """Resolve the four user-facing web knobs into bounded runtime budgets."""
+    overrides = request.overrides if request is not None else None
+    research_mode = bool(getattr(overrides, "web_research_mode", None))
+    raw_depth = str(getattr(overrides, "web_fetch_depth", None) or "normal").lower()
+    fetch_depth = raw_depth if raw_depth in {"snippets", "normal", "deep"} else "normal"
+    if research_mode and fetch_depth == "normal":
+        fetch_depth = "deep"
+
+    youtube_value = getattr(overrides, "web_youtube_transcripts", None)
+    youtube_transcripts = True if youtube_value is None else bool(youtube_value)
+
+    requested_sources = _safe_int(
+        getattr(overrides, "web_max_sources", None),
+        _DEFAULT_EVIDENCE_MAX_SOURCES,
+        minimum=3,
+        maximum=_MAX_WEB_SEARCH_RESULTS_PER_CALL,
+    )
+    effective_sources = requested_sources * (2 if research_mode else 1)
+    effective_sources = max(3, min(effective_sources, _MAX_WEB_SEARCH_RESULTS_PER_CALL))
+
+    configured_fetch_pages = _safe_int(
+        getattr(settings, "LIVE_WEB_FETCH_MAX_PAGES", 6),
+        6,
+        minimum=0,
+        maximum=20,
+    )
+    max_fetch_pages = configured_fetch_pages * (2 if research_mode else 1)
+    max_fetch_pages = max(0, min(max_fetch_pages, 20))
+
+    configured_candidates = _safe_int(
+        getattr(settings, "LIVE_WEB_SEARCH_CANDIDATE_RESULTS", effective_sources),
+        effective_sources,
+        minimum=effective_sources,
+        maximum=40,
+    )
+    candidate_limit = max(
+        effective_sources,
+        configured_candidates,
+        effective_sources * (2 if research_mode else 1),
+    )
+    candidate_limit = max(effective_sources, min(candidate_limit, 40))
+
+    return {
+        "fetch_depth": fetch_depth,
+        "research_mode": research_mode,
+        "youtube_transcripts": youtube_transcripts,
+        "requested_max_sources": requested_sources,
+        "max_sources": effective_sources,
+        "candidate_limit": candidate_limit,
+        "max_fetch_pages": max_fetch_pages,
+    }
+
+
+def _source_title(data: dict[str, Any]) -> str:
+    metadata = _source_metadata(data)
+    for value in (
+        data.get("doc_name"),
+        metadata.get("title"),
+        metadata.get("filename"),
+        metadata.get("url"),
+        data.get("doc_id"),
+        data.get("chunk_id"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    return "source"
+
+
+def _source_excerpt(data: dict[str, Any], *, max_chars: int) -> str:
+    text = str(data.get("text") or data.get("summary") or "").strip()
+    marker = "\nContent: "
+    if marker in text:
+        text = text.split(marker, 1)[1]
+    text = " ".join(text.split())
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "..."
+
+
+def _dedupe_for_evidence_packet(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deduplicate by URL/domain/content fingerprint, not score shape."""
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for data in items:
+        metadata = _source_metadata(data)
+        url = str(metadata.get("url") or data.get("doc_id") or "").strip().lower()
+        title = _source_title(data).lower()
+        text = " ".join(str(data.get("text") or "").split()).lower()
+        fingerprint = f"{url}|{title[:120]}|{text[:240]}"
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        deduped.append(data)
+    return deduped
+
+
+def _collect_web_run_summaries(request: ChatRequest | None) -> list[dict[str, Any]]:
+    if request is None:
+        return []
+    runs = getattr(request, "_web_evidence_runs", None)
+    return list(runs) if isinstance(runs, list) else []
+
+
+def _record_web_evidence_run(
+    request: ChatRequest | None,
+    summary: dict[str, Any],
+) -> None:
+    if request is None:
+        return
+    runs = _collect_web_run_summaries(request)
+    runs.append(summary)
+    object.__setattr__(request, "_web_evidence_runs", runs[-6:])
+
+
+def _web_health_from_runs(runs: list[dict[str, Any]]) -> tuple[str, list[str]]:
+    if not runs:
+        return "no_web", []
+    errors: list[str] = []
+    total_results = 0
+    for run in runs:
+        total_results += int(run.get("result_count") or 0)
+        for item in run.get("engine_errors") or []:
+            text = str(item or "").strip()
+            if text and text not in errors:
+                errors.append(text)
+    if total_results <= 0:
+        return "failed_search", errors
+    if errors or any(run.get("degraded") for run in runs):
+        return "degraded_search", errors
+    return "ok", []
+
+
+_EVIDENCE_SCORE_STOPWORDS = {
+    "about",
+    "after",
+    "also",
+    "and",
+    "are",
+    "can",
+    "does",
+    "for",
+    "from",
+    "how",
+    "into",
+    "its",
+    "latest",
+    "like",
+    "more",
+    "should",
+    "that",
+    "the",
+    "their",
+    "then",
+    "this",
+    "use",
+    "using",
+    "what",
+    "when",
+    "where",
+    "why",
+    "with",
+}
+
+
+def _evidence_score_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9][a-z0-9.+#-]*", value.lower())
+        if len(token) >= 3 and token not in _EVIDENCE_SCORE_STOPWORDS
+    }
+
+
+def _query_coverage(query: str, text: str) -> float:
+    query_tokens = _evidence_score_tokens(query)
+    if not query_tokens:
+        return 0.0
+    text_tokens = _evidence_score_tokens(text)
+    if not text_tokens:
+        return 0.0
+    denominator = min(len(query_tokens), 8)
+    return round(min(1.0, len(query_tokens & text_tokens) / denominator), 3)
+
+
+def _score_web_evidence_chunk(
+    *,
+    query: str,
+    chunk: Any,
+    seen_domains: set[str],
+    seen_types: set[str],
+) -> dict[str, Any]:
+    data = _source_to_dict(chunk) or {}
+    metadata = _source_metadata(data)
+    url = str(metadata.get("url") or data.get("doc_id") or "")
+    domain = urlparse(url).netloc.lower().removeprefix("www.")
+    source_type = str(metadata.get("source_type") or "webpage")
+    evidence_mode = str(metadata.get("evidence_mode") or "snippet_only")
+    fetch_method = str(metadata.get("fetch_method") or "snippet")
+    text = str(data.get("text") or "")
+    title = _source_title(data)
+
+    try:
+        rerank_score = float(data.get("score") or getattr(chunk, "score", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        rerank_score = 0.0
+    relevance = max(0.0, min(1.0, rerank_score))
+    coverage = _query_coverage(query, f"{title} {text}")
+    relevance = round(max(relevance, coverage), 3)
+
+    if evidence_mode == "full_page":
+        completeness = 0.92
+    elif fetch_method == "yt_dlp" or source_type == "video":
+        completeness = 0.88
+    elif str(metadata.get("search_provider") or "").lower() == "wikipedia":
+        completeness = 0.84
+    elif evidence_mode == "snippet_fetch_failed":
+        completeness = 0.28
+    else:
+        completeness = 0.48
+
+    intent_fit = coverage
+    if any(
+        marker in query.lower()
+        for marker in ("official", "docs", "documentation", "api", "reference")
+    ):
+        if any(
+            marker in url.lower()
+            for marker in ("docs", "developer", "reference", "github.com")
+        ):
+            intent_fit = max(intent_fit, 0.9)
+    if any(marker in query.lower() for marker in ("tutorial", "demo", "walkthrough")):
+        if source_type == "video" or "youtube" in url.lower():
+            intent_fit = max(intent_fit, 0.85)
+
+    diversity_bonus = 0.0
+    if domain and domain not in seen_domains:
+        diversity_bonus += 0.08
+    if source_type and source_type not in seen_types:
+        diversity_bonus += 0.07
+    diversity_bonus = round(diversity_bonus, 3)
+
+    penalty = 0.0
+    if metadata.get("fetch_failed"):
+        penalty += 0.15
+    if metadata.get("engine_errors"):
+        penalty += 0.05
+    if metadata.get("content_truncated"):
+        penalty += 0.03
+
+    final = round(
+        max(
+            0.0,
+            min(
+                1.0,
+                relevance * 0.5
+                + completeness * 0.25
+                + intent_fit * 0.15
+                + diversity_bonus
+                - penalty,
+            ),
+        ),
+        3,
+    )
+    return {
+        "final": final,
+        "relevance": relevance,
+        "completeness": round(completeness, 3),
+        "intent_fit": round(intent_fit, 3),
+        "diversity_bonus": diversity_bonus,
+        "penalty": round(penalty, 3),
+        "domain": domain,
+        "source_type": source_type,
+    }
+
+
+def _annotate_web_evidence_scores(query: str, chunks: list[Any]) -> list[dict[str, Any]]:
+    seen_domains: set[str] = set()
+    seen_types: set[str] = set()
+    scores: list[dict[str, Any]] = []
+    for chunk in chunks:
+        score = _score_web_evidence_chunk(
+            query=query,
+            chunk=chunk,
+            seen_domains=seen_domains,
+            seen_types=seen_types,
+        )
+        scores.append(score)
+        if score.get("domain"):
+            seen_domains.add(str(score["domain"]))
+        if score.get("source_type"):
+            seen_types.add(str(score["source_type"]))
+        metadata = dict(getattr(chunk, "metadata", None) or {})
+        metadata["evidence_score"] = score
+        try:
+            chunk.metadata = metadata
+        except Exception:
+            pass
+    return scores
+
+
+def _classify_web_evidence_sufficiency(
+    *,
+    chunks: list[Any],
+    scores: list[dict[str, Any]],
+    engine_errors: list[str],
+    pipeline: dict[str, Any],
+) -> dict[str, Any]:
+    """Hard web-evidence grade for the final model and UI telemetry."""
+    result_count = len(chunks)
+    best_score = max((float(score.get("final") or 0.0) for score in scores), default=0.0)
+    avg_score = (
+        sum(float(score.get("final") or 0.0) for score in scores) / len(scores)
+        if scores
+        else 0.0
+    )
+    full_page_successes = int(pipeline.get("full_page_fetch_successes") or 0)
+    snippet_score = float(pipeline.get("snippet_sufficiency_score") or 0.0)
+    degraded = bool(engine_errors)
+
+    if result_count == 0:
+        grade = "insufficient"
+        reason = "no_final_web_sources"
+    elif best_score >= 0.72 and avg_score >= 0.55 and result_count >= 3 and not degraded:
+        grade = "confident"
+        reason = "multiple_relevant_sources"
+    elif (
+        best_score >= 0.68
+        and result_count >= 2
+        and (full_page_successes > 0 or snippet_score >= 0.72)
+    ):
+        grade = "confident" if not degraded else "partial"
+        reason = "strong_relevance_with_page_or_rich_snippet_evidence"
+    elif best_score >= 0.45 or result_count >= 2:
+        grade = "partial"
+        reason = "some_relevant_evidence_but_thin_or_degraded"
+    else:
+        grade = "insufficient"
+        reason = "low_relevance_or_too_little_evidence"
+
+    return {
+        "grade": grade,
+        "reason": reason,
+        "best_score": round(best_score, 3),
+        "avg_score": round(avg_score, 3),
+        "result_count": result_count,
+        "degraded": degraded,
+    }
+
+
+def _build_backend_retry_query(
+    *,
+    search_query: str,
+    original_query: str | None,
+) -> str | None:
+    """Deterministic alternate query for one backend-owned recovery attempt."""
+    base = re.sub(r"\b(site:[^\s]+|![a-z]+\s*)", " ", original_query or search_query)
+    base = re.sub(r"[^A-Za-z0-9.+#_/-]+", " ", base)
+    tokens = [
+        token
+        for token in base.split()
+        if len(token) >= 3 and token.lower() not in _EVIDENCE_SCORE_STOPWORDS
+    ]
+    anchors = re.findall(r"\b[A-Z][A-Za-z0-9_]*(?:Service|API|SDK|DB|RAG|LLM)?\b", original_query or search_query)
+    ordered: list[str] = []
+    for token in [*anchors, *tokens]:
+        cleaned = token.strip(".,;:()[]{}")
+        if not cleaned or cleaned.lower() in {item.lower() for item in ordered}:
+            continue
+        ordered.append(cleaned)
+        if len(ordered) >= 10:
+            break
+    if not ordered:
+        return None
+    retry = " ".join(ordered)
+    lower_original = (original_query or search_query).lower()
+    if any(marker in lower_original for marker in ("official", "docs", "documentation", "api", "reference")):
+        if "official" not in retry.lower():
+            retry = f"{retry} official documentation"
+    if retry.lower() == search_query.lower():
+        retry = f"{retry} guide reference"
+    return retry[:300]
+
+
+def _format_evidence_packet_block(
+    *,
+    sources: list[Any] | None,
+    request: ChatRequest | None,
+) -> str:
+    """Build the explicit evidence contract shown to the final chat model."""
+    source_dicts = [
+        data
+        for source in (sources or [])
+        if (data := _source_to_dict(source)) is not None
+    ]
+    if not source_dicts and not _collect_web_run_summaries(request):
+        return ""
+
+    options = _resolve_web_evidence_options(request)
+    runs = _collect_web_run_summaries(request)
+    web_sources = _dedupe_for_evidence_packet(
+        [data for data in source_dicts if _is_web_source_data(data)]
+    )
+    corpus_sources = _dedupe_for_evidence_packet(
+        [data for data in source_dicts if not _is_web_source_data(data)]
+    )
+    web_limit = int(options["max_sources"])
+    corpus_limit = min(8, len(corpus_sources))
+    web_selected = web_sources[:web_limit]
+    corpus_selected = corpus_sources[:corpus_limit]
+
+    web_health, engine_errors = _web_health_from_runs(runs)
+    sufficiency = next(
+        (
+            run.get("sufficiency")
+            for run in reversed(runs)
+            if isinstance(run.get("sufficiency"), dict)
+        ),
+        None,
+    )
+    web_modes = {
+        str(_source_metadata(data).get("evidence_mode") or "unknown")
+        for data in web_selected
+    }
+    evidence_mode = (
+        "none"
+        if not web_selected
+        else next(iter(web_modes))
+        if len(web_modes) == 1
+        else "mixed"
+    )
+    obscura_rendered = any(
+        bool(_source_metadata(data).get("js_rendered")) for data in web_selected
+    )
+    obscura_attempted = any(
+        bool(_source_metadata(data).get("obscura_attempted")) for data in web_selected
+    )
+    obscura_skips = [
+        str(_source_metadata(data).get("obscura_skipped_reason"))
+        for data in web_selected
+        if _source_metadata(data).get("obscura_skipped_reason")
+    ]
+    youtube_ok = sum(
+        1
+        for data in web_selected
+        if _source_metadata(data).get("transcript_status") == "ok"
+    )
+    wikipedia_count = sum(
+        1
+        for data in web_selected
+        if str(_source_metadata(data).get("search_provider") or "").lower()
+        == "wikipedia"
+    )
+    if obscura_rendered:
+        obscura_status = "rendered"
+    elif obscura_attempted:
+        obscura_status = "attempted_no_render"
+    elif obscura_skips:
+        obscura_status = f"skipped ({', '.join(dict.fromkeys(obscura_skips))})"
+    else:
+        obscura_status = "not_needed_or_no_allowlisted_failure"
+
+    lines = [
+        "[EVIDENCE PACKET]",
+        f"Web health: {web_health}",
+        f"Web sufficiency: {(sufficiency or {}).get('grade', 'not_assessed')}",
+        f"Fetch depth: {options['fetch_depth']}",
+        f"Research mode: {str(bool(options['research_mode'])).lower()}",
+        f"Evidence mode: {evidence_mode}",
+        f"Obscura: {obscura_status}",
+        (
+            "YouTube transcripts: "
+            f"{'enabled' if options['youtube_transcripts'] else 'disabled'}"
+            f"; successes={youtube_ok}"
+        ),
+        f"Wikipedia entity extracts: {wikipedia_count}",
+        f"Corpus sources included: {len(corpus_selected)}",
+        f"Web sources included: {len(web_selected)} of requested {web_limit}",
+    ]
+    if engine_errors:
+        lines.append(f"Search engine issues: {'; '.join(engine_errors[:5])}")
+    if sufficiency:
+        lines.append(
+            "Sufficiency reason: "
+            f"{sufficiency.get('reason')} "
+            f"(best={sufficiency.get('best_score')}, avg={sufficiency.get('avg_score')})"
+        )
+    if runs:
+        query_lines = []
+        for run in runs[-3:]:
+            query = _clip_trace_value(run.get("query"), 140)
+            result_count = run.get("result_count")
+            query_lines.append(f"- {query} -> {result_count} result(s)")
+        lines.append("Search attempts:\n" + "\n".join(query_lines))
+    lines.append(
+        "Use relevance first. Treat source type as metadata, not privilege. "
+        "If web health is degraded or evidence is snippet-only, lower confidence "
+        "for web-dependent claims and say what could not be verified."
+    )
+
+    if corpus_selected:
+        lines.append("\n[Corpus Evidence]")
+        for idx, data in enumerate(corpus_selected, start=1):
+            metadata = _source_metadata(data)
+            label = _source_title(data)
+            score = data.get("score")
+            kind = data.get("source_tier") or metadata.get("chunk_kind") or "corpus"
+            excerpt = _source_excerpt(data, max_chars=700)
+            lines.append(
+                f"{idx}. {label} | kind={kind} | score={score}\n"
+                f"   {excerpt or '(no excerpt)'}"
+            )
+
+    if web_selected:
+        lines.append("\n[Web Evidence]")
+        for idx, data in enumerate(web_selected, start=1):
+            metadata = _source_metadata(data)
+            label = _source_title(data)
+            url = str(metadata.get("url") or data.get("doc_id") or "").strip()
+            method = metadata.get("fetch_method") or "snippet"
+            mode = metadata.get("evidence_mode") or "unknown"
+            source_type = metadata.get("source_type") or "webpage"
+            transcript = metadata.get("transcript_status")
+            provider = metadata.get("search_provider") or metadata.get("source")
+            score = metadata.get("evidence_score") or {}
+            final_score = (
+                score.get("final")
+                if isinstance(score, dict)
+                else None
+            )
+            excerpt = _source_excerpt(data, max_chars=1100)
+            lines.append(
+                f"{idx}. {label} | {url} | provider={provider or 'unknown'} "
+                f"| type={source_type} | mode={mode} | fetch={method}"
+                f"{f' | transcript={transcript}' if transcript else ''}"
+                f"{f' | evidence_score={final_score}' if final_score is not None else ''}\n"
+                f"   {excerpt or '(no excerpt)'}"
+            )
+
+    return "\n".join(lines).strip()
 
 
 def _source_identity_key(source: Any) -> str | None:
@@ -287,6 +840,16 @@ def _format_web_retrieval_decision_trace(
     js_render = (
         pipeline.get("js_render") if isinstance(pipeline.get("js_render"), dict) else {}
     )
+    sufficiency = (
+        pipeline.get("evidence_sufficiency")
+        if isinstance(pipeline.get("evidence_sufficiency"), dict)
+        else {}
+    )
+    backend_retry = (
+        pipeline.get("backend_retry")
+        if isinstance(pipeline.get("backend_retry"), dict)
+        else {}
+    )
 
     method_counts: dict[str, int] = {}
     for item in fetches:
@@ -340,6 +903,12 @@ def _format_web_retrieval_decision_trace(
         f"obscura: configured={str(bool(js_render.get('configured'))).lower()}, "
         f"attempted={str(bool(js_render.get('attempted'))).lower()}, "
         f"rendered={str(bool(js_render.get('rendered'))).lower()}\n"
+        f"web_sufficiency: grade={sufficiency.get('grade', 'unknown')}, "
+        f"reason={sufficiency.get('reason', 'unknown')}, "
+        f"best={sufficiency.get('best_score', 'unknown')}, "
+        f"avg={sufficiency.get('avg_score', 'unknown')}\n"
+        f"backend_retry: attempted={str(bool(backend_retry.get('attempted'))).lower()}, "
+        f"selected_query={_clip_trace_value(backend_retry.get('selected_query'), 180)}\n"
         f"reranker: {pipeline.get('ranked_by') or payload.get('ranked_by') or 'unknown'} "
         f"selected={final_results}/{final_limit}\n"
         "top_selected_sources:\n"
@@ -359,6 +928,8 @@ def _format_web_retrieval_decision_trace(
         "ranked_by": pipeline.get("ranked_by") or payload.get("ranked_by"),
         "final_reranked_results": final_results,
         "final_result_limit": final_limit,
+        "web_sufficiency": sufficiency.get("grade"),
+        "backend_retry_attempted": bool(backend_retry.get("attempted")),
         "raw_chain_of_thought": False,
     }
     return content, metadata
@@ -425,8 +996,8 @@ def _web_search_tool_schema() -> dict[str, Any]:
                 "blogs, framework docs, and production guides unless the user "
                 "asks for papers. The server executes controlled SearXNG search, "
                 "deterministic page fetching including Obscura fallback for "
-                "niche JS-render cases, and local reranking to at most seven "
-                "results."
+                "niche JS-render cases, and local reranking within the user's "
+                "configured source budget."
             ),
             "parameters": {
                 "type": "object",
@@ -974,12 +1545,22 @@ class ChatOrchestrator:
         # use IT as the retrieval query. Answers tend to embed closer to
         # answer-shaped chunks than questions do. Graceful fallback on failure.
         hyde_trace_enabled = bool(request.overrides and request.overrides.hyde_enabled)
+        hyde_route = None
+        if hyde_trace_enabled:
+            hyde_route = await self._resolve_hyde_route(
+                request,
+                user_id=user_id,
+                fallback_model=model_used,
+                fallback_api_base=profile_creds.get("api_base"),
+                fallback_api_key=profile_creds.get("api_key"),
+                fallback_extra=profile_creds.get("extra_params"),
+            )
         if hyde_trace_enabled:
             hyde_model_trace = (
-                request.overrides.hyde_model
-                if request.overrides
-                else None
-            ) or settings.HYDE_MODEL
+                (hyde_route or {}).get("model")
+                or settings.HYDE_MODEL
+                or model_used
+            )
             yield _record_trace_event(
                 lane="model_call",
                 title="HyDE query helper",
@@ -1000,6 +1581,11 @@ class ChatOrchestrator:
             request,
             user_id=user_id,
             hyde_explicit=bool(profile_cfg.get("hyde_explicit", False)),
+            fallback_model=model_used,
+            fallback_api_base=profile_creds.get("api_base"),
+            fallback_api_key=profile_creds.get("api_key"),
+            fallback_extra=profile_creds.get("extra_params"),
+            resolved_route=hyde_route,
         )
         if hyde_trace_enabled:
             yield _record_trace_event(
@@ -2011,6 +2597,84 @@ class ChatOrchestrator:
                         conversation_id=str(conversation_id),
                     )
                 )
+                evidence_block = _format_evidence_packet_block(
+                    sources=sources,
+                    request=request,
+                )
+                if evidence_block:
+                    evidence_signature = str(hash(evidence_block))
+                    if (
+                        getattr(request, "_last_evidence_packet_signature", None)
+                        != evidence_signature
+                    ):
+                        object.__setattr__(
+                            request,
+                            "_last_evidence_packet_signature",
+                            evidence_signature,
+                        )
+                        react_messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"{evidence_block}\n\n"
+                                    "Use this evidence packet for the final "
+                                    "synthesis. Do not repeat the packet; "
+                                    "answer the user's original question."
+                                ),
+                            }
+                        )
+                        yield _record_trace_event(
+                            lane="reasoning",
+                            title="Evidence packet",
+                            status="done",
+                            content=_clip_trace_value(evidence_block, 900),
+                            metadata={
+                                "web_sources": sum(
+                                    1
+                                    for source in sources
+                                    if (
+                                        (data := _source_to_dict(source))
+                                        and _is_web_source_data(data)
+                                    )
+                                ),
+                                "corpus_sources": sum(
+                                    1
+                                    for source in sources
+                                    if (
+                                        (data := _source_to_dict(source))
+                                        and not _is_web_source_data(data)
+                                    )
+                                ),
+                                "raw_chain_of_thought": False,
+                            },
+                        )
+            elif _collect_web_run_summaries(request):
+                evidence_block = _format_evidence_packet_block(
+                    sources=sources,
+                    request=request,
+                )
+                if evidence_block:
+                    evidence_signature = str(hash(evidence_block))
+                    if (
+                        getattr(request, "_last_evidence_packet_signature", None)
+                        != evidence_signature
+                    ):
+                        object.__setattr__(
+                            request,
+                            "_last_evidence_packet_signature",
+                            evidence_signature,
+                        )
+                        react_messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"{evidence_block}\n\n"
+                                    "Use this evidence packet for the final "
+                                    "synthesis. Do not repeat the packet; "
+                                    "answer the user's original question."
+                                ),
+                            }
+                        )
 
         # === END ReAct LOOP ===
 
@@ -2435,12 +3099,77 @@ class ChatOrchestrator:
             **extras,
         }
 
+    async def _resolve_hyde_route(
+        self,
+        request: ChatRequest,
+        user_id: str | None = None,
+        *,
+        fallback_model: str | None = None,
+        fallback_api_base: str | None = None,
+        fallback_api_key: str | None = None,
+        fallback_extra: dict | None = None,
+    ) -> dict[str, Any]:
+        """Resolve the model used by the optional HyDE helper call.
+
+        Dedicated HyDE pool config wins. If it is absent, HyDE inherits the
+        already-resolved chat model, including pool/profile credentials.
+        """
+        overrides = request.overrides
+        explicit_model = (overrides.hyde_model if overrides else None) or None
+        if explicit_model:
+            return {
+                "model": explicit_model,
+                "api_base": None,
+                "api_key": None,
+                "extra_params": None,
+                "source": "request_override",
+            }
+
+        # Phase F — user-configured Settings -> Models -> HyDE card.
+        if user_id:
+            qres = await resolve_query_model_kind(user_id, "hyde")
+            if qres:
+                logger.info(
+                    "HyDE — Phase F prefs resolution: user=%s → %s",
+                    user_id,
+                    qres["model"],
+                )
+                return {
+                    "model": qres["model"],
+                    "api_base": qres["api_base"],
+                    "api_key": qres["api_key"],
+                    "extra_params": qres["extra_params"] or None,
+                    "source": "hyde_pool",
+                }
+
+        if fallback_model:
+            return {
+                "model": fallback_model,
+                "api_base": fallback_api_base,
+                "api_key": fallback_api_key,
+                "extra_params": fallback_extra,
+                "source": "active_chat_model",
+            }
+
+        return {
+            "model": settings.HYDE_MODEL,
+            "api_base": None,
+            "api_key": None,
+            "extra_params": None,
+            "source": "env",
+        }
+
     async def _apply_hyde(
         self,
         request: ChatRequest,
         user_id: str | None = None,
         *,
         hyde_explicit: bool = False,
+        fallback_model: str | None = None,
+        fallback_api_base: str | None = None,
+        fallback_api_key: str | None = None,
+        fallback_extra: dict | None = None,
+        resolved_route: dict[str, Any] | None = None,
     ) -> tuple[str, bool]:
         """
         Phase 17 — Hypothetical Document Embeddings.
@@ -2459,7 +3188,8 @@ class ChatOrchestrator:
         Model resolution order:
           1. request.overrides.hyde_model (per-request)
           2. Phase F — user query prefs `hyde_pool_id` → pool entry creds
-          3. settings.HYDE_MODEL (server default)
+          3. active chat model for this turn
+          4. settings.HYDE_MODEL (server emergency default)
 
         On any failure (LLM down, malformed response), log a warning and
         fall back to the original query (applied=False).
@@ -2480,24 +3210,18 @@ class ChatOrchestrator:
                 request.message[:80],
             )
 
-        hyde_model = (overrides.hyde_model if overrides else None) or settings.HYDE_MODEL
-        hyde_api_base: str | None = None
-        hyde_api_key: str | None = None
-        hyde_extra: dict | None = None
-
-        # Phase F — only consult prefs when no per-request override given.
-        # Phase 24 perf — resolver imported at module-level.
-        if user_id and not (overrides and overrides.hyde_model):
-            qres = await resolve_query_model_kind(user_id, "hyde")
-            if qres:
-                hyde_model = qres["model"]
-                hyde_api_base = qres["api_base"]
-                hyde_api_key = qres["api_key"]
-                hyde_extra = qres["extra_params"] or None
-                logger.info(
-                    "HyDE — Phase F prefs resolution: user=%s → %s",
-                    user_id, hyde_model,
-                )
+        route = resolved_route or await self._resolve_hyde_route(
+            request,
+            user_id=user_id,
+            fallback_model=fallback_model,
+            fallback_api_base=fallback_api_base,
+            fallback_api_key=fallback_api_key,
+            fallback_extra=fallback_extra,
+        )
+        hyde_model = route.get("model") or settings.HYDE_MODEL
+        hyde_api_base = route.get("api_base")
+        hyde_api_key = route.get("api_key")
+        hyde_extra = route.get("extra_params") or None
 
         failure_key = _hyde_failure_key(hyde_model, hyde_api_base)
         failed_at = _HYDE_FAILURE_CACHE.get(failure_key)
@@ -2840,13 +3564,14 @@ class ChatOrchestrator:
             query = " ".join(request.message.split()).strip()
         if not query:
             return json.dumps({"error": "query is required"})
+        web_options = _resolve_web_evidence_options(request)
         try:
             max_results = int(
-                args.get("max_results") or _MAX_WEB_SEARCH_RESULTS_PER_CALL
+                args.get("max_results") or web_options["max_sources"]
             )
         except (TypeError, ValueError):
-            max_results = _MAX_WEB_SEARCH_RESULTS_PER_CALL
-        max_results = max(1, min(max_results, _MAX_WEB_SEARCH_RESULTS_PER_CALL))
+            max_results = int(web_options["max_sources"])
+        max_results = max(1, min(max_results, int(web_options["max_sources"])))
 
         try:
             from services.web_freshness import (
@@ -2905,48 +3630,137 @@ class ChatOrchestrator:
                 )
             query = enrichment.query
             search_query = query[:300]
-            candidate_limit = max(
-                max_results,
-                int(settings.LIVE_WEB_SEARCH_CANDIDATE_RESULTS or max_results),
-            )
-            time_range = infer_web_search_time_range(search_query)
-            hits = await live_web_search._search_searxng_pool(
-                search_query,
-                max_results=candidate_limit,
-                time_range=time_range,
-            )
+            candidate_limit = max(max_results, int(web_options["candidate_limit"]))
             prior_web_urls: set[str] = set()
             if request is not None and request.conversation_id:
                 prior_web_urls = await conversation_service.get_recent_web_source_urls(
                     request.conversation_id
                 )
-            fetched, fetch_stats, hits_to_fetch, web_pipeline = (
-                await live_web_search._fetch_pages_for_search(
-                    search_query=search_query,
-                    hits=hits,
-                    max_results=max_results,
-                    prior_web_urls=prior_web_urls,
+
+            async def run_search_pass(pass_query: str) -> dict[str, Any]:
+                pass_time_range = infer_web_search_time_range(pass_query)
+                pass_hits = await live_web_search._search_live_web_pool(
+                    pass_query,
+                    max_results=candidate_limit,
+                    time_range=pass_time_range,
                 )
+                pass_fetched, pass_fetch_stats, pass_hits_to_fetch, pass_web_pipeline = (
+                    await live_web_search._fetch_pages_for_search(
+                        search_query=pass_query,
+                        hits=pass_hits,
+                        max_results=max_results,
+                        prior_web_urls=prior_web_urls,
+                        fetch_depth=str(web_options["fetch_depth"]),
+                        youtube_transcripts_enabled=bool(
+                            web_options["youtube_transcripts"]
+                        ),
+                        max_fetch_pages=int(web_options["max_fetch_pages"]),
+                    )
+                )
+                pass_fetch_stats_by_url = {
+                    str(item.get("url")): item for item in pass_fetch_stats
+                }
+                pass_candidate_chunks = web_hits_to_source_chunks(
+                    pass_hits,
+                    fetched_markdown=pass_fetched,
+                    fetch_stats_by_url=pass_fetch_stats_by_url,
+                    search_query=pass_query,
+                    max_chars=int(settings.OBSCURA_MAX_CHARS or 4000),
+                )
+                pass_chunks = await rerank_web_source_chunks(
+                    pass_query,
+                    pass_candidate_chunks,
+                    limit=max_results,
+                )
+                pass_scores = _annotate_web_evidence_scores(pass_query, pass_chunks)
+                pass_engine_errors = list(
+                    dict.fromkeys(
+                        str(error)
+                        for hit in pass_hits
+                        for error in (hit.engine_errors or ())
+                        if str(error).strip()
+                    )
+                )
+                pass_pipeline_for_grade = {
+                    **pass_web_pipeline,
+                    "full_page_fetch_successes": len(pass_fetched),
+                    "full_page_fetch_attempts": len(pass_hits_to_fetch),
+                }
+                pass_sufficiency = _classify_web_evidence_sufficiency(
+                    chunks=pass_chunks,
+                    scores=pass_scores,
+                    engine_errors=pass_engine_errors,
+                    pipeline=pass_pipeline_for_grade,
+                )
+                return {
+                    "search_query": pass_query,
+                    "time_range": pass_time_range,
+                    "hits": pass_hits,
+                    "fetched": pass_fetched,
+                    "fetch_stats": pass_fetch_stats,
+                    "hits_to_fetch": pass_hits_to_fetch,
+                    "web_pipeline": pass_web_pipeline,
+                    "candidate_chunks": pass_candidate_chunks,
+                    "chunks": pass_chunks,
+                    "scores": pass_scores,
+                    "engine_errors": pass_engine_errors,
+                    "sufficiency": pass_sufficiency,
+                }
+
+            attempts: list[dict[str, Any]] = []
+            selected_pass = await run_search_pass(search_query)
+            attempts.append(selected_pass)
+
+            first_grade = selected_pass["sufficiency"]["grade"]
+            first_best = float(selected_pass["sufficiency"].get("best_score") or 0.0)
+            first_count = int(selected_pass["sufficiency"].get("result_count") or 0)
+            should_retry = (
+                first_grade == "insufficient"
+                or (first_grade == "partial" and first_best < 0.55)
+                or (bool(selected_pass["engine_errors"]) and first_count < 3)
             )
+            retry_query = None
+            if should_retry:
+                retry_query = _build_backend_retry_query(
+                    search_query=search_query,
+                    original_query=request.message if request is not None else None,
+                )
+            if retry_query and retry_query.lower() != search_query.lower():
+                retry_pass = await run_search_pass(retry_query)
+                attempts.append(retry_pass)
+
+                grade_rank = {"insufficient": 0, "partial": 1, "confident": 2}
+
+                def attempt_rank(item: dict[str, Any]) -> tuple[int, float, int]:
+                    sufficiency = item["sufficiency"]
+                    return (
+                        grade_rank.get(str(sufficiency.get("grade")), 0),
+                        float(sufficiency.get("best_score") or 0.0),
+                        int(sufficiency.get("result_count") or 0),
+                    )
+
+                if attempt_rank(retry_pass) > attempt_rank(selected_pass):
+                    selected_pass = retry_pass
+
+            search_query = selected_pass["search_query"]
+            time_range = selected_pass["time_range"]
+            hits = selected_pass["hits"]
+            fetched = selected_pass["fetched"]
+            fetch_stats = selected_pass["fetch_stats"]
+            hits_to_fetch = selected_pass["hits_to_fetch"]
+            web_pipeline = selected_pass["web_pipeline"]
+            candidate_chunks = selected_pass["candidate_chunks"]
+            chunks = selected_pass["chunks"]
+            evidence_scores = selected_pass["scores"]
+            evidence_sufficiency = selected_pass["sufficiency"]
+            engine_errors = selected_pass["engine_errors"]
             fetch_limit = len(hits_to_fetch)
-            fetch_stats_by_url = {str(item.get("url")): item for item in fetch_stats}
-            candidate_chunks = web_hits_to_source_chunks(
-                hits,
-                fetched_markdown=fetched,
-                fetch_stats_by_url=fetch_stats_by_url,
-                search_query=search_query,
-                max_chars=int(settings.OBSCURA_MAX_CHARS or 4000),
-            )
-            chunks = await rerank_web_source_chunks(
-                search_query,
-                candidate_chunks,
-                limit=max_results,
-            )
             hits_by_url = {hit.url: hit for hit in hits}
             result_items = []
             for chunk in chunks:
                 url = str((chunk.metadata or {}).get("url") or chunk.doc_id)
                 hit = hits_by_url.get(url)
+                metadata = chunk.metadata or {}
                 result_items.append(
                     {
                         "title": (hit.title if hit else chunk.doc_name),
@@ -2956,22 +3770,29 @@ class ChatOrchestrator:
                         "published_date": (
                             hit.published_date if hit else (chunk.metadata or {}).get("published_date")
                         ),
-                        "search_query": (chunk.metadata or {}).get("search_query"),
-                        "time_range": (chunk.metadata or {}).get("time_range"),
+                        "search_query": metadata.get("search_query"),
+                        "time_range": metadata.get("time_range"),
                         "full_page_fetched": bool(
-                            (chunk.metadata or {}).get("full_page_fetched")
+                            metadata.get("full_page_fetched")
                         ),
-                        "evidence_mode": (chunk.metadata or {}).get("evidence_mode"),
-                        "fetch_status": (chunk.metadata or {}).get("fetch_status"),
-                        "fetch_method": (chunk.metadata or {}).get("fetch_method"),
-                        "cache_hit": bool((chunk.metadata or {}).get("cache_hit")),
-                        "content_chars": (chunk.metadata or {}).get("content_chars"),
-                        "source_text_chars": (chunk.metadata or {}).get("source_text_chars"),
-                        "source_text_max_chars": (chunk.metadata or {}).get("source_text_max_chars"),
+                        "evidence_mode": metadata.get("evidence_mode"),
+                        "fetch_status": metadata.get("fetch_status"),
+                        "fetch_method": metadata.get("fetch_method"),
+                        "source_type": metadata.get("source_type"),
+                        "transcript_status": metadata.get("transcript_status"),
+                        "evidence_score": metadata.get("evidence_score"),
+                        "engine_errors": metadata.get("engine_errors") or [],
+                        "obscura_skipped_reason": metadata.get(
+                            "obscura_skipped_reason"
+                        ),
+                        "cache_hit": bool(metadata.get("cache_hit")),
+                        "content_chars": metadata.get("content_chars"),
+                        "source_text_chars": metadata.get("source_text_chars"),
+                        "source_text_max_chars": metadata.get("source_text_max_chars"),
                         "content_truncated": bool(
-                            (chunk.metadata or {}).get("content_truncated")
+                            metadata.get("content_truncated")
                         ),
-                        "rerank_text_max_chars": (chunk.metadata or {}).get("rerank_text_max_chars"),
+                        "rerank_text_max_chars": metadata.get("rerank_text_max_chars"),
                         "web_content_untrusted": True,
                     }
                 )
@@ -3002,6 +3823,12 @@ class ChatOrchestrator:
                 "candidate_results": len(hits),
                 "search_queries": search_queries[:12],
                 "freshness_time_range": time_range,
+                "fetch_depth": web_options["fetch_depth"],
+                "research_mode": bool(web_options["research_mode"]),
+                "youtube_transcripts_enabled": bool(
+                    web_options["youtube_transcripts"]
+                ),
+                "requested_max_sources": web_options["requested_max_sources"],
                 "snippet_rerank_applied": bool(
                     settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES
                     and len(hits) > len(hits_to_fetch)
@@ -3030,6 +3857,43 @@ class ChatOrchestrator:
                 "final_reranked_results": len(chunks),
                 "final_result_limit": max_results,
                 "ranked_by": settings.RERANKER_MODEL,
+                "evidence_sufficiency": evidence_sufficiency,
+                "source_scoring": {
+                    "formula": (
+                        "relevance*0.50 + completeness*0.25 + "
+                        "intent_fit*0.15 + diversity_bonus - penalty"
+                    ),
+                    "scores": evidence_scores,
+                },
+                "backend_retry": {
+                    "attempted": len(attempts) > 1,
+                    "reason": (
+                        "low_or_degraded_evidence"
+                        if len(attempts) > 1
+                        else "not_needed"
+                    ),
+                    "selected_query": search_query,
+                    "attempts": [
+                        {
+                            "query": item["search_query"],
+                            "grade": item["sufficiency"]["grade"],
+                            "reason": item["sufficiency"]["reason"],
+                            "best_score": item["sufficiency"]["best_score"],
+                            "result_count": item["sufficiency"]["result_count"],
+                            "candidate_results": len(item["hits"]),
+                            "engine_error_count": len(item["engine_errors"]),
+                        }
+                        for item in attempts
+                    ],
+                },
+                "engine_errors": engine_errors,
+                "provider_counts": {
+                    provider: sum(1 for hit in hits if hit.provider == provider)
+                    for provider in sorted({hit.provider for hit in hits})
+                },
+                "wikipedia_result_count": sum(
+                    1 for hit in hits if hit.provider == "wikipedia"
+                ),
                 "utility_query_enrichment": {
                     "attempted": enrichment.attempted,
                     "applied": enrichment.applied,
@@ -3052,6 +3916,14 @@ class ChatOrchestrator:
                 ),
             }
             pipeline.update(web_pipeline)
+            if evidence_sufficiency.get("grade") == "insufficient":
+                pipeline["search_health"] = "insufficient_evidence"
+            elif engine_errors:
+                pipeline["search_health"] = "degraded_search"
+            elif not hits:
+                pipeline["search_health"] = "failed_search"
+            else:
+                pipeline["search_health"] = "ok"
             logger.info(
                 (
                     "web_search pipeline query=%r candidates=%d "
@@ -3078,6 +3950,20 @@ class ChatOrchestrator:
                 bool((pipeline.get("web_query_planner") or {}).get("native_tool_call")),
                 bool((pipeline.get("web_query_builder") or {}).get("attempted")),
             )
+            _record_web_evidence_run(
+                request,
+                {
+                    "kind": "web_search",
+                    "query": search_query,
+                    "result_count": len(chunks),
+                    "candidate_results": len(hits),
+                    "engine_errors": engine_errors,
+                    "degraded": bool(engine_errors)
+                    or evidence_sufficiency.get("grade") != "confident",
+                    "sufficiency": evidence_sufficiency,
+                    "pipeline": pipeline,
+                },
+            )
 
             return json.dumps(
                 {
@@ -3090,6 +3976,7 @@ class ChatOrchestrator:
                         settings.LIVE_WEB_SEARCH_FETCH_FULL_PAGES
                     ),
                     "pipeline": pipeline,
+                    "evidence_sufficiency": evidence_sufficiency,
                     "results": result_items,
                     "note": (
                         "Use these only when relevant. Cite the URL for any "
@@ -3100,6 +3987,17 @@ class ChatOrchestrator:
             )
         except Exception as e:
             logger.warning("web_search tool failed: %s", e)
+            _record_web_evidence_run(
+                request,
+                {
+                    "kind": "web_search",
+                    "query": query,
+                    "result_count": 0,
+                    "candidate_results": 0,
+                    "engine_errors": [str(e)],
+                    "degraded": True,
+                },
+            )
             return json.dumps({"error": f"web_search failed: {e}"})
 
     async def _execute_fetch_page_tool(
@@ -3121,13 +4019,21 @@ class ChatOrchestrator:
             return json.dumps({"error": "url must be http(s)", "url": raw_url})
 
         try:
-            result = await live_web_search._fetch_one_page_with_stats(raw_url)
+            web_options = _resolve_web_evidence_options(request)
+            result = await live_web_search._fetch_one_page_with_stats(
+                raw_url,
+                allow_obscura=str(web_options["fetch_depth"]) == "deep",
+                youtube_transcripts_enabled=bool(
+                    web_options["youtube_transcripts"]
+                ),
+            )
             content = (result.text or "").strip()
             payload = {
                 "url": raw_url,
                 "reason": reason,
                 "status": result.status,
                 "method": result.method,
+                "fetch_depth": web_options["fetch_depth"],
                 "chars": result.chars,
                 "content_truncated": bool(
                     result.text and result.chars >= int(settings.OBSCURA_MAX_CHARS or 4000)
@@ -3135,8 +4041,11 @@ class ChatOrchestrator:
                 "source_text_max_chars": int(settings.OBSCURA_MAX_CHARS or 4000),
                 "cache_hit": bool(result.from_cache),
                 "cache_layer": result.cache_layer,
+                "source_type": result.source_type,
+                "transcript_status": result.transcript_status,
                 "obscura_attempted": bool(result.obscura_attempted),
                 "obscura_rendered": bool(result.js_rendered),
+                "obscura_skipped_reason": result.obscura_skipped_reason,
                 "web_content_untrusted": True,
                 "content": content,
                 "note": (
@@ -3163,6 +4072,8 @@ class ChatOrchestrator:
                                 "fetch_method": result.method,
                                 "fetch_status": result.status,
                                 "full_page_fetched": True,
+                                "source_type": result.source_type,
+                                "transcript_status": result.transcript_status,
                                 "content_chars": result.chars,
                                 "source_text_chars": result.chars,
                                 "source_text_max_chars": int(settings.OBSCURA_MAX_CHARS or 4000),
@@ -3171,6 +4082,7 @@ class ChatOrchestrator:
                                     and result.chars >= int(settings.OBSCURA_MAX_CHARS or 4000)
                                 ),
                                 "obscura_attempted": bool(result.obscura_attempted),
+                                "obscura_skipped_reason": result.obscura_skipped_reason,
                                 "js_rendered": bool(result.js_rendered),
                                 "retriever": "fetch_page",
                             },
@@ -3179,9 +4091,44 @@ class ChatOrchestrator:
                 )
                 pending = _cap_web_sources_for_turn(pending)
                 object.__setattr__(request, "_pending_tool_sources", pending)
+            _record_web_evidence_run(
+                request,
+                {
+                    "kind": "fetch_page",
+                    "query": raw_url,
+                    "result_count": 1 if content else 0,
+                    "candidate_results": 1,
+                    "engine_errors": [] if content else [result.status],
+                    "degraded": not bool(content),
+                    "pipeline": {
+                        "fetch_depth": web_options["fetch_depth"],
+                        "youtube_transcripts_enabled": bool(
+                            web_options["youtube_transcripts"]
+                        ),
+                        "full_page_fetch_attempts": 1,
+                        "full_page_fetch_successes": 1 if content else 0,
+                        "js_render": {
+                            "attempted": bool(result.obscura_attempted),
+                            "rendered": bool(result.js_rendered),
+                            "skipped_reason": result.obscura_skipped_reason,
+                        },
+                    },
+                },
+            )
             return json.dumps(payload, ensure_ascii=False)
         except Exception as exc:
             logger.warning("fetch_page tool failed: %s", exc)
+            _record_web_evidence_run(
+                request,
+                {
+                    "kind": "fetch_page",
+                    "query": raw_url,
+                    "result_count": 0,
+                    "candidate_results": 1,
+                    "engine_errors": [str(exc)],
+                    "degraded": True,
+                },
+            )
             return json.dumps({"error": f"fetch_page failed: {exc}", "url": raw_url})
 
 

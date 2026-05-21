@@ -2,7 +2,7 @@
 // Phase 24: agentic toggle KILLED. Tool selection itself activates the
 // ReAct loop; auto-fallback to the agentic pool entry happens silently
 // when the chat model can't tool-call. Reasoning Cascade added.
-import { Brain, Globe2, Telescope } from "lucide-react";
+import { Brain, Globe2, Search, Telescope, Youtube } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useQueryModelPoolStore } from "../../stores/queryModelPoolStore";
 import { ActivatorSelector } from "./ActivatorSelector";
@@ -17,6 +17,14 @@ export function ToggleBar({ className = "" }: ToggleBarProps) {
     toggleHyDE,
     webSearchEnabled,
     toggleWebSearch,
+    webFetchDepth,
+    setWebFetchDepth,
+    webResearchMode,
+    toggleWebResearchMode,
+    webYoutubeTranscripts,
+    toggleWebYoutubeTranscripts,
+    webMaxSources,
+    setWebMaxSources,
     reasoningCascadeEnabled,
     toggleReasoningCascade,
     selectedToolIds,
@@ -69,6 +77,63 @@ export function ToggleBar({ className = "" }: ToggleBarProps) {
         onClick={toggleWebSearch}
         activeColor="bg-accent-main"
       />
+
+      {webSearchEnabled && (
+        <div className="flex items-center gap-1.5">
+          <select
+            value={webFetchDepth}
+            onChange={(event) =>
+              setWebFetchDepth(
+                event.target.value as "snippets" | "normal" | "deep",
+              )
+            }
+            className="h-6 bg-bg-base text-[9px] font-bold uppercase tracking-widest text-content-secondary border border-border-minimal px-1 outline-none"
+            title="Fetch depth"
+          >
+            <option value="snippets">SNIP</option>
+            <option value="normal">NORM</option>
+            <option value="deep">DEEP</option>
+          </select>
+
+          <button
+            type="button"
+            onClick={toggleWebResearchMode}
+            className={`h-6 px-1.5 flex items-center gap-1 border text-[9px] font-bold uppercase tracking-widest !transition-colors !duration-150 ${
+              webResearchMode
+                ? "border-accent-secondary/60 bg-accent-secondary/10 text-accent-secondary"
+                : "border-border-minimal bg-transparent text-content-secondary"
+            }`}
+            title="Research mode"
+          >
+            <Search className="w-3 h-3" />
+            RES
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleWebYoutubeTranscripts}
+            className={`h-6 px-1.5 flex items-center gap-1 border text-[9px] font-bold uppercase tracking-widest !transition-colors !duration-150 ${
+              webYoutubeTranscripts
+                ? "border-accent-main/60 bg-accent-main/10 text-accent-main"
+                : "border-border-minimal bg-transparent text-content-secondary"
+            }`}
+            title="YouTube transcripts"
+          >
+            <Youtube className="w-3 h-3" />
+            YT
+          </button>
+
+          <input
+            type="number"
+            min={3}
+            max={20}
+            value={webMaxSources}
+            onChange={(event) => setWebMaxSources(Number(event.target.value))}
+            className="h-6 w-10 bg-bg-base text-center text-[9px] font-bold text-content-secondary border border-border-minimal outline-none"
+            title="Max web sources"
+          />
+        </div>
+      )}
 
       {toolRouteActive && fallbackLabel && (
         <span

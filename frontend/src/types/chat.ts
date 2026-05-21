@@ -330,6 +330,15 @@ export interface ChatOverrides extends Partial<ModelConfig> {
   hyde_enabled?: boolean;
   /** Opt-in live web context for this turn. Omit/false keeps chat corpus-only. */
   web_search_enabled?: boolean;
+  /** Live-web fetch depth. snippets = search only, normal = static fetch,
+   *  deep = static fetch plus Obscura fallback for allowlisted JS pages. */
+  web_fetch_depth?: "snippets" | "normal" | "deep";
+  /** Expands bounded live-web budgets for deeper research turns. */
+  web_research_mode?: boolean;
+  /** Allows YouTube URLs to be converted into transcript evidence. */
+  web_youtube_transcripts?: boolean;
+  /** Max final web evidence sources requested for this turn. */
+  web_max_sources?: number;
   collection_ids?: string[];
   agentic_mode?: boolean;
   agentic_model?: string;
