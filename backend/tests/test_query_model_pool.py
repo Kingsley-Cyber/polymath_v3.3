@@ -510,6 +510,63 @@ async def test_resolver_query_role_skips_disabled_pool_entries():
 
 
 @pytest.mark.asyncio
+async def test_resolver_graph_query_role_returns_configured_pool_entry():
+    from services import query_model_resolver
+
+    await _setup()
+    user = _u()
+    try:
+        await settings_service.update_models(user, ModelsConfig(
+            query_model_pool=[{
+                "entry_id": "ent-graph-query",
+                "label": "Graph Query",
+                "provider": "openai",
+                "base_url": "https://api.openai.com/v1",
+                "api_key_ciphertext": "sk-graph-plaintext",
+                "model_name": "gpt-4o-mini",
+                "source": "cloud",
+            }],
+            graph_query={"pool_entry_id": "ent-graph-query"},
+        ).model_dump())
+
+        resolved = await query_model_resolver.resolve(user, "graph_query")
+
+        assert resolved is not None
+        assert resolved["model"] == "openai/gpt-4o-mini"
+        assert resolved["api_base"] == "https://api.openai.com/v1"
+        assert resolved["api_key"] == "sk-graph-plaintext"
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
+async def test_delete_pool_entry_clears_graph_query_role():
+    await _setup()
+    user = _u()
+    try:
+        await settings_service.update_models(user, ModelsConfig(
+            query_model_pool=[{
+                "entry_id": "ent-graph-delete",
+                "label": "Graph Query",
+                "provider": "openai",
+                "base_url": "https://api.openai.com/v1",
+                "api_key_ciphertext": "sk-graph-plaintext",
+                "model_name": "gpt-4o-mini",
+                "source": "cloud",
+            }],
+            graph_query={"pool_entry_id": "ent-graph-delete"},
+        ).model_dump())
+
+        after = await settings_service.delete_pool_entry(user, "ent-graph-delete")
+
+        assert after.graph_query.pool_entry_id is None
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
 async def test_resolver_utility_role_returns_configured_pool_entry():
     from services import query_model_resolver
 

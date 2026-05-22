@@ -114,16 +114,6 @@ function App() {
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [pipelineStatus, setPipelineStatus] = useState<string>("");
 
-  // Brain mode renders the corpus overview; query mode renders the custom
-  // graph result for the user's question as query-specific nodes and edges.
-  const [graphViewerMode, setGraphViewerMode] = useState<"brain" | "query">(
-    "brain",
-  );
-  const [graphViewerQuery, setGraphViewerQuery] = useState<string>("");
-  const [graphViewerQueryDraft, setGraphViewerQueryDraft] = useState<string>("");
-  const [graphViewerRunCount, setGraphViewerRunCount] = useState(0);
-  const [graphViewerQueryRunning, setGraphViewerQueryRunning] = useState(false);
-
   // Pt 7: prefill bridge from GraphViewer's Graph Query tab to ChatInput.
   // When the user clicks a refined chip in the dashboard, GraphViewer
   // fires onSendToChat(text). We bump nonce + load the text; ChatInput's
@@ -135,20 +125,8 @@ function App() {
   });
   const handleGraphSendToChat = useCallback((text: string) => {
     setChatPrefill((prev) => ({ text, nonce: prev.nonce + 1 }));
-    setGraphViewerQueryRunning(false);
     setIsGraphViewOpen(false);
   }, []);
-
-  const handleGraphQueryPhaseChange = useCallback(
-    (phase: "idle" | "loading" | "ready" | "error") => {
-      // useQueryGraph reports one initial idle frame before its effect starts.
-      // Keep the submit lock during that handoff so a fast second tap cannot
-      // launch the same graph query again.
-      if (phase === "idle" && graphViewerQuery) return;
-      setGraphViewerQueryRunning(phase === "loading");
-    },
-    [graphViewerQuery],
-  );
 
   const { selectedModel, setSelectedModel, setModels, maxTokens, theme, selectedCorpusIds } =
     useSettingsStore();
@@ -825,10 +803,7 @@ function App() {
           <div className="absolute inset-0 flex flex-col">
             <button
               type="button"
-              onClick={() => {
-                setIsGraphViewOpen(false);
-                setGraphViewerQueryRunning(false);
-              }}
+              onClick={() => setIsGraphViewOpen(false)}
               className="absolute left-3 top-3 z-[70] flex h-8 w-8 items-center justify-center rounded border border-zinc-800 bg-zinc-950/85 text-zinc-400 backdrop-blur hover:border-rose-700 hover:text-rose-300"
               title="Close graph view"
               aria-label="Close graph view"
@@ -840,105 +815,10 @@ function App() {
                 edges rather than a separate visual mode. */}
             <div className="flex-1 min-h-0 relative">
               <GraphViewer
-                mode={graphViewerMode}
+                mode="brain"
                 corpusIds={selectedCorpusIds}
-                query={graphViewerMode === "query" ? graphViewerQuery : undefined}
-                model={selectedModel || undefined}
-                onRerun={
-                  graphViewerMode === "query"
-                    ? () => {
-                        setGraphViewerQueryRunning(true);
-                        setGraphViewerRunCount((n) => n + 1);
-                      }
-                    : undefined
-                }
-                onClose={() => {
-                  setIsGraphViewOpen(false);
-                  setGraphViewerQueryRunning(false);
-                }}
-                onQueryPhaseChange={handleGraphQueryPhaseChange}
                 onSendToChat={handleGraphSendToChat}
-                key={`gv-${graphViewerMode}-${graphViewerQuery}-${graphViewerRunCount}`}
               />
-            </div>
-            {/* Query input bar — bottom-center, switches from overview to the
-                query graph renderer. */}
-            <div className="border-t border-zinc-800 bg-zinc-950/90 backdrop-blur p-3 z-50">
-              <form
-                className="max-w-3xl mx-auto flex items-center gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const q = graphViewerQueryDraft.trim();
-                  if (!q || graphViewerQueryRunning) return;
-                  setGraphViewerQuery(q);
-                  setGraphViewerMode("query");
-                  setGraphViewerQueryRunning(true);
-                  setGraphViewerRunCount((n) => n + 1);
-                }}
-              >
-                <input
-                  type="text"
-                  value={graphViewerQueryDraft}
-                  onChange={(e) => setGraphViewerQueryDraft(e.target.value)}
-                  placeholder={
-                    selectedCorpusIds.length === 0
-                      ? "Select a corpus first…"
-                      : graphViewerMode === "query"
-                        ? "Ask another question across selected corpora…"
-                        : "Ask the graph: how does X relate to Y across corpora?"
-                  }
-                  disabled={selectedCorpusIds.length === 0}
-                  className="flex-1 bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-amber-700 font-mono"
-                />
-                <button
-                  type="submit"
-                  disabled={
-                    selectedCorpusIds.length === 0 ||
-                    !graphViewerQueryDraft.trim() ||
-                    graphViewerQueryRunning
-                  }
-                  aria-busy={graphViewerQueryRunning}
-                  className={
-                    "flex min-w-28 items-center justify-center gap-2 text-[10px] uppercase tracking-widest border rounded px-3 py-2 font-mono disabled:cursor-not-allowed " +
-                    (graphViewerQueryRunning
-                      ? "border-amber-600/60 bg-amber-500/10 text-amber-200"
-                      : "border-zinc-700 text-zinc-200 hover:text-amber-400 disabled:opacity-40")
-                  }
-                >
-                  {graphViewerQueryRunning ? (
-                    <>
-                      <span className="status-badge status-badge-gen">
-                        {"<GEN>"}
-                      </span>
-                      Building
-                    </>
-                  ) : (
-                    "Build Graph"
-                  )}
-                </button>
-                {graphViewerMode === "query" && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGraphViewerMode("brain");
-                      setGraphViewerQuery("");
-                      setGraphViewerQueryDraft("");
-                      setGraphViewerQueryRunning(false);
-                    }}
-                    className="text-[10px] uppercase tracking-widest text-zinc-500 hover:text-zinc-200 border border-zinc-800 rounded px-3 py-2 font-mono"
-                  >
-                    Back to Brain
-                  </button>
-                )}
-              </form>
-              <div
-                className="max-w-3xl mx-auto mt-1 min-h-4 text-[10px] font-mono text-amber-300/80"
-                aria-live="polite"
-              >
-                {graphViewerQueryRunning
-                  ? "query accepted · building query graph + synthesis"
-                  : ""}
-              </div>
             </div>
           </div>
         </div>

@@ -443,6 +443,7 @@ class SettingsService:
             ("agentic", incoming.agentic),
             ("reasoning", incoming.reasoning),
             ("utility", incoming.utility),
+            ("graph_query", incoming.graph_query),
         ):
             pid = section_val.pool_entry_id
             if pid and pid not in valid_ids:
@@ -458,6 +459,7 @@ class SettingsService:
             # Phase 24 — Reasoning Cascade target.
             "reasoning": incoming.reasoning.model_dump(),
             "utility": incoming.utility.model_dump(),
+            "graph_query": incoming.graph_query.model_dump(),
         }
         await self._db["settings"].update_one(
             {"user_id": user_id},
@@ -467,13 +469,14 @@ class SettingsService:
         # Phase 24 perf — invalidate cache so next get_settings sees the write.
         self._invalidate_cache(user_id)
         logger.info(
-            "models updated user=%s pool=%d hyde=%s agentic=%s reasoning=%s utility=%s",
+            "models updated user=%s pool=%d hyde=%s agentic=%s reasoning=%s utility=%s graph_query=%s",
             user_id,
             len(resolved_pool),
             incoming.hyde.pool_entry_id or "-",
             incoming.agentic.pool_entry_id or "-",
             incoming.reasoning.pool_entry_id or "-",
             incoming.utility.pool_entry_id or "-",
+            incoming.graph_query.pool_entry_id or "-",
         )
 
         # Return the masked view (same shape as GET) for router response
@@ -527,6 +530,7 @@ class SettingsService:
                 "agentic": current.get("agentic") or {},
                 "reasoning": current.get("reasoning") or {},
                 "utility": current.get("utility") or {},
+                "graph_query": current.get("graph_query") or {},
             })
         # Write back (no re-encryption; we only appended ollama entries)
         await self._db["settings"].update_one(
@@ -554,6 +558,7 @@ class SettingsService:
         agentic = dict(current.get("agentic") or {})
         reasoning = dict(current.get("reasoning") or {})
         utility = dict(current.get("utility") or {})
+        graph_query = dict(current.get("graph_query") or {})
         if hyde.get("pool_entry_id") == entry_id:
             hyde["pool_entry_id"] = None
         if agentic.get("pool_entry_id") == entry_id:
@@ -562,6 +567,8 @@ class SettingsService:
             reasoning["pool_entry_id"] = None
         if utility.get("pool_entry_id") == entry_id:
             utility["pool_entry_id"] = None
+        if graph_query.get("pool_entry_id") == entry_id:
+            graph_query["pool_entry_id"] = None
         await self._db["settings"].update_one(
             {"user_id": user_id},
             {"$set": {
@@ -570,6 +577,7 @@ class SettingsService:
                 "models.agentic": agentic,
                 "models.reasoning": reasoning,
                 "models.utility": utility,
+                "models.graph_query": graph_query,
             }},
             upsert=True,
         )
@@ -588,7 +596,7 @@ class SettingsService:
     async def migrate_legacy_model_stores(self, user_id: str) -> dict:
         """Collapse Phase 19.3 `model_profiles` + Phase E `model_pool`
         collections + Phase F `user_query_preferences` into
-        settings.models.query_model_pool[] + hyde/agentic/utility defaults.
+        settings.models.query_model_pool[] + role defaults.
 
         Idempotent. Keyed by `settings.models_migrated` flag — second call
         is a no-op. Legacy collections are NEVER deleted (guardrail).
@@ -690,6 +698,7 @@ class SettingsService:
             # user picks an entry in Settings → Models when they want it.
             "reasoning": {"default_enabled": False, "pool_entry_id": None},
             "utility": {"default_enabled": False, "pool_entry_id": None},
+            "graph_query": {"pool_entry_id": None},
         }
         await self._db["settings"].update_one(
             {"user_id": user_id},

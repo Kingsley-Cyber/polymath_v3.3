@@ -25,7 +25,7 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
-Kind = Literal["hyde", "agentic", "query", "reasoning", "utility"]
+Kind = Literal["hyde", "agentic", "query", "reasoning", "utility", "graph_query"]
 
 _KIND_TO_POOL_FIELD = {
     "hyde": "hyde",
@@ -33,6 +33,7 @@ _KIND_TO_POOL_FIELD = {
     # Phase 24 — reasoning cascade analyst model
     "reasoning": "reasoning",
     "utility": "utility",
+    "graph_query": "graph_query",
 }
 
 

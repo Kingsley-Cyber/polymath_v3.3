@@ -3,8 +3,8 @@
 // One tab, role sections, one save button:
 //   1. Query Model Pool  — add cloud / add Ollama, chip list with delete + toggle
 //   2. HyDE              — enable toggle + pool-entry dropdown
-//   3. Agentic           — enable toggle + pool-entry dropdown
-//   4. Utility           — fast helper model for small deterministic tasks
+//   3. Agentic           — tool-capable fallback dropdown
+//   4. Graph Query       — graph synthesis + question-builder dropdown
 //   5. API Keys (Shared) — collapsible, mounts existing ApiKeysTab as-is
 //
 // "Save Models Settings" POSTs pool + model-role settings to
@@ -21,6 +21,7 @@ import {
   CheckCircle,
   Loader2,
   Brain,
+  Network,
   Wand2,
   Download,
   ChevronDown,
@@ -33,7 +34,6 @@ import type {
   OllamaInstalledModel,
   PoolProvider,
   QueryModelPoolEntry,
-  UtilityModelTestResult,
 } from "../../types";
 import { POOL_PROVIDER_PRESETS, composeModelString, findPreset } from "../../types";
 import { ApiKeysTab } from "./ApiKeysTab";
@@ -575,6 +575,32 @@ function AgenticSection() {
   );
 }
 
+function GraphQuerySection() {
+  const { config, patchGraphQuery } = useQueryModelPoolStore();
+  const graphQuery = config.graph_query || { pool_entry_id: null };
+  return (
+    <div className="bg-[#2a2a2a] border border-white/5 rounded-lg p-5 space-y-3">
+      <h3 className="text-[15px] font-semibold text-white flex items-center gap-2">
+        <Network size={16} className="text-amber-300" />
+        Graph Query Model
+      </h3>
+      <p className="text-[12px] text-gray-500 leading-relaxed">
+        Used by graph synthesis and the lighter refine/question-builder path.
+        Leave unset to fall back to the normal query/chat model.
+      </p>
+      <div className="flex items-center gap-3">
+        <div className="text-[11px] uppercase tracking-widest text-gray-500 w-24">
+          Model
+        </div>
+        <PoolDropdown
+          value={graphQuery.pool_entry_id}
+          onChange={(v) => patchGraphQuery({ pool_entry_id: v })}
+        />
+      </div>
+    </div>
+  );
+}
+
 // Phase 24 — Reasoning Cascade analyst model.
 // Used by the Reason toggle in the chat header. Digests retrieved chunks
 // before the chat model writes the user-facing answer.
@@ -605,93 +631,6 @@ function ReasoningSection() {
           value={reasoning.pool_entry_id}
           onChange={(v) => patchReasoning({ pool_entry_id: v })}
         />
-      </div>
-    </div>
-  );
-}
-
-function UtilitySection() {
-  const { config, dirty, patchUtility } = useQueryModelPoolStore();
-  const utility = config.utility || {
-    default_enabled: false,
-    pool_entry_id: null,
-  };
-  const [testingUtility, setTestingUtility] = useState(false);
-  const [testResult, setTestResult] = useState<UtilityModelTestResult | null>(
-    null,
-  );
-
-  const handleTestUtility = async () => {
-    setTestingUtility(true);
-    setTestResult(null);
-    try {
-      setTestResult(await api.testUtilityModel());
-    } catch (e) {
-      setTestResult({
-        ok: false,
-        status: "request_failed",
-        model: null,
-        latency_ms: 0,
-        error: e instanceof Error ? e.message : String(e),
-      });
-    } finally {
-      setTestingUtility(false);
-    }
-  };
-
-  return (
-    <div className="bg-[#2a2a2a] border border-white/5 rounded-lg p-5 space-y-3">
-      <h3 className="text-[15px] font-semibold text-white flex items-center gap-2">
-        <Cpu size={16} className="text-cyan-300" />
-        Utility Model — Fast Helper
-      </h3>
-      <p className="text-[12px] text-gray-500 leading-relaxed">
-        Future helper services use this for small deterministic jobs such as
-        intent checks, query cleanup, or compact source triage. Pick a cheap,
-        low-latency model rather than a deep reasoning model.
-      </p>
-      <label className="flex items-center gap-2 text-[12px] text-gray-300">
-        <input
-          type="checkbox"
-          checked={utility.default_enabled}
-          onChange={(e) => patchUtility({ default_enabled: e.target.checked })}
-          className="accent-accent-main"
-        />
-        Enable utility helpers by default when a feature opts in
-      </label>
-      <div className="flex items-center gap-3">
-        <div className="text-[11px] uppercase tracking-widest text-gray-500 w-24">
-          Model
-        </div>
-        <PoolDropdown
-          value={utility.pool_entry_id}
-          onChange={(v) => patchUtility({ pool_entry_id: v })}
-        />
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={handleTestUtility}
-          disabled={!utility.pool_entry_id || dirty || testingUtility}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-cyan-500/50 bg-cyan-500/10 text-cyan-200 text-[11px] font-semibold uppercase tracking-widest hover:bg-cyan-500/15 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {testingUtility ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <CheckCircle className="w-3.5 h-3.5" />
-          )}
-          Test Utility
-        </button>
-        {testResult && (
-          <div
-            className={`text-[11px] font-mono ${
-              testResult.ok ? "text-green-400" : "text-red-300"
-            }`}
-          >
-            {testResult.ok
-              ? `OK · ${testResult.latency_ms} ms · ${testResult.output_preview || testResult.model || "response"}`
-              : `${testResult.status}: ${testResult.error || "failed"}`}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -772,9 +711,9 @@ export function ModelsTab() {
         <h2 className="text-xl font-semibold text-white mb-2">Models</h2>
         <p className="text-[13px] text-gray-500">
           Every chat model lives here. The chat dropdown, HyDE, Agentic,
-          Reasoning, and Utility roles all read from the pool. One save covers
-          the pool and model roles — API Keys has its own save inside its
-          collapsible section.
+          Graph Query, and Reasoning roles all read from the pool. One save
+          covers the pool and model roles — API Keys has its own save inside
+          its collapsible section.
         </p>
       </div>
 
@@ -795,8 +734,8 @@ export function ModelsTab() {
       <PoolSection />
       <HydeSection />
       <AgenticSection />
+      <GraphQuerySection />
       <ReasoningSection />
-      <UtilitySection />
       <SharedApiKeysSection />
 
       {/* Sticky save bar */}

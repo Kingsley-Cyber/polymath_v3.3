@@ -25,6 +25,7 @@ import type {
   SigmaNodeAttributes,
   SigmaEdgeAttributes,
 } from "../lib/polymath-graph-adapter";
+import type { QueryFingerprint } from "../lib/query-fingerprint";
 import { MOTION } from "../lib/design-tokens";
 
 // ── Color helpers (verbatim from GitNexus useSigma.ts) ────────────────────
@@ -80,6 +81,8 @@ interface UseSigmaOptions {
   onStageClick?: () => void;
   onDoubleClickNode?: (nodeId: string) => void;
   highlightedNodeIds?: Set<string>;
+  layoutMode?: "brain" | "query";
+  queryFingerprint?: QueryFingerprint;
   /** Pt 6: when true, FA2 restarts for ~5s after a node-drag release so
    *  the neighbors re-arrange around the new position. Default false. */
   settleAfterDrag?: boolean;
@@ -101,36 +104,88 @@ interface UseSigmaReturn {
   refreshHighlights: () => void;
 }
 
-// ── ForceAtlas2 + noverlap settings (verbatim from GitNexus) ─────────────
+// ── ForceAtlas2 + noverlap settings ─────────────────────────────────────
 
 // Anti-overlap pass is now more aggressive — ratio 1.35 + margin 22 + 80
 // iterations carves real breathing room between nodes after FA2 settles.
 // Without this the no-overlap step had too little authority to undo
 // FA2's central clumping.
-const NOVERLAP_SETTINGS = {
+const BASE_NOVERLAP_SETTINGS = {
   maxIterations: 80,
   ratio: 1.35,
   margin: 22,
   expansion: 1.2,
 };
 
-const getFA2Settings = (_nodeCount: number) => {
-  // Constellation tuning — linLogMode OFF (was forcing the galaxy bulge),
-  // scalingRatio 22 (was 12 — push nodes apart harder), gravity 0.6
-  // (was 1.2 — let same-corpus clusters drift away from center instead
-  // of being pulled toward it). The combined effect: same-corpus books
-  // cluster by hue, distinct corpora separate into their own blobs.
+const getNoverlapSettings = (
+  nodeCount: number,
+  mode: "brain" | "query",
+) => {
+  if (mode !== "query") return BASE_NOVERLAP_SETTINGS;
   return {
+    maxIterations: nodeCount > 500 ? 110 : 90,
+    ratio: nodeCount > 500 ? 1.45 : 1.55,
+    margin: nodeCount > 500 ? 24 : 30,
+    expansion: 1.25,
+  };
+};
+
+const getFA2Settings = (
+  nodeCount: number,
+  mode: "brain" | "query",
+  fingerprint?: QueryFingerprint,
+) => {
+  const queryPhysics = {
+    repulsion: 3.5 * (fingerprint?.repulsionMultiplier ?? 1),
+    spring: 1.5 * (fingerprint?.springMultiplier ?? 1),
+    damping: 1.5 * (fingerprint?.dampingMultiplier ?? 1),
+  };
+  const base = {
     gravity: 0.6,
     scalingRatio: 22,
     slowDown: 3,
-    barnesHutOptimize: _nodeCount > 200,
+    barnesHutOptimize: nodeCount > 200,
     barnesHutTheta: 0.6,
     strongGravityMode: false,
     outboundAttractionDistribution: true,
     linLogMode: false,
     adjustSizes: true,
     edgeWeightInfluence: 1.0,
+  };
+
+  if (mode !== "query") return base;
+
+  // Query graphs should read as a curated atom: more breathing room,
+  // weaker center gravity, and slightly stronger edge weights so seeds,
+  // hubs, and direct evidence connections stay visually coherent.
+  if (nodeCount > 800) {
+    return {
+      ...base,
+      gravity: 0.22,
+      scalingRatio: 38 * queryPhysics.repulsion,
+      slowDown: 4.5 * queryPhysics.damping,
+      barnesHutOptimize: true,
+      barnesHutTheta: 0.7,
+      edgeWeightInfluence: 1.2 * queryPhysics.spring,
+    };
+  }
+  if (nodeCount > 200) {
+    return {
+      ...base,
+      gravity: 0.3,
+      scalingRatio: 32 * queryPhysics.repulsion,
+      slowDown: 4 * queryPhysics.damping,
+      barnesHutOptimize: true,
+      edgeWeightInfluence: 1.15 * queryPhysics.spring,
+    };
+  }
+  return {
+    ...base,
+    gravity: 0.36,
+    scalingRatio: 28 * queryPhysics.repulsion,
+    slowDown: 3.6 * queryPhysics.damping,
+    barnesHutOptimize: nodeCount > 120,
+    edgeWeightInfluence: 1.1 * queryPhysics.spring,
   };
 };
 
@@ -404,17 +459,41 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       if (!s || !g) return;
       const ratio = s.getCamera().ratio;
       const nodeCount = g.order;
-      const isLargeGraph = nodeCount > 800;
-      const isHugeGraph = nodeCount > 3000;
+      const layoutMode = optionsRef.current.layoutMode ?? "brain";
+      const isQueryGraph = layoutMode === "query";
+      const isLargeGraph = nodeCount > (isQueryGraph ? 500 : 800);
+      const isHugeGraph = nodeCount > (isQueryGraph ? 1800 : 3000);
       // Camera tier: closer in = lower ratio. Defaults Sigma uses ~1.0.
       const zoomedFar = ratio >= 4;
       const zoomedMid = ratio >= 1.5 && ratio < 4;
       // Take the STRICTER of zoom-tier and node-count rules.
-      const renderLabels = !zoomedFar && !isLargeGraph;
+      const renderLabels = isQueryGraph
+        ? !zoomedFar
+        : !zoomedFar && !isLargeGraph;
       const labelDensity =
-        zoomedMid || isLargeGraph ? (isHugeGraph ? 0.02 : 0.05) : 0.1;
+        isQueryGraph
+          ? zoomedMid || isLargeGraph
+            ? isHugeGraph
+              ? 0.015
+              : 0.025
+            : 0.04
+          : zoomedMid || isLargeGraph
+            ? isHugeGraph
+              ? 0.02
+              : 0.05
+            : 0.1;
       const labelThreshold =
-        zoomedMid || isLargeGraph ? (isHugeGraph ? 14 : 11) : 8;
+        isQueryGraph
+          ? zoomedMid || isLargeGraph
+            ? isHugeGraph
+              ? 16
+              : 13
+            : 10
+          : zoomedMid || isLargeGraph
+            ? isHugeGraph
+              ? 14
+              : 11
+            : 8;
       try {
         s.setSetting("renderLabels", renderLabels);
         s.setSetting("labelDensity", labelDensity);
@@ -617,7 +696,12 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       }
 
       const inferredSettings = forceAtlas2.inferSettings(graph);
-      const customSettings = getFA2Settings(nodeCount);
+      const layoutMode = optionsRef.current.layoutMode ?? "brain";
+      const customSettings = getFA2Settings(
+        nodeCount,
+        layoutMode,
+        optionsRef.current.queryFingerprint,
+      );
       const settings = { ...inferredSettings, ...customSettings };
 
       const layout = new FA2Layout(graph, { settings });
@@ -631,7 +715,10 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
           layoutRef.current.stop();
           layoutRef.current = null;
           try {
-            noverlap.assign(graph, NOVERLAP_SETTINGS);
+            noverlap.assign(
+              graph,
+              getNoverlapSettings(graph.order, layoutMode),
+            );
           } catch {
             /* ignore */
           }
@@ -676,17 +763,39 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       // forceLabel:true nodes (Book anchors, seeds) visible, drop density
       // and raise the size threshold so the canvas stays readable at scale.
       const nodeCount = newGraph.order;
-      const isLargeGraph = nodeCount > 800;
-      const isHugeGraph = nodeCount > 3000;
+      const layoutMode = optionsRef.current.layoutMode ?? "brain";
+      const isQueryGraph = layoutMode === "query";
+      const isLargeGraph = nodeCount > (isQueryGraph ? 500 : 800);
+      const isHugeGraph = nodeCount > (isQueryGraph ? 1800 : 3000);
       try {
-        sigma.setSetting("renderLabels", !isLargeGraph);
+        sigma.setSetting("renderLabels", isQueryGraph ? true : !isLargeGraph);
         sigma.setSetting(
           "labelDensity",
-          isHugeGraph ? 0.02 : isLargeGraph ? 0.05 : 0.1,
+          isQueryGraph
+            ? isHugeGraph
+              ? 0.015
+              : isLargeGraph
+                ? 0.025
+                : 0.04
+            : isHugeGraph
+              ? 0.02
+              : isLargeGraph
+                ? 0.05
+                : 0.1,
         );
         sigma.setSetting(
           "labelRenderedSizeThreshold",
-          isHugeGraph ? 14 : isLargeGraph ? 11 : 8,
+          isQueryGraph
+            ? isHugeGraph
+              ? 16
+              : isLargeGraph
+                ? 13
+                : 10
+            : isHugeGraph
+              ? 14
+              : isLargeGraph
+                ? 11
+                : 8,
         );
       } catch {
         /* setSetting may throw if the renderer is mid-frame — ignore */
@@ -749,7 +858,13 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       const graph = graphRef.current;
       if (graph) {
         try {
-          noverlap.assign(graph, NOVERLAP_SETTINGS);
+          noverlap.assign(
+            graph,
+            getNoverlapSettings(
+              graph.order,
+              optionsRef.current.layoutMode ?? "brain",
+            ),
+          );
         } catch {
           /* ignore */
         }

@@ -26,6 +26,7 @@ import {
   getCommunityColor,
   type PolymathNodeKind,
 } from "./sigma-constants";
+import type { QueryFingerprint, QueryLayoutMode } from "./query-fingerprint";
 
 // Pt 5: cap how many outbound bridges any single book can show. Prevents
 // hub-books from creating a web that swamps the canvas; long-tail bridges
@@ -72,6 +73,7 @@ export interface SigmaEdgeAttributes {
   relation_family?: string | null;
   dominant_relation_family?: string | null;
   weight?: number;
+  display_weight?: number;
   confidence?: number;
   source_corpora?: string[];
   source_corpus?: string;
@@ -157,6 +159,8 @@ export interface PolymathRawEdge {
 
 export interface BuildOpts {
   colorMode: ColorMode;
+  layoutMode?: "brain" | "query";
+  queryFingerprint?: QueryFingerprint;
   seedIds?: Set<string>;
   hubIds?: Set<string>;
   bridgeIds?: Set<string>;
@@ -187,6 +191,212 @@ function edgeEndpointId(value: unknown): string {
     return String(obj.id ?? obj.key ?? "");
   }
   return String(value ?? "");
+}
+
+function stableUnitHash(value: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    h ^= value.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 4294967295;
+}
+
+type QueryShellRole = "seed" | "hub" | "bridge" | "anchor" | "concept" | "leaf";
+
+function queryShellRole(
+  raw: PolymathRawNode,
+  opts: BuildOpts,
+  degree: number,
+): QueryShellRole {
+  const id = String(raw.id);
+  const kind = inferNodeKind(raw);
+  if (opts.seedIds?.has(id)) return "seed";
+  if (opts.hubIds?.has(id)) return "hub";
+  if (opts.bridgeIds?.has(id)) return "bridge";
+  if (kind === "Domain" || kind === "Book") return "anchor";
+  if (kind === "Concept") return degree >= 5 ? "hub" : "concept";
+  return degree >= 5 ? "hub" : "leaf";
+}
+
+function queryShellBounds(
+  role: QueryShellRole,
+  nodeCount: number,
+): { inner: number; outer: number } {
+  const scale = Math.sqrt(Math.max(nodeCount, 80));
+  switch (role) {
+    case "seed":
+      return { inner: 0, outer: scale * 9 };
+    case "hub":
+      return { inner: scale * 13, outer: scale * 27 };
+    case "bridge":
+      return { inner: scale * 20, outer: scale * 36 };
+    case "anchor":
+      return { inner: scale * 28, outer: scale * 45 };
+    case "concept":
+      return { inner: scale * 34, outer: scale * 55 };
+    case "leaf":
+    default:
+      return { inner: scale * 48, outer: scale * 78 };
+  }
+}
+
+function queryRoleRank(role: QueryShellRole): number {
+  switch (role) {
+    case "seed":
+      return 0;
+    case "hub":
+      return 1;
+    case "bridge":
+      return 2;
+    case "anchor":
+      return 3;
+    case "concept":
+      return 4;
+    case "leaf":
+    default:
+      return 5;
+  }
+}
+
+function queryLayoutMode(opts: BuildOpts): QueryLayoutMode {
+  return opts.queryFingerprint?.layoutMode ?? "radial";
+}
+
+function queryLayoutPoint(
+  mode: QueryLayoutMode,
+  role: QueryShellRole,
+  raw: PolymathRawNode,
+  localIndex: number,
+  roleTotal: number,
+  globalIndex: number,
+  total: number,
+  goldenAngle: number,
+): { x: number; y: number } {
+  const scale = Math.sqrt(Math.max(total, 80));
+  const rank = queryRoleRank(role);
+  const centered = localIndex - (roleTotal - 1) / 2;
+  const laneGap = scale * 13;
+  const t = Math.sqrt((localIndex + 1) / Math.max(roleTotal, 1));
+  const jitter = (stableUnitHash(`${raw.id}:jitter`) - 0.5) * scale * 3;
+
+  if (mode === "chain") {
+    return {
+      x: (globalIndex - (total - 1) / 2) * scale * 5.2,
+      y: (rank - 2.5) * laneGap + jitter,
+    };
+  }
+
+  if (mode === "bipartite") {
+    const left = role === "seed" || role === "hub" || role === "bridge";
+    return {
+      x: (left ? -1 : 1) * scale * 36 + jitter * 0.7,
+      y: centered * scale * 7.5,
+    };
+  }
+
+  if (mode === "hierarchy") {
+    return {
+      x: centered * scale * 7,
+      y: (rank - 2.5) * scale * 18,
+    };
+  }
+
+  if (mode === "cluster") {
+    const angle = globalIndex * goldenAngle;
+    const radius = scale * 12 + scale * 70 * Math.sqrt((globalIndex + 1) / total);
+    return {
+      x: radius * Math.cos(angle),
+      y: radius * Math.sin(angle),
+    };
+  }
+
+  const bounds = queryShellBounds(role, total);
+  const angle =
+    localIndex * goldenAngle +
+    stableUnitHash(`${raw.id}:angle`) * Math.PI * 0.7;
+  const wobble = (stableUnitHash(`${raw.id}:radius`) - 0.5) * 0.16;
+  const radialMultiplier = mode === "force" ? 1.12 : 1;
+  const radius =
+    (bounds.inner +
+      (bounds.outer - bounds.inner) * Math.max(0, Math.min(1, t + wobble))) *
+    radialMultiplier;
+  return { x: radius * Math.cos(angle), y: radius * Math.sin(angle) };
+}
+
+function compactQueryLabel(label: string, important: boolean): string {
+  const limit = important ? 42 : 28;
+  if (label.length <= limit) return label;
+  const words = label.split(/\s+/).filter(Boolean);
+  if (words.length <= 2) return `${label.slice(0, limit - 1)}…`;
+  let out = "";
+  for (const word of words) {
+    const next = out ? `${out} ${word}` : word;
+    if (next.length > limit - 1) break;
+    out = next;
+  }
+  return `${out || label.slice(0, limit - 1)}…`;
+}
+
+function edgeLayoutWeight(
+  rel: PolymathRawEdge,
+  opts: BuildOpts,
+): number {
+  const predicate = String(rel.predicate || "").toLowerCase();
+  const family = String(
+    rel.dominant_relation_family || rel.relation_family || "",
+  ).toLowerCase();
+  const rawWeight =
+    typeof rel.weight === "number" && Number.isFinite(rel.weight)
+      ? Math.max(0.1, rel.weight)
+      : 1;
+
+  // ForceAtlas2 has no explicit "rest length"; edge weight is the clean
+  // proxy. Stronger weight = shorter/tighter spring. Weak bridges and
+  // generic relations stay longer so the query graph breathes.
+  let weight = Math.sqrt(rawWeight);
+  if (
+    predicate === "predicated_by" ||
+    predicate === "in_book" ||
+    predicate === "mentions" ||
+    predicate === "part_of" ||
+    predicate === "member_of" ||
+    predicate === "synonym_of" ||
+    predicate === "alias_of" ||
+    predicate === "same_as" ||
+    family === "canonicalization" ||
+    family === "structural"
+  ) {
+    weight *= 1.6;
+  } else if (
+    predicate === "bridges_to" ||
+    predicate === "related_to" ||
+    predicate === "relates_to" ||
+    family === "weakassociation"
+  ) {
+    weight *= 0.75;
+  } else if (
+    family === "causal" ||
+    family === "operational" ||
+    family === "provenance"
+  ) {
+    weight *= 1.2;
+  }
+
+  if (opts.layoutMode === "query") {
+    const s = edgeEndpointId(rel.source);
+    const t = edgeEndpointId(rel.target);
+    const touchesAnchor =
+      opts.seedIds?.has(s) ||
+      opts.seedIds?.has(t) ||
+      opts.hubIds?.has(s) ||
+      opts.hubIds?.has(t) ||
+      opts.bridgeIds?.has(s) ||
+      opts.bridgeIds?.has(t);
+    if (touchesAnchor) weight *= 1.2;
+  }
+
+  return Math.max(0.2, Math.min(8, weight));
 }
 
 // Scale node size down as graph density grows so the visual hierarchy
@@ -316,6 +526,14 @@ export function polymathToGraphology(
     type: "directed",
   });
   const n = rawNodes.length;
+  const degreeById = new Map<string, number>();
+  for (const rel of rawLinks) {
+    const s = edgeEndpointId(rel.source);
+    const t = edgeEndpointId(rel.target);
+    if (!s || !t || s === t) continue;
+    degreeById.set(s, (degreeById.get(s) ?? 0) + 1);
+    degreeById.set(t, (degreeById.get(t) ?? 0) + 1);
+  }
 
   // Separate "structural" nodes (the anchors that should be positioned
   // first via wide radial spread) from the "content" nodes that cluster
@@ -342,103 +560,150 @@ export function polymathToGraphology(
   // wider seed. FA2 then only has to fine-tune positions, not push the
   // whole pile outward, so the canvas reads as spread-out within the
   // first second instead of clumping for 20s while FA2 settles.
-  const structuralSpread = Math.sqrt(Math.max(n, 120)) * 48;
-  const conceptOrbit = structuralSpread * 0.55;
-  const leafJitter = Math.sqrt(Math.max(n, 50)) * 4;
+  const queryMode = opts.layoutMode === "query";
+  const structuralSpread =
+    Math.sqrt(Math.max(n, queryMode ? 90 : 120)) * (queryMode ? 58 : 48);
+  const conceptOrbit = structuralSpread * (queryMode ? 0.68 : 0.55);
+  const leafJitter =
+    Math.sqrt(Math.max(n, queryMode ? 70 : 50)) * (queryMode ? 7 : 4);
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
 
   const positions = new Map<string, { x: number; y: number }>();
 
-  // 1) Structural anchors → wide golden-angle radial spread.
-  structural.forEach((raw, idx) => {
-    const angle = idx * goldenAngle;
-    const radius =
-      structuralSpread *
-      Math.sqrt((idx + 1) / Math.max(structural.length, 1));
-    const jitter = structuralSpread * 0.12;
-    const x = radius * Math.cos(angle) + (Math.random() - 0.5) * jitter;
-    const y = radius * Math.sin(angle) + (Math.random() - 0.5) * jitter;
-    positions.set(raw.id, { x, y });
-    addNodeToGraph(graph, raw, x, y, n, opts);
-  });
-
-  // 2) Concept supernodes → orbit their primary_domain anchor when known,
-  //    else just a tighter golden-angle radial spread.
-  concepts.forEach((raw, idx) => {
-    let center = { x: 0, y: 0 };
-    if (raw.primary_domain) {
-      const parent = structural.find(
-        (s) => s.display_name === raw.primary_domain,
+  if (queryMode) {
+    // Query graphs are not an atlas of the whole corpus. They should read
+    // like an atom around the user's question: seeds at the nucleus,
+    // hubs/bridges in inner shells, concepts/books in middle shells, and
+    // leaves outside. ForceAtlas2 then resolves the real edge tensions
+    // from a readable deterministic starting point instead of a jellyfish.
+    const roleById = new Map<string, QueryShellRole>();
+    const countByRole = new Map<QueryShellRole, number>();
+    for (const raw of rawNodes) {
+      const role = queryShellRole(raw, opts, degreeById.get(raw.id) ?? 0);
+      roleById.set(raw.id, role);
+      countByRole.set(role, (countByRole.get(role) ?? 0) + 1);
+    }
+    const seenByRole = new Map<QueryShellRole, number>();
+    const ranked = [...rawNodes].sort((a, b) => {
+      const ar = roleById.get(a.id) ?? "leaf";
+      const br = roleById.get(b.id) ?? "leaf";
+      return (
+        queryRoleRank(ar) - queryRoleRank(br) ||
+        (degreeById.get(b.id) ?? 0) - (degreeById.get(a.id) ?? 0) ||
+        String(a.id).localeCompare(String(b.id))
       );
-      if (parent) {
-        const p = positions.get(parent.id);
-        if (p) center = p;
-      }
-    }
-    const angle = idx * goldenAngle;
-    const radius = conceptOrbit * Math.sqrt((idx + 1) / Math.max(concepts.length, 1));
-    const x = center.x + radius * Math.cos(angle) * 0.8;
-    const y = center.y + radius * Math.sin(angle) * 0.8;
-    positions.set(raw.id, { x, y });
-    addNodeToGraph(graph, raw, x, y, n, opts);
-  });
+    });
+    ranked.forEach((raw) => {
+      const role = roleById.get(raw.id) ?? "leaf";
+      const localIndex = seenByRole.get(role) ?? 0;
+      const roleTotal = Math.max(countByRole.get(role) ?? 1, 1);
+      seenByRole.set(role, localIndex + 1);
 
-  // 3) Leaf entities → cluster around their parent (book anchor or concept
-  //    centroid if available), else spread randomly within the canvas.
-  leaves.forEach((raw, idx) => {
-    let cx = 0;
-    let cy = 0;
-    let positioned = false;
-    let isOctopusSatellite = false;
-    // Book mode: leaf entities have primary_doc_id → orbit that book anchor.
-    if (raw.primary_doc_id) {
-      const anchorPos = positions.get(`book:${raw.primary_doc_id}`);
-      if (anchorPos) {
-        cx = anchorPos.x;
-        cy = anchorPos.y;
-        positioned = true;
-        isOctopusSatellite = true;
-      }
-    }
-    // Cluster centers for query/drill mode if caller provides them.
-    if (!positioned && clusterCenters) {
-      const c = clusterCenters.get(raw.primary_domain || "");
-      if (c) {
-        cx = c.x;
-        cy = c.y;
-        positioned = true;
-      }
-    }
-    // Fallback: scatter inside the canvas.
-    if (!positioned) {
+      const { x, y } = queryLayoutPoint(
+        queryLayoutMode(opts),
+        role,
+        raw,
+        localIndex,
+        roleTotal,
+        positions.size,
+        n,
+        goldenAngle,
+      );
+      positions.set(raw.id, { x, y });
+      addNodeToGraph(graph, raw, x, y, n, opts, degreeById);
+    });
+  } else {
+    // 1) Structural anchors → wide golden-angle radial spread.
+    structural.forEach((raw, idx) => {
       const angle = idx * goldenAngle;
       const radius =
         structuralSpread *
-        0.45 *
-        Math.sqrt((idx + 1) / Math.max(leaves.length, 1));
-      cx = radius * Math.cos(angle);
-      cy = radius * Math.sin(angle);
-    }
+        Math.sqrt((idx + 1) / Math.max(structural.length, 1));
+      const jitter = structuralSpread * 0.12;
+      const x = radius * Math.cos(angle) + (Math.random() - 0.5) * jitter;
+      const y = radius * Math.sin(angle) + (Math.random() - 0.5) * jitter;
+      positions.set(raw.id, { x, y });
+      addNodeToGraph(graph, raw, x, y, n, opts, degreeById);
+    });
 
-    let x: number;
-    let y: number;
-    if (isOctopusSatellite) {
-      // Octopus mode — leaf carries a pre-baked polar offset (raw.x/y
-      // set to a ring at ~28px from origin by GraphViewer). Add the
-      // anchor center to land it in tight orbit around the book. This
-      // is much more compact than the scattered-cloud `leafJitter`
-      // fallback, so satellites read as tentacle tips, not as drifters.
-      const offsetX = typeof raw.x === "number" ? raw.x : 0;
-      const offsetY = typeof raw.y === "number" ? raw.y : 0;
-      x = cx + offsetX + (Math.random() - 0.5) * 4;
-      y = cy + offsetY + (Math.random() - 0.5) * 4;
-    } else {
-      x = cx + (Math.random() - 0.5) * leafJitter;
-      y = cy + (Math.random() - 0.5) * leafJitter;
-    }
-    positions.set(raw.id, { x, y });
-    addNodeToGraph(graph, raw, x, y, n, opts);
-  });
+    // 2) Concept supernodes → orbit their primary_domain anchor when known,
+    //    else just a tighter golden-angle radial spread.
+    concepts.forEach((raw, idx) => {
+      let center = { x: 0, y: 0 };
+      if (raw.primary_domain) {
+        const parent = structural.find(
+          (s) => s.display_name === raw.primary_domain,
+        );
+        if (parent) {
+          const p = positions.get(parent.id);
+          if (p) center = p;
+        }
+      }
+      const angle = idx * goldenAngle;
+      const radius = conceptOrbit * Math.sqrt((idx + 1) / Math.max(concepts.length, 1));
+      const x = center.x + radius * Math.cos(angle) * 0.8;
+      const y = center.y + radius * Math.sin(angle) * 0.8;
+      positions.set(raw.id, { x, y });
+      addNodeToGraph(graph, raw, x, y, n, opts, degreeById);
+    });
+
+    // 3) Leaf entities → cluster around their parent (book anchor or concept
+    //    centroid if available), else spread randomly within the canvas.
+    leaves.forEach((raw, idx) => {
+      let cx = 0;
+      let cy = 0;
+      let positioned = false;
+      let isOctopusSatellite = false;
+      // Book mode: leaf entities have primary_doc_id → orbit that book anchor.
+      if (raw.primary_doc_id) {
+        const anchorPos = positions.get(`book:${raw.primary_doc_id}`);
+        if (anchorPos) {
+          cx = anchorPos.x;
+          cy = anchorPos.y;
+          positioned = true;
+          isOctopusSatellite = true;
+        }
+      }
+      // Cluster centers for query/drill mode if caller provides them.
+      if (!positioned && clusterCenters) {
+        const c = clusterCenters.get(raw.primary_domain || "");
+        if (c) {
+          cx = c.x;
+          cy = c.y;
+          positioned = true;
+        }
+      }
+      // Fallback: scatter inside the canvas.
+      if (!positioned) {
+        const angle = idx * goldenAngle;
+        const radius =
+          structuralSpread *
+          0.45 *
+          Math.sqrt((idx + 1) / Math.max(leaves.length, 1));
+        cx = radius * Math.cos(angle);
+        cy = radius * Math.sin(angle);
+      }
+
+      let x: number;
+      let y: number;
+      if (isOctopusSatellite) {
+        // Octopus mode — leaf carries a pre-baked polar offset (raw.x/y
+        // set to a ring at ~28px from origin by GraphViewer). Add the
+        // anchor center to land it in tight orbit around the book. This
+        // is much more compact than the scattered-cloud `leafJitter`
+        // fallback, so satellites read as tentacle tips, not as drifters.
+        const offsetX = typeof raw.x === "number" ? raw.x : 0;
+        const offsetY = typeof raw.y === "number" ? raw.y : 0;
+        x = cx + offsetX + (Math.random() - 0.5) * 4;
+        y = cy + offsetY + (Math.random() - 0.5) * 4;
+      } else {
+        x = cx + (Math.random() - 0.5) * leafJitter;
+        y = cy + (Math.random() - 0.5) * leafJitter;
+      }
+      positions.set(raw.id, { x, y });
+      addNodeToGraph(graph, raw, x, y, n, opts, degreeById);
+    });
+  }
 
   // 4) Edges. EDGE_STYLES gives each predicate / relation_family a
   //    distinct color + size multiplier so the mesh of relationships is
@@ -503,8 +768,25 @@ export function polymathToGraphology(
     const relationFamily =
       rel.dominant_relation_family || rel.relation_family || null;
     const familyStyle = getEdgeStyleByFamily(relationFamily, rel.predicate);
-    // Curvature jitter prevents perfectly-overlapping double edges.
-    const curvature = 0.12 + Math.random() * 0.08;
+    // Curvature jitter prevents perfectly-overlapping double edges. Query
+    // graphs get curvature from the user's semantic fingerprint so compare,
+    // chain, hierarchy, and radial questions do not all feel like the same
+    // generic force layout.
+    const baseCurvature =
+      opts.layoutMode === "query"
+        ? opts.queryFingerprint?.edgeCurvature ?? 0.22
+        : 0.12;
+    const curvature =
+      opts.layoutMode === "query"
+        ? Math.max(
+            0.08,
+            Math.min(
+              0.48,
+              baseCurvature +
+                (stableUnitHash(`${s}:${t}:${i}:curve`) - 0.5) * 0.04,
+            ),
+          )
+        : baseCurvature + Math.random() * 0.08;
     let color = relationFamily
       ? hexToRgba(familyStyle.color, familyStyle.opacity)
       : style.color;
@@ -545,6 +827,7 @@ export function polymathToGraphology(
         edgeLabel = overflow > 0 ? `${head} +${overflow}` : head;
       }
     }
+    const layoutWeight = edgeLayoutWeight(rel, opts);
     graph.addEdgeWithKey(`e${i}`, s, t, {
       size,
       color,
@@ -553,7 +836,8 @@ export function polymathToGraphology(
       predicate: rel.predicate,
       relation_family: rel.relation_family,
       dominant_relation_family: relationFamily,
-      weight: rel.weight,
+      weight: layoutWeight,
+      display_weight: rel.weight,
       confidence: rel.confidence,
       source_corpora: rel.source_corpora || [],
       source_corpus: rel.source_corpus,
@@ -594,6 +878,7 @@ function addNodeToGraph(
   y: number,
   totalCount: number,
   opts: BuildOpts,
+  degreeById: Map<string, number>,
 ) {
   if (graph.hasNode(raw.id)) return;
   const kind = inferNodeKind(raw);
@@ -615,14 +900,25 @@ function addNodeToGraph(
   //   • `raw.label` (pre-cleaned by cleanBookLabel) wins over display_name.
   //   • `raw.forceLabel` boolean (Brain View top-N tagging) overrides the
   //     default Domain/Book always-on rule when explicitly provided.
-  const renderedLabel =
+  const fullLabel =
     (raw as PolymathRawNode).label ||
     raw.display_name ||
     raw.id;
+  const degree = degreeById.get(raw.id) ?? 0;
+  const isQueryAnchor =
+    opts.seedIds?.has(raw.id) ||
+    opts.hubIds?.has(raw.id) ||
+    opts.bridgeIds?.has(raw.id);
+  const renderedLabel =
+    opts.layoutMode === "query"
+      ? compactQueryLabel(String(fullLabel), Boolean(isQueryAnchor) || degree >= 5)
+      : fullLabel;
   const forceLabel =
     typeof (raw as PolymathRawNode).forceLabel === "boolean"
       ? Boolean((raw as PolymathRawNode).forceLabel)
-      : kind === "Domain" || kind === "Book";
+      : opts.layoutMode === "query"
+        ? Boolean(isQueryAnchor) || degree >= 5
+        : kind === "Domain" || kind === "Book";
   // Octopus satellites — leaves bound to a book via primary_doc_id —
   // need very low mass so FA2 doesn't yank them into other orbits. Cap
   // at 2; the book anchors themselves stay heavy (mass 22 in
@@ -630,7 +926,14 @@ function addNodeToGraph(
   const baseMass = NODE_MASSES[kind] || 1;
   const isOctopusSatellite =
     Boolean((raw as PolymathRawNode).primary_doc_id) && kind !== "Book";
-  const mass = isOctopusSatellite ? Math.min(baseMass, 2) : baseMass;
+  let mass = isOctopusSatellite ? Math.min(baseMass, 2) : baseMass;
+  if (opts.layoutMode === "query") {
+    mass += Math.min(16, Math.log2(degree + 1) * 2.2);
+    if (opts.seedIds?.has(raw.id)) mass *= 1.45;
+    else if (opts.hubIds?.has(raw.id) || opts.bridgeIds?.has(raw.id)) {
+      mass *= 1.25;
+    }
+  }
 
   graph.addNode(raw.id, {
     x,

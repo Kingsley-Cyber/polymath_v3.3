@@ -3660,9 +3660,13 @@ async def _resolve_graph_model(
         try:
             from services.query_model_resolver import resolve as resolve_query_model
 
-            resolved = await resolve_query_model(user_id, "query")
+            source_kind = "graph_query_pref"
+            resolved = await resolve_query_model(user_id, "graph_query")
+            if not resolved:
+                source_kind = "query_pref"
+                resolved = await resolve_query_model(user_id, "query")
         except Exception as exc:
-            logger.debug("Graph synthesis query model preference lookup failed: %s", exc)
+            logger.debug("Graph synthesis model preference lookup failed: %s", exc)
             resolved = None
         if resolved:
             return {
@@ -3670,7 +3674,7 @@ async def _resolve_graph_model(
                 "api_base": resolved.get("api_base"),
                 "api_key": resolved.get("api_key"),
                 "extra_params": resolved.get("extra_params") or {},
-                "source": "query_pref",
+                "source": source_kind,
             }
 
     if model.startswith("pool:") or model.startswith("profile:"):

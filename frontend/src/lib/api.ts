@@ -1577,8 +1577,14 @@ export async function findGraphResumeCandidate(
   return fetchJSON("/graph/resume-candidate", { method: "POST", body: JSON.stringify(body) });
 }
 
-export async function getGraphSuggestions(corpusId: string): Promise<import("../types").GraphSuggestionsResponse> {
-  return fetchJSON(`/graph/suggestions?corpus_id=${encodeURIComponent(corpusId)}`);
+export async function getGraphSuggestions(corpusIds: string | string[]): Promise<import("../types").GraphSuggestionsResponse> {
+  if (Array.isArray(corpusIds)) {
+    const ids = corpusIds.map((id) => id.trim()).filter(Boolean);
+    if (ids.length === 0) throw new Error("corpus_id required");
+    const qs = new URLSearchParams({ corpus_ids: ids.join(",") });
+    return fetchJSON(`/graph/suggestions?${qs.toString()}`);
+  }
+  return fetchJSON(`/graph/suggestions?corpus_id=${encodeURIComponent(corpusIds)}`);
 }
 
 export async function deleteGraphSession(sessionId: string): Promise<{ success?: boolean }> {
@@ -1842,6 +1848,23 @@ export interface RefinementResult {
   related_questions: string[];
 }
 
+export interface ContextualQuestions {
+  rag: string[];
+  research: string[];
+  nuance: string[];
+  ideation: string[];
+}
+
+export interface ConceptQuestionPacket {
+  matched_entities: Array<{
+    name: string;
+    type: string;
+    mentions: number;
+  }>;
+  nearby_relations: Array<Record<string, unknown>>;
+  source_hints: Array<Record<string, unknown>>;
+}
+
 /** Pt 7b: entity extracted from the user's question via
  *  extract_query_entities Cypher. Same shape as EntityRow (below) so the
  *  frontend can reuse rendering helpers. `score` is a rough token-overlap
@@ -1863,6 +1886,12 @@ export interface RefineQueryResponse {
    *  on the backend (recomputed every call) so it reflects fresh graph
    *  state. Returned even on cache hits for the refinement portion. */
   entities: ExtractedEntity[];
+  contextual_questions?: ContextualQuestions;
+  contextual_cached?: boolean;
+  contextual_error?: string;
+  contextual_source?: "llm" | "cache" | "local_fallback" | string;
+  concept_packet?: ConceptQuestionPacket;
+  context_signature?: string;
   error?: string;
 }
 
@@ -1871,10 +1900,15 @@ const _refineInflight = new Map<string, Promise<RefineQueryResponse>>();
 const _refineCache = new Map<string, { at: number; value: RefineQueryResponse }>();
 const REFINE_RESULT_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-function _refineKey(question: string, corpusIds: string[], model?: string): string {
+function _refineKey(
+  question: string,
+  corpusIds: string[],
+  model?: string,
+  includeContextual = false,
+): string {
   const normalized = question.trim().toLowerCase().replace(/\s+/g, " ");
   const ids = [...corpusIds].sort().join(",");
-  return `${normalized}|${ids}|${model ?? ""}`;
+  return `${normalized}|${ids}|${model ?? ""}|context:${includeContextual ? "1" : "0"}`;
 }
 
 export async function refineQuery(
@@ -1882,8 +1916,9 @@ export async function refineQuery(
   corpusIds: string[],
   model?: string,
   forceRefresh = false,
+  includeContextual = false,
 ): Promise<RefineQueryResponse> {
-  const key = _refineKey(question, corpusIds, model);
+  const key = _refineKey(question, corpusIds, model, includeContextual);
 
   // (a) Result cache hit (skipped on forceRefresh).
   if (!forceRefresh) {
@@ -1906,6 +1941,7 @@ export async function refineQuery(
           corpus_ids: corpusIds,
           model,
           force_refresh: forceRefresh,
+          include_contextual: includeContextual,
         }),
       });
       _refineCache.set(key, { at: Date.now(), value: res });

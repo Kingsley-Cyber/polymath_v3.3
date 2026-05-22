@@ -7,7 +7,7 @@
  *   • Multi-corpus data fetch (Brain View domains/books, Query View)
  *   • Cache-warming poll
  *   • UI chrome: corpus pill stats, color/view toggles, breadcrumb,
- *     hover tooltip, selection bar, controls cluster, prose pane
+ *     hover tooltip, selection bar, controls cluster
  *   • Drill stack management (concept community drill, book drill)
  */
 
@@ -18,7 +18,6 @@ import {
   useRef,
   useState,
 } from "react";
-import ReactMarkdown from "react-markdown";
 import {
   Loader2,
   Maximize2,
@@ -35,8 +34,13 @@ import {
   polymathToGraphology,
   type ColorMode,
 } from "../../lib/polymath-graph-adapter";
+import { fingerprintGraphQuery } from "../../lib/query-fingerprint";
 import { cleanBookLabel } from "../../lib/label-utils";
-import { BrainViewDashboard, type DashboardTab } from "./BrainViewDashboard";
+import {
+  BrainViewDashboard,
+  type DashboardTab,
+  type GraphProgressStep,
+} from "./BrainViewDashboard";
 import { GalaxyBackground } from "./GalaxyBackground";
 import type { GraphSynthesisMode } from "../../types/discover";
 
@@ -59,9 +63,7 @@ interface GraphViewerProps {
   corpusIds: string[];
   query?: string;
   onRerun?: () => void;
-  onClose?: () => void;
   onQueryPhaseChange?: (phase: "idle" | "loading" | "ready" | "error") => void;
-  model?: string;
   /** Pt 7: callback fired when the user picks a refined chip / entity in
    *  the Graph Query tab. Parent typically closes the modal and loads
    *  the text into the chat input. */
@@ -74,6 +76,246 @@ type DrillFrame = {
   docId: string;
   label: string;
 };
+
+type GraphPayload = { nodes: any[]; links: any[] };
+
+type GraphQueryProgressStage =
+  | "idle"
+  | "querying"
+  | "synthesizing"
+  | "done"
+  | "subgraph_error"
+  | "synthesis_error_after_map";
+
+type QuestionGraphProgressStage =
+  | "idle"
+  | "querying"
+  | "done"
+  | "error";
+
+function graphQueryStepLabels(mode: GraphSynthesisMode): string[] {
+  if (mode === "nuance") {
+    return [
+      "Reading your question and finding the concepts under tension.",
+      "Following the nearby relationships that complicate the simple answer.",
+      "Looking for bridges, gaps, contradictions, and edge cases.",
+      "Packing the evidence that shows tradeoffs and alternate framings.",
+      "Synthesizing the nuanced interpretation.",
+    ];
+  }
+  if (mode === "ideation") {
+    return [
+      "Reading your question and finding the buildable ingredients.",
+      "Finding nearby concepts that could combine into something useful.",
+      "Looking for bridges, gaps, and unexpected pairings.",
+      "Packing the strongest material for idea generation.",
+      "Synthesizing build ideas from the graph.",
+    ];
+  }
+  return [
+    "Reading your question and spotting the main ideas.",
+    "Finding the evidence neighborhood around those ideas.",
+    "Looking for bridges, hubs, and missing links that may affect the answer.",
+    "Packing the strongest source-backed evidence.",
+    "Synthesizing a grounded research answer.",
+  ];
+}
+
+function graphQueryProgressSteps(
+  mode: GraphSynthesisMode,
+  stage: GraphQueryProgressStage,
+  detail?: string | null,
+): GraphProgressStep[] {
+  const labels = graphQueryStepLabels(mode);
+  if (stage === "idle") {
+    return labels.map((label, index) => ({
+      id: `graph-${index}`,
+      label,
+      status: "pending",
+    }));
+  }
+
+  const doneThrough =
+    stage === "querying" || stage === "subgraph_error"
+      ? -1
+      : stage === "synthesizing" || stage === "synthesis_error_after_map"
+        ? 3
+        : 4;
+  const runningIndex =
+    stage === "querying" ? 0 : stage === "synthesizing" ? 4 : -1;
+  const errorIndex =
+    stage === "subgraph_error"
+      ? 0
+      : stage === "synthesis_error_after_map"
+        ? 4
+        : -1;
+
+  return labels.map((label, index) => ({
+    id: `graph-${index}`,
+    label:
+      stage === "synthesis_error_after_map" && index === 4
+        ? "The map loaded, but the synthesis model could not be reached."
+        : label,
+    status:
+      index === errorIndex
+        ? "error"
+        : index === runningIndex
+          ? "running"
+          : index <= doneThrough
+            ? "done"
+            : "pending",
+    detail: index === errorIndex ? detail || undefined : undefined,
+  }));
+}
+
+function questionGraphProgressSteps(
+  stage: QuestionGraphProgressStage,
+  detail?: string | null,
+): GraphProgressStep[] {
+  const labels = [
+    "Sketching a quick map from your question.",
+    "Matching your words to concepts in the corpus.",
+  ];
+  if (stage === "idle") {
+    return labels.map((label, index) => ({
+      id: `question-graph-${index}`,
+      label,
+      status: "pending",
+    }));
+  }
+
+  return labels.map((label, index) => ({
+    id: `question-graph-${index}`,
+    label,
+    status:
+      stage === "error" && index === 0
+        ? "error"
+        : stage === "querying" && index === 0
+          ? "running"
+          : stage === "done"
+            ? "done"
+            : "pending",
+    detail: stage === "error" && index === 0 ? detail || undefined : undefined,
+  }));
+}
+
+const QUERY_VISIBLE_NODE_LIMIT = 420;
+const QUERY_VISIBLE_EDGE_LIMIT = 950;
+
+function graphEndpointId(value: unknown): string {
+  if (value && typeof value === "object") {
+    const obj = value as { id?: unknown; key?: unknown };
+    return String(obj.id ?? obj.key ?? "");
+  }
+  return String(value ?? "");
+}
+
+function graphLinkWeight(link: any): number {
+  const weight = Number(link?.weight ?? link?.shared_entities ?? 1);
+  const confidence = Number(link?.confidence ?? 0.5);
+  return (Number.isFinite(weight) ? weight : 1) +
+    (Number.isFinite(confidence) ? confidence : 0.5);
+}
+
+function curateQueryGraphForCanvas(
+  payload: GraphPayload | null,
+  seedIds: Set<string>,
+  hubIds: Set<string>,
+  bridgeIds: Set<string>,
+): GraphPayload | null {
+  if (!payload || payload.nodes.length <= QUERY_VISIBLE_NODE_LIMIT) {
+    return payload;
+  }
+
+  const nodesById = new Map<string, any>();
+  for (const node of payload.nodes) nodesById.set(String(node.id), node);
+
+  const usableLinks = payload.links.filter((link) => {
+    const s = graphEndpointId(link.source);
+    const t = graphEndpointId(link.target);
+    return s && t && s !== t && nodesById.has(s) && nodesById.has(t);
+  });
+
+  const degreeById = new Map<string, number>();
+  const incidentById = new Map<string, any[]>();
+  for (const link of usableLinks) {
+    const s = graphEndpointId(link.source);
+    const t = graphEndpointId(link.target);
+    degreeById.set(s, (degreeById.get(s) ?? 0) + 1);
+    degreeById.set(t, (degreeById.get(t) ?? 0) + 1);
+    if (!incidentById.has(s)) incidentById.set(s, []);
+    if (!incidentById.has(t)) incidentById.set(t, []);
+    incidentById.get(s)?.push(link);
+    incidentById.get(t)?.push(link);
+  }
+
+  const isAnchor = (id: string) =>
+    seedIds.has(id) || hubIds.has(id) || bridgeIds.has(id);
+  const nodeScore = (node: any) => {
+    const id = String(node.id);
+    const kind = String(node.kind || node.entity_type || node.supernode_type || "");
+    const mentions = Number(node.mention_count ?? node.total_mentions ?? 1);
+    let score = (degreeById.get(id) ?? 0) * 14;
+    if (seedIds.has(id)) score += 1200;
+    if (hubIds.has(id)) score += 700;
+    if (bridgeIds.has(id)) score += 650;
+    if (kind.toLowerCase() === "book" || node.is_cluster_anchor) score += 120;
+    if (kind.toLowerCase() === "concept") score += 70;
+    if (Number.isFinite(mentions)) score += Math.log2(mentions + 1) * 12;
+    return score;
+  };
+
+  const rankedNodes = [...payload.nodes].sort((a, b) => nodeScore(b) - nodeScore(a));
+  const selected = new Set<string>();
+  const addNode = (id: string) => {
+    if (selected.size >= QUERY_VISIBLE_NODE_LIMIT) return false;
+    if (!nodesById.has(id)) return false;
+    selected.add(id);
+    return true;
+  };
+
+  for (const node of rankedNodes) {
+    const id = String(node.id);
+    if (isAnchor(id)) addNode(id);
+  }
+
+  const anchors = [...selected];
+  for (const id of anchors) {
+    const incident = [...(incidentById.get(id) || [])].sort(
+      (a, b) => graphLinkWeight(b) - graphLinkWeight(a),
+    );
+    for (const link of incident) {
+      if (selected.size >= Math.floor(QUERY_VISIBLE_NODE_LIMIT * 0.72)) break;
+      const s = graphEndpointId(link.source);
+      const t = graphEndpointId(link.target);
+      addNode(s === id ? t : s);
+    }
+  }
+
+  for (const node of rankedNodes) {
+    if (selected.size >= QUERY_VISIBLE_NODE_LIMIT) break;
+    addNode(String(node.id));
+  }
+
+  const selectedLinks = usableLinks
+    .filter((link) => selected.has(graphEndpointId(link.source)) &&
+      selected.has(graphEndpointId(link.target)))
+    .sort((a, b) => {
+      const aAnchor =
+        Number(isAnchor(graphEndpointId(a.source))) +
+        Number(isAnchor(graphEndpointId(a.target)));
+      const bAnchor =
+        Number(isAnchor(graphEndpointId(b.source))) +
+        Number(isAnchor(graphEndpointId(b.target)));
+      return bAnchor - aAnchor || graphLinkWeight(b) - graphLinkWeight(a);
+    })
+    .slice(0, QUERY_VISIBLE_EDGE_LIMIT);
+
+  return {
+    nodes: payload.nodes.filter((node) => selected.has(String(node.id))),
+    links: selectedLinks,
+  };
+}
 
 // ─── Brain mode data hook ─────────────────────────────────────────────────
 
@@ -439,7 +681,6 @@ function useBrainGraph(
 function useQueryGraph(
   corpusIds: string[],
   query: string | undefined,
-  model: string | undefined,
   synthesisMode: GraphSynthesisMode = "research",
   validateSynthesis: boolean = false,
 ) {
@@ -464,13 +705,31 @@ function useQueryGraph(
     perCorpus?: Array<{ corpus_id: string; markdown: string }>;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [progressStage, setProgressStage] =
+    useState<GraphQueryProgressStage>("idle");
+  const [progressError, setProgressError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancel = false;
     const run = async () => {
-      if (!corpusIds.length || !query?.trim()) return;
+      if (!corpusIds.length || !query?.trim()) {
+        setPhase("idle");
+        setData(null);
+        setSeedIds(new Set());
+        setHubIds(new Set());
+        setBridgeIds(new Set());
+        setGaps([]);
+        setSynthesis(null);
+        setError(null);
+        setProgressStage("idle");
+        setProgressError(null);
+        return;
+      }
       setPhase("loading");
       setError(null);
+      setProgressStage("querying");
+      setProgressError(null);
+      let subgraphLoaded = false;
       try {
         const subgraphP = api.queryGraph(
           corpusIds,
@@ -485,8 +744,11 @@ function useQueryGraph(
           mode: "auto",
           synthesis_mode: synthesisMode,
           validate_synthesis: validateSynthesis,
-          ...(model ? { model } : {}),
         } as any);
+        // The map and synthesis run in parallel so the graph can appear first.
+        // If the map request fails, this prevents the still-running synthesis
+        // promise from surfacing as an unhandled rejection.
+        void synthP.catch(() => undefined);
         const sub = await subgraphP;
         if (cancel) return;
         setSeedIds(
@@ -501,6 +763,8 @@ function useQueryGraph(
         setGaps(sub.gaps || []);
         setData({ nodes: sub.nodes || [], links: sub.links || [] });
         setPhase("ready");
+        subgraphLoaded = true;
+        setProgressStage("synthesizing");
         const synth = await synthP;
         if (cancel) return;
         const auto = (synth as any).auto_synthesis || {};
@@ -512,10 +776,16 @@ function useQueryGraph(
           sources: auto.sources || [],
           perCorpus: auto.per_corpus_synthesis || undefined,
         });
+        setProgressStage("done");
       } catch (e) {
         if (cancel) return;
-        setError(e instanceof Error ? e.message : String(e));
-        setPhase("error");
+        const message = e instanceof Error ? e.message : String(e);
+        setError(message);
+        setProgressError(message);
+        setProgressStage(
+          subgraphLoaded ? "synthesis_error_after_map" : "subgraph_error",
+        );
+        if (!subgraphLoaded) setPhase("error");
       }
     };
     run();
@@ -525,7 +795,6 @@ function useQueryGraph(
   }, [
     corpusIds,
     query,
-    model,
     synthesisMode,
     validateSynthesis,
     graphQuerySeedEntities,
@@ -542,6 +811,109 @@ function useQueryGraph(
     gaps,
     synthesis,
     error,
+    progressSteps: graphQueryProgressSteps(
+      synthesisMode,
+      progressStage,
+      progressError,
+    ),
+  };
+}
+
+function useQuestionGraph(
+  corpusIds: string[],
+  query: string | undefined,
+) {
+  const graphQuerySeedEntities = useSettingsStore(
+    (state) => state.graphQuerySeedEntities,
+  );
+  const graphQueryMaxHops = useSettingsStore((state) => state.graphQueryMaxHops);
+  const graphQueryNodeLimit = useSettingsStore(
+    (state) => state.graphQueryNodeLimit,
+  );
+  const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "error">(
+    "idle",
+  );
+  const [data, setData] = useState<{ nodes: any[]; links: any[] } | null>(null);
+  const [seedIds, setSeedIds] = useState<Set<string>>(new Set());
+  const [hubIds, setHubIds] = useState<Set<string>>(new Set());
+  const [bridgeIds, setBridgeIds] = useState<Set<string>>(new Set());
+  const [gaps, setGaps] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [progressStage, setProgressStage] =
+    useState<QuestionGraphProgressStage>("idle");
+  const [progressError, setProgressError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancel = false;
+    const run = async () => {
+      if (!corpusIds.length || !query?.trim()) {
+        setPhase("idle");
+        setData(null);
+        setSeedIds(new Set());
+        setHubIds(new Set());
+        setBridgeIds(new Set());
+        setGaps([]);
+        setError(null);
+        setProgressStage("idle");
+        setProgressError(null);
+        return;
+      }
+      setPhase("loading");
+      setError(null);
+      setProgressStage("querying");
+      setProgressError(null);
+      try {
+        const sub = await api.queryGraph(
+          corpusIds,
+          query,
+          graphQueryMaxHops,
+          graphQueryNodeLimit,
+          { seedLimitPerToken: graphQuerySeedEntities },
+        );
+        if (cancel) return;
+        setSeedIds(
+          new Set<string>((sub.seed_entities || []).map((s: any) => String(s.id))),
+        );
+        setHubIds(
+          new Set<string>((sub.hubs || []).map((h: any) => String(h.entity_id))),
+        );
+        setBridgeIds(
+          new Set<string>((sub.bridges || []).map((b: any) => String(b.entity_id))),
+        );
+        setGaps(sub.gaps || []);
+        setData({ nodes: sub.nodes || [], links: sub.links || [] });
+        setPhase("ready");
+        setProgressStage("done");
+      } catch (e) {
+        if (cancel) return;
+        const message = e instanceof Error ? e.message : String(e);
+        setError(message);
+        setProgressError(message);
+        setProgressStage("error");
+        setPhase("error");
+      }
+    };
+    run();
+    return () => {
+      cancel = true;
+    };
+  }, [
+    corpusIds,
+    query,
+    graphQuerySeedEntities,
+    graphQueryMaxHops,
+    graphQueryNodeLimit,
+  ]);
+
+  return {
+    phase,
+    data,
+    seedIds,
+    hubIds,
+    bridgeIds,
+    gaps,
+    error,
+    progressSteps: questionGraphProgressSteps(progressStage, progressError),
   };
 }
 
@@ -552,9 +924,7 @@ export function GraphViewer({
   corpusIds,
   query,
   onRerun,
-  onClose,
   onQueryPhaseChange,
-  model,
   onSendToChat,
 }: GraphViewerProps) {
   const [colorMode, setColorMode] = useState<ColorMode>("community");
@@ -573,20 +943,26 @@ export function GraphViewer({
   // `agentInput` is what the user types; `agentQuery` is what useQueryGraph
   // actually consumes (only promoted when the user hits Run). This way
   // every keystroke doesn't refire the query.
-  const [activeTab, setActiveTab] = useState<DashboardTab>(
-    "agent",
-  );
+  const [activeTab, setActiveTab] = useState<DashboardTab>("brain");
   const [agentInput, setAgentInput] = useState<string>(query ?? "");
   const [agentQuery, setAgentQuery] = useState<string | undefined>(query);
+  const [questionGraphQuery, setQuestionGraphQuery] = useState<string | undefined>(
+    undefined,
+  );
   // Phase 3 — synthesis-mode toggle. "research" (default) gives concrete
   // claims; "ideation" produces [BUILD IDEA] blocks; "nuance" explores gap
   // typology, analogies, transfers, and bridges.
-  const [synthesisMode, setSynthesisMode] =
+  const [draftSynthesisMode, setDraftSynthesisMode] =
+    useState<GraphSynthesisMode>("research");
+  const [executedSynthesisMode, setExecutedSynthesisMode] =
     useState<GraphSynthesisMode>("research");
   // Sprint #2 — opt-in critique + revise loop. When true, the backend
   // runs auditor + editor passes after the draft (2-3× LLM cost).
   // Off by default so the common case stays single-call.
-  const [validateSynthesis, setValidateSynthesis] = useState<boolean>(false);
+  const [draftValidateSynthesis, setDraftValidateSynthesis] =
+    useState<boolean>(false);
+  const [executedValidateSynthesis, setExecutedValidateSynthesis] =
+    useState<boolean>(false);
   const drillStackRef = useRef(drillStack);
   drillStackRef.current = drillStack;
 
@@ -604,25 +980,76 @@ export function GraphViewer({
   const q = useQueryGraph(
     corpusIds,
     agentQuery,
-    model,
-    synthesisMode,
-    validateSynthesis,
+    executedSynthesisMode,
+    executedValidateSynthesis,
+  );
+  const lightQ = useQuestionGraph(corpusIds, questionGraphQuery);
+  const heavyQueryActive = Boolean(agentQuery?.trim()) && q.phase !== "idle";
+  const lightQueryActive =
+    !heavyQueryActive && Boolean(questionGraphQuery?.trim()) && lightQ.phase !== "idle";
+  const activeQ = heavyQueryActive ? q : lightQ;
+  const queryLensActive = heavyQueryActive || lightQueryActive;
+  const effectiveMode: GraphViewerMode =
+    mode === "query" || queryLensActive ? "query" : "brain";
+  const queryFingerprint = useMemo(
+    () =>
+      (heavyQueryActive ? agentQuery : questionGraphQuery)?.trim()
+        ? fingerprintGraphQuery((heavyQueryActive ? agentQuery : questionGraphQuery) || "")
+        : undefined,
+    [agentQuery, questionGraphQuery, heavyQueryActive],
   );
 
-  useEffect(() => {
-    onQueryPhaseChange?.(q.phase);
-  }, [onQueryPhaseChange, q.phase]);
+  const runGraphQuery = useCallback(
+    (nextQuery?: string) => {
+      const normalized = (nextQuery ?? agentInput).trim();
+      if (!normalized) return;
+      setAgentInput(normalized);
+      setExecutedSynthesisMode(draftSynthesisMode);
+      setExecutedValidateSynthesis(draftValidateSynthesis);
+      setAgentQuery(normalized);
+      setQuestionGraphQuery(undefined);
+      setActiveTab("agent");
+    },
+    [agentInput, draftSynthesisMode, draftValidateSynthesis],
+  );
 
-  const data = mode === "brain" ? brain.data : q.data;
-  const loading = mode === "brain" ? brain.loading : q.phase === "loading";
-  const error = mode === "brain" ? brain.error : q.error;
+  const runQuestionGraph = useCallback((nextQuery: string) => {
+    const normalized = nextQuery.trim();
+    if (!normalized) return;
+    setQuestionGraphQuery(normalized);
+    setAgentQuery(undefined);
+    setAgentInput(normalized);
+    setActiveTab("brain");
+  }, []);
+
+  const clearGraphQuery = useCallback(() => {
+    setAgentQuery(undefined);
+    setQuestionGraphQuery(undefined);
+    setAgentInput("");
+    setActiveTab("brain");
+  }, []);
+
+  useEffect(() => {
+    onQueryPhaseChange?.(activeQ.phase);
+  }, [onQueryPhaseChange, activeQ.phase]);
+
+  const rawData = effectiveMode === "brain" ? brain.data : activeQ.data;
+  const data = useMemo(
+    () =>
+      effectiveMode === "query"
+        ? curateQueryGraphForCanvas(rawData, activeQ.seedIds, activeQ.hubIds, activeQ.bridgeIds)
+        : rawData,
+    [effectiveMode, rawData, activeQ.seedIds, activeQ.hubIds, activeQ.bridgeIds],
+  );
+  const loading = effectiveMode === "brain" ? brain.loading : activeQ.phase === "loading";
+  const error = effectiveMode === "brain" ? brain.error : activeQ.error;
 
   // Double-click handler — drills into a book anchor (single-click selects
   // the node + neighbors as usual). Books-as-clusters is the only Brain
   // View now, so the only drill target is `book:<doc_id>`.
   const handleDoubleClickNode = useCallback(
     (nodeId: string) => {
-      if (mode !== "brain") return;
+      if (effectiveMode !== "brain") return;
       if (!nodeId.startsWith("book:")) return;
       const docId = nodeId.slice(5);
       const found = (data?.nodes || []).find((n: any) => String(n.id) === nodeId);
@@ -630,7 +1057,7 @@ export function GraphViewer({
         (found && (found.display_name as string)) || docId.slice(0, 8);
       setDrillStack([...drillStackRef.current, { docId, label }]);
     },
-    [mode, data],
+    [effectiveMode, data],
   );
 
   const sigma = useSigma({
@@ -643,17 +1070,21 @@ export function GraphViewer({
       setHoveredName(found ? String(found.display_name || id) : id);
     },
     onDoubleClickNode: handleDoubleClickNode,
+    layoutMode: effectiveMode,
+    queryFingerprint: effectiveMode === "query" ? queryFingerprint : undefined,
     settleAfterDrag,
   });
 
   // Push new data into sigma when it lands.
   useEffect(() => {
     if (!data) return;
-    const seedIds = mode === "query" ? q.seedIds : new Set<string>();
-    const hubIds = mode === "query" ? q.hubIds : new Set<string>();
-    const bridgeIds = mode === "query" ? q.bridgeIds : new Set<string>();
+    const seedIds = effectiveMode === "query" ? activeQ.seedIds : new Set<string>();
+    const hubIds = effectiveMode === "query" ? activeQ.hubIds : new Set<string>();
+    const bridgeIds = effectiveMode === "query" ? activeQ.bridgeIds : new Set<string>();
     const newGraph = polymathToGraphology(data.nodes, data.links, {
       colorMode,
+      layoutMode: effectiveMode,
+      queryFingerprint: effectiveMode === "query" ? queryFingerprint : undefined,
       seedIds,
       hubIds,
       bridgeIds,
@@ -662,7 +1093,7 @@ export function GraphViewer({
     });
     sigma.setGraph(newGraph);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run on data change
-  }, [data, mode, q.seedIds, q.hubIds, q.bridgeIds, minBridgeStrength, maxBridgesPerBook]);
+  }, [data, effectiveMode, queryFingerprint, activeQ.seedIds, activeQ.hubIds, activeQ.bridgeIds, minBridgeStrength, maxBridgesPerBook]);
 
   // Apply colorMode toggle without rebuilding graph.
   useEffect(() => {
@@ -672,11 +1103,13 @@ export function GraphViewer({
     // Easiest correct path: rebuild the graph with new colorMode. The
     // adapter is fast enough that this stays under a few ms even for
     // overview payloads (~80 nodes).
-    const seedIds = mode === "query" ? q.seedIds : new Set<string>();
-    const hubIds = mode === "query" ? q.hubIds : new Set<string>();
-    const bridgeIds = mode === "query" ? q.bridgeIds : new Set<string>();
+    const seedIds = effectiveMode === "query" ? activeQ.seedIds : new Set<string>();
+    const hubIds = effectiveMode === "query" ? activeQ.hubIds : new Set<string>();
+    const bridgeIds = effectiveMode === "query" ? activeQ.bridgeIds : new Set<string>();
     const newGraph = polymathToGraphology(data.nodes, data.links, {
       colorMode,
+      layoutMode: effectiveMode,
+      queryFingerprint: effectiveMode === "query" ? queryFingerprint : undefined,
       seedIds,
       hubIds,
       bridgeIds,
@@ -767,7 +1200,11 @@ export function GraphViewer({
           {loading && !error && (
             <div className="flex items-center gap-2 text-zinc-400 text-xs font-mono">
               <Loader2 className="w-4 h-4 animate-spin" />
-              {mode === "query" ? "synthesizing across corpora…" : "loading graph…"}
+              {effectiveMode === "query"
+                ? heavyQueryActive
+                  ? "synthesizing across corpora..."
+                  : "building question graph..."
+                : "loading graph..."}
             </div>
           )}
           {error && (
@@ -782,16 +1219,16 @@ export function GraphViewer({
       {data && data.nodes.length === 0 && !loading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center">
           <EmptyDataState
-            mode={mode}
-            cacheWarming={mode === "brain" ? brain.cacheWarming : []}
-            statuses={mode === "brain" ? brain.cacheStatuses : {}}
-            rebuildingIds={mode === "brain" ? brain.rebuildingIds : new Set()}
-            onRebuild={mode === "brain" ? brain.triggerRebuild : async () => {}}
+            mode={effectiveMode}
+            cacheWarming={effectiveMode === "brain" ? brain.cacheWarming : []}
+            statuses={effectiveMode === "brain" ? brain.cacheStatuses : {}}
+            rebuildingIds={effectiveMode === "brain" ? brain.rebuildingIds : new Set()}
+            onRebuild={effectiveMode === "brain" ? brain.triggerRebuild : async () => {}}
           />
         </div>
       )}
 
-      {/* Sigma canvas + optional prose pane */}
+      {/* Sigma canvas */}
       <div className="absolute inset-0 flex">
         <div className="relative flex-1 min-w-0">
           {/* Pt 6: Galaxy background canvas — dust particles + family
@@ -808,67 +1245,6 @@ export function GraphViewer({
             className="absolute inset-0 z-10 cursor-grab active:cursor-grabbing"
           />
         </div>
-        {mode === "query" && q.synthesis && (
-          <div className="w-[40%] min-w-[320px] max-w-[640px] border-l border-zinc-900 bg-[#08080d]/90 backdrop-blur overflow-y-auto z-10">
-            <div className="p-4 space-y-3">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono">
-                synthesis
-              </div>
-              <div className="prose prose-invert prose-sm max-w-none">
-                <ReactMarkdown>{q.synthesis.markdown}</ReactMarkdown>
-              </div>
-              {q.synthesis.sources && q.synthesis.sources.length > 0 && (
-                <div className="border-t border-zinc-900 pt-3">
-                  <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono mb-2">
-                    sources ({q.synthesis.sources.length})
-                  </div>
-                  <ol className="text-xs text-zinc-400 space-y-1 list-decimal list-inside">
-                    {q.synthesis.sources.map((s: any, i: number) => (
-                      <li key={s.chunk_id || i} className="truncate" title={s.snippet}>
-                        {s.source_label || s.doc_id || s.chunk_id}
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              )}
-              {q.gaps && q.gaps.length > 0 && (
-                <div className="border-t border-zinc-900 pt-3">
-                  <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono mb-2">
-                    gaps detected ({q.gaps.length})
-                  </div>
-                  <ul className="text-xs text-zinc-400 space-y-1">
-                    {q.gaps.slice(0, 8).map((g: any, i: number) => (
-                      <li key={i}>
-                        <span className="text-zinc-300">{g.entity_a_name}</span>{" "}
-                        ↔{" "}
-                        <span className="text-zinc-300">{g.entity_b_name}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {q.synthesis.perCorpus && q.synthesis.perCorpus.length > 1 && (
-                <details className="border-t border-zinc-900 pt-3">
-                  <summary className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono cursor-pointer">
-                    per-corpus syntheses ({q.synthesis.perCorpus.length})
-                  </summary>
-                  <div className="mt-2 space-y-3">
-                    {q.synthesis.perCorpus.map((p) => (
-                      <div key={p.corpus_id}>
-                        <div className="text-xs font-mono text-amber-400 mb-1">
-                          {p.corpus_id.slice(0, 8)}
-                        </div>
-                        <div className="prose prose-invert prose-sm max-w-none text-zinc-300">
-                          <ReactMarkdown>{p.markdown}</ReactMarkdown>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
-            </div>
-          </div>
-        )}
       </div>{/* end absolute inset-0 flex */}
 
       {/* Bottom-right control cluster — same layout as GitNexus */}
@@ -929,15 +1305,15 @@ export function GraphViewer({
       <BrainViewDashboard
         collapsed={dashboardCollapsed}
         onToggle={() => setDashboardCollapsed((v) => !v)}
-        mode={mode}
+        mode={effectiveMode}
         drillStack={drillStack}
         setDrillStack={setDrillStack}
         corpusIds={corpusIds}
         data={data as any}
-        cacheWarming={mode === "brain" ? brain.cacheWarming : []}
-        cacheStatuses={mode === "brain" ? brain.cacheStatuses : {}}
-        rebuildingIds={mode === "brain" ? brain.rebuildingIds : new Set()}
-        onRebuild={mode === "brain" ? brain.triggerRebuild : async () => {}}
+        cacheWarming={effectiveMode === "brain" ? brain.cacheWarming : []}
+        cacheStatuses={effectiveMode === "brain" ? brain.cacheStatuses : {}}
+        rebuildingIds={effectiveMode === "brain" ? brain.rebuildingIds : new Set()}
+        onRebuild={effectiveMode === "brain" ? brain.triggerRebuild : async () => {}}
         colorMode={colorMode}
         onColorModeToggle={() =>
           setColorMode((m) => (m === "community" ? "corpus" : "community"))
@@ -952,14 +1328,17 @@ export function GraphViewer({
         onActiveTabChange={setActiveTab}
         agentQuery={agentInput}
         onAgentQueryChange={setAgentInput}
-        onAgentRun={() => setAgentQuery(agentInput)}
-        synthesisMode={synthesisMode}
-        onSynthesisModeChange={setSynthesisMode}
-        validateSynthesis={validateSynthesis}
-        onValidateSynthesisChange={setValidateSynthesis}
+        onAgentRun={() => runGraphQuery()}
+        synthesisMode={draftSynthesisMode}
+        onSynthesisModeChange={setDraftSynthesisMode}
+        validateSynthesis={draftValidateSynthesis}
+        onValidateSynthesisChange={setDraftValidateSynthesis}
+        onBuildQuestionGraph={runQuestionGraph}
         agentPhase={q.phase}
         agentError={q.error}
         agentSynthesisMarkdown={q.synthesis?.markdown ?? null}
+        agentProgressSteps={q.progressSteps}
+        questionProgressSteps={lightQ.progressSteps}
         agentSeedNames={(q.data?.nodes || [])
           .filter((n: any) => q.seedIds.has(String(n.id)))
           .map((n: any) => String(n.display_name || n.id))}
@@ -971,9 +1350,9 @@ export function GraphViewer({
           .map((n: any) => String(n.display_name || n.id))}
         agentGaps={q.gaps as any}
         onSendToChat={onSendToChat}
-        model={model}
         onRerun={onRerun}
-        onClose={onClose}
+        showQueryRerun={heavyQueryActive}
+        onClearGraphQuery={clearGraphQuery}
         selectedDisplay={selectedDisplay}
         onClearSelection={() => sigma.setSelectedNode(null)}
         isLayoutRunning={sigma.isLayoutRunning}

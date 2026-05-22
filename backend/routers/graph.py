@@ -771,6 +771,7 @@ async def graph_refine_query(
       corpus_ids:      list[str]    required (used for cache key)
       model:           str          optional (LLM model override)
       force_refresh:   bool         optional (bypass cache, default false)
+      include_contextual: bool      optional (add corpus-aware question buckets)
 
     Returns:
       {
@@ -780,6 +781,12 @@ async def graph_refine_query(
           alternative_phrasings: [...],
           opposing_framings:     [...],
           related_questions:     [...]
+        },
+        contextual_questions?: {
+          rag:      [...],
+          research: [...],
+          nuance:   [...],
+          ideation: [...]
         },
         error?:          str  // present only when LLM failed or returned non-JSON
       }
@@ -802,6 +809,7 @@ async def graph_refine_query(
 
     model_ref = body.get("model")
     force_refresh = bool(body.get("force_refresh") or False)
+    include_contextual = bool(body.get("include_contextual") or False)
     model = model_ref if isinstance(model_ref, str) else None
     api_base = None
     api_key = None
@@ -829,7 +837,9 @@ async def graph_refine_query(
                 model = None
 
         if not model:
-            resolved = await resolve_query_model(current_user["user_id"], "query")
+            resolved = await resolve_query_model(current_user["user_id"], "graph_query")
+            if not resolved:
+                resolved = await resolve_query_model(current_user["user_id"], "query")
             if resolved:
                 model = resolved.get("model")
                 api_base = resolved.get("api_base")
@@ -864,6 +874,7 @@ async def graph_refine_query(
         extra_params=extra_params,
         force_refresh=force_refresh,
         neo4j_driver=neo4j,
+        include_contextual=include_contextual,
     )
 
 

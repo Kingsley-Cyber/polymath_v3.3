@@ -45,12 +45,17 @@ export interface UtilityConfig {
   pool_entry_id: string | null;
 }
 
+export interface GraphQueryConfig {
+  pool_entry_id: string | null;
+}
+
 export interface ModelsConfig {
   query_model_pool: QueryModelPoolEntry[];
   hyde: HydeConfig;
   agentic: AgenticConfig;
   reasoning: ReasoningConfig;
   utility: UtilityConfig;
+  graph_query: GraphQueryConfig;
 }
 
 export interface UtilityModelTestResult {

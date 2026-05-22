@@ -425,6 +425,10 @@ class UtilityConfig(BaseModel):
     pool_entry_id: str | None = None
 
 
+class GraphQueryConfig(BaseModel):
+    pool_entry_id: str | None = None
+
+
 class ModelsConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -433,6 +437,7 @@ class ModelsConfig(BaseModel):
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
     reasoning: ReasoningConfig = Field(default_factory=ReasoningConfig)
     utility: UtilityConfig = Field(default_factory=UtilityConfig)
+    graph_query: GraphQueryConfig = Field(default_factory=GraphQueryConfig)
 
 
 class UtilityModelTestResult(BaseModel):
