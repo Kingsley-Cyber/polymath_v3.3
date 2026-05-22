@@ -82,6 +82,7 @@ type GraphPayload = { nodes: any[]; links: any[] };
 type GraphQueryProgressStage =
   | "idle"
   | "querying"
+  | "packing"
   | "synthesizing"
   | "done"
   | "subgraph_error"
@@ -138,11 +139,19 @@ function graphQueryProgressSteps(
   const doneThrough =
     stage === "querying" || stage === "subgraph_error"
       ? -1
+      : stage === "packing"
+        ? 2
       : stage === "synthesizing" || stage === "synthesis_error_after_map"
         ? 3
         : 4;
   const runningIndex =
-    stage === "querying" ? 0 : stage === "synthesizing" ? 4 : -1;
+    stage === "querying"
+      ? 0
+      : stage === "packing"
+        ? 3
+        : stage === "synthesizing"
+          ? 4
+          : -1;
   const errorIndex =
     stage === "subgraph_error"
       ? 0
@@ -201,6 +210,8 @@ function questionGraphProgressSteps(
 
 const QUERY_VISIBLE_NODE_LIMIT = 420;
 const QUERY_VISIBLE_EDGE_LIMIT = 950;
+const QUERY_MIN_LINK_DENSITY = 0.55;
+const QUERY_SCAFFOLD_EDGE_LIMIT = 90;
 
 function graphEndpointId(value: unknown): string {
   if (value && typeof value === "object") {
@@ -217,20 +228,170 @@ function graphLinkWeight(link: any): number {
     (Number.isFinite(confidence) ? confidence : 0.5);
 }
 
+function graphPairKey(source: string, target: string): string {
+  return source < target ? `${source}::${target}` : `${target}::${source}`;
+}
+
+function nodeDisplayText(node: any): string {
+  return String(
+    node?.display_name ||
+      node?.label ||
+      node?.name ||
+      node?.id ||
+      "",
+  );
+}
+
+function nodeTerms(node: any): Set<string> {
+  const text = nodeDisplayText(node).toLowerCase();
+  const terms = new Set<string>();
+  for (const match of text.matchAll(/[a-z0-9][a-z0-9.+#-]*/g)) {
+    const value = match[0];
+    if (value.length >= 3) terms.add(value);
+  }
+  return terms;
+}
+
+function queryNodeScore(
+  node: any,
+  seedIds: Set<string>,
+  hubIds: Set<string>,
+  bridgeIds: Set<string>,
+): number {
+  const id = String(node.id);
+  const mentions = Number(node.mention_count ?? node.total_mentions ?? 1);
+  let score = 0;
+  if (seedIds.has(id)) score += 900;
+  if (hubIds.has(id)) score += 650;
+  if (bridgeIds.has(id)) score += 600;
+  if (node.is_working_entity) score += 180;
+  if (node.pagerank_score) score += Number(node.pagerank_score) * 250;
+  if (Number.isFinite(mentions)) score += Math.log2(mentions + 1) * 24;
+  return score;
+}
+
+function ensureQueryScaffoldLinks(
+  payload: GraphPayload,
+  seedIds: Set<string>,
+  hubIds: Set<string>,
+  bridgeIds: Set<string>,
+): GraphPayload {
+  const nodes = payload.nodes || [];
+  if (nodes.length < 2) return payload;
+
+  const nodesById = new Map<string, any>();
+  for (const node of nodes) nodesById.set(String(node.id), node);
+
+  const usableLinks = (payload.links || []).filter((link) => {
+    const s = graphEndpointId(link.source);
+    const t = graphEndpointId(link.target);
+    return s && t && s !== t && nodesById.has(s) && nodesById.has(t);
+  });
+
+  const targetLinkCount = Math.min(
+    nodes.length - 1,
+    Math.floor(nodes.length * QUERY_MIN_LINK_DENSITY),
+  );
+  if (usableLinks.length >= targetLinkCount) {
+    return { nodes, links: usableLinks };
+  }
+
+  const existing = new Set<string>();
+  for (const link of usableLinks) {
+    existing.add(graphPairKey(graphEndpointId(link.source), graphEndpointId(link.target)));
+  }
+
+  const ranked = [...nodes].sort(
+    (a, b) =>
+      queryNodeScore(b, seedIds, hubIds, bridgeIds) -
+        queryNodeScore(a, seedIds, hubIds, bridgeIds) ||
+      nodeDisplayText(a).localeCompare(nodeDisplayText(b)),
+  );
+
+  const anchorIds = ranked
+    .filter((node) => {
+      const id = String(node.id);
+      return seedIds.has(id) || hubIds.has(id) || bridgeIds.has(id);
+    })
+    .map((node) => String(node.id));
+  const anchors = (anchorIds.length ? anchorIds : ranked.slice(0, 6).map((n) => String(n.id)))
+    .filter((id, index, arr) => Boolean(id) && arr.indexOf(id) === index);
+  if (anchors.length === 0) return { nodes, links: usableLinks };
+
+  const termCache = new Map<string, Set<string>>();
+  const termsFor = (id: string) => {
+    if (!termCache.has(id)) termCache.set(id, nodeTerms(nodesById.get(id)));
+    return termCache.get(id) || new Set<string>();
+  };
+  const overlapScore = (a: string, b: string) => {
+    const aTerms = termsFor(a);
+    const bTerms = termsFor(b);
+    let overlap = 0;
+    for (const term of aTerms) {
+      if (bTerms.has(term)) overlap += 1;
+    }
+    return overlap;
+  };
+
+  const scaffold: any[] = [];
+  const addScaffold = (source: string, target: string, weight: number) => {
+    if (source === target || !nodesById.has(source) || !nodesById.has(target)) return;
+    const key = graphPairKey(source, target);
+    if (existing.has(key)) return;
+    if (scaffold.length >= QUERY_SCAFFOLD_EDGE_LIMIT) return;
+    existing.add(key);
+    scaffold.push({
+      source,
+      target,
+      predicate: "related_to",
+      relation_family: "WeakAssociation",
+      confidence: 0.25,
+      weight,
+      visual_scaffold: true,
+    });
+  };
+
+  for (let i = 0; i < anchors.length; i += 1) {
+    addScaffold(anchors[i], anchors[(i + 1) % anchors.length], 0.55);
+  }
+
+  for (const node of ranked) {
+    if (usableLinks.length + scaffold.length >= targetLinkCount) break;
+    const id = String(node.id);
+    if (!id || anchors.includes(id)) continue;
+    const bestAnchor = [...anchors].sort((a, b) => {
+      const aNode = nodesById.get(a);
+      const bNode = nodesById.get(b);
+      return (
+        overlapScore(b, id) - overlapScore(a, id) ||
+        queryNodeScore(bNode, seedIds, hubIds, bridgeIds) -
+          queryNodeScore(aNode, seedIds, hubIds, bridgeIds) ||
+        a.localeCompare(b)
+      );
+    })[0];
+    addScaffold(bestAnchor, id, 0.42);
+  }
+
+  return {
+    nodes,
+    links: [...usableLinks, ...scaffold],
+  };
+}
+
 function curateQueryGraphForCanvas(
   payload: GraphPayload | null,
   seedIds: Set<string>,
   hubIds: Set<string>,
   bridgeIds: Set<string>,
 ): GraphPayload | null {
-  if (!payload || payload.nodes.length <= QUERY_VISIBLE_NODE_LIMIT) {
-    return payload;
-  }
+  if (!payload) return payload;
+  const scaffolded = ensureQueryScaffoldLinks(payload, seedIds, hubIds, bridgeIds);
+  if (scaffolded.nodes.length <= QUERY_VISIBLE_NODE_LIMIT) return scaffolded;
 
   const nodesById = new Map<string, any>();
-  for (const node of payload.nodes) nodesById.set(String(node.id), node);
+  for (const node of scaffolded.nodes) nodesById.set(String(node.id), node);
 
-  const usableLinks = payload.links.filter((link) => {
+  const usableLinks = scaffolded.links.filter((link) => {
     const s = graphEndpointId(link.source);
     const t = graphEndpointId(link.target);
     return s && t && s !== t && nodesById.has(s) && nodesById.has(t);
@@ -265,7 +426,7 @@ function curateQueryGraphForCanvas(
     return score;
   };
 
-  const rankedNodes = [...payload.nodes].sort((a, b) => nodeScore(b) - nodeScore(a));
+  const rankedNodes = [...scaffolded.nodes].sort((a, b) => nodeScore(b) - nodeScore(a));
   const selected = new Set<string>();
   const addNode = (id: string) => {
     if (selected.size >= QUERY_VISIBLE_NODE_LIMIT) return false;
@@ -312,7 +473,7 @@ function curateQueryGraphForCanvas(
     .slice(0, QUERY_VISIBLE_EDGE_LIMIT);
 
   return {
-    nodes: payload.nodes.filter((node) => selected.has(String(node.id))),
+    nodes: scaffolded.nodes.filter((node) => selected.has(String(node.id))),
     links: selectedLinks,
   };
 }
@@ -711,6 +872,7 @@ function useQueryGraph(
 
   useEffect(() => {
     let cancel = false;
+    let synthesisStageTimer: ReturnType<typeof setTimeout> | null = null;
     const run = async () => {
       if (!corpusIds.length || !query?.trim()) {
         setPhase("idle");
@@ -764,9 +926,16 @@ function useQueryGraph(
         setData({ nodes: sub.nodes || [], links: sub.links || [] });
         setPhase("ready");
         subgraphLoaded = true;
-        setProgressStage("synthesizing");
+        setProgressStage("packing");
+        synthesisStageTimer = setTimeout(() => {
+          if (!cancel) setProgressStage("synthesizing");
+        }, 7500);
         const synth = await synthP;
         if (cancel) return;
+        if (synthesisStageTimer) {
+          clearTimeout(synthesisStageTimer);
+          synthesisStageTimer = null;
+        }
         const auto = (synth as any).auto_synthesis || {};
         setSynthesis({
           markdown:
@@ -791,6 +960,7 @@ function useQueryGraph(
     run();
     return () => {
       cancel = true;
+      if (synthesisStageTimer) clearTimeout(synthesisStageTimer);
     };
   }, [
     corpusIds,

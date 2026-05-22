@@ -155,6 +155,7 @@ export interface PolymathRawEdge {
   // can compute a "+N more" suffix when only the top 3 names are shown.
   top_shared_entities?: string[];
   shared_entities?: number;
+  visual_scaffold?: boolean;
 }
 
 export interface BuildOpts {
@@ -164,6 +165,7 @@ export interface BuildOpts {
   seedIds?: Set<string>;
   hubIds?: Set<string>;
   bridgeIds?: Set<string>;
+  queryForceLabelIds?: Set<string>;
   /** Optional cluster centroids per concept_id / domain key, lets the
    *  adapter cluster-position entity-level nodes around their parent. */
   clusterCenters?: Map<string, { x: number; y: number }>;
@@ -272,56 +274,215 @@ function queryLayoutPoint(
   globalIndex: number,
   total: number,
   goldenAngle: number,
+  fingerprint?: QueryFingerprint,
 ): { x: number; y: number } {
   const scale = Math.sqrt(Math.max(total, 80));
   const rank = queryRoleRank(role);
   const centered = localIndex - (roleTotal - 1) / 2;
-  const laneGap = scale * 13;
+  const laneGap = scale * 16;
   const t = Math.sqrt((localIndex + 1) / Math.max(roleTotal, 1));
-  const jitter = (stableUnitHash(`${raw.id}:jitter`) - 0.5) * scale * 3;
+  const jitter = (stableUnitHash(`${raw.id}:jitter`) - 0.5) * scale * 1.1;
+  const bond = scale * 13.5;
+  const roleRing: Record<QueryShellRole, number> = {
+    seed: 0.45,
+    hub: 1.55,
+    bridge: 2.2,
+    anchor: 2.85,
+    concept: 3.55,
+    leaf: 4.45,
+  };
+  const moleculeAngle =
+    ((localIndex % 6) * Math.PI) / 3 +
+    Math.floor(localIndex / 6) * 0.36 +
+    rank * 0.18 +
+    stableUnitHash(`${raw.id}:atom-angle`) * 0.14;
+  const moleculeRing =
+    roleRing[role] +
+    Math.floor(localIndex / 6) * 0.58 +
+    (stableUnitHash(`${raw.id}:atom-ring`) - 0.5) * 0.12;
 
-  if (mode === "chain") {
+  const chainPoint = () => ({
+    x: (globalIndex - (total - 1) / 2) * scale * 6.8,
+    y: (rank - 2.5) * laneGap + jitter,
+  });
+  const vennPoint = () => {
+    const core = role === "seed" || role === "hub" || role === "bridge";
+    if (core) {
+      const radius = bond * (0.42 + rank * 0.18 + Math.floor(localIndex / 6) * 0.18);
+      return {
+        x: radius * Math.cos(moleculeAngle),
+        y: radius * Math.sin(moleculeAngle) * 0.78,
+      };
+    }
+    const side = stableUnitHash(`${raw.id}:venn-side`) < 0.5 ? -1 : 1;
+    const wing = scale * (34 + rank * 7 + Math.floor(localIndex / 7) * 5);
     return {
-      x: (globalIndex - (total - 1) / 2) * scale * 5.2,
-      y: (rank - 2.5) * laneGap + jitter,
+      x: side * wing + jitter,
+      y: centered * scale * 8.4 + side * scale * 2.5,
     };
-  }
-
-  if (mode === "bipartite") {
-    const left = role === "seed" || role === "hub" || role === "bridge";
+  };
+  const treePoint = () => ({
+    x: centered * scale * 9.8 + jitter,
+    y: (rank - 2.3) * scale * 24,
+  });
+  const scatterPoint = () => {
+    const axis = stableUnitHash(`${raw.id}:scatter-axis`) * 2 - 1;
+    const vertical = stableUnitHash(`${raw.id}:scatter-y`) * 2 - 1;
+    const importance = role === "seed" ? 0.45 : role === "hub" || role === "bridge" ? 0.72 : 1;
     return {
-      x: (left ? -1 : 1) * scale * 36 + jitter * 0.7,
-      y: centered * scale * 7.5,
+      x: axis * scale * (46 + rank * 5) * importance,
+      y: vertical * scale * (24 + rank * 4) + centered * scale * 1.4,
     };
-  }
-
-  if (mode === "hierarchy") {
+  };
+  const sociogramPoint = () => {
+    const faction = Math.floor(stableUnitHash(`${raw.id}:social-faction`) * 5);
+    const factionAngle = (faction / 5) * Math.PI * 2 + rank * 0.14;
+    const centrality = role === "seed" || role === "hub" || role === "bridge" ? 0.72 : 1.12;
+    const radius = bond * moleculeRing * centrality;
     return {
-      x: centered * scale * 7,
-      y: (rank - 2.5) * scale * 18,
+      x: radius * Math.cos(factionAngle + localIndex * 0.11),
+      y: radius * Math.sin(factionAngle + localIndex * 0.11),
     };
-  }
-
-  if (mode === "cluster") {
-    const angle = globalIndex * goldenAngle;
-    const radius = scale * 12 + scale * 70 * Math.sqrt((globalIndex + 1) / total);
+  };
+  const mindmapPoint = () => {
+    const spokeCount = Math.max(5, Math.min(9, Math.ceil(Math.sqrt(total))));
+    const spoke = localIndex % spokeCount;
+    const spokeAngle = (spoke / spokeCount) * Math.PI * 2 + rank * 0.1;
+    const depth = rank + 0.65 + Math.floor(localIndex / spokeCount) * 0.55;
+    const radius = bond * depth;
+    return {
+      x: radius * Math.cos(spokeAngle),
+      y: radius * Math.sin(spokeAngle),
+    };
+  };
+  const moleculePoint = () => {
+    const nucleusPull = role === "seed" ? 0.72 : 1;
+    const radius = bond * moleculeRing * nucleusPull;
+    return {
+      x: radius * Math.cos(moleculeAngle),
+      y: radius * Math.sin(moleculeAngle),
+    };
+  };
+  const clusterPoint = () => {
+    const angle = moleculeAngle + globalIndex * goldenAngle * 0.12;
+    const radius = bond * moleculeRing;
     return {
       x: radius * Math.cos(angle),
       y: radius * Math.sin(angle),
     };
+  };
+  const legacyRadialPoint = () => {
+    const bounds = queryShellBounds(role, total);
+    const angle =
+      localIndex * goldenAngle +
+      stableUnitHash(`${raw.id}:angle`) * Math.PI * 0.7;
+    const wobble = (stableUnitHash(`${raw.id}:radius`) - 0.5) * 0.16;
+    const radialMultiplier = mode === "force" ? 1.12 : 1;
+    const radius =
+      (bounds.inner +
+        (bounds.outer - bounds.inner) * Math.max(0, Math.min(1, t + wobble))) *
+      radialMultiplier;
+    return { x: radius * Math.cos(angle), y: radius * Math.sin(angle) };
+  };
+
+  let point: { x: number; y: number };
+  if (mode === "chain") {
+    point = chainPoint();
+  } else if (mode === "venn_molecule") {
+    point = vennPoint();
+  } else if (mode === "topological_tree") {
+    point = treePoint();
+  } else if (mode === "scatter_correlation") {
+    point = scatterPoint();
+  } else if (mode === "sociogram") {
+    point = sociogramPoint();
+  } else if (mode === "mindmap") {
+    point = mindmapPoint();
+  } else if (mode === "bipartite") {
+    const left = role === "seed" || role === "hub" || role === "bridge";
+    point = {
+      x: (left ? -1 : 1) * scale * 46 + jitter * 0.5,
+      y: centered * scale * 9.2,
+    };
+  } else if (mode === "hierarchy") {
+    point = treePoint();
+  } else if (mode === "cluster") {
+    point = clusterPoint();
+  } else if (mode === "force" || mode === "radial") {
+    point = moleculePoint();
+  } else {
+    point = legacyRadialPoint();
   }
 
-  const bounds = queryShellBounds(role, total);
-  const angle =
-    localIndex * goldenAngle +
-    stableUnitHash(`${raw.id}:angle`) * Math.PI * 0.7;
-  const wobble = (stableUnitHash(`${raw.id}:radius`) - 0.5) * 0.16;
-  const radialMultiplier = mode === "force" ? 1.12 : 1;
-  const radius =
-    (bounds.inner +
-      (bounds.outer - bounds.inner) * Math.max(0, Math.min(1, t + wobble))) *
-    radialMultiplier;
-  return { x: radius * Math.cos(angle), y: radius * Math.sin(angle) };
+  const blendToward = (target: { x: number; y: number }, amount: number) => {
+    const ratio = Math.max(0, Math.min(0.58, amount));
+    point = {
+      x: point.x * (1 - ratio) + target.x * ratio,
+      y: point.y * (1 - ratio) + target.y * ratio,
+    };
+  };
+  const blend = fingerprint?.blend;
+  if (blend) {
+    if (mode !== "venn_molecule" && blend.venn > 0) {
+      blendToward(vennPoint(), blend.venn * 0.42);
+    }
+    if (mode !== "topological_tree" && blend.tree > 0) {
+      blendToward(treePoint(), blend.tree * 0.38);
+    }
+    if (mode !== "scatter_correlation" && blend.scatter > 0) {
+      blendToward(scatterPoint(), blend.scatter * 0.42);
+    }
+    if (mode !== "sociogram" && blend.sociogram > 0) {
+      blendToward(sociogramPoint(), blend.sociogram * 0.42);
+    }
+    if (mode !== "mindmap" && blend.mindmap > 0) {
+      blendToward(mindmapPoint(), blend.mindmap * 0.36);
+    }
+    if (mode !== "chain" && blend.causal > 0) {
+      blendToward(chainPoint(), blend.causal * 0.32);
+    }
+  }
+
+  return point;
+}
+
+function separateQueryPositions(
+  nodes: PolymathRawNode[],
+  positions: Map<string, { x: number; y: number }>,
+) {
+  if (nodes.length < 2) return;
+  const scale = Math.sqrt(Math.max(nodes.length, 80));
+  const minDist = scale * (nodes.length > 300 ? 6.4 : 8.8);
+
+  for (let pass = 0; pass < 12; pass += 1) {
+    for (let i = 0; i < nodes.length; i += 1) {
+      const a = nodes[i];
+      const pa = positions.get(a.id);
+      if (!pa) continue;
+      for (let j = i + 1; j < nodes.length; j += 1) {
+        const b = nodes[j];
+        const pb = positions.get(b.id);
+        if (!pb) continue;
+        let dx = pa.x - pb.x;
+        let dy = pa.y - pb.y;
+        let dist = Math.sqrt(dx * dx + dy * dy);
+        if (!Number.isFinite(dist) || dist < 0.01) {
+          const angle = stableUnitHash(`${a.id}:${b.id}:separate`) * Math.PI * 2;
+          dx = Math.cos(angle) * 0.01;
+          dy = Math.sin(angle) * 0.01;
+          dist = 0.01;
+        }
+        if (dist >= minDist) continue;
+        const push = ((minDist - dist) / dist) * 0.58;
+        const px = dx * push;
+        const py = dy * push;
+        pa.x += px;
+        pa.y += py;
+        pb.x -= px;
+        pb.y -= py;
+      }
+    }
+  }
 }
 
 function compactQueryLabel(label: string, important: boolean): string {
@@ -338,10 +499,27 @@ function compactQueryLabel(label: string, important: boolean): string {
   return `${out || label.slice(0, limit - 1)}…`;
 }
 
+function queryLabelScore(
+  raw: PolymathRawNode,
+  opts: BuildOpts,
+  degree: number,
+): number {
+  const id = String(raw.id);
+  const mentions = Number(raw.mention_count ?? raw.total_mentions ?? 1);
+  let score = degree * 18;
+  if (opts.seedIds?.has(id)) score += 900;
+  if (opts.hubIds?.has(id)) score += 650;
+  if (opts.bridgeIds?.has(id)) score += 620;
+  if ((raw as any).is_working_entity) score += 120;
+  if (Number.isFinite(mentions)) score += Math.log2(mentions + 1) * 18;
+  return score;
+}
+
 function edgeLayoutWeight(
   rel: PolymathRawEdge,
   opts: BuildOpts,
 ): number {
+  if (rel.visual_scaffold) return 0.01;
   const predicate = String(rel.predicate || "").toLowerCase();
   const family = String(
     rel.dominant_relation_family || rel.relation_family || "",
@@ -593,6 +771,18 @@ export function polymathToGraphology(
         String(a.id).localeCompare(String(b.id))
       );
     });
+    const queryForceLabelIds = new Set(
+      [...rawNodes]
+        .sort(
+          (a, b) =>
+            queryLabelScore(b, opts, degreeById.get(b.id) ?? 0) -
+              queryLabelScore(a, opts, degreeById.get(a.id) ?? 0) ||
+            String(a.id).localeCompare(String(b.id)),
+        )
+        .slice(0, n > 300 ? 8 : 11)
+        .map((raw) => String(raw.id)),
+    );
+    const queryOpts: BuildOpts = { ...opts, queryForceLabelIds };
     ranked.forEach((raw) => {
       const role = roleById.get(raw.id) ?? "leaf";
       const localIndex = seenByRole.get(role) ?? 0;
@@ -608,10 +798,18 @@ export function polymathToGraphology(
         positions.size,
         n,
         goldenAngle,
+        opts.queryFingerprint,
       );
       positions.set(raw.id, { x, y });
-      addNodeToGraph(graph, raw, x, y, n, opts, degreeById);
+      addNodeToGraph(graph, raw, x, y, n, queryOpts, degreeById);
     });
+    separateQueryPositions(ranked, positions);
+    for (const raw of ranked) {
+      const pos = positions.get(raw.id);
+      if (pos && graph.hasNode(raw.id)) {
+        graph.mergeNodeAttributes(raw.id, pos);
+      }
+    }
   } else {
     // 1) Structural anchors → wide golden-angle radial spread.
     structural.forEach((raw, idx) => {
@@ -718,7 +916,17 @@ export function polymathToGraphology(
   //     extension) → semantic edge color (Operational=blue, Causal=amber,
   //     Conflict=red, etc.) instead of all-violet.
   //   • Thinner size: max ~1.8px ("thin spaghetti" per user spec).
-  const edgeBaseSize = n > 20000 ? 0.4 : n > 5000 ? 0.6 : 1.0;
+  const edgeBaseSize = queryMode
+    ? n > 800
+      ? 1.15
+      : n > 200
+        ? 1.3
+        : 1.45
+    : n > 20000
+      ? 0.4
+      : n > 5000
+        ? 0.6
+        : 1.0;
 
   // Pre-process Brain View bridges so we can apply the strength filter +
   // per-source top-N cap before writing edges. All non-bridge edges pass
@@ -774,23 +982,25 @@ export function polymathToGraphology(
     // generic force layout.
     const baseCurvature =
       opts.layoutMode === "query"
-        ? opts.queryFingerprint?.edgeCurvature ?? 0.22
+        ? (opts.queryFingerprint?.edgeCurvature ?? 0.22) * 0.34
         : 0.12;
     const curvature =
       opts.layoutMode === "query"
         ? Math.max(
-            0.08,
+            0.025,
             Math.min(
-              0.48,
+              0.18,
               baseCurvature +
-                (stableUnitHash(`${s}:${t}:${i}:curve`) - 0.5) * 0.04,
+                (stableUnitHash(`${s}:${t}:${i}:curve`) - 0.5) * 0.018,
             ),
           )
         : baseCurvature + Math.random() * 0.08;
     let color = relationFamily
       ? hexToRgba(familyStyle.color, familyStyle.opacity)
       : style.color;
-    if (rel.dangling) {
+    if (rel.visual_scaffold) {
+      color = "rgba(148, 163, 184, 0.4)";
+    } else if (rel.dangling) {
       color = "#d97706"; // amber for dangling edges (target outside loaded set)
     } else if (!relationFamily &&
       Array.isArray(rel.source_corpora) &&
@@ -804,6 +1014,9 @@ export function polymathToGraphology(
     // family, color the bridge semantically while opacity carries bridge
     // strength: faint = weak connection, bright = strong.
     let size = edgeBaseSize * (relationFamily ? familyStyle.size : style.sizeMultiplier);
+    if (rel.visual_scaffold) {
+      size = Math.max(0.7, edgeBaseSize * 0.56);
+    }
     let edgeLabel: string | undefined;
     if (rel.predicate === "bridges_to" && typeof rel.weight === "number") {
       const strength = Math.max(0, rel.weight);
@@ -859,7 +1072,10 @@ export function polymathToGraphology(
     if (seedIds.has(id)) {
       graph.mergeNodeAttributes(id, {
         isSeed: true,
-        forceLabel: true,
+        forceLabel:
+          opts.layoutMode === "query"
+            ? Boolean(opts.queryForceLabelIds?.has(id))
+            : true,
         size: attrs.size + 4,
       });
     }
@@ -917,7 +1133,7 @@ function addNodeToGraph(
     typeof (raw as PolymathRawNode).forceLabel === "boolean"
       ? Boolean((raw as PolymathRawNode).forceLabel)
       : opts.layoutMode === "query"
-        ? Boolean(isQueryAnchor) || degree >= 5
+        ? Boolean(opts.queryForceLabelIds?.has(raw.id))
         : kind === "Domain" || kind === "Book";
   // Octopus satellites — leaves bound to a book via primary_doc_id —
   // need very low mass so FA2 doesn't yank them into other orbits. Cap

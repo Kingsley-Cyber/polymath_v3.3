@@ -178,6 +178,25 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 function GraphProgressNarrator({ steps }: { steps?: GraphProgressStep[] }) {
   const visible = (steps || []).filter((step) => step.status !== "pending");
+  const runningSinceRef = useRef<Record<string, number>>({});
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const hasRunning = visible.some((step) => step.status === "running");
+
+  for (const step of visible) {
+    if (step.status === "running" && !runningSinceRef.current[step.id]) {
+      runningSinceRef.current[step.id] = Date.now();
+    }
+  }
+
+  useEffect(() => {
+    if (!hasRunning) {
+      runningSinceRef.current = {};
+      return;
+    }
+    const timer = window.setInterval(() => setNowMs(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [hasRunning]);
+
   if (visible.length === 0) return null;
 
   const statusClass = (status: GraphProgressStatus) => {
@@ -193,6 +212,20 @@ function GraphProgressNarrator({ steps }: { steps?: GraphProgressStep[] }) {
     if (status === "running") return "→";
     return "·";
   };
+  const elapsedLabel = (step: GraphProgressStep) => {
+    const started = runningSinceRef.current[step.id];
+    if (!started) return "";
+    const elapsed = Math.max(0, nowMs - started);
+    const seconds = Math.floor(elapsed / 1000);
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  };
+  const meterLeft = (step: GraphProgressStep) => {
+    const started = runningSinceRef.current[step.id] || nowMs;
+    const elapsed = Math.max(0, nowMs - started);
+    return `${((elapsed % 1200) / 1200) * 72}%`;
+  };
 
   return (
     <div className="mb-3 rounded-md border border-zinc-800 bg-zinc-950/65 px-2.5 py-2">
@@ -206,9 +239,28 @@ function GraphProgressNarrator({ steps }: { steps?: GraphProgressStep[] }) {
             className={`rounded border px-2 py-1.5 text-[11px] leading-relaxed ${statusClass(step.status)}`}
           >
             <div className="flex gap-2">
-              <span className="shrink-0 font-mono text-[11px]">{mark(step.status)}</span>
+              <span className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[11px]">
+                {step.status === "running" ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  mark(step.status)
+                )}
+              </span>
               <span className="min-w-0 flex-1">{step.label}</span>
             </div>
+            {step.status === "running" && (
+              <div className="mt-1.5 pl-6">
+                <div className="relative h-1 overflow-hidden rounded-full bg-zinc-950/80">
+                  <div
+                    className="absolute top-0 h-full w-[28%] rounded-full bg-amber-300/80 shadow-[0_0_10px_rgba(252,211,77,0.45)] transition-transform duration-200"
+                    style={{ transform: `translateX(${meterLeft(step)})` }}
+                  />
+                </div>
+                <div className="mt-1 font-mono text-[9px] uppercase tracking-widest text-amber-200/70">
+                  running · {elapsedLabel(step)}
+                </div>
+              </div>
+            )}
             {step.detail && (
               <div className="mt-1 pl-5 font-mono text-[10px] text-zinc-500">
                 {step.detail}

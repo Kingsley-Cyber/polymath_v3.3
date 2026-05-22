@@ -123,10 +123,10 @@ const getNoverlapSettings = (
 ) => {
   if (mode !== "query") return BASE_NOVERLAP_SETTINGS;
   return {
-    maxIterations: nodeCount > 500 ? 110 : 90,
-    ratio: nodeCount > 500 ? 1.45 : 1.55,
-    margin: nodeCount > 500 ? 24 : 30,
-    expansion: 1.25,
+    maxIterations: nodeCount > 500 ? 170 : 150,
+    ratio: nodeCount > 500 ? 1.85 : 2.05,
+    margin: nodeCount > 500 ? 42 : 54,
+    expansion: 1.42,
   };
 };
 
@@ -136,9 +136,9 @@ const getFA2Settings = (
   fingerprint?: QueryFingerprint,
 ) => {
   const queryPhysics = {
-    repulsion: 3.5 * (fingerprint?.repulsionMultiplier ?? 1),
-    spring: 1.5 * (fingerprint?.springMultiplier ?? 1),
-    damping: 1.5 * (fingerprint?.dampingMultiplier ?? 1),
+    repulsion: 5.25 * (fingerprint?.repulsionMultiplier ?? 1),
+    spring: 1.15 * (fingerprint?.springMultiplier ?? 1),
+    damping: 1.8 * (fingerprint?.dampingMultiplier ?? 1),
   };
   const base = {
     gravity: 0.6,
@@ -161,33 +161,95 @@ const getFA2Settings = (
   if (nodeCount > 800) {
     return {
       ...base,
-      gravity: 0.22,
-      scalingRatio: 38 * queryPhysics.repulsion,
-      slowDown: 4.5 * queryPhysics.damping,
+      gravity: 0.055,
+      scalingRatio: 52 * queryPhysics.repulsion,
+      slowDown: 5.8 * queryPhysics.damping,
       barnesHutOptimize: true,
       barnesHutTheta: 0.7,
-      edgeWeightInfluence: 1.2 * queryPhysics.spring,
+      edgeWeightInfluence: 0.8 * queryPhysics.spring,
     };
   }
   if (nodeCount > 200) {
     return {
       ...base,
-      gravity: 0.3,
-      scalingRatio: 32 * queryPhysics.repulsion,
-      slowDown: 4 * queryPhysics.damping,
+      gravity: 0.07,
+      scalingRatio: 46 * queryPhysics.repulsion,
+      slowDown: 5.2 * queryPhysics.damping,
       barnesHutOptimize: true,
-      edgeWeightInfluence: 1.15 * queryPhysics.spring,
+      edgeWeightInfluence: 0.82 * queryPhysics.spring,
     };
   }
   return {
     ...base,
-    gravity: 0.36,
-    scalingRatio: 28 * queryPhysics.repulsion,
-    slowDown: 3.6 * queryPhysics.damping,
+    gravity: 0.09,
+    scalingRatio: 40 * queryPhysics.repulsion,
+    slowDown: 4.8 * queryPhysics.damping,
     barnesHutOptimize: nodeCount > 120,
-    edgeWeightInfluence: 1.1 * queryPhysics.spring,
+    edgeWeightInfluence: 0.85 * queryPhysics.spring,
   };
 };
+
+function enforceQueryMinimumSpacing(
+  graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>,
+  passes = 8,
+) {
+  const nodes = graph.nodes();
+  const nodeCount = nodes.length;
+  if (nodeCount < 2) return;
+
+  const scale = Math.sqrt(Math.max(nodeCount, 80));
+  const baseGap = nodeCount > 450 ? 7.4 : nodeCount > 180 ? 9.0 : 11.2;
+  const minFor = (id: string) => {
+    const size = Number(graph.getNodeAttribute(id, "size") ?? 8);
+    const forced = Boolean(graph.getNodeAttribute(id, "forceLabel"));
+    return Math.max(scale * baseGap, size * (forced ? 9 : 7));
+  };
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    let moved = false;
+    for (let i = 0; i < nodeCount; i += 1) {
+      const a = nodes[i];
+      let ax = Number(graph.getNodeAttribute(a, "x") ?? 0);
+      let ay = Number(graph.getNodeAttribute(a, "y") ?? 0);
+      for (let j = i + 1; j < nodeCount; j += 1) {
+        const b = nodes[j];
+        let bx = Number(graph.getNodeAttribute(b, "x") ?? 0);
+        let by = Number(graph.getNodeAttribute(b, "y") ?? 0);
+        let dx = ax - bx;
+        let dy = ay - by;
+        let dist = Math.sqrt(dx * dx + dy * dy);
+        if (!Number.isFinite(dist) || dist < 0.001) {
+          const seed = `${a}:${b}`;
+          let h = 2166136261;
+          for (let k = 0; k < seed.length; k += 1) {
+            h ^= seed.charCodeAt(k);
+            h = Math.imul(h, 16777619);
+          }
+          const angle = ((h >>> 0) / 4294967295) * Math.PI * 2;
+          dx = Math.cos(angle) * 0.001;
+          dy = Math.sin(angle) * 0.001;
+          dist = 0.001;
+        }
+        const minDist = (minFor(a) + minFor(b)) * 0.5;
+        if (dist >= minDist) continue;
+
+        const push = ((minDist - dist) / dist) * 0.62;
+        const px = dx * push;
+        const py = dy * push;
+        ax += px;
+        ay += py;
+        bx -= px;
+        by -= py;
+        graph.setNodeAttribute(b, "x", bx);
+        graph.setNodeAttribute(b, "y", by);
+        moved = true;
+      }
+      graph.setNodeAttribute(a, "x", ax);
+      graph.setNodeAttribute(a, "y", ay);
+    }
+    if (!moved) break;
+  }
+}
 
 // Cut layout duration roughly 4-5× — settles fast enough on
 // modern hardware and matches the user-perceived "load" window.
@@ -384,10 +446,11 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
 
         // No selection — boost seeds and hubs.
         if (data.isSeed) {
+          const isQueryGraph = (optionsRef.current.layoutMode ?? "brain") === "query";
           res.color = brightenColor(data.color, 1.25);
           res.size = (data.size || 8) * 1.25;
           res.zIndex = 2;
-          res.forceLabel = true;
+          res.forceLabel = isQueryGraph ? Boolean(data.forceLabel) : true;
         } else if (data.isHub) {
           res.color = brightenColor(data.color, 1.1);
           res.zIndex = 1;
@@ -400,6 +463,10 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
         const sel = selectedNodeRef.current;
         const highlighted = highlightedRef.current;
         const hasHighlights = highlighted.size > 0;
+        const isQueryGraph = (optionsRef.current.layoutMode ?? "brain") === "query";
+        if (isQueryGraph && !sel) {
+          res.label = undefined;
+        }
 
         if (hasHighlights && !sel) {
           const g = graphRef.current;
@@ -474,9 +541,9 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
         isQueryGraph
           ? zoomedMid || isLargeGraph
             ? isHugeGraph
-              ? 0.015
-              : 0.025
-            : 0.04
+              ? 0.006
+              : 0.012
+            : 0.018
           : zoomedMid || isLargeGraph
             ? isHugeGraph
               ? 0.02
@@ -486,9 +553,9 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
         isQueryGraph
           ? zoomedMid || isLargeGraph
             ? isHugeGraph
-              ? 16
-              : 13
-            : 10
+              ? 19
+              : 16
+            : 13
           : zoomedMid || isLargeGraph
             ? isHugeGraph
               ? 14
@@ -584,6 +651,13 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       }
       const wasDragging = isDraggingRef.current;
       draggedRef.current = null;
+      isDraggingRef.current = false;
+      const layoutMode = optionsRef.current.layoutMode ?? "brain";
+      const graph = graphRef.current;
+      if (layoutMode === "query" && graph) {
+        enforceQueryMinimumSpacing(graph, 8);
+        sigmaRef.current?.refresh();
+      }
       // Pt 6: settle-restart-after-drag. When the user opts in, restart
       // FA2 for ~5s after a real drag release so neighbors re-arrange
       // around the new node position. Default OFF so position sticks.
@@ -719,6 +793,9 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
               graph,
               getNoverlapSettings(graph.order, layoutMode),
             );
+            if (layoutMode === "query") {
+              enforceQueryMinimumSpacing(graph, 12);
+            }
           } catch {
             /* ignore */
           }
@@ -769,14 +846,15 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       const isHugeGraph = nodeCount > (isQueryGraph ? 1800 : 3000);
       try {
         sigma.setSetting("renderLabels", isQueryGraph ? true : !isLargeGraph);
+        sigma.setSetting("hideEdgesOnMove", !isQueryGraph);
         sigma.setSetting(
           "labelDensity",
           isQueryGraph
             ? isHugeGraph
-              ? 0.015
+              ? 0.006
               : isLargeGraph
-                ? 0.025
-                : 0.04
+                ? 0.012
+                : 0.018
             : isHugeGraph
               ? 0.02
               : isLargeGraph
@@ -787,10 +865,10 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
           "labelRenderedSizeThreshold",
           isQueryGraph
             ? isHugeGraph
-              ? 16
+              ? 19
               : isLargeGraph
-                ? 13
-                : 10
+                ? 16
+                : 13
             : isHugeGraph
               ? 14
               : isLargeGraph
@@ -801,8 +879,20 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
         /* setSetting may throw if the renderer is mid-frame — ignore */
       }
       sigma.setGraph(newGraph);
+      if (isQueryGraph) {
+        try {
+          noverlap.assign(newGraph, getNoverlapSettings(nodeCount, "query"));
+          enforceQueryMinimumSpacing(newGraph, 10);
+        } catch {
+          /* ignore */
+        }
+      }
       setSelectedNode(null);
-      runLayout(newGraph);
+      if (isQueryGraph) {
+        sigma.refresh();
+      } else {
+        runLayout(newGraph);
+      }
       ambientSyncRef.current?.();
       sigma.getCamera().animatedReset({ duration: 500 });
     },
