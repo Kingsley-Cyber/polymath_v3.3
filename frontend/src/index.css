@@ -1113,6 +1113,11 @@
   margin-bottom: 0.25rem;
 }
 
+.message-assistant strong {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
 .message-assistant code {
   background-color: rgba(255, 255, 255, 0.05);
   border: none;
@@ -1154,6 +1159,20 @@
   width: 100%;
   margin: var(--spacing-sm) 0;
   font-size: 0.9em;
+}
+
+.message-assistant .pm-table-scroll {
+  margin: var(--spacing-sm) 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.message-assistant .pm-table-scroll table {
+  display: table;
+  margin: 0;
+  min-width: min(100%, 42rem);
+  white-space: normal;
 }
 
 .message-assistant th,
@@ -1325,8 +1344,32 @@
 }
 
 #root .pm-process-body,
+#root .pm-live-scroll-panel {
+  max-height: min(34vh, 22rem);
+  overscroll-behavior: contain;
+  scroll-behavior: auto;
+}
+
+#root .pm-process-body-live,
+#root .pm-live-scroll-panel-live {
+  max-height: min(28vh, 18rem);
+}
+
+#root .pm-process-body-review,
+#root .pm-live-scroll-panel-review {
+  max-height: min(56vh, 30rem);
+}
+
 #root .pm-process-row-content,
-#root .pm-tool-sources,
+#root .pm-tool-detail {
+  max-height: min(22vh, 10rem);
+  overflow-y: auto;
+}
+
+#root .pm-tool-sources {
+  max-height: min(26vh, 12rem);
+}
+
 #root .pm-tool-decision {
-  max-height: none;
+  max-height: min(24vh, 11rem);
 }

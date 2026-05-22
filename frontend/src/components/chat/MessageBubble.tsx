@@ -302,6 +302,13 @@ const markdownComponents: Components = {
   pre({ children }) {
     return <>{children}</>;
   },
+  table({ children }) {
+    return (
+      <div className="pm-table-scroll custom-scrollbar">
+        <table>{children}</table>
+      </div>
+    );
+  },
 };
 
 function toolNameFromTraceTitle(title: string): string | undefined {
@@ -385,7 +392,11 @@ function ProcessTimelineCard({
   }, [active, bodyRef, group.id, open]);
 
   return (
-    <div className={`process-group w-full ${open ? "expanded" : ""}`}>
+    <div
+      className={`process-group w-full ${open ? "expanded" : ""} ${
+        active ? "process-group-active" : ""
+      }`}
+    >
       <button
         type="button"
         className="process-group-header"
@@ -406,7 +417,9 @@ function ProcessTimelineCard({
         <div className="content">
           <div
             ref={bodyRef}
-            className="pm-process-body custom-scrollbar"
+            className={`pm-process-body custom-scrollbar ${
+              active ? "pm-process-body-live" : "pm-process-body-review"
+            }`}
           >
             {group.kind === "exe" ? (
               <ToolTranscript group={group} />
@@ -939,7 +952,11 @@ function TracePanel({
   ]);
 
   return (
-    <div className={`process-group mb-2 w-full max-w-[82ch] ${open ? "expanded" : ""}`}>
+    <div
+      className={`process-group mb-2 w-full max-w-[82ch] ${
+        open ? "expanded" : ""
+      } ${active ? "process-group-active" : ""}`}
+    >
       <button
         type="button"
         className="process-group-header"
@@ -958,7 +975,9 @@ function TracePanel({
         <div className="content">
           <div
             ref={bodyRef}
-            className="mt-2 overflow-y-auto custom-scrollbar bg-bg-base p-3 font-mono text-[12px] leading-6 text-content-secondary transition-none rounded-none"
+            className={`pm-live-scroll-panel mt-2 overflow-y-auto custom-scrollbar bg-bg-base p-3 font-mono text-[12px] leading-6 text-content-secondary transition-none rounded-none ${
+              active ? "pm-live-scroll-panel-live" : "pm-live-scroll-panel-review"
+            }`}
           >
             <div className="space-y-2">
               {active && (
@@ -994,7 +1013,11 @@ function ReasoningPanel({
   const bodyRef = useAutoScroll<HTMLDivElement>([thinking]);
 
   return (
-    <div className={`process-group mb-2 w-full max-w-[82ch] ${open ? "expanded" : ""}`}>
+    <div
+      className={`process-group mb-2 w-full max-w-[82ch] ${
+        open ? "expanded" : ""
+      } ${active ? "process-group-active" : ""}`}
+    >
       <button
         type="button"
         className="process-group-header"
@@ -1013,7 +1036,9 @@ function ReasoningPanel({
         <div className="content">
           <div
             ref={bodyRef}
-            className="mt-2 overflow-y-auto custom-scrollbar bg-bg-base px-3 py-2 font-mono text-[12px] leading-6 text-content-secondary transition-none rounded-none whitespace-pre-wrap break-words"
+            className={`pm-live-scroll-panel mt-2 overflow-y-auto custom-scrollbar bg-bg-base px-3 py-2 font-mono text-[12px] leading-6 text-content-secondary transition-none rounded-none whitespace-pre-wrap break-words ${
+              active ? "pm-live-scroll-panel-live" : "pm-live-scroll-panel-review"
+            }`}
           >
             {thinking}
           </div>
@@ -1107,7 +1132,11 @@ function ToolActivityPanel({
   const running = activities.some((activity) => activity.status === "running");
 
   return (
-    <div className={`process-group mb-2 w-full max-w-[82ch] ${open ? "expanded" : ""}`}>
+    <div
+      className={`process-group mb-2 w-full max-w-[82ch] ${
+        open ? "expanded" : ""
+      } ${running ? "process-group-active" : ""}`}
+    >
       <button
         type="button"
         className="process-group-header"
@@ -1126,7 +1155,9 @@ function ToolActivityPanel({
         <div className="content">
           <div
             ref={bodyRef}
-            className="mt-2 overflow-y-auto custom-scrollbar bg-bg-base px-3 py-2 font-mono text-[12px] leading-6 text-content-secondary transition-none rounded-none"
+            className={`pm-live-scroll-panel mt-2 overflow-y-auto custom-scrollbar bg-bg-base px-3 py-2 font-mono text-[12px] leading-6 text-content-secondary transition-none rounded-none ${
+              running ? "pm-live-scroll-panel-live" : "pm-live-scroll-panel-review"
+            }`}
           >
             <div className="space-y-1">
               {activities.map((activity) => {
@@ -1152,7 +1183,7 @@ function ToolActivityPanel({
                       </span>
                     </div>
                     {activity.detail && (
-                      <div className="ml-10 mt-1 overflow-y-auto custom-scrollbar break-all bg-bg-surface p-2 text-[11px] leading-5 text-content-tertiary">
+                      <div className="pm-tool-detail ml-10 mt-1 overflow-y-auto custom-scrollbar break-all bg-bg-surface p-2 text-[11px] leading-5 text-content-tertiary">
                         {activity.detail}
                       </div>
                     )}
