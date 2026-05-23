@@ -560,6 +560,14 @@ async def upsert_children(
             # /python, /rust, … skill scoping and code-aware reranking.
             "language": c.get("language"),
             "metadata": c.get("metadata") or {},
+            "facet_ids": c.get("facet_ids") or [],
+            "facet_text": c.get("facet_text") or "",
+            "content_facet_ids": c.get("content_facet_ids") or [],
+            "content_facet_text": c.get("content_facet_text") or "",
+            "content_facet_source": c.get("content_facet_source") or "",
+            "content_facet_confidence": c.get("content_facet_confidence"),
+            "doc_facet_ids": c.get("doc_facet_ids") or [],
+            "facet_schema_version": c.get("facet_schema_version") or "",
         }
         for c in chunks
     ]
@@ -636,6 +644,14 @@ async def upsert_summaries(
             "chunk_kind": p.get("chunk_kind", "body"),
             "language": p.get("language"),
             "metadata": p.get("metadata") or {},
+            "facet_ids": p.get("facet_ids") or [],
+            "facet_text": p.get("facet_text") or "",
+            "content_facet_ids": p.get("content_facet_ids") or [],
+            "content_facet_text": p.get("content_facet_text") or "",
+            "content_facet_source": p.get("content_facet_source") or "",
+            "content_facet_confidence": p.get("content_facet_confidence"),
+            "doc_facet_ids": p.get("doc_facet_ids") or [],
+            "facet_schema_version": p.get("facet_schema_version") or "",
         }
         for p in summary_payloads
     ]

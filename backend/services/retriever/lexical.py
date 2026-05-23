@@ -28,6 +28,7 @@ from models.schemas import SourceChunk
 from pymongo.errors import OperationFailure
 from qdrant_client import AsyncQdrantClient, models as qmodels
 from services.conversation import conversation_service
+from services.facets import metadata_with_facets
 
 logger = logging.getLogger(__name__)
 _settings = get_settings()
@@ -61,7 +62,15 @@ def _regex_score(query: str, terms: list[str], row: dict[str, Any]) -> float:
     """Small fallback scorer used when Mongo text index is unavailable."""
     text = str(row.get("text") or "")
     heading = " ".join(str(h) for h in (row.get("heading_path") or []))
-    haystack = f"{heading}\n{text}".lower()
+    facet_text = " ".join(
+        [
+            str(row.get("facet_text") or ""),
+            " ".join(str(v) for v in (row.get("facet_ids") or [])),
+            str(row.get("content_facet_text") or ""),
+            " ".join(str(v) for v in (row.get("content_facet_ids") or [])),
+        ]
+    )
+    haystack = f"{heading}\n{facet_text}\n{text}".lower()
     if not haystack:
         return 0.0
 
@@ -252,7 +261,7 @@ class LexicalRetriever:
                         doc_name=payload.get("doc_name") or payload.get("filename"),
                         heading_path=payload.get("heading_path") or None,
                         language=payload.get("language"),
-                        metadata=payload.get("metadata") or {},
+                        metadata=metadata_with_facets(payload.get("metadata"), payload),
                         provenance=[{"retriever": "qdrant_sparse"}],
                     )
                 )
@@ -278,6 +287,12 @@ class LexicalRetriever:
             "chunk_kind": 1,
             "language": 1,
             "metadata": 1,
+            "facet_ids": 1,
+            "facet_text": 1,
+            "content_facet_ids": 1,
+            "content_facet_text": 1,
+            "content_facet_source": 1,
+            "content_facet_confidence": 1,
             "score": {"$meta": "textScore"},
         }
         # Same default-noise filter as the Qdrant funnels (funnel_a / funnel_b):
@@ -334,6 +349,22 @@ class LexicalRetriever:
             {"heading_path": {"$regex": re.escape(term), "$options": "i"}}
             for term in terms[:6]
         )
+        conditions.extend(
+            {"facet_text": {"$regex": re.escape(term), "$options": "i"}}
+            for term in terms[:6]
+        )
+        conditions.extend(
+            {"facet_ids": {"$regex": re.escape(term), "$options": "i"}}
+            for term in terms[:6]
+        )
+        conditions.extend(
+            {"content_facet_text": {"$regex": re.escape(term), "$options": "i"}}
+            for term in terms[:6]
+        )
+        conditions.extend(
+            {"content_facet_ids": {"$regex": re.escape(term), "$options": "i"}}
+            for term in terms[:6]
+        )
         # Mirror the text-search default-noise filter on the regex fallback.
         from services.ingestion.section_classifier import NOISY_KINDS
         cursor = (
@@ -356,6 +387,12 @@ class LexicalRetriever:
                     "chunk_kind": 1,
                     "language": 1,
                     "metadata": 1,
+                    "facet_ids": 1,
+                    "facet_text": 1,
+                    "content_facet_ids": 1,
+                    "content_facet_text": 1,
+                    "content_facet_source": 1,
+                    "content_facet_confidence": 1,
                 },
             )
             .limit(max(top_k * 4, 20))
@@ -388,7 +425,7 @@ class LexicalRetriever:
             chunk_kind=str(row.get("chunk_kind") or "body"),
             heading_path=row.get("heading_path") or None,
             language=row.get("language"),
-            metadata=row.get("metadata") or {},
+            metadata=metadata_with_facets(row.get("metadata"), row),
             provenance=[{"retriever": "lexical"}],
         )
 

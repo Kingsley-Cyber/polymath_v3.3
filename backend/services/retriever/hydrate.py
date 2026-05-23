@@ -16,6 +16,7 @@ from typing import List, Optional
 
 from models.schemas import SourceChunk
 from services.conversation import conversation_service
+from services.facets import metadata_with_facets
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +76,17 @@ async def hydrate_chunks(
             pid_map = {r["chunk_id"]: r.get("parent_id", "") for r in chunk_records}
             did_map = {r["chunk_id"]: r.get("doc_id", "") for r in chunk_records}
             kind_map = {r["chunk_id"]: r.get("chunk_kind", "") for r in chunk_records}
+            meta_map = {r["chunk_id"]: r for r in chunk_records}
             for chunk in orphans:
                 chunk.parent_id = pid_map.get(chunk.chunk_id, "") or ""
                 if not chunk.doc_id:
                     chunk.doc_id = did_map.get(chunk.chunk_id, "") or ""
                 if not getattr(chunk, "chunk_kind", "") or chunk.chunk_kind == "body":
                     chunk.chunk_kind = kind_map.get(chunk.chunk_id, "") or chunk.chunk_kind
+                chunk.metadata = metadata_with_facets(
+                    chunk.metadata,
+                    meta_map.get(chunk.chunk_id),
+                )
             logger.debug(
                 "Pass 0: resolved parent_id for %d orphan chunks", len(orphans)
             )
@@ -152,8 +158,10 @@ async def hydrate_chunks(
                 # when missing so payload values are preserved.
                 if not chunk.language and pc.get("language"):
                     chunk.language = pc["language"]
-                if not chunk.metadata and pc.get("metadata"):
-                    chunk.metadata = pc["metadata"] or {}
+                chunk.metadata = metadata_with_facets(
+                    chunk.metadata or pc.get("metadata") or {},
+                    pc,
+                )
 
             meta = doc_meta.get(chunk.doc_id, {})
             chunk.doc_name = meta.get("doc_name") or chunk.doc_id
@@ -226,6 +234,12 @@ async def hydrate_rerank_texts(
                 "heading_path": 1,
                 "language": 1,
                 "metadata": 1,
+                "facet_ids": 1,
+                "facet_text": 1,
+                "content_facet_ids": 1,
+                "content_facet_text": 1,
+                "content_facet_source": 1,
+                "content_facet_confidence": 1,
             },
         ).to_list(length=None)
     except Exception as exc:
@@ -254,8 +268,10 @@ async def hydrate_rerank_texts(
                 copied.heading_path = record["heading_path"]
             if not copied.language and record.get("language"):
                 copied.language = record["language"]
-            if not copied.metadata and record.get("metadata"):
-                copied.metadata = record["metadata"] or {}
+            copied.metadata = metadata_with_facets(
+                copied.metadata or record.get("metadata") or {},
+                record,
+            )
         hydrated.append(copied)
 
     if replaced:
@@ -324,6 +340,12 @@ async def hydrate_summary_rerank_texts(
                 "parent_chunks.heading_path": 1,
                 "parent_chunks.chunk_kind": 1,
                 "parent_chunks.metadata": 1,
+                "parent_chunks.facet_ids": 1,
+                "parent_chunks.facet_text": 1,
+                "parent_chunks.content_facet_ids": 1,
+                "parent_chunks.content_facet_text": 1,
+                "parent_chunks.content_facet_source": 1,
+                "parent_chunks.content_facet_confidence": 1,
             },
         ).to_list(length=None)
     except Exception as exc:
@@ -371,8 +393,10 @@ async def hydrate_summary_rerank_texts(
                 copied.heading_path = record["heading_path"]
             if (not copied.chunk_kind or copied.chunk_kind == "body") and record.get("chunk_kind"):
                 copied.chunk_kind = record["chunk_kind"]
-            if not copied.metadata and record.get("metadata"):
-                copied.metadata = record["metadata"] or {}
+            copied.metadata = metadata_with_facets(
+                copied.metadata or record.get("metadata") or {},
+                record,
+            )
         hydrated.append(copied)
 
     if replaced:

@@ -11,6 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from services.facets import (
+    matching_ingest_facets,
+    matching_vector_facets,
+    metadata_facet_terms,
+)
+
 try:
     import bson as _bson  # noqa: F401
 except ModuleNotFoundError:
@@ -1412,6 +1418,13 @@ def _curated_evidence_rows(
                 ),
                 "source": row.get("source") or row.get("source_meta") or {},
                 "heading_path": row.get("heading_path") or [],
+                "facet_ids": row.get("facet_ids") or [],
+                "facet_text": row.get("facet_text") or "",
+                "content_facet_ids": row.get("content_facet_ids") or [],
+                "content_facet_text": row.get("content_facet_text") or "",
+                "content_facet_source": row.get("content_facet_source") or "",
+                "content_facet_confidence": row.get("content_facet_confidence"),
+                "metadata": row.get("metadata") or {},
                 "source_tier": str(row.get("source_tier") or ""),
                 "score": round(score, 3),
                 "quality_flags": reasons,
@@ -1459,6 +1472,7 @@ def _source_docs_from_retrieval_chunks(
                 "source_tier": str(getattr(chunk, "source_tier", "") or "retriever"),
                 "heading_path": getattr(chunk, "heading_path", None) or [],
                 "score": float(getattr(chunk, "score", 0.0) or 0.0),
+                "metadata": getattr(chunk, "metadata", None) or {},
                 "retrieval_rank": rank,
                 "retriever": "shared_chat_retriever",
                 "provenance": getattr(chunk, "provenance", None) or [],
@@ -1998,6 +2012,122 @@ def _semantic_facets_for_query(query: str, packet: dict[str, Any]) -> list[dict[
     return facets[:_SEMANTIC_FACET_MAX_LANES]
 
 
+def _merge_semantic_facets(
+    base: list[dict[str, Any]],
+    dynamic: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for row in [*base, *dynamic]:
+        name = str(row.get("name") or "")
+        if not name:
+            continue
+        existing = merged.get(name)
+        if existing is None:
+            merged[name] = dict(row)
+            continue
+        for key in ("matched", "support_terms", "triggers"):
+            existing[key] = list(
+                dict.fromkeys([*(existing.get(key) or []), *(row.get(key) or [])])
+            )[:12]
+        existing["first_match_pos"] = min(
+            int(existing.get("first_match_pos") or 999999),
+            int(row.get("first_match_pos") or 999999),
+        )
+        existing["source"] = existing.get("source") or row.get("source")
+        existing["query_matched"] = bool(
+            existing.get("query_matched") or row.get("query_matched")
+        )
+        existing["semantic_matched"] = bool(
+            existing.get("semantic_matched") or row.get("semantic_matched")
+        )
+        existing["match_score"] = max(
+            float(existing.get("match_score") or 0.0),
+            float(row.get("match_score") or 0.0),
+        )
+        if row.get("vector_score") is not None:
+            existing["vector_score"] = max(
+                float(existing.get("vector_score") or 0.0),
+                float(row.get("vector_score") or 0.0),
+            )
+        if row.get("facet_doc_ids"):
+            existing["facet_doc_ids"] = list(
+                dict.fromkeys(
+                    [*(existing.get("facet_doc_ids") or []), *(row.get("facet_doc_ids") or [])]
+                )
+            )[:8]
+        if row.get("facet_docs"):
+            existing["facet_docs"] = [
+                *list(existing.get("facet_docs") or []),
+                *[
+                    doc
+                    for doc in (row.get("facet_docs") or [])
+                    if doc not in (existing.get("facet_docs") or [])
+                ],
+            ][:8]
+    rows = list(merged.values())
+    rows.sort(
+        key=lambda item: (
+            0 if item.get("query_matched") else 1,
+            0 if float(item.get("match_score") or 0.0) >= 4.0 else 1,
+            int(item.get("first_match_pos") or 999999),
+            -float(item.get("match_score") or 0.0),
+            -len(item.get("matched") or []),
+            int(item.get("hub_order") or 0),
+            str(item.get("name") or ""),
+        )
+    )
+    return rows[:_SEMANTIC_FACET_MAX_LANES]
+
+
+async def _semantic_facets_for_query_with_corpus(
+    db: Any,
+    *,
+    query: str,
+    packet: dict[str, Any],
+    corpus_id: str,
+) -> list[dict[str, Any]]:
+    base = _semantic_facets_for_query(query, packet)
+    try:
+        dynamic = await matching_ingest_facets(db, query, [corpus_id], limit=_SEMANTIC_FACET_MAX_LANES)
+    except Exception as exc:
+        logger.debug("graph ingest facet match skipped: %s", exc)
+        dynamic = []
+    try:
+        from services.embedder import embed_query
+        from services.ingestion_service import ingestion_service
+
+        qdrant = ingestion_service.qdrant_client
+        if qdrant is None:
+            from config import get_settings
+            from qdrant_client import AsyncQdrantClient
+
+            settings = get_settings()
+            qdrant = AsyncQdrantClient(
+                url=settings.QDRANT_URL,
+                timeout=settings.QDRANT_TIMEOUT_SECONDS,
+            )
+        corpus = await db["corpora"].find_one(
+            {"corpus_id": corpus_id},
+            {"_id": 0, "default_ingestion_config": 1},
+        )
+        query_vector = await embed_query(
+            query,
+            (corpus or {}).get("default_ingestion_config"),
+        )
+        vector_dynamic = await matching_vector_facets(
+            db,
+            qdrant,
+            query,
+            query_vector,
+            [corpus_id],
+            limit=_SEMANTIC_FACET_MAX_LANES,
+        )
+    except Exception as exc:
+        logger.debug("graph vector facet match skipped: %s", exc)
+        vector_dynamic = []
+    return _merge_semantic_facets(base, [*dynamic, *vector_dynamic])
+
+
 def _semantic_hub_facets_for_query(query_haystack: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for hub in _SEMANTIC_HUB_FACET_DEFS:
@@ -2060,6 +2190,7 @@ def _semantic_facet_row_score(row: dict[str, Any], facet: dict[str, Any]) -> int
         return 0
     facet_name = str(facet.get("name") or "")
     support_facet = row.get("support_facet") if isinstance(row.get("support_facet"), dict) else {}
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
     score = 0
     if str(support_facet.get("name") or "") == facet_name:
         score += 8
@@ -2076,6 +2207,11 @@ def _semantic_facet_row_score(row: dict[str, Any], facet: dict[str, Any]) -> int
                 source.get("filename"),
                 source.get("section"),
                 " ".join(str(v) for v in (row.get("heading_path") or [])),
+                row.get("facet_text"),
+                " ".join(str(v) for v in (row.get("facet_ids") or [])),
+                row.get("content_facet_text"),
+                " ".join(str(v) for v in (row.get("content_facet_ids") or [])),
+                " ".join(metadata_facet_terms(metadata)),
             )
             if value
         )
@@ -2141,6 +2277,7 @@ def _semantic_query_fit_score(
         facet_terms = _semantic_facet_terms(facet)
     unique_terms = list(dict.fromkeys([*query_terms, *facet_terms]))[:32]
     source = row.get("source") if isinstance(row.get("source"), dict) else {}
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
     text = _semantic_norm(
         " ".join(
             str(value)
@@ -2152,6 +2289,11 @@ def _semantic_query_fit_score(
                 " ".join(str(v) for v in (row.get("heading_path") or [])),
                 row.get("summary"),
                 row.get("parent_summary"),
+                row.get("facet_text"),
+                " ".join(str(v) for v in (row.get("facet_ids") or [])),
+                row.get("content_facet_text"),
+                " ".join(str(v) for v in (row.get("content_facet_ids") or [])),
+                " ".join(metadata_facet_terms(metadata)),
                 row.get("text"),
                 row.get("chunk_text"),
             )
@@ -2376,7 +2518,12 @@ async def _semantic_facet_support_evidence(
     if not evidence:
         return []
 
-    facets = _semantic_facets_for_query(query, packet)
+    facets = await _semantic_facets_for_query_with_corpus(
+        db,
+        query=query,
+        packet=packet,
+        corpus_id=corpus_id,
+    )
     if len(facets) < 2:
         return []
 
@@ -2396,6 +2543,29 @@ async def _semantic_facet_support_evidence(
     )
     if not selected_facets:
         return []
+    lane_reports: list[dict[str, Any]] = []
+    reports_by_name: dict[str, dict[str, Any]] = {}
+    for facet in selected_facets:
+        name = str(facet.get("name") or "")
+        report = {
+            "lane": name,
+            "label": str(facet.get("label") or name),
+            "query_explicit": bool(facet.get("query_matched")),
+            "coverage_score": next(
+                (
+                    int(row.get("coverage_score") or 0)
+                    for row in meta.get("detected_facets", [])
+                    if isinstance(row, dict) and str(row.get("name") or "") == name
+                ),
+                0,
+            ),
+            "status": "uncovered",
+            "attempts": [],
+        }
+        lane_reports.append(report)
+        if name:
+            reports_by_name[name] = report
+    meta["lane_reports"] = lane_reports
 
     support_rows: list[dict[str, Any]] = []
     seen_chunk_ids = {
@@ -2418,6 +2588,8 @@ async def _semantic_facet_support_evidence(
         for facet in selected_facets:
             if len(support_rows) >= max_support:
                 break
+            facet_name = str(facet.get("name") or "")
+            lane_report = reports_by_name.get(facet_name)
             facet_terms = [str(t) for t in (facet.get("support_terms") or [])[:8] if t]
             facet_label = str(facet.get("label") or facet.get("name") or "semantic facet")
             support_query = " ".join(
@@ -2429,6 +2601,12 @@ async def _semantic_facet_support_evidence(
                     query,
                 ]
             )
+            attempt: dict[str, Any] = {
+                "query": _text(support_query, 220),
+                "search_mode": "local",
+                "returned": 0,
+                "status": "started",
+            }
             graph_candidates = await _graph_edge_support_candidates(
                 db,
                 corpus_id=corpus_id,
@@ -2445,6 +2623,7 @@ async def _semantic_facet_support_evidence(
                 neo4j_expansion_cap=12,
                 final_top_k=12,
                 rerank_enabled=True,
+                search_mode="local",
             )
             rows = _source_docs_from_retrieval_chunks(
                 list(getattr(result, "chunks", []) or []),
@@ -2462,7 +2641,12 @@ async def _semantic_facet_support_evidence(
                 and str(row.get("doc_id") or "") not in seen_doc_ids
                 and str(row.get("chunk_id") or row.get("id") or "") not in seen_chunk_ids
             ]
+            attempt["returned"] = len(candidates)
             if not candidates:
+                attempt["status"] = "no_candidates"
+                if lane_report is not None:
+                    lane_report["attempts"].append(attempt)
+                    lane_report["reason"] = "no_new_doc_candidates"
                 continue
             row = _choose_semantic_facet_candidate(
                 candidates,
@@ -2473,10 +2657,19 @@ async def _semantic_facet_support_evidence(
                 seen_chunk_ids=seen_chunk_ids,
             )
             if not row:
+                attempt["status"] = "uncovered"
+                attempt["reason"] = "no_candidate_passed_lane_floor"
+                if lane_report is not None:
+                    lane_report["attempts"].append(attempt)
+                    lane_report["reason"] = "no_candidate_passed_lane_floor"
                 continue
             chunk_id = str(row.get("chunk_id") or "")
             doc_id = str(row.get("doc_id") or "")
             if not chunk_id or chunk_id in seen_chunk_ids or doc_id in seen_doc_ids:
+                attempt["status"] = "duplicate_or_seen_doc"
+                if lane_report is not None:
+                    lane_report["attempts"].append(attempt)
+                    lane_report["reason"] = "duplicate_or_seen_doc"
                 continue
             row["support_query"] = _text(support_query, 220)
             row["support_role"] = "semantic_facet_coverage"
@@ -2487,19 +2680,36 @@ async def _semantic_facet_support_evidence(
                 "matched": facet.get("matched") or [],
                 "parent_hub": str(facet.get("parent_hub") or ""),
             }
+            attempt["status"] = "selected"
+            attempt["selected_chunk_id"] = chunk_id
+            attempt["selected_doc_id"] = doc_id
+            attempt["support_activation"] = row.get("support_activation")
+            if lane_report is not None:
+                lane_report["status"] = "selected"
+                lane_report["selected_doc_id"] = doc_id
+                lane_report["selected_doc_name"] = str(row.get("doc_name") or row.get("title") or "")
+                lane_report["selected_chunk_id"] = chunk_id
+                lane_report["support_activation"] = row.get("support_activation")
+                lane_report["attempts"].append(attempt)
             support_rows.append(row)
             seen_chunk_ids.add(chunk_id)
             seen_doc_ids.add(doc_id)
     except Exception as exc:
         logger.debug("semantic facet support retrieval skipped: %s", exc)
-        return support_rows
-
-    if support_rows:
+        meta["error"] = _text(exc, 180)
         packet.setdefault("evidence_filter", {})["semantic_coverage_support"] = {
             **meta,
             "added_candidates": len(support_rows),
             "support_doc_ids": [str(row.get("doc_id") or "") for row in support_rows if row.get("doc_id")],
         }
+        return support_rows
+
+    packet.setdefault("evidence_filter", {})["semantic_coverage_support"] = {
+        **meta,
+        "added_candidates": len(support_rows),
+        "support_doc_ids": [str(row.get("doc_id") or "") for row in support_rows if row.get("doc_id")],
+    }
+    if support_rows:
         logger.info(
             "semantic_facet_support: facets=%s selected=%s added=%d docs=%s",
             [facet.get("name") for facet in facets],
@@ -2787,6 +2997,13 @@ async def _hydrate_trace_source_docs(
                 "chunk_kind": 1,
                 "page_start": 1,
                 "page_end": 1,
+                "facet_ids": 1,
+                "facet_text": 1,
+                "content_facet_ids": 1,
+                "content_facet_text": 1,
+                "content_facet_source": 1,
+                "content_facet_confidence": 1,
+                "metadata": 1,
             },
         )
         chunk_by_id = {str(row.get("chunk_id")): row async for row in cursor}
@@ -2819,6 +3036,7 @@ async def _hydrate_trace_source_docs(
                 "ebook_metadata": 1,
                 "pdf_metadata": 1,
                 "schema_lens": 1,
+                "facet_profile": 1,
                 "created_at": 1,
                 "updated_at": 1,
                 "parent_chunks.parent_id": 1,
@@ -2828,6 +3046,13 @@ async def _hydrate_trace_source_docs(
                 "parent_chunks.source_tier": 1,
                 "parent_chunks.page_start": 1,
                 "parent_chunks.page_end": 1,
+                "parent_chunks.facet_ids": 1,
+                "parent_chunks.facet_text": 1,
+                "parent_chunks.content_facet_ids": 1,
+                "parent_chunks.content_facet_text": 1,
+                "parent_chunks.content_facet_source": 1,
+                "parent_chunks.content_facet_confidence": 1,
+                "parent_chunks.metadata": 1,
             },
         )
         async for doc in cursor:
@@ -2898,6 +3123,53 @@ async def _hydrate_trace_source_docs(
                 "text": _text(text, _PACKET_EVIDENCE_TEXT_LIMIT),
                 "summary": parent_summary,
                 "heading_path": heading_path,
+                "facet_ids": (
+                    row.get("facet_ids")
+                    or chunk.get("facet_ids")
+                    or parent.get("facet_ids")
+                    or (doc.get("facet_profile") or {}).get("facet_ids")
+                    or []
+                ),
+                "facet_text": (
+                    row.get("facet_text")
+                    or chunk.get("facet_text")
+                    or parent.get("facet_text")
+                    or (doc.get("facet_profile") or {}).get("facet_text")
+                    or ""
+                ),
+                "content_facet_ids": (
+                    row.get("content_facet_ids")
+                    or chunk.get("content_facet_ids")
+                    or parent.get("content_facet_ids")
+                    or []
+                ),
+                "content_facet_text": (
+                    row.get("content_facet_text")
+                    or chunk.get("content_facet_text")
+                    or parent.get("content_facet_text")
+                    or ""
+                ),
+                "content_facet_source": (
+                    row.get("content_facet_source")
+                    or chunk.get("content_facet_source")
+                    or parent.get("content_facet_source")
+                    or ""
+                ),
+                "content_facet_confidence": (
+                    row.get("content_facet_confidence")
+                    if row.get("content_facet_confidence") is not None
+                    else (
+                        chunk.get("content_facet_confidence")
+                        if chunk.get("content_facet_confidence") is not None
+                        else parent.get("content_facet_confidence")
+                    )
+                ),
+                "metadata": (
+                    row.get("metadata")
+                    or chunk.get("metadata")
+                    or parent.get("metadata")
+                    or {}
+                ),
                 "chunk_kind": str(chunk.get("chunk_kind") or row.get("chunk_kind") or ""),
                 "source_tier": (
                     chunk.get("source_tier")

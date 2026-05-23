@@ -16,6 +16,7 @@ from typing import Any
 from models.schemas import SourceChunk
 from pymongo.errors import OperationFailure
 from services.conversation import conversation_service
+from services.facets import metadata_with_facets
 from services.retriever.lexical import _regex_score, _terms
 
 logger = logging.getLogger(__name__)
@@ -150,6 +151,9 @@ def _label_variants(value: Any) -> list[str]:
 
 def _doc_labels(doc: dict[str, Any]) -> list[str]:
     labels: list[str] = []
+    facet_profile = (
+        doc.get("facet_profile") if isinstance(doc.get("facet_profile"), dict) else {}
+    )
     title_sources = [
         doc.get("title"),
         doc.get("filename"),
@@ -181,6 +185,19 @@ def _doc_labels(doc: dict[str, Any]) -> list[str]:
                 combo = f"{author} {text}"
                 if combo not in labels:
                     labels.append(combo)
+    for facet in facet_profile.get("doc_facets") or []:
+        if not isinstance(facet, dict):
+            continue
+        values = [
+            facet.get("display_name"),
+            str(facet.get("facet_id") or "").replace("_", " "),
+            *(facet.get("aliases") or [])[:4],
+            *(facet.get("search_terms") or [])[:4],
+        ]
+        for value in values:
+            text = re.sub(r"\s+", " ", str(value or "")).strip()
+            if text and text not in labels:
+                labels.append(text)
     return labels
 
 
@@ -308,7 +325,7 @@ class DocumentAnchorRetriever:
                         chunk_kind=str(row.get("chunk_kind") or "body"),
                         heading_path=row.get("heading_path") or None,
                         language=row.get("language"),
-                        metadata=row.get("metadata") or {},
+                        metadata=metadata_with_facets(row.get("metadata"), row),
                         provenance=[
                             {
                                 "retriever": "document_anchor",
@@ -350,6 +367,7 @@ class DocumentAnchorRetriever:
                 "metadata": 1,
                 "document_metadata": 1,
                 "source_metadata": 1,
+                "facet_profile": 1,
             },
         )
         docs = await cursor.to_list(length=None)
@@ -387,6 +405,12 @@ class DocumentAnchorRetriever:
             "chunk_kind": 1,
             "language": 1,
             "metadata": 1,
+            "facet_ids": 1,
+            "facet_text": 1,
+            "content_facet_ids": 1,
+            "content_facet_text": 1,
+            "content_facet_source": 1,
+            "content_facet_confidence": 1,
             "score": {"$meta": "textScore"},
         }
         search_text = " ".join(terms[:12])
@@ -422,6 +446,10 @@ class DocumentAnchorRetriever:
         for term in terms[:8]:
             conditions.append({"text": {"$regex": re.escape(term), "$options": "i"}})
             conditions.append({"heading_path": {"$regex": re.escape(term), "$options": "i"}})
+            conditions.append({"facet_text": {"$regex": re.escape(term), "$options": "i"}})
+            conditions.append({"facet_ids": {"$regex": re.escape(term), "$options": "i"}})
+            conditions.append({"content_facet_text": {"$regex": re.escape(term), "$options": "i"}})
+            conditions.append({"content_facet_ids": {"$regex": re.escape(term), "$options": "i"}})
         if conditions:
             cursor = (
                 db["chunks"]

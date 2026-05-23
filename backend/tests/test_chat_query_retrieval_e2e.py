@@ -219,7 +219,7 @@ async def test_chat_query_e2e_document_anchor_seeds_graph_expansion(monkeypatch)
         raising=False,
     )
 
-    async def no_fact_seeds(self, query, corpus_ids):
+    async def no_fact_seeds(self, query, corpus_ids, **_kwargs):
         del self, query, corpus_ids
         return []
 
@@ -298,7 +298,7 @@ async def test_chat_query_e2e_graph_pipeline_order_is_fact_first(monkeypatch):
         events.append(("embed", ()))
         return [0.1, 0.2, 0.3]
 
-    async def fake_fact_seeds(self, query, corpus_ids):
+    async def fake_fact_seeds(self, query, corpus_ids, **_kwargs):
         del self, query, corpus_ids
         events.append(("facts", ()))
         return [

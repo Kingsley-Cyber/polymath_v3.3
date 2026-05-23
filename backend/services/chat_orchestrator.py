@@ -25,6 +25,14 @@ from models.schemas import (
 )
 from services.context_manager import context_manager
 from services.conversation import conversation_service
+from services.facets import (
+    FacetCandidate,
+    matching_ingest_facets,
+    matching_vector_facets,
+    metadata_facet_terms,
+    normalize_facet_id,
+    select_facet_final,
+)
 from services.llm import llm_service
 from services.retriever import retriever_orchestrator
 from services.tool_registry import tool_registry
@@ -54,6 +62,11 @@ _MAX_TOOL_CALLS_PER_TURN = 5
 _MAX_WEB_SEARCH_CALLS_PER_TURN = 3
 _MAX_WEB_SEARCH_RESULTS_PER_CALL = 20
 _DEFAULT_EVIDENCE_MAX_SOURCES = 9
+_CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS = 4
+_CHAT_COVERAGE_THRESHOLD = 4
+_CHAT_COVERAGE_WEAK_THRESHOLD = 2
+_CHAT_COVERAGE_SOURCE_CAP = 8
+_CHAT_EVIDENCE_MIN_KEEP_AFTER_FILTER = 4
 _RAW_TOOL_REQUEST_MARKERS = (
     "<｜｜dsml｜｜tool_calls",
     "<tool_calls",
@@ -61,6 +74,216 @@ _RAW_TOOL_REQUEST_MARKERS = (
     "invoke name=",
     "\"tool_calls\"",
     "'tool_calls'",
+)
+
+_REFERENCE_QUERY_RE = re.compile(
+    r"\b(reference|references|bibliography|citation|citations|works cited|"
+    r"related work|literature review|acknowledg(?:e)?ments?)\b",
+    re.IGNORECASE,
+)
+_LOW_VALUE_EVIDENCE_RE = re.compile(
+    r"\b(references?|bibliography|works cited|acknowledg(?:e)?ments?)\b",
+    re.IGNORECASE,
+)
+_FRONTMATTER_RE = re.compile(r"\A\s*---\s*\n.*?\n---\s*\n", re.DOTALL)
+
+_CHAT_COVERAGE_FACETS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "knowledge_graph",
+        "label": "knowledge graph / graph RAG",
+        "triggers": (
+            "knowledge graph",
+            "knowledge graphs",
+            "graph rag",
+            "graph database",
+            "neo4j",
+            "rdf",
+            "ontology",
+            "schema",
+            "nodes and edges",
+        ),
+        "support_terms": (
+            "knowledge graph",
+            "graph RAG",
+            "graph database",
+            "RDF triples",
+            "ontology",
+            "schema",
+            "linked data",
+            "entity relationship",
+            "semantic network",
+            "concept map",
+            "graph-based reasoning",
+            "personal knowledge graph",
+        ),
+    },
+    {
+        "name": "user_modeling",
+        "label": "user modeling / profiling",
+        "triggers": (
+            "user modeling",
+            "user model",
+            "user profile",
+            "user profiling",
+            "adaptive system",
+            "personalization",
+        ),
+        "support_terms": (
+            "user modeling",
+            "user model",
+            "private user model",
+            "personal user model",
+            "user profile",
+            "user profiling",
+            "user representation",
+            "user preferences",
+            "adaptive systems",
+            "personalization",
+            "cognitive profile",
+            "student model",
+            "persona inference",
+            "adaptive user representation",
+        ),
+    },
+    {
+        "name": "psychometrics",
+        "label": "psychometrics / measurement",
+        "triggers": (
+            "psychometrics",
+            "psychometric",
+            "measurement",
+            "measure",
+            "validity",
+            "latent variable",
+            "assessment",
+            "score",
+        ),
+        "support_terms": (
+            "psychometrics",
+            "psychometric",
+            "measurement",
+            "test validity",
+            "latent variable",
+            "assessment",
+            "score",
+        ),
+    },
+    {
+        "name": "neuro_narrative",
+        "label": "neuro-narrative therapy",
+        "triggers": (
+            "neuro narrative",
+            "neuro-narrative",
+            "narrative therapy",
+            "neuroscience",
+            "embodied",
+            "affect",
+        ),
+        "support_terms": (
+            "neuro-narrative therapy",
+            "narrative therapy",
+            "neuroscience",
+            "embodiment",
+            "affect",
+            "emotion-filled conversations",
+            "narrative reconstruction",
+            "autobiographical memory",
+            "self story",
+            "narrative identity",
+            "trauma narrative",
+            "re-authoring",
+        ),
+    },
+    {
+        "name": "socialization",
+        "label": "socialization / professional world",
+        "triggers": (
+            "socialization",
+            "secondary socialization",
+            "professional world",
+            "institutional world",
+            "sub-world",
+            "home world",
+            "significant others",
+        ),
+        "support_terms": (
+            "secondary socialization",
+            "professional world",
+            "institutional sub-worlds",
+            "significant others",
+            "social stock of knowledge",
+            "reality maintenance",
+        ),
+    },
+    {
+        "name": "identity_narrative",
+        "label": "identity / narrative formation",
+        "triggers": (
+            "identity",
+            "narrative",
+            "self narrative",
+            "hero journey",
+            "meaning making",
+            "values",
+            "choices",
+        ),
+        "support_terms": (
+            "identity",
+            "narrative",
+            "narrative identity",
+            "narrative construction",
+            "narrative construction of reality",
+            "self narrative",
+            "self story",
+            "life story",
+            "Jerome Bruner",
+            "hero's journey",
+            "meaning making",
+            "meaning-making",
+            "values",
+            "choices",
+        ),
+    },
+    {
+        "name": "design_system",
+        "label": "design / system intervention",
+        "triggers": (
+            "design",
+            "interface",
+            "ux",
+            "user experience",
+            "affordance",
+            "prototype",
+            "system intervention",
+        ),
+        "support_terms": (
+            "design principles",
+            "interface",
+            "user experience",
+            "affordance",
+            "prototype",
+            "system intervention",
+        ),
+    },
+    {
+        "name": "platform_ecosystem",
+        "label": "platform ecosystem",
+        "triggers": (
+            "platform ecosystem",
+            "platform revolution",
+            "network effects",
+            "marketplace",
+            "producer",
+            "consumer",
+        ),
+        "support_terms": (
+            "platform ecosystem",
+            "network effects",
+            "multi-sided market",
+            "marketplace",
+            "producer consumer",
+        ),
+    },
 )
 
 
@@ -792,6 +1015,1040 @@ def _dedupe_sources_for_context(sources: list[Any] | None) -> list[Any]:
     if duplicates:
         logger.info("source dedupe removed %d duplicate source card(s)", duplicates)
     return deduped
+
+
+def _query_allows_reference_evidence(query: str) -> bool:
+    return bool(_REFERENCE_QUERY_RE.search(str(query or "")))
+
+
+def _clean_chat_source_text(source: SourceChunk) -> SourceChunk:
+    """Remove source frontmatter/metadata noise before the LLM sees a chunk."""
+    text = str(source.text or "")
+    cleaned = _FRONTMATTER_RE.sub("", text, count=1).lstrip()
+    if cleaned == text:
+        return source
+    data = source.model_dump()
+    data["text"] = cleaned
+    return SourceChunk(**data)
+
+
+def _chat_source_is_low_value(source: SourceChunk, query: str) -> bool:
+    """Detect citation/acknowledgement chunks that are poor answer evidence."""
+    if _query_allows_reference_evidence(query):
+        return False
+    heading_text = " ".join(str(h) for h in (source.heading_path or []))
+    text_head = str(source.text or "")[:1200]
+    summary_head = str(source.summary or "")[:500]
+    haystack = f"{heading_text}\n{summary_head}\n{text_head}"
+    if _LOW_VALUE_EVIDENCE_RE.search(haystack):
+        return True
+    if re.search(r"\brelated work\b", heading_text, re.IGNORECASE):
+        citation_hits = len(re.findall(r"\b[A-Z][A-Za-z-]+ et al\.\s*\(\d{4}", haystack))
+        year_hits = len(re.findall(r"\(\d{4}[a-z]?\)", haystack))
+        if citation_hits >= 3 or year_hits >= 5:
+            return True
+    return False
+
+
+def _prepare_chat_evidence_sources(
+    sources: list[SourceChunk],
+    *,
+    query: str,
+    min_keep: int = _CHAT_EVIDENCE_MIN_KEEP_AFTER_FILTER,
+) -> tuple[list[SourceChunk], dict[str, Any]]:
+    """Clean and lightly filter chunks before coverage/final prompt assembly."""
+    cleaned = [_clean_chat_source_text(source) for source in (sources or [])]
+    if not cleaned:
+        return [], {"filtered_low_value": 0, "cleaned_frontmatter": 0}
+
+    kept: list[SourceChunk] = []
+    low_value: list[SourceChunk] = []
+    for source in cleaned:
+        if _chat_source_is_low_value(source, query):
+            low_value.append(source)
+        else:
+            kept.append(source)
+
+    if len(kept) < max(1, min_keep):
+        needed = max(1, min_keep) - len(kept)
+        kept.extend(low_value[:needed])
+        low_value = low_value[needed:]
+
+    cleaned_frontmatter = sum(
+        1
+        for before, after in zip(sources or [], cleaned)
+        if str(before.text or "") != str(after.text or "")
+    )
+    return kept, {
+        "filtered_low_value": len(low_value),
+        "cleaned_frontmatter": cleaned_frontmatter,
+    }
+
+
+def _chat_coverage_norm(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _chat_coverage_facets_for_query(query: str) -> list[dict[str, Any]]:
+    haystack = str(query or "").lower()
+    facets: list[dict[str, Any]] = []
+    for facet in _CHAT_COVERAGE_FACETS:
+        triggers = tuple(str(t).lower() for t in facet.get("triggers") or ())
+        matched = [term for term in triggers if term and term in haystack]
+        if not matched:
+            continue
+        facets.append(
+            {
+                "name": str(facet.get("name") or ""),
+                "label": str(facet.get("label") or facet.get("name") or ""),
+                "matched": matched[:5],
+                "query_explicit": True,
+                "query_matched": True,
+                "source": "query_deconstruction",
+                "first_match_pos": min(
+                    [haystack.find(term) for term in matched if haystack.find(term) >= 0]
+                    or [999999]
+                ),
+                "support_terms": [
+                    str(t) for t in (facet.get("support_terms") or []) if t
+                ],
+                "triggers": [str(t) for t in triggers if t],
+            }
+        )
+    facets.sort(key=lambda row: (int(row.get("first_match_pos") or 999999), row["name"]))
+    return facets[:8]
+
+
+def _merge_chat_coverage_facets(
+    base: list[dict[str, Any]],
+    dynamic: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for row in [*base, *dynamic]:
+        name = str(row.get("name") or "")
+        if not name:
+            continue
+        existing = merged.get(name)
+        if existing is None:
+            merged[name] = dict(row)
+            continue
+        existing["matched"] = list(
+            dict.fromkeys([*(existing.get("matched") or []), *(row.get("matched") or [])])
+        )[:8]
+        existing["support_terms"] = list(
+            dict.fromkeys(
+                [*(existing.get("support_terms") or []), *(row.get("support_terms") or [])]
+            )
+        )[:12]
+        existing["triggers"] = list(
+            dict.fromkeys([*(existing.get("triggers") or []), *(row.get("triggers") or [])])
+        )[:12]
+        existing["source"] = existing.get("source") or row.get("source")
+        existing["query_matched"] = bool(
+            existing.get("query_matched") or row.get("query_matched")
+        )
+        existing["query_explicit"] = bool(
+            existing.get("query_explicit") or row.get("query_explicit")
+        )
+        existing["semantic_matched"] = bool(
+            existing.get("semantic_matched") or row.get("semantic_matched")
+        )
+        existing["match_score"] = max(
+            float(existing.get("match_score") or 0.0),
+            float(row.get("match_score") or 0.0),
+        )
+        if row.get("vector_score") is not None:
+            existing["vector_score"] = max(
+                float(existing.get("vector_score") or 0.0),
+                float(row.get("vector_score") or 0.0),
+            )
+        if row.get("facet_doc_ids"):
+            existing["facet_doc_ids"] = list(
+                dict.fromkeys(
+                    [*(existing.get("facet_doc_ids") or []), *(row.get("facet_doc_ids") or [])]
+                )
+            )[:8]
+        if row.get("facet_docs"):
+            existing["facet_docs"] = [
+                *list(existing.get("facet_docs") or []),
+                *[
+                    doc
+                    for doc in (row.get("facet_docs") or [])
+                    if doc not in (existing.get("facet_docs") or [])
+                ],
+            ][:8]
+        existing["first_match_pos"] = min(
+            int(existing.get("first_match_pos") or 999999),
+            int(row.get("first_match_pos") or 999999),
+        )
+    rows = list(merged.values())
+    rows.sort(
+        key=lambda item: (
+            0 if item.get("query_explicit") else 1,
+            int(item.get("first_match_pos") or 999999),
+            0 if float(item.get("match_score") or 0.0) >= 4.0 else 1,
+            -float(item.get("match_score") or 0.0),
+            -len(item.get("matched") or []),
+            str(item.get("name") or ""),
+        )
+    )
+    return rows[:8]
+
+
+async def _chat_coverage_facets_for_query_with_corpus(
+    query: str,
+    corpus_ids: list[str] | None,
+) -> list[dict[str, Any]]:
+    base = _chat_coverage_facets_for_query(query)
+    db = conversation_service._db
+    try:
+        dynamic = await matching_ingest_facets(db, query, corpus_ids, limit=8)
+    except Exception as exc:
+        logger.debug("chat ingest facet match skipped: %s", exc)
+        dynamic = []
+    try:
+        from services.embedder import embed_query
+        from services.ingestion_service import ingestion_service
+
+        qdrant = ingestion_service.qdrant_client
+        if qdrant is None:
+            from qdrant_client import AsyncQdrantClient
+
+            qdrant = AsyncQdrantClient(
+                url=settings.QDRANT_URL,
+                timeout=settings.QDRANT_TIMEOUT_SECONDS,
+            )
+        query_vector = await embed_query(
+            query,
+            await retriever_orchestrator._embedding_config_for_query(corpus_ids),
+        )
+        vector_dynamic = await matching_vector_facets(
+            db,
+            qdrant,
+            query,
+            query_vector,
+            corpus_ids,
+            limit=8,
+        )
+    except Exception as exc:
+        logger.debug("chat vector facet match skipped: %s", exc)
+        vector_dynamic = []
+    return _merge_chat_coverage_facets(base, [*dynamic, *vector_dynamic])
+
+
+def _chat_coverage_facet_terms(facet: dict[str, Any]) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for key in ("matched", "support_terms", "triggers"):
+        for raw in facet.get(key) or []:
+            term = _chat_coverage_norm(raw)
+            if term and term not in seen:
+                seen.add(term)
+                terms.append(term)
+    return terms
+
+
+def _chat_source_text(source: SourceChunk) -> str:
+    metadata = source.metadata if isinstance(source.metadata, dict) else {}
+    values: list[Any] = [
+        source.doc_name,
+        source.doc_id,
+        source.source_tier,
+        source.summary,
+        source.text,
+        " ".join(str(v) for v in (source.heading_path or [])),
+        metadata.get("title"),
+        metadata.get("filename"),
+        metadata.get("section"),
+        " ".join(metadata_facet_terms(metadata)),
+    ]
+    return _chat_coverage_norm(" ".join(str(v) for v in values if v))
+
+
+def _chat_facet_coverage_score(source: SourceChunk, facet: dict[str, Any]) -> int:
+    text = _chat_source_text(source)
+    if not text:
+        return 0
+    score = 0
+    metadata = source.metadata if isinstance(source.metadata, dict) else {}
+    support_facet = metadata.get("support_facet") if isinstance(metadata.get("support_facet"), dict) else {}
+    if str(support_facet.get("name") or "") == str(facet.get("name") or ""):
+        score += 8
+    high_text = _chat_coverage_norm(
+        " ".join(
+            str(v)
+            for v in (
+                source.doc_name,
+                source.doc_id,
+                source.source_tier,
+                " ".join(str(h) for h in (source.heading_path or [])),
+            )
+            if v
+        )
+    )
+    summary_text = _chat_coverage_norm(source.summary or "")
+    body_text = _chat_coverage_norm(source.text or "")
+    for term in _chat_coverage_facet_terms(facet):
+        is_phrase = " " in term
+        if term in high_text:
+            score += 4 if is_phrase else 2
+        if term in summary_text:
+            score += 2 if is_phrase else 1
+        if term in body_text:
+            score += 1 if is_phrase else 0
+    return score
+
+
+def _chat_query_fit_score(source: SourceChunk, query: str, facet: dict[str, Any]) -> int:
+    query_terms = [
+        term
+        for term in re.findall(r"[a-z0-9][a-z0-9\-]{3,}", str(query or "").lower())
+        if term
+        not in {
+            "could",
+            "would",
+            "should",
+            "with",
+            "from",
+            "that",
+            "this",
+            "they",
+            "them",
+            "someone",
+            "combine",
+            "helps",
+            "help",
+            "over",
+            "time",
+        }
+    ]
+    terms = list(dict.fromkeys([*query_terms, *_chat_coverage_facet_terms(facet)]))[:32]
+    text = _chat_source_text(source)
+    return sum(1 for term in terms if _chat_coverage_norm(term) in text)
+
+
+def _chat_support_query_variants(
+    facet: dict[str, Any],
+    original_query: str,
+) -> list[str]:
+    """Build bounded support queries for a missing facet.
+
+    The first query is the precise lane query. Later variants widen the net
+    with triggers, matched query text, and salient user terms. This keeps the
+    support lane deterministic and offline, while avoiding the previous one-
+    shot failure mode where a missing lane could disappear silently.
+    """
+
+    support_terms = [str(t) for t in (facet.get("support_terms") or []) if t]
+    matched = [str(t) for t in (facet.get("matched") or []) if t]
+    triggers = [str(t) for t in (facet.get("triggers") or []) if t]
+    label = str(facet.get("label") or facet.get("name") or "").strip()
+    query_terms = [
+        term
+        for term in re.findall(r"[a-z0-9][a-z0-9\-]{4,}", str(original_query or "").lower())
+        if term
+        not in {
+            "could",
+            "would",
+            "should",
+            "their",
+            "there",
+            "where",
+            "about",
+            "after",
+            "before",
+            "through",
+            "combine",
+            "build",
+            "helps",
+            "someone",
+            "personal",
+            "reflection",
+            "over",
+            "time",
+        }
+    ]
+
+    variants: list[list[str]] = [
+        support_terms[:12] or matched[:8] or triggers[:8] or [label],
+        [label, *matched[:4], *support_terms[:14], *triggers[:8]],
+        [label, *support_terms[:8], *query_terms[:8]],
+    ]
+    queries: list[str] = []
+    seen: set[str] = set()
+    for parts in variants:
+        text = " ".join(str(part).strip() for part in parts if str(part).strip())
+        text = " ".join(text.split())
+        key = text.lower()
+        if text and key not in seen:
+            queries.append(text)
+            seen.add(key)
+    return queries[:3]
+
+
+def _chat_coverage_candidate_snapshot(
+    chunk: SourceChunk,
+    *,
+    facet: dict[str, Any],
+    original_query: str,
+    reason: str,
+) -> dict[str, Any]:
+    cleaned = _clean_chat_source_text(chunk)
+    return {
+        "chunk_id": str(cleaned.chunk_id or ""),
+        "doc_id": str(cleaned.doc_id or ""),
+        "doc_name": str(cleaned.doc_name or ""),
+        "score": float(cleaned.score or 0.0),
+        "facet_score": _chat_facet_coverage_score(cleaned, facet),
+        "query_fit": _chat_query_fit_score(cleaned, original_query, facet),
+        "reason": reason,
+    }
+
+
+def _chat_coverage_scores(
+    sources: list[SourceChunk],
+    facets: list[dict[str, Any]],
+) -> dict[str, int]:
+    return {
+        str(facet.get("name") or ""): max(
+            (_chat_facet_coverage_score(source, facet) for source in sources),
+            default=0,
+        )
+        for facet in facets
+    }
+
+
+def _chat_query_facet_breakdown(
+    facets: list[dict[str, Any]],
+    scores: dict[str, int],
+) -> list[dict[str, Any]]:
+    """Model- and UI-facing view of the user's query decomposition."""
+
+    rows: list[dict[str, Any]] = []
+    for facet in facets:
+        name = str(facet.get("name") or "")
+        if not name:
+            continue
+        score = int(scores.get(name, 0) or 0)
+        rows.append(
+            {
+                "name": name,
+                "label": str(facet.get("label") or name.replace("_", " ")),
+                "matched": facet.get("matched") or [],
+                "source": str(facet.get("source") or ""),
+                "query_explicit": bool(facet.get("query_explicit")),
+                "semantic_matched": bool(facet.get("semantic_matched")),
+                "coverage_score": score,
+                "coverage_status": (
+                    "grounded" if score >= _CHAT_COVERAGE_THRESHOLD else "needs_support"
+                ),
+            }
+        )
+    return rows
+
+
+def _choose_chat_coverage_candidate_with_report(
+    candidates: list[SourceChunk],
+    *,
+    facet: dict[str, Any],
+    original_query: str,
+    existing_chunk_ids: set[str],
+    existing_doc_ids: set[str],
+) -> tuple[SourceChunk | None, dict[str, Any]]:
+    best_new_doc: tuple[float, SourceChunk] | None = None
+    best_any_doc: tuple[float, SourceChunk] | None = None
+    best_lane_new_doc: tuple[float, SourceChunk] | None = None
+    best_lane_any_doc: tuple[float, SourceChunk] | None = None
+    best_weak_new_doc: tuple[float, SourceChunk] | None = None
+    best_weak_any_doc: tuple[float, SourceChunk] | None = None
+    rejected: dict[str, int] = {
+        "low_value": 0,
+        "duplicate": 0,
+        "below_facet_floor": 0,
+    }
+    sampled: list[dict[str, Any]] = []
+    substantive = [
+        chunk
+        for chunk in candidates
+        if not _chat_source_is_low_value(_clean_chat_source_text(chunk), original_query)
+    ]
+    rejected["low_value"] = max(0, len(candidates or []) - len(substantive))
+    pool = substantive or list(candidates or [])
+    for chunk in pool:
+        chunk = _clean_chat_source_text(chunk)
+        chunk_id = str(chunk.chunk_id or "")
+        if not chunk_id or chunk_id in existing_chunk_ids:
+            rejected["duplicate"] += 1
+            if len(sampled) < 4:
+                sampled.append(
+                    _chat_coverage_candidate_snapshot(
+                        chunk,
+                        facet=facet,
+                        original_query=original_query,
+                        reason="duplicate",
+                    )
+                )
+            continue
+        facet_score = _chat_facet_coverage_score(chunk, facet)
+        query_fit = _chat_query_fit_score(chunk, original_query, facet)
+        if facet_score < _CHAT_COVERAGE_WEAK_THRESHOLD:
+            rejected["below_facet_floor"] += 1
+            if len(sampled) < 4:
+                sampled.append(
+                    _chat_coverage_candidate_snapshot(
+                        chunk,
+                        facet=facet,
+                        original_query=original_query,
+                        reason="below_facet_floor",
+                    )
+                )
+            continue
+        doc_id = str(chunk.doc_id or "")
+        new_doc_bonus = 4.0 if doc_id and doc_id not in existing_doc_ids else 0.0
+        final_score = (facet_score * 10.0) + (query_fit * 2.0) + float(chunk.score or 0.0) + new_doc_bonus
+        if facet_score >= _CHAT_COVERAGE_THRESHOLD and query_fit > 0:
+            current = (final_score, chunk)
+            if best_any_doc is None or final_score > best_any_doc[0]:
+                best_any_doc = current
+            if doc_id and doc_id not in existing_doc_ids:
+                if best_new_doc is None or final_score > best_new_doc[0]:
+                    best_new_doc = current
+        elif facet_score >= _CHAT_COVERAGE_THRESHOLD:
+            # Lane fallback: the support query already targeted this missing
+            # facet. If the chunk cleanly covers the lane but not much of the
+            # full multi-part query, keep it as partial evidence instead of
+            # letting global relevance erase the facet.
+            current = (final_score, chunk)
+            if best_lane_any_doc is None or final_score > best_lane_any_doc[0]:
+                best_lane_any_doc = current
+            if doc_id and doc_id not in existing_doc_ids:
+                if best_lane_new_doc is None or final_score > best_lane_new_doc[0]:
+                    best_lane_new_doc = current
+        else:
+            # Weak fallback: enough lane signal to be useful, but not enough to
+            # pretend the lane is fully grounded. The chunk can enter the
+            # packet with metadata that tells the model and UI it is weak
+            # support.
+            current = (final_score, chunk)
+            if best_weak_any_doc is None or final_score > best_weak_any_doc[0]:
+                best_weak_any_doc = current
+            if doc_id and doc_id not in existing_doc_ids:
+                if best_weak_new_doc is None or final_score > best_weak_new_doc[0]:
+                    best_weak_new_doc = current
+
+    chosen_tuple = (
+        best_new_doc
+        or best_any_doc
+        or best_lane_new_doc
+        or best_lane_any_doc
+        or best_weak_new_doc
+        or best_weak_any_doc
+        or (None, None)
+    )
+    chosen = chosen_tuple[1]
+    if chosen is None:
+        return None, {
+            "status": "uncovered",
+            "candidate_count": len(candidates or []),
+            "substantive_count": len(substantive),
+            "rejected": rejected,
+            "sampled_rejections": sampled,
+            "reason": "no_candidate_passed_lane_floor",
+        }
+
+    facet_score = _chat_facet_coverage_score(chosen, facet)
+    strength = "strong" if facet_score >= _CHAT_COVERAGE_THRESHOLD else "weak"
+    return chosen, {
+        "status": "selected",
+        "strength": strength,
+        "candidate_count": len(candidates or []),
+        "substantive_count": len(substantive),
+        "rejected": rejected,
+        "selected": _chat_coverage_candidate_snapshot(
+            chosen,
+            facet=facet,
+            original_query=original_query,
+            reason=f"{strength}_support",
+        ),
+    }
+
+
+def _choose_chat_coverage_candidate(
+    candidates: list[SourceChunk],
+    *,
+    facet: dict[str, Any],
+    original_query: str,
+    existing_chunk_ids: set[str],
+    existing_doc_ids: set[str],
+) -> SourceChunk | None:
+    chosen, _ = _choose_chat_coverage_candidate_with_report(
+        candidates,
+        facet=facet,
+        original_query=original_query,
+        existing_chunk_ids=existing_chunk_ids,
+        existing_doc_ids=existing_doc_ids,
+    )
+    return chosen
+
+
+def _mark_chat_coverage_chunk(
+    chunk: SourceChunk,
+    *,
+    facet: dict[str, Any],
+    support_query: str,
+    original_query: str,
+    support_strength: str = "strong",
+) -> SourceChunk:
+    chunk = _clean_chat_source_text(chunk)
+    data = chunk.model_dump()
+    metadata = dict(data.get("metadata") or {})
+    support_query_score = float(data.get("score") or 0.0)
+    facet_score = _chat_facet_coverage_score(chunk, facet)
+    query_fit = _chat_query_fit_score(chunk, original_query, facet)
+    selection_score = min(
+        0.95,
+        (min(facet_score, 16) / 16.0 * 0.55)
+        + (min(query_fit, 12) / 12.0 * 0.35)
+        + (max(0.0, min(support_query_score, 1.0)) * 0.10),
+    )
+    data["score"] = round(selection_score, 6)
+    metadata["support_role"] = "chat_semantic_facet_coverage"
+    metadata["support_lane"] = f"facet:{facet.get('name') or ''}"
+    metadata["support_query"] = _clip_trace_value(support_query, 220)
+    metadata["support_query_score"] = support_query_score
+    metadata["support_selection_score"] = round(selection_score, 6)
+    metadata["support_facet_score"] = facet_score
+    metadata["support_query_fit"] = query_fit
+    metadata["support_strength"] = support_strength
+    metadata["support_facet"] = {
+        "name": str(facet.get("name") or ""),
+        "label": str(facet.get("label") or ""),
+        "matched": facet.get("matched") or [],
+    }
+    data["metadata"] = metadata
+    return SourceChunk(**data)
+
+
+def _chat_source_candidate_lanes(
+    source: SourceChunk,
+    facets: list[dict[str, Any]],
+) -> set[str]:
+    metadata = source.metadata if isinstance(source.metadata, dict) else {}
+    lanes: set[str] = set()
+
+    support_lane = str(metadata.get("support_lane") or "")
+    if support_lane.startswith("facet:"):
+        lanes.add(support_lane.split(":", 1)[1])
+    support_facet = (
+        metadata.get("support_facet")
+        if isinstance(metadata.get("support_facet"), dict)
+        else {}
+    )
+    if support_facet.get("name"):
+        lanes.add(str(support_facet.get("name")))
+
+    semantic = (
+        metadata.get("semantic_facets")
+        if isinstance(metadata.get("semantic_facets"), dict)
+        else {}
+    )
+    raw_ids: list[Any] = []
+    raw_ids.extend(semantic.get("facet_ids") or [])
+    raw_ids.extend(semantic.get("doc_facet_ids") or [])
+    raw_ids.extend(semantic.get("content_facet_ids") or [])
+    raw_ids.extend([semantic.get("content_facet_text") or ""])
+    raw_ids.extend(metadata.get("facet_ids") or [])
+    raw_ids.extend(metadata.get("doc_facet_ids") or [])
+    raw_ids.extend(metadata.get("content_facet_ids") or [])
+    raw_ids.extend([metadata.get("content_facet_text") or ""])
+    raw_ids.append(source.doc_name or "")
+    raw_ids.append(source.doc_id or "")
+    normalized_ids = {normalize_facet_id(value) for value in raw_ids if value}
+
+    for facet in facets:
+        name = str(facet.get("name") or "")
+        if not name:
+            continue
+        name_norm = normalize_facet_id(name)
+        if name_norm and name_norm in normalized_ids:
+            lanes.add(name)
+            continue
+        # Fallback for hand-authored/static facets whose lane names do not
+        # exist as ingest-time facet ids. This lets the final selector see that
+        # a chunk materially covers the facet even if it came from normal
+        # retrieval rather than a support lane.
+        if _chat_facet_coverage_score(source, facet) >= _CHAT_COVERAGE_THRESHOLD:
+            lanes.add(name)
+
+    return lanes
+
+
+def _chat_selector_candidates(
+    sources: list[SourceChunk],
+    *,
+    facets: list[dict[str, Any]],
+    original_query: str,
+) -> list[FacetCandidate]:
+    candidates: list[FacetCandidate] = []
+    for order, source in enumerate(sources or []):
+        cleaned = _clean_chat_source_text(source)
+        chunk_id = str(cleaned.chunk_id or "")
+        key = f"chunk:{chunk_id}" if chunk_id else ""
+        candidates.append(
+            FacetCandidate(
+                item=cleaned,
+                score=float(cleaned.score or 0.0),
+                lanes=_chat_source_candidate_lanes(cleaned, facets),
+                key=key,
+                doc_id=str(cleaned.doc_id or ""),
+                junk=_chat_source_is_low_value(cleaned, original_query),
+                order=order,
+            )
+        )
+    return candidates
+
+
+def _merge_chat_coverage_sources(
+    base_sources: list[SourceChunk],
+    support_sources: list[SourceChunk],
+    *,
+    max_sources: int,
+) -> tuple[list[SourceChunk], int]:
+    return _select_chat_coverage_sources(
+        base_sources,
+        support_sources,
+        facets=[],
+        missing_lanes=[],
+        priority_lanes=[],
+        original_query="",
+        max_sources=max_sources,
+    )[:2]
+
+
+def _select_chat_coverage_sources(
+    base_sources: list[SourceChunk],
+    support_sources: list[SourceChunk],
+    *,
+    facets: list[dict[str, Any]],
+    missing_lanes: list[str],
+    priority_lanes: list[str] | None = None,
+    original_query: str,
+    max_sources: int,
+) -> tuple[list[SourceChunk], int, dict[str, Any]]:
+    max_sources = max(1, int(max_sources or len(base_sources) or 1))
+    all_sources = [*base_sources, *support_sources]
+    candidates = _chat_selector_candidates(
+        all_sources,
+        facets=facets,
+        original_query=original_query,
+    )
+    selected, selector_meta = select_facet_final(
+        candidates,
+        missing_lanes=missing_lanes,
+        priority_lanes=priority_lanes or [],
+        max_items=max_sources,
+        lane_budget=1,
+        source_cap=_CHAT_COVERAGE_SOURCE_CAP,
+    )
+    actual_support = [
+        source
+        for source in selected
+        if isinstance(getattr(source, "metadata", None), dict)
+        and source.metadata.get("support_role") == "chat_semantic_facet_coverage"
+    ]
+    return selected, len(actual_support), selector_meta
+
+
+def _format_chat_coverage_prompt_note(meta: dict[str, Any]) -> str | None:
+    """Compact evidence-coverage contract for the final model call."""
+
+    selected = [str(name) for name in (meta.get("selected_facets") or []) if name]
+    breakdown = (
+        meta.get("query_facet_breakdown")
+        if isinstance(meta.get("query_facet_breakdown"), list)
+        else []
+    )
+    explicit = [
+        row
+        for row in breakdown
+        if isinstance(row, dict) and row.get("query_explicit")
+    ]
+    if not selected and not explicit:
+        return None
+    lane_counts = meta.get("coverage_lane_counts") if isinstance(meta.get("coverage_lane_counts"), dict) else {}
+    uncovered = [str(name) for name in (meta.get("coverage_uncovered_lanes") or []) if name]
+    reports = meta.get("lane_reports") if isinstance(meta.get("lane_reports"), list) else []
+    weak = [
+        str(report.get("lane") or "")
+        for report in reports
+        if report.get("status") == "selected" and report.get("strength") == "weak"
+    ]
+    covered = [
+        name
+        for name in selected
+        if int(lane_counts.get(name, 0) or 0) > 0 and name not in uncovered
+    ]
+    lines = ["Evidence coverage note:"]
+    if explicit:
+        facet_parts = []
+        for row in explicit[:8]:
+            name = str(row.get("name") or "")
+            status = str(row.get("coverage_status") or "")
+            if name:
+                facet_parts.append(f"{name}={status}")
+        if facet_parts:
+            lines.append(
+                "- Query decomposed into explicit facets: "
+                f"{', '.join(facet_parts)}."
+            )
+    if covered:
+        lines.append(f"- Directly grounded lanes: {', '.join(covered[:8])}.")
+    if weak:
+        lines.append(
+            "- Weakly grounded lanes: "
+            f"{', '.join(dict.fromkeys(weak))}. Treat these as partial evidence."
+        )
+    if uncovered:
+        lines.append(
+            "- Uncovered lanes: "
+            f"{', '.join(uncovered[:8])}. Do not present these as source-backed; "
+            "frame them as design hypotheses, corpus gaps, or integration points."
+        )
+    lines.append(
+        "- Synthesize cohesively around the evidence that exists. Avoid separate "
+        "ingredient-by-ingredient exposition when the user asks how concepts combine."
+    )
+    return "\n".join(lines)
+
+
+async def _enforce_chat_query_coverage(
+    *,
+    original_query: str,
+    retrieval_query: str,
+    sources: list[SourceChunk],
+    corpus_ids: list[str] | None,
+    retrieval_tier: RetrievalTier,
+    collections: list[str] | None,
+    retrieval_k: int | None,
+    rerank_enabled: bool,
+    top_k_summary: int | None,
+    rerank_top_n: int | None,
+    similarity_threshold: float | None,
+    neo4j_expansion_cap: int | None,
+    max_corpora_per_query: int | None,
+    fact_seed_limit: int | None,
+    final_top_k: int | None,
+    search_mode: str,
+) -> tuple[list[SourceChunk], dict[str, Any]]:
+    """Add missing query-facet evidence using the same chat retrieval tier.
+
+    This is query satisfaction, not source diversity for its own sake. Normal
+    retrieval runs first. Only query-stated facets with weak coverage get a
+    small support retrieval, and selected chunks must still fit the original
+    query/facet before they enter the final prompt.
+    """
+
+    base_sources = list(sources or [])
+    facets = await _chat_coverage_facets_for_query_with_corpus(
+        original_query,
+        corpus_ids,
+    )
+    meta: dict[str, Any] = {
+        "detected_facets": [],
+        "selected_facets": [],
+        "added": 0,
+        "support_doc_ids": [],
+        "support_lanes": [],
+        "lane_reports": [],
+        "effective_tier": str(getattr(retrieval_tier, "value", retrieval_tier)),
+    }
+
+    base_sources, evidence_meta = _prepare_chat_evidence_sources(
+        base_sources,
+        query=original_query,
+    )
+    meta.update(evidence_meta)
+    if not base_sources:
+        return [], meta
+    if not facets:
+        return base_sources, meta
+
+    scores = _chat_coverage_scores(base_sources, facets)
+    query_explicit_missing: list[dict[str, Any]] = []
+    inferred_missing: list[dict[str, Any]] = []
+    meta["detected_facets"] = [
+        {
+            "name": str(facet.get("name") or ""),
+            "label": str(facet.get("label") or ""),
+            "matched": facet.get("matched") or [],
+            "source": str(facet.get("source") or ""),
+            "query_explicit": bool(facet.get("query_explicit")),
+            "semantic_matched": bool(facet.get("semantic_matched")),
+            "coverage_score": scores.get(str(facet.get("name") or ""), 0),
+        }
+        for facet in facets
+    ]
+    meta["query_facet_breakdown"] = _chat_query_facet_breakdown(facets, scores)
+    explicit_priority_lanes = [
+        str(facet.get("name") or "")
+        for facet in facets
+        if facet.get("query_explicit") and str(facet.get("name") or "")
+    ]
+    meta["priority_lanes"] = explicit_priority_lanes
+    for facet in facets:
+        if scores.get(str(facet.get("name") or ""), 0) >= _CHAT_COVERAGE_THRESHOLD:
+            continue
+        if facet.get("query_explicit"):
+            query_explicit_missing.append(facet)
+        else:
+            inferred_missing.append(facet)
+    dynamic_missing = inferred_missing[:_CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS]
+    skipped_dynamic = inferred_missing[_CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS:]
+    missing = [*query_explicit_missing, *dynamic_missing]
+    if not missing:
+        return base_sources, meta
+    meta["selected_facets"] = [str(facet.get("name") or "") for facet in missing]
+    meta["explicit_missing_facets"] = [
+        str(facet.get("name") or "") for facet in query_explicit_missing
+    ]
+    meta["dynamic_missing_facets"] = [
+        str(facet.get("name") or "") for facet in dynamic_missing
+    ]
+    meta["skipped_dynamic_facets"] = [
+        str(facet.get("name") or "") for facet in skipped_dynamic
+    ]
+    meta["support_search_mode"] = "local"
+
+    existing_chunk_ids = {str(source.chunk_id or "") for source in base_sources}
+    existing_doc_ids = {str(source.doc_id or "") for source in base_sources if source.doc_id}
+    support_sources: list[SourceChunk] = []
+
+    for facet in missing:
+        facet_name = str(facet.get("name") or "")
+        lane_report: dict[str, Any] = {
+            "lane": facet_name,
+            "label": str(facet.get("label") or facet_name),
+            "query_explicit": bool(facet.get("query_explicit")),
+            "source": str(facet.get("source") or ""),
+            "coverage_score": scores.get(facet_name, 0),
+            "status": "uncovered",
+            "attempts": [],
+        }
+        chosen: SourceChunk | None = None
+        chosen_report: dict[str, Any] = {}
+        support_query = ""
+        for support_query in _chat_support_query_variants(facet, original_query):
+            attempt: dict[str, Any] = {
+                "query": _clip_trace_value(support_query, 220),
+                "search_mode": "local",
+                "returned": 0,
+                "status": "started",
+            }
+            try:
+                result = await retriever_orchestrator.retrieve(
+                    query=support_query,
+                    corpus_ids=corpus_ids,
+                    retrieval_tier=retrieval_tier,
+                    collections=collections,
+                    retrieval_k=max(24, min(int(retrieval_k or 40), 48)),
+                    rerank_enabled=rerank_enabled,
+                    ranking_query=support_query,
+                    top_k_summary=top_k_summary,
+                    rerank_top_n=max(12, min(int(rerank_top_n or 24), 32)),
+                    similarity_threshold=similarity_threshold,
+                    neo4j_expansion_cap=neo4j_expansion_cap,
+                    max_corpora_per_query=max_corpora_per_query,
+                    final_top_k=6,
+                    fact_seed_limit=fact_seed_limit,
+                    search_mode="local",
+                )
+            except Exception as exc:
+                attempt["status"] = "retrieval_error"
+                attempt["error"] = _clip_trace_value(exc, 180)
+                lane_report["attempts"].append(attempt)
+                logger.debug("chat coverage support retrieval skipped for %s: %s", facet_name, exc)
+                continue
+            candidates = list(getattr(result, "chunks", []) or [])
+            attempt["returned"] = len(candidates)
+            chosen, chosen_report = _choose_chat_coverage_candidate_with_report(
+                candidates,
+                facet=facet,
+                original_query=original_query,
+                existing_chunk_ids=existing_chunk_ids,
+                existing_doc_ids=existing_doc_ids,
+            )
+            attempt.update(
+                {
+                    "status": chosen_report.get("status", "uncovered"),
+                    "strength": chosen_report.get("strength"),
+                    "selected": chosen_report.get("selected"),
+                    "rejected": chosen_report.get("rejected"),
+                    "sampled_rejections": chosen_report.get("sampled_rejections"),
+                    "reason": chosen_report.get("reason"),
+                }
+            )
+            lane_report["attempts"].append(attempt)
+            if chosen:
+                break
+
+        if not chosen:
+            lane_report["reason"] = "no_support_chunk_selected_after_fallbacks"
+            meta["lane_reports"].append(lane_report)
+            continue
+
+        strength = str(chosen_report.get("strength") or "strong")
+        marked = _mark_chat_coverage_chunk(
+            chosen,
+            facet=facet,
+            support_query=support_query,
+            original_query=original_query,
+            support_strength=strength,
+        )
+        lane_report["status"] = "selected"
+        lane_report["strength"] = strength
+        lane_report["selected_doc_id"] = str(marked.doc_id or "")
+        lane_report["selected_doc_name"] = str(marked.doc_name or "")
+        lane_report["selected_chunk_id"] = str(marked.chunk_id or "")
+        support_sources.append(marked)
+        meta["lane_reports"].append(lane_report)
+        existing_chunk_ids.add(str(marked.chunk_id or ""))
+        if marked.doc_id:
+            existing_doc_ids.add(str(marked.doc_id))
+
+    max_sources = int(final_top_k or len(base_sources) or 8)
+    merged, added, selector_meta = _select_chat_coverage_sources(
+        base_sources,
+        support_sources,
+        facets=facets,
+        missing_lanes=meta["selected_facets"],
+        priority_lanes=explicit_priority_lanes,
+        original_query=original_query,
+        max_sources=max_sources,
+    )
+    actual_support = [
+        source
+        for source in merged
+        if isinstance(source.metadata, dict)
+        and source.metadata.get("support_role") == "chat_semantic_facet_coverage"
+    ]
+    meta["added"] = len(actual_support)
+    meta["support_doc_ids"] = [str(source.doc_id or "") for source in actual_support if source.doc_id]
+    meta["support_lanes"] = [
+        str(source.metadata.get("support_lane") or "")
+        for source in actual_support
+        if isinstance(source.metadata, dict)
+    ]
+    meta["final_chunks"] = len(merged)
+    meta["final_selector"] = selector_meta
+    meta["coverage_lane_counts"] = selector_meta.get("lane_counts", {})
+    meta["coverage_uncovered_lanes"] = selector_meta.get("uncovered_lanes", [])
+    meta["coverage_priority_lanes"] = selector_meta.get("priority_lanes", [])
+    meta["coverage_uncovered_priority_lanes"] = selector_meta.get("uncovered_priority_lanes", [])
+    for report in meta.get("lane_reports", []):
+        lane = str(report.get("lane") or "")
+        if lane in meta["coverage_uncovered_lanes"] and report.get("status") == "selected":
+            report["status"] = "selected_but_not_in_final_packet"
+    return merged, meta
 
 
 def _clip_trace_value(value: Any, max_chars: int = 180) -> str:
@@ -1665,6 +2922,14 @@ class ChatOrchestrator:
         # Step 3.5: Retrieval Pipeline
         #   atomic mode: decompose query → fan-out retrieval → merge
         #   all other modes: standard single-query retrieval
+        from services.retriever.search_mode import resolve_search_mode
+
+        requested_mode = (
+            getattr(request.overrides, "search_mode", None)
+            if request.overrides
+            else None
+        )
+        resolved_mode = resolve_search_mode(requested_mode, request.message)
         if reasoning_mode == "atomic":
             from services.reasoning import atomic_retrieve
 
@@ -1679,14 +2944,6 @@ class ChatOrchestrator:
             # Phase 27 — resolve search-mode dispatch. "auto" infers from
             # the user's actual message (NOT the HyDE-expanded retrieval
             # query, which would have lost the original phrasing signal).
-            from services.retriever.search_mode import resolve_search_mode
-
-            requested_mode = (
-                getattr(request.overrides, "search_mode", None)
-                if request.overrides
-                else None
-            )
-            resolved_mode = resolve_search_mode(requested_mode, request.message)
             logger.info(
                 "search_mode: requested=%s resolved=%s",
                 requested_mode or "auto",
@@ -1709,7 +2966,44 @@ class ChatOrchestrator:
                 fact_seed_limit=profile_cfg["fact_seed_limit"],
                 search_mode=resolved_mode,
             )
-        sources = _dedupe_sources_for_context(retrieval.chunks)
+        coverage_start = perf_counter()
+        coverage_sources, coverage_meta = await _enforce_chat_query_coverage(
+            original_query=request.message,
+            retrieval_query=retrieval_query,
+            sources=list(retrieval.chunks or []),
+            corpus_ids=request.corpus_ids,
+            retrieval_tier=getattr(retrieval, "effective_tier", request.retrieval_tier),
+            collections=request.collections,
+            retrieval_k=profile_k,
+            rerank_enabled=profile_rerank,
+            top_k_summary=profile_cfg["top_k_summary"],
+            rerank_top_n=profile_cfg["rerank_top_n"],
+            similarity_threshold=profile_cfg["similarity_threshold"],
+            neo4j_expansion_cap=profile_cfg["neo4j_expansion_cap"],
+            max_corpora_per_query=profile_cfg["max_corpora_per_query"],
+            fact_seed_limit=profile_cfg["fact_seed_limit"],
+            final_top_k=profile_cfg["final_top_k"],
+            search_mode=resolved_mode,
+        )
+        coverage_meta["duration_s"] = perf_counter() - coverage_start
+        if coverage_meta.get("added"):
+            logger.info(
+                "chat_semantic_coverage: tier=%s selected=%s added=%s docs=%s uncovered=%s",
+                coverage_meta.get("effective_tier"),
+                coverage_meta.get("selected_facets"),
+                coverage_meta.get("added"),
+                coverage_meta.get("support_doc_ids"),
+                coverage_meta.get("coverage_uncovered_lanes", []),
+            )
+        elif coverage_meta.get("selected_facets"):
+            logger.info(
+                "chat_semantic_coverage: tier=%s selected=%s added=0 uncovered=%s reports=%s",
+                coverage_meta.get("effective_tier"),
+                coverage_meta.get("selected_facets"),
+                coverage_meta.get("coverage_uncovered_lanes", []),
+                coverage_meta.get("lane_reports", []),
+            )
+        sources = _dedupe_sources_for_context(coverage_sources)
         effective_tier_for_trace = getattr(
             retrieval.effective_tier,
             "value",
@@ -1728,6 +3022,32 @@ class ChatOrchestrator:
                 "duration_s": perf_counter() - rag_start,
                 "effective_tier": str(effective_tier_for_trace),
                 "chunks": len(sources or []),
+                "coverage_detected_facets": coverage_meta.get("detected_facets", []),
+                "coverage_query_facet_breakdown": coverage_meta.get("query_facet_breakdown", []),
+                "coverage_selected_facets": coverage_meta.get("selected_facets", []),
+                "coverage_explicit_missing_facets": coverage_meta.get(
+                    "explicit_missing_facets", []
+                ),
+                "coverage_dynamic_missing_facets": coverage_meta.get(
+                    "dynamic_missing_facets", []
+                ),
+                "coverage_skipped_dynamic_facets": coverage_meta.get(
+                    "skipped_dynamic_facets", []
+                ),
+                "coverage_added": coverage_meta.get("added", 0),
+                "coverage_support_lanes": coverage_meta.get("support_lanes", []),
+                "coverage_support_search_mode": coverage_meta.get("support_search_mode"),
+                "coverage_support_doc_ids": coverage_meta.get("support_doc_ids", []),
+                "coverage_duration_s": coverage_meta.get("duration_s", 0.0),
+                "evidence_filtered_low_value": coverage_meta.get("filtered_low_value", 0),
+                "evidence_cleaned_frontmatter": coverage_meta.get("cleaned_frontmatter", 0),
+                "coverage_priority_lanes": coverage_meta.get("coverage_priority_lanes", []),
+                "coverage_uncovered_priority_lanes": coverage_meta.get(
+                    "coverage_uncovered_priority_lanes", []
+                ),
+                "coverage_lane_counts": coverage_meta.get("coverage_lane_counts", {}),
+                "coverage_uncovered_lanes": coverage_meta.get("coverage_uncovered_lanes", []),
+                "coverage_lane_reports": coverage_meta.get("lane_reports", []),
             },
         )
 
@@ -1964,6 +3284,14 @@ class ChatOrchestrator:
                 )
             except Exception as exc:
                 logger.warning("Reasoning cascade failed: %s", exc)
+
+        coverage_prompt_note = _format_chat_coverage_prompt_note(coverage_meta)
+        if coverage_prompt_note:
+            analysis_text = (
+                f"{analysis_text.strip()}\n\n{coverage_prompt_note}"
+                if analysis_text and analysis_text.strip()
+                else coverage_prompt_note
+            )
 
         # Build augmented prompt — works whether or not we have sources, as
         # long as skills or analysis or sources is present.

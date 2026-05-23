@@ -198,6 +198,10 @@ async def test_qdrant_child_and_summary_payloads_include_readable_doc_label(monk
                 "filename": "aws.txt",
                 "text": "Lambda handles event-driven compute.",
                 "source_tier": "tier_b",
+                "facet_ids": ["event_driven_compute"],
+                "facet_text": "event driven compute",
+                "doc_facet_ids": ["aws_lambda"],
+                "facet_schema_version": "polymath.facets.v1",
             }
         ],
         vectors=[[0.1, 0.2]],
@@ -214,6 +218,10 @@ async def test_qdrant_child_and_summary_payloads_include_readable_doc_label(monk
                 "filename": "aws.txt",
                 "summary": "AWS service recommendations.",
                 "source_tier": "tier_a",
+                "facet_ids": ["aws_service_recommendations"],
+                "facet_text": "aws service recommendations",
+                "doc_facet_ids": ["aws_lambda"],
+                "facet_schema_version": "polymath.facets.v1",
             }
         ],
         vectors=[[0.3, 0.4]],
@@ -224,8 +232,14 @@ async def test_qdrant_child_and_summary_payloads_include_readable_doc_label(monk
     summary_payload = captured[1][2][0].payload
     assert child_payload["filename"] == "aws.txt"
     assert child_payload["doc_name"] == "aws.txt"
+    assert child_payload["facet_ids"] == ["event_driven_compute"]
+    assert child_payload["doc_facet_ids"] == ["aws_lambda"]
+    assert child_payload["facet_schema_version"] == "polymath.facets.v1"
     assert summary_payload["filename"] == "aws.txt"
     assert summary_payload["doc_name"] == "aws.txt"
+    assert summary_payload["facet_ids"] == ["aws_service_recommendations"]
+    assert summary_payload["doc_facet_ids"] == ["aws_lambda"]
+    assert summary_payload["facet_schema_version"] == "polymath.facets.v1"
 
 
 @pytest.mark.asyncio
@@ -244,6 +258,10 @@ async def test_qdrant_funnels_read_payload_doc_name(monkeypatch):
         "chunk_text": "Lambda handles events.",
         "source_tier": "tier_b",
         "chunk_type": "child",
+        "facet_ids": ["event_driven_compute"],
+        "facet_text": "event driven compute",
+        "doc_facet_ids": ["aws_lambda"],
+        "facet_schema_version": "polymath.facets.v1",
     }
     child_funnel = FunnelB.__new__(FunnelB)
     child_funnel.client = _QdrantClient(child_payload)
@@ -251,6 +269,9 @@ async def test_qdrant_funnels_read_payload_doc_name(monkeypatch):
     child_chunks = await child_funnel._search_collection("collection", [0.1], None, 1)
 
     assert child_chunks[0].doc_name == "aws.txt"
+    assert child_chunks[0].metadata["semantic_facets"]["facet_ids"] == [
+        "event_driven_compute"
+    ]
 
     summary_payload = {
         **child_payload,
@@ -264,3 +285,6 @@ async def test_qdrant_funnels_read_payload_doc_name(monkeypatch):
     summary_chunks = await summary_funnel._search_collection("collection", [0.1], None, 1)
 
     assert summary_chunks[0].doc_name == "aws.txt"
+    assert summary_chunks[0].metadata["semantic_facets"]["doc_facet_ids"] == [
+        "aws_lambda"
+    ]

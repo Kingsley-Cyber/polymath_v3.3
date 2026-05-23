@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from config import get_settings
 from models.schemas import SourceChunk
+from services.facets import metadata_with_facets
 from qdrant_client import AsyncQdrantClient, models
 
 logger = logging.getLogger(__name__)
@@ -153,7 +154,7 @@ class FunnelA:
                         doc_name=payload.get("doc_name") or payload.get("filename"),
                         heading_path=payload.get("heading_path") or None,
                         language=payload.get("language"),
-                        metadata=payload.get("metadata") or {},
+                        metadata=metadata_with_facets(payload.get("metadata"), payload),
                     )
                 )
             return chunks

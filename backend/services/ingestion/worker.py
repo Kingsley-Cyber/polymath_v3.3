@@ -98,6 +98,7 @@ from services.ghost_b import (
     SchemaContext,
     extract_entities,
 )
+from services.facets import build_ingest_facet_profile
 from services.ingestion import docling_adapter, tier_chunker
 from services.ingestion.schema_lens import get_or_create_schema_lens
 from services.ingestion.section_classifier import (
@@ -896,7 +897,38 @@ async def _run_ghosts_parallel(
     )
 
 
-def _build_parent_dicts(parents, summaries: list[SummaryResult] | None) -> list[dict]:
+def _document_facet_profile(facet_profile: dict | None) -> dict | None:
+    """Return the compact document-level facet profile.
+
+    Child/parent facet maps are stored on the child/parent records themselves,
+    not duplicated inside documents.facet_profile.
+    """
+
+    if not isinstance(facet_profile, dict):
+        return None
+    return {
+        "schema_version": facet_profile.get("schema_version"),
+        "doc_facets": facet_profile.get("doc_facets") or [],
+        "facet_ids": facet_profile.get("facet_ids") or [],
+        "facet_text": facet_profile.get("facet_text") or "",
+        "primary_facet_id": facet_profile.get("primary_facet_id"),
+        "source": facet_profile.get("source") or "ingestion",
+    }
+
+
+def _metadata_with_facets(metadata: dict | None, facet_meta: dict | None) -> dict:
+    base = dict(metadata or {})
+    semantic = (facet_meta or {}).get("semantic_facets")
+    if semantic:
+        base["semantic_facets"] = semantic
+    return base
+
+
+def _build_parent_dicts(
+    parents,
+    summaries: list[SummaryResult] | None,
+    parent_facets: dict[str, dict] | None = None,
+) -> list[dict]:
     """Assemble the parent_chunks[] array for the Mongo document record,
     populating `summary` inline from Ghost A output when available.
 
@@ -906,46 +938,76 @@ def _build_parent_dicts(parents, summaries: list[SummaryResult] | None) -> list[
     code reading parent records gets a consistent shape.
     """
     summary_by_parent = {s.parent_id: s.summary for s in (summaries or [])}
-    return [
-        {
-            "parent_id": p.parent_id,
-            "doc_id": p.doc_id,
-            "corpus_id": p.corpus_id,
-            "text": p.text,
-            "heading_path": p.heading_path,
-            "source_tier": p.source_tier,
-            "page_start": getattr(p, "page_start", None),
-            "page_end": getattr(p, "page_end", None),
-            "summary": summary_by_parent.get(p.parent_id),
-            "child_ids": [c.chunk_id for c in p.children],
-            "chunk_kind": getattr(p, "chunk_kind", ChunkKind.BODY),
-            "language": getattr(p, "language", None),
-            "metadata": getattr(p, "metadata", {}) or {},
-        }
-        for p in parents
-    ]
+    rows: list[dict] = []
+    parent_facets = parent_facets or {}
+    for p in parents:
+        facet_meta = parent_facets.get(p.parent_id, {})
+        rows.append(
+            {
+                "parent_id": p.parent_id,
+                "doc_id": p.doc_id,
+                "corpus_id": p.corpus_id,
+                "text": p.text,
+                "heading_path": p.heading_path,
+                "source_tier": p.source_tier,
+                "page_start": getattr(p, "page_start", None),
+                "page_end": getattr(p, "page_end", None),
+                "summary": summary_by_parent.get(p.parent_id),
+                "child_ids": [c.chunk_id for c in p.children],
+                "chunk_kind": getattr(p, "chunk_kind", ChunkKind.BODY),
+                "language": getattr(p, "language", None),
+                "metadata": _metadata_with_facets(
+                    getattr(p, "metadata", {}) or {},
+                    facet_meta,
+                ),
+                "facet_ids": facet_meta.get("facet_ids") or [],
+                "facet_text": facet_meta.get("facet_text") or "",
+                "content_facet_ids": facet_meta.get("content_facet_ids") or [],
+                "content_facet_text": facet_meta.get("content_facet_text") or "",
+                "content_facet_source": facet_meta.get("content_facet_source") or "",
+                "content_facet_confidence": facet_meta.get("content_facet_confidence"),
+            }
+        )
+    return rows
 
 
-def _build_child_dicts(children, user_id: str) -> list[dict]:
-    return [
-        {
-            "chunk_id": c.chunk_id,
-            "parent_id": c.parent_id,
-            "doc_id": c.doc_id,
-            "corpus_id": c.corpus_id,
-            "user_id": user_id,
-            "text": c.text,
-            "heading_path": c.heading_path,
-            "source_tier": c.source_tier,
-            "token_count": c.token_count,
-            "page_start": getattr(c, "page_start", None),
-            "page_end": getattr(c, "page_end", None),
-            "chunk_kind": getattr(c, "chunk_kind", ChunkKind.BODY),
-            "language": getattr(c, "language", None),
-            "metadata": getattr(c, "metadata", {}) or {},
-        }
-        for c in children
-    ]
+def _build_child_dicts(
+    children,
+    user_id: str,
+    child_facets: dict[str, dict] | None = None,
+) -> list[dict]:
+    rows: list[dict] = []
+    child_facets = child_facets or {}
+    for c in children:
+        facet_meta = child_facets.get(c.chunk_id, {})
+        rows.append(
+            {
+                "chunk_id": c.chunk_id,
+                "parent_id": c.parent_id,
+                "doc_id": c.doc_id,
+                "corpus_id": c.corpus_id,
+                "user_id": user_id,
+                "text": c.text,
+                "heading_path": c.heading_path,
+                "source_tier": c.source_tier,
+                "token_count": c.token_count,
+                "page_start": getattr(c, "page_start", None),
+                "page_end": getattr(c, "page_end", None),
+                "chunk_kind": getattr(c, "chunk_kind", ChunkKind.BODY),
+                "language": getattr(c, "language", None),
+                "metadata": _metadata_with_facets(
+                    getattr(c, "metadata", {}) or {},
+                    facet_meta,
+                ),
+                "facet_ids": facet_meta.get("facet_ids") or [],
+                "facet_text": facet_meta.get("facet_text") or "",
+                "content_facet_ids": facet_meta.get("content_facet_ids") or [],
+                "content_facet_text": facet_meta.get("content_facet_text") or "",
+                "content_facet_source": facet_meta.get("content_facet_source") or "",
+                "content_facet_confidence": facet_meta.get("content_facet_confidence"),
+            }
+        )
+    return rows
 
 
 async def _write_mongo_all(
@@ -966,6 +1028,7 @@ async def _write_mongo_all(
     ghost_b_out: list[ExtractionResult] | None,
     ghost_b_failures: list[ExtractionFailureItem] | None,
     ghost_b_metrics: dict | None,
+    facet_profile: dict | None,
     ws: WriteState,
 ) -> None:
     """Single Mongo write pass: documents + chunks. Summaries go INLINE on
@@ -974,14 +1037,22 @@ async def _write_mongo_all(
     The staging list is authoritative for Ghost B resume gating and is
     retained as provenance after neo4j_written flips (never cleared).
     """
-    parent_dicts = _build_parent_dicts(parents, summaries)
+    parent_dicts = _build_parent_dicts(
+        parents,
+        summaries,
+        (facet_profile or {}).get("parent_facets"),
+    )
     duplicate_candidates = await _find_near_duplicate_documents(
         db=db,
         corpus_id=corpus_id,
         doc_id=doc_id,
         parent_texts=[p.get("text") or "" for p in parent_dicts],
     )
-    child_dicts = _build_child_dicts(children, user_id)
+    child_dicts = _build_child_dicts(
+        children,
+        user_id,
+        (facet_profile or {}).get("child_facets"),
+    )
     ghost_b_staging = (
         [asdict(r) for r in ghost_b_out] if ghost_b_out else None
     )
@@ -1010,6 +1081,7 @@ async def _write_mongo_all(
         "ghost_b_failures": ghost_b_failure_rows,
         "ghost_b_metrics": ghost_b_metrics or {},
         "schema_lens": (ghost_b_metrics or {}).get("schema_lens"),
+        "facet_profile": _document_facet_profile(facet_profile),
         "is_near_duplicate": bool(duplicate_candidates),
         "near_duplicate_candidates": duplicate_candidates,
         "created_at": now,
@@ -1040,6 +1112,7 @@ async def _ensure_progress_document(
     ingestion_config: IngestionConfig,
     chunking_config: dict,
     parents,
+    facet_profile: dict | None,
     ws: WriteState,
 ) -> None:
     """Create a minimal document row so SSE has something to poll early."""
@@ -1059,7 +1132,12 @@ async def _ensure_progress_document(
             "ingestion_config": freeze_snapshot(ingestion_config),
             "chunking_config": chunking_config,
             "write_state": ws.model_dump(),
-            "parent_chunks": _build_parent_dicts(parents, None),
+            "parent_chunks": _build_parent_dicts(
+                parents,
+                None,
+                (facet_profile or {}).get("parent_facets"),
+            ),
+            "facet_profile": _document_facet_profile(facet_profile),
             "ghost_b_staging": None,
             "ghost_b_failures": [],
             "ghost_b_metrics": {},
@@ -1076,10 +1154,15 @@ async def _checkpoint_child_chunks(
     corpus_id: str,
     user_id: str,
     children,
+    facet_profile: dict | None,
 ) -> None:
     """Persist child chunks before Ghost B so graph failures cannot strand them."""
 
-    child_dicts = _build_child_dicts(children, user_id)
+    child_dicts = _build_child_dicts(
+        children,
+        user_id,
+        (facet_profile or {}).get("child_facets"),
+    )
     await mongo_writer.upsert_chunks(db, child_dicts)
     logger.info(
         "phase=chunk_checkpoint doc=%s corpus=%s children=%d",
@@ -1162,6 +1245,7 @@ async def _write_qdrant_for_doc(
     config: IngestionConfig,
     child_sparse_map: dict[str, Any] | None = None,
     summary_sparse_map: dict[str, Any] | None = None,
+    facet_profile: dict | None = None,
 ) -> None:
     """Write children + summaries to per-corpus Qdrant collections.
 
@@ -1179,8 +1263,14 @@ async def _write_qdrant_for_doc(
     child_sparse_map = child_sparse_map or {}
     summary_sparse_map = summary_sparse_map or {}
     vector_children = [c for c in children if c.chunk_id in vec_map]
+    schema_version = (facet_profile or {}).get("schema_version")
+    doc_facet_ids = (facet_profile or {}).get("facet_ids") or []
+    child_facet_map = (facet_profile or {}).get("child_facets") or {}
+    parent_facet_map = (facet_profile or {}).get("parent_facets") or {}
 
     def _as_payload(c) -> dict:
+        facet_meta = child_facet_map.get(c.chunk_id, {})
+        metadata = _metadata_with_facets(getattr(c, "metadata", {}) or {}, facet_meta)
         # CRITICAL: include language + metadata so the Qdrant writer can
         # stamp them onto the point payload (qdrant_writer.upsert_children
         # at line 548-549 reads these fields). Without this, code-lane
@@ -1202,7 +1292,15 @@ async def _write_qdrant_for_doc(
             "page_end": getattr(c, "page_end", None),
             "chunk_kind": getattr(c, "chunk_kind", ChunkKind.BODY),
             "language": getattr(c, "language", None),
-            "metadata": getattr(c, "metadata", {}) or {},
+            "metadata": metadata,
+            "facet_ids": facet_meta.get("facet_ids") or doc_facet_ids[:6],
+            "facet_text": facet_meta.get("facet_text") or "",
+            "content_facet_ids": facet_meta.get("content_facet_ids") or [],
+            "content_facet_text": facet_meta.get("content_facet_text") or "",
+            "content_facet_source": facet_meta.get("content_facet_source") or "",
+            "content_facet_confidence": facet_meta.get("content_facet_confidence"),
+            "doc_facet_ids": doc_facet_ids,
+            "facet_schema_version": schema_version,
         }
 
     if "naive" in target_cols:
@@ -1236,21 +1334,32 @@ async def _write_qdrant_for_doc(
     if summaries:
         hp_map = {p.parent_id: p.heading_path for p in parents}
         kind_map = {p.parent_id: getattr(p, "chunk_kind", ChunkKind.BODY) for p in parents}
-        summary_payloads = [
-            {
-                "parent_id": s.parent_id,
-                "doc_id": s.doc_id,
-                "corpus_id": s.corpus_id,
-                "source_tier": s.source_tier,
-                "filename": filename,
-                "doc_name": filename,
-                "summary": s.summary,
-                "heading_path": hp_map.get(s.parent_id),
-                "user_id": user_id,
-                "chunk_kind": kind_map.get(s.parent_id, ChunkKind.BODY),
-            }
-            for s in summaries
-        ]
+        summary_payloads = []
+        for s in summaries:
+            facet_meta = parent_facet_map.get(s.parent_id, {})
+            summary_payloads.append(
+                {
+                    "parent_id": s.parent_id,
+                    "doc_id": s.doc_id,
+                    "corpus_id": s.corpus_id,
+                    "source_tier": s.source_tier,
+                    "filename": filename,
+                    "doc_name": filename,
+                    "summary": s.summary,
+                    "heading_path": hp_map.get(s.parent_id),
+                    "user_id": user_id,
+                    "chunk_kind": kind_map.get(s.parent_id, ChunkKind.BODY),
+                    "metadata": _metadata_with_facets({}, facet_meta),
+                    "facet_ids": facet_meta.get("facet_ids") or doc_facet_ids[:6],
+                    "facet_text": facet_meta.get("facet_text") or "",
+                    "content_facet_ids": facet_meta.get("content_facet_ids") or [],
+                    "content_facet_text": facet_meta.get("content_facet_text") or "",
+                    "content_facet_source": facet_meta.get("content_facet_source") or "",
+                    "content_facet_confidence": facet_meta.get("content_facet_confidence"),
+                    "doc_facet_ids": doc_facet_ids,
+                    "facet_schema_version": schema_version,
+                }
+            )
         summary_vecs = [summary_vec_map[s.parent_id] for s in summaries]
         summary_sparse = [summary_sparse_map.get(s.parent_id) for s in summaries]
         summary_kinds = [k for k in target_cols if k in ("naive", "hrag")]
@@ -1672,6 +1781,13 @@ async def run_ingest_job(
         len(children),
         len(injected_headers),
     )
+    base_facet_profile = build_ingest_facet_profile(
+        filename=filename,
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        parents=parents,
+        children=children,
+    )
 
     # ── Resume: existing write_state ─────────────────────────────────────
     existing_doc = await mongo_reader.get_document(db, doc_id, corpus_id=corpus_id)
@@ -1697,6 +1813,7 @@ async def run_ingest_job(
             ingestion_config=ingestion_config,
             chunking_config=chunking_config,
             parents=parents,
+            facet_profile=base_facet_profile,
             ws=ws,
         )
 
@@ -1715,6 +1832,7 @@ async def run_ingest_job(
             corpus_id=corpus_id,
             user_id=user_id,
             children=children,
+            facet_profile=base_facet_profile,
         )
 
     # ── Phase 3: Ghost model phases ──────────────────────────────────────
@@ -1758,6 +1876,15 @@ async def run_ingest_job(
         ghost_b_failures,
         ghost_b_metrics,
     )
+    facet_profile = build_ingest_facet_profile(
+        filename=filename,
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        schema_lens=(ghost_b_metrics or {}).get("schema_lens"),
+        parents=parents,
+        children=children,
+        summaries=summaries,
+    )
     ws.warnings = _merge_warnings(ws.warnings, ingest_warnings)
     ghost_a_partial = any(w.startswith("Ghost A ") for w in ingest_warnings)
     ghost_b_partial = any(w.startswith("Ghost B ") for w in ingest_warnings)
@@ -1794,6 +1921,7 @@ async def run_ingest_job(
             ghost_b_out=ghost_b_out,
             ghost_b_failures=ghost_b_failures,
             ghost_b_metrics=ghost_b_metrics,
+            facet_profile=facet_profile,
             ws=ws,
         )
         await mongo_writer.update_write_state(
@@ -1948,6 +2076,7 @@ async def run_ingest_job(
                 config=ingestion_config,
                 child_sparse_map=child_sparse_map,
                 summary_sparse_map=summary_sparse_map,
+                facet_profile=facet_profile,
             )
             await mongo_writer.update_write_state(
                 db, doc_id, corpus_id=corpus_id, qdrant_written=True

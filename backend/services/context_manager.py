@@ -483,6 +483,11 @@ class ContextManager:
                         attribution += f" ({url})"
                     if evidence_mode:
                         attribution += f" [{evidence_mode}]"
+                if isinstance(metadata, dict) and metadata.get("support_role") == "chat_semantic_facet_coverage":
+                    support_lane = str(metadata.get("support_lane") or "").replace("facet:", "")
+                    support_strength = str(metadata.get("support_strength") or "strong")
+                    if support_lane:
+                        attribution += f" [coverage:{support_lane}; strength={support_strength}]"
                 if section:
                     attribution += f" §{section}"
                 # Phase 16.1 — graph provenance: bridging entity + confidence.
