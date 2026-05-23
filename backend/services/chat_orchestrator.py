@@ -1133,13 +1133,44 @@ def _available_tool_schemas(
     tool_schemas: list[dict[str, Any]],
     *,
     web_search_call_count: int,
+    force_initial_web_search: bool = False,
 ) -> list[dict[str, Any]]:
-    if web_search_call_count < _MAX_WEB_SEARCH_CALLS_PER_TURN:
-        return tool_schemas
+    available = (
+        tool_schemas
+        if web_search_call_count < _MAX_WEB_SEARCH_CALLS_PER_TURN
+        else [
+            schema
+            for schema in tool_schemas
+            if _tool_schema_name(schema) != "web_search"
+        ]
+    )
+    if force_initial_web_search:
+        web_only = [
+            schema
+            for schema in available
+            if _tool_schema_name(schema) == "web_search"
+        ]
+        return web_only or available
+    return available
+
+
+def _force_tool_choice(tool_name: str) -> dict[str, Any]:
+    """OpenAI-compatible forced tool-choice shape."""
+    return {"type": "function", "function": {"name": tool_name}}
+
+
+def _tool_schemas_contain(
+    tool_schemas: list[dict[str, Any]],
+    tool_name: str,
+) -> bool:
+    return any(_tool_schema_name(schema) == tool_name for schema in tool_schemas)
+
+
+def _tool_schema_names(tool_schemas: list[dict[str, Any]]) -> list[str]:
     return [
-        schema
+        name
         for schema in tool_schemas
-        if _tool_schema_name(schema) != "web_search"
+        if (name := _tool_schema_name(schema))
     ]
 
 
@@ -2170,9 +2201,19 @@ class ChatOrchestrator:
                         break
             if react_messages:
                 message_dicts.extend(react_messages)
+            force_initial_web_search = bool(
+                web_search_enabled and web_search_call_count == 0
+            )
             active_tool_schemas = _available_tool_schemas(
                 tool_schemas,
                 web_search_call_count=web_search_call_count,
+                force_initial_web_search=force_initial_web_search,
+            )
+            active_tool_choice = (
+                _force_tool_choice("web_search")
+                if force_initial_web_search
+                and _tool_schemas_contain(active_tool_schemas, "web_search")
+                else None
             )
 
             assistant_content = ""
@@ -2204,13 +2245,17 @@ class ChatOrchestrator:
                     ),
                     detail=(
                         f"messages={len(message_dicts)} "
-                        f"tools={'yes' if active_tool_schemas else 'no'}"
+                        f"tools={','.join(_tool_schema_names(active_tool_schemas)) or 'no'}"
                     ),
                 ),
                 metadata={
                     "model": model_used,
                     "messages": len(message_dicts),
                     "tools_enabled": bool(active_tool_schemas),
+                    "tool_choice": (
+                        "web_search" if active_tool_choice is not None else None
+                    ),
+                    "forced_initial_web_search": bool(active_tool_choice),
                     "web_search_required_before_final": bool(
                         web_search_enabled and web_search_call_count == 0
                     ),
@@ -2222,6 +2267,7 @@ class ChatOrchestrator:
                     model=model_used,
                     overrides=request.overrides,
                     tools=active_tool_schemas or None,
+                    tool_choice=active_tool_choice,
                     **profile_creds,
                 ):
                     if first_token_at is None and (

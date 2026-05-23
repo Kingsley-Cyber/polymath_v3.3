@@ -102,6 +102,75 @@ def test_no_effort_no_change():
     assert body == snapshot
 
 
+def test_llm_request_body_auto_enables_glm_by_default(monkeypatch):
+    """The chat UI omits auto from the wire, so LLMService must still
+    resolve provider-default thinking for GLM. Otherwise [THINK: AUTO]
+    becomes an accidental no-op and GLM streams no reasoning."""
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "test")
+    monkeypatch.setenv("AUTH_SECRET_KEY", "test-secret-key-for-unit-tests")
+    monkeypatch.setenv("DEFAULT_ADMIN_PASSWORD", "test-password")
+    from services.llm import LLMService
+
+    body = LLMService()._build_request_body(
+        messages=[{"role": "user", "content": "hi"}],
+        model="openai/GLM-5.1",
+    )
+    assert body.get("thinking") == {"type": "enabled"}
+
+
+def test_explicit_auto_wins_over_pool_extra_disabled(monkeypatch):
+    """Saved model-pool extras may carry `thinking: disabled` from older
+    configs. When the UI sends AUTO explicitly, the per-turn selector must
+    re-enable GLM thinking after extras are merged.
+    """
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "test")
+    monkeypatch.setenv("AUTH_SECRET_KEY", "test-secret-key-for-unit-tests")
+    monkeypatch.setenv("DEFAULT_ADMIN_PASSWORD", "test-password")
+    from models.schemas import ModelOverrides
+    from services.llm import LLMService
+
+    overrides = ModelOverrides(thinking_effort="auto")
+    body = LLMService()._build_request_body(
+        messages=[{"role": "user", "content": "hi"}],
+        model="openai/GLM-5.1",
+        overrides=overrides,
+    )
+    body["thinking"] = {"type": "disabled"}
+
+    LLMService()._reapply_explicit_thinking_effort(
+        body,
+        "openai/GLM-5.1",
+        overrides,
+    )
+
+    assert body.get("thinking") == {"type": "enabled"}
+
+
+def test_explicit_none_wins_over_pool_extra_enabled(monkeypatch):
+    """The same precedence must preserve the user's explicit off switch."""
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "test")
+    monkeypatch.setenv("AUTH_SECRET_KEY", "test-secret-key-for-unit-tests")
+    monkeypatch.setenv("DEFAULT_ADMIN_PASSWORD", "test-password")
+    from models.schemas import ModelOverrides
+    from services.llm import LLMService
+
+    overrides = ModelOverrides(thinking_effort="none")
+    body = LLMService()._build_request_body(
+        messages=[{"role": "user", "content": "hi"}],
+        model="openai/GLM-5.1",
+        overrides=overrides,
+    )
+    body["thinking"] = {"type": "enabled"}
+
+    LLMService()._reapply_explicit_thinking_effort(
+        body,
+        "openai/GLM-5.1",
+        overrides,
+    )
+
+    assert body.get("thinking") == {"type": "disabled"}
+
+
 # ─── No reasoning_effort emitted ───────────────────────────────────────────
 
 

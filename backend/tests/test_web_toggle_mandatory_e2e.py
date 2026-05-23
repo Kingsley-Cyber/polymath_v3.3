@@ -479,11 +479,12 @@ async def test_web_toggle_on_runs_agentic_rag_web_loop_to_rerank_pipeline(
 
     first_stream = captured["first_stream"]
     assert first_stream["model"] == "deepseek/deepseek-v4-flash"
-    assert first_stream["tool_choice"] is None
+    assert first_stream["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "web_search"},
+    }
     assert [tool["function"]["name"] for tool in first_stream["tools"]] == [
         "web_search",
-        "fetch_page",
-        "response",
     ]
 
     final_stream = captured["final_stream"]

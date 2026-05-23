@@ -387,16 +387,11 @@ function App() {
             settings.searchMode && settings.searchMode !== "auto"
               ? settings.searchMode
               : undefined,
-          // Phase 28 — thinking-effort dial. Omit when "auto" so the
-          // backend's thinking_mapper picks the per-provider default,
-          // AND so non-reasoning model requests don't carry an
-          // irrelevant field on the wire. The frontend hides the
-          // selector entirely for non-reasoning models, so a stray
-          // non-auto value here always indicates a user-set override.
-          thinking_effort:
-            settings.thinkingEffort && settings.thinkingEffort !== "auto"
-              ? settings.thinkingEffort
-              : undefined,
+          // Phase 28 — thinking-effort dial. Send AUTO explicitly so the
+          // visible selector wins over stale model-pool extras such as a
+          // saved `thinking: disabled`. The backend mapper is a no-op for
+          // ordinary chat models, so this stays safe for non-reasoning paths.
+          thinking_effort: settings.thinkingEffort || "auto",
           // Phase 17/24 — HyDE model routing lives on the backend:
           // Settings -> Models -> HyDE wins when configured; otherwise the
           // helper inherits the active chat model for this turn. Do not send
@@ -426,7 +421,28 @@ function App() {
         reasoning_cascade: settings.reasoningCascadeEnabled || undefined,
       };
 
+      let tokenBuffer = "";
+      let thinkingBuffer = "";
+      let flushTimer: number | undefined;
+      const flushStreamingBuffers = () => {
+        if (flushTimer !== undefined) {
+          window.clearTimeout(flushTimer);
+          flushTimer = undefined;
+        }
+        const tokenChunk = tokenBuffer;
+        const thinkingChunk = thinkingBuffer;
+        tokenBuffer = "";
+        thinkingBuffer = "";
+        if (tokenChunk) chat.updateStreamingContent(tokenChunk);
+        if (thinkingChunk) chat.updateStreamingThinking(thinkingChunk);
+      };
+      const scheduleStreamingFlush = () => {
+        if (flushTimer !== undefined) return;
+        flushTimer = window.setTimeout(flushStreamingBuffers, 33);
+      };
+
       const preserveStreamingFailure = (errorMessage: string) => {
+        flushStreamingBuffers();
         chat.setError(errorMessage);
         const state = useChatStore.getState();
         const hasPartialAssistant =
@@ -464,13 +480,19 @@ function App() {
           (event) => {
             switch (event.type) {
               case "token":
-                if (event.content) chat.updateStreamingContent(event.content);
+                if (event.content) {
+                  tokenBuffer += event.content;
+                  scheduleStreamingFlush();
+                }
                 break;
               case "thinking":
-                if (event.thinking)
-                  chat.updateStreamingThinking(event.thinking);
+                if (event.thinking) {
+                  thinkingBuffer += event.thinking;
+                  scheduleStreamingFlush();
+                }
                 break;
               case "trace_event":
+                flushStreamingBuffers();
                 if (event.trace_event) {
                   chat.addStreamingTraceEvent(event.trace_event);
                 }
@@ -487,6 +509,7 @@ function App() {
                 }
                 break;
               case "tier_downgraded": {
+                flushStreamingBuffers();
                 // Surface as an italic notice inline in the assistant message
                 const msg =
                   event.content ||
@@ -504,6 +527,7 @@ function App() {
                 break;
               }
               case "tool_call_start": {
+                flushStreamingBuffers();
                 // Keep tool activity out of the assistant answer text. The
                 // live MessageBubble renders this in a separate status lane.
                 try {
@@ -532,6 +556,7 @@ function App() {
                 break;
               }
               case "tool_result": {
+                flushStreamingBuffers();
                 try {
                   const results = JSON.parse(event.content || "[]") as Array<{
                     name: string;
@@ -549,9 +574,11 @@ function App() {
                 break;
               }
               case "error":
+                flushStreamingBuffers();
                 preserveStreamingFailure(event.content || "An error occurred");
                 break;
               case "done": {
+                flushStreamingBuffers();
                 const state = useChatStore.getState();
                 // Trust-signal fields ride on the `done` SSE frame so the
                 // live message renders the RetrievalBadge immediately.

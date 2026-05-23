@@ -37,7 +37,9 @@ export function MessageBubble({
     : toolActivity.length > 0
       ? toolActivity
       : deriveToolActivityFromTraceEvents(message.trace_events);
-  const visibleProcessTimeline = processTimeline || message.process_timeline || [];
+  const visibleProcessTimeline = (processTimeline || message.process_timeline || []).filter(
+    (item) => item.kind !== "reasoning",
+  );
   const hasProcessTimeline = !isUser && visibleProcessTimeline.length > 0;
   const hasRunningTool = visibleToolActivity.some(
     (activity) => activity.status === "running",
@@ -62,7 +64,7 @@ export function MessageBubble({
     }
     const thinkingGrew = thinkingLength > previousThinkingLengthRef.current;
 
-    if (!isStreaming || hasRunningTool || message.content.length > 0) {
+    if (!isStreaming || hasRunningTool) {
       setThinkingOpen(false);
     } else if (thinkingGrew) {
       setThinkingOpen(true);
@@ -73,7 +75,6 @@ export function MessageBubble({
     hasRunningTool,
     isStreaming,
     isUser,
-    message.content.length,
     message.thinking?.length,
   ]);
 
@@ -143,12 +144,12 @@ export function MessageBubble({
         )}
 
         {/* Thinking Block */}
-        {!hasProcessTimeline && message.thinking && (
+        {message.thinking && (
           <ReasoningPanel
             thinking={message.thinking}
             open={thinkingOpen}
             active={Boolean(
-              thinkingOpen && isStreaming && !hasRunningTool && !message.content,
+              thinkingOpen && isStreaming && !hasRunningTool,
             )}
             onToggle={setThinkingOpen}
           />
@@ -468,6 +469,7 @@ function ProcessTimelineRow({
             ? "WRN"
             : "LOG";
   const content = [item.content, item.detail].filter(Boolean).join("\n\n");
+  const modelCall = parseModelCallBlock(content);
 
   return (
     <div className="pm-process-row">
@@ -477,12 +479,57 @@ function ProcessTimelineRow({
       <StatusBadge tag={rowLabel} tone={toneForTag(rowLabel)} />
       <div className="min-w-0 flex-1">
         <div className="pm-process-row-title">{item.title}</div>
-        {content && (
+        {modelCall ? (
+          <ModelCallSummary data={modelCall} />
+        ) : content && (
           <div className="pm-process-row-content custom-scrollbar">
             {content}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+interface ModelCallSummaryData {
+  name?: string;
+  model?: string;
+  status?: string;
+  purpose?: string;
+  duration?: string;
+  detail: Record<string, string>;
+}
+
+function ModelCallSummary({ data }: { data: ModelCallSummaryData }) {
+  const thinkingChars = data.detail.thinking_chars;
+  const noReasoning = thinkingChars === "0";
+  const entries = [
+    ["Model", data.model],
+    ["Status", data.status],
+    ["Duration", data.duration ? `${data.duration}s` : undefined],
+    ["Output", data.detail.content_chars ? `${data.detail.content_chars} chars` : undefined],
+    ["Thinking", thinkingChars ? `${thinkingChars} chars` : undefined],
+    ["Tools", data.detail.tool_calls],
+  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
+
+  return (
+    <div className="pm-model-call-summary">
+      {entries.length > 0 && (
+        <div className="pm-model-call-grid">
+          {entries.map(([label, value]) => (
+            <div key={label}>
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+      {data.purpose && <p>{data.purpose}</p>}
+      {noReasoning && (
+        <div className="pm-model-call-note">
+          No separate reasoning text was emitted by this model for this step.
+        </div>
+      )}
     </div>
   );
 }
@@ -731,6 +778,28 @@ function parseKeyValueBlock(text: string): Record<string, string> {
   return out;
 }
 
+function parseModelCallBlock(text: string): ModelCallSummaryData | null {
+  if (!text.includes("[Model API call]")) return null;
+  const fields = parseKeyValueBlock(text);
+  return {
+    name: fields.name,
+    model: fields.model,
+    status: fields.status,
+    purpose: fields.purpose,
+    duration: fields.duration_s,
+    detail: parseInlineKeyValueBlock(fields.detail || ""),
+  };
+}
+
+function parseInlineKeyValueBlock(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of text.split(/\s+/)) {
+    const match = /^([a-zA-Z_]+)=([^=]+)$/.exec(part.trim());
+    if (match) out[match[1]] = match[2];
+  }
+  return out;
+}
+
 function extractLineValue(text: string, key: string): string | undefined {
   const match = new RegExp(`^${key}:\\s*(.+)$`, "im").exec(text);
   return match?.[1]?.trim();
@@ -874,10 +943,15 @@ function compactProcessTimeline(items: ProcessTimelineItem[]): ProcessGroup[] {
       continue;
     }
 
-    if (isModelTrace(item) || item.kind === "reasoning") {
+    if (item.kind === "reasoning") {
+      ensure("gen", "Reasoning trace").items.push(item);
+      continue;
+    }
+
+    if (isModelTrace(item)) {
       ensure(
         "gen",
-        item.title.includes("final") ? "Final synthesis" : "Model reasoning",
+        item.title.includes("final") ? "Final synthesis" : "Model activity",
       ).items.push(item);
       continue;
     }

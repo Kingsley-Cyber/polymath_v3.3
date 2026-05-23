@@ -274,9 +274,9 @@ export const useSettingsStore = create<SettingsStore>()(
       ) => {
         // Per-turn knob (Phase 28). Read by App.tsx.handleSend and
         // injected into ChatRequest.overrides.thinking_effort. "auto"
-        // means "omit the field and let the backend's thinking_mapper
-        // pick the per-provider default". The selector is hidden in
-        // the UI when the selected model has no thinking dial.
+        // means "ask the backend's thinking_mapper to pick the provider
+        // default". The selector is hidden in the UI when the selected
+        // model has no thinking dial.
         set({ thinkingEffort: effort });
       },
 

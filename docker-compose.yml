@@ -310,7 +310,7 @@ services:
       - ${LLAMA_RERANKER_CACHE_RAM_MB:-0}
       - --no-cache-idle-slots
       - --sleep-idle-seconds
-      - ${LLAMA_RERANKER_SLEEP_IDLE_SECONDS:-240}
+      - ${LLAMA_RERANKER_SLEEP_IDLE_SECONDS:--1}
     volumes:
       - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}/Qwen3-Reranker-0.6B-Q8_0-GGUF:/models:ro"
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/llama.cpp:/root/.cache/llama.cpp"

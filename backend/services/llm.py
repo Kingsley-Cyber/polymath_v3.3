@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator
 import httpx
 from config import get_settings
 from models.schemas import ModelOverrides
+from services.streaming_normalizer import StreamingNormalizer, extract_stream_delta
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -108,35 +109,59 @@ class LLMService:
             if overrides.model is not None:
                 body["model"] = overrides.model
 
-            # Phase 28 — thinking-effort dial (per-turn). Mapped to the
-            # provider-native body param by services.thinking_mapper:
-            #   OpenAI o-series → reasoning_effort: low|medium|high
-            #   Anthropic Claude → thinking: {type:"enabled", budget_tokens: N}
-            #   Gemini 2.5+ → thinking_budget: N
-            #   DeepSeek-R1 → ignored (always thinks, no dial)
-            # `apply_thinking_effort` is a no-op for non-reasoning models, so
-            # we can call it unconditionally without provider gating here —
-            # the mapper does the gating. Resolves the effective model from
-            # the override first, falling back to the call-site arg.
-            thinking_effort = getattr(overrides, "thinking_effort", None)
-            if thinking_effort is not None:
-                try:
-                    from services.thinking_mapper import apply_thinking_effort
-
-                    apply_thinking_effort(
-                        body,
-                        body.get("model") or model,
-                        thinking_effort,
-                    )
-                except Exception as exc:  # pragma: no cover — defensive
-                    # Never block the LLM call on a mapper failure. Log
-                    # and continue with the unmapped body.
-                    logger.warning(
-                        "thinking_mapper failed (effort=%r model=%r): %s",
-                        thinking_effort, body.get("model") or model, exc,
-                    )
+        # Phase 28 — thinking-effort dial. `auto` is the normal UI default:
+        # omit/None from the request still means "apply the provider's
+        # thinking default if this model has a supported dial." The mapper is
+        # a no-op for ordinary chat models, and explicit "none" still disables
+        # thinking for providers that support an off switch.
+        thinking_effort = (
+            getattr(overrides, "thinking_effort", None) if overrides else None
+        ) or "auto"
+        self._apply_thinking_effort(body, body.get("model") or model, thinking_effort)
 
         return body
+
+    def _apply_thinking_effort(
+        self,
+        body: dict,
+        model: str,
+        thinking_effort: str | None,
+    ) -> None:
+        """Apply the provider-native thinking knob without blocking calls."""
+        try:
+            from services.thinking_mapper import apply_thinking_effort
+
+            apply_thinking_effort(body, model, thinking_effort)
+        except Exception as exc:  # pragma: no cover — defensive
+            # Never block the LLM call on a mapper failure. Log and continue
+            # with the unmapped body.
+            logger.warning(
+                "thinking_mapper failed (effort=%r model=%r): %s",
+                thinking_effort, model, exc,
+            )
+
+    def _reapply_explicit_thinking_effort(
+        self,
+        body: dict,
+        model: str,
+        overrides: ModelOverrides | None,
+    ) -> None:
+        """Let the visible per-turn selector win over stale pool extras.
+
+        Model pool ``extra_params`` are intentionally powerful, but a saved
+        ``thinking: disabled`` should not silently defeat the live selector
+        when the frontend explicitly sends AUTO/HIGH/NONE for this turn.
+        """
+        if overrides is None:
+            return
+        thinking_effort = getattr(overrides, "thinking_effort", None)
+        if thinking_effort is None:
+            return
+        self._apply_thinking_effort(
+            body,
+            body.get("model") or model,
+            thinking_effort,
+        )
 
     async def _request_with_retry(
         self,
@@ -412,6 +437,7 @@ class LLMService:
                 }:
                     continue
                 body[key] = value
+        self._reapply_explicit_thinking_effort(body, model, overrides)
 
         client = await self._get_client()
         resp = await client.post(
@@ -497,6 +523,7 @@ class LLMService:
             for _k, _v in extra_params.items():
                 if _k not in ("model", "messages", "stream", "tools", "tool_choice"):
                     body[_k] = _v
+        self._reapply_explicit_thinking_effort(body, model, overrides)
         headers = self._get_headers()
 
         client = await self._get_client()
@@ -522,9 +549,7 @@ class LLMService:
                     )
                     response.raise_for_status()
 
-                # Track thinking state for models that use <think> tags
-                in_thinking = False
-                buffer = ""
+                normalizer = StreamingNormalizer()
                 pending_tool_calls: dict[int, dict[str, Any]] = {}
 
                 # Stream the response
@@ -552,7 +577,23 @@ class LLMService:
                                 finish_reason = choice.get("finish_reason")
                                 tool_calls = delta.get("tool_calls")
 
-                                # Handle streaming tool-call deltas first.
+                                content, thinking = extract_stream_delta(chunk)
+                                normalized = normalizer.add(
+                                    content=content,
+                                    thinking=thinking,
+                                )
+                                if normalized["thinking"]:
+                                    yield {"thinking": normalized["thinking"]}
+                                if normalized["content"]:
+                                    yield {"content": normalized["content"]}
+
+                                # Handle streaming tool-call deltas after
+                                # normalizing provider reasoning. Some
+                                # OpenAI-compatible providers can send
+                                # reasoning_content on the same chunks that
+                                # carry tool-call argument fragments; skipping
+                                # straight to `continue` here would hide live
+                                # reasoning until the model stops using tools.
                                 # OpenAI-compatible providers usually send
                                 # arguments in fragments; emit only once the
                                 # provider marks the assistant turn complete.
@@ -605,57 +646,15 @@ class LLMService:
                                     pending_tool_calls = {}
                                     continue
 
-                                # Check for thinking content (Claude 3.7, etc.)
-                                thinking = delta.get("thinking") or delta.get(
-                                    "reasoning_content"
-                                )
-                                content = delta.get("content", "")
-
-                                # Handle DeepSeek-style <think> tags
-                                if content:
-                                    buffer += content
-                                    while buffer:
-                                        if not in_thinking:
-                                            think_start = buffer.find("<think>")
-                                            if think_start == -1:
-                                                # No think tag, yield as normal content
-                                                if buffer:
-                                                    yield {"content": buffer}
-                                                buffer = ""
-                                            else:
-                                                # Yield content before <think>
-                                                if think_start > 0:
-                                                    yield {
-                                                        "content": buffer[:think_start]
-                                                    }
-                                                buffer = buffer[think_start + 7 :]
-                                                in_thinking = True
-                                        else:
-                                            think_end = buffer.find("</think>")
-                                            if think_end == -1:
-                                                # Still in thinking, yield as thinking
-                                                yield {"thinking": buffer}
-                                                buffer = ""
-                                            else:
-                                                # End of thinking block
-                                                yield {"thinking": buffer[:think_end]}
-                                                buffer = buffer[think_end + 8 :]
-                                                in_thinking = False
-
-                                # Yield native thinking content
-                                if thinking:
-                                    yield {"thinking": thinking}
-
                         except json.JSONDecodeError:
                             logger.debug(f"Failed to parse SSE chunk: {data}")
                             continue
 
-                # Yield any remaining buffer
-                if buffer:
-                    if in_thinking:
-                        yield {"thinking": buffer}
-                    else:
-                        yield {"content": buffer}
+                remaining = normalizer.flush()
+                if remaining["thinking"]:
+                    yield {"thinking": remaining["thinking"]}
+                if remaining["content"]:
+                    yield {"content": remaining["content"]}
 
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error during streaming: {e}")

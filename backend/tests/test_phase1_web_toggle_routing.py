@@ -30,6 +30,115 @@ def _parse_sse(frame: str) -> dict:
 
 
 @pytest.mark.asyncio
+async def test_chat_orchestrator_streams_thinking_separately_from_answer(
+    monkeypatch,
+):
+    monkeypatch.setattr(co.settings, "LIVE_WEB_SEARCH_ENABLED", False, raising=False)
+    monkeypatch.setattr(co.settings, "AGENTIC_MODE_ENABLED", False, raising=False)
+    monkeypatch.setattr(co.settings, "NEO4J_ENABLED", False, raising=False)
+
+    orchestrator = ChatOrchestrator()
+    conversation_id = ObjectId()
+    saved_assistant: dict = {}
+
+    request = ChatRequest(
+        message="Explain the test path.",
+        corpus_ids=[],
+        overrides=ModelOverrides(model="openai/test-thinking"),
+    )
+
+    async def fake_load_or_create(_request):
+        return conversation_id, ModelConfig(model="openai/test-thinking"), []
+
+    async def fake_query_profile(_request, user_id=None):
+        return {
+            "retrieval_k": 0,
+            "rerank_enabled": False,
+            "query_profile": "fast",
+            "hyde_explicit": False,
+            "top_k_summary": 0,
+            "rerank_top_n": 0,
+            "similarity_threshold": 0.0,
+            "neo4j_expansion_cap": 0,
+            "max_corpora_per_query": 1,
+            "final_top_k": 1,
+            "fact_seed_limit": 0,
+        }
+
+    async def fake_apply_hyde(_request, user_id=None, hyde_explicit=False, **_kwargs):
+        return _request.message, False
+
+    async def fake_retrieve(**_kwargs):
+        return RetrievalResult(
+            chunks=[],
+            facts=[],
+            requested_tier=RetrievalTier.qdrant_mongo,
+            effective_tier=RetrievalTier.qdrant_mongo,
+        )
+
+    async def fake_trim(messages, model):
+        return messages, False, "", 42, 4096
+
+    async def fake_get_tools_by_ids(_tool_ids):
+        return []
+
+    async def fake_append_message(_conversation_id, _message):
+        return True
+
+    async def fake_save_assistant_message(
+        _conversation_id,
+        content,
+        thinking,
+        model,
+        trimming_applied,
+        **kwargs,
+    ):
+        saved_assistant.update(
+            {
+                "content": content,
+                "thinking": thinking,
+                "model": model,
+                **kwargs,
+            }
+        )
+        return ChatMessage(role="assistant", content=content, model_used=model)
+
+    async def fake_stream_chat(*, messages, model, overrides, tools=None, **kwargs):
+        yield {"thinking": "private reasoning"}
+        yield {"content": "public answer"}
+
+    monkeypatch.setattr(orchestrator, "_load_or_create_conversation", fake_load_or_create)
+    monkeypatch.setattr(orchestrator, "_resolve_reasoning", lambda _request: (None, None))
+    monkeypatch.setattr(orchestrator, "_resolve_query_profile", fake_query_profile)
+    monkeypatch.setattr(orchestrator, "_apply_hyde", fake_apply_hyde)
+    monkeypatch.setattr(orchestrator, "_trim_history", fake_trim)
+    monkeypatch.setattr(orchestrator, "_save_assistant_message", fake_save_assistant_message)
+    monkeypatch.setattr(co.retriever_orchestrator, "retrieve", fake_retrieve)
+    monkeypatch.setattr(co.tool_registry, "get_tools_by_ids", fake_get_tools_by_ids)
+    monkeypatch.setattr(co.conversation_service, "append_message", fake_append_message)
+    monkeypatch.setattr(
+        co.context_manager,
+        "build_augmented_prompt",
+        lambda **kwargs: kwargs["query"],
+    )
+    monkeypatch.setattr(co.llm_service, "stream_chat", fake_stream_chat)
+
+    events = [
+        _parse_sse(frame)
+        async for frame in orchestrator.process_chat_request(request, user_id="user-1")
+    ]
+
+    thinking_events = [event for event in events if event["type"] == "thinking"]
+    token_events = [event for event in events if event["type"] == "token"]
+
+    assert [event["thinking"] for event in thinking_events] == ["private reasoning"]
+    assert [event["content"] for event in token_events] == ["public answer"]
+    assert saved_assistant["thinking"] == "private reasoning"
+    assert saved_assistant["content"] == "public answer"
+    assert "private reasoning" not in "".join(event["content"] for event in token_events)
+
+
+@pytest.mark.asyncio
 async def test_web_toggle_uses_agentic_web_loop_and_keeps_final_chat_model(
     monkeypatch,
 ):
@@ -197,10 +306,11 @@ async def test_web_toggle_uses_agentic_web_loop_and_keeps_final_chat_model(
     assert stream_calls[0]["model"] == "openai/base-query"
     assert [tool["function"]["name"] for tool in stream_calls[0]["tools"]] == [
         "web_search",
-        "fetch_page",
-        "response",
     ]
-    assert stream_calls[0]["tool_choice"] is None
+    assert stream_calls[0]["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "web_search"},
+    }
     assert stream_calls[1]["tools"] is not None
     assert stream_calls[1]["tool_choice"] is None
 

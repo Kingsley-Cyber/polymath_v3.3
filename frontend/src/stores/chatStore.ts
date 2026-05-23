@@ -287,6 +287,7 @@ export const useChatStore = create<ChatState>()((set) => ({
   finalizeStreamingMessage: (conversationId, message) =>
     set((state) => ({
       isStreaming: false,
+      isLoading: false,
       streamingContent: "",
       streamingThinking: "",
       streamingTraceEvents: [],
