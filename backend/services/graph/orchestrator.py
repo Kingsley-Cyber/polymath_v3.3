@@ -132,6 +132,10 @@ _PACKET_RETRIEVER_RERANK_POOL = 40
 _PACKET_RETRIEVER_GRAPH_EXPANSION = 20
 _PACKET_MAX_GATEWAYS = 5
 _PACKET_MAX_SUPPORTING_STATEMENTS = 4
+_SEMANTIC_FACET_MAX_LANES = 8
+_SEMANTIC_FACET_COVERAGE_THRESHOLD = 4
+_SEMANTIC_FACET_SOURCE_CAP = 8
+_SEMANTIC_FACET_QUERY_FIT_FLOOR = 1
 
 
 @dataclass(frozen=True)
@@ -178,8 +182,10 @@ def _packet_caps_for_mode(synthesis_mode: str = "research") -> _PacketCaps:
             analogies=5,
             transfers=5,
             bridges=6,
-            evidence=6,
+            evidence=10,
         )
+    if mode == "nuance":
+        return _PacketCaps(evidence=10)
     return _DEFAULT_PACKET_CAPS
 
 # Synthesis-time LLM budget. Keep the call fast; the packet is bounded so the
@@ -187,11 +193,12 @@ def _packet_caps_for_mode(synthesis_mode: str = "research") -> _PacketCaps:
 # paragraphs (5-7 sentences each, ~3 themes + 2 bridges + 2 gaps + 2 signals)
 # need ~3500 output tokens to land cleanly without truncation.
 _SYNTHESIS_TIMEOUT_SECONDS = 120.0
-# Prose-only synthesis fits comfortably in ~1400 tokens. Reasoning models can
-# burn extra reasoning tokens before emitting prose; we accept that and keep
-# the cap modest because the output itself is bounded by the prompt.
-_SYNTHESIS_MAX_TOKENS = 1400
+# Research synthesis includes a short reader-orientation ramp before the
+# load-bearing claim, so it needs a little more room than the old prose-only
+# budget. Nuance and ideation keep their mode-specific caps below.
+_SYNTHESIS_MAX_TOKENS = 1900
 _SYNTHESIS_MAX_TOKENS_NUANCE = 1800
+_SYNTHESIS_MAX_TOKENS_IDEATION = 2400
 _SYNTHESIS_TEMPERATURE = 0.55
 _SYNTHESIS_HEADLINE_RE = re.compile(r"^\s*#\s+(.+?)\s*$", re.MULTILINE)
 _SYNTHESIS_CITATION_RE = re.compile(r"\[(\d{1,3})\]")
@@ -214,8 +221,11 @@ _GRAPH_RELEVANCE_STOPWORDS = {
 
 
 def _synthesis_max_tokens_for_mode(synthesis_mode: str = "research") -> int:
-    if (synthesis_mode or "").strip().lower() == "nuance":
+    mode = (synthesis_mode or "").strip().lower()
+    if mode == "nuance":
         return _SYNTHESIS_MAX_TOKENS_NUANCE
+    if mode == "ideation":
+        return _SYNTHESIS_MAX_TOKENS_IDEATION
     return _SYNTHESIS_MAX_TOKENS
 
 
@@ -1530,6 +1540,1210 @@ async def _retrieve_packet_source_docs(
     return hydrated_rows, meta
 
 
+def _ideation_cross_source_terms(packet: dict[str, Any]) -> list[str]:
+    """Pull compact support terms from graph-side ideation signals."""
+
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: Any, limit: int = 80) -> None:
+        text = _text(value or "", limit)
+        key = text.lower()
+        if text and key not in seen:
+            seen.add(key)
+            terms.append(text)
+
+    for edge in packet.get("edges") or []:
+        if not isinstance(edge, dict):
+            continue
+        add(edge.get("source_name"))
+        add(edge.get("target_name"))
+        add(edge.get("predicate"), 50)
+
+    for gap in packet.get("gaps") or []:
+        if not isinstance(gap, dict):
+            continue
+        add(gap.get("cluster_a_label"))
+        add(gap.get("cluster_b_label"))
+        add(gap.get("question"), 140)
+        for key in ("source_domain", "target_domain"):
+            add(gap.get(key), 60)
+        coherence = gap.get("coherence") if isinstance(gap.get("coherence"), dict) else {}
+        for value in (coherence.get("shared_terms") or [])[:4]:
+            add(value, 50)
+        for value in (coherence.get("shared_neighbors") or [])[:4]:
+            add(value, 50)
+
+    for bucket in ("bridges", "analogies", "transfers", "fragile_bridges"):
+        for item in packet.get(bucket) or []:
+            if not isinstance(item, dict):
+                continue
+            for key in (
+                "source_name",
+                "target_name",
+                "hub_name",
+                "source_domain",
+                "target_domain",
+                "hub_domain",
+                "rationale",
+                "evidence",
+            ):
+                add(item.get(key), 100 if key in {"rationale", "evidence"} else 70)
+            for value in (item.get("shared_terms") or [])[:4]:
+                add(value, 50)
+            for analog in (item.get("analogs") or [])[:3]:
+                if isinstance(analog, dict):
+                    add(analog.get("name"), 60)
+                    add(analog.get("domain"), 50)
+
+    for signal in packet.get("signals") or []:
+        if not isinstance(signal, dict):
+            continue
+        add(signal.get("canonical_name"), 70)
+        add(signal.get("rationale"), 120)
+
+    return terms[:12]
+
+
+_SEMANTIC_FACET_DEFS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "knowledge_graph",
+        "label": "graph RAG / knowledge graph",
+        "triggers": (
+            "graph rag",
+            "knowledge graph",
+            "knowledge graphs",
+            "graph database",
+            "graph databases",
+            "neo4j",
+            "rdf",
+            "triples",
+            "ontology",
+            "schema",
+            "linked data",
+            "nodes and edges",
+            "relations",
+            "relationships",
+        ),
+        "support_terms": (
+            "knowledge graph",
+            "graph RAG",
+            "graph database",
+            "RDF triples",
+            "ontology",
+            "schema",
+            "linked data",
+            "entity relationship",
+        ),
+    },
+    {
+        "name": "user_modeling",
+        "label": "user modeling / profiling",
+        "triggers": (
+            "user modeling",
+            "user model",
+            "user models",
+            "user profile",
+            "user profiling",
+            "adaptive system",
+            "adaptive systems",
+            "personalization",
+            "personalized",
+            "learner model",
+        ),
+        "support_terms": (
+            "user modeling",
+            "user model",
+            "user profile",
+            "user profiling",
+            "adaptive systems",
+            "personalization",
+        ),
+    },
+    {
+        "name": "socialization",
+        "label": "socialization / professional world",
+        "triggers": (
+            "socialization",
+            "secondary socialization",
+            "primary socialization",
+            "professional world",
+            "institutional world",
+            "institutional sub-world",
+            "institutional sub-worlds",
+            "sub-world",
+            "sub-worlds",
+            "significant others",
+            "social stock of knowledge",
+            "reality maintenance",
+            "home world",
+        ),
+        "support_terms": (
+            "secondary socialization",
+            "professional world",
+            "institutional sub-worlds",
+            "significant others",
+            "social stock of knowledge",
+            "reality maintenance",
+            "Berger Luckmann",
+        ),
+    },
+    {
+        "name": "identity_narrative",
+        "label": "identity / narrative formation",
+        "triggers": (
+            "identity",
+            "narrative",
+            "self narrative",
+            "personal myth",
+            "hero journey",
+            "hero's journey",
+            "meaning making",
+            "initiation",
+        ),
+        "support_terms": (
+            "identity",
+            "narrative",
+            "self narrative",
+            "hero's journey",
+            "meaning making",
+            "initiation",
+        ),
+    },
+    {
+        "name": "design_system",
+        "label": "design principles / system intervention",
+        "triggers": (
+            "universal design",
+            "universal design principles",
+            "design principles",
+            "design",
+            "interface",
+            "ux",
+            "user experience",
+            "affordance",
+            "constraints",
+            "feedback",
+            "mapping",
+            "visibility",
+            "usability",
+            "system intervention",
+            "principle",
+            "prototype",
+        ),
+        "support_terms": (
+            "universal design",
+            "design principles",
+            "affordance",
+            "constraints",
+            "feedback",
+            "mapping",
+            "interface",
+            "user experience",
+            "system intervention",
+            "prototype",
+        ),
+    },
+    {
+        "name": "platform_ecosystem",
+        "label": "platform ecosystems / market coordination",
+        "triggers": (
+            "platform ecosystem",
+            "platform ecosystems",
+            "platform revolution",
+            "network effects",
+            "multi-sided market",
+            "multisided market",
+            "ecosystem",
+            "platform governance",
+            "producer",
+            "consumer",
+            "marketplace",
+        ),
+        "support_terms": (
+            "platform ecosystem",
+            "platform revolution",
+            "network effects",
+            "multi-sided market",
+            "platform governance",
+            "producer consumer",
+            "marketplace",
+        ),
+    },
+    {
+        "name": "power_dynamics",
+        "label": "power dynamics / organizational influence",
+        "triggers": (
+            "power dynamics",
+            "power",
+            "influence",
+            "politics",
+            "coalition",
+            "resource control",
+            "authority",
+            "dependency",
+        ),
+        "support_terms": (
+            "power dynamics",
+            "organizational power",
+            "influence",
+            "coalition",
+            "resource control",
+            "authority",
+            "dependency",
+        ),
+    },
+    {
+        "name": "psychometrics",
+        "label": "measurement / psychometrics",
+        "triggers": (
+            "psychometrics",
+            "psychometric",
+            "measurement",
+            "measure",
+            "validity",
+            "test validity",
+            "latent variable",
+            "latent variables",
+            "assessment",
+            "score",
+        ),
+        "support_terms": (
+            "psychometrics",
+            "measurement",
+            "test validity",
+            "latent variable",
+            "assessment",
+            "score",
+        ),
+    },
+    {
+        "name": "neuro_narrative",
+        "label": "neuro-narrative therapy / embodied story",
+        "triggers": (
+            "neuro narrative",
+            "neuro-narrative",
+            "narrative therapy",
+            "neuroscience",
+            "embodied",
+            "embodiment",
+            "rewiring",
+            "right brain",
+            "affect",
+        ),
+        "support_terms": (
+            "neuro-narrative therapy",
+            "narrative therapy",
+            "neuroscience",
+            "embodiment",
+            "rewiring",
+            "affect",
+        ),
+    },
+)
+
+
+_SEMANTIC_HUB_FACET_DEFS: tuple[dict[str, Any], ...] = (
+    {
+        "hub": "agency",
+        "triggers": (
+            "agency",
+            "without losing agency",
+            "not lose agency",
+            "autonomy",
+            "authorship",
+            "self determination",
+        ),
+        "subfacets": (
+            {
+                "name": "agency_identity_preservation",
+                "label": "agency / identity preservation",
+                "support_terms": (
+                    "identity preservation",
+                    "role change",
+                    "identity",
+                    "self narrative",
+                    "personal meaning",
+                    "continuity",
+                ),
+            },
+            {
+                "name": "agency_autonomy",
+                "label": "agency / autonomy under adaptation",
+                "support_terms": (
+                    "autonomy",
+                    "authorship",
+                    "choice",
+                    "self determination",
+                    "personal agency",
+                    "adaptation",
+                ),
+            },
+            {
+                "name": "agency_value_alignment",
+                "label": "agency / value alignment",
+                "support_terms": (
+                    "value alignment",
+                    "values",
+                    "norms",
+                    "legitimation",
+                    "meaning",
+                    "adopting new norms",
+                ),
+            },
+            {
+                "name": "agency_external_pressure",
+                "label": "agency / external pressure",
+                "support_terms": (
+                    "external pressure",
+                    "power dynamics",
+                    "authority",
+                    "institutional pressure",
+                    "professional norms",
+                    "control",
+                ),
+            },
+        ),
+    },
+)
+
+
+def _semantic_facet_text(query: str, packet: dict[str, Any]) -> str:
+    parts: list[str] = [query]
+
+    def add(value: Any) -> None:
+        if value not in (None, "", [], {}):
+            parts.append(str(value))
+
+    add(packet.get("interpretation"))
+    add(packet.get("headline"))
+    for bucket in ("anchors", "entities", "communities", "signals"):
+        for item in packet.get(bucket) or []:
+            if not isinstance(item, dict):
+                continue
+            for key in (
+                "name",
+                "label",
+                "canonical_name",
+                "domain",
+                "rationale",
+                "description",
+            ):
+                add(item.get(key))
+            for value in item.get("top_entities") or []:
+                add(value)
+    for edge in packet.get("edges") or []:
+        if not isinstance(edge, dict):
+            continue
+        add(edge.get("source_name"))
+        add(edge.get("target_name"))
+        add(edge.get("predicate"))
+    return " ".join(parts).lower()
+
+
+def _semantic_facets_for_query(query: str, packet: dict[str, Any]) -> list[dict[str, Any]]:
+    """Detect query facets that deserve separate evidence coverage.
+
+    This is intentionally deterministic and tiny. It does not classify the
+    whole corpus; it just notices when a user question names multiple major
+    conceptual ingredients, so a one-file evidence packet can be checked for
+    tunnel vision.
+    """
+
+    query_haystack = str(query or "").lower()
+    packet_haystack = _semantic_facet_text(query, packet)
+    query_facets: list[dict[str, Any]] = []
+    packet_only_facets: list[dict[str, Any]] = []
+    for facet in _SEMANTIC_FACET_DEFS:
+        triggers = tuple(str(t).lower() for t in facet.get("triggers") or ())
+        query_matched = [term for term in triggers if term and term in query_haystack]
+        packet_matched = [term for term in triggers if term and term in packet_haystack]
+        matched = query_matched or packet_matched
+        if not matched:
+            continue
+        row = {
+            "name": str(facet.get("name") or ""),
+            "label": str(facet.get("label") or facet.get("name") or ""),
+            "matched": matched[:5],
+            "query_matched": bool(query_matched),
+            "first_match_pos": min(
+                [query_haystack.find(term) for term in query_matched if query_haystack.find(term) >= 0]
+                or [999999]
+            ),
+            "support_terms": [str(t) for t in (facet.get("support_terms") or []) if t],
+            "triggers": [str(t) for t in (facet.get("triggers") or []) if t],
+        }
+        if query_matched:
+            query_facets.append(row)
+        else:
+            packet_only_facets.append(row)
+    hub_facets = _semantic_hub_facets_for_query(query_haystack)
+    # Query-stated facets are the user's contract. Packet-only facets can help
+    # only when the query itself did not expose enough structure. Hub facets
+    # split broad terms such as "agency" into retrieval-ready lanes so one
+    # ambiguous word cannot inject one blunt support document.
+    facets = (
+        [*query_facets, *hub_facets]
+        if len(query_facets) >= 2
+        else [*query_facets, *hub_facets, *packet_only_facets]
+    )
+    facets.sort(
+        key=lambda row: (
+            0 if row.get("query_matched") else 1,
+            int(row.get("first_match_pos") or 999999),
+            -len(row.get("matched") or []),
+            int(row.get("hub_order") or 0),
+        )
+    )
+    return facets[:_SEMANTIC_FACET_MAX_LANES]
+
+
+def _semantic_hub_facets_for_query(query_haystack: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for hub in _SEMANTIC_HUB_FACET_DEFS:
+        triggers = tuple(str(t).lower() for t in hub.get("triggers") or ())
+        query_matched = [term for term in triggers if term and term in query_haystack]
+        if not query_matched:
+            continue
+        first_pos = min(
+            [query_haystack.find(term) for term in query_matched if query_haystack.find(term) >= 0]
+            or [999999]
+        )
+        for index, subfacet in enumerate(hub.get("subfacets") or ()):
+            name = str(subfacet.get("name") or "")
+            if not name:
+                continue
+            support_terms = [
+                str(t) for t in (subfacet.get("support_terms") or []) if t
+            ]
+            rows.append(
+                {
+                    "name": name,
+                    "label": str(subfacet.get("label") or name),
+                    "matched": query_matched[:5],
+                    "query_matched": True,
+                    "first_match_pos": first_pos,
+                    "support_terms": support_terms,
+                    "triggers": [*query_matched, *support_terms],
+                    "parent_hub": str(hub.get("hub") or ""),
+                    "hub_order": index,
+                }
+            )
+    return rows
+
+
+def _semantic_norm(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _semantic_facet_terms(facet: dict[str, Any]) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for key in ("matched", "support_terms", "triggers"):
+        for raw in facet.get(key) or []:
+            term = _semantic_norm(raw)
+            if term and term not in seen:
+                seen.add(term)
+                terms.append(term)
+    return terms
+
+
+def _semantic_facet_row_score(row: dict[str, Any], facet: dict[str, Any]) -> int:
+    """Source-aware coverage score for one evidence row and one facet.
+
+    Body-only mentions are intentionally weak. A facet is considered covered
+    when the filename/title/heading/source metadata, support lane, or repeated
+    summary/body evidence shows that the chunk is actually about the facet.
+    """
+
+    if not isinstance(row, dict):
+        return 0
+    facet_name = str(facet.get("name") or "")
+    support_facet = row.get("support_facet") if isinstance(row.get("support_facet"), dict) else {}
+    score = 0
+    if str(support_facet.get("name") or "") == facet_name:
+        score += 8
+    if str(row.get("support_lane") or "").endswith(f":{facet_name}"):
+        score += 6
+
+    source = row.get("source") if isinstance(row.get("source"), dict) else {}
+    high_text = _semantic_norm(
+        " ".join(
+            str(value)
+            for value in (
+                row.get("source_label"),
+                source.get("title"),
+                source.get("filename"),
+                source.get("section"),
+                " ".join(str(v) for v in (row.get("heading_path") or [])),
+            )
+            if value
+        )
+    )
+    summary_text = _semantic_norm(row.get("summary") or row.get("parent_summary") or "")
+    body_text = _semantic_norm(row.get("text") or row.get("chunk_text") or "")
+
+    for term in _semantic_facet_terms(facet):
+        if not term:
+            continue
+        is_phrase = " " in term
+        if term in high_text:
+            score += 4 if is_phrase else 2
+        if term in summary_text:
+            score += 2 if is_phrase else 1
+        if term in body_text:
+            score += 1 if is_phrase else 0
+    return score
+
+
+def _semantic_query_fit_score(
+    row: dict[str, Any],
+    query: str,
+    facet: dict[str, Any] | None = None,
+) -> int:
+    """Small lexical guard that keeps support lanes tied to the original ask.
+
+    A support lane is allowed to satisfy the query through facet synonyms. For
+    example, a user may ask for "psychometrics" while the best document says
+    "measurement", "validity", or "latent variable" in its title/heading/body.
+    """
+
+    if not isinstance(row, dict):
+        return 0
+    query_terms = [
+        term
+        for term in re.findall(r"[a-z0-9][a-z0-9\-]{3,}", str(query or "").lower())
+        if term
+        not in {
+            "could",
+            "would",
+            "should",
+            "into",
+            "with",
+            "from",
+            "that",
+            "this",
+            "they",
+            "them",
+            "someone",
+            "without",
+            "combine",
+            "system",
+            "app",
+            "helps",
+            "help",
+        }
+    ]
+    if not query_terms:
+        return 0
+    facet_terms: list[str] = []
+    if isinstance(facet, dict):
+        facet_terms = _semantic_facet_terms(facet)
+    unique_terms = list(dict.fromkeys([*query_terms, *facet_terms]))[:32]
+    source = row.get("source") if isinstance(row.get("source"), dict) else {}
+    text = _semantic_norm(
+        " ".join(
+            str(value)
+            for value in (
+                row.get("source_label"),
+                source.get("title"),
+                source.get("filename"),
+                source.get("section"),
+                " ".join(str(v) for v in (row.get("heading_path") or [])),
+                row.get("summary"),
+                row.get("parent_summary"),
+                row.get("text"),
+                row.get("chunk_text"),
+            )
+            if value
+        )
+    )
+    return sum(1 for term in unique_terms if _semantic_norm(term) in text)
+
+
+def _semantic_facet_coverage_scores(
+    evidence: list[dict[str, Any]], facets: list[dict[str, Any]]
+) -> dict[str, int]:
+    scores: dict[str, int] = {}
+    for facet in facets:
+        name = str(facet.get("name") or "")
+        scores[name] = max(
+            (_semantic_facet_row_score(row, facet) for row in evidence if isinstance(row, dict)),
+            default=0,
+        )
+    return scores
+
+
+def _semantic_support_facet_order(
+    evidence: list[dict[str, Any]],
+    facets: list[dict[str, Any]],
+    max_support: int,
+    *,
+    coverage_floor: int | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    scores = _semantic_facet_coverage_scores(evidence, facets)
+    dominant = ""
+    if scores:
+        dominant = max(scores.items(), key=lambda item: item[1])[0]
+        if scores.get(dominant, 0) <= 0:
+            dominant = ""
+
+    candidates = list(facets)
+    if coverage_floor is not None:
+        candidates = [
+            facet
+            for facet in candidates
+            if scores.get(str(facet.get("name") or ""), 0) <= coverage_floor
+        ]
+
+    def rank_key(facet: dict[str, Any]) -> tuple[int, int, int, int, str]:
+        name = str(facet.get("name") or "")
+        specificity = max((len(_semantic_norm(term).split()) for term in facet.get("matched") or []), default=1)
+        # Prefer facets not represented by the one dominant source first.
+        return (
+            1 if name == dominant else 0,
+            0 if specificity >= 2 else 1,
+            scores.get(name, 0),
+            int(facet.get("first_match_pos") or 999999),
+            name,
+        )
+
+    ordered = sorted(candidates, key=rank_key)
+    if dominant and len(ordered) > 1:
+        ordered = [facet for facet in ordered if str(facet.get("name") or "") != dominant]
+    return ordered[: max(0, max_support)], {
+        "detected_facets": [
+            {
+                "name": str(facet.get("name") or ""),
+                "label": str(facet.get("label") or ""),
+                "matched": facet.get("matched") or [],
+                "coverage_score": scores.get(str(facet.get("name") or ""), 0),
+                "parent_hub": str(facet.get("parent_hub") or ""),
+            }
+            for facet in facets
+        ],
+        "coverage_threshold": _SEMANTIC_FACET_COVERAGE_THRESHOLD,
+        "max_lanes": _SEMANTIC_FACET_MAX_LANES,
+        "dominant_facet": dominant,
+        "selected_facets": [str(facet.get("name") or "") for facet in ordered[: max(0, max_support)]],
+    }
+
+
+def _graph_edge_chunk_ids_for_facet(
+    packet: dict[str, Any],
+    facet: dict[str, Any],
+    *,
+    limit: int = 12,
+) -> list[str]:
+    """Collect graph-builder edge evidence chunks that touch a facet lane."""
+
+    terms = _semantic_facet_terms(facet)
+    if not terms:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for edge in packet.get("edges") or []:
+        if not isinstance(edge, dict):
+            continue
+        edge_text = _semantic_norm(
+            " ".join(
+                str(value)
+                for value in (
+                    edge.get("source_name"),
+                    edge.get("target_name"),
+                    edge.get("predicate"),
+                    edge.get("relation_family"),
+                    edge.get("role"),
+                    edge.get("rationale"),
+                )
+                if value
+            )
+        )
+        if not any(term and term in edge_text for term in terms):
+            continue
+        for cid in edge.get("evidence_chunk_ids") or []:
+            chunk_id = str(cid or "").strip()
+            if chunk_id and chunk_id not in seen:
+                seen.add(chunk_id)
+                out.append(chunk_id)
+                if len(out) >= limit:
+                    return out
+    return out
+
+
+async def _graph_edge_support_candidates(
+    db: Any,
+    *,
+    corpus_id: str,
+    packet: dict[str, Any],
+    facet: dict[str, Any],
+) -> list[dict[str, Any]]:
+    chunk_ids = _graph_edge_chunk_ids_for_facet(packet, facet)
+    if not chunk_ids or db is None:
+        return []
+    rows = [
+        {
+            "chunk_id": chunk_id,
+            "source_tier": "graph_edge_evidence",
+            "retriever": "graph_edge_evidence",
+            "score": 0.0,
+        }
+        for chunk_id in chunk_ids
+    ]
+    hydrated_trace = await _hydrate_trace_source_docs(
+        db,
+        {"source_docs": rows},
+        corpus_id=corpus_id,
+    )
+    return [row for row in (hydrated_trace.get("source_docs") or rows) if isinstance(row, dict)]
+
+
+def _choose_semantic_facet_candidate(
+    candidates: list[dict[str, Any]],
+    *,
+    facet: dict[str, Any],
+    original_query: str,
+    support_query: str,
+    seen_doc_ids: set[str],
+    seen_chunk_ids: set[str],
+) -> dict[str, Any] | None:
+    if not candidates:
+        return None
+    curated, _rejected, _temporal, _reasons = _curated_evidence_rows(
+        candidates,
+        query=support_query,
+        max_evidence=min(8, len(candidates)),
+    )
+    best: tuple[float, dict[str, Any]] | None = None
+    for row in curated:
+        chunk_id = str(row.get("chunk_id") or "")
+        doc_id = str(row.get("doc_id") or "")
+        if not chunk_id or chunk_id in seen_chunk_ids:
+            continue
+        # Facet support is meant to reduce tunnel vision; it should normally
+        # contribute a new chunk-bearing file rather than another paragraph
+        # from the already-dominant source.
+        if doc_id and doc_id in seen_doc_ids:
+            continue
+        lane_score = _semantic_facet_row_score(row, facet)
+        if lane_score < _SEMANTIC_FACET_COVERAGE_THRESHOLD:
+            continue
+        query_fit = _semantic_query_fit_score(row, original_query, facet)
+        if (
+            query_fit < _SEMANTIC_FACET_QUERY_FIT_FLOOR
+            and not facet.get("parent_hub")
+        ):
+            continue
+        if (
+            query_fit < _SEMANTIC_FACET_QUERY_FIT_FLOOR
+            and facet.get("parent_hub")
+            and lane_score < (_SEMANTIC_FACET_COVERAGE_THRESHOLD + 2)
+        ):
+            continue
+        retrieval_score = float(row.get("score") or 0.0)
+        source_bonus = 1.5 if doc_id else 0.0
+        final_score = (lane_score * 10.0) + (query_fit * 2.0) + retrieval_score + source_bonus
+        if best is None or final_score > best[0]:
+            row["support_activation"] = {
+                "facet_score": lane_score,
+                "query_fit": query_fit,
+                "score": round(final_score, 3),
+            }
+            best = (final_score, row)
+    return best[1] if best else None
+
+
+async def _semantic_facet_support_evidence(
+    db: Any,
+    *,
+    corpus_id: str,
+    query: str,
+    packet: dict[str, Any],
+    synthesis_mode: str = "research",
+    max_support: int = _SEMANTIC_FACET_MAX_LANES,
+) -> list[dict[str, Any]]:
+    """Fill missing query facets with tiny bounded support retrieval.
+
+    This is the second selector layer. It does not run for normal narrow
+    questions. It runs when the query names multiple conceptual facets and the
+    packet has missing/weak coverage for one of those facets. That keeps broad
+    queries from treating "two documents" as enough when a query-stated atomic
+    ingredient, such as knowledge graphs, never made it into evidence.
+    """
+
+    evidence = [row for row in (packet.get("evidence") or []) if isinstance(row, dict)]
+    existing_doc_ids = {str(row.get("doc_id") or "") for row in evidence if row.get("doc_id")}
+    if not evidence:
+        return []
+
+    facets = _semantic_facets_for_query(query, packet)
+    if len(facets) < 2:
+        return []
+
+    # One-file packets get the older broad support behavior. Multi-file packets
+    # only get extra retrieval when the query itself decomposes into at least
+    # three facets and one facet is absent or nearly absent from evidence.
+    coverage_floor = (
+        None
+        if len(existing_doc_ids) <= 1
+        else (_SEMANTIC_FACET_COVERAGE_THRESHOLD - 1 if len(facets) >= 3 else 0)
+    )
+    selected_facets, meta = _semantic_support_facet_order(
+        evidence,
+        facets,
+        max_support,
+        coverage_floor=coverage_floor,
+    )
+    if not selected_facets:
+        return []
+
+    support_rows: list[dict[str, Any]] = []
+    seen_chunk_ids = {
+        str(row.get("chunk_id") or "") for row in evidence if row.get("chunk_id")
+    }
+    seen_doc_ids = set(existing_doc_ids)
+
+    try:
+        from config import get_settings
+        from models.schemas import RetrievalTier
+        from services.retriever import retriever_orchestrator
+
+        settings = get_settings()
+        retrieval_tier = (
+            RetrievalTier.qdrant_mongo_graph
+            if settings.NEO4J_ENABLED
+            else RetrievalTier.qdrant_mongo
+        )
+
+        for facet in selected_facets:
+            if len(support_rows) >= max_support:
+                break
+            facet_terms = [str(t) for t in (facet.get("support_terms") or [])[:8] if t]
+            facet_label = str(facet.get("label") or facet.get("name") or "semantic facet")
+            support_query = " ".join(
+                [
+                    f"{synthesis_mode} support facet:",
+                    facet_label,
+                    *facet_terms,
+                    "original query:",
+                    query,
+                ]
+            )
+            graph_candidates = await _graph_edge_support_candidates(
+                db,
+                corpus_id=corpus_id,
+                packet=packet,
+                facet=facet,
+            )
+            result = await retriever_orchestrator.retrieve(
+                query=support_query,
+                corpus_ids=[corpus_id],
+                retrieval_tier=retrieval_tier,
+                collections=None,
+                retrieval_k=32,
+                rerank_top_n=32,
+                neo4j_expansion_cap=12,
+                final_top_k=12,
+                rerank_enabled=True,
+            )
+            rows = _source_docs_from_retrieval_chunks(
+                list(getattr(result, "chunks", []) or []),
+                max_chunks=12,
+            )
+            hydrated_trace = await _hydrate_trace_source_docs(
+                db,
+                {"source_docs": rows},
+                corpus_id=corpus_id,
+            )
+            candidates = [
+                row
+                for row in [*graph_candidates, *((hydrated_trace.get("source_docs") or rows))]
+                if isinstance(row, dict)
+                and str(row.get("doc_id") or "") not in seen_doc_ids
+                and str(row.get("chunk_id") or row.get("id") or "") not in seen_chunk_ids
+            ]
+            if not candidates:
+                continue
+            row = _choose_semantic_facet_candidate(
+                candidates,
+                facet=facet,
+                original_query=query,
+                support_query=support_query,
+                seen_doc_ids=seen_doc_ids,
+                seen_chunk_ids=seen_chunk_ids,
+            )
+            if not row:
+                continue
+            chunk_id = str(row.get("chunk_id") or "")
+            doc_id = str(row.get("doc_id") or "")
+            if not chunk_id or chunk_id in seen_chunk_ids or doc_id in seen_doc_ids:
+                continue
+            row["support_query"] = _text(support_query, 220)
+            row["support_role"] = "semantic_facet_coverage"
+            row["support_lane"] = f"facet:{facet.get('name') or ''}"
+            row["support_facet"] = {
+                "name": str(facet.get("name") or ""),
+                "label": facet_label,
+                "matched": facet.get("matched") or [],
+                "parent_hub": str(facet.get("parent_hub") or ""),
+            }
+            support_rows.append(row)
+            seen_chunk_ids.add(chunk_id)
+            seen_doc_ids.add(doc_id)
+    except Exception as exc:
+        logger.debug("semantic facet support retrieval skipped: %s", exc)
+        return support_rows
+
+    if support_rows:
+        packet.setdefault("evidence_filter", {})["semantic_coverage_support"] = {
+            **meta,
+            "added_candidates": len(support_rows),
+            "support_doc_ids": [str(row.get("doc_id") or "") for row in support_rows if row.get("doc_id")],
+        }
+        logger.info(
+            "semantic_facet_support: facets=%s selected=%s added=%d docs=%s",
+            [facet.get("name") for facet in facets],
+            meta.get("selected_facets"),
+            len(support_rows),
+            [row.get("doc_id") for row in support_rows],
+        )
+    return support_rows[:max_support]
+
+
+async def _ideation_cross_source_support_evidence(
+    db: Any,
+    *,
+    corpus_id: str,
+    query: str,
+    packet: dict[str, Any],
+    synthesis_mode: str = "research",
+    max_support: int = 2,
+) -> list[dict[str, Any]]:
+    """Try to add 1-2 non-dominant-doc chunks when graph evidence collapses.
+
+    The normal retriever should win for simple factual/single-document queries.
+    This pass only fires after the packet is built, when accepted evidence is
+    all from one document but the graph packet has bridges/gaps/analogy/transfer
+    signals suggesting the query is semantically wider than that one source.
+    """
+
+    evidence = [row for row in (packet.get("evidence") or []) if isinstance(row, dict)]
+    doc_ids = {str(row.get("doc_id") or "") for row in evidence if row.get("doc_id")}
+    if len(doc_ids) != 1:
+        return []
+    if not any(packet.get(key) for key in ("bridges", "analogies", "transfers", "gaps")):
+        return []
+
+    support_terms = _ideation_cross_source_terms(packet)
+    if not support_terms:
+        return []
+    mode = (synthesis_mode or "research").strip().lower()
+    support_query = " ".join(
+        [query, f"{mode} cross-source semantic support", *support_terms[:8]]
+    )
+
+    try:
+        from config import get_settings
+        from models.schemas import RetrievalTier
+        from services.retriever import retriever_orchestrator
+
+        settings = get_settings()
+        retrieval_tier = (
+            RetrievalTier.qdrant_mongo_graph
+            if settings.NEO4J_ENABLED
+            else RetrievalTier.qdrant_mongo
+        )
+        result = await retriever_orchestrator.retrieve(
+            query=support_query,
+            corpus_ids=[corpus_id],
+            retrieval_tier=retrieval_tier,
+            collections=None,
+            retrieval_k=24,
+            rerank_top_n=24,
+            neo4j_expansion_cap=12,
+            final_top_k=12,
+            rerank_enabled=True,
+        )
+    except Exception as exc:
+        logger.debug("ideation cross-source support retrieval skipped: %s", exc)
+        return []
+
+    rows = _source_docs_from_retrieval_chunks(result.chunks or [], max_chunks=12)
+    if not rows:
+        return []
+    hydrated_trace = await _hydrate_trace_source_docs(
+        db,
+        {"source_docs": rows},
+        corpus_id=corpus_id,
+    )
+    existing_chunk_ids = {
+        str(row.get("chunk_id") or "") for row in evidence if row.get("chunk_id")
+    }
+    candidate_rows = [
+        row
+        for row in (hydrated_trace.get("source_docs") or rows)
+        if isinstance(row, dict)
+        and str(row.get("doc_id") or "") not in doc_ids
+        and str(row.get("chunk_id") or row.get("id") or "") not in existing_chunk_ids
+    ]
+    if not candidate_rows:
+        return []
+
+    support, _rejected, _temporal, _reasons = _curated_evidence_rows(
+        candidate_rows,
+        query=support_query,
+        max_evidence=max_support,
+    )
+    for row in support:
+        row["support_query"] = _text(support_query, 220)
+        row["support_role"] = "cross_source_graph_signal"
+        row["support_lane"] = "semantic_coverage"
+    return support[:max_support]
+
+
+def _merge_ideation_cross_source_support(
+    packet: dict[str, Any],
+    support: list[dict[str, Any]],
+    *,
+    max_evidence: int,
+    synthesis_mode: str = "research",
+    max_additions: int = _SEMANTIC_FACET_MAX_LANES,
+    max_files: int = _SEMANTIC_FACET_SOURCE_CAP,
+) -> int:
+    if not support:
+        return 0
+    evidence = [row for row in (packet.get("evidence") or []) if isinstance(row, dict)]
+    if not evidence:
+        return 0
+
+    existing_chunk_ids = {
+        str(row.get("chunk_id") or "") for row in evidence if row.get("chunk_id")
+    }
+    additions = [
+        row
+        for row in support
+        if str(row.get("chunk_id") or "") and str(row.get("chunk_id") or "") not in existing_chunk_ids
+    ][: max(0, int(max_additions or 0))]
+    if not additions:
+        return 0
+
+    max_evidence = max(1, int(max_evidence or _PACKET_MAX_EVIDENCE))
+    reserved_support_slots = min(len(additions), max_additions, max(0, max_evidence - 1))
+    base_prefill_limit = max(1, max_evidence - reserved_support_slots)
+    soft_doc_cap = max(2, max_evidence // 4)
+    hard_doc_cap = max(3, max_evidence // 3)
+    merged: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
+    seen_chunks: set[str] = set()
+    per_doc: dict[str, int] = {}
+    seen_files: set[str] = set()
+
+    def add_row(row: dict[str, Any], *, cap: int | None = None) -> bool:
+        chunk_id = str(row.get("chunk_id") or "")
+        if not chunk_id or chunk_id in seen_chunks:
+            return False
+        if len(merged) >= max_evidence:
+            return False
+        doc_id = str(row.get("doc_id") or "")
+        if doc_id and doc_id not in seen_files and len(seen_files) >= max_files:
+            return False
+        if cap is not None and doc_id and per_doc.get(doc_id, 0) >= cap:
+            return False
+        merged.append(row)
+        seen_chunks.add(chunk_id)
+        if doc_id:
+            seen_files.add(doc_id)
+            per_doc[doc_id] = per_doc.get(doc_id, 0) + 1
+        return True
+
+    # Keep the strongest base evidence, but stop a dominant file from using
+    # every slot before lane support has a chance to enter.
+    for row in evidence:
+        if len(merged) >= base_prefill_limit:
+            deferred.append(row)
+            continue
+        if not add_row(row, cap=soft_doc_cap):
+            deferred.append(row)
+
+    support_added_chunks: set[str] = set()
+    for row in additions:
+        if add_row(row, cap=hard_doc_cap):
+            support_added_chunks.add(str(row.get("chunk_id") or ""))
+
+    for row in deferred:
+        if len(merged) >= max_evidence:
+            break
+        add_row(row, cap=hard_doc_cap)
+
+    for row in evidence:
+        if len(merged) >= max_evidence:
+            break
+        add_row(row)
+
+    added = len(support_added_chunks)
+    for idx, row in enumerate(merged, start=1):
+        row["evidence_id"] = f"e{idx}"
+    packet["evidence"] = merged[:max_evidence]
+
+    evidence_filter = packet.get("evidence_filter")
+    if not isinstance(evidence_filter, dict):
+        evidence_filter = {}
+        packet["evidence_filter"] = evidence_filter
+    evidence_filter["accepted"] = len(packet["evidence"])
+    mode = (synthesis_mode or "research").strip().lower()
+    actual_additions = [
+        row
+        for row in merged
+        if str(row.get("chunk_id") or "") in support_added_chunks
+    ]
+    support_roles = sorted(
+        {
+            str(row.get("support_role") or "")
+            for row in actual_additions
+            if row.get("support_role")
+        }
+    )
+    support_facets = [
+        row.get("support_facet")
+        for row in actual_additions
+        if isinstance(row.get("support_facet"), dict)
+    ]
+    semantic_added = any(role == "semantic_facet_coverage" for role in support_roles)
+    policy = (
+        f"{mode}_semantic_facet_support"
+        if semantic_added
+        else f"{mode}_one_doc_support"
+    )
+    reason = (
+        "the query contained multiple semantic facets and at least one "
+        "query-stated facet was missing or weak in the base evidence"
+        if semantic_added
+        else (
+            "base evidence came from one document while graph signals suggested "
+            "adjacent source support"
+        )
+    )
+    evidence_filter["cross_source_support"] = {
+        "added": added,
+        "policy": policy,
+        "reason": reason,
+        "support_roles": support_roles,
+        "support_lanes": [
+            str(row.get("support_lane") or "") for row in actual_additions if row.get("support_lane")
+        ],
+        "support_facets": support_facets,
+        "support_doc_ids": [
+            str(row.get("doc_id") or "") for row in actual_additions if row.get("doc_id")
+        ],
+        "reserved_support_slots": reserved_support_slots,
+    }
+    packet["temporal_support"] = bool(
+        packet.get("temporal_support")
+        or any(bool(row.get("has_temporal")) for row in additions)
+    )
+    return added
+
+
 async def _hydrate_trace_source_docs(
     db: Any,
     trace: dict[str, Any],
@@ -2704,17 +3918,46 @@ _SYNTHESIS_SYSTEM_PROMPT = (
     "- Markdown prose only. Start with `# headline` (≤ 140 chars).\n"
     "- Second line: italic theme `*Theme: tag · tag · tag*` — 2-4 short "
     "concept tags pulled from groupings or anchor concepts.\n"
-    "- Third paragraph: one **bolded TL;DR sentence** carrying the "
+    "- Third paragraph: a short reader-orientation paragraph for someone "
+    "who does not yet know the corpus vocabulary. Translate the key terms, "
+    "named theories, roles, or mechanisms into ordinary language before "
+    "using them in the deeper synthesis. Example: if the answer depends on "
+    "`home world`, `significant others`, `sub-worlds`, or `secondary "
+    "socialization`, briefly say what those terms mean in plain words and "
+    "how they relate. This is a ramp, not a simplification of the whole "
+    "answer: keep it concise, grounded, and adult.\n"
+    "- Fourth paragraph: one **bolded TL;DR sentence** carrying the "
     "load-bearing claim. The reader should be able to stop here and "
     "walk away with the key insight.\n"
-    "- Then 3-5 short paragraphs, one idea each, strong topic sentence "
-    "first. Use `## Subhead` only when two paragraphs cover genuinely "
-    "distinct movements.\n"
+    "- Then 3-5 short paragraphs or compact sections, one idea each, strong "
+    "topic sentence first. Use `## Subhead` when a section marks a genuinely "
+    "distinct movement. Use bullets inside a section only when explaining a "
+    "mechanism, evidence chain, or stepwise distinction; avoid wall-of-bullets "
+    "answers.\n"
+    "- Best table rule: include a compact Markdown table only when the answer "
+    "is comparing theories, documents, mechanisms, risks, interpretations, or "
+    "decision paths. Use the table as a text chart; do not add a table for "
+    "ordinary explanatory questions.\n"
+    "- Include one short `## Tension / Limits` paragraph. Name the strongest "
+    "complication, missing evidence, ambiguity, or boundary condition. If "
+    "the packet is clean, say what would still need checking instead of "
+    "pretending there is no limit.\n"
+    "- Include one short `## What the graph adds` paragraph. Explain the "
+    "specific bridge, hub, gap, or path that changed the answer. If the "
+    "graph adds little beyond the source text, say that plainly and keep "
+    "the paragraph short.\n"
+    "- End with one short `## Takeaway` paragraph that states the practical "
+    "or conceptual consequence for the user.\n"
+    "- If there is room and the evidence supports it, add `## Follow-on "
+    "questions` with 2-3 specific research questions that would be "
+    "interesting to explore next. These must be grounded in the packet, "
+    "not generic prompts.\n"
     "- Bold key phrases (named patterns, specific APIs, concrete tensions) "
     "— 1–3 per paragraph. Don't over-bold.\n"
     "- Inline `[1]`, `[2]` citations point to the numbered evidence list. "
     "Never invent citations.\n"
-    "- Stay under ~700 words.\n\n"
+    "- Stay under ~900 words unless the user explicitly asks for a longer "
+    "research answer.\n\n"
     "CONCRETE-CLAIM RULES (this is what separates good synthesis from "
     "schema narration):\n"
     "- NEVER output the strings `RELATES_TO`, `MENTIONS`, `PART_OF`, or "
@@ -2769,9 +4012,34 @@ _SYNTHESIS_SYSTEM_PROMPT = (
 _IDEATION_SYSTEM_PROMPT = (
     "You are Polymath's ideation scout. The user wants to find non-obvious "
     "connections, transferable methods, theoretical reframes, interventions, "
-    "or buildable applications from their corpus. Your job is to surface "
-    "IDEAS by combining patterns the corpus contains but never explicitly "
-    "connects. Ideation is corpus-grounded, not corpus-limited.\n\n"
+    "or buildable applications from their materials. Your job is to behave like "
+    "a pattern synthesizer, not just an idea generator: surface IDEAS by "
+    "combining patterns the evidence contains but never explicitly connects. "
+    "Ideation is evidence-grounded, not evidence-limited.\n\n"
+    "IMMERSION RULE:\n"
+    "- Do not narrate the retrieval machinery. Avoid phrases like `your corpus`, "
+    "`the corpus`, `the query`, `the packet`, `the graph`, `the graph suggests`, "
+    "`the evidence packet`, or the word `corpus` itself in the final prose. "
+    "The reader should feel they "
+    "are reading a composed idea, not a system report.\n"
+    "- Do not open with `You're asking...`, `You are asking...`, `The query...`, "
+    "`The user wants...`, or `This question...`. Start by naming the conceptual "
+    "problem directly.\n"
+    "- Prefer natural phrases: `the materials point to`, `the pattern is`, "
+    "`the useful tension is`, `the mechanism would be`, or simply state the "
+    "idea directly with citations.\n\n"
+    "PATTERN SYNTHESIS MODEL:\n"
+    "- Treat the materials like a set of proven or partially proven modules. "
+    "One concept may be enough to form an idea; two to five concepts may "
+    "combine into a stronger idea, the way multiple repositories can be "
+    "combined into a new project.\n"
+    "- Look for four signal types: (1) a need people or systems clearly have, "
+    "(2) an issue, failure mode, or friction pattern, (3) a grounded concept "
+    "that already works fully or partially, and (4) a same-domain or "
+    "cross-domain pattern that can transfer into the user's question.\n"
+    "- The best idea explains why the need exists, what pattern can address "
+    "it, which corpus concepts supply the mechanism, and what new synthesis "
+    "appears when they are combined.\n\n"
     "CURATION LANES:\n"
     "- THESIS SPINE: the strongest evidence anchors for the main idea. Use "
     "these to keep the answer grounded.\n"
@@ -2779,48 +4047,82 @@ _IDEATION_SYSTEM_PROMPT = (
     "that can become invention ingredients. Use this lane to create "
     "non-obvious combinations, but label inference honestly.\n\n"
     "OUTPUT FORMAT:\n"
-    "- Choose the block type that fits the query. [BUILD IDEA] is one option, "
-    "not the default.\n"
-    "- Use `[BUILD IDEA]` for products, systems, apps, games, or implementation "
-    "directions. Include **The Hook**, **The Mechanic**, **Corpus Evidence**, "
-    "**Build Path**, **Feasibility**, and **Risk / Gap**.\n"
-    "- Use `[METHOD TRANSFER]` when a pattern from one domain applies to "
-    "another. Name the source domain, target domain, transfer mechanism, "
-    "corpus grounding, and risk.\n"
-    "- Use `[THEORETICAL SYNTHESIS]` when two concepts from different fields "
-    "share a structure. State the shared structure, what it implies, and "
-    "where evidence supports or limits it.\n"
-    "- Use `[REFRAME]` when evidence is usually read one way but becomes more "
-    "useful under a different lens. State the old reading, the new reading, "
-    "and what changes.\n"
-    "- Use `[INTERVENTION]` when the corpus suggests an actionable change or "
-    "test. Name the intervention, target behavior/system, evidence model, "
-    "test path, and risk.\n"
-    "- If the query asks for methods, approaches, or ways forward, use "
-    "`[APPROACH]` blocks with **Name**, **Why it fits**, **Corpus grounding**, "
-    "**Gap it fills**, and **Risk**. Open-ended queries may mix block types.\n"
+    "- Markdown prose only. Do not use bracketed block labels like "
+    "`[BUILD IDEA]` as section titles; write a fluid idea narrative.\n"
+    "- ALWAYS begin with `## Orientation` before the idea sections. Under it, "
+    "write one compact familiarization paragraph that breaks down the user's "
+    "core question in plain language, defines the dense terms the reader may "
+    "not know, and shows how the ingredients compose. For example, when the "
+    "question combines user modeling, knowledge graphs, socialization theory, "
+    "and professional-world integration, explain that user modeling tracks a "
+    "person's evolving needs, a knowledge graph gives those needs a relational "
+    "map, and socialization theory explains how a person enters an institutional "
+    "world. End the paragraph by naming the synthesis pressure: turning a "
+    "professional world into a navigable learning environment.\n"
+    "- The orientation should sound like a polymath translator: connect terms "
+    "across fields, name the practical tension, and make the deeper idea "
+    "readable without flattening it.\n"
+    "- The orientation should center nuance, not hype: explain what each field "
+    "sees clearly, what each field misses alone, and why their combination "
+    "creates a more concrete design path.\n"
+    "- Default to ONE strong idea. If the materials have multiple strong signals, "
+    "give up to THREE ideas. Do not force three weak ideas.\n"
+    "- For one dominant idea, use: `# Idea name`, then `## Orientation`, "
+    "then the familiarization paragraph, one **Core idea:** sentence, then sections named "
+    "`## Why these pieces belong together`, `## How it works`, "
+    "`## Grounding`, `## What makes it interesting`, "
+    "`## Build path`, and `## Risk / limit`.\n"
+    "- For two or three strong ideas, use `# Buildable directions`, then "
+    "`## Orientation`, then `## 1. Idea name`, `## 2. Idea name`, etc. Each "
+    "idea should include one **Core idea:** sentence, the concept combination, "
+    "the mechanism, evidence grounding, and the main risk. Keep each idea compact "
+    "and readable.\n"
+    "- Format each idea direction like a design board, not a dense essay. Use "
+    "short headings and bullets inside the direction. A strong direction should "
+    "include: `One-line essence:`, `Why it fits the problem:`, `Minimal concrete "
+    "example:`, `Build path:`, and `Risk / limit:`. Keep the bullets precise; "
+    "avoid long paragraphs inside directions.\n"
+    "- The `Minimal concrete example:` should make the idea feel testable. Use "
+    "a tiny scenario, workflow, data shape, interface sketch, or output sketch. "
+    "When useful, show the transformation explicitly, e.g. `Scenario → choice "
+    "points → produced nodes/edges`, `Input → processing steps → output`, or "
+    "`user action → system response → stored representation`.\n"
+    "- If there are two or three directions, include a comparative markdown "
+    "table after the direction sections and before `## Recommendation`. Use "
+    "criteria such as novelty, feasibility, user experience, privacy/on-device "
+    "fit, evidence strength, and risk. Do not force all criteria if they do "
+    "not fit the question.\n"
+    "- After the comparison table, add `## Recommendation` with one concise "
+    "paragraph naming the best starting direction and why. If a second "
+    "direction should become a later validation layer, say that clearly.\n"
+    "- Add `## Next-step prompts` before `## Way Ahead` when the answer would "
+    "benefit from exploration questions. Give 2-4 sharp questions the user "
+    "could ask next; make them concrete, not generic.\n"
+    "- In every idea, make the transition clear: need or issue → grounded "
+    "evidence pattern → same/cross-domain transfer → synthesized idea → "
+    "buildable next move.\n"
+    "- Keep nuance at the center. Every strong idea should name the tension "
+    "that makes it worth building: what works already, what breaks, what "
+    "transfers, and what remains uncertain.\n"
     "- Rank ideas by: (1) distinct evidence anchors, (2) concreteness of "
     "files/APIs/concepts cited, (3) novelty of bridge/gap/analogy used, "
     "(4) clarity of implementation or reasoning path, and (5) honesty about "
     "risks and gaps.\n"
-    "- Keep the whole answer compact enough for about 1400 output tokens.\n\n"
+    "- Keep the whole answer compact enough for about 1800 output tokens.\n\n"
     "ALWAYS END WITH `## Way Ahead`:\n"
-    "- This section is NOT limited to corpus content. It uses patterns, gaps, "
-    "and bridges from the evidence as a scaffold to suggest 2-4 concrete "
-    "approaches the user could explore.\n"
-    "- Each approach needs: a **bolded name**, one sentence on what it is and "
-    "why it fits, one sentence connecting it back to corpus evidence, and a "
-    "`[CORPUS]` or `[OUTSIDE]` label. Use `[CORPUS]` only when packet evidence "
-    "directly supports it. Use `[OUTSIDE]` for general knowledge connected "
-    "back to a corpus pattern. `[SYNTHESIS]` and `[TRANSFER]` are allowed when "
-    "the approach is inferred from multiple evidence items or moved across "
-    "domains.\n"
+    "- This section is the user's next move, not a second answer. Suggest "
+    "2-3 concrete directions the user could explore after reading the idea.\n"
+    "- Each direction needs: a **bolded name**, one sentence on what it is and "
+    "why it fits, one sentence connecting it back to cited evidence, and a "
+    "`[EVIDENCE]`, `[SYNTHESIS]`, `[TRANSFER]`, or `[OUTSIDE]` label. Use "
+    "`[EVIDENCE]` only when packet evidence directly supports it. Use "
+    "`[OUTSIDE]` for general knowledge connected back to an evidence pattern.\n"
     "- Rank Way Ahead approaches by evidence anchor count, implementation "
     "path clarity, and gap-filling potential. A strong `[OUTSIDE]` approach "
-    "with a clear corpus analogy beats a thin `[CORPUS]` approach.\n"
-    "- Cap `## Way Ahead` at about 400 words total. Quality over quantity.\n\n"
+    "with a clear evidence analogy beats a thin `[EVIDENCE]` approach.\n"
+    "- Cap `## Way Ahead` at about 300 words total. Quality over quantity.\n\n"
     "CREATIVE RULES — this is what separates ideation from research:\n"
-    "- You MAY connect evidence items the corpus never connects. Label these "
+    "- You MAY connect evidence items the materials never connect. Label these "
     "connections clearly as [SYNTHESIS] and explain the bridge. The user wants "
     "invention ingredients, not a literature review.\n"
     "- Reframe gaps as opportunities. 'No file does X' becomes 'X is a "
@@ -2832,7 +4134,7 @@ _IDEATION_SYSTEM_PROMPT = (
     "HARD CONSTRAINTS — these prevent ideation from degrading into "
     "hallucination:\n"
     "- Every **bold** API name, method name, class name, file name, named "
-    "concept, method, finding, or theory labeled `[CORPUS]` MUST appear "
+    "concept, method, finding, or theory labeled `[EVIDENCE]` MUST appear "
     "verbatim in the evidence packet. The user must be able to grep code or "
     "search an index for it. If you cannot point to evidence, label it "
     "`[OUTSIDE]`, `[SYNTHESIS]`, or `[TRANSFER]` instead.\n"
@@ -2847,7 +4149,7 @@ _IDEATION_SYSTEM_PROMPT = (
     "relationship exists', or 'the graph suggests a bridge'. State the "
     "MECHANISM: 'X calls Y in [2] which produces Z', or 'X and Y share a "
     "state-machine structure across [1] and [3]'.\n"
-    "- If the packet is too sparse to support a strong idea, say so plainly "
+    "- If the evidence is too sparse to support a strong idea, say so plainly "
     "and give ONE smaller grounded move plus a clearly labeled Way Ahead. Do "
     "not pad.\n"
     "- Distinguish observed evidence [n] from speculative combinations "
@@ -2885,6 +4187,18 @@ _NUANCE_SYSTEM_PROMPT = (
     "- Then 3-6 short sections or paragraphs. Use headings only when they "
     "help: `## What is really going on`, `## Gaps`, `## Bridges`, or more "
     "specific concept names are all acceptable.\n"
+    "- When the answer turns on more than one interpretation, organize it as "
+    "a tension map: `## Tension: A vs B` or another specific heading, then "
+    "use bullets for the competing readings, tradeoffs, and edge cases. "
+    "Keep bullets short and interpretive, not checklist-like.\n"
+    "- Best table rule: include a compact Markdown table only when comparing "
+    "two or more readings, mechanisms, risks, edge cases, or implications. "
+    "Useful table shapes include `Simple reading | Complicated reading | What "
+    "changes`, or `Interpretation | What it explains | What it misses`. Do "
+    "not force a table when prose is clearer.\n"
+    "- If the answer has a clean graph-specific contribution, add a short "
+    "`## What the graph complicates` section that names the bridge, gap, or "
+    "unexpected adjacency and explains how it changes the simple answer.\n"
     "- Include a `## Forward Look` section when the packet supports a "
     "reasonable prediction. Label it `[PREDICTION]`, say what pattern seems "
     "to be forming, and keep uncertainty explicit.\n"
@@ -2981,6 +4295,15 @@ def _render_packet_user_prompt(
             "Curation lanes: THESIS SPINE = strongest grounding evidence; "
             "GRAPH EXPLORER = bridges, gaps, analogies, transfers, and "
             "relationships to use as invention ingredients."
+        )
+        idea_budget = compact.get("idea_budget") or {}
+        target = int(idea_budget.get("target") or 1)
+        reason = _text(idea_budget.get("reason") or "", 180)
+        lines.append(
+            f"Idea budget: target {target}, maximum 3. {reason}. "
+            "Use fewer only if the evidence is too thin; never exceed the "
+            "target unless the packet clearly contains separate, well-grounded "
+            "invention lanes."
         )
     elif mode == "nuance":
         intent = compact.get("intent_profile") or {}
@@ -3254,8 +4577,11 @@ def _render_packet_user_prompt(
     if mode == "ideation":
         lines.append(
             "Write the ideation synthesis now. Markdown only, inline [n] "
-            "citations for corpus-grounded claims, labeled idea blocks, and "
-            "a final ## Way Ahead section. No JSON."
+            "citations for evidence-grounded claims, the requested idea budget, "
+            "direction headings, bullets inside each direction, comparative "
+            "tables when evaluating multiple directions, a recommendation when "
+            "there is more than one viable path, and a final ## Way Ahead "
+            "section. No JSON."
         )
     else:
         lines.append(
@@ -3291,6 +4617,75 @@ def _source_brief_for_prompt(item: dict[str, Any]) -> dict[str, Any]:
     if hint_brief:
         brief["hints"] = hint_brief
     return {key: value for key, value in brief.items() if value not in ("", [], {}, None)}
+
+
+def _ideation_idea_budget(compact: dict[str, Any]) -> dict[str, Any]:
+    """Decide whether an ideation packet can support 1, 2, or 3 ideas.
+
+    This keeps "up to three" from becoming model whim. The budget is based on
+    grounded evidence plus distinct invention signals, not whole-corpus size.
+    """
+
+    evidence_count = len(compact.get("evidence") or [])
+    bridge_count = len(compact.get("bridges") or [])
+    analogy_count = len(compact.get("analogies") or [])
+    transfer_count = len(compact.get("transfers") or [])
+    gap_count = len(compact.get("gaps") or [])
+    signal_count = len(compact.get("signals") or [])
+    edge_count = len(compact.get("edges") or [])
+    doc_count = len(compact.get("documents_in_scope") or [])
+    sparse = bool(compact.get("sparse"))
+    all_rejected = bool((compact.get("filter") or {}).get("all_rejected"))
+
+    invention_categories = sum(
+        1
+        for value in (
+            bridge_count,
+            analogy_count,
+            transfer_count,
+            gap_count,
+            signal_count,
+        )
+        if value > 0
+    )
+    invention_signals = (
+        bridge_count
+        + analogy_count
+        + transfer_count
+        + min(gap_count, 3)
+        + signal_count
+    )
+    grounding_strength = evidence_count + min(edge_count, 4) + min(doc_count, 3)
+
+    if all_rejected or sparse or evidence_count < 2:
+        target = 1
+        reason = "thin grounding; develop one smaller corpus-honest idea"
+    elif evidence_count >= 5 and invention_categories >= 3 and invention_signals >= 6:
+        target = 3
+        reason = "multiple grounded invention lanes are present"
+    elif evidence_count >= 3 and invention_categories >= 2 and grounding_strength >= 6:
+        target = 2
+        reason = "two grounded idea lanes are present"
+    else:
+        target = 1
+        reason = "one idea has the clearest evidence path"
+
+    return {
+        "target": target,
+        "maximum": 3,
+        "reason": reason,
+        "signals": {
+            "evidence": evidence_count,
+            "edges": edge_count,
+            "bridges": bridge_count,
+            "analogies": analogy_count,
+            "transfers": transfer_count,
+            "gaps": gap_count,
+            "emerging_signals": signal_count,
+            "documents": doc_count,
+            "invention_categories": invention_categories,
+        },
+    }
 
 
 def _compact_packet_for_prompt(
@@ -3543,7 +4938,7 @@ def _compact_packet_for_prompt(
         for w in (packet.get("weak_links") or [])[: caps.weak_links]
         if graph_context_allowed and isinstance(w, dict)
     ]
-    return {
+    compact = {
         "q": packet.get("query") or "",
         "retrieval": packet.get("retrieval") or {},
         "temporal": bool(packet.get("temporal_support")),
@@ -3600,6 +4995,9 @@ def _compact_packet_for_prompt(
             else ""
         ),
     }
+    if (synthesis_mode or "").strip().lower() == "ideation":
+        compact["idea_budget"] = _ideation_idea_budget(compact)
+    return compact
 
 
 def _research_contract_for_prompt() -> dict[str, Any]:
@@ -4675,6 +6073,64 @@ async def discover(
         )
     except Exception as exc:
         logger.debug("packet extraction enrichment skipped: %s", exc)
+    if synthesis_mode in {"research", "nuance", "ideation"}:
+        try:
+            caps = _packet_caps_for_mode(synthesis_mode)
+            support_evidence: list[dict[str, Any]] = []
+            graph_signal_support = await _ideation_cross_source_support_evidence(
+                db,
+                corpus_id=corpus_id,
+                query=query,
+                packet=packet,
+                synthesis_mode=synthesis_mode,
+                max_support=min(2, _SEMANTIC_FACET_MAX_LANES),
+            )
+            support_evidence.extend(graph_signal_support)
+            remaining_support = max(
+                0,
+                min(_SEMANTIC_FACET_MAX_LANES, caps.evidence)
+                - len(support_evidence),
+            )
+            if remaining_support:
+                semantic_support = await _semantic_facet_support_evidence(
+                    db,
+                    corpus_id=corpus_id,
+                    query=query,
+                    packet=packet,
+                    synthesis_mode=synthesis_mode,
+                    max_support=remaining_support,
+                )
+                existing_support_chunks = {
+                    str(row.get("chunk_id") or "")
+                    for row in support_evidence
+                    if row.get("chunk_id")
+                }
+                for row in semantic_support:
+                    chunk_id = str(row.get("chunk_id") or "")
+                    if chunk_id and chunk_id not in existing_support_chunks:
+                        support_evidence.append(row)
+                        existing_support_chunks.add(chunk_id)
+            added = _merge_ideation_cross_source_support(
+                packet,
+                support_evidence,
+                max_evidence=caps.evidence,
+                synthesis_mode=synthesis_mode,
+                max_additions=min(_SEMANTIC_FACET_MAX_LANES, caps.evidence),
+                max_files=_SEMANTIC_FACET_SOURCE_CAP,
+            )
+            if isinstance(result.trace, dict) and added:
+                result.trace["cross_source_support"] = packet.get("evidence_filter", {}).get(
+                    "cross_source_support"
+                )
+                result.trace["semantic_coverage_support"] = packet.get(
+                    "evidence_filter", {}
+                ).get("semantic_coverage_support")
+                if synthesis_mode == "ideation":
+                    result.trace["ideation_cross_source_support"] = result.trace[
+                        "cross_source_support"
+                    ]
+        except Exception as exc:
+            logger.debug("%s cross-source support skipped: %s", synthesis_mode, exc)
     if isinstance(result.trace, dict):
         result.trace["source_docs_raw"] = result.trace.get("source_docs") or []
         result.trace["source_docs"] = packet.get("evidence") or []

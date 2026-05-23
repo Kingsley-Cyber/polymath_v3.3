@@ -209,7 +209,7 @@ class ChatRequest(BaseModel):
         ),
     )
     corpus_ids: list[str] | None = Field(
-        default=None, description="Corpora to scope search (max 3)"
+        default=None, description="Corpora to scope search"
     )
     retrieval_tier: RetrievalTier = Field(
         default="qdrant_mongo", description="Strategy for retrieval"
@@ -227,9 +227,7 @@ class ChatRequest(BaseModel):
     @field_validator("corpus_ids")
     @classmethod
     def validate_corpus_ids(cls, v):
-        """Hard cap: max 3 corpora per query (cross-corpus round-robin limit)."""
-        if v is not None and len(v) > 3:
-            raise ValueError("Maximum 3 corpora per query.")
+        """Accept any user-selected corpus scope; retrieval applies its own budgets."""
         return v
 
     @field_validator("conversation_id")

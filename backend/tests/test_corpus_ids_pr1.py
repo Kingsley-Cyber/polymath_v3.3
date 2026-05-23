@@ -167,6 +167,21 @@ def test_signature_accepts_iterable_of_tuples():
 # ─── Pydantic dual-field validators ───────────────────────────────────────────
 
 
+def test_chat_request_accepts_more_than_three_corpora():
+    """Chat and graph both accept the user's selected corpus scope.
+
+    Retrieval budgets decide how much evidence is read; the schema should not
+    reject a normal multi-corpus chat request just because it spans 4+ corpora.
+    """
+    from models.schemas import ChatRequest
+
+    req = ChatRequest(
+        message="compare these corpora",
+        corpus_ids=["alpha", "beta", "gamma", "delta", "epsilon"],
+    )
+    assert req.corpus_ids == ["alpha", "beta", "gamma", "delta", "epsilon"]
+
+
 def test_graph_discover_request_legacy_corpus_id_wraps_to_list():
     from models.schemas import GraphDiscoverRequest
 

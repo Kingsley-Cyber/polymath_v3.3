@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Rubik:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 @import "./styles/typography.css";
 
@@ -29,6 +29,7 @@
     --font-size-base: 0.95rem;
     --font-size-large: 1.15rem;
     --font-family-prose: 'Rubik', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-family-reading: 'Atkinson Hyperlegible', 'Inter', 'Segoe UI', system-ui, sans-serif;
     --font-family-mono: 'Roboto Mono', Consolas, Monaco, monospace;
 
     /* Existing Tailwind token aliases */
@@ -1033,43 +1034,52 @@
 
 /* ── Synthesis markdown rendering ── */
 .synthesis-body {
-  font-size: 16px;
-  line-height: 1.76;
-  color: var(--text-secondary);
+  max-width: 78ch;
+  color: #e7e7e7;
+  font-family: var(--font-family-reading);
+  font-size: 1.03rem;
+  font-kerning: normal;
+  letter-spacing: 0;
+  line-height: 1.82;
+  text-rendering: optimizeLegibility;
+  text-wrap: pretty;
 }
 .synthesis-body h1 {
-  font-size: 1.32rem;
-  font-weight: 800;
-  color: var(--text-primary);
-  margin-bottom: 0.5rem;
+  font-size: 1.46rem;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.22;
+  margin-bottom: 0.72rem;
   letter-spacing: 0;
 }
 .synthesis-body h2 {
-  font-size: 1.14rem;
-  font-weight: 800;
-  color: var(--text-primary);
-  margin-top: 1rem;
-  margin-bottom: 0.35rem;
-  padding-left: 0.55rem;
-  border-left: 3px solid var(--accent-primary);
+  font-size: 1.12rem;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.3;
+  margin-top: 1.35rem;
+  margin-bottom: 0.48rem;
+  padding-left: 0.68rem;
+  border-left: 3px solid #e0a21a;
   border-bottom: 0;
 }
 .synthesis-body h3 {
-  font-size: 1rem;
-  font-weight: 800;
-  color: var(--accent-secondary);
-  margin-top: 0.75rem;
-  margin-bottom: 0.25rem;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: #f5c451;
+  line-height: 1.35;
+  margin-top: 0.95rem;
+  margin-bottom: 0.32rem;
 }
 .synthesis-body p {
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.82rem;
 }
 .synthesis-body strong {
-  color: var(--text-primary);
-  font-weight: 850;
+  color: #ffffff;
+  font-weight: 700;
 }
 .synthesis-body em {
-  color: var(--text-tertiary);
+  color: #b7bcc7;
   font-style: italic;
 }
 .synthesis-body ol {
@@ -1099,7 +1109,7 @@
   list-style-type: disc;
   padding-left: 1.25rem;
   margin-bottom: 0.75rem;
-  color: var(--text-secondary);
+  color: #e1e1e1;
 }
 .synthesis-body ul > li {
   margin-bottom: 0.35rem;
@@ -1113,12 +1123,12 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 .synthesis-body blockquote {
-  border-left: 3px solid var(--accent-secondary);
-  padding-left: 0.75rem;
+  border-left: 3px solid #2b5ab9;
+  padding-left: 0.9rem;
   margin-left: 0;
-  margin-bottom: 0.75rem;
-  color: var(--text-primary);
-  font-style: italic;
+  margin-bottom: 0.95rem;
+  color: #f1f1f1;
+  font-style: normal;
 }
 .synthesis-body a {
   color: var(--accent-secondary);
@@ -1136,10 +1146,10 @@
   background-color: transparent;
   border: none;
   box-shadow: none;
-  color: var(--color-message-text);
-  font-family: var(--font-family-prose);
-  font-size: var(--font-size-base);
-  line-height: 1.6;
+  color: #e7e7e7;
+  font-family: var(--font-family-reading);
+  font-size: 1.03rem;
+  line-height: 1.82;
   padding: 0;
 }
 
@@ -1247,6 +1257,32 @@
 
 .message-assistant tr:nth-child(even) td {
   background-color: rgba(255, 255, 255, 0.03);
+}
+
+.synthesis-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0 1.1rem;
+  font-size: 0.94em;
+  line-height: 1.5;
+}
+
+.synthesis-body th,
+.synthesis-body td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  padding: 0.52rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.synthesis-body th {
+  background: rgba(245, 158, 11, 0.08);
+  color: #f8d26a;
+  font-weight: 700;
+}
+
+.synthesis-body tr:nth-child(even) td {
+  background-color: rgba(255, 255, 255, 0.026);
 }
 
 .process-group {

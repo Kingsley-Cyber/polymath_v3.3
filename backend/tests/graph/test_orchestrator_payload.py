@@ -17,7 +17,10 @@ from services.graph.orchestrator import (
     _curated_evidence_rows,
     _deterministic_prose_fallback,
     _llm_context_trace_from_packet,
+    _merge_ideation_cross_source_support,
     _render_packet_user_prompt,
+    _semantic_facets_for_query,
+    _semantic_facet_support_evidence,
     _should_skip_synthesis,
     _source_docs_from_retrieval_chunks,
     _source_label_from_row,
@@ -731,7 +734,7 @@ def test_compact_packet_uses_ideation_caps():
         synthesis_mode="ideation",
     )
 
-    assert len(compact["evidence"]) == 6
+    assert len(compact["evidence"]) == 10
     assert len(compact["edges"]) == 10
     assert len(compact["gaps"]) == 6
     assert len(compact["bridges"]) == 6
@@ -745,7 +748,7 @@ def test_compact_packet_keeps_nuance_default_caps():
         synthesis_mode="nuance",
     )
 
-    assert len(compact["evidence"]) == 6
+    assert len(compact["evidence"]) == 10
     assert len(compact["edges"]) == 14
     assert len(compact["gaps"]) == 3
     assert len(compact["bridges"]) == 4
@@ -753,10 +756,208 @@ def test_compact_packet_keeps_nuance_default_caps():
     assert len(compact["transfers"]) == 4
 
 
-def test_nuance_uses_larger_synthesis_token_budget_only_for_nuance():
-    assert _synthesis_max_tokens_for_mode("research") == 1400
-    assert _synthesis_max_tokens_for_mode("ideation") == 1400
+def test_synthesis_token_budgets_match_mode_prompts():
+    assert _synthesis_max_tokens_for_mode("research") == 1900
+    assert _synthesis_max_tokens_for_mode("ideation") == 2400
     assert _synthesis_max_tokens_for_mode("nuance") == 1800
+
+
+def test_semantic_facets_detect_broad_query_up_to_eight_lanes():
+    query = (
+        "How could knowledge graphs, user modeling, socialization theory, "
+        "platform ecosystems, universal design principles, power dynamics, "
+        "psychometrics, neuro-narrative therapy, and identity formation combine?"
+    )
+
+    facets = _semantic_facets_for_query(query, {"entities": [], "edges": []})
+    names = [facet["name"] for facet in facets]
+
+    assert len(names) == 8
+    assert "knowledge_graph" in names
+    assert "user_modeling" in names
+    assert "socialization" in names
+    assert "platform_ecosystem" in names
+    assert "design_system" in names
+    assert "power_dynamics" in names
+    assert "psychometrics" in names
+    assert "neuro_narrative" in names
+
+
+def test_semantic_facets_expand_agency_without_power_false_positive():
+    query = (
+        "How could knowledge graphs, user modeling, and socialization theory "
+        "help someone adapt to a professional world without losing agency?"
+    )
+
+    facets = _semantic_facets_for_query(query, {"entities": [], "edges": []})
+    names = [facet["name"] for facet in facets]
+
+    assert "knowledge_graph" in names
+    assert "user_modeling" in names
+    assert "socialization" in names
+    assert "power_dynamics" not in names
+    assert "agency_identity_preservation" in names
+    assert "agency_autonomy" in names
+    agency_rows = [facet for facet in facets if facet["name"].startswith("agency_")]
+    assert all(row.get("parent_hub") == "agency" for row in agency_rows)
+    assert len(names) <= 8
+
+
+def test_semantic_support_merge_reserves_slots_for_query_facets():
+    packet = {
+        "evidence": [
+            {
+                "evidence_id": f"e{i}",
+                "chunk_id": f"base-{i}",
+                "doc_id": f"doc:{i % 4}",
+                "text": f"base evidence {i}",
+                "source_label": f"Base {i % 4}.md",
+            }
+            for i in range(12)
+        ],
+        "evidence_filter": {},
+    }
+    support = [
+        {
+            "chunk_id": "psy-1",
+            "doc_id": "doc:psychometrics",
+            "text": "Measurement validity and latent variables support psychometrics.",
+            "source_label": "Measuring_the_Mind.md",
+            "support_role": "semantic_facet_coverage",
+            "support_lane": "facet:psychometrics",
+            "support_facet": {"name": "psychometrics"},
+        },
+        {
+            "chunk_id": "kg-1",
+            "doc_id": "doc:knowledge-graphs",
+            "text": "Knowledge graphs encode entities and relationships.",
+            "source_label": "Knowledge_Graphs.md",
+            "support_role": "semantic_facet_coverage",
+            "support_lane": "facet:knowledge_graph",
+            "support_facet": {"name": "knowledge_graph"},
+        },
+    ]
+
+    added = _merge_ideation_cross_source_support(
+        packet,
+        support,
+        max_evidence=6,
+        synthesis_mode="ideation",
+        max_additions=2,
+        max_files=8,
+    )
+
+    chunk_ids = [row["chunk_id"] for row in packet["evidence"]]
+    assert added == 2
+    assert "psy-1" in chunk_ids
+    assert "kg-1" in chunk_ids
+    assert len(packet["evidence"]) == 6
+    assert packet["evidence_filter"]["cross_source_support"]["reserved_support_slots"] == 2
+
+
+@pytest.mark.asyncio
+async def test_semantic_facet_support_adds_missing_facet_even_with_two_docs(monkeypatch):
+    """Two files are not enough if a query-stated facet is absent."""
+
+    from services.graph import orchestrator as orch_mod
+
+    query = (
+        "How could user modeling, knowledge graphs, and socialization theory "
+        "combine into a system that helps someone enter a new professional "
+        "world faster without losing their existing identity?"
+    )
+    packet = {
+        "query": query,
+        "evidence": [
+            {
+                "evidence_id": "e1",
+                "chunk_id": "um-1",
+                "doc_id": "doc:user-modeling",
+                "source_label": "USER MODELING AND USER PROFILING.pdf.md",
+                "text": (
+                    "User modeling uses user profiles and adaptive systems for "
+                    "personalization. Knowledge graphs can appear as one technique "
+                    "inside the user-modeling survey."
+                ),
+                "summary": "User modeling and profiling.",
+            },
+            {
+                "evidence_id": "e2",
+                "chunk_id": "soc-1",
+                "doc_id": "doc:socialization",
+                "source_label": "The Social Construction of Reality.md",
+                "text": (
+                    "Secondary socialization teaches people institutional "
+                    "sub-worlds and professional world norms while identity is maintained."
+                ),
+                "summary": "Socialization and institutional worlds.",
+            },
+        ],
+        "entities": [{"name": "user modeling"}, {"name": "knowledge graphs"}],
+        "anchors": [],
+        "communities": [],
+        "edges": [],
+        "signals": [],
+        "evidence_filter": {},
+    }
+    calls: list[str] = []
+
+    async def fake_retrieve(**kwargs):
+        calls.append(kwargs["query"])
+        return SimpleNamespace(
+            chunks=[
+                SourceChunk(
+                    chunk_id="kg-1",
+                    parent_id="kg-parent",
+                    doc_id="doc:knowledge-graphs",
+                    corpus_id="c1",
+                    text=(
+                        "Knowledge graphs represent entities and relationships "
+                        "with RDF triples, ontology, schema, and linked data."
+                    ),
+                    summary="Knowledge graph foundations.",
+                    score=0.93,
+                    source_tier="tier_a+lexical",
+                    doc_name="Knowledge_Graphs_Aidan_Hogan.md",
+                    heading_path=["Knowledge graphs"],
+                    provenance=[{"retriever": "test"}],
+                )
+            ]
+        )
+
+    async def fake_hydrate(_db, trace, *, corpus_id):
+        return trace
+
+    monkeypatch.setitem(
+        sys.modules,
+        "config",
+        SimpleNamespace(get_settings=lambda: SimpleNamespace(NEO4J_ENABLED=True)),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "services.retriever",
+        SimpleNamespace(retriever_orchestrator=SimpleNamespace(retrieve=fake_retrieve)),
+    )
+    monkeypatch.setattr(orch_mod, "_hydrate_trace_source_docs", fake_hydrate)
+
+    support = await _semantic_facet_support_evidence(
+        None,
+        corpus_id="c1",
+        query=query,
+        packet=packet,
+        synthesis_mode="research",
+        max_support=1,
+    )
+
+    assert len(support) == 1
+    assert support[0]["doc_id"] == "doc:knowledge-graphs"
+    assert support[0]["support_role"] == "semantic_facet_coverage"
+    assert support[0]["support_lane"] == "facet:knowledge_graph"
+    assert support[0]["support_facet"]["name"] == "knowledge_graph"
+    assert "knowledge graph" in calls[0].lower()
+    assert packet["evidence_filter"]["semantic_coverage_support"]["selected_facets"] == [
+        "knowledge_graph"
+    ]
 
 
 def test_insight_packet_marks_sparse_when_evidence_missing():

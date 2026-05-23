@@ -12,6 +12,7 @@ import {
   Cloud,
   CloudOff,
   Cpu,
+  KeyRound,
   Settings2,
 } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -53,6 +54,16 @@ function providerIcon(provider: PoolProvider) {
     return <CloudOff className="w-2.5 h-2.5 text-content-secondary" />;
   }
   return <Cloud className="w-2.5 h-2.5 text-emerald-400/80" />;
+}
+
+function entryAccessIcon(entry: QueryModelPoolEntry) {
+  if (entry.source === "ollama") {
+    return <Cpu className="w-2.5 h-2.5 text-cyan-300" />;
+  }
+  if (entry.api_key_ciphertext) {
+    return <KeyRound className="w-2.5 h-2.5 text-emerald-400" />;
+  }
+  return <KeyRound className="w-2.5 h-2.5 text-red-400" />;
 }
 
 export function ModelSelector() {
@@ -187,14 +198,14 @@ export function ModelSelector() {
 
       {isOpen && (
         <div
-          className="absolute top-full right-0 mt-1 w-64 border border-white/10 bg-[#2a2a2a] z-[60] p-1 font-mono shadow-xl rounded"
+          className="absolute bottom-full right-0 mb-2 w-80 max-w-[calc(100vw-1rem)] max-h-[calc(100vh-7rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] z-[80] p-1 font-mono shadow-xl rounded origin-bottom-right"
           data-testid="model-selector-dropdown"
         >
           <div className="text-[9px] font-bold tracking-widest uppercase text-content-secondary px-2 py-1.5 border-b border-border-minimal mb-1">
             Select Engine
           </div>
 
-          <div className="max-h-72 overflow-y-auto custom-scrollbar flex flex-col gap-0.5">
+          <div className="max-h-[calc(100vh-11rem)] overflow-y-auto custom-scrollbar flex flex-col gap-1 pr-0.5">
             {totalEnabled === 0 ? (
               <div
                 className="flex flex-col items-center gap-2 px-2 py-4 text-center"
@@ -240,19 +251,35 @@ export function ModelSelector() {
                           setSelectedModel(pid);
                           setIsOpen(false);
                         }}
-                        className={`flex flex-col items-start px-2 py-1.5 text-left border transition-none rounded-none uppercase w-full ${
+                        className={`group flex w-full flex-col items-stretch gap-1 rounded border px-2 py-2 text-left transition-none ${
                           isActive
-                            ? "bg-emerald-500/20 border-emerald-400 text-emerald-300"
-                            : "border-transparent hover:bg-bg-surface hover:border-border-minimal text-content-primary"
+                            ? "border-emerald-400 bg-emerald-500/15 text-emerald-200"
+                            : "border-white/5 bg-[#0b0c10] text-content-primary hover:border-white/15 hover:bg-bg-base"
                         }`}
                         data-testid={`model-entry-${e.entry_id}`}
+                        title={`${e.provider} · ${e.model_name}`}
                       >
-                        <span className="text-[10px] font-bold tracking-widest truncate w-full">
-                          {e.label}
-                        </span>
-                        <span className="text-[8px] text-content-secondary tracking-widest truncate w-full">
-                          {e.model_name}
-                        </span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="min-w-0 flex-1 truncate text-[10px] font-bold tracking-wider text-white">
+                            {e.label}
+                          </span>
+                          {isActive && (
+                            <span className="shrink-0 rounded border border-emerald-400/40 bg-emerald-400/10 px-1.5 py-0.5 text-[7px] font-bold uppercase tracking-widest text-emerald-300">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span className="shrink-0 rounded border border-white/10 bg-[#16171d] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-content-secondary">
+                            {e.provider}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-[9px] tracking-wide text-content-secondary normal-case">
+                            {e.model_name}
+                          </span>
+                          <span className="shrink-0 opacity-80 group-hover:opacity-100">
+                            {entryAccessIcon(e)}
+                          </span>
+                        </div>
                       </button>
                     );
                   })}

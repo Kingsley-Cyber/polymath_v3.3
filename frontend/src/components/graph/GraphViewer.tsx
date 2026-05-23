@@ -79,9 +79,21 @@ type DrillFrame = {
 
 type GraphPayload = { nodes: any[]; links: any[] };
 
+type GraphRunMode = "new" | "followup";
+
+type GraphTurnContext = {
+  query: string;
+  coreIdea: string;
+  seedNames: string[];
+  fileNames: string[];
+  evidenceFacets: string[];
+};
+
 type GraphQueryProgressStage =
   | "idle"
   | "querying"
+  | "following"
+  | "analyzing"
   | "packing"
   | "synthesizing"
   | "done"
@@ -93,6 +105,68 @@ type QuestionGraphProgressStage =
   | "querying"
   | "done"
   | "error";
+
+const GRAPH_QUERY_PROGRESS_FOLLOWING_MS = 3000;
+const GRAPH_QUERY_PROGRESS_ANALYZING_MS = 6500;
+const GRAPH_QUERY_PROGRESS_PACKING_MS = 10000;
+const GRAPH_QUERY_PROGRESS_SYNTHESIS_MS = 1800;
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => window.setTimeout(resolve, Math.max(0, ms)));
+
+function cleanContextText(value: string, max = 260): string {
+  return value
+    .replace(/[`*_#[\]()]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
+}
+
+function uniqueCompact(values: string[], maxItems: number, maxChars = 80): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    const cleaned = cleanContextText(String(raw || ""), maxChars);
+    if (!cleaned) continue;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(cleaned);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+function extractCoreIdea(markdown: string, fallback = ""): string {
+  const coreMatch = markdown.match(/\*\*\s*Core idea:\s*\*\*\s*([^\n]+)/i);
+  if (coreMatch?.[1]) return cleanContextText(coreMatch[1], 320);
+
+  const paragraphs = markdown
+    .split(/\n{2,}/)
+    .map((p) => p.replace(/^#+\s+/gm, "").trim())
+    .filter((p) => p && !/^[-*]\s/.test(p));
+  const firstParagraph = paragraphs.find((p) => p.length > 80) || paragraphs[0] || "";
+  return cleanContextText(firstParagraph || fallback, 320);
+}
+
+function buildFollowUpSynthesisQuery(rawQuery: string, context: GraphTurnContext): string {
+  const lines = [
+    `Follow-up question: ${cleanContextText(rawQuery, 420)}`,
+    `Prior question: ${cleanContextText(context.query, 360)}`,
+  ];
+  if (context.coreIdea) lines.push(`Prior core idea: ${context.coreIdea}`);
+  if (context.seedNames.length) lines.push(`Seed concepts: ${context.seedNames.join(", ")}`);
+  if (context.evidenceFacets.length) {
+    lines.push(`Evidence facets: ${context.evidenceFacets.join(", ")}`);
+  }
+  if (context.fileNames.length) {
+    lines.push(`Prior files, for continuity only: ${context.fileNames.join("; ")}`);
+  }
+  lines.push(
+    "Resolve words like this, that idea, and the previous direction against the prior turn, then build a fresh source-grounded answer for the follow-up.",
+  );
+  return lines.join("\n").slice(0, 1800);
+}
 
 function graphQueryStepLabels(mode: GraphSynthesisMode): string[] {
   if (mode === "nuance") {
@@ -107,7 +181,7 @@ function graphQueryStepLabels(mode: GraphSynthesisMode): string[] {
   if (mode === "ideation") {
     return [
       "Reading your question and finding the buildable ingredients.",
-      "Finding nearby concepts that could combine into something useful.",
+      "Following nearby concepts that could combine into something useful.",
       "Looking for bridges, gaps, and unexpected pairings.",
       "Packing the strongest material for idea generation.",
       "Synthesizing build ideas from the graph.",
@@ -115,7 +189,7 @@ function graphQueryStepLabels(mode: GraphSynthesisMode): string[] {
   }
   return [
     "Reading your question and spotting the main ideas.",
-    "Finding the evidence neighborhood around those ideas.",
+    "Following the evidence neighborhood around those ideas.",
     "Looking for bridges, hubs, and missing links that may affect the answer.",
     "Packing the strongest source-backed evidence.",
     "Synthesizing a grounded research answer.",
@@ -139,6 +213,10 @@ function graphQueryProgressSteps(
   const doneThrough =
     stage === "querying" || stage === "subgraph_error"
       ? -1
+      : stage === "following"
+        ? 0
+      : stage === "analyzing"
+        ? 1
       : stage === "packing"
         ? 2
       : stage === "synthesizing" || stage === "synthesis_error_after_map"
@@ -147,6 +225,10 @@ function graphQueryProgressSteps(
   const runningIndex =
     stage === "querying"
       ? 0
+      : stage === "following"
+        ? 1
+        : stage === "analyzing"
+          ? 2
       : stage === "packing"
         ? 3
         : stage === "synthesizing"
@@ -842,6 +924,7 @@ function useBrainGraph(
 function useQueryGraph(
   corpusIds: string[],
   query: string | undefined,
+  synthesisQuery: string | undefined,
   synthesisMode: GraphSynthesisMode = "research",
   validateSynthesis: boolean = false,
 ) {
@@ -863,6 +946,11 @@ function useQueryGraph(
   const [synthesis, setSynthesis] = useState<{
     markdown: string;
     sources: any[];
+    files?: any[];
+    sessionId?: string;
+    responseQuery?: string;
+    graphQuery?: string;
+    headline?: string;
     perCorpus?: Array<{ corpus_id: string; markdown: string }>;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -873,6 +961,13 @@ function useQueryGraph(
   useEffect(() => {
     let cancel = false;
     let synthesisStageTimer: ReturnType<typeof setTimeout> | null = null;
+    const subgraphStageTimers: ReturnType<typeof setTimeout>[] = [];
+    const clearSubgraphStageTimers = () => {
+      while (subgraphStageTimers.length) {
+        const timer = subgraphStageTimers.pop();
+        if (timer) clearTimeout(timer);
+      }
+    };
     const run = async () => {
       if (!corpusIds.length || !query?.trim()) {
         setPhase("idle");
@@ -889,10 +984,20 @@ function useQueryGraph(
       }
       setPhase("loading");
       setError(null);
+      setSynthesis(null);
       setProgressStage("querying");
       setProgressError(null);
+      const graphProgressStartedAt = Date.now();
       let subgraphLoaded = false;
       try {
+        subgraphStageTimers.push(
+          setTimeout(() => {
+            if (!cancel) setProgressStage("following");
+          }, GRAPH_QUERY_PROGRESS_FOLLOWING_MS),
+          setTimeout(() => {
+            if (!cancel) setProgressStage("analyzing");
+          }, GRAPH_QUERY_PROGRESS_ANALYZING_MS),
+        );
         const subgraphP = api.queryGraph(
           corpusIds,
           query,
@@ -902,7 +1007,7 @@ function useQueryGraph(
         );
         const synthP = api.discoverGraph({
           corpus_ids: corpusIds as any,
-          query,
+          query: synthesisQuery?.trim() || query,
           mode: "auto",
           synthesis_mode: synthesisMode,
           validate_synthesis: validateSynthesis,
@@ -926,10 +1031,13 @@ function useQueryGraph(
         setData({ nodes: sub.nodes || [], links: sub.links || [] });
         setPhase("ready");
         subgraphLoaded = true;
+        await wait(GRAPH_QUERY_PROGRESS_PACKING_MS - (Date.now() - graphProgressStartedAt));
+        if (cancel) return;
+        clearSubgraphStageTimers();
         setProgressStage("packing");
         synthesisStageTimer = setTimeout(() => {
           if (!cancel) setProgressStage("synthesizing");
-        }, 7500);
+        }, GRAPH_QUERY_PROGRESS_SYNTHESIS_MS);
         const synth = await synthP;
         if (cancel) return;
         if (synthesisStageTimer) {
@@ -943,11 +1051,21 @@ function useQueryGraph(
             (synth as any).interpretation ||
             "(no synthesis generated)",
           sources: auto.sources || [],
+          files: (synth as any).trace?.llm_context?.files || [],
+          sessionId: (synth as any).session_id || "",
+          responseQuery: (synth as any).query || "",
+          graphQuery: query,
+          headline:
+            auto.headline ||
+            (synth as any).headline?.headline ||
+            (synth as any).headline?.kicker ||
+            "",
           perCorpus: auto.per_corpus_synthesis || undefined,
         });
         setProgressStage("done");
       } catch (e) {
         if (cancel) return;
+        clearSubgraphStageTimers();
         const message = e instanceof Error ? e.message : String(e);
         setError(message);
         setProgressError(message);
@@ -960,11 +1078,13 @@ function useQueryGraph(
     run();
     return () => {
       cancel = true;
+      clearSubgraphStageTimers();
       if (synthesisStageTimer) clearTimeout(synthesisStageTimer);
     };
   }, [
     corpusIds,
     query,
+    synthesisQuery,
     synthesisMode,
     validateSynthesis,
     graphQuerySeedEntities,
@@ -1116,9 +1236,14 @@ export function GraphViewer({
   const [activeTab, setActiveTab] = useState<DashboardTab>("brain");
   const [agentInput, setAgentInput] = useState<string>(query ?? "");
   const [agentQuery, setAgentQuery] = useState<string | undefined>(query);
+  const [agentSynthesisQuery, setAgentSynthesisQuery] = useState<string | undefined>(
+    query,
+  );
   const [questionGraphQuery, setQuestionGraphQuery] = useState<string | undefined>(
     undefined,
   );
+  const [lastGraphContext, setLastGraphContext] =
+    useState<GraphTurnContext | null>(null);
   // Phase 3 — synthesis-mode toggle. "research" (default) gives concrete
   // claims; "ideation" produces [BUILD IDEA] blocks; "nuance" explores gap
   // typology, analogies, transfers, and bridges.
@@ -1150,6 +1275,7 @@ export function GraphViewer({
   const q = useQueryGraph(
     corpusIds,
     agentQuery,
+    agentSynthesisQuery,
     executedSynthesisMode,
     executedValidateSynthesis,
   );
@@ -1169,18 +1295,65 @@ export function GraphViewer({
     [agentQuery, questionGraphQuery, heavyQueryActive],
   );
 
+  const agentSeedNames = useMemo(
+    () =>
+      (q.data?.nodes || [])
+        .filter((n: any) => q.seedIds.has(String(n.id)))
+        .map((n: any) => String(n.display_name || n.id)),
+    [q.data, q.seedIds],
+  );
+  const agentBridgeNames = useMemo(
+    () =>
+      (q.data?.nodes || [])
+        .filter((n: any) => q.bridgeIds.has(String(n.id)))
+        .map((n: any) => String(n.display_name || n.id)),
+    [q.data, q.bridgeIds],
+  );
+  const agentHubNames = useMemo(
+    () =>
+      (q.data?.nodes || [])
+        .filter((n: any) => q.hubIds.has(String(n.id)))
+        .map((n: any) => String(n.display_name || n.id)),
+    [q.data, q.hubIds],
+  );
+  const agentSourceNames = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          ((q.synthesis?.files?.length ? q.synthesis.files : q.synthesis?.sources) || [])
+            .map((s: any) => String(s.source_label || s.label || s.doc_id || "").trim())
+            .filter(Boolean),
+        ),
+      ),
+    [q.synthesis],
+  );
+
   const runGraphQuery = useCallback(
-    (nextQuery?: string) => {
+    (nextQuery?: string, requestedMode?: GraphRunMode) => {
       const normalized = (nextQuery ?? agentInput).trim();
       if (!normalized) return;
+      const runMode = requestedMode || "new";
+      const shouldContinue = runMode === "followup" && lastGraphContext !== null;
+      const synthesisQuery = shouldContinue
+        ? buildFollowUpSynthesisQuery(normalized, lastGraphContext)
+        : normalized;
       setAgentInput(normalized);
       setExecutedSynthesisMode(draftSynthesisMode);
       setExecutedValidateSynthesis(draftValidateSynthesis);
       setAgentQuery(normalized);
+      setAgentSynthesisQuery(synthesisQuery);
       setQuestionGraphQuery(undefined);
+      if (!shouldContinue) {
+        setLastGraphContext(null);
+      }
       setActiveTab("agent");
     },
-    [agentInput, draftSynthesisMode, draftValidateSynthesis],
+    [
+      agentInput,
+      draftSynthesisMode,
+      draftValidateSynthesis,
+      lastGraphContext,
+    ],
   );
 
   const runQuestionGraph = useCallback((nextQuery: string) => {
@@ -1188,16 +1361,59 @@ export function GraphViewer({
     if (!normalized) return;
     setQuestionGraphQuery(normalized);
     setAgentQuery(undefined);
+    setAgentSynthesisQuery(undefined);
     setAgentInput(normalized);
+    setLastGraphContext(null);
     setActiveTab("brain");
   }, []);
 
   const clearGraphQuery = useCallback(() => {
     setAgentQuery(undefined);
+    setAgentSynthesisQuery(undefined);
     setQuestionGraphQuery(undefined);
     setAgentInput("");
+    setLastGraphContext(null);
     setActiveTab("brain");
   }, []);
+
+  const corpusKey = corpusIds.join("|");
+  const previousCorpusKey = useRef(corpusKey);
+  useEffect(() => {
+    if (previousCorpusKey.current === corpusKey) return;
+    previousCorpusKey.current = corpusKey;
+    setAgentQuery(undefined);
+    setAgentSynthesisQuery(undefined);
+    setQuestionGraphQuery(undefined);
+    setLastGraphContext(null);
+    setActiveTab("brain");
+  }, [corpusKey]);
+
+  useEffect(() => {
+    if (q.phase !== "ready" || !agentQuery?.trim() || !q.synthesis?.markdown) return;
+    if (q.synthesis.graphQuery !== agentQuery) return;
+    const seedNames = uniqueCompact(agentSeedNames, 8);
+    const fileNames = uniqueCompact(agentSourceNames, 4, 120);
+    const evidenceFacets = uniqueCompact(
+      [...agentBridgeNames, ...agentHubNames, ...seedNames],
+      8,
+      80,
+    );
+    setLastGraphContext({
+      query: agentQuery,
+      coreIdea: extractCoreIdea(q.synthesis.markdown, q.synthesis.headline || ""),
+      seedNames,
+      fileNames,
+      evidenceFacets,
+    });
+  }, [
+    q.phase,
+    q.synthesis,
+    agentQuery,
+    agentSeedNames,
+    agentSourceNames,
+    agentBridgeNames,
+    agentHubNames,
+  ]);
 
   useEffect(() => {
     onQueryPhaseChange?.(activeQ.phase);
@@ -1498,26 +1714,23 @@ export function GraphViewer({
         onActiveTabChange={setActiveTab}
         agentQuery={agentInput}
         onAgentQueryChange={setAgentInput}
-        onAgentRun={() => runGraphQuery()}
+        onAgentRun={(runMode) => runGraphQuery(undefined, runMode)}
         synthesisMode={draftSynthesisMode}
         onSynthesisModeChange={setDraftSynthesisMode}
         validateSynthesis={draftValidateSynthesis}
         onValidateSynthesisChange={setDraftValidateSynthesis}
+        followUpAvailable={lastGraphContext !== null}
+        followUpPreview={lastGraphContext?.coreIdea || lastGraphContext?.query || ""}
         onBuildQuestionGraph={runQuestionGraph}
         agentPhase={q.phase}
         agentError={q.error}
         agentSynthesisMarkdown={q.synthesis?.markdown ?? null}
         agentProgressSteps={q.progressSteps}
         questionProgressSteps={lightQ.progressSteps}
-        agentSeedNames={(q.data?.nodes || [])
-          .filter((n: any) => q.seedIds.has(String(n.id)))
-          .map((n: any) => String(n.display_name || n.id))}
-        agentBridgeNames={(q.data?.nodes || [])
-          .filter((n: any) => q.bridgeIds.has(String(n.id)))
-          .map((n: any) => String(n.display_name || n.id))}
-        agentHubNames={(q.data?.nodes || [])
-          .filter((n: any) => q.hubIds.has(String(n.id)))
-          .map((n: any) => String(n.display_name || n.id))}
+        agentSeedNames={agentSeedNames}
+        agentSourceNames={agentSourceNames}
+        agentBridgeNames={agentBridgeNames}
+        agentHubNames={agentHubNames}
         agentGaps={q.gaps as any}
         onSendToChat={onSendToChat}
         onRerun={onRerun}

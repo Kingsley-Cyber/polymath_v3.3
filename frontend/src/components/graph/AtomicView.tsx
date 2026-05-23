@@ -23,6 +23,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { discoverGraph, queryGraph } from "../../lib/api";
 import { graphColors, nodeFillColor } from "../../lib/graph-colors";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -780,8 +781,8 @@ export default function AtomicView({
                   : "Synthesis"}
               {" · click to expand"}
             </summary>
-            <div className="p-4 prose prose-sm max-w-none">
-              <ReactMarkdown>
+            <div className="p-4 synthesis-body">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {
                   (synthesis.auto_synthesis as { markdown: string })
                     .markdown

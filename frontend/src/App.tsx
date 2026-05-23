@@ -347,19 +347,15 @@ function App() {
           // backend query-profile defaults cannot silently turn HyDE on.
           hyde_enabled: settings.hydeEnabled,
           web_search_enabled: settings.webSearchEnabled ? true : undefined,
-          web_fetch_depth: settings.webSearchEnabled
-            ? settings.webFetchDepth
-            : undefined,
-          web_research_mode:
-            settings.webSearchEnabled && settings.webResearchMode
-              ? true
-              : undefined,
-          web_youtube_transcripts: settings.webSearchEnabled
-            ? settings.webYoutubeTranscripts
-            : undefined,
-          web_max_sources: settings.webSearchEnabled
-            ? settings.webMaxSources
-            : undefined,
+          // Evidence-controller defaults. Keep the chat bar simple:
+          // Web ON means normal fetch policy, native YouTube transcript
+          // extraction when a YouTube URL is actually relevant, and the
+          // default source budget. Advanced internals stay out of the
+          // per-turn toolbar.
+          web_fetch_depth: settings.webSearchEnabled ? "normal" : undefined,
+          web_research_mode: undefined,
+          web_youtube_transcripts: settings.webSearchEnabled ? true : undefined,
+          web_max_sources: settings.webSearchEnabled ? 9 : undefined,
           collection_ids: settings.selectedCollectionIds,
           // Phase 14.1 — agentic override (per-request)
           agentic_mode: settings.agenticModeEnabled || undefined,

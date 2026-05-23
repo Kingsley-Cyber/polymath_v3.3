@@ -18,16 +18,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
+  GitBranch,
   Loader2,
   PanelRightClose,
   PanelRightOpen,
   Pause,
   Play,
+  PlusCircle,
   Send,
   Sparkles,
   Zap,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import type {
   CacheStatus,
@@ -48,6 +51,8 @@ import type { GraphSynthesisMode } from "../../types/discover";
 
 export type DashboardTab = "brain" | "agent" | "graph-query";
 
+export type GraphRunMode = "new" | "followup";
+
 export type GraphProgressStatus =
   | "pending"
   | "running"
@@ -60,6 +65,40 @@ export interface GraphProgressStep {
   label: string;
   status: GraphProgressStatus;
   detail?: string;
+}
+
+function BackToBrainButton({
+  onClick,
+  className = "",
+}: {
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Back to Brain"
+      title="Back to Brain"
+      className={
+        "group relative flex w-full items-center justify-between overflow-hidden rounded-md border border-cyan-500/25 bg-[radial-gradient(circle_at_15%_50%,rgba(34,211,238,0.14),transparent_42%),linear-gradient(90deg,rgba(8,47,73,0.28),rgba(9,9,14,0.82))] px-3 py-2 text-[10px] font-technical uppercase tracking-widest text-cyan-100 shadow-[0_0_24px_rgba(8,145,178,0.08)] transition-all hover:border-cyan-300/55 hover:bg-cyan-500/10 hover:text-white " +
+        className
+      }
+    >
+      <span className="flex items-center gap-2">
+        <span className="relative grid h-6 w-8 place-items-center rounded border border-cyan-400/20 bg-black/20">
+          <span className="absolute left-1 top-1 h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_10px_rgba(252,211,77,0.8)] transition-transform group-hover:-translate-x-0.5" />
+          <span className="absolute right-1.5 top-1 h-1 w-1 rounded-full bg-cyan-300/80 transition-transform group-hover:translate-x-0.5" />
+          <span className="absolute bottom-1 right-2 h-1 w-1 rounded-full bg-emerald-300/80 transition-transform group-hover:translate-x-0.5" />
+          <span className="absolute bottom-1.5 left-3.5 h-1 w-1 rounded-full bg-violet-300/70 transition-transform group-hover:translate-x-0.5" />
+          <span className="absolute left-2 top-[11px] h-px w-4 origin-left rotate-[-12deg] bg-cyan-300/25" />
+          <ChevronLeft className="relative h-3.5 w-3.5 text-cyan-200 transition-transform group-hover:-translate-x-0.5" />
+        </span>
+        Back to Brain
+      </span>
+      <span className="h-1.5 w-1.5 rounded-full bg-cyan-300/70 shadow-[0_0_12px_rgba(103,232,249,0.9)]" />
+    </button>
+  );
 }
 
 // Sidebar width bounds when expanded. Default mirrors Pt 5 baseline (320).
@@ -126,13 +165,14 @@ export interface BrainViewDashboardProps {
   // Agent Search tab — wired to existing useQueryGraph state
   agentQuery: string;
   onAgentQueryChange: (q: string) => void;
-  onAgentRun: () => void;
+  onAgentRun: (mode?: GraphRunMode) => void;
   agentPhase: "idle" | "loading" | "ready" | "error";
   agentError?: string | null;
   agentSynthesisMarkdown?: string | null;
   agentProgressSteps?: GraphProgressStep[];
   questionProgressSteps?: GraphProgressStep[];
   agentSeedNames?: string[];
+  agentSourceNames?: string[];
   agentBridgeNames?: string[];
   agentHubNames?: string[];
   agentGaps?: Array<{ entity_a_name?: string; entity_b_name?: string }>;
@@ -146,6 +186,8 @@ export interface BrainViewDashboardProps {
   // Adds 2-3× latency/tokens; surfaced as a small checkbox in the tab.
   validateSynthesis?: boolean;
   onValidateSynthesisChange?: (v: boolean) => void;
+  followUpAvailable?: boolean;
+  followUpPreview?: string;
   // Pt 7: Graph Query tab — send a refined chip back to the chat.
   onSendToChat?: (text: string) => void;
   // Lightweight question-builder path: build a visual query graph without
@@ -436,6 +478,7 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     agentProgressSteps,
     questionProgressSteps,
     agentSeedNames,
+    agentSourceNames,
     agentBridgeNames,
     agentHubNames,
     agentGaps,
@@ -443,6 +486,8 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     onSynthesisModeChange,
     validateSynthesis,
     onValidateSynthesisChange,
+    followUpAvailable,
+    followUpPreview,
     onSendToChat,
     onBuildQuestionGraph,
     onRerun,
@@ -876,6 +921,7 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
             synthesisMarkdown={agentSynthesisMarkdown}
             progressSteps={agentProgressSteps}
             seedNames={agentSeedNames}
+            sourceNames={agentSourceNames}
             bridgeNames={agentBridgeNames}
             hubNames={agentHubNames}
             gaps={agentGaps}
@@ -883,6 +929,8 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
             onSynthesisModeChange={onSynthesisModeChange}
             validateSynthesis={validateSynthesis}
             onValidateSynthesisChange={onValidateSynthesisChange}
+            followUpAvailable={followUpAvailable}
+            followUpPreview={followUpPreview}
           />
         )}
 
@@ -891,7 +939,7 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           <BrainQuickGraphCard
             query={agentQuery}
             onChange={onAgentQueryChange}
-            onRun={onAgentRun}
+            onRun={() => onAgentRun("new")}
             phase={agentPhase}
             progressSteps={agentProgressSteps}
             disabled={corpusIds.length === 0}
@@ -1140,13 +1188,14 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
 interface AgentSearchTabProps {
   query: string;
   onChange: (q: string) => void;
-  onRun: () => void;
+  onRun: (mode?: GraphRunMode) => void;
   onClear?: () => void;
   phase: "idle" | "loading" | "ready" | "error";
   error?: string | null;
   synthesisMarkdown?: string | null;
   progressSteps?: GraphProgressStep[];
   seedNames?: string[];
+  sourceNames?: string[];
   bridgeNames?: string[];
   hubNames?: string[];
   gaps?: Array<{ entity_a_name?: string; entity_b_name?: string }>;
@@ -1154,6 +1203,8 @@ interface AgentSearchTabProps {
   onSynthesisModeChange?: (m: GraphSynthesisMode) => void;
   validateSynthesis?: boolean;
   onValidateSynthesisChange?: (v: boolean) => void;
+  followUpAvailable?: boolean;
+  followUpPreview?: string;
 }
 
 function AgentSearchTab(props: AgentSearchTabProps) {
@@ -1167,6 +1218,7 @@ function AgentSearchTab(props: AgentSearchTabProps) {
     synthesisMarkdown,
     progressSteps,
     seedNames,
+    sourceNames,
     bridgeNames,
     hubNames,
     gaps,
@@ -1174,6 +1226,8 @@ function AgentSearchTab(props: AgentSearchTabProps) {
     onSynthesisModeChange,
     validateSynthesis = false,
     onValidateSynthesisChange,
+    followUpAvailable = false,
+    followUpPreview = "",
   } = props;
   const canRun = phase !== "loading" && query.trim().length > 0;
   const modeOptions: Array<{
@@ -1218,13 +1272,7 @@ function AgentSearchTab(props: AgentSearchTabProps) {
         </div>
         <GraphProgressNarrator steps={progressSteps} />
         {phase === "ready" && onClear && (
-          <button
-            type="button"
-            onClick={onClear}
-            className="mb-3 w-full rounded-md border border-zinc-800 bg-zinc-950/70 px-3 py-1.5 text-[10px] font-technical uppercase tracking-widest text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-          >
-            Back to Brain
-          </button>
+          <BackToBrainButton onClick={onClear} className="mb-3" />
         )}
         <div className="space-y-3">
           {onSynthesisModeChange && (
@@ -1272,7 +1320,7 @@ function AgentSearchTab(props: AgentSearchTabProps) {
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canRun) {
                 e.preventDefault();
-                onRun();
+                onRun("new");
               }
             }}
             placeholder={
@@ -1284,27 +1332,50 @@ function AgentSearchTab(props: AgentSearchTabProps) {
             }
             className="w-full resize-none rounded-md border border-zinc-800 bg-[#09090f] px-3 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/70 focus:outline-none focus:ring-1 focus:ring-amber-500/20"
           />
-          <button
-            onClick={onRun}
-            disabled={!canRun}
-            aria-busy={phase === "loading"}
-            className={
-              "flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed " +
-              (phase === "loading"
-                ? "border-amber-500/60 bg-amber-500/15 text-amber-100"
-                : "border-amber-500/35 bg-amber-500/10 text-amber-100 hover:border-amber-400/70 hover:bg-amber-500/20 disabled:border-zinc-800 disabled:bg-zinc-900/60 disabled:text-zinc-600")
-            }
-          >
-            {phase === "loading" ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Building Graph
-              </>
-            ) : (
-              <>
-                <Zap className="h-3.5 w-3.5" /> Run Graph Query
-              </>
-            )}
-          </button>
+          {phase === "ready" && followUpAvailable ? (
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => onRun("new")}
+                disabled={!canRun}
+                className="flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-sky-500/35 bg-sky-500/10 px-2 py-2 text-xs font-semibold text-sky-100 transition-all hover:border-sky-300/70 hover:bg-sky-500/18 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900/60 disabled:text-zinc-600"
+                title="Start a clean graph query from the text above"
+              >
+                <PlusCircle className="h-3.5 w-3.5" /> New
+              </button>
+              <button
+                type="button"
+                onClick={() => onRun("followup")}
+                disabled={!canRun}
+                className="flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-amber-500/45 bg-amber-500/12 px-2 py-2 text-xs font-semibold text-amber-100 transition-all hover:border-amber-300/75 hover:bg-amber-500/22 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900/60 disabled:text-zinc-600"
+                title={followUpPreview || "Continue from the last graph answer"}
+              >
+                <GitBranch className="h-3.5 w-3.5" /> Continue
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => onRun("new")}
+              disabled={!canRun}
+              aria-busy={phase === "loading"}
+              className={
+                "flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed " +
+                (phase === "loading"
+                  ? "border-amber-500/60 bg-amber-500/15 text-amber-100"
+                  : "border-amber-500/35 bg-amber-500/10 text-amber-100 hover:border-amber-400/70 hover:bg-amber-500/20 disabled:border-zinc-800 disabled:bg-zinc-900/60 disabled:text-zinc-600")
+              }
+            >
+              {phase === "loading" ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Building Graph
+                </>
+              ) : (
+                <>
+                  <Zap className="h-3.5 w-3.5" /> Run Graph Query
+                </>
+              )}
+            </button>
+          )}
           <div className="min-h-4 text-[10px] text-zinc-500">
             {phase === "loading"
               ? "Building query nodes, edges, and synthesis..."
@@ -1355,13 +1426,18 @@ function AgentSearchTab(props: AgentSearchTabProps) {
                 : "Synthesis"}
           </SectionLabel>
           <div className="rounded border border-zinc-800 bg-[#0d0d14] px-3 py-3 synthesis-body custom-scroll max-h-[70vh] overflow-y-auto">
-            <ReactMarkdown>{synthesisMarkdown || ""}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {synthesisMarkdown || ""}
+            </ReactMarkdown>
           </div>
         </section>
       )}
 
       {phase === "ready" && (seedNames?.length || 0) > 0 && (
         <ChipList label="Seeds" items={seedNames || []} tone="cyan" />
+      )}
+      {phase === "ready" && (sourceNames?.length || 0) > 0 && (
+        <ChipList label="Files used" items={sourceNames || []} tone="emerald" />
       )}
       {phase === "ready" && (bridgeNames?.length || 0) > 0 && (
         <ChipList label="Bridges" items={bridgeNames || []} tone="violet" />
@@ -1402,13 +1478,15 @@ function ChipList({
 }: {
   label: string;
   items: string[];
-  tone: "cyan" | "violet" | "amber";
+  tone: "cyan" | "violet" | "amber" | "emerald";
 }) {
   const toneClass =
     tone === "cyan"
       ? "border-cyan-700/40 bg-cyan-500/5 text-cyan-200"
       : tone === "violet"
         ? "border-violet-700/40 bg-violet-500/5 text-violet-200"
+        : tone === "emerald"
+          ? "border-emerald-700/40 bg-emerald-500/5 text-emerald-200"
         : "border-amber-700/40 bg-amber-500/5 text-amber-200";
   return (
     <section>
@@ -1788,13 +1866,7 @@ function GraphQueryTab({
                 : "fresh run · cached 24h · Ctrl + Enter"}
         </div>
         {graphActive && onClearGraph && (
-          <button
-            type="button"
-            onClick={onClearGraph}
-            className="mt-2 w-full rounded-md border border-zinc-800 bg-zinc-950/70 px-3 py-1.5 text-[10px] font-technical uppercase tracking-widest text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-          >
-            Back to Brain
-          </button>
+          <BackToBrainButton onClick={onClearGraph} className="mt-2" />
         )}
       </section>
 
