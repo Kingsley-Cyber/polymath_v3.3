@@ -89,6 +89,73 @@ _FRONTMATTER_RE = re.compile(r"\A\s*---\s*\n.*?\n---\s*\n", re.DOTALL)
 
 _CHAT_COVERAGE_FACETS: tuple[dict[str, Any], ...] = (
     {
+        "name": "on_device_llm",
+        "label": "on-device AI / local LLM",
+        "triggers": (
+            "on-device ai",
+            "on device ai",
+            "on-device llm",
+            "on device llm",
+            "on-device assistant",
+            "on device assistant",
+            "local llm",
+            "local ai",
+            "small language model",
+            "small language models",
+            "edge inference",
+            "private inference",
+            "local inference",
+            "offline model",
+            "offline ai",
+            "runs on device",
+            "data stays on device",
+        ),
+        "support_terms": (
+            "on-device AI",
+            "on-device LLM",
+            "local LLM",
+            "local AI",
+            "small language model",
+            "edge inference",
+            "private inference",
+            "local inference",
+            "offline model",
+            "mobile AI",
+            "device-local processing",
+            "data stays on device",
+        ),
+    },
+    {
+        "name": "privacy",
+        "label": "privacy / user data control",
+        "triggers": (
+            "privacy",
+            "private",
+            "privacy-preserving",
+            "privacy preserving",
+            "data privacy",
+            "user data",
+            "data stays on device",
+            "local-first",
+            "local first",
+            "data minimization",
+            "consent",
+            "confidential",
+        ),
+        "support_terms": (
+            "privacy",
+            "privacy-preserving",
+            "data privacy",
+            "private user data",
+            "sensitive data",
+            "local-first",
+            "data minimization",
+            "consent",
+            "user data control",
+            "data stays on device",
+        ),
+    },
+    {
         "name": "knowledge_graph",
         "label": "knowledge graph / graph RAG",
         "triggers": (
@@ -284,6 +351,34 @@ _CHAT_COVERAGE_FACETS: tuple[dict[str, Any], ...] = (
             "producer consumer",
         ),
     },
+)
+
+_CHAT_COMPOUND_QUERY_FACET_ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("privacy-preserving on-device ai", ("privacy", "on_device_llm")),
+    ("privacy preserving on device ai", ("privacy", "on_device_llm")),
+    ("privacy-preserving on-device llm", ("privacy", "on_device_llm")),
+    ("privacy preserving on device llm", ("privacy", "on_device_llm")),
+    ("privacy-preserving local llm", ("privacy", "on_device_llm")),
+    ("privacy preserving local llm", ("privacy", "on_device_llm")),
+    ("data stays on device", ("privacy", "on_device_llm")),
+    ("data remains on device", ("privacy", "on_device_llm")),
+    ("keep data on device", ("privacy", "on_device_llm")),
+    ("keeps data on device", ("privacy", "on_device_llm")),
+    ("runs on device", ("on_device_llm",)),
+    ("on-device ai", ("on_device_llm",)),
+    ("on device ai", ("on_device_llm",)),
+    ("on-device llm", ("on_device_llm",)),
+    ("on device llm", ("on_device_llm",)),
+    ("local llm", ("on_device_llm",)),
+    ("small language model", ("on_device_llm",)),
+    ("small language models", ("on_device_llm",)),
+    ("edge inference", ("on_device_llm",)),
+    ("private inference", ("privacy", "on_device_llm")),
+    ("local inference", ("on_device_llm",)),
+    ("privacy-preserving", ("privacy",)),
+    ("privacy preserving", ("privacy",)),
+    ("local-first", ("privacy",)),
+    ("local first", ("privacy",)),
 )
 
 
@@ -1089,34 +1184,93 @@ def _chat_coverage_norm(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
 
 
+def _chat_coverage_facet_definitions() -> dict[str, dict[str, Any]]:
+    return {str(facet.get("name") or ""): facet for facet in _CHAT_COVERAGE_FACETS}
+
+
+def _chat_coverage_query_row(
+    facet: dict[str, Any],
+    *,
+    matched: list[str],
+    source: str,
+    first_match_pos: int,
+) -> dict[str, Any]:
+    triggers = tuple(str(t).lower() for t in facet.get("triggers") or ())
+    return {
+        "name": str(facet.get("name") or ""),
+        "label": str(facet.get("label") or facet.get("name") or ""),
+        "matched": matched[:5],
+        "query_explicit": True,
+        "query_matched": True,
+        "source": source,
+        "first_match_pos": first_match_pos,
+        "support_terms": [str(t) for t in (facet.get("support_terms") or []) if t],
+        "triggers": [str(t) for t in triggers if t],
+    }
+
+
+def _chat_compound_query_facets(query: str) -> list[dict[str, Any]]:
+    """Promote user-written compound ideas into explicit retrieval lanes.
+
+    Dynamic corpus facets are great at finding what exists in the corpus. This
+    layer handles the other side of the contract: phrases the user explicitly
+    asked for, especially multi-word concepts such as "privacy-preserving
+    on-device AI" that should not be demoted to optional dynamic coverage.
+    """
+
+    query_norm = _chat_coverage_norm(query)
+    if not query_norm:
+        return []
+    definitions = _chat_coverage_facet_definitions()
+    rows: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    for phrase, facet_names in _CHAT_COMPOUND_QUERY_FACET_ALIASES:
+        phrase_norm = _chat_coverage_norm(phrase)
+        if not phrase_norm or phrase_norm not in query_norm:
+            continue
+        first_match_pos = query_norm.find(phrase_norm)
+        for facet_name in facet_names:
+            facet = definitions.get(facet_name)
+            if not facet:
+                continue
+            key = (facet_name, phrase_norm)
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+            rows.append(
+                _chat_coverage_query_row(
+                    facet,
+                    matched=[phrase],
+                    source="compound_query_phrase",
+                    first_match_pos=first_match_pos if first_match_pos >= 0 else 999999,
+                )
+            )
+    return rows
+
+
 def _chat_coverage_facets_for_query(query: str) -> list[dict[str, Any]]:
     haystack = str(query or "").lower()
-    facets: list[dict[str, Any]] = []
+    literal_facets: list[dict[str, Any]] = []
     for facet in _CHAT_COVERAGE_FACETS:
         triggers = tuple(str(t).lower() for t in facet.get("triggers") or ())
         matched = [term for term in triggers if term and term in haystack]
         if not matched:
             continue
-        facets.append(
-            {
-                "name": str(facet.get("name") or ""),
-                "label": str(facet.get("label") or facet.get("name") or ""),
-                "matched": matched[:5],
-                "query_explicit": True,
-                "query_matched": True,
-                "source": "query_deconstruction",
-                "first_match_pos": min(
+        literal_facets.append(
+            _chat_coverage_query_row(
+                facet,
+                matched=matched,
+                source="query_deconstruction",
+                first_match_pos=min(
                     [haystack.find(term) for term in matched if haystack.find(term) >= 0]
                     or [999999]
                 ),
-                "support_terms": [
-                    str(t) for t in (facet.get("support_terms") or []) if t
-                ],
-                "triggers": [str(t) for t in triggers if t],
-            }
+            )
         )
-    facets.sort(key=lambda row: (int(row.get("first_match_pos") or 999999), row["name"]))
-    return facets[:8]
+    return _merge_chat_coverage_facets(
+        _chat_compound_query_facets(query),
+        literal_facets,
+    )
 
 
 def _merge_chat_coverage_facets(
@@ -1760,7 +1914,12 @@ def _select_chat_coverage_sources(
 
 
 def _format_chat_coverage_prompt_note(meta: dict[str, Any]) -> str | None:
-    """Compact evidence-coverage contract for the final model call."""
+    """Internal RAG guardrail for the final model call.
+
+    This note is deliberately *not* a user-facing report. It keeps the chat
+    answer honest about weak/missing evidence without priming the model to
+    narrate retrieval lanes the way Graph Query does.
+    """
 
     selected = [str(name) for name in (meta.get("selected_facets") or []) if name]
     breakdown = (
@@ -1788,7 +1947,7 @@ def _format_chat_coverage_prompt_note(meta: dict[str, Any]) -> str | None:
         for name in selected
         if int(lane_counts.get(name, 0) or 0) > 0 and name not in uncovered
     ]
-    lines = ["Evidence coverage note:"]
+    lines = ["Internal RAG evidence guardrail (do not mention this block):"]
     if explicit:
         facet_parts = []
         for row in explicit[:8]:
@@ -1798,25 +1957,42 @@ def _format_chat_coverage_prompt_note(meta: dict[str, Any]) -> str | None:
                 facet_parts.append(f"{name}={status}")
         if facet_parts:
             lines.append(
-                "- Query decomposed into explicit facets: "
+                "- The user question required these evidence areas: "
                 f"{', '.join(facet_parts)}."
             )
     if covered:
-        lines.append(f"- Directly grounded lanes: {', '.join(covered[:8])}.")
+        lines.append(f"- Source-backed areas: {', '.join(covered[:8])}.")
     if weak:
         lines.append(
-            "- Weakly grounded lanes: "
+            "- Weakly source-backed areas: "
             f"{', '.join(dict.fromkeys(weak))}. Treat these as partial evidence."
         )
     if uncovered:
+        uncovered_text = ", ".join(uncovered[:8])
+        lines.append(f"- Not source-backed in this retrieval packet: {uncovered_text}.")
         lines.append(
-            "- Uncovered lanes: "
-            f"{', '.join(uncovered[:8])}. Do not present these as source-backed; "
-            "frame them as design hypotheses, corpus gaps, or integration points."
+            "- HARD LIMIT: the retrieved chunks have no source-backed evidence for "
+            f"these areas: {uncovered_text}."
+        )
+        lines.append(
+            "- Do not state these areas as existing capabilities, proven "
+            "mechanisms, established design facts, or source-backed conclusions."
+        )
+        lines.append(
+            "- If one of these areas matters to the answer, handle it briefly at "
+            "the exact point where the caveat matters. Do not open with a corpus "
+            "audit or a list of covered/uncovered areas."
         )
     lines.append(
-        "- Synthesize cohesively around the evidence that exists. Avoid separate "
-        "ingredient-by-ingredient exposition when the user asks how concepts combine."
+        "- Chat RAG answer rule: answer the user's question directly from the "
+        "retrieved evidence. Do not expose internal terms like facets, lanes, "
+        "coverage contract, packet, retrieval tier, graph query, or chunks unless "
+        "the user explicitly asks about retrieval diagnostics."
+    )
+    lines.append(
+        "- For unsupported requested ideas, use cautious wording such as "
+        "'the retrieved sources do not establish this part' or 'this would need "
+        "additional evidence' only where necessary."
     )
     return "\n".join(lines)
 
@@ -2562,6 +2738,72 @@ POLYMATH_SYSTEM_PROMPT = (
     "(e.g., <GEN>, <USE>).\n"
     "- Default to the KVP list pattern (`**key:** value`) for any factual "
     "rundown of 2-6 attributes. Default heading hierarchy is h2 then h3.\n"
+    "\n"
+    "Agent-Zero-inspired chat render style for RAG answers:\n"
+    "- Treat the answer like compact whiteboard synthesis built from RAG "
+    "evidence, not a graph-query report. Keep it clean, scannable, and "
+    "high-signal.\n"
+    "- Open with the answer's strongest one-sentence synthesis. For complex "
+    "answers this can be a short bold summary sentence; for simple answers, "
+    "just answer plainly.\n"
+    "- Use a descending hierarchy of detail: summary first, then structured "
+    "evidence or comparison if useful, then the reasoning bridge, then "
+    "supporting detail and caveats.\n"
+    "- Use tables first only when the answer contains structured data, "
+    "comparisons, configurations, multiple options, steps, or tradeoffs. Do "
+    "not force tables into plain conceptual explanations.\n"
+    "- Reasoning bridges are welcome when they help: after a factual payload, "
+    "add 1-2 sentences explaining why it matters for the user's question. "
+    "Do not add reasoning bridges to simple answers.\n"
+    "- Use blockquotes only as brief margin annotations, not as another "
+    "generic section. Use horizontal rules only for real topic shifts.\n"
+    "- Put warnings, missing evidence, or failure risks in a compact caveat "
+    "section only when the caveat materially changes the answer.\n"
+    "- Never expose retrieval mechanics unless the user asks for diagnostics: "
+    "do not mention facets, lanes, chunks, packets, graph tiers, coverage "
+    "contracts, or 'the retrieved corpus grounds X lanes' in the final answer.\n"
+    "- Start with a short orientation paragraph that familiarizes dense terms "
+    "and answers the question's core idea. Do not start with a source audit, "
+    "coverage audit, or ingredient checklist.\n"
+    "- Do not use fixed Graph Query section labels such as `Orientation`, "
+    "`Direction`, `Comparative Read`, `Recommended Start`, or `Next "
+    "Questions` unless the user explicitly asks for that template. Choose "
+    "plain content-driven headings that answer the question, such as "
+    "`Core idea`, `How it would work`, `What the evidence supports`, or "
+    "`Limits`.\n"
+    "- For ideation or product/application questions, answer as natural RAG: "
+    "explain the central synthesis first, then give the strongest concrete "
+    "design or reasoning path. Use 2-3 alternatives only when the evidence "
+    "really supports multiple paths.\n"
+    "- For app, product, prototype, architecture, or research-design queries, "
+    "prefer pressure-tested synthesis over a pure concept pitch. After the "
+    "core answer, include what works, what is under-specified, feasibility "
+    "risks, validation needs, and the smallest credible prototype path.\n"
+    "- When a design touches several domains, a compact table is often the "
+    "best first payload: columns like `Component`, `Strength`, `Weakness`, "
+    "`What to validate`, or `Implementation note`. Follow it with prose that "
+    "weaves the pieces together.\n"
+    "- Break ambitious concepts into sub-problems when that makes the answer "
+    "more actionable: research validity, engineering feasibility, UX pattern, "
+    "privacy/data boundary, and minimum viable prototype.\n"
+    "- Use existing conversation context when it is clearly relevant to the "
+    "user's current idea. Connect to prior named concepts or architecture only "
+    "if they are present in the conversation or retrieved evidence; do not "
+    "invent private project history.\n"
+    "- For psychometrics, assessment, identity, or AI-personalization ideas, "
+    "include a validation path when relevant: reliability, convergent validity, "
+    "human review/coding, measurement drift, hallucination control, and what "
+    "would count as a credible pilot.\n"
+    "- Include minimal concrete examples when useful, but keep them grounded "
+    "in retrieved evidence. Keep bullets compact and avoid template filler.\n"
+    "- End with follow-on questions only when they naturally help the user "
+    "continue the work.\n"
+    "- Do not use emoji as decoration. Use bold sparingly as the thick-marker "
+    "takeaway stroke: one sentence, one key term, or one decision label.\n"
+    "- If the internal RAG guardrail says an idea is weakly supported or "
+    "unsupported, do not turn that into a retrieval-status section. Instead, "
+    "avoid overclaiming and add a concise caveat exactly where the unsupported "
+    "claim would otherwise appear.\n"
     "\n"
     "Sound like a smart friend explaining, not a research assistant producing "
     "a report."

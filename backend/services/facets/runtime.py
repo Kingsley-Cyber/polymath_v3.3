@@ -248,6 +248,7 @@ async def matching_ingest_facets(
                     "label": str(facet.get("display_name") or facet_id.replace("_", " ")),
                     "matched": matched,
                     "query_matched": True,
+                    "query_explicit": True,
                     "first_match_pos": first_pos,
                     "support_terms": support_terms,
                     "triggers": support_terms,
@@ -422,6 +423,7 @@ async def matching_vector_facets(
                     first_pos = min(positions)
             vector_score = round(score * 10.0, 3)
             row_score = max(float(lexical_score or 0.0), vector_score)
+            query_explicit = float(lexical_score or 0.0) >= 4.0
             doc_ref = {
                 "doc_id": doc_id,
                 "corpus_id": str(doc.get("corpus_id") or payload.get("corpus_id") or ""),
@@ -434,6 +436,7 @@ async def matching_vector_facets(
                     "label": str(facet.get("display_name") or facet_id.replace("_", " ")),
                     "matched": matched[:5],
                     "query_matched": True,
+                    "query_explicit": query_explicit,
                     "semantic_matched": True,
                     "first_match_pos": first_pos,
                     "support_terms": support_terms,
@@ -453,6 +456,9 @@ async def matching_vector_facets(
                     float(existing.get("vector_score") or 0.0), round(score, 4)
                 )
                 existing["vector_hits"] = int(existing.get("vector_hits") or 0) + 1
+                existing["query_explicit"] = bool(
+                    existing.get("query_explicit") or query_explicit
+                )
                 if doc_id not in existing["facet_doc_ids"]:
                     existing["facet_doc_ids"].append(doc_id)
                     existing["facet_docs"].append(doc_ref)

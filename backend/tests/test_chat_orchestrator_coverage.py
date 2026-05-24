@@ -7,6 +7,7 @@ os.environ.setdefault("AUTH_SECRET_KEY", "test-auth-secret-key")
 os.environ.setdefault("DEFAULT_ADMIN_PASSWORD", "test-admin-password")
 
 import services.chat_orchestrator as chat_module
+from services.facets.runtime import matching_ingest_facets
 from models.schemas import RetrievalResult, RetrievalTier, SourceChunk
 
 
@@ -34,6 +35,71 @@ def _chunk(
         metadata=metadata or {},
         provenance=[{"retriever": source_tier}],
     )
+
+
+class _FakeFacetCursor:
+    def __init__(self, rows):
+        self.rows = rows
+
+    async def to_list(self, length=None):
+        return list(self.rows)
+
+
+class _FakeFacetCollection:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def find(self, *args, **kwargs):
+        return _FakeFacetCursor(self.rows)
+
+
+class _FakeFacetDb:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def __getitem__(self, name):
+        assert name == "documents"
+        return _FakeFacetCollection(self.rows)
+
+
+@pytest.mark.asyncio
+async def test_named_ingest_facets_are_query_explicit():
+    rows = await matching_ingest_facets(
+        _FakeFacetDb(
+            [
+                {
+                    "doc_id": "cooperative-doc",
+                    "corpus_id": "c1",
+                    "filename": "Identifying_Cooperative_Personalities.md",
+                    "facet_profile": {
+                        "doc_facets": [
+                            {
+                                "facet_id": "cooperative_personality",
+                                "display_name": "Cooperative Personality",
+                                "aliases": ["team roles", "multi-agent cooperation"],
+                                "search_terms": ["cooperative personality"],
+                            },
+                            {
+                                "facet_id": "interpersonal_perception",
+                                "display_name": "Interpersonal Perception",
+                                "aliases": ["person perception", "perceiving others"],
+                                "search_terms": ["interpersonal perception"],
+                            },
+                        ]
+                    },
+                }
+            ]
+        ),
+        (
+            "How could cooperative personality and interpersonal perception "
+            "shape a personal reflection app?"
+        ),
+        ["c1"],
+    )
+    by_name = {row["name"]: row for row in rows}
+
+    assert by_name["cooperative_personality"]["query_explicit"] is True
+    assert by_name["interpersonal_perception"]["query_explicit"] is True
 
 
 @pytest.mark.asyncio
@@ -246,6 +312,124 @@ def test_chat_evidence_cleaner_strips_frontmatter():
     assert meta["cleaned_frontmatter"] == 1
 
 
+def test_compound_query_phrase_promotes_privacy_and_on_device_lanes():
+    facets = chat_module._chat_coverage_facets_for_query(
+        "How could privacy-preserving on-device AI help users reflect locally?"
+    )
+    by_name = {facet["name"]: facet for facet in facets}
+
+    assert by_name["privacy"]["query_explicit"] is True
+    assert by_name["on_device_llm"]["query_explicit"] is True
+    assert by_name["privacy"]["source"] in {
+        "compound_query_phrase",
+        "query_deconstruction",
+    }
+    assert by_name["on_device_llm"]["source"] in {
+        "compound_query_phrase",
+        "query_deconstruction",
+    }
+    assert "privacy-preserving on-device ai" in [
+        str(term).lower() for term in by_name["privacy"]["matched"]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chat_semantic_coverage_forces_compound_privacy_on_device_lanes(monkeypatch):
+    base_sources = [
+        _chunk(
+            "measurement-1",
+            doc_id="measurement.md",
+            text="Psychometric assessment can use scenario choices and values.",
+        )
+    ]
+
+    async def fake_retrieve(**kwargs):
+        query = kwargs["query"].lower()
+        if "on-device" in query or "local llm" in query or "local inference" in query:
+            chunks = [
+                _chunk(
+                    "on-device-1",
+                    doc_id="on_device_llm_architecture_guide.md",
+                    text=(
+                        "On-device LLM architecture uses local inference and a "
+                        "small language model so sensitive data stays on device."
+                    ),
+                    metadata={
+                        "semantic_facets": {
+                            "facet_ids": ["on_device_llm_architecture"],
+                            "content_facet_ids": ["on_device_llm", "privacy"],
+                            "content_facet_text": "on device llm privacy",
+                        }
+                    },
+                )
+            ]
+        elif "privacy" in query or "data privacy" in query:
+            chunks = [
+                _chunk(
+                    "privacy-1",
+                    doc_id="privacy.md",
+                    text=(
+                        "Privacy-preserving systems keep private user data local, "
+                        "minimize collection, and require consent."
+                    ),
+                    metadata={
+                        "semantic_facets": {
+                            "facet_ids": ["privacy"],
+                            "content_facet_ids": ["privacy", "on_device_llm"],
+                            "content_facet_text": "privacy on device llm",
+                        }
+                    },
+                )
+            ]
+        else:
+            chunks = []
+        return RetrievalResult(
+            chunks=chunks,
+            requested_tier=kwargs["retrieval_tier"],
+            effective_tier=kwargs["retrieval_tier"],
+        )
+
+    async def fake_facets(query, corpus_ids):
+        return chat_module._chat_coverage_facets_for_query(query)
+
+    monkeypatch.setattr(
+        chat_module,
+        "_chat_coverage_facets_for_query_with_corpus",
+        fake_facets,
+    )
+    monkeypatch.setattr(chat_module.retriever_orchestrator, "retrieve", fake_retrieve)
+
+    merged, meta = await chat_module._enforce_chat_query_coverage(
+        original_query=(
+            "How could privacy-preserving on-device AI support a personal "
+            "reflection app without reducing someone to behavior data?"
+        ),
+        retrieval_query="same",
+        sources=base_sources,
+        corpus_ids=["c1"],
+        retrieval_tier=RetrievalTier.qdrant_mongo,
+        collections=None,
+        retrieval_k=40,
+        rerank_enabled=True,
+        top_k_summary=12,
+        rerank_top_n=24,
+        similarity_threshold=None,
+        neo4j_expansion_cap=None,
+        max_corpora_per_query=None,
+        fact_seed_limit=None,
+        final_top_k=8,
+        search_mode="local",
+    )
+
+    assert {"privacy", "on_device_llm"} <= set(meta["selected_facets"])
+    assert {"privacy", "on_device_llm"} <= set(meta["explicit_missing_facets"])
+    assert {"facet:privacy", "facet:on_device_llm"} <= set(meta["support_lanes"])
+    assert {chunk.doc_id for chunk in merged} >= {
+        "privacy.md",
+        "on_device_llm_architecture_guide.md",
+    }
+
+
 def test_chat_support_chunk_score_is_selection_score_not_support_query_score():
     chunk = _chunk(
         "support-1",
@@ -308,10 +492,42 @@ def test_chat_coverage_prompt_note_names_uncovered_and_weak_lanes():
     )
 
     assert note is not None
-    assert "Query decomposed into explicit facets" in note
-    assert "Uncovered lanes: knowledge_graph" in note
-    assert "Weakly grounded lanes: user_modeling" in note
-    assert "Do not present these as source-backed" in note
+    assert "Internal RAG evidence guardrail" in note
+    assert "do not mention this block" in note
+    assert "required these evidence areas" in note
+    assert "Not source-backed in this retrieval packet: knowledge_graph" in note
+    assert "Weakly source-backed areas: user_modeling" in note
+    assert "HARD LIMIT" in note
+    assert "no source-backed evidence" in note
+    assert "Do not state these areas as existing capabilities" in note
+    assert "Do not expose internal terms like facets, lanes" in note
+    assert "Do not open with a corpus audit" in note
+
+
+def test_system_prompt_includes_agent_zero_chat_rag_shape():
+    prompt = chat_module._build_polymath_system_prompt()
+
+    assert "Agent-Zero-inspired chat render style" in prompt
+    assert "high-signal" in prompt
+    assert "strongest one-sentence synthesis" in prompt
+    assert "Use tables first only when" in prompt
+    assert "Reasoning bridges are welcome" in prompt
+    assert "blockquotes only as brief margin annotations" in prompt
+    assert "short orientation paragraph" in prompt
+    assert "not a graph-query report" in prompt
+    assert "Never expose retrieval mechanics" in prompt
+    assert "Do not use fixed Graph Query section labels" in prompt
+    assert "content-driven headings" in prompt
+    assert "natural RAG" in prompt
+    assert "pressure-tested synthesis" in prompt
+    assert "what works, what is under-specified" in prompt
+    assert "smallest credible prototype path" in prompt
+    assert "Break ambitious concepts into sub-problems" in prompt
+    assert "Use existing conversation context" in prompt
+    assert "convergent validity" in prompt
+    assert "`Orientation`" in prompt
+    assert "`Direction`" in prompt
+    assert "do not turn that into a retrieval-status section" in prompt
 
 
 @pytest.mark.asyncio
