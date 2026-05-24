@@ -640,8 +640,8 @@ Mongo + Qdrant write so vector RAG works for them. Tally per doc lives on
   Identical queries return in < 1s.
 - **Moving machines does not require re-ingestion if you move the runtime
   stores.** Stop the stack and copy Mongo, Qdrant, and Neo4j from
-  `POLYMATH_DOCKER_DATA_ROOT`; see `docs/deployment-portability.md`. Today
-  that is a whole-runtime mount, not a raw single-corpus folder copy.
+  `POLYMATH_DOCKER_DATA_ROOT`. Today that is a whole-runtime mount, not a raw
+  single-corpus folder copy.
 - **MCP agents can choose retrieval, chat, graph maps, graph synthesis, or
   contextual question building.** The sidecar exposes cross-corpus search,
   `/api/chat` equivalent querying with the current retrieval/web/reasoning

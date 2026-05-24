@@ -15,6 +15,14 @@ graphify-out/cache/
 # Personal scratch — session notes, ad-hoc smoke runs, etc.
 backend/TEST/
 A0_2/
+docs/
+polymath-foundry/
+a0-model-provider-streaming-architecture.md
+a0-streaming-normalizer (1).py
+a0-synthesis-style-guide.md
+obscura-native-embed-architecture.md
+polymath-rag-web-architecture.md
+commit_history.md
 .DS_Store
 Thumbs.db
 
