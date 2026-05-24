@@ -1385,8 +1385,32 @@ export interface McpInfo {
   host: string;
   require_auth: boolean;
   has_api_key: boolean;
+  has_static_api_key?: boolean;
+  has_user_api_key?: boolean;
+  user_api_key_count?: number;
+  supports_user_api_keys?: boolean;
   default_top_k: number;
   tools: Array<{ name: string; description: string }>;
+}
+
+export interface McpApiKeyPublic {
+  key_id: string;
+  name: string;
+  prefix: string;
+  created_at: string | null;
+  last_used_at: string | null;
+  revoked_at?: string | null;
+  scope: "user" | string;
+}
+
+export interface McpApiKeyCreated {
+  key_id: string;
+  name: string;
+  api_key: string;
+  prefix: string;
+  created_at: string;
+  restart_required: boolean;
+  scope: "user" | string;
 }
 
 export async function getModelsSettings(): Promise<import("../types").ModelsConfig> {
@@ -1514,6 +1538,23 @@ export async function deleteSkill(skillId: string): Promise<{ success: boolean }
 
 export async function getMcpInfo(): Promise<McpInfo> {
   return fetchJSON("/mcp/info");
+}
+
+export async function listMcpApiKeys(): Promise<{ keys: McpApiKeyPublic[] }> {
+  return fetchJSON("/mcp/api-keys");
+}
+
+export async function createMcpApiKey(name?: string): Promise<{ key: McpApiKeyCreated }> {
+  return fetchJSON("/mcp/api-keys", {
+    method: "POST",
+    body: JSON.stringify({ name: name || "MCP key" }),
+  });
+}
+
+export async function revokeMcpApiKey(keyId: string): Promise<{ key_id: string; revoked: boolean }> {
+  return fetchJSON(`/mcp/api-keys/${encodeURIComponent(keyId)}`, {
+    method: "DELETE",
+  });
 }
 
 export interface PortabilityImportResponse {

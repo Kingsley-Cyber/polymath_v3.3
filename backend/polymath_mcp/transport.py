@@ -25,7 +25,7 @@ from starlette.responses import JSONResponse, Response
 from .auth import (
     extract_bearer_token,
     set_current_user_id,
-    validate_token,
+    validate_token_async,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         token = extract_bearer_token(request.headers.get("authorization"))
-        user_id = validate_token(token)
+        user_id = await validate_token_async(token)
 
         if user_id is None and settings.MCP_REQUIRE_AUTH:
             return JSONResponse(

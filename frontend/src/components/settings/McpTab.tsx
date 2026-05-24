@@ -2,9 +2,8 @@
 //
 // Surfaces the Polymath MCP server's connection details so users can paste
 // ready-to-use config snippets into Claude Desktop, Cursor, or other MCP
-// clients. The actual MCP_API_KEY is NEVER returned by the API — we only
-// show whether one is set, and the user copies the snippet then substitutes
-// their own token.
+// clients. User-scoped MCP keys are shown once at generation time; saved keys
+// are listed only by metadata/prefix.
 //
 // Inspired by Agent Zero's "External MCP Servers" surface, adapted to
 // Polymath's stack.
@@ -20,22 +19,34 @@ import {
   KeyRound,
   Zap,
   Wrench,
+  Trash2,
 } from "lucide-react";
 import * as api from "../../lib/api";
-import type { McpInfo } from "../../lib/api";
+import type { McpApiKeyCreated, McpApiKeyPublic, McpInfo } from "../../lib/api";
 
 export function McpTab() {
   const [info, setInfo] = useState<McpInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [keys, setKeys] = useState<McpApiKeyPublic[]>([]);
+  const [generatedKey, setGeneratedKey] = useState<McpApiKeyCreated | null>(null);
+  const [keyName, setKeyName] = useState("Desktop MCP key");
+  const [generating, setGenerating] = useState(false);
+  const [revoking, setRevoking] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const data = await api.getMcpInfo();
-        if (!cancelled) setInfo(data);
+        const [data, keyData] = await Promise.all([
+          api.getMcpInfo(),
+          api.listMcpApiKeys().catch(() => ({ keys: [] })),
+        ]);
+        if (!cancelled) {
+          setInfo(data);
+          setKeys(keyData.keys || []);
+        }
       } catch (err) {
         if (!cancelled)
           setError(err instanceof Error ? err.message : "Failed to load MCP info");
@@ -55,6 +66,41 @@ export function McpTab() {
       setTimeout(() => setCopied(null), 1500);
     } catch (e) {
       console.warn("clipboard write failed:", e);
+    }
+  };
+
+  const handleGenerateKey = async () => {
+    setGenerating(true);
+    setError(null);
+    try {
+      const result = await api.createMcpApiKey(keyName);
+      setGeneratedKey(result.key);
+      const keyData = await api.listMcpApiKeys();
+      setKeys(keyData.keys || []);
+      const nextInfo = await api.getMcpInfo();
+      setInfo(nextInfo);
+      await handleCopy(result.key.api_key, "generated-key");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate MCP key");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleRevokeKey = async (keyId: string) => {
+    setRevoking(keyId);
+    setError(null);
+    try {
+      await api.revokeMcpApiKey(keyId);
+      const keyData = await api.listMcpApiKeys();
+      setKeys(keyData.keys || []);
+      const nextInfo = await api.getMcpInfo();
+      setInfo(nextInfo);
+      if (generatedKey?.key_id === keyId) setGeneratedKey(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to revoke MCP key");
+    } finally {
+      setRevoking(null);
     }
   };
 
@@ -79,6 +125,13 @@ export function McpTab() {
   }
 
   // ── Connection snippet generators ───────────────────────────────────
+  const authToken = generatedKey?.api_key || "YOUR_MCP_API_KEY";
+  const hasUserKeys = Boolean(info.has_user_api_key || keys.length);
+  const apiKeyStatus = info.has_static_api_key
+    ? "static .env key configured"
+    : hasUserKeys
+      ? `${keys.length} user key${keys.length === 1 ? "" : "s"} active`
+      : "no key yet";
   const claudeDesktopSnippet = JSON.stringify(
     {
       mcpServers: {
@@ -86,7 +139,7 @@ export function McpTab() {
           type: info.transport === "stdio" ? "stdio" : "streamable-http",
           url: `${info.url}/mcp/`,
           ...(info.require_auth && {
-            headers: { Authorization: "Bearer YOUR_MCP_API_KEY" },
+            headers: { Authorization: `Bearer ${authToken}` },
           }),
         },
       },
@@ -103,7 +156,7 @@ export function McpTab() {
             transport: "streamable-http",
             url: `${info.url}/mcp/`,
             ...(info.require_auth && {
-              headers: { Authorization: "Bearer YOUR_MCP_API_KEY" },
+              headers: { Authorization: `Bearer ${authToken}` },
             }),
           },
         },
@@ -115,7 +168,7 @@ export function McpTab() {
 
   const curlSnippet = `curl -X POST "${info.url}/mcp/" \\
   -H "Content-Type: application/json" \\
-  ${info.require_auth ? `-H "Authorization: Bearer YOUR_MCP_API_KEY" \\\n  ` : ""}-d '{"jsonrpc":"2.0","method":"tools/list","id":1}'`;
+  ${info.require_auth ? `-H "Authorization: Bearer ${authToken}" \\\n  ` : ""}-d '{"jsonrpc":"2.0","method":"tools/list","id":1}'`;
 
   return (
     <div className="space-y-8">
@@ -173,9 +226,7 @@ export function McpTab() {
           <span
             className={info.has_api_key ? "text-emerald-400" : "text-amber-400"}
           >
-            {info.has_api_key
-              ? "configured (in .env as MCP_API_KEY)"
-              : "not set — using JWT auth only"}
+            {apiKeyStatus}
           </span>
 
           <span className="text-gray-500 uppercase tracking-widest text-[10px]">
@@ -190,14 +241,110 @@ export function McpTab() {
         <div className="flex items-start gap-3 border border-amber-400/30 bg-amber-400/5 px-4 py-3 rounded-lg">
           <KeyRound className="w-4 h-4 text-amber-300 mt-0.5 shrink-0" />
           <div className="text-[12px] text-amber-100/90 leading-relaxed">
-            <span className="font-bold">Auth is on.</span> Replace{" "}
-            <code className="font-mono text-amber-300">YOUR_MCP_API_KEY</code> in
-            the snippets below with the value of{" "}
-            <code className="font-mono text-amber-300">MCP_API_KEY</code> from
-            your <code className="font-mono">.env</code>. To rotate it, edit{" "}
-            <code className="font-mono">.env</code> and restart the backend
-            container. Setting <code className="font-mono">MCP_REQUIRE_AUTH=false</code>{" "}
-            disables auth (only safe for trusted local dev).
+            <span className="font-bold">Auth is on.</span> Generate a user-scoped
+            key below, then paste it into the snippets. User keys are stored
+            hashed, shown once, and work immediately without editing{" "}
+            <code className="font-mono">.env</code>. Static{" "}
+            <code className="font-mono text-amber-300">MCP_API_KEY</code> is still
+            supported for trusted system agents.
+          </div>
+        </div>
+      )}
+
+      {/* User-scoped API key generator */}
+      {info.require_auth && (
+        <div className="bg-[#2a2a2a] border border-white/5 rounded-lg p-5 space-y-4">
+          <h3 className="text-[15px] font-semibold text-white flex items-center gap-2">
+            <KeyRound size={16} className="text-amber-300" />
+            MCP API Keys
+          </h3>
+          <p className="text-[12px] text-gray-500 leading-relaxed">
+            Generate a bearer key for Claude, Cursor, OpenClaw, or another MCP
+            client. These keys are scoped to your user account and your allowed
+            corpora.
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              value={keyName}
+              onChange={(e) => setKeyName(e.target.value)}
+              className="flex-1 bg-[#1a1a1a] border border-white/10 rounded px-3 py-2 text-[12px] text-white outline-none focus:border-cyan-400/60"
+              placeholder="Key name"
+            />
+            <button
+              type="button"
+              onClick={handleGenerateKey}
+              disabled={generating}
+              className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded bg-cyan-500/15 border border-cyan-400/30 text-cyan-100 text-[12px] hover:bg-cyan-500/25 disabled:opacity-60"
+            >
+              {generating ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <KeyRound className="w-3.5 h-3.5" />
+              )}
+              Generate key
+            </button>
+          </div>
+
+          {generatedKey && (
+            <div className="border border-emerald-400/25 bg-emerald-400/5 rounded-lg p-3 space-y-2">
+              <div className="text-[12px] text-emerald-200 font-semibold">
+                New key created. Copy it now; it will not be shown again.
+              </div>
+              <div className="flex items-center gap-2 bg-[#111] border border-white/10 rounded px-3 py-2">
+                <code className="flex-1 min-w-0 font-mono text-[11px] text-emerald-100 break-all">
+                  {generatedKey.api_key}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(generatedKey.api_key, "generated-key")}
+                  className="shrink-0 inline-flex items-center gap-1 text-[11px] text-emerald-200 hover:text-white"
+                >
+                  {copied === "generated-key" ? (
+                    <Check className="w-3.5 h-3.5" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                  {copied === "generated-key" ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {keys.length === 0 ? (
+              <div className="text-[11px] text-gray-500">
+                No user-scoped MCP keys yet.
+              </div>
+            ) : (
+              keys.map((key) => (
+                <div
+                  key={key.key_id}
+                  className="flex items-center gap-3 px-3 py-2 bg-[#1a1a1a] border border-white/5 rounded"
+                >
+                  <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] text-white">{key.name}</div>
+                    <div className="text-[11px] text-gray-500 font-mono">
+                      {key.prefix}… · created {key.created_at || "unknown"}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRevokeKey(key.key_id)}
+                    disabled={revoking === key.key_id}
+                    className="inline-flex items-center gap-1 text-[11px] text-red-300 hover:text-red-100 disabled:opacity-60"
+                  >
+                    {revoking === key.key_id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3.5 h-3.5" />
+                    )}
+                    Revoke
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}

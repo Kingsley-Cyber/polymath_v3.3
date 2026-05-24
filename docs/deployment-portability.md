@@ -178,10 +178,18 @@ Agent-facing tools:
 
 - `polymath_list_corpora`: discover accessible corpora.
 - `polymath_cross_corpus_search`: retrieve evidence chunks across one, many, or
-  all accessible corpora.
+  all accessible corpora, with the same vector, hybrid, Graph Augmented,
+  rerank, search-mode, and final chunk-budget knobs as chat.
 - `polymath_chat_query`: ask the same chat pipeline used by `/api/chat` and get
-  a compact non-streamed answer plus source previews.
-- `polymath_graph_query`: run Mission Control graph synthesis for a corpus.
+  a compact non-streamed answer plus source previews, trace events, optional
+  skill/tool activation, web-search controls, and reasoning-cascade metadata.
+- `polymath_graph_query`: run Mission Control graph synthesis across one or
+  more corpora in `research`, `nuance`, or `ideation` mode.
+- `polymath_graph_map_query`: run the lightweight graph canvas query
+  (`/api/graph/query`) and return nodes, links, seeds, bridges, hubs, and gaps
+  without synthesis.
+- `polymath_graph_question_suggestions`: run the lighter contextual question
+  builder (`/api/graph/refine`) for RAG, research, nuance, and ideation prompts.
 - `polymath_get_chunk_extraction`: inspect extracted entities/relations for a
   chunk.
 - `polymath_search_entities` and `polymath_get_entity_relations`: traverse the

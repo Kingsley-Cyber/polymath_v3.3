@@ -106,6 +106,31 @@ def validate_token(token: str | None) -> Optional[str]:
     return token_data.user_id
 
 
+async def validate_token_async(token: str | None) -> Optional[str]:
+    """Validate bearer token, including database-backed user MCP keys.
+
+    The sync `validate_token` path handles the legacy static MCP_API_KEY and
+    normal JWTs. User-generated MCP keys live in MongoDB, so the HTTP
+    middleware calls this async wrapper.
+    """
+    user_id = validate_token(token)
+    if user_id is not None:
+        return user_id
+    if not token:
+        return None
+    db = conversation_service._db
+    if db is None:
+        logger.warning("MCP auth: MongoDB not connected; cannot validate user key")
+        return None
+    try:
+        from .key_store import validate_user_mcp_key
+
+        return await validate_user_mcp_key(db, token)
+    except Exception as exc:
+        logger.warning("MCP auth: user key validation failed: %s", exc)
+        return None
+
+
 async def allowed_corpus_ids(user_id: Optional[str]) -> set[str]:
     """Resolve user_id → set of allowed corpus_ids.
 

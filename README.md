@@ -57,8 +57,132 @@ It runs end-to-end on a single workstation with one GPU. Cloud LLMs are
 optional and routed through a wildcard LiteLLM proxy so you can pick any
 provider per query.
 
-**It is not** a chatbot, a vector-search-only RAG, or a one-prompt summarizer.
-It tries to behave like a research assistant who has actually read the corpus.
+**It is not just** a chatbot, a vector-search-only RAG, or a one-prompt
+summarizer. It tries to behave like a research assistant who has actually read
+the corpus.
+
+---
+
+## Current build highlights
+
+The latest repo history is summarized in [`commit_history.md`](commit_history.md).
+Recent work focused on making the app feel less like a generic RAG demo and
+more like a research workbench:
+
+| Area | Current capability |
+|---|---|
+| **Chat RAG** | Agent-Zero-inspired synthesis style, live reasoning streams, source-aware rendering, and pressure-tested answers for design/research questions. |
+| **Retrieval** | Vector, hybrid, and graph-augmented tiers with reranking, HyDE controls, facet-aware coverage, and evidence provenance. |
+| **Graph Query** | Query-specific graph views, evidence packets for research/nuance/ideation, bridges/gaps/hubs, and richer graph visualization controls. |
+| **Model routing** | LiteLLM wildcard routing with DeepSeek, GLM 5.1, MiMo, OpenRouter, Anthropic, OpenAI, Gemini, Mistral, Ollama, and custom providers. |
+| **Web RAG** | Optional live-web retrieval with cache, trust signals, reranking, and visible trace events. |
+
+---
+
+## Download & install
+
+Polymath does not ship as a signed `.exe` or `.dmg` installer yet. The supported
+download is the GitHub repo, then the platform installer script. You can use
+Git or GitHub's green **Code -> Download ZIP** button.
+
+| Platform | Recommended path | Best for |
+|---|---|---|
+| **Windows 11** | Docker Desktop + PowerShell bootstrap | NVIDIA / WSL2 workstation installs |
+| **Apple Silicon Mac** | Docker core + host-native MLX sidecars | M1/M2/M3/M4 Macs where Docker cannot access the Apple GPU |
+| **Linux / NVIDIA** | Docker Compose + bash bootstrap | Single-GPU Linux boxes or servers |
+
+### Windows 11 install
+
+Prerequisites:
+
+- Docker Desktop with WSL2 enabled
+- Git for Windows
+- PowerShell 7 or Windows PowerShell
+- NVIDIA driver if you want the local embedder/reranker GPU profile
+- A fast SSD path for runtime data, defaulting to `C:\PolymathRuntime`
+
+```powershell
+# 1. Download
+git clone https://github.com/Kingsley-Cyber/polymath_v3.3.git
+cd polymath_v3.3
+
+# 2. Create .env, secrets, runtime folders, LiteLLM config, and local model folders
+.\scripts\bootstrap-runtime.ps1 -GenerateSecrets -StageModels
+
+# 3. Add at least one model provider key to .env
+# Example keys supported: DEEPSEEK_API_KEY, OPENAI_API_KEY,
+# ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, Z_AI_API_KEY.
+notepad .env
+
+# 4. Validate before startup
+.\scripts\check-install.ps1
+
+# 5. Start Polymath
+docker compose up -d --build
+
+# 6. Verify and open
+.\scripts\check-install.ps1 -CheckRunning
+Start-Process http://localhost:3000
+```
+
+If model staging fails because Hugging Face is unavailable, rerun the bootstrap
+without `-StageModels` and use a cloud provider key first. You can stage local
+models later.
+
+### Apple Silicon Mac install
+
+Apple GPUs are not exposed to Docker Desktop. On M-series Macs, the core app
+still runs in Docker, but embeddings/reranking/parsing run as host-native MLX
+sidecars.
+
+Prerequisites:
+
+- Apple Silicon Mac (`arm64`)
+- Docker Desktop for Mac, running
+- Git and command-line tools (`xcode-select --install` if needed)
+- Homebrew is recommended but not strictly required
+- A fast local runtime path, defaulting to `~/PolymathRuntime`
+
+```bash
+# 1. Download
+git clone https://github.com/Kingsley-Cyber/polymath_v3.3.git
+cd polymath_v3.3
+
+# 2. One-shot Apple setup:
+#    - bootstraps .env and runtime folders
+#    - installs host-native MLX sidecars
+#    - pulls MLX embed/rerank models
+#    - writes a launchd service
+#    - starts Docker with the Apple override
+#    - smoke-tests embeddings and reranking
+bash scripts/setup_apple_mlx.sh
+
+# 3. Add a chat/synthesis provider key if you have not already
+nano .env
+
+# 4. Open
+open http://localhost:3000
+```
+
+Manual Apple mode is also available:
+
+```bash
+bash scripts/install_apple_mlx_runtime.sh
+docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build
+bash scripts/smoke_apple_mlx.sh
+```
+
+### Linux / NVIDIA install
+
+```bash
+git clone https://github.com/Kingsley-Cyber/polymath_v3.3.git
+cd polymath_v3.3
+bash scripts/bootstrap-runtime.sh --generate-secrets --stage-models
+bash scripts/check-install.sh
+docker compose up -d --build
+bash scripts/check-install.sh --check-running
+xdg-open http://localhost:3000
+```
 
 ---
 
@@ -127,12 +251,14 @@ ChatGPT-style reading flow.
 
 ---
 
-## Quickstart (the happy path)
+## Advanced quickstart (reference NVIDIA rig)
 
 > **Reference rig:** Windows 11 / Linux x86_64, NVIDIA GPU with ≥ 8 GB VRAM
 > (RTX 3090, 4070, A4000, RTX Pro Blackwell, etc.), Docker Desktop with WSL2
 > or Linux Docker Engine, 32 GB RAM, fast SSD. The system runs lighter than
-> this — see "Cross-device setup" below for slimmed configs.
+> this — see "Cross-device setup" below for slimmed configs. If you only want
+> the install commands, use "Download & install" above; this section explains
+> the longer reference path and first-run signals.
 
 ```bash
 # 1. Clone
@@ -516,9 +642,12 @@ Mongo + Qdrant write so vector RAG works for them. Tally per doc lives on
   stores.** Stop the stack and copy Mongo, Qdrant, and Neo4j from
   `POLYMATH_DOCKER_DATA_ROOT`; see `docs/deployment-portability.md`. Today
   that is a whole-runtime mount, not a raw single-corpus folder copy.
-- **MCP agents can choose retrieval, chat, or graph synthesis.** The sidecar
-  exposes cross-corpus search, `/api/chat` equivalent querying, and Mission
-  Control graph synthesis through the same backend services the UI uses.
+- **MCP agents can choose retrieval, chat, graph maps, graph synthesis, or
+  contextual question building.** The sidecar exposes cross-corpus search,
+  `/api/chat` equivalent querying with the current retrieval/web/reasoning
+  knobs, Mission Control `research` / `nuance` / `ideation` synthesis, the
+  lightweight graph canvas query, and contextual follow-up question generation
+  through the same backend services the UI uses.
 
 ---
 

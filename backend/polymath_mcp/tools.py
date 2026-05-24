@@ -21,7 +21,7 @@ from enum import Enum
 from typing import Any, Literal
 
 from config import get_settings
-from models.schemas import ChatRequest, ModelOverrides, RetrievalTier
+from models.schemas import ChatRequest, GraphQueryRequest, ModelOverrides, RetrievalTier
 from services.graph import neo4j_reader
 from services.ingestion.admission import (
     release_ingest_slot as _release_ingest_slot,
@@ -123,6 +123,16 @@ async def _run_search(
     ],
     top_k: int | None,
     default_to_all: bool,
+    retrieval_k: int | None = None,
+    rerank_enabled: bool = True,
+    top_k_summary: int | None = None,
+    rerank_top_n: int | None = None,
+    similarity_threshold: float | None = None,
+    neo4j_expansion_cap: int | None = None,
+    max_corpora_per_query: int | None = None,
+    final_top_k: int | None = None,
+    fact_seed_limit: int | None = None,
+    search_mode: Literal["local", "global", "auto"] = "local",
 ) -> dict[str, Any]:
     settings = get_settings()
     scoped = await _scope_corpus_ids(corpus_ids, default_to_all=default_to_all)
@@ -136,13 +146,37 @@ async def _run_search(
         }
 
     tier = RetrievalTier(retrieval_tier)
-    k = top_k if top_k is not None else settings.MCP_DEFAULT_TOP_K
+    # `top_k` is the legacy MCP-facing result cap. The retriever's
+    # `retrieval_k` is a pre-rerank pool size, so keep them separate for the
+    # newer coverage/facet-aware retrieval stack.
+    result_cap = final_top_k if final_top_k is not None else (
+        top_k if top_k is not None else settings.MCP_DEFAULT_TOP_K
+    )
+    effective_search_mode = search_mode
+    if search_mode == "auto":
+        try:
+            from services.retriever.search_mode import resolve_search_mode
+
+            effective_search_mode = str(resolve_search_mode("auto", query))
+        except Exception as exc:
+            logger.debug("MCP search_mode auto fallback to local: %s", exc)
+            effective_search_mode = "local"
+
     result = await retriever_orchestrator.retrieve(
         query=query,
         corpus_ids=scoped,
         retrieval_tier=tier,
         collections=None,
-        retrieval_k=k,
+        retrieval_k=retrieval_k,
+        rerank_enabled=rerank_enabled,
+        top_k_summary=top_k_summary,
+        rerank_top_n=rerank_top_n,
+        similarity_threshold=similarity_threshold,
+        neo4j_expansion_cap=neo4j_expansion_cap,
+        max_corpora_per_query=max_corpora_per_query,
+        final_top_k=result_cap,
+        fact_seed_limit=fact_seed_limit,
+        search_mode=effective_search_mode,
     )
     return {
         "chunks": [_json_ready(c) for c in result.chunks],
@@ -150,6 +184,19 @@ async def _run_search(
         "requested_tier": _json_ready(result.requested_tier),
         "effective_tier": _json_ready(result.effective_tier),
         "downgrade_reason": result.downgrade_reason,
+        "retrieval": {
+            "search_mode": effective_search_mode,
+            "requested_search_mode": search_mode,
+            "result_cap": result_cap,
+            "retrieval_k": retrieval_k,
+            "rerank_enabled": rerank_enabled,
+            "top_k_summary": top_k_summary,
+            "rerank_top_n": rerank_top_n,
+            "similarity_threshold": similarity_threshold,
+            "neo4j_expansion_cap": neo4j_expansion_cap,
+            "max_corpora_per_query": max_corpora_per_query,
+            "fact_seed_limit": fact_seed_limit,
+        },
     }
 
 
@@ -160,6 +207,16 @@ async def polymath_search(
         "qdrant_only", "qdrant_mongo", "qdrant_mongo_graph"
     ] = "qdrant_mongo",
     top_k: int | None = None,
+    retrieval_k: int | None = None,
+    rerank_enabled: bool = True,
+    top_k_summary: int | None = None,
+    rerank_top_n: int | None = None,
+    similarity_threshold: float | None = None,
+    neo4j_expansion_cap: int | None = None,
+    max_corpora_per_query: int | None = None,
+    final_top_k: int | None = None,
+    fact_seed_limit: int | None = None,
+    search_mode: Literal["local", "global", "auto"] = "local",
 ) -> dict[str, Any]:
     """Search Polymath corpora and return ranked chunks.
 
@@ -175,7 +232,17 @@ async def polymath_search(
         retrieval_tier: 'qdrant_only' (raw vectors), 'qdrant_mongo' (default;
             vectors + parent hydration), or 'qdrant_mongo_graph' (adds Mode A
             graph expansion; requires use_neo4j=True on every selected corpus).
-        top_k: Override server default (settings.MCP_DEFAULT_TOP_K, default 5).
+        top_k: Legacy result cap alias. Prefer final_top_k for new clients.
+        retrieval_k: Pre-rerank candidate pool size.
+        rerank_enabled: Disable the reranker when False.
+        top_k_summary: Summary-vector gather budget.
+        rerank_top_n: Candidate pool cap before rerank.
+        similarity_threshold: Optional score floor.
+        neo4j_expansion_cap: Graph Augmented expansion cap.
+        max_corpora_per_query: Corpus breadth cap for retrieval.
+        final_top_k: Final result cap after rerank/diversity selection.
+        fact_seed_limit: Graph fact seed budget.
+        search_mode: local | global | auto.
 
     Returns:
         {
@@ -192,6 +259,16 @@ async def polymath_search(
         retrieval_tier=retrieval_tier,
         top_k=top_k,
         default_to_all=True,
+        retrieval_k=retrieval_k,
+        rerank_enabled=rerank_enabled,
+        top_k_summary=top_k_summary,
+        rerank_top_n=rerank_top_n,
+        similarity_threshold=similarity_threshold,
+        neo4j_expansion_cap=neo4j_expansion_cap,
+        max_corpora_per_query=max_corpora_per_query,
+        final_top_k=final_top_k,
+        fact_seed_limit=fact_seed_limit,
+        search_mode=search_mode,
     )
 
 
@@ -202,6 +279,16 @@ async def polymath_cross_corpus_search(
         "qdrant_only", "qdrant_mongo", "qdrant_mongo_graph"
     ] = "qdrant_mongo",
     top_k: int | None = None,
+    retrieval_k: int | None = None,
+    rerank_enabled: bool = True,
+    top_k_summary: int | None = None,
+    rerank_top_n: int | None = None,
+    similarity_threshold: float | None = None,
+    neo4j_expansion_cap: int | None = None,
+    max_corpora_per_query: int | None = None,
+    final_top_k: int | None = None,
+    fact_seed_limit: int | None = None,
+    search_mode: Literal["local", "global", "auto"] = "local",
 ) -> dict[str, Any]:
     """Explicit cross-corpus retrieval tool for agents.
 
@@ -216,6 +303,16 @@ async def polymath_cross_corpus_search(
         retrieval_tier=retrieval_tier,
         top_k=top_k,
         default_to_all=True,
+        retrieval_k=retrieval_k,
+        rerank_enabled=rerank_enabled,
+        top_k_summary=top_k_summary,
+        rerank_top_n=rerank_top_n,
+        similarity_threshold=similarity_threshold,
+        neo4j_expansion_cap=neo4j_expansion_cap,
+        max_corpora_per_query=max_corpora_per_query,
+        final_top_k=final_top_k,
+        fact_seed_limit=fact_seed_limit,
+        search_mode=search_mode,
     )
 
 
@@ -229,8 +326,30 @@ async def polymath_chat_query(
     model: str | None = None,
     query_profile: Literal["fast", "balanced", "thorough", "custom"] | None = None,
     reasoning_mode: str | None = None,
+    reasoning_blend: list[str] | None = None,
+    reasoning_cascade: bool | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
+    hyde_enabled: bool | None = None,
+    hyde_model: str | None = None,
+    rerank_enabled: bool | None = None,
+    retrieval_k: int | None = None,
+    top_k_summary: int | None = None,
+    rerank_top_n: int | None = None,
+    similarity_threshold: float | None = None,
+    neo4j_expansion_cap: int | None = None,
+    max_corpora_per_query: int | None = None,
+    final_top_k: int | None = None,
+    fact_seed_limit: int | None = None,
+    search_mode: Literal["auto", "local", "global"] | None = None,
+    thinking_effort: Literal["none", "low", "medium", "high", "auto"] | None = None,
+    web_search_enabled: bool | None = None,
+    web_fetch_depth: Literal["snippets", "normal", "deep"] | None = None,
+    web_research_mode: bool | None = None,
+    web_youtube_transcripts: bool | None = None,
+    web_max_sources: int | None = None,
+    selected_tools: list[str] | None = None,
+    active_skill_ids: list[str] | None = None,
     max_sources: int = 8,
 ) -> dict[str, Any]:
     """Ask Polymath chat from MCP and return the final non-streamed answer.
@@ -241,16 +360,38 @@ async def polymath_chat_query(
 
     Args:
         message: Natural-language question or instruction.
-        corpus_ids: Optional corpora to ground the answer. Current chat API
-            supports up to 3 corpora per turn; use polymath_cross_corpus_search
-            for broader evidence gathering.
+        corpus_ids: Optional corpora to ground the answer. MCP now follows the
+            live chat API's retrieval settings instead of imposing an old
+            three-corpus sidecar cap.
         retrieval_tier: Retrieval route used by chat.
         conversation_id: Optional existing chat conversation id.
         model: Optional concrete model/pool/profile override.
         query_profile: fast | balanced | thorough | custom.
         reasoning_mode: Optional Polymath reasoning mode.
+        reasoning_blend: Optional list of raw reasoning modes to blend.
+        reasoning_cascade: Run the optional evidence pre-digest when true.
         temperature: Optional model temperature.
         max_tokens: Optional output cap.
+        hyde_enabled: Enable/disable HyDE.
+        hyde_model: Optional HyDE model override.
+        rerank_enabled: Enable/disable reranker.
+        retrieval_k: Pre-rerank pool size.
+        top_k_summary: Summary-vector gather budget.
+        rerank_top_n: Candidate pool cap before rerank.
+        similarity_threshold: Optional retrieval score floor.
+        neo4j_expansion_cap: Graph Augmented expansion cap.
+        max_corpora_per_query: Retrieval breadth cap.
+        final_top_k: Final chunks sent to the LLM.
+        fact_seed_limit: Graph fact seed budget.
+        search_mode: auto | local | global.
+        thinking_effort: Provider-native thinking/reasoning effort dial.
+        web_search_enabled: Enable live web search tool path for the turn.
+        web_fetch_depth: snippets | normal | deep.
+        web_research_mode: Expand bounded web budgets when true.
+        web_youtube_transcripts: Allow YouTube transcript evidence.
+        web_max_sources: Maximum requested web sources.
+        selected_tools: Tool IDs to enable for agentic chat.
+        active_skill_ids: Skill IDs to inject into the prompt.
         max_sources: Number of source previews to return.
     """
     from services.chat_orchestrator import chat_orchestrator
@@ -263,25 +404,32 @@ async def polymath_chat_query(
             "answer": "",
             "sources": [],
         }
-    if len(scoped) > 3:
-        return {
-            "status": "error",
-            "error": (
-                "polymath_chat_query currently accepts at most 3 corpora. "
-                "Use polymath_cross_corpus_search for wider corpus discovery, "
-                "then ask chat with the most relevant 1-3 corpus_ids."
-            ),
-            "answer": "",
-            "sources": [],
-            "corpus_ids": scoped,
-        }
 
     override_data = {
         "model": model,
         "query_profile": query_profile,
         "reasoning_mode": reasoning_mode,
+        "reasoning_blend": reasoning_blend,
         "temperature": temperature,
         "max_tokens": max_tokens,
+        "hyde_enabled": hyde_enabled,
+        "hyde_model": hyde_model,
+        "rerank_enabled": rerank_enabled,
+        "retrieval_k": retrieval_k,
+        "top_k_summary": top_k_summary,
+        "rerank_top_n": rerank_top_n,
+        "similarity_threshold": similarity_threshold,
+        "neo4j_expansion_cap": neo4j_expansion_cap,
+        "max_corpora_per_query": max_corpora_per_query,
+        "final_top_k": final_top_k,
+        "fact_seed_limit": fact_seed_limit,
+        "search_mode": search_mode,
+        "thinking_effort": thinking_effort,
+        "web_search_enabled": web_search_enabled,
+        "web_fetch_depth": web_fetch_depth,
+        "web_research_mode": web_research_mode,
+        "web_youtube_transcripts": web_youtube_transcripts,
+        "web_max_sources": web_max_sources,
     }
     overrides = (
         ModelOverrides(**{k: v for k, v in override_data.items() if v is not None})
@@ -294,12 +442,16 @@ async def polymath_chat_query(
         corpus_ids=scoped or None,
         retrieval_tier=RetrievalTier(retrieval_tier),
         overrides=overrides,
+        selected_tools=selected_tools,
+        active_skill_ids=active_skill_ids,
+        reasoning_cascade=reasoning_cascade,
     )
 
     answer_parts: list[str] = []
     thinking_parts: list[str] = []
     sources: list[dict[str, Any]] = []
     signals: list[dict[str, Any]] = []
+    trace_events: list[dict[str, Any]] = []
     done: dict[str, Any] = {}
     user_id = get_current_user_id()
 
@@ -325,6 +477,10 @@ async def polymath_chat_query(
                 thinking_parts.append(event.get("thinking") or "")
             elif event_type == "sources":
                 sources = _trim_items(event.get("sources") or [], max_sources)
+            elif event_type == "trace_event":
+                trace_events.append(
+                    _json_ready(event.get("trace_event") or event)
+                )
             elif event_type == "done":
                 done = _json_ready(event)
             elif event_type == "error":
@@ -334,6 +490,7 @@ async def polymath_chat_query(
                     "answer": "".join(answer_parts).strip(),
                     "sources": sources,
                     "signals": signals,
+                    "trace_events": trace_events,
                 }
             else:
                 signals.append(_json_ready(event))
@@ -344,10 +501,18 @@ async def polymath_chat_query(
         "thinking": "".join(thinking_parts).strip() or None,
         "sources": sources,
         "signals": signals,
+        "trace_events": trace_events,
         "conversation_id": done.get("conversation_id"),
         "model_used": done.get("model_used"),
         "chunks_returned": done.get("chunks_returned"),
         "strategy_used": done.get("strategy_used"),
+        "query_profile_used": done.get("query_profile_used"),
+        "reasoning_mode_used": done.get("reasoning_mode_used"),
+        "hyde_applied": done.get("hyde_applied"),
+        "agentic_mode_used": done.get("agentic_mode_used"),
+        "tools_used": done.get("tools_used"),
+        "skills_used": done.get("skills_used"),
+        "reasoning_cascade_applied": done.get("reasoning_cascade_applied"),
         "downgrade_reason": done.get("downgrade_reason"),
         "corpus_ids": scoped,
     }
@@ -379,6 +544,10 @@ def _compact_graph_result(
         "status": "ok",
         "session_id": _field(result, "session_id", ""),
         "corpus_id": _field(result, "corpus_id", ""),
+        "corpus_ids": _json_ready(
+            _field(result, "corpus_ids", None)
+            or ([_field(result, "corpus_id", "")] if _field(result, "corpus_id", "") else [])
+        ),
         "query": _field(result, "query", ""),
         "mode": _field(result, "mode", "auto"),
         "headline": _json_ready(_field(result, "headline", None)),
@@ -424,11 +593,15 @@ def _compact_graph_result(
 
 
 async def polymath_graph_query(
-    corpus_id: str,
     query: str,
+    corpus_id: str | None = None,
+    corpus_ids: list[str] | None = None,
     mode: Literal["auto", "connect", "gaps", "themes"] = "auto",
+    synthesis_mode: Literal["research", "nuance", "ideation"] = "research",
+    validate_synthesis: bool = False,
     session_id: str | None = None,
     model: str | None = None,
+    agentic: bool = False,
     include_graph: bool = False,
     include_trace: bool = False,
     max_items: int = 8,
@@ -441,16 +614,26 @@ async def polymath_graph_query(
     deeper traversal context.
 
     Args:
-        corpus_id: Corpus to analyze.
+        corpus_id: Legacy single corpus to analyze.
+        corpus_ids: Preferred multi-corpus scope.
         query: Research question or concept neighborhood to explore.
         mode: Compatibility field; graph discovery currently behaves as auto.
+        synthesis_mode: research | nuance | ideation. Mirrors the Graph Query
+            #1 tabs in the app.
+        validate_synthesis: Run the optional critique/revise loop.
         session_id: Optional existing Mission Control session id.
         model: Optional synthesis model override.
+        agentic: Enable agentic graph retrieval scouting.
         include_graph: Include full graph payload.
         include_trace: Include full trace/evidence diagnostics.
         max_items: Compact-list cap for previews.
     """
-    await assert_corpus_allowed(corpus_id)
+    requested_ids = list(corpus_ids or [])
+    if not requested_ids and corpus_id:
+        requested_ids = [corpus_id]
+    scoped = await _scope_corpus_ids(requested_ids, default_to_all=False)
+    if not scoped:
+        return {"status": "error", "error": "no accessible corpora in request"}
     qdrant = ingestion_service.qdrant_client
     if qdrant is None:
         return {"status": "error", "error": "Qdrant is not connected"}
@@ -465,13 +648,15 @@ async def polymath_graph_query(
             qdrant=qdrant,
             neo4j_driver=ingestion_service.neo4j_driver,
             db=db,
-            corpus_id=corpus_id,
+            corpus_ids=scoped,
             query=query,
             mode=mode,
+            synthesis_mode=synthesis_mode,
+            validate_synthesis=validate_synthesis,
             session_id=session_id,
             user_id=get_current_user_id(),
             model_override=model,
-            agentic=False,
+            agentic=agentic,
         )
     except ValueError as exc:
         return {"status": "error", "error": str(exc)}
@@ -487,7 +672,346 @@ async def polymath_graph_query(
         include_graph=include_graph,
         include_trace=include_trace,
         max_items=max_items,
+    ) | {"synthesis_mode": synthesis_mode}
+
+
+async def polymath_graph_map_query(
+    query: str,
+    corpus_id: str | None = None,
+    corpus_ids: list[str] | None = None,
+    max_hops: int = 2,
+    limit: int = 80,
+    seed_limit_per_token: int = 3,
+    max_items: int = 200,
+) -> dict[str, Any]:
+    """Run the lightweight graph-map query used by the canvas.
+
+    This exposes the `/api/graph/query` behavior to MCP clients: seed entity
+    extraction, hop traversal, edges, bridges, hubs, and gaps. It does not run
+    synthesis. Use polymath_graph_query when you want the research / nuance /
+    ideation packet and LLM answer.
+
+    Args:
+        query: Natural-language graph query.
+        corpus_id: Legacy single corpus scope.
+        corpus_ids: Preferred multi-corpus scope.
+        max_hops: Entity traversal depth from seeds (1-3).
+        limit: Per-corpus node limit.
+        seed_limit_per_token: Entity seed budget per query token.
+        max_items: Response trim cap for MCP payload size.
+    """
+    requested_ids = list(corpus_ids or [])
+    if not requested_ids and corpus_id:
+        requested_ids = [corpus_id]
+    scoped = await _scope_corpus_ids(requested_ids, default_to_all=False)
+    if not scoped:
+        return {"status": "error", "error": "no accessible corpora in request"}
+
+    body = GraphQueryRequest(
+        corpus_ids=scoped,
+        query=query,
+        max_hops=max_hops,
+        limit=limit,
+        seed_limit_per_token=seed_limit_per_token,
     )
+    driver = _neo4j_or_error()
+    qdrant = ingestion_service.qdrant_client
+
+    from services.graph.graph_query import (
+        expand_subgraph,
+        extract_query_entities,
+        find_bridges,
+        find_gaps,
+        find_hubs,
+    )
+
+    db = ingestion_service.db
+    corpus_metrics_map: dict[str, Any] = {}
+    if db is not None:
+        try:
+            from services.graph.analytics import (
+                compute_corpus_change_signature,
+                get_cached_metrics,
+            )
+
+            for cid in scoped:
+                try:
+                    sig = await compute_corpus_change_signature(db, cid)
+                    metrics = await get_cached_metrics(db, cid, sig)
+                    if metrics is not None:
+                        corpus_metrics_map[cid] = metrics
+                except Exception as exc:
+                    logger.debug("MCP graph map metrics lookup skipped for %s: %s", cid, exc)
+        except Exception as exc:
+            logger.debug("MCP graph map analytics cache unavailable: %s", exc)
+
+    async def _run_one(cid: str) -> tuple[str, dict[str, Any]]:
+        seeds = await extract_query_entities(
+            body.query,
+            cid,
+            driver,
+            limit_per_token=body.seed_limit_per_token,
+            qdrant=qdrant,
+        )
+        if not seeds:
+            return cid, {"nodes": [], "links": [], "bridges": [], "gaps": [], "seeds": []}
+
+        seed_ids = [s["entity_id"] for s in seeds]
+        seed_scores = {
+            s["entity_id"]: float(s.get("score") or 0.0)
+            for s in seeds
+            if s.get("entity_id")
+        }
+        metrics = corpus_metrics_map.get(cid)
+        subgraph = await expand_subgraph(
+            entity_ids=seed_ids,
+            corpus_id=cid,
+            driver=driver,
+            max_hops=body.max_hops,
+            limit=body.limit,
+            metrics=metrics,
+            entity_scores=seed_scores,
+        )
+        bridges = await find_bridges(
+            driver=driver,
+            entity_ids=seed_ids,
+            corpus_id=cid,
+            max_hops=body.max_hops,
+            metrics=metrics,
+        )
+        gaps = await find_gaps(driver=driver, entity_ids=seed_ids, metrics=metrics)
+        return cid, {
+            "nodes": subgraph["nodes"],
+            "links": subgraph["links"],
+            "bridges": bridges,
+            "gaps": gaps,
+            "seeds": seeds,
+        }
+
+    import asyncio as _asyncio
+
+    sem = _asyncio.Semaphore(4)
+
+    async def _gated(cid: str) -> tuple[str, dict[str, Any]]:
+        async with sem:
+            try:
+                return await _run_one(cid)
+            except Exception as exc:
+                logger.warning(
+                    "MCP graph map query: corpus=%s failed (%s); returning empty",
+                    cid,
+                    exc,
+                )
+                return cid, {"nodes": [], "links": [], "bridges": [], "gaps": [], "seeds": []}
+
+    per_corpus = await _asyncio.gather(*[_gated(cid) for cid in scoped])
+
+    merged_nodes: dict[str, dict[str, Any]] = {}
+    merged_links: dict[tuple[Any, Any, Any], dict[str, Any]] = {}
+    merged_bridges: dict[str, dict[str, Any]] = {}
+    merged_gaps: list[dict[str, Any]] = []
+    merged_seeds: dict[str, dict[str, Any]] = {}
+
+    def _stamp(item: dict[str, Any], cid: str) -> dict[str, Any]:
+        sc = list(item.get("source_corpora") or [])
+        if cid and cid not in sc:
+            sc.append(cid)
+        item["source_corpora"] = sc
+        item.setdefault("source_corpus", cid)
+        return item
+
+    for cid, payload in per_corpus:
+        for node in payload["nodes"]:
+            node_id = node.get("id")
+            if not node_id:
+                continue
+            if node_id in merged_nodes:
+                _stamp(merged_nodes[node_id], cid)
+            else:
+                merged_nodes[node_id] = _stamp(dict(node), cid)
+        for link in payload["links"]:
+            key = (link.get("source"), link.get("target"), link.get("predicate"))
+            if key in merged_links:
+                _stamp(merged_links[key], cid)
+            else:
+                merged_links[key] = _stamp(dict(link), cid)
+        for bridge in payload["bridges"]:
+            bridge_id = bridge.get("entity_id")
+            if not bridge_id:
+                continue
+            if bridge_id in merged_bridges:
+                _stamp(merged_bridges[bridge_id], cid)
+                try:
+                    merged_bridges[bridge_id]["connected_seed_count"] = (
+                        int(merged_bridges[bridge_id].get("connected_seed_count") or 0)
+                        + int(bridge.get("connected_seed_count") or 0)
+                    )
+                except Exception:
+                    pass
+            else:
+                merged_bridges[bridge_id] = _stamp(dict(bridge), cid)
+        for gap in payload["gaps"]:
+            merged_gaps.append(_stamp(dict(gap), cid))
+        for seed in payload["seeds"]:
+            seed_id = seed.get("entity_id")
+            if not seed_id:
+                continue
+            if seed_id in merged_seeds:
+                _stamp(merged_seeds[seed_id], cid)
+            else:
+                merged_seeds[seed_id] = _stamp(dict(seed), cid)
+
+    nodes = list(merged_nodes.values())
+    links = list(merged_links.values())
+    bridges = list(merged_bridges.values())
+
+    merged_metrics = None
+    if corpus_metrics_map:
+        from types import SimpleNamespace
+
+        merged_top_pr: dict[str, dict[str, Any]] = {}
+        for metrics in corpus_metrics_map.values():
+            for entry in getattr(metrics, "top_pagerank", None) or []:
+                entity_id = entry.get("entity_id")
+                if not entity_id:
+                    continue
+                current = merged_top_pr.get(entity_id)
+                if current is None or float(entry.get("score", 0)) > float(
+                    current.get("score", 0)
+                ):
+                    merged_top_pr[entity_id] = entry
+        merged_metrics = SimpleNamespace(
+            top_pagerank=sorted(
+                merged_top_pr.values(),
+                key=lambda e: float(e.get("score", 0)),
+                reverse=True,
+            )
+        )
+
+    hubs = find_hubs(nodes, links, metrics=merged_metrics)
+    seed_entities = [
+        {
+            "id": seed["entity_id"],
+            "display_name": seed.get("display_name", ""),
+            "entity_type": seed.get("entity_type", "other"),
+            "mention_count": seed.get("mention_count", 0),
+            "is_seed": True,
+            "source_corpora": seed.get("source_corpora") or [],
+            "source_corpus": seed.get("source_corpus"),
+        }
+        for seed in merged_seeds.values()
+    ]
+
+    cap = max(1, min(int(max_items or 200), 500))
+    return {
+        "status": "ok",
+        "query": body.query,
+        "corpus_ids": scoped,
+        "nodes": _trim_items(nodes, cap),
+        "links": _trim_items(links, cap),
+        "seed_entities": _trim_items(seed_entities, cap),
+        "bridges": _trim_items(bridges, cap),
+        "hubs": _trim_items(hubs, cap),
+        "gaps": _trim_items(merged_gaps, cap),
+        "metrics": {
+            "node_count": len(nodes),
+            "link_count": len(links),
+            "seed_count": len(seed_entities),
+            "bridge_count": len(bridges),
+            "hub_count": len(hubs),
+            "gap_count": len(merged_gaps),
+        },
+    }
+
+
+async def polymath_graph_question_suggestions(
+    question: str,
+    corpus_id: str | None = None,
+    corpus_ids: list[str] | None = None,
+    model: str | None = None,
+    force_refresh: bool = False,
+    include_contextual: bool = True,
+) -> dict[str, Any]:
+    """Refine a graph/RAG question and optionally build contextual suggestions.
+
+    This is the MCP surface for the lighter question-builder path behind
+    `/api/graph/refine`. When include_contextual is true, the result can include
+    question buckets for rag, research, nuance, and ideation.
+    """
+    requested_ids = list(corpus_ids or [])
+    if not requested_ids and corpus_id:
+        requested_ids = [corpus_id]
+    scoped = await _scope_corpus_ids(requested_ids, default_to_all=False)
+    if not scoped:
+        return {"status": "error", "error": "no accessible corpora in request"}
+
+    db = ingestion_service.db
+    if db is None:
+        return {"status": "error", "error": "MongoDB is not connected"}
+    if not question or not question.strip():
+        return {"status": "error", "error": "question is required"}
+
+    user_id = get_current_user_id()
+    resolved_model = model.strip() if isinstance(model, str) and model.strip() else None
+    api_base = None
+    api_key = None
+    extra_params = None
+    try:
+        from services.query_model_resolver import (
+            resolve as resolve_query_model,
+            resolve_by_entry_id,
+        )
+
+        if resolved_model and (
+            resolved_model.startswith("pool:") or resolved_model.startswith("profile:")
+        ):
+            _prefix, _, entry_id = resolved_model.partition(":")
+            resolved = await resolve_by_entry_id(user_id, entry_id)
+            if resolved:
+                resolved_model = resolved.get("model")
+                api_base = resolved.get("api_base")
+                api_key = resolved.get("api_key")
+                extra_params = resolved.get("extra_params") or None
+            else:
+                resolved_model = None
+
+        if not resolved_model:
+            resolved = await resolve_query_model(user_id, "graph_query")
+            if not resolved:
+                resolved = await resolve_query_model(user_id, "query")
+            if resolved:
+                resolved_model = resolved.get("model")
+                api_base = resolved.get("api_base")
+                api_key = resolved.get("api_key")
+                extra_params = resolved.get("extra_params") or None
+    except Exception as exc:
+        logger.warning("MCP graph question model resolution failed: %s", exc)
+        resolved_model = None
+
+    from services.query_refinement import ensure_cache_index, refine_query
+
+    await ensure_cache_index(db)
+    try:
+        result = await refine_query(
+            db=db,
+            question=question.strip(),
+            corpus_ids=scoped,
+            model=resolved_model,
+            api_base=api_base,
+            api_key=api_key,
+            extra_params=extra_params,
+            force_refresh=force_refresh,
+            neo4j_driver=ingestion_service.neo4j_driver,
+            include_contextual=include_contextual,
+        )
+    except Exception as exc:
+        logger.exception("MCP graph question suggestions failed: %s", exc)
+        return {
+            "status": "error",
+            "error": "question refinement failed",
+            "detail": str(exc),
+        }
+    return {"status": "ok", "corpus_ids": scoped, **_json_ready(result)}
 
 
 # ── Tool 2: polymath_get_chunk_extraction ──────────────────────────────────
@@ -1275,6 +1799,8 @@ ALL_TOOLS = (
     polymath_cross_corpus_search,
     polymath_chat_query,
     polymath_graph_query,
+    polymath_graph_map_query,
+    polymath_graph_question_suggestions,
     polymath_get_chunk_extraction,
     polymath_search_entities,
     polymath_get_entity_relations,
@@ -1298,6 +1824,8 @@ __all__ = [
     "polymath_cross_corpus_search",
     "polymath_chat_query",
     "polymath_graph_query",
+    "polymath_graph_map_query",
+    "polymath_graph_question_suggestions",
     "polymath_get_chunk_extraction",
     "polymath_search_entities",
     "polymath_get_entity_relations",
