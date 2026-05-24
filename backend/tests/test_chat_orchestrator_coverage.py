@@ -511,8 +511,13 @@ def test_system_prompt_includes_agent_zero_chat_rag_shape():
     assert "high-signal" in prompt
     assert "strongest one-sentence synthesis" in prompt
     assert "Use tables first only when" in prompt
+    assert "first substantial payload" in prompt
+    assert "Use bold anchors for scanability" in prompt
     assert "Reasoning bridges are welcome" in prompt
+    assert "Use the `→` marker sparingly" in prompt
     assert "blockquotes only as brief margin annotations" in prompt
+    assert "**Failure mode:**" in prompt
+    assert "bold thesis, table or decision matrix" in prompt
     assert "short orientation paragraph" in prompt
     assert "not a graph-query report" in prompt
     assert "Never expose retrieval mechanics" in prompt
