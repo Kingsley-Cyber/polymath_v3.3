@@ -457,6 +457,9 @@ services:
       - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}:/models:ro"
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/home/appuser/.cache/huggingface"
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/ingest-files:/data/ingest-files"
+      # Durable backend-owned folder ingest reads from this host directory.
+      # In the UI, paths under the mounted host root appear as /ingest-source/...
+      - "${POLYMATH_INGEST_SOURCE_ROOT:-C:/PolymathRuntime/ingest-source}:/ingest-source:ro"
       # Phase 22 — expose the Modal deploy factory inside the backend
       # container so /api/infrastructure/modal/deploy can import it.
       # Read-only bind; file lives at repo root for CLI-deploy compatibility.

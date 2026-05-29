@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   Trash2,
   FileText,
+  FolderOpen,
   Upload,
   Loader2,
   Check,
@@ -23,6 +24,7 @@ import * as api from "../../lib/api";
 import type {
   CorpusResponse,
   DocumentResponse,
+  IngestBatchResponse,
   IngestJobResponse,
   ModalStatus,
   WriteState,
@@ -39,6 +41,19 @@ interface CorpusDetailProps {
 }
 
 const INGEST_BATCH_SIZE = 25;
+const LOCAL_BATCH_DEFAULT_PATH = "/ingest-source/authentic_files";
+
+function formatBytes(bytes?: number | null): string {
+  if (!bytes || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unitIdx = 0;
+  while (value >= 1024 && unitIdx < units.length - 1) {
+    value /= 1024;
+    unitIdx += 1;
+  }
+  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIdx]}`;
+}
 
 function getWriteStateMessages(
   state: Pick<WriteState, "warnings" | "verify_errors">,
@@ -69,6 +84,11 @@ export function CorpusDetail({
   // Per-batch overrides (Sprint 2B). Empty object = use corpus defaults.
   const [overrides, setOverrides] = useState<IngestOverrides>({});
   const [showOverrides, setShowOverrides] = useState(false);
+  const [showLocalBatch, setShowLocalBatch] = useState(false);
+  const [localBatchPath, setLocalBatchPath] = useState(LOCAL_BATCH_DEFAULT_PATH);
+  const [localBatchConcurrency, setLocalBatchConcurrency] = useState(2);
+  const [localBatch, setLocalBatch] = useState<IngestBatchResponse | null>(null);
+  const [isStartingLocalBatch, setIsStartingLocalBatch] = useState(false);
 
   // Modal global status — used to warn when corpus default is embed_mode='modal'
   // but Modal isn't deployed.
@@ -79,6 +99,36 @@ export function CorpusDetail({
       .then(setModalStatus)
       .catch(() => setModalStatus(null));
   }, []);
+
+  useEffect(() => {
+    if (!localBatch?.batch_id) return;
+    if (!["queued", "running"].includes(localBatch.status)) return;
+    const timer = window.setInterval(() => {
+      api
+        .getIngestBatch(localBatch.batch_id)
+        .then(setLocalBatch)
+        .catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [localBatch?.batch_id, localBatch?.status]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listIngestBatches(corpus.corpus_id, 1)
+      .then((batches) => {
+        if (cancelled || batches.length === 0) return;
+        const latest = batches[0];
+        setLocalBatch(latest);
+        if (["queued", "running"].includes(latest.status)) {
+          setShowLocalBatch(true);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [corpus.corpus_id]);
 
   // Retry UX — the bytes of uploaded files aren't cached server-side, so
   // "retry" on a failed ingest is really "re-pick the file from disk". The
@@ -256,6 +306,50 @@ export function CorpusDetail({
     fileInputRef.current?.click();
   };
 
+  const handleStartLocalBatch = async () => {
+    const rootPath = localBatchPath.trim();
+    if (!rootPath) {
+      setError("Enter a backend-visible folder path such as /ingest-source/books");
+      return;
+    }
+    setIsStartingLocalBatch(true);
+    setError(null);
+    try {
+      const batch = await api.createLocalIngestBatch(corpus.corpus_id, {
+        root_path: rootPath,
+        recursive: true,
+        store_files: true,
+        max_total_bytes: 2 * 1024 * 1024 * 1024,
+        concurrency: localBatchConcurrency,
+        start: true,
+      });
+      setLocalBatch(batch);
+      setRetryHint(
+        `Durable backend batch ${batch.batch_id.slice(0, 8)} started from ${rootPath}. ` +
+          `${batch.total} file(s), ${formatBytes(batch.stored_bytes)} stored in the backend spool.`,
+      );
+      await loadDocuments();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start local ingest batch");
+    } finally {
+      setIsStartingLocalBatch(false);
+    }
+  };
+
+  const handleResumeLocalBatch = async () => {
+    if (!localBatch?.batch_id) return;
+    setIsStartingLocalBatch(true);
+    setError(null);
+    try {
+      const batch = await api.resumeIngestBatch(localBatch.batch_id);
+      setLocalBatch(batch);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to resume local ingest batch");
+    } finally {
+      setIsStartingLocalBatch(false);
+    }
+  };
+
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -363,6 +457,18 @@ export function CorpusDetail({
                 ` (${Object.keys(overrides).length})`}
             </span>
           </button>
+          <button
+            onClick={() => setShowLocalBatch((open) => !open)}
+            className={`flex items-center gap-1.5 px-2 py-1 text-[9px] font-bold tracking-widest border transition-none uppercase ${
+              showLocalBatch || localBatch
+                ? "border-accent-main text-accent-main hover:bg-accent-main hover:text-bg-base"
+                : "border-border-minimal text-content-tertiary hover:border-content-secondary hover:text-content-secondary"
+            }`}
+            title="Start a durable backend-owned folder ingest"
+          >
+            <FolderOpen className="w-3 h-3" />
+            <span>Backend Folder</span>
+          </button>
           <label className="flex items-center gap-1.5 px-2 py-1 text-[9px] font-bold tracking-widest text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base transition-none uppercase cursor-pointer">
             {isUploading ? (
               <Loader2 className="w-3 h-3 animate-spin" />
@@ -384,6 +490,89 @@ export function CorpusDetail({
       </div>
         <IngestionProgressBar documents={documents} isUploading={isUploading} />
       </div>
+
+      {showLocalBatch && (
+        <div className="border-b border-border-minimal bg-bg-base/70 px-4 py-3 shrink-0">
+          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_88px_auto_auto] gap-2 items-end">
+            <label className="min-w-0">
+              <span className="block text-[9px] font-bold tracking-widest text-content-tertiary uppercase mb-1">
+                Backend Path
+              </span>
+              <input
+                value={localBatchPath}
+                onChange={(e) => setLocalBatchPath(e.target.value)}
+                className="w-full h-8 px-2 bg-bg-surface border border-border-minimal text-[11px] text-content-primary font-mono outline-none focus:border-accent-main"
+                placeholder="/ingest-source/authentic_files"
+              />
+            </label>
+            <label>
+              <span className="block text-[9px] font-bold tracking-widest text-content-tertiary uppercase mb-1">
+                Workers
+              </span>
+              <input
+                value={localBatchConcurrency}
+                onChange={(e) =>
+                  setLocalBatchConcurrency(
+                    Math.max(1, Math.min(32, Number(e.target.value) || 1)),
+                  )
+                }
+                type="number"
+                min={1}
+                max={32}
+                className="w-full h-8 px-2 bg-bg-surface border border-border-minimal text-[11px] text-content-primary font-mono outline-none focus:border-accent-main"
+              />
+            </label>
+            <button
+              onClick={handleStartLocalBatch}
+              disabled={isStartingLocalBatch}
+              className="h-8 flex items-center justify-center gap-1.5 px-3 text-[9px] font-bold tracking-widest text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-accent-main transition-none uppercase"
+            >
+              {isStartingLocalBatch ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <FolderOpen className="w-3 h-3" />
+              )}
+              <span>Start</span>
+            </button>
+            <button
+              onClick={handleResumeLocalBatch}
+              disabled={!localBatch || isStartingLocalBatch}
+              className="h-8 flex items-center justify-center gap-1.5 px-3 text-[9px] font-bold tracking-widest text-content-secondary border border-border-minimal hover:border-content-secondary disabled:opacity-40 transition-none uppercase"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Resume</span>
+            </button>
+          </div>
+          {localBatch && (
+            <div className="mt-2 grid grid-cols-2 md:grid-cols-5 gap-2 text-[9px] font-mono">
+              <div className="border border-border-minimal px-2 py-1">
+                <div className="text-content-tertiary uppercase">Status</div>
+                <div className="text-content-primary">{localBatch.status}</div>
+              </div>
+              <div className="border border-border-minimal px-2 py-1">
+                <div className="text-content-tertiary uppercase">Files</div>
+                <div className="text-content-primary">{localBatch.total}</div>
+              </div>
+              <div className="border border-border-minimal px-2 py-1">
+                <div className="text-content-tertiary uppercase">Done</div>
+                <div className="text-green-500">{localBatch.counts?.done ?? 0}</div>
+              </div>
+              <div className="border border-border-minimal px-2 py-1">
+                <div className="text-content-tertiary uppercase">Recoverable</div>
+                <div className="text-amber-400">
+                  {localBatch.counts?.failed_recoverable ?? 0}
+                </div>
+              </div>
+              <div className="border border-border-minimal px-2 py-1">
+                <div className="text-content-tertiary uppercase">Stored</div>
+                <div className="text-content-primary">
+                  {formatBytes(localBatch.stored_bytes)}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Per-batch overrides panel */}
       {showOverrides && (

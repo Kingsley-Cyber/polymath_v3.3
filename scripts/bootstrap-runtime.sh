@@ -2,6 +2,7 @@
 set -euo pipefail
 
 runtime_root="${POLYMATH_DOCKER_DATA_ROOT:-}"
+ingest_source_root="${POLYMATH_INGEST_SOURCE_ROOT:-}"
 compose_profiles="${COMPOSE_PROFILES:-local-embed,local-rerank,local-parser,mcp}"
 generate_secrets=0
 force_secrets=0
@@ -15,6 +16,7 @@ Usage: scripts/bootstrap-runtime.sh [options]
 
 Options:
   --runtime-root PATH      Host runtime root. Default: $POLYMATH_DOCKER_DATA_ROOT or ~/PolymathRuntime
+  --ingest-source-root PATH Host folder mounted read-only at /ingest-source. Default: runtime-root/ingest-source
   --compose-profiles LIST  Compose profiles to enable. Default: local-embed,local-rerank,local-parser,mcp
   --generate-secrets      Fill missing CHANGE_ME secrets in .env
   --force-secrets         Regenerate secrets even when values already exist
@@ -29,6 +31,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --runtime-root)
       runtime_root="$2"
+      shift 2
+      ;;
+    --ingest-source-root)
+      ingest_source_root="$2"
       shift 2
       ;;
     --compose-profiles)
@@ -102,6 +108,14 @@ case "$runtime_root" in
   *) runtime_root="$PWD/$runtime_root" ;;
 esac
 runtime_root="${runtime_root%/}"
+if [[ -z "$ingest_source_root" ]]; then
+  ingest_source_root="$runtime_root/ingest-source"
+fi
+case "$ingest_source_root" in
+  /*) ;;
+  *) ingest_source_root="$PWD/$ingest_source_root" ;;
+esac
+ingest_source_root="${ingest_source_root%/}"
 binds_root="$runtime_root/binds"
 models_root="$runtime_root/models"
 cache_root="$runtime_root"
@@ -183,6 +197,8 @@ for dir in \
   "$runtime_root/volumes/redis" \
   "$runtime_root/volumes/hf-cache" \
   "$runtime_root/volumes/docling/models" \
+  "$runtime_root/volumes/ingest-files" \
+  "$ingest_source_root" \
   "$binds_root/litellm" \
   "$models_root"; do
   if [[ "$dry_run" != "1" ]]; then
@@ -198,6 +214,7 @@ env_set "POLYMATH_DOCKER_DATA_ROOT" "$runtime_root"
 env_set "POLYMATH_RUNTIME_BINDS_ROOT" "$binds_root"
 env_set "POLYMATH_CACHE_ROOT" "$cache_root"
 env_set "POLYMATH_MODELS_ROOT" "$models_root"
+env_set "POLYMATH_INGEST_SOURCE_ROOT" "$ingest_source_root"
 env_set "COMPOSE_PROFILES" "$compose_profiles"
 env_set "LOCAL_EMBEDDER_ENABLED" "true"
 env_set "LOCAL_RERANKER_ENABLED" "true"

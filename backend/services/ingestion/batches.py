@@ -328,6 +328,22 @@ async def get_batch(
     return batch
 
 
+async def list_batches(
+    db: AsyncIOMotorDatabase,
+    corpus_id: str,
+    *,
+    user_id: str,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Return recent durable ingest batches for a corpus."""
+    limit = max(1, min(int(limit), 100))
+    cursor = db[BATCHES].find(
+        {"corpus_id": corpus_id, "user_id": user_id},
+        {"_id": 0},
+    ).sort("created_at", -1).limit(limit)
+    return await cursor.to_list(length=limit)
+
+
 async def refresh_batch_counts(
     db: AsyncIOMotorDatabase,
     batch_id: str,

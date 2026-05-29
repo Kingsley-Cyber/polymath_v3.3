@@ -560,6 +560,15 @@ export async function createLocalIngestBatch(
   );
 }
 
+export async function listIngestBatches(
+  corpusId: string,
+  limit = 10,
+): Promise<IngestBatchResponse[]> {
+  return fetchJSON(
+    `/corpora/${encodeURIComponent(corpusId)}/ingest-batches?limit=${encodeURIComponent(String(limit))}`,
+  );
+}
+
 export async function getIngestBatch(
   batchId: string,
 ): Promise<IngestBatchResponse> {
@@ -1334,6 +1343,7 @@ export const api = {
   listDocuments,
   uploadDocumentToCorpus,
   createLocalIngestBatch,
+  listIngestBatches,
   getIngestBatch,
   resumeIngestBatch,
   reconcileStaleIngestion,

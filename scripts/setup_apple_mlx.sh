@@ -4,6 +4,7 @@
 set -euo pipefail
 
 runtime_root="${POLYMATH_DOCKER_DATA_ROOT:-${HOME}/PolymathRuntime}"
+ingest_source_root="${POLYMATH_INGEST_SOURCE_ROOT:-}"
 compose_profiles="${COMPOSE_PROFILES:-mcp}"
 skip_bootstrap=0
 skip_docker_up=0
@@ -16,6 +17,7 @@ Usage: scripts/setup_apple_mlx.sh [options]
 
 Options:
   --runtime-root PATH         Host runtime root. Default: $POLYMATH_DOCKER_DATA_ROOT or ~/PolymathRuntime
+  --ingest-source-root PATH   Host folder mounted read-only at /ingest-source. Default: runtime-root/ingest-source
   --compose-profiles LIST     Compose profiles to enable. Default: mcp
   --skip-bootstrap            Do not run bootstrap-runtime.sh
   --skip-docker-up            Install MLX sidecars but do not start Docker
@@ -29,6 +31,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --runtime-root)
       runtime_root="$2"
+      shift 2
+      ;;
+    --ingest-source-root)
+      ingest_source_root="$2"
       shift 2
       ;;
     --compose-profiles)
@@ -72,16 +78,23 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 compose_files=(-f docker-compose.yml -f docker-compose.apple-mlx.yml)
 
+if [[ -z "${ingest_source_root}" ]]; then
+  ingest_source_root="${runtime_root%/}/ingest-source"
+fi
+
 export POLYMATH_DOCKER_DATA_ROOT="${runtime_root}"
+export POLYMATH_INGEST_SOURCE_ROOT="${ingest_source_root}"
 export COMPOSE_PROFILES="${compose_profiles}"
 
 echo "[apple-mlx] repo root    : ${repo_root}"
 echo "[apple-mlx] runtime root : ${POLYMATH_DOCKER_DATA_ROOT}"
+echo "[apple-mlx] ingest root  : ${POLYMATH_INGEST_SOURCE_ROOT}"
 echo "[apple-mlx] profiles     : ${COMPOSE_PROFILES}"
 
 if [[ "${skip_bootstrap}" != "1" ]]; then
   bootstrap_args=(
     --runtime-root "${POLYMATH_DOCKER_DATA_ROOT}"
+    --ingest-source-root "${POLYMATH_INGEST_SOURCE_ROOT}"
     --compose-profiles "${COMPOSE_PROFILES}"
     --generate-secrets
   )
@@ -90,6 +103,8 @@ if [[ "${skip_bootstrap}" != "1" ]]; then
   fi
   echo "[apple-mlx] bootstrapping runtime layout"
   bash "${repo_root}/scripts/bootstrap-runtime.sh" "${bootstrap_args[@]}"
+elif [[ ! -d "${POLYMATH_INGEST_SOURCE_ROOT}" ]]; then
+  mkdir -p "${POLYMATH_INGEST_SOURCE_ROOT}"
 fi
 
 if [[ "${preserve_host_sidecars}" == "1" ]]; then

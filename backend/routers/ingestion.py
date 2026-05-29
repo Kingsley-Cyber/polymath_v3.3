@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from typing import Literal
 
 import httpx
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from config import get_settings
 from models.schemas import (
@@ -766,6 +766,23 @@ async def create_local_ingest_batch(
             user_id=current_user["user_id"],
         )
     return {**batch, "runner_started": started}
+
+
+@router.get("/corpora/{corpus_id}/ingest-batches")
+async def list_ingest_batches(
+    corpus_id: str,
+    limit: int = Query(default=10, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
+):
+    corpus = await ingestion_service.get_corpus(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    return await ingest_batches.list_batches(
+        ingestion_service.db,
+        corpus_id,
+        user_id=current_user["user_id"],
+        limit=limit,
+    )
 
 
 @router.get("/ingest-batches/{batch_id}")

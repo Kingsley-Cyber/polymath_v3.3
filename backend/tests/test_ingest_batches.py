@@ -83,6 +83,76 @@ def test_file_item_doc_records_stored_copy(tmp_path):
     assert item["stored_bytes"] == source.stat().st_size
 
 
+class _BatchCursor:
+    def __init__(self, rows):
+        self.rows = rows
+        self._limit = None
+
+    def sort(self, field, direction):
+        reverse = direction < 0
+        self.rows = sorted(self.rows, key=lambda row: row.get(field), reverse=reverse)
+        return self
+
+    def limit(self, limit):
+        self._limit = limit
+        return self
+
+    async def to_list(self, length=None):
+        limit = length or self._limit
+        return list(self.rows[:limit] if limit else self.rows)
+
+
+class _BatchCollection:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def find(self, query, projection=None):
+        rows = [
+            dict(row)
+            for row in self.rows
+            if row.get("corpus_id") == query.get("corpus_id")
+            and row.get("user_id") == query.get("user_id")
+        ]
+        return _BatchCursor(rows)
+
+
+@pytest.mark.asyncio
+async def test_list_batches_returns_recent_user_batches():
+    db = {
+        batches.BATCHES: _BatchCollection(
+            [
+                {
+                    "batch_id": "old",
+                    "corpus_id": "corpus-1",
+                    "user_id": "user-1",
+                    "created_at": datetime(2024, 1, 1),
+                },
+                {
+                    "batch_id": "new",
+                    "corpus_id": "corpus-1",
+                    "user_id": "user-1",
+                    "created_at": datetime(2024, 1, 2),
+                },
+                {
+                    "batch_id": "other-user",
+                    "corpus_id": "corpus-1",
+                    "user_id": "user-2",
+                    "created_at": datetime(2024, 1, 3),
+                },
+            ]
+        )
+    }
+
+    rows = await batches.list_batches(
+        db,
+        "corpus-1",
+        user_id="user-1",
+        limit=1,
+    )
+
+    assert [row["batch_id"] for row in rows] == ["new"]
+
+
 class _FakeCursor:
     def __init__(self, rows):
         self.rows = rows

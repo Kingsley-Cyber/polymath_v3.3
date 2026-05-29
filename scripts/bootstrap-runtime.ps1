@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$RuntimeRoot = "",
+    [string]$IngestSourceRoot = $(if ($env:POLYMATH_INGEST_SOURCE_ROOT) { $env:POLYMATH_INGEST_SOURCE_ROOT } else { "" }),
     [string]$ComposeProfiles = $(if ($env:COMPOSE_PROFILES) { $env:COMPOSE_PROFILES } else { "local-embed,local-rerank,local-parser,mcp" }),
     [switch]$GenerateSecrets,
     [switch]$ForceSecrets,
@@ -132,6 +133,11 @@ if (-not $RuntimeRoot) {
 }
 
 $runtimeRootFull = [System.IO.Path]::GetFullPath($RuntimeRoot)
+$ingestSourceRootFull = if ($IngestSourceRoot) {
+    [System.IO.Path]::GetFullPath($IngestSourceRoot)
+} else {
+    Join-Path $runtimeRootFull "ingest-source"
+}
 $bindsRoot = Join-Path $runtimeRootFull "binds"
 $modelsRoot = Join-Path $runtimeRootFull "models"
 $cacheRoot = $runtimeRootFull
@@ -158,6 +164,8 @@ $directories = @(
     (Join-Path $runtimeRootFull "volumes\redis"),
     (Join-Path $runtimeRootFull "volumes\hf-cache"),
     (Join-Path $runtimeRootFull "volumes\docling\models"),
+    (Join-Path $runtimeRootFull "volumes\ingest-files"),
+    $ingestSourceRootFull,
     $bindsRoot,
     (Join-Path $bindsRoot "litellm"),
     $modelsRoot
@@ -181,6 +189,7 @@ Set-EnvValue -Path $envFile -Key "POLYMATH_DOCKER_DATA_ROOT" -Value ($runtimeRoo
 Set-EnvValue -Path $envFile -Key "POLYMATH_RUNTIME_BINDS_ROOT" -Value ($bindsRoot -replace "\\", "/")
 Set-EnvValue -Path $envFile -Key "POLYMATH_CACHE_ROOT" -Value ($cacheRoot -replace "\\", "/")
 Set-EnvValue -Path $envFile -Key "POLYMATH_MODELS_ROOT" -Value ($modelsRoot -replace "\\", "/")
+Set-EnvValue -Path $envFile -Key "POLYMATH_INGEST_SOURCE_ROOT" -Value ($ingestSourceRootFull -replace "\\", "/")
 Set-EnvValue -Path $envFile -Key "COMPOSE_PROFILES" -Value $ComposeProfiles
 Set-EnvValue -Path $envFile -Key "LOCAL_EMBEDDER_ENABLED" -Value "true"
 Set-EnvValue -Path $envFile -Key "LOCAL_RERANKER_ENABLED" -Value "true"
