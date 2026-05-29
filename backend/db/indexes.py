@@ -117,6 +117,26 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     )
     logger.info("Indexes ensured: ghost_b_error_events")
 
+    # --- ingest batches ---
+    await db["ingest_batches"].create_index("batch_id", unique=True)
+    await db["ingest_batches"].create_index([("user_id", 1), ("created_at", -1)])
+    await db["ingest_batches"].create_index([("corpus_id", 1), ("created_at", -1)])
+    await db["ingest_batch_items"].create_index("item_id", unique=True)
+    await db["ingest_batch_items"].create_index(
+        [("batch_id", 1), ("ordinal", 1)],
+        name="ingest_batch_items_order",
+    )
+    await db["ingest_batch_items"].create_index(
+        [("batch_id", 1), ("status", 1), ("ordinal", 1)],
+        name="ingest_batch_items_status_order",
+    )
+    await db["ingest_batch_items"].create_index(
+        [("status", 1), ("lease_until", 1)],
+        name="ingest_batch_items_stale_lease",
+    )
+    await db["ingest_batch_items"].create_index("doc_id")
+    logger.info("Indexes ensured: ingest_batches / ingest_batch_items")
+
     # --- settings ---
     await db["settings"].create_index("user_id", unique=True)
     logger.info("Indexes ensured: settings (unique user_id)")

@@ -15,7 +15,7 @@ import json
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 import httpx
@@ -33,6 +33,7 @@ from models.schemas import (
 from pydantic import BaseModel, Field
 from routers.auth import get_current_user
 from services.ingestion_service import FrozenFieldError, ingestion_service
+from services.ingestion import batches as ingest_batches
 from utils.streaming import build_sse_done, build_sse_error
 
 # Phase K — strong references to in-flight ingest tasks so asyncio doesn't GC
@@ -102,6 +103,25 @@ class CorpusUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None
     default_ingestion_config: IngestionConfig | None = None
+
+
+class LocalIngestBatchRequest(BaseModel):
+    """Create a durable backend-owned ingest batch from a local folder path."""
+
+    root_path: str = Field(..., min_length=1)
+    recursive: bool = True
+    extensions: list[str] | None = None
+    max_files: int | None = Field(default=None, ge=1, le=20000)
+    use_neo4j: bool | None = None
+    chunk_summarization: bool | None = None
+    model: str = ""
+    concurrency: int | None = Field(default=None, ge=1, le=32)
+    start: bool = True
+
+
+class StaleIngestReconcileRequest(BaseModel):
+    stale_after_minutes: int | None = Field(default=None, ge=1, le=1440)
+    auto_backfill_graph: bool = True
 
 
 class ModelRefTestRequest(BaseModel):
@@ -627,16 +647,28 @@ async def backfill_document_graph(
         raise HTTPException(status_code=404, detail="Corpus not found")
     doc = await ingestion_service.db["documents"].find_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"ghost_b_failures": 1, "ghost_b_staging": 1, "write_state": 1, "_id": 0},
+        {
+            "ghost_b_failures": 1,
+            "ghost_b_staging": 1,
+            "ingestion_config": 1,
+            "write_state": 1,
+            "_id": 0,
+        },
     )
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     failures = doc.get("ghost_b_failures") or []
     write_state = doc.get("write_state") or {}
     neo4j_written = bool(write_state.get("neo4j_written"))
+    graph_replayable = (
+        not neo4j_written
+        and bool(write_state.get("mongo_written"))
+        and bool(write_state.get("qdrant_written"))
+        and bool((doc.get("ingestion_config") or {}).get("use_neo4j", True))
+    )
     has_staging = bool(doc.get("ghost_b_staging"))
     # Pt 9 — true noop only when there's genuinely nothing to do.
-    if not failures and (neo4j_written or not has_staging):
+    if not failures and (neo4j_written or (not has_staging and not graph_replayable)):
         return {
             "status": "noop",
             "doc_id": doc_id,
@@ -644,6 +676,7 @@ async def backfill_document_graph(
             "failed_chunks": 0,
             "neo4j_written": neo4j_written,
             "has_staging": has_staging,
+            "graph_replayable": graph_replayable,
         }
 
     async def _run() -> None:
@@ -686,6 +719,196 @@ async def ingestion_audit(
     if not existing:
         raise HTTPException(status_code=404, detail="Corpus not found")
     return await ingestion_service.get_ingestion_audit(corpus_id)
+
+
+@router.post("/corpora/{corpus_id}/ingest-batches/local")
+async def create_local_ingest_batch(
+    corpus_id: str,
+    body: LocalIngestBatchRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Create a durable backend-owned batch from a server-visible folder.
+
+    This is the recovery path for large local libraries: the backend writes a
+    manifest to Mongo before processing any file, then leases/resumes items
+    from that manifest instead of relying on a browser tab to remember the
+    remaining file list.
+    """
+    corpus = await ingestion_service.get_corpus(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    try:
+        batch = await ingest_batches.create_local_batch(
+            db=ingestion_service.db,
+            corpus_id=corpus_id,
+            user_id=current_user["user_id"],
+            root_path=body.root_path,
+            recursive=body.recursive,
+            extensions=body.extensions,
+            max_files=body.max_files,
+            use_neo4j=body.use_neo4j,
+            chunk_summarization=body.chunk_summarization,
+            model=body.model,
+            concurrency=body.concurrency,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    started = False
+    if body.start:
+        started = ingest_batches.start_local_batch_runner(
+            db=ingestion_service.db,
+            ingestion_service=ingestion_service,
+            batch_id=batch["batch_id"],
+            user_id=current_user["user_id"],
+        )
+    return {**batch, "runner_started": started}
+
+
+@router.get("/ingest-batches/{batch_id}")
+async def get_ingest_batch(
+    batch_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    batch = await ingest_batches.get_batch(
+        ingestion_service.db,
+        batch_id,
+        user_id=current_user["user_id"],
+    )
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    return batch
+
+
+@router.post("/ingest-batches/{batch_id}/resume")
+async def resume_ingest_batch(
+    batch_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    batch = await ingest_batches.get_batch(
+        ingestion_service.db,
+        batch_id,
+        user_id=current_user["user_id"],
+        include_items=False,
+    )
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    await ingest_batches.reconcile_stale_items(
+        ingestion_service.db,
+        batch_id=batch_id,
+        user_id=current_user["user_id"],
+    )
+    started = ingest_batches.start_local_batch_runner(
+        db=ingestion_service.db,
+        ingestion_service=ingestion_service,
+        batch_id=batch_id,
+        user_id=current_user["user_id"],
+    )
+    refreshed = await ingest_batches.get_batch(
+        ingestion_service.db,
+        batch_id,
+        user_id=current_user["user_id"],
+        include_items=False,
+    )
+    return {**(refreshed or batch), "runner_started": started}
+
+
+@router.post("/corpora/{corpus_id}/ingestion/reconcile-stale")
+async def reconcile_stale_ingestion(
+    corpus_id: str,
+    body: StaleIngestReconcileRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Mark stale durable items resumable and queue graph-only repairs.
+
+    Partial docs that are already in Mongo/Qdrant but never reached Neo4j are
+    repaired through the graph backfill endpoint, which now supports replaying
+    Ghost B from Mongo chunks even when staging is missing.
+    """
+    existing = await ingestion_service.get_corpus(corpus_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    body = body or StaleIngestReconcileRequest()
+    batch_result = await ingest_batches.reconcile_stale_items(
+        ingestion_service.db,
+        user_id=current_user["user_id"],
+        stale_after_minutes=body.stale_after_minutes,
+    )
+    cutoff = datetime.utcnow() - timedelta(
+        minutes=int(body.stale_after_minutes or get_settings().INGEST_STALE_JOB_MINUTES)
+    )
+    cursor = ingestion_service.db["documents"].find(
+        {
+            "corpus_id": corpus_id,
+            "user_id": current_user["user_id"],
+            "$or": [
+                {"updated_at": {"$lt": cutoff}},
+                {"updated_at": {"$exists": False}, "created_at": {"$lt": cutoff}},
+            ],
+            "error": {"$exists": False},
+            "write_state.verified": None,
+            "write_state.mongo_written": True,
+        },
+        {
+            "_id": 0,
+            "doc_id": 1,
+            "filename": 1,
+            "ingestion_config": 1,
+            "write_state": 1,
+        },
+    )
+    graph_repairs_queued = 0
+    marked_recoverable = 0
+    inspected: list[dict] = []
+    async for doc in cursor:
+        ws = doc.get("write_state") or {}
+        cfg = doc.get("ingestion_config") or {}
+        qdrant_required = bool(cfg.get("target_qdrant_collections") or [])
+        qdrant_done = (not qdrant_required) or bool(ws.get("qdrant_written"))
+        neo4j_required = bool(cfg.get("use_neo4j")) and bool(get_settings().NEO4J_ENABLED)
+        neo4j_done = (not neo4j_required) or bool(ws.get("neo4j_written"))
+        doc_id = str(doc.get("doc_id") or "")
+        if not doc_id:
+            continue
+        if qdrant_done and neo4j_required and not neo4j_done and body.auto_backfill_graph:
+            async def _run_backfill(did: str = doc_id) -> None:
+                try:
+                    await ingestion_service.backfill_graph_failures(
+                        corpus_id=corpus_id,
+                        doc_id=did,
+                        user_id=current_user["user_id"],
+                    )
+                except Exception as exc:
+                    logger.exception("Stale graph repair failed doc=%s: %s", did, exc)
+
+            task = asyncio.create_task(_run_backfill())
+            _BACKFILL_BG_TASKS.add(task)
+            task.add_done_callback(_BACKFILL_BG_TASKS.discard)
+            graph_repairs_queued += 1
+            inspected.append({"doc_id": doc_id, "action": "graph_repair_queued"})
+        elif not qdrant_done or not neo4j_done:
+            message = (
+                "Ingest stalled without recoverable server-side bytes; "
+                "re-upload the file or run it through a durable local ingest batch."
+            )
+            warnings = list(ws.get("warnings") or [])
+            if message not in warnings:
+                warnings.append(message)
+            await ingestion_service.db["documents"].update_one(
+                {"doc_id": doc_id, "corpus_id": corpus_id},
+                {"$set": {
+                    "error": message,
+                    "write_state.warnings": warnings,
+                    "updated_at": datetime.utcnow(),
+                }},
+            )
+            marked_recoverable += 1
+            inspected.append({"doc_id": doc_id, "action": "marked_failed_recoverable"})
+    return {
+        **batch_result,
+        "graph_repairs_queued": graph_repairs_queued,
+        "marked_failed_recoverable": marked_recoverable,
+        "inspected": inspected,
+    }
 
 
 @router.get("/ingestion/health")

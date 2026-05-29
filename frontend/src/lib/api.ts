@@ -24,6 +24,8 @@ import type {
   ModelProfileRef,
   DocumentResponse,
   IngestJobResponse,
+  IngestBatchResponse,
+  LocalIngestBatchRequest,
   EntityResult,
   RelationEdge,
   ChunkExtractionResponse,
@@ -543,6 +545,46 @@ export async function uploadDocumentToCorpus(
   }
 
   return response.json();
+}
+
+export async function createLocalIngestBatch(
+  corpusId: string,
+  body: LocalIngestBatchRequest,
+): Promise<IngestBatchResponse> {
+  return fetchJSON(
+    `/corpora/${encodeURIComponent(corpusId)}/ingest-batches/local`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function getIngestBatch(
+  batchId: string,
+): Promise<IngestBatchResponse> {
+  return fetchJSON(`/ingest-batches/${encodeURIComponent(batchId)}`);
+}
+
+export async function resumeIngestBatch(
+  batchId: string,
+): Promise<IngestBatchResponse> {
+  return fetchJSON(`/ingest-batches/${encodeURIComponent(batchId)}/resume`, {
+    method: "POST",
+  });
+}
+
+export async function reconcileStaleIngestion(
+  corpusId: string,
+  body: { stale_after_minutes?: number; auto_backfill_graph?: boolean } = {},
+): Promise<Record<string, unknown>> {
+  return fetchJSON(
+    `/corpora/${encodeURIComponent(corpusId)}/ingestion/reconcile-stale`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 // ============================================================================
@@ -1291,6 +1333,10 @@ export const api = {
   testIngestionModelRef,
   listDocuments,
   uploadDocumentToCorpus,
+  createLocalIngestBatch,
+  getIngestBatch,
+  resumeIngestBatch,
+  reconcileStaleIngestion,
   queryGraph,
   entitySearch,
   getDiscourseGraph,

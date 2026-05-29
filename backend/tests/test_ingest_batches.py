@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+import os
+from datetime import datetime
+
+import pytest
+
+os.environ.setdefault("LITELLM_MASTER_KEY", "test-master-key")
+os.environ.setdefault("AUTH_SECRET_KEY", "test-auth-secret")
+os.environ.setdefault("DEFAULT_ADMIN_PASSWORD", "test-password")
+
+from services.ghost_b import ExtractionBatchReport, ExtractionResult
+from services.ingestion import batches, graph_backfill
+from models.schemas import IngestionConfig
+
+
+def test_discover_local_files_filters_and_sorts(tmp_path):
+    (tmp_path / "b.pdf").write_bytes(b"b")
+    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+    (tmp_path / "skip.png").write_bytes(b"png")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "c.md").write_text("# c", encoding="utf-8")
+
+    root, files = batches.discover_local_files(
+        str(tmp_path),
+        recursive=True,
+        extensions=["txt", ".md"],
+    )
+
+    assert root == tmp_path.resolve()
+    assert [path.name for path in files] == ["a.txt", "c.md"]
+
+
+def test_discover_local_files_respects_max_files(tmp_path):
+    for idx in range(5):
+        (tmp_path / f"{idx}.pdf").write_bytes(b"x")
+
+    _root, files = batches.discover_local_files(str(tmp_path), max_files=2)
+
+    assert len(files) == 2
+
+
+class _FakeCursor:
+    def __init__(self, rows):
+        self.rows = rows
+
+    async def to_list(self, length=None):
+        return list(self.rows)
+
+
+class _FakeCollection:
+    def __init__(self, rows):
+        self.rows = rows
+        self.updates = []
+
+    async def find_one(self, query, projection=None):
+        for row in self.rows:
+            if all(row.get(k) == v for k, v in query.items()):
+                return dict(row)
+        return None
+
+    def find(self, query, projection=None):
+        rows = []
+        for row in self.rows:
+            if row.get("doc_id") != query.get("doc_id"):
+                continue
+            if row.get("corpus_id") != query.get("corpus_id"):
+                continue
+            chunk_filter = query.get("chunk_id")
+            if isinstance(chunk_filter, dict) and "$in" in chunk_filter:
+                if row.get("chunk_id") not in chunk_filter["$in"]:
+                    continue
+            rows.append(dict(row))
+        return _FakeCursor(rows)
+
+    async def update_one(self, query, update):
+        self.updates.append((query, update))
+        return type("Result", (), {"modified_count": 1})()
+
+
+class _FakeDb:
+    def __init__(self, doc, chunks):
+        self.collections = {
+            "documents": _FakeCollection([doc]),
+            "chunks": _FakeCollection(chunks),
+            "corpora": _FakeCollection([{"corpus_id": doc["corpus_id"]}]),
+        }
+
+    def __getitem__(self, name):
+        return self.collections[name]
+
+
+@pytest.mark.asyncio
+async def test_graph_backfill_replays_from_chunks_when_staging_missing(monkeypatch):
+    doc = {
+        "doc_id": "doc-1",
+        "corpus_id": "corpus-1",
+        "user_id": "user-1",
+        "filename": "book.pdf",
+        "ingestion_config": {"use_neo4j": True, "target_qdrant_collections": ["graph"]},
+        "write_state": {
+            "mongo_written": True,
+            "qdrant_written": True,
+            "neo4j_written": False,
+            "verified": None,
+        },
+        "ghost_b_failures": [],
+        "ghost_b_staging": [],
+        "parent_chunks": [{"parent_id": "p1"}],
+        "updated_at": datetime.utcnow(),
+    }
+    chunks = [
+        {
+            "doc_id": "doc-1",
+            "corpus_id": "corpus-1",
+            "chunk_id": "chunk-body",
+            "text": "substantive body text",
+            "chunk_kind": "body",
+        },
+        {
+            "doc_id": "doc-1",
+            "corpus_id": "corpus-1",
+            "chunk_id": "chunk-code",
+            "text": "print('skip ghost b')",
+            "chunk_kind": "code",
+        },
+    ]
+    db = _FakeDb(doc, chunks)
+    seen = {}
+
+    async def fake_load_config(**kwargs):
+        return IngestionConfig()
+
+    async def fake_run_ghost_b_backfill(**kwargs):
+        tasks = kwargs["tasks"]
+        seen["task_ids"] = [task.chunk_id for task in tasks]
+        return ExtractionBatchReport(
+            results=[
+                ExtractionResult(
+                    schema_version="test",
+                    chunk_id=tasks[0].chunk_id,
+                    doc_id="doc-1",
+                    corpus_id="corpus-1",
+                    text=tasks[0].text,
+                )
+            ],
+            failures=[],
+            metrics={},
+        )
+
+    async def fake_write_graph_results(**kwargs):
+        seen["written_chunk_ids"] = kwargs["all_chunk_ids"]
+        seen["written_results"] = kwargs["extraction_results"]
+
+    monkeypatch.setattr(graph_backfill, "_load_backfill_config", fake_load_config)
+    monkeypatch.setattr(
+        graph_backfill,
+        "_run_ghost_b_backfill",
+        fake_run_ghost_b_backfill,
+    )
+    monkeypatch.setattr(graph_backfill, "_write_graph_results", fake_write_graph_results)
+
+    result = await graph_backfill.backfill_failed_graph_chunks(
+        db=db,
+        qdrant_client=object(),
+        neo4j_driver=object(),
+        corpus_id="corpus-1",
+        doc_id="doc-1",
+        user_id="user-1",
+    )
+
+    assert result["status"] == "replayed_from_chunks"
+    assert result["full_replay"] is True
+    assert seen["task_ids"] == ["chunk-body"]
+    assert seen["written_chunk_ids"] == ["chunk-body", "chunk-code"]
+    update = db["documents"].updates[-1][1]["$set"]
+    assert update["write_state.neo4j_written"] is True

@@ -33,6 +33,7 @@ from services.ingestion.worker import (
     _ghost_b_partial_warning,
     _rehydrate_ghost_b_staging,
 )
+from services.ingestion.section_classifier import ChunkKind, should_skip_ghost_b
 from services.storage.qdrant_writer import retrieve_schema_for_chunk
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,147 @@ def _merge_metrics(
     return merged
 
 
+def _schema_lens_id(doc: dict, metrics: dict) -> str | None:
+    value = (doc.get("ingestion_config") or {}).get("schema_lens_id") or metrics.get(
+        "schema_lens"
+    )
+    return value if isinstance(value, str) else None
+
+
+def _graph_parent_count(doc: dict) -> int:
+    parents = doc.get("parent_chunks") or []
+    return len(parents) if isinstance(parents, list) else 0
+
+
+async def _write_graph_results(
+    *,
+    neo4j_driver: Any,
+    doc: dict,
+    corpus_id: str,
+    doc_id: str,
+    user_id: str,
+    extraction_results: list[ExtractionResult],
+    all_chunk_ids: list[str],
+    metrics: dict,
+) -> None:
+    await write_document_graph(
+        driver=neo4j_driver,
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        extraction_results=extraction_results,
+        user_id=user_id,
+        file_id=doc.get("file_id"),
+        all_chunk_ids=all_chunk_ids,
+        filename=doc.get("filename"),
+        parent_count=_graph_parent_count(doc),
+        schema_lens_id=_schema_lens_id(doc, metrics),
+        ghost_b_success_rate=(
+            float(metrics["success_rate"])
+            if metrics.get("success_rate") is not None
+            else None
+        ),
+        ghost_b_extracted=(
+            int(metrics["extracted_chunks"])
+            if metrics.get("extracted_chunks") is not None
+            else None
+        ),
+        ghost_b_total=(
+            int(metrics["requested_chunks"])
+            if metrics.get("requested_chunks") is not None
+            else None
+        ),
+    )
+
+
+async def _load_backfill_config(
+    *,
+    db: AsyncIOMotorDatabase,
+    corpus_id: str,
+    doc: dict,
+) -> IngestionConfig:
+    corpus = await db["corpora"].find_one({"corpus_id": corpus_id})
+    live_cfg = (corpus or {}).get("default_ingestion_config") or {}
+    from services.ingestion_service import build_effective_config
+
+    return build_effective_config(
+        frozen_base=doc.get("ingestion_config") or live_cfg,
+        live_corpus=live_cfg,
+        ingest_overrides=None,
+    )
+
+
+async def _extract_tasks(
+    *,
+    db: AsyncIOMotorDatabase,
+    corpus_id: str,
+    doc_id: str,
+    chunk_ids: list[str] | None = None,
+) -> tuple[list[ExtractionTask], list[str]]:
+    query: dict[str, Any] = {"doc_id": doc_id, "corpus_id": corpus_id}
+    if chunk_ids is not None:
+        query["chunk_id"] = {"$in": chunk_ids}
+    rows = await db["chunks"].find(
+        query,
+        {"chunk_id": 1, "text": 1, "chunk_kind": 1, "_id": 0},
+    ).to_list(length=None)
+    all_chunk_ids = [str(row.get("chunk_id") or "") for row in rows if row.get("chunk_id")]
+    tasks = [
+        ExtractionTask(
+            chunk_id=str(row["chunk_id"]),
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            text=str(row.get("text") or ""),
+        )
+        for row in rows
+        if row.get("chunk_id")
+        and str(row.get("text") or "").strip()
+        and not should_skip_ghost_b(str(row.get("chunk_kind") or ChunkKind.BODY))
+    ]
+    return tasks, all_chunk_ids
+
+
+async def _run_ghost_b_backfill(
+    *,
+    db: AsyncIOMotorDatabase,
+    qdrant_client: AsyncQdrantClient,
+    corpus_id: str,
+    tasks: list[ExtractionTask],
+    config: IngestionConfig,
+) -> ExtractionBatchReport:
+    schema_ctx = SchemaContext(
+        entity_schema=config.entity_schema,
+        relation_schema=config.relation_schema,
+        strict=config.schema_strict,
+    )
+    pool = (
+        _build_ghost_pool(config.summary_models)
+        if config.models_linked or not config.extraction_models
+        else _build_ghost_pool(config.extraction_models)
+    )
+
+    async def _schema_resolver(kind: str, query_vec: list[float], top_k: int) -> list[str]:
+        return await retrieve_schema_for_chunk(qdrant_client, corpus_id, kind, query_vec, top_k)
+
+    ghost_b_run_id = f"backfill-{uuid.uuid4()}"
+    report = await extract_entities(
+        tasks,
+        schema=schema_ctx,
+        chunk_vectors=None,
+        schema_resolver=_schema_resolver,
+        pool=pool,
+        model=None,
+        return_report=True,
+        audit_event_sink=_build_ghost_b_error_event_sink(
+            db,
+            run_id=ghost_b_run_id,
+        ),
+        audit_run_id=ghost_b_run_id,
+    )
+    if not isinstance(report, ExtractionBatchReport):
+        raise RuntimeError("Ghost B did not return a batch report")
+    return report
+
+
 async def backfill_failed_graph_chunks(
     *,
     db: AsyncIOMotorDatabase,
@@ -144,9 +286,16 @@ async def backfill_failed_graph_chunks(
     neo4j_already_written = bool(write_state.get("neo4j_written"))
     staged_raw = doc.get("ghost_b_staging") or []
     needs_neo4j_flush = (not neo4j_already_written) and bool(staged_raw)
+    needs_full_replay = (
+        not failures
+        and not needs_neo4j_flush
+        and not neo4j_already_written
+        and bool(write_state.get("mongo_written"))
+        and bool(write_state.get("qdrant_written"))
+    )
 
     # Pt 9 — early-return only when there's truly nothing to do.
-    if not failures and not needs_neo4j_flush:
+    if not failures and not needs_neo4j_flush and not needs_full_replay:
         return {
             "status": "noop",
             "doc_id": doc_id,
@@ -182,37 +331,15 @@ async def backfill_failed_graph_chunks(
             )
         ]
         doc_metrics = doc.get("ghost_b_metrics") or {}
-        parents = doc.get("parent_chunks") or []
-        await write_document_graph(
-            driver=neo4j_driver,
-            doc_id=doc_id,
+        await _write_graph_results(
+            neo4j_driver=neo4j_driver,
+            doc=doc,
             corpus_id=corpus_id,
-            extraction_results=staged_results,
+            doc_id=doc_id,
             user_id=user_id,
-            file_id=doc.get("file_id"),
+            extraction_results=staged_results,
             all_chunk_ids=all_chunk_ids,
-            filename=doc.get("filename"),
-            parent_count=len(parents) if isinstance(parents, list) else 0,
-            schema_lens_id=(
-                (doc.get("ingestion_config") or {}).get("schema_lens_id")
-                or doc_metrics.get("schema_lens")
-            ) if isinstance(
-                (doc.get("ingestion_config") or {}).get("schema_lens_id")
-                or doc_metrics.get("schema_lens"),
-                str,
-            ) else None,
-            ghost_b_success_rate=(
-                float(doc_metrics["success_rate"])
-                if doc_metrics.get("success_rate") is not None else None
-            ),
-            ghost_b_extracted=(
-                int(doc_metrics["extracted_chunks"])
-                if doc_metrics.get("extracted_chunks") is not None else None
-            ),
-            ghost_b_total=(
-                int(doc_metrics["requested_chunks"])
-                if doc_metrics.get("requested_chunks") is not None else None
-            ),
+            metrics=doc_metrics,
         )
         # Flip the flag — same contract the worker uses on success.
         await db["documents"].update_one(
@@ -237,69 +364,152 @@ async def backfill_failed_graph_chunks(
             "staged_results_written": len(staged_results),
         }
 
-    failed_ids = list(dict.fromkeys(f.chunk_id for f in failures if f.chunk_id))
-    chunk_rows = await db["chunks"].find(
-        {
+    # Pt 10 — full replay fallback. Some partial docs made it through
+    # Mongo/Qdrant with `neo4j_written=False`, no failures, and no staging
+    # left to flush. The raw file bytes are gone, but Mongo still has the child
+    # chunks. Re-run Ghost B from those chunks and write a normal full graph.
+    if needs_full_replay:
+        tasks, all_chunk_ids = await _extract_tasks(
+            db=db,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+        )
+        config = await _load_backfill_config(db=db, corpus_id=corpus_id, doc=doc)
+        if not tasks:
+            metrics = summarize_extraction_batch(
+                total_chunks=len(all_chunk_ids),
+                results=[],
+                failures=[],
+                call_metrics=[],
+                models=[],
+            )
+            await _write_graph_results(
+                neo4j_driver=neo4j_driver,
+                doc=doc,
+                corpus_id=corpus_id,
+                doc_id=doc_id,
+                user_id=user_id,
+                extraction_results=[],
+                all_chunk_ids=all_chunk_ids,
+                metrics=metrics,
+            )
+            await db["documents"].update_one(
+                {"doc_id": doc_id, "corpus_id": corpus_id},
+                {"$set": {
+                    "ghost_b_staging": [],
+                    "ghost_b_failures": [],
+                    "ghost_b_metrics": metrics,
+                    "write_state.neo4j_written": True,
+                    "updated_at": datetime.utcnow(),
+                }},
+            )
+            return {
+                "status": "replayed_from_chunks",
+                "doc_id": doc_id,
+                "corpus_id": corpus_id,
+                "retried_chunks": 0,
+                "recovered_chunks": 0,
+                "remaining_failed_chunks": 0,
+                "neo4j_flushed": True,
+                "full_replay": True,
+            }
+
+        report = await _run_ghost_b_backfill(
+            db=db,
+            qdrant_client=qdrant_client,
+            corpus_id=corpus_id,
+            tasks=tasks,
+            config=config,
+        )
+        if not report.results and report.failures:
+            raise RuntimeError(
+                "Ghost B full replay could not recover any chunks from Mongo"
+            )
+        staged_results = list(report.results)
+        remaining_failures = list(report.failures)
+        metrics = _merge_metrics(
+            total_chunks=len(all_chunk_ids),
+            staged_results=staged_results,
+            remaining_failures=remaining_failures,
+            previous_metrics={},
+            retry_metrics=report.metrics,
+        )
+        await _write_graph_results(
+            neo4j_driver=neo4j_driver,
+            doc=doc,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+            user_id=user_id,
+            extraction_results=staged_results,
+            all_chunk_ids=all_chunk_ids,
+            metrics=metrics,
+        )
+        warnings = _clean_graph_warnings(
+            (doc.get("write_state") or {}).get("warnings") or []
+        )
+        if remaining_failures:
+            warnings.append(
+                _ghost_b_partial_warning(
+                    extracted=max(len(tasks) - len(remaining_failures), 0),
+                    total=len(tasks),
+                )
+            )
+            warnings.append(
+                "Ghost B full replay from Mongo chunks recovered "
+                f"{len(staged_results)} chunks; {len(remaining_failures)} still failed."
+            )
+        else:
+            warnings.append(
+                f"Ghost B full replay from Mongo chunks recovered {len(staged_results)} chunks."
+            )
+        await db["documents"].update_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {"$set": {
+                "ghost_b_staging": [asdict(result) for result in staged_results],
+                "ghost_b_failures": [asdict(failure) for failure in remaining_failures],
+                "ghost_b_metrics": metrics,
+                "write_state.neo4j_written": True,
+                "write_state.warnings": warnings,
+                "updated_at": datetime.utcnow(),
+            }},
+        )
+        logger.info(
+            "phase=ghost_b_backfill_full_replay doc=%s corpus=%s chunks=%d recovered=%d remaining=%d",
+            doc_id[:12],
+            corpus_id[:8],
+            len(tasks),
+            len(staged_results),
+            len(remaining_failures),
+        )
+        return {
+            "status": "replayed_from_chunks",
             "doc_id": doc_id,
             "corpus_id": corpus_id,
-            "chunk_id": {"$in": failed_ids},
-        },
-        {"chunk_id": 1, "text": 1, "_id": 0},
-    ).to_list(length=None)
-    chunk_by_id = {row["chunk_id"]: row for row in chunk_rows}
-    tasks = [
-        ExtractionTask(
-            chunk_id=chunk_id,
-            doc_id=doc_id,
-            corpus_id=corpus_id,
-            text=str(chunk_by_id[chunk_id].get("text") or ""),
-        )
-        for chunk_id in failed_ids
-        if chunk_id in chunk_by_id
-    ]
+            "retried_chunks": len(tasks),
+            "recovered_chunks": len(staged_results),
+            "remaining_failed_chunks": len(remaining_failures),
+            "neo4j_flushed": True,
+            "full_replay": True,
+        }
+
+    failed_ids = list(dict.fromkeys(f.chunk_id for f in failures if f.chunk_id))
+    tasks, _ = await _extract_tasks(
+        db=db,
+        corpus_id=corpus_id,
+        doc_id=doc_id,
+        chunk_ids=failed_ids,
+    )
     if not tasks:
         raise RuntimeError("Failed chunk records exist, but no matching chunks were found")
 
-    corpus = await db["corpora"].find_one({"corpus_id": corpus_id})
-    live_cfg = (corpus or {}).get("default_ingestion_config") or {}
-    from services.ingestion_service import build_effective_config
-
-    config = build_effective_config(
-        frozen_base=doc.get("ingestion_config") or live_cfg,
-        live_corpus=live_cfg,
-        ingest_overrides=None,
+    config = await _load_backfill_config(db=db, corpus_id=corpus_id, doc=doc)
+    report = await _run_ghost_b_backfill(
+        db=db,
+        qdrant_client=qdrant_client,
+        corpus_id=corpus_id,
+        tasks=tasks,
+        config=config,
     )
-    schema_ctx = SchemaContext(
-        entity_schema=config.entity_schema,
-        relation_schema=config.relation_schema,
-        strict=config.schema_strict,
-    )
-    pool = (
-        _build_ghost_pool(config.summary_models)
-        if config.models_linked or not config.extraction_models
-        else _build_ghost_pool(config.extraction_models)
-    )
-
-    async def _schema_resolver(kind: str, query_vec: list[float], top_k: int) -> list[str]:
-        return await retrieve_schema_for_chunk(qdrant_client, corpus_id, kind, query_vec, top_k)
-
-    ghost_b_run_id = f"backfill-{uuid.uuid4()}"
-    report = await extract_entities(
-        tasks,
-        schema=schema_ctx,
-        chunk_vectors=None,
-        schema_resolver=_schema_resolver,
-        pool=pool,
-        model=None,
-        return_report=True,
-        audit_event_sink=_build_ghost_b_error_event_sink(
-            db,
-            run_id=ghost_b_run_id,
-        ),
-        audit_run_id=ghost_b_run_id,
-    )
-    if not isinstance(report, ExtractionBatchReport):
-        raise RuntimeError("Ghost B did not return a batch report")
 
     recovered_ids = {result.chunk_id for result in report.results}
     retry_failure_by_id = {failure.chunk_id: failure for failure in report.failures}

@@ -155,6 +155,23 @@ class Settings(BaseSettings):
             "Requests over this cap fail fast with 429 instead of holding uploaded bytes."
         ),
     )
+    INGEST_BATCH_WORKERS: int = Field(
+        default=2,
+        ge=1,
+        le=32,
+        description=(
+            "Default worker count for durable backend-owned local folder ingest batches."
+        ),
+    )
+    INGEST_STALE_JOB_MINUTES: int = Field(
+        default=30,
+        ge=1,
+        le=1440,
+        description=(
+            "Age after which durable ingest batch item leases are considered stale "
+            "and can be marked failed_recoverable for resume."
+        ),
+    )
 
     # === LOCAL MODELS DIR ===
     MODELS_DIR: str = Field(

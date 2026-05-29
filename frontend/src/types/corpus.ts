@@ -321,6 +321,52 @@ export interface IngestJobResponse {
   error: string | null;
 }
 
+export interface IngestBatchItemResponse {
+  item_id: string;
+  batch_id: string;
+  corpus_id: string;
+  filename: string;
+  relative_path?: string;
+  source_path?: string;
+  status:
+    | "queued"
+    | "running"
+    | "done"
+    | "failed"
+    | "failed_recoverable"
+    | "skipped";
+  attempts: number;
+  doc_id?: string | null;
+  error?: string | null;
+  size_bytes?: number;
+  updated_at?: string;
+}
+
+export interface IngestBatchResponse {
+  batch_id: string;
+  corpus_id: string;
+  source: "local_folder" | string;
+  root_path?: string;
+  status: "queued" | "running" | "done" | "partial" | "failed";
+  total: number;
+  counts: Record<string, number>;
+  options?: Record<string, unknown>;
+  runner_started?: boolean;
+  items?: IngestBatchItemResponse[];
+}
+
+export interface LocalIngestBatchRequest {
+  root_path: string;
+  recursive?: boolean;
+  extensions?: string[];
+  max_files?: number;
+  use_neo4j?: boolean;
+  chunk_summarization?: boolean;
+  model?: string;
+  concurrency?: number;
+  start?: boolean;
+}
+
 export interface CorpusDeleteResponse {
   status: string;
   message: string;
