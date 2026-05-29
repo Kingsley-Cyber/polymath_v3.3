@@ -172,6 +172,18 @@ class Settings(BaseSettings):
             "and can be marked failed_recoverable for resume."
         ),
     )
+    INGEST_FILE_STORAGE_DIR: str = Field(
+        default="/data/ingest-files",
+        description=(
+            "Durable backend-owned file spool used by local ingest batches when "
+            "store_files=true."
+        ),
+    )
+    INGEST_FILE_STORAGE_MAX_BYTES: int = Field(
+        default=2 * 1024 * 1024 * 1024,
+        ge=1,
+        description="Maximum total bytes allowed in the durable ingest file spool.",
+    )
 
     # === LOCAL MODELS DIR ===
     MODELS_DIR: str = Field(

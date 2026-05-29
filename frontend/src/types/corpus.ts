@@ -328,6 +328,7 @@ export interface IngestBatchItemResponse {
   filename: string;
   relative_path?: string;
   source_path?: string;
+  stored_path?: string | null;
   status:
     | "queued"
     | "running"
@@ -339,6 +340,7 @@ export interface IngestBatchItemResponse {
   doc_id?: string | null;
   error?: string | null;
   size_bytes?: number;
+  stored_bytes?: number;
   updated_at?: string;
 }
 
@@ -347,6 +349,10 @@ export interface IngestBatchResponse {
   corpus_id: string;
   source: "local_folder" | string;
   root_path?: string;
+  store_files?: boolean;
+  total_source_bytes?: number;
+  stored_bytes?: number;
+  storage_limit_bytes?: number | null;
   status: "queued" | "running" | "done" | "partial" | "failed";
   total: number;
   counts: Record<string, number>;
@@ -360,6 +366,8 @@ export interface LocalIngestBatchRequest {
   recursive?: boolean;
   extensions?: string[];
   max_files?: number;
+  store_files?: boolean;
+  max_total_bytes?: number;
   use_neo4j?: boolean;
   chunk_summarization?: boolean;
   model?: string;

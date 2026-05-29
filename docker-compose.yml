@@ -456,6 +456,7 @@ services:
     volumes:
       - "${POLYMATH_MODELS_ROOT:-C:/PolymathRuntime/models}:/models:ro"
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/home/appuser/.cache/huggingface"
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/ingest-files:/data/ingest-files"
       # Phase 22 — expose the Modal deploy factory inside the backend
       # container so /api/infrastructure/modal/deploy can import it.
       # Read-only bind; file lives at repo root for CLI-deploy compatibility.
@@ -578,6 +579,9 @@ services:
       INGEST_MAX_PARSE_JOBS: ${INGEST_MAX_PARSE_JOBS:-8}
       INGEST_MAX_MODEL_PHASE_DOCS: ${INGEST_MAX_MODEL_PHASE_DOCS:-8}
       INGEST_MAX_ACTIVE_JOBS: ${INGEST_MAX_ACTIVE_JOBS:-16}
+      INGEST_BATCH_WORKERS: ${INGEST_BATCH_WORKERS:-2}
+      INGEST_FILE_STORAGE_DIR: ${INGEST_FILE_STORAGE_DIR:-/data/ingest-files}
+      INGEST_FILE_STORAGE_MAX_BYTES: ${INGEST_FILE_STORAGE_MAX_BYTES:-2147483648}
     depends_on:
       mongodb:
         condition: service_healthy

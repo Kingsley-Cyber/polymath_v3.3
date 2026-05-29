@@ -13,6 +13,7 @@ import asyncio
 import logging
 import mimetypes
 import os
+import shutil
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -77,6 +78,44 @@ def _normalize_extensions(extensions: list[str] | None) -> set[str]:
     return normalized
 
 
+def _sum_file_sizes(files: list[Path]) -> int:
+    return sum(path.stat().st_size for path in files)
+
+
+def _directory_size_bytes(root: Path) -> int:
+    if not root.exists():
+        return 0
+    total = 0
+    for path in root.rglob("*"):
+        if path.is_file():
+            try:
+                total += path.stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def _ensure_storage_quota(
+    *,
+    storage_root: Path,
+    incoming_bytes: int,
+    max_total_bytes: int,
+) -> None:
+    used = _directory_size_bytes(storage_root)
+    if used + incoming_bytes > max_total_bytes:
+        raise ValueError(
+            "Durable ingest file storage quota exceeded: "
+            f"{used + incoming_bytes} bytes requested, "
+            f"{max_total_bytes} bytes available. "
+            "Delete old stored batches or raise INGEST_FILE_STORAGE_MAX_BYTES."
+        )
+
+
+def _storage_path_for_item(storage_root: Path, batch_id: str, item_id: str, filename: str) -> Path:
+    suffix = Path(filename).suffix
+    return storage_root / batch_id / f"{item_id}{suffix}"
+
+
 def discover_local_files(
     root_path: str,
     *,
@@ -113,23 +152,28 @@ def _file_item_doc(
     root: Path,
     path: Path,
     ordinal: int,
+    item_id: str | None = None,
+    stored_path: Path | None = None,
 ) -> dict[str, Any]:
     stat = path.stat()
     try:
         rel_path = str(path.relative_to(root))
     except ValueError:
         rel_path = path.name
+    item_id = item_id or str(uuid.uuid4())
     return {
-        "item_id": str(uuid.uuid4()),
+        "item_id": item_id,
         "batch_id": batch_id,
         "corpus_id": corpus_id,
         "user_id": user_id,
         "source": "local_folder",
         "source_path": str(path),
+        "stored_path": str(stored_path) if stored_path is not None else None,
         "relative_path": rel_path,
         "filename": path.name,
         "ordinal": ordinal,
         "size_bytes": int(stat.st_size),
+        "stored_bytes": int(stat.st_size) if stored_path is not None else 0,
         "mtime": datetime.utcfromtimestamp(stat.st_mtime),
         "mime_type": mimetypes.guess_type(path.name)[0],
         "status": ITEM_QUEUED,
@@ -154,6 +198,8 @@ async def create_local_batch(
     recursive: bool = True,
     extensions: list[str] | None = None,
     max_files: int | None = None,
+    store_files: bool = False,
+    max_total_bytes: int | None = None,
     use_neo4j: bool | None = None,
     chunk_summarization: bool | None = None,
     model: str = "",
@@ -171,6 +217,35 @@ async def create_local_batch(
     now = _now()
     batch_id = str(uuid.uuid4())
     settings = get_settings()
+    total_source_bytes = _sum_file_sizes(files)
+    storage_root = Path(settings.INGEST_FILE_STORAGE_DIR).expanduser().resolve()
+    storage_limit = int(max_total_bytes or settings.INGEST_FILE_STORAGE_MAX_BYTES)
+    stored_paths: dict[Path, Path] = {}
+    item_ids: dict[Path, str] = {}
+    if store_files:
+        _ensure_storage_quota(
+            storage_root=storage_root,
+            incoming_bytes=total_source_bytes,
+            max_total_bytes=storage_limit,
+        )
+        batch_storage_dir = storage_root / batch_id
+        batch_storage_dir.mkdir(parents=True, exist_ok=False)
+        try:
+            for path in files:
+                item_id = str(uuid.uuid4())
+                item_ids[path] = item_id
+                stored_path = _storage_path_for_item(
+                    storage_root,
+                    batch_id,
+                    item_id,
+                    path.name,
+                )
+                stored_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, stored_path)
+                stored_paths[path] = stored_path
+        except Exception:
+            shutil.rmtree(batch_storage_dir, ignore_errors=True)
+            raise
     worker_count = max(
         1,
         min(
@@ -186,6 +261,10 @@ async def create_local_batch(
         "root_path": str(root),
         "recursive": recursive,
         "extensions": sorted(_normalize_extensions(extensions)),
+        "store_files": store_files,
+        "total_source_bytes": total_source_bytes,
+        "stored_bytes": total_source_bytes if store_files else 0,
+        "storage_limit_bytes": storage_limit if store_files else None,
         "status": BATCH_QUEUED,
         "total": len(files),
         "counts": {
@@ -217,6 +296,8 @@ async def create_local_batch(
                 root=root,
                 path=path,
                 ordinal=idx,
+                item_id=item_ids.get(path),
+                stored_path=stored_paths.get(path),
             )
             for idx, path in enumerate(files)
         ],
@@ -401,13 +482,16 @@ async def _process_local_item(
     item: dict[str, Any],
 ) -> None:
     item_id = item["item_id"]
-    path = Path(str(item.get("source_path") or ""))
+    stored_path_raw = item.get("stored_path")
+    source_path_raw = item.get("source_path")
+    path = Path(str(stored_path_raw or source_path_raw or ""))
     if not path.exists() or not path.is_file():
+        label = "Stored source" if stored_path_raw else "Source file"
         await db[ITEMS].update_one(
             {"item_id": item_id},
             {"$set": {
                 "status": ITEM_FAILED_RECOVERABLE,
-                "error": f"Source file is missing: {path}",
+                "error": f"{label} is missing: {path}",
                 "lease_owner": None,
                 "lease_until": None,
                 "updated_at": _now(),

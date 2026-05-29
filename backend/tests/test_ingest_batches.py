@@ -41,6 +41,48 @@ def test_discover_local_files_respects_max_files(tmp_path):
     assert len(files) == 2
 
 
+def test_storage_quota_counts_existing_bytes(tmp_path):
+    storage = tmp_path / "spool"
+    storage.mkdir()
+    (storage / "old.bin").write_bytes(b"x" * 8)
+
+    batches._ensure_storage_quota(
+        storage_root=storage,
+        incoming_bytes=2,
+        max_total_bytes=10,
+    )
+
+    with pytest.raises(ValueError, match="quota exceeded"):
+        batches._ensure_storage_quota(
+            storage_root=storage,
+            incoming_bytes=3,
+            max_total_bytes=10,
+        )
+
+
+def test_file_item_doc_records_stored_copy(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    source = root / "book.md"
+    source.write_text("# Book", encoding="utf-8")
+    stored = tmp_path / "spool" / "item.md"
+
+    item = batches._file_item_doc(
+        batch_id="batch-1",
+        corpus_id="corpus-1",
+        user_id="user-1",
+        root=root,
+        path=source,
+        ordinal=0,
+        item_id="item-1",
+        stored_path=stored,
+    )
+
+    assert item["item_id"] == "item-1"
+    assert item["stored_path"] == str(stored)
+    assert item["stored_bytes"] == source.stat().st_size
+
+
 class _FakeCursor:
     def __init__(self, rows):
         self.rows = rows

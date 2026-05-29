@@ -112,6 +112,8 @@ class LocalIngestBatchRequest(BaseModel):
     recursive: bool = True
     extensions: list[str] | None = None
     max_files: int | None = Field(default=None, ge=1, le=20000)
+    store_files: bool = True
+    max_total_bytes: int | None = Field(default=None, ge=1, le=2 * 1024 * 1024 * 1024)
     use_neo4j: bool | None = None
     chunk_summarization: bool | None = None
     model: str = ""
@@ -746,6 +748,8 @@ async def create_local_ingest_batch(
             recursive=body.recursive,
             extensions=body.extensions,
             max_files=body.max_files,
+            store_files=body.store_files,
+            max_total_bytes=body.max_total_bytes,
             use_neo4j=body.use_neo4j,
             chunk_summarization=body.chunk_summarization,
             model=body.model,
