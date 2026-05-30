@@ -121,7 +121,25 @@ const getNoverlapSettings = (
   nodeCount: number,
   mode: "brain" | "query",
 ) => {
-  if (mode !== "query") return BASE_NOVERLAP_SETTINGS;
+  if (mode !== "query") {
+    if (nodeCount > 900) {
+      return {
+        maxIterations: 16,
+        ratio: 1.18,
+        margin: 12,
+        expansion: 1.12,
+      };
+    }
+    if (nodeCount > 450) {
+      return {
+        maxIterations: 28,
+        ratio: 1.24,
+        margin: 16,
+        expansion: 1.15,
+      };
+    }
+    return BASE_NOVERLAP_SETTINGS;
+  }
   return {
     maxIterations: nodeCount > 500 ? 170 : 150,
     ratio: nodeCount > 500 ? 1.85 : 2.05,

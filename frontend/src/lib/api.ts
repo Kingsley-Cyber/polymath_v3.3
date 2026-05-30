@@ -1866,6 +1866,8 @@ export interface BrainViewResponse {
     total_documents: number;
     total_bridges: number;
     limit_applied: number;
+    bridge_entity_cap?: number;
+    detail?: "anchors" | "bridges";
     error?: string;
     partial?: boolean;
   };
@@ -1874,10 +1876,21 @@ export interface BrainViewResponse {
 export async function getBrainView(
   corpusIds: string[],
   limit = 2000,
+  opts?: {
+    detail?: "anchors" | "bridges";
+    bridgeEntityCap?: number;
+    signal?: AbortSignal;
+  },
 ): Promise<BrainViewResponse> {
   return fetchJSON("/graph/brain-view", {
     method: "POST",
-    body: JSON.stringify({ corpus_ids: corpusIds, limit }),
+    signal: opts?.signal,
+    body: JSON.stringify({
+      corpus_ids: corpusIds,
+      limit,
+      detail: opts?.detail,
+      bridge_entity_cap: opts?.bridgeEntityCap,
+    }),
   });
 }
 

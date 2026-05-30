@@ -900,6 +900,8 @@ async def graph_brain_view(body: dict = Body(...)) -> dict:
     Body:
       corpus_ids: list[str]   required, 1+
       limit:      int         optional, default 2000 (safety cap)
+      detail:     str         optional, "anchors" for the quick paint path
+      bridge_entity_cap: int  optional, caps per-book bridge traversal
 
     Response:
       {documents, bridges, meta} — see services.graph.queries.get_brain_view.
@@ -907,10 +909,24 @@ async def graph_brain_view(body: dict = Body(...)) -> dict:
     driver = _require_neo4j()
     corpus_ids = _validate_corpus_ids_or_400(body)
     limit = max(1, min(int(body.get("limit", 2000) or 2000), 10000))
+    detail = "anchors" if str(body.get("detail") or "").lower() == "anchors" else "bridges"
+    bridge_entity_cap = max(
+        1,
+        min(
+            int(body.get("bridge_entity_cap", 64) or 64),
+            256,
+        ),
+    )
 
     from services.graph.queries import get_brain_view
 
-    return await get_brain_view(driver, corpus_ids, limit=limit)
+    return await get_brain_view(
+        driver,
+        corpus_ids,
+        limit=limit,
+        bridge_entity_cap=bridge_entity_cap,
+        detail=detail,
+    )
 
 
 @discovery_router.post(

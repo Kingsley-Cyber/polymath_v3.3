@@ -17,7 +17,7 @@ import json
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from neo4j import AsyncDriver
 
@@ -244,12 +244,44 @@ LIMIT $limit
 """
 
 
+_BRAIN_VIEW_ANCHORS_CYPHER = """
+MATCH (d:Document)
+WHERE d.corpus_id IN $corpus_ids
+  AND d.is_cluster_anchor = true
+RETURN
+    d.doc_id          AS doc_id,
+    d.corpus_id       AS corpus_id,
+    coalesce(d.filename, d.doc_id) AS label,
+    d.filename        AS filename,
+    d.kind            AS kind,
+    d.chunk_count     AS chunk_count,
+    d.parent_count    AS parent_count,
+    coalesce(d.chunk_count, 0) AS actual_chunk_count,
+    d.dominant_family AS dominant_family,
+    d.dominant_entity_type AS dominant_entity_type,
+    d.ghost_b_success_rate AS ghost_b_success_rate,
+    d.ghost_b_extracted    AS ghost_b_extracted,
+    d.ghost_b_total        AS ghost_b_total,
+    d.schema_lens_id  AS schema_lens_id,
+    d.source_tier     AS source_tier,
+    d.ingested_at     AS ingested_at,
+    d.updated_at      AS updated_at,
+    0                 AS bridge_count,
+    []                AS bridges,
+    0                 AS entity_count,
+    []                AS top_entities
+ORDER BY label ASC
+LIMIT $limit
+"""
+
+
 async def get_brain_view(
     driver: AsyncDriver,
     corpus_ids: list[str],
     *,
     limit: int = 2000,
     bridge_entity_cap: int = BRAIN_VIEW_BRIDGE_ENTITY_CAP,
+    detail: Literal["anchors", "bridges"] = "bridges",
 ) -> dict[str, Any]:
     """Top-level books-as-clusters view.
 
@@ -283,17 +315,25 @@ async def get_brain_view(
             "meta": {"corpus_count": 0, "total_documents": 0, "total_bridges": 0, "limit_applied": limit},
         }
 
-    stop_exact, stop_pattern = _load_entity_stoplist()
+    detail = "anchors" if detail == "anchors" else "bridges"
+    stop_exact, stop_pattern = _load_entity_stoplist() if detail == "bridges" else ([], "$^")
     try:
         async with driver.session() as session:
-            result = await session.run(
-                _BRAIN_VIEW_CYPHER,
-                corpus_ids=list(corpus_ids),
-                limit=int(limit),
-                bridge_entity_cap=max(1, int(bridge_entity_cap)),
-                stop_exact=stop_exact,
-                stop_pattern=stop_pattern,
-            )
+            if detail == "anchors":
+                result = await session.run(
+                    _BRAIN_VIEW_ANCHORS_CYPHER,
+                    corpus_ids=list(corpus_ids),
+                    limit=int(limit),
+                )
+            else:
+                result = await session.run(
+                    _BRAIN_VIEW_CYPHER,
+                    corpus_ids=list(corpus_ids),
+                    limit=int(limit),
+                    bridge_entity_cap=max(1, int(bridge_entity_cap)),
+                    stop_exact=stop_exact,
+                    stop_pattern=stop_pattern,
+                )
             records = [dict(r) async for r in result]
     except Exception as exc:
         logger.exception("Brain view query failed: %s", exc)
@@ -364,6 +404,7 @@ async def get_brain_view(
             "total_bridges": len(flat_bridges),
             "limit_applied": limit,
             "bridge_entity_cap": max(1, int(bridge_entity_cap)),
+            "detail": detail,
         },
     }
 
