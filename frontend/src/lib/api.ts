@@ -516,6 +516,54 @@ export async function createLocalIngestBatch(
   );
 }
 
+export async function createUploadIngestBatch(
+  corpusId: string,
+  files: File[],
+  options: {
+    use_neo4j?: boolean;
+    chunk_summarization?: boolean;
+    model?: string;
+    concurrency?: number;
+    start?: boolean;
+  } = {},
+): Promise<IngestBatchResponse> {
+  const form = new FormData();
+  for (const file of files) {
+    form.append("files", file);
+  }
+  if (options.use_neo4j !== undefined) {
+    form.append("use_neo4j", String(options.use_neo4j));
+  }
+  if (options.chunk_summarization !== undefined) {
+    form.append("chunk_summarization", String(options.chunk_summarization));
+  }
+  if (options.model) form.append("model", options.model);
+  if (options.concurrency !== undefined) {
+    form.append("concurrency", String(options.concurrency));
+  }
+  form.append("start", String(options.start ?? true));
+
+  const token = getPersistedToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const response = await fetch(
+    `${API_BASE}/corpora/${encodeURIComponent(corpusId)}/ingest-batches/upload`,
+    {
+      method: "POST",
+      headers,
+      body: form,
+    },
+  );
+  if (!response.ok) {
+    if (response.status === 401) {
+      useAuthStore.getState().clearAuth();
+      throw new Error("Session expired. Please log in again.");
+    }
+    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  }
+  return response.json();
+}
+
 export async function listIngestBatches(
   corpusId: string,
   limit = 10,
@@ -1308,6 +1356,7 @@ export const api = {
   testIngestionModelRef,
   listDocuments,
   createLocalIngestBatch,
+  createUploadIngestBatch,
   listIngestBatches,
   getIngestBatch,
   resumeIngestBatch,

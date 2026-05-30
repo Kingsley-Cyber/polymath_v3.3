@@ -31,6 +31,9 @@ _UTC_EPOCH = datetime(1970, 1, 1)
 
 BATCHES = "ingest_batches"
 ITEMS = "ingest_batch_items"
+SOURCE_LOCAL_FOLDER = "local_folder"
+SOURCE_BROWSER_UPLOAD = "browser_upload"
+RUNNABLE_SOURCES = [SOURCE_LOCAL_FOLDER, SOURCE_BROWSER_UPLOAD]
 
 ITEM_QUEUED = "queued"
 ITEM_RUNNING = "running"
@@ -185,23 +188,30 @@ def _file_item_doc(
     ordinal: int,
     item_id: str | None = None,
     stored_path: Path | None = None,
+    source: str = SOURCE_LOCAL_FOLDER,
+    relative_path: str | None = None,
+    filename: str | None = None,
+    source_path: str | None = None,
 ) -> dict[str, Any]:
     stat = path.stat()
-    try:
-        rel_path = str(path.relative_to(root))
-    except ValueError:
-        rel_path = path.name
+    if relative_path is None:
+        try:
+            relative_path = str(path.relative_to(root))
+        except ValueError:
+            relative_path = path.name
+    filename = filename or path.name
+    source_path = source_path if source_path is not None else str(path)
     item_id = item_id or str(uuid.uuid4())
     return {
         "item_id": item_id,
         "batch_id": batch_id,
         "corpus_id": corpus_id,
         "user_id": user_id,
-        "source": "local_folder",
-        "source_path": str(path),
+        "source": source,
+        "source_path": source_path,
         "stored_path": str(stored_path) if stored_path is not None else None,
-        "relative_path": rel_path,
-        "filename": path.name,
+        "relative_path": relative_path,
+        "filename": filename,
         "ordinal": ordinal,
         "size_bytes": int(stat.st_size),
         "stored_bytes": int(stat.st_size) if stored_path is not None else 0,
@@ -336,6 +346,134 @@ async def create_local_batch(
                 stored_path=stored_paths.get(path),
             )
             for idx, path in enumerate(files)
+        ],
+        ordered=False,
+    )
+    return await refresh_batch_counts(db, batch_id, user_id=user_id)
+
+
+async def create_upload_batch(
+    *,
+    db: AsyncIOMotorDatabase,
+    corpus_id: str,
+    user_id: str,
+    files: list[dict[str, Any]],
+    max_total_bytes: int | None = None,
+    use_neo4j: bool | None = None,
+    chunk_summarization: bool | None = None,
+    model: str = "",
+    concurrency: int | None = None,
+) -> dict[str, Any]:
+    """Create a durable one-off browser-upload batch from already-read bytes."""
+    if not files:
+        raise ValueError("No files uploaded")
+    allowed_exts = _normalize_extensions(None)
+    cleaned: list[dict[str, Any]] = []
+    total_source_bytes = 0
+    for idx, file in enumerate(files):
+        filename = str(file.get("filename") or f"upload-{idx + 1}").strip()
+        data = bytes(file.get("data") or b"")
+        ext = Path(filename).suffix.lower()
+        if ext not in allowed_exts:
+            raise ValueError(f"Unsupported file extension for {filename}: {ext or '(none)'}")
+        if not data:
+            raise ValueError(f"Uploaded file is empty: {filename}")
+        cleaned.append(
+            {
+                "filename": filename,
+                "content_type": file.get("content_type"),
+                "data": data,
+            }
+        )
+        total_source_bytes += len(data)
+
+    now = _now()
+    batch_id = str(uuid.uuid4())
+    settings = get_settings()
+    storage_root = Path(settings.INGEST_FILE_STORAGE_DIR).expanduser().resolve()
+    storage_limit = int(max_total_bytes or settings.INGEST_FILE_STORAGE_MAX_BYTES)
+    _ensure_storage_quota(
+        storage_root=storage_root,
+        incoming_bytes=total_source_bytes,
+        max_total_bytes=storage_limit,
+    )
+    worker_count = max(
+        1,
+        min(
+            int(concurrency or 1),
+            int(settings.INGEST_MAX_ACTIVE_JOBS),
+        ),
+    )
+    batch_storage_dir = storage_root / batch_id
+    batch_storage_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        for file in cleaned:
+            item_id = str(uuid.uuid4())
+            stored_path = _storage_path_for_item(
+                storage_root,
+                batch_id,
+                item_id,
+                file["filename"],
+            )
+            stored_path.write_bytes(file["data"])
+            file["item_id"] = item_id
+            file["stored_path"] = stored_path
+    except Exception:
+        shutil.rmtree(batch_storage_dir, ignore_errors=True)
+        raise
+
+    batch_doc = {
+        "batch_id": batch_id,
+        "corpus_id": corpus_id,
+        "user_id": user_id,
+        "source": SOURCE_BROWSER_UPLOAD,
+        "root_path": None,
+        "recursive": False,
+        "extensions": sorted({Path(file["filename"]).suffix.lower() for file in cleaned}),
+        "max_files": len(cleaned),
+        "store_files": True,
+        "total_source_bytes": total_source_bytes,
+        "stored_bytes": total_source_bytes,
+        "storage_limit_bytes": storage_limit,
+        "status": BATCH_QUEUED,
+        "total": len(cleaned),
+        "counts": {
+            ITEM_QUEUED: len(cleaned),
+            ITEM_RUNNING: 0,
+            ITEM_DONE: 0,
+            ITEM_FAILED: 0,
+            ITEM_FAILED_RECOVERABLE: 0,
+            ITEM_SKIPPED: 0,
+        },
+        "options": {
+            "use_neo4j": use_neo4j,
+            "chunk_summarization": chunk_summarization,
+            "model": model or "",
+            "concurrency": worker_count,
+        },
+        "created_at": now,
+        "updated_at": now,
+        "started_at": None,
+        "completed_at": None,
+    }
+    await db[BATCHES].insert_one(batch_doc)
+    await db[ITEMS].insert_many(
+        [
+            _file_item_doc(
+                batch_id=batch_id,
+                corpus_id=corpus_id,
+                user_id=user_id,
+                root=batch_storage_dir,
+                path=file["stored_path"],
+                ordinal=idx,
+                item_id=file["item_id"],
+                stored_path=file["stored_path"],
+                source=SOURCE_BROWSER_UPLOAD,
+                relative_path=file["filename"],
+                filename=file["filename"],
+                source_path=file["filename"],
+            )
+            for idx, file in enumerate(cleaned)
         ],
         ordered=False,
     )
@@ -617,7 +755,7 @@ async def recover_local_batch_runners(
     """
     now = _now()
     running_filter: dict[str, Any] = {
-        "source": "local_folder",
+        "source": {"$in": RUNNABLE_SOURCES},
         "status": ITEM_RUNNING,
     }
     if user_id is not None:
@@ -643,7 +781,7 @@ async def recover_local_batch_runners(
     )
 
     work_filter: dict[str, Any] = {
-        "source": "local_folder",
+        "source": {"$in": RUNNABLE_SOURCES},
         "status": {"$in": [ITEM_QUEUED, ITEM_FAILED_RECOVERABLE]},
     }
     if user_id is not None:
@@ -672,7 +810,7 @@ async def recover_local_batch_runners(
 
     batch_filter: dict[str, Any] = {
         "batch_id": {"$in": batch_ids},
-        "source": "local_folder",
+        "source": {"$in": RUNNABLE_SOURCES},
     }
     if user_id is not None:
         batch_filter["user_id"] = user_id
@@ -715,7 +853,7 @@ async def _lease_next_item(
     return await db[ITEMS].find_one_and_update(
         {
             "batch_id": batch_id,
-            "source": "local_folder",
+            "source": {"$in": RUNNABLE_SOURCES},
             "status": {"$in": [ITEM_QUEUED, ITEM_FAILED_RECOVERABLE]},
         },
         {
@@ -901,8 +1039,8 @@ async def run_local_batch(
     batch = await db[BATCHES].find_one({"batch_id": batch_id, "user_id": user_id})
     if not batch:
         raise ValueError("Batch not found")
-    if batch.get("source") != "local_folder":
-        raise ValueError("Only local_folder batches can be run by the backend")
+    if batch.get("source") not in RUNNABLE_SOURCES:
+        raise ValueError("Only durable ingest batches can be run by the backend")
 
     await reconcile_stale_items(db, batch_id=batch_id, user_id=user_id)
     await db[BATCHES].update_one(

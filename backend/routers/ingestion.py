@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from typing import Literal
 
 import httpx
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from config import get_settings
 from models.schemas import (
@@ -776,6 +776,74 @@ async def create_local_ingest_batch(
     return {**batch, "runner_started": started}
 
 
+@router.post("/corpora/{corpus_id}/ingest-batches/upload")
+async def create_upload_ingest_batch(
+    corpus_id: str,
+    files: list[UploadFile] = File(...),
+    use_neo4j: bool | None = Form(default=None),
+    chunk_summarization: bool | None = Form(default=None),
+    model: str = Form(default=""),
+    concurrency: int | None = Form(default=1),
+    start: bool = Form(default=True),
+    current_user: dict = Depends(get_current_user),
+):
+    """Create a durable browser-upload batch for quick one-off files."""
+    corpus = await ingestion_service.get_corpus(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded")
+    if len(files) > 25:
+        raise HTTPException(
+            status_code=400,
+            detail="Quick upload accepts at most 25 files. Use Backend Folder for large batches.",
+        )
+
+    payloads: list[dict] = []
+    try:
+        for upload in files:
+            data = await upload.read()
+            payloads.append(
+                {
+                    "filename": upload.filename or "upload",
+                    "content_type": upload.content_type,
+                    "data": data,
+                }
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to read upload: {exc}") from exc
+    finally:
+        for upload in files:
+            try:
+                await upload.close()
+            except Exception:
+                pass
+
+    try:
+        batch = await ingest_batches.create_upload_batch(
+            db=ingestion_service.db,
+            corpus_id=corpus_id,
+            user_id=current_user["user_id"],
+            files=payloads,
+            use_neo4j=use_neo4j,
+            chunk_summarization=chunk_summarization,
+            model=model,
+            concurrency=concurrency,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    started = False
+    if start:
+        started = ingest_batches.start_local_batch_runner(
+            db=ingestion_service.db,
+            ingestion_service=ingestion_service,
+            batch_id=batch["batch_id"],
+            user_id=current_user["user_id"],
+        )
+    return {**batch, "runner_started": started}
+
+
 @router.get("/corpora/{corpus_id}/ingest-batches")
 async def list_ingest_batches(
     corpus_id: str,
@@ -1176,7 +1244,8 @@ async def ingest_document(
         status_code=410,
         detail=(
             "Browser upload ingest is disabled. Use the durable backend folder "
-            "batch endpoint: POST /api/corpora/{corpus_id}/ingest-batches/local."
+            "batch endpoint: POST /api/corpora/{corpus_id}/ingest-batches/local "
+            "or quick upload endpoint: POST /api/corpora/{corpus_id}/ingest-batches/upload."
         ),
     )
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -342,6 +343,10 @@ class _RecoveryCollection:
                 return type("Result", (), {"modified_count": 1})()
         return type("Result", (), {"modified_count": 0})()
 
+    async def insert_one(self, doc):
+        self.rows.append(dict(doc))
+        return type("Result", (), {"inserted_id": doc.get("batch_id")})()
+
     async def insert_many(self, docs, ordered=False):
         del ordered
         self.rows.extend(dict(doc) for doc in docs)
@@ -461,6 +466,43 @@ async def test_recover_local_batch_runners_does_not_start_manifest_only_batch(mo
 
     assert result["candidate_batches"] == 1
     assert result["started_batches"] == 0
+
+
+@pytest.mark.asyncio
+async def test_create_upload_batch_stores_browser_files_as_runnable_batch(monkeypatch, tmp_path):
+    settings = SimpleNamespace(
+        INGEST_FILE_STORAGE_DIR=str(tmp_path / "spool"),
+        INGEST_FILE_STORAGE_MAX_BYTES=1024,
+        INGEST_BATCH_WORKERS=2,
+        INGEST_MAX_ACTIVE_JOBS=16,
+    )
+    monkeypatch.setattr(batches, "get_settings", lambda: settings)
+    db = _RecoveryDb([], [])
+
+    result = await batches.create_upload_batch(
+        db=db,
+        corpus_id="corpus-1",
+        user_id="user-1",
+        files=[
+            {
+                "filename": "quick.md",
+                "content_type": "text/markdown",
+                "data": b"# Quick",
+            }
+        ],
+        concurrency=4,
+    )
+
+    assert result["source"] == batches.SOURCE_BROWSER_UPLOAD
+    assert result["counts"][batches.ITEM_QUEUED] == 1
+    assert result["stored_bytes"] == len(b"# Quick")
+    assert result["options"]["concurrency"] == 4
+    item = db.collections[batches.ITEMS].rows[0]
+    assert item["source"] == batches.SOURCE_BROWSER_UPLOAD
+    assert item["relative_path"] == "quick.md"
+    assert item["source_path"] == "quick.md"
+    assert item["stored_path"]
+    assert Path(item["stored_path"]).read_bytes() == b"# Quick"
 
 
 @pytest.mark.asyncio

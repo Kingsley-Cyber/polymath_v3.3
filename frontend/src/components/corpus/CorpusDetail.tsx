@@ -5,6 +5,7 @@ import {
   Trash2,
   FileText,
   FolderOpen,
+  Upload,
   Loader2,
   Check,
   X,
@@ -94,6 +95,8 @@ export function CorpusDetail({
   const [localBatchConcurrency, setLocalBatchConcurrency] = useState(1);
   const [localBatch, setLocalBatch] = useState<IngestBatchResponse | null>(null);
   const [isStartingLocalBatch, setIsStartingLocalBatch] = useState(false);
+  const [isQuickUploading, setIsQuickUploading] = useState(false);
+  const quickUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   // Modal global status — used to warn when corpus default is embed_mode='modal'
   // but Modal isn't deployed.
@@ -314,6 +317,33 @@ export function CorpusDetail({
     }
   };
 
+  const handleQuickUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files ?? []);
+    if (selected.length === 0) return;
+    setIsQuickUploading(true);
+    setError(null);
+    try {
+      const batch = await api.createUploadIngestBatch(corpus.corpus_id, selected, {
+        use_neo4j: overrides.use_neo4j,
+        chunk_summarization: overrides.chunk_summarization,
+        model: overrides.model,
+        concurrency: Math.max(1, Math.min(4, selected.length)),
+        start: true,
+      });
+      setLocalBatch(batch);
+      setShowLocalBatch(true);
+      setRetryHint(
+        `Quick upload batch ${batch.batch_id.slice(0, 8)} started for ${batch.total} file(s).`,
+      );
+      await loadDocuments();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start quick upload");
+    } finally {
+      setIsQuickUploading(false);
+      e.target.value = "";
+    }
+  };
+
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -414,6 +444,27 @@ export function CorpusDetail({
             <FolderOpen className="w-3 h-3" />
             <span>Backend Folder</span>
           </button>
+          <button
+            onClick={() => quickUploadInputRef.current?.click()}
+            disabled={isQuickUploading}
+            className="flex items-center gap-1.5 px-2 py-1 text-[9px] font-bold tracking-widest text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-accent-main transition-none uppercase"
+            title="Upload one or a few files as a durable resumable batch"
+          >
+            {isQuickUploading ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <Upload className="w-3 h-3" />
+            )}
+            <span>{isQuickUploading ? "Uploading" : "Quick Upload"}</span>
+          </button>
+          <input
+            ref={quickUploadInputRef}
+            type="file"
+            multiple
+            onChange={handleQuickUpload}
+            className="hidden"
+            accept=".pdf,.epub,.doc,.docx,.rtf,.odt,.txt,.text,.md,.markdown,.html,.htm,.xhtml"
+          />
         </div>
       </div>
         <IngestionProgressBar documents={documents} />
