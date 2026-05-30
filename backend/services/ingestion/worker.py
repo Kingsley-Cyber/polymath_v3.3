@@ -2563,9 +2563,17 @@ async def run_ingest_job(
             from services.graph.cache_warmup import (
                 schedule_metrics_warmup_after_ingest,
             )
+            from services.graph.brain_cache import (
+                schedule_brain_view_warmup_after_ingest,
+            )
 
             schedule_metrics_warmup_after_ingest(
                 qdrant=qdrant_client,
+                neo4j_driver=neo4j_driver,
+                db=db,
+                corpus_id=corpus_id,
+            )
+            schedule_brain_view_warmup_after_ingest(
                 neo4j_driver=neo4j_driver,
                 db=db,
                 corpus_id=corpus_id,

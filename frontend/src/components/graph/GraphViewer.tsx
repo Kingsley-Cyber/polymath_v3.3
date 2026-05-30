@@ -55,52 +55,10 @@ function adaptiveTopN(total: number): number {
 }
 
 const BRAIN_VIEW_LIMIT = 2000;
-const BRAIN_GRAPH_CACHE_TTL_MS = 90_000;
 const BRAIN_BRIDGE_ENTITY_CAP = 32;
-
-type BrainDetailLevel = "anchors" | "bridges";
-
-type BrainGraphCacheEntry = {
-  detail: BrainDetailLevel;
-  fetchedAt: number;
-  data: GraphPayload;
-  totalDocuments: number;
-  totalBridges: number;
-};
-
-const brainGraphCache = new Map<string, BrainGraphCacheEntry>();
 
 function brainCorpusKey(corpusIds: string[]): string {
   return [...corpusIds].sort().join("|");
-}
-
-function isFreshBrainCache(entry: BrainGraphCacheEntry): boolean {
-  return Date.now() - entry.fetchedAt < BRAIN_GRAPH_CACHE_TTL_MS;
-}
-
-function getCachedBrainGraph(corpusKey: string): BrainGraphCacheEntry | null {
-  const cached = brainGraphCache.get(corpusKey);
-  if (!cached || !isFreshBrainCache(cached)) return null;
-  return cached;
-}
-
-function cacheBrainGraph(
-  corpusKey: string,
-  detail: BrainDetailLevel,
-  response: api.BrainViewResponse,
-  data: GraphPayload,
-) {
-  const existing = brainGraphCache.get(corpusKey);
-  if (existing?.detail === "bridges" && detail === "anchors" && isFreshBrainCache(existing)) {
-    return;
-  }
-  brainGraphCache.set(corpusKey, {
-    detail,
-    data,
-    fetchedAt: Date.now(),
-    totalDocuments: response.meta.total_documents,
-    totalBridges: response.meta.total_bridges,
-  });
 }
 
 function isAbortError(error: unknown, signal?: AbortSignal): boolean {
@@ -742,7 +700,7 @@ function useBrainGraph(
   const corpusKey = useMemo(() => brainCorpusKey(corpusIds), [corpusIds]);
   const stableCorpusIds = useMemo(() => [...corpusIds].sort(), [corpusKey]);
 
-  const reload = useCallback(async (opts?: { signal?: AbortSignal; force?: boolean }) => {
+  const reload = useCallback(async (opts?: { signal?: AbortSignal }) => {
     const signal = opts?.signal;
     if (stableCorpusIds.length === 0) {
       setData(null);
@@ -877,24 +835,14 @@ function useBrainGraph(
       // and computes pairwise bridge strength on the Neo4j side. Anchor
       // metadata (filename, chunk_count, ghost_b_success_rate) lives on the
       // Document node so no MongoDB round-trip is needed.
-      const cached = opts?.force ? null : getCachedBrainGraph(corpusKey);
-      if (cached) {
-        setData(cached.data);
-        setLoading(false);
-        setCacheWarming([]);
-        if (cached.detail === "bridges") return;
-      } else {
-        setLoading(true);
-        const anchors = await api.getBrainView(stableCorpusIds, BRAIN_VIEW_LIMIT, {
-          detail: "anchors",
-          signal,
-        });
-        if (signal?.aborted) return;
-        const anchorData = brainViewToGraphPayload(anchors);
-        cacheBrainGraph(corpusKey, "anchors", anchors, anchorData);
-        setData(anchorData);
-        setLoading(false);
-      }
+      setLoading(true);
+      const anchors = await api.getBrainView(stableCorpusIds, BRAIN_VIEW_LIMIT, {
+        detail: "anchors",
+        signal,
+      });
+      if (signal?.aborted) return;
+      setData(brainViewToGraphPayload(anchors));
+      setLoading(false);
 
       const bv = await api.getBrainView(stableCorpusIds, BRAIN_VIEW_LIMIT, {
         detail: "bridges",
@@ -902,9 +850,7 @@ function useBrainGraph(
         signal,
       });
       if (signal?.aborted) return;
-      const graphData = brainViewToGraphPayload(bv);
-      cacheBrainGraph(corpusKey, "bridges", bv, graphData);
-      setData(graphData);
+      setData(brainViewToGraphPayload(bv));
       setCacheWarming([]);
     } catch (e) {
       if (isAbortError(e, signal)) return;

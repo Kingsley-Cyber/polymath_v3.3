@@ -42,6 +42,7 @@ MONGO_COLLECTIONS = (
     "graph_domain_cache",
     "graph_metrics_cache",
     "graph_anchor_cache",
+    "graph_brain_view_cache",
 )
 
 
@@ -92,6 +93,8 @@ def _mongo_query(collection: str, user_id: str, corpus_ids: list[str]) -> dict[s
         return {"corpus_id": {"$in": corpus_ids}}
     if collection in {"settings", "model_pool", "model_profiles", "user_query_preferences"}:
         return {"user_id": user_id}
+    if collection == "graph_brain_view_cache":
+        return {"corpus_ids": {"$in": corpus_ids}}
     if collection in {"graph_domain_cache", "graph_metrics_cache", "graph_anchor_cache"}:
         return {"corpus_id": {"$in": corpus_ids}}
     # tools/skills/conversations/messages are legacy global collections in this
@@ -286,15 +289,22 @@ async def import_portability_archive(archive_path: Path, user_id: str) -> dict[s
                     else:
                         key = {"user_id": user_id, "label": doc.get("label")}
                     await db[collection].replace_one(key, doc, upsert=True)
-                elif collection in {"graph_domain_cache", "graph_metrics_cache", "graph_anchor_cache", "graph_sessions"}:
+                elif collection in {"graph_domain_cache", "graph_metrics_cache", "graph_anchor_cache", "graph_sessions", "graph_brain_view_cache"}:
                     doc = _strip_id(doc)
                     if "user_id" in doc:
                         doc["user_id"] = user_id
-                    key = {
-                        k: doc[k]
-                        for k in ("corpus_id", "session_id", "signature", "cache_key")
-                        if k in doc
-                    }
+                    if collection == "graph_brain_view_cache":
+                        key = {
+                            k: doc[k]
+                            for k in ("cache_key", "detail", "limit", "bridge_entity_cap")
+                            if k in doc
+                        }
+                    else:
+                        key = {
+                            k: doc[k]
+                            for k in ("corpus_id", "session_id", "signature", "cache_key")
+                            if k in doc
+                        }
                     await db[collection].replace_one(key or doc, doc, upsert=True)
                 else:
                     if "_id" in doc:

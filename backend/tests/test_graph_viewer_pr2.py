@@ -261,6 +261,95 @@ async def test_cache_status_classifies_ready_warming_missing(monkeypatch):
     assert status["metrics_cache"] == "missing"
 
 
+# ─── brain_cache durable Brain View snapshots ───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_brain_view_cache_hit_is_order_independent_and_signature_checked(monkeypatch):
+    from services.graph import analytics
+    from services.graph import brain_cache
+
+    sigs = {"alpha": "sig-a", "beta": "sig-b"}
+
+    async def fake_sig(_db, corpus_id):
+        return sigs[corpus_id]
+
+    monkeypatch.setattr(analytics, "compute_corpus_change_signature", fake_sig)
+
+    class FakeCollection:
+        def __init__(self):
+            self.docs: list[dict[str, Any]] = []
+
+        async def find_one(self, query, projection=None):
+            for doc in self.docs:
+                if all(doc.get(k) == v for k, v in query.items()):
+                    out = dict(doc)
+                    if projection and projection.get("_id") == 0:
+                        out.pop("_id", None)
+                    return out
+            return None
+
+        async def update_one(self, query, update, upsert=False):
+            doc = None
+            for candidate in self.docs:
+                if all(candidate.get(k) == v for k, v in query.items()):
+                    doc = candidate
+                    break
+            if doc is None:
+                doc = dict(query)
+                self.docs.append(doc)
+            for key, value in (update.get("$set") or {}).items():
+                doc[key] = value
+            for key in (update.get("$unset") or {}):
+                doc.pop(key, None)
+            return SimpleNamespace(modified_count=1)
+
+    class FakeDB:
+        def __init__(self):
+            self.collection = FakeCollection()
+
+        def __getitem__(self, name):
+            assert name == brain_cache.CACHE_COLLECTION
+            return self.collection
+
+    db = FakeDB()
+    payload = {
+        "documents": [{"doc_id": "d1", "corpus_id": "alpha"}],
+        "bridges": [],
+        "meta": {"total_documents": 1, "total_bridges": 0},
+    }
+
+    await brain_cache.store_brain_view_cache(
+        db,
+        ["beta", "alpha"],
+        payload,
+        detail="bridges",
+        limit=2000,
+        bridge_entity_cap=32,
+    )
+
+    hit, _selection_sig, _corpus_sigs = await brain_cache.get_cached_brain_view(
+        db,
+        ["alpha", "beta"],
+        detail="bridges",
+        limit=2000,
+        bridge_entity_cap=32,
+    )
+    assert hit is not None
+    assert hit["meta"]["brain_cache"]["status"] == "hit"
+    assert hit["documents"][0]["doc_id"] == "d1"
+
+    sigs["beta"] = "sig-b-new"
+    miss, _selection_sig, _corpus_sigs = await brain_cache.get_cached_brain_view(
+        db,
+        ["alpha", "beta"],
+        detail="bridges",
+        limit=2000,
+        bridge_entity_cap=32,
+    )
+    assert miss is None
+
+
 # ─── Router validation (without running the FastAPI app) ─────────────────────
 
 

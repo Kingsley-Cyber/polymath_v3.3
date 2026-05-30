@@ -1187,7 +1187,23 @@ class IngestionService:
         await delete_documents_by_corpus(self._db, corpus_id)
 
         # 5. Delete corpus record
-        return await delete_corpus(self._db, corpus_id)
+        deleted = await delete_corpus(self._db, corpus_id)
+        if deleted:
+            try:
+                from services.graph.brain_cache import invalidate_brain_view_cache_for_corpus
+
+                await invalidate_brain_view_cache_for_corpus(
+                    self._db,
+                    corpus_id,
+                    delete=True,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Brain View cache delete failed for corpus %s: %s",
+                    corpus_id[:8],
+                    exc,
+                )
+        return deleted
 
     async def list_documents(
         self,
@@ -1245,7 +1261,19 @@ class IngestionService:
         await delete_chunks_by_doc(self._db, corpus_id, doc_id)
 
         # 4. Mongo document record.
-        return await delete_document(self._db, corpus_id, doc_id)
+        deleted = await delete_document(self._db, corpus_id, doc_id)
+        if deleted:
+            try:
+                from services.graph.brain_cache import invalidate_brain_view_cache_for_corpus
+
+                await invalidate_brain_view_cache_for_corpus(self._db, corpus_id)
+            except Exception as exc:
+                logger.warning(
+                    "Brain View cache invalidation failed for corpus %s: %s",
+                    corpus_id[:8],
+                    exc,
+                )
+        return deleted
 
     async def list_all_user_documents(
         self,

@@ -917,6 +917,21 @@ async def graph_brain_view(body: dict = Body(...)) -> dict:
             256,
         ),
     )
+    force_refresh = bool(body.get("force_refresh") or False)
+
+    db = ingestion_service.db
+    if db is not None:
+        from services.graph.brain_cache import get_or_build_brain_view
+
+        return await get_or_build_brain_view(
+            db=db,
+            driver=driver,
+            corpus_ids=corpus_ids,
+            detail=detail,
+            limit=limit,
+            bridge_entity_cap=bridge_entity_cap,
+            force_refresh=force_refresh,
+        )
 
     from services.graph.queries import get_brain_view
 
