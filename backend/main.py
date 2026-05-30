@@ -34,6 +34,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from services.auth import auth_service
 from services.conversation import conversation_service
+from services.ingestion import batches as ingest_batches
 from services.ingestion_service import ingestion_service
 from services.llm import llm_service
 from services.model_pool import model_pool_service
@@ -276,6 +277,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 )
     except Exception as exc:
         logger.warning("graph_sessions multi-corpus migration failed (non-fatal): %s", exc)
+
+    try:
+        result = await ingest_batches.recover_local_batch_runners(
+            db=conversation_service._db,
+            ingestion_service=ingestion_service,
+        )
+        if result["reclaimed_items"] or result["started_batches"]:
+            logger.info(
+                "Durable ingest startup recovery: reclaimed_items=%d "
+                "candidate_batches=%d started_batches=%d",
+                result["reclaimed_items"],
+                result["candidate_batches"],
+                result["started_batches"],
+            )
+    except Exception as exc:
+        logger.warning("Durable ingest startup recovery failed (non-fatal): %s", exc)
 
     yield
 

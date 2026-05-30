@@ -58,6 +58,10 @@ function getWriteStateMessages(
   return [...(state.warnings ?? []), ...(state.verify_errors ?? [])].filter(Boolean);
 }
 
+function getParentCount(doc: DocumentResponse): number {
+  return doc.parent_count ?? doc.parent_chunks?.length ?? 0;
+}
+
 export function CorpusDetail({
   corpus,
   onBack,
@@ -622,12 +626,12 @@ export function CorpusDetail({
                     <div className="flex items-center gap-3 text-[9px] text-content-tertiary tracking-wider shrink-0">
                       <span
                         className="flex items-center gap-1"
-                        title={`${doc.chunk_count ?? 0} child chunks (retrieval unit) · ${doc.parent_chunks?.length ?? 0} parent chunks (context unit)`}
+                        title={`${doc.chunk_count ?? 0} child chunks (retrieval unit) · ${getParentCount(doc)} parent chunks (context unit)`}
                       >
                         <Layers className="w-3 h-3" />
                         {doc.chunk_count ?? 0}
                         <span className="text-content-tertiary/60">
-                          ({doc.parent_chunks?.length ?? 0}p)
+                          ({getParentCount(doc)}p)
                         </span>
                       </span>
                       <span
@@ -950,7 +954,7 @@ function IngestionProgressBar({
     if (d.write_state.neo4j_written) neo4jDone += 1;
     if (d.write_state.verified === true) verifiedDone += 1;
     totalChunks += d.chunk_count ?? 0;
-    totalParents += d.parent_chunks?.length ?? 0;
+    totalParents += getParentCount(d);
   }
   const overall = Math.round(
     ((mongoDone + qdrantDone + neo4jDone) / (3 * total)) * 100,
@@ -1266,7 +1270,7 @@ function LibraryRow({
   const name =
     doc.filename || doc.source_path?.split("/").pop() || doc.doc_id.slice(0, 12);
   const chunks = doc.chunk_count ?? 0;
-  const parents = doc.parent_chunks?.length ?? 0;
+  const parents = getParentCount(doc);
   const failedStage = deriveFailedStage(doc);
   const stateMessages = getWriteStateMessages(doc.write_state);
 

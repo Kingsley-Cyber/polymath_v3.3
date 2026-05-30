@@ -278,6 +278,179 @@ async def test_list_batches_returns_recent_user_batches():
     assert [row["batch_id"] for row in rows] == ["new"]
 
 
+def _matches_query(row, query):
+    for key, expected in query.items():
+        actual = row.get(key)
+        if isinstance(expected, dict):
+            if "$in" in expected and actual not in expected["$in"]:
+                return False
+            elif "$in" not in expected:
+                raise AssertionError(f"Unsupported query operator in {expected!r}")
+        elif actual != expected:
+            return False
+    return True
+
+
+class _RecoveryCursor:
+    def __init__(self, rows):
+        self.rows = [dict(row) for row in rows]
+        self._limit = None
+
+    def limit(self, limit):
+        self._limit = limit
+        return self
+
+    async def to_list(self, length=None):
+        limit = length or self._limit
+        return list(self.rows[:limit] if limit else self.rows)
+
+
+class _RecoveryCollection:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def find(self, query, projection=None):
+        del projection
+        return _RecoveryCursor([row for row in self.rows if _matches_query(row, query)])
+
+    async def find_one(self, query, projection=None):
+        del projection
+        for row in self.rows:
+            if _matches_query(row, query):
+                return dict(row)
+        return None
+
+    async def update_many(self, query, update):
+        modified = 0
+        for row in self.rows:
+            if _matches_query(row, query):
+                row.update(update.get("$set", {}))
+                modified += 1
+        return type("Result", (), {"modified_count": modified})()
+
+    async def update_one(self, query, update):
+        for row in self.rows:
+            if _matches_query(row, query):
+                row.update(update.get("$set", {}))
+                return type("Result", (), {"modified_count": 1})()
+        return type("Result", (), {"modified_count": 0})()
+
+    async def count_documents(self, query):
+        return sum(1 for row in self.rows if _matches_query(row, query))
+
+
+class _RecoveryDb:
+    def __init__(self, batch_rows, item_rows):
+        self.collections = {
+            batches.BATCHES: _RecoveryCollection(batch_rows),
+            batches.ITEMS: _RecoveryCollection(item_rows),
+        }
+
+    def __getitem__(self, name):
+        return self.collections[name]
+
+
+@pytest.mark.asyncio
+async def test_recover_local_batch_runners_reclaims_orphaned_running_items(monkeypatch):
+    batch_rows = [
+        {
+            "batch_id": "batch-1",
+            "source": "local_folder",
+            "user_id": "user-1",
+            "status": batches.BATCH_RUNNING,
+            "started_at": datetime(2024, 1, 1),
+        }
+    ]
+    item_rows = [
+        {
+            "item_id": "running",
+            "batch_id": "batch-1",
+            "source": "local_folder",
+            "user_id": "user-1",
+            "status": batches.ITEM_RUNNING,
+        },
+        {
+            "item_id": "queued",
+            "batch_id": "batch-1",
+            "source": "local_folder",
+            "user_id": "user-1",
+            "status": batches.ITEM_QUEUED,
+        },
+        {
+            "item_id": "true-failed",
+            "batch_id": "batch-1",
+            "source": "local_folder",
+            "user_id": "user-1",
+            "status": batches.ITEM_FAILED,
+        },
+    ]
+    db = _RecoveryDb(batch_rows, item_rows)
+    started = []
+
+    def fake_start_local_batch_runner(**kwargs):
+        started.append((kwargs["batch_id"], kwargs["user_id"]))
+        return True
+
+    monkeypatch.setattr(
+        batches,
+        "start_local_batch_runner",
+        fake_start_local_batch_runner,
+    )
+
+    result = await batches.recover_local_batch_runners(
+        db=db,
+        ingestion_service=object(),
+    )
+
+    assert result["reclaimed_items"] == 1
+    assert result["candidate_batches"] == 1
+    assert result["started_batches"] == 1
+    assert started == [("batch-1", "user-1")]
+    by_item = {row["item_id"]: row for row in item_rows}
+    assert by_item["running"]["status"] == batches.ITEM_FAILED_RECOVERABLE
+    assert by_item["running"]["failure_stage"] == "backend_restarted"
+    assert by_item["true-failed"]["status"] == batches.ITEM_FAILED
+
+
+@pytest.mark.asyncio
+async def test_recover_local_batch_runners_does_not_start_manifest_only_batch(monkeypatch):
+    batch_rows = [
+        {
+            "batch_id": "batch-1",
+            "source": "local_folder",
+            "user_id": "user-1",
+            "status": batches.BATCH_QUEUED,
+        }
+    ]
+    item_rows = [
+        {
+            "item_id": "queued",
+            "batch_id": "batch-1",
+            "source": "local_folder",
+            "user_id": "user-1",
+            "status": batches.ITEM_QUEUED,
+        }
+    ]
+    db = _RecoveryDb(batch_rows, item_rows)
+
+    def fake_start_local_batch_runner(**_kwargs):
+        raise AssertionError("manifest-only batch should not auto-start")
+
+    monkeypatch.setattr(
+        batches,
+        "start_local_batch_runner",
+        fake_start_local_batch_runner,
+    )
+
+    result = await batches.recover_local_batch_runners(
+        db=db,
+        ingestion_service=object(),
+    )
+
+    assert result["candidate_batches"] == 1
+    assert result["started_batches"] == 0
+
+
 class _FakeCursor:
     def __init__(self, rows):
         self.rows = rows

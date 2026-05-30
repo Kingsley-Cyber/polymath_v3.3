@@ -445,6 +445,109 @@ async def reconcile_stale_items(
     return {"reconciled_items": int(res.modified_count)}
 
 
+async def recover_local_batch_runners(
+    *,
+    db: AsyncIOMotorDatabase,
+    ingestion_service: Any,
+    user_id: str | None = None,
+    max_batches: int = 100,
+) -> dict[str, Any]:
+    """Rehydrate durable local-folder batches after a backend restart.
+
+    The batch manifest is durable in Mongo, but the asyncio runner is process
+    local. On startup, any item still marked ``running`` is necessarily
+    orphaned in the single-backend deployment and must be made resumable before
+    the next runner leases work.
+    """
+    now = _now()
+    running_filter: dict[str, Any] = {
+        "source": "local_folder",
+        "status": ITEM_RUNNING,
+    }
+    if user_id is not None:
+        running_filter["user_id"] = user_id
+    orphaned = await db[ITEMS].find(
+        running_filter,
+        {"batch_id": 1, "_id": 0},
+    ).to_list(length=None)
+    res = await db[ITEMS].update_many(
+        running_filter,
+        {
+            "$set": {
+                "status": ITEM_FAILED_RECOVERABLE,
+                "phase": "stale",
+                "failure_stage": "backend_restarted",
+                "error": "Backend restarted while this item was running; item can be resumed.",
+                "lease_owner": None,
+                "lease_until": None,
+                "last_heartbeat_at": now,
+                "updated_at": now,
+            }
+        },
+    )
+
+    work_filter: dict[str, Any] = {
+        "source": "local_folder",
+        "status": {"$in": [ITEM_QUEUED, ITEM_FAILED_RECOVERABLE]},
+    }
+    if user_id is not None:
+        work_filter["user_id"] = user_id
+    pending = await db[ITEMS].find(
+        work_filter,
+        {"batch_id": 1, "_id": 0},
+    ).to_list(length=None)
+
+    batch_ids = sorted(
+        {
+            str(row.get("batch_id"))
+            for row in [*orphaned, *pending]
+            if row.get("batch_id")
+        }
+    )
+    if not batch_ids:
+        return {
+            "reclaimed_items": int(res.modified_count),
+            "candidate_batches": 0,
+            "started_batches": 0,
+        }
+
+    for batch_id in batch_ids:
+        await refresh_batch_counts(db, batch_id, user_id=user_id)
+
+    batch_filter: dict[str, Any] = {
+        "batch_id": {"$in": batch_ids},
+        "source": "local_folder",
+    }
+    if user_id is not None:
+        batch_filter["user_id"] = user_id
+    rows = await db[BATCHES].find(
+        batch_filter,
+        {"_id": 0, "batch_id": 1, "user_id": 1, "status": 1, "started_at": 1},
+    ).limit(max(1, int(max_batches))).to_list(length=max(1, int(max_batches)))
+
+    started = 0
+    for batch in rows:
+        if batch.get("status") == BATCH_QUEUED and not batch.get("started_at"):
+            continue
+        batch_user_id = str(batch.get("user_id") or user_id or "")
+        batch_id = str(batch.get("batch_id") or "")
+        if not batch_id or not batch_user_id:
+            continue
+        if start_local_batch_runner(
+            db=db,
+            ingestion_service=ingestion_service,
+            batch_id=batch_id,
+            user_id=batch_user_id,
+        ):
+            started += 1
+
+    return {
+        "reclaimed_items": int(res.modified_count),
+        "candidate_batches": len(rows),
+        "started_batches": started,
+    }
+
+
 async def _lease_next_item(
     db: AsyncIOMotorDatabase,
     *,

@@ -261,6 +261,9 @@ export interface DocumentResponse {
   /** Child-chunk count from `chunks` collection — the retrieval/embedding
    *  unit. Distinct from parent_chunks.length which is the context unit. */
   chunk_count?: number;
+  /** Parent chunk count from `parent_chunks` collection; document list
+   *  responses intentionally omit the heavy parent payload. */
+  parent_count?: number;
   doc_summary?: string | null;
   entities_extracted?: boolean;
   is_near_duplicate?: boolean;

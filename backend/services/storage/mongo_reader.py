@@ -255,11 +255,26 @@ async def list_documents(
     # compound index on chunks (which we have).
     if docs:
         doc_ids = [d["doc_id"] for d in docs]
-        pipeline = [
+        chunk_pipeline = [
             {"$match": {"corpus_id": corpus_id, "doc_id": {"$in": doc_ids}}},
             {"$group": {"_id": "$doc_id", "count": {"$sum": 1}}},
         ]
-        counts = {row["_id"]: row["count"] async for row in db["chunks"].aggregate(pipeline)}
+        counts = {
+            row["_id"]: int(row["count"])
+            async for row in db["chunks"].aggregate(chunk_pipeline)
+        }
+        parent_pipeline = [
+            {"$match": {"corpus_id": corpus_id, "doc_id": {"$in": doc_ids}}},
+            {"$group": {"_id": "$doc_id", "count": {"$sum": 1}}},
+        ]
+        parent_counts = {
+            row["_id"]: int(row["count"])
+            async for row in db["parent_chunks"].aggregate(parent_pipeline)
+        }
         for d in docs:
             d["chunk_count"] = counts.get(d["doc_id"], 0)
+            d["parent_count"] = parent_counts.get(
+                d["doc_id"],
+                int(d.get("parent_count") or 0),
+            )
     return docs
