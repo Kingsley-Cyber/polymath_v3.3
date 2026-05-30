@@ -41,6 +41,7 @@ interface CorpusDetailProps {
 }
 
 const INGEST_BATCH_SIZE = 25;
+const MAX_BROWSER_INGEST_FILES = INGEST_BATCH_SIZE;
 const LOCAL_BATCH_DEFAULT_PATH = "/ingest-source/authentic_files";
 
 function formatBytes(bytes?: number | null): string {
@@ -185,17 +186,25 @@ export function CorpusDetail({
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+    const fileList = Array.from(files);
+
+    if (fileList.length > MAX_BROWSER_INGEST_FILES) {
+      setShowLocalBatch(true);
+      setError(
+        `Browser upload is capped at ${MAX_BROWSER_INGEST_FILES} files. ` +
+          "Use Backend Folder for durable local batch ingest so the backend can checkpoint, resume, and avoid proxy timeouts.",
+      );
+      setRetryHint(
+        `Selected ${fileList.length} files. Put that folder on a backend-visible path, then start it from Backend Folder.`,
+      );
+      e.target.value = "";
+      return;
+    }
 
     setIsUploading(true);
     setError(null);
 
     try {
-      const fileList = Array.from(files);
-      if (fileList.length > INGEST_BATCH_SIZE) {
-        setRetryHint(
-          `Large batch detected. Upload will run sequentially in ${INGEST_BATCH_SIZE}-document checkpoints and warm the graph cache after each checkpoint.`,
-        );
-      }
       for (let idx = 0; idx < fileList.length; idx += 1) {
         const file = fileList[idx];
         const batchNo = Math.floor(idx / INGEST_BATCH_SIZE) + 1;
