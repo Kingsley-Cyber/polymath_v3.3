@@ -12,7 +12,7 @@ import asyncio
 import copy
 import hashlib
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from neo4j import AsyncDriver
@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 CACHE_COLLECTION = "graph_brain_view_cache"
 DEFAULT_BRAIN_VIEW_LIMIT = 2000
 DEFAULT_BRAIN_VIEW_BRIDGE_ENTITY_CAP = 32
+DEFAULT_MAX_CACHE_ENTRIES = 512
+DEFAULT_STALE_RETENTION_DAYS = 14
 _WARMUP_DEBOUNCE_SECONDS = 30.0
 _PENDING_WARMUP_TASKS: dict[str, asyncio.Task[Any]] = {}
 
@@ -39,6 +41,14 @@ def _selection_key(corpus_ids: list[str]) -> str:
 
 def _bridge_cap_for_cache(detail: BrainDetail, bridge_entity_cap: int) -> int:
     return 0 if detail == "anchors" else max(1, int(bridge_entity_cap))
+
+
+def _iso_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
 
 
 async def compute_brain_view_selection_signature(
@@ -173,6 +183,8 @@ async def store_brain_view_cache(
                 "selection_signature": selection_signature,
                 "corpus_signatures": corpus_signatures,
                 "payload": copy.deepcopy(payload),
+                "total_documents": (payload.get("meta") or {}).get("total_documents"),
+                "total_bridges": (payload.get("meta") or {}).get("total_bridges"),
                 "status": "ready",
                 "computed_at": now,
                 "updated_at": now,
@@ -181,6 +193,116 @@ async def store_brain_view_cache(
         },
         upsert=True,
     )
+
+
+async def get_brain_view_cache_status(
+    db: Any,
+    corpus_ids: list[str],
+    *,
+    detail: BrainDetail,
+    limit: int,
+    bridge_entity_cap: int,
+) -> dict[str, Any]:
+    """Inspect cache readiness for a selected Brain View without rebuilding."""
+
+    normalized_ids = normalize_corpus_ids(corpus_ids)
+    if not normalized_ids:
+        return {
+            "status": "empty",
+            "corpus_ids": [],
+            "detail": detail,
+            "limit": int(limit),
+            "bridge_entity_cap": _bridge_cap_for_cache(detail, bridge_entity_cap),
+        }
+
+    selection_signature, corpus_signatures = await compute_brain_view_selection_signature(
+        db, normalized_ids
+    )
+    query = _cache_query(
+        normalized_ids,
+        detail=detail,
+        limit=limit,
+        bridge_entity_cap=bridge_entity_cap,
+    )
+    cached = await db[CACHE_COLLECTION].find_one(query, {"_id": 0, "payload": 0})
+    if not cached:
+        return {
+            "status": "missing",
+            **query,
+            "corpus_ids": normalized_ids,
+            "selection_signature": selection_signature,
+            "corpus_signatures": corpus_signatures,
+            "cached_signature": None,
+            "built_at": None,
+            "stale_at": None,
+            "updated_at": None,
+            "total_documents": None,
+            "total_bridges": None,
+        }
+
+    cached_signature = cached.get("selection_signature")
+    stored_status = str(cached.get("status") or "missing")
+    status = (
+        "ready"
+        if stored_status == "ready" and cached_signature == selection_signature
+        else "stale"
+    )
+    return {
+        "status": status,
+        **query,
+        "corpus_ids": normalized_ids,
+        "selection_signature": selection_signature,
+        "corpus_signatures": corpus_signatures,
+        "cached_signature": cached_signature,
+        "stored_status": stored_status,
+        "built_at": _iso_or_none(cached.get("computed_at")),
+        "stale_at": _iso_or_none(cached.get("stale_at")),
+        "updated_at": _iso_or_none(cached.get("updated_at")),
+        "total_documents": cached.get("total_documents"),
+        "total_bridges": cached.get("total_bridges"),
+    }
+
+
+async def prune_brain_view_cache(
+    db: Any,
+    *,
+    max_entries: int = DEFAULT_MAX_CACHE_ENTRIES,
+    stale_retention_days: int = DEFAULT_STALE_RETENTION_DAYS,
+) -> dict[str, int]:
+    """Best-effort cache cleanup for stale rows and old selection combos."""
+
+    collection = db[CACHE_COLLECTION]
+    cutoff = datetime.utcnow() - timedelta(days=max(1, int(stale_retention_days)))
+    stale_result = await collection.delete_many(
+        {
+            "$or": [
+                {"stale_at": {"$lt": cutoff}},
+                {"status": {"$ne": "ready"}, "updated_at": {"$lt": cutoff}},
+            ]
+        }
+    )
+    deleted_stale = int(getattr(stale_result, "deleted_count", 0) or 0)
+
+    try:
+        total = int(await collection.count_documents({}))
+    except Exception:
+        total = 0
+    overflow = max(0, total - max(1, int(max_entries)))
+    deleted_overflow = 0
+    if overflow:
+        cursor = collection.find({}, {"_id": 1}).sort("updated_at", 1).limit(overflow)
+        rows = await cursor.to_list(length=overflow)
+        ids = [row.get("_id") for row in rows if row.get("_id") is not None]
+        if ids:
+            overflow_result = await collection.delete_many({"_id": {"$in": ids}})
+            deleted_overflow = int(getattr(overflow_result, "deleted_count", 0) or 0)
+
+    remaining = max(0, total - deleted_overflow)
+    return {
+        "deleted_stale": deleted_stale,
+        "deleted_overflow": deleted_overflow,
+        "remaining": remaining,
+    }
 
 
 async def get_or_build_brain_view(
@@ -258,6 +380,10 @@ async def get_or_build_brain_view(
             selection_signature=selection_signature,
             corpus_signatures=corpus_signatures,
         )
+        try:
+            await prune_brain_view_cache(db)
+        except Exception as exc:
+            logger.debug("Brain View cache prune skipped: %s", exc)
     return _annotate_cache_meta(
         payload,
         status="miss_stored" if not payload.get("_error") else "miss_error",

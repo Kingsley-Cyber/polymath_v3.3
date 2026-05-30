@@ -175,6 +175,8 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     )
     await db["graph_brain_view_cache"].create_index("corpus_ids")
     await db["graph_brain_view_cache"].create_index("selection_signature")
+    await db["graph_brain_view_cache"].create_index("status")
+    await db["graph_brain_view_cache"].create_index("updated_at")
     logger.info("Indexes ensured: graph_brain_view_cache")
 
     # --- settings ---

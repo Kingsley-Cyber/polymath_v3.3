@@ -945,6 +945,38 @@ async def graph_brain_view(body: dict = Body(...)) -> dict:
 
 
 @discovery_router.post(
+    "/brain-view/cache-status",
+    summary="Inspect durable Brain View cache readiness for a corpus selection",
+)
+async def graph_brain_view_cache_status(body: dict = Body(...)) -> dict:
+    """Return hit/miss/stale status for the selected Brain View snapshot."""
+
+    db = ingestion_service.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    corpus_ids = _validate_corpus_ids_or_400(body)
+    limit = max(1, min(int(body.get("limit", 2000) or 2000), 10000))
+    detail = "anchors" if str(body.get("detail") or "").lower() == "anchors" else "bridges"
+    bridge_entity_cap = max(
+        1,
+        min(
+            int(body.get("bridge_entity_cap", 64) or 64),
+            256,
+        ),
+    )
+
+    from services.graph.brain_cache import get_brain_view_cache_status
+
+    return await get_brain_view_cache_status(
+        db,
+        corpus_ids,
+        detail=detail,
+        limit=limit,
+        bridge_entity_cap=bridge_entity_cap,
+    )
+
+
+@discovery_router.post(
     "/book-drilldown",
     summary="Brain View drill: one :Document anchor's entities + cross-book bridges",
 )
