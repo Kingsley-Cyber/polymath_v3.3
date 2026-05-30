@@ -1210,11 +1210,57 @@ async def _ensure_progress_document(
             "facet_profile": _document_facet_profile(facet_profile),
             "ghost_b_failures": [],
             "ghost_b_metrics": {},
+            "ingest_stage": "chunked",
             "created_at": now,
             "updated_at": now,
         },
     )
     await mongo_writer.upsert_parent_chunks(db, parent_dicts)
+
+
+async def _ensure_parse_progress_document(
+    *,
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+    user_id: str,
+    file_id: str,
+    filename: str,
+    source_tier: SourceTier,
+    source_mime: str,
+    ingestion_config: IngestionConfig,
+    ws: WriteState,
+) -> None:
+    """Create the first compact row as soon as parse resolves doc_id."""
+    from services.ingestion_service import freeze_snapshot
+
+    now = datetime.utcnow()
+    await mongo_writer.upsert_document(
+        db,
+        {
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "user_id": user_id,
+            "file_id": file_id,
+            "filename": filename,
+            "source_mime": source_mime,
+            "source_tier": source_tier.value,
+            "ingestion_config": freeze_snapshot(ingestion_config),
+            "chunking_config": {},
+            "write_state": ws.model_dump(),
+            "parent_count": 0,
+            "child_count": 0,
+            "summary_count": 0,
+            "ghost_b_staging_count": 0,
+            "ghost_b_failure_count": 0,
+            "facet_profile": {},
+            "ghost_b_failures": [],
+            "ghost_b_metrics": {},
+            "ingest_stage": "chunking",
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
 
 
 async def _checkpoint_child_chunks(
@@ -1239,6 +1285,7 @@ async def _checkpoint_child_chunks(
         {
             "$set": {
                 "child_count": len(child_dicts),
+                "ingest_stage": "chunks_saved",
                 "updated_at": datetime.utcnow(),
             }
         },
@@ -1248,6 +1295,29 @@ async def _checkpoint_child_chunks(
         doc_id[:12],
         corpus_id[:8],
         len(child_dicts),
+    )
+
+
+async def _mark_ingest_failed(
+    *,
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+    message: str,
+    stage: str,
+) -> None:
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {
+            "$set": {
+                "error": message[:1000],
+                "ingest_stage": stage,
+                "updated_at": datetime.utcnow(),
+            },
+            "$addToSet": {
+                "write_state.warnings": f"Ingest failed: {message[:1000]}",
+            },
+        },
     )
 
 
@@ -1807,6 +1877,41 @@ async def run_ingest_job(
         source_tier.value,
     )
 
+    # Create the durable doc anchor before chunking. Pathological Markdown can
+    # spend minutes in the chunker or fail there; the browser route, local
+    # batch status, and resume logic still need a compact row to track it.
+    existing_doc = await mongo_reader.get_document(db, doc_id, corpus_id=corpus_id)
+    if existing_doc and existing_doc.get("write_state"):
+        ws = WriteState(**existing_doc["write_state"])
+    else:
+        ws = WriteState()
+    file_id = (
+        existing_doc.get("file_id", str(uuid.uuid4()))
+        if existing_doc
+        else str(uuid.uuid4())
+    )
+    if existing_doc is None:
+        await _ensure_parse_progress_document(
+            db=db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            user_id=user_id,
+            file_id=file_id,
+            filename=filename,
+            source_tier=source_tier,
+            source_mime=source_mime,
+            ingestion_config=ingestion_config,
+            ws=ws,
+        )
+
+    # Phase K — signal the HTTP endpoint after the parse progress row exists,
+    # so the frontend/SSE never observes a real running job as "not found".
+    if on_doc_id is not None:
+        try:
+            on_doc_id(doc_id)
+        except Exception as _exc:
+            logger.debug("on_doc_id callback raised: %s", _exc)
+
     # ── Phase 2: Chunk ───────────────────────────────────────────────────
     # Run sync chunker in a thread with a wall-clock cap so pathological
     # docs (PBR4-style: thousands of code/math blocks with no sentence
@@ -1835,11 +1940,29 @@ async def run_ingest_job(
             "or raise TIER_CHUNKER_DOC_TIMEOUT_SECONDS.",
             doc_id[:12], corpus_id[:8], _chunk_timeout,
         )
-        raise RuntimeError(
+        message = (
             f"tier_chunker exceeded {_chunk_timeout}s wall-clock for this "
             "document — likely pathological content (long code/math/table "
             "blocks with no sentence boundaries). Pre-process and retry."
-        ) from exc
+        )
+        await _mark_ingest_failed(
+            db=db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            message=message,
+            stage="chunk_failed",
+        )
+        raise RuntimeError(message) from exc
+    except Exception as exc:
+        message = f"tier_chunker failed: {exc}"
+        await _mark_ingest_failed(
+            db=db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            message=message,
+            stage="chunk_failed",
+        )
+        raise RuntimeError(message) from exc
     chunking_config = tier_chunker.describe_chunking(parse_result, ingestion_config)
     if injected_headers:
         chunking_config["injected_headers"] = [
@@ -1868,18 +1991,8 @@ async def run_ingest_job(
         children=children,
     )
 
-    # ── Resume: existing write_state ─────────────────────────────────────
-    existing_doc = await mongo_reader.get_document(db, doc_id, corpus_id=corpus_id)
-    if existing_doc and existing_doc.get("write_state"):
-        ws = WriteState(**existing_doc["write_state"])
-    else:
-        ws = WriteState()
-    file_id = (
-        existing_doc.get("file_id", str(uuid.uuid4()))
-        if existing_doc
-        else str(uuid.uuid4())
-    )
-    if existing_doc is None:
+    # ── Resume: checkpoint chunk artifacts before model work ─────────────
+    if not ws.mongo_written:
         await _ensure_progress_document(
             db=db,
             doc_id=doc_id,
@@ -1895,14 +2008,6 @@ async def run_ingest_job(
             facet_profile=base_facet_profile,
             ws=ws,
         )
-
-    # Phase K — signal the HTTP endpoint only after a progress row exists, so
-    # the frontend/SSE never observes a real running job as "not found".
-    if on_doc_id is not None:
-        try:
-            on_doc_id(doc_id)
-        except Exception as _exc:
-            logger.debug("on_doc_id callback raised: %s", _exc)
 
     if not ws.mongo_written:
         await _checkpoint_child_chunks(

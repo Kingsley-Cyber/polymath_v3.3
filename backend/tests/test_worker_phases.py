@@ -247,6 +247,7 @@ def _install_mocks(
         "corpus_id": "c" * 36,
         "default_ingestion_config": {},
     })
+    ensure_parse_progress_mock = AsyncMock()
     ensure_progress_mock = AsyncMock()
     async def _checkpoint_side_effect(**kwargs):
         recorder.events.append("chunk_checkpoint")
@@ -268,6 +269,7 @@ def _install_mocks(
         patch.object(worker, "_write_neo4j_for_doc", neo4j_mock),
         patch.object(worker.mongo_reader, "get_document", get_doc_mock),
         patch.object(worker.mongo_reader, "get_corpus", get_corpus_mock),
+        patch.object(worker, "_ensure_parse_progress_document", ensure_parse_progress_mock),
         patch.object(worker, "_ensure_progress_document", ensure_progress_mock),
         patch.object(worker, "_checkpoint_child_chunks", checkpoint_mock),
         patch.object(worker.mongo_writer, "update_write_state", update_state_mock),
@@ -291,6 +293,7 @@ def _install_mocks(
         "qdrant": qdrant_mock,
         "neo4j": neo4j_mock,
         "get_doc": get_doc_mock,
+        "ensure_parse_progress": ensure_parse_progress_mock,
         "ensure_progress": ensure_progress_mock,
         "checkpoint_chunks": checkpoint_mock,
         "update_state": update_state_mock,
@@ -313,6 +316,59 @@ async def _run_job(mocks, config: IngestionConfig, *, corpus_id: str = "c" * 36)
         neo4j_driver=MagicMock(),
         model="ollama/qwen3:1.7b",
     )
+
+
+@pytest.mark.asyncio
+async def test_parse_progress_and_doc_id_callback_happen_before_chunk_failure():
+    """A chunker crash must leave a durable document anchor for polling."""
+    events: list[str] = []
+    db = MagicMock()
+    documents = MagicMock()
+    documents.update_one = AsyncMock()
+    db.__getitem__.return_value = documents
+
+    async def _parse(*args, **kwargs):
+        events.append("parse")
+        return _parse_result()
+
+    async def _parse_progress(**kwargs):
+        events.append("parse_progress")
+
+    def _chunk(*args, **kwargs):
+        events.append("chunk")
+        raise RuntimeError("chunk exploded")
+
+    def _on_doc_id(_doc_id: str) -> None:
+        events.append("doc_id")
+
+    with patch.object(worker.mongo_reader, "get_corpus", AsyncMock(return_value={
+            "corpus_id": "c" * 36,
+            "default_ingestion_config": {},
+         })), \
+         patch.object(worker.mongo_reader, "get_document", AsyncMock(return_value=None)), \
+         patch.object(worker.docling_adapter, "parse_document", AsyncMock(side_effect=_parse)), \
+         patch.object(worker.tier_chunker, "chunk", MagicMock(side_effect=_chunk)), \
+         patch.object(worker, "_ensure_parse_progress_document", AsyncMock(side_effect=_parse_progress)):
+        with pytest.raises(RuntimeError, match="tier_chunker failed: chunk exploded"):
+            await worker.run_ingest_job(
+                job_id="job-1",
+                data=b"dummy bytes",
+                filename="doc.txt",
+                corpus_id="c" * 36,
+                user_id="u1",
+                ingestion_config=IngestionConfig(),
+                db=db,
+                qdrant_client=MagicMock(),
+                neo4j_driver=MagicMock(),
+                model="ollama/qwen3:1.7b",
+                on_doc_id=_on_doc_id,
+            )
+
+    assert events == ["parse", "parse_progress", "doc_id", "chunk"]
+    documents.update_one.assert_awaited_once()
+    update = documents.update_one.await_args.args[1]
+    assert update["$set"]["ingest_stage"] == "chunk_failed"
+    assert update["$set"]["error"] == "tier_chunker failed: chunk exploded"
 
 
 # ── Phase order tests ───────────────────────────────────────────────────────

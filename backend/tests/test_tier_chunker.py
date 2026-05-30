@@ -162,6 +162,27 @@ def test_scrub_idempotent():
     assert once == twice
 
 
+def test_scrub_splits_pathological_epub_mega_lines():
+    raw = "Before\n" + ("alpha beta gamma " * 500).strip() + "\nAfter"
+    cleaned = tier_chunker._scrub_markup_noise(raw)
+    assert "Before" in cleaned and "After" in cleaned
+    assert max(len(line) for line in cleaned.splitlines()) <= 2500
+    assert "\n\n" in cleaned
+
+
+def test_table_splitter_normalizes_calibre_layout_line_without_rows():
+    table_text = "Table: layout\n" + ("cell value | " * 700).strip()
+    groups = tier_chunker._split_table_rows_for_children(
+        table_text,
+        {},
+        child_target_tokens=200,
+        child_max_tokens=500,
+    )
+    assert len(groups) == 1
+    text, _ = groups[0]
+    assert max(len(line) for line in text.splitlines()) <= 2500
+
+
 def test_local_markdown_heading_anchor_is_removed_from_heading_path():
     md = "# Embedding Pipeline {#embedding-pipeline}\n\nBody text."
     sections, _, _ = _markdown_sections(md)

@@ -190,6 +190,64 @@ _MARKUP_NOISE_PATTERNS: tuple[tuple["re.Pattern[str]", str], ...] = (
     (re.compile(r"</(?:span|a)>"), ""),
 )
 
+_PATHOLOGICAL_LINE_CHARS = 5_000
+_PATHOLOGICAL_LINE_SLICE_CHARS = 2_000
+
+
+def _split_pathological_line(line: str) -> list[str]:
+    if len(line) <= _PATHOLOGICAL_LINE_CHARS:
+        return [line]
+
+    pieces: list[str] = []
+    remaining = line.rstrip()
+    while len(remaining) > _PATHOLOGICAL_LINE_SLICE_CHARS:
+        window = remaining[:_PATHOLOGICAL_LINE_SLICE_CHARS]
+        cut = max(
+            window.rfind(" "),
+            window.rfind("\t"),
+            window.rfind("|"),
+            window.rfind(","),
+            window.rfind(";"),
+        )
+        if cut < (_PATHOLOGICAL_LINE_SLICE_CHARS // 2):
+            cut = _PATHOLOGICAL_LINE_SLICE_CHARS
+        else:
+            cut += 1
+        piece = remaining[:cut].strip()
+        if piece:
+            pieces.append(piece)
+        remaining = remaining[cut:].lstrip()
+
+    tail = remaining.strip()
+    if tail:
+        pieces.append(tail)
+    return pieces or [line]
+
+
+def _split_pathological_lines(text: str) -> str:
+    """Break ebook-conversion mega-lines before token boundary splitting.
+
+    Calibre/Pandoc Markdown can contain 10k+ character single lines for layout
+    tables. Treat those as paragraph-sized slices so the boundary splitter and
+    tokenizer do not spend minutes on one unbroken string.
+    """
+    if not text or len(text) <= _PATHOLOGICAL_LINE_CHARS:
+        return text
+
+    out: list[str] = []
+    changed = False
+    for line in text.splitlines():
+        if len(line) <= _PATHOLOGICAL_LINE_CHARS:
+            out.append(line)
+            continue
+        changed = True
+        parts = _split_pathological_line(line)
+        for idx, part in enumerate(parts):
+            if idx:
+                out.append("")
+            out.append(part)
+    return "\n".join(out) if changed else text
+
 
 def _scrub_markup_noise(text: str) -> str:
     """Strip HTML/EPUB scaffolding before chunking.
@@ -206,6 +264,7 @@ def _scrub_markup_noise(text: str) -> str:
     cleaned = text
     for pat, repl in _MARKUP_NOISE_PATTERNS:
         cleaned = pat.sub(repl, cleaned)
+    cleaned = _split_pathological_lines(cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 
@@ -515,18 +574,19 @@ def _split_table_rows_for_children(
     child is independently meaningful to the embedder, reranker, and Ghost B.
     """
     meta = dict(metadata or {})
-    lines = [line.rstrip() for line in (table_text or "").splitlines()]
+    normalized_table = _split_pathological_lines(table_text or "")
+    lines = [line.rstrip() for line in normalized_table.splitlines()]
     first_row = next(
         (idx for idx, line in enumerate(lines) if re.match(r"^Row\s+\d+:", line)),
         None,
     )
     if first_row is None:
-        return [(table_text.strip(), meta)] if table_text.strip() else []
+        return [(normalized_table.strip(), meta)] if normalized_table.strip() else []
 
     header_lines = [line for line in lines[:first_row] if line.strip()]
     row_lines = [line for line in lines[first_row:] if line.strip()]
     if not row_lines:
-        return [(table_text.strip(), meta)] if table_text.strip() else []
+        return [(normalized_table.strip(), meta)] if normalized_table.strip() else []
 
     max_tokens = max(1, child_max_tokens)
     target_tokens = max(1, min(child_target_tokens, child_max_tokens))

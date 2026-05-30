@@ -1233,9 +1233,10 @@ async def ingest_document(
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     # Phase K — Non-blocking ingest. Worker runs in the background; we wait
-    # only for docling parse so the content-derived doc_id exists before the
-    # client opens the progress stream. Text-native files usually resolve in a
-    # few seconds, but layout-heavy documents can take longer.
+    # only for docling parse plus the first compact Mongo row so the
+    # content-derived doc_id exists before the client opens the progress
+    # stream. Text-native files usually resolve in a few seconds, but
+    # layout-heavy documents can take longer.
     doc_id_future: asyncio.Future[str] = asyncio.get_event_loop().create_future()
     resolved_doc_id: str | None = None
 
@@ -1298,7 +1299,7 @@ async def ingest_document(
         raise HTTPException(
             status_code=504,
             detail=(
-                f"Ingest parse phase exceeded {int(PARSE_DOC_ID_WAIT_SECONDS)}s. "
+                f"Ingest parse/doc-id phase exceeded {int(PARSE_DOC_ID_WAIT_SECONDS)}s. "
                 "The worker is still running; poll /api/corpora/{corpus_id}/documents "
                 "for status."
             ),
