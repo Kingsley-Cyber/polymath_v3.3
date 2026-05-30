@@ -50,7 +50,8 @@ async def hydrate_chunks(
     Pass 0 (Mode A fix): For any chunk that has chunk_id but no parent_id,
     resolve parent_id from the MongoDB chunks collection before hydration.
 
-    Pass 1: Replace chunk.text with full parent body from documents.parent_chunks[].
+    Pass 1: Replace chunk.text with full parent body from parent_chunks
+    collection, with legacy documents.parent_chunks[] fallback.
 
     Pass 2: Populate corpus_name and doc_name for prompt attribution.
 
@@ -93,8 +94,9 @@ async def hydrate_chunks(
         except Exception as exc:
             logger.warning("Pass 0 parent_id lookup failed: %s", exc)
 
-    # ── Pass 1: fetch parent text from documents collection ──────────────────
+    # ── Pass 1: fetch parent text from split parent collection ───────────────
     doc_ids = {c.doc_id for c in chunks if c.parent_id and c.doc_id}
+    parent_ids = {c.parent_id for c in chunks if c.parent_id}
 
     mongo_query: dict = {"doc_id": {"$in": list(doc_ids)}}
     if corpus_ids:
@@ -109,6 +111,26 @@ async def hydrate_chunks(
     # (doc_id, parent_id) → parent_chunk dict
     parent_lookup: dict[tuple[str, str], dict] = {}
     doc_meta: dict[str, dict] = {}
+    if doc_ids and parent_ids:
+        parent_query: dict = {
+            "doc_id": {"$in": list(doc_ids)},
+            "parent_id": {"$in": list(parent_ids)},
+        }
+        if corpus_ids:
+            parent_query["corpus_id"] = {"$in": corpus_ids}
+        try:
+            parent_rows = await db["parent_chunks"].find(
+                parent_query,
+                {"_id": 0},
+            ).to_list(length=None)
+            for pc in parent_rows:
+                did = pc.get("doc_id", "")
+                pid = pc.get("parent_id", "")
+                if did and pid:
+                    parent_lookup[(did, pid)] = pc
+        except Exception as exc:
+            logger.debug("Split parent hydration lookup skipped: %s", exc)
+
     for doc in docs:
         did = doc.get("doc_id", "")
         doc_meta[did] = {
@@ -303,6 +325,7 @@ async def hydrate_summary_rerank_texts(
 
     summary_refs: list[tuple[str, str]] = []
     doc_ids: set[str] = set()
+    parent_ids: set[str] = set()
     for chunk in chunks:
         chunk_id = chunk.chunk_id or ""
         parent_id = chunk.parent_id or (
@@ -311,6 +334,7 @@ async def hydrate_summary_rerank_texts(
         if not parent_id:
             continue
         summary_refs.append((chunk.doc_id or "", parent_id))
+        parent_ids.add(parent_id)
         if chunk.doc_id:
             doc_ids.add(chunk.doc_id)
     if not summary_refs:
@@ -355,6 +379,28 @@ async def hydrate_summary_rerank_texts(
     by_doc_parent: dict[tuple[str, str], dict] = {}
     by_parent: dict[str, dict] = {}
     doc_names: dict[str, str] = {}
+    if parent_ids:
+        parent_query: dict = {"parent_id": {"$in": list(parent_ids)}}
+        if doc_ids:
+            parent_query["doc_id"] = {"$in": list(doc_ids)}
+        if corpus_ids:
+            parent_query["corpus_id"] = {"$in": corpus_ids}
+        try:
+            parent_rows = await db["parent_chunks"].find(
+                parent_query,
+                {"_id": 0},
+            ).to_list(length=None)
+            for parent in parent_rows:
+                parent_id = str(parent.get("parent_id") or "")
+                summary = str(parent.get("summary") or "")
+                doc_id = str(parent.get("doc_id") or "")
+                if not parent_id or not summary:
+                    continue
+                by_doc_parent[(doc_id, parent_id)] = parent
+                by_parent[parent_id] = parent
+        except Exception as exc:
+            logger.debug("Split summary hydration lookup skipped: %s", exc)
+
     for doc in docs:
         doc_id = str(doc.get("doc_id") or "")
         doc_names[doc_id] = _document_display_name(doc)

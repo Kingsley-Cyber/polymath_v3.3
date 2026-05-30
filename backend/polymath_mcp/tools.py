@@ -1180,7 +1180,9 @@ async def polymath_list_documents(
                 "filename": d.get("filename"),
                 "source_tier": d.get("source_tier"),
                 "chunk_count": d.get("chunk_count", 0),
-                "parent_count": len(d.get("parent_chunks") or []),
+                "parent_count": int(
+                    d.get("parent_count") or len(d.get("parent_chunks") or [])
+                ),
                 "write_state": d.get("write_state", {}),
                 "ingested_at": (d.get("ingested_at").isoformat()
                                 if d.get("ingested_at") else None),
@@ -1741,7 +1743,9 @@ async def polymath_get_ingest_status(
         "filename": doc.get("filename"),
         "status": _summarize_write_state(doc),
         "chunk_count": int(doc.get("chunk_count") or 0),
-        "parent_count": len(doc.get("parent_chunks") or []),
+        "parent_count": int(
+            doc.get("parent_count") or len(doc.get("parent_chunks") or [])
+        ),
         "source_tier": doc.get("source_tier"),
         "write_state": {
             "mongo_written": bool(ws.get("mongo_written")),

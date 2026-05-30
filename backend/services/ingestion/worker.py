@@ -3,17 +3,18 @@ Ingestion pipeline worker — locked pipeline order:
 
   1. Parse     → docling_adapter.parse_document
   2. Chunk     → tier_chunker.chunk (parents + children)
-  3. Ghosts    → summary then extraction under the model-phase semaphore
+  3. Mongo     → compact progress doc + parent/chunk checkpoints
+  4. Ghosts    → summary then extraction under the model-phase semaphore
                  Ghost A runs iff chunk_summarization=True.
                  Ghost B runs iff use_neo4j=True.
                  Either branch is a no-op (returns None) when its flag is off.
-  4. Mongo     → ONE write pass: documents (summaries INLINE on parent_chunks)
-                 + chunks. Flip mongo_written.
-  5. Embed     → one embed_batch call over children+summary texts.
+  5. Mongo     → compact document metadata + parent summaries +
+                 Ghost B extraction rows. Flip mongo_written.
+  6. Embed     → one embed_batch call over children+summary texts.
                  mode / dim / model-id come from ingestion_config.
-  6. Qdrant    → children → naive / hrag (tier-filtered) / graph,
+  7. Qdrant    → children → naive / hrag (tier-filtered) / graph,
                  summaries → naive + hrag only. Flip qdrant_written.
-  7. Neo4j     → write_document_graph. Flip neo4j_written.
+  8. Neo4j     → write_document_graph. Flip neo4j_written.
                  Skipped entirely when use_neo4j=False.
 
 Ghost A total failure is a hard abort because parent summaries feed retrieval;
@@ -21,8 +22,8 @@ partial summary coverage continues as a warning so later storage/graph phases
 still commit.
 Ghost B partial extraction is a soft warning: Mongo/Qdrant still commit, Neo4j
 keeps full chunk coverage, and only entity/relation extraction is partial.
-Resume logic (Decision D) reuses existing Mongo summaries and probes Neo4j for
-MENTIONS so we never pay the LLM twice for work already persisted.
+Resume logic reuses split Mongo checkpoints for parent summaries and Ghost B
+extractions so large books never need one giant document write.
 """
 
 import asyncio
@@ -510,12 +511,17 @@ async def _find_near_duplicate_documents(
     candidates: list[dict] = []
     cursor = db["documents"].find(
         {"corpus_id": corpus_id, "doc_id": {"$ne": doc_id}},
-        {"doc_id": 1, "filename": 1, "parent_chunks.text": 1},
+        {"doc_id": 1, "corpus_id": 1, "filename": 1},
     )
     async for doc in cursor:
+        parent_rows = await mongo_reader.get_parent_chunks(
+            db,
+            str(doc.get("doc_id") or ""),
+            str(doc.get("corpus_id") or corpus_id),
+        )
         existing_texts = [
             str(p.get("text") or "")
-            for p in (doc.get("parent_chunks") or [])
+            for p in parent_rows
             if isinstance(p, dict)
         ]
         existing = _doc_token_set(existing_texts)
@@ -565,16 +571,20 @@ async def _run_ghosts_parallel(
     ghost_b_failures: list[ExtractionFailureItem] = []
     ghost_b_metrics: dict | None = None
     # ── GHOST A path decisions ────────────────────────────────────────────
-    existing_parent_chunks: list[dict] = (
-        (existing_doc or {}).get("parent_chunks") or []
+    existing_parent_chunks: list[dict] = await mongo_reader.get_parent_chunks(
+        db,
+        doc_id,
+        corpus_id,
     )
+    if not existing_parent_chunks and existing_doc:
+        existing_parent_chunks = (existing_doc or {}).get("parent_chunks") or []
     summaries_from_mongo: list[SummaryResult] | None = None
     need_ghost_a = config.chunk_summarization
 
     if need_ghost_a and ws.qdrant_written:
         # Summaries already embedded into Qdrant on a prior run; nothing to do.
         need_ghost_a = False
-    elif need_ghost_a and ws.mongo_written and existing_parent_chunks:
+    elif need_ghost_a and existing_parent_chunks:
         existing_by_parent_id = {p.get("parent_id"): p for p in existing_parent_chunks}
         summarizable_parents = [
             p
@@ -608,30 +618,55 @@ async def _run_ghosts_parallel(
         config.use_neo4j and settings.NEO4J_ENABLED and not ws.neo4j_written
     )
     ghost_b_from_staging: list[ExtractionResult] | None = None
+    ghost_b_missing_ids: set[str] | None = None
     if need_ghost_b and neo4j_driver is None:
         need_ghost_b = False
-    elif need_ghost_b and ws.mongo_written:
+    elif need_ghost_b:
         staged = await mongo_reader.read_ghost_b_staging(db, doc_id, corpus_id)
         if staged:
             ghost_b_from_staging = _rehydrate_ghost_b_staging(staged)
-            ghost_b_failures.extend(
-                _rehydrate_ghost_b_failures(
-                    (existing_doc or {}).get("ghost_b_failures") or []
+            expected_ids = {
+                c.chunk_id
+                for c in children
+                if getattr(c, "chunk_id", None)
+                and not should_skip_ghost_b(
+                    getattr(c, "chunk_kind", None) or ChunkKind.BODY
                 )
-            )
-            ghost_b_metrics = _ghost_b_metrics_with_failures(
-                ghost_b_from_staging,
-                ghost_b_failures,
-                (existing_doc or {}).get("ghost_b_metrics"),
-            )
-            need_ghost_b = False
-            logger.info(
-                "phase=ghost_b_skip reason=staging_found doc=%s corpus=%s entries=%d failures=%d",
-                doc_id[:12],
-                corpus_id[:8],
-                len(ghost_b_from_staging),
-                len(ghost_b_failures),
-            )
+            }
+            staged_ids = {r.chunk_id for r in ghost_b_from_staging}
+            missing_ids = expected_ids - staged_ids
+            if not missing_ids:
+                ghost_b_failures.extend(
+                    _rehydrate_ghost_b_failures(
+                        await mongo_reader.read_ghost_b_failures(
+                            db,
+                            doc_id,
+                            corpus_id,
+                        )
+                    )
+                )
+                ghost_b_metrics = _ghost_b_metrics_with_failures(
+                    ghost_b_from_staging,
+                    ghost_b_failures,
+                    (existing_doc or {}).get("ghost_b_metrics"),
+                )
+                need_ghost_b = False
+                logger.info(
+                    "phase=ghost_b_skip reason=staging_complete doc=%s corpus=%s entries=%d failures=%d",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    len(ghost_b_from_staging),
+                    len(ghost_b_failures),
+                )
+            else:
+                ghost_b_missing_ids = missing_ids
+                logger.info(
+                    "phase=ghost_b_resume reason=staging_partial doc=%s corpus=%s staged=%d missing=%d",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    len(ghost_b_from_staging),
+                    len(missing_ids),
+                )
         elif ws.qdrant_written:
             # Pre-feature document: Qdrant done, Neo4j not, no staging on
             # disk → only possible for docs ingested before this change.
@@ -731,6 +766,8 @@ async def _run_ghosts_parallel(
             kind = getattr(c, "chunk_kind", None) or ChunkKind.BODY
             if should_skip_ghost_b(kind):
                 skipped_kinds[kind] = skipped_kinds.get(kind, 0) + 1
+            elif ghost_b_missing_ids is not None and c.chunk_id not in ghost_b_missing_ids:
+                continue
             else:
                 body_children.append(c)
         if skipped_kinds:
@@ -798,7 +835,11 @@ async def _run_ghosts_parallel(
         # (no resolver call). For larger vocabs the resolver cannot use real
         # chunk vectors and resolve_chunk_vocab falls back to the first N
         # terms — this is the documented degraded mode (GOTCHA #42).
-        reason = "fresh_ingest" if not ws.mongo_written else "staging_missing_legacy_doc"
+        reason = (
+            "staging_partial_resume"
+            if ghost_b_missing_ids is not None
+            else ("fresh_ingest" if not ws.mongo_written else "staging_missing_legacy_doc")
+        )
         logger.info(
             "phase=ghost_b_run reason=%s doc=%s corpus=%s children=%d pool=%d strict=%s",
             reason,
@@ -834,11 +875,11 @@ async def _run_ghosts_parallel(
                 audit_run_id=ghost_b_run_id,
             )
         if not isinstance(report, ExtractionBatchReport):
-            results = report
+            fresh_results = report
             failures: list[ExtractionFailureItem] = []
-            metrics = _ghost_b_metrics_for_skipped(results)
+            metrics = _ghost_b_metrics_for_skipped(fresh_results)
         else:
-            results = report.results
+            fresh_results = report.results
             failures = report.failures
             metrics = report.metrics
         metrics = dict(metrics or {})
@@ -846,8 +887,8 @@ async def _run_ghosts_parallel(
         ghost_b_failures.extend(failures)
         nonlocal ghost_b_metrics
         ghost_b_metrics = metrics
-        if len(results) < len(tasks):
-            if not results and tasks:
+        if len(fresh_results) < len(tasks):
+            if not fresh_results and tasks:
                 warning = _ghost_b_total_failure_warning(total=len(tasks))
                 warnings.append(warning)
                 logger.error(
@@ -859,9 +900,11 @@ async def _run_ghosts_parallel(
                     metrics.get("error_counts") if isinstance(metrics, dict) else None,
                 )
                 return None
-            missing_ids = sorted({t.chunk_id for t in tasks} - {r.chunk_id for r in results})
+            missing_ids = sorted(
+                {t.chunk_id for t in tasks} - {r.chunk_id for r in fresh_results}
+            )
             warning = _ghost_b_partial_warning(
-                extracted=len(results),
+                extracted=len(fresh_results),
                 total=len(tasks),
             )
             warnings.append(warning)
@@ -869,10 +912,16 @@ async def _run_ghosts_parallel(
                 "phase=ghost_b_partial doc=%s corpus=%s extracted=%d total=%d missing_sample=%s",
                 doc_id[:12],
                 corpus_id[:8],
-                len(results),
+                len(fresh_results),
                 len(tasks),
                 missing_ids[:5],
             )
+        results = list(fresh_results)
+        if ghost_b_from_staging:
+            merged_by_chunk = {result.chunk_id: result for result in ghost_b_from_staging}
+            for result in fresh_results:
+                merged_by_chunk[result.chunk_id] = result
+            results = list(merged_by_chunk.values())
         return results
 
     # Keep these branches sequential inside a document. User-configured
@@ -929,8 +978,7 @@ def _build_parent_dicts(
     summaries: list[SummaryResult] | None,
     parent_facets: dict[str, dict] | None = None,
 ) -> list[dict]:
-    """Assemble the parent_chunks[] array for the Mongo document record,
-    populating `summary` inline from Ghost A output when available.
+    """Assemble parent chunk rows, populating ``summary`` from Ghost A output.
 
     Code lane (Phase 1) — emits chunk_kind, language, and metadata on every
     parent. `chunk_kind` was a pre-existing gap here (children had it, parents
@@ -1031,11 +1079,11 @@ async def _write_mongo_all(
     facet_profile: dict | None,
     ws: WriteState,
 ) -> None:
-    """Single Mongo write pass: documents + chunks. Summaries go INLINE on
-    parent_chunks[].summary and Ghost B output goes INLINE on
-    documents.ghost_b_staging — one atomic write, no post-insert UPDATE.
-    The staging list is authoritative for Ghost B resume gating and is
-    retained as provenance after neo4j_written flips (never cleared).
+    """Persist compact document metadata and split durable ingest artifacts.
+
+    Parent summaries are stored in ``parent_chunks`` and Ghost B outputs are
+    stored in ``ghost_b_extractions``. The ``documents`` row keeps only counts,
+    flags, metrics, and human-facing metadata.
     """
     parent_dicts = _build_parent_dicts(
         parents,
@@ -1054,7 +1102,7 @@ async def _write_mongo_all(
         (facet_profile or {}).get("child_facets"),
     )
     ghost_b_staging = (
-        [asdict(r) for r in ghost_b_out] if ghost_b_out else None
+        [asdict(r) for r in ghost_b_out] if ghost_b_out is not None else None
     )
     ghost_b_failure_rows = (
         [asdict(f) for f in ghost_b_failures] if ghost_b_failures else []
@@ -1076,9 +1124,12 @@ async def _write_mongo_all(
         "ingestion_config": freeze_snapshot(ingestion_config),
         "chunking_config": chunking_config,
         "write_state": ws.model_dump(),
-        "parent_chunks": parent_dicts,
-        "ghost_b_staging": ghost_b_staging,
-        "ghost_b_failures": ghost_b_failure_rows,
+        "ghost_b_failures": ghost_b_failure_rows[:20],
+        "parent_count": len(parent_dicts),
+        "child_count": len(child_dicts),
+        "summary_count": len(summaries or []),
+        "ghost_b_staging_count": len(ghost_b_staging or []),
+        "ghost_b_failure_count": len(ghost_b_failure_rows),
         "ghost_b_metrics": ghost_b_metrics or {},
         "schema_lens": (ghost_b_metrics or {}).get("schema_lens"),
         "facet_profile": _document_facet_profile(facet_profile),
@@ -1096,7 +1147,21 @@ async def _write_mongo_all(
             duplicate_candidates,
         )
     await mongo_writer.upsert_document(db, doc_record)
+    await mongo_writer.upsert_parent_chunks(db, parent_dicts)
     await mongo_writer.upsert_chunks(db, child_dicts)
+    if ghost_b_staging is not None:
+        await mongo_writer.stash_ghost_b(
+            db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            results=ghost_b_staging,
+        )
+    await mongo_writer.stash_ghost_b_failures(
+        db,
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        failures=ghost_b_failure_rows,
+    )
 
 
 async def _ensure_progress_document(
@@ -1115,10 +1180,15 @@ async def _ensure_progress_document(
     facet_profile: dict | None,
     ws: WriteState,
 ) -> None:
-    """Create a minimal document row so SSE has something to poll early."""
+    """Create a compact progress document and checkpoint parent rows early."""
     from services.ingestion_service import freeze_snapshot
 
     now = datetime.utcnow()
+    parent_dicts = _build_parent_dicts(
+        parents,
+        None,
+        (facet_profile or {}).get("parent_facets"),
+    )
     await mongo_writer.upsert_document(
         db,
         {
@@ -1132,19 +1202,19 @@ async def _ensure_progress_document(
             "ingestion_config": freeze_snapshot(ingestion_config),
             "chunking_config": chunking_config,
             "write_state": ws.model_dump(),
-            "parent_chunks": _build_parent_dicts(
-                parents,
-                None,
-                (facet_profile or {}).get("parent_facets"),
-            ),
+            "parent_count": len(parent_dicts),
+            "child_count": 0,
+            "summary_count": 0,
+            "ghost_b_staging_count": 0,
+            "ghost_b_failure_count": 0,
             "facet_profile": _document_facet_profile(facet_profile),
-            "ghost_b_staging": None,
             "ghost_b_failures": [],
             "ghost_b_metrics": {},
             "created_at": now,
             "updated_at": now,
         },
     )
+    await mongo_writer.upsert_parent_chunks(db, parent_dicts)
 
 
 async def _checkpoint_child_chunks(
@@ -1164,6 +1234,15 @@ async def _checkpoint_child_chunks(
         (facet_profile or {}).get("child_facets"),
     )
     await mongo_writer.upsert_chunks(db, child_dicts)
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {
+            "$set": {
+                "child_count": len(child_dicts),
+                "updated_at": datetime.utcnow(),
+            }
+        },
+    )
     logger.info(
         "phase=chunk_checkpoint doc=%s corpus=%s children=%d",
         doc_id[:12],
@@ -1901,7 +1980,7 @@ async def run_ingest_job(
         len(ghost_b_failures),
     )
 
-    # ── Phase 4: Mongo (ONE write pass, inline summaries) ────────────────
+    # ── Phase 4: Mongo durable checkpoints ──────────────────────────────
     if not ws.mongo_written:
         t0 = time.monotonic()
         await _write_mongo_all(
@@ -1941,13 +2020,43 @@ async def run_ingest_job(
             len(children),
             len(summaries or []),
         )
-    elif ingest_warnings or ghost_b_failures or ghost_b_metrics:
+    elif (
+        ingest_warnings
+        or ghost_b_failures
+        or ghost_b_metrics
+        or summaries is not None
+        or ghost_b_out is not None
+    ):
+        parent_dicts = _build_parent_dicts(
+            parents,
+            summaries,
+            (facet_profile or {}).get("parent_facets"),
+        )
+        await mongo_writer.upsert_parent_chunks(db, parent_dicts)
+        if ghost_b_out is not None:
+            await mongo_writer.stash_ghost_b(
+                db,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                results=[asdict(r) for r in ghost_b_out],
+            )
+        await mongo_writer.stash_ghost_b_failures(
+            db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            failures=[asdict(f) for f in ghost_b_failures],
+        )
         await db["documents"].update_one(
             {"doc_id": doc_id, "corpus_id": corpus_id},
             {
                 "$set": {
                     "write_state.warnings": ws.warnings,
-                    "ghost_b_failures": [asdict(f) for f in ghost_b_failures],
+                    "ghost_b_failures": [asdict(f) for f in ghost_b_failures][:20],
+                    "parent_count": len(parent_dicts),
+                    "child_count": len(children),
+                    "summary_count": len(summaries or []),
+                    "ghost_b_staging_count": len(ghost_b_out or []),
+                    "ghost_b_failure_count": len(ghost_b_failures),
                     "ghost_b_metrics": ghost_b_metrics or {},
                     "schema_lens": (ghost_b_metrics or {}).get("schema_lens"),
                     "updated_at": datetime.utcnow(),
@@ -2288,10 +2397,28 @@ async def run_ingest_job(
                 exc,
             )
 
-    final_status = "failed" if ws.verified is False else "done"
+    neo4j_required = bool(ingestion_config.use_neo4j and settings.NEO4J_ENABLED)
+    storage_complete = (
+        ws.mongo_written
+        and ws.qdrant_written
+        and ((not neo4j_required) or ws.neo4j_written)
+    )
+    verified_complete = storage_complete and ws.verified is True
+    final_status = "done" if verified_complete else "failed"
     final_error = None
     if ws.verified is False and ws.verify_errors:
         final_error = "; ".join(ws.verify_errors)
+    elif not verified_complete:
+        missing = []
+        if not ws.mongo_written:
+            missing.append("mongo")
+        if not ws.qdrant_written:
+            missing.append("qdrant")
+        if neo4j_required and not ws.neo4j_written:
+            missing.append("neo4j")
+        if ws.verified is not True:
+            missing.append("verification")
+        final_error = "Ingest incomplete: " + ", ".join(missing)
     if ws.verified is True:
         # A resumed ingest can repair an earlier phase failure. Clear the
         # stale top-level error and remove only the synthetic failure warning;

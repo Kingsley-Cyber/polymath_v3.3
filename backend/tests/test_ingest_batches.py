@@ -157,6 +157,19 @@ class _FakeCursor:
     def __init__(self, rows):
         self.rows = rows
 
+    def sort(self, *_args, **_kwargs):
+        return self
+
+    def __aiter__(self):
+        self._iter = iter(self.rows)
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._iter)
+        except StopIteration:
+            raise StopAsyncIteration
+
     async def to_list(self, length=None):
         return list(self.rows)
 
@@ -165,6 +178,7 @@ class _FakeCollection:
     def __init__(self, rows):
         self.rows = rows
         self.updates = []
+        self.bulk_ops = []
 
     async def find_one(self, query, projection=None):
         for row in self.rows:
@@ -183,12 +197,29 @@ class _FakeCollection:
             if isinstance(chunk_filter, dict) and "$in" in chunk_filter:
                 if row.get("chunk_id") not in chunk_filter["$in"]:
                     continue
+            elif chunk_filter is not None and row.get("chunk_id") != chunk_filter:
+                continue
+            status_filter = query.get("status")
+            if status_filter is not None and row.get("status") != status_filter:
+                continue
             rows.append(dict(row))
         return _FakeCursor(rows)
 
     async def update_one(self, query, update):
         self.updates.append((query, update))
         return type("Result", (), {"modified_count": 1})()
+
+    async def bulk_write(self, ops, ordered=False):
+        del ordered
+        self.bulk_ops.extend(list(ops))
+        return type("Result", (), {"bulk_api_result": {}})()
+
+    async def count_documents(self, query):
+        count = 0
+        for row in self.rows:
+            if all(row.get(k) == v for k, v in query.items()):
+                count += 1
+        return count
 
 
 class _FakeDb:
@@ -197,6 +228,8 @@ class _FakeDb:
             "documents": _FakeCollection([doc]),
             "chunks": _FakeCollection(chunks),
             "corpora": _FakeCollection([{"corpus_id": doc["corpus_id"]}]),
+            "parent_chunks": _FakeCollection(doc.get("parent_chunks") or []),
+            "ghost_b_extractions": _FakeCollection([]),
         }
 
     def __getitem__(self, name):
@@ -288,3 +321,68 @@ async def test_graph_backfill_replays_from_chunks_when_staging_missing(monkeypat
     assert seen["written_chunk_ids"] == ["chunk-body", "chunk-code"]
     update = db["documents"].updates[-1][1]["$set"]
     assert update["write_state.neo4j_written"] is True
+
+
+@pytest.mark.asyncio
+async def test_graph_backfill_flushes_from_extraction_collection(monkeypatch):
+    doc = {
+        "doc_id": "doc-2",
+        "corpus_id": "corpus-1",
+        "user_id": "user-1",
+        "filename": "book.pdf",
+        "ingestion_config": {"use_neo4j": True, "target_qdrant_collections": ["graph"]},
+        "write_state": {
+            "mongo_written": True,
+            "qdrant_written": True,
+            "neo4j_written": False,
+            "verified": None,
+        },
+        "ghost_b_failures": [],
+        "ghost_b_staging_count": 1,
+        "parent_count": 1,
+        "updated_at": datetime.utcnow(),
+    }
+    chunks = [
+        {
+            "doc_id": "doc-2",
+            "corpus_id": "corpus-1",
+            "chunk_id": "chunk-body",
+            "text": "substantive body text",
+            "chunk_kind": "body",
+        }
+    ]
+    db = _FakeDb(doc, chunks)
+    db.collections["ghost_b_extractions"] = _FakeCollection(
+        [
+            {
+                "doc_id": "doc-2",
+                "corpus_id": "corpus-1",
+                "chunk_id": "chunk-body",
+                "schema_version": "test",
+                "entities": [],
+                "relations": [],
+                "facts": [],
+                "status": "ok",
+            }
+        ]
+    )
+    seen = {}
+
+    async def fake_write_graph_results(**kwargs):
+        seen["written_results"] = kwargs["extraction_results"]
+        seen["parent_count"] = kwargs["parent_count"]
+
+    monkeypatch.setattr(graph_backfill, "_write_graph_results", fake_write_graph_results)
+
+    result = await graph_backfill.backfill_failed_graph_chunks(
+        db=db,
+        qdrant_client=object(),
+        neo4j_driver=object(),
+        corpus_id="corpus-1",
+        doc_id="doc-2",
+        user_id="user-1",
+    )
+
+    assert result["status"] == "flushed_to_neo4j"
+    assert len(seen["written_results"]) == 1
+    assert seen["parent_count"] == 1

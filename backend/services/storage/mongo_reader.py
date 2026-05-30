@@ -49,11 +49,25 @@ async def get_parent_chunks(
     doc_id: str,
     corpus_id: str,
 ) -> list[dict]:
-    """Return the parent_chunks inline array from a document record."""
-    doc = await db["documents"].find_one(
-        {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"parent_chunks": 1},
-    )
+    """Return parent chunk rows, with legacy inline fallback."""
+    try:
+        rows = await db["parent_chunks"].find(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {"_id": 0},
+        ).sort("parent_id", 1).to_list(length=None)
+        if rows:
+            return rows
+    except Exception as exc:
+        logger.debug("parent_chunks split lookup skipped: %s", exc)
+
+    try:
+        doc = await db["documents"].find_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {"parent_chunks": 1},
+        )
+    except Exception as exc:
+        logger.debug("legacy parent_chunks lookup skipped: %s", exc)
+        return []
     if not doc:
         return []
     return doc.get("parent_chunks", [])
@@ -63,12 +77,30 @@ async def get_parent_by_id(
     db: AsyncIOMotorDatabase,
     parent_id: str,
     doc_id: str,
+    corpus_id: str | None = None,
 ) -> dict | None:
-    """Fetch a single parent chunk by parent_id from the inline array."""
-    doc = await db["documents"].find_one(
-        {"doc_id": doc_id, "parent_chunks.parent_id": parent_id},
-        {"parent_chunks.$": 1},
-    )
+    """Fetch a single parent chunk by parent_id, with legacy inline fallback."""
+    q: dict = {"doc_id": doc_id, "parent_id": parent_id}
+    if corpus_id is not None:
+        q["corpus_id"] = corpus_id
+    try:
+        row = await db["parent_chunks"].find_one(q, {"_id": 0})
+        if row:
+            return row
+    except Exception as exc:
+        logger.debug("parent_chunks split lookup skipped: %s", exc)
+
+    doc_q: dict = {"doc_id": doc_id, "parent_chunks.parent_id": parent_id}
+    if corpus_id is not None:
+        doc_q["corpus_id"] = corpus_id
+    try:
+        doc = await db["documents"].find_one(
+            doc_q,
+            {"parent_chunks.$": 1},
+        )
+    except Exception as exc:
+        logger.debug("legacy parent lookup skipped: %s", exc)
+        return None
     if not doc or not doc.get("parent_chunks"):
         return None
     return doc["parent_chunks"][0]
@@ -94,7 +126,7 @@ async def list_all_user_documents(
     """List all documents across all corpora for a user, sorted by ingested_at desc."""
     cursor = (
         db["documents"]
-        .find({"user_id": user_id}, {"_id": 0})
+        .find({"user_id": user_id}, {"_id": 0, "parent_chunks": 0, "ghost_b_staging": 0})
         .sort("ingested_at", -1)
         .limit(limit)
     )
@@ -106,19 +138,88 @@ async def read_ghost_b_staging(
     doc_id: str,
     corpus_id: str,
 ) -> list[dict] | None:
-    """Return `ghost_b_staging` from the document record, or None if absent.
+    """Return Ghost B staging rows, preferring ``ghost_b_extractions``.
 
     Returns None in both cases: doc missing, or doc present but without the
     staging field (legacy pre-feature document). Callers distinguish via
     write_state flags.
     """
-    doc = await db["documents"].find_one(
-        {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"ghost_b_staging": 1},
-    )
+    try:
+        rows = await db["ghost_b_extractions"].find(
+            {"doc_id": doc_id, "corpus_id": corpus_id, "status": "ok"},
+            {"_id": 0},
+        ).sort("chunk_id", 1).to_list(length=None)
+        if rows:
+            return rows
+    except Exception as exc:
+        logger.debug("ghost_b_extractions split lookup skipped: %s", exc)
+
+    try:
+        doc = await db["documents"].find_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {"ghost_b_staging": 1},
+        )
+    except Exception as exc:
+        logger.debug("legacy ghost_b_staging lookup skipped: %s", exc)
+        return None
     if not doc:
         return None
     return doc.get("ghost_b_staging")
+
+
+async def read_ghost_b_failures(
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+) -> list[dict]:
+    """Return Ghost B error rows, with legacy inline fallback."""
+    try:
+        rows = await db["ghost_b_extractions"].find(
+            {"doc_id": doc_id, "corpus_id": corpus_id, "status": "error"},
+            {"_id": 0},
+        ).sort("chunk_id", 1).to_list(length=None)
+        if rows:
+            return rows
+    except Exception as exc:
+        logger.debug("ghost_b_extractions failure lookup skipped: %s", exc)
+
+    try:
+        doc = await db["documents"].find_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {"ghost_b_failures": 1},
+        )
+    except Exception as exc:
+        logger.debug("legacy ghost_b_failures lookup skipped: %s", exc)
+        return []
+    return list((doc or {}).get("ghost_b_failures") or [])
+
+
+async def count_parent_chunks(
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+) -> int:
+    """Count parents from the split collection, falling back to legacy inline docs."""
+    try:
+        count = int(
+            await db["parent_chunks"].count_documents(
+                {"doc_id": doc_id, "corpus_id": corpus_id}
+            )
+        )
+        if count:
+            return count
+    except Exception as exc:
+        logger.debug("parent_chunks count skipped: %s", exc)
+    try:
+        doc = await db["documents"].find_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {"parent_chunks.parent_id": 1},
+        )
+    except Exception as exc:
+        logger.debug("legacy parent count lookup skipped: %s", exc)
+        return 0
+    parents = (doc or {}).get("parent_chunks") or []
+    return len(parents) if isinstance(parents, list) else 0
 
 
 async def list_documents(
@@ -133,7 +234,8 @@ async def list_documents(
     Each record is decorated with a `chunk_count` field = number of CHILD
     chunks in the `chunks` collection for that doc. That's what gets embedded
     and searched — the retrieval unit, not the context-hydration unit.
-    Separate from `parent_chunks[].length` which is the inline parent count.
+    Separate from ``parent_count`` / parent_chunks rows, which count parent
+    hydration units.
     """
     query: dict = {"corpus_id": corpus_id}
     if user_id:
@@ -142,7 +244,7 @@ async def list_documents(
     # default encoder; the API identifies docs by doc_id anyway).
     cursor = (
         db["documents"]
-        .find(query, {"_id": 0})
+        .find(query, {"_id": 0, "parent_chunks": 0, "ghost_b_staging": 0})
         .sort("ingested_at", -1)
         .skip(offset)
         .limit(limit)

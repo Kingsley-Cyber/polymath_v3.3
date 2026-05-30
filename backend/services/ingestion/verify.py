@@ -67,11 +67,17 @@ async def _expected_qdrant_texts(
         if chunk_id:
             expected[chunk_id] = str(row.get("text") or "")
 
-    doc = await db["documents"].find_one(
+    parents = await db["parent_chunks"].find(
         {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"_id": 0, "parent_chunks.parent_id": 1, "parent_chunks.summary": 1},
-    )
-    for parent in (doc or {}).get("parent_chunks", []) or []:
+        {"_id": 0, "parent_id": 1, "summary": 1},
+    ).to_list(length=None)
+    if not parents:
+        doc = await db["documents"].find_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {"_id": 0, "parent_chunks.parent_id": 1, "parent_chunks.summary": 1},
+        )
+        parents = (doc or {}).get("parent_chunks", []) or []
+    for parent in parents:
         parent_id = str(parent.get("parent_id") or "")
         summary = str(parent.get("summary") or "")
         if parent_id and summary:

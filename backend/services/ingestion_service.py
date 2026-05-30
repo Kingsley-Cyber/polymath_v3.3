@@ -1280,6 +1280,8 @@ class IngestionService:
                 "chunk_count": 1,
                 "ghost_b_failures": 1,
                 "ghost_b_staging": 1,
+                "ghost_b_failure_count": 1,
+                "ghost_b_staging_count": 1,
                 "ghost_b_metrics": 1,
                 "write_state": 1,
                 "_id": 0,
@@ -1308,24 +1310,26 @@ class IngestionService:
             ws = doc.get("write_state") or {}
             warnings = ws.get("warnings") or []
             failures = doc.get("ghost_b_failures") or []
+            failure_count = int(doc.get("ghost_b_failure_count") or len(failures))
             staged = doc.get("ghost_b_staging") or []
+            staged_count = int(doc.get("ghost_b_staging_count") or len(staged))
             metrics = doc.get("ghost_b_metrics") or {}
             if warnings:
                 totals["warning_docs"] += 1
             if ws.get("verified") is False:
                 totals["verify_failed_docs"] += 1
-            if failures:
+            if failure_count:
                 totals["graph_partial_docs"] += 1
                 partial_docs.append(
                     {
                         "doc_id": doc.get("doc_id"),
                         "filename": doc.get("filename"),
-                        "failed_chunks": len(failures),
+                        "failed_chunks": failure_count,
                     }
                 )
-            totals["ghost_b_failed_chunks"] += len(failures)
+            totals["ghost_b_failed_chunks"] += failure_count
             totals["ghost_b_extracted_chunks"] += int(
-                metrics.get("extracted_chunks") or len(staged)
+                metrics.get("extracted_chunks") or staged_count
             )
             totals["ghost_b_tokens"] += int(metrics.get("total_tokens") or 0)
             totals["ghost_b_attempts"] += int(metrics.get("attempt_count") or 0)

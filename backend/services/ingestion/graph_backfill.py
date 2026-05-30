@@ -34,6 +34,7 @@ from services.ingestion.worker import (
     _rehydrate_ghost_b_staging,
 )
 from services.ingestion.section_classifier import ChunkKind, should_skip_ghost_b
+from services.storage import mongo_reader, mongo_writer
 from services.storage.qdrant_writer import retrieve_schema_for_chunk
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,11 @@ def _schema_lens_id(doc: dict, metrics: dict) -> str | None:
 
 
 def _graph_parent_count(doc: dict) -> int:
+    if doc.get("parent_count") is not None:
+        try:
+            return int(doc.get("parent_count") or 0)
+        except Exception:
+            pass
     parents = doc.get("parent_chunks") or []
     return len(parents) if isinstance(parents, list) else 0
 
@@ -126,6 +132,7 @@ async def _write_graph_results(
     extraction_results: list[ExtractionResult],
     all_chunk_ids: list[str],
     metrics: dict,
+    parent_count: int | None = None,
 ) -> None:
     await write_document_graph(
         driver=neo4j_driver,
@@ -136,7 +143,7 @@ async def _write_graph_results(
         file_id=doc.get("file_id"),
         all_chunk_ids=all_chunk_ids,
         filename=doc.get("filename"),
-        parent_count=_graph_parent_count(doc),
+        parent_count=parent_count if parent_count is not None else _graph_parent_count(doc),
         schema_lens_id=_schema_lens_id(doc, metrics),
         ghost_b_success_rate=(
             float(metrics["success_rate"])
@@ -277,14 +284,19 @@ async def backfill_failed_graph_chunks(
     if not doc:
         raise ValueError("Document not found")
 
+    parent_count = await mongo_reader.count_parent_chunks(db, doc_id, corpus_id)
+    if not parent_count:
+        parent_count = _graph_parent_count(doc)
+
+    failure_rows = await mongo_reader.read_ghost_b_failures(db, doc_id, corpus_id)
     failures = [
         _failure_from_dict(row)
-        for row in (doc.get("ghost_b_failures") or [])
+        for row in failure_rows
         if row.get("chunk_id")
     ]
     write_state = doc.get("write_state") or {}
     neo4j_already_written = bool(write_state.get("neo4j_written"))
-    staged_raw = doc.get("ghost_b_staging") or []
+    staged_raw = await mongo_reader.read_ghost_b_staging(db, doc_id, corpus_id) or []
     needs_neo4j_flush = (not neo4j_already_written) and bool(staged_raw)
     needs_full_replay = (
         not failures
@@ -340,6 +352,7 @@ async def backfill_failed_graph_chunks(
             extraction_results=staged_results,
             all_chunk_ids=all_chunk_ids,
             metrics=doc_metrics,
+            parent_count=parent_count,
         )
         # Flip the flag — same contract the worker uses on success.
         await db["documents"].update_one(
@@ -396,12 +409,15 @@ async def backfill_failed_graph_chunks(
             await db["documents"].update_one(
                 {"doc_id": doc_id, "corpus_id": corpus_id},
                 {"$set": {
-                    "ghost_b_staging": [],
+                    "ghost_b_staging_count": 0,
                     "ghost_b_failures": [],
+                    "ghost_b_failure_count": 0,
                     "ghost_b_metrics": metrics,
                     "write_state.neo4j_written": True,
                     "updated_at": datetime.utcnow(),
-                }},
+                },
+                "$unset": {"ghost_b_staging": ""},
+                },
             )
             return {
                 "status": "replayed_from_chunks",
@@ -443,6 +459,7 @@ async def backfill_failed_graph_chunks(
             extraction_results=staged_results,
             all_chunk_ids=all_chunk_ids,
             metrics=metrics,
+            parent_count=parent_count,
         )
         warnings = _clean_graph_warnings(
             (doc.get("write_state") or {}).get("warnings") or []
@@ -462,16 +479,31 @@ async def backfill_failed_graph_chunks(
             warnings.append(
                 f"Ghost B full replay from Mongo chunks recovered {len(staged_results)} chunks."
             )
+        await mongo_writer.stash_ghost_b(
+            db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            results=[asdict(result) for result in staged_results],
+        )
+        await mongo_writer.stash_ghost_b_failures(
+            db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            failures=[asdict(failure) for failure in remaining_failures],
+        )
         await db["documents"].update_one(
             {"doc_id": doc_id, "corpus_id": corpus_id},
             {"$set": {
-                "ghost_b_staging": [asdict(result) for result in staged_results],
-                "ghost_b_failures": [asdict(failure) for failure in remaining_failures],
+                "ghost_b_staging_count": len(staged_results),
+                "ghost_b_failures": [asdict(failure) for failure in remaining_failures][:20],
+                "ghost_b_failure_count": len(remaining_failures),
                 "ghost_b_metrics": metrics,
                 "write_state.neo4j_written": True,
                 "write_state.warnings": warnings,
                 "updated_at": datetime.utcnow(),
-            }},
+            },
+            "$unset": {"ghost_b_staging": ""},
+            },
         )
         logger.info(
             "phase=ghost_b_backfill_full_replay doc=%s corpus=%s chunks=%d recovered=%d remaining=%d",
@@ -519,7 +551,7 @@ async def backfill_failed_graph_chunks(
         if failure.chunk_id not in recovered_ids
     ]
 
-    staged_results = _rehydrate_ghost_b_staging(doc.get("ghost_b_staging") or [])
+    staged_results = _rehydrate_ghost_b_staging(staged_raw)
     staged_by_chunk = {result.chunk_id: result for result in staged_results}
     for result in report.results:
         staged_by_chunk[result.chunk_id] = result
@@ -539,8 +571,6 @@ async def backfill_failed_graph_chunks(
         success_rate = doc_metrics.get("success_rate")
         extracted = doc_metrics.get("extracted_chunks")
         total = doc_metrics.get("requested_chunks")
-        parents = doc.get("parent_chunks") or []
-        parent_count = len(parents) if isinstance(parents, list) else 0
         schema_lens_id = (
             (doc.get("ingestion_config") or {}).get("schema_lens_id")
             or doc_metrics.get("schema_lens")
@@ -592,9 +622,22 @@ async def backfill_failed_graph_chunks(
     # but left this flag untouched, so subsequent backfill calls saw
     # neo4j_written=False and re-fired the writer. MERGE makes that
     # safe but wasteful. Flipping the flag makes the contract honest.
+    await mongo_writer.stash_ghost_b(
+        db,
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        results=[asdict(result) for result in staged_results],
+    )
+    await mongo_writer.stash_ghost_b_failures(
+        db,
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        failures=[asdict(failure) for failure in remaining_failures],
+    )
     update_set: dict[str, Any] = {
-        "ghost_b_staging": [asdict(result) for result in staged_results],
-        "ghost_b_failures": [asdict(failure) for failure in remaining_failures],
+        "ghost_b_staging_count": len(staged_results),
+        "ghost_b_failures": [asdict(failure) for failure in remaining_failures][:20],
+        "ghost_b_failure_count": len(remaining_failures),
         "ghost_b_metrics": metrics,
         "write_state.warnings": warnings,
         "updated_at": datetime.utcnow(),
@@ -604,7 +647,7 @@ async def backfill_failed_graph_chunks(
 
     await db["documents"].update_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"$set": update_set},
+        {"$set": update_set, "$unset": {"ghost_b_staging": ""}},
     )
     logger.info(
         "phase=ghost_b_backfill doc=%s corpus=%s retried=%d recovered=%d remaining=%d neo4j_written=%s",

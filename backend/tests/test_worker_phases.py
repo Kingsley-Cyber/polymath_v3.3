@@ -253,6 +253,7 @@ def _install_mocks(
 
     checkpoint_mock = AsyncMock(side_effect=_checkpoint_side_effect)
     update_state_mock = AsyncMock()
+    verify_mock = AsyncMock(return_value=(True, []))
     mongo_db = MagicMock()
     # For the corpora counter update path in run_ingest_job
     mongo_db.__getitem__.return_value.update_one = AsyncMock()
@@ -270,6 +271,7 @@ def _install_mocks(
         patch.object(worker, "_ensure_progress_document", ensure_progress_mock),
         patch.object(worker, "_checkpoint_child_chunks", checkpoint_mock),
         patch.object(worker.mongo_writer, "update_write_state", update_state_mock),
+        patch("services.ingestion.verify.verify_ingest", verify_mock),
         patch.object(worker.settings, "NEO4J_ENABLED", True),
     ]
     for p in patches:
@@ -292,6 +294,7 @@ def _install_mocks(
         "ensure_progress": ensure_progress_mock,
         "checkpoint_chunks": checkpoint_mock,
         "update_state": update_state_mock,
+        "verify": verify_mock,
         "db": mongo_db,
         "stop_all": _stop_all,
     }
@@ -825,11 +828,18 @@ async def test_full_deep_ingest_small_doc():
             {"doc_id": result.doc_id, "corpus_id": cid}
         )
         assert doc is not None
-        assert doc["parent_chunks"], "parent_chunks should not be empty"
-        assert any(p.get("summary") for p in doc["parent_chunks"]), \
-            "at least one parent should have a summary inline"
-        assert isinstance(doc.get("ghost_b_staging"), list), \
-            "ghost_b_staging must be persisted"
+        assert "parent_chunks" not in doc
+        assert "ghost_b_staging" not in doc
+        parent_rows = await db["parent_chunks"].find(
+            {"doc_id": result.doc_id, "corpus_id": cid}
+        ).to_list(length=None)
+        assert parent_rows, "parent_chunks collection should not be empty"
+        assert any(p.get("summary") for p in parent_rows), \
+            "at least one parent should have a summary row"
+        staged_count = await db["ghost_b_extractions"].count_documents(
+            {"doc_id": result.doc_id, "corpus_id": cid, "status": "ok"}
+        )
+        assert staged_count > 0, "ghost_b_extractions rows must be persisted"
 
         async with ingestion_service._neo4j.session() as s:
             res = await s.run(
@@ -842,6 +852,8 @@ async def test_full_deep_ingest_small_doc():
     finally:
         await db["documents"].delete_many({"corpus_id": cid})
         await db["chunks"].delete_many({"corpus_id": cid})
+        await db["parent_chunks"].delete_many({"corpus_id": cid})
+        await db["ghost_b_extractions"].delete_many({"corpus_id": cid})
         await db["corpora"].delete_one({"corpus_id": cid})
         try:
             await drop_collections_for_corpus(ingestion_service._qdrant, cid)

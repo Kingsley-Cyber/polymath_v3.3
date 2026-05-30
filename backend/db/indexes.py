@@ -102,6 +102,36 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
         logger.warning("Could not create chunks text index: %s", exc)
     logger.info("Indexes ensured: chunks")
 
+    # --- parent_chunks ---
+    # Parent rows are the hydration/summarization unit. They used to live
+    # inline in documents.parent_chunks, which breaks on large books.
+    await db["parent_chunks"].create_index(
+        [("corpus_id", 1), ("doc_id", 1), ("parent_id", 1)],
+        unique=True,
+        name="corpus_doc_parent_unique",
+    )
+    await db["parent_chunks"].create_index(
+        [("corpus_id", 1), ("doc_id", 1)],
+        name="parent_chunks_doc",
+    )
+    await db["parent_chunks"].create_index("parent_id")
+    logger.info("Indexes ensured: parent_chunks")
+
+    # --- ghost_b_extractions ---
+    # One durable Ghost B checkpoint per child chunk. Successful rows feed
+    # graph backfill; error rows can be retried independently.
+    await db["ghost_b_extractions"].create_index(
+        [("corpus_id", 1), ("doc_id", 1), ("chunk_id", 1)],
+        unique=True,
+        name="corpus_doc_chunk_extraction_unique",
+    )
+    await db["ghost_b_extractions"].create_index(
+        [("corpus_id", 1), ("doc_id", 1), ("status", 1)],
+        name="ghost_b_extractions_doc_status",
+    )
+    await db["ghost_b_extractions"].create_index("chunk_id")
+    logger.info("Indexes ensured: ghost_b_extractions")
+
     # --- ghost_b_error_events ---
     # Sampled forensic rows for Ghost B extraction failures. These are small by
     # design: no child text, only raw output snippets plus failure metadata.
