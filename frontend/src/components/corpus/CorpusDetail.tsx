@@ -478,13 +478,16 @@ export function CorpusDetail({
             <FolderOpen className="w-3 h-3" />
             <span>Backend Folder</span>
           </button>
-          <label className="flex items-center gap-1.5 px-2 py-1 text-[9px] font-bold tracking-widest text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base transition-none uppercase cursor-pointer">
+          <label
+            className="flex items-center gap-1.5 px-2 py-1 text-[9px] font-bold tracking-widest text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base transition-none uppercase cursor-pointer"
+            title={`Browser upload for up to ${MAX_BROWSER_INGEST_FILES} files. Use Backend Folder for large local libraries.`}
+          >
             {isUploading ? (
               <Loader2 className="w-3 h-3 animate-spin" />
             ) : (
               <Upload className="w-3 h-3" />
             )}
-            <span>{isUploading ? "Processing..." : "+ Ingest"}</span>
+            <span>{isUploading ? "Processing..." : "Upload Files"}</span>
             <input
               ref={fileInputRef}
               data-testid="corpus-file-input"
