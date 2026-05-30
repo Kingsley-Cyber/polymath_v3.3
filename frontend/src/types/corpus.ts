@@ -337,10 +337,14 @@ export interface IngestBatchItemResponse {
     | "failed_recoverable"
     | "skipped";
   attempts: number;
+  phase?: string | null;
+  failure_stage?: string | null;
   doc_id?: string | null;
   error?: string | null;
   size_bytes?: number;
   stored_bytes?: number;
+  last_heartbeat_at?: string | null;
+  phase_started_at?: string | null;
   updated_at?: string;
 }
 

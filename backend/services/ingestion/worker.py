@@ -29,6 +29,7 @@ extractions so large books never need one giant document write.
 import asyncio
 from collections import Counter
 import hashlib
+import inspect
 import logging
 import mimetypes
 import os
@@ -1321,6 +1322,51 @@ async def _mark_ingest_failed(
     )
 
 
+async def _call_optional_callback(callback, *args) -> None:
+    if callback is None:
+        return
+    try:
+        result = callback(*args)
+        if inspect.isawaitable(result):
+            await result
+    except Exception as exc:
+        logger.debug("ingest callback raised: %s", exc)
+
+
+async def _emit_ingest_phase(
+    callback,
+    phase: str,
+    *,
+    doc_id: str,
+    corpus_id: str,
+    **details,
+) -> None:
+    payload = {"doc_id": doc_id, "corpus_id": corpus_id, **details}
+    await _call_optional_callback(callback, phase, payload)
+
+
+async def _set_ingest_stage(
+    *,
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+    stage: str,
+    on_phase=None,
+    **details,
+) -> None:
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {"$set": {"ingest_stage": stage, "updated_at": datetime.utcnow()}},
+    )
+    await _emit_ingest_phase(
+        on_phase,
+        stage,
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        **details,
+    )
+
+
 async def _embed_batch_for_doc(
     *,
     children,
@@ -1805,6 +1851,7 @@ async def run_ingest_job(
     # The HTTP endpoint uses this to return {doc_id, status: "queued"} in
     # under ~2s even when the full pipeline will run for 30+ minutes.
     on_doc_id: "Callable[[str], None] | None" = None,
+    on_phase: "Callable[[str, dict], None] | None" = None,
 ) -> IngestJobResponse:
     """Run the locked ingestion pipeline for a single document.
 
@@ -1906,11 +1953,14 @@ async def run_ingest_job(
 
     # Phase K — signal the HTTP endpoint after the parse progress row exists,
     # so the frontend/SSE never observes a real running job as "not found".
-    if on_doc_id is not None:
-        try:
-            on_doc_id(doc_id)
-        except Exception as _exc:
-            logger.debug("on_doc_id callback raised: %s", _exc)
+    await _call_optional_callback(on_doc_id, doc_id)
+    await _emit_ingest_phase(
+        on_phase,
+        "chunking",
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        filename=filename,
+    )
 
     # ── Phase 2: Chunk ───────────────────────────────────────────────────
     # Run sync chunker in a thread with a wall-clock cap so pathological
@@ -1952,6 +2002,13 @@ async def run_ingest_job(
             message=message,
             stage="chunk_failed",
         )
+        await _emit_ingest_phase(
+            on_phase,
+            "chunk_failed",
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            error=message,
+        )
         raise RuntimeError(message) from exc
     except Exception as exc:
         message = f"tier_chunker failed: {exc}"
@@ -1961,6 +2018,13 @@ async def run_ingest_job(
             corpus_id=corpus_id,
             message=message,
             stage="chunk_failed",
+        )
+        await _emit_ingest_phase(
+            on_phase,
+            "chunk_failed",
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            error=message,
         )
         raise RuntimeError(message) from exc
     chunking_config = tier_chunker.describe_chunking(parse_result, ingestion_config)
@@ -2020,6 +2084,13 @@ async def run_ingest_job(
         )
 
     # ── Phase 3: Ghost model phases ──────────────────────────────────────
+    await _set_ingest_stage(
+        db=db,
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        stage="ghosts",
+        on_phase=on_phase,
+    )
     async with _MODEL_PHASE_SEMAPHORE:
         t0 = time.monotonic()
         ghost_result = await _run_ghosts_parallel(
@@ -2087,6 +2158,13 @@ async def run_ingest_job(
 
     # ── Phase 4: Mongo durable checkpoints ──────────────────────────────
     if not ws.mongo_written:
+        await _set_ingest_stage(
+            db=db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            stage="mongo",
+            on_phase=on_phase,
+        )
         t0 = time.monotonic()
         await _write_mongo_all(
             db=db,
@@ -2227,6 +2305,13 @@ async def run_ingest_job(
     # through to Phase 7 so Neo4j can still get the document.
     if not ws.qdrant_written:
         try:
+            await _set_ingest_stage(
+                db=db,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                stage="embedding",
+                on_phase=on_phase,
+            )
             async with _MODEL_PHASE_SEMAPHORE:
                 t0 = time.monotonic()
                 vec_map, summary_vec_map = await _embed_batch_for_doc(
@@ -2277,6 +2362,13 @@ async def run_ingest_job(
             )
 
             t0 = time.monotonic()
+            await _set_ingest_stage(
+                db=db,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                stage="qdrant",
+                on_phase=on_phase,
+            )
             await _write_qdrant_for_doc(
                 qdrant_client=qdrant_client,
                 corpus_id=corpus_id,
@@ -2309,6 +2401,13 @@ async def run_ingest_job(
             # via the backfill endpoint without re-doing extraction.
             warning = f"Embed/Qdrant failed: {embed_qdrant_exc}"
             ws.warnings = _merge_warnings(ws.warnings, [warning])
+            await _emit_ingest_phase(
+                on_phase,
+                "qdrant_failed",
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                error=warning,
+            )
             logger.warning(
                 "phase=embed_qdrant doc=%s corpus=%s status=failed_continue err=%s",
                 doc_id[:12], cid8, embed_qdrant_exc,
@@ -2350,6 +2449,13 @@ async def run_ingest_job(
             )
         else:
             t0 = time.monotonic()
+            await _set_ingest_stage(
+                db=db,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                stage="neo4j",
+                on_phase=on_phase,
+            )
             await _write_neo4j_for_doc(
                 neo4j_driver=neo4j_driver,
                 doc_id=doc_id,
@@ -2392,6 +2498,13 @@ async def run_ingest_job(
     try:
         from services.ingestion.verify import verify_ingest
 
+        await _set_ingest_stage(
+            db=db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            stage="verifying",
+            on_phase=on_phase,
+        )
         ok, verify_errors = await verify_ingest(
             db=db,
             qdrant=qdrant_client,
@@ -2524,7 +2637,13 @@ async def run_ingest_job(
         if ws.verified is not True:
             missing.append("verification")
         final_error = "Ingest incomplete: " + ", ".join(missing)
-    if ws.verified is True:
+    final_stage = "complete" if verified_complete else "failed"
+    final_update: dict[str, Any] = {
+        "ingest_stage": final_stage,
+        "updated_at": datetime.utcnow(),
+    }
+    final_unset: dict[str, str] = {}
+    if verified_complete:
         # A resumed ingest can repair an earlier phase failure. Clear the
         # stale top-level error and remove only the synthetic failure warning;
         # genuine coverage warnings such as Ghost B partial extraction remain.
@@ -2533,16 +2652,24 @@ async def run_ingest_job(
         ]
         if repaired_warnings != ws.warnings:
             ws.warnings = repaired_warnings
-        await db["documents"].update_one(
-            {"doc_id": doc_id, "corpus_id": corpus_id},
-            {
-                "$set": {
-                    "write_state.warnings": ws.warnings,
-                    "updated_at": datetime.utcnow(),
-                },
-                "$unset": {"error": ""},
-            },
-        )
+        final_update["write_state.warnings"] = ws.warnings
+        final_unset["error"] = ""
+    else:
+        final_update["error"] = final_error
+    update_doc: dict[str, Any] = {"$set": final_update}
+    if final_unset:
+        update_doc["$unset"] = final_unset
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        update_doc,
+    )
+    await _emit_ingest_phase(
+        on_phase,
+        final_stage,
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        error=final_error,
+    )
 
     return IngestJobResponse(
         job_id=job_id,

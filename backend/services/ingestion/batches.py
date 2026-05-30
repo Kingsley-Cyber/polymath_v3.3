@@ -177,11 +177,15 @@ def _file_item_doc(
         "mtime": datetime.utcfromtimestamp(stat.st_mtime),
         "mime_type": mimetypes.guess_type(path.name)[0],
         "status": ITEM_QUEUED,
+        "phase": "queued",
+        "failure_stage": None,
         "attempts": 0,
         "doc_id": None,
         "error": None,
         "lease_owner": None,
         "lease_until": None,
+        "last_heartbeat_at": None,
+        "phase_started_at": None,
         "created_at": _now(),
         "updated_at": _now(),
         "started_at": None,
@@ -424,9 +428,12 @@ async def reconcile_stale_items(
         {
             "$set": {
                 "status": ITEM_FAILED_RECOVERABLE,
+                "phase": "stale",
+                "failure_stage": "lease_expired",
                 "error": "Worker lease expired before completion; item can be resumed.",
                 "lease_owner": None,
                 "lease_until": None,
+                "last_heartbeat_at": _now(),
                 "updated_at": _now(),
             }
         },
@@ -455,9 +462,13 @@ async def _lease_next_item(
         {
             "$set": {
                 "status": ITEM_RUNNING,
+                "phase": "claimed",
+                "failure_stage": None,
                 "lease_owner": owner,
                 "lease_until": now + timedelta(seconds=lease_seconds),
                 "started_at": now,
+                "phase_started_at": now,
+                "last_heartbeat_at": now,
                 "updated_at": now,
                 "error": None,
             },
@@ -490,6 +501,39 @@ async def _build_item_config(
     return IngestionConfig(**cfg_dict)
 
 
+async def _set_item_phase(
+    db: AsyncIOMotorDatabase,
+    item_id: str,
+    phase: str,
+    *,
+    status: str | None = None,
+    doc_id: str | None = None,
+    error: str | None = None,
+    failure_stage: str | None = None,
+    completed: bool = False,
+) -> None:
+    now = _now()
+    set_doc: dict[str, Any] = {
+        "phase": phase,
+        "phase_started_at": now,
+        "updated_at": now,
+        "last_heartbeat_at": now,
+    }
+    if status is not None:
+        set_doc["status"] = status
+    if doc_id is not None:
+        set_doc["doc_id"] = doc_id
+    if error is not None:
+        set_doc["error"] = error[:1000]
+    if failure_stage is not None:
+        set_doc["failure_stage"] = failure_stage
+    if completed:
+        set_doc["completed_at"] = now
+        set_doc["lease_owner"] = None
+        set_doc["lease_until"] = None
+    await db[ITEMS].update_one({"item_id": item_id}, {"$set": set_doc})
+
+
 async def _process_local_item(
     *,
     db: AsyncIOMotorDatabase,
@@ -503,15 +547,14 @@ async def _process_local_item(
     path = Path(str(stored_path_raw or source_path_raw or ""))
     if not path.exists() or not path.is_file():
         label = "Stored source" if stored_path_raw else "Source file"
-        await db[ITEMS].update_one(
-            {"item_id": item_id},
-            {"$set": {
-                "status": ITEM_FAILED_RECOVERABLE,
-                "error": f"{label} is missing: {path}",
-                "lease_owner": None,
-                "lease_until": None,
-                "updated_at": _now(),
-            }},
+        await _set_item_phase(
+            db,
+            item_id,
+            "failed",
+            status=ITEM_FAILED,
+            error=f"{label} is missing: {path}",
+            failure_stage="source_missing",
+            completed=True,
         )
         return
 
@@ -519,12 +562,38 @@ async def _process_local_item(
     try:
         await _wait_for_ingest_slot()
         slot_acquired = True
+        await _set_item_phase(db, item_id, "reading", status=ITEM_RUNNING)
         data = path.read_bytes()
+        await _set_item_phase(db, item_id, "starting_worker", status=ITEM_RUNNING)
         config = await _build_item_config(
             ingestion_service=ingestion_service,
             corpus_id=batch["corpus_id"],
             options=batch.get("options") or {},
         )
+
+        async def _on_doc_id(doc_id: str) -> None:
+            await _set_item_phase(
+                db,
+                item_id,
+                "chunking",
+                status=ITEM_RUNNING,
+                doc_id=doc_id,
+            )
+
+        async def _on_phase(phase: str, details: dict[str, Any]) -> None:
+            phase_doc_id = details.get("doc_id")
+            phase_error = details.get("error")
+            failure_stage = phase if phase.endswith("failed") else None
+            await _set_item_phase(
+                db,
+                item_id,
+                phase,
+                status=ITEM_RUNNING,
+                doc_id=str(phase_doc_id) if phase_doc_id else None,
+                error=str(phase_error) if phase_error else None,
+                failure_stage=failure_stage,
+            )
+
         result = await ingestion_service.ingest(
             data=data,
             filename=str(item.get("filename") or path.name),
@@ -533,31 +602,30 @@ async def _process_local_item(
             ingestion_config=config,
             model=str((batch.get("options") or {}).get("model") or ""),
             ingest_overrides=None,
+            on_doc_id=_on_doc_id,
+            on_phase=_on_phase,
         )
-        status = ITEM_DONE if result.status == "done" else ITEM_FAILED_RECOVERABLE
-        await db[ITEMS].update_one(
-            {"item_id": item_id},
-            {"$set": {
-                "status": status,
-                "doc_id": result.doc_id,
-                "error": result.error,
-                "lease_owner": None,
-                "lease_until": None,
-                "completed_at": _now() if status == ITEM_DONE else None,
-                "updated_at": _now(),
-            }},
+        status = ITEM_DONE if result.status == "done" else ITEM_FAILED
+        await _set_item_phase(
+            db,
+            item_id,
+            "complete" if status == ITEM_DONE else "failed",
+            status=status,
+            doc_id=result.doc_id,
+            error=result.error,
+            failure_stage=None if status == ITEM_DONE else "worker_result_failed",
+            completed=True,
         )
     except Exception as exc:
         logger.exception("Batch item ingest failed item=%s path=%s", item_id, path)
-        await db[ITEMS].update_one(
-            {"item_id": item_id},
-            {"$set": {
-                "status": ITEM_FAILED_RECOVERABLE,
-                "error": str(exc)[:1000],
-                "lease_owner": None,
-                "lease_until": None,
-                "updated_at": _now(),
-            }},
+        await _set_item_phase(
+            db,
+            item_id,
+            "failed",
+            status=ITEM_FAILED,
+            error=str(exc),
+            failure_stage="worker_exception",
+            completed=True,
         )
     finally:
         if slot_acquired:

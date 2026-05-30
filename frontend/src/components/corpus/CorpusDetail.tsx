@@ -87,7 +87,7 @@ export function CorpusDetail({
   const [showOverrides, setShowOverrides] = useState(false);
   const [showLocalBatch, setShowLocalBatch] = useState(false);
   const [localBatchPath, setLocalBatchPath] = useState(LOCAL_BATCH_DEFAULT_PATH);
-  const [localBatchConcurrency, setLocalBatchConcurrency] = useState(2);
+  const [localBatchConcurrency, setLocalBatchConcurrency] = useState(1);
   const [localBatch, setLocalBatch] = useState<IngestBatchResponse | null>(null);
   const [isStartingLocalBatch, setIsStartingLocalBatch] = useState(false);
 
@@ -556,7 +556,7 @@ export function CorpusDetail({
             </button>
           </div>
           {localBatch && (
-            <div className="mt-2 grid grid-cols-2 md:grid-cols-5 gap-2 text-[9px] font-mono">
+            <div className="mt-2 grid grid-cols-2 md:grid-cols-6 gap-2 text-[9px] font-mono">
               <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Status</div>
                 <div className="text-content-primary">{localBatch.status}</div>
@@ -570,6 +570,10 @@ export function CorpusDetail({
                 <div className="text-green-500">{localBatch.counts?.done ?? 0}</div>
               </div>
               <div className="border border-border-minimal px-2 py-1">
+                <div className="text-content-tertiary uppercase">Failed</div>
+                <div className="text-error">{localBatch.counts?.failed ?? 0}</div>
+              </div>
+              <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Recoverable</div>
                 <div className="text-amber-400">
                   {localBatch.counts?.failed_recoverable ?? 0}
@@ -580,6 +584,51 @@ export function CorpusDetail({
                 <div className="text-content-primary">
                   {formatBytes(localBatch.stored_bytes)}
                 </div>
+              </div>
+            </div>
+          )}
+          {localBatch?.items && localBatch.items.length > 0 && (
+            <div className="mt-2 border border-border-minimal">
+              <div className="grid grid-cols-[42px_minmax(0,1.4fr)_86px_92px_minmax(0,1fr)] gap-2 px-2 py-1 text-[9px] font-bold tracking-widest text-content-tertiary uppercase border-b border-border-minimal">
+                <span>Size</span>
+                <span>File</span>
+                <span>Status</span>
+                <span>Phase</span>
+                <span>Reason</span>
+              </div>
+              <div className="max-h-40 overflow-y-auto custom-scrollbar">
+                {localBatch.items.slice(0, 12).map((item) => (
+                  <div
+                    key={item.item_id}
+                    className="grid grid-cols-[42px_minmax(0,1.4fr)_86px_92px_minmax(0,1fr)] gap-2 px-2 py-1 text-[10px] font-mono border-b border-border-minimal/60 last:border-b-0"
+                  >
+                    <span className="text-content-tertiary">
+                      {typeof item.size_bytes === "number" ? formatBytes(item.size_bytes) : ""}
+                    </span>
+                    <span className="text-content-secondary truncate" title={item.relative_path || item.filename}>
+                      {item.relative_path || item.filename}
+                    </span>
+                    <span
+                      className={
+                        item.status === "done"
+                          ? "text-green-500"
+                          : item.status === "failed"
+                            ? "text-error"
+                            : item.status === "failed_recoverable"
+                              ? "text-amber-400"
+                              : "text-content-primary"
+                      }
+                    >
+                      {item.status}
+                    </span>
+                    <span className="text-accent-secondary truncate" title={item.phase || ""}>
+                      {item.phase || "queued"}
+                    </span>
+                    <span className="text-content-tertiary truncate" title={item.error || item.failure_stage || ""}>
+                      {item.error || item.failure_stage || ""}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           )}

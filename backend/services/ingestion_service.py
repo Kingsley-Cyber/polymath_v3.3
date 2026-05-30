@@ -620,6 +620,7 @@ class IngestionService:
         model: str,
         ingest_overrides: dict | None = None,
         on_doc_id: "Any | None" = None,
+        on_phase: "Any | None" = None,
     ) -> IngestJobResponse:
         """Run the full ingestion pipeline for one document.
 
@@ -630,6 +631,10 @@ class IngestionService:
         `on_doc_id` (Phase K) is invoked with the resolved doc_id as soon as
         docling parse completes — the HTTP endpoint uses this to return a
         response before the long tail of ghost/embed/write runs.
+
+        `on_phase` is an optional durable-batch hook called as the worker
+        crosses coarse phase boundaries such as chunking, embedding, qdrant,
+        neo4j, verifying, complete, or failed.
         """
         from services.ingestion.worker import run_ingest_job
 
@@ -646,6 +651,7 @@ class IngestionService:
             model=model,
             ingest_overrides=ingest_overrides,
             on_doc_id=on_doc_id,
+            on_phase=on_phase,
         )
 
     async def _embed_and_upsert_schema_terms(

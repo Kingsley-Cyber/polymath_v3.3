@@ -156,7 +156,7 @@ class Settings(BaseSettings):
         ),
     )
     INGEST_BATCH_WORKERS: int = Field(
-        default=2,
+        default=1,
         ge=1,
         le=32,
         description=(

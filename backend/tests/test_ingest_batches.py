@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -81,6 +82,130 @@ def test_file_item_doc_records_stored_copy(tmp_path):
     assert item["item_id"] == "item-1"
     assert item["stored_path"] == str(stored)
     assert item["stored_bytes"] == source.stat().st_size
+    assert item["phase"] == "queued"
+
+
+class _ItemUpdatesCollection:
+    def __init__(self):
+        self.updates = []
+
+    async def update_one(self, query, update):
+        self.updates.append((query, update))
+        return type("Result", (), {"modified_count": 1})()
+
+
+class _ItemUpdatesDb:
+    def __init__(self):
+        self.items = _ItemUpdatesCollection()
+
+    def __getitem__(self, name):
+        assert name == batches.ITEMS
+        return self.items
+
+
+@pytest.mark.asyncio
+async def test_local_batch_item_exception_is_terminal_failed(monkeypatch, tmp_path):
+    source = tmp_path / "bad.md"
+    source.write_text("# bad", encoding="utf-8")
+    db = _ItemUpdatesDb()
+    item = {
+        "item_id": "item-1",
+        "source_path": str(source),
+        "filename": source.name,
+    }
+    batch = {
+        "corpus_id": "corpus-1",
+        "user_id": "user-1",
+        "options": {},
+    }
+
+    class FakeIngestionService:
+        async def _get_corpus_raw(self, _corpus_id):
+            return {"default_ingestion_config": {}}
+
+        async def ingest(self, **kwargs):
+            await kwargs["on_doc_id"]("doc-1")
+            await kwargs["on_phase"](
+                "chunk_failed",
+                {"doc_id": "doc-1", "error": "chunker timeout"},
+            )
+            raise RuntimeError("chunker timeout")
+
+    async def fake_wait_for_slot():
+        return None
+
+    async def fake_release_slot():
+        return None
+
+    monkeypatch.setattr(batches, "_wait_for_ingest_slot", fake_wait_for_slot)
+    monkeypatch.setattr(batches.admission, "release_ingest_slot", fake_release_slot)
+
+    await batches._process_local_item(
+        db=db,
+        ingestion_service=FakeIngestionService(),
+        batch=batch,
+        item=item,
+    )
+
+    updates = [update["$set"] for _query, update in db.items.updates]
+    assert any(update.get("doc_id") == "doc-1" for update in updates)
+    final = updates[-1]
+    assert final["status"] == batches.ITEM_FAILED
+    assert final["phase"] == "failed"
+    assert final["failure_stage"] == "worker_exception"
+    assert "chunker timeout" in final["error"]
+
+
+@pytest.mark.asyncio
+async def test_local_batch_item_failed_result_does_not_requeue(monkeypatch, tmp_path):
+    source = tmp_path / "incomplete.md"
+    source.write_text("# incomplete", encoding="utf-8")
+    db = _ItemUpdatesDb()
+    item = {
+        "item_id": "item-2",
+        "source_path": str(source),
+        "filename": source.name,
+    }
+    batch = {
+        "corpus_id": "corpus-1",
+        "user_id": "user-1",
+        "options": {},
+    }
+
+    class FakeIngestionService:
+        async def _get_corpus_raw(self, _corpus_id):
+            return {"default_ingestion_config": {}}
+
+        async def ingest(self, **kwargs):
+            await kwargs["on_doc_id"]("doc-2")
+            await kwargs["on_phase"]("embedding", {"doc_id": "doc-2"})
+            return SimpleNamespace(
+                status="failed",
+                doc_id="doc-2",
+                error="Ingest incomplete: qdrant",
+            )
+
+    async def fake_wait_for_slot():
+        return None
+
+    async def fake_release_slot():
+        return None
+
+    monkeypatch.setattr(batches, "_wait_for_ingest_slot", fake_wait_for_slot)
+    monkeypatch.setattr(batches.admission, "release_ingest_slot", fake_release_slot)
+
+    await batches._process_local_item(
+        db=db,
+        ingestion_service=FakeIngestionService(),
+        batch=batch,
+        item=item,
+    )
+
+    final = db.items.updates[-1][1]["$set"]
+    assert final["status"] == batches.ITEM_FAILED
+    assert final["phase"] == "failed"
+    assert final["doc_id"] == "doc-2"
+    assert final["failure_stage"] == "worker_result_failed"
 
 
 class _BatchCursor:
