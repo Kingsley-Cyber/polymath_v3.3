@@ -296,6 +296,11 @@ class _RecoveryCursor:
         self.rows = [dict(row) for row in rows]
         self._limit = None
 
+    def sort(self, field, direction):
+        reverse = direction < 0
+        self.rows = sorted(self.rows, key=lambda row: row.get(field, 0), reverse=reverse)
+        return self
+
     def limit(self, limit):
         self._limit = limit
         return self
@@ -332,8 +337,15 @@ class _RecoveryCollection:
         for row in self.rows:
             if _matches_query(row, query):
                 row.update(update.get("$set", {}))
+                for key, value in (update.get("$inc") or {}).items():
+                    row[key] = row.get(key, 0) + value
                 return type("Result", (), {"modified_count": 1})()
         return type("Result", (), {"modified_count": 0})()
+
+    async def insert_many(self, docs, ordered=False):
+        del ordered
+        self.rows.extend(dict(doc) for doc in docs)
+        return type("Result", (), {"inserted_ids": [doc.get("item_id") for doc in docs]})()
 
     async def count_documents(self, query):
         return sum(1 for row in self.rows if _matches_query(row, query))
@@ -449,6 +461,64 @@ async def test_recover_local_batch_runners_does_not_start_manifest_only_batch(mo
 
     assert result["candidate_batches"] == 1
     assert result["started_batches"] == 0
+
+
+@pytest.mark.asyncio
+async def test_append_new_files_to_batch_adds_only_unseen_manifest_items(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    existing = root / "existing.md"
+    existing.write_text("# existing", encoding="utf-8")
+    added = root / "added.md"
+    added.write_text("# added", encoding="utf-8")
+    existing_stat = existing.stat()
+    existing_mtime = datetime.utcfromtimestamp(existing_stat.st_mtime)
+    batch_rows = [
+        {
+            "batch_id": "batch-1",
+            "corpus_id": "corpus-1",
+            "source": "local_folder",
+            "root_path": str(root),
+            "recursive": True,
+            "extensions": [".md"],
+            "store_files": False,
+            "user_id": "user-1",
+            "status": batches.BATCH_RUNNING,
+            "total_source_bytes": existing_stat.st_size,
+            "stored_bytes": 0,
+        }
+    ]
+    item_rows = [
+        {
+            "item_id": "existing-item",
+            "batch_id": "batch-1",
+            "corpus_id": "corpus-1",
+            "source": "local_folder",
+            "user_id": "user-1",
+            "relative_path": "existing.md",
+            "filename": "existing.md",
+            "size_bytes": existing_stat.st_size,
+            "mtime": existing_mtime,
+            "ordinal": 0,
+            "status": batches.ITEM_DONE,
+        }
+    ]
+    db = _RecoveryDb(batch_rows, item_rows)
+
+    result = await batches.append_new_files_to_batch(
+        db=db,
+        batch_id="batch-1",
+        user_id="user-1",
+    )
+
+    assert result["appended_items"] == 1
+    assert result["discovered_files"] == 2
+    assert result["counts"][batches.ITEM_DONE] == 1
+    assert result["counts"][batches.ITEM_QUEUED] == 1
+    by_name = {row["filename"]: row for row in item_rows}
+    assert by_name["existing.md"]["status"] == batches.ITEM_DONE
+    assert by_name["added.md"]["status"] == batches.ITEM_QUEUED
+    assert by_name["added.md"]["ordinal"] == 1
 
 
 class _FakeCursor:

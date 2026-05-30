@@ -27,6 +27,7 @@ from models.schemas import IngestionConfig
 from services.ingestion import admission
 
 logger = logging.getLogger(__name__)
+_UTC_EPOCH = datetime(1970, 1, 1)
 
 BATCHES = "ingest_batches"
 ITEMS = "ingest_batch_items"
@@ -114,6 +115,36 @@ def _ensure_storage_quota(
 def _storage_path_for_item(storage_root: Path, batch_id: str, item_id: str, filename: str) -> Path:
     suffix = Path(filename).suffix
     return storage_root / batch_id / f"{item_id}{suffix}"
+
+
+def _mtime_ms(value: Any) -> int:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return int((value - _UTC_EPOCH).total_seconds() * 1000)
+        return int(value.timestamp() * 1000)
+    return int(float(value) * 1000)
+
+
+def _file_identity(*, root: Path, path: Path, size_bytes: int, mtime: Any) -> tuple[str, int, int]:
+    try:
+        rel_path = str(path.relative_to(root))
+    except ValueError:
+        rel_path = path.name
+    return (rel_path, int(size_bytes), _mtime_ms(mtime))
+
+
+def _item_identity(item: dict[str, Any]) -> tuple[str, int, int] | None:
+    rel_path = str(item.get("relative_path") or "")
+    if not rel_path:
+        return None
+    mtime = item.get("mtime")
+    if mtime is None:
+        return None
+    try:
+        mtime_ms = _mtime_ms(mtime)
+    except (TypeError, ValueError):
+        return None
+    return (rel_path, int(item.get("size_bytes") or 0), mtime_ms)
 
 
 def discover_local_files(
@@ -265,6 +296,7 @@ async def create_local_batch(
         "root_path": str(root),
         "recursive": recursive,
         "extensions": sorted(_normalize_extensions(extensions)),
+        "max_files": max_files,
         "store_files": store_files,
         "total_source_bytes": total_source_bytes,
         "stored_bytes": total_source_bytes if store_files else 0,
@@ -346,6 +378,130 @@ async def list_batches(
         {"_id": 0},
     ).sort("created_at", -1).limit(limit)
     return await cursor.to_list(length=limit)
+
+
+async def append_new_files_to_batch(
+    *,
+    db: AsyncIOMotorDatabase,
+    batch_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    """Rescan a local-folder batch root and append unseen files as queued."""
+    batch = await db[BATCHES].find_one({"batch_id": batch_id, "user_id": user_id})
+    if not batch:
+        raise ValueError("Batch not found")
+    if batch.get("source") != "local_folder":
+        raise ValueError("Only local_folder batches can be rescanned")
+    root_path = str(batch.get("root_path") or "")
+    if not root_path:
+        raise ValueError("Batch has no root_path to rescan")
+
+    root, files = discover_local_files(
+        root_path,
+        recursive=bool(batch.get("recursive", True)),
+        extensions=batch.get("extensions") or None,
+    )
+    existing_items = await db[ITEMS].find(
+        {"batch_id": batch_id, "user_id": user_id},
+        {"_id": 0, "relative_path": 1, "size_bytes": 1, "mtime": 1},
+    ).to_list(length=None)
+    existing_identities = {
+        identity
+        for identity in (_item_identity(item) for item in existing_items)
+        if identity is not None
+    }
+
+    new_files: list[Path] = []
+    for path in files:
+        stat = path.stat()
+        identity = _file_identity(
+            root=root,
+            path=path,
+            size_bytes=stat.st_size,
+            mtime=stat.st_mtime,
+        )
+        if identity not in existing_identities:
+            new_files.append(path)
+
+    if not new_files:
+        refreshed = await refresh_batch_counts(db, batch_id, user_id=user_id)
+        return {**refreshed, "appended_items": 0, "discovered_files": len(files)}
+
+    max_rows = await db[ITEMS].find(
+        {"batch_id": batch_id, "user_id": user_id},
+        {"_id": 0, "ordinal": 1},
+    ).sort("ordinal", -1).limit(1).to_list(length=1)
+    next_ordinal = int(max_rows[0].get("ordinal", -1)) + 1 if max_rows else 0
+    incoming_bytes = _sum_file_sizes(new_files)
+
+    settings = get_settings()
+    storage_root = Path(settings.INGEST_FILE_STORAGE_DIR).expanduser().resolve()
+    storage_limit = int(
+        batch.get("storage_limit_bytes")
+        or settings.INGEST_FILE_STORAGE_MAX_BYTES
+    )
+    store_files = bool(batch.get("store_files"))
+    stored_paths: dict[Path, Path] = {}
+    item_ids: dict[Path, str] = {}
+    copied_paths: list[Path] = []
+    if store_files:
+        _ensure_storage_quota(
+            storage_root=storage_root,
+            incoming_bytes=incoming_bytes,
+            max_total_bytes=storage_limit,
+        )
+        batch_storage_dir = storage_root / batch_id
+        batch_storage_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            for path in new_files:
+                item_id = str(uuid.uuid4())
+                item_ids[path] = item_id
+                stored_path = _storage_path_for_item(
+                    storage_root,
+                    batch_id,
+                    item_id,
+                    path.name,
+                )
+                shutil.copy2(path, stored_path)
+                stored_paths[path] = stored_path
+                copied_paths.append(stored_path)
+        except Exception:
+            for copied_path in copied_paths:
+                copied_path.unlink(missing_ok=True)
+            raise
+
+    await db[ITEMS].insert_many(
+        [
+            _file_item_doc(
+                batch_id=batch_id,
+                corpus_id=str(batch["corpus_id"]),
+                user_id=user_id,
+                root=root,
+                path=path,
+                ordinal=next_ordinal + idx,
+                item_id=item_ids.get(path),
+                stored_path=stored_paths.get(path),
+            )
+            for idx, path in enumerate(new_files)
+        ],
+        ordered=False,
+    )
+    await db[BATCHES].update_one(
+        {"batch_id": batch_id, "user_id": user_id},
+        {
+            "$inc": {
+                "total_source_bytes": incoming_bytes,
+                "stored_bytes": incoming_bytes if store_files else 0,
+            },
+            "$set": {"updated_at": _now()},
+        },
+    )
+    refreshed = await refresh_batch_counts(db, batch_id, user_id=user_id)
+    return {
+        **refreshed,
+        "appended_items": len(new_files),
+        "discovered_files": len(files),
+    }
 
 
 async def refresh_batch_counts(

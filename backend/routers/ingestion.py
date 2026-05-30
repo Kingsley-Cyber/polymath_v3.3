@@ -127,6 +127,10 @@ class StaleIngestReconcileRequest(BaseModel):
     auto_backfill_graph: bool = True
 
 
+class RescanIngestBatchRequest(BaseModel):
+    start: bool = True
+
+
 class ModelRefTestRequest(BaseModel):
     """Ad-hoc probe for ingestion model-pool entries.
 
@@ -832,9 +836,60 @@ async def resume_ingest_batch(
         ingestion_service.db,
         batch_id,
         user_id=current_user["user_id"],
-        include_items=False,
     )
     return {**(refreshed or batch), "runner_started": started}
+
+
+@router.post("/ingest-batches/{batch_id}/rescan")
+async def rescan_ingest_batch(
+    batch_id: str,
+    body: RescanIngestBatchRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Append new files from the original local folder manifest root."""
+    batch = await ingest_batches.get_batch(
+        ingestion_service.db,
+        batch_id,
+        user_id=current_user["user_id"],
+        include_items=False,
+    )
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    try:
+        refreshed = await ingest_batches.append_new_files_to_batch(
+            db=ingestion_service.db,
+            batch_id=batch_id,
+            user_id=current_user["user_id"],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    body = body or RescanIngestBatchRequest()
+    started = False
+    if body.start and int(refreshed.get("appended_items") or 0) > 0:
+        await ingest_batches.reconcile_stale_items(
+            ingestion_service.db,
+            batch_id=batch_id,
+            user_id=current_user["user_id"],
+        )
+        started = ingest_batches.start_local_batch_runner(
+            db=ingestion_service.db,
+            ingestion_service=ingestion_service,
+            batch_id=batch_id,
+            user_id=current_user["user_id"],
+        )
+
+    full_batch = await ingest_batches.get_batch(
+        ingestion_service.db,
+        batch_id,
+        user_id=current_user["user_id"],
+    )
+    return {
+        **(full_batch or refreshed),
+        "appended_items": refreshed.get("appended_items", 0),
+        "discovered_files": refreshed.get("discovered_files", 0),
+        "runner_started": started,
+    }
 
 
 @router.post("/corpora/{corpus_id}/ingestion/reconcile-stale")

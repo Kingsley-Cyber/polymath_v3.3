@@ -23,6 +23,7 @@ import * as api from "../../lib/api";
 import type {
   CorpusResponse,
   DocumentResponse,
+  IngestBatchItemResponse,
   IngestBatchResponse,
   ModalStatus,
   WriteState,
@@ -60,6 +61,13 @@ function getWriteStateMessages(
 
 function getParentCount(doc: DocumentResponse): number {
   return doc.parent_count ?? doc.parent_chunks?.length ?? 0;
+}
+
+function getBatchItemStatusLabel(item: IngestBatchItemResponse): string {
+  if (item.status === "failed_recoverable") {
+    return item.phase === "stale" ? "stale" : "recoverable";
+  }
+  return item.status;
 }
 
 export function CorpusDetail({
@@ -288,6 +296,24 @@ export function CorpusDetail({
     }
   };
 
+  const handleRescanLocalBatch = async () => {
+    if (!localBatch?.batch_id) return;
+    setIsStartingLocalBatch(true);
+    setError(null);
+    try {
+      const batch = await api.rescanIngestBatch(localBatch.batch_id, { start: true });
+      setLocalBatch(batch);
+      setRetryHint(
+        `Folder sync found ${batch.appended_items ?? 0} new file(s) from ${batch.discovered_files ?? 0} discovered file(s).`,
+      );
+      await loadDocuments();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to sync local ingest folder");
+    } finally {
+      setIsStartingLocalBatch(false);
+    }
+  };
+
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -313,6 +339,9 @@ export function CorpusDetail({
     if (state.mongo_written) return "MONGO_ONLY";
     return "PENDING";
   };
+
+  const localBatchStaleCount =
+    localBatch?.items?.filter((item) => item.phase === "stale").length ?? 0;
 
   return (
     <div className="flex flex-col h-full relative">
@@ -392,7 +421,7 @@ export function CorpusDetail({
 
       {showLocalBatch && (
         <div className="border-b border-border-minimal bg-bg-base/70 px-4 py-3 shrink-0">
-          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_88px_auto_auto] gap-2 items-end">
+          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_88px_auto_auto_auto] gap-2 items-end">
             <label className="min-w-0">
               <span className="block text-[9px] font-bold tracking-widest text-content-tertiary uppercase mb-1">
                 Backend Path
@@ -441,9 +470,18 @@ export function CorpusDetail({
               <RotateCcw className="w-3 h-3" />
               <span>Resume</span>
             </button>
+            <button
+              onClick={handleRescanLocalBatch}
+              disabled={!localBatch || isStartingLocalBatch}
+              className="h-8 flex items-center justify-center gap-1.5 px-3 text-[9px] font-bold tracking-widest text-content-secondary border border-border-minimal hover:border-content-secondary disabled:opacity-40 transition-none uppercase"
+              title="Rescan the original backend folder and append new files to this batch"
+            >
+              <FolderOpen className="w-3 h-3" />
+              <span>Sync</span>
+            </button>
           </div>
           {localBatch && (
-            <div className="mt-2 grid grid-cols-2 md:grid-cols-6 gap-2 text-[9px] font-mono">
+            <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-9 gap-2 text-[9px] font-mono">
               <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Status</div>
                 <div className="text-content-primary">{localBatch.status}</div>
@@ -451,6 +489,14 @@ export function CorpusDetail({
               <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Files</div>
                 <div className="text-content-primary">{localBatch.total}</div>
+              </div>
+              <div className="border border-border-minimal px-2 py-1">
+                <div className="text-content-tertiary uppercase">Queued</div>
+                <div className="text-content-primary">{localBatch.counts?.queued ?? 0}</div>
+              </div>
+              <div className="border border-border-minimal px-2 py-1">
+                <div className="text-content-tertiary uppercase">Running</div>
+                <div className="text-accent-secondary">{localBatch.counts?.running ?? 0}</div>
               </div>
               <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Done</div>
@@ -465,6 +511,10 @@ export function CorpusDetail({
                 <div className="text-amber-400">
                   {localBatch.counts?.failed_recoverable ?? 0}
                 </div>
+              </div>
+              <div className="border border-border-minimal px-2 py-1">
+                <div className="text-content-tertiary uppercase">Stale</div>
+                <div className="text-amber-400">{localBatchStaleCount}</div>
               </div>
               <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Stored</div>
@@ -485,36 +535,7 @@ export function CorpusDetail({
               </div>
               <div className="max-h-40 overflow-y-auto custom-scrollbar">
                 {localBatch.items.slice(0, 12).map((item) => (
-                  <div
-                    key={item.item_id}
-                    className="grid grid-cols-[42px_minmax(0,1.4fr)_86px_92px_minmax(0,1fr)] gap-2 px-2 py-1 text-[10px] font-mono border-b border-border-minimal/60 last:border-b-0"
-                  >
-                    <span className="text-content-tertiary">
-                      {typeof item.size_bytes === "number" ? formatBytes(item.size_bytes) : ""}
-                    </span>
-                    <span className="text-content-secondary truncate" title={item.relative_path || item.filename}>
-                      {item.relative_path || item.filename}
-                    </span>
-                    <span
-                      className={
-                        item.status === "done"
-                          ? "text-green-500"
-                          : item.status === "failed"
-                            ? "text-error"
-                            : item.status === "failed_recoverable"
-                              ? "text-amber-400"
-                              : "text-content-primary"
-                      }
-                    >
-                      {item.status}
-                    </span>
-                    <span className="text-accent-secondary truncate" title={item.phase || ""}>
-                      {item.phase || "queued"}
-                    </span>
-                    <span className="text-content-tertiary truncate" title={item.error || item.failure_stage || ""}>
-                      {item.error || item.failure_stage || ""}
-                    </span>
-                  </div>
+                  <BatchItemRow key={item.item_id} item={item} />
                 ))}
               </div>
             </div>
@@ -926,6 +947,40 @@ export function CorpusDetail({
 // So counts are monotonic: mongo ≥ qdrant ≥ neo4j ≥ verified. That's why
 // the stacked bar paints left→right in stage order — each later layer is
 // narrower, revealing the slower stage as a trailing stripe on the right.
+
+function BatchItemRow({ item }: { item: IngestBatchItemResponse }) {
+  const label = getBatchItemStatusLabel(item);
+  const statusClass =
+    label === "done"
+      ? "text-green-500"
+      : label === "failed"
+        ? "text-error"
+        : label === "stale" || label === "recoverable"
+          ? "text-amber-400"
+          : label === "queued"
+            ? "text-content-secondary"
+            : "text-content-primary";
+
+  return (
+    <div className="grid grid-cols-[42px_minmax(0,1.4fr)_86px_92px_minmax(0,1fr)] gap-2 px-2 py-1 text-[10px] font-mono border-b border-border-minimal/60 last:border-b-0">
+      <span className="text-content-tertiary">
+        {typeof item.size_bytes === "number" ? formatBytes(item.size_bytes) : ""}
+      </span>
+      <span className="text-content-secondary truncate" title={item.relative_path || item.filename}>
+        {item.relative_path || item.filename}
+      </span>
+      <span className={statusClass} title={item.status}>
+        {label}
+      </span>
+      <span className="text-accent-secondary truncate" title={item.phase || ""}>
+        {label === "stale" ? "recoverable" : item.phase || "queued"}
+      </span>
+      <span className="text-content-tertiary truncate" title={item.error || item.failure_stage || ""}>
+        {item.error || item.failure_stage || ""}
+      </span>
+    </div>
+  );
+}
 
 function IngestionProgressBar({
   documents,

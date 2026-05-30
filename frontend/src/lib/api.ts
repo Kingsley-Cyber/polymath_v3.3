@@ -539,6 +539,16 @@ export async function resumeIngestBatch(
   });
 }
 
+export async function rescanIngestBatch(
+  batchId: string,
+  body: { start?: boolean } = { start: true },
+): Promise<IngestBatchResponse> {
+  return fetchJSON(`/ingest-batches/${encodeURIComponent(batchId)}/rescan`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export async function reconcileStaleIngestion(
   corpusId: string,
   body: { stale_after_minutes?: number; auto_backfill_graph?: boolean } = {},
@@ -1301,6 +1311,7 @@ export const api = {
   listIngestBatches,
   getIngestBatch,
   resumeIngestBatch,
+  rescanIngestBatch,
   reconcileStaleIngestion,
   queryGraph,
   entitySearch,

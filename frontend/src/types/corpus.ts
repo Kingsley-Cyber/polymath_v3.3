@@ -365,6 +365,8 @@ export interface IngestBatchResponse {
   counts: Record<string, number>;
   options?: Record<string, unknown>;
   runner_started?: boolean;
+  appended_items?: number;
+  discovered_files?: number;
   items?: IngestBatchItemResponse[];
 }
 
