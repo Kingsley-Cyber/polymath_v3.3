@@ -5,7 +5,6 @@ import {
   Trash2,
   FileText,
   FolderOpen,
-  Upload,
   Loader2,
   Check,
   X,
@@ -25,7 +24,6 @@ import type {
   CorpusResponse,
   DocumentResponse,
   IngestBatchResponse,
-  IngestJobResponse,
   ModalStatus,
   WriteState,
 } from "../../types";
@@ -40,8 +38,6 @@ interface CorpusDetailProps {
   onEditConfig?: (corpus: CorpusResponse) => void;
 }
 
-const INGEST_BATCH_SIZE = 25;
-const MAX_BROWSER_INGEST_FILES = INGEST_BATCH_SIZE;
 const LOCAL_BATCH_DEFAULT_PATH = "/ingest-source/authentic_files";
 
 function formatBytes(bytes?: number | null): string {
@@ -78,14 +74,10 @@ export function CorpusDetail({
   // Delete confirmation
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  // Upload state
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
-
   // Per-batch overrides (Sprint 2B). Empty object = use corpus defaults.
   const [overrides, setOverrides] = useState<IngestOverrides>({});
   const [showOverrides, setShowOverrides] = useState(false);
-  const [showLocalBatch, setShowLocalBatch] = useState(false);
+  const [showLocalBatch, setShowLocalBatch] = useState(true);
   const [localBatchPath, setLocalBatchPath] = useState(LOCAL_BATCH_DEFAULT_PATH);
   const [localBatchConcurrency, setLocalBatchConcurrency] = useState(1);
   const [localBatch, setLocalBatch] = useState<IngestBatchResponse | null>(null);
@@ -131,11 +123,6 @@ export function CorpusDetail({
     };
   }, [corpus.corpus_id]);
 
-  // Retry UX — the bytes of uploaded files aren't cached server-side, so
-  // "retry" on a failed ingest is really "re-pick the file from disk". The
-  // library panel's retry button clicks this hidden input to trigger the
-  // browser file picker.
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [retryHint, setRetryHint] = useState<string | null>(null);
   const [backfillingDocs, setBackfillingDocs] = useState<Set<string>>(new Set());
 
@@ -182,68 +169,6 @@ export function CorpusDetail({
   useEffect(() => {
     loadDocuments();
   }, [loadDocuments]);
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const fileList = Array.from(files);
-
-    if (fileList.length > MAX_BROWSER_INGEST_FILES) {
-      setShowLocalBatch(true);
-      setError(
-        `Browser upload is capped at ${MAX_BROWSER_INGEST_FILES} files. ` +
-          "Use Backend Folder for durable local batch ingest so the backend can checkpoint, resume, and avoid proxy timeouts.",
-      );
-      setRetryHint(
-        `Selected ${fileList.length} files. Put that folder on a backend-visible path, then start it from Backend Folder.`,
-      );
-      e.target.value = "";
-      return;
-    }
-
-    setIsUploading(true);
-    setError(null);
-
-    try {
-      for (let idx = 0; idx < fileList.length; idx += 1) {
-        const file = fileList[idx];
-        const batchNo = Math.floor(idx / INGEST_BATCH_SIZE) + 1;
-        const batchTotal = Math.ceil(fileList.length / INGEST_BATCH_SIZE);
-        setUploadProgress(
-          `Batch ${batchNo}/${batchTotal} · ${idx + 1}/${fileList.length}: ${file.name}`,
-        );
-        const result: IngestJobResponse = await api.uploadDocumentToCorpus(
-          corpus.corpus_id,
-          file,
-          Object.keys(overrides).length > 0 ? overrides : undefined,
-        );
-        if (result.status === "failed") {
-          setError(
-            `Failed to ingest ${file.name}: ${result.error || "Unknown error"}`,
-          );
-        }
-        if ((idx + 1) % INGEST_BATCH_SIZE === 0 && corpus.default_ingestion_config.use_neo4j) {
-          await api.warmGraphCache(corpus.corpus_id).catch(() => undefined);
-          await loadDocuments();
-        }
-      }
-      if (corpus.default_ingestion_config.use_neo4j) {
-        await api.warmGraphCache(corpus.corpus_id).catch(() => undefined);
-      }
-      // Refresh documents after upload
-      await loadDocuments();
-      // Refresh corpus doc_count
-      const updated = await api.getCorpus(corpus.corpus_id);
-      onCorpusUpdated(updated);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setIsUploading(false);
-      setUploadProgress(null);
-      // Reset file input
-      e.target.value = "";
-    }
-  };
 
   const handleDeleteDoc = async (docId: string) => {
     setError(null);
@@ -309,10 +234,10 @@ export function CorpusDetail({
 
   const handleRetryDoc = (doc: DocumentResponse) => {
     const name = doc.filename || doc.source_path?.split("/").pop() || "this file";
+    setShowLocalBatch(true);
     setRetryHint(
-      `Re-select "${name}" in the file picker — original bytes weren't cached. The ingest is idempotent on content hash, so re-uploading resumes the same doc.`,
+      `Retry "${name}" through Backend Folder. Browser upload is disabled so ingest state stays durable and resumable.`,
     );
-    fileInputRef.current?.click();
   };
 
   const handleStartLocalBatch = async () => {
@@ -387,26 +312,6 @@ export function CorpusDetail({
 
   return (
     <div className="flex flex-col h-full relative">
-      {/* Full-panel upload overlay — shown while ingesting so the user isn't
-          staring at a black screen during the 1-3 min DOCX pipeline */}
-      {isUploading && (
-        <div
-          data-testid="upload-overlay"
-          className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-bg-base/95 backdrop-blur-sm"
-        >
-          <Loader2 className="w-10 h-10 animate-spin text-accent-main mb-4" />
-          <div className="text-[13px] font-bold tracking-widest text-accent-main uppercase mb-2">
-            INGESTING DOCUMENT
-          </div>
-          <div className="text-[11px] text-content-secondary font-mono text-center max-w-[500px] px-4 mb-4">
-            {uploadProgress || "Uploading..."}
-          </div>
-          <div className="flex flex-col gap-1 text-[10px] font-bold tracking-widest text-content-tertiary uppercase">
-            <span>&gt; extract → chunk → embed → commit</span>
-            <span className="text-content-tertiary/60">this may take 1–3 min for large documents</span>
-          </div>
-        </div>
-      )}
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border-minimal bg-bg-surface shrink-0">
         <button
@@ -441,13 +346,11 @@ export function CorpusDetail({
         </div>
       </div>
 
-      {/* Upload Bar */}
+      {/* Ingest Bar */}
       <div className="flex flex-col border-b border-border-minimal bg-bg-surface/50 shrink-0">
       <div className="flex items-center justify-between px-4 py-2">
         <div data-testid="upload-status" className="text-[9px] font-bold tracking-widest text-content-tertiary uppercase">
-          {isUploading
-            ? uploadProgress || "UPLOADING..."
-            : `DOCUMENTS · ${documents.length}`}
+          {`DOCUMENTS · ${documents.length}`}
         </div>
         <div className="flex items-center gap-1.5">
           <button
@@ -478,29 +381,9 @@ export function CorpusDetail({
             <FolderOpen className="w-3 h-3" />
             <span>Backend Folder</span>
           </button>
-          <label
-            className="flex items-center gap-1.5 px-2 py-1 text-[9px] font-bold tracking-widest text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base transition-none uppercase cursor-pointer"
-            title={`Browser upload for up to ${MAX_BROWSER_INGEST_FILES} files. Use Backend Folder for large local libraries.`}
-          >
-            {isUploading ? (
-              <Loader2 className="w-3 h-3 animate-spin" />
-            ) : (
-              <Upload className="w-3 h-3" />
-            )}
-            <span>{isUploading ? "Processing..." : "Upload Files"}</span>
-            <input
-              ref={fileInputRef}
-              data-testid="corpus-file-input"
-              type="file"
-              multiple
-              onChange={handleUpload}
-              disabled={isUploading}
-              className="hidden"
-            />
-          </label>
         </div>
       </div>
-        <IngestionProgressBar documents={documents} isUploading={isUploading} />
+        <IngestionProgressBar documents={documents} />
       </div>
 
       {showLocalBatch && (
@@ -690,7 +573,7 @@ export function CorpusDetail({
             <FileText className="w-8 h-8 mb-3 text-content-tertiary/50" />
             <span>[NO_DOCUMENTS]</span>
             <span className="mt-1 opacity-60">
-              &gt; Upload a file to begin ingestion
+              &gt; Start a backend folder batch to begin ingestion
             </span>
           </div>
         ) : (
@@ -1042,10 +925,8 @@ export function CorpusDetail({
 
 function IngestionProgressBar({
   documents,
-  isUploading,
 }: {
   documents: DocumentResponse[];
-  isUploading: boolean;
 }) {
   const total = documents.length;
 
@@ -1053,11 +934,6 @@ function IngestionProgressBar({
     return (
       <div className="flex items-center gap-3 px-4 py-1.5 border-t border-border-minimal text-[9px] font-bold tracking-widest uppercase text-content-tertiary">
         <span>[NO_INGEST_ACTIVITY]</span>
-        {isUploading && (
-          <span className="text-accent-main animate-pulse">
-            · UPLOAD_IN_FLIGHT
-          </span>
-        )}
       </div>
     );
   }
@@ -1142,9 +1018,6 @@ function IngestionProgressBar({
           className="absolute top-0 left-0 h-full bg-accent-main transition-none"
           style={width(neo4jDone)}
         />
-        {isUploading && (
-          <div className="absolute top-0 right-0 h-full w-8 bg-gradient-to-l from-accent-main/40 to-transparent animate-pulse" />
-        )}
       </div>
     </div>
   );

@@ -1,11 +1,12 @@
 """
-Ingestion router — corpus management + document upload/ingest.
+Ingestion router — corpus management + durable backend ingest.
 
 Endpoints:
   POST /api/corpora                                    — create corpus
   GET  /api/corpora                                    — list corpora (user-scoped)
   GET  /api/corpora/{corpus_id}                        — get corpus by ID
-  POST /api/corpora/{corpus_id}/ingest                 — upload + ingest a file
+  POST /api/corpora/{corpus_id}/ingest                 — disabled browser upload
+  POST /api/corpora/{corpus_id}/ingest-batches/local   — durable backend folder ingest
   GET  /api/ingestion/jobs/{doc_id}                    — poll ingest job status
   GET  /api/ingestion/jobs/{doc_id}/stream             — SSE stream ingest progress
 """
@@ -19,7 +20,7 @@ from datetime import datetime, timedelta
 from typing import Literal
 
 import httpx
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from config import get_settings
 from models.schemas import (
@@ -1102,221 +1103,26 @@ async def list_documents(
     return docs
 
 
-@router.post("/corpora/{corpus_id}/ingest", response_model=IngestJobResponse)
+@router.post("/corpora/{corpus_id}/ingest")
 async def ingest_document(
     corpus_id: str,
-    file: UploadFile = File(...),
-    use_neo4j: bool | None = Form(default=None),
-    chunk_summarization: bool | None = Form(default=None),
-    # Phase 24 — empty default. Real model selection comes from the
-    # corpus's IngestionConfig (summary_models / extraction_models pool
-    # entries). The form param survives for back-compat with curl callers
-    # passing an explicit model; empty just means "use corpus defaults".
-    model: str = Form(default=""),
-    # Phase 21 — per-ingest mutable overrides. All optional. Not persisted
-    # onto the corpus. Plaintext values flow straight into the worker; the
-    # Fernet encrypt path never sees them.
-    embed_mode: str | None = Form(default=None),
-    embed_base_url: str | None = Form(default=None),
-    embed_api_key: str | None = Form(default=None),
-    embed_max_concurrent: int | None = Form(default=None),
-    summary_model: str | None = Form(default=None),
-    summary_base_url: str | None = Form(default=None),
-    summary_api_key: str | None = Form(default=None),
-    extraction_model: str | None = Form(default=None),
-    extraction_base_url: str | None = Form(default=None),
-    extraction_api_key: str | None = Form(default=None),
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Upload and ingest a document into a corpus.
+    Browser multipart ingest is intentionally disabled.
 
-    The corpus's own `default_ingestion_config` (chip pools, schema, etc.) is
-    the base configuration. Optional multipart form fields `use_neo4j` and
-    `chunk_summarization` override just those two flags for this single ingest.
-    Everything else — summary_models, extraction_models, schema, chunk sizes —
-    comes from the corpus itself.
-
-    Supports: PDF, HTML, plain text, Markdown.
-    Returns job result synchronously (async job queue is Phase 5+).
+    Ingest must enter through the durable backend-owned batch manifest:
+    POST /api/corpora/{corpus_id}/ingest-batches/local
     """
-    # IMPORTANT: get the *raw* corpus so ingestion_config's api_key fields still
-    # carry their Fernet ciphertext. The public `get_corpus` masks them to
-    # "[set]", which would defeat decryption at worker time and silently kill
-    # the summary/extraction ghost pools.
-    corpus = await ingestion_service._get_corpus_raw(corpus_id)
+    corpus = await ingestion_service.get_corpus(corpus_id)
     if not corpus:
         raise HTTPException(status_code=404, detail="Corpus not found")
-
-    # ── Order matters here ───────────────────────────────────────────
-    # Pre-fix: file.read() ran FIRST, then config build, then slot
-    # acquire. A 500-file batch upload would materialize 500 × ~10MB
-    # = ~5GB of file bytes into RAM (UploadFile's SpooledTemporaryFile
-    # gets fully read into a single `bytes` object) BEFORE any of
-    # them could be rejected by the slot gate. With the gate at
-    # INGEST_MAX_ACTIVE_JOBS=16, the other 484 requests would just
-    # 429 but their RAM was already paid for, easily OOM-killing
-    # the container on dense uploads.
-    #
-    # Post-fix: build the ingestion config (cheap dict ops on the
-    # already-fetched corpus row), then acquire the slot, then read
-    # the file body. If the slot acquire 429s, the file body stays
-    # as a spooled temp file (large files on disk, small in RAM)
-    # and gets cleaned up when FastAPI's request handler returns.
-    base_cfg_dict = corpus.get("default_ingestion_config") or {}
-    if use_neo4j is not None:
-        base_cfg_dict["use_neo4j"] = use_neo4j
-    if chunk_summarization is not None:
-        base_cfg_dict["chunk_summarization"] = chunk_summarization
-    cfg = IngestionConfig(**base_cfg_dict)
-
-    # Phase 21 — collect per-ingest mutable overrides. None values are dropped
-    # by build_effective_config; the router only forwards what the caller set.
-    overrides: dict = {}
-    for name, val in (
-        ("embed_mode", embed_mode),
-        ("embed_base_url", embed_base_url),
-        ("embed_api_key", embed_api_key),
-        ("embed_max_concurrent", embed_max_concurrent),
-    ):
-        if val is not None:
-            overrides[name] = val
-    # Flat-scalar summary / extraction overrides synthesize a single-entry
-    # pool that shadows the corpus's persisted multi-entry pool for this
-    # ingest only. Key material stays plaintext — ephemeral, not Fernet'd.
-    if any(v is not None for v in (summary_model, summary_base_url, summary_api_key)):
-        overrides["summary_models"] = [{
-            "provider_preset": "",
-            "model": summary_model or "",
-            "base_url": summary_base_url,
-            "api_key": summary_api_key,
-            "max_concurrent": 1,
-            "extra_params": {},
-        }]
-    if any(v is not None for v in (extraction_model, extraction_base_url, extraction_api_key)):
-        overrides["extraction_models"] = [{
-            "provider_preset": "",
-            "model": extraction_model or "",
-            "base_url": extraction_base_url,
-            "api_key": extraction_api_key,
-            "max_concurrent": 1,
-            "extra_params": {},
-        }]
-
-    # Acquire the ingest slot BEFORE reading the file body. The slot
-    # is released by the background `_run()` task's finally block once
-    # it starts; if we fail to even start `_run()` (empty body, read
-    # error), the explicit release below keeps the slot accounting
-    # honest.
-    if not await _try_acquire_ingest_slot():
-        raise HTTPException(
-            status_code=429,
-            detail=(
-                f"Too many active ingest jobs ({_INGEST_ACTIVE_LIMIT}). "
-                "Wait for current uploads to finish or lower upload concurrency."
-            ),
-        )
-
-    try:
-        data = await file.read()
-    except Exception:
-        # Read failure (network drop mid-upload, malformed multipart) —
-        # release the slot we just acquired so the next request can
-        # use it.
-        await _release_ingest_slot()
-        raise
-
-    if not data:
-        # Empty body — release slot, return 400 (same response as
-        # pre-fix).
-        await _release_ingest_slot()
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
-
-    # Phase K — Non-blocking ingest. Worker runs in the background; we wait
-    # only for docling parse plus the first compact Mongo row so the
-    # content-derived doc_id exists before the client opens the progress
-    # stream. Text-native files usually resolve in a few seconds, but
-    # layout-heavy documents can take longer.
-    doc_id_future: asyncio.Future[str] = asyncio.get_event_loop().create_future()
-    resolved_doc_id: str | None = None
-
-    def _resolve_doc_id(did: str) -> None:
-        nonlocal resolved_doc_id
-        resolved_doc_id = did
-        if not doc_id_future.done():
-            doc_id_future.set_result(did)
-
-    async def _run() -> IngestJobResponse | None:
-        try:
-            return await ingestion_service.ingest(
-                data=data,
-                filename=file.filename or "upload",
-                corpus_id=corpus_id,
-                user_id=current_user["user_id"],
-                ingestion_config=cfg,
-                model=model,
-                ingest_overrides=overrides or None,
-                on_doc_id=_resolve_doc_id,
-            )
-        except Exception as exc:
-            logger.exception("Ingest failed for corpus %s: %s", corpus_id, exc)
-            if resolved_doc_id:
-                try:
-                    await _mark_ingest_failed(
-                        doc_id=resolved_doc_id,
-                        corpus_id=corpus_id,
-                        user_id=current_user["user_id"],
-                        exc=exc,
-                    )
-                except Exception as mark_exc:
-                    logger.warning(
-                        "Failed to persist ingest failure doc=%s corpus=%s: %s",
-                        resolved_doc_id[:12],
-                        corpus_id,
-                        mark_exc,
-                    )
-            # Surface the error through the future so the HTTP response
-            # doesn't hang if parse itself failed.
-            if not doc_id_future.done():
-                doc_id_future.set_exception(exc)
-            return None
-        finally:
-            await _release_ingest_slot()
-
-    task = asyncio.create_task(_run())
-    _INGEST_BG_TASKS.add(task)
-    task.add_done_callback(_INGEST_BG_TASKS.discard)
-
-    # Wait for parse-resolved doc_id. Keep the cap below the frontend/nginx
-    # proxy timeout so large PDFs do not surface as false 504 failures while
-    # still leaving room for the response to return.
-    try:
-        doc_id = await asyncio.wait_for(
-            doc_id_future,
-            timeout=PARSE_DOC_ID_WAIT_SECONDS,
-        )
-    except asyncio.TimeoutError:
-        raise HTTPException(
-            status_code=504,
-            detail=(
-                f"Ingest parse/doc-id phase exceeded {int(PARSE_DOC_ID_WAIT_SECONDS)}s. "
-                "The worker is still running; poll /api/corpora/{corpus_id}/documents "
-                "for status."
-            ),
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Ingest parse failed: {exc}")
-
-    return IngestJobResponse(
-        job_id=doc_id,
-        doc_id=doc_id,
-        corpus_id=corpus_id,
-        filename=file.filename or "upload",
-        source_tier=None,
-        status="processing",
-        write_state=WriteState(),
-        chunk_count=0,
-        parent_count=0,
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Browser upload ingest is disabled. Use the durable backend folder "
+            "batch endpoint: POST /api/corpora/{corpus_id}/ingest-batches/local."
+        ),
     )
 
 

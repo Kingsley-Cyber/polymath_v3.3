@@ -10,7 +10,6 @@ import {
 } from "react";
 import {
   Paperclip,
-  FolderUp,
   CornerDownLeft,
   X,
   Wrench,
@@ -67,7 +66,6 @@ async function walkEntry(entry: FileSystemEntry, out: File[]): Promise<void> {
 
 interface ChatInputProps {
   onSend: (message: string, attachments?: File[]) => void;
-  onFileUpload?: (files: File[]) => Promise<void>;
   isLoading?: boolean;
   placeholder?: string;
   tokenCount?: { current: number; max: number };
@@ -95,7 +93,6 @@ function StatusTag({
 
 export function ChatInput({
   onSend,
-  onFileUpload,
   isLoading = false,
   placeholder = "EXECUTE QUERY // INJECT CONTEXT...",
   tokenCount,
@@ -156,10 +153,8 @@ export function ChatInput({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- nonce IS the trigger
   }, [prefill?.nonce]);
   const [isDragging, setIsDragging] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
 
   // Phase 24 — slash command popover state.
   // Detects `/<query>` token at the end of the input (typed by user) and
@@ -340,7 +335,7 @@ export function ChatInput({
    * ingestion. Files added via the paperclip stay in component state
    * until the user hits Send, at which point they ride on the chat
    * request as multimodal content. They are NOT uploaded to the
-   * corpus. For folder-style bulk ingestion, see handleFolderSelect.
+   * corpus. Corpus ingest is backend-folder only from Corpus Detail.
    */
   const handleFileSelect = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -352,26 +347,6 @@ export function ChatInput({
       const combined = [...prev, ...newFiles];
       return combined.slice(0, 4);
     });
-  };
-
-  /**
-   * Folder picker — bulk corpus ingestion path. Keeps the old
-   * onFileUpload contract because folder uploads are inherently
-   * corpus-shaped (you don't multimodal-attach a 500-file folder
-   * to one chat turn).
-   */
-  const handleFolderSelect = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    if (!onFileUpload) return;
-    const newFiles = Array.from(files);
-    setUploading(true);
-    try {
-      await onFileUpload(newFiles);
-    } catch (error) {
-      console.error("Folder upload failed:", error);
-    } finally {
-      setUploading(false);
-    }
   };
 
   const handleFileInputChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -397,25 +372,12 @@ export function ChatInput({
       return;
     }
 
-    // Phase 29 routing — if ANY dropped entry is a directory, treat the
-    // whole drop as a corpus-ingestion event (calls onFileUpload). If
-    // all entries are individual files, treat as per-turn attachments.
-    // This matches the menu split: paperclip = per-turn, folder button
-    // = corpus. Dragging a folder onto chat continues to ingest as
-    // before; dragging files now stages them for the next message.
-    const hasDirectory = entries.some((en) => en.isDirectory);
-
     const collected: File[] = [];
     await Promise.all(entries.map((en) => walkEntry(en, collected)));
 
     const dt = new DataTransfer();
     collected.forEach((f) => dt.items.add(f));
-
-    if (hasDirectory) {
-      handleFolderSelect(dt.files);
-    } else {
-      handleFileSelect(dt.files);
-    }
+    handleFileSelect(dt.files);
   };
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
@@ -559,51 +521,19 @@ export function ChatInput({
               Does NOT persist anything into a corpus. */}
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={isLoading || uploading}
+            disabled={isLoading}
             className={`
               flex-shrink-0 p-2 border transition-none rounded-none
               ${isDragging
                 ? "bg-accent-main text-bg-base border-accent-main"
                 : "border-transparent text-content-tertiary hover:border-border-minimal hover:text-accent-main bg-bg-surface"
               }
-              ${isLoading || uploading ? "opacity-50 cursor-not-allowed" : ""}
+              ${isLoading ? "opacity-50 cursor-not-allowed" : ""}
             `}
             title="Per-turn attachment — images + text files inlined into THIS message only. Not saved to any corpus. Max 4 files / 20 MB each."
           >
-            {uploading ? (
-              <StatusTag tag="GEN" tone="gen" />
-            ) : (
-              <Paperclip className="w-4 h-4" />
-            )}
+            <Paperclip className="w-4 h-4" />
           </button>
-
-          {/* Folder up — CORPUS INGEST. Walks every file in the
-              picked folder and pushes them through the full ingestion
-              pipeline (Docling parse → Ghost A summary → Ghost B
-              extraction → Qdrant + Neo4j writes). Permanent — files
-              become searchable in the selected corpus. */}
-          <button
-            onClick={() => folderInputRef.current?.click()}
-            disabled={isLoading || uploading}
-            className={`
-              flex-shrink-0 p-2 border transition-none rounded-none
-              border-transparent text-content-tertiary hover:border-border-minimal hover:text-accent-main bg-bg-surface
-              ${isLoading || uploading ? "opacity-50 cursor-not-allowed" : ""}
-            `}
-            title="Corpus ingest — recursively walk a folder and add every file to the selected corpus (parsing + embedding + graph extraction). Permanent."
-          >
-            <FolderUp className="w-4 h-4" />
-          </button>
-          <input
-            ref={folderInputRef}
-            type="file"
-            multiple
-            // @ts-expect-error — webkitdirectory is non-standard but supported
-            webkitdirectory=""
-            directory=""
-            onChange={(e) => handleFolderSelect(e.target.files)}
-            className="hidden"
-          />
           <input
             ref={fileInputRef}
             type="file"

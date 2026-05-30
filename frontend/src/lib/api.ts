@@ -23,7 +23,6 @@ import type {
   CorpusDeleteResponse,
   ModelProfileRef,
   DocumentResponse,
-  IngestJobResponse,
   IngestBatchResponse,
   LocalIngestBatchRequest,
   EntityResult,
@@ -502,49 +501,6 @@ export async function listDocuments(
   return fetchJSON(
     `/corpora/${corpusId}/documents?limit=${limit}&offset=${offset}`,
   );
-}
-
-/**
- * POST /api/corpora/{corpus_id}/ingest
- * Upload and ingest a document into a corpus.
- */
-export async function uploadDocumentToCorpus(
-  corpusId: string,
-  file: File,
-  options?: {
-    use_neo4j?: boolean;
-    chunk_summarization?: boolean;
-    model?: string;
-  },
-): Promise<IngestJobResponse> {
-  const formData = new FormData();
-  formData.append("file", file);
-  if (options?.use_neo4j !== undefined)
-    formData.append("use_neo4j", String(options.use_neo4j));
-  if (options?.chunk_summarization !== undefined)
-    formData.append("chunk_summarization", String(options.chunk_summarization));
-  if (options?.model) formData.append("model", options.model);
-
-  const token = getPersistedToken();
-  const headers: Record<string, string> = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-
-  const response = await fetch(`${API_BASE}/corpora/${corpusId}/ingest`, {
-    method: "POST",
-    headers,
-    body: formData,
-  });
-
-  if (!response.ok) {
-    if (response.status === 401) {
-      useAuthStore.getState().clearAuth();
-      throw new Error("Session expired. Please log in again.");
-    }
-    const error = await response.text();
-    throw new Error(`HTTP ${response.status}: ${error}`);
-  }
-
-  return response.json();
 }
 
 export async function createLocalIngestBatch(
@@ -1341,7 +1297,6 @@ export const api = {
   deleteCorpus,
   testIngestionModelRef,
   listDocuments,
-  uploadDocumentToCorpus,
   createLocalIngestBatch,
   listIngestBatches,
   getIngestBatch,

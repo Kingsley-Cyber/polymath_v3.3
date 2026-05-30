@@ -20,7 +20,6 @@ import { useSettingsStore } from "./stores/settingsStore";
 import { useQueryModelPoolStore } from "./stores/queryModelPoolStore";
 import { useChatStore } from "./stores/chatStore";
 import { useAuthStore } from "./stores/authStore";
-import { useIngestionQueueStore } from "./stores/ingestionQueueStore";
 import * as api from "./lib/api";
 import type { ChatMessage, ChatRequest, Collection } from "./types";
 
@@ -112,7 +111,6 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
-  const [pipelineStatus, setPipelineStatus] = useState<string>("");
 
   // Pt 7: prefill bridge from GraphViewer's Graph Query tab to ChatInput.
   // When the user clicks a refined chip in the dashboard, GraphViewer
@@ -163,91 +161,6 @@ function App() {
   // renders an empty-state prompt instead. Multi-corpus selection is
   // explicit; the legacy "first available corpus" fallback is retired
   // (Phase F cleanup of GRAPH_VIEWER_BRIDGE.md).
-
-  // Uploads each file into the user's selected corpus, pushes the returned
-  // doc_id into the ingestion queue store, and returns immediately. The
-  // IngestionDashboard panel watches progress via SSE — no blocking here.
-  const handleFileUpload = async (files: File[]) => {
-    if (files.length === 0) return;
-
-    const selectedCorpusIds = useSettingsStore.getState().selectedCorpusIds;
-    const targetCorpusId = selectedCorpusIds[0];
-    if (!targetCorpusId) {
-      setPipelineStatus(
-        "select a corpus first — use the Corpus dropdown to pick one",
-      );
-      setTimeout(() => setPipelineStatus(""), 4000);
-      return;
-    }
-
-    let corpusName = targetCorpusId.slice(0, 8);
-    try {
-      const all = await api.listCorpora();
-      const match = all.find((c) => c.corpus_id === targetCorpusId);
-      if (match) corpusName = match.name;
-    } catch {
-      /* fall back to id prefix */
-    }
-
-    const { enqueue } = useIngestionQueueStore.getState();
-    setPipelineStatus(`uploading ${files.length} file(s)…`);
-
-    // Continuous-replenish worker pool. N parallel uploaders each pull from
-    // the queue until empty. Keeps the docling sidecar + backend ingest
-    // queue full so the LLM extraction pool saturates. Per-doc worker on
-    // the backend then chews through its chunks via the multi-lane ghost
-    // pool. Tune UPLOAD_CONCURRENCY based on docling throughput and
-    // backend CPU — 10 is the safe default for single-box dev; bump to
-    // 20-30 on beefier hosts if docling isn't saturated.
-    const UPLOAD_CONCURRENCY = 10;
-    const queue = [...files];
-    let uploaded = 0;
-    let failed = 0;
-
-    const worker = async () => {
-      while (queue.length > 0) {
-        const file = queue.shift();
-        if (!file) break;
-        try {
-          const result = await api.uploadDocumentToCorpus(
-            targetCorpusId,
-            file,
-          );
-          if (result.doc_id) {
-            enqueue({
-              doc_id: result.doc_id,
-              filename: result.filename || file.name,
-              corpus_id: result.corpus_id || targetCorpusId,
-              corpus_name: corpusName,
-            });
-            uploaded += 1;
-          }
-        } catch (err) {
-          console.error(`upload failed for ${file.name}:`, err);
-          failed += 1;
-        }
-        // Live status so the user sees progress even before the dashboard
-        // SSE streams start landing.
-        setPipelineStatus(
-          `uploading ${uploaded + failed}/${files.length}` +
-            (failed > 0 ? ` (${failed} failed)` : ""),
-        );
-      }
-    };
-
-    await Promise.all(
-      Array.from({ length: Math.min(UPLOAD_CONCURRENCY, files.length) }, () =>
-        worker(),
-      ),
-    );
-
-    setPipelineStatus(
-      `queued ${uploaded}/${files.length} file(s) — see panel` +
-        (failed > 0 ? ` · ${failed} failed` : ""),
-    );
-    setTimeout(() => setPipelineStatus(""), 4000);
-    return;
-  };
 
   const handleSend = useCallback(
     async (message: string, attachedFiles?: File[]) => {
@@ -791,22 +704,11 @@ function App() {
           <ChatWindow />
         </div>
 
-        {pipelineStatus && (
-          <div
-            data-testid="pipeline-status"
-            className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-bg-surface border border-border-minimal px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-accent-main z-50">
-            [ PIPELINE STATUS: {pipelineStatus} ]
-            {/* Duplicate for older test locator compatibility */}
-            <div data-testid="upload-status" className="hidden">{pipelineStatus}</div>
-          </div>
-        )}
-
         {/* Input Area - Command Line Interface */}
         <div className="shrink-0 p-4 bg-bg-base border-t border-border-minimal z-10">
           <div className="max-w-7xl mx-auto">
             <ChatInput
               onSend={handleSend}
-              onFileUpload={handleFileUpload}
               isLoading={!modelsLoaded}
               placeholder={
                 modelsLoaded

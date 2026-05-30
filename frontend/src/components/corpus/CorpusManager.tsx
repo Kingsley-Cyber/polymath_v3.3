@@ -892,7 +892,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                             data-testid="corpus-browse-btn"
                             onClick={() => setSelectedCorpus(corpus)}
                             className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold tracking-widest text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base transition-none uppercase"
-                            title="Browse Documents & Upload Files"
+                            title="Browse documents and start backend folder ingest"
                           >
                             <ExternalLink className="w-3 h-3" />
                             <span>Open</span>

@@ -1,24 +1,13 @@
-"""Ingest slot-acquire ordering tests — Bug #1 from the 500-file audit.
+"""Ingest admission tests and browser-upload disablement pins.
 
-Pre-fix:
-  routers/ingestion.py:ingest_document read the full file body into
-  RAM (`data = await file.read()`) BEFORE acquiring an ingest slot.
-  A 500-file simultaneous upload would materialize ~5GB of body bytes
-  in RAM (UploadFile's SpooledTemporaryFile rollover to a single
-  bytes() object), even though only INGEST_MAX_ACTIVE_JOBS=16 of
-  them could run. The other 484 paid the RAM cost just to get 429'd.
-
-Post-fix:
-  Slot acquire happens BEFORE file.read(). If the slot 429s, the
-  spooled body stays unmaterialized. The early-validation paths
-  (empty body, read error) explicitly release the slot they just
-  acquired so the next request can use it.
+Large corpus ingest is now backend-folder only. The legacy browser multipart
+endpoint must reject before declaring UploadFile/File parameters or reading a
+body, while the shared admission primitives remain tested for MCP/internal
+ingest surfaces that still use the same slot gate.
 
 These tests cover the slot accounting primitives (_try_acquire,
-_release) and the new release-on-early-failure contract. Driving
-the actual FastAPI endpoint requires multipart + mongo + qdrant
-fixtures; the contract test below validates the slot semantics
-that the endpoint relies on.
+_release) and pin the disabled browser endpoint so it cannot silently become
+a request-owned batch runner again.
 """
 from __future__ import annotations
 
@@ -197,10 +186,7 @@ async def test_burst_of_acquires_respects_limit():
 
 @pytest.mark.asyncio
 async def test_early_failure_release_pattern_keeps_accounting_honest():
-    """The post-fix endpoint acquires the slot, then runs file.read().
-    If the read fails or the body is empty, the explicit release in
-    the except / if-not-data branches keeps the active count
-    accurate. This test simulates that pattern manually."""
+    """Internal callers that acquire then fail before enqueue must release."""
     _admission.INGEST_ACTIVE_LIMIT = 2
     # Successful slot acquire.
     assert await ing._try_acquire_ingest_slot() is True
@@ -225,17 +211,28 @@ async def test_early_failure_release_pattern_keeps_accounting_honest():
     assert _admission._ingest_active_count == 1
 
 
-# ── Source-code introspection: confirm the reorder is in place ──────
+# ── Browser ingest endpoint is intentionally disabled ───────────────
 
 
-def test_slot_acquire_is_before_file_read_in_source():
-    """Source-pin: byte-position of '_try_acquire_ingest_slot()' must
-    be BEFORE the byte-position of 'data = await file.read()' in
-    ingest_document. A future refactor that moves them back to the
-    pre-fix order fails this test.
+@pytest.mark.asyncio
+async def test_browser_ingest_endpoint_rejects_with_backend_batch_hint(monkeypatch):
+    async def fake_get_corpus(corpus_id):
+        return {"corpus_id": corpus_id}
 
-    Mirrors the Phase 29 injection-order pin pattern from
-    test_chat_attachments_production.py."""
+    monkeypatch.setattr(ing.ingestion_service, "get_corpus", fake_get_corpus)
+
+    with pytest.raises(ing.HTTPException) as exc_info:
+        await ing.ingest_document(
+            corpus_id="corpus-1",
+            current_user={"user_id": "user-1"},
+        )
+
+    assert exc_info.value.status_code == 410
+    assert "ingest-batches/local" in str(exc_info.value.detail)
+
+
+def test_browser_ingest_endpoint_does_not_read_multipart_body():
+    """Source-pin: browser ingest must reject before body parsing/slot work."""
     from pathlib import Path
 
     router_path = (
@@ -244,10 +241,6 @@ def test_slot_acquire_is_before_file_read_in_source():
     )
     source = router_path.read_text(encoding="utf-8")
 
-    # We anchor on the in-function lines (not the helper definitions
-    # at the top of the file). The function body is the one between
-    # the @router.post("/corpora/{corpus_id}/ingest") decorator and
-    # the next @router decorator.
     decorator_pos = source.find('@router.post("/corpora/{corpus_id}/ingest"')
     assert decorator_pos != -1, "ingest endpoint decorator missing"
     body = source[decorator_pos:]
@@ -257,12 +250,9 @@ def test_slot_acquire_is_before_file_read_in_source():
     if next_decorator_pos > 0:
         body = body[:next_decorator_pos]
 
-    slot_pos = body.find("_try_acquire_ingest_slot()")
-    read_pos = body.find("data = await file.read()")
-    assert slot_pos != -1, "slot acquire call missing from ingest endpoint"
-    assert read_pos != -1, "file.read() call missing from ingest endpoint"
-    assert slot_pos < read_pos, (
-        "Bug #1 regression — _try_acquire_ingest_slot() must come BEFORE "
-        "`data = await file.read()` so 500-file uploads don't materialize "
-        "all bodies into RAM before the slot rejection runs."
-    )
+    assert "UploadFile" not in body
+    assert "File(" not in body
+    assert "Form(" not in body
+    assert "file.read()" not in body
+    assert "_try_acquire_ingest_slot()" not in body
+    assert "ingest-batches/local" in body
