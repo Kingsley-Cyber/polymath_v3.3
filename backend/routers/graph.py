@@ -900,8 +900,6 @@ async def graph_brain_view(body: dict = Body(...)) -> dict:
     Body:
       corpus_ids: list[str]   required, 1+
       limit:      int         optional, default 2000 (safety cap)
-      detail:     str         optional, "anchors" for the quick paint path
-      bridge_entity_cap: int  optional, caps per-book bridge traversal
 
     Response:
       {documents, bridges, meta} — see services.graph.queries.get_brain_view.
@@ -909,71 +907,10 @@ async def graph_brain_view(body: dict = Body(...)) -> dict:
     driver = _require_neo4j()
     corpus_ids = _validate_corpus_ids_or_400(body)
     limit = max(1, min(int(body.get("limit", 2000) or 2000), 10000))
-    detail = "anchors" if str(body.get("detail") or "").lower() == "anchors" else "bridges"
-    bridge_entity_cap = max(
-        1,
-        min(
-            int(body.get("bridge_entity_cap", 64) or 64),
-            256,
-        ),
-    )
-    force_refresh = bool(body.get("force_refresh") or False)
-
-    db = ingestion_service.db
-    if db is not None:
-        from services.graph.brain_cache import get_or_build_brain_view
-
-        return await get_or_build_brain_view(
-            db=db,
-            driver=driver,
-            corpus_ids=corpus_ids,
-            detail=detail,
-            limit=limit,
-            bridge_entity_cap=bridge_entity_cap,
-            force_refresh=force_refresh,
-        )
 
     from services.graph.queries import get_brain_view
 
-    return await get_brain_view(
-        driver,
-        corpus_ids,
-        limit=limit,
-        bridge_entity_cap=bridge_entity_cap,
-        detail=detail,
-    )
-
-
-@discovery_router.post(
-    "/brain-view/cache-status",
-    summary="Inspect durable Brain View cache readiness for a corpus selection",
-)
-async def graph_brain_view_cache_status(body: dict = Body(...)) -> dict:
-    """Return hit/miss/stale status for the selected Brain View snapshot."""
-
-    db = ingestion_service.db
-    if db is None:
-        raise HTTPException(status_code=503, detail="Database not connected")
-    corpus_ids = _validate_corpus_ids_or_400(body)
-    limit = max(1, min(int(body.get("limit", 2000) or 2000), 10000))
-    detail = "anchors" if str(body.get("detail") or "").lower() == "anchors" else "bridges"
-    bridge_entity_cap = max(
-        1,
-        min(
-            int(body.get("bridge_entity_cap", 64) or 64),
-            256,
-        ),
-    )
-
-    from services.graph.brain_cache import get_brain_view_cache_status
-
-    return await get_brain_view_cache_status(
-        db,
-        corpus_ids,
-        detail=detail,
-        limit=limit,
-        bridge_entity_cap=bridge_entity_cap,
-    )
+    return await get_brain_view(driver, corpus_ids, limit=limit)
 
 
 @discovery_router.post(

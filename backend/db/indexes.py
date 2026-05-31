@@ -167,18 +167,6 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     await db["ingest_batch_items"].create_index("doc_id")
     logger.info("Indexes ensured: ingest_batches / ingest_batch_items")
 
-    # --- graph_brain_view_cache ---
-    await db["graph_brain_view_cache"].create_index(
-        [("cache_key", 1), ("detail", 1), ("limit", 1), ("bridge_entity_cap", 1)],
-        unique=True,
-        name="brain_view_cache_unique",
-    )
-    await db["graph_brain_view_cache"].create_index("corpus_ids")
-    await db["graph_brain_view_cache"].create_index("selection_signature")
-    await db["graph_brain_view_cache"].create_index("status")
-    await db["graph_brain_view_cache"].create_index("updated_at")
-    logger.info("Indexes ensured: graph_brain_view_cache")
-
     # --- settings ---
     await db["settings"].create_index("user_id", unique=True)
     logger.info("Indexes ensured: settings (unique user_id)")

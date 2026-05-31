@@ -54,117 +54,6 @@ function adaptiveTopN(total: number): number {
   return Math.min(24, Math.max(3, Math.ceil(total * 0.3)));
 }
 
-const BRAIN_VIEW_LIMIT = 2000;
-const BRAIN_BRIDGE_ENTITY_CAP = 32;
-
-function brainCorpusKey(corpusIds: string[]): string {
-  return [...corpusIds].sort().join("|");
-}
-
-function isAbortError(error: unknown, signal?: AbortSignal): boolean {
-  if (signal?.aborted) return true;
-  return error instanceof Error && error.name === "AbortError";
-}
-
-function spotlightCountForDocuments(total: number): number {
-  if (total >= 400) return 32;
-  if (total >= 200) return 48;
-  if (total >= 100) return 60;
-  return Math.min(80, total);
-}
-
-function satelliteLimitForDocuments(total: number): number {
-  if (total >= 400) return 4;
-  if (total >= 200) return 5;
-  if (total >= 100) return 6;
-  return 8;
-}
-
-function brainViewToGraphPayload(bv: api.BrainViewResponse): GraphPayload {
-  const sortedDocs = [...bv.documents].sort(
-    (a, b) => (b.bridge_count || 0) - (a.bridge_count || 0),
-  );
-  const topN = adaptiveTopN(sortedDocs.length);
-  const spotlightCount = spotlightCountForDocuments(sortedDocs.length);
-  const satelliteLimit = satelliteLimitForDocuments(sortedDocs.length);
-  const satOrbitR = 28;
-
-  const anchorNodes: any[] = [];
-  const satelliteNodes: any[] = [];
-  const satelliteEdges: any[] = [];
-
-  sortedDocs.forEach((d, idx) => {
-    const rawLabel = d.label || d.filename || d.doc_id.slice(0, 8);
-    const bookId = `book:${d.doc_id}`;
-    const topEntities = (d.top_entities || []).slice(0, satelliteLimit);
-    anchorNodes.push({
-      id: bookId,
-      display_name: rawLabel,
-      label: cleanBookLabel(rawLabel) || rawLabel,
-      mention_count: Math.max(1, d.chunk_count || d.actual_chunk_count || 1),
-      kind: "book" as const,
-      source_corpora: [d.corpus_id],
-      source_corpus: d.corpus_id,
-      is_cluster_anchor: true,
-      forceLabel: idx < topN,
-      dominant_family: d.dominant_family,
-      dominant_entity_type: d.dominant_entity_type,
-      ghost_b_success_rate: d.ghost_b_success_rate,
-      ghost_b_extracted: d.ghost_b_extracted,
-      ghost_b_total: d.ghost_b_total,
-      chunk_count: d.chunk_count,
-      parent_count: d.parent_count,
-      bridge_count: d.bridge_count,
-      filename: d.filename,
-      entity_count: d.entity_count,
-      top_entities: d.top_entities || [],
-    });
-
-    if (idx < spotlightCount) {
-      const satCount = topEntities.length;
-      topEntities.forEach((name, i) => {
-        const angle = (i / Math.max(satCount, 1)) * Math.PI * 2 + idx * 0.7;
-        const entityId = `ent:${d.doc_id}:${i}`;
-        satelliteNodes.push({
-          id: entityId,
-          display_name: name,
-          label: name.length > 18 ? name.slice(0, 17) + "…" : name,
-          entity_type: "Concept",
-          kind: "Concept",
-          source_corpus: d.corpus_id,
-          source_corpora: [d.corpus_id],
-          primary_doc_id: d.doc_id,
-          mention_count: 1,
-          x: Math.cos(angle) * satOrbitR,
-          y: Math.sin(angle) * satOrbitR,
-        });
-        satelliteEdges.push({
-          source: bookId,
-          target: entityId,
-          predicate: "contains",
-          weight: 0.2,
-        });
-      });
-    }
-  });
-
-  const bridgeLinks = bv.bridges.map((b) => ({
-    source: `book:${b.source}`,
-    target: `book:${b.target}`,
-    predicate: "bridges_to",
-    weight: b.strength,
-    confidence: Math.min(1, (b.shared_entities || 0) / 12),
-    dominant_relation_family: b.dominant_relation_family,
-    top_shared_entities: b.top_shared_entities || [],
-    shared_entities: b.shared_entities,
-  }));
-
-  return {
-    nodes: [...anchorNodes, ...satelliteNodes],
-    links: [...bridgeLinks, ...satelliteEdges],
-  };
-}
-
 // ─── Types ────────────────────────────────────────────────────────────────
 
 export type GraphViewerMode = "brain" | "query";
@@ -697,15 +586,13 @@ function useBrainGraph(
     Record<string, api.CacheStatus>
   >({});
   const [rebuildingIds, setRebuildingIds] = useState<Set<string>>(new Set());
-  const corpusKey = useMemo(() => brainCorpusKey(corpusIds), [corpusIds]);
-  const stableCorpusIds = useMemo(() => [...corpusIds].sort(), [corpusKey]);
 
-  const reload = useCallback(async (opts?: { signal?: AbortSignal }) => {
-    const signal = opts?.signal;
-    if (stableCorpusIds.length === 0) {
+  const reload = useCallback(async () => {
+    if (corpusIds.length === 0) {
       setData(null);
       return;
     }
+    setLoading(true);
     setError(null);
     try {
       // ── DRILL: one Document anchor + its local entities + cross-book bridges ──
@@ -713,12 +600,10 @@ function useBrainGraph(
       // anchor's local_entities + intra-book relations + cross_book_bridges
       // in one query. No MongoDB enrichment, no Python aggregation.
       if (drill) {
-        setLoading(true);
         const drillRes = await api.getBookDrilldown(
           drill.docId,
-          stableCorpusIds,
+          corpusIds,
         );
-        if (signal?.aborted) return;
 
         const anchorRaw =
           drillRes.anchor?.label ||
@@ -835,35 +720,131 @@ function useBrainGraph(
       // and computes pairwise bridge strength on the Neo4j side. Anchor
       // metadata (filename, chunk_count, ghost_b_success_rate) lives on the
       // Document node so no MongoDB round-trip is needed.
-      setLoading(true);
-      const anchors = await api.getBrainView(stableCorpusIds, BRAIN_VIEW_LIMIT, {
-        detail: "anchors",
-        signal,
-      });
-      if (signal?.aborted) return;
-      setData(brainViewToGraphPayload(anchors));
-      setLoading(false);
+      const bv = await api.getBrainView(corpusIds);
+      // Sort by bridge_count desc so we can tag the top-N anchors with
+      // forceLabel — those are the most-connected books and worth always
+      // labelling, the long tail relies on semantic zoom.
+      const sortedDocs = [...bv.documents].sort(
+        (a, b) => (b.bridge_count || 0) - (a.bridge_count || 0),
+      );
+      const topN = adaptiveTopN(sortedDocs.length);
 
-      const bv = await api.getBrainView(stableCorpusIds, BRAIN_VIEW_LIMIT, {
-        detail: "bridges",
-        bridgeEntityCap: BRAIN_BRIDGE_ENTITY_CAP,
-        signal,
+      // Octopus / spotlight mode. The top SPOTLIGHT_COUNT docs by bridge
+      // count grow satellites (orbiting Entity nodes). The long tail stays
+      // as plain head-only anchors so the canvas doesn't drown in dots.
+      // 100 docs × 8 satellites = 800 satellite nodes max — well within
+      // sigma's smooth-render budget.
+      const SPOTLIGHT_COUNT = 100;
+      const SAT_ORBIT_R = 28; // initial orbit radius (FA2 will adjust)
+
+      const anchorNodes: any[] = [];
+      const satelliteNodes: any[] = [];
+      const satelliteEdges: any[] = [];
+
+      sortedDocs.forEach((d, idx) => {
+        const rawLabel = d.label || d.filename || d.doc_id.slice(0, 8);
+        const bookId = `book:${d.doc_id}`;
+        anchorNodes.push({
+          id: bookId,
+          // Full text kept on display_name for tooltip; sigma renders `label`.
+          display_name: rawLabel,
+          label: cleanBookLabel(rawLabel) || rawLabel,
+          // mention_count drives node size in the adapter — use chunk_count
+          // so a 5000-chunk book is visually larger than a 50-chunk one.
+          mention_count: Math.max(1, d.chunk_count || d.actual_chunk_count || 1),
+          kind: "book" as const,
+          source_corpora: [d.corpus_id],
+          source_corpus: d.corpus_id,
+          is_cluster_anchor: true,
+          // Top-N strongest anchors keep their label visible at all zoom
+          // levels; the long tail relies on semantic-zoom logic in useSigma.
+          forceLabel: idx < topN,
+          // Pt 5: extraction-schema facets drive deterministic node color
+          // in polymath-graph-adapter::pickNodeColor.
+          dominant_family: d.dominant_family,
+          dominant_entity_type: d.dominant_entity_type,
+          // Pass anchor metadata through so the selection bar can render it.
+          ghost_b_success_rate: d.ghost_b_success_rate,
+          ghost_b_extracted: d.ghost_b_extracted,
+          ghost_b_total: d.ghost_b_total,
+          chunk_count: d.chunk_count,
+          parent_count: d.parent_count,
+          bridge_count: d.bridge_count,
+          filename: d.filename,
+          entity_count: d.entity_count,
+        });
+
+        // Only the spotlight (top SPOTLIGHT_COUNT by bridge_count) gets
+        // satellites. Long-tail books read as solo dots, keeping the
+        // canvas legible at 1000+ books.
+        if (idx < SPOTLIGHT_COUNT) {
+          const topEntities = d.top_entities || [];
+          const satCount = topEntities.length;
+          topEntities.forEach((name, i) => {
+            // Pre-bake polar position around (0,0) — the adapter resolves
+            // the book's anchor position and adds these as offsets, so
+            // satellites start in a ring instead of being dragged into
+            // orbit by FA2.
+            const angle =
+              (i / Math.max(satCount, 1)) * Math.PI * 2 + idx * 0.7;
+            const entityId = `ent:${d.doc_id}:${i}`;
+            satelliteNodes.push({
+              id: entityId,
+              display_name: name,
+              label: name.length > 18 ? name.slice(0, 17) + "…" : name,
+              entity_type: "Concept",
+              kind: "Concept", // adapter picks Concept color
+              source_corpus: d.corpus_id,
+              source_corpora: [d.corpus_id],
+              // primary_doc_id wires the adapter's "orbit your book"
+              // positioning. Without this, FA2 would scatter satellites.
+              primary_doc_id: d.doc_id,
+              mention_count: 1,
+              // Pre-baked polar — adapter adds anchor position.
+              x: Math.cos(angle) * SAT_ORBIT_R,
+              y: Math.sin(angle) * SAT_ORBIT_R,
+            });
+            satelliteEdges.push({
+              source: bookId,
+              target: entityId,
+              predicate: "contains",
+              weight: 0.2,
+            });
+          });
+        }
       });
-      if (signal?.aborted) return;
-      setData(brainViewToGraphPayload(bv));
+
+      const bridgeLinks = bv.bridges.map((b) => ({
+        source: `book:${b.source}`,
+        target: `book:${b.target}`,
+        predicate: "bridges_to",
+        // Use strength on weight so the adapter / sigma reducer thickens
+        // bridges by how many cross-book entity pairs they represent.
+        weight: b.strength,
+        confidence: Math.min(1, (b.shared_entities || 0) / 12),
+        // Pt 5: passes through to the adapter, which uses
+        // EDGE_COLORS_BY_FAMILY[dominant_relation_family] for the edge color.
+        dominant_relation_family: b.dominant_relation_family,
+        // Pt 7c: top shared concept names + total count. The adapter
+        // builds an on-edge label string like "Bayes' theorem +5" so
+        // users see what links two books without clicking.
+        top_shared_entities: b.top_shared_entities || [],
+        shared_entities: b.shared_entities,
+      }));
+      setData({
+        nodes: [...anchorNodes, ...satelliteNodes],
+        links: [...bridgeLinks, ...satelliteEdges],
+      });
       setCacheWarming([]);
     } catch (e) {
-      if (isAbortError(e, signal)) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      setLoading(false);
     }
-  }, [stableCorpusIds, corpusKey, drill]);
+  }, [corpusIds, drill]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    reload({ signal: controller.signal });
-    return () => controller.abort();
+    reload();
   }, [reload]);
 
   // Whenever cacheWarming changes, fetch per-corpus statuses ONCE so the
