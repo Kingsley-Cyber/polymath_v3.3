@@ -8,7 +8,7 @@
 #   EMBEDDER_HOST / EMBEDDER_PORT     default 0.0.0.0 / 8082
 #   RERANKER_HOST / RERANKER_PORT     default 0.0.0.0 / 8081
 #   DOCLING_HOST  / DOCLING_PORT      default 0.0.0.0 / 8500
-#   EMBED_BATCH_SIZE                  default 8   (unified-memory friendly)
+#   EMBED_BATCH_SIZE                  default 32  (M-series Studio friendly; lower if memory pressure appears)
 #   EMBED_MAX_LENGTH                  default 512
 #   RERANKER_BATCH_SIZE               default 16
 #   RERANKER_MAX_DOC_CHARS            default 6000
@@ -45,7 +45,7 @@ export APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID:-mlx-community
 export EMBEDDER_MODEL_NAME="${EMBEDDER_MODEL_NAME:-Qwen3-Embedding-0.6B}"
 export RERANKER_SCORE_SCALE="${RERANKER_SCORE_SCALE:-cosine}"
 
-export EMBED_BATCH_SIZE="${EMBED_BATCH_SIZE:-8}"
+export EMBED_BATCH_SIZE="${EMBED_BATCH_SIZE:-32}"
 export EMBED_MAX_LENGTH="${EMBED_MAX_LENGTH:-512}"
 export RERANKER_BATCH_SIZE="${RERANKER_BATCH_SIZE:-16}"
 export RERANKER_MAX_DOC_CHARS="${RERANKER_MAX_DOC_CHARS:-6000}"

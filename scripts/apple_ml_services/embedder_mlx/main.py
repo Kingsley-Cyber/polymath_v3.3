@@ -13,7 +13,7 @@ Required env:
   APPLE_MLX_EMBED_MODEL_ID default mlx-community/Qwen3-Embedding-0.6B-mxfp8
   EMBEDDER_PORT          default 8082 (set by start.sh)
   EMBED_MAX_LENGTH       default 512
-  EMBED_BATCH_SIZE       default 8
+  EMBED_BATCH_SIZE       default 32
   HF_HOME                provided by LaunchAgent
 """
 
@@ -36,7 +36,7 @@ MODEL_ID = os.environ.get(
 MODEL_NAME = os.environ.get("EMBEDDER_MODEL_NAME", "Qwen3-Embedding-0.6B")
 EMBED_DIM = 1024
 MAX_LENGTH = int(os.environ.get("EMBED_MAX_LENGTH", "512"))
-BATCH_SIZE = int(os.environ.get("EMBED_BATCH_SIZE", "8"))
+BATCH_SIZE = int(os.environ.get("EMBED_BATCH_SIZE", "32"))
 
 
 class EmbeddingsRequest(BaseModel):

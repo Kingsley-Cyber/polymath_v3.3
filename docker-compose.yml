@@ -583,6 +583,7 @@ services:
       INGEST_MAX_MODEL_PHASE_DOCS: ${INGEST_MAX_MODEL_PHASE_DOCS:-8}
       INGEST_MAX_ACTIVE_JOBS: ${INGEST_MAX_ACTIVE_JOBS:-16}
       INGEST_BATCH_WORKERS: ${INGEST_BATCH_WORKERS:-2}
+      EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}
       INGEST_FILE_STORAGE_DIR: ${INGEST_FILE_STORAGE_DIR:-/data/ingest-files}
       INGEST_FILE_STORAGE_MAX_BYTES: ${INGEST_FILE_STORAGE_MAX_BYTES:-2147483648}
     depends_on:
@@ -640,6 +641,7 @@ services:
       RERANKER_SCORE_SCALE: ${RERANKER_SCORE_SCALE:-probability}
       RERANKER_LOW_CONFIDENCE_THRESHOLD: ${RERANKER_LOW_CONFIDENCE_THRESHOLD:--2.5}
       EMBEDDER_URL: http://embedder:80
+      EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}
       # Auth — reuse the backend's JWT secret so tokens issued by /api/auth
       # validate identically here. DEFAULT_ADMIN_PASSWORD is unused by MCP at
       # runtime (only auth_service.bootstrap consumes it), but Pydantic Settings

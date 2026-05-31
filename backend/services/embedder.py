@@ -32,7 +32,8 @@ from config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_BATCH_SIZE = 32
+_DEFAULT_BATCH_SIZE = 32
+_MAX_BATCH_SIZE = 512
 _LOCAL_TIMEOUT = 600.0
 _DEFAULT_DIM = 1024  # fallback when caller doesn't specify (e.g. query path on Qwen3-0.6B)
 
@@ -63,6 +64,18 @@ def _plaintext_embedding_pool(api_pool: list[dict[str, Any]] | None) -> list[dic
             data["api_key"] = _decrypt_api_key(data.get("api_key"))
         out.append(data)
     return out
+
+
+def _embedding_batch_size() -> int:
+    """Configured request batch size, clamped for provider and memory sanity."""
+    value = getattr(get_settings(), "EMBED_BATCH_SIZE", _DEFAULT_BATCH_SIZE)
+    if not isinstance(value, (int, float, str)):
+        return _DEFAULT_BATCH_SIZE
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return _DEFAULT_BATCH_SIZE
+    return max(1, min(_MAX_BATCH_SIZE, parsed))
 
 
 async def _local_fallback_or_raise(
@@ -271,9 +284,10 @@ async def _embed_batch_api_pool(
         raise ValueError("embedding API pool has no complete entries")
 
     semaphores = [asyncio.Semaphore(entry["max_concurrent"]) for entry in pool]
+    batch_size = _embedding_batch_size()
     batches = [
-        (batch_idx, start, texts[start : start + _BATCH_SIZE])
-        for batch_idx, start in enumerate(range(0, len(texts), _BATCH_SIZE))
+        (batch_idx, start, texts[start : start + batch_size])
+        for batch_idx, start in enumerate(range(0, len(texts), batch_size))
     ]
     attempts: dict[int, int] = {batch_idx: 0 for batch_idx, _, _ in batches}
     disabled_lanes: set[int] = set()
@@ -448,10 +462,11 @@ async def _embed_batch_local(
     settings = get_settings()
     url = f"{settings.EMBEDDER_URL}/embeddings"
     vectors: list[list[float]] = []
+    batch_size = _embedding_batch_size()
 
     async with httpx.AsyncClient(timeout=_LOCAL_TIMEOUT) as client:
-        for i in range(0, len(texts), _BATCH_SIZE):
-            batch = texts[i : i + _BATCH_SIZE]
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
             batch_vectors = await _embed_local_batch_with_split(
                 client=client,
                 url=url,
@@ -613,10 +628,11 @@ async def _post_openai_compatible(
     Every response row is checked for dimension match; model_id mismatch raises.
     """
     vectors: list[list[float]] = []
+    batch_size = _embedding_batch_size()
 
     async with httpx.AsyncClient(timeout=timeout) as client:
-        for i in range(0, len(texts), _BATCH_SIZE):
-            batch = texts[i : i + _BATCH_SIZE]
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
             payload: dict[str, Any] = {"input": batch, "model": model_hint}
             if request_dimensions and _provider_supports_dimensions(model_hint):
                 payload["dimensions"] = expected_dim

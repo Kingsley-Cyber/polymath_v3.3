@@ -35,10 +35,12 @@ LAUNCH_AGENT_NAME="com.polymath.apple-ml"
 LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LAUNCH_AGENT_NAME}.plist"
 APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID:-mlx-community/Qwen3-Embedding-0.6B-mxfp8}"
 APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID:-mlx-community/jina-reranker-v3-4bit-mxfp4}"
+EMBED_BATCH_SIZE="${EMBED_BATCH_SIZE:-32}"
 
 echo "[apple-mlx] runtime root : ${RUNTIME_ROOT}"
 echo "[apple-mlx] services     : ${SERVICES_DIR}"
 echo "[apple-mlx] launch agent : ${LAUNCH_AGENT_PATH}"
+echo "[apple-mlx] embed batch  : ${EMBED_BATCH_SIZE}"
 
 mkdir -p "${SERVICES_DIR}" "${LOG_DIR}" "${RUNTIME_ROOT}/models" "${RUNTIME_ROOT}/volumes/hf-cache"
 
@@ -142,6 +144,8 @@ cat > "${LAUNCH_AGENT_PATH}" <<PLIST
         <string>${APPLE_MLX_EMBED_MODEL_ID}</string>
         <key>APPLE_MLX_RERANKER_MODEL_ID</key>
         <string>${APPLE_MLX_RERANKER_MODEL_ID}</string>
+        <key>EMBED_BATCH_SIZE</key>
+        <string>${EMBED_BATCH_SIZE}</string>
         <key>RERANKER_SCORE_SCALE</key>
         <string>cosine</string>
     </dict>

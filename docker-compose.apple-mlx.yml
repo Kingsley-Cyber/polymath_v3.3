@@ -43,6 +43,7 @@ services:
       RERANKER_SCORE_SCALE: cosine
       RERANKER_MODEL: mlx-community/jina-reranker-v3-4bit-mxfp4
       EMBEDDER_MODEL_NAME: Qwen3-Embedding-0.6B
+      EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}
       LOCAL_EMBEDDER_ENABLED: "true"
       LOCAL_RERANKER_ENABLED: "true"
       EMBED_DEVICE: mps
@@ -58,3 +59,4 @@ services:
       RERANKER_SCORE_SCALE: cosine
       RERANKER_MODEL: mlx-community/jina-reranker-v3-4bit-mxfp4
       EMBEDDER_MODEL_NAME: Qwen3-Embedding-0.6B
+      EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}

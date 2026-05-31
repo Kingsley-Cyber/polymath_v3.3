@@ -11,11 +11,23 @@ Mocks all HTTP. Verifies:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from config import get_settings
 from services import embedder
+
+
+@pytest.fixture(autouse=True)
+def _settings_env(monkeypatch):
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "test-master-key")
+    monkeypatch.setenv("AUTH_SECRET_KEY", "test-auth-secret")
+    monkeypatch.setenv("DEFAULT_ADMIN_PASSWORD", "test-password")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def _dim_response(dim: int = 1024, count: int = 1, model: str | None = None):
@@ -79,6 +91,7 @@ async def test_api_mode_hits_generic_openai_endpoint():
 @pytest.mark.asyncio
 async def test_api_mode_embedding_pool_round_robins_batches(monkeypatch):
     captured: list[tuple[str, str, int]] = []
+    monkeypatch.setattr(embedder, "_embedding_batch_size", lambda: 32)
 
     async def fake_post(
         *,
@@ -122,6 +135,70 @@ async def test_api_mode_embedding_pool_round_robins_batches(monkeypatch):
     assert ("https://a.example/v1/embeddings", "embed-a", 32) in captured
     assert ("https://b.example/v1/embeddings", "embed-b", 32) in captured
     assert ("https://a.example/v1/embeddings", "embed-a", 1) in captured
+
+
+@pytest.mark.asyncio
+async def test_embedding_batch_size_config_controls_pool_batches(monkeypatch):
+    captured: list[int] = []
+    monkeypatch.setattr(embedder, "_embedding_batch_size", lambda: 64)
+
+    async def fake_post(
+        *,
+        url,
+        headers,
+        texts,
+        model_hint,
+        expected_dim,
+        expected_model_id,
+        timeout,
+        provider_label,
+        request_dimensions=False,
+    ):
+        captured.append(len(texts))
+        return [[float(t)] * expected_dim for t in texts]
+
+    monkeypatch.setattr(embedder, "_post_openai_compatible", fake_post)
+
+    vecs = await embedder.embed_batch(
+        [str(i) for i in range(130)],
+        mode="api",
+        expected_dim=3,
+        api_pool=[
+            {
+                "model": "embed-a",
+                "base_url": "https://a.example/v1",
+                "api_key": "sk-a",
+                "max_concurrent": 1,
+            },
+        ],
+    )
+
+    assert captured == [64, 64, 2]
+    assert [int(v[0]) for v in vecs] == list(range(130))
+
+
+@pytest.mark.asyncio
+async def test_local_embedder_uses_configured_client_batch_size(monkeypatch):
+    captured: list[int] = []
+    monkeypatch.setattr(
+        embedder,
+        "get_settings",
+        lambda: SimpleNamespace(
+            EMBEDDER_URL="http://local-embedder",
+            EMBED_BATCH_SIZE=64,
+        ),
+    )
+
+    async def fake_post(*, client, url, batch, expected_dim):
+        captured.append(len(batch))
+        return [[0.01] * expected_dim for _ in batch]
+
+    monkeypatch.setattr(embedder, "_post_local_embedding_batch", fake_post)
+
+    vecs = await embedder._embed_batch_local([str(i) for i in range(130)], 3)
+
+    assert captured == [64, 64, 2]
+    assert len(vecs) == 130
 
 
 @pytest.mark.asyncio

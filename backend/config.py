@@ -84,6 +84,16 @@ class Settings(BaseSettings):
         default="Qwen3-Embedding-0.6B",
         description="Display name of the loaded embedding model — must match MODEL_NAME env var in embedder container",
     )
+    EMBED_BATCH_SIZE: int = Field(
+        default=32,
+        ge=1,
+        le=512,
+        description=(
+            "Client-side embedding request batch size. Larger values reduce "
+            "HTTP overhead and let local/MLX embedders use bigger internal "
+            "encode batches, but raise memory pressure."
+        ),
+    )
     LOCAL_EMBEDDER_ENABLED: bool = Field(
         default=False,
         description="Whether the local Docker embedder profile is expected to be running.",
