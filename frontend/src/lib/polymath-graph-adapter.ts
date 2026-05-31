@@ -24,6 +24,8 @@ import {
   DEFAULT_EDGE_STYLE,
   getEdgeStyleByFamily,
   getCommunityColor,
+  colorForFamily,
+  colorForEntityType,
   type PolymathNodeKind,
 } from "./sigma-constants";
 import type { QueryFingerprint, QueryLayoutMode } from "./query-fingerprint";
@@ -127,6 +129,9 @@ export interface PolymathRawNode {
   /** Brain View bridge count, used by sigma-constants::nodeReducer to scale
    *  Book anchor size logarithmically (well-connected books read larger). */
   bridge_count?: number;
+  /** Brain View semantic color facets supplied by the backend Document anchor. */
+  dominant_family?: string | null;
+  dominant_entity_type?: string | null;
 }
 
 export interface PolymathRawEdge {
@@ -596,73 +601,30 @@ function colorForCorpus(corpora: string[] | undefined): string {
   return CORPUS_COLORS[h % CORPUS_COLORS.length];
 }
 
-function hslToHex(h: number, s: number, l: number): string {
-  const hue = (((h % 360) + 360) % 360) / 60;
-  const sat = Math.max(0, Math.min(100, s)) / 100;
-  const light = Math.max(0, Math.min(100, l)) / 100;
-  const c = (1 - Math.abs(2 * light - 1)) * sat;
-  const x = c * (1 - Math.abs((hue % 2) - 1));
-  let r = 0;
-  let g = 0;
-  let b = 0;
-
-  if (hue < 1) {
-    r = c;
-    g = x;
-  } else if (hue < 2) {
-    r = x;
-    g = c;
-  } else if (hue < 3) {
-    g = c;
-    b = x;
-  } else if (hue < 4) {
-    g = x;
-    b = c;
-  } else if (hue < 5) {
-    r = x;
-    b = c;
-  } else {
-    r = c;
-    b = x;
-  }
-
-  const m = light - c / 2;
-  const toHex = (v: number) =>
-    Math.round((v + m) * 255)
-      .toString(16)
-      .padStart(2, "0");
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-}
-
 function pickNodeColor(
   kind: PolymathNodeKind,
   raw: PolymathRawNode,
   colorMode: ColorMode,
 ): string {
-  // Constellation aesthetic — Books are colored by a deterministic hash
-  // of their corpus_id so same-corpus books cluster visually as a single
-  // hue. Within a corpus, lightness varies with bridge_count so books
-  // aren't clones — well-connected hubs read brighter than leaf books.
-  //
-  // Replaces the dominant_family / dominant_entity_type chain (those
-  // fields aren't reliably populated upstream and produced mostly-amber
-  // graphs).
   if (kind === "Book") {
-    const corpusId = String(
-      (raw as any).source_corpus || raw.source_corpora?.[0] || "",
-    );
-    if (corpusId) {
-      let h = 0;
-      for (const ch of corpusId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-      h = h % 360;
-      // Lightness ramp drives within-corpus differentiation. 5 buckets
-      // means a corpus with many books still produces ≤5 distinct
-      // brightness tiers, keeping the hue identity stable.
-      const bridges = Math.max(0, Number((raw as any).bridge_count ?? 0));
-      const l = 42 + (bridges % 5) * 7; // 42%, 49%, 56%, 63%, 70%
-      return hslToHex(h, 72, l);
+    if (colorMode === "corpus") {
+      return colorForCorpus(raw.source_corpora);
     }
-    return NODE_COLORS.Book;
+    const familyColor = colorForFamily(raw.dominant_family);
+    if (raw.dominant_family && familyColor !== NODE_COLORS.Book) {
+      return familyColor;
+    }
+    const typeColor = colorForEntityType(raw.dominant_entity_type);
+    if (raw.dominant_entity_type && typeColor !== NODE_COLORS.Book) {
+      return typeColor;
+    }
+    // Community mode fallback: stable per-book hue, not per-corpus hue.
+    // This keeps a one-corpus library from collapsing into one purple cloud
+    // when older ingests do not have dominant semantic facets yet.
+    const seed = String(raw.label || raw.display_name || raw.id || "");
+    let h = 0;
+    for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+    return getCommunityColor(h);
   }
   if (colorMode === "corpus") {
     return colorForCorpus(raw.source_corpora);
