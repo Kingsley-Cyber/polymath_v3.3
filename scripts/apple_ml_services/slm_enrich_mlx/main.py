@@ -27,7 +27,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import uvicorn
 
-BACKEND = os.environ.get("SLM_ENRICH_BACKEND", "mlx").lower()
+BACKEND = os.environ.get("SLM_ENRICH_BACKEND", "gguf").lower()
 MODEL_ID = os.environ.get("APPLE_SLM_ENRICH_MODEL_ID", "Unravler/LFM2-1.2B-Extract-MLX-4bit")
 GGUF_PATH = os.environ.get("APPLE_SLM_ENRICH_GGUF_PATH", "")
 PORT = int(os.environ.get("SLM_ENRICH_PORT", "8083"))

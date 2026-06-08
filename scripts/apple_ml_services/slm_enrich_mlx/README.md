@@ -15,28 +15,38 @@ putting the entity *type* in `property_name`. Two fixes, layered:
 Also: `max_tokens` default 160 → **400** (160 truncated mid-fact).
 
 ## Backends (env `SLM_ENRICH_BACKEND`)
-| | `mlx` (default) | `gguf` |
+| | **`gguf` (default)** | `mlx` (fast escape hatch) |
 |---|---|---|
-| model | `APPLE_SLM_ENRICH_MODEL_ID` (e.g. `Unravler/LFM2-1.2B-Extract-MLX-4bit`) | `APPLE_SLM_ENRICH_GGUF_PATH` (`LFM2-1.2B-Extract-GGUF` .gguf) |
-| `fact_type` enforcement | **prompt only** (improved) | **hard grammar — mathematically forced into the 9** |
-| dep | `mlx-lm` | `llama-cpp-python` (Metal) |
+| model | `APPLE_SLM_ENRICH_GGUF_PATH` (`Qwen/Qwen2.5-1.5B-Instruct-GGUF`, Q4_K_M ~1.1 GB) | `APPLE_SLM_ENRICH_MODEL_ID` (e.g. `mlx-community/Qwen2.5-1.5B-Instruct-4bit`) |
+| `fact_type` enforcement | **hard grammar — mathematically forced into the 9** | prompt only |
+| dep | `llama-cpp-python` (Metal auto-detected on Apple Silicon) | `mlx-lm` |
+| warm latency (M1 Max, Q4 1.5B) | ~2.4 s for 3-fact output; ~0.55 s for 1 facet | ~0.7 s facts; ~0.55 s facets |
+| facts passing Pydantic | 3/3 on the Qdrant test (real win) | 0/3 (all off-vocab `fact_type` get dropped) |
 
-## TEST SEQUENCE (do this in order — isolates prompt vs grammar)
+Cold start (first call) is ~14 s for GGUF on Apple Silicon — Metal library init alone takes ~10 s. Subsequent calls are warm; keep the sidecar long-lived. MLX cold start is ~5 s.
+
+## Setup (default: GGUF + grammar)
 ```bash
-pip install -r requirements.txt          # mlx path needs no llama-cpp
+pip install -r requirements.txt   # installs mlx-lm AND llama-cpp-python (Metal)
 
-# 1) MLX + new prompt ONLY (no new dep) — does the better prompt alone fix vocab adherence?
-SLM_ENRICH_BACKEND=mlx APPLE_SLM_ENRICH_MODEL_ID=Unravler/LFM2-1.2B-Extract-MLX-4bit \
-  SLM_ENRICH_PORT=8083 python main.py
-#    re-run the Qdrant /enrich/facts test. Count how many facts survive the fact_type∈9 gate.
-#    if most survive with sensible types -> ship mlx, done.
+# Download Qwen 2.5 1.5B Instruct GGUF (Q4_K_M ~1.1 GB):
+python -c "from huggingface_hub import hf_hub_download; \
+    print(hf_hub_download(repo_id='Qwen/Qwen2.5-1.5B-Instruct-GGUF', \
+                          filename='qwen2.5-1.5b-instruct-q4_k_m.gguf'))"
+# copy the printed path to APPLE_SLM_ENRICH_GGUF_PATH
 
-# 2) ONLY if step 1 still emits off-vocab fact_types -> GGUF hard constraint:
-CMAKE_ARGS="-DGGML_METAL=on" pip install llama-cpp-python
-# download LiquidAI/LFM2-1.2B-Extract-GGUF  (a *.gguf file)
-SLM_ENRICH_BACKEND=gguf APPLE_SLM_ENRICH_GGUF_PATH=/path/to/LFM2-1.2B-Extract.gguf \
+APPLE_SLM_ENRICH_GGUF_PATH=<that path> SLM_ENRICH_PORT=8083 python main.py
+```
+
+## MLX escape hatch (faster but produces no validated facts)
+The MLX path runs the same prompts unconstrained — useful for prompt iteration
+or when latency dominates over correctness:
+```bash
+SLM_ENRICH_BACKEND=mlx \
+  APPLE_SLM_ENRICH_MODEL_ID=mlx-community/Qwen2.5-1.5B-Instruct-4bit \
   SLM_ENRICH_PORT=8083 python main.py
-#    grammar forces fact_type into the 9 -> 0% off-vocab by construction.
+# expect /enrich/facets_aliases to produce reasonable labels but
+# /enrich/facts to emit off-vocab fact_types that the adapter drops.
 ```
 
 ## Endpoints (unchanged contracts — adapter already matches)
