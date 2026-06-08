@@ -99,6 +99,27 @@ class Settings(BaseSettings):
         description="Whether the local Docker embedder profile is expected to be running.",
     )
 
+    # === LOCAL ENRICHMENT (Pass-1 deterministic + Pass-2 SLM-residual) ===
+    # Two independent flags; default off so cloud Ghost B behavior is unchanged.
+    # Pass-1 is pure Python (services/ingestion/enrich.py) and bit-for-bit
+    # reproducible. Pass-2 calls the host-native slm_enrich_mlx sidecar.
+    LOCAL_PASS1_ENRICH_ENABLED: bool = Field(
+        default=False,
+        description="Run Pass-1 deterministic enrichment (numeric facts + in-text aliases) after Ghost B.",
+    )
+    LOCAL_SLM_ENRICH_ENABLED: bool = Field(
+        default=False,
+        description="Run Pass-2 SLM-residual enrichment (facets + out-of-text aliases + qualitative facts) via the slm_enrich_mlx sidecar.",
+    )
+    LOCAL_SLM_ENRICH_URL: str = Field(
+        default="http://localhost:8083",
+        description="slm_enrich_mlx sidecar URL. Use http://host.docker.internal:8083 when backend runs in Docker on the same Mac.",
+    )
+    LOCAL_SLM_ENRICH_TIMEOUT_S: float = Field(
+        default=30.0,
+        description="HTTP timeout for /enrich/* sidecar calls.",
+    )
+
     # === MODAL CLOUD GPU (primary ingestion embed path) ===
     MODAL_ENABLED: bool = Field(
         default=False,

@@ -900,6 +900,16 @@ async def _run_ghosts_parallel(
                     len(failures),
                     metrics.get("error_counts") if isinstance(metrics, dict) else None,
                 )
+                if ghost_b_from_staging:
+                    logger.warning(
+                        "phase=ghost_b_resume_using_staging_after_missing_retry_failure "
+                        "doc=%s corpus=%s staged=%d failed_missing=%d",
+                        doc_id[:12],
+                        corpus_id[:8],
+                        len(ghost_b_from_staging),
+                        len(tasks),
+                    )
+                    return ghost_b_from_staging
                 return None
             missing_ids = sorted(
                 {t.chunk_id for t in tasks} - {r.chunk_id for r in fresh_results}
@@ -931,6 +941,18 @@ async def _run_ghosts_parallel(
     # high-throughput API settings unsafe during batch ingest.
     summaries = await _a_branch()
     ghost_b_out = await _b_branch()
+    # Pass-1 deterministic + Pass-2 SLM-residual enrichment (each env-gated,
+    # default off). Adds numeric/qualitative facts and in-text/out-of-text
+    # aliases to the ExtractionResults in place. No-op when both flags are
+    # off, and Pass-2 is safe when the sidecar is unreachable.
+    if ghost_b_out:
+        from .slm_enrich import (
+            PASS1_ENABLED as _SLM_PASS1_ON,
+            PASS2_ENABLED as _SLM_PASS2_ON,
+        )
+        if _SLM_PASS1_ON or _SLM_PASS2_ON:
+            from .slm_enrich import run_enrichment
+            ghost_b_out = await run_enrichment(ghost_b_out)
     if ghost_b_metrics is None:
         ghost_b_metrics = _ghost_b_metrics_for_skipped(ghost_b_out)
     ghost_b_metrics = _ghost_b_metrics_with_failures(
