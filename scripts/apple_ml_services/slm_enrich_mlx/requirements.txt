@@ -1,7 +1,14 @@
-# Pass-2 enrichment sidecar (Apple Silicon, host-native MPS).
-mlx-lm>=0.19
+# Pass-2 enrichment sidecar (Apple Silicon).
 fastapi
 uvicorn
 pydantic>=2
-# Default model: LiquidAI/LFM2-1.2B-Extract  (may need `mlx_lm.convert` to an MLX
-# build, or point APPLE_SLM_ENRICH_MODEL_ID at an existing mlx-community LFM2 build).
+
+# --- MLX backend (default; prompt-only) ---
+mlx-lm>=0.19
+# model: an existing MLX build, no convert needed, e.g.
+#   APPLE_SLM_ENRICH_MODEL_ID=Unravler/LFM2-1.2B-Extract-MLX-4bit
+
+# --- GGUF backend (SLM_ENRICH_BACKEND=gguf; prompt + HARD JSON-schema grammar) ---
+# Install with Metal:  CMAKE_ARGS="-DGGML_METAL=on" pip install llama-cpp-python
+llama-cpp-python>=0.3.2
+# model: LiquidAI/LFM2-1.2B-Extract-GGUF  ->  APPLE_SLM_ENRICH_GGUF_PATH=/path/to/*.gguf
