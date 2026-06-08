@@ -45,3 +45,6 @@ incoming_glirel/
 incoming_local_ghost_b/
 models/glirel_ghost_b_*/
 models/polymath_local_ghost_b_*/
+
+# slm_enrich transfer / staging
+incoming_slm_enrich/
