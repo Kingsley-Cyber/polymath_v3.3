@@ -1,0 +1,7 @@
+# Pass-2 enrichment sidecar (Apple Silicon, host-native MPS).
+mlx-lm>=0.19
+fastapi
+uvicorn
+pydantic>=2
+# Default model: LiquidAI/LFM2-1.2B-Extract  (may need `mlx_lm.convert` to an MLX
+# build, or point APPLE_SLM_ENRICH_MODEL_ID at an existing mlx-community LFM2 build).
