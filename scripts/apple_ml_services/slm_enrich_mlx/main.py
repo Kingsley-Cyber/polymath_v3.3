@@ -34,7 +34,7 @@ import uvicorn
 
 MODEL_ID = os.environ.get("APPLE_SLM_ENRICH_MODEL_ID", "LiquidAI/LFM2-1.2B-Extract")
 PORT = int(os.environ.get("SLM_ENRICH_PORT", "8083"))
-MAX_TOKENS = int(os.environ.get("SLM_ENRICH_MAX_TOKENS", "160"))  # bounded output = bounded latency
+MAX_TOKENS = int(os.environ.get("SLM_ENRICH_MAX_TOKENS", "400"))  # 160 truncated multi-fact responses; 400 fits ~6 facts
 
 # 9-value FactType vocabulary (mirror backend ghost_b_schemas.FactType). The model is
 # steered toward these; the adapter is the authority that drops off-vocab.
