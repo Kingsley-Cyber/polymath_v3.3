@@ -1,0 +1,6 @@
+torch>=2.4
+transformers>=4.48,<5.0
+tokenizers>=0.21
+safetensors>=0.4
+numpy<2.3
+# Qwen MLX fast-path (optional): mlx-lm>=0.18

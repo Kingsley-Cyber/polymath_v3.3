@@ -1,0 +1,30 @@
+{
+  "label2id": {
+    "part_of": 0,
+    "uses": 1,
+    "implements": 2,
+    "depends_on": 3,
+    "supports": 4,
+    "produces": 5,
+    "stores": 6,
+    "detects": 7,
+    "instance_of": 8,
+    "example_of": 9,
+    "member_of": 10,
+    "none": 11
+  },
+  "id2label": {
+    "0": "part_of",
+    "1": "uses",
+    "2": "implements",
+    "3": "depends_on",
+    "4": "supports",
+    "5": "produces",
+    "6": "stores",
+    "7": "detects",
+    "8": "instance_of",
+    "9": "example_of",
+    "10": "member_of",
+    "11": "none"
+  }
+}

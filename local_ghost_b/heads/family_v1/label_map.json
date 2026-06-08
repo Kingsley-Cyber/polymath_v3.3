@@ -1,0 +1,22 @@
+{
+  "label2id": {
+    "structural": 0,
+    "operational": 1,
+    "definitional": 2,
+    "affiliation": 3,
+    "temporal": 4,
+    "causal": 5,
+    "provenance": 6,
+    "sentinel": 7
+  },
+  "id2label": {
+    "0": "structural",
+    "1": "operational",
+    "2": "definitional",
+    "3": "affiliation",
+    "4": "temporal",
+    "5": "causal",
+    "6": "provenance",
+    "7": "sentinel"
+  }
+}

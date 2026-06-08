@@ -1,0 +1,22 @@
+{
+  "label2id": {
+    "created_by": 0,
+    "during": 1,
+    "located_in": 2,
+    "stores": 3,
+    "owns": 4,
+    "works_for": 5,
+    "maps_to": 6,
+    "none": 7
+  },
+  "id2label": {
+    "0": "created_by",
+    "1": "during",
+    "2": "located_in",
+    "3": "stores",
+    "4": "owns",
+    "5": "works_for",
+    "6": "maps_to",
+    "7": "none"
+  }
+}
