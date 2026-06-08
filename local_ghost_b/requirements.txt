@@ -3,4 +3,10 @@ transformers>=4.48,<5.0
 tokenizers>=0.21
 safetensors>=0.4
 numpy<2.3
+# Entity tagger (upstream of relation extraction)
+gliner>=0.2
+# Relation classifier (zero-shot fallback + fine-tuned path)
+glirel>=1.2
+loguru  # glirel imports it but doesn't pin it
+# NOTE: glirel requires Python 3.10+. On Mac use /Users/king/.local/bin/python3.11
 # Qwen MLX fast-path (optional): mlx-lm>=0.18

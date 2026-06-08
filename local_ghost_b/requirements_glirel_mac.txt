@@ -1,0 +1,20 @@
+# Mac inference-only requirements for the GLiREL relation stage.
+# Lean subset of requirements.txt — what glirel_infer.py needs and nothing more.
+#
+# Python 3.11+ REQUIRED (glirel uses PEP 604 `int | None` syntax).
+# Install with:
+#     /Users/king/.local/bin/python3.11 -m venv .venv
+#     .venv/bin/pip install -r requirements_glirel_mac.txt
+
+torch>=2.4               # MPS backend on Apple Silicon
+transformers>=4.48,<5.0
+tokenizers>=0.21
+safetensors>=0.4
+numpy<2.3
+
+# Relation classifier
+glirel>=1.2
+loguru                   # glirel imports it but doesn't pin it
+
+# Entity tagger (upstream of relation extraction — needed for the in-sync test)
+gliner>=0.2

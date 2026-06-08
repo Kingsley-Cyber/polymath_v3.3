@@ -1,0 +1,42 @@
+{
+  "_schema": "polymath.ghost_b.label_descriptions.v1",
+  "_notes": "Natural-language descriptions for each Ghost B predicate. Used as zero-shot label signals AND as canonical ontology reference. Edit deliberately — these shape model behavior.",
+
+  "part_of":         "Subject is a component, module, section, or constituent of Object. Object contains, comprises, or is composed of Subject.",
+  "uses":            "Subject employs, leverages, utilizes, applies, or operates via Object to perform its function.",
+  "implements":      "Subject realizes, conforms to, or provides an interface for Object. Object is an abstract specification, protocol, or contract.",
+  "depends_on":      "Subject requires Object to function. Subject is built on top of Object or treats Object as a prerequisite.",
+  "supports":        "Subject enables, facilitates, allows, or helps Object happen. Object would not be possible (or would be harder) without Subject.",
+  "produces":        "Subject generates, outputs, yields, or emits Object as a result of its operation.",
+  "stores":          "Subject persists, caches, or holds Object as data. Object is the artifact being stored; Subject is the storage system.",
+  "detects":         "Subject identifies, recognizes, classifies, or finds instances of Object during operation.",
+
+  "member_of":       "Subject is a constituent member, participant, or affiliate of group Object (Organization or Concept).",
+  "instance_of":     "Subject is a concrete example or specific case of category Object. Object is an abstract concept; Subject is a realization.",
+  "example_of":      "Subject is given as a representative illustration of Object. Often introduced by 'such as', 'for example', 'e.g.'.",
+
+  "created_by":      "Subject was authored, written, designed, developed, or made by Object (Person or Organization).",
+  "works_for":       "Subject (Person) is employed by, contracted to, or a staff member of Object (Organization).",
+  "owns":            "Subject possesses, controls, or has ownership of Object.",
+  "affiliated_with": "Subject is partnered with, allied to, or associated with Object without full membership or employment.",
+  "located_in":      "Subject is physically situated, based, found, or stored at Object (Location).",
+
+  "during":          "Subject occurs concurrently with, while, or throughout Object. Both are temporal Events or processes.",
+  "preceded_by":     "Subject occurs after Object in time. Object happens first; Subject follows. Inverse of 'precedes'.",
+  "overlaps":        "Subject and Object share a temporal interval; they coincide in part of their durations.",
+
+  "causes":          "Subject leads to, results in, triggers, or brings about Object. Object is a consequence of Subject.",
+  "contradicts":     "Subject conflicts with, opposes, refutes, or is inconsistent with Object. Both cannot simultaneously hold.",
+  "overrides":       "Subject supersedes, replaces, takes precedence over, or preempts Object.",
+  "excepts":         "Subject applies except in the case of Object. Object is an exclusion or carve-out from Subject.",
+
+  "defines":         "Subject specifies, formalizes, or gives the meaning of Object. Object is a term, concept, or specification.",
+  "represents":      "Subject stands for, denotes, or symbolizes Object. Subject is a sign or proxy for Object.",
+  "maps_to":         "Subject corresponds to, is equivalent to, or translates into Object across two systems or vocabularies.",
+  "synonym_of":      "Subject and Object refer to the same thing; one is another name for the other.",
+
+  "references":      "Subject cites, mentions, or points to Object (a Document, Concept, or Standard) as a source or related work.",
+  "derived_from":    "Subject is based on, adapted from, extends, or inherits from Object.",
+
+  "no_relation":     "Subject and Object co-occur in the same context but no specific predicate from this ontology applies. Use this when the pair is real but the relation is absent, ambiguous, or outside the vocabulary."
+}
