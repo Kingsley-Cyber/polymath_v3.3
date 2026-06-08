@@ -28,3 +28,20 @@ Thumbs.db
 
 # Cloudflare Tunnel credentials (cert.pem + tunnel JSON + config.yml)
 .cloudflared/
+
+# Local Ghost B / GLiREL — model weights, transfer artifacts, run outputs
+# (large binaries; not for source control)
+local_ghost_b/heads/*/model.safetensors
+local_ghost_b/heads/*/pytorch_model.bin
+local_ghost_b/heads/*/tokenizer.json
+local_ghost_b/heads/*/training_args.bin
+local_ghost_b/*.jsonl
+local_ghost_b/*.bak
+local_ghost_b/batch_out*/
+# extra venv variants (the base .venv/ already covered above)
+.venv-*/
+.venv_*/
+incoming_glirel/
+incoming_local_ghost_b/
+models/glirel_ghost_b_*/
+models/polymath_local_ghost_b_*/
