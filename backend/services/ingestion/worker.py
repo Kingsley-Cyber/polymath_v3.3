@@ -98,8 +98,14 @@ from services.ghost_b import (
     FactItem,
     RelationItem,
     SchemaContext,
-    extract_entities,
 )
+
+# Phase A — fully-local, deterministic Ghost B. The data-layer dataclasses
+# (above) stay sourced from services.ghost_b; only the extractor is rerouted to
+# the local GLiNER×2 + GLiREL + Python-rules implementation. Same signature,
+# same ExtractionResult shape, so this branch and everything downstream are
+# unchanged. Ghost A (summaries) remains the cloud path.
+from services.ghost_b_local import extract_entities
 from services.facets import build_ingest_facet_profile
 from services.ingestion import docling_adapter, tier_chunker
 from services.ingestion.schema_lens import get_or_create_schema_lens
@@ -941,18 +947,12 @@ async def _run_ghosts_parallel(
     # high-throughput API settings unsafe during batch ingest.
     summaries = await _a_branch()
     ghost_b_out = await _b_branch()
-    # Pass-1 deterministic + Pass-2 SLM-residual enrichment (each env-gated,
-    # default off). Adds numeric/qualitative facts and in-text/out-of-text
-    # aliases to the ExtractionResults in place. No-op when both flags are
-    # off, and Pass-2 is safe when the sidecar is unreachable.
-    if ghost_b_out:
-        from .slm_enrich import (
-            PASS1_ENABLED as _SLM_PASS1_ON,
-            PASS2_ENABLED as _SLM_PASS2_ON,
-        )
-        if _SLM_PASS1_ON or _SLM_PASS2_ON:
-            from .slm_enrich import run_enrichment
-            ghost_b_out = await run_enrichment(ghost_b_out)
+    # Phase A: deterministic enrichment (numeric + qualitative facts, in-text
+    # aliases) now runs INSIDE services.ghost_b_local per chunk, so the former
+    # external Pass-1/Pass-2 (services.ingestion.slm_enrich) call is removed —
+    # keeping it would double the deterministic facts and re-introduce the
+    # retired SLM sidecar. The slm_enrich module stays in the tree for
+    # reference but is no longer wired into ingestion.
     if ghost_b_metrics is None:
         ghost_b_metrics = _ghost_b_metrics_for_skipped(ghost_b_out)
     ghost_b_metrics = _ghost_b_metrics_with_failures(
