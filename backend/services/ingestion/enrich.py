@@ -7,18 +7,30 @@ Two jobs, both pure Python:
   2. ALIASES — in-text aliases via Schwartz-Hearst (acronym<->expansion) + casing variants.
 
 Also the SHARED CUE SOURCE: `CUES` maps each of the 9 ghost_b FactType values to a regex.
-Pass-1 uses the deterministic-type cues to *extract*; the Pass-2 adapter imports
-`qualitative_cue_hits()` for Gate B (the status/category/tag/rule_* types that only the
-SLM can structure). One regex, two consumers.
+Pass-1 uses the deterministic-type cues to *extract* numeric facts; `extract_qualitative_facts()`
+(added for the fully-local lane) uses the five SLM_GATED cues to *also extract*, deterministically
+— status / category / tag / rule_condition / rule_action — slicing each value VERBATIM from the
+sentence so there is no paraphrase or hallucination. The Pass-2 SLM adapter still imports
+`qualitative_cue_hits()` for its Gate B, but in the local Ghost B stack the SLM is no longer in
+the path: Python structures all nine FactTypes. One regex, several consumers.
 
 Outputs match the backend Pydantic shapes (LLMFact / LLMEntity.query_aliases) so the
-caller merges them into ExtractionResult in place. spaCy is OPTIONAL — used for better
-subject attachment if present, else a deterministic proximity fallback.
+caller merges them into ExtractionResult in place. No model, no network, bit-for-bit
+reproducible.
+
+Confidence note: these functions emit fact dicts WITHOUT a `confidence` key (mirroring
+the original extract_facts contract). The caller stamps the sentinel by FactType —
+1.0 for the four DETERMINISTIC types, 0.9 for the five SLM_GATED types — so
+`extract()`'s two fact lists stay independently labellable.
 
 API:
-    CUES                       dict[FactType, re.Pattern]   (shared)
-    qualitative_cue_hits(text) -> set[str]   FactTypes that need the SLM (Gate B)
-    extract(text, entities)    -> {"facts": [LLMFact-dict...], "aliases": {canonical:[..]}}
+    CUES                            dict[FactType, re.Pattern]   (shared)
+    qualitative_cue_hits(text)      -> set[str]   FactTypes flagged by cue (legacy Gate B)
+    extract_facts(text, ents)       -> [LLMFact-dict...]   numeric (quantity/timestamp/threshold/property)
+    extract_qualitative_facts(t, e) -> [LLMFact-dict...]   status/category/tag/rule_condition/rule_action
+    extract(text, entities)         -> {"facts": [...numeric...],
+                                        "qualitative_facts": [...status/category/tag/rule_*...],
+                                        "aliases": {canonical: [..]}}
 """
 from __future__ import annotations
 
@@ -212,7 +224,8 @@ def extract_facts(text: str, entities: list[dict]) -> list[dict]:
                 return
             facts.append({"subject": subj, "fact_type": ft,
                           "property_name": prop or _property_name_before(sent, m.start()),
-                          "value": value.strip(), "unit": unit, "condition": cond})
+                          "value": value.strip(), "unit": unit, "condition": cond,
+                          "evidence_phrase": sent[:500]})
 
         # quantity: number + unit
         for m in CUES["quantity"].finditer(sent):
@@ -241,21 +254,202 @@ def extract_facts(text: str, entities: list[dict]) -> list[dict]:
     return uniq
 
 
+# --------------------------------------------------- qualitative facts (A.4)
+# The five SLM_GATED FactTypes, structured deterministically. The SLM used to
+# own these; in the fully-local Ghost B lane Python does, by slicing the value
+# VERBATIM from the sentence (faithful substring — no paraphrase, no invented
+# numbers). Lower recall than an SLM, but every emitted value is grounded.
+
+# Where a trailing noun phrase ends: first clause break, preposition, or
+# conjunction. Keeps "X is a Y" category values tight ("vector database",
+# not the rest of the sentence).
+_PHRASE_STOP = re.compile(
+    r"[.,;:!?()]|\b(?:that|which|who|whom|whose|and|but|or|nor|because|since|so|"
+    r"if|when|unless|while|with|without|for|to|from|as|in|on|at|by|of)\b", re.I)
+
+# Where a rule_condition clause ends: the comma / clause break, or the main
+# clause kicking in ("then ...", "must ...").
+_COND_STOP = re.compile(
+    r"[,.;:]|\b(?:then|must|shall|should|will|would|do not|don't|never|always|"
+    r"may not|required)\b", re.I)
+
+# Where a rule_action clause ends: sentence-final punctuation or a trailing
+# condition ("... must X if Y").
+_ACT_STOP = re.compile(
+    r"[.;:]|\b(?:if|when|unless|while|because|since|provided|whenever)\b", re.I)
+
+_ARTICLES = {"a", "an", "the", "this", "that", "these", "those"}
+
+# Single-word generic head nouns that survive "X is a ___" but carry no
+# category signal ("Flame is a set of ...", "Flutter is a way to ..."). Dropped
+# as category values; multi-word phrases and specific nouns are kept.
+_GENERIC_CATEGORY = {
+    "way", "kind", "type", "sort", "lot", "thing", "one", "bit", "piece",
+    "form", "set", "number", "part", "range", "series", "group", "collection",
+    "variety", "means", "tool", "system",
+}
+
+# status surface -> the maturity bucket it denotes. Falls back to the matched
+# phrase itself for anything not in the map.
+_STATUS_VALUE = {
+    "production-ready": "production-ready", "production ready": "production-ready",
+    "production": "production-ready", "ga": "ga", "stable": "stable",
+    "beta": "beta", "alpha": "alpha", "experimental": "experimental",
+    "preview": "preview", "deprecated": "deprecated", "legacy": "legacy",
+    "eol": "end-of-life", "end-of-life": "end-of-life", "end of life": "end-of-life",
+    "archived": "archived", "maintenance": "maintenance",
+    "released": "released", "release": "released",
+}
+
+
+def _preceding_subject(idx: int, ent_pos: list[tuple[int, str]]) -> str:
+    """Closest entity mention that STARTS at or before `idx`. Used for category
+    ("X is a Y" — the subject is the entity to the left of the cue), where the
+    nearest-overall fallback would wrongly grab the trailing noun phrase's
+    entity."""
+    preceding = [(i, n) for i, n in ent_pos if i <= idx]
+    if not preceding:
+        return ""
+    return max(preceding, key=lambda p: p[0])[1]
+
+
+def _trailing_phrase(sent: str, start: int, max_words: int = 4) -> str:
+    """Short noun phrase beginning at char `start`, cut at the first clause
+    break / preposition / conjunction and stripped of leading articles.
+    Returns a verbatim substring (modulo leading-article trim)."""
+    rest = sent[start:]
+    m = _PHRASE_STOP.search(rest)
+    span = rest[:m.start()] if m else rest
+    words = span.split()
+    while words and words[0].lower() in _ARTICLES:
+        words = words[1:]
+    return " ".join(words[:max_words]).strip(" ,.;:-")
+
+
+def _clause_after(sent: str, cue_end: int, stop: re.Pattern) -> str:
+    """Clause following a cue, cut at the first `stop` boundary. Verbatim."""
+    rest = sent[cue_end:]
+    m = stop.search(rest)
+    clause = rest[:m.start()] if m else rest
+    return clause.strip(" ,.;:-")
+
+
+def extract_qualitative_facts(text: str, entities: list[dict]) -> list[dict]:
+    """Deterministically structure the five SLM_GATED FactTypes
+    (status / category / tag / rule_condition / rule_action).
+
+    Per sentence: locate each cue, attach to the nearest in-sentence entity
+    (the subject), and slice value / condition VERBATIM from the sentence.
+    A fact is only emitted when there is an entity in the sentence to anchor
+    it (FactItem.subject requires min_length=1), which is also the main
+    precision guard against entity-free prose.
+
+    Returns LLMFact-shaped dicts WITHOUT `confidence` (the caller stamps the
+    0.9 qualitative sentinel) — same contract as extract_facts(). `tag` lines
+    are scanned on the RAW text because norm() collapses the newlines the
+    `tag` cue anchors to."""
+    facts: list[dict] = []
+
+    for sent in _SENT.split(norm(text)):
+        sent = sent.strip()
+        if not sent:
+            continue
+        ent_pos = _entity_positions(sent, entities)
+        if not ent_pos:
+            continue  # no anchor entity -> no fact (precision guard)
+
+        def emit(ft, subj, value, prop, condition=""):
+            value = norm(value)
+            if not subj or not value:
+                return
+            facts.append({"subject": subj, "fact_type": ft, "property_name": prop,
+                          "value": value[:500], "unit": "",
+                          "condition": norm(condition)[:300],
+                          "evidence_phrase": sent[:500]})
+
+        # status -> maturity. Map the surface to a canonical maturity bucket.
+        for m in CUES["status"].finditer(sent):
+            raw = m.group(0)
+            emit("status", _nearest_subject(m.start(), ent_pos),
+                 _STATUS_VALUE.get(raw.lower(), raw), "maturity")
+
+        # category -> "X is a Y": subject = entity left of the cue, value = the
+        # trailing noun phrase. Skip when there's no preceding named subject
+        # (usually "It is a ..." coreference, which we can't resolve).
+        for m in CUES["category"].finditer(sent):
+            subj = _preceding_subject(m.start(), ent_pos)
+            if not subj:
+                continue
+            cat = _trailing_phrase(sent, m.end())
+            if cat and cat.lower() not in _GENERIC_CATEGORY:
+                emit("category", subj, cat, "category")
+
+        # rule_condition + rule_action, paired within the sentence. A lone
+        # condition still emits (queryable trigger); an action carries its
+        # in-sentence condition when one is present.
+        cond_m = CUES["rule_condition"].search(sent)
+        act_m = CUES["rule_action"].search(sent)
+        cond_clause = _clause_after(sent, cond_m.end(), _COND_STOP) if cond_m else ""
+        if act_m:
+            emit("rule_action", _nearest_subject(act_m.start(), ent_pos),
+                 _clause_after(sent, act_m.end(), _ACT_STOP), "obligation",
+                 condition=cond_clause)
+        if cond_m and cond_clause:
+            emit("rule_condition", _nearest_subject(cond_m.start(), ent_pos),
+                 cond_clause, "condition")
+
+    # tags: line-anchored, so scan RAW text. Attach to the chunk's primary
+    # subject (first entity in GLiNER order) — tag/keyword lines rarely name an
+    # entity inline, and first-entity is a stable, deterministic proxy.
+    primary = ""
+    for e in entities:
+        primary = norm(e.get("canonical_name") or e.get("surface_form") or "")
+        if primary:
+            break
+    if primary:
+        for m in CUES["tag"].finditer(text or ""):
+            line = (text or "")[m.end():].split("\n", 1)[0].lstrip(" :-\t")
+            for tag in re.split(r"[,;]", line):
+                tag = norm(tag).strip(" .")
+                if tag and len(tag) <= 60:
+                    facts.append({"subject": primary, "fact_type": "tag",
+                                  "property_name": "tags", "value": tag[:500],
+                                  "unit": "", "condition": "",
+                                  "evidence_phrase": norm(line)[:500]})
+
+    # dedupe identical facts (subject/type/property/value/condition)
+    seen, uniq = set(), []
+    for f in facts:
+        k = (f["subject"].lower(), f["fact_type"], f["property_name"].lower(),
+             f["value"].lower(), (f["condition"] or "").lower())
+        if k not in seen:
+            seen.add(k)
+            uniq.append(f)
+    return uniq
+
+
 def extract(text: str, entities: list[dict]) -> dict:
-    """Pass-1 entry point: deterministic facts + in-text aliases for one chunk."""
+    """Local Ghost B enrichment entry point for one chunk: deterministic numeric
+    facts, qualitative facts, and in-text aliases. The two fact lists stay
+    separate so the caller can stamp the right confidence sentinel on each
+    (1.0 numeric, 0.9 qualitative)."""
     return {"facts": extract_facts(text, entities),
+            "qualitative_facts": extract_qualitative_facts(text, entities),
             "aliases": extract_aliases(text, entities)}
 
 
 if __name__ == "__main__":
-    demo_text = ("Qdrant needs at least 4 GB of RAM and stores 1000000 vectors. "
+    demo_text = ("Qdrant is a vector database that needs at least 4 GB of RAM and "
+                 "stores 1000000 vectors. "
                  "Qdrant version: 1.7, released in 2021 and is production-ready. "
                  "The HNSW (Hierarchical Navigable Small World) index is used; "
-                 "if the index is full, the system must reject new inserts.")
+                 "if the index is full, the system must reject new inserts.\n"
+                 "Tags: vector-search, ann, embeddings")
     demo_ents = [{"canonical_name": "qdrant", "surface_form": "Qdrant", "entity_type": "Software"},
                  {"canonical_name": "hnsw", "surface_form": "HNSW", "entity_type": "Method"}]
     import json
     out = extract(demo_text, demo_ents)
     print(json.dumps(out, indent=2))
-    print("Gate-B (qualitative) cue hits :", qualitative_cue_hits(demo_text))
-    print("Gate-B should route to SLM?   :", should_enrich_facts(demo_text, out["facts"]))
+    print("numeric facts     :", len(out["facts"]))
+    print("qualitative facts :", len(out["qualitative_facts"]))
+    print("Gate-B cue hits   :", qualitative_cue_hits(demo_text))
