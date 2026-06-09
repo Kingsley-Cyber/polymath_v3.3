@@ -10,7 +10,7 @@ in place without a version bump.
 
 from __future__ import annotations
 
-PIPELINE_VERSION = "v1.2026.06"
+PIPELINE_VERSION = "v1.2026.06b"  # Phase A: +3 entity types, +facet vocab (GLiNER pass-2)
 
 # ---------- DEFAULT CLASSIFIER (LOCAL_GHOST_B_CLASSIFIER) ----------------
 #
@@ -32,10 +32,20 @@ DEFAULT_GLIREL_THRESHOLD = 0.40
 GLINER_MODEL = "urchade/gliner_medium-v2.1"
 GLINER_THRESHOLD = 0.45
 
-# 11 Ghost B entity types. Derived from polymath_local_extractor.py's
-# TYPE_CONSTRAINTS / TYPE_RULES + ghost_b_cascade_infer.py's high-value
-# type pairs. DO NOT REORDER — labels are passed to GLiNER as a list
-# and order can affect zero-shot calibration.
+# Ghost B entity types passed to GLiNER as zero-shot labels. The first 11 are
+# the original locked set (derived from polymath_local_extractor.py's
+# TYPE_CONSTRAINTS / TYPE_RULES + ghost_b_cascade_infer.py's high-value type
+# pairs). Phase A appends Rule, Law, TimeReference to cover the rest of the
+# cloud EntityType schema that GLiREL was trained against.
+#
+# DO NOT REORDER the existing entries — labels are passed to GLiNER as a list
+# and order can affect zero-shot calibration. New types are APPENDED only.
+#
+# NOTE: the cloud EntityType Literal also has "other", but that is the
+# code-level SENTINEL applied when a type can't be pinned down — it is NOT a
+# GLiNER predict label (giving GLiNER "other" makes it tag ambiguous spans as
+# "other", which is noise). So this list has 14 real types; "other" lives only
+# in ghost_b_schemas.EntityType for downstream validation.
 GHOST_B_ENTITY_TYPES: list[str] = [
     "Person",
     "Organization",
@@ -48,7 +58,55 @@ GHOST_B_ENTITY_TYPES: list[str] = [
     "Document",
     "Standard",
     "Event",
+    "Rule",          # Phase A — appended (do not reorder above)
+    "Law",           # Phase A
+    "TimeReference",  # Phase A
 ]
+
+# ---------- GLiNER pass-2 facet vocabulary (object_kind) -------------------
+#
+# Second GLiNER pass over the SAME model: re-tag each unique entity with the
+# open facet vocabulary below to refine the coarse entity_type ("Software")
+# into a fine object_kind ("vector_database"). Drives EntityItem.object_kind.
+# Deduped — runs once per unique canonical_name across the doc.
+#
+# Starting set (refine against the smoke test in A.6). DO NOT REORDER — same
+# zero-shot calibration concern as the entity types above.
+GHOST_B_FACET_VOCAB: list[str] = [
+    "vector_database",
+    "web_framework",
+    "embedding_model",
+    "dataset",
+    "algorithm",
+    "protocol",
+    "language",
+    "game_engine",
+    "library",
+    "framework",
+    "platform",
+    "model",
+    "api",
+    "schema",
+    "format",
+    "plugin",
+    "extension",
+    "package",
+    "runtime",
+    "server",
+    "ide",
+    "compiler",
+    "tool",
+    "service",
+    "database",
+    "ontology",
+    "methodology",
+    "paradigm",
+]
+
+# Facet pass runs a touch looser than entity tagging — the vocab is finer and
+# zero-shot scores run lower. Only assign object_kind when a returned span
+# matches the entity's own surface, so precision stays high regardless.
+GLINER_FACET_THRESHOLD = 0.45
 
 # ---------- Chunker --------------------------------------------------------
 
@@ -106,6 +164,8 @@ def summary() -> dict:
             "model": GLINER_MODEL,
             "threshold": GLINER_THRESHOLD,
             "n_entity_types": len(GHOST_B_ENTITY_TYPES),
+            "facet_threshold": GLINER_FACET_THRESHOLD,
+            "n_facets": len(GHOST_B_FACET_VOCAB),
         },
         "chunker": {
             "target_chars": CHUNKER_TARGET_CHARS,
