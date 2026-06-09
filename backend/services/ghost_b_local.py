@@ -1,0 +1,440 @@
+"""ghost_b_local.py — fully-local, deterministic Ghost B extraction.
+
+Drop-in replacement for `services.ghost_b.extract_entities` in the ingestion
+worker's Ghost B branch. NO cloud LLM, NO SLM, NO network. The output is the
+same `ExtractionResult` dataclass shape the cloud extractor emits, so everything
+downstream (Mongo staging, Neo4j MERGE, Qdrant) is unaffected.
+
+The stack, per chunk:
+  1. GLiNER pass-1  -> entities (14 Ghost B types)          [facet_tagger.get_gliner]
+  2. enrich.py      -> numeric facts + in-text aliases       [deterministic Python]
+  3. enrich.py      -> qualitative facts (status/category/   [deterministic Python]
+                       tag/rule_condition/rule_action)
+  4. GLiREL         -> relations (30 Ghost B predicates,      [glirel_infer]
+                       sentence-windowed, type-gated)
+Then once per doc:
+  5. GLiNER pass-2  -> object_kind facet per UNIQUE entity    [facet_tagger.tag_facets]
+
+Confidence sentinels (locked): GLiNER softmax for entities, GLiREL score for
+relations, 1.0 for the four deterministic fact types, 0.9 for the five
+qualitative ones.
+
+Concurrency: extraction is GPU/CPU-bound synchronous work. We run it in a worker
+thread via asyncio.to_thread so the event loop stays free for the concurrent
+cloud Ghost A (summaries) branch, and serialize model access with a module lock
+(Metal serializes GPU work anyway, and the GLiNER/GLiREL singletons are not
+safe under concurrent forward passes).
+
+Determinism: every stage is a forward pass + threshold or pure-Python regex —
+no sampling — so the same (tasks) input reproduces the same output on a given
+machine.
+
+Runtime requirement: this module must run where MPS (or CPU) torch + the gliner
+and glirel packages + the GLiNER/GLiREL weights are importable — i.e. natively
+on the Mac with the local_ghost_b venv, NOT inside a Linux Docker container
+(no Metal). Heavy imports are deferred to call time so importing this module is
+always cheap and safe.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import sys
+import threading
+from pathlib import Path
+from typing import Any
+
+from pydantic import ValidationError
+
+# These are light (pydantic / re only) and import nothing from services.ghost_b,
+# so they are safe at module load. The heavy / circular-prone imports
+# (services.ghost_b dataclasses, glirel_infer, gliner, torch, pipeline_config)
+# are deferred into the functions below.
+from services.ghost_b_schemas import LLMEntity, LLMFact, LLMRelation
+from services.ingestion.enrich import (
+    extract_aliases,
+    extract_facts,
+    extract_qualitative_facts,
+)
+from services.ingestion.facet_tagger import get_gliner, tag_facets
+
+logger = logging.getLogger(__name__)
+
+SCHEMA_VERSION = "polymath.extract.v1"
+
+# Confidence sentinels (locked decision).
+_FACT_CONF_DETERMINISTIC = 1.0   # quantity / timestamp / threshold / property
+_FACT_CONF_QUALITATIVE = 0.9     # status / category / tag / rule_condition / rule_action
+
+# Serialize all model inference: one thread touches GLiNER/GLiREL at a time.
+_INFER_LOCK = threading.Lock()
+_GLIREL: Any = None  # GliRELClassifier singleton
+
+
+# --------------------------------------------------------------- path / models
+def _repo_root() -> Path:
+    # backend/services/ghost_b_local.py -> parents[2] == repo root
+    return Path(__file__).resolve().parents[2]
+
+
+def _ensure_local_ghost_b_on_path() -> Any:
+    """Put local_ghost_b (and its tools/) on sys.path and return pipeline_config.
+    LOCAL_GHOST_B_DIR overrides the default repo-relative location."""
+    lgb = Path(os.environ.get("LOCAL_GHOST_B_DIR") or (_repo_root() / "local_ghost_b"))
+    for p in (lgb, lgb / "tools"):
+        sp = str(p)
+        if p.exists() and sp not in sys.path:
+            sys.path.insert(0, sp)
+    import pipeline_config  # noqa: E402  (resolved via the inserted path)
+    return pipeline_config
+
+
+def _get_glirel() -> Any:
+    """Lazy, cached fine-tuned GLiREL classifier (sentence-windowed, type-gated)."""
+    global _GLIREL
+    if _GLIREL is not None:
+        return _GLIREL
+    pc = _ensure_local_ghost_b_on_path()
+    import json as _json
+
+    from glirel_infer import GliRELClassifier, pick_device
+
+    root = _repo_root()
+    ckpt = os.environ.get("GLIREL_CKPT_DIR") or str(root / "models" / pc.GLIREL_BUNDLE / "best")
+    labels_path = Path(ckpt) / pc.GLIREL_LABELS_FILE
+    if not labels_path.exists():
+        labels_path = root / "local_ghost_b" / "heads" / pc.GLIREL_BUNDLE / pc.GLIREL_LABELS_FILE
+    labels = _json.loads(Path(labels_path).read_text(encoding="utf-8"))
+    device = pick_device()
+    logger.info("ghost_b_local: loading GLiREL %s on %s (%d labels)", ckpt, device, len(labels))
+    _GLIREL = GliRELClassifier(
+        ckpt, labels, device,
+        threshold=pc.GLIREL_THRESHOLD,
+        max_entities=pc.PAIR_MAX_ENTITIES_PER_CHUNK,
+        max_tokens=pc.GLIREL_MAX_TOKENS_PER_SENTENCE,
+        type_gate=pc.APPLY_TYPE_CONSTRAINTS,
+        danger_guard=pc.APPLY_DANGER_GUARD,
+    )
+    return _GLIREL
+
+
+# ----------------------------------------------------------------- helpers
+def _lens_id(schema_lens: Any) -> str | None:
+    """Best-effort schema_lens id for ExtractionResult.schema_lens_id passthrough."""
+    if schema_lens is None:
+        return None
+    for attr in ("schema_lens_id", "lens_id", "id"):
+        v = getattr(schema_lens, attr, None)
+        if v:
+            return str(v)
+    if isinstance(schema_lens, dict):
+        for k in ("schema_lens_id", "lens_id", "id"):
+            if schema_lens.get(k):
+                return str(schema_lens[k])
+    return None
+
+
+def _dedupe_entities(raw: list[dict], is_junk_surface) -> list[dict]:
+    """Collapse GLiNER hits into one entity per canonical_name, drop junk
+    surfaces, keep the max softmax score as confidence and surface variants as
+    query_aliases.
+
+    Two levels: first by (canonical, type) — like chunk_with_gliner.dedupe_entities
+    but PRESERVING the score (that function drops it) — then a second collapse to
+    one entity per canonical_name, where GLiNER tagged the same surface with two
+    types in different sentences (e.g. Flame as Software AND Organization). The
+    highest-confidence type wins; the other surfaces fold into query_aliases. The
+    cloud lane likewise emits one entity per canonical, and a single entity per
+    name keeps GLiREL span assignment and the Neo4j MERGE clean. Deterministic:
+    GLiNER output order is stable, so insertion order and max()-tie-breaking are
+    reproducible."""
+    by_key: dict[tuple[str, str], dict] = {}
+    for e in raw:
+        surface = (e.get("text") or "").strip()
+        label = e.get("label") or "Concept"
+        if not surface or is_junk_surface(surface, label):
+            continue
+        canonical = surface.lower()
+        key = (canonical, label)
+        score = float(e.get("score") or 0.0)
+        slot = by_key.get(key)
+        if slot is None:
+            by_key[key] = {
+                "canonical_name": canonical,
+                "entity_type": label,
+                "surface_form": surface,
+                "query_aliases": [],
+                "confidence": score,
+            }
+        else:
+            slot["confidence"] = max(slot["confidence"], score)
+            if surface != slot["surface_form"] and surface not in slot["query_aliases"]:
+                slot["query_aliases"].append(surface)
+
+    # second level: one entity per canonical_name (highest-confidence type wins)
+    grouped: dict[str, list[dict]] = {}
+    for slot in by_key.values():
+        grouped.setdefault(slot["canonical_name"], []).append(slot)
+    out: list[dict] = []
+    for canon, slots in grouped.items():
+        rep = max(slots, key=lambda s: s["confidence"])
+        aliases = list(rep["query_aliases"])
+        seen = {rep["surface_form"].lower(), canon}
+        seen.update(a.lower() for a in aliases)
+        for s in slots:
+            for a in (s["surface_form"], *s["query_aliases"]):
+                if a and a.lower() not in seen:
+                    aliases.append(a)
+                    seen.add(a.lower())
+        rep["query_aliases"] = aliases[:5]
+        out.append(rep)
+    return out
+
+
+def _merge_aliases(ent_dicts: list[dict], alias_map: dict[str, list[str]]) -> None:
+    """Fold in-text aliases (Schwartz-Hearst + casing) into each entity dict,
+    cap 5, dedup — so both GLiREL span-location and EntityItem.query_aliases see
+    them."""
+    for d in ent_dicts:
+        canon = d.get("canonical_name") or ""
+        new = alias_map.get(canon) or []
+        if not new:
+            continue
+        existing = {a.lower() for a in (d.get("query_aliases") or []) if a}
+        existing.add((d.get("surface_form") or "").lower())
+        existing.add(canon.lower())
+        merged = list(d.get("query_aliases") or [])
+        for a in new:
+            if isinstance(a, str) and a.lower() not in existing:
+                merged.append(a)
+                existing.add(a.lower())
+        d["query_aliases"] = merged[:5]
+
+
+def _build_entity_items(ent_dicts: list[dict], EntityItem, counters: dict) -> list:
+    items = []
+    for d in ent_dicts:
+        try:
+            cand = LLMEntity(
+                canonical_name=str(d.get("canonical_name") or ""),
+                surface_form=str(d.get("surface_form") or "")[:300],
+                entity_type=d.get("entity_type") or "other",
+                confidence=float(d.get("confidence") or 0.0),
+                query_aliases=[a for a in (d.get("query_aliases") or []) if isinstance(a, str)][:5],
+                object_kind="",  # filled by the doc-level facet pass
+            )
+        except (ValidationError, ValueError, TypeError):
+            counters["entity_drop"] += 1
+            continue
+        items.append(EntityItem(
+            canonical_name=cand.canonical_name,
+            surface_form=cand.surface_form,
+            entity_type=cand.entity_type,
+            confidence=cand.confidence,
+            query_aliases=list(cand.query_aliases),
+            definitional_phrase=cand.definitional_phrase,
+            object_kind=cand.object_kind,
+        ))
+    return items
+
+
+def _build_relation_items(edges: list[dict], RelationItem, counters: dict) -> list:
+    items = []
+    for edge in edges:
+        subj = (edge.get("sub") or "").strip()
+        obj = (edge.get("obj") or "").strip()
+        pred = (edge.get("pred") or "related_to").strip()
+        ev = (edge.get("ev") or "").strip()
+        if not subj or not obj:
+            counters["relation_drop"] += 1
+            continue
+        if not ev:  # Phase B evidence gate — no traceable phrase, drop it
+            counters["evidence_drop"] += 1
+            continue
+        try:
+            cand = LLMRelation(
+                subject=subj, predicate=pred, object=obj,
+                object_kind="entity",  # GLiREL relations are always entity->entity
+                confidence=float(edge.get("score") or 0.0),
+                evidence_phrase=ev[:500], relation_cue="",
+            )
+        except (ValidationError, ValueError, TypeError):
+            counters["relation_drop"] += 1
+            continue
+        items.append(RelationItem(
+            subject=cand.subject, predicate=cand.predicate, object=cand.object,
+            object_kind=cand.object_kind, confidence=cand.confidence,
+            evidence_phrase=cand.evidence_phrase, relation_cue=cand.relation_cue,
+            source_predicate=None, validation_status=None,
+        ))
+    return items
+
+
+def _build_fact_items(fact_dicts: list[dict], confidence: float, FactItem, counters: dict) -> list:
+    items = []
+    for fd in fact_dicts:
+        try:
+            v = LLMFact(
+                subject=str(fd.get("subject") or ""),
+                fact_type=fd.get("fact_type") or "",
+                property_name=str(fd.get("property_name") or "")[:80],
+                value=str(fd.get("value") or "")[:500],
+                unit=str(fd.get("unit") or "")[:40],
+                condition=str(fd.get("condition") or "")[:300],
+                confidence=confidence,
+                evidence_phrase=str(fd.get("evidence_phrase") or "")[:500],
+            )
+        except (ValidationError, ValueError, TypeError):
+            counters["fact_drop"] += 1
+            continue
+        items.append(FactItem(
+            subject=v.subject, fact_type=v.fact_type, property_name=v.property_name,
+            value=v.value, unit=v.unit or None, condition=v.condition or None,
+            confidence=v.confidence, evidence_phrase=v.evidence_phrase,
+        ))
+    return items
+
+
+# --------------------------------------------------------- synchronous core
+def _extract_sync(tasks: list, do_facts: bool, lens_id: str | None) -> list:
+    """The blocking GLiNER+GLiREL+enrich pipeline. Runs in a worker thread under
+    the inference lock. Returns list[ExtractionResult] (one per task, order
+    preserved)."""
+    # Deferred imports (dataclasses + local stack).
+    from services.ghost_b import EntityItem, ExtractionResult, FactItem, RelationItem
+
+    pc = _ensure_local_ghost_b_on_path()
+    from chunk_with_gliner import is_junk_surface
+
+    entity_types = pc.GHOST_B_ENTITY_TYPES
+    gliner_threshold = pc.GLINER_THRESHOLD
+    max_related = pc.MAX_RELATED_TO_PER_CHUNK
+
+    with _INFER_LOCK:
+        gliner = get_gliner()
+        glirel = _get_glirel()
+
+        results: list = []
+        for task in tasks:
+            text = getattr(task, "text", "") or ""
+            counters = {"entity_drop": 0, "relation_drop": 0, "evidence_drop": 0, "fact_drop": 0}
+
+            if text.strip():
+                raw = gliner.predict_entities(text, entity_types, threshold=gliner_threshold)
+                ent_dicts = _dedupe_entities(raw, is_junk_surface)
+            else:
+                ent_dicts = []
+
+            # enrich: aliases always; facts only when enabled.
+            alias_map = extract_aliases(text, ent_dicts) if ent_dicts else {}
+            _merge_aliases(ent_dicts, alias_map)
+
+            entities = _build_entity_items(ent_dicts, EntityItem, counters)
+
+            # relations (GLiREL needs >=2 located entities; extract_chunk no-ops otherwise)
+            relations = []
+            if len(ent_dicts) >= 2:
+                chunk = {
+                    "chunk_id": getattr(task, "chunk_id", ""),
+                    "doc_id": getattr(task, "doc_id", ""),
+                    "text": text,
+                    "entities": ent_dicts,
+                }
+                edges = glirel.extract_chunk(chunk, max_related=max_related)
+                relations = _build_relation_items(edges, RelationItem, counters)
+
+            # facts
+            facts = []
+            if do_facts and ent_dicts and text.strip():
+                facts += _build_fact_items(
+                    extract_facts(text, ent_dicts), _FACT_CONF_DETERMINISTIC, FactItem, counters)
+                facts += _build_fact_items(
+                    extract_qualitative_facts(text, ent_dicts), _FACT_CONF_QUALITATIVE, FactItem, counters)
+
+            results.append(ExtractionResult(
+                schema_version=SCHEMA_VERSION,
+                chunk_id=getattr(task, "chunk_id", ""),
+                doc_id=getattr(task, "doc_id", ""),
+                corpus_id=getattr(task, "corpus_id", ""),
+                entities=entities,
+                relations=relations,
+                facts=facts,
+                text=text,  # Pt 10b — REQUIRED for downstream taxonomy matching
+                relation_drop_count=counters["relation_drop"],
+                entity_drop_count=counters["entity_drop"],
+                evidence_drop_count=counters["evidence_drop"],
+                fact_drop_count=counters["fact_drop"],
+                schema_lens_id=lens_id,
+            ))
+
+        # ---- doc-level GLiNER pass-2: object_kind facet per unique entity ----
+        all_entities = [e for r in results for e in r.entities]
+        if all_entities:
+            context_by_entity: dict[str, str] = {}
+            for r in sorted(results, key=lambda x: x.chunk_id):  # deterministic first-occurrence
+                ctx = (r.text or "")[:1000]
+                if not ctx:
+                    continue
+                for e in r.entities:
+                    canon = (e.canonical_name or "").strip().lower()
+                    if canon and canon not in context_by_entity:
+                        context_by_entity[canon] = ctx
+            try:
+                tag_facets(all_entities, context_by_entity, model=gliner)
+            except Exception as exc:  # noqa: BLE001 — facets are best-effort, never abort
+                logger.warning("ghost_b_local: facet pass failed: %s", exc)
+
+    return results
+
+
+def _metrics(results: list) -> dict:
+    return {
+        "model": "ghost_b_local",
+        "schema_version": SCHEMA_VERSION,
+        "n_chunks": len(results),
+        "n_entities": sum(len(r.entities) for r in results),
+        "n_relations": sum(len(r.relations) for r in results),
+        "n_facts": sum(len(r.facts) for r in results),
+        "entity_drop_count": sum(r.entity_drop_count for r in results),
+        "relation_drop_count": sum(r.relation_drop_count for r in results),
+        "evidence_drop_count": sum(r.evidence_drop_count for r in results),
+        "fact_drop_count": sum(r.fact_drop_count for r in results),
+    }
+
+
+# ----------------------------------------------------------------- entry point
+async def extract_entities(
+    tasks: list,
+    model: str | None = None,
+    schema: Any = None,
+    schema_lens: Any = None,
+    chunk_vectors: dict[str, list[float]] | None = None,
+    schema_resolver: Any = None,
+    *,
+    pool: list[dict] | None = None,
+    return_report: bool = False,
+    enable_facts: bool | None = None,
+    audit_event_sink: Any = None,
+    audit_run_id: str | None = None,
+) -> list:
+    """Local Ghost B extraction. Signature mirrors services.ghost_b.extract_entities
+    so the worker's _b_branch swaps the import with no call-site change.
+
+    Honored: tasks, schema_lens (id passthrough), return_report, enable_facts.
+    Accepted-and-ignored (no LLM in this lane): model, schema, chunk_vectors,
+    schema_resolver, pool, audit_event_sink, audit_run_id.
+    """
+    if not tasks:
+        return []
+
+    do_facts = True if enable_facts is None else bool(enable_facts)
+    lens_id = _lens_id(schema_lens)
+
+    results = await asyncio.to_thread(_extract_sync, list(tasks), do_facts, lens_id)
+
+    if return_report:
+        from services.ghost_b import ExtractionBatchReport
+        return ExtractionBatchReport(results=results, failures=[], metrics=_metrics(results))
+    return results
