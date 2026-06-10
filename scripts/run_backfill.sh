@@ -87,7 +87,7 @@ else
   say_log "corpus: $CORPUS_ID"
   BATCH_ID=$(curl -s -m 60 -X POST "http://localhost:8000/api/corpora/$CORPUS_ID/ingest-batches/local" \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-    -d "{\"root_path\":\"$SOURCE_PATH\",\"recursive\":false,\"extensions\":[\".md\"],\"use_neo4j\":true,\"concurrency\":1}" \
+    -d "{\"root_path\":\"$SOURCE_PATH\",\"recursive\":false,\"extensions\":[\".md\"],\"use_neo4j\":true,\"concurrency\":2}" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['batch_id'])")
   say_log "durable batch: $BATCH_ID"
   printf 'CORPUS_ID=%s\nBATCH_ID=%s\n' "$CORPUS_ID" "$BATCH_ID" > "$STATE"
