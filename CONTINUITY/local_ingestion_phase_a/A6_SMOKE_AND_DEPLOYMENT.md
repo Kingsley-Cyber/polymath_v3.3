@@ -48,35 +48,40 @@ structural reason worth a decision:
   locked A.5 design ("just reroute the import") therefore assumes the worker
   runs **natively on macOS**, not in the Docker container.
 
-### The decision (user-owned — cannot be inferred from code)
+### The decision — RESOLVED 2026-06-09: sidecar (option 2)
 
-**How should the local Ghost B run in production?**
+The original recommendation here was option 1 (native worker). That was
+**reversed** after tracing the deployment: ingestion runs inside the uvicorn
+backend process (`routers/ingestion.py` → `ingestion_service.py` → worker), so
+"native worker" means running the whole backend natively — but `frontend` and
+`cloudflared` hard-depend on the `backend` compose service's healthcheck, and
+the public tunnel routes `api.kingsleylab.xyz -> http://backend:8000` by Docker
+service name. Going native would dismantle a working public deployment. The
+sidecar is the repo's own established pattern (embedder :8082, docling :8500).
 
-1. **Native worker (matches the locked in-process design).** Run the ingestion
-   worker natively on macOS (outside Docker) with the `local_ghost_b` venv (now
-   incl. pydantic). Zero code change beyond Phase A. GLiNER/GLiREL load
-   in-process on MPS. Qdrant/Neo4j/Mongo stay in Docker (they're reachable over
-   localhost). **Recommended** — it's what Phase A already targets and needs no
-   further work.
+**Built and verified same day:**
+- `scripts/apple_ml_services/ghost_b_extract_svc/main.py` — FastAPI sidecar on
+  :8084, runs `ghost_b_local._extract_raw` on MPS, warms models at startup.
+  Runs on `local_ghost_b/.venv` (the pinned ML working set).
+- `ghost_b_local.extract_entities` is now dual-mode: in-process when
+  torch/gliner/glirel import (native scripts/tests), HTTP to the sidecar when
+  they don't (Docker backend). Env: `LOCAL_GHOST_B_EXTRACT_URL` (default
+  `http://host.docker.internal:8084`), `LOCAL_GHOST_B_EXTRACT_MODE`
+  (auto|inproc|http), `LOCAL_GHOST_B_EXTRACT_TIMEOUT_S` (default 600).
+- `start.sh`: `START_GHOST_B_EXTRACT=true` launches it supervised.
+- **Equivalence verified**: sidecar output byte-identical to in-process on real
+  chunks; forced-http dataclass rebuild identical to the in-process path.
+- Bonus: the cross-process comparison exposed a latent determinism bug —
+  `enrich._casing_variants` returned set-ordered aliases (hash-seed dependent,
+  flipped across restarts). Fixed with `sorted()`.
 
-2. **Ghost B sidecar (consistent with embedder/docling).** Wrap
-   `ghost_b_local` in a small FastAPI sidecar on a port, keep the worker in
-   Docker, and have `_b_branch` call it over HTTP. This is a NEW task (a
-   "Phase B"): a sidecar app + changing A.5 from an import reroute to an HTTP
-   client. More moving parts, but keeps the worker containerized.
+### To finish the e2e smoke (next step)
 
-Phase A's locked scope is option 1 (in-process). The code is complete and
-correct for it. Option 2 would be additive future work, not a change to the
-Phase A modules.
-
-### To finish the e2e smoke once the decision is made
-
-- **If native:** start the worker natively (`uvicorn main:app` from `backend/`
-  in the native venv with the local stack deps), ensure embedder :8082 is up
-  (it is), POST `flame_engine_docs_complete.md` to the ingest endpoint, then
-  verify in Neo4j (entities with `object_kind`, relations, facts) and Qdrant
-  (chunk + summary vectors).
-- **If sidecar:** build the sidecar first (new task), then the above.
+Start the sidecar (`START_GHOST_B_EXTRACT=true scripts/apple_ml_services/start.sh`
+or manually via uvicorn), bring up the backend container, POST
+`flame_engine_docs_complete.md` to the ingest endpoint, then verify in Neo4j
+(entities with `object_kind`, relations, facts) and Qdrant (chunk + summary
+vectors).
 
 ## Runtime dependency note
 

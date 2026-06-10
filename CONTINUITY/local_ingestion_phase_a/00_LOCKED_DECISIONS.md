@@ -37,6 +37,14 @@ Every entry here was explicitly confirmed by the user across the build-up sessio
 - No partial-doc / per-doc routing logic (no lanes)
 - No Ghost A local summarizer (user kept it cloud)
 
+## Runtime decision (2026-06-09, user-approved direction: full local extraction)
+
+| decision | locked value | source |
+|---|---|---|
+| Where local Ghost B runs | **native sidecar `ghost_b_extract_svc` on :8084** (pattern-consistent with embedder :8082 / docling :8500); the Dockerized backend calls it over `host.docker.internal`. When the worker itself runs natively (driver scripts, tests), extraction runs **in-process** — `ghost_b_local.extract_entities` auto-detects by probing for torch/gliner/glirel, override via `LOCAL_GHOST_B_EXTRACT_MODE` | feasibility review 2026-06-09: backend container is Linux (no Metal), and `frontend` + `cloudflared` hard-depend on the `backend` compose service (public tunnel routes `api.kingsleylab.xyz -> http://backend:8000` by service name), so running the whole backend natively would dismantle the deployment. Sidecar equivalence test: sidecar output byte-identical to in-process |
+| Ghost A (summaries) | **still cloud API** — reconfirmed | user 2026-06-09: "as a reminder summary will remain cloud api llm calls" |
+| Sidecar venv | `local_ghost_b/.venv` (pinned torch/gliner/glirel + pydantic/fastapi/uvicorn), NOT the shared apple_ml_services venv | avoids re-fighting the huggingface_hub<1.0 / transformers<5 pin battle |
+
 ## Hardware constraint
 
 Mac M1 Max, 32 GB unified RAM, 10-core CPU + 32-core GPU. User confirmed: "24gb of 32gb actually and i agree we will just have to ensure allocation of memory" — but with SLM removed, memory pressure drops significantly. Local Ghost B stack uses ~2.5 GB total (GLiNER 500MB + GLiREL 1.5GB + Python overhead 500MB).
