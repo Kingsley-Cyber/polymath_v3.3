@@ -108,8 +108,13 @@ def _startup() -> None:
 def health() -> dict:
     try:
         import torch
-        device = "mps" if (getattr(torch.backends, "mps", None)
-                           and torch.backends.mps.is_available()) else "cpu"
+        if torch.cuda.is_available():
+            device = f"cuda ({torch.cuda.get_device_name(0)})"
+        elif (getattr(torch.backends, "mps", None)
+              and torch.backends.mps.is_available()):
+            device = "mps"
+        else:
+            device = "cpu"
     except Exception:  # noqa: BLE001
         device = "unavailable"
     try:
