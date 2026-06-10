@@ -10,7 +10,7 @@ in place without a version bump.
 
 from __future__ import annotations
 
-PIPELINE_VERSION = "v1.2026.06b"  # Phase A: +3 entity types, +facet vocab (GLiNER pass-2)
+PIPELINE_VERSION = "v1.2026.06c"  # noise-proofing: entity floor + generic blocklist
 
 # ---------- DEFAULT CLASSIFIER (LOCAL_GHOST_B_CLASSIFIER) ----------------
 #
@@ -107,6 +107,62 @@ GHOST_B_FACET_VOCAB: list[str] = [
 # zero-shot scores run lower. Only assign object_kind when a returned span
 # matches the entity's own surface, so precision stays high regardless.
 GLINER_FACET_THRESHOLD = 0.45
+
+# ---------- Entity noise gates (post-GLiNER, pre-validation) ----------------
+#
+# Two deterministic precision gates applied after dedup in ghost_b_local:
+#
+# 1. FLOOR: drop an entity when its best GLiNER score is below the floor AND
+#    the surface is a single all-lowercase word — low-confidence lowercase
+#    singles are where GLiNER's generic-noun mistags live ("engine" @0.49,
+#    "game" @0.64). Proper nouns ("World" — a real Flame class), acronyms,
+#    and multi-word names are exempt regardless of score.
+GLINER_ENTITY_CONF_FLOOR = 0.55
+
+# 2. BLOCKLIST: single-word canonicals that are never a queryable entity on
+#    their own, at any confidence. Multi-word names containing them survive
+#    ("flame component system" stays; bare "components" dies). Generous on
+#    purpose — graph cleanliness beats marginal recall, and the taxonomy /
+#    facet layers still capture the concept via the multi-word forms.
+GENERIC_ENTITY_BLOCKLIST: frozenset[str] = frozenset({
+    # discourse / document furniture
+    "way", "kind", "type", "sort", "thing", "things", "stuff", "lot", "bit",
+    "piece", "pieces", "part", "parts", "set", "sets", "group", "groups",
+    "number", "numbers", "example", "examples", "sample", "samples",
+    "overview", "introduction", "summary", "section", "sections", "page",
+    "pages", "content", "contents", "item", "items", "list", "lists",
+    "table", "tables", "figure", "figures", "image", "images", "note",
+    "notes", "tip", "tips", "step", "steps", "guide", "guides", "tutorial",
+    "tutorials", "documentation", "docs", "doc", "article", "articles",
+    "post", "posts", "blog", "book", "books", "chapter", "chapters",
+    "paper", "papers", "report", "reports", "detail", "details",
+    "description", "information", "info", "question", "questions",
+    "answer", "answers",
+    # generic tech nouns (the multi-word forms carry the signal)
+    "system", "systems", "engine", "engines", "game", "games", "world",
+    "application", "applications", "app", "apps", "project", "projects",
+    "tool", "tools", "library", "libraries", "framework", "frameworks",
+    "platform", "platforms", "service", "services", "component",
+    "components", "module", "modules", "function", "functions", "method",
+    "methods", "class", "classes", "object", "objects", "feature",
+    "features", "version", "versions", "release", "releases", "update",
+    "updates", "model", "models", "software", "hardware", "product",
+    "products", "device", "devices", "machine", "machines", "computer",
+    "computers", "server", "servers", "database", "databases", "network",
+    "networks", "language", "languages", "code", "data", "file", "files",
+    "folder", "folders", "directory", "directories", "website", "site",
+    "web", "internet", "online", "user", "users", "team", "teams",
+    "community", "support", "help", "process", "processes", "task",
+    "tasks", "job", "jobs", "work", "action", "actions", "event",
+    "events", "result", "results", "output", "outputs", "input",
+    "inputs", "value", "values", "name", "names", "text", "word",
+    "words", "line", "lines", "field", "fields", "form", "forms",
+    "term", "terms", "point", "points", "case", "cases", "issue",
+    "issues", "error", "errors", "problem", "problems", "change",
+    "changes", "state", "states", "status", "level", "levels", "order",
+    "time", "times", "day", "days", "year", "years", "place", "area",
+    "areas", "region", "regions", "people", "person", "study", "studies",
+})
 
 # ---------- Chunker --------------------------------------------------------
 

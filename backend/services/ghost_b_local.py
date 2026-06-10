@@ -73,6 +73,7 @@ from pydantic import ValidationError
 from services.ghost_b_schemas import LLMEntity, LLMFact, LLMRelation
 from services.ingestion.enrich import (
     extract_aliases,
+    extract_definitional_phrases,
     extract_facts,
     extract_qualitative_facts,
 )
@@ -250,6 +251,30 @@ def _dedupe_entities(raw: list[dict], is_junk_surface) -> list[dict]:
     return out
 
 
+def _noise_gate(ent_dicts: list[dict], pc: Any, counters: dict) -> list[dict]:
+    """Deterministic entity precision gates (see pipeline_config):
+    blocklisted single-word generics die at any confidence; low-confidence
+    all-lowercase single words die below GLINER_ENTITY_CONF_FLOOR. Multi-word
+    names and proper-cased surfaces are exempt from the floor."""
+    floor = pc.GLINER_ENTITY_CONF_FLOOR
+    blocklist = pc.GENERIC_ENTITY_BLOCKLIST
+    out = []
+    for d in ent_dicts:
+        canon = d.get("canonical_name") or ""
+        surface = d.get("surface_form") or canon
+        if canon in blocklist:
+            counters["entity_drop"] += 1
+            continue
+        if (float(d.get("confidence") or 0.0) < floor
+                and " " not in canon
+                and surface.isalpha()
+                and surface == surface.lower()):
+            counters["entity_drop"] += 1
+            continue
+        out.append(d)
+    return out
+
+
 def _merge_aliases(ent_dicts: list[dict], alias_map: dict[str, list[str]]) -> None:
     """Fold in-text aliases (Schwartz-Hearst + casing) into each entity dict,
     cap 5, dedup — so both GLiREL span-location and EntityItem.query_aliases see
@@ -346,7 +371,7 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
     sidecar can serve it from the local_ghost_b venv. One result dict per task,
     order preserved; entities/relations/facts are already Pydantic-validated."""
     pc = _ensure_local_ghost_b_on_path()
-    from chunk_with_gliner import is_junk_surface
+    from chunk_with_gliner import is_junk_surface, strip_noise
 
     entity_types = pc.GHOST_B_ENTITY_TYPES
     gliner_threshold = pc.GLINER_THRESHOLD
@@ -357,19 +382,31 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
         glirel = _get_glirel()
 
         results: list[dict] = []
+        defs_by_chunk: list[tuple[str, dict[str, str]]] = []  # (chunk_id, canon -> sentence)
         for task in task_dicts:
             text = task["text"]
             counters = {"entity_drop": 0, "relation_drop": 0, "evidence_drop": 0, "fact_drop": 0}
 
             if text.strip():
-                raw = gliner.predict_entities(text, entity_types, threshold=gliner_threshold)
-                ent_dicts = _dedupe_entities(raw, is_junk_surface)
+                # GLiNER sees the chunk with inline code / URLs / md links
+                # stripped (junk-entity source); everything downstream — facts,
+                # evidence, GLiREL spans, storage — stays on the RAW text so
+                # values remain verbatim. strip_noise only removes content, so
+                # any surface found on the stripped text exists in raw too.
+                raw = gliner.predict_entities(
+                    strip_noise(text), entity_types, threshold=gliner_threshold)
+                ent_dicts = _noise_gate(
+                    _dedupe_entities(raw, is_junk_surface), pc, counters)
             else:
                 ent_dicts = []
 
             # enrich: aliases always; facts only when enabled.
             alias_map = extract_aliases(text, ent_dicts) if ent_dicts else {}
             _merge_aliases(ent_dicts, alias_map)
+            if ent_dicts:
+                defs = extract_definitional_phrases(text, ent_dicts)
+                if defs:
+                    defs_by_chunk.append((task["chunk_id"], defs))
 
             entities = _validated_entities(ent_dicts, counters)
 
@@ -409,10 +446,25 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
                 "schema_lens_id": lens_id,
             })
 
+        # ---- doc-level: definitional phrases (first definition wins) ---------
+        doc_defs: dict[str, str] = {}
+        for _cid, defs in sorted(defs_by_chunk, key=lambda x: x[0]):  # deterministic
+            for canon, sent in defs.items():
+                doc_defs.setdefault(canon, sent)
+        if doc_defs:
+            for r in results:
+                for e in r["entities"]:
+                    canon = (e.get("canonical_name") or "").strip().lower()
+                    if canon in doc_defs and not e.get("definitional_phrase"):
+                        e["definitional_phrase"] = doc_defs[canon]
+
         # ---- doc-level GLiNER pass-2: object_kind facet per unique entity ----
         all_entities = [e for r in results for e in r["entities"]]
         if all_entities:
-            context_by_entity: dict[str, str] = {}
+            # Context preference: the entity's defining sentence ("X is a Y…")
+            # beats the first-occurrence chunk — it's exactly the construction
+            # the facet vocabulary keys on, and it ignores surrounding noise.
+            context_by_entity: dict[str, str] = dict(doc_defs)
             for r in sorted(results, key=lambda x: x["chunk_id"]):  # deterministic first-occurrence
                 ctx = (r["text"] or "")[:1000]
                 if not ctx:

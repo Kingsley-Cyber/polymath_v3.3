@@ -75,6 +75,9 @@ CUES: dict[str, re.Pattern] = {
         r"may not|prohibited)\b", re.I),
 }
 
+# property values that are syntactically valid but semantically empty.
+_JUNK_PROPERTY_VALUES = {"true", "false", "yes", "no", "null", "none", "n/a", "na", "-", "tbd"}
+
 # number + optional unit, used to pull the concrete value for quantity/threshold/timestamp
 _NUM_UNIT = re.compile(
     r"\d[\d,]*\.?\d*\s?(?:%|x|[KMGT]B|ms|sec|seconds?|min(?:ute)?s?|hours?|days?|tokens?|"
@@ -85,6 +88,30 @@ _YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
 
 def norm(s) -> str:
     return _WS.sub(" ", str(s or "")).strip()
+
+
+_MD_HEADING = re.compile(r"^#{1,6}\s")
+
+
+def _sentences(text: str) -> list[str]:
+    """Sentence units for cue matching: split on newlines FIRST, drop markdown
+    heading lines, then split each line on sentence punctuation.
+
+    Splitting `norm(text)` directly (the old way) collapsed newlines before
+    sentence-splitting, so a run of punctuation-free heading lines glued into
+    one giant pseudo-sentence ("# Getting Started ## About Flame Flame is a
+    …") — polluting subjects, evidence phrases, and definitional capture on
+    heading-heavy chunks."""
+    out: list[str] = []
+    for line in (text or "").split("\n"):
+        line = line.strip()
+        if not line or _MD_HEADING.match(line):
+            continue
+        for s in _SENT.split(norm(line)):
+            s = s.strip()
+            if s:
+                out.append(s)
+    return out
 
 
 def qualitative_cue_hits(text: str) -> set[str]:
@@ -216,7 +243,7 @@ def extract_facts(text: str, entities: list[dict]) -> list[dict]:
     """Deterministic facts (quantity/timestamp/threshold/property) attached to the nearest
     in-sentence entity. Returns LLMFact-shaped dicts; the caller validates against LLMFact."""
     facts = []
-    for sent in _SENT.split(norm(text)):
+    for sent in _sentences(text):
         ent_pos = _entity_positions(sent, entities)
         if not ent_pos:
             continue
@@ -242,11 +269,15 @@ def extract_facts(text: str, entities: list[dict]) -> list[dict]:
         # timestamp: years / dates
         for m in _YEAR.finditer(sent):
             add("timestamp", m, m.group(0), prop="year")
-        # property: key: value / key = value
+        # property: key: value / key = value. Bare boolean/null tokens carry no
+        # queryable signal ("default: true" -> property 'true') — skip them.
         for m in CUES["property"].finditer(sent):
             kv = re.split(r"[:=]", m.group(0), 1)
             if len(kv) == 2:
-                add("property", m, kv[1].strip(), prop=kv[0].strip().lower())
+                val = kv[1].strip()
+                if val.strip(" .,;").lower() in _JUNK_PROPERTY_VALUES:
+                    continue
+                add("property", m, val, prop=kv[0].strip().lower())
     # dedupe identical facts
     seen, uniq = set(), []
     for f in facts:
@@ -353,7 +384,7 @@ def extract_qualitative_facts(text: str, entities: list[dict]) -> list[dict]:
     `tag` cue anchors to."""
     facts: list[dict] = []
 
-    for sent in _SENT.split(norm(text)):
+    for sent in _sentences(text):
         sent = sent.strip()
         if not sent:
             continue
@@ -431,14 +462,41 @@ def extract_qualitative_facts(text: str, entities: list[dict]) -> list[dict]:
     return uniq
 
 
+def extract_definitional_phrases(text: str, entities: list[dict]) -> dict[str, str]:
+    """canonical_name -> one defining sentence, deterministically.
+
+    A sentence defines an entity when the category cue fires ("X is a/an Y",
+    "classified as", ...) with that entity as the preceding subject — the same
+    detection the category fact uses. First such sentence wins. Feeds
+    EntityItem.definitional_phrase (cloud-parity field rendered in chat
+    provenance; max 200 chars per LLMEntity) and doubles as the highest-signal
+    context for the GLiNER facet pass."""
+    out: dict[str, str] = {}
+    for sent in _sentences(text):
+        sent = sent.strip()
+        if not sent:
+            continue
+        m = CUES["category"].search(sent)
+        if not m:
+            continue
+        ent_pos = _entity_positions(sent, entities)
+        if not ent_pos:
+            continue
+        subj = _preceding_subject(m.start(), ent_pos)
+        if subj and subj not in out:
+            out[subj] = sent[:200]
+    return out
+
+
 def extract(text: str, entities: list[dict]) -> dict:
     """Local Ghost B enrichment entry point for one chunk: deterministic numeric
-    facts, qualitative facts, and in-text aliases. The two fact lists stay
-    separate so the caller can stamp the right confidence sentinel on each
-    (1.0 numeric, 0.9 qualitative)."""
+    facts, qualitative facts, in-text aliases, and definitional phrases. The two
+    fact lists stay separate so the caller can stamp the right confidence
+    sentinel on each (1.0 numeric, 0.9 qualitative)."""
     return {"facts": extract_facts(text, entities),
             "qualitative_facts": extract_qualitative_facts(text, entities),
-            "aliases": extract_aliases(text, entities)}
+            "aliases": extract_aliases(text, entities),
+            "definitional_phrases": extract_definitional_phrases(text, entities)}
 
 
 if __name__ == "__main__":
