@@ -145,4 +145,5 @@ def extract(body: ExtractIn) -> dict:
     except Exception as exc:  # noqa: BLE001
         logger.exception("extract failed (%d tasks)", len(task_dicts))
         raise HTTPException(status_code=500, detail=f"extraction failed: {exc}") from exc
-    return {"results": raw, "metrics": _metrics(raw)}
+    from services.ghost_b_local import LAST_TIMINGS
+    return {"results": raw, "metrics": _metrics(raw), "timings": dict(LAST_TIMINGS)}

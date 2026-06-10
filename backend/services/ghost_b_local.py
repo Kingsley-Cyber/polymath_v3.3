@@ -96,6 +96,7 @@ _INFER_LOCK = threading.Lock()
 _GLIREL: Any = None        # GliRELClassifier singleton (GPU/MPS)
 _GLIREL_CPU: Any = None    # second instance on CPU — the otherwise-idle cores
 _ML_AVAILABLE: bool | None = None  # cached import probe
+LAST_TIMINGS: dict = {}    # stage split of the most recent _extract_raw call
 
 # Dual-lane GLiREL (default OFF — measured null on Apple Silicon). Theory: the
 # idle 10-core CPU runs DeBERTa at ~half MPS speed, so a parallel CPU lane
@@ -108,17 +109,26 @@ _ML_AVAILABLE: bool | None = None  # cached import probe
 GLIREL_CPU_LANE = os.environ.get("GHOST_B_GLIREL_CPU_LANE", "0").strip().lower() in (
     "1", "true", "yes", "on")
 
-SIDECAR_URL = os.environ.get(
-    "LOCAL_GHOST_B_EXTRACT_URL", "http://host.docker.internal:8084"
-).rstrip("/")
+# Comma-separated list fans work across MULTIPLE sidecar instances — on a
+# 96 GB CUDA box, N processes (~3.7 GB each) parallelize the GIL-bound Python
+# preprocessing that a single process serializes (the GLiNER stage stayed
+# CPU-bound after GPU batching), each with its own CUDA stream.
+SIDECAR_URLS = [
+    u.strip().rstrip("/")
+    for u in os.environ.get(
+        "LOCAL_GHOST_B_EXTRACT_URL", "http://host.docker.internal:8084"
+    ).split(",")
+    if u.strip()
+]
+SIDECAR_URL = SIDECAR_URLS[0]  # back-compat for error messages
 # Per-REQUEST ceiling. Requests are sliced to SIDECAR_SLICE chunks, so this
 # bounds one slice, not a whole book — the pilot's 932 KB doc (~1800 chunks in
 # one request) blew the old 600 s whole-doc ceiling at per-chunk speeds.
 SIDECAR_TIMEOUT_S = float(os.environ.get("LOCAL_GHOST_B_EXTRACT_TIMEOUT_S", "1800"))
-# 2048-chunk slices keep most BOOKS single-slice, so the per-doc facet/
-# definitional dedup sees the whole document (multi-slice docs re-predict
-# overlapping unique entities per slice — wasted GPU on exactly the docs that
-# can least afford it).
+# 2048-chunk slices keep most BOOKS single-slice when ONE sidecar serves, so
+# the per-doc facet/definitional dedup sees the whole document. With multiple
+# sidecars the doc is split to keep every instance busy (the per-slice facet
+# re-prediction overlap is the accepted price of N-way parallelism).
 SIDECAR_SLICE = max(1, int(os.environ.get("LOCAL_GHOST_B_EXTRACT_SLICE", "2048")))
 EXTRACT_MODE = os.environ.get("LOCAL_GHOST_B_EXTRACT_MODE", "auto").strip().lower()
 
@@ -621,6 +631,19 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
             t_glirel - t_cpu, t_facet - t_glirel,
             (t_facet - t0) * 1000 / max(1, n),
         )
+        # Exposed in the sidecar's /extract response so remote callers can
+        # see the stage split without log access (single-writer: we hold
+        # _INFER_LOCK).
+        LAST_TIMINGS.clear()
+        LAST_TIMINGS.update({
+            "chunks": n,
+            "total_s": round(t_facet - t0, 2),
+            "gliner_s": round(t_gliner - t0, 2),
+            "cpu_s": round(t_cpu - t_gliner, 2),
+            "glirel_s": round(t_glirel - t_cpu, 2),
+            "facts_facets_s": round(t_facet - t_glirel, 2),
+            "ms_per_chunk": round((t_facet - t0) * 1000 / max(1, n)),
+        })
 
     return results
 
@@ -701,36 +724,68 @@ def _metrics(raw: list[dict]) -> dict:
 
 # ------------------------------------------------------------- http client
 async def _extract_via_sidecar(task_dicts: list[dict], do_facts: bool, lens_id: str | None) -> list[dict]:
-    """POST the doc's tasks to the native ghost_b_extract sidecar in slices of
-    SIDECAR_SLICE chunks and return the concatenated raw wire dicts. Slicing
-    bounds request size/timeout for book-scale docs (a 932 KB pilot doc was
-    ~1800 chunks — one request blew the whole-doc timeout). Most docs fit one
-    slice; for sliced docs the doc-level facet/definitional passes run per
-    slice, so a definition appearing in a LATER slice won't backfill entities
-    in an earlier one — an accepted, narrow trade on 512+-chunk books (the
-    cloud lane had no doc-level pass at all). Raises on any failure —
+    """POST the doc's tasks to the ghost_b_extract sidecar(s) and return the
+    concatenated raw wire dicts, order preserved.
+
+    Slicing bounds request size/timeout for book-scale docs. With ONE sidecar,
+    slices go sequentially (SIDECAR_SLICE keeps most docs single-slice so the
+    doc-level facet/definitional dedup sees the whole document). With MULTIPLE
+    sidecars (comma-separated LOCAL_GHOST_B_EXTRACT_URL), the doc is split so
+    every instance works in parallel — slices dispatch round-robin and run
+    concurrently. Per-slice facet re-prediction overlap and lost cross-slice
+    definitional backfill are the accepted price of N-way parallelism (the
+    cloud lane had no doc-level pass at all). Timing dicts from each slice
+    response are logged for remote stage diagnosis. Raises on any failure —
     extraction is the pipeline, not an optional enrichment."""
+    import asyncio as _asyncio
+
     import httpx
 
-    results: list[dict] = []
+    n_urls = len(SIDECAR_URLS)
+    slice_size = SIDECAR_SLICE
+    if n_urls > 1 and task_dicts:
+        # Split the doc across instances, but never below 64 chunks per slice
+        # (tiny slices waste batching) and never above SIDECAR_SLICE.
+        per_url = -(-len(task_dicts) // n_urls)  # ceil
+        slice_size = max(64, min(SIDECAR_SLICE, per_url))
+
+    slices = [task_dicts[s:s + slice_size]
+              for s in range(0, len(task_dicts), slice_size)]
+
+    async def _post_slice(client: httpx.AsyncClient, idx: int, sl: list[dict]) -> list[dict]:
+        url = SIDECAR_URLS[idx % n_urls]
+        resp = await client.post(
+            f"{url}/extract",
+            json={"tasks": sl, "enable_facts": do_facts, "schema_lens_id": lens_id},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        t = data.get("timings")
+        if t:
+            logger.info("ghost_b_local: sidecar %s slice %d -> %s", url, idx, t)
+        return list(data.get("results") or [])
+
     try:
         async with httpx.AsyncClient(timeout=SIDECAR_TIMEOUT_S) as client:
-            for start in range(0, len(task_dicts), SIDECAR_SLICE):
-                sl = task_dicts[start:start + SIDECAR_SLICE]
-                resp = await client.post(
-                    f"{SIDECAR_URL}/extract",
-                    json={"tasks": sl, "enable_facts": do_facts,
-                          "schema_lens_id": lens_id},
-                )
-                resp.raise_for_status()
-                results.extend(resp.json().get("results") or [])
+            if n_urls == 1:
+                out: list[list[dict]] = []
+                for i, sl in enumerate(slices):
+                    out.append(await _post_slice(client, i, sl))
+            else:
+                out = list(await _asyncio.gather(
+                    *(_post_slice(client, i, sl) for i, sl in enumerate(slices))
+                ))
     except Exception as exc:
         raise RuntimeError(
-            f"ghost_b_local: extract sidecar at {SIDECAR_URL} failed "
-            f"({type(exc).__name__}: {exc}). Start it via "
+            f"ghost_b_local: extract sidecar(s) {SIDECAR_URLS} failed "
+            f"({type(exc).__name__}: {exc}). Start via "
             "scripts/apple_ml_services/start.sh (START_GHOST_B_EXTRACT=true) "
             "or run the worker natively where torch/gliner/glirel are importable."
         ) from exc
+
+    results: list[dict] = []
+    for r in out:
+        results.extend(r)
     return results
 
 
