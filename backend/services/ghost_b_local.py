@@ -89,10 +89,24 @@ SCHEMA_VERSION = "polymath.extract.v1"
 _FACT_CONF_DETERMINISTIC = 1.0   # quantity / timestamp / threshold / property
 _FACT_CONF_QUALITATIVE = 0.9     # status / category / tag / rule_condition / rule_action
 
-# Serialize all model inference: one thread touches GLiNER/GLiREL at a time.
+# Serialize all model inference: one REQUEST holds the models at a time. The
+# dual-lane GLiREL below runs two threads INSIDE the locked region (one MPS,
+# one CPU) — that's intra-request parallelism, not concurrent requests.
 _INFER_LOCK = threading.Lock()
-_GLIREL: Any = None        # GliRELClassifier singleton
+_GLIREL: Any = None        # GliRELClassifier singleton (GPU/MPS)
+_GLIREL_CPU: Any = None    # second instance on CPU — the otherwise-idle cores
 _ML_AVAILABLE: bool | None = None  # cached import probe
+
+# Dual-lane GLiREL (default OFF — measured null on Apple Silicon). Theory: the
+# idle 10-core CPU runs DeBERTa at ~half MPS speed, so a parallel CPU lane
+# should add ~1.5x. Measured: 420 -> 428 ms/chunk — NO gain. Together with
+# fp16 measuring 0.99x and MPS being only 2.1x CPU, the consistent explanation
+# is that unified-memory BANDWIDTH (~400 GB/s shared by CPU+GPU) is the
+# binding constraint for DeBERTa-large inference on this machine; parallel
+# engines split the same bandwidth. Kept env-gated for hardware where the
+# lanes have separate memory.
+GLIREL_CPU_LANE = os.environ.get("GHOST_B_GLIREL_CPU_LANE", "0").strip().lower() in (
+    "1", "true", "yes", "on")
 
 SIDECAR_URL = os.environ.get(
     "LOCAL_GHOST_B_EXTRACT_URL", "http://host.docker.internal:8084"
@@ -142,15 +156,11 @@ def _ml_stack_available() -> bool:
     return _ML_AVAILABLE
 
 
-def _get_glirel() -> Any:
-    """Lazy, cached fine-tuned GLiREL classifier (sentence-windowed, type-gated)."""
-    global _GLIREL
-    if _GLIREL is not None:
-        return _GLIREL
+def _build_glirel(device: str) -> Any:
     pc = _ensure_local_ghost_b_on_path()
     import json as _json
 
-    from glirel_infer import GliRELClassifier, pick_device
+    from glirel_infer import GliRELClassifier
 
     root = _repo_root()
     ckpt = os.environ.get("GLIREL_CKPT_DIR") or str(root / "models" / pc.GLIREL_BUNDLE / "best")
@@ -158,9 +168,8 @@ def _get_glirel() -> Any:
     if not labels_path.exists():
         labels_path = root / "local_ghost_b" / "heads" / pc.GLIREL_BUNDLE / pc.GLIREL_LABELS_FILE
     labels = _json.loads(Path(labels_path).read_text(encoding="utf-8"))
-    device = pick_device()
     logger.info("ghost_b_local: loading GLiREL %s on %s (%d labels)", ckpt, device, len(labels))
-    _GLIREL = GliRELClassifier(
+    return GliRELClassifier(
         ckpt, labels, device,
         threshold=pc.GLIREL_THRESHOLD,
         max_entities=pc.PAIR_MAX_ENTITIES_PER_CHUNK,
@@ -168,7 +177,32 @@ def _get_glirel() -> Any:
         type_gate=pc.APPLY_TYPE_CONSTRAINTS,
         danger_guard=pc.APPLY_DANGER_GUARD,
     )
+
+
+def _get_glirel() -> Any:
+    """Lazy, cached fine-tuned GLiREL classifier (sentence-windowed, type-gated)."""
+    global _GLIREL
+    if _GLIREL is None:
+        from glirel_infer import pick_device
+        _GLIREL = _build_glirel(pick_device())
     return _GLIREL
+
+
+def _get_glirel_cpu() -> Any | None:
+    """Second GLiREL on the CPU cores (dual-lane). None when the GPU lane IS
+    the CPU (no point doubling) or the lane is disabled."""
+    global _GLIREL_CPU
+    if not GLIREL_CPU_LANE:
+        return None
+    gpu = _get_glirel()
+    if getattr(gpu, "device", "cpu") == "cpu":
+        return None
+    if _GLIREL_CPU is None:
+        import torch
+        # Leave cores for the embedder/uvicorn/IO; 8 of 10 for the lane.
+        torch.set_num_threads(max(1, min(8, (os.cpu_count() or 8) - 2)))
+        _GLIREL_CPU = _build_glirel("cpu")
+    return _GLIREL_CPU
 
 
 # ----------------------------------------------------------------- helpers
@@ -465,20 +499,45 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
         t_cpu = _time.time()
 
         # ---- Stage C: GLiREL, sentence units batched across chunks ---------
+        # Dual-lane: 2 of every 3 relation-bearing chunks go to the GPU
+        # classifier, the rest to a CPU instance running in a parallel thread
+        # (torch releases the GIL during forwards). Assignment is positional,
+        # so lane placement is deterministic per doc.
         rel_idx = [i for i in range(n)
                    if not is_table_flags[i] and len(ents_per_task[i]) >= 2]
         relations_per_task: list[list[dict]] = [[] for _ in range(n)]
         if rel_idx:
-            chunks = [{
-                "chunk_id": task_dicts[i]["chunk_id"],
-                "doc_id": task_dicts[i]["doc_id"],
-                "text": task_dicts[i]["text"],
-                "entities": ents_per_task[i],
-            } for i in rel_idx]
-            edge_lists = glirel.extract_chunks(
-                chunks, max_related=max_related, unit_batch=glirel_ub)
-            for i, edges in zip(rel_idx, edge_lists):
-                relations_per_task[i] = _validated_relations(edges, counters_per[i])
+            def chunk_of(i: int) -> dict:
+                return {
+                    "chunk_id": task_dicts[i]["chunk_id"],
+                    "doc_id": task_dicts[i]["doc_id"],
+                    "text": task_dicts[i]["text"],
+                    "entities": ents_per_task[i],
+                }
+
+            glirel_cpu = _get_glirel_cpu()
+            if glirel_cpu is not None and len(rel_idx) >= 12:
+                gpu_idx = [i for k, i in enumerate(rel_idx) if k % 3 != 2]
+                cpu_idx = [i for k, i in enumerate(rel_idx) if k % 3 == 2]
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    f_gpu = pool.submit(
+                        glirel.extract_chunks, [chunk_of(i) for i in gpu_idx],
+                        max_related, glirel_ub)
+                    f_cpu = pool.submit(
+                        glirel_cpu.extract_chunks, [chunk_of(i) for i in cpu_idx],
+                        max_related, glirel_ub)
+                    for idx_list, edge_lists in ((gpu_idx, f_gpu.result()),
+                                                 (cpu_idx, f_cpu.result())):
+                        for i, edges in zip(idx_list, edge_lists):
+                            relations_per_task[i] = _validated_relations(
+                                edges, counters_per[i])
+            else:
+                edge_lists = glirel.extract_chunks(
+                    [chunk_of(i) for i in rel_idx],
+                    max_related=max_related, unit_batch=glirel_ub)
+                for i, edges in zip(rel_idx, edge_lists):
+                    relations_per_task[i] = _validated_relations(edges, counters_per[i])
         t_glirel = _time.time()
 
         # ---- Stage D: facts (pure Python) -----------------------------------
