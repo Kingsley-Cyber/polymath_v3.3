@@ -16,7 +16,16 @@ services:
       # the Mac sidecar: comment this line out, start the local sidecar
       # (START_GHOST_B_EXTRACT=true scripts/apple_ml_services/start.sh), and
       # `docker compose up -d backend`. Queries never touch this.
+      # Single instance for now; swap to the 6-instance fleet line once the
+      # RTX agent confirms all are warm (round-robin to a down port fails
+      # requests — never list more URLs than are actually serving):
+      # LOCAL_GHOST_B_EXTRACT_URL: http://192.168.1.83:8084,http://192.168.1.83:8085,http://192.168.1.83:8086,http://192.168.1.83:8087,http://192.168.1.83:8088,http://192.168.1.83:8089
       LOCAL_GHOST_B_EXTRACT_URL: http://192.168.1.83:8084
+      # Docs in flight through extraction (default 1 serialized everything).
+      # With an N-instance RTX fleet, small docs can't feed the fleet alone —
+      # several docs in flight keep all instances busy while the Mac embeds
+      # completed ones. Memory cost per extra doc ≈ its chunks in RAM (small).
+      EXTRACTION_MAX_ACTIVE_DOCS: "4"
       # Native Qwen3-Reranker-0.6B cross-encoder (llama.cpp on Metal, :8081,
       # LaunchAgent com.polymath.reranker-qwen3) — final ranking stage of
       # retrieval (step 6). Probe quality 8/8 with 0.93+ score separation vs
