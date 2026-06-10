@@ -455,6 +455,20 @@ class TokenBudget(BaseModel):
     max_tokens: int = Field(default=2000, ge=500)
 
 
+class ChildTokenBudget(TokenBudget):
+    """TokenBudget with floors low enough for small-child chunking.
+
+    The shared TokenBudget floors (100/200/500) are parent-scale sanity rails;
+    they made the 100–150-token child range — better retrieval precision on
+    cross-domain corpora, and the band the local GLiNER/GLiREL stack was
+    validated on — unrepresentable. Same wire shape; only the floors differ.
+    Pre-existing corpora (128/500/700) validate unchanged."""
+
+    min_tokens: int = Field(default=64, ge=32)
+    target_tokens: int = Field(default=128, ge=64)
+    max_tokens: int = Field(default=256, ge=128)
+
+
 class AuthConfig(BaseModel):
     """Auth settings — masked in API responses."""
 
@@ -735,14 +749,17 @@ class IngestionConfig(BaseModel):
         ),
         description="Parent chunk token range",
     )
-    child_chunk_tokens: TokenBudget = Field(
-        default_factory=lambda: TokenBudget(
-            min_tokens=128, target_tokens=500, max_tokens=700
+    child_chunk_tokens: ChildTokenBudget = Field(
+        default_factory=lambda: ChildTokenBudget(
+            min_tokens=64, target_tokens=128, max_tokens=256
         ),
         description=(
-            "Child chunk token range. Cap at 700 to keep extraction prompts "
-            "small and stay well under the Qwen3-Embedding-0.6B 1024-token "
-            "ceiling. Raising max_tokens above 900 risks silent truncation."
+            "Child chunk token range. Default 128-token targets: higher "
+            "retrieval precision on cross-domain corpora (small-to-big — the "
+            "retriever dedupes by parent_id and hydrates parent text), and "
+            "the band the local GLiNER/GLiREL extraction stack was validated "
+            "on. Keep max_tokens well under the Qwen3-Embedding-0.6B "
+            "1024-token ceiling; above 900 risks silent truncation."
         ),
     )
     chunk_overlap: int = Field(default=200, description="Overlap between parent chunks")

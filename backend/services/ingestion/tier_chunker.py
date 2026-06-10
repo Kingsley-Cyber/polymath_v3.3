@@ -42,7 +42,13 @@ def _embedder_safe_max_tokens() -> int:
 
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
 PARENT_TARGET_TOKENS = 1200
-CHILD_TARGET_TOKENS = 350
+# 128-token children (was 350): higher vector-retrieval precision on
+# cross-domain corpora — recall is preserved by small-to-big (the retriever
+# dedupes by parent_id and hydrates parent text) — and it's the band the
+# local GLiNER/GLiREL extraction stack was validated on. Mirrors the
+# ChildTokenBudget defaults in models/_schemas_legacy.py; corpus config wins
+# when present.
+CHILD_TARGET_TOKENS = 128
 # Phase K — adaptive parent sizing. Heading-aware tiers (A/B/B+) sometimes
 # produce many small parents when docs have dense subheadings. The coalesce
 # pass merges consecutive below-MIN sections up to MAX to keep parents near
@@ -56,9 +62,9 @@ class ChunkingPolicy:
     parent_min_tokens: int = 500
     parent_target_tokens: int = PARENT_TARGET_TOKENS
     parent_max_tokens: int = 2000
-    child_min_tokens: int = 128
+    child_min_tokens: int = 64
     child_target_tokens: int = CHILD_TARGET_TOKENS
-    child_max_tokens: int = 512
+    child_max_tokens: int = 256
     parent_overlap_tokens: int = 200
     requested_child_strategy: str = "sentence_merge"
     resolved_child_strategy: str = "sentence_merge"

@@ -320,9 +320,31 @@ def _split_markdown_table_row(line: str) -> list[str]:
     ]
 
 
+# Inline markdown link `[text](url)` / `[text](url "title")` — keep the
+# visible text, drop the target. Scraped docs carry anchor links on every
+# heading (`Getting Started[¶](https://…#x "Link to this heading")`) and the
+# URLs/pilcrows were the last embedding-noise class left after the
+# frontmatter/metadata strips. Applied to prose paragraphs, heading titles,
+# and table cells — NEVER to code blocks (they're sectioned separately and
+# must stay verbatim).
+_IMG_MD_RE = re.compile(r"!\[[^\]\n]*\]\([^)\n]*\)")  # drop images entirely (alt incl.)
+_INLINE_MD_LINK_RE = re.compile(r"\[([^\]\n]*)\]\((?:[^)\s]+(?:\s+\"[^\"]*\")?)\)")
+_BARE_URL_RE = re.compile(r"https?://\S+")
+
+
+def _scrub_inline_links(text: str) -> str:
+    if not text or ("[" not in text and "http" not in text and "¶" not in text):
+        return text
+    t = _IMG_MD_RE.sub("", text)  # before link rewrite, or `![x](u)` leaves a stray `!`
+    t = _INLINE_MD_LINK_RE.sub(r"\1", t)
+    t = _BARE_URL_RE.sub("", t)
+    t = t.replace("¶", "")
+    return re.sub(r"[ \t]{2,}", " ", t)
+
+
 def _clean_heading_title(title: str) -> str:
-    """Strip markdown anchor IDs from visible heading metadata."""
-    return _HEADING_ANCHOR_RE.sub("", title or "").strip()
+    """Strip markdown anchor IDs + inline links from visible heading metadata."""
+    return _scrub_inline_links(_HEADING_ANCHOR_RE.sub("", title or "")).strip()
 
 
 def _is_markdown_table_separator(line: str) -> bool:
@@ -423,7 +445,7 @@ def _linearize_markdown_table(
             padded.extend([""] * (len(cleaned_columns) - len(padded)))
         pairs = []
         for col, cell in zip(cleaned_columns, padded):
-            value = re.sub(r"\s+", " ", cell).strip()
+            value = _scrub_inline_links(re.sub(r"\s+", " ", cell)).strip()
             if value:
                 pairs.append(f"{col}={value}")
         if pairs:
@@ -452,7 +474,7 @@ def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
 
     def flush_paragraph() -> None:
         nonlocal paragraph
-        text = "\n".join(paragraph).strip()
+        text = _scrub_inline_links("\n".join(paragraph)).strip()
         if text:
             sections.append(
                 Section(

@@ -191,9 +191,9 @@ class IngestionConfig(BaseModel):
             min_tokens=500, target_tokens=1200, max_tokens=2000
         )
     )
-    child_chunk_tokens: _legacy.TokenBudget = Field(
-        default_factory=lambda: _legacy.TokenBudget(
-            min_tokens=128, target_tokens=500, max_tokens=700
+    child_chunk_tokens: _legacy.ChildTokenBudget = Field(
+        default_factory=lambda: _legacy.ChildTokenBudget(
+            min_tokens=64, target_tokens=128, max_tokens=256
         )
     )
     chunk_overlap: int = Field(default=200)
