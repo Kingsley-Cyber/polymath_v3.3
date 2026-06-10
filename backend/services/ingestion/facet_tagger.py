@@ -218,9 +218,12 @@ def tag_facets(
             mdl = get_gliner()
         try:
             # One forward pass per slice instead of one per entity — the facet
-            # pass was a per-entity hot spot on entity-dense docs.
+            # pass was a per-entity hot spot on entity-dense docs. batch_size
+            # pins GLiNER's INTERNAL mini-batching (default 8) to the slice,
+            # so one slice is genuinely one forward.
             batches = mdl.batch_predict_entities(
-                [ctx for _c, ctx in sl], vocab, threshold=threshold)
+                [ctx for _c, ctx in sl], vocab, threshold=threshold,
+                batch_size=len(sl))
         except Exception as exc:  # noqa: BLE001 — never let a tag failure abort ingestion
             logger.warning("facet_tagger: batch predict failed (%d ctxs): %s", len(sl), exc)
             continue

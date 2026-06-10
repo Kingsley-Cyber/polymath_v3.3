@@ -476,7 +476,12 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
             for (i, _s), spans in zip(
                 sl,
                 gliner.batch_predict_entities(
-                    [s for _i, s in sl], entity_types, threshold=gliner_threshold),
+                    [s for _i, s in sl], entity_types, threshold=gliner_threshold,
+                    # GLiNER's inference() internally mini-batches at EIGHT
+                    # texts per forward regardless of input size — silently
+                    # turning a 128-text call into 16 micro-forwards. Pin the
+                    # internal batch to our slice so one slice == one forward.
+                    batch_size=len(sl)),
             ):
                 raw_per_task[i] = spans
         t_gliner = _time.time()
