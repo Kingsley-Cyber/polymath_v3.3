@@ -39,6 +39,16 @@ GLINER_BATCH_SIZE = _env_int("GHOST_B_GLINER_BATCH", 32)   # chunks / pass-1 for
 GLIREL_UNIT_BATCH = _env_int("GHOST_B_GLIREL_BATCH", 64)   # sentence units / forward
 FACET_BATCH = _env_int("GHOST_B_FACET_BATCH", 32)          # contexts / pass-2 forward
 
+# The facet vocabulary (vector_database/game_engine/library/...) only ever
+# applies to artifact-like types — running pass-2 for Person/Location/Event/
+# TimeReference entities is pure waste (profiled at ~50% of extraction wall on
+# entity-dense books: hundreds of people/places, none facetable). Eligible
+# types keep facets; the rest skip straight to the downstream taxonomy.
+FACET_ELIGIBLE_TYPES: frozenset[str] = frozenset({
+    "Software", "Product", "Method", "Standard", "Artifact", "Concept",
+    "Document", "Organization",
+})
+
 # ---------- DEFAULT CLASSIFIER (LOCAL_GHOST_B_CLASSIFIER) ----------------
 #
 # As of 2026-06-07, fine-tuned GLiREL Ghost B v1 ships at

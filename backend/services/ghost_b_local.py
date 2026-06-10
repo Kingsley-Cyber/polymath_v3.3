@@ -97,7 +97,15 @@ _ML_AVAILABLE: bool | None = None  # cached import probe
 SIDECAR_URL = os.environ.get(
     "LOCAL_GHOST_B_EXTRACT_URL", "http://host.docker.internal:8084"
 ).rstrip("/")
-SIDECAR_TIMEOUT_S = float(os.environ.get("LOCAL_GHOST_B_EXTRACT_TIMEOUT_S", "600"))
+# Per-REQUEST ceiling. Requests are sliced to SIDECAR_SLICE chunks, so this
+# bounds one slice, not a whole book — the pilot's 932 KB doc (~1800 chunks in
+# one request) blew the old 600 s whole-doc ceiling at per-chunk speeds.
+SIDECAR_TIMEOUT_S = float(os.environ.get("LOCAL_GHOST_B_EXTRACT_TIMEOUT_S", "1800"))
+# 2048-chunk slices keep most BOOKS single-slice, so the per-doc facet/
+# definitional dedup sees the whole document (multi-slice docs re-predict
+# overlapping unique entities per slice — wasted GPU on exactly the docs that
+# can least afford it).
+SIDECAR_SLICE = max(1, int(os.environ.get("LOCAL_GHOST_B_EXTRACT_SLICE", "2048")))
 EXTRACT_MODE = os.environ.get("LOCAL_GHOST_B_EXTRACT_MODE", "auto").strip().lower()
 
 
@@ -629,24 +637,37 @@ def _metrics(raw: list[dict]) -> dict:
 
 # ------------------------------------------------------------- http client
 async def _extract_via_sidecar(task_dicts: list[dict], do_facts: bool, lens_id: str | None) -> list[dict]:
-    """POST the whole doc's tasks to the native ghost_b_extract sidecar and
-    return the raw wire dicts. Raises on any failure — extraction is the
-    pipeline, not an optional enrichment."""
+    """POST the doc's tasks to the native ghost_b_extract sidecar in slices of
+    SIDECAR_SLICE chunks and return the concatenated raw wire dicts. Slicing
+    bounds request size/timeout for book-scale docs (a 932 KB pilot doc was
+    ~1800 chunks — one request blew the whole-doc timeout). Most docs fit one
+    slice; for sliced docs the doc-level facet/definitional passes run per
+    slice, so a definition appearing in a LATER slice won't backfill entities
+    in an earlier one — an accepted, narrow trade on 512+-chunk books (the
+    cloud lane had no doc-level pass at all). Raises on any failure —
+    extraction is the pipeline, not an optional enrichment."""
     import httpx
 
-    body = {"tasks": task_dicts, "enable_facts": do_facts, "schema_lens_id": lens_id}
+    results: list[dict] = []
     try:
         async with httpx.AsyncClient(timeout=SIDECAR_TIMEOUT_S) as client:
-            resp = await client.post(f"{SIDECAR_URL}/extract", json=body)
-            resp.raise_for_status()
-            data = resp.json()
+            for start in range(0, len(task_dicts), SIDECAR_SLICE):
+                sl = task_dicts[start:start + SIDECAR_SLICE]
+                resp = await client.post(
+                    f"{SIDECAR_URL}/extract",
+                    json={"tasks": sl, "enable_facts": do_facts,
+                          "schema_lens_id": lens_id},
+                )
+                resp.raise_for_status()
+                results.extend(resp.json().get("results") or [])
     except Exception as exc:
         raise RuntimeError(
-            f"ghost_b_local: extract sidecar at {SIDECAR_URL} failed ({exc}). "
-            "Start it via scripts/apple_ml_services/start.sh (START_GHOST_B_EXTRACT=true) "
+            f"ghost_b_local: extract sidecar at {SIDECAR_URL} failed "
+            f"({type(exc).__name__}: {exc}). Start it via "
+            "scripts/apple_ml_services/start.sh (START_GHOST_B_EXTRACT=true) "
             "or run the worker natively where torch/gliner/glirel are importable."
         ) from exc
-    return list(data.get("results") or [])
+    return results
 
 
 # ----------------------------------------------------------------- entry point

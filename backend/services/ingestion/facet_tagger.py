@@ -31,9 +31,12 @@ from typing import Any, Iterable
 
 logger = logging.getLogger(__name__)
 
-# How much of the entity's first-occurrence chunk to feed the facet pass.
-# Chunks are ~400-600 chars; the cap guards against an oversized parent chunk.
-_CONTEXT_CHARS = 1000
+# How much context to feed the facet pass per entity. The preferred context is
+# the entity's defining sentence (short); first-occurrence chunks are capped
+# hard — profiling showed facet forwards over long contexts rivaling GLiREL as
+# the top extraction cost, and the facet signal lives in the immediate
+# definitional neighborhood, not deep context.
+_CONTEXT_CHARS = 400
 
 _PC: Any = None       # cached pipeline_config module
 _MODEL: Any = None     # cached GLiNER singleton (shared with pass-1)
@@ -177,18 +180,26 @@ def tag_facets(
     Returns the canonical_name -> object_kind map that was applied (handy for
     logging / tests). Additive: an entity that already has object_kind is left
     untouched."""
+    pc_eligible = getattr(_pc(), "FACET_ELIGIBLE_TYPES", None)
     items = [e for e in entities if _get(e, "canonical_name").strip()]
     if not items:
         return {}
     context_by_entity = context_by_entity or {}
 
     # Dedup canonical_name -> union of its surfaces (for span matching).
+    # Only facet-eligible types get a prediction (a Person is never a
+    # "vector_database"); ineligible entities keep object_kind="" for the
+    # downstream taxonomy, exactly like a no-match.
     reps: dict[str, set[str]] = {}
     for e in items:
+        if pc_eligible is not None and _get(e, "entity_type") not in pc_eligible:
+            continue
         canon = _get(e, "canonical_name").strip().lower()
         if not canon:
             continue
         reps.setdefault(canon, set()).update(_surfaces_of(e))
+    if not reps:
+        return {}
 
     pc = _pc()
     vocab = pc.GHOST_B_FACET_VOCAB
