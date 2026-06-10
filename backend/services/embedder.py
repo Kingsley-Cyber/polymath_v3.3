@@ -478,6 +478,38 @@ async def _embed_batch_local(
     return vectors
 
 
+async def _post_local_with_retries(
+    *,
+    client: httpx.AsyncClient,
+    url: str,
+    batch: list[str],
+    expected_dim: int,
+) -> list[list[float]]:
+    """Retry transient sidecar failures (intermittent 400/5xx/short responses
+    observed under GPU contention — PILOT_REPORT resilience #2) before
+    raising. Timeouts re-raise immediately so the caller's halve-and-recurse
+    path handles them."""
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            return await _post_local_embedding_batch(
+                client=client,
+                url=url,
+                batch=batch,
+                expected_dim=expected_dim,
+            )
+        except httpx.TimeoutException:
+            raise
+        except (httpx.HTTPStatusError, httpx.ConnectError, ValueError) as exc:
+            last_exc = exc
+            logger.warning(
+                "Local embedder transient failure (attempt %d/3, batch=%d): %s",
+                attempt + 1, len(batch), exc,
+            )
+            await asyncio.sleep(1.5 * (attempt + 1))
+    raise last_exc  # type: ignore[misc]
+
+
 async def _embed_local_batch_with_split(
     *,
     client: httpx.AsyncClient,
@@ -487,7 +519,7 @@ async def _embed_local_batch_with_split(
 ) -> list[list[float]]:
     """Embed a local batch, splitting it when a large PDF batch times out."""
     try:
-        return await _post_local_embedding_batch(
+        return await _post_local_with_retries(
             client=client,
             url=url,
             batch=batch,
@@ -532,8 +564,16 @@ async def _post_local_embedding_batch(
     resp = await client.post(url, json={"input": batch, "model": "embed"})
     resp.raise_for_status()
     data = resp.json()
+    items = data.get("data") or []
+    # COUNT IS A CONTRACT. A silent partial response (seen once under GPU
+    # contention) used to flow through unchecked — downstream zips then drop
+    # the tail chunk or, worse, misalign summary vectors onto children.
+    if len(items) != len(batch):
+        raise ValueError(
+            f"Local embedder returned {len(items)} vectors for {len(batch)} texts"
+        )
     batch_vectors = [
-        item["embedding"] for item in sorted(data["data"], key=lambda x: x["index"])
+        item["embedding"] for item in sorted(items, key=lambda x: x["index"])
     ]
     for v in batch_vectors:
         if len(v) != expected_dim:

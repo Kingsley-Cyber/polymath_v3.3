@@ -1440,6 +1440,15 @@ async def _embed_batch_for_doc(
         modal_containers=getattr(config, "modal_containers", None),
         api_pool=_build_ghost_pool(getattr(config, "embedding_models", None)),
     )
+    # ALIGNMENT GUARD — a short vector list would silently drop the tail
+    # child below (zip) or, with summaries present, hand summary vectors to
+    # children. Fail the doc loudly instead; Phase 5+6 is best-effort, so
+    # the item lands failed-with-reason and re-embeds on resume.
+    if len(all_vectors) != len(all_texts):
+        raise RuntimeError(
+            f"embed_batch returned {len(all_vectors)} vectors for "
+            f"{len(all_texts)} texts — refusing to slice misaligned"
+        )
     split = len(child_texts)
     child_vecs = all_vectors[:split]
     summary_vecs = all_vectors[split:]
@@ -2325,6 +2334,57 @@ async def run_ingest_job(
     # unwritten even though ghost_b_out was fully populated and Mongo had
     # everything staged. Fix: catch the exception, log + warn, and fall
     # through to Phase 7 so Neo4j can still get the document.
+    #
+    # Reconcile-on-resume: qdrant_written=True only proves the upsert call
+    # completed once — a partial embed response or interrupted upsert can
+    # leave the flag true WITH HOLES (pilot: 1725 of 1726 vectors, and the
+    # resume path trusted the flag forever). Cheap exact count vs the
+    # vector-eligible children; any mismatch reruns this phase for the doc
+    # (upserts are idempotent — point ids are md5(chunk_id)).
+    if ws.qdrant_written:
+        try:
+            from qdrant_client import models as qmodels
+
+            from services.storage.qdrant_writer import _col_for_corpus
+
+            targets = list(
+                getattr(ingestion_config, "target_qdrant_collections", None) or ["naive"]
+            )
+            # naive's membership == all vector-eligible children; hrag is
+            # tier-filtered, so only naive gives an exact expected count.
+            primary = "naive" if "naive" in targets else targets[0]
+            expected_n = sum(1 for c in children if _is_vectorized_child(c))
+            res = await qdrant_client.count(
+                collection_name=_col_for_corpus(corpus_id, primary),
+                count_filter=qmodels.Filter(
+                    must=[
+                        qmodels.FieldCondition(
+                            key="doc_id", match=qmodels.MatchValue(value=doc_id)
+                        ),
+                        qmodels.FieldCondition(
+                            key="chunk_type", match=qmodels.MatchValue(value="child")
+                        ),
+                    ]
+                ),
+                exact=True,
+            )
+            if primary == "naive" and int(res.count) != expected_n:
+                logger.warning(
+                    "phase=embed_reconcile doc=%s corpus=%s qdrant=%d expected=%d "
+                    "— re-running embed+qdrant for this doc",
+                    doc_id[:12],
+                    cid8,
+                    int(res.count),
+                    expected_n,
+                )
+                ws.qdrant_written = False
+        except Exception as exc:  # noqa: BLE001 — reconcile is best-effort
+            logger.warning(
+                "phase=embed_reconcile_check_failed doc=%s corpus=%s: %s",
+                doc_id[:12],
+                cid8,
+                exc,
+            )
     if not ws.qdrant_written:
         try:
             await _set_ingest_stage(
