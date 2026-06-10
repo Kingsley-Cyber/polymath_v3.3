@@ -150,6 +150,66 @@ def _looks_like_markdown(filename: str, mime: str) -> bool:
     return (mime or "").lower() in _MARKDOWN_MIMES or _extension(filename) in _MARKDOWN_EXTS
 
 
+# YAML frontmatter: `---` on line 1, closing `---`/`...` within the first 4 KB.
+# Scraped/exported markdown (e.g. the merged corpus: source_url / site_name /
+# priority / extracted headers) carries it on every file. Left in place it
+# leaks into the first chunk as embedding noise AND fires fact cues — the
+# `extracted: 2026-03-24` line became a confident-but-junk timestamp fact in
+# the Phase A smoke. It is metadata, not content; strip before sectioning.
+_FRONTMATTER_RE = re.compile(
+    r"\A﻿?---[ \t]*\r?\n.{0,4096}?\r?\n(?:---|\.\.\.)[ \t]*\r?\n",
+    re.DOTALL,
+)
+
+
+def _strip_yaml_frontmatter(text: str) -> str:
+    if not text or not text.lstrip("﻿").startswith("---"):
+        return text
+    stripped = _FRONTMATTER_RE.sub("", text, count=1)
+    if stripped is not text:
+        logger.info("local_markdown: stripped YAML frontmatter (%d chars)",
+                    len(text) - len(stripped))
+    return stripped
+
+
+# Bold-key metadata line: `**Source:** https://…`, `**Extracted:** 2026-03-24`.
+# Scraper/export tooling writes a run of these right under the document title —
+# a second metadata layer alongside YAML frontmatter. Like frontmatter, it is
+# provenance, not content: it embeds as a junk chunk and its dates/URLs sit one
+# entity-mention away from becoming junk facts.
+_BOLD_KEY_LINE = re.compile(r"^\*\*[^*\n]{1,32}:\*\*\s")
+_MD_TITLE = re.compile(r"^#{1,6}\s")
+
+
+def _strip_leading_metadata_block(text: str) -> str:
+    """Drop a doc-START run of 2+ bold-key metadata lines (blank lines allowed
+    between them), preserving an optional leading title heading. A single bold
+    note is left alone — only a BLOCK signals export metadata."""
+    if not text:
+        return text
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i < len(lines) and _MD_TITLE.match(lines[i].strip()):
+        i += 1
+    j, n_meta = i, 0
+    while j < len(lines):
+        s = lines[j].strip()
+        if not s:
+            j += 1
+            continue
+        if _BOLD_KEY_LINE.match(s):
+            n_meta += 1
+            j += 1
+            continue
+        break
+    if n_meta < 2:
+        return text
+    logger.info("local_markdown: stripped %d leading metadata lines", n_meta)
+    return "\n".join(lines[:i] + [""] + lines[j:])
+
+
 def _looks_like_html(filename: str, mime: str) -> bool:
     return (mime or "").lower() in _HTML_MIMES or _extension(filename) in _HTML_EXTS
 
@@ -521,7 +581,8 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
         )
 
     if _looks_like_markdown(filename, mime):
-        markdown = raw_bytes.decode("utf-8", errors="replace")
+        markdown = _strip_leading_metadata_block(
+            _strip_yaml_frontmatter(raw_bytes.decode("utf-8", errors="replace")))
         sections, h1, h2 = _markdown_sections(markdown)
         has_tables = any(s.element_type == "table" for s in sections)
         has_structure = (h1 + h2) > 0 or has_tables
