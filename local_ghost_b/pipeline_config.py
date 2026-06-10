@@ -10,7 +10,34 @@ in place without a version bump.
 
 from __future__ import annotations
 
-PIPELINE_VERSION = "v1.2026.06d"  # table-fact extraction (local execution half)
+PIPELINE_VERSION = "v1.2026.06e"  # batched inference (GLiNER/GLiREL/facets)
+
+# ---------- Batched inference (throughput) ----------------------------------
+#
+# Per-chunk model calls leave the GPU idle between tiny forward passes; the
+# Mac Studio's 32 GB unified memory comfortably fits batched activations.
+# Defaults are conservative for DeBERTa-large (GLiREL) + medium GLiNER at
+# 128-token chunks. Env overrides exist for backfill-time tuning under the
+# reclaimed-memory envelope (scripts/ingest_reclaim_memory.sh guarantees
+# ≥~25 GB; measured stack peak ≈ 20-22 GB at DOUBLED batches, so 2x these
+# defaults is the validated raise). Slicing follows chunk order, so batch
+# grouping is deterministic per document. NOTE: batched softmax scores can
+# differ from per-chunk mode in the last float digits (padding / reduction
+# order) — each mode is self-deterministic, but don't expect bit-identical
+# scores across modes.
+import os as _os
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(_os.environ.get(name, "") or default))
+    except ValueError:
+        return default
+
+
+GLINER_BATCH_SIZE = _env_int("GHOST_B_GLINER_BATCH", 32)   # chunks / pass-1 forward
+GLIREL_UNIT_BATCH = _env_int("GHOST_B_GLIREL_BATCH", 64)   # sentence units / forward
+FACET_BATCH = _env_int("GHOST_B_FACET_BATCH", 32)          # contexts / pass-2 forward
 
 # ---------- DEFAULT CLASSIFIER (LOCAL_GHOST_B_CLASSIFIER) ----------------
 #

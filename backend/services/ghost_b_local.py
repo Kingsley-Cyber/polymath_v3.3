@@ -384,93 +384,122 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
     in whatever process has the ML stack (native worker thread OR the sidecar).
     Takes and returns PLAIN DICTS only — no services.ghost_b import — so the
     sidecar can serve it from the local_ghost_b venv. One result dict per task,
-    order preserved; entities/relations/facts are already Pydantic-validated."""
+    order preserved; entities/relations/facts are already Pydantic-validated.
+
+    Model calls are BATCHED across the doc's chunks (GLINER_BATCH_SIZE /
+    GLIREL_UNIT_BATCH / FACET_BATCH in pipeline_config): per-chunk forward
+    passes left the GPU idle between tiny kernels and dominated wall time.
+    Batch composition follows chunk order, so it is deterministic per doc."""
+    import time as _time
+
     pc = _ensure_local_ghost_b_on_path()
     from chunk_with_gliner import is_junk_surface, strip_noise
 
     entity_types = pc.GHOST_B_ENTITY_TYPES
     gliner_threshold = pc.GLINER_THRESHOLD
     max_related = pc.MAX_RELATED_TO_PER_CHUNK
+    gliner_bs = max(1, int(getattr(pc, "GLINER_BATCH_SIZE", 32)))
+    glirel_ub = max(1, int(getattr(pc, "GLIREL_UNIT_BATCH", 64)))
 
     with _INFER_LOCK:
         gliner = get_gliner()
         glirel = _get_glirel()
+        t0 = _time.time()
 
-        results: list[dict] = []
-        defs_by_chunk: list[tuple[str, dict[str, str]]] = []  # (chunk_id, canon -> sentence)
-        for task in task_dicts:
+        n = len(task_dicts)
+        is_table_flags = [t.get("chunk_kind") == "table" for t in task_dicts]
+        counters_per = [
+            {"entity_drop": 0, "relation_drop": 0, "evidence_drop": 0, "fact_drop": 0}
+            for _ in range(n)
+        ]
+
+        # ---- Stage A: GLiNER pass-1, batched across chunks -----------------
+        # Prose chunks see noise-stripped text (facts/evidence/GLiREL stay on
+        # RAW text — strip only removes content, so surfaces still locate);
+        # table chunks see cell VALUES only (cloud rule: headers/captions are
+        # never entities).
+        gliner_inputs: list[str] = []
+        for task, is_table in zip(task_dicts, is_table_flags):
             text = task["text"]
-            is_table = task.get("chunk_kind") == "table"
-            counters = {"entity_drop": 0, "relation_drop": 0, "evidence_drop": 0, "fact_drop": 0}
-
             if not text.strip():
-                ent_dicts = []
+                gliner_inputs.append("")
             elif is_table:
-                # Table chunks: tag entities over the cell VALUES only —
-                # excludes captions/headers/scaffolding by construction
-                # (mirrors the cloud table rule).
-                value_text = table_entity_text(text, task.get("columns"))
-                raw = (gliner.predict_entities(value_text, entity_types,
-                                               threshold=gliner_threshold)
-                       if value_text else [])
-                ent_dicts = _noise_gate(
-                    _dedupe_entities(raw, is_junk_surface), pc, counters)
+                gliner_inputs.append(table_entity_text(text, task.get("columns")) or "")
             else:
-                # GLiNER sees the chunk with inline code / URLs / md links
-                # stripped (junk-entity source); everything downstream — facts,
-                # evidence, GLiREL spans, storage — stays on the RAW text so
-                # values remain verbatim. strip_noise only removes content, so
-                # any surface found on the stripped text exists in raw too.
-                raw = gliner.predict_entities(
-                    strip_noise(text), entity_types, threshold=gliner_threshold)
-                ent_dicts = _noise_gate(
-                    _dedupe_entities(raw, is_junk_surface), pc, counters)
+                gliner_inputs.append(strip_noise(text))
+        raw_per_task: list[list] = [[] for _ in range(n)]
+        live = [(i, s) for i, s in enumerate(gliner_inputs) if s.strip()]
+        for start in range(0, len(live), gliner_bs):
+            sl = live[start:start + gliner_bs]
+            for (i, _s), spans in zip(
+                sl,
+                gliner.batch_predict_entities(
+                    [s for _i, s in sl], entity_types, threshold=gliner_threshold),
+            ):
+                raw_per_task[i] = spans
+        t_gliner = _time.time()
 
-            # enrich (prose chunks only): aliases + definitional capture.
-            # Tables skip both — Schwartz-Hearst and "X is a Y" don't apply to
-            # `col=val` rows.
-            if ent_dicts and not is_table:
-                _merge_aliases(ent_dicts, extract_aliases(text, ent_dicts))
-                defs = extract_definitional_phrases(text, ent_dicts)
+        # ---- Stage B: CPU per chunk — gates, aliases, definitional ---------
+        ents_per_task: list[list[dict]] = []
+        entities_per_task: list[list[dict]] = []
+        defs_by_chunk: list[tuple[str, dict[str, str]]] = []
+        for i, task in enumerate(task_dicts):
+            counters = counters_per[i]
+            ent_dicts = _noise_gate(
+                _dedupe_entities(raw_per_task[i], is_junk_surface), pc, counters)
+            if ent_dicts and not is_table_flags[i]:
+                _merge_aliases(ent_dicts, extract_aliases(task["text"], ent_dicts))
+                defs = extract_definitional_phrases(task["text"], ent_dicts)
                 if defs:
                     defs_by_chunk.append((task["chunk_id"], defs))
+            ents_per_task.append(ent_dicts)
+            entities_per_task.append(_validated_entities(ent_dicts, counters))
+        t_cpu = _time.time()
 
-            entities = _validated_entities(ent_dicts, counters)
+        # ---- Stage C: GLiREL, sentence units batched across chunks ---------
+        rel_idx = [i for i in range(n)
+                   if not is_table_flags[i] and len(ents_per_task[i]) >= 2]
+        relations_per_task: list[list[dict]] = [[] for _ in range(n)]
+        if rel_idx:
+            chunks = [{
+                "chunk_id": task_dicts[i]["chunk_id"],
+                "doc_id": task_dicts[i]["doc_id"],
+                "text": task_dicts[i]["text"],
+                "entities": ents_per_task[i],
+            } for i in rel_idx]
+            edge_lists = glirel.extract_chunks(
+                chunks, max_related=max_related, unit_batch=glirel_ub)
+            for i, edges in zip(rel_idx, edge_lists):
+                relations_per_task[i] = _validated_relations(edges, counters_per[i])
+        t_glirel = _time.time()
 
-            # relations: GLiREL is prose-only — `col=val` rows aren't
-            # relational sentences (needs >=2 located entities regardless).
-            relations: list[dict] = []
-            if not is_table and len(ent_dicts) >= 2:
-                chunk = {
-                    "chunk_id": task["chunk_id"],
-                    "doc_id": task["doc_id"],
-                    "text": text,
-                    "entities": ent_dicts,
-                }
-                edges = glirel.extract_chunk(chunk, max_related=max_related)
-                relations = _validated_relations(edges, counters)
-
-            # facts
+        # ---- Stage D: facts (pure Python) -----------------------------------
+        results: list[dict] = []
+        for i, task in enumerate(task_dicts):
+            text = task["text"]
+            counters = counters_per[i]
             facts: list[dict] = []
             if do_facts and text.strip():
-                if is_table:
+                if is_table_flags[i]:
                     facts += _validated_facts(
                         extract_table_facts(text, task.get("columns"),
                                             max_facts=pc.TABLE_MAX_FACTS_PER_CHUNK),
                         _FACT_CONF_DETERMINISTIC, counters)
-                elif ent_dicts:
+                elif ents_per_task[i]:
                     facts += _validated_facts(
-                        extract_facts(text, ent_dicts), _FACT_CONF_DETERMINISTIC, counters)
+                        extract_facts(text, ents_per_task[i]),
+                        _FACT_CONF_DETERMINISTIC, counters)
                     facts += _validated_facts(
-                        extract_qualitative_facts(text, ent_dicts), _FACT_CONF_QUALITATIVE, counters)
+                        extract_qualitative_facts(text, ents_per_task[i]),
+                        _FACT_CONF_QUALITATIVE, counters)
 
             results.append({
                 "schema_version": SCHEMA_VERSION,
                 "chunk_id": task["chunk_id"],
                 "doc_id": task["doc_id"],
                 "corpus_id": task["corpus_id"],
-                "entities": entities,
-                "relations": relations,
+                "entities": entities_per_task[i],
+                "relations": relations_per_task[i],
                 "facts": facts,
                 "text": text,  # Pt 10b — REQUIRED for downstream taxonomy matching
                 "entity_drop_count": counters["entity_drop"],
@@ -511,6 +540,15 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
                 tag_facets(all_entities, context_by_entity, model=gliner)
             except Exception as exc:  # noqa: BLE001 — facets are best-effort, never abort
                 logger.warning("ghost_b_local: facet pass failed: %s", exc)
+        t_facet = _time.time()
+
+        logger.info(
+            "ghost_b_local: %d chunks in %.1fs (gliner %.1fs, cpu %.1fs, "
+            "glirel %.1fs, facts+facets %.1fs) = %.0f ms/chunk",
+            n, t_facet - t0, t_gliner - t0, t_cpu - t_gliner,
+            t_glirel - t_cpu, t_facet - t_glirel,
+            (t_facet - t0) * 1000 / max(1, n),
+        )
 
     return results
 

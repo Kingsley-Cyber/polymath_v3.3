@@ -127,6 +127,26 @@ class GliRELClassifier:
             if len(ner) >= 2:
                 yield toks, ner, pos2ent, sent
 
+    def _edges_from_preds(self, preds, pos2ent, sent):
+        """Shared edge construction for single-chunk and batched paths."""
+        edges = []
+        for r in preds:
+            hp = (r["head_pos"][0], r["head_pos"][1] - 1)  # back to inclusive
+            tp = (r["tail_pos"][0], r["tail_pos"][1] - 1)
+            se = pos2ent.get(hp); oe = pos2ent.get(tp)
+            if se is None or oe is None or hp == tp:
+                continue
+            st = se.get("entity_type", "Concept"); ot = oe.get("entity_type", "Concept")
+            pred = r["label"]; score = float(r["score"])
+            if self.type_gate and not type_plausible(pred, st, ot):
+                pred = "related_to"
+            if self.danger_guard:
+                pred = guard_dangerous(pred, sent, "", st, ot)
+            edges.append({"sub": out_name(se), "pred": pred, "obj": out_name(oe),
+                          "score": round(score, 4), "ev": sent,
+                          "st": st, "ot": ot})
+        return edges
+
     def extract_chunk(self, chunk: dict, max_related: int = 3):
         units = list(self._sentence_units(chunk))
         if not units:
@@ -137,26 +157,38 @@ class GliRELClassifier:
             token_lists, self.labels, flat_ner=True,
             threshold=self.threshold, ner=ner_lists, top_k=1,
         )
-        edges = []  # (sub, pred, obj, score, ev)
+        edges = []
         for (toks, ner, pos2ent, sent), preds in zip(units, batch):
-            for r in preds:
-                hp = (r["head_pos"][0], r["head_pos"][1] - 1)  # back to inclusive
-                tp = (r["tail_pos"][0], r["tail_pos"][1] - 1)
-                se = pos2ent.get(hp); oe = pos2ent.get(tp)
-                if se is None or oe is None or hp == tp:
-                    continue
-                st = se.get("entity_type", "Concept"); ot = oe.get("entity_type", "Concept")
-                pred = r["label"]; score = float(r["score"])
-                if self.type_gate and not type_plausible(pred, st, ot):
-                    pred = "related_to"
-                if self.danger_guard:
-                    pred = guard_dangerous(pred, sent, "", st, ot)
-                edges.append({"sub": out_name(se), "pred": pred, "obj": out_name(oe),
-                              "score": round(score, 4), "ev": sent,
-                              "st": st, "ot": ot})
+            edges.extend(self._edges_from_preds(preds, pos2ent, sent))
         edges = _collapse_directions(edges)
         edges = _cap_related(edges, max_related)
         return edges
+
+    def extract_chunks(self, chunks: list, max_related: int = 3, unit_batch: int = 64):
+        """Batched variant over MANY chunks: gathers sentence units across all
+        chunks and runs batch_predict_relations in `unit_batch` slices, then
+        regroups edges per chunk (same direction-collapse + related_to cap).
+
+        This is the throughput path: per-chunk calls pay tokenize/collate/
+        kernel-launch overhead on batches of 1-6 sentences; cross-chunk slices
+        keep the GPU fed. Slicing follows chunk order, so grouping is
+        deterministic for a given doc. Returns a list of edge lists aligned
+        with `chunks`."""
+        all_units = []  # (chunk_idx, toks, ner, pos2ent, sent)
+        for ci, ch in enumerate(chunks):
+            for toks, ner, pos2ent, sent in self._sentence_units(ch):
+                all_units.append((ci, toks, ner, pos2ent, sent))
+        per_chunk: list[list] = [[] for _ in chunks]
+        step = max(1, int(unit_batch))
+        for start in range(0, len(all_units), step):
+            sl = all_units[start:start + step]
+            batch = self.model.batch_predict_relations(
+                [u[1] for u in sl], self.labels, flat_ner=True,
+                threshold=self.threshold, ner=[u[2] for u in sl], top_k=1,
+            )
+            for (ci, _toks, _ner, pos2ent, sent), preds in zip(sl, batch):
+                per_chunk[ci].extend(self._edges_from_preds(preds, pos2ent, sent))
+        return [_cap_related(_collapse_directions(e), max_related) for e in per_chunk]
 
 
 def _collapse_directions(edges):

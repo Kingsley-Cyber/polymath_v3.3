@@ -193,23 +193,30 @@ def tag_facets(
     pc = _pc()
     vocab = pc.GHOST_B_FACET_VOCAB
     threshold = pc.GLINER_FACET_THRESHOLD
+    batch_size = max(1, int(getattr(pc, "FACET_BATCH", 32)))
+
+    # Stable order -> deterministic batch composition.
+    queue = [(canon, context_by_entity[canon][:_CONTEXT_CHARS])
+             for canon in sorted(reps) if context_by_entity.get(canon)]
 
     facet_map: dict[str, str] = {}
     mdl = model
-    for canon in sorted(reps):  # stable order -> deterministic
-        ctx = context_by_entity.get(canon)
-        if not ctx:
-            continue
+    for start in range(0, len(queue), batch_size):
+        sl = queue[start:start + batch_size]
         if mdl is None:
             mdl = get_gliner()
         try:
-            spans = mdl.predict_entities(ctx[:_CONTEXT_CHARS], vocab, threshold=threshold)
+            # One forward pass per slice instead of one per entity — the facet
+            # pass was a per-entity hot spot on entity-dense docs.
+            batches = mdl.batch_predict_entities(
+                [ctx for _c, ctx in sl], vocab, threshold=threshold)
         except Exception as exc:  # noqa: BLE001 — never let a tag failure abort ingestion
-            logger.warning("facet_tagger: predict failed for %r: %s", canon, exc)
+            logger.warning("facet_tagger: batch predict failed (%d ctxs): %s", len(sl), exc)
             continue
-        facet = _match_facet(spans, reps[canon])
-        if facet:
-            facet_map[canon] = facet[:100]  # LLMEntity.object_kind max_length
+        for (canon, _ctx), spans in zip(sl, batches):
+            facet = _match_facet(spans, reps[canon])
+            if facet:
+                facet_map[canon] = facet[:100]  # LLMEntity.object_kind max_length
 
     # Apply — additive, never overwrite an existing object_kind.
     for e in items:
