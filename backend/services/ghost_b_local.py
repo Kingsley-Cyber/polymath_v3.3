@@ -76,6 +76,8 @@ from services.ingestion.enrich import (
     extract_definitional_phrases,
     extract_facts,
     extract_qualitative_facts,
+    extract_table_facts,
+    table_entity_text,
 )
 from services.ingestion.facet_tagger import get_gliner, tag_facets
 
@@ -178,19 +180,32 @@ def _lens_id(schema_lens: Any) -> str | None:
 
 
 def _task_dict(task: Any) -> dict:
-    """Normalize an ExtractionTask (or wire dict) to the plain-dict task shape."""
+    """Normalize an ExtractionTask (or wire dict) to the plain-dict task shape.
+
+    chunk_kind routes table chunks to the deterministic table-fact extractor;
+    `columns` is the one metadata key extraction consumes (set by the table
+    linearizer), slimmed out of the full metadata dict so the wire format stays
+    small and JSON-safe."""
     if isinstance(task, dict):
+        meta = task.get("metadata") or {}
+        columns = task.get("columns") or (meta.get("columns") if isinstance(meta, dict) else None)
         return {
             "chunk_id": str(task.get("chunk_id") or ""),
             "doc_id": str(task.get("doc_id") or ""),
             "corpus_id": str(task.get("corpus_id") or ""),
             "text": task.get("text") or "",
+            "chunk_kind": str(task.get("chunk_kind") or "body").lower(),
+            "columns": [str(c) for c in (columns or []) if str(c).strip()],
         }
+    meta = getattr(task, "metadata", None) or {}
+    columns = meta.get("columns") if isinstance(meta, dict) else None
     return {
         "chunk_id": getattr(task, "chunk_id", "") or "",
         "doc_id": getattr(task, "doc_id", "") or "",
         "corpus_id": getattr(task, "corpus_id", "") or "",
         "text": getattr(task, "text", "") or "",
+        "chunk_kind": str(getattr(task, "chunk_kind", "") or "body").lower(),
+        "columns": [str(c) for c in (columns or []) if str(c).strip()],
     }
 
 
@@ -385,9 +400,22 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
         defs_by_chunk: list[tuple[str, dict[str, str]]] = []  # (chunk_id, canon -> sentence)
         for task in task_dicts:
             text = task["text"]
+            is_table = task.get("chunk_kind") == "table"
             counters = {"entity_drop": 0, "relation_drop": 0, "evidence_drop": 0, "fact_drop": 0}
 
-            if text.strip():
+            if not text.strip():
+                ent_dicts = []
+            elif is_table:
+                # Table chunks: tag entities over the cell VALUES only —
+                # excludes captions/headers/scaffolding by construction
+                # (mirrors the cloud table rule).
+                value_text = table_entity_text(text, task.get("columns"))
+                raw = (gliner.predict_entities(value_text, entity_types,
+                                               threshold=gliner_threshold)
+                       if value_text else [])
+                ent_dicts = _noise_gate(
+                    _dedupe_entities(raw, is_junk_surface), pc, counters)
+            else:
                 # GLiNER sees the chunk with inline code / URLs / md links
                 # stripped (junk-entity source); everything downstream — facts,
                 # evidence, GLiREL spans, storage — stays on the RAW text so
@@ -397,22 +425,22 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
                     strip_noise(text), entity_types, threshold=gliner_threshold)
                 ent_dicts = _noise_gate(
                     _dedupe_entities(raw, is_junk_surface), pc, counters)
-            else:
-                ent_dicts = []
 
-            # enrich: aliases always; facts only when enabled.
-            alias_map = extract_aliases(text, ent_dicts) if ent_dicts else {}
-            _merge_aliases(ent_dicts, alias_map)
-            if ent_dicts:
+            # enrich (prose chunks only): aliases + definitional capture.
+            # Tables skip both — Schwartz-Hearst and "X is a Y" don't apply to
+            # `col=val` rows.
+            if ent_dicts and not is_table:
+                _merge_aliases(ent_dicts, extract_aliases(text, ent_dicts))
                 defs = extract_definitional_phrases(text, ent_dicts)
                 if defs:
                     defs_by_chunk.append((task["chunk_id"], defs))
 
             entities = _validated_entities(ent_dicts, counters)
 
-            # relations (GLiREL needs >=2 located entities; extract_chunk no-ops otherwise)
+            # relations: GLiREL is prose-only — `col=val` rows aren't
+            # relational sentences (needs >=2 located entities regardless).
             relations: list[dict] = []
-            if len(ent_dicts) >= 2:
+            if not is_table and len(ent_dicts) >= 2:
                 chunk = {
                     "chunk_id": task["chunk_id"],
                     "doc_id": task["doc_id"],
@@ -424,11 +452,17 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
 
             # facts
             facts: list[dict] = []
-            if do_facts and ent_dicts and text.strip():
-                facts += _validated_facts(
-                    extract_facts(text, ent_dicts), _FACT_CONF_DETERMINISTIC, counters)
-                facts += _validated_facts(
-                    extract_qualitative_facts(text, ent_dicts), _FACT_CONF_QUALITATIVE, counters)
+            if do_facts and text.strip():
+                if is_table:
+                    facts += _validated_facts(
+                        extract_table_facts(text, task.get("columns"),
+                                            max_facts=pc.TABLE_MAX_FACTS_PER_CHUNK),
+                        _FACT_CONF_DETERMINISTIC, counters)
+                elif ent_dicts:
+                    facts += _validated_facts(
+                        extract_facts(text, ent_dicts), _FACT_CONF_DETERMINISTIC, counters)
+                    facts += _validated_facts(
+                        extract_qualitative_facts(text, ent_dicts), _FACT_CONF_QUALITATIVE, counters)
 
             results.append({
                 "schema_version": SCHEMA_VERSION,

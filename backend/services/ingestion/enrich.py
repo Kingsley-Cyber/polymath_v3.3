@@ -462,6 +462,155 @@ def extract_qualitative_facts(text: str, entities: list[dict]) -> list[dict]:
     return uniq
 
 
+# ------------------------------------------------------- table facts (local)
+# Deterministic completion of the table-extraction concept. Ingest already does
+# the hard work: docling_adapter._linearize_markdown_table renders every pipe
+# table as
+#     Table: <label> / Section: a > b / Caption: … / Columns: c1 | c2 | …
+#     Row N: c1=v1; c2=v2; …
+# and tier_chunker keeps rows intact with the header context repeated per
+# child. The cloud lane handed this to the LLM with _render_table_extraction_
+# rules; locally the same rules are mechanical: row label -> subject, column
+# header -> property_name, cell -> verbatim value.
+
+_TABLE_ROW_LINE = re.compile(r"^Row\s+\d+:\s*(.*)$")
+_TABLE_COLUMNS_LINE = re.compile(r"^Columns:\s*(.*)$")
+_TABLE_TITLE_LINE = re.compile(r"^(?:Table|Section|Caption):\s*(.*)$")
+# A row-label cell that is just a number/comparator carries no subject signal.
+_NUMERIC_CELL = re.compile(r"^[\d.,%<>=≤≥+\-\s]+$")
+# Cell that is a bare number + known unit -> quantity instead of property.
+_QUANTITY_CELL = re.compile(
+    r"^\d[\d,]*\.?\d*\s?(?:%|x|[KMGT]B|ms|sec|seconds?|min(?:ute)?s?|hours?|days?|"
+    r"tokens?|param(?:eter)?s?|qps|fps|dims?|layers?|heads?|GHz|MHz|cores?|bits?|bytes?)$",
+    re.I)
+
+
+def _parse_row_pairs(body: str, columns: list[str]) -> list[tuple[str, str]]:
+    """Split `c1=v1; c2=v2` into (column, value) pairs. A fragment only STARTS
+    a new pair when its key matches a known column (when columns are known) —
+    otherwise it is a continuation of the previous value, which recovers cells
+    that themselves contain `'; '` or `=`."""
+    col_keys = {c.strip().lower() for c in columns if c.strip()}
+    pairs: list[list[str]] = []
+    for frag in body.split("; "):
+        if "=" in frag:
+            k, v = frag.split("=", 1)
+            k = k.strip()
+            if k and (not col_keys or k.lower() in col_keys):
+                pairs.append([k, v.strip()])
+                continue
+        if pairs:  # continuation of the previous cell's value
+            pairs[-1][1] = (pairs[-1][1] + "; " + frag).strip()
+    return [(k, v) for k, v in pairs if k and v]
+
+
+def extract_table_facts(
+    text: str,
+    columns: list[str] | None = None,
+    max_facts: int = 24,
+) -> list[dict]:
+    """Deterministic facts from one linearized table chunk.
+
+    Per row: subject = the row-label (first) column's value when it names
+    something (non-numeric), else the Table/Section/Caption title; every other
+    cell becomes one fact with property_name = column header and the cell value
+    VERBATIM. fact_type is `quantity` for bare number+unit cells, else
+    `property`. evidence_phrase = the raw Row line. Returns LLMFact-shaped
+    dicts WITHOUT confidence (caller stamps 1.0 — deterministic). `max_facts`
+    caps runaway wide×tall chunks; rows are processed in order so the cap is
+    deterministic. No-ops on table chunks that lack `Row N:` lines (the
+    linearizer's raw-text fallback)."""
+    cols = [str(c).strip() for c in (columns or []) if str(c).strip()]
+    title = ""
+    facts: list[dict] = []
+    for line in (text or "").split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        m = _TABLE_COLUMNS_LINE.match(line)
+        if m:
+            if not cols:
+                cols = [c.strip() for c in m.group(1).split("|") if c.strip()]
+            continue
+        m = _TABLE_TITLE_LINE.match(line)
+        if m:
+            if not title:
+                title = norm(m.group(1))
+            continue
+        m = _TABLE_ROW_LINE.match(line)
+        if not m:
+            continue
+        pairs = _parse_row_pairs(m.group(1), cols)
+        if not pairs:
+            continue
+
+        # subject: the row-label column's value, when (a) this row actually has
+        # the table's FIRST column (rows can omit empty cells) and (b) the value
+        # names something rather than measuring it. Otherwise the table title.
+        first_col = cols[0].lower() if cols else None
+        label_col, label_val = pairs[0]
+        is_label = ((first_col is None or label_col.lower() == first_col)
+                    and not _NUMERIC_CELL.match(label_val)
+                    and not _QUANTITY_CELL.match(label_val))
+        if is_label:
+            subject = norm(label_val).lower()[:200]
+            value_pairs = pairs[1:]
+        else:
+            subject = norm(title).lower()[:200]
+            value_pairs = pairs
+        if not subject:
+            continue
+
+        for col, val in value_pairs:
+            if val.strip(" .,;").lower() in _JUNK_PROPERTY_VALUES:
+                continue
+            facts.append({
+                "subject": subject,
+                "fact_type": "quantity" if _QUANTITY_CELL.match(val) else "property",
+                "property_name": norm(col).lower()[:80],
+                "value": val[:500],
+                "unit": "",
+                "condition": "",
+                "evidence_phrase": line[:500],
+            })
+            if len(facts) >= max_facts:
+                break
+        if len(facts) >= max_facts:
+            break
+
+    # dedupe identical facts (same shape as the other extractors)
+    seen, uniq = set(), []
+    for f in facts:
+        k = (f["subject"], f["fact_type"], f["property_name"], f["value"].lower())
+        if k not in seen:
+            seen.add(k)
+            uniq.append(f)
+    return uniq
+
+
+def table_entity_text(text: str, columns: list[str] | None = None) -> str:
+    """Cell VALUES of a linearized table as period-joined pseudo-prose, for
+    entity tagging. Excludes the Table/Section/Caption scaffolding, the
+    Columns header line, and the column keys — the cloud table rule was 'do
+    not extract table numbers, captions, or column headers as standalone
+    entities', and feeding GLiNER values-only enforces that by construction."""
+    cols = [str(c).strip() for c in (columns or []) if str(c).strip()]
+    values: list[str] = []
+    for line in (text or "").split("\n"):
+        m = _TABLE_ROW_LINE.match(line.strip())
+        if not m:
+            if not cols:
+                cm = _TABLE_COLUMNS_LINE.match(line.strip())
+                if cm:
+                    cols = [c.strip() for c in cm.group(1).split("|") if c.strip()]
+            continue
+        for _col, val in _parse_row_pairs(m.group(1), cols):
+            v = norm(val)
+            if v and not _NUMERIC_CELL.match(v):
+                values.append(v)
+    return ". ".join(values)
+
+
 def extract_definitional_phrases(text: str, entities: list[dict]) -> dict[str, str]:
     """canonical_name -> one defining sentence, deterministically.
 

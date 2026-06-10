@@ -68,6 +68,10 @@ class TaskIn(BaseModel):
     doc_id: str = ""
     corpus_id: str = ""
     text: str = ""
+    # Table routing: kind selects the deterministic table-fact path; columns
+    # is the linearizer's header list (slimmed from chunk metadata).
+    chunk_kind: str = "body"
+    columns: list[str] = Field(default_factory=list)
 
 
 class ExtractIn(BaseModel):

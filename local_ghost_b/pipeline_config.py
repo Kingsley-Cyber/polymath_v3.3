@@ -10,7 +10,7 @@ in place without a version bump.
 
 from __future__ import annotations
 
-PIPELINE_VERSION = "v1.2026.06c"  # noise-proofing: entity floor + generic blocklist
+PIPELINE_VERSION = "v1.2026.06d"  # table-fact extraction (local execution half)
 
 # ---------- DEFAULT CLASSIFIER (LOCAL_GHOST_B_CLASSIFIER) ----------------
 #
@@ -107,6 +107,16 @@ GHOST_B_FACET_VOCAB: list[str] = [
 # zero-shot scores run lower. Only assign object_kind when a returned span
 # matches the entity's own surface, so precision stays high regardless.
 GLINER_FACET_THRESHOLD = 0.45
+
+# ---------- Table chunks (kind=="table") -----------------------------------
+#
+# Table chunks route to the deterministic table-fact extractor
+# (enrich.extract_table_facts) instead of the prose path: row label ->
+# subject, column header -> property_name, cell -> verbatim value. GLiREL is
+# skipped (rows aren't relational prose). The cap keeps a wide x tall chunk
+# from emitting hundreds of facts; rows are processed in order so the cap is
+# deterministic.
+TABLE_MAX_FACTS_PER_CHUNK = 24
 
 # ---------- Entity noise gates (post-GLiNER, pre-validation) ----------------
 #
