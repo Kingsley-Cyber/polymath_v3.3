@@ -172,6 +172,13 @@ GLINER_ENTITY_CONF_FLOOR = 0.55
 #    purpose — graph cleanliness beats marginal recall, and the taxonomy /
 #    facet layers still capture the concept via the multi-word forms.
 GENERIC_ENTITY_BLOCKLIST: frozenset[str] = frozenset({
+    # pronouns — GLiNER tags them as Person in book prose ("you" was the
+    # TOP-mentioned pilot entity at 715 mentions) and they then anchor facts
+    # and relations. A pronoun is never a queryable graph entity.
+    "i", "you", "we", "they", "he", "she", "it", "me", "us", "them", "him",
+    "her", "one", "someone", "anyone", "everyone", "everybody", "somebody",
+    "anybody", "nobody", "yourself", "yourselves", "ourselves", "themselves",
+    "himself", "herself", "itself", "myself", "others", "another",
     # discourse / document furniture
     "way", "kind", "type", "sort", "thing", "things", "stuff", "lot", "bit",
     "piece", "pieces", "part", "parts", "set", "sets", "group", "groups",
