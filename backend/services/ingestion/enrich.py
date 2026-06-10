@@ -145,7 +145,10 @@ def _casing_variants(name: str) -> list[str]:
     cand = {n.lower(), n.replace(" ", "_").lower(), n.replace(" ", "-").lower(),
             n.replace("-", " ").lower(), n.replace("_", " ").lower()}
     cand.discard(n.lower())
-    return [c for c in cand if c]
+    # sorted, not raw set order: set iteration depends on the per-process hash
+    # seed, which made alias order flip across processes/restarts and broke
+    # cross-process reproducibility (caught by the sidecar equivalence test).
+    return sorted(c for c in cand if c)
 
 
 def extract_aliases(text: str, entities: list[dict]) -> dict[str, list[str]]:
