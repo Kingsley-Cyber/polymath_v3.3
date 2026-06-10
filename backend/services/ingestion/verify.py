@@ -330,9 +330,14 @@ async def verify_ingest(
                 corpus_id=corpus_id,
                 collection_kind="naive",
             )
+            # Scope the Chunk side by corpus too: Document nodes MERGE on
+            # doc_id, so re-ingesting the same file into a different corpus
+            # leaves the shared Document linked to BOTH corpora's chunks.
+            # Counting unscoped chunks false-fails any doc previously ingested
+            # elsewhere (e.g. chunker settings changed -> stale extra chunk).
             cypher = (
                 "MATCH (d:Document {doc_id: $doc_id, corpus_id: $corpus_id})"
-                "-[:HAS_CHUNK]->(c:Chunk) "
+                "-[:HAS_CHUNK]->(c:Chunk {corpus_id: $corpus_id}) "
                 "RETURN count(c) AS cnt"
             )
             async with neo4j_driver.session() as session:

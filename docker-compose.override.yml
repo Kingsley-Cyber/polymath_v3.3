@@ -1,0 +1,12 @@
+# Local-machine overrides (auto-merged by `docker compose`).
+#
+# This Mac runs the embedder as a NATIVE MLX sidecar on :8082
+# (scripts/apple_ml_services/start.sh), not as the Docker `embedder`
+# profile service the base compose file points at (`http://embedder:80`,
+# which doesn't resolve when the local-embed profile is off). Same
+# pattern as the ghost_b_extract sidecar on :8084 — Metal is only
+# available natively, never inside Linux containers.
+services:
+  backend:
+    environment:
+      EMBEDDER_URL: http://host.docker.internal:8082
