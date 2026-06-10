@@ -75,13 +75,42 @@ sidecar is the repo's own established pattern (embedder :8082, docling :8500).
   `enrich._casing_variants` returned set-ordered aliases (hash-seed dependent,
   flipped across restarts). Fixed with `sorted()`.
 
-### To finish the e2e smoke (next step)
+### E2E smoke — PASSED 2026-06-09
 
-Start the sidecar (`START_GHOST_B_EXTRACT=true scripts/apple_ml_services/start.sh`
-or manually via uvicorn), bring up the backend container, POST
-`flame_engine_docs_complete.md` to the ingest endpoint, then verify in Neo4j
-(entities with `object_kind`, relations, facts) and Qdrant (chunk + summary
-vectors).
+Full production path, flame_engine_docs_complete.md through the Docker backend:
+upload batch → tier_chunker (12 children @ corpus default 500-tok target) →
+schema_lens (deterministic fallback; litellm 400 on the LLM lens is fine) →
+**Ghost B via sidecar :8084** (HTTP mode auto-detected — no torch in the
+container) → Mongo staging → embed (native :8082) → Qdrant ×3 collections →
+graph_backfill → `phase=verify ok=true`, batch `done=1`.
+
+Results in the stores (corpus 56bad53d, flame smoke):
+
+| store | result |
+|---|---|
+| Qdrant | 12 vectors in each of naive / hrag / graph |
+| Neo4j entities | 42 distinct, **26 with object_kind (62%)** — facet survived to the graph (flame→game_engine, flutter→framework) |
+| Neo4j relations | 25 edges: part_of 15, implements 3, supports 2, created_by 1, depends_on 1, related_to 3 → **88% typed** |
+| Neo4j facts | 12: rule_action 4, rule_condition 4, category 3, timestamp 1 |
+
+Two bugs found + fixed along the way (commit 41276ed):
+1. **EMBEDDER_URL pointed at the dormant Docker `embedder` profile service**
+   (`http://embedder:80` doesn't resolve) → 0 vectors. Fixed with
+   `docker-compose.override.yml` → `http://host.docker.internal:8082`.
+2. **verify.py counted HAS_CHUNK cross-corpus** (Document nodes MERGE on
+   doc_id; a previous ingest of the same file into corpus 0a231647 left a
+   stale 13th chunk) → false-fail on any re-ingested file. Fixed by scoping
+   the Chunk side with corpus_id.
+
+Known design debt observed (pre-existing, NOT fixed): Chunk nodes MERGE on
+chunk_id (doc_id+ordinal), so same-file ingests across corpora overwrite each
+other's chunk.corpus_id. Harmless for the planned single-corpus backfill;
+flag if multi-corpus same-file becomes a real workflow.
+
+Caveats: this smoke did NOT exercise Ghost A cloud summaries (fresh corpus has
+`summary_models: []`, chunk_summarization=false) — use a corpus with a real
+model pool for the pilot. Batch runner state: hard-`failed` items are not
+re-run by /resume; re-upload instead.
 
 ## Runtime dependency note
 
