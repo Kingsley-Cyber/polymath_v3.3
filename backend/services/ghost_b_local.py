@@ -1,8 +1,8 @@
 """ghost_b_local.py — fully-local, deterministic Ghost B extraction.
 
 Drop-in replacement for `services.ghost_b.extract_entities` in the ingestion
-worker's Ghost B branch. NO cloud LLM, NO SLM, NO network. The output is the
-same `ExtractionResult` dataclass shape the cloud extractor emits, so everything
+worker's Ghost B branch. NO cloud LLM, NO SLM. The output is the same
+`ExtractionResult` dataclass shape the cloud extractor emits, so everything
 downstream (Mongo staging, Neo4j MERGE, Qdrant) is unaffected.
 
 The stack, per chunk:
@@ -19,21 +19,39 @@ Confidence sentinels (locked): GLiNER softmax for entities, GLiREL score for
 relations, 1.0 for the four deterministic fact types, 0.9 for the five
 qualitative ones.
 
-Concurrency: extraction is GPU/CPU-bound synchronous work. We run it in a worker
-thread via asyncio.to_thread so the event loop stays free for the concurrent
-cloud Ghost A (summaries) branch, and serialize model access with a module lock
-(Metal serializes GPU work anyway, and the GLiNER/GLiREL singletons are not
-safe under concurrent forward passes).
+RUNTIME TOPOLOGY (two modes, auto-detected):
+
+  in-process  When the ML stack (torch/gliner/glirel) is importable — i.e. the
+              worker runs natively on macOS — extraction runs in this process
+              on MPS, in a worker thread under an inference lock.
+
+  http        When the ML stack is NOT importable — i.e. the worker runs in the
+              Linux Docker backend, which has no Metal and no torch — the tasks
+              are POSTed to the native ghost_b_extract sidecar
+              (scripts/apple_ml_services/ghost_b_extract_svc, default
+              http://host.docker.internal:8084), which runs the same
+              `_extract_raw` pipeline and returns the validated wire dicts.
+
+  Override with LOCAL_GHOST_B_EXTRACT_MODE=auto|inproc|http.
+  Sidecar URL: LOCAL_GHOST_B_EXTRACT_URL  (default http://host.docker.internal:8084)
+  Timeout:     LOCAL_GHOST_B_EXTRACT_TIMEOUT_S (default 600 — a whole doc's
+               chunks travel in one request; 230 chunks ≈ 80 s warm).
+
+The wire format is the pipeline's native output: `ExtractionResult`-shaped
+plain dicts whose entities/relations/facts have already passed LLMEntity /
+LLMRelation / LLMFact validation (drops are counted per chunk). Dataclass
+construction (`services.ghost_b` — backend-only imports) happens ONLY in
+`_to_results`, on the worker side, after either mode returns. That split is
+what lets the sidecar import this module from the `local_ghost_b` venv without
+dragging in the backend dependency chain.
 
 Determinism: every stage is a forward pass + threshold or pure-Python regex —
-no sampling — so the same (tasks) input reproduces the same output on a given
-machine.
+no sampling — so the same tasks reproduce the same output on a given machine
+(JSON float roundtrip is repr-exact, so http mode changes nothing).
 
-Runtime requirement: this module must run where MPS (or CPU) torch + the gliner
-and glirel packages + the GLiNER/GLiREL weights are importable — i.e. natively
-on the Mac with the local_ghost_b venv, NOT inside a Linux Docker container
-(no Metal). Heavy imports are deferred to call time so importing this module is
-always cheap and safe.
+If the sidecar is unreachable in http mode, extraction RAISES — local
+extraction is the pipeline, not a best-effort enrichment; failing loudly is
+correct.
 """
 
 from __future__ import annotations
@@ -49,9 +67,9 @@ from typing import Any
 from pydantic import ValidationError
 
 # These are light (pydantic / re only) and import nothing from services.ghost_b,
-# so they are safe at module load. The heavy / circular-prone imports
-# (services.ghost_b dataclasses, glirel_infer, gliner, torch, pipeline_config)
-# are deferred into the functions below.
+# so they are safe at module load — in the backend container AND in the sidecar
+# venv. The heavy / circular-prone imports (services.ghost_b dataclasses,
+# glirel_infer, gliner, torch, pipeline_config) are deferred into functions.
 from services.ghost_b_schemas import LLMEntity, LLMFact, LLMRelation
 from services.ingestion.enrich import (
     extract_aliases,
@@ -70,7 +88,14 @@ _FACT_CONF_QUALITATIVE = 0.9     # status / category / tag / rule_condition / ru
 
 # Serialize all model inference: one thread touches GLiNER/GLiREL at a time.
 _INFER_LOCK = threading.Lock()
-_GLIREL: Any = None  # GliRELClassifier singleton
+_GLIREL: Any = None        # GliRELClassifier singleton
+_ML_AVAILABLE: bool | None = None  # cached import probe
+
+SIDECAR_URL = os.environ.get(
+    "LOCAL_GHOST_B_EXTRACT_URL", "http://host.docker.internal:8084"
+).rstrip("/")
+SIDECAR_TIMEOUT_S = float(os.environ.get("LOCAL_GHOST_B_EXTRACT_TIMEOUT_S", "600"))
+EXTRACT_MODE = os.environ.get("LOCAL_GHOST_B_EXTRACT_MODE", "auto").strip().lower()
 
 
 # --------------------------------------------------------------- path / models
@@ -89,6 +114,21 @@ def _ensure_local_ghost_b_on_path() -> Any:
             sys.path.insert(0, sp)
     import pipeline_config  # noqa: E402  (resolved via the inserted path)
     return pipeline_config
+
+
+def _ml_stack_available() -> bool:
+    """True when torch+gliner+glirel are importable in THIS process (native Mac
+    venv). False in the Linux backend container, which routes to the sidecar."""
+    global _ML_AVAILABLE
+    if _ML_AVAILABLE is None:
+        try:
+            import gliner  # noqa: F401
+            import glirel  # noqa: F401
+            import torch  # noqa: F401
+            _ML_AVAILABLE = True
+        except ImportError:
+            _ML_AVAILABLE = False
+    return _ML_AVAILABLE
 
 
 def _get_glirel() -> Any:
@@ -134,6 +174,23 @@ def _lens_id(schema_lens: Any) -> str | None:
             if schema_lens.get(k):
                 return str(schema_lens[k])
     return None
+
+
+def _task_dict(task: Any) -> dict:
+    """Normalize an ExtractionTask (or wire dict) to the plain-dict task shape."""
+    if isinstance(task, dict):
+        return {
+            "chunk_id": str(task.get("chunk_id") or ""),
+            "doc_id": str(task.get("doc_id") or ""),
+            "corpus_id": str(task.get("corpus_id") or ""),
+            "text": task.get("text") or "",
+        }
+    return {
+        "chunk_id": getattr(task, "chunk_id", "") or "",
+        "doc_id": getattr(task, "doc_id", "") or "",
+        "corpus_id": getattr(task, "corpus_id", "") or "",
+        "text": getattr(task, "text", "") or "",
+    }
 
 
 def _dedupe_entities(raw: list[dict], is_junk_surface) -> list[dict]:
@@ -213,8 +270,9 @@ def _merge_aliases(ent_dicts: list[dict], alias_map: dict[str, list[str]]) -> No
         d["query_aliases"] = merged[:5]
 
 
-def _build_entity_items(ent_dicts: list[dict], EntityItem, counters: dict) -> list:
-    items = []
+# ----------------------------------------------- validation -> wire dicts
+def _validated_entities(ent_dicts: list[dict], counters: dict) -> list[dict]:
+    out = []
     for d in ent_dicts:
         try:
             cand = LLMEntity(
@@ -228,20 +286,12 @@ def _build_entity_items(ent_dicts: list[dict], EntityItem, counters: dict) -> li
         except (ValidationError, ValueError, TypeError):
             counters["entity_drop"] += 1
             continue
-        items.append(EntityItem(
-            canonical_name=cand.canonical_name,
-            surface_form=cand.surface_form,
-            entity_type=cand.entity_type,
-            confidence=cand.confidence,
-            query_aliases=list(cand.query_aliases),
-            definitional_phrase=cand.definitional_phrase,
-            object_kind=cand.object_kind,
-        ))
-    return items
+        out.append(cand.model_dump())
+    return out
 
 
-def _build_relation_items(edges: list[dict], RelationItem, counters: dict) -> list:
-    items = []
+def _validated_relations(edges: list[dict], counters: dict) -> list[dict]:
+    out = []
     for edge in edges:
         subj = (edge.get("sub") or "").strip()
         obj = (edge.get("obj") or "").strip()
@@ -263,17 +313,12 @@ def _build_relation_items(edges: list[dict], RelationItem, counters: dict) -> li
         except (ValidationError, ValueError, TypeError):
             counters["relation_drop"] += 1
             continue
-        items.append(RelationItem(
-            subject=cand.subject, predicate=cand.predicate, object=cand.object,
-            object_kind=cand.object_kind, confidence=cand.confidence,
-            evidence_phrase=cand.evidence_phrase, relation_cue=cand.relation_cue,
-            source_predicate=None, validation_status=None,
-        ))
-    return items
+        out.append(cand.model_dump())
+    return out
 
 
-def _build_fact_items(fact_dicts: list[dict], confidence: float, FactItem, counters: dict) -> list:
-    items = []
+def _validated_facts(fact_dicts: list[dict], confidence: float, counters: dict) -> list[dict]:
+    out = []
     for fd in fact_dicts:
         try:
             v = LLMFact(
@@ -289,22 +334,17 @@ def _build_fact_items(fact_dicts: list[dict], confidence: float, FactItem, count
         except (ValidationError, ValueError, TypeError):
             counters["fact_drop"] += 1
             continue
-        items.append(FactItem(
-            subject=v.subject, fact_type=v.fact_type, property_name=v.property_name,
-            value=v.value, unit=v.unit or None, condition=v.condition or None,
-            confidence=v.confidence, evidence_phrase=v.evidence_phrase,
-        ))
-    return items
+        out.append(v.model_dump())
+    return out
 
 
 # --------------------------------------------------------- synchronous core
-def _extract_sync(tasks: list, do_facts: bool, lens_id: str | None) -> list:
-    """The blocking GLiNER+GLiREL+enrich pipeline. Runs in a worker thread under
-    the inference lock. Returns list[ExtractionResult] (one per task, order
-    preserved)."""
-    # Deferred imports (dataclasses + local stack).
-    from services.ghost_b import EntityItem, ExtractionResult, FactItem, RelationItem
-
+def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) -> list[dict]:
+    """The blocking GLiNER+GLiREL+enrich pipeline. Runs under the inference lock
+    in whatever process has the ML stack (native worker thread OR the sidecar).
+    Takes and returns PLAIN DICTS only — no services.ghost_b import — so the
+    sidecar can serve it from the local_ghost_b venv. One result dict per task,
+    order preserved; entities/relations/facts are already Pydantic-validated."""
     pc = _ensure_local_ghost_b_on_path()
     from chunk_with_gliner import is_junk_surface
 
@@ -316,9 +356,9 @@ def _extract_sync(tasks: list, do_facts: bool, lens_id: str | None) -> list:
         gliner = get_gliner()
         glirel = _get_glirel()
 
-        results: list = []
-        for task in tasks:
-            text = getattr(task, "text", "") or ""
+        results: list[dict] = []
+        for task in task_dicts:
+            text = task["text"]
             counters = {"entity_drop": 0, "relation_drop": 0, "evidence_drop": 0, "fact_drop": 0}
 
             if text.strip():
@@ -331,54 +371,54 @@ def _extract_sync(tasks: list, do_facts: bool, lens_id: str | None) -> list:
             alias_map = extract_aliases(text, ent_dicts) if ent_dicts else {}
             _merge_aliases(ent_dicts, alias_map)
 
-            entities = _build_entity_items(ent_dicts, EntityItem, counters)
+            entities = _validated_entities(ent_dicts, counters)
 
             # relations (GLiREL needs >=2 located entities; extract_chunk no-ops otherwise)
-            relations = []
+            relations: list[dict] = []
             if len(ent_dicts) >= 2:
                 chunk = {
-                    "chunk_id": getattr(task, "chunk_id", ""),
-                    "doc_id": getattr(task, "doc_id", ""),
+                    "chunk_id": task["chunk_id"],
+                    "doc_id": task["doc_id"],
                     "text": text,
                     "entities": ent_dicts,
                 }
                 edges = glirel.extract_chunk(chunk, max_related=max_related)
-                relations = _build_relation_items(edges, RelationItem, counters)
+                relations = _validated_relations(edges, counters)
 
             # facts
-            facts = []
+            facts: list[dict] = []
             if do_facts and ent_dicts and text.strip():
-                facts += _build_fact_items(
-                    extract_facts(text, ent_dicts), _FACT_CONF_DETERMINISTIC, FactItem, counters)
-                facts += _build_fact_items(
-                    extract_qualitative_facts(text, ent_dicts), _FACT_CONF_QUALITATIVE, FactItem, counters)
+                facts += _validated_facts(
+                    extract_facts(text, ent_dicts), _FACT_CONF_DETERMINISTIC, counters)
+                facts += _validated_facts(
+                    extract_qualitative_facts(text, ent_dicts), _FACT_CONF_QUALITATIVE, counters)
 
-            results.append(ExtractionResult(
-                schema_version=SCHEMA_VERSION,
-                chunk_id=getattr(task, "chunk_id", ""),
-                doc_id=getattr(task, "doc_id", ""),
-                corpus_id=getattr(task, "corpus_id", ""),
-                entities=entities,
-                relations=relations,
-                facts=facts,
-                text=text,  # Pt 10b — REQUIRED for downstream taxonomy matching
-                relation_drop_count=counters["relation_drop"],
-                entity_drop_count=counters["entity_drop"],
-                evidence_drop_count=counters["evidence_drop"],
-                fact_drop_count=counters["fact_drop"],
-                schema_lens_id=lens_id,
-            ))
+            results.append({
+                "schema_version": SCHEMA_VERSION,
+                "chunk_id": task["chunk_id"],
+                "doc_id": task["doc_id"],
+                "corpus_id": task["corpus_id"],
+                "entities": entities,
+                "relations": relations,
+                "facts": facts,
+                "text": text,  # Pt 10b — REQUIRED for downstream taxonomy matching
+                "entity_drop_count": counters["entity_drop"],
+                "relation_drop_count": counters["relation_drop"],
+                "evidence_drop_count": counters["evidence_drop"],
+                "fact_drop_count": counters["fact_drop"],
+                "schema_lens_id": lens_id,
+            })
 
         # ---- doc-level GLiNER pass-2: object_kind facet per unique entity ----
-        all_entities = [e for r in results for e in r.entities]
+        all_entities = [e for r in results for e in r["entities"]]
         if all_entities:
             context_by_entity: dict[str, str] = {}
-            for r in sorted(results, key=lambda x: x.chunk_id):  # deterministic first-occurrence
-                ctx = (r.text or "")[:1000]
+            for r in sorted(results, key=lambda x: x["chunk_id"]):  # deterministic first-occurrence
+                ctx = (r["text"] or "")[:1000]
                 if not ctx:
                     continue
-                for e in r.entities:
-                    canon = (e.canonical_name or "").strip().lower()
+                for e in r["entities"]:
+                    canon = (e.get("canonical_name") or "").strip().lower()
                     if canon and canon not in context_by_entity:
                         context_by_entity[canon] = ctx
             try:
@@ -389,19 +429,100 @@ def _extract_sync(tasks: list, do_facts: bool, lens_id: str | None) -> list:
     return results
 
 
-def _metrics(results: list) -> dict:
+# ----------------------------------------------------- wire -> dataclasses
+def _to_results(raw: list[dict]) -> list:
+    """Build ExtractionResult dataclasses from validated wire dicts. The ONLY
+    place this module touches services.ghost_b — backend-side only."""
+    from services.ghost_b import EntityItem, ExtractionResult, FactItem, RelationItem
+
+    out = []
+    for r in raw:
+        entities = [
+            EntityItem(
+                canonical_name=e["canonical_name"],
+                surface_form=e.get("surface_form", ""),
+                entity_type=e["entity_type"],
+                confidence=float(e.get("confidence") or 0.0),
+                query_aliases=list(e.get("query_aliases") or []),
+                definitional_phrase=e.get("definitional_phrase", ""),
+                object_kind=e.get("object_kind", ""),
+            )
+            for e in (r.get("entities") or [])
+        ]
+        relations = [
+            RelationItem(
+                subject=x["subject"], predicate=x["predicate"], object=x["object"],
+                object_kind=x.get("object_kind", "entity"),
+                confidence=float(x.get("confidence") or 0.0),
+                evidence_phrase=x.get("evidence_phrase", ""),
+                relation_cue=x.get("relation_cue", ""),
+                source_predicate=None, validation_status=None,
+            )
+            for x in (r.get("relations") or [])
+        ]
+        facts = [
+            FactItem(
+                subject=f["subject"], fact_type=f["fact_type"],
+                property_name=f.get("property_name", ""), value=f.get("value", ""),
+                unit=(f.get("unit") or None), condition=(f.get("condition") or None),
+                confidence=float(f.get("confidence") or 0.0),
+                evidence_phrase=f.get("evidence_phrase", ""),
+            )
+            for f in (r.get("facts") or [])
+        ]
+        out.append(ExtractionResult(
+            schema_version=r.get("schema_version") or SCHEMA_VERSION,
+            chunk_id=r.get("chunk_id", ""),
+            doc_id=r.get("doc_id", ""),
+            corpus_id=r.get("corpus_id", ""),
+            entities=entities,
+            relations=relations,
+            facts=facts,
+            text=r.get("text", ""),
+            entity_drop_count=int(r.get("entity_drop_count") or 0),
+            relation_drop_count=int(r.get("relation_drop_count") or 0),
+            evidence_drop_count=int(r.get("evidence_drop_count") or 0),
+            fact_drop_count=int(r.get("fact_drop_count") or 0),
+            schema_lens_id=r.get("schema_lens_id"),
+        ))
+    return out
+
+
+def _metrics(raw: list[dict]) -> dict:
     return {
         "model": "ghost_b_local",
         "schema_version": SCHEMA_VERSION,
-        "n_chunks": len(results),
-        "n_entities": sum(len(r.entities) for r in results),
-        "n_relations": sum(len(r.relations) for r in results),
-        "n_facts": sum(len(r.facts) for r in results),
-        "entity_drop_count": sum(r.entity_drop_count for r in results),
-        "relation_drop_count": sum(r.relation_drop_count for r in results),
-        "evidence_drop_count": sum(r.evidence_drop_count for r in results),
-        "fact_drop_count": sum(r.fact_drop_count for r in results),
+        "n_chunks": len(raw),
+        "n_entities": sum(len(r.get("entities") or []) for r in raw),
+        "n_relations": sum(len(r.get("relations") or []) for r in raw),
+        "n_facts": sum(len(r.get("facts") or []) for r in raw),
+        "entity_drop_count": sum(int(r.get("entity_drop_count") or 0) for r in raw),
+        "relation_drop_count": sum(int(r.get("relation_drop_count") or 0) for r in raw),
+        "evidence_drop_count": sum(int(r.get("evidence_drop_count") or 0) for r in raw),
+        "fact_drop_count": sum(int(r.get("fact_drop_count") or 0) for r in raw),
     }
+
+
+# ------------------------------------------------------------- http client
+async def _extract_via_sidecar(task_dicts: list[dict], do_facts: bool, lens_id: str | None) -> list[dict]:
+    """POST the whole doc's tasks to the native ghost_b_extract sidecar and
+    return the raw wire dicts. Raises on any failure — extraction is the
+    pipeline, not an optional enrichment."""
+    import httpx
+
+    body = {"tasks": task_dicts, "enable_facts": do_facts, "schema_lens_id": lens_id}
+    try:
+        async with httpx.AsyncClient(timeout=SIDECAR_TIMEOUT_S) as client:
+            resp = await client.post(f"{SIDECAR_URL}/extract", json=body)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as exc:
+        raise RuntimeError(
+            f"ghost_b_local: extract sidecar at {SIDECAR_URL} failed ({exc}). "
+            "Start it via scripts/apple_ml_services/start.sh (START_GHOST_B_EXTRACT=true) "
+            "or run the worker natively where torch/gliner/glirel are importable."
+        ) from exc
+    return list(data.get("results") or [])
 
 
 # ----------------------------------------------------------------- entry point
@@ -431,10 +552,20 @@ async def extract_entities(
 
     do_facts = True if enable_facts is None else bool(enable_facts)
     lens_id = _lens_id(schema_lens)
+    task_dicts = [_task_dict(t) for t in tasks]
 
-    results = await asyncio.to_thread(_extract_sync, list(tasks), do_facts, lens_id)
+    mode = EXTRACT_MODE
+    if mode not in ("inproc", "http"):
+        mode = "inproc" if _ml_stack_available() else "http"
+
+    if mode == "inproc":
+        raw = await asyncio.to_thread(_extract_raw, task_dicts, do_facts, lens_id)
+    else:
+        raw = await _extract_via_sidecar(task_dicts, do_facts, lens_id)
+
+    results = _to_results(raw)
 
     if return_report:
         from services.ghost_b import ExtractionBatchReport
-        return ExtractionBatchReport(results=results, failures=[], metrics=_metrics(results))
+        return ExtractionBatchReport(results=results, failures=[], metrics=_metrics(raw))
     return results

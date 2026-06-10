@@ -16,6 +16,11 @@
 #   RERANKER_BATCH_SIZE               default 16
 #   RERANKER_MAX_DOC_CHARS            default 6000
 #   RERANKER_MAX_QUERY_CHARS          default 2000
+#   GHOST_B_EXTRACT_HOST / _PORT      default 0.0.0.0 / 8084
+#   START_GHOST_B_EXTRACT             default false
+#   GHOST_B_EXTRACT_PY                default <repo>/local_ghost_b/.venv/bin/python
+#                                     (the pinned torch/gliner/glirel venv — NOT
+#                                     the shared apple_ml_services .venv)
 
 set -euo pipefail
 
@@ -62,6 +67,13 @@ export RERANKER_BATCH_SIZE="${RERANKER_BATCH_SIZE:-16}"
 export RERANKER_MAX_DOC_CHARS="${RERANKER_MAX_DOC_CHARS:-6000}"
 export RERANKER_MAX_QUERY_CHARS="${RERANKER_MAX_QUERY_CHARS:-2000}"
 
+# Local Ghost B extraction sidecar (GLiNER ×2 + GLiREL + Python rules).
+# Runs on the local_ghost_b venv — the pinned torch/gliner/glirel working set.
+export GHOST_B_EXTRACT_HOST="${GHOST_B_EXTRACT_HOST:-0.0.0.0}"
+export GHOST_B_EXTRACT_PORT="${GHOST_B_EXTRACT_PORT:-8084}"
+export START_GHOST_B_EXTRACT="${START_GHOST_B_EXTRACT:-false}"
+GHOST_B_EXTRACT_PY="${GHOST_B_EXTRACT_PY:-$(cd "${PROJECT_ROOT}/../.." && pwd)/local_ghost_b/.venv/bin/python}"
+
 PID_FILES=()
 
 should_start() {
@@ -72,10 +84,11 @@ should_start() {
 }
 
 start_service() {
-  local name="$1" module="$2" host_var="$3" port_var="$4"
+  # Optional 5th arg: python interpreter override (defaults to the shared PY).
+  local name="$1" module="$2" host_var="$3" port_var="$4" py="${5:-${PY}}"
   local host="${!host_var}" port="${!port_var}"
   echo "[apple-ml] starting ${name} on ${host}:${port}"
-  ${PY} -m uvicorn "${module}:app" \
+  ${py} -m uvicorn "${module}:app" \
     --host "${host}" --port "${port}" \
     --log-level info \
     >> "${LOG_DIR}/apple_ml_services.log" 2>> "${LOG_DIR}/apple_ml_services.err.log" &
@@ -114,6 +127,13 @@ if should_start "${START_SLM_ENRICH}"; then
   start_service "slm_enrich" "slm_enrich_mlx.main" SLM_ENRICH_HOST SLM_ENRICH_PORT
 else
   skip_service "slm_enrich"
+fi
+
+if should_start "${START_GHOST_B_EXTRACT}"; then
+  start_service "ghost_b_extract" "ghost_b_extract_svc.main" \
+    GHOST_B_EXTRACT_HOST GHOST_B_EXTRACT_PORT "${GHOST_B_EXTRACT_PY}"
+else
+  skip_service "ghost_b_extract"
 fi
 
 if [[ "${#PID_FILES[@]}" -eq 0 ]]; then

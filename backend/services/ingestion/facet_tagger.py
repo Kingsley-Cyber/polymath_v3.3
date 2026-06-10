@@ -129,13 +129,28 @@ def _match_facet(spans: list[dict], surfaces: set[str]) -> str:
     return best_label
 
 
+def _get(entity: Any, key: str) -> str:
+    """Field access that works for EntityItem-like objects AND the plain wire
+    dicts the local lane ships between sidecar and worker."""
+    if isinstance(entity, dict):
+        return str(entity.get(key) or "")
+    return str(getattr(entity, key, "") or "")
+
+
+def _set(entity: Any, key: str, value: str) -> None:
+    if isinstance(entity, dict):
+        entity[key] = value
+    else:
+        setattr(entity, key, value)
+
+
 def _surfaces_of(entity: Any) -> set[str]:
-    """Lowercased {canonical_name, surface_form} for an EntityItem-like object."""
+    """Lowercased {canonical_name, surface_form} for an entity (object or dict)."""
     out: set[str] = set()
-    canon = (getattr(entity, "canonical_name", "") or "").strip().lower()
+    canon = _get(entity, "canonical_name").strip().lower()
     if canon:
         out.add(canon)
-    surf = (getattr(entity, "surface_form", "") or "").strip().lower()
+    surf = _get(entity, "surface_form").strip().lower()
     if surf:
         out.add(surf)
     return out
@@ -151,8 +166,9 @@ def tag_facets(
     """Set EntityItem.object_kind via GLiNER pass-2, deduped per canonical_name.
 
     Args:
-        entities: iterable of EntityItem-like objects (need .canonical_name,
-            .surface_form, and a settable .object_kind). Mutated in place.
+        entities: iterable of EntityItem-like objects OR plain wire dicts (need
+            canonical_name, surface_form, and a settable object_kind). Mutated
+            in place.
         context_by_entity: canonical_name (lowercased) -> context text, usually
             the entity's first-occurrence chunk. Entities with no context are
             skipped (object_kind stays "").
@@ -161,7 +177,7 @@ def tag_facets(
     Returns the canonical_name -> object_kind map that was applied (handy for
     logging / tests). Additive: an entity that already has object_kind is left
     untouched."""
-    items = [e for e in entities if (getattr(e, "canonical_name", "") or "").strip()]
+    items = [e for e in entities if _get(e, "canonical_name").strip()]
     if not items:
         return {}
     context_by_entity = context_by_entity or {}
@@ -169,7 +185,7 @@ def tag_facets(
     # Dedup canonical_name -> union of its surfaces (for span matching).
     reps: dict[str, set[str]] = {}
     for e in items:
-        canon = e.canonical_name.strip().lower()
+        canon = _get(e, "canonical_name").strip().lower()
         if not canon:
             continue
         reps.setdefault(canon, set()).update(_surfaces_of(e))
@@ -197,8 +213,8 @@ def tag_facets(
 
     # Apply — additive, never overwrite an existing object_kind.
     for e in items:
-        canon = e.canonical_name.strip().lower()
+        canon = _get(e, "canonical_name").strip().lower()
         facet = facet_map.get(canon)
-        if facet and not (getattr(e, "object_kind", "") or ""):
-            e.object_kind = facet
+        if facet and not _get(e, "object_kind"):
+            _set(e, "object_kind", facet)
     return facet_map
