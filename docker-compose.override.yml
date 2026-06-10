@@ -10,3 +10,17 @@ services:
   backend:
     environment:
       EMBEDDER_URL: http://host.docker.internal:8082
+      # Extraction runs on the RTX PRO 6000 box (34 ms/chunk vs the Mac's
+      # 420 — unified-memory bandwidth binds DeBERTa here). If that box is
+      # offline, ingestion fails loudly (no silent fallback); to fall back to
+      # the Mac sidecar: comment this line out, start the local sidecar
+      # (START_GHOST_B_EXTRACT=true scripts/apple_ml_services/start.sh), and
+      # `docker compose up -d backend`. Queries never touch this.
+      LOCAL_GHOST_B_EXTRACT_URL: http://192.168.1.83:8084
+      # Native Qwen3-Reranker-0.6B cross-encoder (llama.cpp on Metal, :8081,
+      # LaunchAgent com.polymath.reranker-qwen3) — final ranking stage of
+      # retrieval (step 6). Probe quality 8/8 with 0.93+ score separation vs
+      # the jina bi-encoder MLX sidecar's 4/6 (retired); 40-doc pool ≈ 1 s.
+      # If unreachable, the retriever falls back to fusion score sort.
+      RERANKER_URL: http://host.docker.internal:8081
+      RERANKER_SCORE_SCALE: probability
