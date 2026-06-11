@@ -7,6 +7,7 @@
 #
 # Exported entry point: emerge_domains(qdrant, neo4j_driver, db, corpus_id)
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -754,7 +755,59 @@ async def emerge_domains(
     )
 
     await _cache_domain_map(db, domain_map)
+    # Metrics are the second half of what the overview/cluster readers gate
+    # on (get_cached_metrics) — chain them here so every domain rebuild
+    # (post-ingest auto-warm, manual rebuild route, read-path self-heal)
+    # yields a servable graph. compute_all_metrics had NO remaining callers
+    # after refactors, which left every corpus permanently "warming" in
+    # Brain View. It is signature-cached, so non-force re-runs are cheap.
+    #
+    # ISOLATION IS LOAD-BEARING: the metrics pass is minutes of CPU-bound
+    # NetworkX on large corpora. Run as a coroutine on the main loop it
+    # starves EVERY API request for that whole window (observed live: the
+    # entire backend stopped answering /health). So it runs in a worker
+    # thread with its own event loop and its own short-lived DB clients —
+    # never the caller's loop-bound clients.
+    try:
+        await asyncio.to_thread(
+            _compute_metrics_isolated, corpus_id, domain_map, force)
+    except Exception:  # noqa: BLE001 — a metrics failure must not void the domain map
+        logger.exception("metrics computation failed corpus=%s", corpus_id)
     return domain_map
+
+
+def _compute_metrics_isolated(corpus_id: str, domain_map: "DomainMap",
+                              force: bool) -> None:
+    """Run compute_all_metrics on a private event loop with private clients.
+
+    Called via asyncio.to_thread from emerge_domains. Motor/neo4j clients are
+    bound to the loop that created them, so this thread builds its own from
+    settings and closes them before returning."""
+    import asyncio as _aio
+
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    from config import settings as _settings
+
+    async def _run() -> None:
+        client = AsyncIOMotorClient(_settings.MONGODB_URI)
+        neo = None
+        try:
+            db = client.get_default_database()
+            if getattr(_settings, "NEO4J_ENABLED", False):
+                from neo4j import AsyncGraphDatabase
+
+                neo = AsyncGraphDatabase.driver(
+                    _settings.NEO4J_URI,
+                    auth=(_settings.NEO4J_USER, _settings.NEO4J_PASSWORD),
+                )
+            await compute_all_metrics(neo, db, corpus_id, domain_map, force=force)
+        finally:
+            if neo is not None:
+                await neo.close()
+            client.close()
+
+    _aio.run(_run())
 
 
 # ── Cache I/O ──────────────────────────────────────────────────────────────

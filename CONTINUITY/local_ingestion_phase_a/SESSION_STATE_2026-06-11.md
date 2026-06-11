@@ -15,7 +15,42 @@ fact-entity linkage). Everything is committed+pushed through `e918ad6`
 (repo github.com/Kingsley-Cyber/polymath_v3.3, branch main; verify with
 `git rev-list --count origin/main..HEAD` == 0).
 
-THE ONE BIG PENDING ACTION: the 498-file backfill —
+BACKFILL LAUNCHED 2026-06-11 ~14:00 local: corpus `authentic_library`
+(f8a0aa85), durable batch c9ab348b, 498 files, concurrency 3,
+run_backfill.sh supervising (caffeinated, 60s monitor, log
+backfill_20260611_080000.log, .backfill_state present → reruns resume).
+Verified at launch: extraction routed to RTX ONNX :8086 (30–53 ms/chunk),
+ghost_a=ok via the NEW parent-summary lane — tencent/Hy3-preview on
+SiliconFlow INTERNATIONAL (api.siliconflow.COM — the .cn endpoint rejects
+these keys), 2 working keys as pool entries (model string MUST be
+"openai/tencent/Hy3-preview" — litellm needs the openai/ prefix to route a
+custom api_base), max_concurrent 8 each, keys live in the corpus config
+(encrypted at rest). COST CAVEAT: measured ~$0.001/summary × ~138k parents
+≈ $70–140 total vs ~$8.5 quoted credit; both accounts already run NEGATIVE
+totalBalance yet still serve (preview model likely promo-priced) — if
+SiliconFlow cuts them off mid-run, ghost_a disables lanes gracefully and
+docs continue WITHOUT summaries (core corpus unaffected). A later
+"summarize missing parents" pass is the recovery path.
+
+GOTCHA (cost a failed smoke): IngestionConfig presets OVERWRITE
+chunk_summarization — corpus creation MUST send preset="custom" for the
+summary lane to stick ("balanced", the default, forces it false).
+
+GRAPH VIEW FIXES SHIPPED TODAY (commit 6ff5dbc + follow-ups): (1)
+self-healing cache reads — overview/cluster reads kick emerge_domains
+force=True for cold corpora (in-flight registry, 4/read cap, 15-min
+cooldown, defers during active ingest); (2) THE metrics orphan —
+compute_all_metrics had ZERO callers after refactors, so every corpus sat
+"warming" forever; now chained inside emerge_domains; (3) metrics run in an
+ISOLATED THREAD with own event loop + own Mongo/Neo4j clients —
+on-main-loop it froze the ENTIRE API for minutes (observed live); (4)
+frontend FA2 position cache (sessionStorage, LRU 8) — reopening a graph
+re-settles in 0.8s instead of replaying the 4–8s layout churn. Main_files
+(0a231647) heal is QUEUED (deferred during backfill); first Brain View
+visit after the backfill rebuilds it threaded. The new corpus warms
+automatically post-batch.
+
+PREVIOUSLY the one big pending action: the 498-file backfill —
 `scripts/run_backfill.sh` (caffeinated, resumable, monitored; preflight now
 requires the ONNX sidecar healthy+CUDA on :8086). User says "launch" when
 ready. Target: `/Volumes/Flash Drive/authentic_files` (498 .md, 340 MB).
