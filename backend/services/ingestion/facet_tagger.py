@@ -76,11 +76,15 @@ def _pc() -> Any:
 
 # ---------------------------------------------------------------- the model
 def get_gliner() -> Any:
-    """Lazy, cached GLiNER model on MPS (Metal) when available, else CPU.
+    """Lazy, cached GLiNER model — CUDA > MPS > CPU (torch lane).
 
     This is the ONE GLiNER instance for the local Ghost B lane — both the
     pass-1 entity tagger (ghost_b_local) and the pass-2 facet tagger call this,
-    so the weights load once. Falls back to CPU if MPS placement raises."""
+    so the weights load once. Falls back to CPU if accelerator placement raises.
+
+    HISTORY: until 2026-06-11 this picked only MPS-or-CPU (written on the Mac),
+    which silently ran torch GLiNER on the CPU of the CUDA RTX box — the real
+    reason "the GPU looked idle" during torch extraction benchmarks there."""
     global _MODEL
     if _MODEL is not None:
         return _MODEL
@@ -115,8 +119,12 @@ def get_gliner() -> Any:
 
     logger.info("facet_tagger: loading GLiNER %s ...", pc.GLINER_MODEL)
     model = GLiNER.from_pretrained(pc.GLINER_MODEL)
-    use_mps = bool(getattr(torch.backends, "mps", None)) and torch.backends.mps.is_available()
-    dev = "mps" if use_mps else "cpu"
+    if torch.cuda.is_available():
+        dev = "cuda"
+    elif bool(getattr(torch.backends, "mps", None)) and torch.backends.mps.is_available():
+        dev = "mps"
+    else:
+        dev = "cpu"
     # NOTE: GLiNER's `.device` is a read-only @property derived from the model's
     # parameters — `.to(dev)` is the only correct way to place it; assigning
     # `.device` raises AttributeError on this build.
