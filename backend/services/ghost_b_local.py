@@ -743,7 +743,28 @@ async def _extract_via_sidecar(task_dicts: list[dict], do_facts: bool, lens_id: 
 
     import httpx
 
-    n_urls = len(SIDECAR_URLS)
+    # Liveness filter: the URL list is a PREFERENCE ORDER spanning machines
+    # (e.g. RTX instances first, the Mac's own sidecar last). Only live
+    # instances get work, so the same config serves both worlds: RTX on ->
+    # fast bulk ingestion; RTX off -> the Mac handles small batches at its
+    # own pace. Probe cost is one /health round-trip per URL per doc.
+    live_urls: list[str] = []
+    async with httpx.AsyncClient(timeout=3.0) as probe:
+        for u in SIDECAR_URLS:
+            try:
+                r = await probe.get(f"{u}/health")
+                if r.status_code == 200 and r.json().get("status") == "ok":
+                    live_urls.append(u)
+            except Exception:  # noqa: BLE001 — dead/off instance, skip
+                continue
+    if not live_urls:
+        raise RuntimeError(
+            f"ghost_b_local: no extraction sidecar reachable among {SIDECAR_URLS}. "
+            "Start the RTX sidecar(s) or the Mac sidecar "
+            "(START_GHOST_B_EXTRACT=true scripts/apple_ml_services/start.sh)."
+        )
+
+    n_urls = len(live_urls)
     slice_size = SIDECAR_SLICE
     if n_urls > 1 and task_dicts:
         # Split the doc across instances, but never below 64 chunks per slice
@@ -755,7 +776,7 @@ async def _extract_via_sidecar(task_dicts: list[dict], do_facts: bool, lens_id: 
               for s in range(0, len(task_dicts), slice_size)]
 
     async def _post_slice(client: httpx.AsyncClient, idx: int, sl: list[dict]) -> list[dict]:
-        url = SIDECAR_URLS[idx % n_urls]
+        url = live_urls[idx % n_urls]
         resp = await client.post(
             f"{url}/extract",
             json={"tasks": sl, "enable_facts": do_facts, "schema_lens_id": lens_id},

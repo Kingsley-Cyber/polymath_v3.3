@@ -16,11 +16,14 @@ services:
       # the Mac sidecar: comment this line out, start the local sidecar
       # (START_GHOST_B_EXTRACT=true scripts/apple_ml_services/start.sh), and
       # `docker compose up -d backend`. Queries never touch this.
-      # Single instance for now; swap to the 6-instance fleet line once the
-      # RTX agent confirms all are warm (round-robin to a down port fails
-      # requests — never list more URLs than are actually serving):
-      # LOCAL_GHOST_B_EXTRACT_URL: http://192.168.1.83:8084,http://192.168.1.83:8085,http://192.168.1.83:8086,http://192.168.1.83:8087,http://192.168.1.83:8088,http://192.168.1.83:8089
-      LOCAL_GHOST_B_EXTRACT_URL: http://192.168.1.83:8084
+      # PREFERENCE-ORDERED sidecar list spanning both machines — the client
+      # health-probes each per call and uses only the live ones (multi-
+      # process on Windows serializes under WDDM, so just 2 RTX instances).
+      # RTX on  -> bulk extraction runs there (fast).
+      # RTX off -> the Mac's own always-on sidecar (LaunchAgent
+      #            com.polymath.ghostb-extract) quietly handles small
+      #            batches. One config, no switching, either machine works.
+      LOCAL_GHOST_B_EXTRACT_URL: http://192.168.1.83:8084,http://192.168.1.83:8085,http://host.docker.internal:8084
       # Docs in flight through extraction (default 1 serialized everything).
       # With an N-instance RTX fleet, small docs can't feed the fleet alone —
       # several docs in flight keep all instances busy while the Mac embeds
