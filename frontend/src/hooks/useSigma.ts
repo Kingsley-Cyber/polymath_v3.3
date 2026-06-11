@@ -260,6 +260,84 @@ const getLayoutDuration = (nodeCount: number): number => {
   return 4000;
 };
 
+// ── Layout position cache ────────────────────────────────────────────────
+// Re-opening the same graph used to replay the full FA2 settle (4–8s of
+// churn at multi-hundred-file scale) just to re-derive the same shape.
+// Final node positions are cached per graph fingerprint (sessionStorage,
+// LRU-capped) and restored on the next open: FA2 STILL runs — the motion
+// design is unchanged — but it starts from the settled answer and converges
+// in under a second. Changed graphs (different node set) miss the cache and
+// animate exactly as before. Drag-release re-settles never restore (they
+// pass a duration override), so user-placed nodes stay where dropped.
+const POS_CACHE_KEY = "polymath.graph.positions.v1";
+const POS_CACHE_MAX_ENTRIES = 8;
+const RESTORED_SETTLE_MS = 800;
+
+const graphFingerprint = (
+  graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>,
+): string => {
+  const keys = graph.nodes().sort();
+  let h = 5381;
+  for (const k of keys) {
+    for (let i = 0; i < k.length; i++) h = ((h << 5) + h + k.charCodeAt(i)) | 0;
+    h = ((h << 5) + h + 124) | 0; // key separator
+  }
+  return `${graph.order}:${graph.size}:${h}`;
+};
+
+type PositionCache = Record<
+  string,
+  { t: number; pos: Record<string, [number, number]> }
+>;
+
+const readPositionCache = (): PositionCache => {
+  try {
+    return JSON.parse(sessionStorage.getItem(POS_CACHE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+};
+
+const saveLayoutPositions = (
+  graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>,
+): void => {
+  try {
+    const cache = readPositionCache();
+    const pos: Record<string, [number, number]> = {};
+    graph.forEachNode((n, a) => {
+      pos[n] = [a.x as number, a.y as number];
+    });
+    cache[graphFingerprint(graph)] = { t: Date.now(), pos };
+    const entries = Object.entries(cache)
+      .sort((a, b) => b[1].t - a[1].t)
+      .slice(0, POS_CACHE_MAX_ENTRIES);
+    sessionStorage.setItem(POS_CACHE_KEY, JSON.stringify(Object.fromEntries(entries)));
+  } catch {
+    /* quota / serialization — the cache is best-effort */
+  }
+};
+
+const restoreLayoutPositions = (
+  graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>,
+): boolean => {
+  try {
+    const hit = readPositionCache()[graphFingerprint(graph)];
+    if (!hit) return false;
+    let applied = 0;
+    graph.forEachNode((n) => {
+      const p = hit.pos[n];
+      if (p) {
+        graph.setNodeAttribute(n, "x", p[0]);
+        graph.setNodeAttribute(n, "y", p[1]);
+        applied++;
+      }
+    });
+    return applied === graph.order && applied > 0;
+  } catch {
+    return false;
+  }
+};
+
 // ── Hook ─────────────────────────────────────────────────────────────────
 
 export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
@@ -778,12 +856,20 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       );
       const settings = { ...inferredSettings, ...customSettings };
 
+      // Position-cache restore — only for fresh loads (no duration override;
+      // overrides come from drag-release re-settles, where snapping nodes
+      // back to cached spots would undo the user's drag).
+      const restored =
+        durationOverrideMs == null && restoreLayoutPositions(graph);
+
       const layout = new FA2Layout(graph, { settings });
       layoutRef.current = layout;
       layout.start();
       setIsLayoutRunning(true);
 
-      const duration = durationOverrideMs ?? getLayoutDuration(nodeCount);
+      const duration =
+        durationOverrideMs ??
+        (restored ? RESTORED_SETTLE_MS : getLayoutDuration(nodeCount));
       layoutTimeoutRef.current = setTimeout(() => {
         if (layoutRef.current) {
           layoutRef.current.stop();
@@ -799,6 +885,7 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
           } catch {
             /* ignore */
           }
+          saveLayoutPositions(graph);
           sigmaRef.current?.refresh();
           setIsLayoutRunning(false);
         }

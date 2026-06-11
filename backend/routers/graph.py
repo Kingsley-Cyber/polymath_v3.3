@@ -81,12 +81,17 @@ async def get_graph_overview(
         raise HTTPException(status_code=503, detail="Database not connected")
     from services.graph.overview import get_cached_graph_overview
 
-    return await get_cached_graph_overview(
+    result = await get_cached_graph_overview(
         db,
         corpus_id,
         max_concepts=max_concepts,
         max_edges=max_edges,
     )
+    # Self-heal: a cold corpus rebuilds because someone looked at it.
+    if isinstance(result, dict) and result.get("status") == "cache_warming":
+        result.setdefault("_meta", {})["self_heal_kicked"] = (
+            _kick_cache_rebuild_for([corpus_id]))
+    return result
 
 
 @router.get(
@@ -1374,9 +1379,15 @@ async def graph_overview_multi_corpus(body: dict = Body(...)) -> dict:
 
     from services.graph.overview import get_cached_graph_overview_multi
 
-    return await get_cached_graph_overview_multi(
+    result = await get_cached_graph_overview_multi(
         db, corpus_ids, max_concepts=max_concepts, max_edges=max_edges
     )
+    # Self-heal: viewing the graph kicks rebuilds for any cold corpora, so
+    # "warming" converges to ready without a manual rebuild call.
+    warming = list((result.get("_meta") or {}).get("cache_warming_corpora") or [])
+    if warming:
+        result.setdefault("_meta", {})["self_heal_kicked"] = _kick_cache_rebuild_for(warming)
+    return result
 
 
 @discovery_router.post(
@@ -1434,6 +1445,8 @@ async def graph_cluster_drill(concept_id: str, body: dict = Body(...)) -> dict:
             if str((info or {}).get("concept_id") or "") == str(concept_id):
                 entity_id_set.add(str(entity_id))
 
+    self_heal_kicked = _kick_cache_rebuild_for(cache_warming) if cache_warming else []
+
     entity_ids = sorted(entity_id_set)
     if not entity_ids:
         return {
@@ -1446,6 +1459,7 @@ async def graph_cluster_drill(concept_id: str, body: dict = Body(...)) -> dict:
                 "failed_ids": [],
                 "errors": {},
                 "cache_warming_corpora": cache_warming,
+                "self_heal_kicked": self_heal_kicked,
                 "entity_id_count": 0,
             },
         }
@@ -1490,6 +1504,79 @@ async def graph_cache_status(corpus_id: str) -> dict:
 # Track in-flight cache-rebuild jobs so we don't double-fire and so the
 # frontend can poll for completion without spinning up a new task each time.
 _CACHE_REBUILD_TASKS: dict[str, asyncio.Task] = {}
+
+# Self-heal cap: a multi-corpus overview over many cold corpora kicks at most
+# this many rebuilds per read — Brain View polls while warming, so the rest
+# get kicked on subsequent reads instead of stampeding Neo4j/Qdrant at once.
+_SELF_HEAL_MAX_KICKS_PER_READ = 4
+
+# Self-heal must rebuild with force=True: a half-built corpus (domain cache
+# ready, metrics missing — e.g. warmup died mid-build) makes force=False
+# short-circuit on the fresh domain cache and never produce the metrics the
+# overview needs (verified live on a 401-doc corpus). force=True makes the
+# heal real, and this cooldown prevents the pathological loop where a corpus
+# that can never become ready (zero entities, persistent build failure) gets
+# a full rebuild kicked by every read.
+_SELF_HEAL_COOLDOWN_SECONDS = 900.0
+_SELF_HEAL_LAST_KICK: dict[str, float] = {}
+
+
+def _kick_cache_rebuild_for(corpus_ids: list[str]) -> list[str]:
+    """Self-heal: fire-and-forget analytics rebuilds for corpora a graph read
+    found cold (cache missing or signature-stale), making the view itself the
+    rebuild trigger. Before this, the only triggers were post-ingest warmup
+    and the manual /cache/rebuild route — a corpus whose warmup crashed (or
+    that predates the hook) stayed "warming" forever unless someone found the
+    manual button. Reuses the manual route's task registry (in-flight guard),
+    respects the active-ingest deferral, and never raises."""
+    import logging
+
+    log = logging.getLogger(__name__)
+    db = ingestion_service.db
+    qdrant = ingestion_service.qdrant_client
+    if db is None or qdrant is None or not corpus_ids:
+        return []
+    neo4j = ingestion_service.neo4j_driver  # may be None — emerge_domains tolerates
+    from services.graph.analytics import emerge_domains
+    from services.graph.cache_warmup import should_defer_warmup_for_active_ingest
+
+    import time as _time
+
+    kicked: list[str] = []
+    now = _time.monotonic()
+    for cid in corpus_ids:
+        if len(kicked) >= _SELF_HEAL_MAX_KICKS_PER_READ:
+            break
+        existing = _CACHE_REBUILD_TASKS.get(cid)
+        if existing and not existing.done():
+            continue
+        last = _SELF_HEAL_LAST_KICK.get(cid)
+        if last is not None and (now - last) < _SELF_HEAL_COOLDOWN_SECONDS:
+            continue
+
+        async def _heal_one(target_cid: str = cid) -> None:
+            try:
+                if await should_defer_warmup_for_active_ingest(db, target_cid):
+                    # Don't burn the cooldown on a deferral — re-kick freely
+                    # once the ingest settles.
+                    _SELF_HEAL_LAST_KICK.pop(target_cid, None)
+                    log.info(
+                        "graph self-heal: deferred rebuild for %s (active ingest)",
+                        target_cid,
+                    )
+                    return
+                log.info("graph self-heal: rebuilding analytics cache for %s", target_cid)
+                await emerge_domains(qdrant, neo4j, db, target_cid, force=True)
+                log.info("graph self-heal: rebuild complete for %s", target_cid)
+            except Exception:  # noqa: BLE001 — background task must not raise
+                log.exception("graph self-heal: rebuild failed for %s", target_cid)
+            finally:
+                _CACHE_REBUILD_TASKS.pop(target_cid, None)
+
+        _SELF_HEAL_LAST_KICK[cid] = now
+        _CACHE_REBUILD_TASKS[cid] = asyncio.create_task(_heal_one())
+        kicked.append(cid)
+    return kicked
 
 
 @discovery_router.post(
