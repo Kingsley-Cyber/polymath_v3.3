@@ -50,3 +50,6 @@ local_ghost_b/models/
 
 # slm_enrich transfer / staging
 incoming_slm_enrich/
+
+# agent bus — RTX-side outbox is LAN-served, never committed
+agent_outbox/
