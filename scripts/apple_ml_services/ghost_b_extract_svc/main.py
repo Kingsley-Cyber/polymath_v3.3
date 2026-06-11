@@ -104,6 +104,7 @@ def _startup() -> None:
         logger.info("warmup disabled (GHOST_B_EXTRACT_WARM=false)")
 
 
+@app.get("/healthz")  # k8s-style alias — kills 404 noise from generic probes
 @app.get("/health")
 def health() -> dict:
     try:
