@@ -35,9 +35,14 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-GLINER_BATCH_SIZE = _env_int("GHOST_B_GLINER_BATCH", 32)   # chunks / pass-1 forward
+GLINER_BATCH_SIZE = _env_int("GHOST_B_GLINER_BATCH", 32)   # chunks / OUTER slice (Python amortization)
 GLIREL_UNIT_BATCH = _env_int("GHOST_B_GLIREL_BATCH", 64)   # sentence units / forward
-FACET_BATCH = _env_int("GHOST_B_FACET_BATCH", 32)          # contexts / pass-2 forward
+FACET_BATCH = _env_int("GHOST_B_FACET_BATCH", 32)          # contexts / OUTER slice
+# GPU forward size for GLiNER pass-1 AND the facet pass. Measured on CUDA
+# (256 real book chunks): 8 -> 328 ms/chunk total, 32 -> 654, 256 -> 842 —
+# big forwards pad length-varied texts to the batch max and lose more than
+# they save in launch overhead. Keep small; tune per machine via env.
+GLINER_FORWARD = _env_int("GHOST_B_GLINER_FORWARD", 8)
 
 # The facet vocabulary (vector_database/game_engine/library/...) only ever
 # applies to artifact-like types — running pass-2 for Person/Location/Event/

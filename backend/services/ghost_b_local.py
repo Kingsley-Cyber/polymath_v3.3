@@ -487,11 +487,13 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
                 sl,
                 gliner.batch_predict_entities(
                     [s for _i, s in sl], entity_types, threshold=gliner_threshold,
-                    # GLiNER's inference() internally mini-batches at EIGHT
-                    # texts per forward regardless of input size — silently
-                    # turning a 128-text call into 16 micro-forwards. Pin the
-                    # internal batch to our slice so one slice == one forward.
-                    batch_size=len(sl)),
+                    # Forward size measured on real book chunks (CUDA): 8 is
+                    # the sweet spot — large forwards pad length-varied texts
+                    # to the batch max and LOSE (8: 328 ms/chunk total;
+                    # 32: 654; 256: 842). Outer slicing still amortizes the
+                    # Python call overhead; this knob only sizes the GPU
+                    # forward.
+                    batch_size=max(1, int(getattr(pc, "GLINER_FORWARD", 8)))),
             ):
                 raw_per_task[i] = spans
         t_gliner = _time.time()

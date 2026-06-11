@@ -217,13 +217,12 @@ def tag_facets(
         if mdl is None:
             mdl = get_gliner()
         try:
-            # One forward pass per slice instead of one per entity — the facet
-            # pass was a per-entity hot spot on entity-dense docs. batch_size
-            # pins GLiNER's INTERNAL mini-batching (default 8) to the slice,
-            # so one slice is genuinely one forward.
+            # Outer slices amortize Python call overhead; the GPU forward
+            # size stays SMALL (default 8) — measured on CUDA, large forwards
+            # pad length-varied contexts to the batch max and run slower.
             batches = mdl.batch_predict_entities(
                 [ctx for _c, ctx in sl], vocab, threshold=threshold,
-                batch_size=len(sl))
+                batch_size=max(1, int(getattr(_pc(), "GLINER_FORWARD", 8))))
         except Exception as exc:  # noqa: BLE001 — never let a tag failure abort ingestion
             logger.warning("facet_tagger: batch predict failed (%d ctxs): %s", len(sl), exc)
             continue
