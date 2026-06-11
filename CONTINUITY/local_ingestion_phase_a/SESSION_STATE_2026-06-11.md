@@ -16,10 +16,28 @@ fact-entity linkage). Everything is committed+pushed through `e918ad6`
 `git rev-list --count origin/main..HEAD` == 0).
 
 THE ONE BIG PENDING ACTION: the 498-file backfill —
-`scripts/run_backfill.sh` (caffeinated, resumable, monitored). User says
-"launch" when ready. Target corpus dir: `/Volumes/Flash Drive/authentic_files`
-(498 .md, 340 MB — strict subset of merged/ which has 25 test extras).
-Expected wall: ~1.3–1.7 days at measured rates.
+`scripts/run_backfill.sh` (caffeinated, resumable, monitored; preflight now
+requires the ONNX sidecar healthy+CUDA on :8086). User says "launch" when
+ready. Target: `/Volumes/Flash Drive/authentic_files` (498 .md, 340 MB).
+Expected wall: ~half a day — extraction is 19 ms/chunk on RTX ONNX; the Mac
+MLX embedder is the long pole now.
+
+E2E VALIDATED 2026-06-11 (corpus onnx_e2e_proof, 2657e9b0, 2 files): lister
+dotfile guard → docling → 94 children → extraction routed via Settings to
+RTX :8086 at 24–26 ms/chunk → 347 entities / 470 relations (87.7% typed) /
+153 facts → 88 vectors exact → verify ok=true ×2 → dense retrieval routed
+4/4 to the right doc per query + Qwen3 rerank discriminating (0.97–0.43
+spread). PRODUCTION EXTRACTION CONFIG NOW LIVES IN SETTINGS (Mongo
+`extraction.endpoints`; UI Settings → Ingestion): "RTX ONNX (GPU)" :8086
+enabled; ":8084 control" + "Local sidecar (Mac)" rows present but DISABLED —
+round-robin splits slices evenly across live enabled endpoints, so a slow
+enabled endpoint drags everything. Compose env LOCAL_GHOST_B_EXTRACT_URL is
+only the seed/fallback now.
+
+KNOWN FRAGILITY: RTX :8086 was launched manually — NOT boot-persistent until
+the user's RTX agent executes bus instruction 001 (CONTINUITY/agent_bus/;
+needs the user to type the one bootstrap line). If the RTX box reboots
+before that, relaunch 8086 per the envs in 001.
 
 ## Topology (the user's final, simplified operating model)
 
@@ -136,7 +154,9 @@ only after passing the equivalence gate. Can run DURING the backfill.
 - Disposable test corpora (deletable anytime): flame_smoke*, table_facts_smoke,
   ab_control_500, ab_treatment_128, rtx_smoke*, dual_machine_smoke*,
   toggle_proof, pilot_cross_domain_15 (137550d5 — keep until backfill done,
-  it's the quality reference), rtx_after_benchmark (4cb2421e).
+  it's the quality reference), rtx_after_benchmark (4cb2421e),
+  onnx_e2e_proof (2657e9b0 — ONNX-production-path e2e proof; keep until
+  backfill done).
 
 ## After the backfill completes (agreed follow-ups, in rough order)
 

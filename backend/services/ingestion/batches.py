@@ -170,6 +170,11 @@ def discover_local_files(
     for path in sorted(candidates, key=lambda p: str(p).lower()):
         if not path.is_file():
             continue
+        # AppleDouble resource forks ("._x.md") and other dotfiles satisfy the
+        # extension filter but are never documents — exFAT drives grow them on
+        # any Finder copy.
+        if path.name.startswith("."):
+            continue
         if allowed_exts and path.suffix.lower() not in allowed_exts:
             continue
         files.append(path)

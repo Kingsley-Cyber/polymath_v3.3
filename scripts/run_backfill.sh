@@ -42,12 +42,15 @@ docker ps >/dev/null 2>&1 || { say_log "FATAL: docker daemon down — open -a Do
 say_log "preflight: backend"
 curl -s -m 5 http://localhost:8000/api/health >/dev/null || { say_log "FATAL: backend not responding"; exit 1; }
 
-say_log "preflight: RTX extraction sidecar"
+say_log "preflight: RTX extraction sidecar (ONNX production :8086)"
 RTX=$(docker exec polymath_v33-backend-1 python -c "
 import urllib.request, json
-r = json.load(urllib.request.urlopen('http://192.168.1.83:8084/health', timeout=8))
-print('ok' if (r.get('status')=='ok' and r.get('warm')) else 'bad', r.get('device','?')[:40])" 2>/dev/null || echo "unreachable")
-case "$RTX" in ok*) say_log "  RTX: $RTX";; *) say_log "FATAL: RTX sidecar not ok/warm: $RTX"; exit 1;; esac
+r = json.load(urllib.request.urlopen('http://192.168.1.83:8086/health', timeout=8))
+g = r.get('gliner') or {}
+ok = (r.get('status')=='ok' and r.get('warm') and g.get('backend')=='onnx'
+      and 'CUDAExecutionProvider' in (g.get('providers') or []))
+print('ok' if ok else 'bad', g.get('backend','?'), str(g.get('providers'))[:48])" 2>/dev/null || echo "unreachable")
+case "$RTX" in ok*) say_log "  RTX: $RTX";; *) say_log "FATAL: RTX ONNX sidecar not ok/warm/cuda: $RTX"; exit 1;; esac
 
 say_log "preflight: embedder"
 curl -s -m 5 http://localhost:8082/health | grep -q '"status":"ok"' || { say_log "FATAL: embedder :8082 down"; exit 1; }
