@@ -1,0 +1,146 @@
+# SESSION STATE — 2026-06-11 (supersedes prior docs in this folder for "where are we")
+
+Read this FIRST after compaction. Older docs in this folder are background:
+A1_FINDINGS (extraction contract), PILOT_REPORT (quality evidence),
+NOISE_PROOFING, TABLE_FACTS, CHUNK_SIZE_AB, RTX_SIDECAR_RUNBOOK (setup),
+00_LOCKED_DECISIONS / 06_BEHAVIORAL_RULES (still binding).
+
+## Mission status: BUILD COMPLETE — backfill NOT yet launched
+
+Fully local, deterministic Ghost B extraction (GLiNER ×2 + GLiREL + Python
+rules) replaced cloud extraction end-to-end. Ghost A summaries remain cloud
+(reconfirmed twice by user — do not touch). Quality proven (15/15 pilot,
+typed-share 46–97%, no junk signature, 4/4+4/4 retrieval probes, 100%
+fact-entity linkage). Everything is committed+pushed through `e918ad6`
+(repo github.com/Kingsley-Cyber/polymath_v3.3, branch main; verify with
+`git rev-list --count origin/main..HEAD` == 0).
+
+THE ONE BIG PENDING ACTION: the 498-file backfill —
+`scripts/run_backfill.sh` (caffeinated, resumable, monitored). User says
+"launch" when ready. Target corpus dir: `/Volumes/Flash Drive/authentic_files`
+(498 .md, 340 MB — strict subset of merged/ which has 25 test extras).
+Expected wall: ~1.3–1.7 days at measured rates.
+
+## Topology (the user's final, simplified operating model)
+
+| where | what | how managed |
+|---|---|---|
+| Mac Studio 32 GB (this machine) | Docker stack (backend/frontend/Mongo/Neo4j/Qdrant/litellm/redis/cloudflared…, 11 containers), native embedder :8082 (MLX, EMBED_BATCH_SIZE=128), native reranker :8081 (Qwen3-Reranker-0.6B cross-encoder via brew llama-server on Metal), native extraction sidecar :8084 | LaunchAgents: com.polymath.apple-ml (embedder; START_RERANKER=false now), com.polymath.reranker-qwen3, com.polymath.ghostb-extract |
+| RTX PRO 6000 Blackwell 96 GB, Windows, 28 cores, LAN 192.168.1.83 | extraction sidecar(s) :8084 (+:8085) — repo clone at E:\polymath_v3.3, venv .venv_sidecar, torch cu130, weights via GLIREL_CKPT_DIR=E:\Polymath_Training\ghost_b_dataset\runs\glirel_ghost_b_v1\best | Windows Scheduled Task PolymathGhostBSidecar + run_sidecar_windows.ps1 (in THEIR clone, possibly uncommitted there). Firewall LAN-only 8084-8091. User drives this box via their own AI agent — communicate by giving the USER paste-ready agent prompts. |
+
+**Extraction endpoint selection is now an APP FEATURE** (user's explicit
+product requirement): Settings → Ingestion → "Extraction Engines" card —
+toggleable {label,url,enabled} list, Mongo-backed (`extraction` section of
+GlobalSettings), seeded from LOCAL_GHOST_B_EXTRACT_URL env, read per-ingest by
+the worker via `settings_service.get_system_extraction()` →
+`ghost_b_local.RUNTIME_ENDPOINT_URLS`. The client liveness-probes enabled
+endpoints per doc and round-robins slices across live ones. RTX off → Mac
+sidecar absorbs small batches automatically. Verified e2e both directions.
+Env override file: docker-compose.override.yml (EMBEDDER_URL, RERANKER_URL
++scale, LOCAL_GHOST_B_EXTRACT_URL=rtx:8084,rtx:8085,host.docker.internal:8084,
+EXTRACTION_MAX_ACTIVE_DOCS=4).
+
+## RTX-side state (LAST KNOWN — confirm before relying)
+
+Last confirmed from the user's agent: 8-instance fleet relaunched at envs
+32/512/32 on code 5ffedd8. I then instructed (NOT yet confirmed executed):
+pull ≥4751e3c, STOP all, relaunch just TWO instances (8084, 8085) with
+GHOST_B_GLINER_BATCH=256 GHOST_B_FACET_BATCH=256 GHOST_B_GLIREL_BATCH=512
+(GLINER_FORWARD defaults 8 in code). If port 8084 returns `timings: null`
+on /extract, it's running pre-22b6b64 code — needs pull+restart. Port 8090
+note: Wondershare WsToastNotification.exe squats it if their main app runs.
+
+## Performance: measured truth table (do NOT re-test these)
+
+| hypothesis | result |
+|---|---|
+| GLiNER internal batching (default 8/forward) is the bottleneck | Pin to slice made it WORSE: forward 8=328 ms/chunk, 32=654, 256=842 (padding on length-varied texts). GHOST_B_GLINER_FORWARD env, default 8. |
+| fp16 GLiREL on MPS | 0.99× — null (Mac is unified-memory-bandwidth-bound for DeBERTa-large; ~420 ms/chunk is the Mac's ceiling) |
+| Dual-lane GLiREL (CPU+GPU threads on Mac) | null (same bandwidth wall). Code kept env-gated GHOST_B_GLIREL_CPU_LANE, default off |
+| Multi-process fleet on Windows | FULLY SERIALIZES — 2 procs = exactly 2× each (WDDM; CUDA MPS is Linux-only). Fleet abandoned; multi-URL client kept for CROSS-machine fan-out |
+| RTX single-process real-content rate | ~280–330 ms/chunk (stage split ≈ gliner 49% + facets 40% + glirel 6%) — kernel-launch overhead, GPU mostly idle (~4/96 GB, low util) |
+| E2E measured | 1 MB book = 8m13s (ghosts 342s, embed 106s, qdrant 6s) → 498 files ≈ 1.3–1.7 days with concurrency-3 pipelining |
+
+**Next speed lever (proposed, user-approved direction, NOT started): ONNX
+Runtime for GLiNER on the RTX.** Prebuilt model exists:
+huggingface.co/onnx-community/gliner_medium-v2.1; load via
+`GLiNER.from_pretrained(..., load_onnx_model=True, load_tokenizer=True,
+providers=["CUDAExecutionProvider","CPUExecutionProvider"])`. Risks: (a)
+DOCUMENTED silent-CPU-fallback on Blackwell sm_120 with ORT-cu12 vs cu13
+mismatch (ragflow#14565, ORT#26177/#27875) — MUST verify CUDAExecutionProvider
+active AND nvidia-smi utilization during bench, never trust logs; (b) einsum
+ops choke some ORT backends (DirectML EP = Windows plan B). Expected 3–5× on
+the 89% (gliner+facets) → backfill ~0.7–1.1 days. Trial design: agent stands
+up ONNX variant on port 8086; bench from Mac with the same 256-chunk payload
+(re-export: mongo chunks doc_id^4ceee45bfa14 body limit 256 → POST /extract,
+read response `timings`); add to engine list only if it beats 328 ms/chunk
+with verified GPU use. Can run DURING the backfill (toggle mid-run is safe).
+
+## Resilience features in place (all live-verified)
+
+- Embed self-healing: transient-failure retries (intermittent embedder 400s
+  are real), vector-count contract (silent partial responses), alignment
+  guard in `_embed_batch_for_doc`, reconcile-on-resume (Qdrant exact count vs
+  vector-eligible children; mismatch reruns embed — verified by deleting a
+  point and watching it heal in 2m17s).
+- Verify stage catches everything (it caught my own md5-vs-sha1 hand-repair;
+  text contract = sha1+len+is_truncated; counts corpus-scoped — I fixed the
+  cross-corpus HAS_CHUNK false-fail).
+- run_backfill.sh: caffeinate -ims (CRITICAL: Mac system sleep is set to
+  1 MINUTE; sleep killed Docker Desktop's VM twice on 06-10), preflights
+  (docker/backend/RTX/embedder/drive/disk), durable manifest batch
+  (ingest-batches/local, concurrency 3), .backfill_state → rerun = resume.
+- scripts/ingest_reclaim_memory.sh --apply --require-gb 22 before launch
+  (dry-run default; keep-list protects Docker/terminals/Claude).
+
+## Session gotchas (will bite you again)
+
+- DEPLOY DISCIPLINE: backend code changes need `docker compose build backend`
+  + `up -d` (source is BAKED, no volume mount). Env-only changes need only
+  `up -d`. I shipped a broken deploy once by forgetting this.
+- Mac sidecar/code changes: restart the LaunchAgent process (it caches
+  modules). launchctl kickstart does NOT reload plist env — use
+  `launchctl unload && load`.
+- /tmp gets cleaned: /tmp/pm_token + bench files vanish. Re-auth:
+  PW=$(grep '^DEFAULT_ADMIN_PASSWORD=' .env | cut -d= -f2-) → POST
+  /api/auth/login {username: admin} → access_token.
+- Mongo/Neo4j creds: from .env (MONGO_PASSWORD, NEO4J_PASSWORD); mongosh via
+  docker exec polymath_v33-mongodb-1, cypher-shell via polymath_v33-neo4j-1.
+- Qdrant: named vector "dense"; upsert = PUT /points; filtered scroll may 400
+  (no payload index) — page client-side. Point id = md5(chunk_id) as UUID.
+- Ghost A skips on test corpora (empty summary_models pool) — chat-level QA
+  needs a corpus with a real model pool. litellm 400 on schema_lens → falls
+  back deterministic (fine).
+- Batch /resume does NOT re-run hard-failed items — re-upload instead.
+- git: ALWAYS `-c user.name="Kingsley" -c user.email="ezeokonkwokingsley@gmail.com"`,
+  explicit file staging (never -A), push without asking is OK for this
+  initiative (user authorized). 9 pre-existing modified files + untracked
+  research reports are NOT ours — leave uncommitted.
+- Disposable test corpora (deletable anytime): flame_smoke*, table_facts_smoke,
+  ab_control_500, ab_treatment_128, rtx_smoke*, dual_machine_smoke*,
+  toggle_proof, pilot_cross_domain_15 (137550d5 — keep until backfill done,
+  it's the quality reference), rtx_after_benchmark (4cb2421e).
+
+## After the backfill completes (agreed follow-ups, in rough order)
+
+1. Post-backfill QA eval: ~20 cross-domain questions through the real chat
+   path (needs model pool on the corpus) — this finally measures the
+   "unified KB" score (~70% → target ~78+).
+2. Entity dedup/resolution pass (flame vs flame-engine fragmentation) — the
+   single biggest "unified KB" win (~1–2 days, deterministic embedding-merge).
+3. ONNX GLiNER experiment (above) for future re-ingests.
+4. GLiREL v3 fine-tune with business-prose examples (Mom Test 46% / Elegant
+   Puzzle 52% / Hidden Games 55% typed — legitimate weak domains) — RTX
+   recipe, NOT v2's literal-recovery recipe (it regressed).
+5. Optional: have the RTX agent commit run_sidecar_windows.ps1 + firewall
+   script from their clone.
+
+## User interaction protocol
+
+User is an "agentic vibe coder": for anything on the RTX box, give a
+PASTE-READY prompt for their agent (self-contained, no conversation context
+assumed). BLUF format, concrete numbers, honest about failures (user has
+explicitly rewarded admitting wrong theories — I was wrong about GIL and the
+batch pin; say so plainly when it happens). Predict outcomes before
+multi-step/destructive actions (06_BEHAVIORAL_RULES Rule 1). Simplicity is
+now an explicit product value — prefer toggles/config over new moving parts.
