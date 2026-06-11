@@ -74,6 +74,32 @@ DEFAULT_GLIREL_THRESHOLD = 0.40
 GLINER_MODEL = "urchade/gliner_medium-v2.1"
 GLINER_THRESHOLD = 0.45
 
+# ---------- GLiNER ONNX Runtime lane (GHOST_B_GLINER_ONNX=1) ----------------
+#
+# Swaps the GLiNER forward (entity pass-1 AND facet pass-2 — same shared
+# instance) from torch onto ONNX Runtime. Target: CUDA kernel-launch overhead
+# on the RTX box, where torch runs ~280-330 ms/chunk with the GPU mostly idle
+# and gliner+facets = 89% of the wall. GLiREL stays torch either way.
+#
+# Provider selection is gliner-internal: map_location "cuda" requests
+# CUDAExecutionProvider, anything else CPUExecutionProvider. ORT may still
+# place unsupported nodes on CPU silently — verify via sidecar /health
+# (gliner.providers) AND nvidia-smi utilization during a bench; never trust
+# logs alone (documented Blackwell sm_120 silent-fallback when ORT's CUDA
+# libs mismatch torch's — ragflow#14565, onnxruntime#26177).
+#
+# GHOST_B_GLINER_ONNX_FILE: onnx/model.onnx (fp32) | onnx/model_fp16.onnx.
+# Any non-fp32 file must pass local_ghost_b/onnx_equivalence_check.py before
+# production use.
+GLINER_ONNX = (_os.environ.get("GHOST_B_GLINER_ONNX", "").strip().lower()
+               in ("1", "true", "yes", "on"))
+GLINER_ONNX_REPO = (_os.environ.get("GHOST_B_GLINER_ONNX_REPO", "").strip()
+                    or "onnx-community/gliner_medium-v2.1")
+GLINER_ONNX_FILE = (_os.environ.get("GHOST_B_GLINER_ONNX_FILE", "").strip()
+                    or "onnx/model.onnx")
+GLINER_ONNX_DEVICE = (_os.environ.get("GHOST_B_GLINER_ONNX_DEVICE", "").strip().lower()
+                      or "auto")  # auto -> cuda if available else cpu
+
 # Ghost B entity types passed to GLiNER as zero-shot labels. The first 11 are
 # the original locked set (derived from polymath_local_extractor.py's
 # TYPE_CONSTRAINTS / TYPE_RULES + ghost_b_cascade_infer.py's high-value type
@@ -276,7 +302,8 @@ def summary() -> dict:
     return {
         "version": PIPELINE_VERSION,
         "gliner": {
-            "model": GLINER_MODEL,
+            "model": GLINER_ONNX_REPO if GLINER_ONNX else GLINER_MODEL,
+            "backend": "onnx" if GLINER_ONNX else "torch",
             "threshold": GLINER_THRESHOLD,
             "n_entity_types": len(GHOST_B_ENTITY_TYPES),
             "facet_threshold": GLINER_FACET_THRESHOLD,

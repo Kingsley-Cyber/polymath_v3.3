@@ -88,6 +88,31 @@ def get_gliner() -> Any:
     from gliner import GLiNER
     import torch
 
+    if getattr(pc, "GLINER_ONNX", False):
+        # ONNX Runtime lane (GHOST_B_GLINER_ONNX=1). The device is fixed at
+        # session creation — gliner maps map_location "cuda" to
+        # CUDAExecutionProvider and anything else to CPUExecutionProvider —
+        # so the torch-path .to(dev) below does not apply (and would raise on
+        # the ORT wrapper). get_providers() is the ground truth for what ORT
+        # actually activated; log it and expose it via gliner_backend_info().
+        dev = pc.GLINER_ONNX_DEVICE
+        if dev == "auto":
+            dev = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info("facet_tagger: loading GLiNER ONNX %s (%s, map_location=%s) ...",
+                    pc.GLINER_ONNX_REPO, pc.GLINER_ONNX_FILE, dev)
+        model = GLiNER.from_pretrained(
+            pc.GLINER_ONNX_REPO,
+            load_onnx_model=True,
+            load_tokenizer=True,
+            onnx_model_file=pc.GLINER_ONNX_FILE,
+            map_location=dev,
+        )
+        providers = list(model.model.session.get_providers())
+        logger.info("facet_tagger: GLiNER ONNX ready — active providers %s (%d facets)",
+                    providers, len(pc.GHOST_B_FACET_VOCAB))
+        _MODEL = model
+        return model
+
     logger.info("facet_tagger: loading GLiNER %s ...", pc.GLINER_MODEL)
     model = GLiNER.from_pretrained(pc.GLINER_MODEL)
     use_mps = bool(getattr(torch.backends, "mps", None)) and torch.backends.mps.is_available()
@@ -104,6 +129,34 @@ def get_gliner() -> Any:
     logger.info("facet_tagger: GLiNER ready on %s (%d facets)", dev, len(pc.GHOST_B_FACET_VOCAB))
     _MODEL = model
     return model
+
+
+def gliner_backend_info() -> dict:
+    """Introspect the GLiNER lane for health reporting (sidecar /health).
+
+    Cheap and safe to call before the model loads: configuration comes from
+    pipeline_config; session providers / device are added only once the
+    singleton exists. For the ONNX lane, `providers` is what ORT ACTUALLY
+    activated — the remote-visible guard against the documented
+    silent-CPU-fallback (a CUDA request that came up CPU-only shows here)."""
+    pc = _pc()
+    is_onnx = bool(getattr(pc, "GLINER_ONNX", False))
+    info: dict = {
+        "backend": "onnx" if is_onnx else "torch",
+        "model": pc.GLINER_ONNX_REPO if is_onnx else pc.GLINER_MODEL,
+        "loaded": _MODEL is not None,
+    }
+    if is_onnx:
+        info["onnx_file"] = pc.GLINER_ONNX_FILE
+    if _MODEL is not None:
+        try:
+            info["device"] = str(_MODEL.device)
+            sess = getattr(getattr(_MODEL, "model", None), "session", None)
+            if sess is not None:
+                info["providers"] = list(sess.get_providers())
+        except Exception as exc:  # noqa: BLE001 — health must never raise
+            info["introspect_error"] = str(exc)
+    return info
 
 
 # ----------------------------------------------------------------- matching

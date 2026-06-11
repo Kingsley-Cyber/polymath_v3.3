@@ -45,6 +45,8 @@ incoming_glirel/
 incoming_local_ghost_b/
 models/glirel_ghost_b_*/
 models/polymath_local_ghost_b_*/
+# local model snapshots (ONNX GLiNER etc.) — weights never enter source control
+local_ghost_b/models/
 
 # slm_enrich transfer / staging
 incoming_slm_enrich/

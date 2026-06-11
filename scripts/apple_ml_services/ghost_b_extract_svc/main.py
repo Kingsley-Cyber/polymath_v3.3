@@ -33,6 +33,12 @@ Env:
     GHOST_B_EXTRACT_WARM   default true — load GLiNER+GLiREL at startup in a
                            background thread (first /extract otherwise pays
                            ~20 s cold load).
+    GHOST_B_GLINER_ONNX    "1" swaps the GLiNER forward (both passes) onto
+                           ONNX Runtime — see pipeline_config for the repo /
+                           file / device companions (GHOST_B_GLINER_ONNX_*).
+                           /health then reports the ACTIVE ORT providers under
+                           "gliner" — check it (plus nvidia-smi under load)
+                           before trusting any CUDA bench number.
 """
 
 from __future__ import annotations
@@ -123,6 +129,11 @@ def health() -> dict:
         version = _ensure_local_ghost_b_on_path().PIPELINE_VERSION
     except Exception:  # noqa: BLE001
         version = "unknown"
+    try:
+        from services.ingestion.facet_tagger import gliner_backend_info
+        gliner = gliner_backend_info()
+    except Exception as exc:  # noqa: BLE001
+        gliner = {"introspect_error": str(exc)}
     return {
         "status": "ok",
         "service": "ghost_b_extract",
@@ -130,6 +141,7 @@ def health() -> dict:
         "warm": _WARM["done"],
         "warm_error": _WARM["error"],
         "device": device,
+        "gliner": gliner,
     }
 
 

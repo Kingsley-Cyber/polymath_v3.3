@@ -61,20 +61,32 @@ note: Wondershare WsToastNotification.exe squats it if their main app runs.
 | RTX single-process real-content rate | ~280–330 ms/chunk (stage split ≈ gliner 49% + facets 40% + glirel 6%) — kernel-launch overhead, GPU mostly idle (~4/96 GB, low util) |
 | E2E measured | 1 MB book = 8m13s (ghosts 342s, embed 106s, qdrant 6s) → 498 files ≈ 1.3–1.7 days with concurrency-3 pipelining |
 
-**Next speed lever (proposed, user-approved direction, NOT started): ONNX
-Runtime for GLiNER on the RTX.** Prebuilt model exists:
-huggingface.co/onnx-community/gliner_medium-v2.1; load via
-`GLiNER.from_pretrained(..., load_onnx_model=True, load_tokenizer=True,
-providers=["CUDAExecutionProvider","CPUExecutionProvider"])`. Risks: (a)
-DOCUMENTED silent-CPU-fallback on Blackwell sm_120 with ORT-cu12 vs cu13
-mismatch (ragflow#14565, ORT#26177/#27875) — MUST verify CUDAExecutionProvider
-active AND nvidia-smi utilization during bench, never trust logs; (b) einsum
-ops choke some ORT backends (DirectML EP = Windows plan B). Expected 3–5× on
-the 89% (gliner+facets) → backfill ~0.7–1.1 days. Trial design: agent stands
-up ONNX variant on port 8086; bench from Mac with the same 256-chunk payload
-(re-export: mongo chunks doc_id^4ceee45bfa14 body limit 256 → POST /extract,
-read response `timings`); add to engine list only if it beats 328 ms/chunk
-with verified GPU use. Can run DURING the backfill (toggle mid-run is safe).
+**Next speed lever — ONNX Runtime for GLiNER (CODE SHIPPED + MAC-VALIDATED
+2026-06-11; RTX bench pending).** Env gate: `GHOST_B_GLINER_ONNX=1` swaps
+BOTH GLiNER passes (entity + facet — the one shared instance in
+facet_tagger.get_gliner) onto ORT; companions GHOST_B_GLINER_ONNX_REPO /
+_FILE / _DEVICE (defaults: onnx-community/gliner_medium-v2.1,
+onnx/model.onnx, auto). NOTE: gliner 0.2.26 has NO providers kwarg —
+map_location "cuda" requests CUDAExecutionProvider (exclusive), else CPU EP.
+Sidecar /health now reports the ACTIVE session providers under "gliner".
+Quality gate: `local_ghost_b/onnx_equivalence_check.py` (dump per lane via
+env, then compare) — full-pipeline diff, gates ent-jaccard≥0.95 /
+rel≥0.90 / facet-agree≥0.95. Mac CPU-EP run on 16 real chunks: PASS,
+jaccard 1.0 everywhere, conf delta 0. Pre-download trick (gliner
+snapshot_downloads the WHOLE repo ~3GB+ otherwise): hf download with
+--include "*.json" "spm.model" "onnx/model.onnx", point _REPO env at the
+local dir (Mac copy: local_ghost_b/models/gliner_onnx_medium_v2.1, now
+gitignored). Remaining risks RTX-side: (a) DOCUMENTED silent-CPU-fallback
+on Blackwell sm_120 with ORT-cu12 vs torch-cu13 (ragflow#14565,
+ORT#26177/#27875) — verify /health providers AND nvidia-smi utilization
+during bench, never logs alone; (b) einsum ops choke some ORT backends
+(DirectML EP = Windows plan B). Expected 3–5× on the 89% (gliner+facets)
+→ backfill ~0.7–1.1 days. Bench design: agent stands up ONNX instance on
+port 8086 (separate venv OK); bench from Mac with the 256-chunk payload
+(re-export: mongo chunks doc_id^4ceee45bfa14 text limit 256 → POST
+/extract, read response `timings`); add to engine list only if it beats
+328 ms/chunk with verified GPU use. fp16 (onnx/model_fp16.onnx) allowed
+only after passing the equivalence gate. Can run DURING the backfill.
 
 ## Resilience features in place (all live-verified)
 
