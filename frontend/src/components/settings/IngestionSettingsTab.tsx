@@ -7,8 +7,15 @@ import { Layers, Info, Copy, Check, Cpu, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { IngestionConfig, TokenBudget } from "../../types";
 import { DEFAULT_INGESTION_CONFIG } from "../../types";
-import type { ExtractionEndpoint } from "../../types/settings";
-import { getGlobalSettings, updateGlobalSettings } from "../../lib/api";
+import type {
+  ExtractionEndpoint,
+  ExtractionValidationReport,
+} from "../../types/settings";
+import {
+  getGlobalSettings,
+  updateGlobalSettings,
+  validateExtraction,
+} from "../../lib/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -111,6 +118,8 @@ function ExtractionEnginesCard() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [report, setReport] = useState<ExtractionValidationReport | null>(null);
 
   useEffect(() => {
     getGlobalSettings()
@@ -121,6 +130,7 @@ function ExtractionEnginesCard() {
   const mutate = (next: ExtractionEndpoint[]) => {
     setEndpoints(next);
     setDirty(true);
+    setReport(null); // edits invalidate the last validation
   };
 
   const save = async () => {
@@ -130,10 +140,26 @@ function ExtractionEnginesCard() {
     try {
       await updateGlobalSettings({ extraction: { endpoints } });
       setDirty(false);
+      setReport(null);
     } catch (e) {
       setError(String(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Probes run from the BACKEND's network position (what the worker actually
+  // uses) against the SAVED config — hence disabled while there are unsaved
+  // edits.
+  const validate = async () => {
+    setValidating(true);
+    setError(null);
+    try {
+      setReport(await validateExtraction());
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setValidating(false);
     }
   };
 
@@ -143,17 +169,35 @@ function ExtractionEnginesCard() {
         <h3 className="text-[15px] font-semibold text-white flex items-center gap-2">
           <Cpu size={16} className="text-emerald-400" /> Extraction Engines
         </h3>
-        <button
-          onClick={save}
-          disabled={!dirty || saving}
-          className={`text-[12px] px-3 py-1 rounded ${
-            dirty
-              ? "bg-emerald-600 hover:bg-emerald-500 text-white"
-              : "bg-white/5 text-gray-500"
-          }`}
-        >
-          {saving ? "Saving…" : dirty ? "Save" : "Saved"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={validate}
+            disabled={dirty || validating || endpoints === null}
+            title={
+              dirty
+                ? "Save changes first — validation probes the saved config"
+                : "Probe every engine from the backend (reachable, healthy, GPU active)"
+            }
+            className={`text-[12px] px-3 py-1 rounded border ${
+              dirty || validating
+                ? "border-white/10 text-gray-500"
+                : "border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+            }`}
+          >
+            {validating ? "Validating…" : "Validate"}
+          </button>
+          <button
+            onClick={save}
+            disabled={!dirty || saving}
+            className={`text-[12px] px-3 py-1 rounded ${
+              dirty
+                ? "bg-emerald-600 hover:bg-emerald-500 text-white"
+                : "bg-white/5 text-gray-500"
+            }`}
+          >
+            {saving ? "Saving…" : dirty ? "Save" : "Saved"}
+          </button>
+        </div>
       </div>
       <p className="text-[12px] text-gray-500">
         Machines that run entity/relation extraction during ingestion. The
@@ -162,6 +206,21 @@ function ExtractionEnginesCard() {
         automatically, so the local engine quietly handles small batches.
       </p>
       {error && <p className="text-[12px] text-red-400">{error}</p>}
+      {report && (
+        <p
+          className={`text-[12px] rounded px-2 py-1.5 ${
+            report.deploy_ready
+              ? "text-emerald-400 bg-emerald-500/10"
+              : "text-red-400 bg-red-500/10"
+          }`}
+        >
+          {report.deploy_ready
+            ? `Deploy ready — ${report.enabled_ready}/${report.enabled_total} enabled engine${
+                report.enabled_total === 1 ? "" : "s"
+              } fully validated from the backend.`
+            : "Not deploy ready — no enabled engine passed validation. Enable a healthy engine or fix the flagged ones before ingesting."}
+        </p>
+      )}
       {endpoints === null ? (
         <p className="text-[12px] text-gray-600">Loading…</p>
       ) : (
@@ -214,6 +273,43 @@ function ExtractionEnginesCard() {
                 }
                 className="flex-1 bg-transparent border border-white/10 rounded px-2 py-1 text-[12px] text-white font-mono"
               />
+              {(() => {
+                const r = report?.endpoints.find((x) => x.url === ep.url);
+                if (!r) return null;
+                const cls =
+                  r.state === "ready"
+                    ? "text-emerald-400 border-emerald-500/30"
+                    : r.state === "warning"
+                      ? "text-amber-400 border-amber-500/30"
+                      : "text-red-400 border-red-500/30";
+                const text =
+                  r.state === "ready"
+                    ? `✓ ${r.info.backend ?? "?"} · ${r.info.device ?? "?"}`
+                    : r.state === "warning"
+                      ? "⚠ degraded"
+                      : "✗ offline";
+                const fmt = (v: boolean | null | undefined) =>
+                  v === null || v === undefined ? "n/a" : v ? "yes" : "NO";
+                const tip = [
+                  `reachable: ${fmt(r.checks.reachable)}`,
+                  `healthy: ${fmt(r.checks.healthy)}`,
+                  `warm: ${fmt(r.checks.warm)}`,
+                  `model loaded: ${fmt(r.checks.model_loaded)}`,
+                  `gpu active: ${fmt(r.checks.gpu_active)}`,
+                  `version match: ${fmt(r.checks.version_match)}`,
+                  r.detail,
+                ]
+                  .filter(Boolean)
+                  .join("\n");
+                return (
+                  <span
+                    title={tip}
+                    className={`shrink-0 text-[11px] border rounded px-1.5 py-0.5 font-mono ${cls}`}
+                  >
+                    {text}
+                  </span>
+                );
+              })()}
               <button
                 onClick={() => mutate(endpoints.filter((_, j) => j !== i))}
                 className="p-1 text-gray-600 hover:text-red-400"

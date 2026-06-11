@@ -213,6 +213,24 @@ async def update_settings(
     return GlobalSettingsResponse(settings=settings)
 
 
+@router.get("/extraction/validate")
+async def validate_extraction(
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Probe every configured extraction endpoint (enabled or not) from the
+    backend's own network position and return per-endpoint deploy-readiness
+    checklists plus an overall deploy_ready verdict. Read-only.
+    """
+    from services.extraction_validation import validate_endpoints
+
+    settings = await settings_service.get_settings(current_user["user_id"])
+    extraction = getattr(settings, "extraction", None)
+    raw = getattr(extraction, "endpoints", None) or []
+    endpoints = [e.model_dump() if hasattr(e, "model_dump") else dict(e) for e in raw]
+    return await validate_endpoints(endpoints)
+
+
 @router.post("/infrastructure/test")
 async def test_all_services(
     current_user: dict = Depends(get_current_user),

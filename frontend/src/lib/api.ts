@@ -1165,6 +1165,15 @@ export async function updateGlobalSettings(
 }
 
 /**
+ * GET /api/settings/extraction/validate
+ * Probe every configured extraction endpoint from the backend's network
+ * position; returns per-endpoint checklists + an overall deploy_ready verdict.
+ */
+export async function validateExtraction(): Promise<ExtractionValidationReport> {
+  return fetchJSON("/settings/extraction/validate");
+}
+
+/**
  * POST /api/settings/infrastructure/test
  * Test connectivity to all infrastructure services.
  */
@@ -1301,6 +1310,7 @@ export async function testModelPoolEntry(
 // ─────────────────────────────────────────────────────────────────────────
 
 import type { QueryPrefs, QueryPrefsUpdate } from "../types/queryPrefs";
+import type { ExtractionValidationReport } from "../types/settings";
 
 export async function getQueryPrefs(): Promise<QueryPrefs> {
   return fetchJSON("/query-prefs");
@@ -1377,6 +1387,7 @@ export const api = {
   getEntityRelations,
   getGlobalSettings,
   updateGlobalSettings,
+  validateExtraction,
   testInfrastructure,
   testService,
   testModalEndpoint,

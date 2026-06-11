@@ -91,6 +91,10 @@ Git or GitHub's green **Code -> Download ZIP** button.
 | **Apple Silicon Mac** | Docker core + host-native MLX sidecars | M1/M2/M3/M4 Macs where Docker cannot access the Apple GPU |
 | **Linux / NVIDIA** | Docker Compose + bash bootstrap | Single-GPU Linux boxes or servers |
 
+Local extraction engines (run ingestion's entity/relation extraction on any
+machine on your network — models, sidecars, the Settings toggle list, and the
+Validate checklist): see [scripts/EXTRACTION_SETUP.md](scripts/EXTRACTION_SETUP.md).
+
 ### Windows 11 install
 
 Prerequisites:

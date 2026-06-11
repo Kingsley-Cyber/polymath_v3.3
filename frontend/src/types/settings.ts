@@ -222,6 +222,42 @@ export interface ExtractionSettings {
   endpoints: ExtractionEndpoint[];
 }
 
+// Deploy-readiness report from GET /api/settings/extraction/validate —
+// every configured endpoint probed from the BACKEND's network position
+// (what the ingestion worker actually sees), with per-check results.
+export interface ExtractionValidationChecks {
+  reachable: boolean;
+  healthy?: boolean;
+  warm?: boolean;
+  model_loaded?: boolean;
+  gpu_active?: boolean | null;
+  version_match?: boolean | null;
+}
+
+export interface ExtractionValidationEndpoint {
+  label: string;
+  url: string;
+  enabled: boolean;
+  checks: ExtractionValidationChecks;
+  info: {
+    backend?: string;
+    device?: string;
+    model?: string;
+    pipeline_version?: string | null;
+    providers?: string[];
+  };
+  state: "ready" | "warning" | "fail";
+  detail: string;
+}
+
+export interface ExtractionValidationReport {
+  endpoints: ExtractionValidationEndpoint[];
+  backend_pipeline_version: string | null;
+  enabled_total: number;
+  enabled_ready: number;
+  deploy_ready: boolean;
+}
+
 export interface GlobalSettings {
   infrastructure: InfrastructureSettings;
   chat: ChatLLMSettings;
