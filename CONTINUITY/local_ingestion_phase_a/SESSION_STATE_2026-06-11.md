@@ -99,11 +99,18 @@ jaccard 1.0 everywhere, conf delta 0. Pre-download trick (gliner
 snapshot_downloads the WHOLE repo ~3GB+ otherwise): hf download with
 --include "*.json" "spm.model" "onnx/model.onnx", point _REPO env at the
 local dir (Mac copy: local_ghost_b/models/gliner_onnx_medium_v2.1, now
-gitignored). Remaining risks RTX-side: (a) DOCUMENTED silent-CPU-fallback
-on Blackwell sm_120 with ORT-cu12 vs torch-cu13 (ragflow#14565,
-ORT#26177/#27875) — verify /health providers AND nvidia-smi utilization
-during bench, never logs alone; (b) einsum ops choke some ORT backends
-(DirectML EP = Windows plan B). Expected 3–5× on the 89% (gliner+facets)
+gitignored). RTX INSTALL FACTS (load-bearing, from the RTX agent's run): PyPI
+onnxruntime-gpu is CUDA-12-only and structurally CANNOT coexist with torch
+cu130 in one process (GLiREL needs torch there) — it silently falls back to
+CPU EP, and pip-installing nvidia-*-cu12 libs to appease it BREAKS torch's
+own import (WinError 127, wrong cuDNN on the DLL path). The working build is
+the OFFICIAL Microsoft CUDA-13 ORT nightly: onnxruntime-gpu
+1.27.0.dev20260511001 from the ort-cuda-13-nightly Azure feed
+(aiinfra.pkgs.visualstudio.com), installed --pre --no-deps into .venv_onnx.
+It works BECAUSE torch imports before ORT (natural order via `from gliner
+import GLiNER`) and ORT reuses torch's bundled CUDA-13 DLLs — do not reorder
+imports, do not add nvidia-cu12 pip libs. Residual risk: einsum ops choke
+some ORT backends (DirectML EP = Windows plan B; not needed). Expected 3–5× on the 89% (gliner+facets)
 → backfill ~0.7–1.1 days. Bench design: agent stands up ONNX instance on
 port 8086 (separate venv OK); bench from Mac with the 256-chunk payload
 (re-export: mongo chunks doc_id^4ceee45bfa14 text limit 256 → POST
