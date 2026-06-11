@@ -584,6 +584,10 @@ services:
       INGEST_MAX_ACTIVE_JOBS: ${INGEST_MAX_ACTIVE_JOBS:-16}
       INGEST_BATCH_WORKERS: ${INGEST_BATCH_WORKERS:-2}
       EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}
+      # Keep expensive graph/cache rebuilds off the hot ingest path. They can
+      # still run after the durable batch leaves "running".
+      GRAPH_CACHE_WARMUP_SKIP_DURING_ACTIVE_INGEST: ${GRAPH_CACHE_WARMUP_SKIP_DURING_ACTIVE_INGEST:-true}
+      GRAPH_CACHE_WARMUP_ACTIVE_INGEST_DEFER_SECONDS: ${GRAPH_CACHE_WARMUP_ACTIVE_INGEST_DEFER_SECONDS:-120}
       INGEST_FILE_STORAGE_DIR: ${INGEST_FILE_STORAGE_DIR:-/data/ingest-files}
       INGEST_FILE_STORAGE_MAX_BYTES: ${INGEST_FILE_STORAGE_MAX_BYTES:-2147483648}
     depends_on:
@@ -713,13 +717,9 @@ services:
     <<: *default-logging
     image: cloudflare/cloudflared:latest
     profiles: ["cloudflare"]
-    # Locally-managed tunnel: ingress + tunnel id live in
-    # ./.cloudflared/config.yml; credentials file is the JSON dropped
-    # by `cloudflared tunnel create`. No connector token needed — the
-    # cert.pem authenticates the daemon.
-    command: tunnel --config /etc/cloudflared/config.yml run
-    volumes:
-      - ./.cloudflared:/etc/cloudflared:ro
+    # Remote-managed tunnel: ingress + DNS hostnames live in the Cloudflare
+    # Zero Trust dashboard; the connector authenticates with CLOUDFLARE_TUNNEL_TOKEN.
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
       frontend:
         condition: service_healthy

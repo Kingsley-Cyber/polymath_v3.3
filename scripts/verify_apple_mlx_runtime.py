@@ -128,15 +128,29 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--docling-url", default="http://localhost:8500")
     parser.add_argument("--expected-dim", type=int, default=1024)
     parser.add_argument("--wait", type=int, default=1, help="Seconds to wait for each endpoint.")
+    parser.add_argument("--skip-embedder", action="store_true", help="Do not check the embedder sidecar.")
+    parser.add_argument("--skip-reranker", action="store_true", help="Do not check the reranker sidecar.")
+    parser.add_argument("--skip-docling", action="store_true", help="Do not check the docling sidecar.")
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
     try:
-        _check_embedder(Endpoint("embedder", args.embedder_url.rstrip("/")), args.wait, args.expected_dim)
-        _check_reranker(Endpoint("reranker", args.reranker_url.rstrip("/")), args.wait)
-        _check_docling(Endpoint("docling", args.docling_url.rstrip("/")), args.wait)
+        if args.skip_embedder:
+            print("[SKIP] embedder disabled")
+        else:
+            _check_embedder(Endpoint("embedder", args.embedder_url.rstrip("/")), args.wait, args.expected_dim)
+
+        if args.skip_reranker:
+            print("[SKIP] reranker disabled")
+        else:
+            _check_reranker(Endpoint("reranker", args.reranker_url.rstrip("/")), args.wait)
+
+        if args.skip_docling:
+            print("[SKIP] docling disabled")
+        else:
+            _check_docling(Endpoint("docling", args.docling_url.rstrip("/")), args.wait)
     except (CheckError, urllib.error.URLError, TimeoutError) as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 1

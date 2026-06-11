@@ -7,7 +7,7 @@
 #   3. Creates a uv-managed venv with requirements.txt
 #   4. Pre-warms and verifies the HuggingFace cache with the MLX model weights
 #   5. Writes a LaunchAgent (com.polymath.apple-ml) and bootstraps it
-#   6. Smoke-tests embeddings, reranking, and docling health
+#   6. Smoke-tests enabled sidecars
 #
 # Usage (run from repo root on macOS):
 #   bash scripts/install_apple_mlx_runtime.sh
@@ -36,11 +36,22 @@ LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LAUNCH_AGENT_NAME}.plist"
 APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID:-mlx-community/Qwen3-Embedding-0.6B-mxfp8}"
 APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID:-mlx-community/jina-reranker-v3-4bit-mxfp4}"
 EMBED_BATCH_SIZE="${EMBED_BATCH_SIZE:-32}"
+START_EMBEDDER="${START_EMBEDDER:-true}"
+START_RERANKER="${START_RERANKER:-false}"
+START_DOCLING="${START_DOCLING:-false}"
+
+should_start() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 echo "[apple-mlx] runtime root : ${RUNTIME_ROOT}"
 echo "[apple-mlx] services     : ${SERVICES_DIR}"
 echo "[apple-mlx] launch agent : ${LAUNCH_AGENT_PATH}"
 echo "[apple-mlx] embed batch  : ${EMBED_BATCH_SIZE}"
+echo "[apple-mlx] sidecars     : embedder=${START_EMBEDDER} reranker=${START_RERANKER} docling=${START_DOCLING}"
 
 mkdir -p "${SERVICES_DIR}" "${LOG_DIR}" "${RUNTIME_ROOT}/models" "${RUNTIME_ROOT}/volumes/hf-cache"
 
@@ -146,6 +157,12 @@ cat > "${LAUNCH_AGENT_PATH}" <<PLIST
         <string>${APPLE_MLX_RERANKER_MODEL_ID}</string>
         <key>EMBED_BATCH_SIZE</key>
         <string>${EMBED_BATCH_SIZE}</string>
+        <key>START_EMBEDDER</key>
+        <string>${START_EMBEDDER}</string>
+        <key>START_RERANKER</key>
+        <string>${START_RERANKER}</string>
+        <key>START_DOCLING</key>
+        <string>${START_DOCLING}</string>
         <key>RERANKER_SCORE_SCALE</key>
         <string>cosine</string>
     </dict>
@@ -166,7 +183,11 @@ launchctl kickstart -k "gui/$(id -u)/${LAUNCH_AGENT_NAME}"
 
 # ── 6. Smoke ─────────────────────────────────────────────────────────
 echo "[apple-mlx] waiting up to 90s for sidecars to come up"
-"${SERVICES_DIR}/.venv/bin/python" "${REPO_ROOT}/scripts/verify_apple_mlx_runtime.py" --wait 90
+VERIFY_ARGS=(--wait 90)
+should_start "${START_EMBEDDER}" || VERIFY_ARGS+=(--skip-embedder)
+should_start "${START_RERANKER}" || VERIFY_ARGS+=(--skip-reranker)
+should_start "${START_DOCLING}" || VERIFY_ARGS+=(--skip-docling)
+"${SERVICES_DIR}/.venv/bin/python" "${REPO_ROOT}/scripts/verify_apple_mlx_runtime.py" "${VERIFY_ARGS[@]}"
 
 echo
 echo "[apple-mlx] installed. Now bring up Docker with the override:"

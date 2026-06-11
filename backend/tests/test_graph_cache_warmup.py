@@ -238,6 +238,50 @@ async def test_db_none_is_silent_noop():
 
 
 @pytest.mark.asyncio
+async def test_active_ingest_batch_defers_rebuild(monkeypatch):
+    """When enabled, auto-warm waits until a running durable batch settles."""
+
+    class _Batches:
+        def __init__(self):
+            self.calls = 0
+
+        async def find_one(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return {"_id": "batch-1"}
+            return None
+
+    class _Db:
+        def __init__(self):
+            self.batches = _Batches()
+
+        def __getitem__(self, name):
+            assert name == "ingest_batches"
+            return self.batches
+
+    monkeypatch.setenv("GRAPH_CACHE_WARMUP_SKIP_DURING_ACTIVE_INGEST", "true")
+    monkeypatch.setenv("GRAPH_CACHE_WARMUP_ACTIVE_INGEST_DEFER_SECONDS", "0.01")
+    fake_emerge = AsyncMock()
+    fake_db = _Db()
+
+    with patch(
+        "services.graph.analytics.emerge_domains",
+        new=fake_emerge,
+    ):
+        cache_warmup.schedule_metrics_warmup_after_ingest(
+            qdrant=MagicMock(), neo4j_driver=MagicMock(), db=fake_db,
+            corpus_id="corp-1", debounce_seconds=0.01,
+        )
+        await asyncio.sleep(0.015)
+        fake_emerge.assert_not_called()
+        await asyncio.sleep(0.08)
+
+    fake_emerge.assert_awaited_once()
+    assert fake_db.batches.calls >= 2
+    assert not cache_warmup.is_warmup_pending("corp-1")
+
+
+@pytest.mark.asyncio
 async def test_pending_corpus_ids_lists_in_flight_only():
     """Diagnostic helper returns only corpora with non-done tasks."""
     fake_emerge = AsyncMock()

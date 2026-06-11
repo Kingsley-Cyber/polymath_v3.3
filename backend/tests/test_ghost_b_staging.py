@@ -584,6 +584,96 @@ async def test_resume_extracts_only_missing_ghost_b_chunks():
 
 
 @pytest.mark.asyncio
+async def test_resume_keeps_staged_ghost_b_when_missing_retry_totally_fails():
+    from models.schemas import IngestionConfig, WriteState
+    from services.ingestion import worker
+
+    staged = [
+        _sample_result("c1").__dict__ | {
+            "chunk_id": "c1",
+            "doc_id": "d-resume",
+            "corpus_id": "c-resume",
+            "entities": [],
+            "relations": [],
+            "facts": [],
+        }
+    ]
+    children = [
+        SimpleNamespace(
+            chunk_id="c1",
+            doc_id="d-resume",
+            corpus_id="c-resume",
+            text="already extracted",
+            chunk_kind="body",
+            metadata={},
+        ),
+        SimpleNamespace(
+            chunk_id="c2",
+            doc_id="d-resume",
+            corpus_id="c-resume",
+            text="missing extraction",
+            chunk_kind="body",
+            metadata={},
+        ),
+    ]
+    lens = SimpleNamespace(to_dict=lambda: {"id": "lens-1"})
+
+    async def _extract_stub(tasks, **_kwargs):
+        assert [task.chunk_id for task in tasks] == ["c2"]
+        return ExtractionBatchReport(
+            results=[],
+            failures=[
+                ExtractionFailureItem(
+                    chunk_id="c2",
+                    doc_id="d-resume",
+                    corpus_id="c-resume",
+                    model="m",
+                    lane=0,
+                    attempts=2,
+                    error_type="jsonl_contract",
+                    error_message="bad tail",
+                )
+            ],
+            metrics={"requested_chunks": 1, "extracted_chunks": 0, "failed_chunks": 1},
+        )
+
+    with patch.object(
+        worker.mongo_reader, "get_parent_chunks", new_callable=AsyncMock
+    ) as parent_mock, patch.object(
+        worker.mongo_reader, "read_ghost_b_staging", new_callable=AsyncMock
+    ) as staging_mock, patch.object(
+        worker.mongo_reader, "read_ghost_b_failures", new_callable=AsyncMock
+    ) as failures_mock, patch.object(
+        worker, "get_or_create_schema_lens", new_callable=AsyncMock
+    ) as lens_mock, patch.object(
+        worker, "extract_entities", side_effect=_extract_stub
+    ) as extract_mock, patch.object(worker.settings, "NEO4J_ENABLED", True):
+        parent_mock.return_value = []
+        staging_mock.return_value = staged
+        failures_mock.return_value = []
+        lens_mock.return_value = lens
+        result = await worker._run_ghosts_parallel(
+            config=IngestionConfig(use_neo4j=True, chunk_summarization=False),
+            parents=[],
+            children=children,
+            doc_id="d-resume",
+            corpus_id="c-resume",
+            model="ollama/test",
+            db=AsyncMock(),
+            qdrant_client=None,
+            neo4j_driver=object(),
+            existing_doc={"doc_id": "d-resume", "ghost_b_metrics": {}},
+            ws=WriteState(mongo_written=True, qdrant_written=False, neo4j_written=False),
+        )
+
+    assert extract_mock.call_count == 1
+    assert result.ghost_b_out is not None
+    assert [r.chunk_id for r in result.ghost_b_out] == ["c1"]
+    assert result.ghost_b_failures
+    assert result.warnings[0].startswith("Ghost B graph extraction produced 0/1")
+
+
+@pytest.mark.asyncio
 async def test_resume_reuses_saved_parent_summaries_without_mongo_flag():
     from models.schemas import IngestionConfig, SourceTier, WriteState
     from services.ingestion import worker

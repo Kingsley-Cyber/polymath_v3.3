@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,51 @@ _PENDING_WARMUP_TASKS: dict[str, asyncio.Task[Any]] = {}
 # (5-15s per doc) but not so long that a user querying their fresh
 # corpus has to wait.
 _WARMUP_DEBOUNCE_SECONDS: float = 30.0
+
+
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def active_ingest_warmup_defer_seconds(fallback: float) -> float:
+    raw = os.getenv("GRAPH_CACHE_WARMUP_ACTIVE_INGEST_DEFER_SECONDS")
+    if not raw:
+        return max(0.01, fallback)
+    try:
+        return max(0.01, float(raw))
+    except ValueError:
+        logger.warning(
+            "auto-warm: invalid GRAPH_CACHE_WARMUP_ACTIVE_INGEST_DEFER_SECONDS=%r; "
+            "using %.0fs",
+            raw,
+            fallback,
+        )
+        return max(0.01, fallback)
+
+
+async def should_defer_warmup_for_active_ingest(db: Any, corpus_id: str) -> bool:
+    """Return True when a corpus still has an actively running durable batch."""
+
+    if not _env_flag("GRAPH_CACHE_WARMUP_SKIP_DURING_ACTIVE_INGEST"):
+        return False
+    if db is None:
+        return False
+    try:
+        batch = await db["ingest_batches"].find_one(
+            {"corpus_id": corpus_id, "status": "running"},
+            {"_id": 1},
+        )
+    except Exception as exc:
+        logger.warning(
+            "auto-warm: active-ingest check failed corpus=%s: %s",
+            corpus_id[:8],
+            exc,
+        )
+        return False
+    return batch is not None
 
 
 def schedule_metrics_warmup_after_ingest(
@@ -106,6 +152,17 @@ def schedule_metrics_warmup_after_ingest(
             # Superseded by a newer ingest completion — exit cleanly.
             return
         try:
+            while await should_defer_warmup_for_active_ingest(db, corpus_id):
+                defer_seconds = active_ingest_warmup_defer_seconds(
+                    debounce_seconds
+                )
+                logger.info(
+                    "auto-warm: deferring metrics rebuild corpus=%s; "
+                    "durable ingest batch is still running",
+                    corpus_id[:8],
+                )
+                await asyncio.sleep(defer_seconds)
+
             # Local import — avoids pulling analytics' heavy
             # dependencies (NetworkX, etc.) at module load time. The
             # ingest worker runs in worker processes that don't need
