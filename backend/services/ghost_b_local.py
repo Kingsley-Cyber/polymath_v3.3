@@ -121,6 +121,10 @@ SIDECAR_URLS = [
     if u.strip()
 ]
 SIDECAR_URL = SIDECAR_URLS[0]  # back-compat for error messages
+# App-level override: the worker sets this per ingest from the Settings UI's
+# extraction endpoints (enabled ones, in order) — see
+# settings_service.get_system_extraction(). None -> env list above.
+RUNTIME_ENDPOINT_URLS: list[str] | None = None
 # Per-REQUEST ceiling. Requests are sliced to SIDECAR_SLICE chunks, so this
 # bounds one slice, not a whole book — the pilot's 932 KB doc (~1800 chunks in
 # one request) blew the old 600 s whole-doc ceiling at per-chunk speeds.
@@ -748,9 +752,12 @@ async def _extract_via_sidecar(task_dicts: list[dict], do_facts: bool, lens_id: 
     # instances get work, so the same config serves both worlds: RTX on ->
     # fast bulk ingestion; RTX off -> the Mac handles small batches at its
     # own pace. Probe cost is one /health round-trip per URL per doc.
+    # Settings-UI endpoints (RUNTIME_ENDPOINT_URLS, set by the worker per
+    # ingest) take precedence over the env list.
+    pref_urls = RUNTIME_ENDPOINT_URLS or SIDECAR_URLS
     live_urls: list[str] = []
     async with httpx.AsyncClient(timeout=3.0) as probe:
-        for u in SIDECAR_URLS:
+        for u in pref_urls:
             try:
                 r = await probe.get(f"{u}/health")
                 if r.status_code == 200 and r.json().get("status") == "ok":
@@ -759,8 +766,9 @@ async def _extract_via_sidecar(task_dicts: list[dict], do_facts: bool, lens_id: 
                 continue
     if not live_urls:
         raise RuntimeError(
-            f"ghost_b_local: no extraction sidecar reachable among {SIDECAR_URLS}. "
-            "Start the RTX sidecar(s) or the Mac sidecar "
+            f"ghost_b_local: no extraction sidecar reachable among {pref_urls}. "
+            "Enable a live endpoint in Settings -> Ingestion, start the GPU "
+            "box sidecar, or start the local one "
             "(START_GHOST_B_EXTRACT=true scripts/apple_ml_services/start.sh)."
         )
 

@@ -208,11 +208,26 @@ export const MODAL_GPU_TIERS: {
   { tier: "H100", label: "H100 (80 GB)", priceHint: "~$4.56/hr", pricePerHour: 4.56, notes: "Fastest; reserve for giant models" },
 ];
 
+// One Ghost B extraction sidecar the user can toggle on/off. The worker
+// health-probes ENABLED endpoints per document (list order = preference) and
+// dispatches to whichever are live — power a GPU box off and work simply
+// flows to the next enabled endpoint (e.g. the always-on local sidecar).
+export interface ExtractionEndpoint {
+  label: string;
+  url: string;
+  enabled: boolean;
+}
+
+export interface ExtractionSettings {
+  endpoints: ExtractionEndpoint[];
+}
+
 export interface GlobalSettings {
   infrastructure: InfrastructureSettings;
   chat: ChatLLMSettings;
   retrieval: RetrievalSettings;
   modal: ModalDeploySettings;
+  extraction?: ExtractionSettings;
 }
 
 export interface GlobalSettingsResponse {
@@ -223,6 +238,7 @@ export interface GlobalSettingsUpdate {
   chat?: ChatLLMSettings | null;
   retrieval?: RetrievalSettings | null;
   modal?: ModalDeploySettings | null;
+  extraction?: ExtractionSettings | null;
 }
 
 export interface InfrastructureTestResponse {

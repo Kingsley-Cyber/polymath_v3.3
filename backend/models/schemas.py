@@ -463,6 +463,28 @@ class RetrievalSettings(_legacy.RetrievalSettings):
     final_top_k: int = Field(default=8, ge=1, le=50)
 
 
+class ExtractionEndpoint(BaseModel):
+    """One Ghost B extraction sidecar a user can toggle on/off.
+
+    The worker health-probes ENABLED endpoints per document (preference
+    order = list order) and dispatches slices to the live ones — so a GPU
+    box can be powered off without any config change: work just flows to
+    whatever is on (e.g. the always-on local sidecar)."""
+
+    label: str = Field(default="", max_length=60)
+    url: str = Field(default="", max_length=300)
+    enabled: bool = True
+
+
+class ExtractionSettings(BaseModel):
+    """Where local Ghost B extraction runs. Defaults seed from
+    LOCAL_GHOST_B_EXTRACT_URL so existing deployments see their current
+    wiring in the UI; edits persist in Mongo and apply on the next ingest
+    without a backend restart (same pattern as Modal settings)."""
+
+    endpoints: list[ExtractionEndpoint] = Field(default_factory=list)
+
+
 class GlobalSettings(BaseModel):
     infrastructure: _legacy.InfrastructureSettings = Field(
         default_factory=_legacy.InfrastructureSettings
@@ -473,6 +495,7 @@ class GlobalSettings(BaseModel):
         default_factory=_legacy.ModalDeploySettings
     )
     models: ModelsConfig = Field(default_factory=ModelsConfig)
+    extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
 
 
 class GlobalSettingsResponse(BaseModel):
@@ -484,6 +507,7 @@ class GlobalSettingsUpdate(BaseModel):
     retrieval: RetrievalSettings | None = None
     modal: _legacy.ModalDeploySettings | None = None
     models: ModelsConfig | None = None
+    extraction: ExtractionSettings | None = None
 
 
 class SynthesisSource(BaseModel):

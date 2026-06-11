@@ -1,11 +1,14 @@
-// IngestionSettingsTab.tsx — Read-only display of global ingestion/chunking defaults
-// These values serve as defaults when creating new corpora. Per-corpus overrides
-// are configured in CorpusManager at creation time and frozen after first ingest.
+// IngestionSettingsTab.tsx — Global ingestion settings.
+// Extraction Engines (top card) is MUTABLE: toggleable sidecar endpoints the
+// worker health-probes per document. The remaining cards are read-only
+// chunking/pool defaults that pre-fill corpus creation.
 
-import { Layers, Info, Copy, Check } from "lucide-react";
-import { useState } from "react";
+import { Layers, Info, Copy, Check, Cpu, Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { IngestionConfig, TokenBudget } from "../../types";
 import { DEFAULT_INGESTION_CONFIG } from "../../types";
+import type { ExtractionEndpoint } from "../../types/settings";
+import { getGlobalSettings, updateGlobalSettings } from "../../lib/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -98,6 +101,142 @@ function SectionCard({
   );
 }
 
+// ── Extraction Engines (mutable) ─────────────────────────────────────────
+// Toggleable sidecar endpoints. The ingestion worker health-probes ENABLED
+// endpoints per document (top-to-bottom preference) and dispatches to the
+// live ones — turn a GPU box off and work flows to the next enabled engine.
+
+function ExtractionEnginesCard() {
+  const [endpoints, setEndpoints] = useState<ExtractionEndpoint[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getGlobalSettings()
+      .then((r) => setEndpoints(r.settings.extraction?.endpoints ?? []))
+      .catch((e) => setError(String(e)));
+  }, []);
+
+  const mutate = (next: ExtractionEndpoint[]) => {
+    setEndpoints(next);
+    setDirty(true);
+  };
+
+  const save = async () => {
+    if (!endpoints) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await updateGlobalSettings({ extraction: { endpoints } });
+      setDirty(false);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-[#2a2a2a] border border-white/5 rounded-lg p-5 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-[15px] font-semibold text-white flex items-center gap-2">
+          <Cpu size={16} className="text-emerald-400" /> Extraction Engines
+        </h3>
+        <button
+          onClick={save}
+          disabled={!dirty || saving}
+          className={`text-[12px] px-3 py-1 rounded ${
+            dirty
+              ? "bg-emerald-600 hover:bg-emerald-500 text-white"
+              : "bg-white/5 text-gray-500"
+          }`}
+        >
+          {saving ? "Saving…" : dirty ? "Save" : "Saved"}
+        </button>
+      </div>
+      <p className="text-[12px] text-gray-500">
+        Machines that run entity/relation extraction during ingestion. The
+        worker checks which enabled engines are online for each document and
+        uses them in this order — a powered-off GPU box is skipped
+        automatically, so the local engine quietly handles small batches.
+      </p>
+      {error && <p className="text-[12px] text-red-400">{error}</p>}
+      {endpoints === null ? (
+        <p className="text-[12px] text-gray-600">Loading…</p>
+      ) : (
+        <div className="space-y-2">
+          {endpoints.map((ep, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-2 bg-black/20 rounded px-3 py-2"
+            >
+              <button
+                onClick={() =>
+                  mutate(
+                    endpoints.map((e, j) =>
+                      j === i ? { ...e, enabled: !e.enabled } : e,
+                    ),
+                  )
+                }
+                title={ep.enabled ? "Enabled — click to disable" : "Disabled — click to enable"}
+                className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${
+                  ep.enabled ? "bg-emerald-600" : "bg-white/10"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                    ep.enabled ? "left-[18px]" : "left-0.5"
+                  }`}
+                />
+              </button>
+              <input
+                value={ep.label}
+                placeholder="Label"
+                onChange={(ev) =>
+                  mutate(
+                    endpoints.map((e, j) =>
+                      j === i ? { ...e, label: ev.target.value } : e,
+                    ),
+                  )
+                }
+                className="w-36 bg-transparent border border-white/10 rounded px-2 py-1 text-[12px] text-white"
+              />
+              <input
+                value={ep.url}
+                placeholder="http://192.168.x.x:8084"
+                onChange={(ev) =>
+                  mutate(
+                    endpoints.map((e, j) =>
+                      j === i ? { ...e, url: ev.target.value } : e,
+                    ),
+                  )
+                }
+                className="flex-1 bg-transparent border border-white/10 rounded px-2 py-1 text-[12px] text-white font-mono"
+              />
+              <button
+                onClick={() => mutate(endpoints.filter((_, j) => j !== i))}
+                className="p-1 text-gray-600 hover:text-red-400"
+                title="Remove engine"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={() =>
+              mutate([...endpoints, { label: "", url: "", enabled: true }])
+            }
+            className="flex items-center gap-1.5 text-[12px] text-emerald-400 hover:text-emerald-300 px-1 py-1"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add engine
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ───────────────────────────────────────────────────────
 
 export function IngestionSettingsTab() {
@@ -114,6 +253,9 @@ export function IngestionSettingsTab() {
           after first document ingest.
         </p>
       </div>
+
+      {/* Extraction Engines — mutable, applies on next ingest */}
+      <ExtractionEnginesCard />
 
       {/* Info banner */}
       <div className="flex items-start gap-3 bg-blue-950/20 border border-blue-700/30 rounded-lg px-4 py-3">

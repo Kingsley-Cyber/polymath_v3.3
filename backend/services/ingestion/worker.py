@@ -864,6 +864,23 @@ async def _run_ghosts_parallel(
                 settings.EXTRACTION_MAX_ACTIVE_DOCS,
                 len(tasks),
             )
+            # Settings-UI extraction endpoints (toggleable per machine) take
+            # effect on the next ingest without a restart — same pattern as
+            # the Modal embedder config. Falls back to env wiring on any
+            # error or when the user disabled everything (env is the floor).
+            try:
+                from services import ghost_b_local as _gbl
+                from services.settings import settings_service as _ss
+
+                ext = await _ss.get_system_extraction()
+                urls = [
+                    e.url.strip().rstrip("/")
+                    for e in (ext.endpoints or [])
+                    if e.enabled and e.url and e.url.strip()
+                ]
+                _gbl.RUNTIME_ENDPOINT_URLS = urls or None
+            except Exception as exc:  # noqa: BLE001 — env fallback is fine
+                logger.warning("extraction endpoint settings unavailable: %s", exc)
             ghost_b_run_id = str(uuid.uuid4())
             report = await extract_entities(
                 tasks,

@@ -24,6 +24,8 @@ from config import get_settings
 from models.schemas import (
     AuthConfig,
     ChatLLMSettings,
+    ExtractionEndpoint,
+    ExtractionSettings,
     GlobalSettings,
     InfrastructureSettings,
     ModalDeploySettings,
@@ -41,7 +43,7 @@ _MASK_SENTINEL = "[set]"
 _DEFAULT_CHAT_ENTRY_ID = "system-default-chat"
 
 # Sections that users CAN modify via PUT /api/settings
-_MUTABLE_SECTIONS = {"chat", "retrieval", "modal", "models"}
+_MUTABLE_SECTIONS = {"chat", "retrieval", "modal", "models", "extraction"}
 
 # Sections that are always read from config.py (env vars) — never stored in MongoDB
 _IMMUTABLE_SECTIONS = {"infrastructure"}
@@ -176,7 +178,46 @@ class SettingsService:
                 graph_query_node_limit=80,
             ),
             modal=ModalDeploySettings(),
+            extraction=self._extraction_defaults_from_env(),
         )
+
+    def _extraction_defaults_from_env(self) -> ExtractionSettings:
+        """Seed extraction endpoints from LOCAL_GHOST_B_EXTRACT_URL so
+        existing env-wired deployments see their current setup in the UI."""
+        import os
+
+        raw = os.environ.get(
+            "LOCAL_GHOST_B_EXTRACT_URL", "http://host.docker.internal:8084"
+        )
+        endpoints: list[ExtractionEndpoint] = []
+        for i, u in enumerate(x.strip().rstrip("/") for x in raw.split(",")):
+            if not u:
+                continue
+            local = "host.docker.internal" in u or "localhost" in u or "127.0.0.1" in u
+            endpoints.append(
+                ExtractionEndpoint(
+                    label="Local sidecar" if local else f"GPU box {i + 1}",
+                    url=u,
+                    enabled=True,
+                )
+            )
+        return ExtractionSettings(endpoints=endpoints)
+
+    async def get_system_extraction(self) -> ExtractionSettings:
+        """Extraction endpoints for the ingestion worker. Reads the first
+        settings doc (single-admin deployments) and falls back to env-seeded
+        defaults — same pattern as get_system_modal, so UI toggles apply on
+        the next ingest without a backend restart."""
+        if self._db is not None:
+            try:
+                doc = await self._db["settings"].find_one(
+                    {"extraction": {"$exists": True}}
+                )
+                if doc and doc.get("extraction"):
+                    return ExtractionSettings(**doc["extraction"])
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("get_system_extraction fell back to env: %s", exc)
+        return self._extraction_defaults_from_env()
 
     async def get_settings(self, user_id: str) -> GlobalSettings:
         """
@@ -255,12 +296,20 @@ class SettingsService:
         # Infrastructure is ALWAYS from config.py (env vars), never from MongoDB
         infrastructure = self._infrastructure_defaults()
 
+        extraction_raw = doc.get("extraction")
+        extraction_cfg = (
+            ExtractionSettings(**extraction_raw)
+            if extraction_raw
+            else self._extraction_defaults_from_env()
+        )
+
         result = GlobalSettings(
             infrastructure=infrastructure,
             chat=chat,
             retrieval=retrieval,
             modal=modal_cfg,
             models=models_cfg,
+            extraction=extraction_cfg,
         )
         # Phase 24 perf — cache the assembled result
         self._settings_cache[user_id] = (now, result)
@@ -743,6 +792,8 @@ class SettingsService:
                 RetrievalSettings(**section_data)
             elif section_name == "modal":
                 ModalDeploySettings(**section_data)
+            elif section_name == "extraction":
+                ExtractionSettings(**section_data)
             elif section_name == "models":
                 # Route through update_models so ciphertext handling + ref
                 # validation run. Remove from safe_patch so the blind $set
