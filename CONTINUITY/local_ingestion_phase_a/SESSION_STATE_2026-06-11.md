@@ -42,13 +42,15 @@ EXTRACTION_MAX_ACTIVE_DOCS=4).
 
 ## RTX-side state (LAST KNOWN — confirm before relying)
 
-Last confirmed from the user's agent: 8-instance fleet relaunched at envs
-32/512/32 on code 5ffedd8. I then instructed (NOT yet confirmed executed):
-pull ≥4751e3c, STOP all, relaunch just TWO instances (8084, 8085) with
-GHOST_B_GLINER_BATCH=256 GHOST_B_FACET_BATCH=256 GHOST_B_GLIREL_BATCH=512
-(GLINER_FORWARD defaults 8 in code). If port 8084 returns `timings: null`
-on /extract, it's running pre-22b6b64 code — needs pull+restart. Port 8090
-note: Wondershare WsToastNotification.exe squats it if their main app runs.
+2026-06-11: the user's agent executed RTX_ONNX_AGENT_PROMPT.md — 8084 torch
+(GLiNER on CPU, see truth table) + 8086 ONNX-CUDA both up at envs 256/256/512,
+verified from the Mac via /health gliner blocks. PENDING (user types one line
+to their agent): pull ≥322cc4f and ROLE-SWAP — 8084 relaunches with the ONNX
+envs (production; app engine list needs NO change), 8086 relaunches plain
+torch (becomes the torch-CUDA control to complete the truth table). The
+agent's report file (git push, http :8091 fallback) never arrived — fully
+superseded by direct Mac-side /health probes + benches. Port 8090 note:
+Wondershare WsToastNotification.exe squats it if their main app runs.
 
 ## Performance: measured truth table (do NOT re-test these)
 
@@ -58,11 +60,14 @@ note: Wondershare WsToastNotification.exe squats it if their main app runs.
 | fp16 GLiREL on MPS | 0.99× — null (Mac is unified-memory-bandwidth-bound for DeBERTa-large; ~420 ms/chunk is the Mac's ceiling) |
 | Dual-lane GLiREL (CPU+GPU threads on Mac) | null (same bandwidth wall). Code kept env-gated GHOST_B_GLIREL_CPU_LANE, default off |
 | Multi-process fleet on Windows | FULLY SERIALIZES — 2 procs = exactly 2× each (WDDM; CUDA MPS is Linux-only). Fleet abandoned; multi-URL client kept for CROSS-machine fan-out |
-| RTX single-process real-content rate | ~280–330 ms/chunk (stage split ≈ gliner 49% + facets 40% + glirel 6%) — kernel-launch overhead, GPU mostly idle (~4/96 GB, low util) |
+| RTX single-process real-content rate (torch) | ~280–330 ms/chunk — ROOT CAUSE FOUND 2026-06-11: get_gliner() was Mac-written (MPS-else-CPU) and silently ran GLiNER+facets (89% of wall) on the 28-core CPU; only GLiREL was on GPU. "Kernel-launch overhead, GPU mostly idle" was a WRONG theory — the GPU was idle because the work never reached it. Fixed in 322cc4f (CUDA > MPS > CPU; /health gliner.device is the tell). |
+| ONNX CUDA lane on RTX (same 256-chunk payload, Mac-side bench) | 19 ms/chunk total (gliner 2.2s + facets 0.9s + glirel 1.5s for 256) vs deployed torch-CPU 253 ms/chunk = 13.3×; both rounds identical. CUDAExecutionProvider verified active via /health; 9 ms/chunk pass-1 is physically impossible on CPU. Quality: 536 vs 535 entities — the single diff is ('multithreading', Concept) at conf 0.45019 vs threshold 0.45, pure fp boundary; zero conf drifts >0.01 elsewhere. torch-CUDA control number pending (8086 role-swap). |
 | E2E measured | 1 MB book = 8m13s (ghosts 342s, embed 106s, qdrant 6s) → 498 files ≈ 1.3–1.7 days with concurrency-3 pipelining |
 
-**Next speed lever — ONNX Runtime for GLiNER (CODE SHIPPED + MAC-VALIDATED
-2026-06-11; RTX bench pending).** Env gate: `GHOST_B_GLINER_ONNX=1` swaps
+**ONNX Runtime for GLiNER — VALIDATED ON RTX 2026-06-11: 19 ms/chunk, 13.3×
+vs deployed torch (see truth table). PROMOTED: 8084 relaunching as ONNX.
+Backfill ETA collapses to well under a day; the Mac MLX embedder is now the
+expected long pole.** Env gate: `GHOST_B_GLINER_ONNX=1` swaps
 BOTH GLiNER passes (entity + facet — the one shared instance in
 facet_tagger.get_gliner) onto ORT; companions GHOST_B_GLINER_ONNX_REPO /
 _FILE / _DEVICE (defaults: onnx-community/gliner_medium-v2.1,
