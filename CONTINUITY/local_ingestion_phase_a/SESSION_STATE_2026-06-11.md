@@ -34,7 +34,22 @@ round-robin splits slices evenly across live enabled endpoints, so a slow
 enabled endpoint drags everything. Compose env LOCAL_GHOST_B_EXTRACT_URL is
 only the seed/fallback now.
 
-KNOWN FRAGILITY: RTX :8086 was launched manually — NOT boot-persistent until
+PRODUCTIZED 2026-06-11 (commit ad8a822): extraction engines are a full user
+feature now — GET /api/settings/extraction/validate probes every configured
+endpoint FROM THE BACKEND's network position (per-endpoint checklists:
+reachable/healthy/warm/model_loaded/gpu_active/version_match; graded
+ready/warning/fail; deploy_ready verdict; 8 unit tests), the Settings card
+has a Validate button + per-row check chips + readiness banner,
+scripts/bootstrap_models.py installs models per machine in one idempotent
+command, and scripts/EXTRACTION_SETUP.md (linked from README) is the
+fresh-clone guide. Final e2e through the validated config (deploy_e2e_proof,
+14d6b2a9): 2/2 done, verify ok ×2, routed to :8086 at 24–30 ms/chunk.
+
+RESOLVED (was KNOWN FRAGILITY): RTX :8086 boot-persists via Scheduled Task
+PolymathGhostBSidecarONNX (AtLogOn — returns on first logon after reboot,
+not pre-login; agent offered SYSTEM-task elevation if ever needed). The
+launchers + task XMLs are in scripts/apple_ml_services/ (bus 002, merged
+0922801). Historical note: :8086 was originally launched manually — NOT boot-persistent until
 the user's RTX agent executes bus instruction 001 (CONTINUITY/agent_bus/;
 needs the user to type the one bootstrap line). If the RTX box reboots
 before that, relaunch 8086 per the envs in 001.
@@ -163,7 +178,8 @@ only after passing the equivalence gate. Can run DURING the backfill.
   toggle_proof, pilot_cross_domain_15 (137550d5 — keep until backfill done,
   it's the quality reference), rtx_after_benchmark (4cb2421e),
   onnx_e2e_proof (2657e9b0 — ONNX-production-path e2e proof; keep until
-  backfill done).
+  backfill done), deploy_e2e_proof (14d6b2a9 — validate-gate→ingest product
+  flow proof on rebuilt containers).
 
 ## After the backfill completes (agreed follow-ups, in rough order)
 
