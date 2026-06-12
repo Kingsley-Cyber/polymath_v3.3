@@ -189,6 +189,22 @@ function PresetModeSelector({ config, onChange, idPrefix }: PresetSelectorProps)
           </label>
         </div>
       )}
+
+      {/* Local extraction is the engine for every preset — say so where the
+          user makes ingestion choices, instead of leaving it implicit. */}
+      <div
+        className="mt-2 px-2 py-1.5 border border-border-minimal bg-bg-base/50"
+        data-testid={`${idPrefix}-local-extraction-note`}
+      >
+        <div className="text-[10px] font-bold tracking-widest uppercase text-emerald-400">
+          Extraction · local engines
+        </div>
+        <div className="text-[11px] text-content-secondary">
+          Entities, relations &amp; facts run locally via GLiNER ×2 + GLiREL —
+          no cloud calls. Engine machines (and their GPU/health checks) are
+          managed in Settings → Ingestion → Extraction Engines.
+        </div>
+      </div>
     </div>
   );
 }
