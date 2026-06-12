@@ -32,6 +32,23 @@ SiliconFlow cuts them off mid-run, ghost_a disables lanes gracefully and
 docs continue WITHOUT summaries (core corpus unaffected). A later
 "summarize missing parents" pass is the recovery path.
 
+BACKFILL INCIDENT LOG (both recovered, run continued):
+(1) ~14:30–15:20 local: ONNX :8086 threw CUBLAS alloc failures under real
+load (GLiREL VRAM spikes on dense books + ORT arena + 3-doc concurrency);
+231 docs failed. Fix: flipped production to torch-CUDA :8084 via Settings
+toggle, requeued failed items by direct Mongo status flip (resume does NOT
+requeue hard-failed; batch counters must be recomputed by aggregation after
+manual flips), bus 003 sent for an 8086 memory-safe restart (GLIREL_BATCH
+128). 8086 stays out of production until soak-tested.
+(2) ~18:00–19:00 local: SiliconFlow keys exhausted → ghost_a produced 0/N
+summaries → worker treats as provider outage and FAILS the doc (deliberate
+design; "graceful degradation" only holds per-lane, not all-lanes-dead);
+383 docs failed. Fix: chunk_summarization flipped false on the corpus
+(worker reads corpus config live per doc), requeued, resumed. ~115 docs
+keep their Hy3 summaries; the rest ingest without summaries. POST-HOC
+SUMMARY PASS = the recovery path for the unsummarized parents (needs fresh
+credit or a different provider; corpus is fully queryable without them).
+
 GOTCHA (cost a failed smoke): IngestionConfig presets OVERWRITE
 chunk_summarization — corpus creation MUST send preset="custom" for the
 summary lane to stick ("balanced", the default, forces it false).
