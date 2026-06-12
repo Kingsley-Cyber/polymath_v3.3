@@ -24,7 +24,10 @@ SiliconFlow keys died) / 524,212 naive vectors / 782,045 entities /
 951,305 relations at 86.0% typed. Wall ~21h including three recovered
 incidents (ONNX CUBLAS OOM, summary-key death, orphan-purge race) + two
 verify-checker hardenings (retry external probes). Graph analytics cache
-rebuild kicked at completion. POST-RUN PUNCH LIST: QA eval (~20 questions),
+rebuild READY (~30 min build after the streaming-fingerprints OOM fix —
+raw-vector accumulation needed ~17GB at 524k points and silently killed the
+process; per-doc sum+count needs ~4MB. Brain View serves in <100ms: 83
+supernodes / 500 concepts / 3 domains). POST-RUN PUNCH LIST: QA eval (~20 questions),
 entity dedup, post-hoc summary pass for the 118k unsummarized parents
 (needs fresh credit), ONNX 8086 soak test before re-promotion, deferred UI
 fixes (#69 doc-count display, #70 container healthcheck), MLX embedder
