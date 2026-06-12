@@ -343,6 +343,13 @@ async def _log_validation_error(request: Request, exc: RequestValidationError):
         content={"detail": exc.errors()},
     )
 
+# Compress JSON responses — the UI's hottest payloads (batch detail ~585 KB,
+# graph overview ~312 KB, corpora list ~35 KB) are highly repetitive JSON
+# that gzips 5-10×. Browsers negotiate via Accept-Encoding automatically.
+from fastapi.middleware.gzip import GZipMiddleware  # noqa: E402
+
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
 # CORS middleware configuration
 # Allow frontend origins as specified in CLAUDE.md
 app.add_middleware(

@@ -864,12 +864,17 @@ async def list_ingest_batches(
 @router.get("/ingest-batches/{batch_id}")
 async def get_ingest_batch(
     batch_id: str,
+    include_items: bool = True,
     current_user: dict = Depends(get_current_user),
 ):
+    """Batch detail. Pass include_items=false for poll loops — with a 498-item
+    batch the full payload is ~585 KB, and progress displays only need the
+    counts/status summary."""
     batch = await ingest_batches.get_batch(
         ingestion_service.db,
         batch_id,
         user_id=current_user["user_id"],
+        include_items=include_items,
     )
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")

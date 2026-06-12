@@ -113,8 +113,15 @@ export function CorpusDetail({
     if (!["queued", "running"].includes(localBatch.status)) return;
     const timer = window.setInterval(() => {
       api
-        .getIngestBatch(localBatch.batch_id)
-        .then(setLocalBatch)
+        // Summary mode: the 3s progress poll needs counts/status, not the
+        // ~585 KB item list. Keep previously-loaded items so any expanded
+        // item view doesn't blank out between polls.
+        .getIngestBatch(localBatch.batch_id, { includeItems: false })
+        .then((next) =>
+          setLocalBatch((prev) =>
+            prev ? { ...next, items: next.items ?? prev.items } : next,
+          ),
+        )
         .catch(() => undefined);
     }, 3000);
     return () => window.clearInterval(timer);

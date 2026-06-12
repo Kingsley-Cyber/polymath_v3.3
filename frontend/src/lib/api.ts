@@ -575,8 +575,10 @@ export async function listIngestBatches(
 
 export async function getIngestBatch(
   batchId: string,
+  opts?: { includeItems?: boolean },
 ): Promise<IngestBatchResponse> {
-  return fetchJSON(`/ingest-batches/${encodeURIComponent(batchId)}`);
+  const qs = opts?.includeItems === false ? "?include_items=false" : "";
+  return fetchJSON(`/ingest-batches/${encodeURIComponent(batchId)}${qs}`);
 }
 
 export async function resumeIngestBatch(
