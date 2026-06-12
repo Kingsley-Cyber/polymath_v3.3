@@ -694,7 +694,19 @@ async def emerge_domains(
             logger.info(
                 "Domain cache HIT corpus=%s sig=%s", corpus_id, signature[:8]
             )
-            return _deserialize_domain_map(cached)
+            domain_map = _deserialize_domain_map(cached)
+            # The metrics chain must run on the HIT path too: a corpus with a
+            # fresh domain map but missing/stale metrics (warmup died midway,
+            # or pre-metrics-chain builds) would otherwise never become
+            # servable — the overview gates on BOTH caches. compute_all_metrics
+            # is signature-cached, so this is a no-op when metrics are fresh.
+            try:
+                await asyncio.to_thread(
+                    _compute_metrics_isolated, corpus_id, domain_map, False)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "metrics computation failed corpus=%s", corpus_id)
+            return domain_map
 
     logger.info(
         "Domain cache MISS corpus=%s sig=%s — running emergence",
@@ -787,7 +799,9 @@ def _compute_metrics_isolated(corpus_id: str, domain_map: "DomainMap",
 
     from motor.motor_asyncio import AsyncIOMotorClient
 
-    from config import settings as _settings
+    from config import get_settings
+
+    _settings = get_settings()
 
     async def _run() -> None:
         client = AsyncIOMotorClient(_settings.MONGODB_URI)
