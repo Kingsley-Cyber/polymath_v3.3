@@ -120,6 +120,26 @@ async def _scroll_doc_payloads(
     return payloads
 
 
+async def _with_retries(fn, *, attempts: int = 3, base_delay: float = 2.0):
+    """Run an async checker callable with retries.
+
+    Verify's external probes (qdrant count/scroll, neo4j count) blip under
+    ingest load, and a CHECKER blip must not fail a healthy doc — observed
+    live twice, both times as undebuggable empty-string errors because many
+    timeout exceptions stringify to "". Re-raises the last exception after
+    the final attempt; callers record type(exc).__name__ alongside it."""
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            return await fn()
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            if i < attempts - 1:
+                await asyncio.sleep(base_delay * (i + 1))
+    assert last is not None
+    raise last
+
+
 async def _verify_qdrant_text_contract(
     *,
     db: AsyncIOMotorDatabase,
@@ -226,7 +246,7 @@ async def verify_ingest(
             collection_kind=kind,
         )
         try:
-            res = await qdrant.count(
+            res = await _with_retries(lambda col=col: qdrant.count(
                 collection_name=col,
                 count_filter=qmodels.Filter(
                     must=[
@@ -240,10 +260,13 @@ async def verify_ingest(
                     ]
                 ),
                 exact=True,
-            )
+            ))
             qdrant_counts[col] = int(res.count)
         except Exception as exc:
-            errors.append(f"qdrant.count({col}): {exc}")
+            errors.append(
+                f"qdrant.count({col}): check failed after retries — "
+                f"{type(exc).__name__}: {exc}"
+            )
             qdrant_counts[col] = -1
 
     # 3. Consistency: each target collection should match Mongo.
@@ -309,7 +332,7 @@ async def verify_ingest(
             )
             sample_chunk_id = (sample or {}).get("chunk_id")
             if sample_chunk_id:
-                hits, _ = await qdrant.scroll(
+                hits, _ = await _with_retries(lambda: qdrant.scroll(
                     collection_name=probe_col,
                     scroll_filter=qmodels.Filter(
                         must=[
@@ -322,13 +345,16 @@ async def verify_ingest(
                     limit=1,
                     with_payload=False,
                     with_vectors=False,
-                )
+                ))
                 if not hits:
                     errors.append(
                         f"probe: chunk_id={sample_chunk_id[:16]} missing from {probe_col}"
                     )
         except Exception as exc:
-            errors.append(f"probe.scroll({probe_col}): {exc}")
+            errors.append(
+                f"probe.scroll({probe_col}): check failed after retries — "
+                f"{type(exc).__name__}: {exc}"
+            )
 
     # 5. Neo4j chunk count (only when use_neo4j and driver available).
     # Pt 8c — worker.py filters NOISY_KINDS (toc/index/bibliography/front_matter
