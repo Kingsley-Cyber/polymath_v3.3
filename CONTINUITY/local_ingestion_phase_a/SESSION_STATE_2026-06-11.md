@@ -15,7 +15,22 @@ fact-entity linkage). Everything is committed+pushed through `e918ad6`
 (repo github.com/Kingsley-Cyber/polymath_v3.3, branch main; verify with
 `git rev-list --count origin/main..HEAD` == 0).
 
-BACKFILL LAUNCHED 2026-06-11 ~14:00 local: corpus `authentic_library`
+★ BACKFILL COMPLETE 2026-06-12 ~11:07 local — ALL 498 FILES: 496 done +
+2 skipped (genuine stub files: "AI-Powered Developer" 217B, "Things That
+Make Us Smart" 500B — replace + rescan if real copies exist), 0 failed.
+FINAL CORPUS (authentic_library, f8a0aa85): 570,086 children / 138,518
+parents / 20,059 parents WITH Hy3 summaries (the lane's yield before the
+SiliconFlow keys died) / 524,212 naive vectors / 782,045 entities /
+951,305 relations at 86.0% typed. Wall ~21h including three recovered
+incidents (ONNX CUBLAS OOM, summary-key death, orphan-purge race) + two
+verify-checker hardenings (retry external probes). Graph analytics cache
+rebuild kicked at completion. POST-RUN PUNCH LIST: QA eval (~20 questions),
+entity dedup, post-hoc summary pass for the 118k unsummarized parents
+(needs fresh credit), ONNX 8086 soak test before re-promotion, deferred UI
+fixes (#69 doc-count display, #70 container healthcheck), MLX embedder
+cache-cap experiment.
+
+ORIGINAL LAUNCH RECORD — BACKFILL LAUNCHED 2026-06-11 ~14:00 local: corpus `authentic_library`
 (f8a0aa85), durable batch c9ab348b, 498 files, concurrency 3,
 run_backfill.sh supervising (caffeinated, 60s monitor, log
 backfill_20260611_080000.log, .backfill_state present → reruns resume).
