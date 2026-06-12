@@ -500,7 +500,18 @@ async def _post_local_with_retries(
             )
         except httpx.TimeoutException:
             raise
-        except (httpx.HTTPStatusError, httpx.ConnectError, ValueError) as exc:
+        except (
+            httpx.HTTPStatusError,
+            httpx.ConnectError,
+            # TransportError covers RemoteProtocolError ("Server disconnected
+            # without sending a response"), ReadError, WriteError — the
+            # embedder dropping a connection mid-request (restart, load
+            # spike). One such drop used to kill the doc's whole embed phase
+            # because only ConnectError was retried (observed live: doc
+            # failed verify with 0 vectors after a single disconnect).
+            httpx.TransportError,
+            ValueError,
+        ) as exc:
             last_exc = exc
             logger.warning(
                 "Local embedder transient failure (attempt %d/3, batch=%d): %s",
