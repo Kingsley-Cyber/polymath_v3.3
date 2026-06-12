@@ -292,7 +292,13 @@ async def get_doc_fingerprints(qdrant, corpus_id: str) -> dict[str, list[float]]
     from services.storage.qdrant_writer import _col_for_corpus
 
     collection = _col_for_corpus(corpus_id, "naive")
-    doc_vectors: dict[str, list[list[float]]] = defaultdict(list)
+    # Streaming mean — only the per-doc MEAN is ever used downstream.
+    # Accumulating raw vectors as Python lists needed ~17 GB on a 524k-point
+    # corpus and got the process OOM-killed mid-emergence (observed live:
+    # silent container restart 10 min in, rebuild cycling forever). Sum +
+    # count per doc is ~4 MB for ~500 docs.
+    doc_sums: dict[str, Any] = {}
+    doc_counts: dict[str, int] = defaultdict(int)
 
     offset = None
     while True:
@@ -326,14 +332,18 @@ async def get_doc_fingerprints(qdrant, corpus_id: str) -> dict[str, list[float]]
             vector = _dense_vector_from_qdrant(r.vector)
             if not doc_id or vector is None:
                 continue
-            doc_vectors[doc_id].append(vector)
+            v = np.asarray(vector, dtype=np.float64)
+            prev = doc_sums.get(doc_id)
+            doc_sums[doc_id] = v if prev is None else prev + v
+            doc_counts[doc_id] += 1
         if offset is None:
             break
 
     fingerprints: dict[str, list[float]] = {}
-    for doc_id, vecs in doc_vectors.items():
-        arr = np.asarray(vecs, dtype=np.float32)
-        fingerprints[doc_id] = arr.mean(axis=0).tolist()
+    for doc_id, vec_sum in doc_sums.items():
+        fingerprints[doc_id] = (
+            (vec_sum / max(1, doc_counts[doc_id])).astype(np.float32).tolist()
+        )
 
     logger.info(
         "Doc fingerprints: corpus=%s docs=%d collection=%s",
