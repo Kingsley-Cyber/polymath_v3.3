@@ -1504,13 +1504,9 @@ function IngestOverridesPanel({
 }) {
   const cfg = corpus.default_ingestion_config;
   const summaryDefault = cfg.summary_models?.[0]?.model ?? "(none)";
-  const extractionDefault = cfg.models_linked
-    ? summaryDefault
-    : cfg.extraction_models?.[0]?.model ?? "(none)";
 
   const [editEmbed, setEditEmbed] = useState(false);
   const [editSummary, setEditSummary] = useState(false);
-  const [editExtraction, setEditExtraction] = useState(false);
 
   const patch = (p: Partial<IngestOverrides>) => onChange({ ...overrides, ...p });
   const clearKeys = (keys: (keyof IngestOverrides)[]) => {
@@ -1654,45 +1650,27 @@ function IngestOverridesPanel({
         </div>
       </OverrideRow>
 
-      {/* Extraction row */}
-      <OverrideRow
-        label="Extraction (GHOST B)"
-        defaultValue={extractionDefault}
-        overrideValue={overrides.extraction_model}
-        editing={editExtraction}
-        onToggle={() => setEditExtraction(!editExtraction)}
-        onClear={() =>
-          clearKeys([
-            "extraction_model",
-            "extraction_base_url",
-            "extraction_api_key",
-          ])
-        }
-      >
-        <div className="grid grid-cols-3 gap-2">
-          <input
-            type="text"
-            placeholder="model"
-            value={overrides.extraction_model ?? ""}
-            onChange={(e) => patch({ extraction_model: e.target.value })}
-            className="px-2 py-1 bg-bg-base border border-border-minimal text-[11px] text-content-primary font-mono"
-          />
-          <input
-            type="text"
-            placeholder="base_url (optional)"
-            value={overrides.extraction_base_url ?? ""}
-            onChange={(e) => patch({ extraction_base_url: e.target.value })}
-            className="px-2 py-1 bg-bg-base border border-border-minimal text-[11px] text-content-primary font-mono"
-          />
-          <input
-            type="password"
-            placeholder="api_key (optional, ephemeral)"
-            value={overrides.extraction_api_key ?? ""}
-            onChange={(e) => patch({ extraction_api_key: e.target.value })}
-            className="px-2 py-1 bg-bg-base border border-border-minimal text-[11px] text-content-primary font-mono"
-          />
+      {/* Extraction row — Ghost B runs the LOCAL deterministic lane
+          (GLiNER ×2 + GLiREL + rules) unconditionally since the local
+          transition; there is no per-batch LLM to override. Showing the
+          linked summary model here (the old behavior) was a lie that
+          confused which engine does extraction. Engine selection +
+          validation lives in Settings → Ingestion → Extraction Engines. */}
+      <div className="flex items-start justify-between gap-3 py-2">
+        <div className="min-w-0">
+          <div className="text-[11px] uppercase tracking-wide text-content-tertiary">
+            Extraction (GHOST B)
+          </div>
+          <div className="text-[12px] text-content-primary font-mono truncate">
+            GLiNER ×2 + GLiREL — local engine
+          </div>
+          <div className="text-[11px] text-content-tertiary">
+            Routed via Settings → Ingestion → Extraction Engines (Validate
+            shows the live engine + GPU state). Not an LLM; no per-batch
+            override.
+          </div>
         </div>
-      </OverrideRow>
+      </div>
     </div>
   );
 }
