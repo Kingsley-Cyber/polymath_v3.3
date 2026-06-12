@@ -296,13 +296,28 @@ async def get_doc_fingerprints(qdrant, corpus_id: str) -> dict[str, list[float]]
 
     offset = None
     while True:
-        records, offset = await qdrant.scroll(
-            collection_name=collection,
-            limit=QDRANT_SCROLL_BATCH,
-            with_payload=True,
-            with_vectors=True,
-            offset=offset,
-        )
+        # With-vectors scrolls over 500k+ point corpora hit transport
+        # timeouts under load; one failed batch used to kill the WHOLE
+        # emergence (observed live: ResponseHandlingException at ~524k
+        # points → endless rebuild-crash-rekick cycle). The offset cursor
+        # is held here, so retrying just the failed batch loses nothing.
+        last_exc: Exception | None = None
+        for attempt in range(4):
+            try:
+                records, offset = await qdrant.scroll(
+                    collection_name=collection,
+                    limit=QDRANT_SCROLL_BATCH,
+                    with_payload=True,
+                    with_vectors=True,
+                    offset=offset,
+                )
+                last_exc = None
+                break
+            except Exception as exc:  # noqa: BLE001 — transport blips
+                last_exc = exc
+                await asyncio.sleep(2.0 * (attempt + 1))
+        if last_exc is not None:
+            raise last_exc
         if not records:
             break
         for r in records:
