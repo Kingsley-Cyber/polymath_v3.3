@@ -12,6 +12,7 @@ investigate instead of silently trusting bad data.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -261,18 +262,33 @@ async def verify_ingest(
     # can affect vector-only/global retrieval lanes.
     for kind in target_qdrant_collections:
         col = _col_for_corpus(corpus_id, kind)
-        try:
-            errors.extend(
-                await _verify_qdrant_text_contract(
-                    db=db,
-                    qdrant=qdrant,
-                    doc_id=doc_id,
-                    corpus_id=corpus_id,
-                    collection_name=col,
+        # The contract scroll can time out under ingest load — that's a
+        # checker infrastructure blip, not evidence the doc is bad. Retry
+        # before failing, and never record an empty reason (many timeout
+        # exceptions stringify to "", which produced undebuggable
+        # "text_contract(col):" failures).
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                errors.extend(
+                    await _verify_qdrant_text_contract(
+                        db=db,
+                        qdrant=qdrant,
+                        doc_id=doc_id,
+                        corpus_id=corpus_id,
+                        collection_name=col,
+                    )
                 )
+                last_exc = None
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                await asyncio.sleep(2.0 * (attempt + 1))
+        if last_exc is not None:
+            errors.append(
+                f"text_contract({col}): check failed after retries — "
+                f"{type(last_exc).__name__}: {last_exc}"
             )
-        except Exception as exc:
-            errors.append(f"text_contract({col}): {exc}")
 
     # 4. Probe query on the first target collection — prove retrieval works,
     #    not just that inserts landed.
