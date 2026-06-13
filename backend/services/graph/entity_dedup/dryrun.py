@@ -48,13 +48,21 @@ from config import get_settings
 # ── Tunables (surfaced in the preview so they can be calibrated) ────────────
 SIM_THRESHOLD = 0.90          # Tier-2 cosine floor to PROPOSE (report-only cut)
 SIM_STRONG = 0.93             # Tier-2 cosine at/above which we'd auto-apply
-JACCARD_MIN = 0.10            # neighbor overlap shown for calibration (soft)
-MAX_EMBED = 8000              # Tier-2 embedding budget for the dry run
+JACCARD_MIN = 0.10            # neighbor overlap required for a Tier-2 AUTO
+TIER2_MIN_JACCARD = 0.05      # below this a Tier-2 pair is too risky to PROPOSE
+MAX_EMBED = 12000             # Tier-2 embedding budget for the dry run
 EMBED_DIM = 1024              # Qwen3-Embedding-0.6B (matches _DEFAULT_DIM)
 PREFIX_LEN = 4                # Tier-2 bucket key = squash-key char prefix
 BUCKET_MAX = 400              # cap members scored per Tier-2 bucket
 JUNK_MENTION_MAX = 2          # junk candidate must be this sparse...
 JUNK_DEGREE_MAX = 2           # ...on both mentions and degree to be flagged
+BOTH_HIGH_MENTIONS = 10       # squash match w/ both sides this busy → review
+                              # (possible distinct compound: notebook/note book)
+
+# Structural pseudo-entity types excluded from dedup entirely. 'Document' holds
+# generic references ('chapter 3', 'this book', 'sourcecode', part00xx splits)
+# that are not semantic entities and must never be cross-merged.
+EXCLUDED_TYPES = {"Document"}
 
 # Symmetric cross-type transitions allowed (entity-identity-compatible).
 _ALLOW = {
@@ -142,6 +150,7 @@ async def _load_corpus_entities(sess, corpus_id: str) -> list[dict]:
     WHERE e.merged_into IS NULL AND coalesce(e.tombstone, false) = false
       AND coalesce(e.quarantined, false) = false
       AND e.normalized_name IS NOT NULL AND e.normalized_name <> ''
+      AND NOT coalesce(e.primary_entity_type, '') IN $excluded_types
     WITH DISTINCT e
     RETURN e.entity_id AS id, e.canonical_name AS cn, e.normalized_name AS nn,
            e.canonical_family AS fam, e.primary_entity_type AS pt,
@@ -150,7 +159,7 @@ async def _load_corpus_entities(sess, corpus_id: str) -> list[dict]:
            size([(e)-[:RELATES_TO]-() | 1]) AS degree
     """
     out: list[dict] = []
-    res = await sess.run(q, cid=corpus_id)
+    res = await sess.run(q, cid=corpus_id, excluded_types=sorted(EXCLUDED_TYPES))
     async for r in res:
         out.append({
             "id": r["id"], "cn": r["cn"] or "", "nn": r["nn"] or "",
@@ -240,9 +249,24 @@ async def run_dryrun(corpus_id: str, *, do_tier2: bool = True) -> dict:
                 for dup in grp:
                     if dup["id"] == survivor["id"]:
                         continue
-                    allowed, cross = _type_ok(survivor["pt"], dup["pt"])
+                    _, cross = _type_ok(survivor["pt"], dup["pt"])
                     j = _jaccard(nbrs.get(survivor["id"], set()),
                                  nbrs.get(dup["id"], set()))
+                    # squash key == identical surface form after stripping
+                    # whitespace/underscore/hyphen, so identity is certain and
+                    # the allow-list is not needed here. The only Tier-1 risk
+                    # is a genuine distinct compound (notebook vs note book);
+                    # those tend to have BOTH sides well-attested, so route
+                    # both-busy pairs to review. Cross-type means a typing
+                    # error on the same surface form → reconcile to survivor.
+                    both_high = (survivor["mentions"] >= BOTH_HIGH_MENTIONS
+                                 and dup["mentions"] >= BOTH_HIGH_MENTIONS)
+                    if both_high:
+                        decision = "review"
+                    elif cross:
+                        decision = "auto_cross_type"
+                    else:
+                        decision = "auto"
                     proposals.append({
                         "lane": "tier1_squash",
                         "survivor_id": survivor["id"], "survivor_cn": survivor["cn"],
@@ -253,9 +277,9 @@ async def run_dryrun(corpus_id: str, *, do_tier2: bool = True) -> dict:
                         "neighbor_jaccard": round(j, 3),
                         "same_family": bool(survivor["fam"] and survivor["fam"] == dup["fam"]),
                         "cross_type": cross,
-                        "type_allowed": allowed,
-                        "require_review": cross or (not allowed),
-                        "decision": "auto" if (allowed and not cross) else "review",
+                        "reconciled_type": survivor["pt"],
+                        "both_high_mention": both_high,
+                        "decision": decision,
                     })
 
             already = {p["dup_id"] for p in proposals} | {p["survivor_id"] for p in proposals}
@@ -309,10 +333,18 @@ async def run_dryrun(corpus_id: str, *, do_tier2: bool = True) -> dict:
                                         raw_pairs.append((a, b, sim))
                                         pair_ids.add(a["id"]); pair_ids.add(b["id"])
                         nbrs2 = await _load_neighbor_sets(sess, list(pair_ids))
+                        low_jac = 0
                         for a, b, sim in raw_pairs:
+                            j = _jaccard(nbrs2.get(a["id"], set()), nbrs2.get(b["id"], set()))
+                            # Tier-2 names are only SIMILAR (not identical), so a
+                            # high cosine with no graph overlap is the sequential-
+                            # name trap (part0009_split_001 vs _002). Demand some
+                            # neighbor overlap to even propose.
+                            if j < TIER2_MIN_JACCARD:
+                                low_jac += 1
+                                continue
                             survivor, dup = (a, b) if _survivor_sort_key(a) >= _survivor_sort_key(b) else (b, a)
                             allowed, cross = _type_ok(survivor["pt"], dup["pt"])
-                            j = _jaccard(nbrs2.get(a["id"], set()), nbrs2.get(b["id"], set()))
                             proposals.append({
                                 "lane": "tier2_embed",
                                 "survivor_id": survivor["id"], "survivor_cn": survivor["cn"],
@@ -323,26 +355,28 @@ async def run_dryrun(corpus_id: str, *, do_tier2: bool = True) -> dict:
                                 "neighbor_jaccard": round(j, 3),
                                 "same_family": bool(survivor["fam"] and survivor["fam"] == dup["fam"]),
                                 "cross_type": cross, "type_allowed": allowed,
-                                "require_review": (not allowed) or cross or sim < SIM_STRONG or j < JACCARD_MIN,
                                 "decision": "auto" if (allowed and not cross and sim >= SIM_STRONG and j >= JACCARD_MIN) else "review",
                             })
                         tier2_stats["candidates"] = len(raw_pairs)
+                        tier2_stats["skipped_low_jaccard"] = low_jac
 
             # ── stats ─────────────────────────────────────────────────────
             auto = [p for p in proposals if p["decision"] == "auto"]
+            auto_x = [p for p in proposals if p["decision"] == "auto_cross_type"]
             review = [p for p in proposals if p["decision"] == "review"]
-            survivors = {p["survivor_id"] for p in proposals}
-            dups = {p["dup_id"] for p in proposals}
+            apply_set = auto + auto_x  # what an apply run would mutate
+            dups_apply = {p["dup_id"] for p in apply_set}
             stats = {
                 "corpus_id": corpus_id,
                 "corpus_entities": len(ents),
                 "junk_flagged": len(junk),
                 "tier1_groups": len(tier1_groups),
                 "proposals_total": len(proposals),
-                "proposals_auto": len(auto),
+                "proposals_auto_same_type": len(auto),
+                "proposals_auto_cross_type": len(auto_x),
                 "proposals_review": len(review),
-                "distinct_survivors": len(survivors),
-                "entities_eliminated_if_applied": len(dups),
+                "distinct_survivors_in_apply": len({p["survivor_id"] for p in apply_set}),
+                "entities_eliminated_if_applied": len(dups_apply),
                 "tier2": tier2_stats,
             }
 
@@ -387,27 +421,30 @@ def _print_report(result: dict) -> None:
     print(f"Tier-1 squash-key dup groups    : {st['tier1_groups']:,}")
     t2 = st["tier2"]
     print(f"Tier-2 embed: buckets={t2['buckets']:,} embedded={t2['embedded']:,} "
-          f"candidates={t2['candidates']:,} budget_skipped={t2['skipped_budget']:,}")
+          f"candidates={t2['candidates']:,} low_jaccard_skipped={t2.get('skipped_low_jaccard',0):,} "
+          f"budget_skipped={t2['skipped_budget']:,}")
     print("-" * 72)
-    print(f"proposed merges TOTAL           : {st['proposals_total']:,}")
-    print(f"  auto (same-type, high conf)   : {st['proposals_auto']:,}")
-    print(f"  review (cross-type / soft)    : {st['proposals_review']:,}")
-    print(f"entities eliminated if applied  : {st['entities_eliminated_if_applied']:,} "
+    print(f"proposed merges TOTAL              : {st['proposals_total']:,}")
+    print(f"  auto same-type (deterministic)  : {st['proposals_auto_same_type']:,}")
+    print(f"  auto cross-type (reconcile type): {st['proposals_auto_cross_type']:,}")
+    print(f"  review (compound/embedding/soft): {st['proposals_review']:,}")
+    print(f"entities eliminated if AUTO applied: {st['entities_eliminated_if_applied']:,} "
           f"({100*st['entities_eliminated_if_applied']/max(1,st['corpus_entities']):.1f}% of corpus)")
-    print(f"preview doc                     : {st.get('preview_doc_id','(mongo skipped)')}")
+    print(f"preview doc                        : {st.get('preview_doc_id','(mongo skipped)')}")
     print("-" * 72)
     props = result["proposals"]
     def _show(title, rows):
-        print(f"\n{title} ({len(rows)} shown up to 18):")
-        for p in rows[:18]:
+        print(f"\n{title} ({len(rows)} shown up to 16):")
+        for p in rows[:16]:
             extra = (f"cos={p['cosine']}" if "cosine" in p else "squash") + \
                     f" jac={p['neighbor_jaccard']}"
-            flag = " [CROSS-TYPE]" if p.get("cross_type") else ""
+            flag = f" [->{p.get('reconciled_type')}]" if p.get("cross_type") else ""
             print(f"  {p['dup_cn']!r}({p['dup_pt']},{p['dup_mentions']}m) -> "
                   f"{p['survivor_cn']!r}({p['survivor_pt']},{p['survivor_mentions']}m)"
                   f"  [{p['lane']} {extra}]{flag}")
-    _show("AUTO merges", [p for p in props if p["decision"] == "auto"])
-    _show("REVIEW merges", [p for p in props if p["decision"] == "review"])
+    _show("AUTO same-type", [p for p in props if p["decision"] == "auto"])
+    _show("AUTO cross-type (reconcile to survivor type)", [p for p in props if p["decision"] == "auto_cross_type"])
+    _show("REVIEW", [p for p in props if p["decision"] == "review"])
     if result["junk"]:
         print(f"\nJUNK flagged ({len(result['junk'])} shown up to 20):")
         print("  " + ", ".join(repr(j["cn"]) for j in result["junk"][:20]))
