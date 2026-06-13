@@ -946,19 +946,55 @@ async def graph_brain_view(body: dict = Body(...)) -> dict:
     existing = _BRAIN_VIEW_BUILD_TASKS.get(key)
     if existing is None or existing.done():
 
+        def _prune(payload: dict, *, per_doc: int = 12, global_cap: int = 3000,
+                   name_cap: int = 5) -> dict:
+            """Keep only the strongest bridges — a 496-book corpus yields
+            >16 MB of pairwise bridges (Mongo DocumentTooLarge, observed
+            live) and no canvas renders 100k edges meaningfully anyway."""
+            strength = lambda b: float(b.get("strength") or 0)  # noqa: E731
+            bridges = sorted(payload.get("bridges") or [], key=strength,
+                             reverse=True)[:global_cap]
+            for b in bridges:
+                if isinstance(b.get("top_shared_entities"), list):
+                    b["top_shared_entities"] = b["top_shared_entities"][:name_cap]
+            payload["bridges"] = bridges
+            for d in payload.get("documents") or []:
+                db_list = sorted(d.get("bridges") or [], key=strength,
+                                 reverse=True)[:per_doc]
+                d["bridges"] = db_list
+            meta = payload.setdefault("meta", {})
+            meta["bridges_pruned_to"] = {"global": global_cap, "per_doc": per_doc}
+            return payload
+
         async def _build(bkey: str = key, bsig: str = signature) -> None:
             try:
                 logger.info("brain-view: building cache key=%s", bkey[:60])
                 payload = await get_brain_view(driver, corpus_ids, limit=limit)
                 if not payload.get("_error"):
-                    await db["graph_brain_view_cache"].update_one(
-                        {"key": bkey},
-                        {"$set": {"key": bkey, "signature": bsig,
-                                  "payload": payload}},
-                        upsert=True,
-                    )
-                    logger.info("brain-view: cache built key=%s docs=%d",
-                                bkey[:60], len(payload.get("documents") or []))
+                    payload = _prune(payload)
+                    try:
+                        await db["graph_brain_view_cache"].update_one(
+                            {"key": bkey},
+                            {"$set": {"key": bkey, "signature": bsig,
+                                      "payload": payload}},
+                            upsert=True,
+                        )
+                    except Exception as store_exc:  # noqa: BLE001
+                        # Paranoia tier: halve the caps once if even the
+                        # pruned payload trips a storage limit.
+                        logger.warning("brain-view: store failed (%s) — "
+                                       "re-pruning harder", type(store_exc).__name__)
+                        payload = _prune(payload, per_doc=6, global_cap=1200,
+                                         name_cap=3)
+                        await db["graph_brain_view_cache"].update_one(
+                            {"key": bkey},
+                            {"$set": {"key": bkey, "signature": bsig,
+                                      "payload": payload}},
+                            upsert=True,
+                        )
+                    logger.info("brain-view: cache built key=%s docs=%d bridges=%d",
+                                bkey[:60], len(payload.get("documents") or []),
+                                len(payload.get("bridges") or []))
                 else:
                     logger.warning("brain-view: build returned error key=%s: %s",
                                    bkey[:60], payload.get("meta"))
