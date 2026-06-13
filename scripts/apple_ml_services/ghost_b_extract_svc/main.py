@@ -110,6 +110,59 @@ def _startup() -> None:
         logger.info("warmup disabled (GHOST_B_EXTRACT_WARM=false)")
 
 
+def _gpu_memory_info() -> dict:
+    """GPU memory snapshot for /health — makes VRAM pressure remotely visible
+    (the app's Validate button, the Mac's probes) instead of requiring someone
+    at the box running nvidia-smi. allocated = tensors live now; reserved =
+    torch's caching-allocator pool (high-water — looks like a leak in Task
+    Manager but is reusable); free/total = device truth from the driver."""
+    info: dict = {}
+    try:
+        import torch
+        if torch.cuda.is_available():
+            free_b, total_b = torch.cuda.mem_get_info()
+            info = {
+                "backend": "cuda",
+                "total_gb": round(total_b / 2**30, 1),
+                "free_gb": round(free_b / 2**30, 1),
+                "allocated_gb": round(torch.cuda.memory_allocated() / 2**30, 1),
+                "reserved_gb": round(torch.cuda.memory_reserved() / 2**30, 1),
+            }
+        elif (getattr(torch.backends, "mps", None)
+              and torch.backends.mps.is_available()):
+            info = {
+                "backend": "mps",
+                "allocated_gb": round(
+                    torch.mps.current_allocated_memory() / 2**30, 1),
+                "driver_gb": round(
+                    torch.mps.driver_allocated_memory() / 2**30, 1),
+            }
+    except Exception:  # noqa: BLE001 — telemetry must never break health
+        pass
+    return info
+
+
+def _maybe_trim_cuda_cache() -> None:
+    """Release the caching-allocator pool back to the driver when it hoards.
+
+    Monster documents push the pool to their high-water mark and torch never
+    returns it (observed live: 71.8 GB held while ~idle, leaving a 96 GB card
+    one big doc away from OOM). When cached-but-unused exceeds
+    GHOST_B_VRAM_TRIM_GB (default 16), empty_cache() hands it back — the next
+    doc re-grows the pool as needed, costing only fresh allocations."""
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return
+        trim_gb = float(os.environ.get("GHOST_B_VRAM_TRIM_GB", "16") or 16)
+        idle = (torch.cuda.memory_reserved() - torch.cuda.memory_allocated()) / 2**30
+        if idle > trim_gb:
+            torch.cuda.empty_cache()
+            logger.info("vram-trim: released %.1f GB of idle allocator cache", idle)
+    except Exception:  # noqa: BLE001 — stewardship must never break serving
+        pass
+
+
 @app.get("/healthz")  # k8s-style alias — kills 404 noise from generic probes
 @app.get("/health")
 def health() -> dict:
@@ -142,6 +195,7 @@ def health() -> dict:
         "warm_error": _WARM["error"],
         "device": device,
         "gliner": gliner,
+        "gpu_memory": _gpu_memory_info(),
     }
 
 
@@ -153,10 +207,41 @@ def extract(body: ExtractIn) -> dict:
     if not body.tasks:
         return {"results": [], "metrics": _metrics([])}
     task_dicts = [t.model_dump() for t in body.tasks]
+
+    def _is_gpu_oom(exc: Exception) -> bool:
+        text = f"{type(exc).__name__}: {exc}"
+        return ("OutOfMemoryError" in text or "out of memory" in text
+                or "CUBLAS" in text or "resource allocation failed" in text)
+
     try:
         raw = _extract_raw(task_dicts, body.enable_facts, body.schema_lens_id)
     except Exception as exc:  # noqa: BLE001
-        logger.exception("extract failed (%d tasks)", len(task_dicts))
-        raise HTTPException(status_code=500, detail=f"extraction failed: {exc}") from exc
+        # VRAM stewardship: an OOM-class failure gets ONE in-place retry
+        # after releasing the caching-allocator pool — the failure mode that
+        # killed 231 docs in the 2026-06-11 backfill (allocator high-water +
+        # concurrent docs left no headroom). A clean retry beats failing the
+        # caller's whole document.
+        if _is_gpu_oom(exc):
+            logger.warning("extract hit GPU-OOM class error — trimming cache "
+                           "and retrying once (%d tasks)", len(task_dicts))
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                raw = _extract_raw(task_dicts, body.enable_facts, body.schema_lens_id)
+            except Exception as exc2:  # noqa: BLE001
+                logger.exception("extract failed after OOM retry (%d tasks)",
+                                 len(task_dicts))
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"extraction failed: {exc2}") from exc2
+        else:
+            logger.exception("extract failed (%d tasks)", len(task_dicts))
+            raise HTTPException(
+                status_code=500, detail=f"extraction failed: {exc}") from exc
+    _maybe_trim_cuda_cache()
     from services.ghost_b_local import LAST_TIMINGS
     return {"results": raw, "metrics": _metrics(raw), "timings": dict(LAST_TIMINGS)}

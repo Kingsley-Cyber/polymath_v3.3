@@ -269,7 +269,11 @@ const getLayoutDuration = (nodeCount: number): number => {
 // in under a second. Changed graphs (different node set) miss the cache and
 // animate exactly as before. Drag-release re-settles never restore (they
 // pass a duration override), so user-placed nodes stay where dropped.
-const POS_CACHE_KEY = "polymath.graph.positions.v1";
+// localStorage (not sessionStorage): settled layouts survive browser
+// restarts, so the graph opens pre-settled on EVERY visit, not just within
+// one tab session. Entries are keyed by graph fingerprint, so a changed
+// corpus misses the cache and animates a fresh layout as before.
+const POS_CACHE_KEY = "polymath.graph.positions.v2";
 const POS_CACHE_MAX_ENTRIES = 8;
 const RESTORED_SETTLE_MS = 800;
 
@@ -292,7 +296,7 @@ type PositionCache = Record<
 
 const readPositionCache = (): PositionCache => {
   try {
-    return JSON.parse(sessionStorage.getItem(POS_CACHE_KEY) || "{}");
+    return JSON.parse(localStorage.getItem(POS_CACHE_KEY) || "{}");
   } catch {
     return {};
   }
@@ -311,7 +315,7 @@ const saveLayoutPositions = (
     const entries = Object.entries(cache)
       .sort((a, b) => b[1].t - a[1].t)
       .slice(0, POS_CACHE_MAX_ENTRIES);
-    sessionStorage.setItem(POS_CACHE_KEY, JSON.stringify(Object.fromEntries(entries)));
+    localStorage.setItem(POS_CACHE_KEY, JSON.stringify(Object.fromEntries(entries)));
   } catch {
     /* quota / serialization — the cache is best-effort */
   }
