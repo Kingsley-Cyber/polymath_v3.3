@@ -13,6 +13,7 @@ Usage in main.py lifespan:
     await ingestion_service.disconnect()
 """
 
+import asyncio
 import logging
 import hashlib
 import mimetypes
@@ -1152,18 +1153,28 @@ class IngestionService:
 
     async def delete_corpus(self, corpus_id: str) -> bool:
         """
-        Cascade delete: corpus → documents → chunks → Qdrant points.
-        Returns True if corpus existed and was deleted.
+        Cascade delete: corpus → documents → chunks → Qdrant points → Neo4j.
+        Returns True if the corpus existed and its record was removed.
+
+        FAST-RETURN DESIGN: the heavy parts (deleting ~570k chunks and ~1.7M
+        Neo4j elements on a large corpus) used to run synchronously inside the
+        request and blow past the 60s proxy timeout → DELETE 504'd, the UI
+        looked broken, and re-clicks raced. We now do only the cheap, vanish-
+        making work synchronously (drop Qdrant collections — O(1) collection
+        drops; delete the corpus record + document records — small), then
+        background the bulk chunk + graph deletion (keyed by corpus_id, so it
+        completes correctly even after the corpus record is gone). The corpus
+        disappears from the UI immediately; orphaned bulk data clears behind it.
         """
         from services.storage.mongo_writer import (
-            delete_chunks_by_corpus,
             delete_corpus,
             delete_documents_by_corpus,
         )
         from services.storage.qdrant_writer import drop_collections_for_corpus
 
         # Phase 7.5 — atomically drop all 4 per-corpus collections (naive,
-        # hrag, graph, schemas). Replaces the old filter-delete cascade.
+        # hrag, graph, schemas). A whole-collection drop is fast regardless of
+        # point count, so it stays synchronous.
         try:
             await drop_collections_for_corpus(self._qdrant, corpus_id)
         except Exception:
@@ -1171,23 +1182,40 @@ class IngestionService:
                 "Failed to drop per-corpus Qdrant collections for %s", corpus_id
             )
 
-        # 2. Delete Neo4j nodes if enabled
+        # Remove the document records + corpus record synchronously so the
+        # corpus vanishes from list/get right away (both are small).
+        await delete_documents_by_corpus(self._db, corpus_id)
+        removed = await delete_corpus(self._db, corpus_id)
+
+        # Background the bulk deletes (chunks + Neo4j) — they no longer gate
+        # the HTTP response.
+        try:
+            asyncio.create_task(self._purge_corpus_bulk(corpus_id))
+        except RuntimeError:
+            # No running loop (sync context) — fall back to inline so data is
+            # still cleaned, just slower.
+            await self._purge_corpus_bulk(corpus_id)
+
+        return removed
+
+    async def _purge_corpus_bulk(self, corpus_id: str) -> None:
+        """Background bulk cleanup for a deleted corpus: Mongo chunks +
+        batched Neo4j graph. Best-effort — orphaned rows keyed by a dead
+        corpus_id are harmless and re-runnable."""
+        from services.storage.mongo_writer import delete_chunks_by_corpus
+
+        try:
+            await delete_chunks_by_corpus(self._db, corpus_id)
+        except Exception:
+            logger.warning("Background chunk purge failed for corpus %s", corpus_id)
         if self._settings.NEO4J_ENABLED and self._neo4j:
             try:
                 from services.graph.neo4j_writer import delete_corpus_graph
 
                 await delete_corpus_graph(self._neo4j, corpus_id=corpus_id)
             except Exception:
-                logger.warning("Failed to delete Neo4j nodes for corpus %s", corpus_id)
-
-        # 3. Delete chunks
-        await delete_chunks_by_corpus(self._db, corpus_id)
-
-        # 4. Delete documents
-        await delete_documents_by_corpus(self._db, corpus_id)
-
-        # 5. Delete corpus record
-        return await delete_corpus(self._db, corpus_id)
+                logger.warning("Background Neo4j purge failed for corpus %s", corpus_id)
+        logger.info("Background purge complete for corpus %s", corpus_id)
 
     async def list_documents(
         self,

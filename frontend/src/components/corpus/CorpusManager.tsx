@@ -243,6 +243,9 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
 
   // Delete confirmation
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  // Id whose delete request is in flight — drives the "Deleting…" state and
+  // blocks double-fires (a slow cascade used to invite repeat clicks).
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // ESC closes the modal — matches SettingsModal behavior
   useEffect(() => {
@@ -349,7 +352,9 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
   };
 
   const handleDelete = async (corpusId: string) => {
+    if (deletingId) return; // a delete is already in flight — ignore re-clicks
     setError(null);
+    setDeletingId(corpusId);
     try {
       await api.deleteCorpus(corpusId);
       setCorpora(corpora.filter((c) => c.corpus_id !== corpusId));
@@ -358,6 +363,8 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
       if (expandedId === corpusId) setExpandedId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete corpus");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -809,6 +816,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                 const isExpanded = expandedId === corpus.corpus_id;
                 const isEditing = editingId === corpus.corpus_id;
                 const isPendingDelete = deleteConfirmId === corpus.corpus_id;
+                const isDeleting = deletingId === corpus.corpus_id;
 
                 return (
                   <div
@@ -924,13 +932,15 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                             <div className="flex items-center gap-1">
                               <button
                                 onClick={() => handleDelete(corpus.corpus_id)}
-                                className="px-1.5 py-0.5 text-[9px] font-bold tracking-widest text-error border border-error hover:bg-error hover:text-bg-base transition-none uppercase"
+                                disabled={isDeleting}
+                                className="px-1.5 py-0.5 text-[9px] font-bold tracking-widest text-error border border-error hover:bg-error hover:text-bg-base transition-none uppercase disabled:opacity-60 disabled:cursor-wait"
                               >
-                                Confirm
+                                {isDeleting ? "Deleting…" : "Confirm"}
                               </button>
                               <button
                                 onClick={() => setDeleteConfirmId(null)}
-                                className="px-1.5 py-0.5 text-[9px] font-bold tracking-widest text-content-tertiary border border-border-minimal hover:border-content-secondary transition-none uppercase"
+                                disabled={isDeleting}
+                                className="px-1.5 py-0.5 text-[9px] font-bold tracking-widest text-content-tertiary border border-border-minimal hover:border-content-secondary transition-none uppercase disabled:opacity-40"
                               >
                                 No
                               </button>
@@ -941,7 +951,8 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                                 setDeleteConfirmId(corpus.corpus_id)
                               }
                               className="p-1 text-content-tertiary hover:text-error transition-none"
-                              title="Delete"
+                              title="Delete corpus"
+                              aria-label="Delete corpus"
                             >
                               <Trash2 className="w-3 h-3" />
                             </button>

@@ -1332,16 +1332,27 @@ async def delete_corpus_graph(
     *,
     corpus_id: str,
 ) -> None:
-    """Delete Neo4j graph state for one corpus and prune shared edges."""
+    """Delete Neo4j graph state for one corpus and prune shared edges.
+
+    Batched: a single DETACH DELETE over a large corpus (~1.7M nodes+edges on
+    a 496-book corpus) runs one giant transaction that exceeds the proxy
+    timeout AND can exhaust Neo4j's heap. Deleting in 10k auto-commit batches
+    keeps each transaction small and bounded — loop until none remain."""
     async with driver.session() as session:
         await _prune_relates_to_for_corpus(session, corpus_id=corpus_id)
-        await session.run(
-            """
-            MATCH (n {corpus_id: $corpus_id})
-            DETACH DELETE n
-            """,
-            corpus_id=corpus_id,
-        )
+        while True:
+            res = await session.run(
+                """
+                MATCH (n {corpus_id: $corpus_id})
+                WITH n LIMIT 10000
+                DETACH DELETE n
+                RETURN count(n) AS deleted
+                """,
+                corpus_id=corpus_id,
+            )
+            row = await res.single()
+            if not row or int(row["deleted"]) == 0:
+                break
         await _delete_orphan_entities(session)
 
 
