@@ -644,9 +644,11 @@ class GraphDiscoverRequest(BaseModel):
     # Phase 3 — synthesis-mode selector. "research" (default) gives the
     # concrete-claim research synthesis. "ideation" gives the build-advisor
     # output with [BUILD IDEA] blocks. "nuance" gives conceptual exploration
-    # of gaps, analogies, transfers, and bridges. Retrieval + packet are
-    # identical; only the system prompt differs.
-    synthesis_mode: Literal["research", "ideation", "nuance"] = "research"
+    # of gaps, analogies, transfers, and bridges. "gap" gives a structural
+    # gap-analysis map — what the corpus does NOT yet connect — foregrounding
+    # candidate gaps, fragile bridges, and weak links. Retrieval + packet are
+    # the same shape; the packet caps and system prompt differ per mode.
+    synthesis_mode: Literal["research", "ideation", "nuance", "gap"] = "research"
     # Sprint #2 — opt-in critique + revise loop. When True, the synthesis
     # pipeline runs a second LLM call to audit the draft (flag fabricated
     # terms, missing citations, shell sentences, label leaks) and a third

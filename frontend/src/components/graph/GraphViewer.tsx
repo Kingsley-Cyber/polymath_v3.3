@@ -187,6 +187,15 @@ function graphQueryStepLabels(mode: GraphSynthesisMode): string[] {
       "Synthesizing build ideas from the graph.",
     ];
   }
+  if (mode === "gap") {
+    return [
+      "Reading your question and finding the concepts that should connect.",
+      "Tracing which neighbors are linked — and which are conspicuously not.",
+      "Ranking candidate gaps, fragile bridges, and weak links by structural signal.",
+      "Packing the absence map plus the evidence that grounds it.",
+      "Synthesizing what the corpus does not yet connect.",
+    ];
+  }
   return [
     "Reading your question and spotting the main ideas.",
     "Following the evidence neighborhood around those ideas.",

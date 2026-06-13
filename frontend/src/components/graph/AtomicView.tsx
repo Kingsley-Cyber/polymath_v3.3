@@ -778,7 +778,9 @@ export default function AtomicView({
                 ? "Build idea"
                 : synthesisMode === "nuance"
                   ? "Nuance"
-                  : "Synthesis"}
+                  : synthesisMode === "gap"
+                    ? "Gap analysis"
+                    : "Synthesis"}
               {" · click to expand"}
             </summary>
             <div className="p-4 synthesis-body">

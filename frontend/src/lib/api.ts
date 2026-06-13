@@ -1978,6 +1978,7 @@ export interface ContextualQuestions {
   research: string[];
   nuance: string[];
   ideation: string[];
+  gap: string[];
 }
 
 export interface ConceptQuestionPacket {

@@ -112,6 +112,10 @@ export function ChatWindow() {
           text: "Which concepts act as bridges between otherwise separate parts of this corpus?",
         },
         {
+          kind: "gap",
+          text: "What should this corpus connect but doesn't — which related ideas are never linked?",
+        },
+        {
           kind: "audit",
           text: "What important question is this corpus prepared to answer better than a normal web search?",
         },

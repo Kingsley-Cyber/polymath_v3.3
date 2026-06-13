@@ -119,6 +119,31 @@ _SELECT_DEEPEN_IDEATION_PROMPT = (
     "Maximum 3 selections."
 )
 
+_SELECT_DEEPEN_GAP_PROMPT = (
+    "You are Polymath's gap scout. The analyst will write a map of what the "
+    "corpus does NOT yet connect. Your job is to spot the 1-3 entities or "
+    "gap-endpoints to deepen so the analyst can tell a REAL absence from one "
+    "that is merely under-retrieved.\n\n"
+    "Rules:\n"
+    "- Prefer the endpoints of the most credible gaps and fragile bridges "
+    "below — deepen BOTH sides so the analyst can confirm whether the corpus "
+    "truly never links them, or just hasn't surfaced the link yet.\n"
+    "- For a gap or fragile bridge, name both sides as `A + B`.\n"
+    "- Prefer endpoints with strong structural signals (high topology_sim / "
+    "neighbor_jaccard, shared terms) but no asserted edge — those are where "
+    "more evidence most changes the verdict.\n"
+    "- Use a raw entity only when one side of a promising gap is thinly "
+    "covered and needs grounding before the analyst can judge it.\n"
+    "- Only name components that appear verbatim somewhere in the packet "
+    "below. Do NOT invent new ones.\n\n"
+    "Output ONLY a JSON object, nothing else:\n"
+    "{\n"
+    "  \"entities\": [\"Vector Index + Query Planner\", \"Cache Eviction\"],\n"
+    "  \"reason\": \"<one sentence on why deepening these tests a candidate gap>\"\n"
+    "}\n\n"
+    "Maximum 3 selections."
+)
+
 
 def _select_prompt_for_mode(synthesis_mode: str) -> tuple[str, bool]:
     mode = (synthesis_mode or "").strip().lower()
@@ -126,6 +151,8 @@ def _select_prompt_for_mode(synthesis_mode: str) -> tuple[str, bool]:
         return _SELECT_DEEPEN_IDEATION_PROMPT, True
     if mode == "research":
         return _SELECT_DEEPEN_RESEARCH_PROMPT, False
+    if mode == "gap":
+        return _SELECT_DEEPEN_GAP_PROMPT, True
     return _SELECT_DEEPEN_PROMPT, False
 
 

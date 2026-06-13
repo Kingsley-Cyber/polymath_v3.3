@@ -1238,6 +1238,7 @@ function AgentSearchTab(props: AgentSearchTabProps) {
     { id: "research", label: "Research", meta: "evidence" },
     { id: "nuance", label: "Nuance", meta: "tension" },
     { id: "ideation", label: "Ideation", meta: "build" },
+    { id: "gap", label: "Gap", meta: "absence" },
   ];
   return (
     <>
@@ -1279,7 +1280,7 @@ function AgentSearchTab(props: AgentSearchTabProps) {
             <div
               role="radiogroup"
               aria-label="Synthesis mode"
-              className="grid grid-cols-3 gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950/75 p-1"
+              className="grid grid-cols-2 gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950/75 p-1"
             >
               {modeOptions.map((opt) => {
                 const active = synthesisMode === opt.id;
@@ -1328,7 +1329,9 @@ function AgentSearchTab(props: AgentSearchTabProps) {
                 ? "What could I build from this corpus?"
                 : synthesisMode === "nuance"
                   ? "Where is the conceptual tension or hidden bridge?"
-                  : "What does my library think about...?"
+                  : synthesisMode === "gap"
+                    ? "What should this corpus connect but doesn't?"
+                    : "What does my library think about...?"
             }
             className="w-full resize-none rounded-md border border-zinc-800 bg-[#09090f] px-3 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/70 focus:outline-none focus:ring-1 focus:ring-amber-500/20"
           />
@@ -1423,7 +1426,9 @@ function AgentSearchTab(props: AgentSearchTabProps) {
               ? "Build Idea"
               : synthesisMode === "nuance"
                 ? "Nuance"
-                : "Synthesis"}
+                : synthesisMode === "gap"
+                  ? "Gap Analysis"
+                  : "Synthesis"}
           </SectionLabel>
           <div className="rounded border border-zinc-800 bg-[#0d0d14] px-3 py-3 synthesis-body custom-scroll max-h-[70vh] overflow-y-auto">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -2069,6 +2074,13 @@ function ContextualQuestionBuckets({
       meta: "build",
       className:
         "border-emerald-700/40 bg-emerald-500/5 text-emerald-100 hover:border-emerald-500/70 hover:bg-emerald-500/15",
+    },
+    {
+      key: "gap",
+      label: "Gap",
+      meta: "absence",
+      className:
+        "border-rose-700/40 bg-rose-500/5 text-rose-100 hover:border-rose-500/70 hover:bg-rose-500/15",
     },
   ];
   const hasAny = buckets.some((b) => (questions?.[b.key]?.length || 0) > 0);

@@ -597,7 +597,7 @@ async def polymath_graph_query(
     corpus_id: str | None = None,
     corpus_ids: list[str] | None = None,
     mode: Literal["auto", "connect", "gaps", "themes"] = "auto",
-    synthesis_mode: Literal["research", "nuance", "ideation"] = "research",
+    synthesis_mode: Literal["research", "nuance", "ideation", "gap"] = "research",
     validate_synthesis: bool = False,
     session_id: str | None = None,
     model: str | None = None,

@@ -101,7 +101,8 @@ Output ONLY valid JSON matching this exact shape:
   "rag": ["..."],
   "research": ["..."],
   "nuance": ["..."],
-  "ideation": ["..."]
+  "ideation": ["..."],
+  "gap": ["..."]
 }
 
 Rules:
@@ -110,6 +111,7 @@ Rules:
 - research: a more evidence-seeking or comparison question.
 - nuance: a question that surfaces tensions, limits, contradictions, or edge cases.
 - ideation: a question that turns the corpus context into a useful design, product, workflow, or project idea.
+- gap: a question that probes what the corpus does NOT yet connect — two concepts that seem related but are never linked, or a bridge that looks fragile.
 - Use the corpus context terms when helpful, but do not invent source titles or entities not present in the packet.
 - Keep each question under 26 words.
 - No preamble, no markdown, no exclamation marks."""
@@ -298,6 +300,7 @@ def _coerce_contextual_questions(raw: dict[str, Any]) -> dict[str, list[str]]:
         "research": [],
         "nuance": [],
         "ideation": [],
+        "gap": [],
     }
     if not isinstance(raw, dict):
         return out
@@ -408,11 +411,16 @@ def _local_contextual_questions(question: str, packet: dict[str, Any]) -> dict[s
         f"What could be built by combining {primary} with {compare_target}?",
         f"What workflow, taxonomy, or decision model could organize {primary} for practical use?",
     ]
+    gap = [
+        f"What connection between {primary} and {compare_target} does the corpus imply but never state?",
+        f"Where is the corpus's coverage of {primary} thinnest or held together by a single source?",
+    ]
     return {
         "rag": rag[:2],
         "research": research[:2],
         "nuance": nuance[:2],
         "ideation": ideation[:2],
+        "gap": gap[:2],
     }
 
 

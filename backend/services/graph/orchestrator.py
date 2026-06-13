@@ -192,6 +192,25 @@ def _packet_caps_for_mode(synthesis_mode: str = "research") -> _PacketCaps:
         )
     if mode == "nuance":
         return _PacketCaps(evidence=10)
+    if mode == "gap":
+        # Gap analysis foregrounds absence and under-connection. Maximize the
+        # structural gap signals (candidate gaps, fragile/articulation bridges,
+        # provenance weak links, emerging signals) and keep the cross-domain
+        # bridge material — analogies and transfers are exactly the lateral
+        # material that suggests where a missing edge could be drawn. Evidence
+        # and the dense edge list are trimmed: the point is what the corpus
+        # does NOT yet connect, not a heavily-cited thesis spine.
+        return _PacketCaps(
+            edges=6,
+            gaps=12,
+            signals=6,
+            weak_links=8,
+            analogies=4,
+            transfers=5,
+            bridges=5,
+            fragile_bridges=8,
+            evidence=8,
+        )
     return _DEFAULT_PACKET_CAPS
 
 # Synthesis-time LLM budget. Keep the call fast; the packet is bounded so the
@@ -205,6 +224,10 @@ _SYNTHESIS_TIMEOUT_SECONDS = 120.0
 _SYNTHESIS_MAX_TOKENS = 1900
 _SYNTHESIS_MAX_TOKENS_NUANCE = 1800
 _SYNTHESIS_MAX_TOKENS_IDEATION = 2400
+# Gap analysis enumerates several distinct under-connections, each with its
+# own bridging question and honesty caveat, so it needs more room than a
+# single-thesis research answer but less than full ideation.
+_SYNTHESIS_MAX_TOKENS_GAP = 2200
 _SYNTHESIS_TEMPERATURE = 0.55
 _SYNTHESIS_HEADLINE_RE = re.compile(r"^\s*#\s+(.+?)\s*$", re.MULTILINE)
 _SYNTHESIS_CITATION_RE = re.compile(r"\[(\d{1,3})\]")
@@ -232,6 +255,8 @@ def _synthesis_max_tokens_for_mode(synthesis_mode: str = "research") -> int:
         return _SYNTHESIS_MAX_TOKENS_NUANCE
     if mode == "ideation":
         return _SYNTHESIS_MAX_TOKENS_IDEATION
+    if mode == "gap":
+        return _SYNTHESIS_MAX_TOKENS_GAP
     return _SYNTHESIS_MAX_TOKENS
 
 
@@ -4518,11 +4543,92 @@ _NUANCE_SYSTEM_PROMPT = (
 )
 
 
+_GAP_SYSTEM_PROMPT = (
+    "You are Polymath's gap analyst, a structural cartographer of absence in "
+    "the user's corpus. The user does not want a summary of what the corpus "
+    "says. They want a precise map of what it does NOT yet connect: the "
+    "concept pairs that sit close in meaning but are never linked, the "
+    "bridges that hang on a single fragile path, the same idea wearing two "
+    "different names, and the methods that could transfer across domains but "
+    "have not. You diagnose missing structure, not missing facts.\n\n"
+    "WHAT COUNTS AS A GAP (treat each type on its own terms):\n"
+    "- missing_edge: two clusters or entities are repeatedly co-present or "
+    "semantically near (high topology_sim / neighbor_jaccard) yet the corpus "
+    "never asserts a relation between them. This is the highest-value gap.\n"
+    "- fragile_bridge: a real connection exists but rests on a single "
+    "articulation path; remove one entity and two regions fall apart. Name "
+    "the load-bearing path and why it is brittle.\n"
+    "- terminological: two labels likely denote the same concept "
+    "(shared_terms / shared_neighbors high) but the corpus treats them as "
+    "distinct. Flag the probable synonymy and the cost of the split.\n"
+    "- analogy / transfer: a structural homology or a method that plausibly "
+    "travels to another domain — phrase as an opportunity, not a claim.\n"
+    "- weak_link: a provenance-thin assertion the corpus leans on without "
+    "support. Name what evidence is missing to firm it up.\n\n"
+    "ATTENTION WEIGHTS:\n"
+    "- Name and rank the gaps: about 60 percent. Lead with the gaps the "
+    "structural signals make most credible, not the ones that sound "
+    "interesting. The metrics (topology_sim, neighbor_jaccard, cd_pagerank, "
+    "support, shared_terms/neighbors) are your evidence that a gap is real "
+    "rather than an artifact — cite them.\n"
+    "- Explain why each gap matters: about 25 percent. A gap is only worth "
+    "naming if closing it would change what the corpus can answer or build.\n"
+    "- Point at what would close it: about 15 percent. For each top gap, say "
+    "what to read, link, rename, or test to resolve it.\n\n"
+    "OUTPUT FORMAT:\n"
+    "- Markdown prose only. Start with `# headline` (<= 140 chars) that names "
+    "the single most consequential absence.\n"
+    "- Second line: italic theme `*Theme: tag · tag · tag*` using 2-4 "
+    "concept tags drawn from the gap material.\n"
+    "- Third paragraph: one **bolded TL;DR sentence** naming the most "
+    "valuable gap to close and why.\n"
+    "- Then a `## Gap ledger` section: a compact Markdown table is the best "
+    "shape here. Columns `Gap (A ↔ B) | Type | Why it's credible | Why it "
+    "matters | What would close it`. One row per gap, strongest first, "
+    "5-8 rows. Keep cells terse.\n"
+    "- After the table, 2-4 short prose sections that go deep on the highest-"
+    "value gaps: for each, state the bridging question explicitly (`Does X "
+    "relate to Y, and how?`), interpret the structural signal in plain "
+    "language, and name the concrete next step. Use specific concept names "
+    "as headings, e.g. `## The unlinked spine: A ↔ B`.\n"
+    "- If the corpus is densely connected and genuinely has few real gaps, "
+    "SAY SO plainly and report the one or two that survive scrutiny rather "
+    "than manufacturing absences to fill a quota. A short honest answer beats "
+    "a padded one.\n"
+    "- End with a `## Close this first` section: 2-3 sentences naming the "
+    "single highest-leverage gap to act on, framed to the user's likely "
+    "intent — `If you are trying to X, the gap between A and B is where the "
+    "corpus is thinnest, and here is the cheapest way to test it.`\n"
+    "- Stay under ~1000 words unless the gap material is unusually rich.\n\n"
+    "GAP RULES:\n"
+    "- A gap is a HYPOTHESIS, not a proven absence. Distinguish 'co-mentioned "
+    "but no asserted relation' from 'genuinely never appear together.' Never "
+    "claim the corpus is missing something you did not check the packet for.\n"
+    "- Ground every gap in the packet's gap / fragile-bridge / weak-link "
+    "material or in two evidence items the corpus never connects. Cite "
+    "evidence as `[1]`, `[2]`. Never invent citations or metrics.\n"
+    "- When you assert two things are unconnected, you MAY draw the candidate "
+    "bridge yourself — label it `[CANDIDATE BRIDGE]` and keep it distinct "
+    "from anything the corpus actually asserts.\n"
+    "- Do not pad. If a gap's only basis is a weak metric, say the basis is "
+    "weak rather than dressing it up. Rank honesty over completeness.\n"
+    "- NEVER output the strings `RELATES_TO`, `MENTIONS`, `PART_OF`, or any "
+    "other ALL_CAPS_UNDERSCORED Neo4j label. Use natural language.\n"
+    "- Avoid empty-shell narration. Bad: 'there is a gap between A and B.' "
+    "Good: 'A and B share 4 neighbors and a 0.71 topology similarity yet the "
+    "corpus never states how A bears on B — that unasserted edge is the gap.'\n"
+    "- The answer must feel diagnostic and actionable, not Socratic. The user "
+    "should leave knowing exactly which absence is worth their next hour.\n"
+)
+
+
 def _system_prompt_for_synthesis_mode(synthesis_mode: str) -> str:
     if synthesis_mode == "ideation":
         return _IDEATION_SYSTEM_PROMPT
     if synthesis_mode == "nuance":
         return _NUANCE_SYSTEM_PROMPT
+    if synthesis_mode == "gap":
+        return _GAP_SYSTEM_PROMPT
     return _SYNTHESIS_SYSTEM_PROMPT
 
 
@@ -4587,6 +4693,15 @@ def _render_packet_user_prompt(
             if rationale:
                 line += f" Rationale: {rationale}"
             lines.append(line)
+    elif mode == "gap":
+        lines.append(
+            "Curation lanes: the GAP MATERIAL below (candidate gaps, fragile "
+            "bridges, weak links, analogies, transfers) is the spine of this "
+            "answer — read it first and rank by the structural metrics. The "
+            "numbered evidence and edges are SUPPORT: use them to confirm what "
+            "the corpus does assert so you can argue precisely about what it "
+            "does not. Lead with the most metrically-credible absences."
+        )
 
     docs_in_scope = compact.get("documents_in_scope") or []
     if docs_in_scope:
@@ -6345,7 +6460,7 @@ async def discover(
         )
     except Exception as exc:
         logger.debug("packet extraction enrichment skipped: %s", exc)
-    if synthesis_mode in {"research", "nuance", "ideation"}:
+    if synthesis_mode in {"research", "nuance", "ideation", "gap"}:
         try:
             caps = _packet_caps_for_mode(synthesis_mode)
             support_evidence: list[dict[str, Any]] = []
