@@ -17,6 +17,11 @@ Lanes:
                    CONTINUITY/local_ingestion_phase_a/SESSION_STATE_2026-06-11.md.
   --gliner both    both of the above.
 
+  --glirel-custom  fetch the FINE-TUNED Ghost B GLiREL (~1.7 GB) — the one
+                   custom production relation model — from HF Hub into
+                   models/glirel_ghost_b_v1/best/, where the sidecar loads it
+                   by default. This is the relation model that makes the local
+                   graph typed; without it, extraction falls back to zero-shot.
   --glirel-zero-shot   also fetch jackboyla/glirel-large-v0 (~1.5 GB), the
                    zero-shot relation fallback used when you don't have the
                    fine-tuned Ghost B GLiREL checkpoint (GLIREL_CKPT_DIR).
@@ -24,20 +29,31 @@ Lanes:
 Idempotent: re-running verifies and resumes; complete installs are no-ops.
 
 Examples:
-  python scripts/bootstrap_models.py --gliner torch            # Mac sidecar
-  python scripts/bootstrap_models.py --gliner onnx             # GPU box
-  python scripts/bootstrap_models.py --gliner both --glirel-zero-shot
+  # Full local stack (Mac sidecar): stock GLiNER + custom Ghost B GLiREL
+  python scripts/bootstrap_models.py --gliner torch --glirel-custom
+  python scripts/bootstrap_models.py --gliner onnx --glirel-custom   # GPU box
+  python scripts/bootstrap_models.py --gliner both --glirel-custom
+
+(Maintainer: publish the custom GLiREL once with
+ scripts/publish_glirel_to_hf.py before users can --glirel-custom it.)
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 GLINER_TORCH_REPO = "urchade/gliner_medium-v2.1"
 GLINER_ONNX_REPO = "onnx-community/gliner_medium-v2.1"
 GLIREL_ZERO_SHOT_REPO = "jackboyla/glirel-large-v0"
+# Fine-tuned Ghost B GLiREL — the one CUSTOM production model. Published to
+# HF Hub by scripts/publish_glirel_to_hf.py; override the repo via env or
+# --glirel-repo if you forked it to your own account.
+GLIREL_CUSTOM_REPO = (
+    os.environ.get("GHOST_B_GLIREL_HF_REPO") or "Kingsley-Cyber/glirel-ghost-b-v1"
+)
 
 # Selective ONNX pull: tokenizer/config + fp32 + fp16. Quantized variants
 # (int8/q4/...) are excluded — they failed no gate yet but fp16 already showed
@@ -50,6 +66,7 @@ MIN_SIZES = {
     "onnx/model.onnx": 500_000_000,
     "onnx/model_fp16.onnx": 250_000_000,
     "tokenizer.json": 1_000_000,
+    "pytorch_model.bin": 1_500_000_000,  # fine-tuned GLiREL is ~1.7 GB
 }
 
 
@@ -84,6 +101,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--gliner", choices=["torch", "onnx", "both"], required=True)
+    ap.add_argument("--glirel-custom", action="store_true",
+                    help="fetch the fine-tuned Ghost B GLiREL (the custom "
+                         "production relation model) from HF Hub")
+    ap.add_argument("--glirel-repo", default=GLIREL_CUSTOM_REPO,
+                    help=f"HF repo for the custom GLiREL (default: {GLIREL_CUSTOM_REPO})")
     ap.add_argument("--glirel-zero-shot", action="store_true",
                     help="also fetch the zero-shot GLiREL fallback model")
     ap.add_argument("--dest", default=None,
@@ -124,14 +146,27 @@ def main() -> int:
             "    (point _REPO at this LOCAL DIR — letting gliner snapshot the HF\n"
             "     repo at runtime downloads every quantized variant, 3 GB+)")
 
+    if args.glirel_custom:
+        # MUST land at the production loader's default path
+        # (<repo>/models/glirel_ghost_b_v1/best), NOT under --dest — that's
+        # where ghost_b_local resolves GLiREL when GLIREL_CKPT_DIR is unset.
+        d = repo_root / "models" / "glirel_ghost_b_v1" / "best"
+        _download(args.glirel_repo, d, None)
+        problems += _verify(d, ["glirel_config.json", "labels.json",
+                                "pytorch_model.bin"])
+        wiring.append(
+            f"custom GLiREL (Ghost B v1) at {d} — the extraction sidecar loads "
+            "it automatically (no env needed). To use a HF repo id directly "
+            f"instead of a local copy, set GLIREL_CKPT_DIR={args.glirel_repo}.")
+
     if args.glirel_zero_shot:
         d = dest_root / "glirel_large_v0"
         _download(GLIREL_ZERO_SHOT_REPO, d, None)
         problems += _verify(d, ["config.json"])
         wiring.append(
             f"glirel zero-shot fallback at {d} — used automatically when "
-            "GLIREL_CKPT_DIR is unset (fine-tuned Ghost B checkpoint is preferred "
-            "when you have it)")
+            "GLIREL_CKPT_DIR is unset AND no custom checkpoint is present "
+            "(fine-tuned Ghost B checkpoint is preferred when you have it)")
 
     print()
     if problems:

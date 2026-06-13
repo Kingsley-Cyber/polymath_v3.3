@@ -25,14 +25,39 @@ One command, idempotent, selective (no multi-GB surprise snapshots):
 
 ```
 pip install huggingface_hub
-python scripts/bootstrap_models.py --gliner torch          # Mac / CPU / plain CUDA
-python scripts/bootstrap_models.py --gliner onnx           # CUDA box, ONNX lane (fastest)
-python scripts/bootstrap_models.py --gliner both --glirel-zero-shot
+# Full local stack — stock GLiNER + the custom fine-tuned Ghost B GLiREL:
+python scripts/bootstrap_models.py --gliner torch --glirel-custom   # Mac / CPU / plain CUDA
+python scripts/bootstrap_models.py --gliner onnx  --glirel-custom   # CUDA box, ONNX lane (fastest)
 ```
 
-It prints the exact env wiring for the lane you chose. The fine-tuned GLiREL
-relation model is preferred when you have its checkpoint (`GLIREL_CKPT_DIR`);
-without it the zero-shot fallback model is used.
+Two models back the extraction lane, distributed two different ways:
+
+- **GLiNER (entity pass)** — stock `urchade/gliner_medium-v2.1`, pulled from HF
+  Hub. Not custom; the customization is the zero-shot *labels* in
+  `pipeline_config`, which ship in the repo as code.
+- **GLiREL (relation pass)** — the **custom fine-tuned Ghost B model** (~1.7 GB,
+  30 predicates). `--glirel-custom` downloads it from HF Hub into
+  `models/glirel_ghost_b_v1/best/`, where the sidecar loads it by default. This
+  is what makes the local graph *typed*; without it, relations fall back to
+  zero-shot GLiREL (`--glirel-zero-shot`, weaker). Weights are NOT in git (too
+  large); HF Hub is the channel, same as GLiNER.
+
+You can also skip the local copy and point `GLIREL_CKPT_DIR` at the HF repo id
+directly — `from_pretrained` downloads + caches it.
+
+### Maintainer: publishing the custom GLiREL (one time)
+
+The `--glirel-custom` download only works once the checkpoint is on HF Hub.
+To publish it from a machine that has the trained weights:
+
+```
+export HF_TOKEN=hf_xxx        # a WRITE token from hf.co/settings/tokens
+python scripts/publish_glirel_to_hf.py            # -> Kingsley-Cyber/glirel-ghost-b-v1 (public)
+# or:  python scripts/publish_glirel_to_hf.py --repo you/your-glirel --private
+```
+
+If you publish to a non-default repo, users pass `--glirel-repo you/your-glirel`
+(or set `GHOST_B_GLIREL_HF_REPO`).
 
 ## 2. The sidecar process (per extraction machine)
 
