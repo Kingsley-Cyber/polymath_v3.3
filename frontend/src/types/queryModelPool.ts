@@ -156,6 +156,33 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
     example_model: "kimi-k2-0711-preview",
   },
   {
+    // OpenCode Go ($/mo subscription) curated coding models. The
+    // OpenAI-compatible Go models ride the openai/* route with a per-entry
+    // base_url override (same pattern as Moonshot / SiliconFlow), so
+    // composeModelString yields e.g. "openai/deepseek-v4-pro" and LiteLLM
+    // forwards it to the Go endpoint. model_dropdown_only is intentionally
+    // LEFT OFF: example_models render as datalist suggestions while the model
+    // field stays free-text, so new Go models can be typed in if the catalog
+    // changes. NOTE: the Anthropic-endpoint Go models (minimax-*, qwen3.7-*)
+    // use /messages, not /chat/completions — they are NOT listed here; wire
+    // them via an anthropic-route entry separately if you need them.
+    id: "opencode-go",
+    name: "OpenCode Go",
+    litellm_provider: "openai",
+    base_url: "https://opencode.ai/zen/go/v1",
+    example_model: "deepseek-v4-pro",
+    example_models: [
+      "deepseek-v4-pro",
+      "deepseek-v4-flash",
+      "glm-5.1",
+      "glm-5",
+      "kimi-k2.7",
+      "kimi-k2.6",
+      "mimo-v2.5",
+      "mimo-v2.5-pro",
+    ],
+  },
+  {
     id: "together",
     name: "Together",
     litellm_provider: "together_ai",
