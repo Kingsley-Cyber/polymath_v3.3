@@ -1,0 +1,195 @@
+entity_types:
+  - Person
+  - Organization
+  - Location
+  - Event
+  - Concept
+  - Method
+  - Product
+  - Software
+  - Document
+  - Standard
+  - Rule
+  - Law
+  - Artifact
+  - TimeReference
+  - other
+
+predicates:
+  includes:
+    allowed_pairs:
+      - [Concept, Concept]
+      - [Concept, Method]
+      - [Concept, Software]
+      - [Software, Method]
+      - [Software, Artifact]
+      - [Product, Artifact]
+      - [Document, Concept]
+  uses:
+    allowed_pairs:
+      - [Person, Software]
+      - [Person, Method]
+      - [Organization, Software]
+      - [Organization, Method]
+      - [Software, Software]
+      - [Software, Method]
+      - [Software, Standard]
+      - [Software, Artifact]
+      - [Method, Software]
+      - [Method, Concept]
+      - [Concept, Method]
+      - [Concept, Software]
+      - [Artifact, Software]
+  supports:
+    allowed_pairs:
+      - [Software, Method]
+      - [Software, Concept]
+      - [Software, Artifact]
+      - [Artifact, Method]
+      - [Artifact, Concept]
+      - [Method, Concept]
+      - [Concept, Method]
+      - [Organization, Software]
+      - [Product, Method]
+  produces:
+    allowed_pairs:
+      - [Software, Artifact]
+      - [Software, Document]
+      - [Software, Concept]
+      - [Method, Artifact]
+      - [Method, Concept]
+      - [Person, Document]
+      - [Organization, Product]
+      - [Product, Artifact]
+  implements:
+    allowed_pairs:
+      - [Software, Method]
+      - [Software, Standard]
+      - [Software, Rule]
+      - [Artifact, Method]
+      - [Artifact, Standard]
+      - [Method, Concept]
+      - [Product, Method]
+  has_part:
+    allowed_pairs:
+      - [Concept, Concept]
+      - [Concept, Method]
+      - [Software, Software]
+      - [Software, Artifact]
+      - [Product, Artifact]
+      - [Document, Concept]
+      - [Organization, Organization]
+  instance_of:
+    allowed_pairs:
+      - [Software, Concept]
+      - [Product, Concept]
+      - [Method, Concept]
+      - [Artifact, Concept]
+      - [Person, Concept]
+      - [Organization, Concept]
+      - [Document, Concept]
+  references:
+    allowed_pairs:
+      - [Document, Document]
+      - [Document, Concept]
+      - [Software, Document]
+      - [Software, Standard]
+      - [Method, Document]
+      - [Concept, Document]
+      - [Person, Document]
+      - [Organization, Document]
+  depends_on:
+    allowed_pairs:
+      - [Software, Software]
+      - [Software, Artifact]
+      - [Software, Standard]
+      - [Method, Software]
+      - [Method, Concept]
+      - [Concept, Concept]
+      - [Product, Software]
+  quantizes:
+    allowed_pairs:
+      - [Method, Software]
+      - [Method, Artifact]
+      - [Software, Artifact]
+      - [Software, Concept]
+      - [Concept, Artifact]
+  causes:
+    allowed_pairs:
+      - [Concept, Concept]
+      - [Concept, Method]
+      - [Method, Concept]
+      - [Software, Concept]
+      - [Event, Event]
+      - [Rule, Concept]
+  synonym_of:
+    allowed_pairs:
+      - [Concept, Concept]
+      - [Method, Method]
+      - [Software, Software]
+      - [Artifact, Artifact]
+      - [Standard, Standard]
+      - [Product, Product]
+  member_of:
+    allowed_pairs:
+      - [Person, Organization]
+      - [Organization, Organization]
+      - [Software, Concept]
+      - [Product, Concept]
+      - [Concept, Concept]
+  example_of:
+    allowed_pairs:
+      - [Software, Concept]
+      - [Product, Concept]
+      - [Method, Concept]
+      - [Artifact, Concept]
+      - [Document, Concept]
+      - [Person, Concept]
+  evaluates:
+    allowed_pairs:
+      - [Method, Concept]
+      - [Method, Software]
+      - [Software, Concept]
+      - [Software, Software]
+      - [Person, Software]
+      - [Organization, Software]
+  deploys:
+    allowed_pairs:
+      - [Person, Software]
+      - [Organization, Software]
+      - [Software, Location]
+      - [Software, Artifact]
+      - [Method, Software]
+      - [Product, Software]
+  creates:
+    allowed_pairs:
+      - [Person, Document]
+      - [Person, Product]
+      - [Person, Software]
+      - [Organization, Product]
+      - [Organization, Software]
+      - [Software, Artifact]
+      - [Method, Artifact]
+  trains:
+    allowed_pairs:
+      - [Person, Method]
+      - [Organization, Method]
+      - [Method, Software]
+      - [Software, Software]
+      - [Concept, Software]
+      - [Artifact, Software]
+  runs:
+    allowed_pairs:
+      - [Software, Software]
+      - [Software, Location]
+      - [Software, Artifact]
+      - [Product, Software]
+      - [Method, Software]
+  located_in:
+    allowed_pairs:
+      - [Person, Location]
+      - [Organization, Location]
+      - [Software, Location]
+      - [Product, Location]
+      - [Artifact, Location]
+      - [Concept, Location]

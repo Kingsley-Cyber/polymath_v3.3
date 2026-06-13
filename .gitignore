@@ -53,3 +53,13 @@ incoming_slm_enrich/
 
 # agent bus — RTX-side outbox is LAN-served, never committed
 agent_outbox/
+
+# Local-extraction training/eval ARTIFACTS — never source control:
+#  • models/ root holds 13GB of weights/run outputs (qwen_resolver_mlx etc.)
+#  • data/ + data_eval/ are training/eval jsonl DERIVED FROM the user's
+#    personal documents — committing would publish library excerpts
+#  • fixtures hold verbatim book chunks (same leak concern)
+models/
+data/
+data_eval/
+scripts/local_extraction_fixtures/
