@@ -112,6 +112,14 @@ general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   disable_spend_logs: True
   telemetry: False
+  # Allow per-request api_base/api_key in the body. The query model pool and
+  # ghost summary lane send each entry's own base_url + key this way (custom
+  # OpenAI/Anthropic-compatible endpoints: OpenCode Go, SiliconFlow, …).
+  # LiteLLM blocks this by default (CVE hardening) and 401s with
+  # "api_base is not allowed in request body". Safe here: this proxy is
+  # local/LAN-only and master-key protected. If it is ever exposed publicly,
+  # gate clients with virtual keys instead of turning this off.
+  allow_client_side_credentials: True
   # Intentionally NO `completion_model` / `embedding_model` here — those keys
   # coerce every incoming request into that single model group, blocking
   # per-request routing (sends deepseek/* through ollama/llama3.2:3b).
