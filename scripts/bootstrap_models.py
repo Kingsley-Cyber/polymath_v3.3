@@ -52,7 +52,7 @@ GLIREL_ZERO_SHOT_REPO = "jackboyla/glirel-large-v0"
 # HF Hub by scripts/publish_glirel_to_hf.py; override the repo via env or
 # --glirel-repo if you forked it to your own account.
 GLIREL_CUSTOM_REPO = (
-    os.environ.get("GHOST_B_GLIREL_HF_REPO") or "Kingsley-Cyber/glirel-ghost-b-v1"
+    os.environ.get("GHOST_B_GLIREL_HF_REPO") or "Sambenja1/glirel-ghost-b-v1"
 )
 
 # Selective ONNX pull: tokenizer/config + fp32 + fp16. Quantized variants

@@ -30,7 +30,7 @@ import os
 import sys
 from pathlib import Path
 
-DEFAULT_REPO = os.environ.get("GHOST_B_GLIREL_HF_REPO") or "Kingsley-Cyber/glirel-ghost-b-v1"
+DEFAULT_REPO = os.environ.get("GHOST_B_GLIREL_HF_REPO") or "Sambenja1/glirel-ghost-b-v1"
 REQUIRED_FILES = ["glirel_config.json", "labels.json", "pytorch_model.bin"]
 
 _MODEL_CARD = """---

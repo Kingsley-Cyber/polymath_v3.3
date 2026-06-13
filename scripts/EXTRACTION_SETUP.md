@@ -52,7 +52,7 @@ To publish it from a machine that has the trained weights:
 
 ```
 export HF_TOKEN=hf_xxx        # a WRITE token from hf.co/settings/tokens
-python scripts/publish_glirel_to_hf.py            # -> Kingsley-Cyber/glirel-ghost-b-v1 (public)
+python scripts/publish_glirel_to_hf.py            # -> Sambenja1/glirel-ghost-b-v1 (public)
 # or:  python scripts/publish_glirel_to_hf.py --repo you/your-glirel --private
 ```
 
