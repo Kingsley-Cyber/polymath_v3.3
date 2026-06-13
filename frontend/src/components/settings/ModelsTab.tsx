@@ -78,8 +78,14 @@ function PoolSection() {
     }
   };
 
+  // Require an API key for cloud entries. A custom endpoint (OpenCode Go,
+  // SiliconFlow, …) has no "shared" key behind it, so a keyless entry saves
+  // fine then fails at query time with the provider's "Missing API key" 401 —
+  // a silent dead-end. Requiring the key here also neutralizes the model-field
+  // Enter shortcut firing Add before the key is typed.
   const canAddCloud =
     modelName.trim().length > 0 &&
+    apiKey.trim().length > 0 &&
     (provider === "custom" || baseUrl.trim().length > 0);
 
   const handleAddCloud = () => {
@@ -253,8 +259,10 @@ function PoolSection() {
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder="api key (optional — else shared key)"
-            className="flex-1 min-w-[180px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600"
+            placeholder="api key (required)"
+            className={`flex-1 min-w-[180px] bg-[#0b0c10] text-white border rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600 ${
+              apiKey.trim() ? "border-white/10" : "border-amber-500/40"
+            }`}
           />
           <input
             type="text"
@@ -266,6 +274,11 @@ function PoolSection() {
           <button
             onClick={handleAddCloud}
             disabled={!canAddCloud}
+            title={
+              !canAddCloud
+                ? "Needs a model name, base URL, and an API key"
+                : "Add this model to the query pool"
+            }
             className="flex items-center gap-1 px-3 py-1 rounded border border-accent-main/60 bg-accent-main/10 text-accent-main text-[11px] font-bold uppercase tracking-widest hover:bg-accent-main/20 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Plus className="w-3 h-3" />
