@@ -163,9 +163,10 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
     // forwards it to the Go endpoint. model_dropdown_only is intentionally
     // LEFT OFF: example_models render as datalist suggestions while the model
     // field stays free-text, so new Go models can be typed in if the catalog
-    // changes. NOTE: the Anthropic-endpoint Go models (minimax-*, qwen3.7-*)
-    // use /messages, not /chat/completions — they are NOT listed here; wire
-    // them via an anthropic-route entry separately if you need them.
+    // changes. The Anthropic-endpoint Go models (minimax-*, qwen3.x-*) use
+    // /messages — they live in the sibling "opencode-go-anthropic" preset.
+    // Highest-throughput Go models (per the published rate limits) are
+    // deepseek-v4-flash (~31.6k req/5h) and mimo-v2.5 (~30.1k) — both here.
     id: "opencode-go",
     name: "OpenCode Go",
     litellm_provider: "openai",
@@ -180,6 +181,27 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
       "kimi-k2.6",
       "mimo-v2.5",
       "mimo-v2.5-pro",
+    ],
+  },
+  {
+    // OpenCode Go — Anthropic-endpoint models (MiniMax, Qwen). These serve on
+    // /v1/messages (not /chat/completions), so they ride LiteLLM's anthropic
+    // route: composeModelString yields "anthropic/<model>" and LiteLLM appends
+    // /v1/messages to base_url. UNVERIFIED vs the OpenAI set — the anthropic
+    // custom-base path hasn't been smoke-tested with a live key; if a model
+    // 404s, confirm whether base_url needs the trailing "/v1". Free-text stays
+    // on so ids can be corrected/added.
+    id: "opencode-go-anthropic",
+    name: "OpenCode Go (Anthropic)",
+    litellm_provider: "anthropic",
+    base_url: "https://opencode.ai/zen/go",
+    example_model: "qwen3.7-plus",
+    example_models: [
+      "qwen3.7-plus",
+      "qwen3.7-max",
+      "qwen3.6-plus",
+      "minimax-m3",
+      "minimax-m2.7",
     ],
   },
   {
