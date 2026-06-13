@@ -10,9 +10,12 @@ because it's not scoped to a single corpus in the URL path (corpus_id is in
 the request body).
 """
 import asyncio
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+
+logger = logging.getLogger(__name__)
 
 from routers.auth import get_current_user
 from models.schemas import (
@@ -913,9 +916,70 @@ async def graph_brain_view(body: dict = Body(...)) -> dict:
     corpus_ids = _validate_corpus_ids_or_400(body)
     limit = max(1, min(int(body.get("limit", 2000) or 2000), 10000))
 
+    # Cache-first: the pairwise-bridges Cypher is O(anchors²) over shared
+    # entity mentions — at 496 books / 782k entities it exceeds any proxy
+    # timeout (observed live: nginx 504 at 60s). Same architecture as the
+    # overview/metrics caches: compute ONCE in a background task keyed by
+    # (corpus set, per-corpus change signatures), serve from Mongo after.
+    db = ingestion_service.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+
+    from services.graph.analytics import compute_corpus_change_signature
     from services.graph.queries import get_brain_view
 
-    return await get_brain_view(driver, corpus_ids, limit=limit)
+    key = "|".join(sorted(corpus_ids)) + f"|limit={limit}"
+    sig_parts: list[str] = []
+    for cid in sorted(corpus_ids):
+        try:
+            sig_parts.append(await compute_corpus_change_signature(db, cid))
+        except Exception:  # noqa: BLE001 — missing corpus → unique sentinel
+            sig_parts.append(f"nosig:{cid}")
+    signature = "|".join(sig_parts)
+
+    cached = await db["graph_brain_view_cache"].find_one(
+        {"key": key, "signature": signature}, {"_id": 0, "payload": 1}
+    )
+    if cached and cached.get("payload") is not None:
+        return cached["payload"]
+
+    existing = _BRAIN_VIEW_BUILD_TASKS.get(key)
+    if existing is None or existing.done():
+
+        async def _build(bkey: str = key, bsig: str = signature) -> None:
+            try:
+                logger.info("brain-view: building cache key=%s", bkey[:60])
+                payload = await get_brain_view(driver, corpus_ids, limit=limit)
+                if not payload.get("_error"):
+                    await db["graph_brain_view_cache"].update_one(
+                        {"key": bkey},
+                        {"$set": {"key": bkey, "signature": bsig,
+                                  "payload": payload}},
+                        upsert=True,
+                    )
+                    logger.info("brain-view: cache built key=%s docs=%d",
+                                bkey[:60], len(payload.get("documents") or []))
+                else:
+                    logger.warning("brain-view: build returned error key=%s: %s",
+                                   bkey[:60], payload.get("meta"))
+            except Exception:  # noqa: BLE001
+                logger.exception("brain-view: cache build failed key=%s", bkey[:60])
+            finally:
+                _BRAIN_VIEW_BUILD_TASKS.pop(bkey, None)
+
+        _BRAIN_VIEW_BUILD_TASKS[key] = asyncio.create_task(_build())
+
+    return {
+        "documents": [],
+        "bridges": [],
+        "meta": {
+            "corpus_count": len(corpus_ids),
+            "total_documents": 0,
+            "total_bridges": 0,
+            "limit_applied": limit,
+            "warming": True,
+        },
+    }
 
 
 @discovery_router.post(
@@ -1265,13 +1329,22 @@ async def graph_suggestions(
             status_code=400, detail="corpus_id or corpus_ids query parameter required"
         )
 
-    payload = await build_corpus_suggestions(
-        qdrant=qdrant,
-        neo4j_driver=ingestion_service.neo4j_driver,
-        db=db,
-        corpus_ids=parsed_ids,
-        user_id=current_user["user_id"],
-    )
+    try:
+        payload = await build_corpus_suggestions(
+            qdrant=qdrant,
+            neo4j_driver=ingestion_service.neo4j_driver,
+            db=db,
+            corpus_ids=parsed_ids,
+            user_id=current_user["user_id"],
+        )
+    except RuntimeError as exc:
+        # Suggestions are optional UI sugar that depends on the legacy
+        # discovery module; when that module is absent the page should get
+        # an empty list, not a 500 (observed live during Brain View loads).
+        logger.warning("graph suggestions unavailable: %s", exc)
+        return GraphSuggestionsResponse(
+            corpus_id=parsed_ids[0], domain_map_summary=[], suggestions=[]
+        )
     return GraphSuggestionsResponse(**payload)
 
 
@@ -1504,6 +1577,7 @@ async def graph_cache_status(corpus_id: str) -> dict:
 # Track in-flight cache-rebuild jobs so we don't double-fire and so the
 # frontend can poll for completion without spinning up a new task each time.
 _CACHE_REBUILD_TASKS: dict[str, asyncio.Task] = {}
+_BRAIN_VIEW_BUILD_TASKS: dict[str, asyncio.Task] = {}
 
 # Self-heal cap: a multi-corpus overview over many cold corpora kicks at most
 # this many rebuilds per read — Brain View polls while warming, so the rest

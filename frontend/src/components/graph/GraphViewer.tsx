@@ -721,6 +721,14 @@ function useBrainGraph(
       // metadata (filename, chunk_count, ghost_b_success_rate) lives on the
       // Document node so no MongoDB round-trip is needed.
       const bv = await api.getBrainView(corpusIds);
+      // Backend computes the pairwise-bridge view ONCE per corpus signature
+      // (too heavy for request time at 500-book scale — it used to 504) and
+      // serves `meta.warming` until the background build lands. Poll.
+      if ((bv.meta as Record<string, unknown> | undefined)?.warming) {
+        window.setTimeout(() => {
+          void reload();
+        }, 20000);
+      }
       // Sort by bridge_count desc so we can tag the top-N anchors with
       // forceLabel — those are the most-connected books and worth always
       // labelling, the long tail relies on semantic zoom.

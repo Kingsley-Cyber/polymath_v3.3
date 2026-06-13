@@ -6922,6 +6922,16 @@ def merge_discover_results(
 # wrapper passes through to the legacy helper unchanged. For len > 1 the
 # wrapper uses Mongo $in / parallel fan-out as appropriate.
 
+# Pre-bind to None so a missing/unloadable legacy module degrades to the
+# intended RuntimeError(_LEGACY_MISSING_MESSAGE) guards — NOT a NameError
+# (observed live: /api/graph/suggestions 500'd with NameError because these
+# names only existed when the legacy .pyc loaded).
+_legacy_list_sessions = None
+_legacy_get_session = None
+_legacy_find_resume_candidate = None
+_legacy_build_corpus_suggestions = None
+_legacy_delete_session = None
+
 if _legacy is not None:
     _legacy_list_sessions = getattr(_legacy, "list_sessions", None)
     _legacy_get_session = getattr(_legacy, "get_session", None)
