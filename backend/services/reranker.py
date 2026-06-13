@@ -13,6 +13,7 @@ independently before merge so the cross-encoder's wider score range does not
 crowd code out.
 """
 import logging
+import os
 from typing import List
 
 import httpx
@@ -21,6 +22,14 @@ from models.schemas import SourceChunk
 
 logger = logging.getLogger(__name__)
 _TIMEOUT = 30.0
+
+# Per-document character cap for rerank requests. The reranker (llama.cpp
+# Qwen3-Reranker) processes each (query, doc) pair against its context window
+# and returns HTTP 500 — not a truncated score — when a pair overflows it.
+# Large parent chunks / summaries in the candidate pool blew past it (verified:
+# a ~20k-char doc 500s; truncated to 2k it 200s). A cross-encoder only attends
+# to its first ~512 tokens anyway, so capping here costs no ranking signal.
+_RERANK_MAX_DOC_CHARS = max(256, int(os.environ.get("RERANKER_MAX_DOC_CHARS", "2000") or 2000))
 
 
 def _is_code_chunk(s: SourceChunk) -> bool:
@@ -176,7 +185,9 @@ class RerankerService:
         if not pool:
             return []
 
-        documents = [c.text for c in pool]
+        # Cap each doc so no single (query, doc) pair overflows the reranker's
+        # context and 500s the whole batch (the cross-encoder truncates anyway).
+        documents = [(c.text or "")[:_RERANK_MAX_DOC_CHARS] for c in pool]
         url = f"{self._settings.RERANKER_URL}/rerank"
 
         try:
