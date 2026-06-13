@@ -5,6 +5,7 @@
 
 import { Layers, Info, Copy, Check, Cpu, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Button } from "../ui/Button";
 import type { IngestionConfig, TokenBudget } from "../../types";
 import { DEFAULT_INGESTION_CONFIG } from "../../types";
 import type {
@@ -170,7 +171,9 @@ function ExtractionEnginesCard() {
           <Cpu size={16} className="text-emerald-400" /> Extraction Engines
         </h3>
         <div className="flex items-center gap-2">
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={validate}
             disabled={dirty || validating || endpoints === null}
             title={
@@ -178,25 +181,17 @@ function ExtractionEnginesCard() {
                 ? "Save changes first — validation probes the saved config"
                 : "Probe every engine from the backend (reachable, healthy, GPU active)"
             }
-            className={`text-[12px] px-3 py-1 rounded border ${
-              dirty || validating
-                ? "border-white/10 text-gray-500"
-                : "border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
-            }`}
           >
             {validating ? "Validating…" : "Validate"}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
             onClick={save}
             disabled={!dirty || saving}
-            className={`text-[12px] px-3 py-1 rounded ${
-              dirty
-                ? "bg-emerald-600 hover:bg-emerald-500 text-white"
-                : "bg-white/5 text-gray-500"
-            }`}
           >
             {saving ? "Saving…" : dirty ? "Save" : "Saved"}
-          </button>
+          </Button>
         </div>
       </div>
       <p className="text-[12px] text-gray-500">
@@ -310,23 +305,26 @@ function ExtractionEnginesCard() {
                   </span>
                 );
               })()}
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => mutate(endpoints.filter((_, j) => j !== i))}
-                className="p-1 text-gray-600 hover:text-red-400"
                 title="Remove engine"
+                className="hover:text-red-400 hover:bg-red-500/10"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              </Button>
             </div>
           ))}
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() =>
               mutate([...endpoints, { label: "", url: "", enabled: true }])
             }
-            className="flex items-center gap-1.5 text-[12px] text-emerald-400 hover:text-emerald-300 px-1 py-1"
           >
             <Plus className="w-3.5 h-3.5" /> Add engine
-          </button>
+          </Button>
         </div>
       )}
     </div>

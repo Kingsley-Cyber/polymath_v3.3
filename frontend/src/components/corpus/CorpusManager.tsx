@@ -29,6 +29,7 @@ import type {
 import { DEFAULT_INGESTION_CONFIG, inferPreset } from "../../types";
 import { CorpusDetail } from "./CorpusDetail";
 import { IngestionModelPool } from "../settings/IngestionModelPool";
+import { Button } from "../ui/Button";
 
 interface CorpusManagerProps {
   isOpen: boolean;
@@ -763,11 +764,12 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
             </div>
 
             <div className="flex gap-2">
-              <button
+              <Button
                 data-testid="corpus-create-submit"
+                variant="primary"
                 onClick={handleCreate}
                 disabled={!newName.trim() || isCreating}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold tracking-widest bg-accent-main text-bg-base border border-accent-main hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-none uppercase"
+                className="font-bold tracking-widest uppercase text-[11px] disabled:cursor-not-allowed"
               >
                 {isCreating ? (
                   <Loader2 className="w-3 h-3 animate-spin" />
@@ -775,18 +777,19 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                   <Check className="w-3 h-3" />
                 )}
                 {isCreating ? "Creating..." : "Create"}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setShowCreateForm(false);
                   setNewName("");
                   setNewDescription("");
                   setNewConfig(DEFAULT_INGESTION_CONFIG);
                 }}
-                className="px-3 py-1.5 text-[11px] font-bold tracking-widest text-content-tertiary border border-border-minimal hover:border-content-secondary transition-none uppercase"
+                className="font-bold tracking-widest uppercase text-[11px]"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -911,51 +914,60 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
 
                       {/* Actions */}
                       {!isEditing && (
-                        <div className="flex items-center gap-1 transition-none shrink-0">
-                          <button
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button
                             data-testid="corpus-browse-btn"
+                            variant="secondary"
+                            size="sm"
                             onClick={() => setSelectedCorpus(corpus)}
-                            className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold tracking-widest text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base transition-none uppercase"
+                            className="font-bold tracking-widest uppercase text-[10px]"
                             title="Browse documents and start backend folder ingest"
                           >
                             <ExternalLink className="w-3 h-3" />
                             <span>Open</span>
-                          </button>
-                          <button
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             onClick={() => startEdit(corpus)}
-                            className="p-1 text-content-tertiary hover:text-accent-main transition-none"
                             title="Edit"
                           >
                             <Edit3 className="w-3 h-3" />
-                          </button>
+                          </Button>
                           {isPendingDelete ? (
                             <div className="flex items-center gap-1">
-                              <button
+                              <Button
+                                variant="danger"
+                                size="sm"
                                 onClick={() => handleDelete(corpus.corpus_id)}
                                 disabled={isDeleting}
-                                className="px-1.5 py-0.5 text-[9px] font-bold tracking-widest text-error border border-error hover:bg-error hover:text-bg-base transition-none uppercase disabled:opacity-60 disabled:cursor-wait"
+                                className="font-bold tracking-widest uppercase text-[9px] disabled:cursor-wait"
                               >
                                 {isDeleting ? "Deleting…" : "Confirm"}
-                              </button>
-                              <button
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
                                 onClick={() => setDeleteConfirmId(null)}
                                 disabled={isDeleting}
-                                className="px-1.5 py-0.5 text-[9px] font-bold tracking-widest text-content-tertiary border border-border-minimal hover:border-content-secondary transition-none uppercase disabled:opacity-40"
+                                className="font-bold tracking-widest uppercase text-[9px]"
                               >
                                 No
-                              </button>
+                              </Button>
                             </div>
                           ) : (
-                            <button
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               onClick={() =>
                                 setDeleteConfirmId(corpus.corpus_id)
                               }
-                              className="p-1 text-content-tertiary hover:text-error transition-none"
+                              className="hover:text-red-400 hover:bg-red-500/10"
                               title="Delete corpus"
                               aria-label="Delete corpus"
                             >
                               <Trash2 className="w-3 h-3" />
-                            </button>
+                            </Button>
                           )}
                         </div>
                       )}
