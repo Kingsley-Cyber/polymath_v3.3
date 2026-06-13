@@ -40,6 +40,22 @@ export function ChatWindow() {
   const isEmptyState = conversationMessages.length === 0 && !isLoading;
   const corpusKey = selectedCorpusIds.slice().sort().join(",");
 
+  // Has the streaming response produced anything renderable yet?
+  const hasStreamingOutput =
+    !!streamingContent ||
+    !!streamingThinking ||
+    streamingTraceEvents.length > 0 ||
+    streamingToolActivity.length > 0 ||
+    streamingProcessTimeline.length > 0;
+  // The request is in flight but nothing has rendered yet — covers BOTH the
+  // pre-stream retrieval phase (isLoading) AND the gap after the stream opens
+  // but before the first token (isStreaming && no output). Without this second
+  // case the UI went blank for several seconds, then the answer "spawned".
+  const showWorkingIndicator = (isLoading || isStreaming) && !hasStreamingOutput;
+  const workingLabel = isStreaming
+    ? "Generating answer…"
+    : "Searching your library…";
+
   useEffect(() => {
     let cancelled = false;
     setGraphSuggestions([]);
@@ -216,12 +232,7 @@ export function ChatWindow() {
         ))}
 
         {/* Streaming message */}
-        {isStreaming &&
-          (streamingContent ||
-            streamingThinking ||
-            streamingTraceEvents.length > 0 ||
-            streamingToolActivity.length > 0 ||
-            streamingProcessTimeline.length > 0) && (
+        {isStreaming && hasStreamingOutput && (
           <MessageBubble
             message={{
               id: "streaming",
@@ -237,12 +248,16 @@ export function ChatWindow() {
           />
         )}
 
-        {/* Loading indicator */}
-        {isLoading && !isStreaming && (
-          <div className="flex items-center gap-2 px-4 py-6">
-            <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-            <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-            <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+        {/* Working indicator — stays visible from submit through the
+            time-to-first-token gap so the UI is never blank mid-query. */}
+        {showWorkingIndicator && (
+          <div className="flex items-center gap-2.5 px-4 py-6" aria-live="polite">
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+              <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+              <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+            </div>
+            <span className="text-[12px] text-content-tertiary">{workingLabel}</span>
           </div>
         )}
 
