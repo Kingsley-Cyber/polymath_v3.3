@@ -291,23 +291,49 @@ async def run_apply(corpus_id: str, decisions: set[str], limit: int | None) -> s
                     applied += 1
                     if applied % 500 == 0:
                         print(f"  applied {applied}/{len(props)}")
-        print(f"APPLIED {applied} merges under run {run}")
+        cleared = await invalidate_caches(db, corpus_id)
+        await db[MERGE_LOG].update_one(
+            {"merge_run": run, "kind": "run_header"},
+            {"$set": {"applied": applied, "caches_cleared": cleared,
+                      "finished_at": datetime.now(timezone.utc)}},
+        )
+        print(f"APPLIED {applied} merges under run {run}; caches cleared: {cleared}")
         return run
     finally:
         await drv.close()
         mc.close()
 
 
+async def invalidate_caches(db, corpus_id: str) -> dict:
+    """Phase 6 — corpus_change_signature is a hash of doc_ids+updated_at, so it
+    does NOT change when entities merge. Merging restructures the graph, so the
+    derived caches are stale and must be dropped to force recompute from the
+    merged graph on the next read (brain-view self-heals via _kick_cache_rebuild).
+    The in-memory brain-view cache (routers/graph) rebuilds on demand."""
+    cleared = {}
+    for coll in ("graph_metrics_cache", "graph_domain_cache"):
+        try:
+            r = await db[coll].delete_many({"corpus_id": corpus_id})
+            cleared[coll] = r.deleted_count
+        except Exception as exc:  # noqa: BLE001
+            cleared[coll] = f"error: {exc!r}"
+    return cleared
+
+
 async def run_undo(run: str) -> int:
     mc, db = _mongo()
     drv = _driver()
     try:
+        header = await db[MERGE_LOG].find_one({"merge_run": run, "kind": "run_header"})
         snaps = [d async for d in db[MERGE_LOG].find({"merge_run": run, "kind": "merge"})]
         n = 0
         async with drv.session() as sess:
             for snap in reversed(snaps):  # reverse application order
                 await _undo_one(sess, snap)
                 n += 1
+        if header and header.get("corpus_id"):
+            cleared = await invalidate_caches(db, header["corpus_id"])
+            print(f"caches cleared after undo: {cleared}")
         print(f"UNDID {n} merges from run {run}")
         return n
     finally:

@@ -27,6 +27,8 @@ import logging
 import re
 from collections import Counter
 
+from services.graph.entity_dedup.resolve import redirect, resolve_entity_ids
+
 logger = logging.getLogger(__name__)
 
 # Very small stop-word list for the entity-name matcher. We don't want to match
@@ -861,7 +863,12 @@ async def find_gaps(
         """
 
         async with driver.session() as session:
-            result = await session.run(cypher, entity_ids=entity_ids)
+            # Phase 7 — follow any merged (tombstoned) seed id to its survivor
+            # so dedup'd fragments don't read as missing-edge endpoints. No-op
+            # when no seed has been merged (mapping is empty).
+            _redir = await resolve_entity_ids(session, entity_ids)
+            _eids = redirect(entity_ids, _redir) if _redir else entity_ids
+            result = await session.run(cypher, entity_ids=_eids)
             async for row in result:
                 row_dict = dict(row)
                 row_dict["gap_type"] = "missing_edge"
