@@ -127,7 +127,7 @@ export function ThinkingEffortSelector() {
         // bottom-full — pops the panel UP (the selector now lives in the
         // ChatInput orchestration row, which is near the bottom of the
         // viewport). Top-full would clip against the page edge.
-        <div className="absolute bottom-full right-0 mb-1 w-64 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-8rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] z-[60] p-1 shadow-xl rounded">
+        <div className="fixed left-2 right-2 bottom-36 z-[100] w-auto max-h-[calc(100dvh-11rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] p-1 shadow-xl rounded sm:absolute sm:left-auto sm:right-0 sm:bottom-full sm:mb-1 sm:w-64 sm:max-w-[calc(100vw-1rem)] sm:max-h-[calc(100dvh-8rem)]">
           <div className="text-[9px] font-bold tracking-widest uppercase text-content-tertiary px-2 py-1.5 border-b border-border-minimal mb-1">
             Thinking Effort
           </div>

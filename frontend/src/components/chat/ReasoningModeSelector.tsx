@@ -63,7 +63,7 @@ export function ReasoningModeSelector() {
       </button>
 
       {isOpen && (
-        <div className="absolute top-full right-0 mt-1 w-80 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-7rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] z-[60] p-1 shadow-xl rounded">
+        <div className="fixed left-2 right-2 top-20 z-[90] w-auto max-h-[calc(100dvh-6rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] p-1 shadow-xl rounded sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-1 sm:w-80 sm:max-w-[calc(100vw-1rem)] sm:max-h-[calc(100dvh-7rem)]">
           <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-border-minimal mb-1">
             <div className="text-[9px] font-bold tracking-widest uppercase text-content-tertiary">
               Reasoning Mode (for next send)

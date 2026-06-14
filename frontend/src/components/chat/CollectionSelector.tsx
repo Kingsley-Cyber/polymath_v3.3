@@ -93,7 +93,7 @@ export function CollectionSelector({
       </button>
 
       {isOpen && (
-        <div className="absolute top-full right-0 z-[60] mt-1 w-64 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-7rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] animate-fade-in font-mono shadow-xl rounded">
+        <div className="fixed left-2 right-2 top-20 z-[90] w-auto max-h-[calc(100dvh-6rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] animate-fade-in font-mono shadow-xl rounded sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-1 sm:w-64 sm:max-w-[calc(100vw-1rem)] sm:max-h-[calc(100dvh-7rem)]">
           {/* Header */}
           <div className="flex items-center justify-between px-3 py-2 border-b border-border-minimal bg-bg-base">
             <span className="text-[10px] font-bold tracking-widest uppercase text-content-primary">

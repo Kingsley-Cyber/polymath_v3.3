@@ -672,7 +672,7 @@ function App() {
             </div>
           </div>
 
-          <div className="flex w-full sm:w-auto items-center gap-1.5 sm:gap-3 overflow-x-auto sm:overflow-visible custom-scrollbar pb-1 sm:pb-0 sm:flex-wrap sm:justify-end">
+          <div className="flex w-full sm:w-auto items-center gap-1.5 sm:gap-3 flex-wrap overflow-visible pb-1 sm:pb-0 sm:justify-end">
             {/* Per-query corpus / retrieval selectors stay in the header. */}
             <CorpusMultiSelect />
             <div className="hidden sm:block h-4 w-px bg-border-minimal" />
@@ -707,7 +707,7 @@ function App() {
         </div>
 
         {/* Input Area - Command Line Interface */}
-        <div className="shrink-0 p-2 sm:p-4 bg-bg-base border-t border-border-minimal z-10">
+        <div className="shrink-0 p-2 sm:p-4 bg-bg-base border-t border-border-minimal z-50">
           <div className="max-w-7xl mx-auto">
             <ChatInput
               onSend={handleSend}

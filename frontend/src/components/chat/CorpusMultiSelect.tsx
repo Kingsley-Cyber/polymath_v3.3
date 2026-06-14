@@ -64,7 +64,7 @@ export function CorpusMultiSelect() {
       </button>
 
       {isOpen && (
-        <div className="absolute top-full right-0 mt-1 w-64 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-7rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] z-[60] p-1 shadow-xl rounded">
+        <div className="fixed left-2 right-2 top-20 z-[90] w-auto max-h-[calc(100dvh-6rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] p-1 shadow-xl rounded sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-1 sm:w-64 sm:max-w-[calc(100vw-1rem)] sm:max-h-[calc(100dvh-7rem)]">
           <div className="text-[9px] font-bold tracking-widest uppercase text-content-tertiary px-2 py-1.5 border-b border-border-minimal mb-1 flex justify-between">
             <span>Corpus Scoping</span>
             {selectedCount > 0 && (

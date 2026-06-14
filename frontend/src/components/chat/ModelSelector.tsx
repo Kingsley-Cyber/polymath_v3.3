@@ -198,14 +198,14 @@ export function ModelSelector() {
 
       {isOpen && (
         <div
-          className="absolute bottom-full right-0 mb-2 w-80 max-w-[calc(100vw-1rem)] max-h-[calc(100vh-7rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] z-[80] p-1 font-mono shadow-xl rounded origin-bottom-right"
+          className="fixed left-2 right-2 bottom-36 z-[110] w-auto max-h-[calc(100dvh-11rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] p-1 font-mono shadow-xl rounded origin-bottom sm:absolute sm:left-auto sm:right-0 sm:bottom-full sm:mb-2 sm:w-80 sm:max-w-[calc(100vw-1rem)] sm:max-h-[calc(100dvh-7rem)] sm:origin-bottom-right"
           data-testid="model-selector-dropdown"
         >
           <div className="text-[9px] font-bold tracking-widest uppercase text-content-secondary px-2 py-1.5 border-b border-border-minimal mb-1">
             Select Engine
           </div>
 
-          <div className="max-h-[calc(100vh-11rem)] overflow-y-auto custom-scrollbar flex flex-col gap-1 pr-0.5">
+          <div className="max-h-[calc(100dvh-14rem)] sm:max-h-[calc(100dvh-11rem)] overflow-y-auto custom-scrollbar flex flex-col gap-1 pr-0.5">
             {totalEnabled === 0 ? (
               <div
                 className="flex flex-col items-center gap-2 px-2 py-4 text-center"
