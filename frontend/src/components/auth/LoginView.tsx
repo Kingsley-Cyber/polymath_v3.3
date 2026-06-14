@@ -150,7 +150,7 @@ export function LoginView() {
                   autoFocus
                   spellCheck={false}
                   className="w-full bg-[var(--bg-base)] border border-[var(--border-subtle)] py-2.5 pl-14 pr-3 text-sm text-[var(--text-primary)] font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-primary)] transition-colors"
-                  placeholder="admin"
+                  placeholder="username"
                 />
               </div>
             </div>
@@ -172,7 +172,7 @@ export function LoginView() {
                   autoComplete="current-password"
                   spellCheck={false}
                   className="w-full bg-[var(--bg-base)] border border-[var(--border-subtle)] py-2.5 pl-14 pr-3 text-sm text-[var(--text-primary)] font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-primary)] transition-colors"
-                  placeholder="••••••••"
+                  placeholder="password"
                 />
               </div>
             </div>
