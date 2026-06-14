@@ -71,6 +71,11 @@ _CHAT_COVERAGE_SOURCE_CAP = 8
 # disciplines instead of clustering on the reranker's favorite domain. Only
 # enforced when search_mode == "global" and chunks carry a domain label.
 _CHAT_COVERAGE_DOMAIN_CAP = 3
+# Global/overview queries should use more of the (often 30+ doc) retrieval pool
+# than a focused query — widen the coverage budget AND the distinct-doc cap for
+# global mode so an overview answer spans more documents/domains. Local unaffected.
+# (Eval: overview pools held ~35 docs but answers used only 6-7 at the default cap.)
+_GLOBAL_OVERVIEW_BUDGET = 12
 # Cross-model fallback for the in-process stream retry: when the primary synthesis
 # model fails BEFORE producing any content (e.g. a lapsed Ollama Cloud model 500s),
 # retry once on this known-good backup so the answer is never blank. litellm v1.60
@@ -2292,6 +2297,12 @@ async def _enforce_chat_query_coverage(
     # no effect). source_cap then caps distinct docs within this budget.
     _base_budget = int(final_top_k or len(base_sources) or 8)
     max_sources = max(_base_budget, int(source_cap or 0))
+    # Overview/global queries span more of the pool than focused queries: widen both
+    # the chunk budget and the distinct-doc cap so the final packet uses more docs
+    # (still ≤ _CHAT_COVERAGE_DOMAIN_CAP per domain). Local mode is unaffected.
+    if str(search_mode or "").lower() == "global":
+        max_sources = max(max_sources, _GLOBAL_OVERVIEW_BUDGET)
+        source_cap = max(int(source_cap or 0), _GLOBAL_OVERVIEW_BUDGET)
     merged, added, selector_meta = _select_chat_coverage_sources(
         base_sources,
         support_sources,
