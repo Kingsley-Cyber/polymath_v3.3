@@ -396,6 +396,13 @@ async def test_phase_order_deep_mode():
             "parse", "chunk", "chunk_checkpoint", "ghosts_parallel",
             "mongo_write", "embed", "qdrant_write", "neo4j_write",
         ]
+        qdrant_updates = [
+            call.kwargs
+            for call in m["update_state"].await_args_list
+            if call.kwargs.get("qdrant_written") is True
+        ]
+        assert qdrant_updates
+        assert qdrant_updates[-1]["summaries_indexed"] is True
     finally:
         m["stop_all"]()
 
@@ -499,6 +506,65 @@ async def test_ghost_a_skip_on_retry_reads_mongo_summaries():
     assert len(summaries) == 1
     assert summaries[0].summary == "Previously computed summary from a prior run."
     assert ghost_b_out is None  # use_neo4j off
+
+
+@pytest.mark.asyncio
+async def test_ghost_a_qdrant_written_without_summaries_reconstructs_for_reindex():
+    """qdrant_written only proves child vectors landed.
+
+    If summaries_indexed is false, Ghost A must still return Mongo-stored
+    summaries so the Qdrant phase can repair orphaned summary points.
+    """
+    doc_id, corpus_id = "doc-summary-orphan", "c" * 36
+    parents = [_parent(doc_id, corpus_id)[0]]
+    children = [parents[0].children[0]]
+
+    existing = {
+        "doc_id": doc_id,
+        "corpus_id": corpus_id,
+        "write_state": {
+            "mongo_written": True,
+            "qdrant_written": True,
+            "summaries_indexed": False,
+            "neo4j_written": False,
+        },
+        "parent_chunks": [{
+            "parent_id": parents[0].parent_id,
+            "summary": "Summary exists in Mongo but not Qdrant.",
+        }],
+    }
+    ws = WriteState(**existing["write_state"])
+    cfg = IngestionConfig(
+        use_neo4j=False,
+        chunk_summarization=True,
+        target_qdrant_collections=["naive", "hrag"],
+    )
+
+    summarize_mock = AsyncMock()
+    summary_check = AsyncMock(return_value=False)
+    with patch.object(worker, "summarize_parents", summarize_mock), \
+         patch.object(worker, "_qdrant_has_summary_points", summary_check), \
+         patch.object(worker.settings, "NEO4J_ENABLED", True):
+        summaries, ghost_b_out = await worker._run_ghosts_parallel(
+            config=cfg,
+            parents=parents,
+            children=children,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            model="m",
+            db=MagicMock(),
+            qdrant_client=MagicMock(),
+            neo4j_driver=MagicMock(),
+            existing_doc=existing,
+            ws=ws,
+        )
+
+    assert summarize_mock.await_count == 0
+    assert summary_check.await_count == 1
+    assert summaries is not None
+    assert summaries[0].summary == "Summary exists in Mongo but not Qdrant."
+    assert ws.summaries_indexed is False
+    assert ghost_b_out is None
 
 
 @pytest.mark.asyncio

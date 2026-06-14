@@ -43,6 +43,29 @@ def test_deep_poll_status_waits_for_neo4j_after_qdrant():
     assert progress["stage"] == "graph_extracting"
 
 
+def test_deep_poll_status_waits_for_summary_indexing_after_qdrant():
+    progress = _resolve_ingest_progress(
+        {
+            "ingestion_config": {
+                **DEEP_CONFIG,
+                "chunk_summarization": True,
+            },
+            "write_state": {
+                "mongo_written": True,
+                "qdrant_written": True,
+                "summaries_indexed": False,
+                "neo4j_written": False,
+                "verified": None,
+            },
+        },
+        neo4j_enabled=True,
+    )
+
+    assert progress["status"] == "processing"
+    assert progress["stage"] == "summary_indexing"
+    assert progress["summaries_indexed"] is False
+
+
 def test_deep_poll_status_done_only_after_verify_passes():
     progress = _resolve_ingest_progress(
         {

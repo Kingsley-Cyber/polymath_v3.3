@@ -25,6 +25,7 @@ from services.ingestion.section_classifier import NOISY_KINDS
 
 logger = logging.getLogger(__name__)
 _HRAG_CHILD_TIERS = ("tier_a", "tier_b", "tier_b_plus")
+_SUMMARY_QDRANT_KINDS = ("naive", "hrag")
 
 
 async def _expected_child_count(
@@ -49,6 +50,39 @@ async def _expected_child_count(
     if collection_kind == "hrag":
         query["source_tier"] = {"$in": list(_HRAG_CHILD_TIERS)}
     return int(await db["chunks"].count_documents(query))
+
+
+async def _expected_summary_count(
+    db: AsyncIOMotorDatabase,
+    *,
+    doc_id: str,
+    corpus_id: str,
+) -> int:
+    """Return Mongo parent summaries that should have Qdrant summary points."""
+    projection = {"_id": 0, "parent_id": 1, "summary": 1, "chunk_kind": 1}
+    parents = await db["parent_chunks"].find(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        projection,
+    ).to_list(length=None)
+    if not parents:
+        doc = await db["documents"].find_one(
+            {"doc_id": doc_id, "corpus_id": corpus_id},
+            {
+                "_id": 0,
+                "parent_chunks.parent_id": 1,
+                "parent_chunks.summary": 1,
+                "parent_chunks.chunk_kind": 1,
+            },
+        )
+        parents = (doc or {}).get("parent_chunks", []) or []
+    count = 0
+    for parent in parents:
+        kind = parent.get("chunk_kind")
+        if kind in NOISY_KINDS:
+            continue
+        if str(parent.get("summary") or "").strip():
+            count += 1
+    return count
 
 
 async def _expected_qdrant_texts(
@@ -278,6 +312,45 @@ async def verify_ingest(
             errors.append(
                 f"mismatch: expected={expected} child vectors but "
                 f"{col} has {qcnt} child vectors"
+            )
+
+    # 3a. Summary breadth tier count. Child-vector counts intentionally filter
+    # chunk_type=child, so they cannot detect a missing parent-summary lane.
+    expected_summary_count = await _expected_summary_count(
+        db, doc_id=doc_id, corpus_id=corpus_id
+    )
+    for kind in [k for k in target_qdrant_collections if k in _SUMMARY_QDRANT_KINDS]:
+        col = _col_for_corpus(corpus_id, kind)
+        try:
+            res = await _with_retries(
+                lambda col=col: qdrant.count(
+                    collection_name=col,
+                    count_filter=qmodels.Filter(
+                        must=[
+                            qmodels.FieldCondition(
+                                key="doc_id",
+                                match=qmodels.MatchValue(value=doc_id),
+                            ),
+                            qmodels.FieldCondition(
+                                key="chunk_type",
+                                match=qmodels.MatchValue(value="summary"),
+                            ),
+                        ]
+                    ),
+                    exact=True,
+                )
+            )
+            q_summary_count = int(res.count)
+        except Exception as exc:
+            errors.append(
+                f"qdrant.summary_count({col}): check failed after retries — "
+                f"{type(exc).__name__}: {exc}"
+            )
+            continue
+        if q_summary_count != expected_summary_count:
+            errors.append(
+                f"mismatch: expected={expected_summary_count} summary vectors but "
+                f"{col} has {q_summary_count} summary vectors"
             )
 
     # 3b. Payload text contract: Qdrant must carry full canonical text with

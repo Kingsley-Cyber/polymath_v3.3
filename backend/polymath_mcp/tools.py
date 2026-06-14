@@ -1383,13 +1383,26 @@ def _summarize_write_state(doc: dict[str, Any]) -> str:
         return "failed_verify"
     mongo_done = bool(ws.get("mongo_written"))
     qdrant_done = bool(ws.get("qdrant_written"))
+    cfg = doc.get("ingestion_config") or doc.get("default_ingestion_config") or {}
+    summary_required = bool(
+        cfg.get("chunk_summarization")
+        and any(
+            k in ("naive", "hrag")
+            for k in (cfg.get("target_qdrant_collections") or [])
+        )
+    )
+    summaries_indexed_raw = ws.get("summaries_indexed")
+    summaries_done = (
+        not summary_required
+        or bool(summaries_indexed_raw)
+        or (summaries_indexed_raw is None and qdrant_done)
+    )
     # use_neo4j is stored on the frozen doc config — honor it so a corpus
     # without graph extraction doesn't get stuck in "processing" forever.
-    cfg = doc.get("ingestion_config") or doc.get("default_ingestion_config") or {}
     needs_neo4j = bool(cfg.get("use_neo4j"))
     neo4j_done = (not needs_neo4j) or bool(ws.get("neo4j_written"))
 
-    if mongo_done and qdrant_done and neo4j_done:
+    if mongo_done and qdrant_done and summaries_done and neo4j_done:
         return "complete"
     if mongo_done or qdrant_done or ws.get("neo4j_written"):
         return "processing"
@@ -1750,6 +1763,7 @@ async def polymath_get_ingest_status(
         "write_state": {
             "mongo_written": bool(ws.get("mongo_written")),
             "qdrant_written": bool(ws.get("qdrant_written")),
+            "summaries_indexed": bool(ws.get("summaries_indexed")),
             "neo4j_written": bool(ws.get("neo4j_written")),
             "verified": ws.get("verified"),
             "warnings": ws.get("warnings") or [],

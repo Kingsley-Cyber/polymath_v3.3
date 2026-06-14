@@ -212,6 +212,23 @@ def test_summarize_write_state_complete_without_neo4j():
     assert mcp_tools._summarize_write_state(doc) == "complete"
 
 
+def test_summarize_write_state_waits_for_required_summaries():
+    doc = {
+        "write_state": {
+            "mongo_written": True,
+            "qdrant_written": True,
+            "summaries_indexed": False,
+            "neo4j_written": False,
+        },
+        "ingestion_config": {
+            "use_neo4j": False,
+            "chunk_summarization": True,
+            "target_qdrant_collections": ["naive", "hrag"],
+        },
+    }
+    assert mcp_tools._summarize_write_state(doc) == "processing"
+
+
 def test_summarize_write_state_complete_with_neo4j():
     doc = {
         "write_state": {

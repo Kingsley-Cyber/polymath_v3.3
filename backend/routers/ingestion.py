@@ -370,12 +370,22 @@ def _resolve_ingest_progress(
     cfg = doc.get("ingestion_config") or {}
     target_qdrant_collections = cfg.get("target_qdrant_collections") or []
     qdrant_required = bool(target_qdrant_collections)
+    summary_required = bool(
+        cfg.get("chunk_summarization")
+        and any(k in ("naive", "hrag") for k in target_qdrant_collections)
+    )
     if neo4j_enabled is None:
         neo4j_enabled = bool(get_settings().NEO4J_ENABLED)
     neo4j_required = bool(cfg.get("use_neo4j")) and neo4j_enabled
 
     mongo_done = bool(ws_raw.get("mongo_written", False))
     qdrant_done = bool(ws_raw.get("qdrant_written", False))
+    summaries_indexed_raw = ws_raw.get("summaries_indexed")
+    summaries_indexed = (
+        bool(summaries_indexed_raw)
+        if summaries_indexed_raw is not None
+        else qdrant_done
+    )
     neo4j_done = bool(ws_raw.get("neo4j_written", False))
     verified = ws_raw.get("verified")
     verify_errors = ws_raw.get("verify_errors", []) or []
@@ -383,6 +393,7 @@ def _resolve_ingest_progress(
     error = doc.get("error")
 
     required_qdrant_done = (not qdrant_required) or qdrant_done
+    required_summary_done = (not summary_required) or summaries_indexed
     required_neo4j_done = (not neo4j_required) or neo4j_done
 
     if error:
@@ -392,6 +403,7 @@ def _resolve_ingest_progress(
     elif (
         mongo_done
         and required_qdrant_done
+        and required_summary_done
         and required_neo4j_done
         and verified is True
     ):
@@ -405,12 +417,20 @@ def _resolve_ingest_progress(
         stage = "verify_failed"
     elif status == "done":
         stage = "verified"
-    elif mongo_done and required_qdrant_done and required_neo4j_done:
+    elif (
+        mongo_done
+        and required_qdrant_done
+        and required_summary_done
+        and required_neo4j_done
+    ):
         stage = "verifying"
+    elif summary_required and mongo_done and qdrant_done and not summaries_indexed:
+        stage = "summary_indexing"
     elif (
         neo4j_required
         and mongo_done
         and required_qdrant_done
+        and required_summary_done
         and not neo4j_done
     ):
         stage = "graph_extracting"
@@ -426,6 +446,7 @@ def _resolve_ingest_progress(
         "stage": stage,
         "mongo_done": mongo_done,
         "qdrant_done": qdrant_done,
+        "summaries_indexed": summaries_indexed,
         "neo4j_done": neo4j_done,
         "verified": verified,
         "verify_errors": verify_errors,
@@ -1330,6 +1351,7 @@ async def stream_job_progress(
                     "write_state": {
                         "mongo_written": progress["mongo_done"],
                         "qdrant_written": progress["qdrant_done"],
+                        "summaries_indexed": progress["summaries_indexed"],
                         "neo4j_written": progress["neo4j_done"],
                         "warnings": progress["warnings"],
                         "verified": progress["verified"],

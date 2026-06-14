@@ -289,6 +289,7 @@ class WriteState(BaseModel):
 
     mongo_written: bool = False
     qdrant_written: bool = False
+    summaries_indexed: bool = False
     neo4j_written: bool = False
     warnings: list[str] = Field(default_factory=list)
     verified: bool | None = None

@@ -158,6 +158,77 @@ _HRAG_TIERS = (
     SourceTier.tier_b.value,
     SourceTier.tier_b_plus.value,
 )
+_SUMMARY_QDRANT_KINDS = ("naive", "hrag")
+
+
+def _summary_target_kinds(config: IngestionConfig) -> list[str]:
+    """Return Qdrant collections that carry parent-summary points."""
+    targets = list(getattr(config, "target_qdrant_collections", None) or [])
+    return [kind for kind in targets if kind in _SUMMARY_QDRANT_KINDS]
+
+
+def _summarizable_parents(parents) -> list:
+    """Parents that Ghost A is expected to summarize."""
+    return [
+        p
+        for p in parents
+        if not should_skip_ghost_b(
+            getattr(p, "chunk_kind", None) or ChunkKind.BODY
+        )
+    ]
+
+
+async def _qdrant_summary_counts(
+    qdrant_client: AsyncQdrantClient,
+    *,
+    corpus_id: str,
+    doc_id: str,
+    target_kinds: list[str],
+) -> dict[str, int]:
+    """Count summary points for a document in each summary-bearing collection."""
+    from qdrant_client import models as qmodels
+
+    counts: dict[str, int] = {}
+    for kind in target_kinds:
+        res = await qdrant_client.count(
+            collection_name=qdrant_writer._col_for_corpus(corpus_id, kind),
+            count_filter=qmodels.Filter(
+                must=[
+                    qmodels.FieldCondition(
+                        key="doc_id", match=qmodels.MatchValue(value=doc_id)
+                    ),
+                    qmodels.FieldCondition(
+                        key="chunk_type",
+                        match=qmodels.MatchValue(value="summary"),
+                    ),
+                ]
+            ),
+            exact=True,
+        )
+        counts[kind] = int(res.count)
+    return counts
+
+
+async def _qdrant_has_summary_points(
+    qdrant_client: AsyncQdrantClient,
+    *,
+    corpus_id: str,
+    doc_id: str,
+    expected_count: int,
+    target_kinds: list[str],
+) -> bool:
+    """Return True when every summary target has the expected summary count."""
+    if not target_kinds:
+        return True
+    counts = await _qdrant_summary_counts(
+        qdrant_client,
+        corpus_id=corpus_id,
+        doc_id=doc_id,
+        target_kinds=target_kinds,
+    )
+    return all(count == expected_count for count in counts.values())
+
+
 _DUPLICATE_DOC_THRESHOLD = 0.90
 _DUPLICATE_TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9_'-]{2,}")
 _DUPLICATE_STOP_WORDS = {
@@ -587,17 +658,47 @@ async def _run_ghosts_parallel(
         existing_parent_chunks = (existing_doc or {}).get("parent_chunks") or []
     summaries_from_mongo: list[SummaryResult] | None = None
     need_ghost_a = config.chunk_summarization
+    summary_targets = _summary_target_kinds(config)
+    summarizable_parents = _summarizable_parents(parents)
+    expected_summary_count = len(summarizable_parents)
 
-    if need_ghost_a and ws.qdrant_written:
-        # Summaries already embedded into Qdrant on a prior run; nothing to do.
-        need_ghost_a = False
-    elif need_ghost_a and existing_parent_chunks:
+    if need_ghost_a and ws.summaries_indexed:
+        # This is the only safe fast-skip: children may already be in Qdrant
+        # while summaries are absent, so qdrant_written is not enough.
+        try:
+            if await _qdrant_has_summary_points(
+                qdrant_client,
+                corpus_id=corpus_id,
+                doc_id=doc_id,
+                expected_count=expected_summary_count,
+                target_kinds=summary_targets,
+            ):
+                need_ghost_a = False
+                logger.info(
+                    "Ghost A skipped (summaries indexed) doc=%s corpus=%s parents=%d",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    expected_summary_count,
+                )
+            else:
+                ws.summaries_indexed = False
+                logger.warning(
+                    "phase=ghost_a_resume reason=summary_points_missing doc=%s corpus=%s expected=%d",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    expected_summary_count,
+                )
+        except Exception as exc:  # noqa: BLE001 - resume probe is best-effort
+            ws.summaries_indexed = False
+            logger.warning(
+                "phase=ghost_a_summary_check_failed doc=%s corpus=%s: %s",
+                doc_id[:12],
+                corpus_id[:8],
+                exc,
+            )
+
+    if need_ghost_a and existing_parent_chunks:
         existing_by_parent_id = {p.get("parent_id"): p for p in existing_parent_chunks}
-        summarizable_parents = [
-            p
-            for p in parents
-            if not should_skip_ghost_b(getattr(p, "chunk_kind", None) or ChunkKind.BODY)
-        ]
         all_filled = all(
             (
                 existing_by_parent_id.get(p.parent_id, {}).get("summary")
@@ -611,11 +712,28 @@ async def _run_ghosts_parallel(
             )
             if len(summaries_from_mongo) == len(summarizable_parents):
                 need_ghost_a = False
+                try:
+                    ws.summaries_indexed = await _qdrant_has_summary_points(
+                        qdrant_client,
+                        corpus_id=corpus_id,
+                        doc_id=doc_id,
+                        expected_count=len(summaries_from_mongo),
+                        target_kinds=summary_targets,
+                    )
+                except Exception as exc:  # noqa: BLE001 - reindex path is safe
+                    ws.summaries_indexed = False
+                    logger.warning(
+                        "phase=ghost_a_reconstruct_summary_check_failed doc=%s corpus=%s: %s",
+                        doc_id[:12],
+                        corpus_id[:8],
+                        exc,
+                    )
                 logger.info(
-                    "Ghost A skipped (resume) doc=%s corpus=%s parents=%d",
+                    "Ghost A skipped (resume) doc=%s corpus=%s parents=%d summaries_indexed=%s",
                     doc_id[:12],
                     corpus_id[:8],
                     len(summaries_from_mongo),
+                    ws.summaries_indexed,
                 )
             else:
                 summaries_from_mongo = None  # partial reconstruct → rerun
@@ -2358,6 +2476,14 @@ async def run_ingest_job(
     # resume path trusted the flag forever). Cheap exact count vs the
     # vector-eligible children; any mismatch reruns this phase for the doc
     # (upserts are idempotent — point ids are md5(chunk_id)).
+    summary_targets = _summary_target_kinds(ingestion_config)
+    summary_gate_required = bool(
+        ingestion_config.chunk_summarization
+        and summary_targets
+        and _summarizable_parents(parents)
+    )
+    summary_write_required = bool(summary_targets and summaries)
+    expected_summary_points = len(summaries or [])
     if ws.qdrant_written:
         try:
             from qdrant_client import models as qmodels
@@ -2402,7 +2528,48 @@ async def run_ingest_job(
                 cid8,
                 exc,
             )
-    if not ws.qdrant_written:
+
+    if ws.qdrant_written and summary_write_required:
+        try:
+            counts = await _qdrant_summary_counts(
+                qdrant_client,
+                corpus_id=corpus_id,
+                doc_id=doc_id,
+                target_kinds=summary_targets,
+            )
+            if all(count == expected_summary_points for count in counts.values()):
+                if not ws.summaries_indexed:
+                    await mongo_writer.update_write_state(
+                        db,
+                        doc_id,
+                        corpus_id=corpus_id,
+                        summaries_indexed=True,
+                    )
+                ws.summaries_indexed = True
+            else:
+                ws.summaries_indexed = False
+                logger.warning(
+                    "phase=summary_reconcile doc=%s corpus=%s qdrant=%s expected=%d "
+                    "— re-running embed+qdrant for this doc",
+                    doc_id[:12],
+                    cid8,
+                    counts,
+                    expected_summary_points,
+                )
+        except Exception as exc:  # noqa: BLE001 - summary reconcile is best-effort
+            ws.summaries_indexed = False
+            logger.warning(
+                "phase=summary_reconcile_check_failed doc=%s corpus=%s: %s",
+                doc_id[:12],
+                cid8,
+                exc,
+            )
+
+    qdrant_phase_needed = (
+        not ws.qdrant_written
+        or (summary_write_required and not ws.summaries_indexed)
+    )
+    if qdrant_phase_needed:
         try:
             await _set_ingest_stage(
                 db=db,
@@ -2483,16 +2650,24 @@ async def run_ingest_job(
                 summary_sparse_map=summary_sparse_map,
                 facet_profile=facet_profile,
             )
+            write_updates: dict[str, Any] = {"qdrant_written": True}
+            if summary_write_required:
+                write_updates["summaries_indexed"] = True
+            elif not summary_gate_required:
+                write_updates["summaries_indexed"] = False
             await mongo_writer.update_write_state(
-                db, doc_id, corpus_id=corpus_id, qdrant_written=True
+                db, doc_id, corpus_id=corpus_id, **write_updates
             )
             ws.qdrant_written = True
+            if summary_write_required:
+                ws.summaries_indexed = True
             logger.info(
-                "phase=qdrant duration=%.2fs doc=%s corpus=%s targets=%s",
+                "phase=qdrant duration=%.2fs doc=%s corpus=%s targets=%s summaries_indexed=%s",
                 time.monotonic() - t0,
                 doc_id[:12],
                 cid8,
                 ",".join(ingestion_config.target_qdrant_collections),
+                ws.summaries_indexed,
             )
         except Exception as embed_qdrant_exc:
             # Pt 9 — capture, warn, continue. Neo4j will still write below
@@ -2715,9 +2890,11 @@ async def run_ingest_job(
             )
 
     neo4j_required = bool(ingestion_config.use_neo4j and settings.NEO4J_ENABLED)
+    summary_complete = (not summary_gate_required) or ws.summaries_indexed
     storage_complete = (
         ws.mongo_written
         and ws.qdrant_written
+        and summary_complete
         and ((not neo4j_required) or ws.neo4j_written)
     )
     verified_complete = storage_complete and ws.verified is True
@@ -2731,6 +2908,8 @@ async def run_ingest_job(
             missing.append("mongo")
         if not ws.qdrant_written:
             missing.append("qdrant")
+        if not summary_complete:
+            missing.append("summaries")
         if neo4j_required and not ws.neo4j_written:
             missing.append("neo4j")
         if ws.verified is not True:
