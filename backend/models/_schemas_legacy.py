@@ -1056,6 +1056,11 @@ class SourceChunk(BaseModel):
     # domain_type, canonical_family, entity_type (Mode A) and predicate +
     # relation_family (Mode C only). Fields default to "" / None when unknown.
     provenance: list[dict] | None = None
+    # Per-document discipline/cluster label (backfilled from graph_domain_cache,
+    # or emitted by Ghost A in future ingestion). Used by domain-aware final
+    # selection to spread BROAD-query answers across disciplines. None when the
+    # parent has not been domain-tagged.
+    domain: str | None = None
 
 
 class SourceFact(BaseModel):

@@ -180,6 +180,8 @@ async def hydrate_chunks(
                 # when missing so payload values are preserved.
                 if not chunk.language and pc.get("language"):
                     chunk.language = pc["language"]
+                if pc.get("domain") and not getattr(chunk, "domain", None):
+                    chunk.domain = pc["domain"]
                 chunk.metadata = metadata_with_facets(
                     chunk.metadata or pc.get("metadata") or {},
                     pc,

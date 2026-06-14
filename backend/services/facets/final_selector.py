@@ -21,6 +21,7 @@ class FacetCandidate:
     lanes: set[str] = field(default_factory=set)
     key: str = ""
     doc_id: str = ""
+    domain: str = ""
     junk: bool = False
     order: int = 0
 
@@ -45,6 +46,7 @@ def select_facet_final(
     max_items: int,
     lane_budget: int = 1,
     source_cap: int | None = None,
+    max_per_domain: int | None = None,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Select final context candidates using lane reservations plus score order.
 
@@ -88,9 +90,15 @@ def select_facet_final(
     selected: list[FacetCandidate] = []
     seen_keys: set[str] = set()
     seen_docs: set[str] = set()
+    domain_counts: dict[str, int] = {}
     lane_counts: dict[str, int] = {lane: 0 for lane in tracked}
 
-    def can_add(candidate: FacetCandidate, *, enforce_source_cap: bool = True) -> bool:
+    def can_add(
+        candidate: FacetCandidate,
+        *,
+        enforce_source_cap: bool = True,
+        enforce_domain_cap: bool = True,
+    ) -> bool:
         key = _candidate_key(candidate)
         if key in seen_keys or len(selected) >= max_items:
             return False
@@ -103,15 +111,26 @@ def select_facet_final(
             and len(seen_docs) >= int(source_cap)
         ):
             return False
+        domain = str(getattr(candidate, "domain", "") or "")
+        if (
+            enforce_domain_cap
+            and max_per_domain is not None
+            and domain
+            and domain_counts.get(domain, 0) >= int(max_per_domain)
+        ):
+            return False
         return True
 
-    def add(candidate: FacetCandidate) -> bool:
-        if not can_add(candidate):
+    def add(candidate: FacetCandidate, *, enforce_domain_cap: bool = True) -> bool:
+        if not can_add(candidate, enforce_domain_cap=enforce_domain_cap):
             return False
         selected.append(candidate)
         seen_keys.add(_candidate_key(candidate))
         if candidate.doc_id:
             seen_docs.add(str(candidate.doc_id))
+        domain = str(getattr(candidate, "domain", "") or "")
+        if domain:
+            domain_counts[domain] = domain_counts.get(domain, 0) + 1
         for lane in candidate.lanes & tracked_set:
             lane_counts[lane] = lane_counts.get(lane, 0) + 1
         return True
@@ -150,17 +169,16 @@ def select_facet_final(
             break
         add(candidate)
 
-    # Pass 5: relax LANE quotas only — still honor source_cap so the distinct-
-    # document ceiling is a HARD cap. (Previously this pass appended by score
-    # while ignoring source_cap, which made the cap a no-op whenever max_items
-    # exceeded it. Routing through add()/can_add keeps the cap while still
-    # filling the budget with extra chunks from already-selected documents; a
-    # corpus with fewer distinct docs than source_cap is unaffected because the
-    # cap only bites once seen_docs reaches it.)
+    # Pass 5: fill remaining budget. Still honor source_cap (hard distinct-doc
+    # ceiling) but RELAX the per-domain cap here — passes 1-4 already spread the
+    # selection across domains, so this pass tops up the chunk budget with extra
+    # chunks (from already-spread domains/docs) rather than starving the answer
+    # when only a few domains exist in the pool. source_cap stays a hard cap
+    # (was previously a no-op relaxation that ignored it entirely).
     for candidate in ranked:
         if len(selected) >= max_items:
             break
-        add(candidate)
+        add(candidate, enforce_domain_cap=False)
 
     covered = [lane for lane in missing if lane_counts.get(lane, 0) > 0]
     priority_covered = [lane for lane in priority if lane_counts.get(lane, 0) > 0]

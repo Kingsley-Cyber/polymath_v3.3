@@ -1018,6 +1018,9 @@ class RetrieverOrchestrator:
             document_anchor_results,
         )
         counts["merged_initial"] = len(merged)
+        counts["distinct_docs_merged"] = len(
+            {c.doc_id for c in merged if getattr(c, "doc_id", None)}
+        )
         _add_timing("merge", phase_started)
         if not merged:
             _log_timings("empty_after_merge", 0)
@@ -1201,8 +1204,9 @@ class RetrieverOrchestrator:
         counts["candidates"] = len(candidates)
         counts["diversity_added"] = diversity.added
         logger.info(
-            "retrieval_pool_breadth: tier=%s distinct_docs_in_pool=%d ranked=%d final_top_k=%d diversity_added=%d",
+            "retrieval_pool_breadth: tier=%s distinct_docs_premerge=%d distinct_docs_postrerank=%d ranked=%d final_top_k=%d diversity_added=%d",
             getattr(effective_tier, "value", effective_tier),
+            counts.get("distinct_docs_merged", -1),
             len(_pool_doc_ids),
             len(ranked),
             effective_final_k,

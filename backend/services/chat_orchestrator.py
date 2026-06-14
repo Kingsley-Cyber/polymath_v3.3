@@ -66,6 +66,11 @@ _CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS = 4
 _CHAT_COVERAGE_THRESHOLD = 4
 _CHAT_COVERAGE_WEAK_THRESHOLD = 2
 _CHAT_COVERAGE_SOURCE_CAP = 8
+# Per-domain cap on the final context set for BROAD (global) queries — at most
+# N chunks from any single emergent domain/cluster, so an overview answer spans
+# disciplines instead of clustering on the reranker's favorite domain. Only
+# enforced when search_mode == "global" and chunks carry a domain label.
+_CHAT_COVERAGE_DOMAIN_CAP = 3
 _CHAT_EVIDENCE_MIN_KEEP_AFTER_FILTER = 4
 _RAW_TOOL_REQUEST_MARKERS = (
     "<｜｜dsml｜｜tool_calls",
@@ -1647,7 +1652,12 @@ def _choose_chat_coverage_candidate_with_report(
         query_fit = _chat_query_fit_score(chunk, original_query, facet)
         doc_id = str(chunk.doc_id or "")
         new_doc_bonus = 4.0 if doc_id and doc_id not in existing_doc_ids else 0.0
-        final_score = (facet_score * 10.0) + (query_fit * 2.0) + float(chunk.score or 0.0) + new_doc_bonus
+        # Reranker/retrieval score enters only as a bounded tiebreaker: cap its
+        # contribution to [0, 1.6] so a single very high raw score (rerank scores
+        # are not 0-1 normalized — observed values 0.7 .. 1400+) cannot drown out
+        # facet_score (*10) and query_fit (*2), which are the grounding signals.
+        bounded_score = min(max(float(chunk.score or 0.0), 0.0), 0.8) * 2.0
+        final_score = (facet_score * 10.0) + (query_fit * 2.0) + bounded_score + new_doc_bonus
         if facet_score < _CHAT_COVERAGE_WEAK_THRESHOLD:
             # Layer-2 retention fix: the lexical facet_score scores 0 for body-only
             # semantic matches and for vector-probe lanes whose terms are the document
@@ -1867,6 +1877,7 @@ def _chat_selector_candidates(
                 lanes=_chat_source_candidate_lanes(cleaned, facets),
                 key=key,
                 doc_id=str(cleaned.doc_id or ""),
+                domain=str(getattr(cleaned, "domain", "") or ""),
                 junk=_chat_source_is_low_value(cleaned, original_query),
                 order=order,
             )
@@ -1901,6 +1912,7 @@ def _select_chat_coverage_sources(
     original_query: str,
     max_sources: int,
     source_cap: int | None = None,
+    max_per_domain: int | None = None,
 ) -> tuple[list[SourceChunk], int, dict[str, Any]]:
     max_sources = max(1, int(max_sources or len(base_sources) or 1))
     all_sources = [*base_sources, *support_sources]
@@ -1916,6 +1928,7 @@ def _select_chat_coverage_sources(
         max_items=max_sources,
         lane_budget=1,
         source_cap=source_cap or _CHAT_COVERAGE_SOURCE_CAP,
+        max_per_domain=max_per_domain,
     )
     actual_support = [
         source
@@ -2220,6 +2233,11 @@ async def _enforce_chat_query_coverage(
         original_query=original_query,
         max_sources=max_sources,
         source_cap=source_cap,
+        max_per_domain=(
+            _CHAT_COVERAGE_DOMAIN_CAP
+            if str(search_mode or "").lower() == "global"
+            else None
+        ),
     )
     actual_support = [
         source
