@@ -529,6 +529,8 @@ def _reconstruct_summaries_from_mongo(
                 corpus_id=p.corpus_id,
                 source_tier=p.source_tier,
                 summary=summary,
+                domain=ep.get("domain"),
+                topics=ep.get("topics"),
             )
         )
     return out
@@ -1143,11 +1145,12 @@ def _build_parent_dicts(
     didn't); fixing alongside the code-lane additions so retrieval / decoration
     code reading parent records gets a consistent shape.
     """
-    summary_by_parent = {s.parent_id: s.summary for s in (summaries or [])}
+    summary_by_parent = {s.parent_id: s for s in (summaries or [])}
     rows: list[dict] = []
     parent_facets = parent_facets or {}
     for p in parents:
         facet_meta = parent_facets.get(p.parent_id, {})
+        sr = summary_by_parent.get(p.parent_id)
         rows.append(
             {
                 "parent_id": p.parent_id,
@@ -1158,7 +1161,9 @@ def _build_parent_dicts(
                 "source_tier": p.source_tier,
                 "page_start": getattr(p, "page_start", None),
                 "page_end": getattr(p, "page_end", None),
-                "summary": summary_by_parent.get(p.parent_id),
+                "summary": sr.summary if sr else None,
+                "domain": sr.domain if sr else None,
+                "topics": sr.topics if sr else None,
                 "child_ids": [c.chunk_id for c in p.children],
                 "chunk_kind": getattr(p, "chunk_kind", ChunkKind.BODY),
                 "language": getattr(p, "language", None),

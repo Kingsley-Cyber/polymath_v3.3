@@ -59,7 +59,9 @@ agent_outbox/
 #  • data/ + data_eval/ are training/eval jsonl DERIVED FROM the user's
 #    personal documents — committing would publish library excerpts
 #  • fixtures hold verbatim book chunks (same leak concern)
-models/
+# Anchored to repo root: backend/models/ is Python source (Pydantic schemas),
+# NOT weights, and must stay tracked.
+/models/
 data/
 data_eval/
 scripts/local_extraction_fixtures/

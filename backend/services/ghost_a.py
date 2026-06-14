@@ -15,6 +15,7 @@ Tier routing for Qdrant writes (enforced by caller):
 """
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
 
@@ -33,15 +34,29 @@ logger = logging.getLogger(__name__)
 _SUMMARY_RETRY_ATTEMPTS = 2
 _SUMMARY_RETRY_BACKOFF_SECONDS = 1.5
 
+# Fixed domain taxonomy — mirrors scripts/backfill_parent_domains_llm.py so
+# ingest-time tags and any later backfill share one controlled vocabulary.
+_DOMAIN_TAXONOMY = [
+    "generative_ai", "machine_learning", "deep_learning", "nlp",
+    "computer_vision", "software_engineering", "web_development",
+    "data_engineering", "devops_cloud", "cybersecurity", "game_development",
+    "creative_coding", "product_design", "ux_design", "psychology",
+    "business_strategy", "research_methods", "mathematics", "other",
+]
+
 _SYSTEM = (
-    "You are a precise document summarizer. Produce a factual, dense summary "
-    "that preserves key terms, proper nouns, and technical language. "
-    "Do not add information not present in the passage."
+    "You are a precise document summarizer and classifier. First produce a "
+    "factual, dense summary that preserves key terms, proper nouns, and "
+    "technical language; do not add information not present in the passage. Then "
+    "classify the passage into exactly one domain from the taxonomy and extract "
+    "2-4 lowercase topic keywords.\nTaxonomy: " + ", ".join(_DOMAIN_TAXONOMY) + "\n"
+    'Respond with ONLY a JSON object: {"summary": "...", "domain": '
+    '"<one taxonomy value>", "topics": ["kw1", "kw2"]}.'
 )
 
 _USER = (
-    "Summarize the following passage in {max_tokens} tokens or fewer.\n\n"
-    "PASSAGE:\n{text}\n\nSUMMARY:"
+    "Summarize the following passage in {max_tokens} tokens or fewer, then "
+    "classify it. Return only the JSON object.\n\nPASSAGE:\n{text}"
 )
 
 
@@ -61,6 +76,37 @@ class SummaryResult:
     corpus_id: str
     source_tier: str
     summary: str
+    domain: str | None = None
+    topics: list[str] | None = None
+
+
+def _parse_summary_json(raw: str) -> tuple[str, str | None, list[str] | None]:
+    """Lenient parse of Ghost A's JSON output ({summary, domain, topics}).
+
+    Falls back to treating the whole string as the summary (domain/topics None)
+    so a model that ignores the JSON instruction never breaks the summary
+    pipeline — the summary tier keeps working, just untagged for that parent.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return "", None, None
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            obj = json.loads(text[start : end + 1])
+            summary = str(obj.get("summary") or "").strip()
+            if summary:
+                domain = str(obj.get("domain") or "").strip().lower().replace(" ", "_")
+                domain = domain if domain in _DOMAIN_TAXONOMY else ("other" if domain else None)
+                topics = [
+                    str(t).strip().lower()
+                    for t in (obj.get("topics") or [])
+                    if str(t).strip()
+                ][:4]
+                return summary, domain, (topics or None)
+        except Exception:
+            pass
+    return text, None, None
 
 
 async def summarize_parents(
@@ -191,13 +237,16 @@ async def summarize_parents(
                     headers=headers,
                 )
                 resp.raise_for_status()
-                summary = resp.json()["choices"][0]["message"]["content"].strip()
+                raw = resp.json()["choices"][0]["message"]["content"].strip()
+                summary, domain, topics = _parse_summary_json(raw)
                 return SummaryResult(
                     parent_id=task.parent_id,
                     doc_id=task.doc_id,
                     corpus_id=task.corpus_id,
                     source_tier=task.source_tier,
                     summary=summary,
+                    domain=domain,
+                    topics=topics,
                 )
         except Exception as exc:
             if is_fatal_provider_error(exc):

@@ -604,11 +604,11 @@ services:
       litellm:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 40s
     restart: unless-stopped
     stop_grace_period: 30s
 

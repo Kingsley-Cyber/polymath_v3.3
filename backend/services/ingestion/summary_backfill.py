@@ -135,8 +135,11 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
                                   # run always advances (thinking-model empties /
                                   # transient errors don't stall the front)
     try:
-        q = {"corpus_id": corpus_id, "$or": [{"summary": None}, {"summary": ""},
-                                             {"summary": {"$exists": False}}]}
+        # Body parents only — Ghost A intentionally skips non-body kinds
+        # (code/table/index/bibliography/toc), so those are NOT a summary gap.
+        q = {"corpus_id": corpus_id, "chunk_kind": "body",
+             "$or": [{"summary": None}, {"summary": ""},
+                     {"summary": {"$exists": False}}]}
         start_missing = await db["parent_chunks"].count_documents(q)
         print(f"generate: {start_missing} parents need summaries"
               + (f" (capped to {limit} this run)" if limit else ""))
@@ -182,6 +185,8 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
             from pymongo import UpdateOne
             ops = [UpdateOne({"parent_id": r.parent_id, "corpus_id": corpus_id},
                              {"$set": {"summary": r.summary,
+                                       "domain": getattr(r, "domain", None),
+                                       "topics": getattr(r, "topics", None),
                                        "summary_updated_at": datetime.now(timezone.utc)}})
                    for r in results]
             if ops:
