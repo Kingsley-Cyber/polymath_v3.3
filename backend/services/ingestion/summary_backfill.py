@@ -227,15 +227,52 @@ async def verify(corpus_id: str) -> dict:
         mc.close()
 
 
+async def heal_all(*, apply: bool = False) -> dict:
+    """Cross-corpus safety net: scan every corpus's summary-tier readiness and
+    flag (or repair) any that are DEGRADED/PARTIAL. This is the net that makes
+    'a corpus silently sitting with an empty breadth tier' impossible to miss —
+    run it on a schedule or post-ingest. With apply=True it auto-runs index (+
+    leaves generation to an operator, since that needs the corpus's model pool).
+    """
+    mc, db = _mongo()
+    try:
+        cids = await db["parent_chunks"].distinct("corpus_id")
+    finally:
+        mc.close()
+    print(f"scanning {len(cids)} corpora for summary-tier health...")
+    statuses: dict[str, dict] = {}
+    for cid in cids:
+        r = await verify(cid)
+        statuses[cid] = r
+        # auto-index is safe + free (no model calls): pushes any Mongo summaries
+        # that exist but were never indexed into Funnel A.
+        if apply and r["status"] != "HEALTHY" and r["with_summary_text"] > r["indexed_summary_points"]:
+            print(f"  -> auto-indexing {cid} (mongo summaries not in Funnel A)")
+            await index_existing(cid)
+            statuses[cid] = await verify(cid)
+    bad = {c: s["status"] for c, s in statuses.items() if s["status"] != "HEALTHY"}
+    print(f"\nHEAL SUMMARY: {len(statuses)} corpora | not-healthy: {len(bad)}")
+    for c, st in bad.items():
+        print(f"  {c}: {st}  (repair: --corpus {c} --generate then --index)")
+    return {"scanned": len(statuses), "not_healthy": bad}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Summary-tier backfill + readiness")
-    ap.add_argument("--corpus", required=True)
+    ap.add_argument("--corpus", help="corpus_id (required for index/generate/verify)")
+    ap.add_argument("--heal-all", action="store_true", help="scan all corpora for summary-tier health")
+    ap.add_argument("--apply-heal", action="store_true", help="with --heal-all: auto-index orphaned summaries")
     ap.add_argument("--index", action="store_true", help="index parents that have summary text")
     ap.add_argument("--generate", action="store_true", help="summarize missing parents via pool")
     ap.add_argument("--verify", action="store_true", help="readiness assertion")
     ap.add_argument("--batch", type=int, default=400)
     ap.add_argument("--limit", type=int, default=None, help="cap parents processed this run (probe)")
     args = ap.parse_args()
+    if args.heal_all:
+        asyncio.run(heal_all(apply=args.apply_heal))
+        return
+    if not args.corpus:
+        ap.error("--corpus is required for --verify / --index / --generate")
     if args.verify:
         asyncio.run(verify(args.corpus))
     if args.index:
@@ -243,7 +280,7 @@ def main() -> None:
     if args.generate:
         asyncio.run(generate(args.corpus, batch=args.batch, limit=args.limit))
     if not (args.verify or args.index or args.generate):
-        ap.error("pass at least one of --verify / --index / --generate")
+        ap.error("pass at least one of --verify / --index / --generate / --heal-all")
 
 
 if __name__ == "__main__":
