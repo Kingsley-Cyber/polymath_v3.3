@@ -176,8 +176,8 @@ export function ChatWindow() {
   // Empty state
   if (isEmptyState) {
     return (
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="text-center max-w-2xl">
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-8">
+        <div className="text-center max-w-full sm:max-w-2xl">
           <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-primary/10 flex items-center justify-center">
             <Sparkles className="w-8 h-8 text-primary" />
           </div>

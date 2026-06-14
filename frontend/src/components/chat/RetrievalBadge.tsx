@@ -201,9 +201,9 @@ export function RetrievalBadge({ message }: RetrievalBadgeProps) {
       </button>
 
       {open && (
-        <div className="process-group mt-1 w-full max-w-[528px] bg-bg-base text-[10.5px] font-mono text-content-secondary normal-case tracking-normal">
+        <div className="process-group mt-1 w-full max-w-full sm:max-w-[528px] bg-bg-base text-[10.5px] font-mono text-content-secondary normal-case tracking-normal">
           {/* ── Metadata top (small + dense) ─────────────────────── */}
-          <div className="px-2.5 py-2 grid grid-cols-[88px_1fr] gap-x-2.5 gap-y-1">
+          <div className="px-2.5 py-2 grid grid-cols-1 sm:grid-cols-[88px_1fr] gap-x-2.5 gap-y-1">
             <span className="text-content-tertiary tracking-widest uppercase text-[9.5px]">
               corpora
             </span>

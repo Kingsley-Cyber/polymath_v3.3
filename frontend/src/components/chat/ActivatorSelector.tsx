@@ -92,7 +92,7 @@ export function ActivatorSelector() {
         // `bottom-full` pops the panel ABOVE the trigger so it stays visible
         // when ChatInput is at the bottom of the viewport. With `top-full`
         // the dropdown opened DOWNWARD and got clipped by the page edge.
-        <div className="absolute bottom-full right-0 mb-1 w-72 border border-white/10 bg-[#2a2a2a] z-[60] shadow-xl rounded">
+        <div className="absolute bottom-full right-0 mb-1 w-72 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-8rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] z-[60] shadow-xl rounded">
           {/* Tabs */}
           <div className="flex border-b border-border-minimal">
             <button
@@ -120,7 +120,7 @@ export function ActivatorSelector() {
           </div>
 
           {/* List */}
-          <div className="max-h-72 overflow-y-auto custom-scrollbar p-1">
+          <div className="max-h-[min(18rem,calc(100dvh-12rem))] overflow-y-auto custom-scrollbar p-1">
             {tab === "tools" && (
               availableTools.length > 0 ? (
                 availableTools.map((tool) => {

@@ -39,7 +39,7 @@ export function ToggleBar({ className = "" }: ToggleBarProps) {
   return (
     <div
       className={`
-        flex items-center gap-2 sm:gap-4 px-1
+        flex items-center flex-wrap gap-1.5 sm:gap-4 px-1
         ${className}
       `}
     >
@@ -79,7 +79,7 @@ export function ToggleBar({ className = "" }: ToggleBarProps) {
         </span>
       )}
 
-      <div className="h-4 w-px bg-border-minimal" />
+      <div className="hidden sm:block h-4 w-px bg-border-minimal" />
       <ActivatorSelector />
     </div>
   );

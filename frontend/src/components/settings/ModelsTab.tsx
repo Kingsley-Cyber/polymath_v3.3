@@ -205,13 +205,13 @@ function PoolSection() {
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
             placeholder="base_url"
-            className="flex-1 min-w-[180px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600"
+            className="flex-1 min-w-full sm:min-w-[180px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600"
           />
           {selectedPreset?.model_dropdown_only ? (
             <select
               value={modelName}
               onChange={(e) => setModelName(e.target.value)}
-              className="flex-1 min-w-[160px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono"
+              className="flex-1 min-w-full sm:min-w-[160px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono"
             >
               {(selectedPreset.example_models || [selectedPreset.example_model]).map((m) => {
                 const value = composeModelString(provider, m);
@@ -240,7 +240,7 @@ function PoolSection() {
                 }
               }}
               placeholder="model name"
-              className="flex-1 min-w-[160px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600"
+              className="flex-1 min-w-full sm:min-w-[160px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600"
             />
           )}
           {/* Datalist suggestions surface every preset's example_models so a
@@ -260,7 +260,7 @@ function PoolSection() {
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder="api key (required)"
-            className={`flex-1 min-w-[180px] bg-[#0b0c10] text-white border rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600 ${
+            className={`flex-1 min-w-full sm:min-w-[180px] bg-[#0b0c10] text-white border rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600 ${
               apiKey.trim() ? "border-white/10" : "border-amber-500/40"
             }`}
           />
@@ -269,7 +269,7 @@ function PoolSection() {
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="label (optional)"
-            className="flex-1 min-w-[140px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600"
+            className="flex-1 min-w-full sm:min-w-[140px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono placeholder:text-gray-600"
           />
           <button
             onClick={handleAddCloud}
@@ -511,7 +511,7 @@ function PoolDropdown({
     <select
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value || null)}
-      className="bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[12px] font-mono min-w-[280px]"
+      className="bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[12px] font-mono min-w-0 sm:min-w-[280px]"
     >
       <option value="">— fall back to server default —</option>
       {pool
@@ -752,7 +752,7 @@ export function ModelsTab() {
       <SharedApiKeysSection />
 
       {/* Sticky save bar */}
-      <div className="fixed bottom-0 right-0 left-[260px] z-[105] bg-[#1a1a1a]/95 border-t border-white/5 px-6 py-3 flex items-center justify-end gap-3 backdrop-blur">
+      <div className="fixed bottom-0 right-0 left-0 sm:left-[260px] z-[105] bg-[#1a1a1a]/95 border-t border-white/5 px-3 sm:px-6 py-3 flex flex-wrap items-center justify-end gap-2 sm:gap-3 backdrop-blur">
         {saveErr && (
           <div className="flex items-center gap-2 text-[12px] text-red-300">
             <AlertTriangle className="w-3.5 h-3.5" />

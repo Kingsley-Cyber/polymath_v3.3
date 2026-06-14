@@ -63,7 +63,7 @@ export function ReasoningModeSelector() {
       </button>
 
       {isOpen && (
-        <div className="absolute top-full right-0 mt-1 w-80 border border-white/10 bg-[#2a2a2a] z-[60] p-1 shadow-xl rounded">
+        <div className="absolute top-full right-0 mt-1 w-80 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-7rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] z-[60] p-1 shadow-xl rounded">
           <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-border-minimal mb-1">
             <div className="text-[9px] font-bold tracking-widest uppercase text-content-tertiary">
               Reasoning Mode (for next send)
@@ -87,7 +87,7 @@ export function ReasoningModeSelector() {
               {powerUserReasoning ? "RAW 40" : "POWER"}
             </button>
           </div>
-          <div className="max-h-80 overflow-y-auto custom-scrollbar flex flex-col gap-0.5">
+          <div className="max-h-[min(20rem,calc(100dvh-12rem))] overflow-y-auto custom-scrollbar flex flex-col gap-0.5">
             {pool.map((mode) => {
               const selected = mode.key === reasoningMode;
               return (

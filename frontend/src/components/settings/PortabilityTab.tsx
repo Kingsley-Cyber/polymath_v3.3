@@ -82,7 +82,7 @@ export function PortabilityTab() {
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <StatusTile
           icon={<HardDrive className="w-4 h-4 text-cyan-300" />}
           label="Stores"
@@ -100,7 +100,7 @@ export function PortabilityTab() {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <button
           type="button"
           onClick={handleDownload}

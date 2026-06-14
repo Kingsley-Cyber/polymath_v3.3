@@ -487,7 +487,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+    <div className="fixed inset-0 z-[100] flex items-stretch sm:items-center justify-center sm:p-4">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-bg-base animate-overlay-in opacity-100"
@@ -496,17 +496,17 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
       {/* Modal Container */}
       <div
-        className={`relative w-full max-w-[1200px] h-[85vh] max-h-[800px] min-h-[500px] bg-[#242424] rounded-2xl shadow-2xl flex overflow-hidden border border-white/5 ${isOpen ? "animate-modal-in" : "opacity-0 scale-95"
+        className={`relative w-full h-dvh sm:h-[85vh] sm:max-h-[800px] sm:min-h-[500px] sm:max-w-[1200px] bg-[#242424] rounded-none sm:rounded-2xl shadow-2xl flex flex-col sm:flex-row overflow-hidden border border-white/5 ${isOpen ? "animate-modal-in" : "opacity-0 scale-95"
           }`}
         style={{ fontFamily: "Inter, -apple-system, sans-serif" }}
       >
         {/* Sidebar Navigation */}
-        <div className="w-[260px] bg-[#242424] border-r border-white/5 flex flex-col py-6 overflow-y-auto custom-scrollbar shrink-0">
+        <div className="w-full sm:w-[260px] max-h-[42dvh] sm:max-h-none bg-[#242424] border-b sm:border-b-0 sm:border-r border-white/5 flex flex-col py-3 sm:py-6 overflow-y-auto custom-scrollbar shrink-0">
           {/* Section: Account */}
-          <div className="mb-2 px-6 text-[12px] font-semibold text-gray-500 uppercase tracking-wider">
+          <div className="mb-2 px-4 sm:px-6 text-[12px] font-semibold text-gray-500 uppercase tracking-wider">
             Account
           </div>
-          <div className="flex flex-col space-y-0.5 px-3 mb-6">
+          <div className="flex flex-col space-y-0.5 px-2 sm:px-3 mb-4 sm:mb-6">
             {tabs.slice(0, 2).map((tab) => (
               <button
                 key={tab.id}
@@ -532,10 +532,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </div>
 
           {/* Section: System */}
-          <div className="mb-2 px-6 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+          <div className="mb-2 px-4 sm:px-6 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
             System
           </div>
-          <div className="flex flex-col space-y-0.5 px-3">
+          <div className="flex flex-col space-y-0.5 px-2 sm:px-3">
             {tabs.slice(2, 7).map((tab) => (
               <button
                 key={tab.id}
@@ -556,10 +556,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </div>
 
           {/* Section: Config */}
-          <div className="mb-2 px-6 text-[12px] font-semibold text-gray-500 uppercase tracking-wider mt-4">
+          <div className="mb-2 px-4 sm:px-6 text-[12px] font-semibold text-gray-500 uppercase tracking-wider mt-4">
             Config
           </div>
-          <div className="flex flex-col space-y-0.5 px-3">
+          <div className="flex flex-col space-y-0.5 px-2 sm:px-3">
             {tabs.slice(7).map((tab) => (
               <button
                 key={tab.id}
@@ -580,7 +580,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </div>
 
           {/* User info + logout at bottom */}
-          <div className="mt-auto px-3 pt-6 border-t border-white/5 mx-3">
+          <div className="mt-auto px-2 sm:px-3 pt-4 sm:pt-6 border-t border-white/5 mx-2 sm:mx-3">
             <div className="flex items-center gap-2 px-3 py-2">
               <div className="w-7 h-7 bg-[#444] rounded-lg flex items-center justify-center text-[11px] font-bold text-white">
                 {user?.username?.charAt(0).toUpperCase() || "?"}
@@ -609,7 +609,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           {/* Close Button */}
           <button
             onClick={onClose}
-            className="absolute top-6 right-6 p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors z-10"
+            className="absolute top-3 right-3 sm:top-6 sm:right-6 p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors z-10"
+            aria-label="Close settings"
           >
             <X className="w-5 h-5" />
           </button>
@@ -619,8 +620,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               {renderTabContent()}
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-10">
-              <div className="max-w-[680px]">{renderTabContent()}</div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-10">
+              <div className="max-w-full sm:max-w-[680px]">{renderTabContent()}</div>
             </div>
           )}
         </div>

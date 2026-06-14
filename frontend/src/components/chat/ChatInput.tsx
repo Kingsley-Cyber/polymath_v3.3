@@ -405,7 +405,7 @@ export function ChatInput({
   const hasContent = input.trim().length > 0 || attachments.length > 0;
 
   return (
-    <div className="w-full font-mono flex flex-col relative chat-input-container border border-border-minimal">
+    <div className="w-full min-w-0 font-mono flex flex-col relative chat-input-container border border-border-minimal">
       {/* Active Scanline Indicator (from index.css) */}
       {(hasContent || isLoading) && <div className="pulse-indicator" />}
 
@@ -413,9 +413,9 @@ export function ChatInput({
           ModelSelector and ThinkingEffortSelector live HERE (not in the
           page header) because they're the most per-turn settings —
           users change them on the same beat they type a query. */}
-      <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-bg-surface border-b border-border-minimal">
-        <ToggleBar />
-        <div className="flex items-center gap-2 flex-wrap justify-end">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-2 sm:px-3 py-1.5 bg-bg-surface border-b border-border-minimal">
+        <ToggleBar className="min-w-0 flex-wrap" />
+        <div className="flex min-w-0 items-center gap-2 flex-wrap justify-start sm:justify-end">
           <ModelSelector />
           <ThinkingEffortSelector />
           <div className="hidden sm:flex items-center gap-1.5 opacity-70 pl-2 border-l border-border-minimal">
@@ -514,7 +514,7 @@ export function ChatInput({
         )}
 
         {/* Input Area */}
-        <div className="flex items-end gap-2 p-3">
+        <div className="flex items-end gap-2 p-2 sm:p-3">
           {/* Paperclip — PER-TURN multimodal attachments. Images go
               into the LLM call as image_url blocks; text files inline
               into the augmented prompt. Capped at 4 files / 20 MB each.
@@ -551,7 +551,7 @@ export function ChatInput({
             onChange={handleFileInputChange}
           />
           {/* Prompt Textarea + Slash Popover wrapper */}
-          <div className="flex-1 relative">
+          <div className="flex-1 min-w-0 relative">
             {/* Phase 24 — Slash popover (skills + tools by /command) */}
             {slashOpen && slashFiltered.length > 0 && (
               <div className="absolute bottom-full left-0 right-0 mb-1 max-h-72 overflow-y-auto custom-scrollbar bg-[#2a2a2a] border border-white/10 rounded shadow-xl z-50">
@@ -643,7 +643,7 @@ export function ChatInput({
               disabled={isLoading}
               rows={1}
               className="
-                w-full min-h-[38px] max-h-[250px] py-2 px-3
+                w-full min-h-[38px] max-h-[42dvh] sm:max-h-[250px] py-2 px-3
                 bg-transparent border border-border-minimal border-l-2 border-l-accent-main/50
                 focus:border-l-accent-main
                 resize-none text-sm text-content-primary placeholder:text-content-tertiary
@@ -655,7 +655,7 @@ export function ChatInput({
           </div>
 
           {/* Execution Controls */}
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-col items-end gap-2 shrink-0">
             {/* Token Tracker */}
             {effectiveTokenCount && (
               <div
@@ -676,7 +676,7 @@ export function ChatInput({
               onClick={handleSubmit}
               disabled={!hasContent || isLoading}
               className={`
-                flex-shrink-0 flex items-center justify-center gap-2 px-4 py-1.5 min-w-[120px]
+                flex-shrink-0 flex items-center justify-center gap-2 px-3 sm:px-4 py-2 sm:py-1.5 min-w-0 sm:min-w-[120px]
                 text-[10px] font-bold tracking-widest uppercase border transition-none
                 ${hasContent && !isLoading
                   ? "bg-accent-main text-bg-base border-accent-main hover:bg-accent-hover hover:border-accent-hover"
@@ -689,12 +689,12 @@ export function ChatInput({
               {isLoading ? (
                 <>
                   <StatusTag tag="GEN" tone="gen" />
-                  <span>PROCESS...</span>
+                  <span className="hidden sm:inline">PROCESS...</span>
                 </>
               ) : (
                 <>
                   <CornerDownLeft className="w-3.5 h-3.5" />
-                  <span>EXECUTE</span>
+                  <span className="hidden sm:inline">EXECUTE</span>
                 </>
               )}
             </button>
@@ -703,8 +703,8 @@ export function ChatInput({
       </div>
 
       {/* Helper Console Text */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-bg-surface border-t border-border-minimal text-[9px] font-bold tracking-widest text-content-tertiary uppercase">
-        <div className="flex gap-4">
+      <div className="flex items-center justify-between gap-2 px-2 sm:px-3 py-1.5 bg-bg-surface border-t border-border-minimal text-[9px] font-bold tracking-widest text-content-tertiary uppercase">
+        <div className="flex min-w-0 gap-4 overflow-hidden">
           <span>&gt; [SHIFT+ENTER] = NEWLINE</span>
           <span className="hidden sm:inline">
             &gt; [DRAG+DROP] = INJECT_FILE

@@ -64,7 +64,7 @@ export function CorpusMultiSelect() {
       </button>
 
       {isOpen && (
-        <div className="absolute top-full right-0 mt-1 w-64 border border-white/10 bg-[#2a2a2a] z-[60] p-1 shadow-xl rounded">
+        <div className="absolute top-full right-0 mt-1 w-64 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-7rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] z-[60] p-1 shadow-xl rounded">
           <div className="text-[9px] font-bold tracking-widest uppercase text-content-tertiary px-2 py-1.5 border-b border-border-minimal mb-1 flex justify-between">
             <span>Corpus Scoping</span>
             {selectedCount > 0 && (
@@ -72,7 +72,7 @@ export function CorpusMultiSelect() {
             )}
           </div>
 
-          <div className="max-h-60 overflow-y-auto custom-scrollbar flex flex-col gap-0.5">
+          <div className="max-h-[min(15rem,calc(100dvh-11rem))] overflow-y-auto custom-scrollbar flex flex-col gap-0.5">
             {loading ? (
               <div className="px-2 py-4 text-center text-[10px] text-content-tertiary uppercase tracking-widest animate-pulse">
                 [LOADING...]

@@ -48,7 +48,7 @@ export function QueryProfileSelector() {
       </button>
 
       {isOpen && (
-        <div className="absolute top-full right-0 mt-1 w-80 border border-white/10 bg-[#2a2a2a] z-[60] p-1 shadow-xl rounded">
+        <div className="absolute top-full right-0 mt-1 w-80 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-7rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] z-[60] p-1 shadow-xl rounded">
           <div className="text-[9px] font-bold tracking-widest uppercase text-content-tertiary px-2 py-1.5 border-b border-border-minimal mb-1">
             Query Speed (for next send)
           </div>

@@ -1573,9 +1573,9 @@ export function GraphViewer({
   }
 
   return (
-    <div className="relative flex h-full w-full bg-[#06060a]">
+    <div className="relative flex h-full w-full flex-col md:flex-row bg-[#06060a]">
       {/* Canvas column (fills remaining width) */}
-      <div className="relative flex-1 min-w-0">
+      <div className="relative flex-1 min-h-0 min-w-0">
         {/* Background gradient — same recipe as GitNexus GraphCanvas */}
         <div className="pointer-events-none absolute inset-0">
           <div
@@ -1651,7 +1651,7 @@ export function GraphViewer({
       </div>{/* end absolute inset-0 flex */}
 
       {/* Bottom-right control cluster — same layout as GitNexus */}
-      <div className="absolute right-4 bottom-4 z-20 flex flex-col gap-1 pointer-events-auto">
+      <div className="absolute right-3 bottom-3 md:right-4 md:bottom-4 z-20 flex flex-col gap-1 pointer-events-auto">
         <button
           onClick={sigma.zoomIn}
           className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"

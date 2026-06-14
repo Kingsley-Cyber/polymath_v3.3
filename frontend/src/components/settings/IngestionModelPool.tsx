@@ -296,7 +296,7 @@ export function IngestionModelPool({
             value={draft.base_url}
             onChange={(e) => setDraft({ ...draft, base_url: e.target.value })}
             placeholder="base_url (blank = default)"
-            className="flex-1 min-w-[140px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono placeholder:text-content-tertiary"
+            className="flex-1 min-w-full sm:min-w-[140px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono placeholder:text-content-tertiary"
           />
           {lockedModelOptions.length > 0 ? (
             <select
@@ -308,7 +308,7 @@ export function IngestionModelPool({
                   commit();
                 }
               }}
-              className="flex-1 min-w-[130px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono"
+              className="flex-1 min-w-full sm:min-w-[130px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono"
               title="Approved MiMo extraction models"
             >
               {lockedModelOptions.map((model) => (
@@ -334,7 +334,7 @@ export function IngestionModelPool({
                 }
               }}
               placeholder={modelPlaceholder}
-              className="flex-1 min-w-[130px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono placeholder:text-content-tertiary"
+              className="flex-1 min-w-full sm:min-w-[130px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono placeholder:text-content-tertiary"
             />
           )}
           <input
@@ -353,7 +353,7 @@ export function IngestionModelPool({
             value={draft.api_key}
             onChange={(e) => setDraft({ ...draft, api_key: e.target.value })}
             placeholder="api_key"
-            className="w-[110px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono placeholder:text-content-tertiary"
+            className="w-full sm:w-[110px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono placeholder:text-content-tertiary"
           />
           <button
             type="button"

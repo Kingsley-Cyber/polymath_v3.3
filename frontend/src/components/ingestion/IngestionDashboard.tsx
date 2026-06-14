@@ -198,7 +198,7 @@ export function IngestionDashboard() {
   if (allJobs.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-80 bg-bg-surface border border-border-minimal shadow-lg font-mono">
+    <div className="fixed bottom-2 left-2 right-2 z-40 max-h-[45dvh] overflow-hidden bg-bg-surface border border-border-minimal shadow-lg font-mono sm:left-auto sm:bottom-4 sm:right-4 sm:w-80">
       {/* Header */}
       <div
         className="flex items-center justify-between px-3 py-2 border-b border-border-minimal bg-bg-base cursor-pointer select-none"

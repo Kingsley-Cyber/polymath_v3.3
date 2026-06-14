@@ -768,7 +768,7 @@ function ModalSection() {
               {/* ── 2. Deploy Config ─────────────────────────────────── */}
               <Section title="Deploy Configuration" accent="blue" pad>
                 {/* App name + workspace */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-[11px] font-semibold text-gray-300 block mb-1">
                       App Name
@@ -800,7 +800,7 @@ function ModalSection() {
                   <label className="text-[11px] font-semibold text-gray-300 block mb-1">
                     GPU Tier
                   </label>
-                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                     {MODAL_GPU_TIERS.map((g) => (
                       <button
                         key={g.tier}
@@ -828,7 +828,7 @@ function ModalSection() {
                 </div>
 
                 {/* Containers + idle timeout */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="flex items-center justify-between text-[11px] font-semibold text-gray-300 mb-1">
                       <span>Max containers</span>
@@ -941,7 +941,7 @@ function ModalSection() {
 
               {/* ── 3. Status + Actions ──────────────────────────────── */}
               <Section title="Deployment" accent="purple" pad>
-                <div className="grid grid-cols-2 gap-3 text-[11px]">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
                   <div>
                     <div className="text-gray-500 uppercase tracking-widest text-[9px] mb-0.5">
                       Status

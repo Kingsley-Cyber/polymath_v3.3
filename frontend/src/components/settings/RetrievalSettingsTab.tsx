@@ -229,7 +229,7 @@ export function RetrievalSettingsTab() {
   const renderPanelBody = (panel: PanelId) => {
     if (panel === "vector") {
       return (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <NumberField
             label="Child chunks"
             min={1}
@@ -261,7 +261,7 @@ export function RetrievalSettingsTab() {
 
     if (panel === "hybrid") {
       return (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <NumberField
             label="Child chunks"
             min={1}
@@ -293,7 +293,7 @@ export function RetrievalSettingsTab() {
 
     if (panel === "graph") {
       return (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <NumberField
             label="Child chunks"
             min={1}
@@ -338,7 +338,7 @@ export function RetrievalSettingsTab() {
     }
 
     return (
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <NumberField
           label="Seed entities"
           min={1}

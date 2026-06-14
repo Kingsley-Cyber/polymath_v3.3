@@ -1466,3 +1466,34 @@
 #root .pm-tool-decision {
   max-height: min(24vh, 11rem);
 }
+
+@media (max-width: 640px) {
+  #root .message-user .message-text,
+  #root [data-role="user"] .message-text {
+    max-width: 92%;
+  }
+
+  #root .message-assistant,
+  #root [data-role="assistant"],
+  #root .synthesis-body,
+  #root .message-assistant .message-text {
+    max-width: 100%;
+    font-size: 0.95rem;
+    line-height: 1.65;
+  }
+
+  #root .message-assistant pre,
+  #root .pm-code-block,
+  #root .message-assistant table,
+  #root .pm-table-scroll {
+    max-width: calc(100vw - 1rem);
+    overflow-x: auto;
+  }
+
+  #root .pm-process-body,
+  #root .pm-live-scroll-panel,
+  #root .pm-process-body-live,
+  #root .pm-live-scroll-panel-live {
+    max-height: min(24dvh, 14rem);
+  }
+}

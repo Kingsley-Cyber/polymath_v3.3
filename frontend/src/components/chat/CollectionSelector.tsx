@@ -93,7 +93,7 @@ export function CollectionSelector({
       </button>
 
       {isOpen && (
-        <div className="absolute top-full z-[60] mt-1 w-64 border border-white/10 bg-[#2a2a2a] animate-fade-in font-mono shadow-xl rounded">
+        <div className="absolute top-full right-0 z-[60] mt-1 w-64 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-7rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] animate-fade-in font-mono shadow-xl rounded">
           {/* Header */}
           <div className="flex items-center justify-between px-3 py-2 border-b border-border-minimal bg-bg-base">
             <span className="text-[10px] font-bold tracking-widest uppercase text-content-primary">
@@ -118,7 +118,7 @@ export function CollectionSelector({
           </div>
 
           {/* Collection List */}
-          <div className="max-h-60 overflow-y-auto custom-scrollbar">
+          <div className="max-h-[min(15rem,calc(100dvh-11rem))] overflow-y-auto custom-scrollbar">
             {localCollections.length === 0 ? (
               <div className="px-3 py-4 text-center text-[10px] tracking-widest uppercase text-content-tertiary">
                 [EMPTY_DIR]

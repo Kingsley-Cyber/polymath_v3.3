@@ -191,7 +191,7 @@ export function McpTab() {
           <Plug size={16} className="text-emerald-400" />
           Server Status
         </h3>
-        <div className="grid grid-cols-[140px_1fr] gap-x-4 gap-y-2 text-[12px]">
+        <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-4 gap-y-2 text-[12px]">
           <span className="text-gray-500 uppercase tracking-widest text-[10px]">
             Transport
           </span>

@@ -638,7 +638,7 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen bg-bg-base text-text-primary overflow-hidden selection:bg-accent-main/30">
+    <div className="flex h-dvh bg-bg-base text-text-primary overflow-hidden selection:bg-accent-main/30">
       {/* 1. LEFT PANE: Directory / Explorer */}
       <Sidebar
         isOpen={sidebarOpen}
@@ -648,11 +648,12 @@ function App() {
       {/* 2. CENTER PANE: Active Workspace (Graph/Chat) */}
       <main className="flex-1 flex flex-col min-w-0 border-r border-border-minimal relative bg-bg-surface">
         {/* Header - Terminal Status Bar + session controls */}
-        <header className="h-24 border-b border-border-minimal flex items-center justify-between px-6 bg-bg-base z-30 shrink-0">
-          <div className="flex items-center gap-3">
+        <header className="min-h-16 md:h-24 border-b border-border-minimal flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 sm:px-6 py-2 md:py-0 bg-bg-base z-30 shrink-0">
+          <div className="flex w-full sm:w-auto items-center justify-between gap-3">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-1 text-content-secondary hover:text-accent-main transition-none"
+              className="lg:hidden flex h-9 w-9 items-center justify-center text-content-secondary hover:text-accent-main transition-none"
+              aria-label="Open navigation"
             >
               <Menu className="w-4 h-4" />
             </button>
@@ -671,24 +672,25 @@ function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 flex-wrap justify-end">
+          <div className="flex w-full sm:w-auto items-center gap-1.5 sm:gap-3 overflow-x-auto sm:overflow-visible custom-scrollbar pb-1 sm:pb-0 sm:flex-wrap sm:justify-end">
             {/* Per-query corpus / retrieval selectors stay in the header. */}
             <CorpusMultiSelect />
-            <div className="h-4 w-px bg-border-minimal" />
+            <div className="hidden sm:block h-4 w-px bg-border-minimal" />
             <CollectionSelector collections={collections} />
-            <div className="h-4 w-px bg-border-minimal" />
+            <div className="hidden sm:block h-4 w-px bg-border-minimal" />
             <ReasoningModeSelector />
-            <div className="h-4 w-px bg-border-minimal" />
+            <div className="hidden sm:block h-4 w-px bg-border-minimal" />
             <SearchModeSelector />
-            <div className="h-4 w-px bg-border-minimal" />
+            <div className="hidden sm:block h-4 w-px bg-border-minimal" />
             <QueryProfileSelector />
-            <div className="h-4 w-px bg-border-minimal" />
+            <div className="hidden sm:block h-4 w-px bg-border-minimal" />
             <RetrievalTierSelector />
-            <div className="h-4 w-px bg-border-minimal" />
+            <div className="hidden sm:block h-4 w-px bg-border-minimal" />
             <button
               onClick={() => setIsGraphViewOpen(true)}
-              className="p-1.5 border transition-none rounded-none border-transparent text-content-secondary hover:text-accent-main"
+              className="flex h-8 w-8 shrink-0 items-center justify-center border transition-none rounded-none border-transparent text-content-secondary hover:text-accent-main"
               title="Global Graph"
+              aria-label="Open global graph"
             >
               <Network className="w-4 h-4" />
             </button>
@@ -705,7 +707,7 @@ function App() {
         </div>
 
         {/* Input Area - Command Line Interface */}
-        <div className="shrink-0 p-4 bg-bg-base border-t border-border-minimal z-10">
+        <div className="shrink-0 p-2 sm:p-4 bg-bg-base border-t border-border-minimal z-10">
           <div className="max-w-7xl mx-auto">
             <ChatInput
               onSend={handleSend}
@@ -729,7 +731,7 @@ function App() {
             <button
               type="button"
               onClick={() => setIsGraphViewOpen(false)}
-              className="absolute left-3 top-3 z-[70] flex h-8 w-8 items-center justify-center rounded border border-zinc-800 bg-zinc-950/85 text-zinc-400 backdrop-blur hover:border-rose-700 hover:text-rose-300"
+              className="absolute left-3 top-3 z-[70] flex h-10 w-10 items-center justify-center rounded border border-zinc-800 bg-zinc-950/85 text-zinc-400 backdrop-blur hover:border-rose-700 hover:text-rose-300"
               title="Close graph view"
               aria-label="Close graph view"
             >

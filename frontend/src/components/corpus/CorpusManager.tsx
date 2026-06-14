@@ -116,7 +116,7 @@ function PresetModeSelector({ config, onChange, idPrefix }: PresetSelectorProps)
       <div
         role="radiogroup"
         aria-label="Ingestion preset"
-        className="grid grid-cols-4 gap-1.5"
+        className="grid grid-cols-2 sm:grid-cols-4 gap-1.5"
       >
         {PRESET_META.map((p) => {
           const checked = current === p.key;
@@ -397,13 +397,13 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
   // Drill-down: show corpus detail with document browser
   if (isOpen && selectedCorpus) {
     return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center">
+      <div className="fixed inset-0 z-[100] flex items-stretch sm:items-center justify-center sm:p-4">
         <div
           className="absolute inset-0 bg-bg-base animate-overlay-in opacity-100"
           onClick={() => setSelectedCorpus(null)}
         />
         <div
-          className="relative w-full max-w-[1200px] h-[85vh] max-h-[800px] min-h-[500px] bg-[#242424] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-white/5"
+          className="relative w-full h-dvh sm:h-[85vh] sm:max-h-[800px] sm:min-h-[500px] sm:max-w-[1200px] bg-[#242424] rounded-none sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-white/5"
           style={{ fontFamily: "Inter, -apple-system, sans-serif" }}
         >
           <CorpusDetail
@@ -429,17 +429,17 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+    <div className="fixed inset-0 z-[100] flex items-stretch sm:items-center justify-center sm:p-4">
       <div
         className="absolute inset-0 bg-bg-base animate-overlay-in opacity-100"
         onClick={onClose}
       />
       <div
-        className="relative w-full max-w-[1200px] h-[85vh] max-h-[800px] min-h-[500px] bg-[#242424] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-white/5"
+        className="relative w-full h-dvh sm:h-[85vh] sm:max-h-[800px] sm:min-h-[500px] sm:max-w-[1200px] bg-[#242424] rounded-none sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-white/5"
         style={{ fontFamily: "Inter, -apple-system, sans-serif" }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0">
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 sm:py-4 border-b border-white/5 shrink-0">
           <div className="flex items-center gap-2">
             <Database className="w-5 h-5 text-accent-main" />
             <span className="text-[13px] font-semibold text-white">
@@ -523,7 +523,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
                 Parent Chunk Tokens
               </div>
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
                 <div>
                   <label className="text-[9px] text-content-tertiary tracking-wider">
                     MIN
@@ -592,7 +592,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
                 Child Chunk Tokens
               </div>
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
                 <div>
                   <label className="text-[9px] text-content-tertiary tracking-wider">
                     MIN
@@ -657,7 +657,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
             </div>
 
             {/* Chunking extras */}
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
               <div>
                 <label className="text-[9px] text-content-tertiary tracking-wider">
                   OVERLAP
@@ -719,7 +719,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
 
             {/* Confidence threshold sits on its own because it's GHOST-B-specific
                 and orthogonal to the model identity. */}
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
               <div>
                 <label className="text-[9px] text-content-tertiary tracking-wider">
                   ENTITY CONFIDENCE
@@ -1053,7 +1053,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                             corpusId={corpus.corpus_id}
                           />
 
-                          <div className="grid grid-cols-3 gap-1.5">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
                             <div>
                               <label className="text-[9px] text-content-tertiary tracking-wider uppercase">
                                 Entity confidence
@@ -1107,7 +1107,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                     {/* Expanded Details */}
                     {isExpanded && !isEditing && (
                       <div className="px-4 pb-3 pl-12 space-y-2">
-                        <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
                           <div>
                             <span className="text-content-tertiary tracking-wider">
                               corpus_id:
@@ -1146,7 +1146,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                           <div className="text-content-tertiary tracking-wider uppercase font-bold">
                             ingestion_config:
                           </div>
-                          <div className="pl-2 grid grid-cols-2 gap-1">
+                          <div className="pl-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
                             <span className="text-content-secondary">
                               use_neo4j:{" "}
                               <span
@@ -1415,7 +1415,7 @@ function EmbedSection({
       </div>
 
       {/* Three-way radio */}
-      <div role="radiogroup" aria-label="embed_mode" className="grid grid-cols-3 gap-1.5">
+      <div role="radiogroup" aria-label="embed_mode" className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
         {EMBED_MODE_OPTIONS.map((opt) => {
           const checked = mode === opt.value;
           return (
@@ -1590,7 +1590,7 @@ function LockedStructuralSection({ config }: { config: IngestionConfig }) {
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5">
         <Row label="preset" value={preset} />
         <Row
           label="use_neo4j"

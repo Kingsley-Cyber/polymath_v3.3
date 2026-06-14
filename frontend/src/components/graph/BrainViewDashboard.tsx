@@ -15,7 +15,7 @@
  * width. Pt 5 of the Brain View refactor.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   ChevronLeft,
   GitBranch,
@@ -599,10 +599,10 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
 
   if (collapsed) {
     return (
-      <aside className="z-30 flex h-full w-9 flex-col items-center border-l border-zinc-900 bg-[#0a0a0e]/95 backdrop-blur">
+      <aside className="z-30 flex h-10 w-full flex-row items-center border-t border-zinc-900 bg-[#0a0a0e]/95 backdrop-blur md:h-full md:w-9 md:flex-col md:border-t-0 md:border-l">
         <button
           onClick={onToggle}
-          className="mt-3 flex h-9 w-9 items-center justify-center text-zinc-500 hover:text-zinc-200"
+          className="flex h-9 w-9 items-center justify-center text-zinc-500 hover:text-zinc-200 md:mt-3"
           title="Expand dashboard"
         >
           <PanelRightOpen className="h-4 w-4" />
@@ -617,15 +617,15 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
 
   return (
     <aside
-      className="relative z-30 flex h-full shrink-0 flex-col border-l border-zinc-900 bg-[#0a0a0e]/95 backdrop-blur"
-      style={{ width: `${width}px` }}
+      className="relative z-30 flex h-[44dvh] w-full shrink-0 flex-col border-t border-zinc-900 bg-[#0a0a0e]/95 backdrop-blur md:h-full md:w-[var(--dashboard-width)] md:border-t-0 md:border-l"
+      style={{ "--dashboard-width": `${width}px` } as CSSProperties}
     >
       {/* Drag handle — 6px hot-zone on the sidebar's left edge. Hover
           shows the col-resize cursor; drag adjusts width within
           [SIDEBAR_MIN_W, SIDEBAR_MAX_W]. */}
       <div
         onMouseDown={onResizeStart}
-        className="group absolute -left-1 top-0 z-40 h-full w-1.5 cursor-col-resize"
+        className="group absolute -left-1 top-0 z-40 hidden h-full w-1.5 cursor-col-resize md:block"
         title="Drag to resize"
       >
         <div className="h-full w-px bg-zinc-900 transition-colors group-hover:bg-amber-500/40 group-active:bg-amber-500/70" />

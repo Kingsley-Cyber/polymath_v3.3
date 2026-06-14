@@ -102,9 +102,9 @@ export function SkillEditor() {
   };
 
   return (
-    <div className="flex h-full bg-bg-base text-content-primary font-mono">
+    <div className="flex h-full min-h-0 flex-col md:flex-row bg-bg-base text-content-primary font-mono">
       {/* Sidebar List */}
-      <div className="w-[320px] border-r border-border-minimal flex flex-col">
+      <div className="w-full md:w-[320px] max-h-48 md:max-h-none border-b md:border-b-0 md:border-r border-border-minimal flex flex-col shrink-0">
         <div className="p-3 border-b border-border-minimal flex-shrink-0">
           <button
             onClick={() => selectSkill(null)}
@@ -157,7 +157,7 @@ export function SkillEditor() {
       </div>
 
       {/* Main Editor Form */}
-      <div className="flex-1 p-6 flex flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 md:p-6 flex flex-col">
         <h2 className="text-lg font-bold uppercase tracking-widest mb-4">
           {editingSkill ? "Edit Skill" : "Create New Skill"}
         </h2>
@@ -165,7 +165,7 @@ export function SkillEditor() {
           onSubmit={handleSubmit(handleSave)}
           className="flex flex-col h-full gap-4"
         >
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="input-label">Skill Name</label>
               <input
@@ -239,7 +239,7 @@ export function SkillEditor() {
             <p className="text-xs text-error">{saveError}</p>
           )}
 
-          <div className="flex justify-between items-center mt-auto pt-4 border-t border-border-minimal">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mt-auto pt-4 border-t border-border-minimal">
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <input
                 type="checkbox"

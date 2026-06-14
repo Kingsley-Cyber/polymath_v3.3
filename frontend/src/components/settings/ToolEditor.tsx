@@ -134,9 +134,9 @@ export function ToolEditor() {
   };
 
   return (
-    <div className="flex h-full bg-bg-base text-content-primary font-mono">
+    <div className="flex h-full min-h-0 flex-col md:flex-row bg-bg-base text-content-primary font-mono">
       {/* Sidebar List */}
-      <div className="w-[320px] border-r border-border-minimal flex flex-col">
+      <div className="w-full md:w-[320px] max-h-48 md:max-h-none border-b md:border-b-0 md:border-r border-border-minimal flex flex-col shrink-0">
         <div className="p-3 border-b border-border-minimal flex-shrink-0">
           <button
             onClick={() => selectTool(null)}
@@ -184,7 +184,7 @@ export function ToolEditor() {
       </div>
 
       {/* Main Editor Form */}
-      <div className="flex-1 p-6 flex flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 md:p-6 flex flex-col">
         <h2 className="text-lg font-bold uppercase tracking-widest mb-4">
           {editingTool ? "Edit Tool" : "Create New Tool"}
         </h2>
@@ -192,7 +192,7 @@ export function ToolEditor() {
           onSubmit={handleSubmit(handleSave)}
           className="flex flex-col h-full gap-4"
         >
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="input-label">Tool Name</label>
               <input

@@ -1,5 +1,5 @@
 // CorpusDetail.tsx - Document browser for a single corpus
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from "react";
 import {
   ChevronLeft,
   Trash2,
@@ -539,7 +539,7 @@ export function CorpusDetail({
             </button>
           </div>
           {localBatch && (
-            <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-9 gap-2 text-[9px] font-mono">
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-4 xl:grid-cols-9 gap-2 text-[9px] font-mono">
               <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Status</div>
                 <div className="text-content-primary">{localBatch.status}</div>
@@ -584,7 +584,7 @@ export function CorpusDetail({
           )}
           {localBatch?.items && localBatch.items.length > 0 && (
             <div className="mt-2 border border-border-minimal">
-              <div className="grid grid-cols-[42px_minmax(0,1.4fr)_86px_92px_minmax(0,1fr)] gap-2 px-2 py-1 text-[9px] font-bold tracking-widest text-content-tertiary uppercase border-b border-border-minimal">
+              <div className="hidden md:grid grid-cols-[42px_minmax(0,1.4fr)_86px_92px_minmax(0,1fr)] gap-2 px-2 py-1 text-[9px] font-bold tracking-widest text-content-tertiary uppercase border-b border-border-minimal">
                 <span>Size</span>
                 <span>File</span>
                 <span>Status</span>
@@ -641,10 +641,10 @@ export function CorpusDetail({
       )}
 
       {/* Main area — resizable split: left = document list, right = library */}
-      <div ref={splitRowRef} className="flex-1 flex overflow-hidden">
+      <div ref={splitRowRef} className="flex-1 flex flex-col md:flex-row overflow-hidden">
       <div
-        style={{ width: `${leftPct}%` }}
-        className="overflow-y-auto custom-scrollbar shrink-0"
+        style={{ "--left-panel-width": `${leftPct}%` } as CSSProperties}
+        className="h-1/2 w-full overflow-y-auto custom-scrollbar shrink-0 md:h-auto md:w-[var(--left-panel-width)]"
       >
         {isLoading ? (
           <div className="flex items-center justify-center py-12 text-[10px] text-content-tertiary tracking-widest">
@@ -759,7 +759,7 @@ export function CorpusDetail({
                   {isExpanded && (
                     <div className="px-4 pb-3 pl-12 space-y-3">
                       {/* Metadata Grid */}
-                      <div className="grid grid-cols-2 gap-2 text-[10px]">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
                         <div>
                           <span className="text-content-tertiary tracking-wider">
                             doc_id:
@@ -803,7 +803,7 @@ export function CorpusDetail({
                         <div className="text-content-tertiary tracking-wider uppercase font-bold">
                           ingestion_config:
                         </div>
-                        <div className="pl-2 grid grid-cols-2 gap-1">
+                        <div className="pl-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
                           <span className="text-content-secondary">
                             use_neo4j:{" "}
                             <span
@@ -871,7 +871,7 @@ export function CorpusDetail({
                           </div>
                         )}
                         {doc.ghost_b_metrics && (
-                          <div className="pl-2 grid grid-cols-2 gap-1 text-content-secondary">
+                          <div className="pl-2 grid grid-cols-1 sm:grid-cols-2 gap-1 text-content-secondary">
                             <span>
                               graph_extract:{" "}
                               <span className="text-accent-secondary">
@@ -966,7 +966,7 @@ export function CorpusDetail({
       </div>
         <div
           onMouseDown={startSplitDrag}
-          className="w-1 shrink-0 bg-border-minimal hover:bg-accent-main cursor-col-resize transition-none"
+          className="hidden w-1 shrink-0 bg-border-minimal hover:bg-accent-main cursor-col-resize transition-none md:block"
           title="Drag to resize"
         />
         <LibraryPanel
@@ -1020,7 +1020,7 @@ function BatchItemRow({ item }: { item: IngestBatchItemResponse }) {
             : "text-content-primary";
 
   return (
-    <div className="grid grid-cols-[42px_minmax(0,1.4fr)_86px_92px_minmax(0,1fr)] gap-2 px-2 py-1 text-[10px] font-mono border-b border-border-minimal/60 last:border-b-0">
+    <div className="grid grid-cols-1 md:grid-cols-[42px_minmax(0,1.4fr)_86px_92px_minmax(0,1fr)] gap-1 md:gap-2 px-2 py-2 md:py-1 text-[10px] font-mono border-b border-border-minimal/60 last:border-b-0">
       <span className="text-content-tertiary">
         {typeof item.size_bytes === "number" ? formatBytes(item.size_bytes) : ""}
       </span>
@@ -1236,8 +1236,8 @@ function LibraryPanel({
 
   return (
     <div
-      style={{ width: `${widthPct}%` }}
-      className="flex flex-col overflow-hidden shrink-0"
+      style={{ "--library-panel-width": `${widthPct}%` } as CSSProperties}
+      className="h-1/2 w-full flex flex-col overflow-hidden shrink-0 md:h-auto md:w-[var(--library-panel-width)]"
     >
       <div className="flex items-center justify-between px-4 py-2 border-b border-border-minimal bg-bg-surface/50 shrink-0">
         <div className="text-[9px] font-bold tracking-widest text-content-tertiary uppercase">
@@ -1601,7 +1601,7 @@ function IngestOverridesPanel({
             ))}
           </div>
           {(overrides.embed_mode ?? cfg.embed_mode) === "api" && (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input
                 type="text"
                 placeholder="base_url"
@@ -1632,7 +1632,7 @@ function IngestOverridesPanel({
           clearKeys(["summary_model", "summary_base_url", "summary_api_key"])
         }
       >
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <input
             type="text"
             placeholder="model (e.g. ollama/llama3.2:3b)"

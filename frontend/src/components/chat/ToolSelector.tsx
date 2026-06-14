@@ -65,11 +65,11 @@ export function ToolSelector() {
       </button>
 
       {isOpen && (
-        <div className="absolute bottom-full right-0 mb-1 w-72 border border-white/10 bg-[#2a2a2a] z-[60] p-1 shadow-xl rounded">
+        <div className="absolute bottom-full right-0 mb-1 w-72 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-8rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] z-[60] p-1 shadow-xl rounded">
           <div className="text-[9px] font-bold tracking-widest uppercase text-content-tertiary px-2 py-1.5 border-b border-border-minimal mb-1">
             Enable Agent Tools
           </div>
-          <div className="max-h-60 overflow-y-auto custom-scrollbar flex flex-col gap-0.5">
+          <div className="max-h-[min(15rem,calc(100dvh-12rem))] overflow-y-auto custom-scrollbar flex flex-col gap-0.5">
             {availableTools.length > 0 ? (
               availableTools.map((tool) => (
                 <button
