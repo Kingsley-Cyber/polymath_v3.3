@@ -10,8 +10,9 @@ from services.graph.neo4j_writer import (
 
 
 class FakeSession:
-    def __init__(self, calls):
+    def __init__(self, calls, tombstone_map=None):
         self.calls = calls
+        self.tombstone_map = tombstone_map or {}
 
     async def __aenter__(self):
         return self
@@ -21,14 +22,40 @@ class FakeSession:
 
     async def run(self, query, **params):
         self.calls.append((query, params))
+        if "tombstone:" in query:
+            return FakeResult([
+                {"orig": old, "sur": self.tombstone_map[old]}
+                for old in params.get("ids", [])
+                if old in self.tombstone_map
+            ])
+        return FakeResult([])
+
+
+class FakeResult:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def __aiter__(self):
+        self._iter = iter(self.rows)
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._iter)
+        except StopIteration:
+            raise StopAsyncIteration
+
+    async def single(self):
+        return self.rows[0] if self.rows else None
 
 
 class FakeDriver:
-    def __init__(self):
+    def __init__(self, tombstone_map=None):
         self.calls = []
+        self.tombstone_map = tombstone_map or {}
 
     def session(self):
-        return FakeSession(self.calls)
+        return FakeSession(self.calls, self.tombstone_map)
 
 
 @pytest.mark.asyncio
@@ -167,6 +194,7 @@ async def test_delete_document_graph_prunes_relation_provenance_before_nodes():
     assert "remaining_corpus_support" in queries[0]
     assert "MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})" in queries[1]
     assert "NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }" in queries[2]
+    assert "coalesce(e.tombstone, false) = false" in queries[2]
 
 
 @pytest.mark.asyncio
@@ -181,3 +209,94 @@ async def test_delete_corpus_graph_prunes_array_scoped_relations_before_nodes():
     assert "WHERE size(coalesce(r.corpus_ids, [])) = 0" in queries[0]
     assert "MATCH (n {corpus_id: $corpus_id})" in queries[1]
     assert "NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }" in queries[2]
+    assert "coalesce(e.tombstone, false) = false" in queries[2]
+
+
+@pytest.mark.asyncio
+async def test_write_document_graph_redirects_tombstoned_entities_before_merge():
+    driver = FakeDriver(
+        tombstone_map={
+            "entity:flame_audio": "entity:flameaudio",
+        }
+    )
+    result = ExtractionResult(
+        schema_version="polymath.extract.v1",
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        entities=[
+            EntityItem(
+                canonical_name="flame_audio",
+                surface_form="flame_audio",
+                entity_type="Software",
+                confidence=0.9,
+            ),
+            EntityItem(
+                canonical_name="dart",
+                surface_form="Dart",
+                entity_type="Software",
+                confidence=0.8,
+            ),
+        ],
+        relations=[
+            RelationItem(
+                subject="flame_audio",
+                predicate="uses",
+                object="dart",
+                object_kind="entity",
+                confidence=0.7,
+            )
+        ],
+        facts=[
+            FactItem(
+                subject="flame_audio",
+                fact_type="attribute",
+                property_name="runtime",
+                value="game engine",
+                unit=None,
+                condition=None,
+                confidence=0.8,
+                evidence_phrase="flame_audio is a game engine",
+            )
+        ],
+    )
+
+    await write_document_graph(
+        driver=driver,
+        doc_id="d1",
+        corpus_id="corp1",
+        extraction_results=[result],
+        user_id="u1",
+        file_id="f1",
+        all_chunk_ids=["c1"],
+    )
+
+    entity_call = next(
+        (query, params)
+        for query, params in driver.calls
+        if "MERGE (e:Entity {entity_id: row.entity_id})" in query
+    )
+    entity_query, entity_params = entity_call
+    flame_row = next(
+        row for row in entity_params["rows"]
+        if row["resolved_from_entity_id"] == "entity:flame_audio"
+    )
+    assert flame_row["entity_id"] == "entity:flameaudio"
+    assert "row.resolved_from_entity_id IS NULL" in entity_query
+
+    relation_params = next(
+        params
+        for query, params in driver.calls
+        if "MERGE (s)-[r:RELATES_TO" in query
+    )
+    relation_row = relation_params["rows"][0]
+    assert relation_row["subject_id"] == "entity:flameaudio"
+    assert relation_row["object_id"] == "entity:dart"
+
+    fact_params = next(
+        params
+        for query, params in driver.calls
+        if "MERGE (f:Fact" in query
+    )
+    fact_row = fact_params["rows"][0]
+    assert fact_row["subject_entity_id"] == "entity:flameaudio"

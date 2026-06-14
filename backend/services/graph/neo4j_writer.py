@@ -32,6 +32,7 @@ from services.ghost_b import (
     UNIVERSAL_RELATION_SCHEMA,
     normalize_relation_predicate_alias,
 )
+from services.graph.entity_dedup.resolve import resolve_entity_ids
 
 logger = logging.getLogger(__name__)
 ALIAS_MAP_PATH = Path(__file__).with_name("entity_aliases.json")
@@ -836,6 +837,56 @@ def entity_id_from_name(canonical_name: str, entity_type: str | None = None) -> 
     return f"{ENTITY_ID_PREFIX}:{_slugify_name(canonical_name)}"
 
 
+async def _resolve_entity_id_redirects(session, ids: list[str]) -> dict[str, str]:
+    """Map merged-away entity ids to their live survivors before graph writes.
+
+    Dedup apply leaves tombstones as edgeless redirect records:
+    `tombstone:<old_id> -> merged_into=<survivor_id>`. Re-ingest must follow
+    those redirects before any MERGE, otherwise it recreates the old entity id.
+    """
+    unique_ids = [eid for eid in dict.fromkeys(ids) if eid]
+    if not unique_ids:
+        return {}
+    return await resolve_entity_ids(session, unique_ids)
+
+
+async def _redirect_graph_write_rows(
+    session,
+    *,
+    mention_rows: list[dict],
+    relation_rows: list[dict],
+    fact_rows: list[dict],
+) -> dict[str, str]:
+    ids: list[str] = []
+    ids.extend(row.get("entity_id", "") for row in mention_rows)
+    for row in relation_rows:
+        ids.append(row.get("subject_id", ""))
+        ids.append(row.get("object_id", ""))
+    ids.extend(row.get("subject_entity_id", "") for row in fact_rows)
+
+    redirects = await _resolve_entity_id_redirects(session, ids)
+    if not redirects:
+        return {}
+
+    for row in mention_rows:
+        original = row.get("entity_id")
+        redirected = redirects.get(original)
+        if redirected:
+            row["resolved_from_entity_id"] = original
+            row["entity_id"] = redirected
+    for row in relation_rows:
+        original_subject = row.get("subject_id")
+        original_object = row.get("object_id")
+        row["subject_id"] = redirects.get(original_subject, original_subject)
+        row["object_id"] = redirects.get(original_object, original_object)
+    for row in fact_rows:
+        original = row.get("subject_entity_id")
+        row["subject_entity_id"] = redirects.get(original, original)
+
+    logger.info("Neo4j tombstone redirects applied before write: %d", len(redirects))
+    return redirects
+
+
 def fact_id_from_parts(
     *,
     doc_id: str,
@@ -1072,27 +1123,69 @@ async def _upsert_entity_and_mention(
     eid = entity_id_from_name(canonical, primary_type)
     ontology = resolve_ontology_metadata(canonical, primary_type, text_context)
     async with driver.session() as session:
+        redirects = await _resolve_entity_id_redirects(session, [eid])
+        resolved_from_entity_id = eid if eid in redirects else None
+        eid = redirects.get(eid, eid)
         await session.run(
             """
             MERGE (e:Entity {entity_id: $entity_id})
             ON CREATE SET e.first_seen = timestamp()
-            SET e.normalized_name = $canonical_name,
-                e.canonical_name = $canonical_name,
-                e.display_name = $display_name,
-                e.primary_entity_type = $primary_entity_type,
-                e.entity_type = $primary_entity_type,
+            SET e.normalized_name = CASE
+                    WHEN $resolved_from_entity_id IS NULL THEN $canonical_name
+                    ELSE coalesce(e.normalized_name, $canonical_name)
+                END,
+                e.canonical_name = CASE
+                    WHEN $resolved_from_entity_id IS NULL THEN $canonical_name
+                    ELSE coalesce(e.canonical_name, $canonical_name)
+                END,
+                e.display_name = CASE
+                    WHEN $resolved_from_entity_id IS NULL THEN $display_name
+                    ELSE coalesce(e.display_name, $display_name)
+                END,
+                e.primary_entity_type = CASE
+                    WHEN $resolved_from_entity_id IS NULL THEN $primary_entity_type
+                    ELSE coalesce(e.primary_entity_type, $primary_entity_type)
+                END,
+                e.entity_type = CASE
+                    WHEN $resolved_from_entity_id IS NULL THEN $primary_entity_type
+                    ELSE coalesce(e.entity_type, $primary_entity_type)
+                END,
                 e.confidence = CASE
                     WHEN e.confidence IS NULL OR $confidence > e.confidence THEN $confidence
                     ELSE e.confidence
                 END,
-                e.object_kind = $object_kind,
-                e.object_kind_parent = $object_kind_parent,
-                e.object_kind_root = $object_kind_root,
-                e.domain_type = $domain_type,
-                e.domain_type_parent = $domain_type_parent,
-                e.domain_type_root = $domain_type_root,
-                e.canonical_family = $canonical_family,
-                e.ontology_version = $ontology_version,
+                e.object_kind = CASE
+                    WHEN $resolved_from_entity_id IS NULL THEN $object_kind
+                    ELSE coalesce(e.object_kind, $object_kind)
+                END,
+                e.object_kind_parent = CASE
+                    WHEN $resolved_from_entity_id IS NULL THEN $object_kind_parent
+                    ELSE coalesce(e.object_kind_parent, $object_kind_parent)
+                END,
+                e.object_kind_root = CASE
+                    WHEN $resolved_from_entity_id IS NULL THEN $object_kind_root
+                    ELSE coalesce(e.object_kind_root, $object_kind_root)
+                END,
+                e.domain_type = CASE
+                    WHEN $resolved_from_entity_id IS NULL THEN $domain_type
+                    ELSE coalesce(e.domain_type, $domain_type)
+                END,
+                e.domain_type_parent = CASE
+                    WHEN $resolved_from_entity_id IS NULL THEN $domain_type_parent
+                    ELSE coalesce(e.domain_type_parent, $domain_type_parent)
+                END,
+                e.domain_type_root = CASE
+                    WHEN $resolved_from_entity_id IS NULL THEN $domain_type_root
+                    ELSE coalesce(e.domain_type_root, $domain_type_root)
+                END,
+                e.canonical_family = CASE
+                    WHEN $resolved_from_entity_id IS NULL THEN $canonical_family
+                    ELSE coalesce(e.canonical_family, $canonical_family)
+                END,
+                e.ontology_version = CASE
+                    WHEN $resolved_from_entity_id IS NULL THEN $ontology_version
+                    ELSE coalesce(e.ontology_version, $ontology_version)
+                END,
                 e.query_aliases = CASE
                     WHEN $query_aliases IS NULL OR size($query_aliases) = 0 THEN coalesce(e.query_aliases, [])
                     ELSE [a IN $query_aliases WHERE NOT a IN coalesce(e.query_aliases, [])] + coalesce(e.query_aliases, [])
@@ -1126,6 +1219,7 @@ async def _upsert_entity_and_mention(
             END
             """,
             entity_id=eid,
+            resolved_from_entity_id=resolved_from_entity_id,
             canonical_name=canonical,
             display_name=entity.surface_form or entity.canonical_name,
             surface_form=entity.surface_form or entity.canonical_name,
@@ -1178,6 +1272,9 @@ async def _upsert_relation(
         predicate_refined=False,
     )
     async with driver.session() as session:
+        redirects = await _resolve_entity_id_redirects(session, [subject_id, object_id])
+        subject_id = redirects.get(subject_id, subject_id)
+        object_id = redirects.get(object_id, object_id)
         await session.run(
             """
             MATCH (s:Entity {entity_id: $subject_id})
@@ -1205,7 +1302,8 @@ async def _delete_orphan_entities(session) -> None:
     await session.run(
         """
         MATCH (e:Entity)
-        WHERE NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }
+        WHERE coalesce(e.tombstone, false) = false
+          AND NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }
         DETACH DELETE e
         """
     )
@@ -1714,6 +1812,13 @@ async def write_document_graph(
     # 3. Single session for all remaining writes. Each query uses UNWIND to
     # fan out over its list.
     async with driver.session() as session:
+        await _redirect_graph_write_rows(
+            session,
+            mention_rows=mention_rows,
+            relation_rows=relation_rows,
+            fact_rows=fact_rows,
+        )
+
         # Chunks + HAS_CHUNK edges.
         if chunk_rows:
             await session.run(
@@ -1737,23 +1842,62 @@ async def write_document_graph(
                 UNWIND $rows AS row
                 MERGE (e:Entity {entity_id: row.entity_id})
                 ON CREATE SET e.first_seen = timestamp()
-                SET e.normalized_name = row.normalized_name,
-                    e.canonical_name = row.canonical_name,
-                    e.display_name = row.display_name,
-                    e.primary_entity_type = row.primary_entity_type,
-                    e.entity_type = row.primary_entity_type,
+                SET e.normalized_name = CASE
+                        WHEN row.resolved_from_entity_id IS NULL THEN row.normalized_name
+                        ELSE coalesce(e.normalized_name, row.normalized_name)
+                    END,
+                    e.canonical_name = CASE
+                        WHEN row.resolved_from_entity_id IS NULL THEN row.canonical_name
+                        ELSE coalesce(e.canonical_name, row.canonical_name)
+                    END,
+                    e.display_name = CASE
+                        WHEN row.resolved_from_entity_id IS NULL THEN row.display_name
+                        ELSE coalesce(e.display_name, row.display_name)
+                    END,
+                    e.primary_entity_type = CASE
+                        WHEN row.resolved_from_entity_id IS NULL THEN row.primary_entity_type
+                        ELSE coalesce(e.primary_entity_type, row.primary_entity_type)
+                    END,
+                    e.entity_type = CASE
+                        WHEN row.resolved_from_entity_id IS NULL THEN row.primary_entity_type
+                        ELSE coalesce(e.entity_type, row.primary_entity_type)
+                    END,
                     e.confidence = CASE
                         WHEN e.confidence IS NULL OR row.confidence > e.confidence THEN row.confidence
                         ELSE e.confidence
                     END,
-                    e.object_kind = row.object_kind,
-                    e.object_kind_parent = row.object_kind_parent,
-                    e.object_kind_root = row.object_kind_root,
-                    e.domain_type = row.domain_type,
-                    e.domain_type_parent = row.domain_type_parent,
-                    e.domain_type_root = row.domain_type_root,
-                    e.canonical_family = row.canonical_family,
-                    e.ontology_version = row.ontology_version,
+                    e.object_kind = CASE
+                        WHEN row.resolved_from_entity_id IS NULL THEN row.object_kind
+                        ELSE coalesce(e.object_kind, row.object_kind)
+                    END,
+                    e.object_kind_parent = CASE
+                        WHEN row.resolved_from_entity_id IS NULL THEN row.object_kind_parent
+                        ELSE coalesce(e.object_kind_parent, row.object_kind_parent)
+                    END,
+                    e.object_kind_root = CASE
+                        WHEN row.resolved_from_entity_id IS NULL THEN row.object_kind_root
+                        ELSE coalesce(e.object_kind_root, row.object_kind_root)
+                    END,
+                    e.domain_type = CASE
+                        WHEN row.resolved_from_entity_id IS NULL THEN row.domain_type
+                        ELSE coalesce(e.domain_type, row.domain_type)
+                    END,
+                    e.domain_type_parent = CASE
+                        WHEN row.resolved_from_entity_id IS NULL THEN row.domain_type_parent
+                        ELSE coalesce(e.domain_type_parent, row.domain_type_parent)
+                    END,
+                    e.domain_type_root = CASE
+                        WHEN row.resolved_from_entity_id IS NULL THEN row.domain_type_root
+                        ELSE coalesce(e.domain_type_root, row.domain_type_root)
+                    END,
+                    e.canonical_family = CASE
+                        WHEN row.resolved_from_entity_id IS NULL THEN row.canonical_family
+                        ELSE coalesce(e.canonical_family, row.canonical_family)
+                    END,
+                    e.ontology_version = CASE
+                        WHEN row.resolved_from_entity_id IS NULL THEN row.ontology_version
+                        ELSE coalesce(e.ontology_version, row.ontology_version)
+                    END,
                     e.query_aliases = CASE
                         WHEN row.query_aliases IS NULL OR size(row.query_aliases) = 0 THEN coalesce(e.query_aliases, [])
                         ELSE [a IN row.query_aliases WHERE NOT a IN coalesce(e.query_aliases, [])] + coalesce(e.query_aliases, [])
