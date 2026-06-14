@@ -185,8 +185,8 @@ export function ChatWindow() {
             Welcome to Polymath
           </h2>
           <p className="text-sm text-text-secondary mb-6">
-            Your hierarchical RAG assistant. Select knowledge collections above,
-            toggle HyDE reasoning or Graph traversal, and start asking questions.
+            Ask across your library, narrow the context when you need to, or
+            open the graph when the shape of the knowledge matters.
           </p>
           <div className="mb-3 flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-content-tertiary font-mono">
             <span>

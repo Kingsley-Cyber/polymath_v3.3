@@ -198,7 +198,7 @@ export function ModelSelector() {
 
       {isOpen && (
         <div
-          className="fixed left-2 right-2 bottom-36 z-[110] w-auto max-h-[calc(100dvh-11rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] p-1 font-mono shadow-xl rounded origin-bottom sm:absolute sm:left-auto sm:right-0 sm:bottom-full sm:mb-2 sm:w-80 sm:max-w-[calc(100vw-1rem)] sm:max-h-[calc(100dvh-7rem)] sm:origin-bottom-right"
+          className="fixed left-2 right-2 bottom-36 z-[110] w-auto max-h-[calc(100dvh-11rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] p-1 font-mono shadow-xl rounded origin-bottom sm:absolute sm:left-0 sm:right-auto sm:bottom-full sm:mb-2 sm:w-80 sm:max-w-[calc(100vw-1rem)] sm:max-h-[calc(100dvh-7rem)] sm:origin-bottom-left"
           data-testid="model-selector-dropdown"
         >
           <div className="text-[9px] font-bold tracking-widest uppercase text-content-secondary px-2 py-1.5 border-b border-border-minimal mb-1">

@@ -1467,6 +1467,90 @@
   max-height: min(24vh, 11rem);
 }
 
+#root .pm-chat-composer {
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 18%, var(--color-border)) !important;
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012)),
+    color-mix(in srgb, var(--bg-surface) 88%, #000 12%);
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.045) !important;
+  overflow: visible;
+}
+
+#root .pm-chat-composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--color-border)) !important;
+  box-shadow:
+    0 20px 56px rgba(0, 0, 0, 0.32),
+    0 0 0 1px color-mix(in srgb, var(--accent-primary) 22%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+#root .pm-query-textarea {
+  border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent) !important;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.16);
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease !important;
+}
+
+#root .pm-query-textarea:focus {
+  border-color: color-mix(in srgb, var(--accent-primary) 52%, var(--color-border)) !important;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+#root .pm-soft-control,
+#root .pm-composer-icon,
+#root .pm-composer-action {
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent) !important;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease !important;
+}
+
+#root .pm-soft-control:hover,
+#root .pm-composer-icon:hover,
+#root .pm-composer-action:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+#root .pm-composer-action:not(:disabled) {
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--accent-primary) 24%, transparent) !important;
+}
+
+#root .pm-context-panel,
+#root .pm-composer-options {
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.42) !important;
+  animation: pm-pop-in 120ms ease-out;
+}
+
+@keyframes pm-pop-in {
+  from {
+    transform: translateY(4px) scale(0.992);
+  }
+  to {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #root .pm-context-panel,
+  #root .pm-composer-options,
+  #root .pm-soft-control,
+  #root .pm-composer-icon,
+  #root .pm-composer-action,
+  #root .pm-query-textarea {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 @media (max-width: 640px) {
   #root .message-user .message-text,
   #root [data-role="user"] .message-text {

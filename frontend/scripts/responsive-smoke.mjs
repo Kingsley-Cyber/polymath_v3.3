@@ -306,7 +306,7 @@ async function run() {
       );
     });
     await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForSelector('[data-testid="corpus-multi-select"]', {
+    await page.waitForSelector('[data-testid="chat-context-toggle"]', {
       timeout: 15000,
     });
     await page.waitForSelector('[data-testid="model-selector-toggle"]', {
@@ -320,6 +320,8 @@ async function run() {
     }));
 
     const boxes = {};
+    await page.click('[data-testid="chat-context-toggle"]');
+    boxes.context = await popoverBox(page, "Query Context");
     await page.click('[data-testid="corpus-multi-select"]');
     boxes.corpus = await popoverBox(page, "Corpus Scoping");
     await page.mouse.click(2, Math.min(height - 2, 300));
@@ -328,6 +330,7 @@ async function run() {
     boxes.model = await popoverBox(page, "Select Engine");
     await page.mouse.click(2, Math.min(height - 2, 300));
 
+    await page.click('[data-testid="composer-features-toggle"]');
     await page.locator("button").filter({ hasText: /\[ITEMS:/ }).click();
     boxes.items = await popoverBox(page, "Tools (0)");
 
@@ -344,6 +347,7 @@ async function run() {
         scroll.scrollWidth <= scroll.innerWidth &&
         scroll.bodyScrollWidth <= scroll.innerWidth,
       inFrame: {
+        context: isInFrame(boxes.context, viewport),
         corpus: isInFrame(boxes.corpus, viewport),
         model: isInFrame(boxes.model, viewport),
         items: isInFrame(boxes.items, viewport),

@@ -52,7 +52,7 @@ export function RetrievalTierSelector() {
         title="Select Retrieval Tier"
       >
         <Icon className="w-3.5 h-3.5 text-content-tertiary group-hover:text-accent-main" />
-        <span className="text-content-secondary hidden sm:inline-block">
+        <span className="text-content-secondary inline-block">
           [{selectedTier.label.replace(/ \(.+\)/, "")}]
         </span>
         <ChevronDown className="w-3 h-3 text-content-tertiary group-hover:text-accent-main" />

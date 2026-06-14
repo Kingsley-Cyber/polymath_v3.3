@@ -4,14 +4,7 @@ import { Menu, Network, Share2, X } from "lucide-react";
 import { Sidebar } from "./components/chat/Sidebar";
 import { ChatWindow } from "./components/chat/ChatWindow";
 import { ChatInput } from "./components/chat/ChatInput";
-import { CollectionSelector } from "./components/chat/CollectionSelector";
-import { CorpusMultiSelect } from "./components/chat/CorpusMultiSelect";
-// ModelSelector + ThinkingEffortSelector now live inside ChatInput's
-// orchestration row (per-turn dials sit closer to the textarea).
-import { ReasoningModeSelector } from "./components/chat/ReasoningModeSelector";
-import { SearchModeSelector } from "./components/chat/SearchModeSelector";
-import { QueryProfileSelector } from "./components/chat/QueryProfileSelector";
-import { RetrievalTierSelector } from "./components/chat/RetrievalTierSelector";
+import { ChatContextMenu } from "./components/chat/ChatContextMenu";
 import { GraphViewer } from "./components/graph/GraphViewer";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { LoginView } from "./components/auth/LoginView";
@@ -672,32 +665,19 @@ function App() {
             </div>
           </div>
 
-          <div className="flex w-full sm:w-auto items-center gap-1.5 sm:gap-3 flex-wrap overflow-visible pb-1 sm:pb-0 sm:justify-end">
-            {/* Per-query corpus / retrieval selectors stay in the header. */}
-            <CorpusMultiSelect />
-            <div className="hidden sm:block h-4 w-px bg-border-minimal" />
-            <CollectionSelector collections={collections} />
-            <div className="hidden sm:block h-4 w-px bg-border-minimal" />
-            <ReasoningModeSelector />
-            <div className="hidden sm:block h-4 w-px bg-border-minimal" />
-            <SearchModeSelector />
-            <div className="hidden sm:block h-4 w-px bg-border-minimal" />
-            <QueryProfileSelector />
-            <div className="hidden sm:block h-4 w-px bg-border-minimal" />
-            <RetrievalTierSelector />
-            <div className="hidden sm:block h-4 w-px bg-border-minimal" />
+          <div className="flex w-full min-w-0 items-center justify-end gap-2 pb-1 sm:w-auto sm:pb-0">
+            <ChatContextMenu
+              collections={collections}
+              onOpenGraph={() => setIsGraphViewOpen(true)}
+            />
             <button
               onClick={() => setIsGraphViewOpen(true)}
-              className="flex h-8 w-8 shrink-0 items-center justify-center border transition-none rounded-none border-transparent text-content-secondary hover:text-accent-main"
+              className="pm-soft-control flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border-minimal bg-bg-surface/95 text-content-secondary hover:text-accent-main"
               title="Global Graph"
               aria-label="Open global graph"
             >
               <Network className="w-4 h-4" />
             </button>
-            {/* ModelSelector + ThinkingEffortSelector relocated to the
-                ChatInput orchestration row (closer to the textarea — the
-                model + thinking dial are the most per-turn settings, so
-                they live next to the input). See ChatInput.tsx. */}
           </div>
         </header>
 
@@ -714,7 +694,7 @@ function App() {
               isLoading={!modelsLoaded}
               placeholder={
                 modelsLoaded
-                  ? "EXECUTE QUERY // INJECT CONTEXT..."
+                  ? "Ask Polymath..."
                   : "INITIALIZING SYSTEMS..."
               }
               tokenCount={{ current: 0, max: maxTokens }}

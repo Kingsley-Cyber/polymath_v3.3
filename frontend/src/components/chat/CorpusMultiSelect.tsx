@@ -55,7 +55,7 @@ export function CorpusMultiSelect() {
         title="Select Target Corpora"
       >
         <FolderGit2 className="w-3.5 h-3.5 text-content-tertiary group-hover:text-accent-main" />
-        <span className="text-content-secondary hidden sm:inline-block">
+        <span className="text-content-secondary inline-block">
           {selectedCount === 0
             ? "[ALL CORPORA]"
             : `[CORPORA: ${selectedCount}]`}

@@ -14,6 +14,7 @@ import {
   X,
   Wrench,
   Sparkles,
+  SlidersHorizontal,
 } from "lucide-react";
 import { ToggleBar } from "./ToggleBar";
 import { ModelSelector } from "./ModelSelector";
@@ -153,8 +154,10 @@ export function ChatInput({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- nonce IS the trigger
   }, [prefill?.nonce]);
   const [isDragging, setIsDragging] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const optionsRef = useRef<HTMLDivElement>(null);
 
   // Phase 24 — slash command popover state.
   // Detects `/<query>` token at the end of the input (typed by user) and
@@ -165,9 +168,25 @@ export function ChatInput({
     availableSkills,
     selectedToolIds,
     selectedSkillIds,
+    hydeEnabled,
+    webSearchEnabled,
+    reasoningCascadeEnabled,
     toggleTool,
     toggleSkill,
   } = useSettingsStore();
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        optionsRef.current &&
+        !optionsRef.current.contains(event.target as Node)
+      ) {
+        setOptionsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   type SlashItem = {
     kind: "tool" | "skill";
@@ -239,6 +258,14 @@ export function ChatInput({
       .filter(Boolean)
       .map((s) => ({ kind: "skill" as const, id: s!.id, name: s!.name, slash: s!.slash_command || undefined })),
   ];
+
+  const activeModeChips = [
+    hydeEnabled ? "HyDE" : null,
+    reasoningCascadeEnabled ? "Reason" : null,
+    webSearchEnabled ? "Web" : null,
+  ].filter((chip): chip is string => Boolean(chip));
+  const activeFeatureCount =
+    activeModeChips.length + selectedToolIds.length + selectedSkillIds.length;
 
   // Auto-resize textarea
   useEffect(() => {
@@ -405,26 +432,49 @@ export function ChatInput({
   const hasContent = input.trim().length > 0 || attachments.length > 0;
 
   return (
-    <div className="w-full min-w-0 font-mono flex flex-col relative chat-input-container border border-border-minimal">
+    <div className="pm-chat-composer w-full min-w-0 font-mono flex flex-col relative chat-input-container">
       {/* Active Scanline Indicator (from index.css) */}
       {(hasContent || isLoading) && <div className="pulse-indicator" />}
 
-      {/* Orchestration Header - Per-query toggles + model/thinking dials.
-          ModelSelector and ThinkingEffortSelector live HERE (not in the
-          page header) because they're the most per-turn settings —
-          users change them on the same beat they type a query. */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-2 sm:px-3 py-1.5 bg-bg-surface border-b border-border-minimal">
-        <ToggleBar className="min-w-0 flex-wrap" />
-        <div className="flex min-w-0 items-center gap-2 flex-wrap justify-start sm:justify-end">
-          <ModelSelector />
-          <ThinkingEffortSelector />
-          <div className="hidden sm:flex items-center gap-1.5 opacity-70 pl-2 border-l border-border-minimal">
-            <span className="status-badge status-badge-use">{"<USE>"}</span>
-            <span className="text-[9px] uppercase tracking-[0.2em] text-content-secondary font-bold">
-              I/O Panel
-            </span>
+      <div className="relative px-2.5 pt-2.5 sm:px-3" ref={optionsRef}>
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <ModelSelector />
+            <ThinkingEffortSelector />
           </div>
+          <button
+            type="button"
+            data-testid="composer-features-toggle"
+            onClick={() => setOptionsOpen((open) => !open)}
+            className={`pm-soft-control flex h-8 shrink-0 items-center gap-2 rounded-full border px-2.5 text-[10px] font-bold uppercase tracking-widest !transition-colors !duration-150 ${
+              activeFeatureCount > 0
+                ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+                : "border-border-minimal bg-bg-surface text-content-secondary hover:text-content-primary"
+            }`}
+            aria-expanded={optionsOpen}
+            title="Tools, skills, web, HyDE, and reasoning"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Features</span>
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-black/25 px-1.5 text-[9px]">
+              {activeFeatureCount}
+            </span>
+          </button>
         </div>
+
+        {optionsOpen && (
+          <div className="pm-composer-options absolute left-2 right-2 bottom-[calc(100%+0.5rem)] z-[105] rounded-2xl border border-white/10 bg-[#15171d] p-2 shadow-2xl sm:left-auto sm:right-2 sm:w-[30rem] sm:max-w-[calc(100vw-1rem)]">
+            <div className="mb-2 flex items-center justify-between gap-2 border-b border-white/10 px-2 pb-2">
+              <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-content-primary">
+                Features
+              </div>
+              <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-emerald-200">
+                {activeFeatureCount} active
+              </span>
+            </div>
+            <ToggleBar className="rounded-xl bg-black/15 p-2" />
+          </div>
+        )}
       </div>
 
       {/* Token Budget Bar — driven by SSE `budget` frame from chat_orchestrator */}
@@ -514,7 +564,7 @@ export function ChatInput({
         )}
 
         {/* Input Area */}
-        <div className="flex items-end gap-2 p-2 sm:p-3">
+        <div className="flex items-end gap-2 p-2.5 sm:p-3">
           {/* Paperclip — PER-TURN multimodal attachments. Images go
               into the LLM call as image_url blocks; text files inline
               into the augmented prompt. Capped at 4 files / 20 MB each.
@@ -523,7 +573,7 @@ export function ChatInput({
             onClick={() => fileInputRef.current?.click()}
             disabled={isLoading}
             className={`
-              flex-shrink-0 p-2 border transition-none rounded-none
+              pm-composer-icon flex-shrink-0 p-2 border transition-none rounded-full
               ${isDragging
                 ? "bg-accent-main text-bg-base border-accent-main"
                 : "border-transparent text-content-tertiary hover:border-border-minimal hover:text-accent-main bg-bg-surface"
@@ -597,15 +647,24 @@ export function ChatInput({
             )}
 
             {/* Active chips above textarea */}
-            {activeChips.length > 0 && (
-              <div className="flex flex-wrap gap-1 mb-1">
+            {(activeModeChips.length > 0 || activeChips.length > 0) && (
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {activeModeChips.map((chip) => (
+                  <span
+                    key={chip}
+                    className="flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-emerald-200"
+                  >
+                    <Sparkles className="h-2.5 w-2.5" />
+                    {chip}
+                  </span>
+                ))}
                 {activeChips.map((chip) => (
                   <span
                     key={`${chip.kind}-${chip.id}`}
-                    className={`flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold tracking-widest uppercase border rounded ${
+                    className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-bold tracking-widest uppercase ${
                       chip.kind === "tool"
-                        ? "border-content-tertiary/40 text-content-secondary bg-bg-base/50"
-                        : "border-accent-secondary/50 text-accent-secondary bg-accent-secondary/10"
+                        ? "border-cyan-400/30 text-cyan-200 bg-cyan-400/10"
+                        : "border-violet-400/30 text-violet-200 bg-violet-400/10"
                     }`}
                   >
                     {chip.kind === "tool" ? (
@@ -643,9 +702,8 @@ export function ChatInput({
               disabled={isLoading}
               rows={1}
               className="
-                w-full min-h-[38px] max-h-[42dvh] sm:max-h-[250px] py-2 px-3
-                bg-transparent border border-border-minimal border-l-2 border-l-accent-main/50
-                focus:border-l-accent-main
+                pm-query-textarea w-full min-h-[42px] max-h-[42dvh] sm:max-h-[250px] py-2.5 px-3
+                bg-transparent border border-border-minimal
                 resize-none text-sm text-content-primary placeholder:text-content-tertiary
                 focus:outline-none focus:ring-0
                 disabled:opacity-50 disabled:cursor-not-allowed
@@ -676,8 +734,8 @@ export function ChatInput({
               onClick={handleSubmit}
               disabled={!hasContent || isLoading}
               className={`
-                flex-shrink-0 flex items-center justify-center gap-2 px-3 sm:px-4 py-2 sm:py-1.5 min-w-0 sm:min-w-[120px]
-                text-[10px] font-bold tracking-widest uppercase border transition-none
+                pm-composer-action flex-shrink-0 flex h-10 w-10 sm:w-auto items-center justify-center gap-2 rounded-full px-3 sm:px-4 py-2 sm:py-1.5 min-w-0 sm:min-w-[118px]
+                text-[10px] font-bold tracking-widest uppercase border !transition-colors !duration-150
                 ${hasContent && !isLoading
                   ? "bg-accent-main text-bg-base border-accent-main hover:bg-accent-hover hover:border-accent-hover"
                   : "bg-bg-surface text-content-tertiary border-border-minimal"
@@ -702,16 +760,18 @@ export function ChatInput({
         </div>
       </div>
 
-      {/* Helper Console Text */}
-      <div className="flex items-center justify-between gap-2 px-2 sm:px-3 py-1.5 bg-bg-surface border-t border-border-minimal text-[9px] font-bold tracking-widest text-content-tertiary uppercase">
-        <div className="flex min-w-0 gap-4 overflow-hidden">
-          <span>&gt; [SHIFT+ENTER] = NEWLINE</span>
-          <span className="hidden sm:inline">
-            &gt; [DRAG+DROP] = INJECT_FILE
-          </span>
+      <div className="flex items-center justify-between gap-2 px-3 pb-2 text-[9px] font-bold uppercase tracking-widest text-content-tertiary">
+        <div className="min-w-0 truncate">
+          {activeFeatureCount > 0
+            ? activeModeChips
+                .concat(activeChips.map((chip) => chip.name))
+                .join(" / ")
+            : "Ready"}
         </div>
-        <div>
-          <span>STATE: {isLoading ? "EXECUTING" : "IDLE"}</span>
+        <div
+          className={isLoading ? "text-accent-main" : "text-content-tertiary"}
+        >
+          {isLoading ? "Executing" : "Idle"}
         </div>
       </div>
     </div>
