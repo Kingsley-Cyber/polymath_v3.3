@@ -294,7 +294,7 @@ export function ChatContextMenu({
 
       {isOpen && (
         <div
-          className="pm-context-panel custom-scrollbar fixed left-2 right-2 top-20 z-[95] max-h-[calc(100dvh-5.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain rounded-2xl border border-white/10 bg-[#15171d] p-2 font-mono shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-3 sm:w-[36rem] sm:max-w-[calc(100vw-1rem)] sm:max-h-[calc(100dvh-7rem)]"
+          className="pm-context-panel custom-scrollbar fixed bottom-1 left-2 right-2 top-14 z-[95] overflow-y-auto overflow-x-hidden overscroll-contain rounded-2xl border border-white/10 bg-[#15171d] p-2 font-mono shadow-2xl sm:bottom-4 sm:left-auto sm:right-4 sm:top-16 sm:w-[50rem] sm:max-w-[calc(100vw-2rem)]"
           data-testid="chat-context-panel"
         >
           <div className="sticky top-0 z-10 mb-2 flex items-center justify-between gap-2 border-b border-white/10 bg-[#15171d] px-2 pb-2 pt-0.5">
@@ -312,7 +312,7 @@ export function ChatContextMenu({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-2 xl:grid-cols-[1fr_1fr]">
             <Section
               icon={<FolderGit2 className="h-3 w-3" />}
               title="Sources"
@@ -347,7 +347,7 @@ export function ChatContextMenu({
                         active={active}
                         onClick={() => toggleCorpus(corpus.corpus_id)}
                       >
-                        <span className="block truncate text-[10px] font-bold uppercase tracking-widest">
+                        <span className="block break-words text-[10px] font-bold uppercase tracking-widest">
                           {compactName(corpus.name, corpus.corpus_id)}
                         </span>
                         <span className="block text-[9px] text-content-tertiary">
@@ -399,7 +399,7 @@ export function ChatContextMenu({
                           active={active}
                           onClick={() => toggleCollection(collection.id)}
                         >
-                          <span className="block truncate text-[10px] font-bold uppercase tracking-widest">
+                          <span className="block break-words text-[10px] font-bold uppercase tracking-widest">
                             {compactName(collection.name, collection.id)}
                           </span>
                         </InlineChoice>
@@ -424,7 +424,7 @@ export function ChatContextMenu({
                     title={profile.description}
                   >
                     <span className="flex min-w-0 items-center justify-between gap-2">
-                      <span className="truncate text-[10px] font-bold uppercase tracking-widest">
+                      <span className="break-words text-[10px] font-bold uppercase tracking-widest">
                         {profile.label}
                       </span>
                       <span className="shrink-0 text-[8px] uppercase tracking-widest text-content-tertiary">
@@ -478,7 +478,7 @@ export function ChatContextMenu({
                     >
                       <span className="flex min-w-0 items-center gap-1.5">
                         <Icon className="h-3 w-3 shrink-0 text-violet-200/70" />
-                        <span className="truncate text-[10px] font-bold uppercase tracking-widest">
+                        <span className="break-words text-[10px] font-bold uppercase tracking-widest">
                           {tier.label}
                         </span>
                       </span>
@@ -500,11 +500,11 @@ export function ChatContextMenu({
                 <span className="block text-[9px] uppercase tracking-widest text-content-tertiary">
                   Active
                 </span>
-                <span className="block truncate text-[10px] font-bold uppercase tracking-widest text-content-primary">
+                <span className="block break-words text-[10px] font-bold uppercase tracking-widest text-content-primary">
                   {activeReasoning?.label ?? "Off"}
                 </span>
               </div>
-              <div className="grid grid-cols-1 gap-1.5" data-testid="context-reasoning-list">
+              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2" data-testid="context-reasoning-list">
                 {REASONING_MODES.map((mode) => (
                   <InlineChoice
                     key={mode.key}
@@ -513,7 +513,7 @@ export function ChatContextMenu({
                     title={mode.description}
                   >
                     <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate text-[10px] font-bold uppercase tracking-widest">
+                      <span className="break-words text-[10px] font-bold uppercase tracking-widest">
                         {mode.label}
                       </span>
                       {mode.retrievalLevel && (
