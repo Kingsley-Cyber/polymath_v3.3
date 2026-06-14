@@ -80,11 +80,11 @@ async def resolve_by_entry_id(
     from services.secrets import decrypt
     from services.settings import settings_service
 
-    def _prefix(mname: str) -> str:
-        """Pass-through for already-prefixed names; fall back to openai/
-        for bare names that came from custom OpenAI-compatible endpoints."""
-        mname = (mname or "").strip()
-        return mname if "/" in mname else f"openai/{mname}"
+    def _route_model(provider: str | None, mname: str) -> str:
+        """Map the user-facing model id to the concrete LiteLLM route."""
+        from services.provider_presets import normalize_model_for_litellm
+
+        return normalize_model_for_litellm(provider, mname)
 
     raw = await settings_service.get_models_raw(user_id)
     for entry in (raw.get("query_model_pool") or []):
@@ -98,7 +98,7 @@ async def resolve_by_entry_id(
         base_url = entry.get("base_url")
         # Ollama entries have no base_url; worker falls through to env default.
         return {
-            "model": _prefix(model_name),
+            "model": _route_model(entry.get("provider"), model_name),
             "api_base": base_url,
             "api_key": plaintext,
             "extra_params": entry.get("extra_params") or {},
@@ -111,7 +111,7 @@ async def resolve_by_entry_id(
         resolved = await model_pool_service.get_resolved(user_id, entry_id)
         if resolved:
             return {
-                "model": _prefix(resolved["model_name"]),
+                "model": _route_model(resolved.get("provider"), resolved["model_name"]),
                 "api_base": resolved.get("base_url"),
                 "api_key": resolved.get("api_key"),
                 "extra_params": resolved.get("extra_params") or {},
@@ -126,7 +126,7 @@ async def resolve_by_entry_id(
         profile = await model_profiles_service.get_resolved(user_id, entry_id)
         if profile:
             return {
-                "model": _prefix(profile["model_name"]),
+                "model": _route_model("custom", profile["model_name"]),
                 "api_base": profile.get("base_url"),
                 "api_key": profile.get("api_key"),
                 "extra_params": profile.get("extra_params") or {},

@@ -1,14 +1,11 @@
 """
 Tests for the bare-model-name migration in IngestionService.
 
-Covers the three storage locations patched by
+Covers the storage location patched by
 `IngestionService.migrate_bare_model_names`:
 
   1. `corpora.default_ingestion_config.summary_models[] / extraction_models[]`
      — per-corpus ingestion pools (ModelProfileRef).
-  2. `settings.models.query_model_pool[]` — per-user unified chat pool
-     (QueryModelPoolEntry).
-  3. `model_pool` collection — Phase E unified pool entries.
 
 The migration must:
   • Add the LiteLLM provider prefix when an entry has a known provider_preset
@@ -293,9 +290,9 @@ async def test_multiple_providers_in_one_corpus():
 
 
 @pytest.mark.asyncio
-async def test_settings_query_model_pool_patched():
+async def test_settings_query_model_pool_preserved():
     """settings.models.query_model_pool[] uses `provider` + `model_name`.
-    Migration must rewrite model_name the same way."""
+    Chat setup stays user-facing; runtime resolution adds route prefixes."""
     db = _FakeDB()
     db.settings.docs.append(
         {
@@ -321,16 +318,16 @@ async def test_settings_query_model_pool_patched():
     )
     svc = _make_service(db)
     result = await svc.migrate_bare_model_names()
-    assert result["settings_users_patched"] == 1
+    assert result["settings_users_patched"] == 0
     pool = db.settings.docs[0]["models"]["query_model_pool"]
-    assert pool[0]["model_name"] == "deepseek/deepseek-chat"
+    assert pool[0]["model_name"] == "deepseek-chat"
     # Already-prefixed entry untouched.
     assert pool[1]["model_name"] == "openai/gpt-4o"
 
 
 @pytest.mark.asyncio
-async def test_model_pool_collection_patched():
-    """Phase E model_pool collection — same rewrite logic."""
+async def test_model_pool_collection_preserved():
+    """Legacy model_pool entries also stay user-facing."""
     db = _FakeDB()
     db.model_pool.docs.append(
         {
@@ -352,8 +349,8 @@ async def test_model_pool_collection_patched():
     )
     svc = _make_service(db)
     result = await svc.migrate_bare_model_names()
-    assert result["model_pool_entries_patched"] == 1
-    assert db.model_pool.docs[0]["model_name"] == "deepseek/deepseek-chat"
+    assert result["model_pool_entries_patched"] == 0
+    assert db.model_pool.docs[0]["model_name"] == "deepseek-chat"
     # Unknown provider untouched.
     assert db.model_pool.docs[1]["model_name"] == "some-model"
 

@@ -35,7 +35,7 @@ import type {
   PoolProvider,
   QueryModelPoolEntry,
 } from "../../types";
-import { POOL_PROVIDER_PRESETS, composeModelString, findPreset } from "../../types";
+import { POOL_PROVIDER_PRESETS, findPreset } from "../../types";
 import { ApiKeysTab } from "./ApiKeysTab";
 
 
@@ -67,12 +67,10 @@ function PoolSection() {
     const p = POOL_PROVIDER_PRESETS.find((pp) => pp.id === id);
     setProvider(id);
     setBaseUrl(p?.base_url || "");
-    // Compose `{litellm_provider}/{example_model}` so the stored model_name
-    // carries the LiteLLM prefix. Only overwrite when the user hasn't typed yet.
     if (p?.model_dropdown_only && p.example_model) {
-      setModelName(composeModelString(id, p.example_model));
+      setModelName(p.example_model);
     } else if (!modelName && p && p.litellm_provider && p.example_model) {
-      setModelName(composeModelString(id, p.example_model));
+      setModelName(p.example_model);
     } else if (!modelName) {
       setModelName(p?.example_model || "");
     }
@@ -90,18 +88,15 @@ function PoolSection() {
 
   const handleAddCloud = () => {
     if (!canAddCloud) return;
-    // Safety net: prefix with the provider LiteLLM route unless already
-    // prefixed. OpenAI-compatible model IDs can contain slashes.
-    const bare = modelName.trim();
-    const composedModel = composeModelString(provider, bare);
+    const cleanModel = modelName.trim();
     const preset = findPreset(provider);
     const entry: QueryModelPoolEntry = {
       entry_id: newEntryId(),
-      label: label.trim() || `${provider} · ${composedModel}`,
+      label: label.trim() || `${provider} · ${cleanModel}`,
       provider,
       base_url: baseUrl.trim() || null,
       api_key_ciphertext: apiKey.trim() || null,
-      model_name: composedModel,
+      model_name: cleanModel,
       source: "cloud",
       enabled: true,
       created_at: new Date().toISOString(),
@@ -214,10 +209,9 @@ function PoolSection() {
               className="flex-1 min-w-full sm:min-w-[160px] bg-[#0b0c10] text-white border border-white/10 rounded px-2 py-1 text-[11px] font-mono"
             >
               {(selectedPreset.example_models || [selectedPreset.example_model]).map((m) => {
-                const value = composeModelString(provider, m);
                 return (
-                  <option key={value} value={value}>
-                    {value}
+                  <option key={m} value={m}>
+                    {m}
                   </option>
                 );
               })}
@@ -250,7 +244,7 @@ function PoolSection() {
             p.example_models && p.example_models.length > 0 ? (
               <datalist key={p.id} id={`models-${p.id}`}>
                 {p.example_models.map((m) => (
-                  <option key={m} value={composeModelString(p.id, m)} />
+                  <option key={m} value={m} />
                 ))}
               </datalist>
             ) : null

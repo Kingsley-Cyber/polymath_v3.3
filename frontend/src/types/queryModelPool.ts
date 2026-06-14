@@ -158,9 +158,9 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
   {
     // OpenCode Go ($/mo subscription) curated coding models. The
     // OpenAI-compatible Go models ride the openai/* route with a per-entry
-    // base_url override (same pattern as Moonshot / SiliconFlow), so
-    // composeModelString yields e.g. "openai/deepseek-v4-pro" and LiteLLM
-    // forwards it to the Go endpoint. model_dropdown_only is intentionally
+    // base_url override (same pattern as Moonshot / SiliconFlow). Chat model
+    // setup stores the bare provider id and the backend adds the route prefix
+    // at call time. model_dropdown_only is intentionally
     // LEFT OFF: example_models render as datalist suggestions while the model
     // field stays free-text, so new Go models can be typed in if the catalog
     // changes. The Anthropic-endpoint Go models (minimax-*, qwen3.x-*) use
@@ -219,8 +219,8 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
     example_model: "grok-2-latest",
   },
   // OpenAI-compatible providers — litellm_provider="openai" but custom base_url.
-  // Model name stored as `openai/<model>`; LiteLLM routes via the openai
-  // provider using the per-entry api_base.
+  // Chat setup stores bare model ids; backend resolution adds `openai/` for
+  // LiteLLM while preserving provider-native names in the UI.
   {
     id: "mimo",
     name: "Xiaomi MiMo (SGP)",

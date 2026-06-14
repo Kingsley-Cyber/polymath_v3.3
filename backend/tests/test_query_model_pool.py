@@ -393,7 +393,7 @@ async def test_resolver_pool_entry_returns_decrypted_key():
             user, "ent-resolve"
         )
         assert resolved is not None
-        assert resolved["model"].endswith("Qwen/Qwen3-Embedding-0.6B")
+        assert resolved["model"] == "openai/Qwen/Qwen3-Embedding-0.6B"
         assert resolved["api_base"] == "https://api.siliconflow.cn/v1"
         assert resolved["api_key"] == "sk-resolved-plaintext"
     finally:
@@ -438,6 +438,71 @@ async def test_resolver_pool_entry_uses_shared_provider_key_when_entry_key_blank
 
 
 @pytest.mark.asyncio
+async def test_resolver_accepts_bare_zai_glm_model_name():
+    from services import query_model_resolver
+
+    await _setup()
+    user = _u()
+    try:
+        await settings_service.update_models(user, ModelsConfig(
+            query_model_pool=[{
+                "entry_id": "ent-glm-bare",
+                "label": "GLM 5.1",
+                "provider": "glm-coding",
+                "base_url": "https://api.z.ai/api/coding/paas/v4",
+                "api_key_ciphertext": "sk-glm-plaintext",
+                "model_name": "glm-5.1",
+                "source": "cloud",
+                "enabled": True,
+            }],
+        ).model_dump())
+
+        resolved = await query_model_resolver.resolve_by_entry_id(
+            user, "ent-glm-bare"
+        )
+
+        assert resolved is not None
+        assert resolved["model"] == "openai/glm-5.1"
+        assert resolved["api_base"] == "https://api.z.ai/api/coding/paas/v4"
+        assert resolved["api_key"] == "sk-glm-plaintext"
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
+async def test_resolver_normalizes_legacy_zai_prefix_alias():
+    from services import query_model_resolver
+
+    await _setup()
+    user = _u()
+    try:
+        await settings_service.update_models(user, ModelsConfig(
+            query_model_pool=[{
+                "entry_id": "ent-glm-zai-prefix",
+                "label": "GLM 5.1 legacy",
+                "provider": "zai",
+                "base_url": "https://api.z.ai/api/paas/v4",
+                "api_key_ciphertext": "sk-zai-plaintext",
+                "model_name": "z.ai/glm-5.1",
+                "source": "cloud",
+                "enabled": True,
+            }],
+        ).model_dump())
+
+        resolved = await query_model_resolver.resolve_by_entry_id(
+            user, "ent-glm-zai-prefix"
+        )
+
+        assert resolved is not None
+        assert resolved["model"] == "openai/glm-5.1"
+        assert resolved["api_base"] == "https://api.z.ai/api/paas/v4"
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
 async def test_resolver_query_role_falls_back_to_first_enabled_pool_entry():
     from services import query_model_resolver
 
@@ -460,7 +525,7 @@ async def test_resolver_query_role_falls_back_to_first_enabled_pool_entry():
         resolved = await query_model_resolver.resolve(user, "query")
 
         assert resolved is not None
-        assert resolved["model"] == "openai/deepseek-v4-flash"
+        assert resolved["model"] == "deepseek/deepseek-v4-flash"
         assert resolved["api_base"] == "https://api.deepseek.com/v1"
         assert resolved["api_key"] == "sk-query-plaintext"
     finally:

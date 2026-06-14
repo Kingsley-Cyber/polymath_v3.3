@@ -408,8 +408,8 @@ class IngestionService:
         }
 
     async def migrate_bare_model_names(self) -> dict:
-        """Lifespan migration — rewrite bare model strings to include the
-        LiteLLM provider prefix.
+        """Lifespan migration — rewrite ingestion bare model strings to include
+        the LiteLLM provider prefix.
 
         Motivation: prior UI presets auto-filled `model = "deepseek-chat"` (no
         prefix). LiteLLM's wildcard router can't match that to `deepseek/*`
@@ -419,10 +419,9 @@ class IngestionService:
         Scope:
           • `corpora.default_ingestion_config.{summary_models,extraction_models}`
             (per-corpus ingestion pools — `ModelProfileRef` with `provider_preset`).
-          • `settings.models.query_model_pool` (per-user unified chat pool —
-            `QueryModelPoolEntry` with `provider` + `model_name`).
-          • `model_pool` collection (Phase E unified pool — same shape as
-            the settings subdoc).
+        Chat/query model pools intentionally stay user-facing and may store
+        provider-native ids (`deepseek-chat`, `glm-5.1`). Chat-time resolution
+        normalizes those with `services.provider_presets.normalize_model_for_litellm`.
 
         Rules per entry:
           • If the stored model contains "/", assume it's already prefixed →
@@ -432,8 +431,8 @@ class IngestionService:
           • Else, rewrite `model = f"{litellm_provider}/{old_model}"`. Log
             an audit line per rewrite.
 
-        Returns: {"corpora_patched", "pool_entries_patched", "corpus_ids",
-                  "settings_users_patched", "model_pool_entries_patched"}.
+        Returns the historical counters. The chat-pool counters remain present
+        for API compatibility but are no-ops.
         """
         from services.provider_presets import litellm_provider_for
 
@@ -522,76 +521,10 @@ class IngestionService:
                     doc["corpus_id"], field, idx, old_model, new_model,
                 )
 
-        # ── 2. Per-user settings.models.query_model_pool.
+        # Chat/query model pools are resolved at use time so setup can keep
+        # provider-native model ids visible to users.
         settings_users_patched = 0
-        scursor = self._db["settings"].find(
-            {}, projection={"user_id": 1, "models.query_model_pool": 1}
-        )
-        async for sdoc in scursor:
-            models_subdoc = sdoc.get("models") or {}
-            pool = models_subdoc.get("query_model_pool") or []
-            if not pool:
-                continue
-            rewrites: list[tuple[int, str, str]] = []
-            for idx, entry in enumerate(pool):
-                if not isinstance(entry, dict):
-                    continue
-                # QueryModelPoolEntry uses `provider` (not `provider_preset`)
-                # and `model_name` (not `model`).
-                rewritten = _needs_rewrite(
-                    entry.get("provider"), entry.get("model_name")
-                )
-                if rewritten is None:
-                    continue
-                rewrites.append((idx, entry["model_name"], rewritten))
-                entry["model_name"] = rewritten
-            if not rewrites:
-                continue
-            await self._db["settings"].update_one(
-                {"_id": sdoc["_id"]},
-                {"$set": {"models.query_model_pool": pool}},
-            )
-            settings_users_patched += 1
-            for idx, old_model, new_model in rewrites:
-                logger.info(
-                    "migrate_bare_model_names: settings user=%s idx=%d "
-                    "old=%r new=%r",
-                    sdoc.get("user_id", "?"), idx, old_model, new_model,
-                )
-
-        # ── 3. model_pool collection (Phase E unified pool).
         model_pool_entries_patched = 0
-        try:
-            mpcursor = self._db["model_pool"].find(
-                {}, projection={"entry_id": 1, "user_id": 1, "provider": 1, "model_name": 1}
-            )
-            async for mdoc in mpcursor:
-                rewritten = _needs_rewrite(
-                    mdoc.get("provider"), mdoc.get("model_name")
-                )
-                if rewritten is None:
-                    continue
-                await self._db["model_pool"].update_one(
-                    {"_id": mdoc["_id"]},
-                    {
-                        "$set": {
-                            "model_name": rewritten,
-                            "updated_at": datetime.utcnow(),
-                        }
-                    },
-                )
-                model_pool_entries_patched += 1
-                logger.info(
-                    "migrate_bare_model_names: model_pool entry=%s user=%s "
-                    "old=%r new=%r",
-                    mdoc.get("entry_id", "?"), mdoc.get("user_id", "?"),
-                    mdoc.get("model_name"), rewritten,
-                )
-        except Exception as exc:
-            # model_pool collection may not exist on fresh installs.
-            logger.debug(
-                "migrate_bare_model_names: model_pool scan skipped: %s", exc
-            )
 
         result = {
             "corpora_patched": len(corpus_ids),
