@@ -65,7 +65,7 @@ export function ToolSelector() {
       </button>
 
       {isOpen && (
-        <div className="fixed left-2 right-2 bottom-36 z-[100] w-auto max-h-[calc(100dvh-11rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] p-1 shadow-xl rounded sm:absolute sm:left-auto sm:right-0 sm:bottom-full sm:mb-1 sm:w-72 sm:max-w-[calc(100vw-1rem)] sm:max-h-[calc(100dvh-8rem)]">
+        <div className="fixed left-2 right-2 bottom-36 z-[100] w-auto max-h-[calc(100dvh-11rem)] overflow-hidden border border-white/10 bg-[#2a2a2a] p-1 shadow-xl rounded sm:absolute sm:left-0 sm:right-auto sm:bottom-full sm:mb-1 sm:w-72 sm:max-w-[calc(100vw-1rem)] sm:max-h-[calc(100dvh-8rem)]">
           <div className="text-[9px] font-bold tracking-widest uppercase text-content-tertiary px-2 py-1.5 border-b border-border-minimal mb-1">
             Enable Agent Tools
           </div>
