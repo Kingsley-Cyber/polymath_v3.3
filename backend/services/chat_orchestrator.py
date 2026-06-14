@@ -1645,7 +1645,16 @@ def _choose_chat_coverage_candidate_with_report(
             continue
         facet_score = _chat_facet_coverage_score(chunk, facet)
         query_fit = _chat_query_fit_score(chunk, original_query, facet)
+        doc_id = str(chunk.doc_id or "")
+        new_doc_bonus = 4.0 if doc_id and doc_id not in existing_doc_ids else 0.0
+        final_score = (facet_score * 10.0) + (query_fit * 2.0) + float(chunk.score or 0.0) + new_doc_bonus
         if facet_score < _CHAT_COVERAGE_WEAK_THRESHOLD:
+            # Layer-2 retention fix: the lexical facet_score scores 0 for body-only
+            # semantic matches and for vector-probe lanes whose terms are the document
+            # title. These candidates already passed retrieval/rerank for this lane, so
+            # retain the best as weakest-tier support instead of hard-dropping — a lane
+            # with real candidates is never falsely reported "uncovered". Above-floor
+            # candidates still take strict priority via the chosen_tuple ordering below.
             rejected["below_facet_floor"] += 1
             if len(sampled) < 4:
                 sampled.append(
@@ -1656,10 +1665,13 @@ def _choose_chat_coverage_candidate_with_report(
                         reason="below_facet_floor",
                     )
                 )
+            current = (final_score, chunk)
+            if best_weak_any_doc is None or final_score > best_weak_any_doc[0]:
+                best_weak_any_doc = current
+            if doc_id and doc_id not in existing_doc_ids:
+                if best_weak_new_doc is None or final_score > best_weak_new_doc[0]:
+                    best_weak_new_doc = current
             continue
-        doc_id = str(chunk.doc_id or "")
-        new_doc_bonus = 4.0 if doc_id and doc_id not in existing_doc_ids else 0.0
-        final_score = (facet_score * 10.0) + (query_fit * 2.0) + float(chunk.score or 0.0) + new_doc_bonus
         if facet_score >= _CHAT_COVERAGE_THRESHOLD and query_fit > 0:
             current = (final_score, chunk)
             if best_any_doc is None or final_score > best_any_doc[0]:
@@ -1888,6 +1900,7 @@ def _select_chat_coverage_sources(
     priority_lanes: list[str] | None = None,
     original_query: str,
     max_sources: int,
+    source_cap: int | None = None,
 ) -> tuple[list[SourceChunk], int, dict[str, Any]]:
     max_sources = max(1, int(max_sources or len(base_sources) or 1))
     all_sources = [*base_sources, *support_sources]
@@ -1902,7 +1915,7 @@ def _select_chat_coverage_sources(
         priority_lanes=priority_lanes or [],
         max_items=max_sources,
         lane_budget=1,
-        source_cap=_CHAT_COVERAGE_SOURCE_CAP,
+        source_cap=source_cap or _CHAT_COVERAGE_SOURCE_CAP,
     )
     actual_support = [
         source
@@ -2014,6 +2027,7 @@ async def _enforce_chat_query_coverage(
     max_corpora_per_query: int | None,
     fact_seed_limit: int | None,
     final_top_k: int | None,
+    source_cap: int | None = None,
     search_mode: str,
 ) -> tuple[list[SourceChunk], dict[str, Any]]:
     """Add missing query-facet evidence using the same chat retrieval tier.
@@ -2191,7 +2205,12 @@ async def _enforce_chat_query_coverage(
         if marked.doc_id:
             existing_doc_ids.add(str(marked.doc_id))
 
-    max_sources = int(final_top_k or len(base_sources) or 8)
+    # final_top_k is the baseline chunk budget; when source_cap is raised above
+    # it, expand the budget so the extra distinct documents can actually appear
+    # (otherwise increasing source_cap would be clamped by final_top_k and have
+    # no effect). source_cap then caps distinct docs within this budget.
+    _base_budget = int(final_top_k or len(base_sources) or 8)
+    max_sources = max(_base_budget, int(source_cap or 0))
     merged, added, selector_meta = _select_chat_coverage_sources(
         base_sources,
         support_sources,
@@ -2200,6 +2219,7 @@ async def _enforce_chat_query_coverage(
         priority_lanes=explicit_priority_lanes,
         original_query=original_query,
         max_sources=max_sources,
+        source_cap=source_cap,
     )
     actual_support = [
         source
@@ -3236,6 +3256,7 @@ class ChatOrchestrator:
             max_corpora_per_query=profile_cfg["max_corpora_per_query"],
             fact_seed_limit=profile_cfg["fact_seed_limit"],
             final_top_k=profile_cfg["final_top_k"],
+            source_cap=profile_cfg.get("source_cap"),
             search_mode=resolved_mode,
         )
         coverage_meta["duration_s"] = perf_counter() - coverage_start
@@ -4625,6 +4646,7 @@ class ChatOrchestrator:
             "max_corpora_per_query": None,
             "final_top_k": None,
             "fact_seed_limit": None,
+            "source_cap": None,
         }
 
         saved_retrieval_settings = None
@@ -4633,6 +4655,9 @@ class ChatOrchestrator:
                 gs = await settings_service.get_settings(user_id)
                 saved_retrieval_settings = gs.retrieval
                 extras["final_top_k"] = saved_retrieval_settings.final_top_k
+                extras["source_cap"] = getattr(
+                    saved_retrieval_settings, "source_cap", _CHAT_COVERAGE_SOURCE_CAP
+                )
             except Exception as exc:
                 logger.warning(
                     "Retrieval settings load failed for %s (%s) — "
@@ -4660,6 +4685,9 @@ class ChatOrchestrator:
                         "max_corpora_per_query": rs.max_corpora_per_query,
                         "final_top_k": rs.final_top_k,
                         "fact_seed_limit": getattr(rs, "fact_seed_limit", 12),
+                        "source_cap": getattr(
+                            rs, "source_cap", _CHAT_COVERAGE_SOURCE_CAP
+                        ),
                     }
                 )
                 logger.info(

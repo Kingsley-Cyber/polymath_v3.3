@@ -6497,13 +6497,25 @@ async def discover(
                     if chunk_id and chunk_id not in existing_support_chunks:
                         support_evidence.append(row)
                         existing_support_chunks.add(chunk_id)
+            _semantic_source_cap = _SEMANTIC_FACET_SOURCE_CAP
+            if user_id:
+                try:
+                    from services.settings import settings_service as _settings_service
+
+                    _gs = await _settings_service.get_settings(user_id)
+                    _semantic_source_cap = int(
+                        getattr(_gs.retrieval, "source_cap", _SEMANTIC_FACET_SOURCE_CAP)
+                        or _SEMANTIC_FACET_SOURCE_CAP
+                    )
+                except Exception as _exc:
+                    logger.debug("semantic source_cap settings load skipped: %s", _exc)
             added = _merge_ideation_cross_source_support(
                 packet,
                 support_evidence,
                 max_evidence=caps.evidence,
                 synthesis_mode=synthesis_mode,
                 max_additions=min(_SEMANTIC_FACET_MAX_LANES, caps.evidence),
-                max_files=_SEMANTIC_FACET_SOURCE_CAP,
+                max_files=_semantic_source_cap,
             )
             if isinstance(result.trace, dict) and added:
                 result.trace["cross_source_support"] = packet.get("evidence_filter", {}).get(

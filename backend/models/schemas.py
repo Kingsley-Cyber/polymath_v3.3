@@ -462,6 +462,18 @@ class RetrievalSettings(_legacy.RetrievalSettings):
     top_k_summary: int = Field(default=20, ge=0, le=100)
     max_corpora_per_query: int = Field(default=32, ge=1, le=100)
     final_top_k: int = Field(default=8, ge=1, le=50)
+    source_cap: int = Field(
+        default=8,
+        ge=1,
+        le=50,
+        description=(
+            "Max distinct source documents in the final context set "
+            "(select_facet_final source_cap). Higher = broader cross-document "
+            "coverage; bounded in practice by final_top_k (chunks sent to the "
+            "LLM). Drives both the chat coverage cap and the graph/Mission-Control "
+            "semantic-facet cap."
+        ),
+    )
 
 
 class ExtractionEndpoint(BaseModel):

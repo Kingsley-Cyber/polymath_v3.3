@@ -150,17 +150,17 @@ def select_facet_final(
             break
         add(candidate)
 
-    # Pass 5: final relaxation for source cap only, useful in tiny corpora.
+    # Pass 5: relax LANE quotas only — still honor source_cap so the distinct-
+    # document ceiling is a HARD cap. (Previously this pass appended by score
+    # while ignoring source_cap, which made the cap a no-op whenever max_items
+    # exceeded it. Routing through add()/can_add keeps the cap while still
+    # filling the budget with extra chunks from already-selected documents; a
+    # corpus with fewer distinct docs than source_cap is unaffected because the
+    # cap only bites once seen_docs reaches it.)
     for candidate in ranked:
         if len(selected) >= max_items:
             break
-        key = _candidate_key(candidate)
-        if key in seen_keys:
-            continue
-        selected.append(candidate)
-        seen_keys.add(key)
-        for lane in candidate.lanes & tracked_set:
-            lane_counts[lane] = lane_counts.get(lane, 0) + 1
+        add(candidate)
 
     covered = [lane for lane in missing if lane_counts.get(lane, 0) > 0]
     priority_covered = [lane for lane in priority if lane_counts.get(lane, 0) > 0]

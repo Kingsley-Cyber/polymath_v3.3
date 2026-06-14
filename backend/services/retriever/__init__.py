@@ -1188,6 +1188,8 @@ class RetrieverOrchestrator:
         effective_final_k = (
             final_top_k if final_top_k is not None else settings.DEFAULT_RETRIEVAL_K
         )
+        _pool_doc_ids = {c.doc_id for c in ranked if getattr(c, "doc_id", None)}
+        counts["distinct_docs_in_pool"] = len(_pool_doc_ids)
         diversity = select_with_diversity(
             ranked,
             final_top_k=effective_final_k,
@@ -1198,6 +1200,14 @@ class RetrieverOrchestrator:
         candidates = diversity.candidates
         counts["candidates"] = len(candidates)
         counts["diversity_added"] = diversity.added
+        logger.info(
+            "retrieval_pool_breadth: tier=%s distinct_docs_in_pool=%d ranked=%d final_top_k=%d diversity_added=%d",
+            getattr(effective_tier, "value", effective_tier),
+            len(_pool_doc_ids),
+            len(ranked),
+            effective_final_k,
+            diversity.added,
+        )
         logger.info(
             "final_top_k=%d diversity_added=%d (post-rerank cut, %d candidates available)",
             effective_final_k,
