@@ -322,8 +322,39 @@ async function run() {
     const boxes = {};
     await page.click('[data-testid="chat-context-toggle"]');
     boxes.context = await popoverBox(page, "Query Context");
-    await page.click('[data-testid="corpus-multi-select"]');
-    boxes.corpus = await popoverBox(page, "Corpus Scoping");
+    await page.waitForSelector('[data-testid="context-corpus-list"]', {
+      timeout: 5000,
+    });
+    await page.waitForSelector('[data-testid="context-query-speed"]', {
+      timeout: 5000,
+    });
+    boxes.corpus = await page
+      .locator('[data-testid="context-corpus-list"]')
+      .evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        return {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          right: Math.round(rect.right),
+          bottom: Math.round(rect.bottom),
+        };
+      });
+    await page.locator('[data-testid="context-query-speed"]').scrollIntoViewIfNeeded();
+    boxes.speed = await page
+      .locator('[data-testid="context-query-speed"]')
+      .evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        return {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          right: Math.round(rect.right),
+          bottom: Math.round(rect.bottom),
+        };
+      });
     await page.mouse.click(2, Math.min(height - 2, 300));
 
     await page.click('[data-testid="model-selector-toggle"]');
@@ -349,6 +380,7 @@ async function run() {
       inFrame: {
         context: isInFrame(boxes.context, viewport),
         corpus: isInFrame(boxes.corpus, viewport),
+        speed: isInFrame(boxes.speed, viewport),
         model: isInFrame(boxes.model, viewport),
         items: isInFrame(boxes.items, viewport),
       },

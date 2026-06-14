@@ -641,7 +641,7 @@ function App() {
       {/* 2. CENTER PANE: Active Workspace (Graph/Chat) */}
       <main className="flex-1 flex flex-col min-w-0 border-r border-border-minimal relative bg-bg-surface">
         {/* Header - Terminal Status Bar + session controls */}
-        <header className="min-h-16 md:h-24 border-b border-border-minimal flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 sm:px-6 py-2 md:py-0 bg-bg-base z-30 shrink-0">
+        <header className="min-h-16 md:h-24 border-b border-border-minimal flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 sm:px-6 py-2 md:py-0 bg-bg-base z-[80] shrink-0">
           <div className="flex w-full sm:w-auto items-center justify-between gap-3">
             <button
               onClick={() => setSidebarOpen(true)}
