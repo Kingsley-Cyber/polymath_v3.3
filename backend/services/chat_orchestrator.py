@@ -71,6 +71,59 @@ _CHAT_COVERAGE_SOURCE_CAP = 8
 # disciplines instead of clustering on the reranker's favorite domain. Only
 # enforced when search_mode == "global" and chunks carry a domain label.
 _CHAT_COVERAGE_DOMAIN_CAP = 3
+# Cross-model fallback for the in-process stream retry: when the primary synthesis
+# model fails BEFORE producing any content (e.g. a lapsed Ollama Cloud model 500s),
+# retry once on this known-good backup so the answer is never blank. litellm v1.60
+# does not auto-fallback on a streamed error (Issue #6532). Routes via litellm's
+# deepseek/* group (DEEPSEEK_API_KEY in .env); no per-request credentials.
+_CHAT_FALLBACK_MODEL = "deepseek/deepseek-chat"
+
+# Phase 4 — lightweight LLM intent classifier. The marker router
+# (search_mode.infer_search_mode) misses natural overview questions that lack a
+# marker phrase; this is a cached second-chance: when auto-mode resolved to
+# "local", ask the backup model whether the query is a broad/overview question
+# and, if so, upgrade to "global" so the domain-stratified breadth path fires.
+# The marker result is the fallback on any error/timeout. Cached per query.
+_INTENT_CACHE: dict[str, str] = {}
+_INTENT_SYSTEM = (
+    "Classify the user's question as exactly one lowercase word.\n"
+    "Answer 'overview' ONLY when the user wants a broad, corpus-wide synthesis "
+    "spanning many documents — e.g. 'main themes', 'what's in my whole library', "
+    "'summarize everything', 'recurring patterns across my notes', 'big picture'.\n"
+    "Answer 'specific' for anything targeting a particular fact, document, entity, "
+    "how-to, debugging, error, code, or single topic — e.g. 'how do I fix X', "
+    "'what does Y do', 'where is Z', 'explain this error'.\n"
+    "When in doubt, answer 'specific'. Reply with only the single word."
+)
+
+
+async def _classify_overview_intent(message: str) -> str:
+    """Return 'global' if the LLM judges the query an overview/thematic question,
+    else 'local'. Cached per normalized query; best-effort (any failure -> 'local')."""
+    key = (message or "").strip().lower()[:300]
+    if not key:
+        return "local"
+    cached = _INTENT_CACHE.get(key)
+    if cached is not None:
+        return cached
+    result = "local"
+    try:
+        answer = await llm_service.complete_sync(
+            messages=[
+                {"role": "system", "content": _INTENT_SYSTEM},
+                {"role": "user", "content": message[:2000]},
+            ],
+            model=_CHAT_FALLBACK_MODEL,
+            temperature=0,
+            max_tokens=4,
+            timeout=8.0,
+        )
+        if "overview" in (answer or "").strip().lower():
+            result = "global"
+    except Exception as exc:
+        logger.debug("intent classifier skipped: %s", exc)
+    _INTENT_CACHE[key] = result
+    return result
 _CHAT_EVIDENCE_MIN_KEEP_AFTER_FILTER = 4
 _RAW_TOOL_REQUEST_MARKERS = (
     "<｜｜dsml｜｜tool_calls",
@@ -3236,6 +3289,13 @@ class ChatOrchestrator:
             else None
         )
         resolved_mode = resolve_search_mode(requested_mode, request.message)
+        # Phase 4 — LLM intent second-chance: when auto-mode's markers resolved to
+        # local, ask the classifier whether this is really an overview question and
+        # upgrade to global so the domain-stratified breadth path activates.
+        if (requested_mode or "auto").lower() == "auto" and resolved_mode == "local":
+            if await _classify_overview_intent(request.message) == "global":
+                resolved_mode = "global"
+                logger.info("intent classifier upgraded auto/local -> global (overview)")
         if reasoning_mode == "atomic":
             from services.reasoning import atomic_retrieve
 
@@ -3933,17 +3993,47 @@ class ChatOrchestrator:
 
             except Exception as e:
                 logger.error(f"Error during LLM streaming: {e}")
-                yield _record_trace_event(
-                    lane="model_call",
-                    title="Chat model stream",
-                    status="error",
-                    content=f"LLM streaming error: {e}",
-                    metadata={"model": model_used},
-                )
-                yield build_sse_chunk(
-                    ChatChunk(type="error", content=f"LLM streaming error: {e}")
-                )
-                return
+                # In-process model fallback: primary failed before any content or
+                # tool call (e.g. lapsed-model 500 at stream start) — retry once on
+                # the known-good backup so the answer is not blank. Falls through to
+                # the normal no-tool answer path on success; on still-empty, errors.
+                if (
+                    not assistant_content.strip()
+                    and not tool_calls
+                    and model_used != _CHAT_FALLBACK_MODEL
+                ):
+                    try:
+                        logger.warning("stream fallback %s -> %s", model_used, _CHAT_FALLBACK_MODEL)
+                        async for fb in llm_service.stream_chat(
+                            messages=message_dicts,
+                            model=_CHAT_FALLBACK_MODEL,
+                            overrides=None,
+                            tools=None,
+                        ):
+                            if fb.get("content"):
+                                assistant_content += fb["content"]
+                                if not suppress_content_until_web:
+                                    yield build_sse_chunk(
+                                        ChatChunk(
+                                            type="token",
+                                            content=fb["content"],
+                                            conversation_id=str(conversation_id),
+                                        )
+                                    )
+                    except Exception as e2:
+                        logger.error(f"Fallback model also failed: {e2}")
+                if not assistant_content.strip() and not tool_calls:
+                    yield _record_trace_event(
+                        lane="model_call",
+                        title="Chat model stream",
+                        status="error",
+                        content=f"LLM streaming error: {e}",
+                        metadata={"model": model_used},
+                    )
+                    yield build_sse_chunk(
+                        ChatChunk(type="error", content=f"LLM streaming error: {e}")
+                    )
+                    return
 
             stream_end = perf_counter()
             yield _record_trace_event(
@@ -4454,17 +4544,41 @@ class ChatOrchestrator:
                 )
             except Exception as e:
                 logger.error(f"Error during final no-tool LLM streaming: {e}")
-                yield _record_trace_event(
-                    lane="model_call",
-                    title="Chat model final stream",
-                    status="error",
-                    content=f"LLM streaming error: {e}",
-                    metadata={"model": model_used},
-                )
-                yield build_sse_chunk(
-                    ChatChunk(type="error", content=f"LLM streaming error: {e}")
-                )
-                return
+                # In-process model fallback (see _CHAT_FALLBACK_MODEL): retry once on
+                # the backup when the primary produced nothing, so the forced answer
+                # is not blank. On still-empty, fall through to the error emit.
+                if not assistant_content.strip() and model_used != _CHAT_FALLBACK_MODEL:
+                    try:
+                        logger.warning("final-stream fallback %s -> %s", model_used, _CHAT_FALLBACK_MODEL)
+                        async for fb in llm_service.stream_chat(
+                            messages=final_messages,
+                            model=_CHAT_FALLBACK_MODEL,
+                            overrides=None,
+                            tools=None,
+                        ):
+                            if fb.get("content"):
+                                assistant_content += fb["content"]
+                                yield build_sse_chunk(
+                                    ChatChunk(
+                                        type="token",
+                                        content=fb["content"],
+                                        conversation_id=str(conversation_id),
+                                    )
+                                )
+                    except Exception as e2:
+                        logger.error(f"Fallback model also failed: {e2}")
+                if not assistant_content.strip():
+                    yield _record_trace_event(
+                        lane="model_call",
+                        title="Chat model final stream",
+                        status="error",
+                        content=f"LLM streaming error: {e}",
+                        metadata={"model": model_used},
+                    )
+                    yield build_sse_chunk(
+                        ChatChunk(type="error", content=f"LLM streaming error: {e}")
+                    )
+                    return
 
         if not assistant_content.strip():
             logger.error("LLM returned an empty assistant response for %s", conversation_id)

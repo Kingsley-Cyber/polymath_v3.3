@@ -1204,7 +1204,7 @@ class RetrieverOrchestrator:
         counts["candidates"] = len(candidates)
         counts["diversity_added"] = diversity.added
         logger.info(
-            "retrieval_pool_breadth: tier=%s distinct_docs_premerge=%d distinct_docs_postrerank=%d ranked=%d final_top_k=%d diversity_added=%d",
+            "retrieval_pool_breadth: tier=%s distinct_docs_postmerge=%d distinct_docs_postrerank=%d ranked=%d final_top_k=%d diversity_added=%d",
             getattr(effective_tier, "value", effective_tier),
             counts.get("distinct_docs_merged", -1),
             len(_pool_doc_ids),
