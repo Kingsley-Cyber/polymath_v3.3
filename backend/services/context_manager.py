@@ -621,6 +621,19 @@ class ContextManager:
                     "</web_content_policy>"
                 )
                 context_block = f"{web_safety}\n{context_block}"
+            # Weak-chunk legend: decodes the inline [strength=weak] coverage tag so
+            # the model down-weights low-confidence support instead of treating it
+            # as a certain fact. Fires only when a weak-tagged source is present.
+            if context_block and "strength=weak" in context_block:
+                weak_legend = (
+                    "<evidence_policy>\n"
+                    "A source tagged [strength=weak] is low-confidence supporting evidence "
+                    "(it matched the topic only weakly). Use it to corroborate or fill gaps, "
+                    "prefer sources without that tag on any conflict, and never state a "
+                    "weak-only claim as a certain fact.\n"
+                    "</evidence_policy>"
+                )
+                context_block = f"{weak_legend}\n{context_block}"
 
             # Pt 10a (Cluster 1) — pre-distilled facts rendered first, before
             # chunk excerpts. Each fact line: subject + type + property→value

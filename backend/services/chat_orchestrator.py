@@ -1445,7 +1445,13 @@ def _chat_facet_coverage_score(source: SourceChunk, facet: dict[str, Any]) -> in
             if v
         )
     )
-    summary_text = _chat_coverage_norm(source.summary or "")
+    # Fold ingestion-tagged content-facet terms (the alias bridge, e.g.
+    # "rag" -> "retrieval augmented generation") into the scored text, so a
+    # semantic body hit that lacks the literal facet keyword still counts toward
+    # grounding instead of scoring 0 on body-only matches.
+    summary_text = _chat_coverage_norm(
+        " ".join([str(source.summary or ""), *metadata_facet_terms(metadata)])
+    )
     body_text = _chat_coverage_norm(source.text or "")
     for term in _chat_coverage_facet_terms(facet):
         is_phrase = " " in term
@@ -1650,6 +1656,15 @@ def _choose_chat_coverage_candidate_with_report(
             continue
         facet_score = _chat_facet_coverage_score(chunk, facet)
         query_fit = _chat_query_fit_score(chunk, original_query, facet)
+        # Vector escape hatch: a chunk retrieved for a semantically-matched lane
+        # (matching_vector_facets cosine activation, cosine floor 0.42) is
+        # genuinely relevant even when the lexical facet_score is low. Promote it
+        # to the grounded floor for SELECTION so a semantic body hit competes as
+        # real support instead of being demoted purely for lacking the literal
+        # keyword. (The chosen chunk's reported strength is still recomputed from
+        # the raw lexical score below, so it stays honestly labeled.)
+        if facet.get("semantic_matched") and facet_score < _CHAT_COVERAGE_THRESHOLD:
+            facet_score = _CHAT_COVERAGE_THRESHOLD
         doc_id = str(chunk.doc_id or "")
         new_doc_bonus = 4.0 if doc_id and doc_id not in existing_doc_ids else 0.0
         # Reranker/retrieval score enters only as a bounded tiebreaker: cap its
