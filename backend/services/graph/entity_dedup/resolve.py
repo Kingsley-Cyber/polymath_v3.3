@@ -31,7 +31,11 @@ async def resolve_entity_ids(session, ids: Iterable[str], *, max_hops: int = 3) 
         res = await session.run(q, ids=pending)
         hop: dict[str, str] = {}
         async for r in res:
-            hop[r["orig"]] = r["sur"]
+            row = dict(r)
+            orig = row.get("orig")
+            sur = row.get("sur")
+            if orig and sur:
+                hop[orig] = sur
         if not hop:
             break
         # compose: anything that previously mapped to an id now-merged again
