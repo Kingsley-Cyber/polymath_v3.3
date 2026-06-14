@@ -363,6 +363,7 @@ async def hydrate_summary_rerank_texts(
                 "source_path": 1,
                 "parent_chunks.parent_id": 1,
                 "parent_chunks.summary": 1,
+                "parent_chunks.domain": 1,
                 "parent_chunks.heading_path": 1,
                 "parent_chunks.chunk_kind": 1,
                 "parent_chunks.metadata": 1,
@@ -441,6 +442,11 @@ async def hydrate_summary_rerank_texts(
                 copied.heading_path = record["heading_path"]
             if (not copied.chunk_kind or copied.chunk_kind == "body") and record.get("chunk_kind"):
                 copied.chunk_kind = record["chunk_kind"]
+            # Global/summary-mode hydration must carry domain too, otherwise the
+            # per-domain coverage cap (gated on search_mode=="global") sees
+            # domain=None and is a no-op in the only mode it fires in.
+            if record.get("domain") and not getattr(copied, "domain", None):
+                copied.domain = record["domain"]
             copied.metadata = metadata_with_facets(
                 copied.metadata or record.get("metadata") or {},
                 record,

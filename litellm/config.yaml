@@ -37,6 +37,15 @@ model_list:
       model: "deepseek/*"
       api_key: os.environ/DEEPSEEK_API_KEY
 
+  # Explicit concrete group used as the cross-model fallback target. litellm
+  # resolves default_fallbacks by exact model_name, not by wildcard, so the
+  # fallback cannot point at "deepseek/*". This is the one justified concrete
+  # model name in this otherwise wildcard config.
+  - model_name: "deepseek-chat-fallback"
+    litellm_params:
+      model: "deepseek/deepseek-chat"
+      api_key: os.environ/DEEPSEEK_API_KEY
+
   # Google models - wildcard pattern (requires GEMINI_API_KEY in environment)
   - model_name: "gemini/*"
     litellm_params:
@@ -98,6 +107,11 @@ litellm_settings:
   drop_params: True
   set_verbose: False
   num_retries: 3
+  # Cross-model fallback: if the primary chat/synthesis model fails (e.g. a
+  # lapsed Ollama Cloud model returns 500), litellm retries on a known-good
+  # backup so the streamed answer is never blank. Requires a valid
+  # DEEPSEEK_API_KEY (set in .env, never committed).
+  default_fallbacks: ["deepseek-chat-fallback"]
   request_timeout: 600
   cache: True
   cache_params:
@@ -123,6 +137,13 @@ general_settings:
   # Intentionally NO `completion_model` / `embedding_model` here — those keys
   # coerce every incoming request into that single model group, blocking
   # per-request routing (sends deepseek/* through ollama/llama3.2:3b).
+
+router_settings:
+  # The litellm PROXY reads cross-model fallbacks from router_settings (not
+  # litellm_settings). On any model failure (e.g. lapsed Ollama Cloud 500), the
+  # router retries on the concrete deepseek-chat-fallback group so the streamed
+  # answer is never blank. Requires DEEPSEEK_API_KEY in .env.
+  default_fallbacks: ["deepseek-chat-fallback"]
 
 environment: &default
   completion_model: "ollama/llama3.2:3b"

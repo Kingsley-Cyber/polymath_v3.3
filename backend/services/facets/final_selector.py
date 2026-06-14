@@ -8,6 +8,13 @@ reserving room for lanes the coverage detector says are missing.
 
 from __future__ import annotations
 
+# VERIFICATION (2026-06-14 e2e wiring audit): select_facet_final consumes two
+# wired signals — source_cap (hard distinct-doc cap, honored in Passes 1-5) and
+# max_per_domain (domain spread for BROAD queries). FacetCandidate.domain is
+# populated from SourceChunk.domain (hydrate_chunks + hydrate_summary_rerank_texts)
+# via chat_orchestrator._chat_selector_candidates; max_per_domain is gated on
+# search_mode=="global". Full chain + integration test:
+# CONTINUITY/RETRIEVAL_WIRING_VERIFICATION.md
 from dataclasses import dataclass, field
 from typing import Any
 
