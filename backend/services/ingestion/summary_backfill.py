@@ -131,6 +131,9 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
     batches = 0
     aborted = False
     consecutive_empty = 0
+    failed_ids: set[str] = set()  # attempted-but-failed this run → skip so the
+                                  # run always advances (thinking-model empties /
+                                  # transient errors don't stall the front)
     try:
         q = {"corpus_id": corpus_id, "$or": [{"summary": None}, {"summary": ""},
                                              {"summary": {"$exists": False}}]}
@@ -141,8 +144,9 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
             if limit is not None and made >= limit:
                 break
             fetch = batch if limit is None else max(1, min(batch, limit - made))
+            fetch_q = {**q, "parent_id": {"$nin": list(failed_ids)}} if failed_ids else q
             rows = await db["parent_chunks"].find(
-                q, {"parent_id": 1, "doc_id": 1, "corpus_id": 1, "source_tier": 1,
+                fetch_q, {"parent_id": 1, "doc_id": 1, "corpus_id": 1, "source_tier": 1,
                     "text": 1, "_id": 0}
             ).limit(fetch).to_list(length=fetch)
             rows = [r for r in rows if (r.get("text") or "").strip()]
@@ -154,6 +158,10 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
                                  text=r["text"]) for r in rows]
             results = await summarize_parents(tasks, pool=pool)
             results = [x for x in results if x and getattr(x, "summary", None)]
+            # parents attempted but not summarized (thinking-empty / transient):
+            # skip them for the rest of THIS run so we advance to fresh parents.
+            ok_ids = {x.parent_id for x in results}
+            failed_ids.update(t.parent_id for t in tasks if t.parent_id not in ok_ids)
             # GUARDRAIL: distinguish a transient blip from real exhaustion. A
             # single empty batch can be a timeout/rate spike (the failed parents
             # stay summary=None and are simply retried on the next fetch). Only
@@ -185,8 +193,10 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
             if cov < 0.5:
                 print(f"  ⚠ low coverage on batch {batches} — some lanes failing")
         remaining = await db["parent_chunks"].count_documents(q)
-        print(f"GENERATE done: made={made} batches={batches} remaining={remaining} aborted={aborted}")
-        return {"made": made, "batches": batches, "remaining": remaining, "aborted": aborted}
+        print(f"GENERATE done: made={made} batches={batches} "
+              f"skipped_this_run={len(failed_ids)} remaining={remaining} aborted={aborted}")
+        return {"made": made, "batches": batches, "skipped": len(failed_ids),
+                "remaining": remaining, "aborted": aborted}
     finally:
         mc.close()
 
