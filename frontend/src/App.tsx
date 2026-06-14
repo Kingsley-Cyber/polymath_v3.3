@@ -666,10 +666,7 @@ function App() {
           </div>
 
           <div className="flex w-full min-w-0 items-center justify-end gap-2 pb-1 sm:w-auto sm:pb-0">
-            <ChatContextMenu
-              collections={collections}
-              onOpenGraph={() => setIsGraphViewOpen(true)}
-            />
+            <ChatContextMenu collections={collections} />
             <button
               onClick={() => setIsGraphViewOpen(true)}
               className="pm-soft-control flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border-minimal bg-bg-surface/95 text-content-secondary hover:text-accent-main"

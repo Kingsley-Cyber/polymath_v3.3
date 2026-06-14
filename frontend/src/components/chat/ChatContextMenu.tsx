@@ -7,7 +7,6 @@ import {
   Database,
   FolderGit2,
   Gauge,
-  Layers3,
   Network,
   SlidersHorizontal,
   Zap,
@@ -25,8 +24,9 @@ import type { RetrievalTier } from "../../types/chat";
 
 interface ChatContextMenuProps {
   collections: Collection[];
-  onOpenGraph: () => void;
 }
+
+type OpenPanel = "context" | "sources" | "reasoning" | null;
 
 const SEARCH_MODES: Array<{
   id: "auto" | "local" | "global";
@@ -101,7 +101,7 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-white/10 bg-black/20 p-2.5">
+    <section className="flex min-h-0 flex-col rounded-xl border border-white/10 bg-black/20 p-2.5">
       <div
         className={`mb-2 flex items-center gap-2 text-[9px] font-bold uppercase tracking-widest ${tone}`}
       >
@@ -110,6 +110,25 @@ function Section({
       </div>
       {children}
     </section>
+  );
+}
+
+function ScrollPane({
+  children,
+  testId,
+  className = "max-h-44 sm:max-h-64",
+}: {
+  children: ReactNode;
+  testId?: string;
+  className?: string;
+}) {
+  return (
+    <div
+      data-testid={testId}
+      className={`custom-scrollbar min-h-0 space-y-1.5 overflow-y-auto overflow-x-hidden pr-1 ${className}`}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -151,9 +170,8 @@ function InlineChoice({
 
 export function ChatContextMenu({
   collections,
-  onOpenGraph,
 }: ChatContextMenuProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
   const [corpora, setCorpora] = useState<CorpusResponse[]>([]);
   const [corporaLoading, setCorporaLoading] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -204,7 +222,7 @@ export function ChatContextMenu({
         menuRef.current &&
         !menuRef.current.contains(event.target as Node)
       ) {
-        setIsOpen(false);
+        setOpenPanel(null);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -252,28 +270,68 @@ export function ChatContextMenu({
     selectedCorpusIds.length,
   ]);
 
+  const contextCount =
+    2 + (queryProfile !== "balanced" ? 1 : 0) + (searchMode !== "auto" ? 1 : 0);
+  const sourceCount =
+    (selectedCorpusIds.length === 0 ? 1 : selectedCorpusIds.length) +
+    selectedCollectionIds.length;
+  const reasoningCount = reasoningMode && reasoningMode !== "none" ? 1 : 0;
+
+  const togglePanel = (panel: Exclude<OpenPanel, null>) => {
+    setOpenPanel((current) => (current === panel ? null : panel));
+  };
+
   return (
     <div className="relative min-w-0" ref={menuRef}>
-      <button
-        type="button"
-        data-testid="chat-context-toggle"
-        onClick={() => setIsOpen((open) => !open)}
-        className="pm-soft-control group flex h-9 max-w-full items-center gap-2 rounded-full border border-border-minimal bg-bg-surface/95 px-2.5 text-[10px] font-bold uppercase tracking-widest text-content-secondary hover:text-content-primary"
-        aria-expanded={isOpen}
-        aria-label="Open chat context controls"
-        title="Chat context"
-      >
-        <SlidersHorizontal className="h-3.5 w-3.5 text-accent-main" />
-        <span className="hidden sm:inline">Context</span>
-        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent-main/15 px-1.5 text-[9px] text-accent-main">
-          {chips.length}
-        </span>
-        <ChevronDown
-          className={`h-3 w-3 text-content-tertiary !transition-transform !duration-150 ${
-            isOpen ? "rotate-180" : ""
-          }`}
-        />
-      </button>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <button
+          type="button"
+          data-testid="chat-sources-toggle"
+          onClick={() => togglePanel("sources")}
+          className="pm-soft-control group flex h-9 max-w-full items-center gap-2 rounded-full border border-border-minimal bg-bg-surface/95 px-2.5 text-[10px] font-bold uppercase tracking-widest text-content-secondary hover:text-content-primary"
+          aria-expanded={openPanel === "sources"}
+          aria-label="Open source controls"
+          title="Sources"
+        >
+          <FolderGit2 className="h-3.5 w-3.5 text-cyan-200" />
+          <span className="hidden md:inline">Sources</span>
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-cyan-400/12 px-1.5 text-[9px] text-cyan-200">
+            {sourceCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          data-testid="chat-context-toggle"
+          onClick={() => togglePanel("context")}
+          className="pm-soft-control group flex h-9 max-w-full items-center gap-2 rounded-full border border-border-minimal bg-bg-surface/95 px-2.5 text-[10px] font-bold uppercase tracking-widest text-content-secondary hover:text-content-primary"
+          aria-expanded={openPanel === "context"}
+          aria-label="Open pace and retrieval controls"
+          title="Pace and retrieval"
+        >
+          <SlidersHorizontal className="h-3.5 w-3.5 text-accent-main" />
+          <span className="hidden sm:inline">Context</span>
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent-main/15 px-1.5 text-[9px] text-accent-main">
+            {contextCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          data-testid="chat-reasoning-toggle"
+          onClick={() => togglePanel("reasoning")}
+          className="pm-soft-control group flex h-9 max-w-full items-center gap-2 rounded-full border border-border-minimal bg-bg-surface/95 px-2.5 text-[10px] font-bold uppercase tracking-widest text-content-secondary hover:text-content-primary"
+          aria-expanded={openPanel === "reasoning"}
+          aria-label="Open reasoning controls"
+          title="Reasoning"
+        >
+          <Brain className="h-3.5 w-3.5 text-amber-200" />
+          <span className="hidden lg:inline">Reason</span>
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-400/12 px-1.5 text-[9px] text-amber-200">
+            {reasoningCount}
+          </span>
+        </button>
+      </div>
 
       <div className="mt-2 hidden min-w-0 items-center gap-1.5 lg:flex">
         {chips.slice(0, 4).map((chip) => (
@@ -292,33 +350,32 @@ export function ChatContextMenu({
         ))}
       </div>
 
-      {isOpen && (
+      {openPanel === "sources" && (
         <div
-          className="pm-context-panel custom-scrollbar fixed bottom-1 left-2 right-2 top-14 z-[95] overflow-y-auto overflow-x-hidden overscroll-contain rounded-2xl border border-white/10 bg-[#15171d] p-2 font-mono shadow-2xl sm:bottom-4 sm:left-auto sm:right-4 sm:top-16 sm:w-[50rem] sm:max-w-[calc(100vw-2rem)]"
-          data-testid="chat-context-panel"
+          className="pm-context-panel fixed left-2 right-2 top-16 z-[95] max-h-[calc(100dvh-5rem)] overflow-hidden overscroll-contain rounded-2xl border border-white/10 bg-[#15171d] p-2 font-mono shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-3 sm:w-[32rem] sm:max-w-[calc(100vw-1rem)]"
+          data-testid="chat-sources-panel"
         >
-          <div className="sticky top-0 z-10 mb-2 flex items-center justify-between gap-2 border-b border-white/10 bg-[#15171d] px-2 pb-2 pt-0.5">
+          <div className="mb-2 flex items-center justify-between gap-2 border-b border-white/10 px-2 pb-2 pt-0.5">
             <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-content-primary">
-              <Layers3 className="h-3.5 w-3.5 text-accent-main" />
-              Query Context
+              <FolderGit2 className="h-3.5 w-3.5 text-cyan-200" />
+              Sources
             </div>
             <button
               type="button"
-              onClick={onOpenGraph}
-              className="pm-soft-control flex h-8 items-center gap-2 rounded-full border border-violet-400/25 bg-violet-400/10 px-3 text-[9px] font-bold uppercase tracking-widest text-violet-200 hover:bg-violet-400/15"
+              onClick={() => setOpenPanel(null)}
+              className="rounded-full border border-white/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest text-content-secondary hover:text-content-primary"
             >
-              <Network className="h-3.5 w-3.5" />
-              Graph
+              Close
             </button>
           </div>
 
-          <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-2 xl:grid-cols-[1fr_1fr]">
+          <div className="grid min-h-0 grid-cols-1 gap-2 sm:grid-cols-2">
             <Section
               icon={<FolderGit2 className="h-3 w-3" />}
-              title="Sources"
+              title="Corpora"
               tone="text-cyan-200/80"
             >
-              <div className="space-y-1.5" data-testid="context-corpus-list">
+              <ScrollPane testId="context-corpus-list">
                 <InlineChoice
                   active={selectedCorpusIds.length === 0}
                   onClick={() => updateSettings({ selectedCorpusIds: [] })}
@@ -357,65 +414,84 @@ export function ChatContextMenu({
                     );
                   })
                 )}
-              </div>
-
-              <div className="mt-3 border-t border-white/10 pt-2">
-                <div className="mb-1.5 flex items-center justify-between gap-2">
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-content-tertiary">
-                    Collections
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        selectAllCollections(collections.map((c) => c.id))
-                      }
-                      className="rounded-full border border-white/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest text-content-secondary hover:text-content-primary"
-                    >
-                      All
-                    </button>
-                    <button
-                      type="button"
-                      onClick={clearCollections}
-                      className="rounded-full border border-white/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest text-content-secondary hover:text-content-primary"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-1" data-testid="context-collection-list">
-                  {collections.length === 0 ? (
-                    <div className="px-2 py-2 text-[9px] uppercase tracking-widest text-content-tertiary">
-                      No collections
-                    </div>
-                  ) : (
-                    collections.map((collection) => {
-                      const active = selectedCollectionIds.includes(
-                        collection.id,
-                      );
-                      return (
-                        <InlineChoice
-                          key={collection.id}
-                          active={active}
-                          onClick={() => toggleCollection(collection.id)}
-                        >
-                          <span className="block break-words text-[10px] font-bold uppercase tracking-widest">
-                            {compactName(collection.name, collection.id)}
-                          </span>
-                        </InlineChoice>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
+              </ScrollPane>
             </Section>
 
+            <Section
+              icon={<Boxes className="h-3 w-3" />}
+              title="Collections"
+              tone="text-cyan-100/70"
+            >
+              <div className="mb-2 flex items-center justify-end gap-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    selectAllCollections(collections.map((c) => c.id))
+                  }
+                  className="rounded-full border border-white/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest text-content-secondary hover:text-content-primary"
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  onClick={clearCollections}
+                  className="rounded-full border border-white/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest text-content-secondary hover:text-content-primary"
+                >
+                  Clear
+                </button>
+              </div>
+              <ScrollPane testId="context-collection-list">
+                {collections.length === 0 ? (
+                  <div className="px-2 py-2 text-[9px] uppercase tracking-widest text-content-tertiary">
+                    No collections
+                  </div>
+                ) : (
+                  collections.map((collection) => {
+                    const active = selectedCollectionIds.includes(
+                      collection.id,
+                    );
+                    return (
+                      <InlineChoice
+                        key={collection.id}
+                        active={active}
+                        onClick={() => toggleCollection(collection.id)}
+                      >
+                        <span className="block break-words text-[10px] font-bold uppercase tracking-widest">
+                          {compactName(collection.name, collection.id)}
+                        </span>
+                      </InlineChoice>
+                    );
+                  })
+                )}
+              </ScrollPane>
+            </Section>
+          </div>
+        </div>
+      )}
+
+      {openPanel === "context" && (
+        <div
+          className="pm-context-panel fixed left-2 right-2 top-16 z-[95] max-h-[calc(100dvh-5rem)] overflow-hidden overscroll-contain rounded-2xl border border-white/10 bg-[#15171d] p-2 font-mono shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-3 sm:w-[30rem] sm:max-w-[calc(100vw-1rem)]"
+          data-testid="chat-context-panel"
+        >
+          <div className="mb-2 flex items-center justify-between gap-2 border-b border-white/10 px-2 pb-2 pt-0.5">
+            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-content-primary">
+              <SlidersHorizontal className="h-3.5 w-3.5 text-accent-main" />
+              Query Context
+            </div>
+            <ChevronDown className="h-3 w-3 rotate-180 text-content-tertiary" />
+          </div>
+
+          <div className="grid min-h-0 grid-cols-1 gap-2 sm:grid-cols-2">
             <Section
               icon={<Gauge className="h-3 w-3" />}
               title="Pace"
               tone="text-emerald-200/80"
             >
-              <div className="space-y-1.5" data-testid="context-query-speed">
+              <ScrollPane
+                testId="context-query-speed"
+                className="max-h-52 sm:max-h-72"
+              >
                 {QUERY_PROFILES.map((profile) => (
                   <InlineChoice
                     key={profile.key}
@@ -440,7 +516,7 @@ export function ChatContextMenu({
                     </span>
                   </InlineChoice>
                 ))}
-              </div>
+              </ScrollPane>
 
               <div className="mt-3 grid grid-cols-3 gap-1">
                 {SEARCH_MODES.map((mode) => (
@@ -466,7 +542,10 @@ export function ChatContextMenu({
               title="Retrieval"
               tone="text-violet-200/80"
             >
-              <div className="space-y-1.5" data-testid="context-retrieval-tier">
+              <ScrollPane
+                testId="context-retrieval-tier"
+                className="max-h-52 sm:max-h-72"
+              >
                 {RETRIEVAL_TIERS.map((tier) => {
                   const Icon = tier.icon;
                   return (
@@ -488,46 +567,58 @@ export function ChatContextMenu({
                     </InlineChoice>
                   );
                 })}
-              </div>
-            </Section>
-
-            <Section
-              icon={<Brain className="h-3 w-3" />}
-              title="Reasoning"
-              tone="text-amber-200/80"
-            >
-              <div className="mb-2 rounded-lg border border-white/5 bg-[#0f1117] px-2 py-1.5">
-                <span className="block text-[9px] uppercase tracking-widest text-content-tertiary">
-                  Active
-                </span>
-                <span className="block break-words text-[10px] font-bold uppercase tracking-widest text-content-primary">
-                  {activeReasoning?.label ?? "Off"}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2" data-testid="context-reasoning-list">
-                {REASONING_MODES.map((mode) => (
-                  <InlineChoice
-                    key={mode.key}
-                    active={mode.key === reasoningMode}
-                    onClick={() => setReasoningMode(mode.key)}
-                    title={mode.description}
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="break-words text-[10px] font-bold uppercase tracking-widest">
-                        {mode.label}
-                      </span>
-                      {mode.retrievalLevel && (
-                        <Zap className="h-3 w-3 shrink-0 text-amber-300" />
-                      )}
-                    </span>
-                    <span className="block text-[9px] text-content-tertiary">
-                      {mode.description}
-                    </span>
-                  </InlineChoice>
-                ))}
-              </div>
+              </ScrollPane>
             </Section>
           </div>
+        </div>
+      )}
+
+      {openPanel === "reasoning" && (
+        <div
+          className="pm-context-panel fixed left-2 right-2 top-16 z-[95] max-h-[calc(100dvh-5rem)] overflow-hidden overscroll-contain rounded-2xl border border-white/10 bg-[#15171d] p-2 font-mono shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-3 sm:w-[28rem] sm:max-w-[calc(100vw-1rem)]"
+          data-testid="chat-reasoning-panel"
+        >
+          <div className="mb-2 flex items-center justify-between gap-2 border-b border-white/10 px-2 pb-2 pt-0.5">
+            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-content-primary">
+              <Brain className="h-3.5 w-3.5 text-amber-200" />
+              Reasoning
+            </div>
+            <span className="rounded-full border border-amber-400/20 bg-amber-400/10 px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest text-amber-200">
+              {activeReasoning?.label ?? "Off"}
+            </span>
+          </div>
+
+          <Section
+            icon={<Brain className="h-3 w-3" />}
+            title="Modes"
+            tone="text-amber-200/80"
+          >
+            <ScrollPane
+              testId="context-reasoning-list"
+              className="max-h-[calc(100dvh-12rem)] sm:max-h-56 lg:max-h-80"
+            >
+              {REASONING_MODES.map((mode) => (
+                <InlineChoice
+                  key={mode.key}
+                  active={mode.key === reasoningMode}
+                  onClick={() => setReasoningMode(mode.key)}
+                  title={mode.description}
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="break-words text-[10px] font-bold uppercase tracking-widest">
+                      {mode.label}
+                    </span>
+                    {mode.retrievalLevel && (
+                      <Zap className="h-3 w-3 shrink-0 text-amber-300" />
+                    )}
+                  </span>
+                  <span className="block text-[9px] text-content-tertiary">
+                    {mode.description}
+                  </span>
+                </InlineChoice>
+              ))}
+            </ScrollPane>
+          </Section>
         </div>
       )}
     </div>

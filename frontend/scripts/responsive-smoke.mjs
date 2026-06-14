@@ -255,6 +255,23 @@ async function popoverBox(page, text) {
     });
 }
 
+async function testIdBox(page, testId) {
+  await page.waitForSelector(`[data-testid="${testId}"]`, { timeout: 5000 });
+  return page.locator(`[data-testid="${testId}"]`).evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    const styles = getComputedStyle(el);
+    return {
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      right: Math.round(rect.right),
+      bottom: Math.round(rect.bottom),
+      position: styles.position,
+    };
+  });
+}
+
 async function run() {
   const launchOptions = existsSync(CHROME_EXECUTABLE_PATH)
     ? { executablePath: CHROME_EXECUTABLE_PATH }
@@ -320,12 +337,9 @@ async function run() {
     }));
 
     const boxes = {};
-    await page.click('[data-testid="chat-context-toggle"]');
-    boxes.context = await popoverBox(page, "Query Context");
+    await page.click('[data-testid="chat-sources-toggle"]');
+    boxes.sources = await testIdBox(page, "chat-sources-panel");
     await page.waitForSelector('[data-testid="context-corpus-list"]', {
-      timeout: 5000,
-    });
-    await page.waitForSelector('[data-testid="context-query-speed"]', {
       timeout: 5000,
     });
     boxes.corpus = await page
@@ -341,9 +355,36 @@ async function run() {
           bottom: Math.round(rect.bottom),
         };
       });
+    await page.mouse.click(2, Math.min(height - 2, 300));
+
+    await page.click('[data-testid="chat-context-toggle"]');
+    boxes.context = await testIdBox(page, "chat-context-panel");
+    await page.waitForSelector('[data-testid="context-query-speed"]', {
+      timeout: 5000,
+    });
     await page.locator('[data-testid="context-query-speed"]').scrollIntoViewIfNeeded();
     boxes.speed = await page
       .locator('[data-testid="context-query-speed"]')
+      .evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        return {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          right: Math.round(rect.right),
+          bottom: Math.round(rect.bottom),
+        };
+      });
+    await page.mouse.click(2, Math.min(height - 2, 300));
+
+    await page.click('[data-testid="chat-reasoning-toggle"]');
+    boxes.reasoning = await testIdBox(page, "chat-reasoning-panel");
+    await page.waitForSelector('[data-testid="context-reasoning-list"]', {
+      timeout: 5000,
+    });
+    boxes.reasoningList = await page
+      .locator('[data-testid="context-reasoning-list"]')
       .evaluate((el) => {
         const rect = el.getBoundingClientRect();
         return {
@@ -378,9 +419,12 @@ async function run() {
         scroll.scrollWidth <= scroll.innerWidth &&
         scroll.bodyScrollWidth <= scroll.innerWidth,
       inFrame: {
+        sources: isInFrame(boxes.sources, viewport),
         context: isInFrame(boxes.context, viewport),
         corpus: isInFrame(boxes.corpus, viewport),
         speed: isInFrame(boxes.speed, viewport),
+        reasoning: isInFrame(boxes.reasoning, viewport),
+        reasoningList: isInFrame(boxes.reasoningList, viewport),
         model: isInFrame(boxes.model, viewport),
         items: isInFrame(boxes.items, viewport),
       },
