@@ -331,6 +331,33 @@ def test_curated_ids_are_unique():
 
 
 @pytest.mark.asyncio
+async def test_get_ollama_models_filters_cloud_subscription_aliases():
+    """Ollama Cloud aliases require a subscription and should not be offered
+    as local runnable models in the picker."""
+    fake_response = MagicMock()
+    fake_response.status_code = 200
+    fake_response.json = MagicMock(return_value={
+        "models": [
+            {"name": "llama3.2:3b", "details": {}},
+            {"name": "deepseek-v4-pro:cloud", "details": {}},
+            {"name": "gemma4:31b-cloud", "details": {}},
+        ],
+    })
+    fake_client = AsyncMock()
+    fake_client.__aenter__.return_value = fake_client
+    fake_client.__aexit__.return_value = None
+    fake_client.get = AsyncMock(return_value=fake_response)
+
+    with patch.object(models_router.httpx, "AsyncClient", return_value=fake_client):
+        result = await models_router.get_ollama_models()
+
+    ids = {m.id for m in result}
+    assert "ollama/llama3.2:3b" in ids
+    assert "ollama/deepseek-v4-pro:cloud" not in ids
+    assert "ollama/gemma4:31b-cloud" not in ids
+
+
+@pytest.mark.asyncio
 async def test_curated_pixtral_is_chat_not_embedding():
     """The _is_embedding_name() helper checks for substrings like
     'embed', 'e5', 'bge', etc. Pixtral / Magistral / etc. must not
