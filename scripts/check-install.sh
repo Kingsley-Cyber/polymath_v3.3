@@ -4,6 +4,7 @@ set -euo pipefail
 runtime_root="${POLYMATH_DOCKER_DATA_ROOT:-}"
 skip_compose_config=0
 check_running=0
+skip_runtime_contracts=0
 failures=0
 warnings=0
 
@@ -14,6 +15,7 @@ Usage: scripts/check-install.sh [options]
 Options:
   --runtime-root PATH      Host runtime root. Default: .env POLYMATH_DOCKER_DATA_ROOT or ~/PolymathRuntime
   --skip-compose-config    Do not run docker compose config --quiet
+  --skip-runtime-contracts Do not run the static startup/worker/trigger contract check
   --check-running          Probe localhost services after docker compose up
   -h, --help               Show this help
 EOF
@@ -27,6 +29,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-compose-config)
       skip_compose_config=1
+      shift
+      ;;
+    --skip-runtime-contracts)
+      skip_runtime_contracts=1
       shift
       ;;
     --check-running)
@@ -84,6 +90,25 @@ http_probe() {
 
 echo "Polymath install check"
 echo "Repo: $repo_root"
+
+if [[ "$skip_runtime_contracts" != "1" ]]; then
+  runtime_contract_script="$repo_root/scripts/verify_runtime_contracts.py"
+  if command -v python3 >/dev/null 2>&1; then
+    if (cd "$repo_root" && python3 "$runtime_contract_script"); then
+      ok "Runtime setup/worker/trigger contracts are intact"
+    else
+      fail "Runtime setup/worker/trigger contract check failed"
+    fi
+  elif command -v python >/dev/null 2>&1; then
+    if (cd "$repo_root" && python "$runtime_contract_script"); then
+      ok "Runtime setup/worker/trigger contracts are intact"
+    else
+      fail "Runtime setup/worker/trigger contract check failed"
+    fi
+  else
+    warn "Python not found; skipping runtime contract check"
+  fi
+fi
 
 if [[ ! -f "$env_file" ]]; then
   fail ".env is missing. Run scripts/bootstrap-runtime.sh --generate-secrets"

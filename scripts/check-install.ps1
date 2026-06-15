@@ -2,6 +2,7 @@
 param(
     [string]$RuntimeRoot = $(if ($env:POLYMATH_DOCKER_DATA_ROOT) { $env:POLYMATH_DOCKER_DATA_ROOT } else { "" }),
     [switch]$SkipComposeConfig,
+    [switch]$SkipRuntimeContracts,
     [switch]$CheckRunning
 )
 
@@ -71,6 +72,32 @@ $envFile = Join-Path $repoRoot ".env"
 
 Write-Host "Polymath install check"
 Write-Host "Repo: $repoRoot"
+
+if (-not $SkipRuntimeContracts) {
+    $contractScript = Join-Path $repoRoot "scripts\verify_runtime_contracts.py"
+    $python = Get-Command python3 -ErrorAction SilentlyContinue
+    if (-not $python) {
+        $python = Get-Command python -ErrorAction SilentlyContinue
+    }
+
+    if ($python) {
+        Push-Location $repoRoot
+        try {
+            & $python.Source $contractScript
+            if ($LASTEXITCODE -eq 0) {
+                Add-Ok "Runtime setup/worker/trigger contracts are intact"
+            } else {
+                Add-Failure "Runtime setup/worker/trigger contract check failed"
+            }
+        } catch {
+            Add-Failure "Runtime setup/worker/trigger contract check failed"
+        } finally {
+            Pop-Location
+        }
+    } else {
+        Add-Warning "Python not found; skipping runtime contract check"
+    }
+}
 
 if (-not (Test-Path -LiteralPath $envFile)) {
     Add-Failure ".env is missing. Run .\scripts\bootstrap-runtime.ps1 -GenerateSecrets"

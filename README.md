@@ -306,6 +306,15 @@ cannot safely infer on its own:
 - generate strong local secrets when requested
 - enable the local embedder, reranker, parser, and MCP profiles by default
 - optionally download the two reference local models
+- run a static runtime contract check that fails if startup migrations,
+  ingestion worker triggers, summary repair guards, graph cleanup guards, or
+  chat streaming paths are no longer wired into the repo
+
+You can also run that guard directly after any clone or refactor:
+
+```bash
+python3 scripts/verify_runtime_contracts.py
+```
 
 **First-run signals you want to see:**
 
