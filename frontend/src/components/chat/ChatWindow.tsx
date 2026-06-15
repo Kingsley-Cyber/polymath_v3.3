@@ -16,6 +16,7 @@ type PromptSuggestion = {
 export function ChatWindow() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const streamingMessageRef = useRef<HTMLDivElement>(null);
   const selectedCorpusIds = useSettingsStore((s) => s.selectedCorpusIds);
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt);
   const [graphSuggestions, setGraphSuggestions] = useState<GraphSuggestionItem[]>([]);
@@ -51,7 +52,7 @@ export function ChatWindow() {
   // pre-stream retrieval phase (isLoading) AND the gap after the stream opens
   // but before the first token (isStreaming && no output). Without this second
   // case the UI went blank for several seconds, then the answer "spawned".
-  const showWorkingIndicator = (isLoading || isStreaming) && !hasStreamingOutput;
+  const showWorkingIndicator = isLoading && !isStreaming && !hasStreamingOutput;
   const workingLabel = isStreaming
     ? "Generating answer…"
     : "Searching your library…";
@@ -158,6 +159,13 @@ export function ChatWindow() {
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     requestAnimationFrame(() => {
+      if (isStreaming && streamingMessageRef.current) {
+        streamingMessageRef.current.scrollIntoView({
+          behavior: "auto",
+          block: "start",
+        });
+        return;
+      }
       messagesEndRef.current?.scrollIntoView({
         behavior: isStreaming ? "auto" : "smooth",
         block: "end",
@@ -236,20 +244,22 @@ export function ChatWindow() {
         ))}
 
         {/* Streaming message */}
-        {isStreaming && hasStreamingOutput && (
-          <MessageBubble
-            message={{
-              id: "streaming",
-              role: "assistant",
-              content: streamingContent,
-              thinking: streamingThinking || undefined,
-              trace_events: streamingTraceEvents,
-              process_timeline: streamingProcessTimeline,
-              created_at: new Date().toISOString(),
-            }}
-            isStreaming={true}
-            toolActivity={streamingToolActivity}
-          />
+        {isStreaming && (
+          <div ref={streamingMessageRef}>
+            <MessageBubble
+              message={{
+                id: "streaming",
+                role: "assistant",
+                content: streamingContent,
+                thinking: streamingThinking || undefined,
+                trace_events: streamingTraceEvents,
+                process_timeline: streamingProcessTimeline,
+                created_at: new Date().toISOString(),
+              }}
+              isStreaming={true}
+              toolActivity={streamingToolActivity}
+            />
+          </div>
         )}
 
         {/* Working indicator — stays visible from submit through the

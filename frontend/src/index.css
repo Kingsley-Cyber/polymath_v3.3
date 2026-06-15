@@ -1366,6 +1366,89 @@
   animation: message-arrive 0.2s ease-out;
 }
 
+.message-assistant-streaming .message-text {
+  min-height: 3.25rem;
+}
+
+.pm-stream-caret {
+  display: inline-block;
+  width: 0.48rem;
+  height: 1.05rem;
+  margin-left: 0.22rem;
+  vertical-align: -0.16rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-primary) 76%, #fff 24%);
+  animation: pm-stream-caret 900ms ease-in-out infinite;
+}
+
+.pm-live-answer-draft {
+  display: grid;
+  gap: 0.65rem;
+  max-width: min(100%, 38rem);
+  padding: 0.15rem 0 0.3rem;
+  color: var(--text-secondary);
+}
+
+.pm-live-answer-draft-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--font-family-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.pm-live-answer-dot {
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: 999px;
+  background: var(--accent-primary);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--accent-primary) 62%, transparent) !important;
+  animation: pm-live-dot 1.15s ease-in-out infinite;
+}
+
+.pm-live-answer-lines {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.pm-live-answer-lines span {
+  display: block;
+  height: 0.62rem;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--text-tertiary) 10%, transparent),
+      color-mix(in srgb, var(--accent-primary) 24%, transparent),
+      color-mix(in srgb, var(--text-tertiary) 10%, transparent)
+    );
+  background-size: 220% 100%;
+  animation: pm-live-line 1.45s ease-in-out infinite;
+}
+
+.pm-live-answer-lines span:nth-child(1) { width: 88%; }
+.pm-live-answer-lines span:nth-child(2) { width: 64%; animation-delay: 110ms; }
+.pm-live-answer-lines span:nth-child(3) { width: 72%; animation-delay: 220ms; }
+
+@keyframes pm-stream-caret {
+  0%, 100% { opacity: 0.28; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-1px); }
+}
+
+@keyframes pm-live-dot {
+  0%, 100% { opacity: 0.48; transform: scale(0.82); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pm-live-line {
+  0% { background-position: 120% 0; opacity: 0.45; }
+  50% { opacity: 0.88; }
+  100% { background-position: -120% 0; opacity: 0.45; }
+}
+
 /* Phase 2 border audit enforcement. The allowed exceptions are restored below. */
 #root :where(*) {
   box-shadow: none !important;
@@ -1545,7 +1628,10 @@
   #root .pm-soft-control,
   #root .pm-composer-icon,
   #root .pm-composer-action,
-  #root .pm-query-textarea {
+  #root .pm-query-textarea,
+  #root .pm-stream-caret,
+  #root .pm-live-answer-dot,
+  #root .pm-live-answer-lines span {
     animation: none !important;
     transition: none !important;
   }

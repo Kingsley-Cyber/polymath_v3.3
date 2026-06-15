@@ -46,6 +46,9 @@ export function MessageBubble({
   const hasRunningTool = visibleToolActivity.some(
     (activity) => activity.status === "running",
   );
+  const hasAssistantContent = !isUser && message.content.trim().length > 0;
+  const showLiveDraftPlaceholder =
+    !isUser && isStreaming && !hasAssistantContent;
 
   useEffect(() => {
     if (isUser) return;
@@ -123,6 +126,67 @@ export function MessageBubble({
           isUser ? "items-end" : "items-start"
         }`}
       >
+        {/* Bubble */}
+        <div
+          data-role={message.role}
+          className={`
+            relative group/bubble
+            ${
+              isUser
+                ? "message-user"
+                : `message-assistant w-full max-w-[82ch] ${
+                    isStreaming ? "message-assistant-streaming" : ""
+                  }`
+            }
+          `}
+        >
+          {/* Content with Markdown and brutalist formatting */}
+          <div
+            className={
+              isUser
+                ? "message-text whitespace-pre-wrap break-words"
+                : "message-text synthesis-body break-words"
+            }
+          >
+            {isUser ? (
+              message.content
+            ) : showLiveDraftPlaceholder ? (
+              <LiveAnswerDraft
+                hasThinking={Boolean(message.thinking)}
+                hasProcess={hasProcessTimeline || Boolean(message.trace_events?.length)}
+              />
+            ) : (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={markdownComponents}
+              >
+                {message.content}
+              </ReactMarkdown>
+            )}
+            {isStreaming && (
+              <span className="pm-stream-caret" aria-hidden="true" />
+            )}
+          </div>
+
+          {/* Copy Button (hover) */}
+          {!isUser && !isStreaming && (
+            <button
+              onClick={handleCopy}
+              className="
+                absolute -right-8 top-0 p-1 text-content-tertiary
+                opacity-0 transition-opacity hover:text-accent-main group-hover/bubble:opacity-100
+              "
+              title="Copy message"
+            >
+              {copied ? (
+                <Check className="w-4 h-4 text-success" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </button>
+          )}
+        </div>
+
         {hasProcessTimeline && (
           <ProcessTimeline
             items={visibleProcessTimeline}
@@ -162,56 +226,6 @@ export function MessageBubble({
           />
         )}
 
-        {/* Bubble */}
-        <div
-          data-role={message.role}
-          className={`
-            relative group/bubble
-            ${isUser ? "message-user" : "message-assistant w-full max-w-[82ch]"}
-          `}
-        >
-          {/* Content with Markdown and brutalist formatting */}
-          <div
-            className={
-              isUser
-                ? "message-text whitespace-pre-wrap break-words"
-                : "message-text synthesis-body break-words"
-            }
-          >
-            {isUser ? (
-              message.content
-            ) : (
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={markdownComponents}
-              >
-                {message.content}
-              </ReactMarkdown>
-            )}
-            {isStreaming && (
-              <span className="inline-block w-2 h-3 ml-1 bg-accent-main animate-pulse" />
-            )}
-          </div>
-
-          {/* Copy Button (hover) */}
-          {!isUser && !isStreaming && (
-            <button
-              onClick={handleCopy}
-              className="
-                absolute -right-8 top-0 p-1 text-content-tertiary
-                opacity-0 transition-opacity hover:text-accent-main group-hover/bubble:opacity-100
-              "
-              title="Copy message"
-            >
-              {copied ? (
-                <Check className="w-4 h-4 text-success" />
-              ) : (
-                <Copy className="w-4 h-4" />
-              )}
-            </button>
-          )}
-        </div>
-
         {/* Metadata */}
         <div
           className={`
@@ -237,6 +251,34 @@ export function MessageBubble({
               scoped. data-testid preserved for existing Playwright. */}
           {!isUser && <RetrievalBadge message={message} />}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function LiveAnswerDraft({
+  hasThinking,
+  hasProcess,
+}: {
+  hasThinking: boolean;
+  hasProcess: boolean;
+}) {
+  const label = hasThinking
+    ? "Reading the model's reasoning stream"
+    : hasProcess
+      ? "Preparing the answer surface"
+      : "Starting the answer stream";
+
+  return (
+    <div className="pm-live-answer-draft" aria-live="polite">
+      <div className="pm-live-answer-draft-head">
+        <span className="pm-live-answer-dot" />
+        <span>{label}</span>
+      </div>
+      <div className="pm-live-answer-lines" aria-hidden="true">
+        <span />
+        <span />
+        <span />
       </div>
     </div>
   );
@@ -324,12 +366,9 @@ function ProcessTimeline({
   isStreaming: boolean;
 }) {
   const groups = compactProcessTimeline(items);
-  const [manualOpenIds, setManualOpenIds] = useState<Set<string>>(() => {
-    if (isStreaming || groups.length === 0) {
-      return new Set();
-    }
-    return new Set([groups[groups.length - 1].id]);
-  });
+  const [manualOpenIds, setManualOpenIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const activeId = isStreaming
     ? [...groups].reverse().find((group) => group.status === "running")?.id
     : undefined;
