@@ -1159,6 +1159,10 @@ class RetrievalResult(BaseModel):
         default=None,
         description="Populated when the requested tier was downgraded at strategy intersection time",
     )
+    diagnostics: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Observable retrieval lane counts, timings, and tier contract metadata.",
+    )
 
 
 class EntitySearchRequest(BaseModel):

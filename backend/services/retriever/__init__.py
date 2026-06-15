@@ -128,6 +128,52 @@ def _document_anchor_limit_for(effective_tier: RetrievalTier, *, retrieval_k: in
     return 8 if retrieval_k >= 40 else 4
 
 
+def _retrieval_store_contract(tier: RetrievalTier) -> dict[str, Any]:
+    """Human-readable store contract for UI diagnostics."""
+
+    if tier == RetrievalTier.qdrant_only:
+        return {
+            "label": "Vector Base",
+            "qdrant_vectors": True,
+            "qdrant_summaries": True,
+            "mongo_lexical": False,
+            "mongo_hydration": False,
+            "neo4j_facts": False,
+            "neo4j_expansion": False,
+            "description": (
+                "Qdrant vector search over child chunks and parent summaries. "
+                "Mongo lexical search and Neo4j graph expansion are disabled."
+            ),
+        }
+    if tier == RetrievalTier.qdrant_mongo:
+        return {
+            "label": "Hybrid",
+            "qdrant_vectors": True,
+            "qdrant_summaries": True,
+            "mongo_lexical": True,
+            "mongo_hydration": True,
+            "neo4j_facts": False,
+            "neo4j_expansion": False,
+            "description": (
+                "Qdrant vector recall plus Mongo lexical/document-anchor recall "
+                "and parent hydration. Neo4j is disabled."
+            ),
+        }
+    return {
+        "label": "Graph Augmented",
+        "qdrant_vectors": True,
+        "qdrant_summaries": True,
+        "mongo_lexical": True,
+        "mongo_hydration": True,
+        "neo4j_facts": True,
+        "neo4j_expansion": True,
+        "description": (
+            "Hybrid retrieval plus Neo4j fact seeds, mention/call walks, "
+            "bridge expansion, and graph-aware ranking signals."
+        ),
+    }
+
+
 def _has_query_term_overlap(chunks: list[SourceChunk], query: str) -> bool:
     """True when any meaningful original-query term appears in retrieved text.
 
@@ -634,6 +680,50 @@ class RetrieverOrchestrator:
                 final_count,
             )
 
+        def _source_tier_counts(chunks: list[SourceChunk] | None) -> dict[str, int]:
+            tier_counts: dict[str, int] = {}
+            for chunk in chunks or []:
+                tier = str(getattr(chunk, "source_tier", None) or "unknown")
+                tier_counts[tier] = tier_counts.get(tier, 0) + 1
+            return tier_counts
+
+        def _diagnostics(
+            status: str,
+            final_count: int,
+            final_chunks: list[SourceChunk] | None = None,
+        ) -> dict[str, Any]:
+            effective = effective_tier
+            return {
+                "status": status,
+                "requested_tier": getattr(retrieval_tier, "value", retrieval_tier),
+                "effective_tier": getattr(effective, "value", effective),
+                "store_contract": _retrieval_store_contract(effective),
+                "search_mode": search_mode,
+                "intent": {
+                    "need": retrieval_intent.need.value,
+                    "broad_score": retrieval_intent.broad_score,
+                    "specific_score": retrieval_intent.specific_score,
+                    "child_ratio": retrieval_intent.child_ratio,
+                    "summary_ratio": retrieval_intent.summary_ratio,
+                },
+                "limits": {
+                    "child_top_k": funnel_limits.child_top_k,
+                    "summary_top_k": funnel_limits.summary_top_k,
+                    "requested_retrieval_k": single_limit,
+                    "final_top_k": final_top_k
+                    if final_top_k is not None
+                    else settings.DEFAULT_RETRIEVAL_K,
+                    "rerank_enabled": rerank_enabled,
+                },
+                "counts": {key: int(value) for key, value in counts.items()},
+                "timings_s": {
+                    key: round(float(value), 3) for key, value in timings.items()
+                },
+                "total_s": round(float(perf_counter() - retrieval_started), 3),
+                "final_count": int(final_count),
+                "final_source_tiers": _source_tier_counts(final_chunks),
+            }
+
         # [0a] Filter stale corpus_ids (frontend may reference deleted corpora)
         phase_started = perf_counter()
         corpus_ids, dropped_ids = await self._filter_existing_corpora(corpus_ids)
@@ -776,6 +866,9 @@ class RetrieverOrchestrator:
                         tier=effective_tier,
                         score_scale=settings.RERANKER_SCORE_SCALE,
                     )
+                    counts["ranked"] = len(ranked)
+                    counts["ranked_query_grounded"] = len(ranked)
+                    counts["candidates"] = min(len(ranked), effective_final_k)
                     hydrated = await hydrate_chunks(ranked[:effective_final_k], corpus_ids)
                     _log_timings("embed_failed_fallback", len(hydrated))
                     return RetrievalResult(
@@ -784,6 +877,11 @@ class RetrieverOrchestrator:
                         requested_tier=retrieval_tier,
                         effective_tier=effective_tier,
                         downgrade_reason=downgrade_reason,
+                        diagnostics=_diagnostics(
+                            "embed_failed_fallback",
+                            len(hydrated),
+                            hydrated,
+                        ),
                     )
             _log_timings("embed_failed_empty", 0)
             return RetrievalResult(
@@ -792,6 +890,7 @@ class RetrieverOrchestrator:
                 requested_tier=retrieval_tier,
                 effective_tier=effective_tier,
                 downgrade_reason=downgrade_reason,
+                diagnostics=_diagnostics("embed_failed_empty", 0),
             )
 
         # [2] Determine Qdrant collections for each funnel
@@ -805,6 +904,7 @@ class RetrieverOrchestrator:
         # chunks" work.
         if search_mode == "global":
             global_top_k = top_k_summary if top_k_summary is not None else 50
+            phase_started = perf_counter()
             try:
                 a_results_global = await funnel_a.search(
                     query_vector, corpus_ids, a_cols, top_k=global_top_k,
@@ -812,7 +912,7 @@ class RetrieverOrchestrator:
             except Exception as exc:
                 logger.warning("global-mode Funnel A failed: %s", exc)
                 a_results_global = []
-            _add_timing("global_funnel_a", phase_started)
+            _add_timing("funnels", phase_started)
             counts["global_summaries"] = len(a_results_global)
             # Optional rerank — summaries are usually well-ordered by
             # vector similarity, but the cross-encoder catches mismatches
@@ -866,6 +966,8 @@ class RetrieverOrchestrator:
                 score_scale=settings.RERANKER_SCORE_SCALE,
             )
             top = a_results_global[:effective_global_k]
+            counts["ranked_query_grounded"] = len(a_results_global)
+            counts["candidates"] = len(top)
             _log_timings("global_done", len(top))
             return RetrievalResult(
                 chunks=top,
@@ -873,6 +975,7 @@ class RetrieverOrchestrator:
                 requested_tier=retrieval_tier,
                 effective_tier=effective_tier,
                 downgrade_reason=downgrade_reason,
+                diagnostics=_diagnostics("global_done", len(top), top),
             )
 
         lexical_limit = _lexical_limit_for(
@@ -1027,13 +1130,14 @@ class RetrieverOrchestrator:
             tier=effective_tier,
         )
 
-        def _result(chunks: list[SourceChunk]) -> RetrievalResult:
+        def _result(chunks: list[SourceChunk], *, status: str = "result") -> RetrievalResult:
             return RetrievalResult(
                 chunks=chunks,
                 facts=seed_facts,
                 requested_tier=retrieval_tier,
                 effective_tier=effective_tier,
                 downgrade_reason=downgrade_reason,
+                diagnostics=_diagnostics(status, len(chunks), chunks),
             )
 
         # [4] Merge + dedupe by parent_id. Lexical and fact-seeded candidates
@@ -1055,7 +1159,7 @@ class RetrieverOrchestrator:
         _add_timing("merge", phase_started)
         if not merged:
             _log_timings("empty_after_merge", 0)
-            return _result([])
+            return _result([], status="empty_after_merge")
 
         # [4a] Phase 23 — Custom profile `similarity_threshold` noise filter.
         # Drops anything below the cosine score floor. Applied before graph
@@ -1072,7 +1176,7 @@ class RetrieverOrchestrator:
             counts["merged_after_threshold"] = len(merged)
             if not merged:
                 _log_timings("empty_after_threshold", 0)
-                return _result([])
+                return _result([], status="empty_after_threshold")
 
         # [5] Mode A graph expansion (graph tier + Neo4j live only)
         if effective_tier == RetrievalTier.qdrant_mongo_graph and settings.NEO4J_ENABLED:
@@ -1196,7 +1300,7 @@ class RetrieverOrchestrator:
                 rank_query[:80],
             )
             _log_timings("empty_low_confidence_rerank", 0)
-            return _result([])
+            return _result([], status="empty_low_confidence_rerank")
 
         trimmed_ranked = _trim_bounded_rerank_tail(
             ranked,
@@ -1224,7 +1328,7 @@ class RetrieverOrchestrator:
         )
         if grounded_ranked is not ranked:
             ranked = grounded_ranked
-            counts["ranked_query_grounded"] = len(ranked)
+        counts["ranked_query_grounded"] = len(ranked)
 
         # Phase 24 — final_top_k (Custom profile slider) overrides the
         # legacy DEFAULT_RETRIEVAL_K env cap. Never silently swap models or
@@ -1269,13 +1373,13 @@ class RetrieverOrchestrator:
                 hydrated = await hydrate_chunks(candidates, corpus_ids)
                 _add_timing("hydrate", phase_started)
                 _log_timings("ok_hydrated", len(hydrated))
-                return _result(hydrated)
+                return _result(hydrated, status="ok_hydrated")
             except Exception as exc:
                 _add_timing("hydrate", phase_started)
                 logger.warning("Hydration failed, returning unhydrated: %s", exc)
 
         _log_timings("ok_unhydrated", len(candidates))
-        return _result(candidates)
+        return _result(candidates, status="ok_unhydrated")
 
 
 retriever_orchestrator = RetrieverOrchestrator()

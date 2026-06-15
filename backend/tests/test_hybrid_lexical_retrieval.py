@@ -3,6 +3,7 @@ from services.retriever import (
     _fact_seed_chunks,
     _has_query_term_overlap,
     _lexical_limit_for,
+    _retrieval_store_contract,
     _should_drop_low_confidence_rerank,
 )
 from services.retriever.lexical import _regex_score, _terms
@@ -29,6 +30,30 @@ def test_speed_profiles_map_to_lexical_budget():
         retrieval_k=60,
         rerank_enabled=True,
     ) == 18
+
+
+def test_retrieval_store_contracts_make_tiers_observable():
+    vector = _retrieval_store_contract(RetrievalTier.qdrant_only)
+    assert vector["label"] == "Vector Base"
+    assert vector["qdrant_vectors"] is True
+    assert vector["qdrant_summaries"] is True
+    assert vector["mongo_lexical"] is False
+    assert vector["neo4j_facts"] is False
+    assert vector["neo4j_expansion"] is False
+
+    hybrid = _retrieval_store_contract(RetrievalTier.qdrant_mongo)
+    assert hybrid["label"] == "Hybrid"
+    assert hybrid["qdrant_vectors"] is True
+    assert hybrid["mongo_lexical"] is True
+    assert hybrid["mongo_hydration"] is True
+    assert hybrid["neo4j_facts"] is False
+
+    graph = _retrieval_store_contract(RetrievalTier.qdrant_mongo_graph)
+    assert graph["label"] == "Graph Augmented"
+    assert graph["qdrant_vectors"] is True
+    assert graph["mongo_lexical"] is True
+    assert graph["neo4j_facts"] is True
+    assert graph["neo4j_expansion"] is True
 
 
 def test_lexical_terms_drop_stop_words_and_duplicates():

@@ -2886,6 +2886,99 @@ def _is_graph_augmented_tier(tier: Any) -> bool:
     return value == RetrievalTier.qdrant_mongo_graph.value
 
 
+def _format_retrieval_diagnostics_trace(
+    diagnostics: dict[str, Any] | None,
+    *,
+    fallback_tier: Any,
+    raw_chunks: int,
+    context_chunks: int,
+) -> str:
+    """Compact live trace text that makes retrieval tiers visibly different."""
+
+    diag = diagnostics or {}
+    contract = diag.get("store_contract") or {}
+    counts = diag.get("counts") or {}
+    timings = diag.get("timings_s") or {}
+    limits = diag.get("limits") or {}
+    intent = diag.get("intent") or {}
+    final_source_tiers = diag.get("final_source_tiers") or {}
+    effective = (
+        diag.get("effective_tier")
+        or getattr(fallback_tier, "value", fallback_tier)
+        or "unknown"
+    )
+    label = contract.get("label") or str(effective)
+
+    def _count(key: str) -> int:
+        try:
+            return int(counts.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    stores: list[str] = []
+    if contract.get("qdrant_vectors"):
+        stores.append(
+            "Qdrant vectors "
+            f"(summaries={_count('funnel_a') + _count('global_summaries')}, "
+            f"children={_count('funnel_b')})"
+        )
+    if contract.get("mongo_lexical"):
+        stores.append(
+            "Mongo lexical/hydration "
+            f"(lexical={_count('lexical')}, anchors={_count('document_anchor')})"
+        )
+    if contract.get("neo4j_facts"):
+        stores.append(
+            "Neo4j graph "
+            f"(facts={_count('facts')}, expanded={_count('graph_expanded')})"
+        )
+    if not stores:
+        stores.append("training-data only or no corpus stores")
+    total_s = float(diag.get("total_s") or 0.0)
+    final_mix = (
+        ", ".join(
+            f"{tier}={count}"
+            for tier, count in sorted(final_source_tiers.items())
+        )
+        if isinstance(final_source_tiers, dict) and final_source_tiers
+        else "none"
+    )
+
+    lines = [
+        "[Retrieval tier trace]",
+        f"tier: {label} ({effective})",
+        f"mode: {diag.get('search_mode') or 'local'}",
+        f"intent: {intent.get('need') or 'balanced'}",
+        f"contract: {contract.get('description') or 'No tier contract available.'}",
+        f"stores: {'; '.join(stores)}",
+        (
+            "pool: "
+            f"merged={_count('merged_initial')} "
+            f"ranked={_count('ranked')} "
+            f"grounded={_count('ranked_query_grounded')} "
+            f"final={context_chunks}/{raw_chunks}"
+        ),
+        f"final_source_tiers: {final_mix}",
+        (
+            "limits: "
+            f"child={limits.get('child_top_k', '?')} "
+            f"summary={limits.get('summary_top_k', '?')} "
+            f"final={limits.get('final_top_k', '?')} "
+            f"rerank={'on' if limits.get('rerank_enabled') else 'off'}"
+        ),
+        (
+            "timing: "
+            f"total={total_s:.2f}s "
+            f"embed={float(timings.get('embed') or 0):.2f}s "
+            f"funnels={float(timings.get('funnels') or 0):.2f}s "
+            f"graph={float(timings.get('graph') or 0):.2f}s "
+            f"rerank={float(timings.get('rerank') or 0):.2f}s "
+            f"hydrate={float(timings.get('hydrate') or 0):.2f}s"
+        ),
+    ]
+    return "\n".join(lines)
+
+
 # Baseline system prompt, applied to every chat turn regardless of reasoning
 # mode. Exists to fix the pre-Phase-23 pattern where the only style guidance
 # was the optional reasoning template — leaving reasoning=none produced raw
@@ -3353,9 +3446,15 @@ class ChatOrchestrator:
             status="running",
             content=(
                 "Starting corpus retrieval before any web-search merge. "
+                f"requested_tier={getattr(request.retrieval_tier, 'value', request.retrieval_tier)} "
                 f"query={_clip_trace_value(retrieval_query, 220)}"
             ),
             metadata={
+                "requested_tier": getattr(
+                    request.retrieval_tier,
+                    "value",
+                    request.retrieval_tier,
+                ),
                 "retrieval_k": profile_k,
                 "rerank_enabled": profile_rerank,
                 "query_profile": query_profile_used,
@@ -3470,15 +3569,17 @@ class ChatOrchestrator:
             lane="retrieval",
             title="Local RAG retrieval",
             status="done",
-            content=(
-                "Corpus retrieval finished. "
-                f"raw_chunks={len(retrieval.chunks or [])} "
-                f"deduped_context_chunks={len(sources or [])}"
+            content=_format_retrieval_diagnostics_trace(
+                getattr(retrieval, "diagnostics", None),
+                fallback_tier=retrieval.effective_tier,
+                raw_chunks=len(retrieval.chunks or []),
+                context_chunks=len(sources or []),
             ),
             metadata={
                 "duration_s": perf_counter() - rag_start,
                 "effective_tier": str(effective_tier_for_trace),
                 "chunks": len(sources or []),
+                "retrieval_diagnostics": getattr(retrieval, "diagnostics", {}),
                 "coverage_detected_facets": coverage_meta.get("detected_facets", []),
                 "coverage_query_facet_breakdown": coverage_meta.get("query_facet_breakdown", []),
                 "coverage_selected_facets": coverage_meta.get("selected_facets", []),

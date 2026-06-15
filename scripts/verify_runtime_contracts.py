@@ -163,6 +163,17 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         ),
     ),
     Requirement(
+        id="retrieval-tier-diagnostics-contract",
+        description="Retriever returns observable tier contracts, lane counts, timings, and final source-tier mix.",
+        path="backend/services/retriever/__init__.py",
+        needles=(
+            "_retrieval_store_contract",
+            "store_contract",
+            "final_source_tiers",
+            "diagnostics=_diagnostics",
+        ),
+    ),
+    Requirement(
         id="lexical-concept-coverage",
         description="Lexical recall adds bounded per-concept coverage so one common term cannot crowd out the rest of a multi-concept query.",
         path="backend/services/retriever/lexical.py",
@@ -206,6 +217,17 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         ),
     ),
     Requirement(
+        id="chat-retrieval-diagnostics-trace",
+        description="Chat streaming exposes tier-specific retrieval diagnostics in the live trace lane.",
+        path="backend/services/chat_orchestrator.py",
+        needles=(
+            "_format_retrieval_diagnostics_trace",
+            "[Retrieval tier trace]",
+            "retrieval_diagnostics",
+            "final_source_tiers",
+        ),
+    ),
+    Requirement(
         id="frontend-stream-consumer",
         description="Frontend consumes token/thinking SSE events and flushes them into the live streaming message.",
         path="frontend/src/App.tsx",
@@ -226,6 +248,7 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             "formatLiveThinkingPreview",
             "pm-live-reasoning-preview",
             "ProcessTimeline",
+            "const open = isStreaming || active || manualOpenIds.has(group.id);",
         ),
     ),
     Requirement(

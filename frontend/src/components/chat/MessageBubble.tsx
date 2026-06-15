@@ -269,7 +269,7 @@ function LiveAnswerDraft({
   const label = hasThinking
     ? "Reading the model's reasoning stream"
     : hasProcess
-      ? "Preparing the answer surface"
+      ? "Tracing retrieval and model steps live"
       : "Starting the answer stream";
   const thinkingPreview = formatLiveThinkingPreview(thinking);
 
@@ -413,7 +413,7 @@ function ProcessTimeline({
     <div className="mb-2 w-full max-w-[82ch]">
       {groups.map((group, index) => {
         const active = group.id === activeId;
-        const open = active || manualOpenIds.has(group.id);
+        const open = isStreaming || active || manualOpenIds.has(group.id);
         return (
           <ProcessTimelineCard
             key={group.id}
