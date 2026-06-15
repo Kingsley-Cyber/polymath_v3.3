@@ -702,8 +702,11 @@ function App() {
       </main>
 
       {/* Global Views & Modals */}
+      {/* z-[100]: must sit above all chat chrome — the header is z-[80], the
+          input bar z-50, and the ChatContextMenu (Sources/Context) panels
+          z-[95]; at z-50 those painted THROUGH this full-screen graph overlay. */}
       {isGraphViewOpen && (
-        <div className="fixed inset-0 z-50 bg-[#0a0a0a]/95">
+        <div className="fixed inset-0 z-[100] bg-[#0a0a0a]/95">
           <div className="absolute inset-0 flex flex-col">
             <button
               type="button"
