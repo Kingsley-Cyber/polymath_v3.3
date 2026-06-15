@@ -14,6 +14,7 @@ crowd code out.
 """
 import logging
 import os
+import time
 from typing import List
 
 import httpx
@@ -21,7 +22,6 @@ from config import get_settings
 from models.schemas import SourceChunk
 
 logger = logging.getLogger(__name__)
-_TIMEOUT = 30.0
 
 # Per-document character cap for rerank requests. The reranker (llama.cpp
 # Qwen3-Reranker) processes each (query, doc) pair against its context window
@@ -114,6 +114,8 @@ class RerankerService:
 
     def __init__(self) -> None:
         self._settings = get_settings()
+        self._disabled_until = 0.0
+        self._last_failure = ""
 
     async def rerank(self, query: str, candidate_pool: List[SourceChunk]) -> List[SourceChunk]:
         """
@@ -185,13 +187,24 @@ class RerankerService:
         if not pool:
             return []
 
+        now = time.monotonic()
+        if now < self._disabled_until:
+            remaining = self._disabled_until - now
+            logger.info(
+                "Reranker circuit open for %.1fs after %s — falling back to score sort",
+                remaining,
+                self._last_failure or "previous failure",
+            )
+            return sorted(pool, key=lambda x: x.score, reverse=True)
+
         # Cap each doc so no single (query, doc) pair overflows the reranker's
         # context and 500s the whole batch (the cross-encoder truncates anyway).
         documents = [(c.text or "")[:_RERANK_MAX_DOC_CHARS] for c in pool]
         url = f"{self._settings.RERANKER_URL}/rerank"
+        timeout = float(getattr(self._settings, "RERANKER_TIMEOUT_SECONDS", 4.0) or 4.0)
 
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post(
                     url,
                     json={"query": query, "documents": documents},
@@ -199,11 +212,25 @@ class RerankerService:
                 resp.raise_for_status()
                 data = resp.json()
 
+            self._last_failure = ""
+            self._disabled_until = 0.0
             return _ranked_chunks_from_response(pool, data)
 
         except Exception as exc:
+            breaker_seconds = float(
+                getattr(self._settings, "RERANKER_CIRCUIT_BREAKER_SECONDS", 120.0)
+                or 0.0
+            )
+            self._last_failure = str(exc)
+            if breaker_seconds > 0:
+                self._disabled_until = time.monotonic() + breaker_seconds
             logger.warning(
-                "Reranker HTTP call failed (%s) — falling back to score sort", exc
+                "Reranker HTTP call failed after %.1fs (%s) — falling back to score sort%s",
+                timeout,
+                exc,
+                f" and opening circuit for {breaker_seconds:.0f}s"
+                if breaker_seconds > 0
+                else "",
             )
             return sorted(pool, key=lambda x: x.score, reverse=True)
 

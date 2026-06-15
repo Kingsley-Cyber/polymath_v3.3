@@ -1071,7 +1071,6 @@ function useQueryGraph(
         );
         setGaps(sub.gaps || []);
         setData({ nodes: sub.nodes || [], links: sub.links || [] });
-        setPhase("ready");
         subgraphLoaded = true;
         await wait(GRAPH_QUERY_PROGRESS_PACKING_MS - (Date.now() - graphProgressStartedAt));
         if (cancel) return;
@@ -1105,6 +1104,7 @@ function useQueryGraph(
           perCorpus: auto.per_corpus_synthesis || undefined,
         });
         setProgressStage("done");
+        setPhase("ready");
       } catch (e) {
         if (cancel) return;
         clearSubgraphStageTimers();
@@ -1114,7 +1114,7 @@ function useQueryGraph(
         setProgressStage(
           subgraphLoaded ? "synthesis_error_after_map" : "subgraph_error",
         );
-        if (!subgraphLoaded) setPhase("error");
+        setPhase(subgraphLoaded ? "ready" : "error");
       }
     };
     run();

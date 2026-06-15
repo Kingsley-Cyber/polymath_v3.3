@@ -12,8 +12,8 @@ test.describe('Conversation Selector and Delete Bug Investigation', () => {
     const loginView = page.locator('[data-testid="login-view"]');
     if (await loginView.isVisible()) {
       // Fill in default credentials
-      await page.fill('input[placeholder="user@"]', 'admin');
-      await page.fill('input[placeholder="pass:"]', 'admin');
+      await page.fill('input[placeholder="username"]', 'admin');
+      await page.fill('input[placeholder="password"]', 'admin');
       await page.click('button:has-text("EXECUTE LOGIN")');
 
       // Wait for login to complete

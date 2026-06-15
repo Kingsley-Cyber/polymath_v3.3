@@ -139,9 +139,6 @@ export function LoginView() {
                 Username
               </label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-[var(--text-tertiary)] font-mono select-none">
-                  user@
-                </span>
                 <input
                   type="text"
                   value={username}
@@ -149,7 +146,7 @@ export function LoginView() {
                   autoComplete="username"
                   autoFocus
                   spellCheck={false}
-                  className="w-full bg-[var(--bg-base)] border border-[var(--border-subtle)] py-2.5 pl-14 pr-3 text-sm text-[var(--text-primary)] font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-primary)] transition-colors"
+                  className="w-full bg-[var(--bg-base)] border border-[var(--border-subtle)] px-3 py-2.5 text-sm text-[var(--text-primary)] font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-primary)] transition-colors"
                   placeholder="username"
                 />
               </div>
@@ -162,16 +159,13 @@ export function LoginView() {
                 Password
               </label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-[var(--text-tertiary)] font-mono select-none">
-                  pass:
-                </span>
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="current-password"
                   spellCheck={false}
-                  className="w-full bg-[var(--bg-base)] border border-[var(--border-subtle)] py-2.5 pl-14 pr-3 text-sm text-[var(--text-primary)] font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-primary)] transition-colors"
+                  className="w-full bg-[var(--bg-base)] border border-[var(--border-subtle)] px-3 py-2.5 text-sm text-[var(--text-primary)] font-mono placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-primary)] transition-colors"
                   placeholder="password"
                 />
               </div>

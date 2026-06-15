@@ -266,6 +266,33 @@ async def test_ollama_bulk_add_dedupes_by_model_name():
 
 
 @pytest.mark.asyncio
+async def test_ollama_bulk_add_accepts_cloud_model_tags():
+    await _setup()
+    user = _u()
+    try:
+        after = await settings_service.add_ollama_entries(
+            user, ["deepseek-v4-flash:cloud", "mistral-large-3:675b-cloud"]
+        )
+
+        ollama_entries = {
+            e.model_name: e
+            for e in after.query_model_pool
+            if e.provider == "ollama"
+        }
+        assert sorted(ollama_entries) == [
+            "deepseek-v4-flash:cloud",
+            "mistral-large-3:675b-cloud",
+        ]
+        for entry in ollama_entries.values():
+            assert entry.source == "ollama"
+            assert entry.base_url is None
+            assert entry.api_key_ciphertext is None
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
 async def test_delete_pool_entry_nulls_hyde_reference():
     await _setup()
     user = _u()
@@ -471,6 +498,30 @@ async def test_resolver_accepts_bare_zai_glm_model_name():
 
 
 @pytest.mark.asyncio
+async def test_resolver_accepts_bare_ollama_cloud_model_name():
+    from services import query_model_resolver
+
+    await _setup()
+    user = _u()
+    try:
+        await settings_service.add_ollama_entries(user, ["deepseek-v4-flash:cloud"])
+        raw = await settings_service.get_models_raw(user)
+        entry_id = raw["query_model_pool"][0]["entry_id"]
+
+        resolved = await query_model_resolver.resolve_by_entry_id(
+            user, entry_id
+        )
+
+        assert resolved is not None
+        assert resolved["model"] == "ollama_chat/deepseek-v4-flash:cloud"
+        assert resolved["api_base"] is None
+        assert resolved["api_key"] is None
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
 async def test_resolver_normalizes_legacy_zai_prefix_alias():
     from services import query_model_resolver
 
@@ -497,6 +548,72 @@ async def test_resolver_normalizes_legacy_zai_prefix_alias():
         assert resolved is not None
         assert resolved["model"] == "openai/glm-5.1"
         assert resolved["api_base"] == "https://api.z.ai/api/paas/v4"
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
+async def test_resolver_normalizes_opencode_go_bare_model_name():
+    from services import query_model_resolver
+
+    await _setup()
+    user = _u()
+    try:
+        await settings_service.update_models(user, ModelsConfig(
+            query_model_pool=[{
+                "entry_id": "ent-opencode-go",
+                "label": "OpenCode Go DeepSeek",
+                "provider": "opencode-go",
+                "base_url": "https://opencode.ai/zen/go/v1",
+                "api_key_ciphertext": "sk-opencode-plaintext",
+                "model_name": "deepseek-v4-flash",
+                "source": "cloud",
+                "enabled": True,
+            }],
+        ).model_dump())
+
+        resolved = await query_model_resolver.resolve_by_entry_id(
+            user, "ent-opencode-go"
+        )
+
+        assert resolved is not None
+        assert resolved["model"] == "openai/deepseek-v4-flash"
+        assert resolved["api_base"] == "https://opencode.ai/zen/go/v1"
+        assert resolved["api_key"] == "sk-opencode-plaintext"
+    finally:
+        await _cleanup(user)
+        await _teardown()
+
+
+@pytest.mark.asyncio
+async def test_resolver_normalizes_legacy_opencode_anthropic_bare_model_name():
+    from services import query_model_resolver
+
+    await _setup()
+    user = _u()
+    try:
+        await settings_service.update_models(user, ModelsConfig(
+            query_model_pool=[{
+                "entry_id": "ent-opencode-anthropic",
+                "label": "OpenCode Go MiniMax legacy",
+                "provider": "opencode-go-anthropic",
+                "base_url": "https://opencode.ai/zen/go",
+                "api_key_ciphertext": "sk-opencode-plaintext",
+                "model_name": "minimax-m2.7",
+                "source": "cloud",
+                "enabled": True,
+            }],
+        ).model_dump())
+
+        resolved = await query_model_resolver.resolve_by_entry_id(
+            user, "ent-opencode-anthropic"
+        )
+
+        assert resolved is not None
+        assert resolved["model"] == "anthropic/minimax-m2.7"
+        assert resolved["api_base"] == "https://opencode.ai/zen/go"
+        assert resolved["api_key"] == "sk-opencode-plaintext"
     finally:
         await _cleanup(user)
         await _teardown()

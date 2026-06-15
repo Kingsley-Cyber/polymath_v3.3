@@ -100,6 +100,43 @@ _INTENT_SYSTEM = (
     "'what does Y do', 'where is Z', 'explain this error'.\n"
     "When in doubt, answer 'specific'. Reply with only the single word."
 )
+_OVERVIEW_CLASSIFIER_HINTS = (
+    "overview",
+    "summarize",
+    "summary",
+    "main themes",
+    "key themes",
+    "main ideas",
+    "key ideas",
+    "big picture",
+    "high level",
+    "high-level",
+    "across",
+    "overall",
+    "whole corpus",
+    "library",
+    "what topics",
+    "what subjects",
+    "patterns",
+    "recurring",
+)
+_SIMPLE_DEFINITION_RE = re.compile(
+    r"^\s*(what\s+is|what\s+are|define|explain)\b",
+    re.IGNORECASE,
+)
+
+
+def _should_run_overview_intent_classifier(message: str) -> bool:
+    """Only pay the LLM classifier tax when the query looks plausibly broad."""
+
+    text = (message or "").strip()
+    if not text:
+        return False
+    lower = text.lower()
+    tokens = re.findall(r"[a-z0-9]+", lower)
+    if _SIMPLE_DEFINITION_RE.search(text) and len(tokens) <= 10:
+        return any(hint in lower for hint in _OVERVIEW_CLASSIFIER_HINTS)
+    return len(tokens) >= 12 or any(hint in lower for hint in _OVERVIEW_CLASSIFIER_HINTS)
 
 
 async def _classify_overview_intent(message: str) -> str:
@@ -1336,6 +1373,22 @@ def _chat_coverage_facets_for_query(query: str) -> list[dict[str, Any]]:
     )
 
 
+def _is_weak_ingest_profile_lane(facet: dict[str, Any]) -> bool:
+    """True when a long stored document facet only weakly overlaps the query."""
+
+    if str(facet.get("source") or "") != "ingest_facet_profile":
+        return False
+    name_tokens = [
+        token for token in str(facet.get("name") or "").split("_") if token
+    ]
+    matched = [str(item) for item in (facet.get("matched") or []) if str(item)]
+    try:
+        match_score = float(facet.get("match_score") or 0.0)
+    except (TypeError, ValueError):
+        match_score = 0.0
+    return len(name_tokens) >= 5 and len(matched) <= 2 and match_score < 8.0
+
+
 def _merge_chat_coverage_facets(
     base: list[dict[str, Any]],
     dynamic: list[dict[str, Any]],
@@ -2174,12 +2227,23 @@ async def _enforce_chat_query_coverage(
     for facet in facets:
         if scores.get(str(facet.get("name") or ""), 0) >= _CHAT_COVERAGE_THRESHOLD:
             continue
-        if facet.get("query_explicit"):
+        if facet.get("query_explicit") and not _is_weak_ingest_profile_lane(facet):
             query_explicit_missing.append(facet)
         else:
             inferred_missing.append(facet)
-    dynamic_missing = inferred_missing[:_CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS]
-    skipped_dynamic = inferred_missing[_CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS:]
+    # Vector-facet probes are breadth hints. In local/specific chat they should
+    # not trigger extra support retrievals; otherwise a simple definition
+    # question can fan out into several book-title searches before answering.
+    dynamic_missing = (
+        inferred_missing[:_CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS]
+        if str(search_mode or "").lower() == "global"
+        else []
+    )
+    skipped_dynamic = (
+        inferred_missing[_CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS:]
+        if str(search_mode or "").lower() == "global"
+        else inferred_missing
+    )
     missing = [*query_explicit_missing, *dynamic_missing]
     if not missing:
         return base_sources, meta
@@ -3303,7 +3367,11 @@ class ChatOrchestrator:
         # Phase 4 — LLM intent second-chance: when auto-mode's markers resolved to
         # local, ask the classifier whether this is really an overview question and
         # upgrade to global so the domain-stratified breadth path activates.
-        if (requested_mode or "auto").lower() == "auto" and resolved_mode == "local":
+        if (
+            (requested_mode or "auto").lower() == "auto"
+            and resolved_mode == "local"
+            and _should_run_overview_intent_classifier(request.message)
+        ):
             if await _classify_overview_intent(request.message) == "global":
                 resolved_mode = "global"
                 logger.info("intent classifier upgraded auto/local -> global (overview)")
@@ -3834,6 +3902,7 @@ class ChatOrchestrator:
         react_messages: list[dict] = []
         tools_used_names: list[str] = []
         web_required_retry_count = 0
+        last_generation_messages: list[dict] = []
 
         # Persist the RAW user message, not the RAG-augmented one. The object
         # `user_message.content` was overwritten above with the full augmented
@@ -3907,6 +3976,7 @@ class ChatOrchestrator:
                         break
             if react_messages:
                 message_dicts.extend(react_messages)
+            last_generation_messages = message_dicts
             force_initial_web_search = bool(
                 web_search_enabled and web_search_call_count == 0
             )
@@ -4480,6 +4550,7 @@ class ChatOrchestrator:
                     ),
                 },
             ]
+            last_generation_messages = final_messages
             try:
                 final_stream_start = perf_counter()
                 yield _record_trace_event(
@@ -4590,6 +4661,61 @@ class ChatOrchestrator:
                         ChatChunk(type="error", content=f"LLM streaming error: {e}")
                     )
                     return
+
+        if not assistant_content.strip():
+            if model_used != _CHAT_FALLBACK_MODEL and last_generation_messages:
+                yield _record_trace_event(
+                    lane="model_call",
+                    title="Chat model fallback",
+                    status="running",
+                    content=(
+                        "The selected model completed without user-facing "
+                        "tokens; retrying once on the fallback chat model."
+                    ),
+                    metadata={"from_model": model_used, "to_model": _CHAT_FALLBACK_MODEL},
+                )
+                fallback_start = perf_counter()
+                try:
+                    async for fb in llm_service.stream_chat(
+                        messages=last_generation_messages,
+                        model=_CHAT_FALLBACK_MODEL,
+                        overrides=None,
+                        tools=None,
+                    ):
+                        if fb.get("content"):
+                            assistant_content += fb["content"]
+                            yield build_sse_chunk(
+                                ChatChunk(
+                                    type="token",
+                                    content=fb["content"],
+                                    conversation_id=str(conversation_id),
+                                )
+                            )
+                    yield _record_trace_event(
+                        lane="model_call",
+                        title="Chat model fallback",
+                        status="done" if assistant_content.strip() else "error",
+                        content=(
+                            "Fallback model generated an answer."
+                            if assistant_content.strip()
+                            else "Fallback model also returned no user-facing tokens."
+                        ),
+                        metadata={
+                            "from_model": model_used,
+                            "to_model": _CHAT_FALLBACK_MODEL,
+                            "duration_s": perf_counter() - fallback_start,
+                            "content_chars": len(assistant_content),
+                        },
+                    )
+                except Exception as fallback_exc:
+                    logger.error("Empty-stream fallback failed: %s", fallback_exc)
+                    yield _record_trace_event(
+                        lane="model_call",
+                        title="Chat model fallback",
+                        status="error",
+                        content=f"Fallback model failed: {fallback_exc}",
+                        metadata={"from_model": model_used, "to_model": _CHAT_FALLBACK_MODEL},
+                    )
 
         if not assistant_content.strip():
             logger.error("LLM returned an empty assistant response for %s", conversation_id)

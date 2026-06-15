@@ -30,7 +30,8 @@ _OLLAMA_MODEL_FIELDS = (
 
 
 def _model_uses_ollama(model: str | None) -> bool:
-    return str(model or "").strip().lower().startswith("ollama/")
+    normalized = str(model or "").strip().lower()
+    return normalized.startswith("ollama/") or normalized.startswith("ollama_chat/")
 
 
 def _ollama_required() -> bool:

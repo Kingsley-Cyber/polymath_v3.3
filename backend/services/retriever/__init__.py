@@ -383,6 +383,13 @@ class RetrieverOrchestrator:
             )
             if driver is None:
                 return []
+            qdrant = getattr(ingestion_service, "qdrant_client", None)
+            if qdrant is None:
+                logger.info(
+                    "Graph fact seeding skipped: Qdrant client unavailable; "
+                    "avoiding slow literal Neo4j scan"
+                )
+                return []
 
             entity_names: list[str] = []
             seen_entities: set[str] = set()
@@ -393,7 +400,8 @@ class RetrieverOrchestrator:
                         cid,
                         driver,
                         limit_per_token=3,
-                        qdrant=None,
+                        qdrant=qdrant,
+                        allow_literal_fallback=False,
                     )
                 except Exception as exc:
                     logger.warning(
@@ -660,11 +668,21 @@ class RetrieverOrchestrator:
         fact_seed_chunks: list[SourceChunk] = []
         if effective_tier == RetrievalTier.qdrant_mongo_graph and settings.NEO4J_ENABLED:
             phase_started = perf_counter()
-            seed_facts = await self._retrieve_graph_seed_facts(
-                rank_query,
-                corpus_ids,
-                fact_seed_limit=fact_seed_limit,
-            )
+            try:
+                seed_facts = await asyncio.wait_for(
+                    self._retrieve_graph_seed_facts(
+                        rank_query,
+                        corpus_ids,
+                        fact_seed_limit=fact_seed_limit,
+                    ),
+                    timeout=float(settings.GRAPH_FACT_SEED_TIMEOUT_SECONDS),
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Graph fact seeding timed out after %.1fs; continuing without facts",
+                    float(settings.GRAPH_FACT_SEED_TIMEOUT_SECONDS),
+                )
+                seed_facts = []
             fact_seed_chunks = _fact_seed_chunks(seed_facts)
             counts["facts"] = len(seed_facts)
             counts["fact_seed_chunks"] = len(fact_seed_chunks)

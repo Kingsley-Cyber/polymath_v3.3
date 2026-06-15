@@ -28,7 +28,9 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [thinkingOpen, setThinkingOpen] = useState(isStreaming);
-  const [traceOpen, setTraceOpen] = useState(isStreaming);
+  const [traceOpen, setTraceOpen] = useState(
+    isStreaming || Boolean(message.trace_events?.length),
+  );
   const [toolOpen, setToolOpen] = useState(false);
   const previousThinkingLengthRef = useRef(0);
   const isUser = message.role === "user";
@@ -50,9 +52,6 @@ export function MessageBubble({
     if (isStreaming && message.trace_events && message.trace_events.length > 0) {
       setTraceOpen(true);
       return;
-    }
-    if (!isStreaming) {
-      setTraceOpen(false);
     }
   }, [isStreaming, isUser, message.trace_events?.length]);
 
@@ -324,8 +323,13 @@ function ProcessTimeline({
   items: ProcessTimelineItem[];
   isStreaming: boolean;
 }) {
-  const [manualOpenIds, setManualOpenIds] = useState<Set<string>>(new Set());
   const groups = compactProcessTimeline(items);
+  const [manualOpenIds, setManualOpenIds] = useState<Set<string>>(() => {
+    if (isStreaming || groups.length === 0) {
+      return new Set();
+    }
+    return new Set([groups[groups.length - 1].id]);
+  });
   const activeId = isStreaming
     ? [...groups].reverse().find((group) => group.status === "running")?.id
     : undefined;

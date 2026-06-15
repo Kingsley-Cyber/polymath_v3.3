@@ -19,6 +19,15 @@ model_list:
       model: "ollama/*"
       api_base: http://host.docker.internal:11434
 
+  # Ollama chat models - wildcard pattern
+  # Use Ollama's /api/chat endpoint for chat turns so native streamed fields
+  # such as message.thinking survive. LiteLLM recommends ollama_chat for
+  # chat-style Ollama calls; keep ollama/* above for legacy/generate paths.
+  - model_name: "ollama_chat/*"
+    litellm_params:
+      model: "ollama_chat/*"
+      api_base: http://host.docker.internal:11434
+
   # OpenAI models - wildcard pattern (requires OPENAI_API_KEY in environment)
   - model_name: "openai/*"
     litellm_params:

@@ -331,9 +331,9 @@ def test_curated_ids_are_unique():
 
 
 @pytest.mark.asyncio
-async def test_get_ollama_models_filters_cloud_subscription_aliases():
-    """Ollama Cloud aliases require a subscription and should not be offered
-    as local runnable models in the picker."""
+async def test_get_ollama_models_includes_cloud_aliases_from_ollama():
+    """Ollama is the source of truth. If the signed-in host Ollama daemon
+    lists cloud aliases, the picker should expose them."""
     fake_response = MagicMock()
     fake_response.status_code = 200
     fake_response.json = MagicMock(return_value={
@@ -353,8 +353,8 @@ async def test_get_ollama_models_filters_cloud_subscription_aliases():
 
     ids = {m.id for m in result}
     assert "ollama/llama3.2:3b" in ids
-    assert "ollama/deepseek-v4-pro:cloud" not in ids
-    assert "ollama/gemma4:31b-cloud" not in ids
+    assert "ollama/deepseek-v4-pro:cloud" in ids
+    assert "ollama/gemma4:31b-cloud" in ids
 
 
 @pytest.mark.asyncio

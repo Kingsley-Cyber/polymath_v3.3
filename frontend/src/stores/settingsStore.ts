@@ -477,9 +477,9 @@ export const useSettingsStore = create<SettingsStore>()(
       name: "polymath-settings",
       // Phase 23/30 — strip dead legacy/default model selections out of
       // restored localStorage. Raw model ids shadow Phase F pool resolution,
-      // so a phone can keep sending a stale Ollama Cloud alias long after the
-      // server defaults were fixed.
-      version: 3,
+      // so a phone can keep sending a stale local default after the server
+      // defaults were fixed.
+      version: 4,
       migrate: (persisted: unknown) => {
         const p = (persisted as Record<string, unknown>) || {};
         const LEGACY = new Set(["ollama/llama3.2:3b", "ollama/qwen3:1.7b"]);
@@ -487,9 +487,6 @@ export const useSettingsStore = create<SettingsStore>()(
           if (typeof v !== "string") return v;
           const lower = v.trim().toLowerCase();
           if (LEGACY.has(lower)) return "";
-          if (lower.startsWith("ollama/") && (lower.endsWith(":cloud") || lower.endsWith("-cloud"))) {
-            return "";
-          }
           return v;
         };
         return {

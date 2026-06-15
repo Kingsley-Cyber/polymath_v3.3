@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.machinery
 import json
 import logging
+import os
 import re
 import sys
 import time as _time
@@ -155,6 +156,8 @@ async def _bounded_discover_without_legacy(
     synthesis_mode: str = "research",
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
+    model_override: Optional[str] = None,
+    validate_synthesis: bool = False,
 ) -> Any:
     """Tracked-source Mission Control graph builder when legacy .pyc is absent.
 
@@ -175,6 +178,8 @@ async def _bounded_discover_without_legacy(
 
     if neo4j_driver is None:
         raise ValueError("Neo4j driver is required for Mission Control graph discovery")
+
+    started_at = _time.perf_counter()
 
     async def _cached_metrics(cid: str) -> Any | None:
         if db is None:
@@ -221,7 +226,7 @@ async def _bounded_discover_without_legacy(
                 corpus_id=cid,
                 driver=neo4j_driver,
                 max_hops=2,
-                limit=80,
+                limit=50,
                 metrics=metrics,
                 entity_scores=seed_scores,
             )
@@ -325,6 +330,85 @@ async def _bounded_discover_without_legacy(
     hubs = list(hubs_by_id.values())
     seeds = list(seeds_by_id.values())
 
+    for node in nodes:
+        label = str(
+            node.get("label")
+            or node.get("display_name")
+            or node.get("canonical_name")
+            or node.get("entity_id")
+            or node.get("id")
+            or ""
+        )
+        node_id = str(node.get("id") or node.get("entity_id") or "")
+        if node_id:
+            node.setdefault("id", node_id)
+            node.setdefault("entity_id", node_id)
+        if label:
+            node.setdefault("label", label)
+            node.setdefault("display_name", label)
+        entity_type = str(
+            node.get("entity_type")
+            or node.get("primary_entity_type")
+            or node.get("object_kind")
+            or "other"
+        )
+        node.setdefault("entity_type", entity_type)
+        node.setdefault("primary_entity_type", entity_type)
+
+    local_degree: dict[str, int] = {}
+    for link in links:
+        source = str(link.get("source") or "")
+        target = str(link.get("target") or "")
+        if source:
+            local_degree[source] = local_degree.get(source, 0) + 1
+        if target:
+            local_degree[target] = local_degree.get(target, 0) + 1
+    for node in nodes:
+        node_id = str(node.get("id") or node.get("entity_id") or "")
+        node["degree"] = max(int(node.get("degree") or 0), local_degree.get(node_id, 0))
+
+    selected_edges = [
+        {
+            "source": str(link.get("source") or ""),
+            "target": str(link.get("target") or ""),
+            "predicate": str(link.get("predicate") or link.get("kind") or "related_to"),
+            "relation_family": str(link.get("relation_family") or ""),
+            "confidence": float(link.get("confidence") or 0.0),
+            "role": str(link.get("role") or "context"),
+        }
+        for link in links
+        if link.get("source") and link.get("target")
+    ][: _PACKET_MAX_EDGES]
+
+    working_entities = [
+        {
+            "entity_id": str(node.get("id") or node.get("entity_id") or ""),
+            "name": str(node.get("label") or node.get("display_name") or ""),
+            "degree": int(node.get("degree") or 0),
+            "role": (
+                "seed"
+                if node.get("is_seed")
+                else "working"
+                if node.get("is_working_entity")
+                else "context"
+            ),
+            "domain_type": str(node.get("domain_type") or ""),
+            "object_kind": str(node.get("object_kind") or ""),
+            "canonical_family": str(node.get("canonical_family") or ""),
+        }
+        for node in sorted(
+            nodes,
+            key=lambda row: (
+                bool(row.get("is_seed")),
+                bool(row.get("is_working_entity")),
+                int(row.get("degree") or 0),
+                int(row.get("mention_count") or 0),
+            ),
+            reverse=True,
+        )
+        if node.get("id") or node.get("entity_id")
+    ][: _PACKET_MAX_ENTITIES]
+
     frontier = [
         {
             "entity_id": node.get("id") or node.get("entity_id"),
@@ -376,6 +460,8 @@ async def _bounded_discover_without_legacy(
             },
         ],
         "errors_per_corpus": errors,
+        "working_entities": working_entities,
+        "selected_edges": selected_edges,
         "source_docs": [],
         "builder": "bounded_graph_query",
     }
@@ -423,7 +509,7 @@ async def _bounded_discover_without_legacy(
         for link in links
         if link.get("source") and link.get("target")
     ]
-    return SimpleNamespace(
+    result = SimpleNamespace(
         session_id=session_id or f"graph-{uuid.uuid4().hex}",
         corpus_id=corpus_ids[0] if corpus_ids else "",
         corpus_ids=list(corpus_ids),
@@ -483,6 +569,88 @@ async def _bounded_discover_without_legacy(
             "meta": {"builder": "bounded_graph_query"},
         },
     )
+
+    corpus_for_packet = corpus_ids[0] if corpus_ids else ""
+    graph_done_at = _time.perf_counter()
+    if corpus_for_packet:
+        try:
+            retrieved_source_docs, retrieval_meta = await _retrieve_packet_source_docs(
+                db,
+                corpus_id=corpus_for_packet,
+                query=query,
+                synthesis_mode=synthesis_mode,
+            )
+            result.trace["retrieval_evidence"] = retrieval_meta
+            result.trace["source_docs"] = retrieved_source_docs
+            result.trace = await _hydrate_trace_source_docs(
+                db, result.trace, corpus_id=corpus_for_packet
+            )
+        except Exception as exc:
+            logger.debug("bounded discover packet retrieval skipped: %s", exc)
+
+    try:
+        packet = _build_insight_packet(
+            result,
+            query=query,
+            corpus_id=corpus_for_packet,
+            synthesis_mode=synthesis_mode,
+        )
+        await _enrich_packet_with_extractions(
+            neo4j_driver=neo4j_driver,
+            db=db,
+            packet=packet,
+            corpus_id=corpus_for_packet,
+        )
+        if isinstance(result.trace, dict):
+            result.trace["source_docs_raw"] = result.trace.get("source_docs") or []
+            result.trace["source_docs"] = packet.get("evidence") or []
+            result.trace["evidence_filter"] = packet.get("evidence_filter") or {}
+            result.trace["graph_hint"] = packet.get("graph_hint") or {}
+            result.trace["llm_context"] = _llm_context_trace_from_packet(
+                packet,
+                synthesis_mode=synthesis_mode,
+            )
+
+        llm_payload, fallback_reason = await _call_llm_synthesis(
+            packet,
+            model_override=model_override,
+            user_id=user_id,
+            synthesis_mode=synthesis_mode,
+            validate_synthesis=validate_synthesis,
+        )
+        if llm_payload is not None:
+            result.auto_synthesis = {
+                **llm_payload,
+                "builder": "bounded_graph_query",
+            }
+        else:
+            fallback = _deterministic_prose_fallback(
+                result,
+                packet,
+                fallback_reason or "unknown",
+            )
+            fallback["builder"] = "bounded_graph_query"
+            result.auto_synthesis = fallback
+        _sync_headline_from_auto_synthesis(result)
+        result.insight_packet_summary = _insight_packet_summary_from_result(result)
+        if fallback_reason:
+            ips = dict(result.insight_packet_summary or {})
+            ips["fallback_reason"] = fallback_reason
+            result.insight_packet_summary = ips
+        result.context_graph = _context_graph_from_result(result)
+        total_done_at = _time.perf_counter()
+        result.trace.setdefault("llm_context", {})["timings_ms"] = {
+            "bounded_graph": round((graph_done_at - started_at) * 1000, 1),
+            "packet_synthesis": round((total_done_at - graph_done_at) * 1000, 1),
+            "total": round((total_done_at - started_at) * 1000, 1),
+        }
+    except Exception as exc:
+        logger.warning(
+            "bounded discover synthesis packet failed; returning structural graph fallback: %s",
+            exc,
+        )
+
+    return result
 
 
 # Hard caps for the LLM input packet. Graph Query should synthesize from a
@@ -584,7 +752,13 @@ def _packet_caps_for_mode(synthesis_mode: str = "research") -> _PacketCaps:
 # model has plenty of room without burning the whole turn budget. Longer essay
 # paragraphs (5-7 sentences each, ~3 themes + 2 bridges + 2 gaps + 2 signals)
 # need ~3500 output tokens to land cleanly without truncation.
-_SYNTHESIS_TIMEOUT_SECONDS = 120.0
+_SYNTHESIS_TIMEOUT_SECONDS = max(
+    5.0,
+    min(
+        120.0,
+        float(os.environ.get("GRAPH_SYNTHESIS_TIMEOUT_SECONDS", "30") or 30),
+    ),
+)
 # Research synthesis includes a short reader-orientation ramp before the
 # load-bearing claim, so it needs a little more room than the old prose-only
 # budget. Nuance and ideation keep their mode-specific caps below.
@@ -4711,8 +4885,11 @@ _IDEATION_SYSTEM_PROMPT = (
     "that can become invention ingredients. Use this lane to create "
     "non-obvious combinations, but label inference honestly.\n\n"
     "OUTPUT FORMAT:\n"
-    "- Markdown prose only. Do not use bracketed block labels like "
-    "`[BUILD IDEA]` as section titles; write a fluid idea narrative.\n"
+    "- Markdown prose only. Render ideas as explicit labeled blocks so the "
+    "interface can scan them reliably. Supported block labels are "
+    "`[BUILD IDEA]`, `[METHOD TRANSFER]`, `[THEORETICAL SYNTHESIS]`, "
+    "`[REFRAME]`, `[INTERVENTION]`, and `[APPROACH]`. Pick the smallest "
+    "accurate label for each direction.\n"
     "- ALWAYS begin with `## Orientation` before the idea sections. Under it, "
     "write one compact familiarization paragraph that breaks down the user's "
     "core question in plain language, defines the dense terms the reader may "
@@ -4732,15 +4909,17 @@ _IDEATION_SYSTEM_PROMPT = (
     "- Default to ONE strong idea. If the materials have multiple strong signals, "
     "give up to THREE ideas. Do not force three weak ideas.\n"
     "- For one dominant idea, use: `# Idea name`, then `## Orientation`, "
-    "then the familiarization paragraph, one **Core idea:** sentence, then sections named "
-    "`## Why these pieces belong together`, `## How it works`, "
-    "`## Grounding`, `## What makes it interesting`, "
-    "`## Build path`, and `## Risk / limit`.\n"
+    "then the familiarization paragraph, one **Core idea:** sentence, then a "
+    "`## [BUILD IDEA] Idea name` or other accurate block-label heading with "
+    "sections named `### The Hook`, `### The Mechanic`, "
+    "`### Corpus Evidence`, `### Build Path`, `### Feasibility`, and "
+    "`### Risk`.\n"
     "- For two or three strong ideas, use `# Buildable directions`, then "
     "`## Orientation`, then `## 1. Idea name`, `## 2. Idea name`, etc. Each "
     "idea should include one **Core idea:** sentence, the concept combination, "
     "the mechanism, evidence grounding, and the main risk. Keep each idea compact "
-    "and readable.\n"
+    "and readable. Each direction must still include The Hook, The Mechanic, "
+    "Corpus Evidence, Build Path, Feasibility, and Risk.\n"
     "- Format each idea direction like a design board, not a dense essay. Use "
     "short headings and bullets inside the direction. A strong direction should "
     "include: `One-line essence:`, `Why it fits the problem:`, `Minimal concrete "
@@ -4772,7 +4951,7 @@ _IDEATION_SYSTEM_PROMPT = (
     "files/APIs/concepts cited, (3) novelty of bridge/gap/analogy used, "
     "(4) clarity of implementation or reasoning path, and (5) honesty about "
     "risks and gaps.\n"
-    "- Keep the whole answer compact enough for about 1800 output tokens.\n\n"
+    "- Keep the whole answer compact enough for about 1400 output tokens.\n\n"
     "ALWAYS END WITH `## Way Ahead`:\n"
     "- This section is the user's next move, not a second answer. Suggest "
     "2-3 concrete directions the user could explore after reading the idea.\n"
@@ -4816,9 +4995,9 @@ _IDEATION_SYSTEM_PROMPT = (
     "- If the evidence is too sparse to support a strong idea, say so plainly "
     "and give ONE smaller grounded move plus a clearly labeled Way Ahead. Do "
     "not pad.\n"
-    "- Distinguish observed evidence [n] from speculative combinations "
-    "[SYNTHESIS], cross-domain movement [TRANSFER], and external options "
-    "[OUTSIDE]. Never blend them silently."
+    "- Distinguish observed evidence [n] and directly grounded corpus moves "
+    "[CORPUS] from speculative combinations [SYNTHESIS], cross-domain movement "
+    "[TRANSFER], and external options [OUTSIDE]. Never blend them silently."
 )
 
 
@@ -5784,6 +5963,48 @@ async def _resolve_graph_model(
     """
 
     model = (model_override or "").strip()
+
+    async def _resolve_pool_entry_matching_model(name: str) -> dict[str, Any] | None:
+        if not user_id or not name:
+            return None
+        try:
+            from services.provider_presets import normalize_model_for_litellm
+            from services.query_model_resolver import resolve_by_entry_id
+            from services.settings import settings_service
+
+            raw = await settings_service.get_models_raw(user_id)
+            wanted = name.strip().lower()
+            for entry in (raw.get("query_model_pool") or []):
+                if not isinstance(entry, dict):
+                    continue
+                entry_id = str(entry.get("entry_id") or "").strip()
+                model_name = str(entry.get("model_name") or "").strip()
+                if not entry_id or not model_name:
+                    continue
+                routed = normalize_model_for_litellm(entry.get("provider"), model_name)
+                candidates = {
+                    model_name.strip().lower(),
+                    str(routed or "").strip().lower(),
+                }
+                if routed and "/" in routed:
+                    candidates.add(routed.split("/", 1)[1].strip().lower())
+                if model_name and "/" in model_name:
+                    candidates.add(model_name.split("/", 1)[1].strip().lower())
+                if wanted not in candidates:
+                    continue
+                resolved = await resolve_by_entry_id(user_id, entry_id)
+                if resolved:
+                    return {
+                        "model": resolved.get("model") or None,
+                        "api_base": resolved.get("api_base"),
+                        "api_key": resolved.get("api_key"),
+                        "extra_params": resolved.get("extra_params") or {},
+                        "source": f"override_match:{entry_id}",
+                    }
+        except Exception as exc:
+            logger.debug("Graph synthesis model-name pool match skipped: %s", exc)
+        return None
+
     if user_id and (model.startswith("pool:") or model.startswith("profile:")):
         _prefix, _, entry_id = model.partition(":")
         try:
@@ -5808,15 +6029,17 @@ async def _resolve_graph_model(
         )
         model = ""
 
+    if user_id and model:
+        matched = await _resolve_pool_entry_matching_model(model)
+        if matched:
+            return matched
+
     if not model and user_id:
         try:
             from services.query_model_resolver import resolve as resolve_query_model
 
             source_kind = "graph_query_pref"
             resolved = await resolve_query_model(user_id, "graph_query")
-            if not resolved:
-                source_kind = "query_pref"
-                resolved = await resolve_query_model(user_id, "query")
         except Exception as exc:
             logger.debug("Graph synthesis model preference lookup failed: %s", exc)
             resolved = None
@@ -5827,6 +6050,43 @@ async def _resolve_graph_model(
                 "api_key": resolved.get("api_key"),
                 "extra_params": resolved.get("extra_params") or {},
                 "source": source_kind,
+            }
+
+    if not model and user_id:
+        try:
+            from services.settings import settings_service
+
+            user_settings = await settings_service.get_settings(user_id)
+            chat_default = (
+                getattr(user_settings.chat, "default_chat_model", None) or ""
+            ).strip()
+        except Exception as exc:
+            logger.debug("Graph synthesis chat-default lookup failed: %s", exc)
+            chat_default = ""
+        if chat_default:
+            return {
+                "model": chat_default,
+                "api_base": None,
+                "api_key": None,
+                "extra_params": {},
+                "source": "chat_default",
+            }
+
+    if not model and user_id:
+        try:
+            from services.query_model_resolver import resolve as resolve_query_model
+
+            resolved = await resolve_query_model(user_id, "query")
+        except Exception as exc:
+            logger.debug("Graph synthesis query preference lookup failed: %s", exc)
+            resolved = None
+        if resolved:
+            return {
+                "model": resolved.get("model") or None,
+                "api_base": resolved.get("api_base"),
+                "api_key": resolved.get("api_key"),
+                "extra_params": resolved.get("extra_params") or {},
+                "source": "query_pref",
             }
 
     if model.startswith("pool:") or model.startswith("profile:"):
@@ -6081,43 +6341,92 @@ async def _call_llm_synthesis(
         },
     ]
     creds = await _resolve_graph_model(user_id, model_override)
-    extra: dict[str, Any] = dict(creds.get("extra_params") or {})
     max_tokens = _synthesis_max_tokens_for_mode(synthesis_mode)
     evidence_items = [
         item for item in (packet.get("evidence") or []) if isinstance(item, dict)
     ]
-    logger.info(
-        "Graph synthesis LLM call: model=%s source=%s sys=%dchars usr=%dchars total≈%dtok "
-        "files=%d chunks=%d collections=%s",
-        creds["model"] or "(selected/default)",
-        creds.get("source") or "",
-        len(messages[0]["content"]),
-        len(messages[1]["content"]),
-        (len(messages[0]["content"]) + len(messages[1]["content"])) // 4,
-        len({str(item.get("doc_id") or "") for item in evidence_items if item.get("doc_id")}),
-        len(evidence_items),
-        ",".join((packet.get("collections") or {}).values()),
-    )
 
-    try:
-        raw = await llm_service.complete_sync(
-            messages=messages,
-            model=creds["model"],
-            temperature=_SYNTHESIS_TEMPERATURE,
-            max_tokens=max_tokens,
-            api_base=creds.get("api_base"),
-            api_key=creds.get("api_key"),
-            timeout=_SYNTHESIS_TIMEOUT_SECONDS,
-            extra_params=extra,
+    candidates: list[dict[str, Any]] = []
+    if creds.get("model"):
+        candidates.append(creds)
+    else:
+        logger.warning("Graph synthesis has no resolved primary model; using fallback lane")
+
+    fallback_model = (
+        os.environ.get("GRAPH_SYNTHESIS_FALLBACK_MODEL", "deepseek/deepseek-chat")
+        or ""
+    ).strip()
+    if fallback_model and all((c.get("model") or "") != fallback_model for c in candidates):
+        candidates.append(
+            {
+                "model": fallback_model,
+                "api_base": None,
+                "api_key": None,
+                "extra_params": {},
+                "source": "graph_synthesis_fallback",
+            }
         )
-    except Exception as exc:
-        logger.warning("synthesis LLM call failed: %s", exc)
+
+    if not candidates:
         return None, "llm_request_failure"
 
-    prose = _strip_code_fences(raw or "").strip()
+    prose = ""
+    fallback_reason: Optional[str] = None
+    for idx, current_creds in enumerate(candidates):
+        extra: dict[str, Any] = dict(current_creds.get("extra_params") or {})
+        logger.info(
+            "Graph synthesis LLM call: model=%s source=%s attempt=%d/%d sys=%dchars "
+            "usr=%dchars total≈%dtok files=%d chunks=%d collections=%s",
+            current_creds["model"],
+            current_creds.get("source") or "",
+            idx + 1,
+            len(candidates),
+            len(messages[0]["content"]),
+            len(messages[1]["content"]),
+            (len(messages[0]["content"]) + len(messages[1]["content"])) // 4,
+            len({
+                str(item.get("doc_id") or "")
+                for item in evidence_items
+                if item.get("doc_id")
+            }),
+            len(evidence_items),
+            ",".join((packet.get("collections") or {}).values()),
+        )
+        try:
+            raw = await llm_service.complete_sync(
+                messages=messages,
+                model=current_creds["model"],
+                temperature=_SYNTHESIS_TEMPERATURE,
+                max_tokens=max_tokens,
+                api_base=current_creds.get("api_base"),
+                api_key=current_creds.get("api_key"),
+                timeout=_SYNTHESIS_TIMEOUT_SECONDS,
+                extra_params=extra,
+            )
+        except Exception as exc:
+            fallback_reason = "llm_request_failure"
+            logger.warning(
+                "synthesis LLM call failed model=%s source=%s: %r",
+                current_creds.get("model"),
+                current_creds.get("source") or "",
+                exc,
+            )
+            continue
+
+        prose = _strip_code_fences(raw or "").strip()
+        if prose:
+            creds = current_creds
+            break
+
+        fallback_reason = "llm_empty_response"
+        logger.warning(
+            "synthesis LLM returned empty response model=%s source=%s",
+            current_creds.get("model"),
+            current_creds.get("source") or "",
+        )
+
     if not prose:
-        logger.warning("synthesis LLM returned empty response")
-        return None, "llm_empty_response"
+        return None, fallback_reason or "llm_empty_response"
 
     headline_match = _SYNTHESIS_HEADLINE_RE.search(prose)
     if headline_match:
@@ -6187,6 +6496,8 @@ async def _call_llm_synthesis(
         "sources": sources,
         "fallback": False,
         "fallback_reason": None,
+        "model_used": creds.get("model"),
+        "model_source": creds.get("source"),
         "critique": critique_meta,
     }, None
 
@@ -6704,6 +7015,8 @@ async def discover(
             synthesis_mode=synthesis_mode,
             session_id=session_id,
             user_id=user_id,
+            model_override=model_override,
+            validate_synthesis=validate_synthesis,
         )
 
     # ── Multi-corpus fan-out ──
@@ -7569,7 +7882,65 @@ async def build_corpus_suggestions(
     if not ids:
         return {"corpus_id": "", "domain_map_summary": [], "suggestions": []}
     if _legacy_build_corpus_suggestions is None:
-        raise RuntimeError(_LEGACY_MISSING_MESSAGE)
+        corpus_rows: dict[str, dict[str, Any]] = {}
+        if db is not None:
+            try:
+                cursor = db["corpora"].find(
+                    {"corpus_id": {"$in": ids}},
+                    {"_id": 0, "corpus_id": 1, "name": 1, "doc_count": 1},
+                )
+                async for row in cursor:
+                    cid = str(row.get("corpus_id") or "")
+                    if cid:
+                        corpus_rows[cid] = row
+            except Exception as exc:
+                logger.debug("bounded corpus suggestions metadata skipped: %s", exc)
+
+        suggestions: list[dict[str, Any]] = []
+        domain_summary: list[dict[str, Any]] = []
+        seen_text: set[str] = set()
+        templates = (
+            ("research", "Map the main relationships in {name}."),
+            ("gaps", "Where are the weakest or missing links in {name}?"),
+            ("nuance", "Which concepts bridge the strongest clusters in {name}?"),
+            ("ideation", "What reusable patterns emerge across {name}?"),
+        )
+        for cid in ids:
+            row = corpus_rows.get(cid) or {}
+            name = str(row.get("name") or cid)
+            domain_summary.append(
+                {
+                    "label": name,
+                    "source_corpus": cid,
+                    "doc_count": int(row.get("doc_count") or 0),
+                    "builder": "bounded_graph_query",
+                }
+            )
+            for kind, template in templates:
+                text = template.format(name=name)
+                if text in seen_text:
+                    continue
+                seen_text.add(text)
+                suggestions.append(
+                    {
+                        "text": text,
+                        "kind": kind,
+                        "entities": [],
+                        "domains": [name],
+                        "source_corpus": cid,
+                        "builder": "bounded_graph_query",
+                    }
+                )
+                if len(suggestions) >= 16:
+                    break
+            if len(suggestions) >= 16:
+                break
+        return {
+            "corpus_id": ids[0],
+            "corpus_ids": ids,
+            "domain_map_summary": domain_summary,
+            "suggestions": suggestions,
+        }
     if len(ids) == 1:
         return await _legacy_build_corpus_suggestions(
             qdrant=qdrant, neo4j_driver=neo4j_driver, db=db, corpus_id=ids[0], user_id=user_id

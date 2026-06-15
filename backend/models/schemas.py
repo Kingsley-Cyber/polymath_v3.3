@@ -541,11 +541,15 @@ class AutoSynthesisPayload(BaseModel):
     `sources` lists the receipts each [n] citation refers to. No card schema.
     """
 
+    model_config = ConfigDict(protected_namespaces=())
+
     headline: str = ""
     markdown: str = ""
     sources: list[SynthesisSource] = Field(default_factory=list)
     fallback: bool = False
     fallback_reason: str | None = None
+    model_used: str | None = None
+    model_source: str | None = None
 
 
 class InsightPacketSummary(BaseModel):

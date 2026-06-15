@@ -136,6 +136,7 @@ async def extract_query_entities(
     driver,
     limit_per_token: int = 3,
     qdrant=None,
+    allow_literal_fallback: bool = True,
 ) -> list[dict]:
     """
     Match query tokens against Entity nodes mentioned in this corpus.
@@ -192,6 +193,14 @@ async def extract_query_entities(
 
     if not contains_tokens and not exact_short_tokens and not vector_seed_ids:
         return []
+    if qdrant is not None and not vector_seed_ids and not allow_literal_fallback:
+        logger.info(
+            "graph_query.extract_query_entities: vector scope empty; "
+            "skipping slow literal fallback for corpus=%s query=%r",
+            corpus_id,
+            query[:80],
+        )
+        return []
 
     # Hard limit budget — give vector seeds room to land on top even
     # when the literal path would have already filled the result set.
@@ -230,6 +239,8 @@ async def extract_query_entities(
             "junk_pattern": _JUNK_NAME_PATTERN,
         }
     else:
+        if not allow_literal_fallback:
+            return []
         # Fallback path for cold/no-vector deployments. This scans corpus
         # mentions, so keep it behind the vector fast path.
         cypher = """

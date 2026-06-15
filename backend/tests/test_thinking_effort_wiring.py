@@ -1,18 +1,12 @@
-"""Phase 28 — thinking-effort wiring tests (blank-slate state).
+"""Phase 28 — thinking-effort wiring tests.
 
-The mapper has no providers configured yet — these tests pin the
-EMPTY-STATE behavior:
+These tests pin the provider-neutral behavior:
 
   - The schema field exists and accepts the 5 effort values
-  - The mapper is a no-op for every model
+  - The mapper is a no-op for models without a configured provider rule
   - The LLM service call site doesn't crash when effort is set
   - The auto / none / explicit-level paths all flow through without
     raising
-
-When you wire a provider, ADD a test file (e.g.
-`test_thinking_anthropic.py`) that pins the provider-specific shape.
-Don't modify these blank-slate tests — they should stay green even
-as providers come online.
 """
 
 from __future__ import annotations
@@ -76,12 +70,9 @@ def test_mapper_noop_when_effort_is_none():
 @pytest.mark.parametrize(
     "effort", ["auto", "low", "medium", "high", "none"]
 )
-def test_mapper_is_noop_for_every_model_and_effort(model, effort):
-    """Blank-slate: no providers configured → every (model, effort)
-    combination leaves the body untouched. The function should NEVER
-    raise. When you wire a provider, this test will continue to pass
-    for OTHER models but will be superseded by a provider-specific
-    test for the wired provider."""
+def test_mapper_is_noop_for_unconfigured_models_and_effort(model, effort):
+    """Unconfigured models leave the body untouched. The function should
+    never raise for a model whose provider has no matching rule."""
     body = {"model": model, "messages": []}
     snapshot = dict(body)
     apply_thinking_effort(body, model, effort)

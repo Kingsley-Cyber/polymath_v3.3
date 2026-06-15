@@ -1,8 +1,8 @@
 """thinking_mapper — provider-agnostic thinking/reasoning-effort dial.
 
-CURRENT STATE: blank slate. No providers configured. `apply_thinking_effort`
-is wired into LLMService._build_request_body but is a no-op for every
-model until a provider block is added below.
+`apply_thinking_effort` is wired into LLMService._build_request_body and maps
+Polymath's small effort enum onto each provider's native request shape
+(`think`, `thinking`, `reasoning_effort`, etc.).
 
 Workflow for adding a provider:
 
@@ -160,6 +160,15 @@ _MISTRAL_REASONING_EFFORT: dict[ThinkingEffort, str] = {
     "high": "high",
 }
 
+_OLLAMA_THINKING_MODEL_HINTS: tuple[str, ...] = (
+    "deepseek-v4",
+    "deepseek-v3.1",
+    "deepseek-r1",
+    "qwen3",
+    "gpt-oss",
+    "glm-5",
+)
+
 
 # ─── Provider detectors ──────────────────────────────────────────────────
 # Each predicate returns True iff the (model, provider) pair belongs to
@@ -221,6 +230,26 @@ def _is_deepseek_v4(model: str, provider: str) -> bool:
     return "deepseek-v4-flash" in m or "deepseek-v4-pro" in m
 
 
+def _is_ollama_route(provider: str) -> bool:
+    """LiteLLM exposes Ollama chat requests as ollama_chat/* and legacy
+    generate-style requests as ollama/*. Both are still Ollama-native."""
+    return provider in {"ollama", "ollama_chat"}
+
+
+def _is_ollama_thinking_model(model: str, provider: str) -> bool:
+    """Match Ollama models that can emit the native `thinking` field.
+
+    Ollama's API uses a provider-specific `think` request field and streams
+    reasoning as `message.thinking`. Keep this matcher intentionally narrower
+    than "all Ollama" so non-thinking local models do not receive surprise
+    params.
+    """
+    if not _is_ollama_route(provider):
+        return False
+    m = model.lower()
+    return any(hint in m for hint in _OLLAMA_THINKING_MODEL_HINTS)
+
+
 # ─── Public entry point ──────────────────────────────────────────────────
 
 
@@ -251,6 +280,25 @@ def apply_thinking_effort(
         effort = "medium"
 
     provider = _provider_from_model(model)
+
+    # ── Ollama / Ollama Cloud thinking models ────────────────────────
+    # Source: Ollama streaming + thinking docs (2026-06-15). Thinking
+    # capable models accept `think` on chat/generate requests and stream
+    # reasoning separately as `message.thinking` before answer content.
+    # GPT-OSS uses string levels and cannot fully disable the trace; most
+    # other models use booleans.
+    if _is_ollama_thinking_model(model, provider):
+        m = model.lower()
+        if "gpt-oss" in m:
+            if effort == "high":
+                body["think"] = "high"
+            elif effort == "medium":
+                body["think"] = "medium"
+            else:
+                body["think"] = "low"
+            return
+        body["think"] = effort != "none"
+        return
 
     # ── GLM (Z.AI: glm-4.5+ and glm-5 line) ──────────────────────────
     # Pure binary toggle. ALL "do think" effort levels (low/medium/

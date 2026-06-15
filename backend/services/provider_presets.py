@@ -32,8 +32,21 @@ PROVIDER_PRESET_PREFIX: dict[str, str] = {
     "zai": "openai",
     "glm-coding": "openai",
     "openrouter": "openrouter",
-    "ollama": "ollama",
+    # Chat turns should use Ollama's /api/chat path. LiteLLM exposes that
+    # as ollama_chat/*; the older ollama/* route uses generate-style parsing
+    # and drops/errors on native streamed thinking chunks.
+    "ollama": "ollama_chat",
     "custom": "openai",
+    # OpenCode's own model cache exposes this as providerID="opencode-go"
+    # with modelID values like "deepseek-v4-flash", "minimax-m2.7",
+    # "qwen3.7-plus". The endpoint is OpenAI-compatible at /zen/go/v1, so
+    # Polymath should store provider-native bare ids and route them as
+    # openai/<model> at call time.
+    "opencode-go": "openai",
+    # Legacy compatibility for older Polymath entries that split OpenCode
+    # Anthropic-backed models into a sibling preset. New entries should prefer
+    # opencode-go + https://opencode.ai/zen/go/v1.
+    "opencode-go-anthropic": "anthropic",
 }
 
 

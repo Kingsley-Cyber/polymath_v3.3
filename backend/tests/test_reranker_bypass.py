@@ -245,6 +245,43 @@ async def test_rerank_bypass_disabled_skips_partition(svc, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_rerank_failure_opens_short_circuit(svc, monkeypatch):
+    """One sidecar failure should not make the same chat turn wait on repeat
+    HTTP attempts. The next call falls back locally while the circuit is open."""
+    svc._settings = SimpleNamespace(
+        RERANKER_URL="http://reranker:8080",
+        RERANKER_BYPASS_CODE=False,
+        RERANKER_TIMEOUT_SECONDS=0.5,
+        RERANKER_CIRCUIT_BREAKER_SECONDS=60.0,
+    )
+    calls = {"client": 0}
+
+    class FailingClient:
+        def __init__(self, timeout):
+            calls["client"] += 1
+            assert timeout == 0.5
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, *args, **kwargs):
+            raise RuntimeError("reranker sick")
+
+    monkeypatch.setattr("services.reranker.httpx.AsyncClient", FailingClient)
+
+    pool = [_chunk(score=0.2, chunk_id="low"), _chunk(score=0.9, chunk_id="high")]
+    first = await svc._rerank_pool("query", pool)
+    second = await svc._rerank_pool("query", pool)
+
+    assert calls["client"] == 1
+    assert [c.chunk_id for c in first] == ["high", "low"]
+    assert [c.chunk_id for c in second] == ["high", "low"]
+
+
+@pytest.mark.asyncio
 async def test_rerank_default_bypass_is_on():
     """Verify the setting default is True so the bypass is opt-OUT, not opt-in."""
     from config import get_settings

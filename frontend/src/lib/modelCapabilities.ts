@@ -77,9 +77,10 @@ type ThinkingPattern = {
 };
 
 const THINKING_PATTERNS: ReadonlyArray<ThinkingPattern> = [
-  // DeepSeek V4 Flash / Pro — supports `thinking: {type}` toggle +
-  // `reasoning_effort` (low/medium → DeepSeek "high", high → "max",
-  // none → disabled). Verified 2026-05-15.
+  // DeepSeek V4 Flash / Pro — direct DeepSeek routes support
+  // `thinking: {type}` + `reasoning_effort`; Ollama/Ollama Cloud routes
+  // use `think`. Backend mapper chooses the provider-native wire shape.
+  // Verified for Ollama Cloud deepseek-v4-flash:cloud on 2026-06-15.
   //
   // Negative on the older "reasoner" / "r1" / "chat" / "v3" models:
   // only V4 follows the toggle contract. Backend's _is_deepseek_v4

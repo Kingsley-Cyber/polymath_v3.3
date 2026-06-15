@@ -156,41 +156,46 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
     example_model: "kimi-k2-0711-preview",
   },
   {
-    // OpenCode Go ($/mo subscription) curated coding models. The
-    // OpenAI-compatible Go models ride the openai/* route with a per-entry
-    // base_url override (same pattern as Moonshot / SiliconFlow). Chat model
-    // setup stores the bare provider id and the backend adds the route prefix
-    // at call time. model_dropdown_only is intentionally
-    // LEFT OFF: example_models render as datalist suggestions while the model
-    // field stays free-text, so new Go models can be typed in if the catalog
-    // changes. The Anthropic-endpoint Go models (minimax-*, qwen3.x-*) use
-    // /messages — they live in the sibling "opencode-go-anthropic" preset.
-    // Highest-throughput Go models (per the published rate limits) are
-    // deepseek-v4-flash (~31.6k req/5h) and mimo-v2.5 (~30.1k) — both here.
+    // OpenCode Go ($/mo subscription) curated coding models. OpenCode's own
+    // config/state shape is providerID="opencode-go" + modelID="<bare-id>"
+    // (for example opencode-go/deepseek-v4-flash). The endpoint is
+    // OpenAI-compatible at /zen/go/v1, so Polymath stores the bare model id
+    // and the backend routes it as openai/<model>. model_dropdown_only is
+    // intentionally LEFT OFF: example_models render as datalist suggestions
+    // while the model field stays free-text, so new Go models can be typed in
+    // if the catalog changes.
     id: "opencode-go",
     name: "OpenCode Go",
     litellm_provider: "openai",
     base_url: "https://opencode.ai/zen/go/v1",
     example_model: "deepseek-v4-pro",
     example_models: [
-      "deepseek-v4-pro",
       "deepseek-v4-flash",
+      "deepseek-v4-pro",
       "glm-5.1",
       "glm-5",
+      "qwen3.7-plus",
+      "qwen3.7-max",
+      "qwen3.6-plus",
+      "qwen3.5-plus",
+      "minimax-m3",
+      "minimax-m2.7",
+      "minimax-m2.5",
       "kimi-k2.7",
+      "kimi-k2.7-code",
       "kimi-k2.6",
+      "kimi-k2.5",
       "mimo-v2.5",
       "mimo-v2.5-pro",
+      "mimo-v2-pro",
+      "mimo-v2-omni",
     ],
   },
   {
-    // OpenCode Go — Anthropic-endpoint models (MiniMax, Qwen). These serve on
-    // /v1/messages (not /chat/completions), so they ride LiteLLM's anthropic
-    // route: composeModelString yields "anthropic/<model>" and LiteLLM appends
-    // /v1/messages to base_url. UNVERIFIED vs the OpenAI set — the anthropic
-    // custom-base path hasn't been smoke-tested with a live key; if a model
-    // 404s, confirm whether base_url needs the trailing "/v1". Free-text stays
-    // on so ids can be corrected/added.
+    // Legacy compatibility for older Polymath entries that manually routed
+    // OpenCode MiniMax/Qwen through LiteLLM's Anthropic adapter. OpenCode's
+    // current JSON/cache shape exposes these under the primary opencode-go
+    // provider, so prefer "OpenCode Go" above for new entries.
     id: "opencode-go-anthropic",
     name: "OpenCode Go (Anthropic)",
     litellm_provider: "anthropic",
@@ -279,7 +284,7 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
   {
     id: "ollama",
     name: "Ollama (local)",
-    litellm_provider: "ollama",
+    litellm_provider: "ollama_chat",
     base_url: "http://ollama:11434",
     example_model: "qwen2.5:1.5b-instruct",
   },

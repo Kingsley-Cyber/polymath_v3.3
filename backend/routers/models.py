@@ -47,18 +47,6 @@ def _is_embedding_name(name: str) -> bool:
     return any(hint in lower for hint in _EMBEDDING_NAME_HINTS)
 
 
-def _is_ollama_cloud_model(name: str) -> bool:
-    """Return True for Ollama Cloud subscription aliases.
-
-    Host Ollama exposes some cloud-only aliases through /api/tags even when the
-    local account cannot run them. Listing those in the picker lets a stale
-    phone/browser session select a model that streams retrieval traces and then
-    fails at answer time with "requires a subscription".
-    """
-    lower = (name or "").strip().lower()
-    return lower.endswith(":cloud") or lower.endswith("-cloud")
-
-
 def _make_display_name(raw: str) -> str:
     return (
         raw.replace("/", " / ")
@@ -88,10 +76,6 @@ async def get_ollama_models() -> list[ModelInfo]:
                 name: str = m.get("name", "")
                 if not name:
                     continue
-                if _is_ollama_cloud_model(name):
-                    logger.info("Skipping Ollama Cloud subscription model: %s", name)
-                    continue
-
                 details = m.get("details", {})
                 is_embed = _is_embedding_name(name)
 

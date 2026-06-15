@@ -58,6 +58,17 @@ class Settings(BaseSettings):
     )
     NEO4J_USER: str = Field(default="neo4j", description="Neo4j username")
     NEO4J_PASSWORD: str = Field(default="", description="Neo4j password")
+    GRAPH_FACT_SEED_TIMEOUT_SECONDS: float = Field(
+        default=5.0,
+        ge=0.2,
+        le=30.0,
+        description=(
+            "Hard cap for the optional Neo4j fact-seed lane in graph-augmented "
+            "retrieval. If the vector-scoped graph lookup is slow or unhealthy, "
+            "retrieval skips facts and continues with Qdrant/Mongo evidence "
+            "instead of blocking the chat turn."
+        ),
+    )
 
     # === LLM GATEWAY ===
     LITELLM_URL: str = Field(
@@ -243,6 +254,25 @@ class Settings(BaseSettings):
         description=(
             "Top-score cutoff for dropping unrelated rerank results when "
             "RERANKER_SCORE_SCALE=logit and no query terms overlap."
+        ),
+    )
+    RERANKER_TIMEOUT_SECONDS: float = Field(
+        default=4.0,
+        ge=0.2,
+        le=30.0,
+        description=(
+            "HTTP timeout for the reranker sidecar. Retrieval may call the "
+            "reranker more than once during coverage repair, so this must stay "
+            "short enough that a sick sidecar cannot stall a chat turn."
+        ),
+    )
+    RERANKER_CIRCUIT_BREAKER_SECONDS: float = Field(
+        default=120.0,
+        ge=0.0,
+        le=3600.0,
+        description=(
+            "After a reranker HTTP failure, skip sidecar calls for this many "
+            "seconds and score-sort locally. Set 0 to disable the breaker."
         ),
     )
     LOCAL_RERANKER_ENABLED: bool = Field(

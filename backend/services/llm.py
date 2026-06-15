@@ -21,8 +21,9 @@ class LLMService:
     """
     Service for LLM operations via LiteLLM proxy.
 
-    All LLM/embedding calls MUST route through LiteLLM.
-    Never call provider SDKs directly.
+    Most LLM/embedding calls route through LiteLLM. Ollama chat streaming uses
+    the native /api/chat endpoint so Polymath can preserve streamed
+    message.thinking chunks that the pinned LiteLLM proxy drops.
     Model names use provider/model format: ollama/llama3.2:3b, openai/gpt-4o
     """
 
@@ -162,6 +163,172 @@ class LLMService:
             body.get("model") or model,
             thinking_effort,
         )
+
+    def _is_ollama_chat_route(self, model: str | None) -> bool:
+        normalized = (model or "").strip().lower()
+        return normalized.startswith("ollama_chat/") or normalized.startswith("ollama/")
+
+    def _ollama_native_model_name(self, model: str) -> str:
+        if "/" not in model:
+            return model
+        return model.split("/", 1)[1]
+
+    def _ollama_options_from_body(self, body: dict[str, Any]) -> dict[str, Any]:
+        options: dict[str, Any] = {}
+        if body.get("max_tokens") is not None:
+            options["num_predict"] = body["max_tokens"]
+        for source, target in (
+            ("temperature", "temperature"),
+            ("top_p", "top_p"),
+            ("presence_penalty", "presence_penalty"),
+            ("frequency_penalty", "frequency_penalty"),
+        ):
+            if body.get(source) is not None:
+                options[target] = body[source]
+        return options
+
+    def _build_ollama_chat_body(
+        self,
+        *,
+        body: dict[str, Any],
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict] | None,
+    ) -> dict[str, Any]:
+        ollama_body: dict[str, Any] = {
+            "model": self._ollama_native_model_name(model),
+            "messages": messages,
+            "stream": True,
+        }
+
+        if body.get("think") is not None:
+            ollama_body["think"] = body["think"]
+        if body.get("format") is not None:
+            ollama_body["format"] = body["format"]
+        if body.get("keep_alive") is not None:
+            ollama_body["keep_alive"] = body["keep_alive"]
+        if tools:
+            ollama_body["tools"] = tools
+
+        options = self._ollama_options_from_body(body)
+        if options:
+            ollama_body["options"] = options
+        return ollama_body
+
+    def _coerce_ollama_tool_calls(self, raw_calls: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw_calls, list):
+            return []
+        out: list[dict[str, Any]] = []
+        for idx, call in enumerate(raw_calls):
+            if not isinstance(call, dict):
+                continue
+            fn = call.get("function") or {}
+            if not isinstance(fn, dict):
+                continue
+            args = fn.get("arguments") or {}
+            if not isinstance(args, str):
+                args = json.dumps(args)
+            out.append(
+                {
+                    "id": call.get("id") or f"ollama-tool-{idx}",
+                    "type": call.get("type") or "function",
+                    "function": {
+                        "name": str(fn.get("name") or ""),
+                        "arguments": args,
+                    },
+                }
+            )
+        return out
+
+    async def _stream_ollama_chat_native(
+        self,
+        *,
+        body: dict[str, Any],
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict] | None,
+        api_base: str | None,
+        api_key: str | None,
+    ) -> AsyncGenerator[dict, None]:
+        """Stream directly from Ollama's /api/chat endpoint.
+
+        LiteLLM v1.60 can route Ollama chat content, but it drops Ollama's
+        native streamed `message.thinking` field. The direct path keeps
+        Polymath's public stream contract unchanged while preserving the
+        reasoning lane described in Ollama's API docs.
+        """
+        base_url = (api_base or settings.OLLAMA_URL).rstrip("/")
+        url = f"{base_url}/api/chat"
+        ollama_body = self._build_ollama_chat_body(
+            body=body,
+            model=model,
+            messages=messages,
+            tools=tools,
+        )
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        client = await self._get_client()
+        logger.info(
+            "Streaming native Ollama chat: model=%s, messages=%d, think=%r",
+            ollama_body["model"],
+            len(messages),
+            ollama_body.get("think"),
+        )
+
+        async with client.stream(
+            "POST",
+            url,
+            json=ollama_body,
+            headers=headers,
+            timeout=httpx.Timeout(300.0, connect=10.0),
+        ) as response:
+            if response.status_code != 200:
+                error_body = await response.aread()
+                error_msg = error_body.decode() if error_body else "Unknown error"
+                logger.error(
+                    "Ollama error: status=%s, body=%s",
+                    response.status_code,
+                    error_msg,
+                )
+                response.raise_for_status()
+
+            normalizer = StreamingNormalizer()
+            async for line in response.aiter_lines():
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.debug("Failed to parse Ollama stream chunk: %s", line)
+                    continue
+
+                message = chunk.get("message") or {}
+                if isinstance(message, dict):
+                    tool_calls = self._coerce_ollama_tool_calls(
+                        message.get("tool_calls")
+                    )
+                    if tool_calls:
+                        yield {"tool_calls": tool_calls}
+
+                    normalized = normalizer.add(
+                        content=message.get("content") or "",
+                        thinking=message.get("thinking") or "",
+                    )
+                    if normalized["thinking"]:
+                        yield {"thinking": normalized["thinking"]}
+                    if normalized["content"]:
+                        yield {"content": normalized["content"]}
+
+                if chunk.get("done"):
+                    break
+
+            remaining = normalizer.flush()
+            if remaining["thinking"]:
+                yield {"thinking": remaining["thinking"]}
+            if remaining["content"]:
+                yield {"content": remaining["content"]}
 
     async def _request_with_retry(
         self,
@@ -479,7 +646,11 @@ class LLMService:
         extra_params: dict | None = None,
     ) -> AsyncGenerator[dict, None]:
         """
-        Stream chat completion from LiteLLM proxy with thinking and tool support.
+        Stream chat completion with thinking and tool support.
+
+        Most providers route through the LiteLLM proxy. Ollama chat routes use
+        native /api/chat streaming because the pinned LiteLLM proxy drops
+        Ollama's streamed message.thinking chunks.
 
         Args:
             messages: List of message dicts with role and content
@@ -524,6 +695,19 @@ class LLMService:
                 if _k not in ("model", "messages", "stream", "tools", "tool_choice"):
                     body[_k] = _v
         self._reapply_explicit_thinking_effort(body, model, overrides)
+
+        if self._is_ollama_chat_route(model):
+            async for chunk in self._stream_ollama_chat_native(
+                body=body,
+                model=model,
+                messages=messages,
+                tools=tools,
+                api_base=api_base,
+                api_key=resolved_key,
+            ):
+                yield chunk
+            return
+
         headers = self._get_headers()
 
         client = await self._get_client()
