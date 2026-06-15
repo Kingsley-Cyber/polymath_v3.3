@@ -27,21 +27,19 @@ import logging
 import re
 from collections import Counter
 
+from services.graph.entity_cleaning import (
+    GRAPH_STOP_WORDS,
+    JUNK_ENTITY_EXACT_LOWER,
+    JUNK_ENTITY_NAME_PATTERN,
+    is_junk_entity_name,
+)
 from services.graph.entity_dedup.resolve import redirect, resolve_entity_ids
 
 logger = logging.getLogger(__name__)
 
 # Very small stop-word list for the entity-name matcher. We don't want to match
 # on "the", "and", etc. — not exhaustive, just noise reduction.
-_STOP_WORDS = frozenset(
-    {
-        "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from",
-        "has", "have", "in", "is", "it", "its", "of", "on", "or", "that", "the",
-        "this", "to", "was", "were", "what", "when", "where", "which", "who",
-        "why", "will", "with", "how", "do", "does", "did", "about", "between",
-        "vs", "versus", "compared",
-    }
-)
+_STOP_WORDS = GRAPH_STOP_WORDS
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_'\-]{1,}")
 _WORD_BOUNDARY_RE = re.compile(r"[^a-z0-9]+")
 
@@ -54,88 +52,11 @@ _SHORT_TOKEN_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "kg": ("knowledge", "graph"),
 }
 
-# Deterministic junk/entity-fragment filter shared by seed matching and graph
-# expansion. This catches extraction debris that is structurally high-degree but
-# semantically useless in a graph UI: conjunctions, type labels, one-character
-# fragments, pure numbers, and OCR-ish fragments such as "0 and x2".
-_JUNK_EXACT_LOWER = frozenset(
-    {
-        *_STOP_WORDS,
-        "set",
-        "sets",
-        "entity",
-        "entities",
-        "concept",
-        "concepts",
-        "object",
-        "objects",
-        "item",
-        "items",
-        "thing",
-        "things",
-        "person",
-        "people",
-        "organization",
-        "organizations",
-        "organisations",
-        "organisation",
-        "product",
-        "products",
-        "method",
-        "event",
-        "location",
-        "artifact",
-        "software",
-        "standard",
-        "rule",
-        "law",
-        "laws",
-        "time",
-        "reference",
-        "user",
-        "users",
-        "index",
-        "the book",
-        "left",
-        "middle",
-        "right",
-        "up",
-        "down",
-        "inlineequation",
-        "equationcontent",
-        "equationwrapper",
-        "chapter",
-        "section",
-        "figure",
-        "table",
-        "page",
-        "appendix",
-    }
-)
-_JUNK_NAME_PATTERN = (
-    r"^(?:"
-    r"\[[0-9]+\]|"
-    r"[0-9]+|"
-    r"[a-z]|"
-    r"[a-z][0-9]+|"
-    r"[0-9]+\s+(?:and|or)\s+[a-z0-9]+|"
-    r"(?:chapter|section|figure|table|page|appendix|part|rule)\s+[0-9ivxlcdm]+"
-    r")$"
-)
-_JUNK_NAME_RE = re.compile(_JUNK_NAME_PATTERN)
+_JUNK_EXACT_LOWER = JUNK_ENTITY_EXACT_LOWER
+_JUNK_NAME_PATTERN = JUNK_ENTITY_NAME_PATTERN
 _GRAPH_QUERY_MAX_SAFE_HOPS = 2
 _GRAPH_QUERY_MAX_NODE_LIMIT = 120
 _GRAPH_QUERY_MAX_EDGE_LIMIT = 360
-
-
-def _normalize_entity_name(name: str | None) -> str:
-    return re.sub(r"\s+", " ", str(name or "").strip().lower()).strip()
-
-
-def is_junk_entity_name(name: str | None) -> bool:
-    """Return True for deterministic graph-junk surface forms."""
-    low = _normalize_entity_name(name)
-    return not low or low in _JUNK_EXACT_LOWER or bool(_JUNK_NAME_RE.match(low))
 
 
 def _is_junk_entity_row(row: dict) -> bool:

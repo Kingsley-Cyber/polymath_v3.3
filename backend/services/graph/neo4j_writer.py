@@ -32,6 +32,7 @@ from services.ghost_b import (
     UNIVERSAL_RELATION_SCHEMA,
     normalize_relation_predicate_alias,
 )
+from services.graph.entity_cleaning import is_junk_extracted_entity
 from services.graph.entity_dedup.resolve import resolve_entity_ids
 
 logger = logging.getLogger(__name__)
@@ -1013,6 +1014,8 @@ def summarize_dominant_facets(
         # entities ended up with empty canonical_family.
         result_text = getattr(result, "text", "") or ""
         for entity in result.entities:
+            if is_junk_extracted_entity(entity.canonical_name, entity.surface_form):
+                continue
             canonical = canonicalize_entity_name(entity.canonical_name)
             if not canonical:
                 continue
@@ -1118,6 +1121,8 @@ async def _upsert_entity_and_mention(
     function is currently unreferenced in the codebase but kept for the
     live-API/legacy path described in earlier comments).
     """
+    if is_junk_extracted_entity(entity.canonical_name, entity.surface_form):
+        return
     canonical = canonicalize_entity_name(entity.canonical_name)
     primary_type = resolve_primary_entity_type(canonical, [entity.entity_type])
     eid = entity_id_from_name(canonical, primary_type)
@@ -1524,11 +1529,15 @@ async def write_document_graph(
     chunk_rows: list[dict] = [{"chunk_id": chunk_id} for chunk_id in chunk_ids]
 
     entity_groups: dict[str, dict] = {}
+    skipped_junk_entities = 0
     for result in extraction_results:
         # Pt 10b — per-result chunk text, used to seed `text_context` for
         # taxonomy synonym matching at resolve time. See note below.
         result_text = getattr(result, "text", "") or ""
         for entity in result.entities:
+            if is_junk_extracted_entity(entity.canonical_name, entity.surface_form):
+                skipped_junk_entities += 1
+                continue
             canonical = canonicalize_entity_name(entity.canonical_name)
             if not canonical:
                 continue
@@ -1700,6 +1709,7 @@ async def write_document_graph(
 
     relation_rows: list[dict] = []
     related_to_refinement_count = 0
+    skipped_relations_missing_endpoint = 0
     for r in extraction_results:
         for relation in r.relations:
             if relation.object_kind != "entity":
@@ -1714,6 +1724,9 @@ async def write_document_graph(
             object_canonical = canonicalize_entity_name(object_name)
             subject_identity = entity_identity.get(subject_canonical)
             object_identity = entity_identity.get(object_canonical)
+            if not subject_identity or not object_identity:
+                skipped_relations_missing_endpoint += 1
+                continue
             refined_predicate = refine_related_to_predicate(
                 relation.predicate,
                 subject_identity,
@@ -1741,12 +1754,8 @@ async def write_document_graph(
                 predicate_refined=predicate_refined,
             )
             relation_rows.append({
-                "subject_id": (subject_identity or {}).get(
-                    "entity_id", entity_id_from_name(subject_canonical)
-                ),
-                "object_id": (object_identity or {}).get(
-                    "entity_id", entity_id_from_name(object_canonical)
-                ),
+                "subject_id": subject_identity["entity_id"],
+                "object_id": object_identity["entity_id"],
                 "predicate": refined_predicate,
                 "source_predicate": source_predicate_raw,
                 "relation_family": relation_family_for_predicate(refined_predicate),
@@ -1765,11 +1774,13 @@ async def write_document_graph(
             })
 
     fact_rows: list[dict] = []
+    skipped_facts_missing_subject = 0
     for r in extraction_results:
         for fact in getattr(r, "facts", []) or []:
             subject_canonical = canonicalize_entity_name(fact.subject)
             subject_identity = entity_identity.get(subject_canonical)
             if not subject_identity:
+                skipped_facts_missing_subject += 1
                 continue
             fact_rows.append({
                 "fact_id": fact_id_from_parts(
@@ -1807,6 +1818,15 @@ async def write_document_graph(
         logger.info(
             "Neo4j relation refinement: doc=%s corpus=%s related_to_refined=%d",
             doc_id[:12], corpus_id[:8], related_to_refinement_count,
+        )
+    if skipped_junk_entities or skipped_relations_missing_endpoint or skipped_facts_missing_subject:
+        logger.info(
+            "Neo4j graph cleaning: doc=%s corpus=%s junk_entities=%d dropped_relations=%d dropped_facts=%d",
+            doc_id[:12],
+            corpus_id[:8],
+            skipped_junk_entities,
+            skipped_relations_missing_endpoint,
+            skipped_facts_missing_subject,
         )
 
     # 3. Single session for all remaining writes. Each query uses UNWIND to

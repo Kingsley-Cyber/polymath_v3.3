@@ -300,3 +300,94 @@ async def test_write_document_graph_redirects_tombstoned_entities_before_merge()
     )
     fact_row = fact_params["rows"][0]
     assert fact_row["subject_entity_id"] == "entity:flameaudio"
+
+
+@pytest.mark.asyncio
+async def test_write_document_graph_filters_junk_entities_before_merge():
+    driver = FakeDriver()
+    result = ExtractionResult(
+        schema_version="polymath.extract.v1",
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        entities=[
+            EntityItem(
+                canonical_name="And",
+                surface_form="And",
+                entity_type="Concept",
+                confidence=0.9,
+            ),
+            EntityItem(
+                canonical_name="Nash equilibrium",
+                surface_form="Nash equilibrium",
+                entity_type="Concept",
+                confidence=0.95,
+            ),
+            EntityItem(
+                canonical_name="Rule 3",
+                surface_form="Rule 3",
+                entity_type="Rule",
+                confidence=0.8,
+            ),
+        ],
+        relations=[
+            RelationItem(
+                subject="And",
+                predicate="related_to",
+                object="Nash equilibrium",
+                object_kind="entity",
+                confidence=0.7,
+            ),
+            RelationItem(
+                subject="Nash equilibrium",
+                predicate="uses",
+                object="Rule 3",
+                object_kind="entity",
+                confidence=0.7,
+            ),
+        ],
+        facts=[
+            FactItem(
+                subject="And",
+                fact_type="attribute",
+                property_name="noise",
+                value="true",
+                unit=None,
+                condition=None,
+                confidence=0.9,
+                evidence_phrase=None,
+            )
+        ],
+    )
+
+    await write_document_graph(
+        driver=driver,
+        doc_id="d1",
+        corpus_id="corp1",
+        extraction_results=[result],
+        user_id="u1",
+        file_id="f1",
+        all_chunk_ids=["c1"],
+    )
+
+    entity_params = next(
+        params
+        for query, params in driver.calls
+        if "MERGE (e:Entity {entity_id: row.entity_id})" in query
+    )
+    assert [row["entity_id"] for row in entity_params["rows"]] == [
+        "entity:nash-equilibrium"
+    ]
+    assert [row["display_name"] for row in entity_params["rows"]] == [
+        "Nash equilibrium"
+    ]
+    assert not [
+        params
+        for query, params in driver.calls
+        if "MERGE (s)-[r:RELATES_TO" in query
+    ]
+    assert not [
+        params
+        for query, params in driver.calls
+        if "MERGE (f:Fact" in query
+    ]

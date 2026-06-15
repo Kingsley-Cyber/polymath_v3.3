@@ -114,6 +114,7 @@ def test_junk_entity_name_filter_catches_fragments():
     assert graph_query.is_junk_entity_name("Rule 3")
     assert not graph_query.is_junk_entity_name("Nash equilibrium")
     assert not graph_query.is_junk_entity_name("C++")
+    assert not graph_query.is_junk_entity_name("S3")
 
 
 # ── Fake Neo4j driver ────────────────────────────────────────────────
