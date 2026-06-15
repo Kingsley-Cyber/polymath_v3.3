@@ -341,6 +341,11 @@ async def expand_subgraph(
         e.entity_id                                       AS id,
         coalesce(e.display_name, e.normalized_name, '')   AS display_name,
         coalesce(e.primary_entity_type, e.entity_type, 'other') AS entity_type,
+        e.primary_entity_type                             AS primary_entity_type,
+        e.definitional_phrase                             AS definitional_phrase,
+        e.observed_entity_types                           AS observed_entity_types,
+        e.canonical_family                                AS canonical_family,
+        coalesce(e.confidence, e.confidence_score)        AS confidence,
         mention_count,
         e.entity_id IN $entity_ids                        AS is_seed
     LIMIT $limit

@@ -116,6 +116,13 @@ interface SelectedDisplay {
   nodeKind?: string;
   kind?: string;
   entity_type?: string;
+  // Classification surfaced in the Selection card ("what is this").
+  primary_entity_type?: string | null;
+  definitional_phrase?: string | null;
+  observed_entity_types?: string[] | null;
+  canonical_family?: string | null;
+  confidence?: number | null;
+  mention_count?: number;
   dominant_entity_type?: string;
   dominant_relation_family?: string;
   primary_doc_id?: string;
@@ -146,7 +153,7 @@ export interface BrainViewDashboardProps {
   onRebuild: (ids: string[]) => Promise<void> | void;
 
   // Color mode (brain only)
-  colorMode: "community" | "corpus";
+  colorMode: "entity_type" | "community" | "corpus";
   onColorModeToggle: () => void;
 
   // Pt 6: bridge filter knobs (brain mode only)
@@ -425,9 +432,9 @@ function nodeLabel(data: { nodes: any[] }, id: string, fallback?: string): strin
 }
 
 function selectionBadgeItems(selected: SelectedDisplay): string[] {
+  // Entity type now has its own prominent chip in the Selection card, so the
+  // structural badge row carries only relation family + bridge count.
   const items = [
-    selected.nodeKind || selected.kind,
-    selected.entity_type || selected.dominant_entity_type,
     selected.dominant_relation_family,
     typeof selected.bridge_count === "number"
       ? `${selected.bridge_count} bridges`
@@ -700,6 +707,67 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                     selectedDisplay.display_name}
                 </div>
               </div>
+              {/* Classification — answers "what is this" at a glance: a typed
+                  header chip + one-line definition + secondary type/family
+                  signals, all from data already on the node (no extra fetch). */}
+              {(() => {
+                const primaryType =
+                  selectedDisplay.primary_entity_type ||
+                  selectedDisplay.entity_type ||
+                  selectedDisplay.dominant_entity_type ||
+                  null;
+                const observed = (
+                  selectedDisplay.observed_entity_types || []
+                ).filter((t) => t && t !== primaryType);
+                const conf =
+                  typeof selectedDisplay.confidence === "number"
+                    ? Math.round(selectedDisplay.confidence * 100)
+                    : null;
+                const mentions = selectedDisplay.mention_count;
+                const meta = [
+                  typeof mentions === "number" && mentions > 0
+                    ? `${mentions} mention${mentions === 1 ? "" : "s"}`
+                    : null,
+                  conf != null ? `${conf}% conf` : null,
+                ].filter(Boolean);
+                return (
+                  <div className="mt-2 ml-4 space-y-1.5">
+                    {primaryType && (
+                      <span className="inline-block rounded border border-violet-500/40 bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-200">
+                        {primaryType}
+                      </span>
+                    )}
+                    {selectedDisplay.definitional_phrase && (
+                      <div className="text-[10px] italic leading-relaxed text-zinc-300">
+                        {selectedDisplay.definitional_phrase}
+                      </div>
+                    )}
+                    {(observed.length > 0 ||
+                      selectedDisplay.canonical_family) && (
+                      <div className="flex flex-wrap gap-1">
+                        {observed.slice(0, 3).map((t) => (
+                          <span
+                            key={t}
+                            className="rounded border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[10px] text-zinc-400"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                        {selectedDisplay.canonical_family && (
+                          <span className="rounded border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                            family: {selectedDisplay.canonical_family}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {meta.length > 0 && (
+                      <div className="font-mono text-[10px] text-zinc-500">
+                        {meta.join(" · ")}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {selectedDisplay.source_corpora.length > 0 && (
                 <div className="mt-1 ml-4 text-[10px] text-zinc-400 font-mono">
                   {selectedDisplay.source_corpora.length} corpora
@@ -1034,7 +1102,11 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
               className="w-full rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 text-left text-[11px] font-mono uppercase tracking-widest text-zinc-300 hover:border-amber-700 hover:text-amber-300"
               onClick={onColorModeToggle}
             >
-              {colorMode}
+              {colorMode === "entity_type"
+                ? "by type"
+                : colorMode === "community"
+                  ? "by community"
+                  : "by corpus"}
               <span className="ml-2 text-zinc-500 normal-case tracking-normal">
                 (click to swap)
               </span>

@@ -163,16 +163,30 @@ CALL {
     ORDER BY mentions DESC
     WITH collect(e_seed) AS ranked_entities,
          collect(coalesce(e_seed.display_name, e_seed.entity_id)) AS ranked_names,
-         collect({
-            entity_id: e_seed.entity_id,
-            name: coalesce(e_seed.display_name, e_seed.entity_id),
-            entity_type: coalesce(e_seed.primary_entity_type, e_seed.entity_type, 'Other')
-         }) AS ranked_records,
+         collect(mentions) AS ranked_mentions,
          count(e_seed) AS entity_count,
          bridge_entity_cap
     RETURN ranked_entities[..bridge_entity_cap] AS bridge_entities,
            ranked_names[..8] AS top_entities,
-           ranked_records[..8] AS top_entity_records,
+           // Build the rich satellite records for the TOP-8 ONLY, reusing the
+           // already-collected (mention-sorted) nodes. Earlier this was a
+           // collect({...}) of a fat map (observed_entity_types list +
+           // definitional_phrase string) over EVERY entity in every book, which
+           // blew Neo4j's 4 GiB transaction-memory limit and failed the build.
+           [i IN range(0, size(ranked_entities[..8]) - 1) | {
+              entity_id: ranked_entities[i].entity_id,
+              name: coalesce(ranked_entities[i].display_name,
+                             ranked_entities[i].entity_id),
+              entity_type: coalesce(ranked_entities[i].primary_entity_type,
+                                    ranked_entities[i].entity_type, 'Other'),
+              primary_entity_type: ranked_entities[i].primary_entity_type,
+              definitional_phrase: ranked_entities[i].definitional_phrase,
+              observed_entity_types: ranked_entities[i].observed_entity_types,
+              canonical_family: ranked_entities[i].canonical_family,
+              confidence: coalesce(ranked_entities[i].confidence,
+                                   ranked_entities[i].confidence_score),
+              mention_count: ranked_mentions[i]
+           }] AS top_entity_records,
            entity_count
 }
 
@@ -432,6 +446,10 @@ RETURN
         entity_id: e.entity_id,
         display_name: coalesce(e.display_name, e.canonical_name),
         entity_type: coalesce(e.primary_entity_type, e.entity_type),
+        primary_entity_type: e.primary_entity_type,
+        definitional_phrase: e.definitional_phrase,
+        observed_entity_types: e.observed_entity_types,
+        confidence: coalesce(e.confidence, e.confidence_score),
         object_kind: e.object_kind,
         canonical_family: e.canonical_family
     }][..$limit] AS local_entities,

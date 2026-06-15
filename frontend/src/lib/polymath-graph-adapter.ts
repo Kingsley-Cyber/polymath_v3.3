@@ -50,6 +50,14 @@ export interface SigmaNodeAttributes {
   nodeKind: PolymathNodeKind;
   display_name: string;
   mention_count: number;
+  // Classification carried onto the graphology node so the inspector can read
+  // it from the selected node ("what is this").
+  entity_type?: string;
+  primary_entity_type?: string | null;
+  definitional_phrase?: string | null;
+  observed_entity_types?: string[] | null;
+  canonical_family?: string | null;
+  confidence?: number | null;
   source_corpora?: string[];
   source_corpus?: string;
   primary_domain?: string;
@@ -94,12 +102,18 @@ export interface SigmaEdgeAttributes {
   label?: string;
 }
 
-export type ColorMode = "community" | "corpus";
+export type ColorMode = "entity_type" | "community" | "corpus";
 
 export interface PolymathRawNode {
   id: string;
   display_name: string;
   entity_type?: string;
+  // Classification surfaced in the node inspector ("what is this").
+  primary_entity_type?: string | null;
+  definitional_phrase?: string | null;
+  observed_entity_types?: string[] | null;
+  canonical_family?: string | null;
+  confidence?: number | null;
   mention_count?: number;
   total_mentions?: number;
   supernode_type?: string;
@@ -664,6 +678,13 @@ function pickNodeColor(
     }
     return NODE_COLORS.Book;
   }
+  // Entity-type mode (default): color EVERY entity-level node by its GLiNER type
+  // from the shared palette, decoupled from community / relation strength — so
+  // even a corpus of weak-relation nodes paints Person/Concept/Software/etc.
+  // distinctly. This is what stops the "all nodes white" collapse.
+  if (colorMode === "entity_type") {
+    return NODE_COLORS[kind] || NODE_COLORS.Other;
+  }
   if (colorMode === "corpus") {
     return colorForCorpus(raw.source_corpora);
   }
@@ -1161,6 +1182,14 @@ function addNodeToGraph(
     nodeKind: kind,
     display_name: raw.display_name || raw.id,
     mention_count: Number(mentionWeight || 1),
+    // Classification carried onto the node so the inspector can answer
+    // "what is this" without a round-trip.
+    entity_type: raw.entity_type,
+    primary_entity_type: raw.primary_entity_type ?? null,
+    definitional_phrase: raw.definitional_phrase ?? null,
+    observed_entity_types: raw.observed_entity_types ?? null,
+    canonical_family: raw.canonical_family ?? null,
+    confidence: raw.confidence ?? null,
     source_corpora: raw.source_corpora || [],
     source_corpus: raw.source_corpus || "",
     primary_domain: raw.primary_domain,

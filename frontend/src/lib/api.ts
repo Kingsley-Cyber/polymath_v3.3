@@ -1830,6 +1830,13 @@ export interface BrainViewTopEntityRecord {
   entity_id?: string | null;
   name: string;
   entity_type?: string | null;
+  // Classification surfaced in the node inspector ("what is this").
+  primary_entity_type?: string | null;
+  definitional_phrase?: string | null;
+  observed_entity_types?: string[] | null;
+  canonical_family?: string | null;
+  confidence?: number | null;
+  mention_count?: number | null;
 }
 
 export interface BrainViewDocument {
@@ -1905,6 +1912,10 @@ export interface BookDrilldownEntity {
   entity_id: string;
   display_name: string;
   entity_type: string;
+  primary_entity_type?: string | null;
+  definitional_phrase?: string | null;
+  observed_entity_types?: string[] | null;
+  confidence?: number | null;
   object_kind?: string | null;
   canonical_family?: string | null;
 }

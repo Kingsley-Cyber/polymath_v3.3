@@ -61,7 +61,8 @@ export const NODE_COLORS: Record<PolymathNodeKind, string> = {
   Law: "#ef4444",           // red
   Artifact: "#84cc16",      // lime
   TimeReference: "#3b82f6", // blue
-  Other: "#cbd5e1",         // slate-300 fallback
+  Other: "#64748b",         // slate-500 — mid-tone so genuinely-untyped nodes
+                            // read as a distinct grey, not near-white
 };
 
 // =============== NODE SIZES ===============

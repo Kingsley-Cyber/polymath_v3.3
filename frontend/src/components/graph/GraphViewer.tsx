@@ -639,6 +639,10 @@ function useBrainGraph(
           id: e.entity_id,
           display_name: e.display_name,
           entity_type: e.entity_type,
+          primary_entity_type: e.primary_entity_type,
+          definitional_phrase: e.definitional_phrase,
+          observed_entity_types: e.observed_entity_types,
+          confidence: e.confidence,
           object_kind: e.object_kind,
           canonical_family: e.canonical_family,
           primary_doc_id: drill.docId,
@@ -800,7 +804,13 @@ function useBrainGraph(
             : (d.top_entities || []).map((name) => ({
                 name,
                 entity_id: null,
-                entity_type: null,
+                entity_type: "",
+                primary_entity_type: null,
+                definitional_phrase: null,
+                observed_entity_types: null,
+                canonical_family: null,
+                confidence: null,
+                mention_count: null,
               }));
           const satCount = topEntities.length;
           topEntities.forEach((entity, i) => {
@@ -818,12 +828,17 @@ function useBrainGraph(
               display_name: name,
               label: name.length > 18 ? name.slice(0, 17) + "…" : name,
               entity_type: entity.entity_type || "",
+              primary_entity_type: entity.primary_entity_type ?? null,
+              definitional_phrase: entity.definitional_phrase ?? null,
+              observed_entity_types: entity.observed_entity_types ?? null,
+              canonical_family: entity.canonical_family ?? null,
+              confidence: entity.confidence ?? null,
               source_corpus: d.corpus_id,
               source_corpora: [d.corpus_id],
               // primary_doc_id wires the adapter's "orbit your book"
               // positioning. Without this, FA2 would scatter satellites.
               primary_doc_id: d.doc_id,
-              mention_count: 1,
+              mention_count: entity.mention_count ?? 1,
               // Pre-baked polar — adapter adds anchor position.
               x: Math.cos(angle) * SAT_ORBIT_R,
               y: Math.sin(angle) * SAT_ORBIT_R,
@@ -832,6 +847,9 @@ function useBrainGraph(
               source: bookId,
               target: entityId,
               predicate: "contains",
+              // Structural containment, not a weak semantic relation — keeps the
+              // Evidence Inspector from labeling every satellite "WeakAssociation".
+              relation_family: "Structural",
               weight: 0.2,
             });
           });
@@ -1241,7 +1259,9 @@ export function GraphViewer({
   onQueryPhaseChange,
   onSendToChat,
 }: GraphViewerProps) {
-  const [colorMode, setColorMode] = useState<ColorMode>("community");
+  // Default to entity_type so nodes are colored by their GLiNER type on first
+  // load (Person/Concept/Software/...), decoupled from relation strength.
+  const [colorMode, setColorMode] = useState<ColorMode>("entity_type");
   const [drillStack, setDrillStack] = useState<DrillFrame[]>([]);
   const [hoveredName, setHoveredName] = useState<string | null>(null);
   // Pt 5: right sidebar dashboard collapse state.
@@ -1549,6 +1569,13 @@ export function GraphViewer({
       nodeKind: (found as any).nodeKind,
       kind: (found as any).kind,
       entity_type: (found as any).entity_type,
+      // Classification surfaced in the inspector ("what is this").
+      primary_entity_type: (found as any).primary_entity_type,
+      definitional_phrase: (found as any).definitional_phrase,
+      observed_entity_types: (found as any).observed_entity_types,
+      canonical_family: (found as any).canonical_family,
+      confidence: (found as any).confidence,
+      mention_count: (found as any).mention_count,
       dominant_entity_type: (found as any).dominant_entity_type,
       dominant_relation_family: (found as any).dominant_relation_family,
       primary_doc_id: (found as any).primary_doc_id,
@@ -1726,7 +1753,13 @@ export function GraphViewer({
         onRebuild={effectiveMode === "brain" ? brain.triggerRebuild : async () => {}}
         colorMode={colorMode}
         onColorModeToggle={() =>
-          setColorMode((m) => (m === "community" ? "corpus" : "community"))
+          setColorMode((m) =>
+            m === "entity_type"
+              ? "community"
+              : m === "community"
+                ? "corpus"
+                : "entity_type",
+          )
         }
         minBridgeStrength={minBridgeStrength}
         onMinBridgeStrengthChange={setMinBridgeStrength}

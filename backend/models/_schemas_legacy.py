@@ -1266,6 +1266,12 @@ class GraphQueryNode(BaseModel):
     id: str
     display_name: str
     entity_type: str = "other"
+    # Classification surfaced in the graph node inspector ("what is this").
+    primary_entity_type: str | None = None
+    definitional_phrase: str | None = None
+    observed_entity_types: list[str] | None = None
+    canonical_family: str | None = None
+    confidence: float | None = None
     mention_count: int = 0
     is_seed: bool = False
 

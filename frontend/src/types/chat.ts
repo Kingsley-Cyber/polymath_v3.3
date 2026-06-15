@@ -18,6 +18,12 @@ export interface GraphQueryNode {
   id: string;
   display_name: string;
   entity_type: string;
+  // Classification surfaced in the node inspector ("what is this").
+  primary_entity_type?: string | null;
+  definitional_phrase?: string | null;
+  observed_entity_types?: string[] | null;
+  canonical_family?: string | null;
+  confidence?: number | null;
   mention_count: number;
   is_seed: boolean;
 }
