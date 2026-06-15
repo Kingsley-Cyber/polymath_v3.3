@@ -30,6 +30,14 @@ logger = logging.getLogger(__name__)
 # a ~20k-char doc 500s; truncated to 2k it 200s). A cross-encoder only attends
 # to its first ~512 tokens anyway, so capping here costs no ranking signal.
 _RERANK_MAX_DOC_CHARS = max(256, int(os.environ.get("RERANKER_MAX_DOC_CHARS", "2000") or 2000))
+_RERANK_HTTP_BATCH_SIZE = max(
+    1,
+    int(os.environ.get("RERANKER_HTTP_BATCH_SIZE", "8") or 8),
+)
+_RERANK_PARTIAL_FAILURE_BUDGET = max(
+    1,
+    int(os.environ.get("RERANKER_PARTIAL_FAILURE_BUDGET", "6") or 6),
+)
 
 
 def _is_code_chunk(s: SourceChunk) -> bool:
@@ -197,24 +205,53 @@ class RerankerService:
             )
             return sorted(pool, key=lambda x: x.score, reverse=True)
 
-        # Cap each doc so no single (query, doc) pair overflows the reranker's
-        # context and 500s the whole batch (the cross-encoder truncates anyway).
-        documents = [(c.text or "")[:_RERANK_MAX_DOC_CHARS] for c in pool]
         url = f"{self._settings.RERANKER_URL}/rerank"
         timeout = float(getattr(self._settings, "RERANKER_TIMEOUT_SECONDS", 4.0) or 4.0)
 
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(
-                    url,
-                    json={"query": query, "documents": documents},
+                ranked, successes, failures = await self._rerank_batch_or_split(
+                    client=client,
+                    url=url,
+                    query=query,
+                    pool=pool,
                 )
-                resp.raise_for_status()
-                data = resp.json()
 
+            if successes <= 0:
+                raise RuntimeError(
+                    f"all reranker batches failed (failures={failures})"
+                )
             self._last_failure = ""
             self._disabled_until = 0.0
-            return _ranked_chunks_from_response(pool, data)
+            if failures:
+                logger.warning(
+                    "Reranker recovered from %d failing sub-batch(es); "
+                    "kept original scores for those candidates",
+                    failures,
+                )
+                if failures >= _RERANK_PARTIAL_FAILURE_BUDGET:
+                    breaker_seconds = float(
+                        getattr(
+                            self._settings,
+                            "RERANKER_CIRCUIT_BREAKER_SECONDS",
+                            120.0,
+                        )
+                        or 0.0
+                    )
+                    self._last_failure = (
+                        f"partial reranker failure budget exceeded "
+                        f"({failures} >= {_RERANK_PARTIAL_FAILURE_BUDGET})"
+                    )
+                    if breaker_seconds > 0:
+                        self._disabled_until = time.monotonic() + breaker_seconds
+                    logger.warning(
+                        "Reranker partial-failure budget exceeded "
+                        "(%d >= %d) — opening circuit for %.0fs",
+                        failures,
+                        _RERANK_PARTIAL_FAILURE_BUDGET,
+                        breaker_seconds,
+                    )
+            return sorted(ranked, key=lambda c: c.score, reverse=True)
 
         except Exception as exc:
             breaker_seconds = float(
@@ -233,6 +270,98 @@ class RerankerService:
                 else "",
             )
             return sorted(pool, key=lambda x: x.score, reverse=True)
+
+    async def _rerank_batch_or_split(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        url: str,
+        query: str,
+        pool: List[SourceChunk],
+    ) -> tuple[List[SourceChunk], int, int]:
+        """Rerank in bounded HTTP batches and isolate bad candidates.
+
+        The llama.cpp reranker can return HTTP 500 for realistic 20-40 item
+        pools even when `/health` and tiny requests succeed. Treat that as a
+        batch-shape failure, not proof the service is down: split the batch and
+        preserve reranker signal for every sub-batch that still scores.
+        """
+
+        if not pool:
+            return [], 0, 0
+        if len(pool) > _RERANK_HTTP_BATCH_SIZE:
+            ranked: List[SourceChunk] = []
+            successes = 0
+            failures = 0
+            for start in range(0, len(pool), _RERANK_HTTP_BATCH_SIZE):
+                part, ok, bad = await self._rerank_batch_or_split(
+                    client=client,
+                    url=url,
+                    query=query,
+                    pool=pool[start : start + _RERANK_HTTP_BATCH_SIZE],
+                )
+                ranked.extend(part)
+                successes += ok
+                failures += bad
+            return ranked, successes, failures
+
+        try:
+            return await self._post_rerank_batch(
+                client=client,
+                url=url,
+                query=query,
+                pool=pool,
+            ), 1, 0
+        except Exception as exc:
+            if len(pool) <= 1:
+                logger.warning(
+                    "Reranker single-candidate failure; preserving original "
+                    "score for chunk_id=%s: %s",
+                    getattr(pool[0], "chunk_id", ""),
+                    exc,
+                )
+                return sorted(pool, key=lambda c: c.score, reverse=True), 0, 1
+
+            mid = len(pool) // 2
+            logger.info(
+                "Reranker batch of %d failed; splitting into %d + %d: %s",
+                len(pool),
+                mid,
+                len(pool) - mid,
+                exc,
+            )
+            left, left_ok, left_bad = await self._rerank_batch_or_split(
+                client=client,
+                url=url,
+                query=query,
+                pool=pool[:mid],
+            )
+            right, right_ok, right_bad = await self._rerank_batch_or_split(
+                client=client,
+                url=url,
+                query=query,
+                pool=pool[mid:],
+            )
+            return left + right, left_ok + right_ok, left_bad + right_bad
+
+    async def _post_rerank_batch(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        url: str,
+        query: str,
+        pool: List[SourceChunk],
+    ) -> List[SourceChunk]:
+        # Cap each doc so no single (query, doc) pair overflows the reranker's
+        # context and 500s the whole batch (the cross-encoder truncates anyway).
+        documents = [(c.text or "")[:_RERANK_MAX_DOC_CHARS] for c in pool]
+        resp = await client.post(
+            url,
+            json={"query": query, "documents": documents},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return _ranked_chunks_from_response(pool, data)
 
 
 reranker_service = RerankerService()

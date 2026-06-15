@@ -333,6 +333,14 @@ def test_compound_query_phrase_promotes_privacy_and_on_device_lanes():
     ]
 
 
+def test_affect_as_ordinary_verb_does_not_trigger_neuro_narrative_lane():
+    facets = chat_module._chat_coverage_facets_for_query(
+        "What is NLP and how does Python affect it?"
+    )
+
+    assert "neuro_narrative" not in {facet["name"] for facet in facets}
+
+
 @pytest.mark.asyncio
 async def test_chat_semantic_coverage_forces_compound_privacy_on_device_lanes(monkeypatch):
     base_sources = [

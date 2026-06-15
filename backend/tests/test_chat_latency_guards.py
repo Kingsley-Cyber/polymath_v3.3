@@ -6,6 +6,12 @@ from services.chat_orchestrator import (
 
 def test_simple_definition_query_skips_overview_classifier():
     assert not _should_run_overview_intent_classifier("what is a neural network")
+    assert not _should_run_overview_intent_classifier(
+        "What is NLP and how does Python affect it?"
+    )
+    assert not _should_run_overview_intent_classifier(
+        "What is NLP and how does Python affect it? Keep it concise."
+    )
 
 
 def test_broad_query_runs_overview_classifier():

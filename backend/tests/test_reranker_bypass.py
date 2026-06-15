@@ -282,6 +282,82 @@ async def test_rerank_failure_opens_short_circuit(svc, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_rerank_batch_failure_splits_and_preserves_successes(svc, monkeypatch):
+    """A realistic sidecar can 500 on a batch while scoring smaller pieces.
+    The client should split the batch instead of opening the global circuit."""
+    svc._settings = SimpleNamespace(
+        RERANKER_URL="http://reranker:8080",
+        RERANKER_BYPASS_CODE=False,
+        RERANKER_TIMEOUT_SECONDS=0.5,
+        RERANKER_CIRCUIT_BREAKER_SECONDS=60.0,
+    )
+    calls: list[list[str]] = []
+
+    async def fake_post_batch(*, client, url, query, pool):
+        calls.append([c.chunk_id for c in pool])
+        if len(pool) > 1:
+            raise RuntimeError("batch too large")
+        chunk = pool[0].model_copy()
+        chunk.score = {"a": 0.1, "b": 0.8, "c": 0.3, "d": 0.6}[chunk.chunk_id]
+        return [chunk]
+
+    monkeypatch.setattr(svc, "_post_rerank_batch", fake_post_batch)
+
+    pool = [
+        _chunk(score=0.1, chunk_id="a"),
+        _chunk(score=0.2, chunk_id="b"),
+        _chunk(score=0.3, chunk_id="c"),
+        _chunk(score=0.4, chunk_id="d"),
+    ]
+    out = await svc._rerank_pool("query", pool)
+
+    assert [c.chunk_id for c in out] == ["b", "d", "c", "a"]
+    assert calls[0] == ["a", "b", "c", "d"]
+    assert ["a"] in calls and ["b"] in calls and ["c"] in calls and ["d"] in calls
+    assert svc._disabled_until == 0.0
+
+
+@pytest.mark.asyncio
+async def test_rerank_partial_failure_budget_opens_circuit(svc, monkeypatch):
+    """If a sidecar partially recovers but keeps 500ing on candidates, keep
+    the current mixed result and short-circuit follow-up retrieval passes."""
+    svc._settings = SimpleNamespace(
+        RERANKER_URL="http://reranker:8080",
+        RERANKER_BYPASS_CODE=False,
+        RERANKER_TIMEOUT_SECONDS=0.5,
+        RERANKER_CIRCUIT_BREAKER_SECONDS=60.0,
+    )
+    monkeypatch.setattr("services.reranker._RERANK_PARTIAL_FAILURE_BUDGET", 2)
+    calls: list[list[str]] = []
+
+    async def fake_post_batch(*, client, url, query, pool):
+        calls.append([c.chunk_id for c in pool])
+        if len(pool) > 1:
+            raise RuntimeError("batch too large")
+        if pool[0].chunk_id in {"c", "d"}:
+            raise RuntimeError("candidate breaks sidecar")
+        chunk = pool[0].model_copy()
+        chunk.score = {"a": 0.4, "b": 0.9}[chunk.chunk_id]
+        return [chunk]
+
+    monkeypatch.setattr(svc, "_post_rerank_batch", fake_post_batch)
+
+    pool = [
+        _chunk(score=0.1, chunk_id="a"),
+        _chunk(score=0.2, chunk_id="b"),
+        _chunk(score=0.8, chunk_id="c"),
+        _chunk(score=0.7, chunk_id="d"),
+    ]
+    first = await svc._rerank_pool("query", pool)
+    second = await svc._rerank_pool("query", pool)
+
+    assert [c.chunk_id for c in first] == ["b", "c", "d", "a"]
+    assert [c.chunk_id for c in second] == ["c", "d", "b", "a"]
+    assert svc._disabled_until > 0.0
+    assert calls.count(["a", "b", "c", "d"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_rerank_default_bypass_is_on():
     """Verify the setting default is True so the bypass is opt-OUT, not opt-in."""
     from config import get_settings

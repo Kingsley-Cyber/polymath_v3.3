@@ -5,6 +5,18 @@ import type { SettingsState, Tool, ModelInfo, Skill } from "../types";
 import * as api from "../lib/api";
 
 const DEFAULT_MAX_TOKENS = 16384;
+const LEGACY_MODEL_DEFAULTS = new Set([
+  "ollama/llama3.2:3b",
+  "ollama/qwen3:1.7b",
+  "deepseek-chat",
+  "deepseek/deepseek-chat",
+]);
+
+function stripLegacyModelDefault(model: string | null | undefined): string {
+  const value = (model || "").trim();
+  if (!value) return "";
+  return LEGACY_MODEL_DEFAULTS.has(value.toLowerCase()) ? "" : value;
+}
 
 const DEFAULT_SETTINGS: Omit<SettingsState, "selectedModel"> = {
   // Model Settings
@@ -327,26 +339,28 @@ export const useSettingsStore = create<SettingsStore>()(
             qdrant_mongo_graph: "qdrant_mongo_graph",
           };
 
-          // Legacy defaults that must clear so Phase F pool resolution wins.
-          // If the Mongo doc still carries the old hardcoded value AND the
-          // user has a pool entry configured, prefer the pool (treat the
-          // flat field as empty).
-          const LEGACY_MODEL_DEFAULT = "ollama/llama3.2:3b";
-          const stripLegacy = (m: string | null | undefined) =>
-            !m || m === LEGACY_MODEL_DEFAULT ? "" : m;
+          const currentSelectedModel = get().selectedModel;
+          const apiDefaultModel = stripLegacyModelDefault(
+            s.chat.default_chat_model,
+          );
+          const selectedModelFromAPI =
+            apiDefaultModel &&
+            apiDefaultModel.startsWith("pool:") &&
+            !currentSelectedModel.startsWith("pool:")
+              ? apiDefaultModel
+              : currentSelectedModel || apiDefaultModel;
 
           set({
             // Agentic mode (Phase 14.1)
             agenticModeEnabled: s.chat.agentic_mode_enabled,
-            agenticModel: stripLegacy(s.chat.agentic_model),
+            agenticModel: stripLegacyModelDefault(s.chat.agentic_model),
 
             // Infrastructure
             modalEnabled: s.infrastructure.modal_enabled,
             modalEmbedderUrl: s.infrastructure.modal_embedder_url,
 
             // Chat defaults — sync API → store on first load
-            selectedModel:
-              get().selectedModel || s.chat.default_chat_model || "",
+            selectedModel: selectedModelFromAPI,
             temperature: s.chat.temperature ?? get().temperature,
             topP: s.chat.top_p ?? get().topP,
             maxTokens: Math.max(
@@ -412,7 +426,9 @@ export const useSettingsStore = create<SettingsStore>()(
             reasoningBlend: s.chat.reasoning_blend ?? [],
 
             // HyDE (Phase 17) — strip legacy default so Phase F pool wins
-            hydeModel: stripLegacy(s.chat.hyde_model ?? get().hydeModel),
+            hydeModel: stripLegacyModelDefault(
+              s.chat.hyde_model ?? get().hydeModel,
+            ),
 
             // Query Profile (Phase 18) — only seed from API if user hasn't
             // set one this session (preserves per-session selection).
@@ -479,15 +495,12 @@ export const useSettingsStore = create<SettingsStore>()(
       // restored localStorage. Raw model ids shadow Phase F pool resolution,
       // so a phone can keep sending a stale local default after the server
       // defaults were fixed.
-      version: 4,
+      version: 5,
       migrate: (persisted: unknown) => {
         const p = (persisted as Record<string, unknown>) || {};
-        const LEGACY = new Set(["ollama/llama3.2:3b", "ollama/qwen3:1.7b"]);
         const strip = (v: unknown) => {
           if (typeof v !== "string") return v;
-          const lower = v.trim().toLowerCase();
-          if (LEGACY.has(lower)) return "";
-          return v;
+          return stripLegacyModelDefault(v);
         };
         return {
           ...p,

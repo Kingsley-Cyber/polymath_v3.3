@@ -1,5 +1,5 @@
 // App.tsx - Main application component (3-Pane Deterministic Graph Architecture)
-import { useCallback, useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Menu, Network, Share2, X } from "lucide-react";
 import { Sidebar } from "./components/chat/Sidebar";
 import { ChatWindow } from "./components/chat/ChatWindow";
@@ -14,7 +14,7 @@ import { useQueryModelPoolStore } from "./stores/queryModelPoolStore";
 import { useChatStore } from "./stores/chatStore";
 import { useAuthStore } from "./stores/authStore";
 import * as api from "./lib/api";
-import type { ChatMessage, ChatRequest, Collection } from "./types";
+import type { ChatMessage, ChatRequest, Collection, CorpusResponse } from "./types";
 
 function summarizeToolResultDetail(name: string, result: string): string | undefined {
   try {
@@ -103,6 +103,8 @@ function App() {
   const [isGraphViewOpen, setIsGraphViewOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [collections, setCollections] = useState<Collection[]>([]);
+  const [corpora, setCorpora] = useState<CorpusResponse[]>([]);
+  const corporaRef = useRef<CorpusResponse[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
 
   // Pt 7: prefill bridge from GraphViewer's Graph Query tab to ChatInput.
@@ -119,7 +121,7 @@ function App() {
     setIsGraphViewOpen(false);
   }, []);
 
-  const { selectedModel, setSelectedModel, setModels, maxTokens, theme, selectedCorpusIds } =
+  const { setSelectedModel, setModels, maxTokens, theme, selectedCorpusIds } =
     useSettingsStore();
 
   // Auth state — route guard depends on isAuthenticated
@@ -150,16 +152,33 @@ function App() {
     checkAuth();
   }, []);
 
-  // PR 4 — no auto-fallback when no corpora selected. The new GraphViewer
-  // renders an empty-state prompt instead. Multi-corpus selection is
-  // explicit; the legacy "first available corpus" fallback is retired
-  // (Phase F cleanup of GRAPH_VIEWER_BRIDGE.md).
+  const effectiveGraphCorpusIds = useMemo(() => {
+    const explicit = selectedCorpusIds.filter(Boolean);
+    if (explicit.length > 0) return Array.from(new Set(explicit));
+    return Array.from(
+      new Set(corpora.map((corpus) => corpus.corpus_id).filter(Boolean)),
+    );
+  }, [corpora, selectedCorpusIds]);
+
+  useEffect(() => {
+    corporaRef.current = corpora;
+  }, [corpora]);
 
   const handleSend = useCallback(
     async (message: string, attachedFiles?: File[]) => {
       console.log("handleSend triggered");
       const chat = useChatStore.getState();
       const settings = useSettingsStore.getState();
+      const requestCorpusIds =
+        settings.selectedCorpusIds.length > 0
+          ? settings.selectedCorpusIds
+          : Array.from(
+              new Set(
+                corporaRef.current
+                  .map((corpus) => corpus.corpus_id)
+                  .filter(Boolean),
+              ),
+            );
 
       // Phase 29 — convert paperclip-staged File[] into the
       // ChatAttachment shape the backend expects. Images become base64;
@@ -242,7 +261,7 @@ function App() {
         // Omitted entirely when there are none; backend treats absence
         // as "no multimodal content" and runs the regular text pipeline.
         attachments,
-        corpus_ids: settings.selectedCorpusIds,
+        corpus_ids: requestCorpusIds,
         retrieval_tier: settings.retrievalTier,
         collections: settings.selectedCollectionIds,
         overrides: {
@@ -371,7 +390,7 @@ function App() {
           process_timeline: state.streamingProcessTimeline,
           model_used: request.overrides?.model || settings.selectedModel,
           created_at: new Date().toISOString(),
-          collections_queried: settings.selectedCorpusIds,
+          collections_queried: requestCorpusIds,
           sources: state.streamingSources,
         });
       };
@@ -497,7 +516,7 @@ function App() {
                   created_at: new Date().toISOString(),
                   trimming_applied: event.trimming_applied,
                   collections_queried:
-                    event.collections_queried ?? settings.selectedCorpusIds,
+                    event.collections_queried ?? requestCorpusIds,
                   chunks_returned: event.chunks_returned,
                   strategy_used: event.strategy_used,
                   query_profile_used: event.query_profile_used,
@@ -548,6 +567,7 @@ function App() {
   useEffect(() => {
     if (!authChecked || !isAuthenticated) return;
     loadCollections();
+    loadCorpora();
     loadModels();
     useSettingsStore.getState().loadFromAPI();
     useQueryModelPoolStore.getState().load();
@@ -600,11 +620,24 @@ function App() {
     }
   };
 
+  const loadCorpora = async () => {
+    try {
+      const data = await api.listCorpora();
+      setCorpora(data);
+      useSettingsStore
+        .getState()
+        .purgeStaleCorpusIds(data.map((corpus) => corpus.corpus_id));
+    } catch (error) {
+      console.error("Failed to load corpora:", error);
+    }
+  };
+
   const loadModels = async () => {
     try {
       const data = await api.getModels();
       setModels(data.chat_models, data.embedding_models);
-      if (data.chat_models.length > 0 && !selectedModel) {
+      const currentSelectedModel = useSettingsStore.getState().selectedModel;
+      if (data.chat_models.length > 0 && !currentSelectedModel) {
         setSelectedModel(data.default_model || data.chat_models[0].id);
       }
       setModelsLoaded(true);
@@ -723,7 +756,7 @@ function App() {
             <div className="flex-1 min-h-0 relative">
               <GraphViewer
                 mode="brain"
-                corpusIds={selectedCorpusIds}
+                corpusIds={effectiveGraphCorpusIds}
                 onSendToChat={handleGraphSendToChat}
               />
             </div>

@@ -134,7 +134,7 @@ def _should_run_overview_intent_classifier(message: str) -> bool:
         return False
     lower = text.lower()
     tokens = re.findall(r"[a-z0-9]+", lower)
-    if _SIMPLE_DEFINITION_RE.search(text) and len(tokens) <= 10:
+    if _SIMPLE_DEFINITION_RE.search(text):
         return any(hint in lower for hint in _OVERVIEW_CLASSIFIER_HINTS)
     return len(tokens) >= 12 or any(hint in lower for hint in _OVERVIEW_CLASSIFIER_HINTS)
 
@@ -344,7 +344,8 @@ _CHAT_COVERAGE_FACETS: tuple[dict[str, Any], ...] = (
             "narrative therapy",
             "neuroscience",
             "embodied",
-            "affect",
+            "affective",
+            "affect theory",
         ),
         "support_terms": (
             "neuro-narrative therapy",
@@ -2136,10 +2137,14 @@ def _format_chat_coverage_prompt_note(meta: dict[str, Any]) -> str | None:
             "audit or a list of covered/uncovered areas."
         )
     lines.append(
-        "- Chat RAG answer rule: answer the user's question directly from the "
-        "retrieved evidence. Do not expose internal terms like facets, lanes, "
-        "coverage contract, packet, retrieval tier, graph query, or chunks unless "
-        "the user explicitly asks about retrieval diagnostics."
+        "- Chat RAG answer rule: answer the user's question directly. Use "
+        "retrieved evidence for source-backed claims. If the retrieved evidence "
+        "is weak but the question is a general definition/background question, "
+        "you may give a concise general-knowledge answer and clearly say the "
+        "corpus did not directly establish that part. For corpus-specific claims, "
+        "do not guess. Do not expose internal terms like facets, lanes, coverage "
+        "contract, packet, retrieval tier, graph query, or chunks unless the user "
+        "explicitly asks about retrieval diagnostics."
     )
     lines.append(
         "- For unsupported requested ideas, use cautious wording such as "
@@ -2901,8 +2906,14 @@ POLYMATH_SYSTEM_PROMPT = (
     "across sources. Do not cite in every sentence.\n"
     "- Skip preambles ('Based on the provided context…', 'Great question…'). "
     "Start with the answer.\n"
-    "- If the context doesn't contain the answer, say so in one sentence. "
-    "Don't invent, don't pad.\n"
+    "- If the context doesn't contain the answer to a corpus-specific or "
+    "source-specific question, say so in one sentence. Don't invent, don't "
+    "pad.\n"
+    "- If the context is weak but the user asks a general background or "
+    "definition question, answer from general knowledge in a compact way and "
+    "add a brief caveat that the retrieved corpus sources did not directly "
+    "establish it. Do not cite weak/off-topic sources for the general-knowledge "
+    "portion.\n"
     "- Use markdown for scanability: short paragraphs, meaningful headings "
     "when the answer has sections, bold key terms sparingly, and compact "
     "bullets for grouped facts.\n"
