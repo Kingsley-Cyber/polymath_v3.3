@@ -1433,6 +1433,40 @@
 .pm-live-answer-lines span:nth-child(2) { width: 64%; animation-delay: 110ms; }
 .pm-live-answer-lines span:nth-child(3) { width: 72%; animation-delay: 220ms; }
 
+.pm-live-reasoning-preview {
+  display: grid;
+  gap: 0.5rem;
+  width: min(100%, 42rem);
+  border-left: 2px solid color-mix(in srgb, var(--accent-primary) 54%, transparent);
+  padding-left: 0.75rem;
+}
+
+.pm-live-reasoning-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--font-family-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.pm-live-reasoning-text {
+  max-height: min(26vh, 13rem);
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-base) 84%, transparent);
+  padding: 0.7rem 0.8rem;
+  font-family: var(--font-family-mono);
+  font-size: 0.78rem;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
 @keyframes pm-stream-caret {
   0%, 100% { opacity: 0.28; transform: translateY(0); }
   50% { opacity: 1; transform: translateY(-1px); }

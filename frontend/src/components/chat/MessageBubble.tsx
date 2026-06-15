@@ -154,6 +154,7 @@ export function MessageBubble({
               <LiveAnswerDraft
                 hasThinking={Boolean(message.thinking)}
                 hasProcess={hasProcessTimeline || Boolean(message.trace_events?.length)}
+                thinking={message.thinking || ""}
               />
             ) : (
               <ReactMarkdown
@@ -259,15 +260,18 @@ export function MessageBubble({
 function LiveAnswerDraft({
   hasThinking,
   hasProcess,
+  thinking,
 }: {
   hasThinking: boolean;
   hasProcess: boolean;
+  thinking: string;
 }) {
   const label = hasThinking
     ? "Reading the model's reasoning stream"
     : hasProcess
       ? "Preparing the answer surface"
       : "Starting the answer stream";
+  const thinkingPreview = formatLiveThinkingPreview(thinking);
 
   return (
     <div className="pm-live-answer-draft" aria-live="polite">
@@ -275,13 +279,33 @@ function LiveAnswerDraft({
         <span className="pm-live-answer-dot" />
         <span>{label}</span>
       </div>
-      <div className="pm-live-answer-lines" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </div>
+      {thinkingPreview ? (
+        <div className="pm-live-reasoning-preview">
+          <div className="pm-live-reasoning-label">
+            <StatusBadge tag="GEN" tone="gen" />
+            <span>live reasoning</span>
+          </div>
+          <div className="pm-live-reasoning-text custom-scrollbar">
+            {thinkingPreview}
+          </div>
+        </div>
+      ) : (
+        <div className="pm-live-answer-lines" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
+      )}
     </div>
   );
+}
+
+function formatLiveThinkingPreview(thinking: string): string {
+  const cleaned = thinking.replace(/\r\n/g, "\n").trim();
+  if (!cleaned) return "";
+  const maxChars = 900;
+  if (cleaned.length <= maxChars) return cleaned;
+  return `...${cleaned.slice(cleaned.length - maxChars)}`;
 }
 
 function deriveToolActivityFromTraceEvents(
