@@ -7,6 +7,7 @@ import re
 import sys
 import time as _time
 import types
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -116,6 +117,347 @@ def schedule_graph_discovery_cache_warm(*args: Any, **kwargs: Any) -> None:
         return warm(*args, **kwargs)
     logger.debug("Skipping graph cache warm: legacy warm function is missing")
     return None
+
+
+async def _bounded_discover_without_legacy(
+    *,
+    qdrant,
+    neo4j_driver,
+    db,
+    corpus_ids: list[str],
+    query: str,
+    mode: str = "auto",
+    synthesis_mode: str = "research",
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> Any:
+    """Tracked-source Mission Control graph builder when legacy .pyc is absent.
+
+    This is intentionally graph-structural, not a prose synthesizer. It reuses
+    the bounded /graph/query primitives so Mission Control returns a real graph
+    object instead of raising a missing-module 500.
+    """
+    import asyncio as _asyncio
+    from types import SimpleNamespace
+
+    from services.graph.graph_query import (
+        expand_subgraph,
+        extract_query_entities,
+        find_bridges,
+        find_gaps,
+        find_hubs,
+    )
+
+    if neo4j_driver is None:
+        raise ValueError("Neo4j driver is required for Mission Control graph discovery")
+
+    async def _cached_metrics(cid: str) -> Any | None:
+        if db is None:
+            return None
+        try:
+            from services.graph.analytics import (
+                compute_corpus_change_signature,
+                get_cached_metrics,
+            )
+
+            sig = await compute_corpus_change_signature(db, cid)
+            return await get_cached_metrics(db, cid, sig)
+        except Exception as exc:
+            logger.debug("bounded discover metrics skipped for %s: %s", cid, exc)
+            return None
+
+    async def _one(cid: str) -> tuple[str, dict[str, Any], str | None]:
+        try:
+            metrics = await _cached_metrics(cid)
+            seeds = await extract_query_entities(
+                query,
+                cid,
+                neo4j_driver,
+                limit_per_token=3,
+                qdrant=qdrant,
+            )
+            if not seeds:
+                return cid, {
+                    "nodes": [],
+                    "links": [],
+                    "bridges": [],
+                    "gaps": [],
+                    "hubs": [],
+                    "seeds": [],
+                }, None
+            seed_ids = [s["entity_id"] for s in seeds if s.get("entity_id")]
+            seed_scores = {
+                s["entity_id"]: float(s.get("score") or 0.0)
+                for s in seeds
+                if s.get("entity_id")
+            }
+            subgraph = await expand_subgraph(
+                entity_ids=seed_ids,
+                corpus_id=cid,
+                driver=neo4j_driver,
+                max_hops=2,
+                limit=80,
+                metrics=metrics,
+                entity_scores=seed_scores,
+            )
+            nodes = list(subgraph.get("nodes") or [])
+            links = list(subgraph.get("links") or [])
+            bridges = await find_bridges(
+                driver=neo4j_driver,
+                entity_ids=seed_ids,
+                corpus_id=cid,
+                max_hops=2,
+                metrics=metrics,
+            )
+            gaps = await find_gaps(
+                driver=neo4j_driver,
+                entity_ids=seed_ids,
+                metrics=metrics,
+            )
+            hubs = find_hubs(nodes, links, metrics=metrics)
+            return cid, {
+                "nodes": nodes,
+                "links": links,
+                "bridges": bridges,
+                "gaps": gaps,
+                "hubs": hubs,
+                "seeds": seeds,
+            }, None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("bounded discover corpus=%s failed: %s", cid, exc)
+            return cid, {
+                "nodes": [],
+                "links": [],
+                "bridges": [],
+                "gaps": [],
+                "hubs": [],
+                "seeds": [],
+            }, str(exc)
+
+    sem = _asyncio.Semaphore(4)
+
+    async def _gated(cid: str) -> tuple[str, dict[str, Any], str | None]:
+        async with sem:
+            return await _one(cid)
+
+    per_corpus = await _asyncio.gather(*[_gated(cid) for cid in corpus_ids])
+
+    nodes_by_id: dict[str, dict[str, Any]] = {}
+    links_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    bridges_by_id: dict[str, dict[str, Any]] = {}
+    gaps: list[dict[str, Any]] = []
+    hubs_by_id: dict[str, dict[str, Any]] = {}
+    seeds_by_id: dict[str, dict[str, Any]] = {}
+    errors: dict[str, str] = {}
+
+    def _stamp(item: dict[str, Any], cid: str) -> dict[str, Any]:
+        stamped = dict(item)
+        corpora = list(stamped.get("source_corpora") or [])
+        if cid and cid not in corpora:
+            corpora.append(cid)
+        stamped["source_corpora"] = corpora
+        stamped.setdefault("source_corpus", cid)
+        return stamped
+
+    for cid, payload, error in per_corpus:
+        if error:
+            errors[cid] = error
+        for node in payload["nodes"]:
+            node_id = node.get("id") or node.get("entity_id")
+            if not node_id:
+                continue
+            if node_id in nodes_by_id:
+                nodes_by_id[node_id] = _stamp(nodes_by_id[node_id], cid)
+            else:
+                nodes_by_id[node_id] = _stamp(node, cid)
+        for link in payload["links"]:
+            key = (
+                str(link.get("source") or ""),
+                str(link.get("target") or ""),
+                str(link.get("predicate") or link.get("kind") or ""),
+            )
+            if key in links_by_key:
+                links_by_key[key] = _stamp(links_by_key[key], cid)
+            else:
+                links_by_key[key] = _stamp(link, cid)
+        for bridge in payload["bridges"]:
+            bridge_id = bridge.get("entity_id") or bridge.get("id")
+            if bridge_id:
+                bridges_by_id[bridge_id] = _stamp(bridge, cid)
+        for hub in payload["hubs"]:
+            hub_id = hub.get("entity_id") or hub.get("id")
+            if hub_id:
+                hubs_by_id[hub_id] = _stamp(hub, cid)
+        for seed in payload["seeds"]:
+            seed_id = seed.get("entity_id") or seed.get("id")
+            if seed_id:
+                seeds_by_id[seed_id] = _stamp(seed, cid)
+        gaps.extend(_stamp(gap, cid) for gap in payload["gaps"])
+
+    nodes = list(nodes_by_id.values())
+    links = list(links_by_key.values())
+    bridges = list(bridges_by_id.values())
+    hubs = list(hubs_by_id.values())
+    seeds = list(seeds_by_id.values())
+
+    frontier = [
+        {
+            "entity_id": node.get("id") or node.get("entity_id"),
+            "display_name": node.get("display_name") or node.get("label"),
+            "entity_type": node.get("entity_type") or node.get("primary_entity_type"),
+            "mention_count": node.get("mention_count", 0),
+            "source_corpora": node.get("source_corpora", []),
+        }
+        for node in nodes[:12]
+    ]
+    questions = [
+        {
+            "question": gap.get("question") or "Inspect this missing graph connection.",
+            "gap_type": gap.get("gap_type", "missing_edge"),
+            "entity_a": gap.get("entity_a") or gap.get("entity_a_name"),
+            "entity_b": gap.get("entity_b") or gap.get("entity_b_name"),
+            "source_corpora": gap.get("source_corpora", []),
+        }
+        for gap in gaps[:8]
+    ]
+    interpretation = (
+        "Mission Control built a bounded graph from live Neo4j/Qdrant structure. "
+        f"It found {len(nodes)} entities, {len(links)} relations, "
+        f"{len(bridges)} bridges, and {len(gaps)} graph gaps for this query."
+    )
+    headline = {
+        "headline": query[:80] or "Mission Control graph",
+        "kicker": "Bounded live graph builder",
+    }
+    trace = {
+        "stages": [
+            {
+                "stage": "seed_entities",
+                "label": "Seed entities",
+                "status": "complete",
+                "count": len(seeds),
+            },
+            {
+                "stage": "bounded_expansion",
+                "label": "Bounded expansion",
+                "status": "complete",
+                "count": len(nodes),
+            },
+            {
+                "stage": "bridges_gaps",
+                "label": "Bridges and gaps",
+                "status": "complete",
+                "count": len(bridges) + len(gaps),
+            },
+        ],
+        "errors_per_corpus": errors,
+        "source_docs": [],
+        "builder": "bounded_graph_query",
+    }
+    auto_synthesis = {
+        "markdown": interpretation,
+        "sources": [],
+        "fallback": False,
+        "builder": "bounded_graph_query",
+    }
+    context_nodes = [
+        {
+            "id": str(node.get("id") or node.get("entity_id") or ""),
+            "label": str(
+                node.get("label")
+                or node.get("display_name")
+                or node.get("canonical_name")
+                or node.get("id")
+                or ""
+            ),
+            "kind": str(node.get("entity_type") or node.get("primary_entity_type") or "concept"),
+            "role": "seed" if node.get("is_seed") else "context",
+            "size": float(node.get("mention_count") or 1),
+            "weight": float(node.get("pagerank_score") or node.get("confidence") or 0.0),
+            "evidence_count": int(node.get("mention_count") or 0),
+            "top_entities": [],
+            "source_corpus": str(node.get("source_corpus") or ""),
+            "source_corpora": list(node.get("source_corpora") or []),
+        }
+        for node in nodes
+        if node.get("id") or node.get("entity_id")
+    ]
+    context_links = [
+        {
+            "source": str(link.get("source") or ""),
+            "target": str(link.get("target") or ""),
+            "kind": str(link.get("predicate") or "related_to"),
+            "role": str(link.get("relation_family") or "context"),
+            "weight": float(link.get("confidence") or 1.0),
+            "suggested": False,
+            "evidence": str(link.get("predicate") or ""),
+            "source_corpus": str(link.get("source_corpus") or ""),
+            "source_corpora": list(link.get("source_corpora") or []),
+            "dangling": False,
+        }
+        for link in links
+        if link.get("source") and link.get("target")
+    ]
+    return SimpleNamespace(
+        session_id=session_id or f"graph-{uuid.uuid4().hex}",
+        corpus_id=corpus_ids[0] if corpus_ids else "",
+        corpus_ids=list(corpus_ids),
+        query=query,
+        mode=mode or "auto",
+        interpretation=interpretation,
+        frontier=frontier,
+        analogies=[],
+        bridges=bridges,
+        weak_links=[],
+        transfers=[],
+        questions=questions,
+        strategic_read={
+            "summary": interpretation,
+            "builder": "bounded_graph_query",
+            "synthesis_mode": synthesis_mode,
+        },
+        intent_profile={"mode": mode, "synthesis_mode": synthesis_mode},
+        atomic_trace=[],
+        socratic_prompts=[],
+        metrics={
+            "builder": "bounded_graph_query",
+            "legacy_orchestrator": False,
+            "nodes": len(nodes),
+            "links": len(links),
+            "bridges": len(bridges),
+            "gaps": len(gaps),
+            "errors_per_corpus": errors,
+        },
+        domain_map_summary=[],
+        graph={"nodes": nodes, "links": links},
+        anchors=seeds,
+        concept_communities=hubs,
+        entity_concept_map={},
+        headline=headline,
+        themes=hubs[:8],
+        bridges_v2=bridges,
+        gaps_v2=gaps,
+        latent_topics=[],
+        tensions=[],
+        trace=trace,
+        auto_synthesis=auto_synthesis,
+        insight_packet_summary={
+            "sparse": len(nodes) < 8,
+            "temporal_support": False,
+            "counts": {
+                "entities": len(nodes),
+                "relations": len(links),
+                "bridges": len(bridges),
+                "gaps": len(gaps),
+            },
+            "evidence_sources": {},
+        },
+        context_graph={
+            "nodes": context_nodes,
+            "links": context_links,
+            "meta": {"builder": "bounded_graph_query"},
+        },
+    )
 
 
 # Hard caps for the LLM input packet. Graph Query should synthesize from a
@@ -6317,15 +6659,27 @@ async def discover(
     The LLM synthesis call path inside _legacy.discover stays untouched —
     multi-corpus only extends the wrapper input/output boundary.
     """
-    if _legacy is None or not hasattr(_legacy, "discover"):
-        raise RuntimeError(_LEGACY_MISSING_MESSAGE)
-
     # Normalize input. utils.corpus_ids is the single source of truth.
     from utils.corpus_ids import normalize_corpus_ids
 
     ids = normalize_corpus_ids(corpus_id=corpus_id, corpus_ids=corpus_ids)
     if not ids:
         raise ValueError("discover() requires at least one corpus_id")
+    if _legacy is None or not hasattr(_legacy, "discover"):
+        logger.warning(
+            "%s Using tracked bounded graph builder fallback.", _LEGACY_MISSING_MESSAGE
+        )
+        return await _bounded_discover_without_legacy(
+            qdrant=qdrant,
+            neo4j_driver=neo4j_driver,
+            db=db,
+            corpus_ids=ids,
+            query=query,
+            mode=mode,
+            synthesis_mode=synthesis_mode,
+            session_id=session_id,
+            user_id=user_id,
+        )
 
     # ── Multi-corpus fan-out ──
     if len(ids) > 1:

@@ -624,7 +624,7 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
 
   return (
     <aside
-      className="relative z-30 flex h-[44dvh] w-full shrink-0 flex-col border-t border-zinc-900 bg-[#0a0a0e]/95 backdrop-blur md:h-full md:w-[var(--dashboard-width)] md:border-t-0 md:border-l"
+      className="relative z-30 flex h-[52dvh] w-full shrink-0 flex-col overflow-hidden rounded-t-xl border-t border-zinc-800 bg-[#0a0a0e]/96 shadow-[0_-20px_60px_rgba(0,0,0,0.45)] backdrop-blur md:h-full md:w-[var(--dashboard-width)] md:rounded-none md:border-t-0 md:border-l md:border-zinc-900 md:shadow-none"
       style={{ "--dashboard-width": `${width}px` } as CSSProperties}
     >
       {/* Drag handle — 6px hot-zone on the sidebar's left edge. Hover
@@ -689,7 +689,7 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
       <GraphPathModelControl activeTab={activeTab} />
 
       {/* Scrollable body */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+      <div className="flex-1 overscroll-contain overflow-y-auto px-3 py-3 space-y-4">
         {/* Persistent Selection card — visible on every tab, sits at the
             top of the body so clicking a node in the canvas always shows
             its info regardless of which tab is active. */}
@@ -1117,7 +1117,7 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
         {activeTab === "brain" && mode === "brain" && (
           <section>
             <SectionLabel>Relation Legend</SectionLabel>
-            <div className="grid grid-cols-2 gap-1.5 rounded border border-zinc-800 bg-[#0d0d14] p-2">
+            <div className="grid grid-cols-1 gap-1.5 rounded border border-zinc-800 bg-[#0d0d14] p-2 min-[420px]:grid-cols-2">
               {RELATION_LEGEND_ENTRIES.map(([family, color]) => (
                 <div
                   key={family}
@@ -1352,7 +1352,7 @@ function AgentSearchTab(props: AgentSearchTabProps) {
             <div
               role="radiogroup"
               aria-label="Synthesis mode"
-              className="grid grid-cols-2 gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950/75 p-1"
+              className="grid grid-cols-1 gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950/75 p-1 min-[420px]:grid-cols-2"
             >
               {modeOptions.map((opt) => {
                 const active = synthesisMode === opt.id;
@@ -1408,7 +1408,7 @@ function AgentSearchTab(props: AgentSearchTabProps) {
             className="w-full resize-none rounded-md border border-zinc-800 bg-[#09090f] px-3 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/70 focus:outline-none focus:ring-1 focus:ring-amber-500/20"
           />
           {phase === "ready" && followUpAvailable ? (
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-1 gap-1.5 min-[420px]:grid-cols-2">
               <button
                 type="button"
                 onClick={() => onRun("new")}

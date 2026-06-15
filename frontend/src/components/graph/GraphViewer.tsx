@@ -1685,7 +1685,7 @@ export function GraphViewer({
       </div>{/* end absolute inset-0 flex */}
 
       {/* Bottom-right control cluster — same layout as GitNexus */}
-      <div className="absolute right-3 bottom-3 md:right-4 md:bottom-4 z-20 flex flex-col gap-1 pointer-events-auto">
+      <div className="absolute right-3 bottom-[calc(52dvh+0.75rem)] z-20 flex flex-col gap-1 pointer-events-auto md:right-4 md:bottom-4">
         <button
           onClick={sigma.zoomIn}
           className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
@@ -1727,7 +1727,7 @@ export function GraphViewer({
 
       {/* Layout running indicator */}
       {sigma.isLayoutRunning && (
-        <div className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/20 px-3 py-1.5 backdrop-blur">
+        <div className="absolute bottom-[calc(52dvh+0.75rem)] left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/20 px-3 py-1.5 backdrop-blur md:bottom-4">
           <div className="h-2 w-2 animate-ping rounded-full bg-emerald-400" />
           <span className="text-xs font-medium text-emerald-200 font-mono">
             layout optimizing…
