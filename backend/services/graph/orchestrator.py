@@ -107,15 +107,40 @@ if _legacy is not None:
 
 
 def schedule_graph_discovery_cache_warm(*args: Any, **kwargs: Any) -> None:
-    """Schedule legacy graph cache warm when the legacy scope module exists."""
+    """Schedule graph cache warmup through the tracked worker.
 
-    if _legacy is None:
-        logger.debug("Skipping graph cache warm: %s", _LEGACY_MISSING_MESSAGE)
+    The legacy scope module may also define a warm function; call it when it
+    exists, but never let the missing legacy artifact make post-ingest graph
+    cache warming a no-op.
+    """
+
+    if _legacy is not None:
+        warm = getattr(_legacy, "schedule_graph_discovery_cache_warm", None)
+        if callable(warm):
+            try:
+                warm(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001 - warmup is best-effort
+                logger.warning("legacy graph cache warm failed: %s", exc)
+        else:
+            logger.debug("Skipping legacy graph cache warm: function is missing")
+    else:
+        logger.debug("Legacy graph cache warm unavailable: %s", _LEGACY_MISSING_MESSAGE)
+
+    corpus_id = kwargs.get("corpus_id")
+    if not corpus_id:
+        logger.debug("Skipping graph metrics warm: corpus_id missing")
         return None
-    warm = getattr(_legacy, "schedule_graph_discovery_cache_warm", None)
-    if callable(warm):
-        return warm(*args, **kwargs)
-    logger.debug("Skipping graph cache warm: legacy warm function is missing")
+    try:
+        from services.graph.cache_warmup import schedule_metrics_warmup_after_ingest
+
+        schedule_metrics_warmup_after_ingest(
+            qdrant=kwargs.get("qdrant"),
+            neo4j_driver=kwargs.get("neo4j_driver"),
+            db=kwargs.get("db"),
+            corpus_id=corpus_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - warmup must not break callers
+        logger.warning("tracked graph metrics warm failed to schedule: %s", exc)
     return None
 
 

@@ -2811,9 +2811,9 @@ async def run_ingest_job(
         )
 
     if ws.qdrant_written and ws.neo4j_written:
-        # Legacy orchestrator stub — no-op when _orchestrator_legacy.pyc
-        # is missing (the common case). Kept as a placeholder in case
-        # the legacy artifact gets restored on some deployments.
+        # Schedule post-ingest graph cache warmup. The orchestrator wrapper
+        # fans out to the tracked analytics warmup worker, and also calls the
+        # legacy warm function if that artifact is restored on a deployment.
         try:
             from services.graph.orchestrator import schedule_graph_discovery_cache_warm
 
@@ -2827,31 +2827,6 @@ async def run_ingest_job(
         except Exception as exc:
             logger.warning(
                 "phase=graph_cache_warm doc=%s corpus=%s legacy_schedule_failed: %s",
-                doc_id[:12],
-                corpus_id[:8],
-                exc,
-            )
-
-        # Phase 4 — auto-warm the analytics.CorpusMetrics cache so
-        # Phase 1-3 elite paths (hybrid extraction + PageRank hubs +
-        # betweenness bridges + working-set expansion + analytics
-        # gaps) activate without an explicit /api/graph/cache/rebuild
-        # call. Debounced per-corpus: a 50-doc batch ingest produces
-        # exactly one rebuild ~30s after the last doc finishes.
-        try:
-            from services.graph.cache_warmup import (
-                schedule_metrics_warmup_after_ingest,
-            )
-
-            schedule_metrics_warmup_after_ingest(
-                qdrant=qdrant_client,
-                neo4j_driver=neo4j_driver,
-                db=db,
-                corpus_id=corpus_id,
-            )
-        except Exception as exc:
-            logger.warning(
-                "phase=auto_warm doc=%s corpus=%s schedule_failed: %s",
                 doc_id[:12],
                 corpus_id[:8],
                 exc,

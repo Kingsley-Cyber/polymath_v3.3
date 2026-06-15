@@ -23,9 +23,9 @@ re-arms a new one. The cache only rebuilds ~`_WARMUP_DEBOUNCE_SECONDS`
 after the LAST ingest completion in a batch — so a 50-doc upload
 results in exactly one rebuild.
 
-The pre-existing `services.graph.orchestrator.schedule_graph_discovery_cache_warm`
-is a no-op stub (its legacy `.pyc` is missing on most deployments).
-This module replaces the dead-code path with one that actually works.
+`services.graph.orchestrator.schedule_graph_discovery_cache_warm` is the
+public trigger. It delegates here whenever the legacy discovery artifact is
+missing, so post-ingest and manual warm paths both reach this tracked worker.
 """
 
 from __future__ import annotations
