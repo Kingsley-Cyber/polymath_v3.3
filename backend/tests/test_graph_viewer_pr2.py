@@ -22,6 +22,120 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 
+class _AsyncRecords:
+    def __init__(self, records: list[dict[str, Any]]):
+        self._records = records
+
+    def __aiter__(self):
+        self._iter = iter(self._records)
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._iter)
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
+
+
+class _BrainViewSession:
+    def __init__(self, records: list[dict[str, Any]]):
+        self.records = records
+        self.params: dict[str, Any] | None = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def run(self, _query: str, **params: Any):
+        self.params = params
+        return _AsyncRecords(self.records)
+
+
+class _BrainViewDriver:
+    def __init__(self, records: list[dict[str, Any]]):
+        self.session_obj = _BrainViewSession(records)
+
+    def session(self):
+        return self.session_obj
+
+
+# ─── services.graph.queries.get_brain_view ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_brain_view_preserves_typed_top_entity_records():
+    from services.graph.queries import get_brain_view
+
+    records = [
+        {
+            "doc_id": "doc-1",
+            "corpus_id": "corpus-a",
+            "label": "Book One",
+            "filename": "book-one.md",
+            "kind": "document",
+            "chunk_count": 12,
+            "parent_count": 3,
+            "actual_chunk_count": 12,
+            "dominant_family": "Human",
+            "dominant_entity_type": "Person",
+            "ghost_b_success_rate": 1.0,
+            "ghost_b_extracted": 8,
+            "ghost_b_total": 8,
+            "schema_lens_id": "lens",
+            "source_tier": "summary",
+            "ingested_at": None,
+            "updated_at": None,
+            "bridge_count": 1,
+            "bridges": [
+                {
+                    "target_doc_id": "doc-2",
+                    "target_corpus_id": "corpus-a",
+                    "strength": 4,
+                    "shared_entities": 2,
+                    "dominant_relation_family": "Operational",
+                    "top_shared_entities": ["Ada"],
+                }
+            ],
+            "entity_count": 2,
+            "top_entities": ["Ada Lovelace", "Analytical Engine"],
+            "top_entity_records": [
+                {
+                    "entity_id": "entity:ada-lovelace",
+                    "name": "Ada Lovelace",
+                    "entity_type": "Person",
+                },
+                {
+                    "entity_id": "entity:analytical-engine",
+                    "name": "Analytical Engine",
+                    "entity_type": "Product",
+                },
+            ],
+        }
+    ]
+    driver = _BrainViewDriver(records)
+
+    payload = await get_brain_view(driver, ["corpus-a"], limit=1)
+
+    doc = payload["documents"][0]
+    assert doc["top_entities"] == ["Ada Lovelace", "Analytical Engine"]
+    assert doc["top_entity_records"] == [
+        {
+            "entity_id": "entity:ada-lovelace",
+            "name": "Ada Lovelace",
+            "entity_type": "Person",
+        },
+        {
+            "entity_id": "entity:analytical-engine",
+            "name": "Analytical Engine",
+            "entity_type": "Product",
+        },
+    ]
+    assert payload["bridges"][0]["dominant_relation_family"] == "Operational"
+    assert driver.session_obj.params["corpus_ids"] == ["corpus-a"]
+
+
 # ─── overview.get_cached_graph_overview_multi ────────────────────────────────
 
 

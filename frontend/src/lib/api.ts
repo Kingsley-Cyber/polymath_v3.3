@@ -1826,6 +1826,12 @@ export interface BrainViewBridge {
   top_shared_entities?: string[];
 }
 
+export interface BrainViewTopEntityRecord {
+  entity_id?: string | null;
+  name: string;
+  entity_type?: string | null;
+}
+
 export interface BrainViewDocument {
   doc_id: string;
   corpus_id: string;
@@ -1855,6 +1861,7 @@ export interface BrainViewDocument {
   // spotlight (top-bridge-count) books; `entity_count` is informational.
   entity_count?: number;
   top_entities?: string[];
+  top_entity_records?: BrainViewTopEntityRecord[];
 }
 
 export interface BrainViewFlatBridge {
@@ -1914,6 +1921,7 @@ export interface BookDrilldownCrossBridge {
   via_entity_id: string;
   bridge_entity_id: string;
   bridge_entity_name?: string;
+  bridge_entity_type?: string | null;
   target_doc_id: string;
   target_filename?: string;
   target_corpus_id?: string;

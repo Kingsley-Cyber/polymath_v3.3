@@ -1213,6 +1213,7 @@ class RelationEdge(BaseModel):
     subject_id: str
     subject_name: str
     predicate: str
+    relation_family: str | None = None
     object_id: str
     object_name: str
     confidence: float
@@ -1273,6 +1274,7 @@ class GraphQueryLink(BaseModel):
     source: str
     target: str
     predicate: str = "related_to"
+    relation_family: str | None = None
     confidence: float = 0.5
 
 

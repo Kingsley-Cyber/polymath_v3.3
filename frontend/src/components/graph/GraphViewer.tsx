@@ -650,7 +650,7 @@ function useBrainGraph(
         const bridgeNodes = drillRes.cross_book_bridges.map((b) => ({
           id: b.bridge_entity_id,
           display_name: b.bridge_entity_name || b.bridge_entity_id,
-          entity_type: "Concept",
+          entity_type: b.bridge_entity_type || "",
           mention_count: b.strength || 1,
         }));
 
@@ -795,9 +795,17 @@ function useBrainGraph(
         // satellites. Long-tail books read as solo dots, keeping the
         // canvas legible at 1000+ books.
         if (idx < SPOTLIGHT_COUNT) {
-          const topEntities = d.top_entities || [];
+          const topEntities = d.top_entity_records?.length
+            ? d.top_entity_records
+            : (d.top_entities || []).map((name) => ({
+                name,
+                entity_id: null,
+                entity_type: null,
+              }));
           const satCount = topEntities.length;
-          topEntities.forEach((name, i) => {
+          topEntities.forEach((entity, i) => {
+            const name = entity.name || entity.entity_id || "";
+            if (!name) return;
             // Pre-bake polar position around (0,0) — the adapter resolves
             // the book's anchor position and adds these as offsets, so
             // satellites start in a ring instead of being dragged into
@@ -809,8 +817,7 @@ function useBrainGraph(
               id: entityId,
               display_name: name,
               label: name.length > 18 ? name.slice(0, 17) + "…" : name,
-              entity_type: "Concept",
-              kind: "Concept", // adapter picks Concept color
+              entity_type: entity.entity_type || "",
               source_corpus: d.corpus_id,
               source_corpora: [d.corpus_id],
               // primary_doc_id wires the adapter's "orbit your book"

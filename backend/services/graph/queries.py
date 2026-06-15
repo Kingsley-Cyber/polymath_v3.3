@@ -163,10 +163,16 @@ CALL {
     ORDER BY mentions DESC
     WITH collect(e_seed) AS ranked_entities,
          collect(coalesce(e_seed.display_name, e_seed.entity_id)) AS ranked_names,
+         collect({
+            entity_id: e_seed.entity_id,
+            name: coalesce(e_seed.display_name, e_seed.entity_id),
+            entity_type: coalesce(e_seed.primary_entity_type, e_seed.entity_type, 'Other')
+         }) AS ranked_records,
          count(e_seed) AS entity_count,
          bridge_entity_cap
     RETURN ranked_entities[..bridge_entity_cap] AS bridge_entities,
            ranked_names[..8] AS top_entities,
+           ranked_records[..8] AS top_entity_records,
            entity_count
 }
 
@@ -215,6 +221,7 @@ CALL {
 WITH d, actual_chunk_count, dominant_family, dominant_entity_type,
      coalesce(entity_count, 0) AS entity_count,
      coalesce(top_entities, []) AS top_entities,
+     coalesce(top_entity_records, []) AS top_entity_records,
      [b IN raw_bridges WHERE b IS NOT NULL] AS bridges
 
 RETURN
@@ -238,7 +245,8 @@ RETURN
     size(bridges)     AS bridge_count,
     bridges,
     entity_count,
-    top_entities
+    top_entities,
+    top_entity_records
 ORDER BY size(bridges) DESC, label ASC
 LIMIT $limit
 """
@@ -335,6 +343,7 @@ async def get_brain_view(
             # as orbiting satellites for spotlight (top-bridge-count) docs.
             "entity_count": int(record.get("entity_count") or 0),
             "top_entities": list(record.get("top_entities") or []),
+            "top_entity_records": list(record.get("top_entity_records") or []),
         }
         documents.append(doc)
         corpora_seen.add(doc["corpus_id"])
@@ -404,6 +413,7 @@ WITH d, chunks, local_entities, local_relations_raw,
                via_entity_id: be.entity_id,
                bridge_entity_id: bridge.entity_id,
                bridge_entity_name: coalesce(bridge.display_name, bridge.canonical_name),
+               bridge_entity_type: coalesce(bridge.primary_entity_type, bridge.entity_type, 'Other'),
                target_doc_id: d2.doc_id,
                target_filename: coalesce(d2.filename, d2.doc_id),
                target_corpus_id: d2.corpus_id,
