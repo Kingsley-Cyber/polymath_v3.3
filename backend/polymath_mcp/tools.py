@@ -1123,11 +1123,16 @@ async def polymath_list_corpora() -> dict[str, Any]:
         {"corpora": [{corpus_id, name, description, doc_count, chunk_count,
                       embedding_model_id, created_at, updated_at}, ...]}
     """
-    from .auth import allowed_corpus_ids, get_current_user_id
+    from .auth import SYSTEM_USER_ID, allowed_corpus_ids, get_current_user_id
 
     uid = get_current_user_id()
     allowed = await allowed_corpus_ids(uid)
-    docs = await ingestion_service.list_corpora(user_id=uid)
+    # System auth (static MCP_API_KEY → SYSTEM_USER_ID) owns no corpora directly,
+    # so an owner-filtered query returns nothing. List across all owners and let
+    # `allowed` (which already returns ALL corpora for the system user) scope.
+    # Real users still list only their own.
+    list_uid = None if uid in (None, SYSTEM_USER_ID) else uid
+    docs = await ingestion_service.list_corpora(user_id=list_uid)
     return {
         "corpora": [
             {
@@ -1164,14 +1169,18 @@ async def polymath_list_documents(
         {"documents": [{doc_id, filename, source_tier, chunk_count,
                         parent_count, write_state, ingested_at}, ...]}
     """
-    from .auth import get_current_user_id
+    from .auth import SYSTEM_USER_ID, get_current_user_id
 
     uid = get_current_user_id()
     await assert_corpus_allowed(corpus_id)
     limit = max(1, min(int(limit), 500))
     offset = max(0, int(offset))
+    # assert_corpus_allowed already enforced the corpus boundary; the system key
+    # owns no corpora directly, so don't owner-filter the doc listing (would be
+    # empty). Real users keep their owner filter as defence-in-depth.
+    list_uid = None if uid in (None, SYSTEM_USER_ID) else uid
     docs = await ingestion_service.list_documents(
-        corpus_id, user_id=uid, limit=limit, offset=offset
+        corpus_id, user_id=list_uid, limit=limit, offset=offset
     )
     return {
         "documents": [

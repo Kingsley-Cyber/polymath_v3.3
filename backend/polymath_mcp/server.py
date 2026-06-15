@@ -39,6 +39,10 @@ async def _bootstrap_services() -> None:
     from services.auth import auth_service
     from services.conversation import conversation_service
     from services.ingestion_service import ingestion_service
+    from services.model_pool import model_pool_service
+    from services.model_profiles import model_profiles_service
+    from services.query_prefs import query_prefs_service
+    from services.settings import settings_service
 
     settings = get_settings()
 
@@ -51,6 +55,17 @@ async def _bootstrap_services() -> None:
     await auth_service.connect(db)
     await ingestion_service.connect(db)
 
+    # Attach the DB-backed singletons the chat/retrieval path reads — the SAME
+    # set the FastAPI lifespan attaches (backend/main.py:182-194). Without these,
+    # polymath_chat_query raises "<Service> not attached to a DB": the in-process
+    # chat_orchestrator resolves models, pools, per-user query prefs, and global
+    # retrieval settings (e.g. source_cap) through them. attach() only binds the
+    # shared `db` handle — no extra network connection.
+    settings_service.attach(db)
+    model_profiles_service.attach(db)
+    model_pool_service.attach(db)
+    query_prefs_service.attach(db)
+
     logger.info(
         "MCP services connected: mongo=%s qdrant=%s neo4j=%s",
         settings.MONGODB_URI.split("@")[-1],
@@ -61,9 +76,41 @@ async def _bootstrap_services() -> None:
 
 def _build_mcp_server():
     """Construct the FastMCP server and register the tool surface."""
+    from urllib.parse import urlparse
+
     from mcp.server.fastmcp import FastMCP
+    from mcp.server.transport_security import TransportSecuritySettings
 
     from . import tools
+
+    # DNS-rebinding protection. The SDK auto-enables a localhost-only allowlist
+    # when the server host looks local, which 421s ("Invalid Host header") any
+    # request whose Host is public — e.g. everything arriving through the
+    # Cloudflare tunnel at MCP_PUBLIC_URL. Allowlist the public host (+ localhost
+    # for in-container smoke tests) so remote agents (Hermes, OpenClaw) connect,
+    # while keeping the protection on. Bearer auth is still the real gate.
+    s = get_settings()
+    allowed_hosts = [
+        "localhost", "127.0.0.1",
+        f"localhost:{s.MCP_PORT}", f"127.0.0.1:{s.MCP_PORT}",
+    ]
+    allowed_origins = [
+        "http://localhost", "http://127.0.0.1",
+        f"http://localhost:{s.MCP_PORT}", f"http://127.0.0.1:{s.MCP_PORT}",
+    ]
+    public = (s.MCP_PUBLIC_URL or "").strip()
+    if public:
+        parsed = urlparse(public)
+        if parsed.hostname:
+            allowed_hosts.append(parsed.hostname)
+            if parsed.port:
+                allowed_hosts.append(f"{parsed.hostname}:{parsed.port}")
+        allowed_origins.append(public.rstrip("/"))
+    transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
 
     mcp = FastMCP(
         name="polymath",
@@ -117,6 +164,7 @@ def _build_mcp_server():
             "  • Deletions are not reversible. Use polymath_delete_document "
             "only to clean up confirmed-failed ingests."
         ),
+        transport_security=transport_security,
     )
 
     for fn in tools.ALL_TOOLS:

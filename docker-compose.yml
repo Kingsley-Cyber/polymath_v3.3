@@ -639,6 +639,10 @@ services:
       NEO4J_ENABLED: ${NEO4J_ENABLED:-false}
       LITELLM_URL: http://litellm:4000
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      # Chat model resolution fallback. The web UI passes a model per request,
+      # but MCP/agent callers (Hermes, OpenClaw) usually don't — without this a
+      # fresh conversation raises "No chat model configured". Mirrors backend.
+      DEFAULT_COMPLETION_MODEL: ${DEFAULT_COMPLETION_MODEL:-}
       # Same host-Ollama routing as backend (see comment above).
       OLLAMA_URL: http://host.docker.internal:11434
       REDIS_URL: redis://redis:6379
