@@ -153,6 +153,36 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         ),
     ),
     Requirement(
+        id="retrieval-query-grounding",
+        description="Hybrid/graph retrieval deterministically recalls and ranks evidence that covers the user's core query concepts.",
+        path="backend/services/retriever/__init__.py",
+        needles=(
+            "apply_query_grounding",
+            "ranked_query_grounded",
+            "hydrate_rerank_texts",
+        ),
+    ),
+    Requirement(
+        id="lexical-concept-coverage",
+        description="Lexical recall adds bounded per-concept coverage so one common term cannot crowd out the rest of a multi-concept query.",
+        path="backend/services/retriever/lexical.py",
+        needles=(
+            "_concept_coverage_recall",
+            "concept_groups(query",
+            '"retriever": "lexical_coverage"',
+        ),
+    ),
+    Requirement(
+        id="reranker-input-cap",
+        description="Reranker requests cap document text below the llama.cpp physical-batch failure point.",
+        path="backend/services/reranker.py",
+        needles=(
+            "RERANKER_MAX_DOC_CHARS",
+            '"1000"',
+            "physical batch",
+        ),
+    ),
+    Requirement(
         id="native-ollama-streaming",
         description="Ollama/Ollama Cloud chat routes bypass LiteLLM so content and native thinking chunks stream separately.",
         path="backend/services/llm.py",

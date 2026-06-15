@@ -6,6 +6,10 @@ from dataclasses import dataclass
 
 from models.schemas import RetrievalTier, SourceChunk
 from services.retriever.intent_policy import QueryNeed, RetrievalIntent
+from services.retriever.query_grounding import (
+    chunk_concept_hits,
+    concept_groups,
+)
 
 
 @dataclass(frozen=True)
@@ -112,6 +116,117 @@ def apply_candidate_weights(
         )
     )
     return weighted
+
+
+def _grounded_score(
+    score: float,
+    *,
+    hits: int,
+    total: int,
+    score_scale: str | None,
+) -> float:
+    """Conservative score adjustment for query-concept coverage.
+
+    Bounded rerankers can emit 0..1 scores that look authoritative even when
+    the sidecar failed and the original lexical score was preserved. Complete
+    query-concept coverage gets a small lift; partial/no coverage gets demoted.
+    """
+    if total <= 0:
+        return score
+
+    scale = (score_scale or "").lower()
+    bounded = scale in {"probability", "cosine"} or 0.0 <= score <= 1.0
+    coverage = hits / total
+
+    if bounded:
+        if hits <= 0:
+            return round(max(0.0, score * 0.30), 4)
+        if hits < total:
+            multiplier = 0.62 + (0.18 * coverage)
+            return round(min(1.0, max(0.0, score * multiplier + 0.04 * hits)), 4)
+        return round(min(1.0, max(0.0, score * 1.04 + 0.12)), 4)
+
+    if hits <= 0:
+        return round(score - 1.25, 4)
+    if hits < total:
+        return round(score - (0.65 * (1.0 - coverage)) + (0.10 * hits), 4)
+    return round(score + 0.75 + (0.10 * min(hits, 3)), 4)
+
+
+def apply_query_grounding(
+    chunks: list[SourceChunk],
+    *,
+    query: str,
+    tier: RetrievalTier,
+    score_scale: str | None = None,
+) -> list[SourceChunk]:
+    """Prefer final evidence that covers the user's core query concepts.
+
+    This does not add any new store to a retrieval tier. It only reorders and
+    lightly rescales the candidates already retrieved by that tier, using a
+    deterministic concept coverage pass. If no candidate covers any extracted
+    query concept, the original ordering is preserved.
+    """
+    if len(chunks) <= 1:
+        return chunks
+
+    groups = concept_groups(query)
+    if not groups:
+        return chunks
+
+    scored: list[tuple[SourceChunk, int, tuple[str, ...]]] = []
+    group_counts: dict[str, int] = {group.key: 0 for group in groups}
+    for chunk in chunks:
+        hits, matched = chunk_concept_hits(chunk, groups)
+        for key in matched:
+            group_counts[key] = group_counts.get(key, 0) + 1
+        scored.append((chunk, hits, matched))
+
+    max_hits = max((hits for _, hits, _ in scored), default=0)
+    if max_hits <= 0:
+        return chunks
+
+    total = len(groups)
+    grounded: list[tuple[SourceChunk, int, float]] = []
+    for chunk, hits, matched in scored:
+        copied = chunk.model_copy()
+        original_score = float(copied.score or 0.0)
+        rarity = 0.0
+        for key in matched:
+            count = max(group_counts.get(key, 0), 1)
+            rarity += 1.0 / count
+        if total > 1:
+            rarity = min(1.0, rarity)
+        else:
+            rarity = 0.0
+        copied.score = _grounded_score(
+            original_score,
+            hits=hits,
+            total=total,
+            score_scale=score_scale,
+        )
+        copied.metadata = dict(copied.metadata or {})
+        copied.metadata["query_grounding"] = {
+            "concept_count": total,
+            "matched_count": hits,
+            "matched": list(matched),
+            "original_score": original_score,
+            "adjusted_score": copied.score,
+            "tier": tier.value if hasattr(tier, "value") else str(tier),
+        }
+        grounded.append((copied, hits, rarity))
+
+    grounded.sort(
+        key=lambda item: (
+            -item[1],
+            -item[2],
+            -float(item[0].score or 0.0),
+            item[0].parent_id or "",
+            item[0].doc_id or "",
+            item[0].chunk_id or "",
+        )
+    )
+    return [chunk for chunk, _, _ in grounded]
 
 
 def _candidate_identity(chunk: SourceChunk) -> tuple[str, str, str]:

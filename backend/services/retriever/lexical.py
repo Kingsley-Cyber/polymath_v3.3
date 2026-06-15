@@ -29,6 +29,11 @@ from pymongo.errors import OperationFailure
 from qdrant_client import AsyncQdrantClient, models as qmodels
 from services.conversation import conversation_service
 from services.facets import metadata_with_facets
+from services.retriever.query_grounding import (
+    chunk_concept_hits,
+    concept_groups,
+    group_matches_text,
+)
 
 logger = logging.getLogger(__name__)
 _settings = get_settings()
@@ -119,6 +124,7 @@ class LexicalRetriever:
 
         sparse_corpora, legacy_corpora = await self._split_by_layout(corpus_ids)
         results: list[SourceChunk] = []
+        db = conversation_service._db
 
         if sparse_corpora:
             try:
@@ -136,7 +142,6 @@ class LexicalRetriever:
                 legacy_corpora = list(set(legacy_corpora) | set(sparse_corpora))
 
         if legacy_corpora:
-            db = conversation_service._db
             if db is None:
                 logger.warning(
                     "Lexical Mongo fallback skipped for %d corpora: MongoDB not connected",
@@ -158,6 +163,16 @@ class LexicalRetriever:
                 except Exception as exc:
                     logger.warning("Mongo lexical search failed (%s)", exc)
 
+        coverage_results = await self._concept_coverage_recall(
+            query,
+            sparse_corpora=sparse_corpora,
+            legacy_corpora=legacy_corpora,
+            existing=results,
+            db=db,
+            per_concept_k=2,
+        )
+        results.extend(coverage_results)
+
         # Dedupe across the two backends by chunk_id and sort by score.
         seen: set[str] = set()
         deduped: list[SourceChunk] = []
@@ -169,6 +184,142 @@ class LexicalRetriever:
                 seen.add(cid)
             deduped.append(chunk)
         return deduped[:top_k]
+
+    async def _concept_coverage_recall(
+        self,
+        query: str,
+        *,
+        sparse_corpora: list[str],
+        legacy_corpora: list[str],
+        existing: list[SourceChunk],
+        db,
+        per_concept_k: int = 2,
+    ) -> list[SourceChunk]:
+        """Add tiny, per-concept lexical recall for missing query concepts.
+
+        This prevents a multi-concept query from being dominated by one common
+        term. Example: "NLP and Python" should seed at least some NLP-bearing
+        evidence instead of returning only Python snippets.
+        """
+        groups = concept_groups(query, max_groups=6)
+        if len(groups) <= 1:
+            return []
+
+        supplemental: list[SourceChunk] = []
+        bridge_query = " ".join(group.key for group in groups[:4])
+        if bridge_query:
+            if sparse_corpora:
+                supplemental.extend(
+                    await self._qdrant_sparse_search(
+                        bridge_query,
+                        sparse_corpora,
+                        top_k=per_concept_k,
+                    )
+                )
+            if legacy_corpora and db is not None:
+                try:
+                    supplemental.extend(
+                        await self._text_search(
+                            db,
+                            bridge_query,
+                            legacy_corpora,
+                            top_k=per_concept_k,
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Lexical concept bridge search failed for %s: %s",
+                        bridge_query,
+                        exc,
+                    )
+
+        missing = [
+            group
+            for group in groups
+            if not any(chunk_concept_hits(chunk, [group])[0] for chunk in existing)
+        ]
+        if not missing and not supplemental:
+            return []
+
+        for group in missing[:4]:
+            variants = list(dict.fromkeys((group.key, *group.aliases)))[:2]
+            for variant in variants:
+                if sparse_corpora:
+                    supplemental.extend(
+                        await self._qdrant_sparse_search(
+                            variant,
+                            sparse_corpora,
+                            top_k=per_concept_k,
+                        )
+                    )
+                if legacy_corpora and db is not None:
+                    try:
+                        supplemental.extend(
+                            await self._text_search(
+                                db,
+                                variant,
+                                legacy_corpora,
+                                top_k=per_concept_k,
+                            )
+                        )
+                    except OperationFailure as exc:
+                        logger.warning(
+                            "Mongo text coverage search unavailable (%s); "
+                            "falling back to regex for concept=%s",
+                            exc,
+                            group.key,
+                        )
+                        supplemental.extend(
+                            await self._regex_search(
+                                db,
+                                variant,
+                                legacy_corpora,
+                                top_k=per_concept_k,
+                            )
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Lexical concept coverage search failed for %s: %s",
+                            group.key,
+                            exc,
+                        )
+
+        filtered: list[SourceChunk] = []
+        for chunk in supplemental:
+            hits, _ = chunk_concept_hits(chunk, groups)
+            search_groups = missing or groups
+            matched_group = next(
+                (
+                    group
+                    for group in search_groups
+                    if group_matches_text(
+                        group,
+                        " ".join([chunk.text, chunk.doc_name or ""]),
+                    )
+                ),
+                None,
+            )
+            if matched_group is None:
+                continue
+            copied = chunk.model_copy()
+            copied.source_tier = f"{copied.source_tier}+coverage"
+            copied.provenance = list(copied.provenance or [])
+            copied.provenance.append(
+                {
+                    "retriever": "lexical_coverage",
+                    "concept": matched_group.key,
+                    "concept_hits": hits,
+                }
+            )
+            filtered.append(copied)
+
+        if filtered:
+            logger.info(
+                "Lexical concept coverage added %d candidate(s) for missing concepts=%s",
+                len(filtered),
+                [group.key for group in missing],
+            )
+        return filtered
 
     async def _split_by_layout(
         self, corpus_ids: list[str]

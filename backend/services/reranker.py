@@ -26,10 +26,14 @@ logger = logging.getLogger(__name__)
 # Per-document character cap for rerank requests. The reranker (llama.cpp
 # Qwen3-Reranker) processes each (query, doc) pair against its context window
 # and returns HTTP 500 — not a truncated score — when a pair overflows it.
-# Large parent chunks / summaries in the candidate pool blew past it (verified:
-# a ~20k-char doc 500s; truncated to 2k it 200s). A cross-encoder only attends
-# to its first ~512 tokens anyway, so capping here costs no ranking signal.
-_RERANK_MAX_DOC_CHARS = max(256, int(os.environ.get("RERANKER_MAX_DOC_CHARS", "2000") or 2000))
+# Large parent chunks / summaries in the candidate pool blow past it. The
+# current llama.cpp Qwen3 sidecar hard-fails around a 512-token physical batch;
+# a real 3.8k-char chunk still produced 655 tokens at the old 2k-char cap.
+# A cross-encoder only needs the leading evidence window, so keep this tight.
+_RERANK_MAX_DOC_CHARS = max(
+    256,
+    int(os.environ.get("RERANKER_MAX_DOC_CHARS", "1000") or 1000),
+)
 _RERANK_HTTP_BATCH_SIZE = max(
     1,
     int(os.environ.get("RERANKER_HTTP_BATCH_SIZE", "8") or 8),

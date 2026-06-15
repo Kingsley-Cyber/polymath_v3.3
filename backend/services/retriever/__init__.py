@@ -54,6 +54,7 @@ from services.retriever.merge import merge_pools
 from services.retriever.mode_a import mode_a_expansion
 from services.retriever.ranking_policy import (
     apply_candidate_weights,
+    apply_query_grounding,
     select_with_diversity,
 )
 
@@ -769,6 +770,12 @@ class RetrieverOrchestrator:
                         if final_top_k is not None
                         else settings.DEFAULT_RETRIEVAL_K
                     )
+                    ranked = apply_query_grounding(
+                        ranked,
+                        query=rank_query,
+                        tier=effective_tier,
+                        score_scale=settings.RERANKER_SCORE_SCALE,
+                    )
                     hydrated = await hydrate_chunks(ranked[:effective_final_k], corpus_ids)
                     _log_timings("embed_failed_fallback", len(hydrated))
                     return RetrievalResult(
@@ -851,6 +858,12 @@ class RetrieverOrchestrator:
                 final_top_k
                 if final_top_k is not None
                 else max(20, settings.DEFAULT_RETRIEVAL_K)
+            )
+            a_results_global = apply_query_grounding(
+                a_results_global,
+                query=rank_query,
+                tier=effective_tier,
+                score_scale=settings.RERANKER_SCORE_SCALE,
             )
             top = a_results_global[:effective_global_k]
             _log_timings("global_done", len(top))
@@ -1202,6 +1215,16 @@ class RetrieverOrchestrator:
             counts["rerank_tail_trimmed"] = len(ranked) - len(trimmed_ranked)
             ranked = trimmed_ranked
             counts["ranked"] = len(ranked)
+
+        grounded_ranked = apply_query_grounding(
+            ranked,
+            query=rank_query,
+            tier=effective_tier,
+            score_scale=settings.RERANKER_SCORE_SCALE,
+        )
+        if grounded_ranked is not ranked:
+            ranked = grounded_ranked
+            counts["ranked_query_grounded"] = len(ranked)
 
         # Phase 24 — final_top_k (Custom profile slider) overrides the
         # legacy DEFAULT_RETRIEVAL_K env cap. Never silently swap models or

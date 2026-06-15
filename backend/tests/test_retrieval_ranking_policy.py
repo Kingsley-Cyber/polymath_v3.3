@@ -3,6 +3,7 @@ from services.retriever.intent_policy import infer_retrieval_intent
 from services.retriever import _trim_bounded_rerank_tail
 from services.retriever.ranking_policy import (
     apply_candidate_weights,
+    apply_query_grounding,
     candidate_kind,
     select_with_diversity,
 )
@@ -14,6 +15,7 @@ def _chunk(
     score: float,
     parent_id: str | None = None,
     doc_id: str | None = None,
+    text: str | None = None,
     summary: str | None = None,
     source_tier: str = "tier_a",
     provenance: list[dict] | None = None,
@@ -23,7 +25,7 @@ def _chunk(
         parent_id=parent_id or chunk_id,
         doc_id=doc_id or f"doc-{chunk_id}",
         corpus_id="corpus-1",
-        text=summary or f"text {chunk_id}",
+        text=text or summary or f"text {chunk_id}",
         summary=summary,
         score=score,
         source_tier=source_tier,
@@ -191,3 +193,62 @@ def test_logit_rerank_tail_trim_is_disabled():
     )
 
     assert trimmed == ranked
+
+
+def test_query_grounding_promotes_complete_concept_coverage():
+    ranked = [
+        _chunk(
+            "python-only",
+            score=1.0,
+            text="Python supports threads, locks, descriptors, and protocols.",
+        ),
+        _chunk(
+            "nlp-python",
+            score=0.62,
+            text=(
+                "Natural language processing systems are often prototyped in "
+                "Python with libraries for tokenization and modeling."
+            ),
+        ),
+        _chunk(
+            "sql-only",
+            score=1.0,
+            text="The relational assignment grammar updates a relvar.",
+        ),
+    ]
+
+    grounded = apply_query_grounding(
+        ranked,
+        query="what is nlp and its relation to python",
+        tier=RetrievalTier.qdrant_mongo_graph,
+        score_scale="probability",
+    )
+
+    assert grounded[0].chunk_id == "nlp-python"
+    assert grounded[-1].chunk_id == "sql-only"
+    assert grounded[0].metadata["query_grounding"]["matched"] == ["nlp", "python"]
+
+
+def test_query_grounding_expands_nlp_acronym_alias():
+    ranked = [
+        _chunk(
+            "expanded",
+            score=0.4,
+            text="Natural language processing studies computational language.",
+        ),
+        _chunk(
+            "unrelated",
+            score=1.0,
+            text="Python decorators wrap functions.",
+        ),
+    ]
+
+    grounded = apply_query_grounding(
+        ranked,
+        query="define NLP",
+        tier=RetrievalTier.qdrant_mongo,
+        score_scale="probability",
+    )
+
+    assert grounded[0].chunk_id == "expanded"
+    assert grounded[0].metadata["query_grounding"]["matched"] == ["nlp"]
