@@ -54,6 +54,103 @@ _SHORT_TOKEN_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "kg": ("knowledge", "graph"),
 }
 
+# Deterministic junk/entity-fragment filter shared by seed matching and graph
+# expansion. This catches extraction debris that is structurally high-degree but
+# semantically useless in a graph UI: conjunctions, type labels, one-character
+# fragments, pure numbers, and OCR-ish fragments such as "0 and x2".
+_JUNK_EXACT_LOWER = frozenset(
+    {
+        *_STOP_WORDS,
+        "set",
+        "sets",
+        "entity",
+        "entities",
+        "concept",
+        "concepts",
+        "object",
+        "objects",
+        "item",
+        "items",
+        "thing",
+        "things",
+        "person",
+        "people",
+        "organization",
+        "organizations",
+        "organisations",
+        "organisation",
+        "product",
+        "products",
+        "method",
+        "event",
+        "location",
+        "artifact",
+        "software",
+        "standard",
+        "rule",
+        "law",
+        "laws",
+        "time",
+        "reference",
+        "user",
+        "users",
+        "index",
+        "the book",
+        "left",
+        "middle",
+        "right",
+        "up",
+        "down",
+        "inlineequation",
+        "equationcontent",
+        "equationwrapper",
+        "chapter",
+        "section",
+        "figure",
+        "table",
+        "page",
+        "appendix",
+    }
+)
+_JUNK_NAME_PATTERN = (
+    r"^(?:"
+    r"\[[0-9]+\]|"
+    r"[0-9]+|"
+    r"[a-z]|"
+    r"[a-z][0-9]+|"
+    r"[0-9]+\s+(?:and|or)\s+[a-z0-9]+|"
+    r"(?:chapter|section|figure|table|page|appendix|part|rule)\s+[0-9ivxlcdm]+"
+    r")$"
+)
+_JUNK_NAME_RE = re.compile(_JUNK_NAME_PATTERN)
+_GRAPH_QUERY_MAX_SAFE_HOPS = 2
+_GRAPH_QUERY_MAX_NODE_LIMIT = 120
+_GRAPH_QUERY_MAX_EDGE_LIMIT = 360
+
+
+def _normalize_entity_name(name: str | None) -> str:
+    return re.sub(r"\s+", " ", str(name or "").strip().lower()).strip()
+
+
+def is_junk_entity_name(name: str | None) -> bool:
+    """Return True for deterministic graph-junk surface forms."""
+    low = _normalize_entity_name(name)
+    return not low or low in _JUNK_EXACT_LOWER or bool(_JUNK_NAME_RE.match(low))
+
+
+def _is_junk_entity_row(row: dict) -> bool:
+    return is_junk_entity_name(row.get("display_name") or row.get("name") or row.get("id"))
+
+
+def _dedupe_ordered(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if value and value not in seen:
+            out.append(value)
+            seen.add(value)
+    return out
+
 
 def _tokenize(query: str) -> list[str]:
     """Extract meaningful tokens from the query, lowercased, stop-filtered."""
@@ -175,38 +272,6 @@ async def extract_query_entities(
     if not contains_tokens and not exact_short_tokens and not vector_seed_ids:
         return []
 
-    # Single Cypher pass — matches via EITHER literal terms OR the
-    # vector_seed_ids set. Long terms use CONTAINS. Short acronym terms use
-    # token boundaries so "ai" does not match "domain" / "container".
-    # Mention_count comes from the same MENTIONS subquery. `vector_match` flag
-    # rides through so the post-hydrate scoring can boost vector hits even
-    # when their name has no token overlap (the whole point of the vector path).
-    cypher = """
-    MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)
-    WITH c, e,
-         toLower(
-           coalesce(e.normalized_name, '') + ' ' +
-           coalesce(e.canonical_name, '') + ' ' +
-           coalesce(e.display_name, '')
-         ) AS name_text
-    WHERE (
-        size($contains_tokens) > 0
-        AND ANY(tok IN $contains_tokens WHERE name_text CONTAINS tok)
-    ) OR (
-        size($exact_short_tokens) > 0
-        AND ANY(tok IN $exact_short_tokens WHERE
-            name_text =~ ('.*(^|[^a-z0-9])' + tok + '([^a-z0-9]|$).*')
-        )
-    ) OR e.entity_id IN $vector_seed_ids
-    WITH e, count(DISTINCT c) AS mention_count
-    RETURN
-        e.entity_id     AS entity_id,
-        coalesce(e.display_name, e.normalized_name, '') AS display_name,
-        coalesce(e.primary_entity_type, e.entity_type, 'other') AS entity_type,
-        mention_count
-    ORDER BY mention_count DESC
-    LIMIT $hard_limit
-    """
     # Hard limit budget — give vector seeds room to land on top even
     # when the literal path would have already filled the result set.
     hard_limit = max(
@@ -214,15 +279,82 @@ async def extract_query_entities(
         len(vector_seed_ids) + 10,
     )
 
+    if vector_seed_ids:
+        # Fast path: Qdrant already narrowed the query to a bounded entity-id
+        # scope. Hydrate those IDs directly instead of running the expensive
+        # corpus-wide literal scan.
+        cypher = """
+        MATCH (e:Entity)
+        WHERE e.entity_id IN $vector_seed_ids
+        OPTIONAL MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(e)
+        WITH e, count(DISTINCT c) AS mention_count,
+             toLower(coalesce(e.display_name, e.normalized_name, e.canonical_name, e.entity_id, '')) AS surface_text
+        WHERE mention_count > 0
+          AND surface_text <> ''
+          AND NOT surface_text IN $junk_exact
+          AND NOT surface_text =~ $junk_pattern
+        RETURN
+            e.entity_id     AS entity_id,
+            coalesce(e.display_name, e.normalized_name, '') AS display_name,
+            coalesce(e.primary_entity_type, e.entity_type, 'other') AS entity_type,
+            mention_count
+        ORDER BY mention_count DESC, entity_id ASC
+        LIMIT $hard_limit
+        """
+        params = {
+            "corpus_id": corpus_id,
+            "vector_seed_ids": list(vector_seed_ids),
+            "hard_limit": hard_limit,
+            "junk_exact": list(_JUNK_EXACT_LOWER),
+            "junk_pattern": _JUNK_NAME_PATTERN,
+        }
+    else:
+        # Fallback path for cold/no-vector deployments. This scans corpus
+        # mentions, so keep it behind the vector fast path.
+        cypher = """
+        MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)
+        WITH c, e,
+             toLower(
+               coalesce(e.normalized_name, '') + ' ' +
+               coalesce(e.canonical_name, '') + ' ' +
+               coalesce(e.display_name, '')
+             ) AS name_text,
+             toLower(coalesce(e.display_name, e.normalized_name, e.canonical_name, e.entity_id, '')) AS surface_text
+        WHERE surface_text <> ''
+          AND NOT surface_text IN $junk_exact
+          AND NOT surface_text =~ $junk_pattern
+          AND (
+            (
+                size($contains_tokens) > 0
+                AND ANY(tok IN $contains_tokens WHERE name_text CONTAINS tok)
+            ) OR (
+                size($exact_short_tokens) > 0
+                AND ANY(tok IN $exact_short_tokens WHERE
+                    name_text =~ ('.*(^|[^a-z0-9])' + tok + '([^a-z0-9]|$).*')
+                )
+            )
+          )
+        WITH e, count(DISTINCT c) AS mention_count
+        RETURN
+            e.entity_id     AS entity_id,
+            coalesce(e.display_name, e.normalized_name, '') AS display_name,
+            coalesce(e.primary_entity_type, e.entity_type, 'other') AS entity_type,
+            mention_count
+        ORDER BY mention_count DESC, entity_id ASC
+        LIMIT $hard_limit
+        """
+        params = {
+            "corpus_id": corpus_id,
+            "contains_tokens": contains_tokens,
+            "exact_short_tokens": exact_short_tokens,
+            "vector_seed_ids": [],
+            "hard_limit": hard_limit,
+            "junk_exact": list(_JUNK_EXACT_LOWER),
+            "junk_pattern": _JUNK_NAME_PATTERN,
+        }
+
     async with driver.session() as session:
-        result = await session.run(
-            cypher,
-            corpus_id=corpus_id,
-            contains_tokens=contains_tokens,
-            exact_short_tokens=exact_short_tokens,
-            vector_seed_ids=list(vector_seed_ids),
-            hard_limit=hard_limit,
-        )
+        result = await session.run(cypher, **params)
         rows = [dict(r) async for r in result]
 
     if not rows:
@@ -240,6 +372,8 @@ async def extract_query_entities(
     # dominate when both paths matched (high-confidence convergence).
     filtered_rows: list[dict] = []
     for r in rows:
+        if _is_junk_entity_row(r):
+            continue
         name_low = (r.get("display_name") or "").lower()
         overlap = _literal_overlap_count(name_low, tokens)
         mentions = r.get("mention_count", 1)
@@ -313,30 +447,28 @@ async def expand_subgraph(
     if not entity_ids:
         return {"nodes": [], "links": []}
 
-    # Cap hops at 3 to keep traversal bounded. Path patterns with variable
-    # depth (`*1..3`) are Community-safe as long as we LIMIT the result set.
-    hops = max(1, min(int(max_hops), 3))
+    # Variable-length path enumeration (`RELATES_TO*1..N`) explodes on large
+    # corpora because Neo4j must materialize paths before the final LIMIT. Use
+    # deterministic hop-frontier expansion instead: each hop is one RELATES_TO,
+    # corpus-scoped, junk-filtered, and globally capped before the next hop.
+    hops = max(1, min(int(max_hops), _GRAPH_QUERY_MAX_SAFE_HOPS))
+    node_limit = max(
+        len(entity_ids),
+        min(max(1, int(limit)), _GRAPH_QUERY_MAX_NODE_LIMIT),
+    )
+    seed_ids = _dedupe_ordered(list(entity_ids))
+    node_by_id: dict[str, dict] = {}
 
-    cypher = f"""
-    MATCH (seed:Entity)
-    WHERE seed.entity_id IN $entity_ids
-
-    // Find entities reachable within N hops, scoped to the corpus
-    OPTIONAL MATCH path = (seed)-[rels:RELATES_TO*1..{hops}]-(other:Entity)
-    WHERE EXISTS {{
-        MATCH (c:Chunk {{corpus_id: $corpus_id}})-[:MENTIONS]->(other)
-    }}
-      AND all(rel IN rels WHERE $corpus_id IN coalesce(rel.corpus_ids, []))
-
-    WITH collect(DISTINCT seed) AS seeds, collect(DISTINCT other) AS others
-    WITH [n IN seeds + others WHERE n IS NOT NULL] AS all_entities
-
-    UNWIND all_entities AS e
-    WITH DISTINCT e, all_entities
-    // Optional mention count scoped to corpus for hub sizing
-    OPTIONAL MATCH (mc:Chunk {{corpus_id: $corpus_id}})-[:MENTIONS]->(e)
-    WITH e, count(DISTINCT mc) AS mention_count, all_entities
-
+    seed_cypher = """
+    MATCH (e:Entity)
+    WHERE e.entity_id IN $entity_ids
+    OPTIONAL MATCH (mc:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(e)
+    WITH e, count(DISTINCT mc) AS mention_count,
+         toLower(coalesce(e.display_name, e.normalized_name, e.canonical_name, e.entity_id, '')) AS surface_text
+    WHERE mention_count > 0
+      AND surface_text <> ''
+      AND NOT surface_text IN $junk_exact
+      AND NOT surface_text =~ $junk_pattern
     RETURN
         e.entity_id                                       AS id,
         coalesce(e.display_name, e.normalized_name, '')   AS display_name,
@@ -347,18 +479,87 @@ async def expand_subgraph(
         e.canonical_family                                AS canonical_family,
         coalesce(e.confidence, e.confidence_score)        AS confidence,
         mention_count,
-        e.entity_id IN $entity_ids                        AS is_seed
+        true                                              AS is_seed
+    ORDER BY mention_count DESC, id ASC
     LIMIT $limit
+    """
+
+    hop_cypher = """
+    MATCH (src:Entity)-[r:RELATES_TO]-(other:Entity)
+    WHERE src.entity_id IN $frontier_ids
+      AND NOT other.entity_id IN $seen_ids
+      AND $corpus_id IN coalesce(r.corpus_ids, [])
+    OPTIONAL MATCH (mc:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(other)
+    WITH other,
+         count(DISTINCT src.entity_id) AS frontier_hits,
+         count(DISTINCT r) AS edge_count,
+         count(DISTINCT mc) AS mention_count,
+         toLower(coalesce(other.display_name, other.normalized_name, other.canonical_name, other.entity_id, '')) AS surface_text
+    WHERE mention_count > 0
+      AND surface_text <> ''
+      AND NOT surface_text IN $junk_exact
+      AND NOT surface_text =~ $junk_pattern
+    RETURN
+        other.entity_id                                       AS id,
+        coalesce(other.display_name, other.normalized_name, '') AS display_name,
+        coalesce(other.primary_entity_type, other.entity_type, 'other') AS entity_type,
+        other.primary_entity_type                             AS primary_entity_type,
+        other.definitional_phrase                             AS definitional_phrase,
+        other.observed_entity_types                           AS observed_entity_types,
+        other.canonical_family                                AS canonical_family,
+        coalesce(other.confidence, other.confidence_score)    AS confidence,
+        mention_count,
+        false                                                AS is_seed,
+        frontier_hits,
+        edge_count
+    ORDER BY frontier_hits DESC, mention_count DESC, edge_count DESC, id ASC
+    LIMIT $hop_limit
     """
 
     async with driver.session() as session:
         result = await session.run(
-            cypher,
-            entity_ids=entity_ids,
+            seed_cypher,
+            entity_ids=seed_ids,
             corpus_id=corpus_id,
-            limit=int(limit),
+            limit=node_limit,
+            junk_exact=list(_JUNK_EXACT_LOWER),
+            junk_pattern=_JUNK_NAME_PATTERN,
         )
-        node_rows = [dict(r) async for r in result]
+        for row in [dict(r) async for r in result]:
+            if not row.get("id") or _is_junk_entity_row(row):
+                continue
+            node_by_id[row["id"]] = row
+
+        frontier_ids = [eid for eid in seed_ids if eid in node_by_id]
+        if not frontier_ids:
+            return {"nodes": [], "links": []}
+
+        for _hop in range(hops):
+            remaining = node_limit - len(node_by_id)
+            if remaining <= 0 or not frontier_ids:
+                break
+            hop_limit = min(max(remaining * 4, 24), 180)
+            result = await session.run(
+                hop_cypher,
+                frontier_ids=frontier_ids,
+                seen_ids=list(node_by_id),
+                corpus_id=corpus_id,
+                hop_limit=hop_limit,
+                junk_exact=list(_JUNK_EXACT_LOWER),
+                junk_pattern=_JUNK_NAME_PATTERN,
+            )
+            new_frontier: list[str] = []
+            for row in [dict(r) async for r in result]:
+                nid = row.get("id")
+                if not nid or nid in node_by_id or _is_junk_entity_row(row):
+                    continue
+                node_by_id[nid] = row
+                new_frontier.append(nid)
+                if len(node_by_id) >= node_limit:
+                    break
+            frontier_ids = new_frontier
+
+    node_rows = list(node_by_id.values())
 
     if not node_rows:
         return {"nodes": [], "links": []}
@@ -377,10 +578,17 @@ async def expand_subgraph(
         coalesce(r.predicate, 'related_to')       AS predicate,
         coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
         coalesce(r.confidence, 0.5)               AS confidence
+    ORDER BY confidence DESC, source ASC, target ASC
+    LIMIT $edge_limit
     """
 
     async with driver.session() as session:
-        result = await session.run(edge_cypher, node_ids=node_ids, corpus_id=corpus_id)
+        result = await session.run(
+            edge_cypher,
+            node_ids=node_ids,
+            corpus_id=corpus_id,
+            edge_limit=_GRAPH_QUERY_MAX_EDGE_LIMIT,
+        )
         edge_rows = [dict(r) async for r in result]
 
     # Phase 3 — additive annotation when the analytics cache is warm.
@@ -586,20 +794,29 @@ async def find_bridges(
     if len(entity_ids) < 2:
         return []
 
-    hops = max(1, min(int(max_hops), 3))
-
-    cypher = f"""
+    # Keep the fallback deliberately one-hop and bounded. The old
+    # RELATES_TO*1..N path-count query was another corpus-scale path
+    # enumerator and can exhaust Neo4j's transaction pool. Analytics warm
+    # corpora still use the richer fragile/betweenness path above.
+    cypher = """
+    UNWIND $entity_ids AS seed_id
     MATCH (seed:Entity)
-    WHERE seed.entity_id IN $entity_ids
+    WHERE seed.entity_id = seed_id
 
-    MATCH (seed)-[:RELATES_TO*1..{hops}]-(bridge:Entity)
+    MATCH (seed)-[r:RELATES_TO]-(bridge:Entity)
     WHERE NOT bridge.entity_id IN $entity_ids
-      AND EXISTS {{
-          MATCH (c:Chunk {{corpus_id: $corpus_id}})-[:MENTIONS]->(bridge)
-      }}
+      AND $corpus_id IN coalesce(r.corpus_ids, [])
+    OPTIONAL MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(bridge)
 
-    WITH bridge, collect(DISTINCT seed.entity_id) AS connected_seeds
+    WITH bridge,
+         collect(DISTINCT seed.entity_id) AS connected_seeds,
+         count(DISTINCT c) AS mention_count,
+         toLower(coalesce(bridge.display_name, bridge.normalized_name, bridge.canonical_name, bridge.entity_id, '')) AS surface_text
     WHERE size(connected_seeds) >= 2
+      AND mention_count > 0
+      AND surface_text <> ''
+      AND NOT surface_text IN $junk_exact
+      AND NOT surface_text =~ $junk_pattern
 
     RETURN
         bridge.entity_id                                        AS entity_id,
@@ -607,7 +824,7 @@ async def find_bridges(
         coalesce(bridge.primary_entity_type, bridge.entity_type, 'other') AS entity_type,
         size(connected_seeds)                                   AS connected_seed_count,
         connected_seeds                                         AS connected_seeds
-    ORDER BY connected_seed_count DESC
+    ORDER BY connected_seed_count DESC, mention_count DESC, entity_id ASC
     LIMIT $limit
     """
 
@@ -617,6 +834,8 @@ async def find_bridges(
             entity_ids=entity_ids,
             corpus_id=corpus_id,
             limit=int(limit),
+            junk_exact=list(_JUNK_EXACT_LOWER),
+            junk_pattern=_JUNK_NAME_PATTERN,
         )
         rows = [dict(r) async for r in result]
         # Stamp source so callers can distinguish path-count results

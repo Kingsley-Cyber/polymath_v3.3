@@ -279,31 +279,73 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
             for s in seeds
             if s.get("entity_id")
         }
+        seed_nodes = [
+            {
+                "id": s["entity_id"],
+                "display_name": s.get("display_name", ""),
+                "entity_type": s.get("entity_type", "other"),
+                "primary_entity_type": s.get("primary_entity_type"),
+                "definitional_phrase": s.get("definitional_phrase"),
+                "observed_entity_types": s.get("observed_entity_types"),
+                "canonical_family": s.get("canonical_family"),
+                "confidence": s.get("confidence"),
+                "mention_count": s.get("mention_count", 0),
+                "is_seed": True,
+            }
+            for s in seeds
+            if s.get("entity_id")
+        ]
         cm = corpus_metrics_map.get(cid)
         # Phase 3 — expand_subgraph annotates returned nodes with
         # pagerank_score / concept_id / is_working_entity when warm.
         # Same return shape otherwise.
-        subgraph = await expand_subgraph(
-            entity_ids=seed_ids,
-            corpus_id=cid,
-            driver=driver,
-            max_hops=body.max_hops,
-            limit=body.limit,
-            metrics=cm,
-            entity_scores=seed_scores,
-        )
+        try:
+            subgraph = await expand_subgraph(
+                entity_ids=seed_ids,
+                corpus_id=cid,
+                driver=driver,
+                max_hops=body.max_hops,
+                limit=body.limit,
+                metrics=cm,
+                entity_scores=seed_scores,
+            )
+        except Exception as exc:
+            logger.warning(
+                "graph_query: corpus=%s expand_subgraph failed (%s) — returning seed graph",
+                cid,
+                exc,
+            )
+            subgraph = {"nodes": seed_nodes, "links": []}
+        if not subgraph.get("nodes"):
+            subgraph = {"nodes": seed_nodes, "links": []}
         # Phase 2 — metrics may be None (cold cache); find_bridges
         # handles that and falls back to path-counting Cypher.
-        bridges = await find_bridges(
-            driver=driver,
-            entity_ids=seed_ids,
-            corpus_id=cid,
-            max_hops=body.max_hops,
-            metrics=cm,
-        )
+        try:
+            bridges = await find_bridges(
+                driver=driver,
+                entity_ids=seed_ids,
+                corpus_id=cid,
+                max_hops=body.max_hops,
+                metrics=cm,
+            )
+        except Exception as exc:
+            logger.warning(
+                "graph_query: corpus=%s bridge detection failed (%s) — continuing",
+                cid,
+                exc,
+            )
+            bridges = []
         # Phase 3 — find_gaps emits terminological / analogy / transfer
         # gap types when warm, in addition to the missing-edge baseline.
-        gaps = await find_gaps(driver=driver, entity_ids=seed_ids, metrics=cm)
+        try:
+            gaps = await find_gaps(driver=driver, entity_ids=seed_ids, metrics=cm)
+        except Exception as exc:
+            logger.warning(
+                "graph_query: corpus=%s gap detection failed (%s) — continuing",
+                cid,
+                exc,
+            )
+            gaps = []
         return cid, {
             "nodes": subgraph["nodes"],
             "links": subgraph["links"],
@@ -1210,8 +1252,63 @@ async def graph_discover(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
-        import logging
-        logging.getLogger(__name__).exception("Discover failed: %s", exc)
+        if "Graph discovery legacy scope module is unavailable" in str(exc):
+            logger.warning(
+                "Discover legacy module unavailable — returning bounded graph-query fallback"
+            )
+            try:
+                fallback = await graph_query(
+                    GraphQueryRequest(
+                        corpus_ids=discover_corpus_ids,
+                        query=body.query,
+                        max_hops=2,
+                        limit=80,
+                        seed_limit_per_token=3,
+                    )
+                )
+                fallback_payload = fallback.model_dump()
+            except Exception as fallback_exc:  # noqa: BLE001
+                logger.warning(
+                    "Discover fallback graph query failed (%s) — returning empty fallback",
+                    fallback_exc,
+                )
+                fallback_payload = {
+                    "nodes": [],
+                    "links": [],
+                    "bridges": [],
+                    "hubs": [],
+                    "gaps": [],
+                    "seed_entities": [],
+                }
+            return GraphDiscoverResponse(
+                session_id=body.session_id or "",
+                corpus_id=discover_corpus_ids[0],
+                corpus_ids=discover_corpus_ids,
+                query=body.query,
+                mode=body.mode,
+                interpretation=(
+                    "Mission Control's legacy synthesis module is unavailable in this "
+                    "backend image, so Polymath returned a bounded graph-query fallback "
+                    "instead of failing."
+                ),
+                graph={
+                    "nodes": fallback_payload.get("nodes", []),
+                    "links": fallback_payload.get("links", []),
+                },
+                anchors=fallback_payload.get("seed_entities", []),
+                bridges=fallback_payload.get("bridges", []),
+                hubs=fallback_payload.get("hubs", []),
+                gaps_v2=fallback_payload.get("gaps", []),
+                metrics={
+                    "fallback": "graph_query",
+                    "reason": "legacy_orchestrator_missing",
+                },
+                headline={
+                    "headline": "Bounded graph query fallback",
+                    "kicker": "Mission Control legacy module unavailable",
+                },
+            )
+        logger.exception("Discover failed: %s", exc)
         raise HTTPException(status_code=500, detail="Mission Control synthesis failed")
 
     return GraphDiscoverResponse(

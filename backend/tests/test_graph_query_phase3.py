@@ -100,6 +100,22 @@ _install_stubs_if_missing()
 from services.graph import graph_query  # noqa: E402
 
 
+def test_junk_entity_name_filter_catches_fragments():
+    assert graph_query.is_junk_entity_name("And")
+    assert graph_query.is_junk_entity_name("Set")
+    assert graph_query.is_junk_entity_name("0")
+    assert graph_query.is_junk_entity_name("0 and x2")
+    assert graph_query.is_junk_entity_name("Person")
+    assert graph_query.is_junk_entity_name("the book")
+    assert graph_query.is_junk_entity_name("EquationWrapper")
+    assert graph_query.is_junk_entity_name("left")
+    assert graph_query.is_junk_entity_name("middle")
+    assert graph_query.is_junk_entity_name("[12]")
+    assert graph_query.is_junk_entity_name("Rule 3")
+    assert not graph_query.is_junk_entity_name("Nash equilibrium")
+    assert not graph_query.is_junk_entity_name("C++")
+
+
 # ── Fake Neo4j driver ────────────────────────────────────────────────
 
 
@@ -132,6 +148,7 @@ class _FakeSession:
 class _FakeDriver:
     def __init__(self, on_run):
         self._on_run = on_run
+        self.queries = []
 
     def session(self):
         return _FakeSession(self._on_run)
@@ -142,14 +159,17 @@ def _build_expand_driver(node_rows, edge_rows):
     edge_rows on the second (matches expand_subgraph's two-Cypher
     pattern)."""
     state = {"calls": 0}
+    driver = _FakeDriver(lambda *_args, **_kwargs: _FakeResult([]))
 
     def on_run(cypher, **kwargs):
+        driver.queries.append(cypher)
         state["calls"] += 1
         if state["calls"] == 1:
             return _FakeResult(node_rows)
         return _FakeResult(edge_rows)
 
-    return _FakeDriver(on_run)
+    driver._on_run = on_run
+    return driver
 
 
 # ── expand_subgraph tests ───────────────────────────────────────────
@@ -160,9 +180,9 @@ async def test_expand_subgraph_cold_cache_unannotated():
     """metrics=None → no annotations added. Byte-for-byte
     pre-Phase-3 shape."""
     node_rows = [
-        {"id": "a", "display_name": "A", "entity_type": "Concept",
+        {"id": "a", "display_name": "Alpha", "entity_type": "Concept",
          "mention_count": 3, "is_seed": True},
-        {"id": "b", "display_name": "B", "entity_type": "Concept",
+        {"id": "b", "display_name": "Beta", "entity_type": "Concept",
          "mention_count": 5, "is_seed": False},
     ]
     edge_rows = [
@@ -174,6 +194,7 @@ async def test_expand_subgraph_cold_cache_unannotated():
         entity_ids=["a"], corpus_id="corp-1", driver=driver, metrics=None
     )
     assert out["nodes"] == node_rows
+    assert all("RELATES_TO*" not in q for q in driver.queries)
     # No annotation fields leaked into the cold-cache path.
     for n in out["nodes"]:
         assert "pagerank_score" not in n
@@ -186,9 +207,9 @@ async def test_expand_subgraph_warm_cache_annotates():
     """metrics warm → nodes annotated with pagerank / concept_id /
     is_working_entity. Original fields preserved."""
     node_rows = [
-        {"id": "a", "display_name": "A", "entity_type": "Concept",
+        {"id": "a", "display_name": "Alpha", "entity_type": "Concept",
          "mention_count": 3, "is_seed": True},
-        {"id": "b", "display_name": "B", "entity_type": "Concept",
+        {"id": "b", "display_name": "Beta", "entity_type": "Concept",
          "mention_count": 5, "is_seed": False},
     ]
     edge_rows = [
@@ -238,7 +259,7 @@ async def test_expand_subgraph_no_pagerank_overlap_still_annotates_working():
     pagerank_score field is omitted but other annotations (working
     entity, concept_id) can still apply."""
     node_rows = [
-        {"id": "a", "display_name": "A", "entity_type": "Concept",
+        {"id": "a", "display_name": "Alpha", "entity_type": "Concept",
          "mention_count": 3, "is_seed": True},
     ]
     driver = _build_expand_driver(node_rows, [])
@@ -265,7 +286,7 @@ async def test_expand_subgraph_select_working_entities_failure_graceful():
     """If select_working_entities raises (half-deserialized cache),
     the BFS rows still return — no exception escapes."""
     node_rows = [
-        {"id": "a", "display_name": "A", "entity_type": "Concept",
+        {"id": "a", "display_name": "Alpha", "entity_type": "Concept",
          "mention_count": 1, "is_seed": True},
     ]
     driver = _build_expand_driver(node_rows, [])
