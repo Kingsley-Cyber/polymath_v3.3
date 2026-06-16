@@ -80,6 +80,26 @@ class Settings(BaseSettings):
 
     # === OLLAMA ===
     OLLAMA_URL: str = Field(default="http://ollama:11434", description="Ollama API URL")
+    OLLAMA_KEEP_ALIVE: str = Field(
+        default="30m",
+        description=(
+            "Default keep_alive for native Ollama chat calls so a local chat "
+            "model stays resident between turns instead of unloading after "
+            "Ollama's ~5m idle default (which forces a multi-minute cold reload "
+            "on the next turn). Applied only when the request does not set its "
+            "own keep_alive. Set to '-1' to keep loaded indefinitely, '0' to "
+            "unload immediately. No effect on remote-API models."
+        ),
+    )
+    OLLAMA_WARMUP_MODEL: str = Field(
+        default="",
+        description=(
+            "Optional model id to pre-load at startup with a tiny completion so "
+            "the first chat turn skips the cold-load. Leave blank to disable "
+            "(the chat model is user-selected, so there is no safe default). "
+            "Set to your primary local chat model, e.g. 'ollama/llama3.2:3b'."
+        ),
+    )
 
     # === REDIS ===
     REDIS_URL: str = Field(

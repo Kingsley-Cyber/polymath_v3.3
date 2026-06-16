@@ -46,6 +46,15 @@ def _is_confident_document_anchor(chunk: SourceChunk) -> bool:
     return _document_anchor_confidence(chunk) >= 0.75
 
 
+def _is_graph_expansion(chunk: SourceChunk) -> bool:
+    """A chunk surfaced by Neo4j Mode A/B expansion (graph_mode_a/_bridge/_b).
+
+    These are demoted by the text-similarity cross-encoder because their value
+    is relational, not lexical, so the diversity pass reserves slots for them.
+    """
+    return (chunk.source_tier or "").lower().startswith("graph_mode")
+
+
 def candidate_kind(chunk: SourceChunk) -> str:
     """Classify a candidate by retrieval lane."""
     source_tier = (chunk.source_tier or "").lower()
@@ -271,6 +280,33 @@ def select_with_diversity(
     selected_parents = {chunk.parent_id or chunk.chunk_id for chunk in selected}
 
     added = 0
+
+    # Graph tier: the cross-encoder ranks pure text similarity, which
+    # systematically demotes graph-expanded neighbors (their value is the
+    # relationship, not lexical overlap with the query). Without a carve-out the
+    # expensive expansion is reranked away and the tier collapses toward Hybrid.
+    # Reserve a small, dedicated number of extra slots for graph-provenance
+    # chunks — only as many as are MISSING from the natural top-k — so the
+    # graph context actually reaches the LLM. This runs first and uses its own
+    # budget (separate from max_extra) so it cannot be crowded out.
+    if tier == RetrievalTier.qdrant_mongo_graph:
+        graph_reserve = 2 if intent.need == QueryNeed.BROAD else 1
+        graph_in_topk = sum(1 for c in selected if _is_graph_expansion(c))
+        graph_need = max(0, graph_reserve - graph_in_topk)
+        for candidate in ranked[final_top_k:]:
+            if graph_need <= 0:
+                break
+            if not _is_graph_expansion(candidate):
+                continue
+            identity = _candidate_identity(candidate)
+            parent_key = candidate.parent_id or candidate.chunk_id
+            if identity in selected_identities or parent_key in selected_parents:
+                continue
+            selected.append(candidate)
+            selected_identities.add(identity)
+            selected_parents.add(parent_key)
+            graph_need -= 1
+            added += 1
 
     # Source-constrained queries can produce high-confidence document-anchor
     # candidates that cross-encoders still demote because the candidate text is

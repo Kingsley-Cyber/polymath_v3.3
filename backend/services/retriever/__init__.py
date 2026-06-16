@@ -772,10 +772,17 @@ class RetrieverOrchestrator:
 
         seed_facts: list[SourceFact] = []
         fact_seed_chunks: list[SourceChunk] = []
+        # Kick off Graph fact seeding CONCURRENTLY (it only needs the query +
+        # corpus_ids, not the embedding) so its ~0.5s Neo4j round-trip overlaps
+        # the embed + funnel work instead of running before it. The result is
+        # awaited lazily via _resolve_fact_seed() right before its first use on
+        # each return path. _add_timing records only the blocking await time, so
+        # the timings reflect the overlap.
+        _fact_seed_resolved = False
+        _fact_seed_task: asyncio.Future | None = None
         if effective_tier == RetrievalTier.qdrant_mongo_graph and settings.NEO4J_ENABLED:
-            phase_started = perf_counter()
-            try:
-                seed_facts = await asyncio.wait_for(
+            _fact_seed_task = asyncio.ensure_future(
+                asyncio.wait_for(
                     self._retrieve_graph_seed_facts(
                         rank_query,
                         corpus_ids,
@@ -783,16 +790,35 @@ class RetrieverOrchestrator:
                     ),
                     timeout=float(settings.GRAPH_FACT_SEED_TIMEOUT_SECONDS),
                 )
+            )
+
+        async def _resolve_fact_seed() -> None:
+            """Await the concurrent fact-seed task once and populate state.
+
+            Idempotent: safe to call on every return path; only the first call
+            does work. A timeout/failure degrades to no facts, matching the
+            previous behavior.
+            """
+            nonlocal seed_facts, fact_seed_chunks, _fact_seed_resolved
+            if _fact_seed_resolved or _fact_seed_task is None:
+                return
+            _fact_seed_resolved = True
+            await_started = perf_counter()
+            try:
+                seed_facts = await _fact_seed_task
             except asyncio.TimeoutError:
                 logger.warning(
                     "Graph fact seeding timed out after %.1fs; continuing without facts",
                     float(settings.GRAPH_FACT_SEED_TIMEOUT_SECONDS),
                 )
                 seed_facts = []
+            except Exception as exc:  # never let seeding break retrieval
+                logger.warning("Graph fact seeding failed: %s", exc)
+                seed_facts = []
             fact_seed_chunks = _fact_seed_chunks(seed_facts)
             counts["facts"] = len(seed_facts)
             counts["fact_seed_chunks"] = len(fact_seed_chunks)
-            _add_timing("fact_seed", phase_started)
+            _add_timing("fact_seed", await_started)
 
         # [1] Embed query. Hydrated tiers can still fall back to lexical
         # retrieval if the embedder is down; qdrant_only remains pure vector.
@@ -806,6 +832,8 @@ class RetrieverOrchestrator:
         except Exception as exc:
             _add_timing("embed", phase_started)
             logger.warning("Embedder unreachable, skipping retrieval: %s", exc)
+            # Fallback path consumes fact_seed_chunks/seed_facts below.
+            await _resolve_fact_seed()
             if effective_tier != RetrievalTier.qdrant_only:
                 lexical_limit = _lexical_limit_for(
                     effective_tier,
@@ -919,6 +947,8 @@ class RetrieverOrchestrator:
         # chunks" work.
         if search_mode == "global":
             global_top_k = top_k_summary if top_k_summary is not None else 50
+            # Global return carries facts=seed_facts; resolve before returning.
+            await _resolve_fact_seed()
             phase_started = perf_counter()
             try:
                 a_results_global = await funnel_a.search(
@@ -1115,6 +1145,8 @@ class RetrieverOrchestrator:
                 "document_anchor",
             )
         _add_timing("funnels", phase_started)
+        # Normal path: fact seed overlapped embed + funnels; collect it now.
+        await _resolve_fact_seed()
         counts["funnel_a"] = len(a_results)
         counts["funnel_b"] = len(b_results)
         counts["lexical"] = len(lexical_results)
@@ -1274,6 +1306,14 @@ class RetrieverOrchestrator:
         # before the cross-encoder sees hydrated text, making the "full RAG"
         # tier worse than Hybrid/Vector. Keep a wider graph floor, then let
         # final_top_k cap what reaches the model.
+        #
+        # The floor is moderate (48 for the default final_top_k=8) rather than
+        # the old 64: still ~2x Hybrid's pre-rerank pool so the semantic core is
+        # preserved, but ~25% fewer cross-encoder forward passes (~0.8s on the
+        # linear Metal reranker). Graph-neighbor survival no longer depends on a
+        # huge window — select_with_diversity now reserves final slots for
+        # graph-provenance chunks (ranking_policy._is_graph_expansion), so
+        # narrowing here is safe.
         effective_rerank_top_n = rerank_top_n
         if (
             effective_tier == RetrievalTier.qdrant_mongo_graph
@@ -1281,8 +1321,8 @@ class RetrieverOrchestrator:
             and merged
         ):
             graph_floor = max(
-                64,
-                int(final_top_k or settings.DEFAULT_RETRIEVAL_K) * 8,
+                48,
+                int(final_top_k or settings.DEFAULT_RETRIEVAL_K) * 6,
             )
             effective_rerank_top_n = min(
                 len(merged),

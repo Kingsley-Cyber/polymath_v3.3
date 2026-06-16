@@ -205,8 +205,15 @@ class LLMService:
             ollama_body["think"] = body["think"]
         if body.get("format") is not None:
             ollama_body["format"] = body["format"]
-        if body.get("keep_alive") is not None:
-            ollama_body["keep_alive"] = body["keep_alive"]
+        # Keep the local chat model resident between turns. Without an explicit
+        # keep_alive, Ollama unloads after ~5m idle and the next turn pays a
+        # multi-minute cold reload. Honor a request-provided value; otherwise
+        # fall back to the configured default. (No effect on remote-API models.)
+        keep_alive = body.get("keep_alive")
+        if keep_alive is None:
+            keep_alive = getattr(settings, "OLLAMA_KEEP_ALIVE", None) or None
+        if keep_alive is not None:
+            ollama_body["keep_alive"] = keep_alive
         if tools:
             ollama_body["tools"] = tools
 

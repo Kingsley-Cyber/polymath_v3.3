@@ -284,7 +284,7 @@ async def test_chat_query_e2e_document_anchor_seeds_graph_expansion(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_chat_query_e2e_graph_pipeline_order_is_fact_first(monkeypatch):
+async def test_chat_query_e2e_graph_pipeline_seeds_facts_before_expand(monkeypatch):
     events: list[tuple[str, tuple[str, ...]]] = []
     monkeypatch.setattr(retriever_module.settings, "NEO4J_ENABLED", True)
     monkeypatch.setattr(
@@ -379,7 +379,12 @@ async def test_chat_query_e2e_graph_pipeline_order_is_fact_first(monkeypatch):
     )
 
     event_names = [name for name, _chunk_ids in events]
-    assert event_names.index("facts") < event_names.index("embed")
+    # Fact seeding is now kicked off concurrently and overlaps embed + funnels
+    # (facts feed neither embed nor the funnel queries), so it is no longer
+    # required to finish "first". The invariant that matters is that the seed
+    # facts are resolved before they are consumed by graph expansion — verified
+    # both here and by the fact-seed chunk appearing in the expand input below.
+    assert event_names.index("facts") < event_names.index("expand")
     assert event_names.index("expand") < event_names.index("rerank")
     assert event_names.index("rerank") < event_names.index("hydrate")
 

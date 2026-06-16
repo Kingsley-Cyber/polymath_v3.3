@@ -485,6 +485,11 @@ services:
       RERANKER_SCORE_SCALE: ${RERANKER_SCORE_SCALE:-probability}
       RERANKER_LOW_CONFIDENCE_THRESHOLD: ${RERANKER_LOW_CONFIDENCE_THRESHOLD:--2.5}
       RERANKER_TIMEOUT_SECONDS: ${RERANKER_TIMEOUT_SECONDS:-4}
+      # Per-doc char cap for cross-encoder rerank. 768 fits a child chunk
+      # (128-256 tok) with headroom while trimming the leading-window cost vs
+      # the 1000-char code default. Cuts rerank time without truncating the
+      # evidence window. Override via .env if your children run longer.
+      RERANKER_MAX_DOC_CHARS: ${RERANKER_MAX_DOC_CHARS:-768}
       RERANKER_CIRCUIT_BREAKER_SECONDS: ${RERANKER_CIRCUIT_BREAKER_SECONDS:-120}
       GRAPH_FACT_SEED_TIMEOUT_SECONDS: ${GRAPH_FACT_SEED_TIMEOUT_SECONDS:-5}
       GRAPH_SYNTHESIS_TIMEOUT_SECONDS: ${GRAPH_SYNTHESIS_TIMEOUT_SECONDS:-30}
@@ -655,6 +660,11 @@ services:
       RERANKER_SCORE_SCALE: ${RERANKER_SCORE_SCALE:-probability}
       RERANKER_LOW_CONFIDENCE_THRESHOLD: ${RERANKER_LOW_CONFIDENCE_THRESHOLD:--2.5}
       RERANKER_TIMEOUT_SECONDS: ${RERANKER_TIMEOUT_SECONDS:-4}
+      # Per-doc char cap for cross-encoder rerank. 768 fits a child chunk
+      # (128-256 tok) with headroom while trimming the leading-window cost vs
+      # the 1000-char code default. Cuts rerank time without truncating the
+      # evidence window. Override via .env if your children run longer.
+      RERANKER_MAX_DOC_CHARS: ${RERANKER_MAX_DOC_CHARS:-768}
       RERANKER_CIRCUIT_BREAKER_SECONDS: ${RERANKER_CIRCUIT_BREAKER_SECONDS:-120}
       GRAPH_FACT_SEED_TIMEOUT_SECONDS: ${GRAPH_FACT_SEED_TIMEOUT_SECONDS:-5}
       GRAPH_SYNTHESIS_TIMEOUT_SECONDS: ${GRAPH_SYNTHESIS_TIMEOUT_SECONDS:-30}

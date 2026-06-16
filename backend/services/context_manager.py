@@ -437,8 +437,23 @@ class ContextManager:
         # memory for structured pre-context tops out around 15 arrows before
         # signal-to-noise drops. Counter is decremented inside the per-source
         # loop; further arrow rendering is skipped once depleted.
-        _TOTAL_ARROW_BUDGET = 15
+        # Graph tier carries more structure than a 15-arrow budget can show
+        # (graph_expanded can reach ~20 with up to 8 neighbors/source), so when
+        # decorations are present give the relations more room; otherwise keep
+        # the original compact budget.
+        _TOTAL_ARROW_BUDGET = 24 if decoration_by_winner else 15
         remaining_arrow_budget = _TOTAL_ARROW_BUDGET
+
+        # Pt 10d.2 — chunk-to-chunk linkage map. A decoration's evidence_chunks
+        # are OTHER chunks that co-mention the arrow's neighbor entity. When one
+        # of those is ALSO a winning chunk in this answer, we can tell the LLM
+        # "this relationship also appears in that other source" — the only
+        # cross-chunk relational signal it otherwise never receives.
+        winning_chunk_labels: dict[str, str] = {}
+        for _s in sources:
+            _cid = str(getattr(_s, "chunk_id", "") or "")
+            if _cid:
+                winning_chunk_labels[_cid] = _s.doc_name or _s.doc_id or "Unknown"
 
         if not sources and not facts:
             base = query
@@ -559,6 +574,8 @@ class ContextManager:
                         is_fragile = False
                         seed_b = None
                         neighbor_b = None
+                        edge_evidence = ""
+                        evidence_chunks: list = []
                         if hasattr(d, "predicate"):
                             pred = getattr(d, "predicate", "") or ""
                             fam = getattr(d, "relation_family", "") or ""
@@ -569,6 +586,8 @@ class ContextManager:
                             is_fragile = bool(getattr(d, "is_fragile_bridge", False))
                             seed_b = getattr(d, "seed_betweenness", None)
                             neighbor_b = getattr(d, "neighbor_betweenness", None)
+                            edge_evidence = str(getattr(d, "edge_evidence", "") or "")
+                            evidence_chunks = list(getattr(d, "evidence_chunks", None) or [])
                         elif isinstance(d, dict):
                             pred = str(d.get("predicate") or "")
                             fam = str(d.get("relation_family") or "")
@@ -579,6 +598,8 @@ class ContextManager:
                             is_fragile = bool(d.get("is_fragile_bridge") or False)
                             seed_b = d.get("seed_betweenness")
                             neighbor_b = d.get("neighbor_betweenness")
+                            edge_evidence = str(d.get("edge_evidence") or "")
+                            evidence_chunks = list(d.get("evidence_chunks") or [])
                         else:
                             continue
                         if not pred or not neighbor:
@@ -606,6 +627,35 @@ class ContextManager:
                             )
                             if best_b > 0.0:
                                 arrow += f" [centrality={best_b:.2f}]"
+                        # Cross-chunk link: if this arrow's neighbor entity is
+                        # co-mentioned by ANOTHER winning chunk in this answer,
+                        # name it so the LLM can relate the two chunks instead
+                        # of re-inferring the link from raw text.
+                        linked_docs: list[str] = []
+                        for ec in evidence_chunks:
+                            ec_id = (
+                                getattr(ec, "chunk_id", None)
+                                if not isinstance(ec, dict)
+                                else ec.get("chunk_id")
+                            )
+                            ec_id = str(ec_id or "")
+                            if (
+                                ec_id
+                                and ec_id != (s.chunk_id or "")
+                                and ec_id in winning_chunk_labels
+                            ):
+                                lbl = winning_chunk_labels[ec_id]
+                                if lbl not in linked_docs:
+                                    linked_docs.append(lbl)
+                        if linked_docs:
+                            arrow += f' (also in this answer: "{", ".join(linked_docs[:2])}")'
+                        # Edge evidence — the predicate's justifying phrase, so
+                        # the LLM treats the relation as grounded, not asserted.
+                        if edge_evidence:
+                            ev_short = edge_evidence.strip()
+                            if len(ev_short) > 120:
+                                ev_short = ev_short[:117] + "..."
+                            arrow += f' — "{ev_short}"'
                         arrow_parts.append(arrow)
                         remaining_arrow_budget -= 1
                     if arrow_parts:

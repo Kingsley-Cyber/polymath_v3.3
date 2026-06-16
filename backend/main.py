@@ -3,6 +3,7 @@
 # ALL routers registered here. Touch only to add routers.
 # Run with: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -293,6 +294,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
     except Exception as exc:
         logger.warning("Durable ingest startup recovery failed (non-fatal): %s", exc)
+
+    # Optional chat-model warmup. The chat model is user-selected at request
+    # time, so there is no reliable default to warm — this is opt-in via
+    # OLLAMA_WARMUP_MODEL. When set, fire a tiny non-blocking completion so the
+    # first real turn does not pay the multi-minute cold-load. keep_alive (see
+    # config.OLLAMA_KEEP_ALIVE) then keeps it resident between turns.
+    try:
+        from config import get_settings as _get_settings
+
+        warmup_model = (getattr(_get_settings(), "OLLAMA_WARMUP_MODEL", "") or "").strip()
+        if warmup_model:
+            async def _warmup() -> None:
+                try:
+                    async for _ in llm_service.stream_chat(
+                        messages=[{"role": "user", "content": "ok"}],
+                        model=warmup_model,
+                        overrides=None,
+                    ):
+                        break  # one chunk proves the model is loaded
+                    logger.info("Chat warmup complete: model=%s", warmup_model)
+                except Exception as exc:  # never let warmup affect serving
+                    logger.warning("Chat warmup failed (non-fatal): %s", exc)
+
+            asyncio.create_task(_warmup())
+    except Exception as exc:
+        logger.warning("Chat warmup scheduling failed (non-fatal): %s", exc)
 
     yield
 

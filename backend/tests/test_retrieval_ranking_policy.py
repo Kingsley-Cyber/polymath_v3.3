@@ -295,3 +295,43 @@ def test_query_grounding_expands_nlp_acronym_alias():
 
     assert grounded[0].chunk_id == "expanded"
     assert grounded[0].metadata["query_grounding"]["matched"] == ["nlp"]
+
+
+def test_graph_tier_reserves_slot_for_demoted_graph_expansion():
+    """A graph-expanded neighbor demoted by the cross-encoder still reaches the
+    LLM via the graph-provenance reservation in select_with_diversity."""
+    intent = infer_retrieval_intent("what is layering")
+    ranked = [
+        _chunk(f"core-{i}", score=0.90 - i * 0.01, doc_id=f"d{i}") for i in range(6)
+    ]
+    # Relational neighbor scored low by text-similarity rerank, distinct doc/parent.
+    ranked.append(
+        _chunk("graph-neighbor", score=0.40, source_tier="graph_mode_a", doc_id="gdoc")
+    )
+    result = select_with_diversity(
+        ranked,
+        final_top_k=5,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo_graph,
+    )
+    ids = [c.chunk_id for c in result.candidates]
+    assert "graph-neighbor" in ids  # reserved despite low rerank score
+
+
+def test_hybrid_tier_does_not_reserve_graph_slot():
+    """Reservation is graph-tier only; Hybrid leaves a low-score chunk excluded."""
+    intent = infer_retrieval_intent("what is layering")
+    ranked = [
+        _chunk(f"core-{i}", score=0.90 - i * 0.01, doc_id=f"d{i}") for i in range(6)
+    ]
+    ranked.append(
+        _chunk("graph-neighbor", score=0.40, source_tier="graph_mode_a", doc_id="gdoc")
+    )
+    result = select_with_diversity(
+        ranked,
+        final_top_k=5,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+    )
+    ids = [c.chunk_id for c in result.candidates]
+    assert "graph-neighbor" not in ids
