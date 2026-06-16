@@ -359,7 +359,7 @@ function App() {
       };
       const scheduleStreamingFlush = () => {
         if (flushTimer !== undefined) return;
-        flushTimer = window.setTimeout(flushStreamingBuffers, 33);
+        flushTimer = window.setTimeout(flushStreamingBuffers, 16);
       };
 
       const preserveStreamingFailure = (errorMessage: string) => {

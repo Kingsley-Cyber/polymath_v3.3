@@ -257,6 +257,7 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             'case "thinking":',
             "chat.updateStreamingThinking(thinkingChunk)",
             "scheduleStreamingFlush",
+            "window.setTimeout(flushStreamingBuffers, 16)",
         ),
     ),
     Requirement(
@@ -268,7 +269,7 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             "formatLiveThinkingPreview",
             "pm-live-reasoning-preview",
             "ProcessTimeline",
-            "defaultOpen={true}",
+            "defaultOpen={!hasAssistantContent}",
             "manualClosedIds",
             "(isStreaming || defaultOpen) && !manualClosedIds.has(group.id)",
         ),
@@ -279,6 +280,9 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         path="frontend/src/components/chat/ChatWindow.tsx",
         needles=(
             "streamingMessageRef",
+            "latestAssistantMessageRef",
+            "previousStreamingRef",
+            "justFinishedStreaming",
             "showWorkingIndicator = isLoading && !isStreaming && !hasStreamingOutput",
             "{isStreaming && (",
             "scrollIntoView({",

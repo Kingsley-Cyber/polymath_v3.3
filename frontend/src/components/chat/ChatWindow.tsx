@@ -17,6 +17,8 @@ export function ChatWindow() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const streamingMessageRef = useRef<HTMLDivElement>(null);
+  const latestAssistantMessageRef = useRef<HTMLDivElement>(null);
+  const previousStreamingRef = useRef(false);
   const selectedCorpusIds = useSettingsStore((s) => s.selectedCorpusIds);
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt);
   const [graphSuggestions, setGraphSuggestions] = useState<GraphSuggestionItem[]>([]);
@@ -158,9 +160,17 @@ export function ChatWindow() {
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
+    const justFinishedStreaming = previousStreamingRef.current && !isStreaming;
     requestAnimationFrame(() => {
       if (isStreaming && streamingMessageRef.current) {
         streamingMessageRef.current.scrollIntoView({
+          behavior: "auto",
+          block: "start",
+        });
+        return;
+      }
+      if (justFinishedStreaming && latestAssistantMessageRef.current) {
+        latestAssistantMessageRef.current.scrollIntoView({
           behavior: "auto",
           block: "start",
         });
@@ -171,6 +181,7 @@ export function ChatWindow() {
         block: "end",
       });
     });
+    previousStreamingRef.current = isStreaming;
   }, [
     conversationMessages,
     isStreaming,
@@ -235,13 +246,22 @@ export function ChatWindow() {
       className="flex-1 overflow-y-auto custom-scrollbar bg-[var(--color-chat-background)]"
     >
       <div className="message-list w-full py-4">
-        {conversationMessages.map((message, index) => (
-          <MessageBubble
-            key={message.id || index}
-            message={message}
-            isStreaming={false}
-          />
-        ))}
+        {conversationMessages.map((message, index) => {
+          const isLatestAssistant =
+            index === conversationMessages.length - 1 &&
+            message.role === "assistant";
+          return (
+            <div
+              key={message.id || index}
+              ref={isLatestAssistant ? latestAssistantMessageRef : undefined}
+            >
+              <MessageBubble
+                message={message}
+                isStreaming={false}
+              />
+            </div>
+          );
+        })}
 
         {/* Streaming message */}
         {isStreaming && (

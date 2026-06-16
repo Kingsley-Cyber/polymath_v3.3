@@ -192,7 +192,7 @@ export function MessageBubble({
           <ProcessTimeline
             items={visibleProcessTimeline}
             isStreaming={isStreaming}
-            defaultOpen={true}
+            defaultOpen={!hasAssistantContent}
           />
         )}
 
