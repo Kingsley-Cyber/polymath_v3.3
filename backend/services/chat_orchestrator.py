@@ -2912,6 +2912,168 @@ def _is_graph_augmented_tier(tier: Any) -> bool:
     return value == RetrievalTier.qdrant_mongo_graph.value
 
 
+def _retrieval_tier_value(tier: Any) -> str:
+    value = getattr(tier, "value", tier)
+    return str(value or RetrievalTier.qdrant_mongo.value)
+
+
+def _retrieval_tier_lens_name(tier: Any) -> str:
+    value = _retrieval_tier_value(tier)
+    if value == RetrievalTier.qdrant_only.value:
+        return "Semantic overview"
+    if value == RetrievalTier.qdrant_mongo_graph.value:
+        return "Relationship map"
+    return "Corpus synthesis"
+
+
+def _format_retrieval_tier_synthesis_contract(
+    tier: Any,
+    diagnostics: dict[str, Any] | None = None,
+) -> str:
+    """Prompt contract that makes each retrieval tier synthesize differently."""
+
+    value = _retrieval_tier_value(tier)
+    lens = _retrieval_tier_lens_name(value)
+    diag = diagnostics or {}
+    counts = diag.get("counts") if isinstance(diag.get("counts"), dict) else {}
+    final_mix = diag.get("final_source_tiers")
+    if not isinstance(final_mix, dict):
+        final_mix = {}
+
+    header = [
+        "<retrieval_synthesis_lens>",
+        f"selected_lens: {lens}",
+        (
+            "This is an internal answer-shaping contract. Do not name this "
+            "contract or the retrieval tier unless the user explicitly asks "
+            "for retrieval diagnostics; express the lens through the structure "
+            "and emphasis of the answer."
+        ),
+    ]
+    if counts or final_mix:
+        header.append(
+            "retrieval_signal: "
+            f"facts={counts.get('facts', 0)}; "
+            f"graph_expanded={counts.get('graph_expanded', 0)}; "
+            f"lexical={counts.get('lexical', 0)}; "
+            f"final_mix={final_mix or 'n/a'}."
+        )
+
+    if value == RetrievalTier.qdrant_only.value:
+        body = [
+            "Required answer shape: semantic overview.",
+            (
+                "Answer the user's question from the strongest semantic matches. "
+                "Favor a clean definition, broad conceptual framing, and a small "
+                "set of high-level examples only when those examples appear in "
+                "retrieved context."
+            ),
+            (
+                "Do not perform source comparison, corpus-wide adjudication, or "
+                "relationship-map/gap analysis. Keep the answer compact unless "
+                "the user asks for depth."
+            ),
+        ]
+    elif value == RetrievalTier.qdrant_mongo_graph.value:
+        body = [
+            "Required answer shape: relationship map.",
+            (
+                "This lens overrides the default short-answer compression. Even "
+                "for a simple definition query, the final answer must visibly "
+                "organize the concept as relationships rather than as only a "
+                "generic definition."
+            ),
+            (
+                "Preferred visible structure: a short definition, then headings "
+                "or bold anchors for 'Core node', 'Connected ideas', and "
+                "'Weak or missing links' when the evidence supports them."
+            ),
+            (
+                "Define the core concept briefly, then explain how it connects "
+                "to adjacent concepts, tools, methods, documents, entities, or "
+                "tensions visible in the retrieved evidence."
+            ),
+            (
+                "When graph facts or graph decoration are present, prioritize "
+                "explicit relationships and bridge concepts. When no graph facts "
+                "are present, still use the graph-expanded context as a network "
+                "lens: distinguish core node, connected ideas, and missing or "
+                "weak links without inventing unsupported edges."
+            ),
+            (
+                "The answer should feel structurally different from Vector and "
+                "Hybrid: relationship-first, not merely a definition or a list "
+                "of source excerpts."
+            ),
+        ]
+    else:
+        body = [
+            "Required answer shape: hydrated corpus synthesis.",
+            (
+                "This lens overrides the default short-answer compression. Do "
+                "not stop at the same generic definition Vector Base would give."
+            ),
+            (
+                "Preferred visible structure: open with 'Across the selected "
+                "sources' or equivalent wording, then give 2-4 evidence-backed "
+                "details, then a compact boundary note for what the retrieved "
+                "evidence does not establish."
+            ),
+            (
+                "Answer as what the selected corpus evidence specifically says. "
+                "Use hydrated parent/lexical evidence to add precision, terms, "
+                "examples, and caveats beyond the broad semantic definition."
+            ),
+            (
+                "Compare or reconcile the strongest retrieved passages when they "
+                "frame the concept differently. Include what the corpus supports "
+                "and what it does not establish, but avoid graph/network claims "
+                "unless graph evidence is actually present."
+            ),
+            (
+                "The answer should feel deeper than Vector Base: more grounded, "
+                "more corpus-specific, and more exact about evidence boundaries."
+            ),
+            (
+                "If the question is simple, the answer may still be concise, "
+                "but it must include at least two concrete retrieved terms, "
+                "phrases, examples, or distinctions that are not merely a "
+                "generic textbook definition."
+            ),
+        ]
+
+    return "\n".join([*header, *body, "</retrieval_synthesis_lens>"])
+
+
+def _format_retrieval_tier_lens_trace(
+    tier: Any,
+    diagnostics: dict[str, Any] | None = None,
+) -> str:
+    value = _retrieval_tier_value(tier)
+    lens = _retrieval_tier_lens_name(value)
+    diag = diagnostics or {}
+    counts = diag.get("counts") if isinstance(diag.get("counts"), dict) else {}
+    if value == RetrievalTier.qdrant_only.value:
+        contract = "semantic overview: broad vector evidence, concise definition."
+    elif value == RetrievalTier.qdrant_mongo_graph.value:
+        contract = (
+            "relationship map: use graph-expanded context to surface connections, "
+            "bridges, weak links, and concept neighborhoods."
+        )
+    else:
+        contract = (
+            "hydrated corpus synthesis: use Mongo lexical/parent context for "
+            "more exact corpus-grounded detail."
+        )
+    return (
+        f"{lens}\n"
+        f"{contract}\n"
+        f"signals: lexical={counts.get('lexical', 0)} · "
+        f"facts={counts.get('facts', 0)} · "
+        f"graph_expanded={counts.get('graph_expanded', 0)}"
+    )
+
+
 def _format_retrieval_diagnostics_trace(
     diagnostics: dict[str, Any] | None,
     *,
@@ -3644,6 +3806,25 @@ class ChatOrchestrator:
                 "coverage_lane_reports": coverage_meta.get("lane_reports", []),
             },
         )
+        retrieval_diagnostics = getattr(retrieval, "diagnostics", {}) or {}
+        synthesis_lens_contract = _format_retrieval_tier_synthesis_contract(
+            retrieval.effective_tier,
+            retrieval_diagnostics,
+        )
+        yield _record_trace_event(
+            lane="planning",
+            title="Synthesis lens",
+            status="done",
+            content=_format_retrieval_tier_lens_trace(
+                retrieval.effective_tier,
+                retrieval_diagnostics,
+            ),
+            metadata={
+                "effective_tier": str(effective_tier_for_trace),
+                "lens": _retrieval_tier_lens_name(retrieval.effective_tier),
+                "retrieval_diagnostics": retrieval_diagnostics,
+            },
+        )
 
         graph_context_enabled = (
             _is_graph_augmented_tier(retrieval.effective_tier)
@@ -3880,12 +4061,16 @@ class ChatOrchestrator:
                 logger.warning("Reasoning cascade failed: %s", exc)
 
         coverage_prompt_note = _format_chat_coverage_prompt_note(coverage_meta)
-        if coverage_prompt_note:
-            analysis_text = (
-                f"{analysis_text.strip()}\n\n{coverage_prompt_note}"
-                if analysis_text and analysis_text.strip()
-                else coverage_prompt_note
+        analysis_blocks = [
+            block
+            for block in (
+                analysis_text,
+                synthesis_lens_contract,
+                coverage_prompt_note,
             )
+            if block and block.strip()
+        ]
+        analysis_text = "\n\n".join(block.strip() for block in analysis_blocks) or None
 
         # Build augmented prompt — works whether or not we have sources, as
         # long as skills or analysis or sources is present.

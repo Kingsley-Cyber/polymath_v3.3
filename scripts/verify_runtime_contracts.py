@@ -307,6 +307,19 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         ),
     ),
     Requirement(
+        id="chat-tier-synthesis-lenses",
+        description="Chat injects a tier-specific synthesis lens so Vector, Hybrid, and Graph answer the same query through different RAG contracts.",
+        path="backend/services/chat_orchestrator.py",
+        needles=(
+            "_format_retrieval_tier_synthesis_contract",
+            "<retrieval_synthesis_lens>",
+            "semantic overview",
+            "hydrated corpus synthesis",
+            "relationship map",
+            "Synthesis lens",
+        ),
+    ),
+    Requirement(
         id="frontend-stream-consumer",
         description="Frontend consumes token/thinking SSE events and flushes them into the live streaming message.",
         path="frontend/src/App.tsx",

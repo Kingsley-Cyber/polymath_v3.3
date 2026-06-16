@@ -166,6 +166,7 @@ from models.schemas import ChatRequest, ModelOverrides, SourceChunk  # noqa: E40
 from services.chat_orchestrator import (  # noqa: E402
     ChatOrchestrator,
     _chat_source_is_low_value,
+    _format_retrieval_tier_synthesis_contract,
     _should_skip_hyde_for_query,
 )
 
@@ -255,6 +256,32 @@ def test_chat_evidence_filter_rejects_frontmatter_noise():
         substantive,
         "What is NLP and how does Python relate to it?",
     )
+
+
+def test_retrieval_tiers_have_distinct_synthesis_lenses():
+    vector = _format_retrieval_tier_synthesis_contract(
+        "qdrant_only",
+        {"counts": {"lexical": 0, "facts": 0, "graph_expanded": 0}},
+    )
+    hybrid = _format_retrieval_tier_synthesis_contract(
+        "qdrant_mongo",
+        {"counts": {"lexical": 12, "facts": 0, "graph_expanded": 0}},
+    )
+    graph = _format_retrieval_tier_synthesis_contract(
+        "qdrant_mongo_graph",
+        {"counts": {"lexical": 12, "facts": 4, "graph_expanded": 20}},
+    )
+
+    assert "semantic overview" in vector.lower()
+    assert "hydrated corpus synthesis" in hybrid.lower()
+    assert "relationship map" in graph.lower()
+    assert "source comparison" in vector
+    assert "what the selected corpus evidence specifically says" in hybrid
+    assert "Across the selected sources" in hybrid
+    assert "default short-answer compression" in hybrid
+    assert "core node, connected ideas" in graph
+    assert "Weak or missing links" in graph
+    assert len({vector, hybrid, graph}) == 3
 
 
 def test_hyde_stays_available_for_open_cross_domain_discovery():
