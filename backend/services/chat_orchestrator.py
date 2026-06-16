@@ -2307,6 +2307,19 @@ async def _enforce_chat_query_coverage(
     # matches the old serial behavior. A semaphore bounds the fan-out.
     coverage_semaphore = asyncio.Semaphore(_CHAT_COVERAGE_MAX_CONCURRENCY)
 
+    # Coverage support retrievals fill per-facet TEXT gaps; they do NOT need
+    # graph expansion (the relational context comes from the MAIN graph
+    # retrieval + decoration). On a graph query each support pass otherwise
+    # pays ~7s of Neo4j Mode-A expansion + fact seeding + a 48-candidate
+    # graph-floor rerank — five times over. Downgrade them to the hybrid tier:
+    # the hybrid `naive` collection is a superset of the graph collection's
+    # chunks, so no supporting chunk is lost, only the graph overhead.
+    coverage_tier = (
+        RetrievalTier.qdrant_mongo
+        if retrieval_tier == RetrievalTier.qdrant_mongo_graph
+        else retrieval_tier
+    )
+
     async def _cover_one_facet(
         facet: dict[str, Any],
     ) -> tuple[dict[str, Any], "SourceChunk | None", dict[str, Any], dict[str, Any], str]:
@@ -2335,7 +2348,7 @@ async def _enforce_chat_query_coverage(
                     result = await retriever_orchestrator.retrieve(
                         query=support_query,
                         corpus_ids=corpus_ids,
-                        retrieval_tier=retrieval_tier,
+                        retrieval_tier=coverage_tier,
                         collections=collections,
                         retrieval_k=max(24, min(int(retrieval_k or 40), 48)),
                         rerank_enabled=rerank_enabled,

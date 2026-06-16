@@ -203,7 +203,7 @@ async def test_chat_semantic_coverage_adds_missing_query_facets(monkeypatch):
         RetrievalTier.qdrant_mongo_graph,
     ],
 )
-async def test_chat_semantic_coverage_uses_same_effective_tier(monkeypatch, tier):
+async def test_chat_semantic_coverage_support_tier_downgrades_graph_only(monkeypatch, tier):
     seen_tiers: list[RetrievalTier] = []
     base_sources = [
         _chunk(
@@ -254,7 +254,15 @@ async def test_chat_semantic_coverage_uses_same_effective_tier(monkeypatch, tier
     )
 
     assert seen_tiers
-    assert set(seen_tiers) == {tier}
+    # Coverage uses the main tier EXCEPT graph, which downgrades to hybrid for
+    # the support retrievals (gap-fill chunks don't need Neo4j graph expansion;
+    # the hybrid `naive` collection is a superset of the graph collection).
+    expected = (
+        RetrievalTier.qdrant_mongo
+        if tier == RetrievalTier.qdrant_mongo_graph
+        else tier
+    )
+    assert set(seen_tiers) == {expected}
 
 
 def test_chat_evidence_filter_removes_bibliography_but_keeps_substantive_chunks():
