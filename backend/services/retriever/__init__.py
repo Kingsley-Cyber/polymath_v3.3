@@ -1247,29 +1247,16 @@ class RetrieverOrchestrator:
                     "db",
                     None,
                 )
-                # Bound the heaviest tier's graph work so a slow/large graph
-                # can't blow the graph-augmentation latency budget — on timeout
-                # we degrade to the vector/lexical pool (the except below logs
-                # and continues) instead of hanging the chat turn.
-                expanded = await asyncio.wait_for(
-                    mode_a_expansion.expand(
-                        merged, corpus_ids, db=db_for_mode_a, **expand_kwargs
-                    ),
-                    timeout=float(
-                        getattr(settings, "GRAPH_EXPANSION_TIMEOUT_SECONDS", 15.0)
-                    ),
+                # No arbitrary time cap — retrieval runs its natural course
+                # (often well under 30s) and scales with the corpus. A genuine
+                # Neo4j error still degrades gracefully via the except below.
+                expanded = await mode_a_expansion.expand(
+                    merged, corpus_ids, db=db_for_mode_a, **expand_kwargs
                 )
                 counts["graph_expanded"] = len(expanded)
                 if expanded:
                     merged = merge_pools(merged, expanded)
                     counts["merged_after_graph"] = len(merged)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "Mode A expansion exceeded %.0fs budget — continuing with "
-                    "vector/lexical evidence (no graph expansion this turn)",
-                    float(getattr(settings, "GRAPH_EXPANSION_TIMEOUT_SECONDS", 15.0)),
-                )
-                counts["graph_expansion_timed_out"] = 1
             except Exception as exc:
                 logger.warning("Mode A expansion failed, continuing: %s", exc)
             finally:

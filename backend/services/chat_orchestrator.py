@@ -87,89 +87,11 @@ _GLOBAL_OVERVIEW_BUDGET = 12
 # deepseek/* group (DEEPSEEK_API_KEY in .env); no per-request credentials.
 _CHAT_FALLBACK_MODEL = "deepseek/deepseek-chat"
 
-# Phase 4 — lightweight LLM intent classifier. The marker router
-# (search_mode.infer_search_mode) misses natural overview questions that lack a
-# marker phrase; this is a cached second-chance: when auto-mode resolved to
-# "local", ask the backup model whether the query is a broad/overview question
-# and, if so, upgrade to "global" so the domain-stratified breadth path fires.
-# The marker result is the fallback on any error/timeout. Cached per query.
-_INTENT_CACHE: dict[str, str] = {}
-_INTENT_SYSTEM = (
-    "Classify the user's question as exactly one lowercase word.\n"
-    "Answer 'overview' ONLY when the user wants a broad, corpus-wide synthesis "
-    "spanning many documents — e.g. 'main themes', 'what's in my whole library', "
-    "'summarize everything', 'recurring patterns across my notes', 'big picture'.\n"
-    "Answer 'specific' for anything targeting a particular fact, document, entity, "
-    "how-to, debugging, error, code, or single topic — e.g. 'how do I fix X', "
-    "'what does Y do', 'where is Z', 'explain this error'.\n"
-    "When in doubt, answer 'specific'. Reply with only the single word."
-)
-_OVERVIEW_CLASSIFIER_HINTS = (
-    "overview",
-    "summarize",
-    "summary",
-    "main themes",
-    "key themes",
-    "main ideas",
-    "key ideas",
-    "big picture",
-    "high level",
-    "high-level",
-    "across",
-    "overall",
-    "whole corpus",
-    "library",
-    "what topics",
-    "what subjects",
-    "patterns",
-    "recurring",
-)
-_SIMPLE_DEFINITION_RE = re.compile(
-    r"^\s*(what\s+is|what\s+are|define|explain)\b",
-    re.IGNORECASE,
-)
-
-
-def _should_run_overview_intent_classifier(message: str) -> bool:
-    """Only pay the LLM classifier tax when the query looks plausibly broad."""
-
-    text = (message or "").strip()
-    if not text:
-        return False
-    lower = text.lower()
-    tokens = re.findall(r"[a-z0-9]+", lower)
-    if _SIMPLE_DEFINITION_RE.search(text):
-        return any(hint in lower for hint in _OVERVIEW_CLASSIFIER_HINTS)
-    return len(tokens) >= 12 or any(hint in lower for hint in _OVERVIEW_CLASSIFIER_HINTS)
-
-
-async def _classify_overview_intent(message: str) -> str:
-    """Return 'global' if the LLM judges the query an overview/thematic question,
-    else 'local'. Cached per normalized query; best-effort (any failure -> 'local')."""
-    key = (message or "").strip().lower()[:300]
-    if not key:
-        return "local"
-    cached = _INTENT_CACHE.get(key)
-    if cached is not None:
-        return cached
-    result = "local"
-    try:
-        answer = await llm_service.complete_sync(
-            messages=[
-                {"role": "system", "content": _INTENT_SYSTEM},
-                {"role": "user", "content": message[:2000]},
-            ],
-            model=_CHAT_FALLBACK_MODEL,
-            temperature=0,
-            max_tokens=4,
-            timeout=8.0,
-        )
-        if "overview" in (answer or "").strip().lower():
-            result = "global"
-    except Exception as exc:
-        logger.debug("intent classifier skipped: %s", exc)
-    _INTENT_CACHE[key] = result
-    return result
+# (Removed) The Phase-4 LLM "overview intent" second-chance classifier that
+# silently upgraded local→global. Routing is now tier-authoritative: GLOBAL is
+# an explicit user choice only (see resolve_search_mode), so the classifier and
+# its helpers (_INTENT_CACHE / _INTENT_SYSTEM / _OVERVIEW_CLASSIFIER_HINTS /
+# _SIMPLE_DEFINITION_RE) were removed.
 _CHAT_EVIDENCE_MIN_KEEP_AFTER_FILTER = 4
 _RAW_TOOL_REQUEST_MARKERS = (
     "<｜｜dsml｜｜tool_calls",

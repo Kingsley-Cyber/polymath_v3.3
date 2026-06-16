@@ -69,18 +69,6 @@ class Settings(BaseSettings):
             "instead of blocking the chat turn."
         ),
     )
-    GRAPH_EXPANSION_TIMEOUT_SECONDS: float = Field(
-        default=15.0,
-        ge=1.0,
-        le=60.0,
-        description=(
-            "Hard cap for Neo4j Mode-A graph expansion (mentions/calls/bridges) "
-            "in graph-augmented retrieval. Keeps the heaviest tier's graph work "
-            "bounded so a slow/large graph can't blow past the graph-augmentation "
-            "latency budget — on timeout, retrieval degrades to the "
-            "vector/lexical pool without expansion instead of hanging."
-        ),
-    )
 
     # === LLM GATEWAY ===
     LITELLM_URL: str = Field(
