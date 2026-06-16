@@ -67,6 +67,9 @@ _CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS = 4
 _CHAT_COVERAGE_THRESHOLD = 4
 _CHAT_COVERAGE_WEAK_THRESHOLD = 2
 _CHAT_COVERAGE_SOURCE_CAP = 8
+# Per-facet coverage retrievals are independent and run concurrently; this caps
+# the fan-out so a many-facet query can't swamp Qdrant/Mongo/the reranker at once.
+_CHAT_COVERAGE_MAX_CONCURRENCY = 4
 # Per-domain cap on the final context set for BROAD (global) queries — at most
 # N chunks from any single emergent domain/cluster, so an overview answer spans
 # disciplines instead of clustering on the reranker's favorite domain. Only
@@ -2295,7 +2298,18 @@ async def _enforce_chat_query_coverage(
     existing_doc_ids = {str(source.doc_id or "") for source in base_sources if source.doc_id}
     support_sources: list[SourceChunk] = []
 
-    for facet in missing:
+    # Each missing facet needs an independent support retrieval, so run them
+    # CONCURRENTLY instead of one-after-another — a multi-part query that
+    # decomposes into N facets otherwise pays N back-to-back full retrievals,
+    # the dominant chat latency on slow models. Each facet selects against the
+    # same BASE snapshot of already-chosen chunks/docs; cross-facet de-dup is
+    # re-applied in `missing` order after the gather so the final selection
+    # matches the old serial behavior. A semaphore bounds the fan-out.
+    coverage_semaphore = asyncio.Semaphore(_CHAT_COVERAGE_MAX_CONCURRENCY)
+
+    async def _cover_one_facet(
+        facet: dict[str, Any],
+    ) -> tuple[dict[str, Any], "SourceChunk | None", dict[str, Any], dict[str, Any], str]:
         facet_name = str(facet.get("name") or "")
         lane_report: dict[str, Any] = {
             "lane": facet_name,
@@ -2309,65 +2323,80 @@ async def _enforce_chat_query_coverage(
         chosen: SourceChunk | None = None
         chosen_report: dict[str, Any] = {}
         support_query = ""
-        for support_query in _chat_support_query_variants(facet, original_query):
-            attempt: dict[str, Any] = {
-                "query": _clip_trace_value(support_query, 220),
-                "search_mode": "local",
-                "returned": 0,
-                "status": "started",
-            }
-            try:
-                result = await retriever_orchestrator.retrieve(
-                    query=support_query,
-                    corpus_ids=corpus_ids,
-                    retrieval_tier=retrieval_tier,
-                    collections=collections,
-                    retrieval_k=max(24, min(int(retrieval_k or 40), 48)),
-                    rerank_enabled=rerank_enabled,
-                    ranking_query=support_query,
-                    top_k_summary=top_k_summary,
-                    rerank_top_n=max(12, min(int(rerank_top_n or 24), 32)),
-                    similarity_threshold=similarity_threshold,
-                    neo4j_expansion_cap=neo4j_expansion_cap,
-                    max_corpora_per_query=max_corpora_per_query,
-                    final_top_k=6,
-                    fact_seed_limit=fact_seed_limit,
-                    search_mode="local",
-                )
-            except Exception as exc:
-                attempt["status"] = "retrieval_error"
-                attempt["error"] = _clip_trace_value(exc, 180)
-                lane_report["attempts"].append(attempt)
-                logger.debug("chat coverage support retrieval skipped for %s: %s", facet_name, exc)
-                continue
-            candidates = list(getattr(result, "chunks", []) or [])
-            attempt["returned"] = len(candidates)
-            chosen, chosen_report = _choose_chat_coverage_candidate_with_report(
-                candidates,
-                facet=facet,
-                original_query=original_query,
-                existing_chunk_ids=existing_chunk_ids,
-                existing_doc_ids=existing_doc_ids,
-            )
-            attempt.update(
-                {
-                    "status": chosen_report.get("status", "uncovered"),
-                    "strength": chosen_report.get("strength"),
-                    "selected": chosen_report.get("selected"),
-                    "rejected": chosen_report.get("rejected"),
-                    "sampled_rejections": chosen_report.get("sampled_rejections"),
-                    "reason": chosen_report.get("reason"),
+        async with coverage_semaphore:
+            for support_query in _chat_support_query_variants(facet, original_query):
+                attempt: dict[str, Any] = {
+                    "query": _clip_trace_value(support_query, 220),
+                    "search_mode": "local",
+                    "returned": 0,
+                    "status": "started",
                 }
-            )
-            lane_report["attempts"].append(attempt)
-            if chosen:
-                break
+                try:
+                    result = await retriever_orchestrator.retrieve(
+                        query=support_query,
+                        corpus_ids=corpus_ids,
+                        retrieval_tier=retrieval_tier,
+                        collections=collections,
+                        retrieval_k=max(24, min(int(retrieval_k or 40), 48)),
+                        rerank_enabled=rerank_enabled,
+                        ranking_query=support_query,
+                        top_k_summary=top_k_summary,
+                        rerank_top_n=max(12, min(int(rerank_top_n or 24), 32)),
+                        similarity_threshold=similarity_threshold,
+                        neo4j_expansion_cap=neo4j_expansion_cap,
+                        max_corpora_per_query=max_corpora_per_query,
+                        final_top_k=6,
+                        fact_seed_limit=fact_seed_limit,
+                        search_mode="local",
+                    )
+                except Exception as exc:
+                    attempt["status"] = "retrieval_error"
+                    attempt["error"] = _clip_trace_value(exc, 180)
+                    lane_report["attempts"].append(attempt)
+                    logger.debug("chat coverage support retrieval skipped for %s: %s", facet_name, exc)
+                    continue
+                candidates = list(getattr(result, "chunks", []) or [])
+                attempt["returned"] = len(candidates)
+                chosen, chosen_report = _choose_chat_coverage_candidate_with_report(
+                    candidates,
+                    facet=facet,
+                    original_query=original_query,
+                    existing_chunk_ids=existing_chunk_ids,
+                    existing_doc_ids=existing_doc_ids,
+                )
+                attempt.update(
+                    {
+                        "status": chosen_report.get("status", "uncovered"),
+                        "strength": chosen_report.get("strength"),
+                        "selected": chosen_report.get("selected"),
+                        "rejected": chosen_report.get("rejected"),
+                        "sampled_rejections": chosen_report.get("sampled_rejections"),
+                        "reason": chosen_report.get("reason"),
+                    }
+                )
+                lane_report["attempts"].append(attempt)
+                if chosen:
+                    break
+        return facet, chosen, chosen_report, lane_report, support_query
 
+    facet_results = await asyncio.gather(*[_cover_one_facet(facet) for facet in missing])
+
+    # Apply marking + cross-facet de-dup in facet order. The serial loop never
+    # picked a duplicate because it grew the seen-sets between facets; the
+    # parallel facets all saw the base snapshot, so two could land on the same
+    # chunk/doc — collapse those here (keep the first in facet order).
+    for facet, chosen, chosen_report, lane_report, support_query in facet_results:
         if not chosen:
             lane_report["reason"] = "no_support_chunk_selected_after_fallbacks"
             meta["lane_reports"].append(lane_report)
             continue
-
+        chunk_key = str(chosen.chunk_id or "")
+        doc_key = str(chosen.doc_id or "")
+        if chunk_key in existing_chunk_ids or (doc_key and doc_key in existing_doc_ids):
+            lane_report["status"] = "deduped_parallel"
+            lane_report["reason"] = "duplicate_selected_by_another_facet"
+            meta["lane_reports"].append(lane_report)
+            continue
         strength = str(chosen_report.get("strength") or "strong")
         marked = _mark_chat_coverage_chunk(
             chosen,

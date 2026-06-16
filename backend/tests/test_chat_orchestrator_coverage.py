@@ -818,3 +818,103 @@ def test_chat_final_selector_reserves_query_priority_lanes_before_dynamic_chunks
         "user_modeling",
         "psychometrics",
     ]
+
+
+@pytest.mark.asyncio
+async def test_chat_semantic_coverage_runs_facet_retrievals_concurrently(monkeypatch):
+    """Per-facet coverage retrievals must run concurrently, not serially, so a
+    multi-facet query does not pay N back-to-back retrieval passes. Proven by
+    tracking the max number of in-flight retrievals."""
+    import asyncio
+
+    base_sources = [
+        _chunk(
+            "measurement-1",
+            doc_id="measurement.md",
+            text="Psychometric assessment can use scenario choices and values.",
+        )
+    ]
+
+    state = {"in_flight": 0, "max_in_flight": 0}
+
+    async def fake_retrieve(**kwargs):
+        state["in_flight"] += 1
+        state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+        try:
+            await asyncio.sleep(0.05)  # hold the slot so overlap is observable
+            query = kwargs["query"].lower()
+            if "on-device" in query or "local llm" in query or "local inference" in query:
+                chunks = [
+                    _chunk(
+                        "on-device-1",
+                        doc_id="on_device_llm_architecture_guide.md",
+                        text=(
+                            "On-device LLM architecture uses local inference and a "
+                            "small language model so sensitive data stays on device."
+                        ),
+                        metadata={"semantic_facets": {
+                            "facet_ids": ["on_device_llm_architecture"],
+                            "content_facet_ids": ["on_device_llm", "privacy"],
+                            "content_facet_text": "on device llm privacy"}},
+                    )
+                ]
+            elif "privacy" in query or "data privacy" in query:
+                chunks = [
+                    _chunk(
+                        "privacy-1",
+                        doc_id="privacy.md",
+                        text=(
+                            "Privacy-preserving systems keep private user data local, "
+                            "minimize collection, and require consent."
+                        ),
+                        metadata={"semantic_facets": {
+                            "facet_ids": ["privacy"],
+                            "content_facet_ids": ["privacy", "on_device_llm"],
+                            "content_facet_text": "privacy on device llm"}},
+                    )
+                ]
+            else:
+                chunks = []
+            return RetrievalResult(
+                chunks=chunks,
+                requested_tier=kwargs["retrieval_tier"],
+                effective_tier=kwargs["retrieval_tier"],
+            )
+        finally:
+            state["in_flight"] -= 1
+
+    async def fake_facets(query, corpus_ids):
+        return chat_module._chat_coverage_facets_for_query(query)
+
+    monkeypatch.setattr(chat_module, "_chat_coverage_facets_for_query_with_corpus", fake_facets)
+    monkeypatch.setattr(chat_module.retriever_orchestrator, "retrieve", fake_retrieve)
+
+    merged, meta = await chat_module._enforce_chat_query_coverage(
+        original_query=(
+            "How could privacy-preserving on-device AI support a personal "
+            "reflection app without reducing someone to behavior data?"
+        ),
+        retrieval_query="same",
+        sources=base_sources,
+        corpus_ids=["c1"],
+        retrieval_tier=RetrievalTier.qdrant_mongo,
+        collections=None,
+        retrieval_k=40,
+        rerank_enabled=True,
+        top_k_summary=12,
+        rerank_top_n=24,
+        similarity_threshold=None,
+        neo4j_expansion_cap=None,
+        max_corpora_per_query=None,
+        fact_seed_limit=None,
+        final_top_k=8,
+        search_mode="local",
+    )
+
+    # The two facet retrievals overlapped (serial would max out at 1).
+    assert state["max_in_flight"] >= 2
+    # And coverage quality is preserved: both facet docs still made the cut.
+    assert {chunk.doc_id for chunk in merged} >= {
+        "privacy.md",
+        "on_device_llm_architecture_guide.md",
+    }
