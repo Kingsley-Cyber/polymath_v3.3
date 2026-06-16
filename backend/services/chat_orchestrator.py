@@ -4423,6 +4423,12 @@ class ChatOrchestrator:
         # Phase 24 — Reasoning cascade (opt-in). Run BEFORE building the
         # augmented prompt so analysis can be embedded as a context block.
         analysis_text: str | None = None
+        # Tracks whether the OPT-IN reasoning cascade actually executed this
+        # turn. It must NOT be inferred from `analysis_text` later, because
+        # analysis_text is reused below to carry the always-on synthesis-lens +
+        # nuance-digest blocks — so `bool(analysis_text)` is true on nearly every
+        # turn and would falsely report "cascade applied" with no toggle set.
+        cascade_ran = False
         if request.reasoning_cascade and sources:
             try:
                 # Phase 24 perf — analyze imported at module-level as
@@ -4440,6 +4446,10 @@ class ChatOrchestrator:
                     chat_api_key=profile_creds.get("api_key") if profile_creds else None,
                     chat_extra_params=profile_creds.get("extra_params") if profile_creds else None,
                 )
+                # Captured BEFORE analysis_text is merged with the always-on
+                # synthesis-lens / nuance blocks, so the signal reflects the
+                # cascade itself, not those blocks.
+                cascade_ran = bool(analysis_text and analysis_text.strip())
             except Exception as exc:
                 logger.warning("Reasoning cascade failed: %s", exc)
 
@@ -5551,7 +5561,7 @@ class ChatOrchestrator:
         # Phase 24 — collect skill/tool/reasoning trust signals for this turn
         skills_used_names = [s["name"] for s in active_skills_dicts]
         final_tools_used = list(tools_used_names)
-        reasoning_cascade_applied = bool(analysis_text)
+        reasoning_cascade_applied = cascade_ran
         yield _record_trace_event(
             lane="final",
             title="Assistant final answer",
