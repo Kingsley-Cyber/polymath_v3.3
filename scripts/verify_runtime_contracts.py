@@ -320,6 +320,18 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         ),
     ),
     Requirement(
+        id="chat-retrieval-nuance-digest",
+        description="Chat synthesis receives deterministic repeated-context cues from the final retrieval packet.",
+        path="backend/services/chat_orchestrator.py",
+        needles=(
+            "_build_retrieval_nuance_digest",
+            "<retrieval_nuance_digest>",
+            "high_frequency_context",
+            "Retrieval nuance",
+            "Integrate 2-5",
+        ),
+    ),
+    Requirement(
         id="frontend-stream-consumer",
         description="Frontend consumes token/thinking SSE events and flushes them into the live streaming message.",
         path="frontend/src/App.tsx",

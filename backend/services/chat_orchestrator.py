@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import re
+from collections import Counter
 from datetime import datetime
 from time import perf_counter
 from typing import Any, AsyncGenerator
@@ -3074,6 +3075,309 @@ def _format_retrieval_tier_lens_trace(
     )
 
 
+_RETRIEVAL_NUANCE_TOKEN_RE = re.compile(r"[a-z][a-z0-9+#-]{2,}")
+_RETRIEVAL_NUANCE_STOPWORDS = frozenset(
+    """
+    about above across after again against all almost along already also although
+    always among and another any are around because been before being below between
+    both but can cannot could did does doing done down during each either else
+    even ever every few for from further had has have having here how however
+    into its itself just later less like likely made many may might more most
+    much must neither nor not now often only other our out over own per same
+    should since some still such than that the their them then there these they
+    this those through too under until upon use used using very was were what
+    when where which while who whom why will with within without would your
+    source sources chunk chunks corpus retrieved retrieval context evidence
+    section chapter page pages figure table appendix article xmlns kobospan class
+    header title kobo span xhtml html href http https www com org pdf markdown
+    text note notes example examples following previous including include includes
+    """
+    .split()
+)
+
+
+def _retrieval_nuance_source_text(source: Any) -> tuple[str, str]:
+    data = _source_to_dict(source)
+    if not data:
+        return "", ""
+    title = _source_title(data)
+    heading = " ".join(str(part) for part in (data.get("heading_path") or []) if part)
+    metadata = _source_metadata(data)
+    parts = [
+        heading,
+        str(data.get("summary") or ""),
+        str(metadata.get("title") or ""),
+        str(metadata.get("section") or ""),
+        str(data.get("text") or "")[:2600],
+    ]
+    text = "\n".join(part for part in parts if part)
+    return title, text
+
+
+def _retrieval_nuance_tokens(text: str) -> list[str]:
+    normalized = str(text or "").lower()
+    normalized = re.sub(r"`{1,3}[^`]*`{1,3}", " ", normalized)
+    normalized = re.sub(r"[_/|=<>()[\]{}.,;:\"'!?*]+", " ", normalized)
+    tokens: list[str] = []
+    for token in _RETRIEVAL_NUANCE_TOKEN_RE.findall(normalized):
+        cleaned = token.strip("-+#")
+        if (
+            len(cleaned) < 3
+            or cleaned in _RETRIEVAL_NUANCE_STOPWORDS
+            or cleaned.isdigit()
+            or cleaned.startswith("xhtml")
+            or cleaned.startswith("class")
+        ):
+            continue
+        tokens.append(cleaned)
+    return tokens
+
+
+def _retrieval_nuance_rank_terms(
+    tf: Counter[str],
+    df: Counter[str],
+    *,
+    phrase: bool,
+    limit: int,
+) -> list[str]:
+    ranked: list[tuple[int, int, str]] = []
+    for term, count in tf.items():
+        document_count = df.get(term, 0)
+        if phrase:
+            if document_count < 2 and count < 3:
+                continue
+            score = document_count * 16 + min(count, 24)
+        else:
+            if document_count < 2 and count < 3:
+                continue
+            score = document_count * 8 + min(count, 16)
+        ranked.append((score, count, term))
+    ranked.sort(key=lambda row: (-row[0], -row[1], row[2]))
+    return [term for _score, _count, term in ranked[:limit]]
+
+
+def _build_retrieval_nuance_digest(
+    *,
+    tier: Any,
+    sources: list[Any] | None,
+    facts: list[Any] | None,
+    decoration: list[Any] | None,
+    diagnostics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Extract deterministic repeated-context signals from the final RAG packet.
+
+    This is intentionally model-free. The final answer model gets a small digest
+    of terms, recurring documents, graph arrows, and lane mix so high-frequency
+    corpus context survives synthesis instead of being washed out by a generic
+    definition.
+    """
+
+    token_tf: Counter[str] = Counter()
+    token_df: Counter[str] = Counter()
+    phrase_tf: Counter[str] = Counter()
+    phrase_df: Counter[str] = Counter()
+    document_counts: Counter[str] = Counter()
+    lane_mix: Counter[str] = Counter()
+
+    for source in sources or []:
+        title, text = _retrieval_nuance_source_text(source)
+        if title:
+            document_counts[title] += 1
+        data = _source_to_dict(source) or {}
+        lane = str(data.get("source_tier") or data.get("chunk_kind") or "source")
+        lane_mix[lane] += 1
+        tokens = _retrieval_nuance_tokens(text)
+        if not tokens:
+            continue
+        token_tf.update(tokens)
+        token_df.update(set(tokens))
+        source_phrases: Counter[str] = Counter()
+        for left, right in zip(tokens, tokens[1:]):
+            if left == right:
+                continue
+            phrase = f"{left} {right}"
+            if phrase in _RETRIEVAL_NUANCE_STOPWORDS:
+                continue
+            source_phrases[phrase] += 1
+        phrase_tf.update(source_phrases)
+        phrase_df.update(set(source_phrases))
+
+    graph_relationships: list[str] = []
+    graph_text_parts: list[str] = []
+    for fact in facts or []:
+        subject = str(getattr(fact, "subject", "") or "").strip()
+        relation = str(
+            getattr(fact, "fact_type", None)
+            or getattr(fact, "property_name", None)
+            or "relates_to"
+        ).strip()
+        value = str(getattr(fact, "value", "") or "").strip()
+        evidence = str(getattr(fact, "evidence_phrase", "") or "").strip()
+        if subject and value:
+            graph_relationships.append(f"{subject} --{relation}-> {value}")
+            graph_text_parts.append(f"{subject} {relation} {value} {evidence}")
+    for edge in decoration or []:
+        seed = str(getattr(edge, "seed_entity", "") or "").strip()
+        neighbor = str(getattr(edge, "neighbor_entity", "") or "").strip()
+        predicate = str(getattr(edge, "predicate", "") or "").strip()
+        family = str(getattr(edge, "relation_family", "") or "").strip()
+        relation = predicate or family or "relates_to"
+        evidence = str(getattr(edge, "edge_evidence", "") or "").strip()
+        if seed and neighbor:
+            suffix = f" ({family})" if family and family != relation else ""
+            graph_relationships.append(f"{seed} --{relation}-> {neighbor}{suffix}")
+            graph_text_parts.append(f"{seed} {relation} {neighbor} {family} {evidence}")
+
+    if graph_text_parts:
+        graph_tokens = _retrieval_nuance_tokens(" ".join(graph_text_parts))
+        token_tf.update(graph_tokens)
+        token_df.update(set(graph_tokens))
+        graph_phrases = Counter(
+            f"{left} {right}"
+            for left, right in zip(graph_tokens, graph_tokens[1:])
+            if left != right
+        )
+        phrase_tf.update(graph_phrases)
+        phrase_df.update(set(graph_phrases))
+
+    phrases = _retrieval_nuance_rank_terms(phrase_tf, phrase_df, phrase=True, limit=8)
+    phrase_words = {word for phrase in phrases for word in phrase.split()}
+    singles = [
+        term
+        for term in _retrieval_nuance_rank_terms(token_tf, token_df, phrase=False, limit=12)
+        if term not in phrase_words
+    ][:8]
+    high_frequency_context = [*phrases[:6], *singles[:6]][:10]
+
+    diag = diagnostics or {}
+    counts = diag.get("counts") if isinstance(diag.get("counts"), dict) else {}
+    final_source_tiers = (
+        diag.get("final_source_tiers")
+        if isinstance(diag.get("final_source_tiers"), dict)
+        else dict(lane_mix)
+    )
+
+    return {
+        "tier": _retrieval_tier_value(tier),
+        "high_frequency_context": high_frequency_context,
+        "recurring_documents": [
+            {"name": name, "chunks": count}
+            for name, count in document_counts.most_common(6)
+            if count >= 2
+        ],
+        "source_lane_mix": final_source_tiers or dict(lane_mix),
+        "retrieval_additions": {
+            "lexical": counts.get("lexical", 0),
+            "facts": counts.get("facts", len(facts or [])),
+            "graph_expanded": counts.get("graph_expanded", 0),
+            "summary": counts.get("funnel_a", 0) + counts.get("global_summaries", 0),
+            "children": counts.get("funnel_b", 0),
+        },
+        "graph_relationships": graph_relationships[:8],
+    }
+
+
+def _format_retrieval_nuance_contract(digest: dict[str, Any] | None) -> str | None:
+    if not digest:
+        return None
+    terms = [str(term) for term in digest.get("high_frequency_context") or [] if term]
+    docs = [
+        f"{item.get('name')} ({item.get('chunks')} chunks)"
+        for item in (digest.get("recurring_documents") or [])
+        if isinstance(item, dict) and item.get("name")
+    ]
+    relationships = [
+        str(item)
+        for item in (digest.get("graph_relationships") or [])
+        if str(item).strip()
+    ]
+    if not any((terms, docs, relationships)):
+        return None
+
+    lines = [
+        "<retrieval_nuance_digest>",
+        (
+            "This is an internal synthesis-priority digest produced from the "
+            "final retrieved packet. Do not expose it as a diagnostic list "
+            "unless the user asks how retrieval behaved."
+        ),
+        f"tier: {digest.get('tier') or 'unknown'}",
+    ]
+    if terms:
+        lines.append(f"high_frequency_context: {', '.join(terms)}")
+    if docs:
+        lines.append(f"recurring_documents: {', '.join(docs)}")
+    source_lane_mix = digest.get("source_lane_mix") or {}
+    if source_lane_mix:
+        lines.append(f"source_lane_mix: {source_lane_mix}")
+    additions = digest.get("retrieval_additions") or {}
+    if additions:
+        lines.append(f"retrieval_additions: {additions}")
+    if relationships:
+        lines.append("graph_relationships:")
+        lines.extend(f"- {relationship}" for relationship in relationships[:8])
+    lines.extend(
+        [
+            "Instructions:",
+            (
+                "- Integrate 2-5 high-frequency context cues when they directly "
+                "answer or sharpen the user's question."
+            ),
+            (
+                "- Preserve nuance added by the selected tier: Vector gives broad "
+                "semantic recurrence; Hybrid adds lexical/parent specificity; "
+                "Graph adds entities, facts, relationships, bridges, and absences."
+            ),
+            (
+                "- If a frequent cue is off-question, omit it rather than forcing "
+                "it into the prose."
+            ),
+            (
+                "- Prefer recurring retrieved terms over generic pretrained "
+                "phrasing when the corpus evidence supports them."
+            ),
+            "</retrieval_nuance_digest>",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _format_retrieval_nuance_trace(digest: dict[str, Any] | None) -> str:
+    if not digest:
+        return "No repeated corpus cues were available for this turn."
+    terms = [str(term) for term in digest.get("high_frequency_context") or [] if term]
+    docs = [
+        f"{item.get('name')} x{item.get('chunks')}"
+        for item in (digest.get("recurring_documents") or [])
+        if isinstance(item, dict) and item.get("name")
+    ]
+    relationships = [
+        str(item)
+        for item in (digest.get("graph_relationships") or [])
+        if str(item).strip()
+    ]
+    lines = ["[Retrieval nuance]", f"tier: {digest.get('tier') or 'unknown'}"]
+    lines.append(
+        "high_frequency_context: "
+        + (", ".join(terms[:8]) if terms else "no repeated terms detected")
+    )
+    if docs:
+        lines.append(f"recurring_documents: {', '.join(docs[:5])}")
+    additions = digest.get("retrieval_additions") or {}
+    if additions:
+        lines.append(
+            "layer_additions: "
+            f"summary={additions.get('summary', 0)} · "
+            f"children={additions.get('children', 0)} · "
+            f"lexical={additions.get('lexical', 0)} · "
+            f"facts={additions.get('facts', 0)} · "
+            f"graph_expanded={additions.get('graph_expanded', 0)}"
+        )
+    if relationships:
+        lines.append("graph_cues: " + " | ".join(relationships[:3]))
+    return "\n".join(lines)
+
+
 def _format_retrieval_diagnostics_trace(
     diagnostics: dict[str, Any] | None,
     *,
@@ -3881,6 +4185,25 @@ class ChatOrchestrator:
                 logger.warning("Graph decoration skipped: %s", exc)
                 decoration = []
 
+        retrieval_nuance_digest = _build_retrieval_nuance_digest(
+            tier=retrieval.effective_tier,
+            sources=sources,
+            facts=facts,
+            decoration=decoration,
+            diagnostics=retrieval_diagnostics,
+        )
+        retrieval_nuance_contract = _format_retrieval_nuance_contract(
+            retrieval_nuance_digest,
+        )
+        if retrieval_nuance_contract:
+            yield _record_trace_event(
+                lane="planning",
+                title="Retrieval nuance",
+                status="done",
+                content=_format_retrieval_nuance_trace(retrieval_nuance_digest),
+                metadata=retrieval_nuance_digest,
+            )
+
         # Trust-signal snapshot — captured here so it carries through to
         # both the `done` SSE frame and the persisted assistant message.
         # `agentic_on_request` was resolved earlier (line ~80) and reflects
@@ -4066,6 +4389,7 @@ class ChatOrchestrator:
             for block in (
                 analysis_text,
                 synthesis_lens_contract,
+                retrieval_nuance_contract,
                 coverage_prompt_note,
             )
             if block and block.strip()

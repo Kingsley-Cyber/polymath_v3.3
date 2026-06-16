@@ -165,7 +165,9 @@ import services.chat_orchestrator as chat_orchestrator_module  # noqa: E402
 from models.schemas import ChatRequest, ModelOverrides, SourceChunk  # noqa: E402
 from services.chat_orchestrator import (  # noqa: E402
     ChatOrchestrator,
+    _build_retrieval_nuance_digest,
     _chat_source_is_low_value,
+    _format_retrieval_nuance_contract,
     _format_retrieval_tier_synthesis_contract,
     _should_skip_hyde_for_query,
 )
@@ -282,6 +284,74 @@ def test_retrieval_tiers_have_distinct_synthesis_lenses():
     assert "core node, connected ideas" in graph
     assert "Weak or missing links" in graph
     assert len({vector, hybrid, graph}) == 3
+
+
+def test_retrieval_nuance_digest_surfaces_repeated_context():
+    sources = [
+        SourceChunk(
+            chunk_id="nlp-1",
+            parent_id="parent-1",
+            doc_id="doc-nlp",
+            corpus_id="corpus",
+            doc_name="Computational Linguistics Handbook.md",
+            heading_path=["Natural Language Processing"],
+            text=(
+                "Natural language processing studies language models, "
+                "annotated corpora, information retrieval, and text analysis."
+            ),
+            score=1.0,
+            source_tier="tier_a_summary",
+        ),
+        SourceChunk(
+            chunk_id="nlp-2",
+            parent_id="parent-2",
+            doc_id="doc-nlp",
+            corpus_id="corpus",
+            doc_name="Computational Linguistics Handbook.md",
+            heading_path=["Information Retrieval"],
+            text=(
+                "NLP and information retrieval both use annotated corpora. "
+                "Language models connect natural language evidence to ranking."
+            ),
+            score=0.95,
+            source_tier="tier_b_child",
+        ),
+        SourceChunk(
+            chunk_id="python-1",
+            parent_id="parent-3",
+            doc_id="doc-python",
+            corpus_id="corpus",
+            doc_name="Python NLP Systems.md",
+            heading_path=["Python"],
+            text=(
+                "Python libraries support natural language processing by "
+                "tokenizing text, training language models, and evaluating "
+                "information retrieval systems."
+            ),
+            score=0.9,
+            source_tier="lexical",
+        ),
+    ]
+
+    digest = _build_retrieval_nuance_digest(
+        tier="qdrant_mongo",
+        sources=sources,
+        facts=[],
+        decoration=[],
+        diagnostics={
+            "counts": {"lexical": 3, "funnel_a": 2, "funnel_b": 1},
+            "final_source_tiers": {"tier_a_summary": 1, "tier_b_child": 1, "lexical": 1},
+        },
+    )
+    contract = _format_retrieval_nuance_contract(digest)
+
+    assert "natural language" in digest["high_frequency_context"]
+    assert "language models" in digest["high_frequency_context"]
+    assert digest["recurring_documents"][0]["name"] == "Computational Linguistics Handbook.md"
+    assert contract is not None
+    assert "<retrieval_nuance_digest>" in contract
+    assert "high_frequency_context" in contract
+    assert "Integrate 2-5" in contract
 
 
 def test_hyde_stays_available_for_open_cross_domain_discovery():
