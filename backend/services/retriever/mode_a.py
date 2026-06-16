@@ -2,6 +2,7 @@
 Neo4j Mode A — Chunk → Entity → Chunk co-reference expansion.
 Seeds from the vector-retrieved chunk pool, traverses the graph for related chunks.
 """
+import asyncio
 import logging
 from typing import List, Optional
 
@@ -43,26 +44,27 @@ class ModeAExpansion:
 
         # Phase 16.1 — confidence-weighted expansion via MENTIONS co-reference.
         # Phase 4.5 — adds a parallel CALLS-walk pass so code chunks reachable
-        # through graphify-emitted entity call edges also surface. Both passes
-        # run, results merge by chunk_id (scores sum, provenance concatenates).
-        mention_chunks = await self._expand_via_mentions(seed_ids, corpus_ids, limit)
-        calls_chunks = await self._expand_via_calls(seed_ids, corpus_ids, limit)
-
-        # Phase 5b — cache-driven bonus expansion. Pulls chunks that mention
-        # entities at the OTHER end of cached bridges (fragile / analogy /
-        # terminological / transfer) when at least one endpoint matches a
-        # seed entity. Capped at max(2, limit // 4) so the existing
-        # mention/calls pool always dominates 3:1. Gated on the flag AND a
-        # db handle being passed; cold-cache → empty list → behavior
-        # identical to pre-Phase-5b.
-        bridge_chunks: List[SourceChunk] = []
-        if (
+        # through graphify-emitted entity call edges also surface.
+        # Phase 5b — cache-driven bonus bridge expansion (fragile / analogy /
+        # terminological / transfer), capped at max(2, limit // 4) so the
+        # mention/calls pool dominates 3:1. Gated on the flag + a db handle.
+        #
+        # All three passes seed from the SAME chunk pool and are independent, so
+        # run their Neo4j round-trips CONCURRENTLY (they were sequential, ~7s
+        # total on a large graph) and merge by chunk_id afterward. The bridge
+        # pass keeps its own error isolation so a metrics-cache miss can't break
+        # the mention/calls result.
+        bridge_enabled = (
             getattr(self._settings, "RETRIEVAL_CACHE_MODE_A_METRICS", True)
             and db is not None
             and corpus_ids
-        ):
+        )
+
+        async def _bridges() -> List[SourceChunk]:
+            if not bridge_enabled:
+                return []
             try:
-                bridge_chunks = await self._expand_via_bridges(
+                return await self._expand_via_bridges(
                     seed_ids=seed_ids,
                     corpus_ids=corpus_ids,
                     db=db,
@@ -73,7 +75,13 @@ class ModeAExpansion:
                     "Mode A bridge expansion failed (%s) — continuing with "
                     "mentions + calls only", exc,
                 )
-                bridge_chunks = []
+                return []
+
+        mention_chunks, calls_chunks, bridge_chunks = await asyncio.gather(
+            self._expand_via_mentions(seed_ids, corpus_ids, limit),
+            self._expand_via_calls(seed_ids, corpus_ids, limit),
+            _bridges(),
+        )
 
         merged: dict[str, SourceChunk] = {}
         for pool in (mention_chunks, calls_chunks, bridge_chunks):

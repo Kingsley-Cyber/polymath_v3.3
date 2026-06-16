@@ -2351,7 +2351,16 @@ async def _enforce_chat_query_coverage(
                         retrieval_tier=coverage_tier,
                         collections=collections,
                         retrieval_k=max(24, min(int(retrieval_k or 40), 48)),
-                        rerank_enabled=rerank_enabled,
+                        # Coverage support retrievals pick ONE gap-fill chunk per
+                        # facet, and the candidate is chosen by facet-fit scoring
+                        # (_choose_chat_coverage_candidate_with_report) — not by the
+                        # cross-encoder. Skipping rerank here removes the serial
+                        # Metal-reranker contention across the ~5 parallel coverage
+                        # passes (the dominant remaining coverage cost). Doc-spread
+                        # is still enforced downstream by select_facet_final's
+                        # distinct-doc cap, and the MAIN answer retrieval still
+                        # reranks fully.
+                        rerank_enabled=False,
                         ranking_query=support_query,
                         top_k_summary=top_k_summary,
                         rerank_top_n=max(12, min(int(rerank_top_n or 24), 32)),
