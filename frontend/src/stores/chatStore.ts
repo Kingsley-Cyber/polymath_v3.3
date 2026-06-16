@@ -76,6 +76,7 @@ interface ChatState {
   startStreaming: () => void;
   stopStreaming: () => void;
   clearStreamingContent: () => void;
+  clearStreamingThinking: () => void;
   setTokenBudget: (used: number, max: number) => void;
 
   // Error handling
@@ -347,6 +348,7 @@ export const useChatStore = create<ChatState>()((set) => ({
     }),
 
   clearStreamingContent: () => set({ streamingContent: "" }),
+  clearStreamingThinking: () => set({ streamingThinking: "" }),
 
   setTokenBudget: (used, max) => set({ tokensUsed: used, tokensMax: max }),
 

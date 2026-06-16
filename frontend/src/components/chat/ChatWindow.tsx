@@ -161,7 +161,22 @@ export function ChatWindow() {
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     const justFinishedStreaming = previousStreamingRef.current && !isStreaming;
+    // Respect manual scroll-away: while streaming, only keep pinning the live
+    // answer into view if the user is still near the bottom. If they scrolled
+    // up to read earlier text, do not yank them back down on every token batch.
+    const container = containerRef.current;
+    const NEAR_BOTTOM_PX = 160;
+    const userScrolledAway = Boolean(
+      container &&
+        container.scrollHeight -
+          (container.scrollTop + container.clientHeight) >
+          NEAR_BOTTOM_PX,
+    );
     requestAnimationFrame(() => {
+      if (isStreaming && userScrolledAway) {
+        // User is reading earlier content mid-stream — leave the scroll alone.
+        return;
+      }
       if (isStreaming && streamingMessageRef.current) {
         streamingMessageRef.current.scrollIntoView({
           behavior: "auto",

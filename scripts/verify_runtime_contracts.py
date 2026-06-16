@@ -321,14 +321,15 @@ REQUIREMENTS: tuple[Requirement, ...] = (
     ),
     Requirement(
         id="chat-retrieval-nuance-digest",
-        description="Chat synthesis receives deterministic repeated-context cues from the final retrieval packet.",
+        description="Chat synthesis receives a deduped, capped, leak-guarded salient-context hint from the final retrieval packet.",
         path="backend/services/chat_orchestrator.py",
         needles=(
             "_build_retrieval_nuance_digest",
             "<retrieval_nuance_digest>",
             "high_frequency_context",
             "Retrieval nuance",
-            "Integrate 2-5",
+            "salient_terms",
+            "NEVER output these terms as a list",
         ),
     ),
     Requirement(

@@ -155,6 +155,11 @@ export function MessageBubble({
                 hasThinking={Boolean(message.thinking)}
                 hasProcess={hasProcessTimeline || Boolean(message.trace_events?.length)}
                 thinking={message.thinking || ""}
+                latestStep={
+                  visibleProcessTimeline[visibleProcessTimeline.length - 1]?.title ||
+                  message.trace_events?.[message.trace_events.length - 1]?.title ||
+                  ""
+                }
               />
             ) : (
               <ReactMarkdown
@@ -262,16 +267,37 @@ function LiveAnswerDraft({
   hasThinking,
   hasProcess,
   thinking,
+  latestStep,
 }: {
   hasThinking: boolean;
   hasProcess: boolean;
   thinking: string;
+  latestStep?: string;
 }) {
-  const label = hasThinking
+  // Live elapsed counter so the time-to-first-token gap (seconds when warm,
+  // up to minutes while a cold model loads) reads as active progress rather
+  // than an inert spinner.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const id = window.setInterval(() => {
+      setElapsed(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const baseLabel = hasThinking
     ? "Reading the model's reasoning stream"
-    : hasProcess
-      ? "Tracing retrieval and model steps live"
-      : "Starting the answer stream";
+    : latestStep
+      ? latestStep
+      : hasProcess
+        ? "Tracing retrieval and model steps live"
+        : "Waiting for the model's first token";
+  const slowHint =
+    !hasThinking && elapsed >= 12
+      ? " · a cold model can take up to a minute to start"
+      : "";
+  const label = `${baseLabel} · ${elapsed}s${slowHint}`;
   const thinkingPreview = formatLiveThinkingPreview(thinking);
 
   return (

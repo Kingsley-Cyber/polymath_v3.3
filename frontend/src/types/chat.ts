@@ -482,7 +482,8 @@ export interface SSEEvent {
     | "tool_call_start"
     | "tool_result"
     | "trace_event"
-    | "tier_downgraded";
+    | "tier_downgraded"
+    | "draft_reset";
   content: string | null;
   thinking?: string;
   trace_event?: TraceEvent;

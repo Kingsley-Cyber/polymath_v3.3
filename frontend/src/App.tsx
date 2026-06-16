@@ -412,6 +412,20 @@ function App() {
                   scheduleStreamingFlush();
                 }
                 break;
+              case "draft_reset":
+                // Backend is about to regenerate after a tool call. Discard the
+                // in-progress answer draft (local buffers AND store) so pre-tool
+                // prose does not concatenate with the final answer. Trace,
+                // sources, and tool activity are intentionally preserved.
+                if (flushTimer !== undefined) {
+                  window.clearTimeout(flushTimer);
+                  flushTimer = undefined;
+                }
+                tokenBuffer = "";
+                thinkingBuffer = "";
+                chat.clearStreamingContent();
+                chat.clearStreamingThinking();
+                break;
               case "trace_event":
                 flushStreamingBuffers();
                 if (event.trace_event) {

@@ -2820,6 +2820,32 @@ def _tool_schema_names(tool_schemas: list[dict[str, Any]]) -> list[str]:
     ]
 
 
+def _partition_known_tool_calls(
+    tool_calls: list[dict[str, Any]],
+    active_tool_schemas: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Split tool calls into (recognized, dropped_names).
+
+    A call is recognized only if it has a non-empty name matching an active tool
+    schema or the always-valid 'response' finish tool. Empty/garbage names — for
+    example minimax-m2.7's spurious ``{"name": ""}`` call emitted alongside a
+    complete answer — are dropped here so they never trigger a not-found tool
+    execution and an extra generation pass that duplicates the answer in the
+    live stream.
+    """
+    valid_names = set(_tool_schema_names(active_tool_schemas))
+    valid_names.add("response")
+    kept: list[dict[str, Any]] = []
+    dropped: list[str] = []
+    for call in tool_calls:
+        name = _tool_call_name(call)
+        if name and name in valid_names:
+            kept.append(call)
+        else:
+            dropped.append(name or "<empty>")
+    return kept, dropped
+
+
 def _limit_tool_calls_for_turn(
     tool_calls: list[dict[str, Any]],
     *,
@@ -2965,14 +2991,22 @@ def _format_retrieval_tier_synthesis_contract(
             "Required answer shape: semantic overview.",
             (
                 "Answer the user's question from the strongest semantic matches. "
-                "Favor a clean definition, broad conceptual framing, and a small "
-                "set of high-level examples only when those examples appear in "
-                "retrieved context."
+                "Favor a clean definition and broad conceptual framing."
             ),
             (
-                "Do not perform source comparison, corpus-wide adjudication, or "
-                "relationship-map/gap analysis. Keep the answer compact unless "
-                "the user asks for depth."
+                "Ground the overview in the retrieved passages: build the answer "
+                "from how THIS corpus frames the concept, and fold in at least "
+                "one concrete term, phrasing, or example that actually appears "
+                "in the retrieved context. Do not fall back to a purely generic "
+                "textbook definition that ignores the retrieved evidence."
+            ),
+            (
+                "Keep it a broad overview — do not perform source-by-source "
+                "comparison, corpus-wide adjudication, or relationship/gap "
+                "analysis. Keep the answer compact unless the user asks for "
+                "depth. If the retrieved context genuinely does not address the "
+                "term, give a short plain definition and say the corpus does not "
+                "cover it — in one inline clause, not a separate section."
             ),
         ]
     elif value == RetrievalTier.qdrant_mongo_graph.value:
@@ -2985,9 +3019,11 @@ def _format_retrieval_tier_synthesis_contract(
                 "generic definition."
             ),
             (
-                "Preferred visible structure: a short definition, then headings "
-                "or bold anchors for 'Core node', 'Connected ideas', and "
-                "'Weak or missing links' when the evidence supports them."
+                "Preferred shape: a short definition, then the concept's core "
+                "relationships, then where the evidence is thin. Use plain, "
+                "content-driven headings that fit the actual question — do not "
+                "paste the fixed labels 'Core node', 'Connected ideas', or "
+                "'Weak or missing links' verbatim as section headers."
             ),
             (
                 "Define the core concept briefly, then explain how it connects "
@@ -3015,10 +3051,10 @@ def _format_retrieval_tier_synthesis_contract(
                 "not stop at the same generic definition Vector Base would give."
             ),
             (
-                "Preferred visible structure: open with 'Across the selected "
-                "sources' or equivalent wording, then give 2-4 evidence-backed "
-                "details, then a compact boundary note for what the retrieved "
-                "evidence does not establish."
+                "Lead with the corpus-grounded synthesis, then give 2-4 "
+                "evidence-backed details drawn from the hydrated parent/lexical "
+                "passages. Open naturally with the answer itself — do NOT use a "
+                "fixed opener like 'Across the selected sources'."
             ),
             (
                 "Answer as what the selected corpus evidence specifically says. "
@@ -3026,14 +3062,17 @@ def _format_retrieval_tier_synthesis_contract(
                 "examples, and caveats beyond the broad semantic definition."
             ),
             (
-                "Compare or reconcile the strongest retrieved passages when they "
-                "frame the concept differently. Include what the corpus supports "
-                "and what it does not establish, but avoid graph/network claims "
-                "unless graph evidence is actually present."
+                "Reconcile the strongest retrieved passages when they frame the "
+                "concept differently, but avoid graph/network claims unless graph "
+                "evidence is actually present."
             ),
             (
                 "The answer should feel deeper than Vector Base: more grounded, "
-                "more corpus-specific, and more exact about evidence boundaries."
+                "more corpus-specific, more exact. Only note an evidence gap when "
+                "it materially changes the answer, and phrase it as a brief "
+                "inline caveat — never a standing 'what the corpus does not "
+                "establish' section or a '→ the retrieved corpus does not "
+                "establish ...' line."
             ),
             (
                 "If the question is simple, the answer may still be concise, "
@@ -3277,64 +3316,77 @@ def _build_retrieval_nuance_digest(
     }
 
 
+def _dedupe_preserving_order(items: list[str], *, limit: int) -> list[str]:
+    """Case-insensitive de-dup that keeps first-seen order, capped at `limit`."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        key = item.strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(item.strip())
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _format_retrieval_nuance_contract(digest: dict[str, Any] | None) -> str | None:
+    """Internal synthesis hint passed to the model.
+
+    Deliberately minimal: only a few de-duped salient terms and (when present)
+    a handful of graph relationships. The diagnostic counters
+    (recurring_documents / source_lane_mix / retrieval_additions) are NOT sent
+    to the model — they are leak-prone and belong only in the trace. The
+    instructions hard-forbid rendering the terms as a list or as repeated
+    cue-prefixed sentences so a weak model cannot turn them into 'Also X.
+    Also Y.' spam.
+    """
     if not digest:
         return None
-    terms = [str(term) for term in digest.get("high_frequency_context") or [] if term]
-    docs = [
-        f"{item.get('name')} ({item.get('chunks')} chunks)"
-        for item in (digest.get("recurring_documents") or [])
-        if isinstance(item, dict) and item.get("name")
-    ]
-    relationships = [
-        str(item)
-        for item in (digest.get("graph_relationships") or [])
-        if str(item).strip()
-    ]
-    if not any((terms, docs, relationships)):
+    terms = _dedupe_preserving_order(
+        [str(term) for term in digest.get("high_frequency_context") or [] if term],
+        limit=6,
+    )
+    relationships = _dedupe_preserving_order(
+        [
+            str(item)
+            for item in (digest.get("graph_relationships") or [])
+            if str(item).strip()
+        ],
+        limit=6,
+    )
+    if not any((terms, relationships)):
         return None
 
     lines = [
         "<retrieval_nuance_digest>",
         (
-            "This is an internal synthesis-priority digest produced from the "
-            "final retrieved packet. Do not expose it as a diagnostic list "
-            "unless the user asks how retrieval behaved."
+            "Internal synthesis hint from the retrieved packet. NEVER render, "
+            "quote, or describe this block; it is guidance only, not content."
         ),
-        f"tier: {digest.get('tier') or 'unknown'}",
     ]
     if terms:
-        lines.append(f"high_frequency_context: {', '.join(terms)}")
-    if docs:
-        lines.append(f"recurring_documents: {', '.join(docs)}")
-    source_lane_mix = digest.get("source_lane_mix") or {}
-    if source_lane_mix:
-        lines.append(f"source_lane_mix: {source_lane_mix}")
-    additions = digest.get("retrieval_additions") or {}
-    if additions:
-        lines.append(f"retrieval_additions: {additions}")
+        lines.append(f"salient_terms: {', '.join(terms)}")
     if relationships:
-        lines.append("graph_relationships:")
-        lines.extend(f"- {relationship}" for relationship in relationships[:8])
+        lines.append("salient_relationships:")
+        lines.extend(f"- {relationship}" for relationship in relationships)
     lines.extend(
         [
-            "Instructions:",
+            "How to use this hint:",
             (
-                "- Integrate 2-5 high-frequency context cues when they directly "
-                "answer or sharpen the user's question."
+                "- Fold the on-topic salient terms naturally into your normal "
+                "prose, only where they genuinely sharpen the answer."
             ),
             (
-                "- Preserve nuance added by the selected tier: Vector gives broad "
-                "semantic recurrence; Hybrid adds lexical/parent specificity; "
-                "Graph adds entities, facts, relationships, bridges, and absences."
+                "- NEVER output these terms as a list, as a 'salient terms' "
+                "section, or as one term per sentence, and never write a run of "
+                "'Also ...'/'Additionally ...' sentences to cram them in."
             ),
             (
-                "- If a frequent cue is off-question, omit it rather than forcing "
-                "it into the prose."
-            ),
-            (
-                "- Prefer recurring retrieved terms over generic pretrained "
-                "phrasing when the corpus evidence supports them."
+                "- If a term is off-question, omit it. Prefer corpus-grounded "
+                "wording over generic pretrained phrasing when the evidence "
+                "supports it."
             ),
             "</retrieval_nuance_digest>",
         ]
@@ -3487,6 +3539,12 @@ POLYMATH_SYSTEM_PROMPT = (
     "or when the answer is genuinely a list (e.g. 'what are the five…').\n"
     "- Synthesize across the context. Do NOT narrate chunk-by-chunk "
     "('Source 1 says X, Source 2 says Y'). Integrate.\n"
+    "- Never emit a run of short sentences that begin with the same word "
+    "(e.g. repeated 'Also ...' or 'Additionally ...' lines). Weave related "
+    "points into unified sentences and vary sentence structure.\n"
+    "- Do not dump retrieved keywords or recurring terms as a list or as one "
+    "term per sentence. Fold any salient terms naturally into the prose only "
+    "where they genuinely sharpen the answer.\n"
     "- Cite only when quoting directly or when a claim is genuinely contested "
     "across sources. Do not cite in every sentence.\n"
     "- Skip preambles ('Based on the provided context…', 'Great question…'). "
@@ -3500,10 +3558,12 @@ POLYMATH_SYSTEM_PROMPT = (
     "that evidence first instead of substituting your pretrained background "
     "knowledge.\n"
     "- Use general knowledge only when no retrieved evidence is present, or as "
-    "a small bridge for a term the sources do not explain. If you use it for "
-    "a material claim, say that the retrieved corpus does not establish that "
-    "specific part. Do not attach corpus citations to unsupported background "
-    "knowledge.\n"
+    "a small bridge for a term the sources do not explain. If you use it for a "
+    "material claim, add a brief inline caveat where the claim appears (e.g. "
+    "'(beyond what the sources cover)'). Do NOT emit a standing status line "
+    "such as '→ the retrieved corpus does not establish ...' or a separate "
+    "'what the corpus does not establish' section, and do not attach corpus "
+    "citations to unsupported background knowledge.\n"
     "- In RAG mode, do not introduce named libraries, frameworks, products, "
     "papers, metrics, datasets, or examples unless they appear in the retrieved "
     "evidence or the user explicitly asks you to use outside knowledge. If a "
@@ -4802,6 +4862,38 @@ class ChatOrchestrator:
                 },
             )
 
+            # Drop malformed / unknown tool calls before deciding whether this
+            # turn is agentic. Some models (e.g. minimax-m2.7) emit an
+            # empty-name tool call alongside a complete answer. An empty or
+            # unrecognized name would otherwise "execute" as a not-found tool,
+            # force a second generation pass, and stream a SECOND answer that
+            # concatenates onto the first in the live UI (the persisted message
+            # is fine because assistant_content is reset each iteration). The
+            # "response" finish-tool is always considered valid.
+            if tool_calls:
+                tool_calls, dropped_tool_names = _partition_known_tool_calls(
+                    tool_calls, active_tool_schemas
+                )
+                if dropped_tool_names:
+                    logger.info(
+                        "Dropped %d invalid/unknown tool call(s) from %s: %s",
+                        len(dropped_tool_names),
+                        model_used,
+                        dropped_tool_names,
+                    )
+                    yield _record_trace_event(
+                        lane="tool_call",
+                        title="Ignored malformed tool call",
+                        status="done",
+                        content=(
+                            f"Ignored {len(dropped_tool_names)} malformed or "
+                            f"unknown tool call(s): "
+                            f"{', '.join(dropped_tool_names)}. Treating the "
+                            "streamed content as the final answer."
+                        ),
+                        metadata={"dropped": dropped_tool_names},
+                    )
+
             # If no tool calls, this is the final response
             if not tool_calls:
                 if web_search_enabled and web_search_call_count == 0:
@@ -4944,6 +5036,7 @@ class ChatOrchestrator:
                     )
                     continue
                 if response_text:
+                    streamed_narrative = assistant_content.strip()
                     assistant_content = response_text
                     yield _record_trace_event(
                         lane="final",
@@ -4952,6 +5045,16 @@ class ChatOrchestrator:
                         content="Model called response() to terminate the agentic loop.",
                         metadata={"tool_name": "response"},
                     )
+                    # If the model already streamed narrative this iteration,
+                    # reset the UI draft so response_text replaces it instead of
+                    # appending (avoids a duplicated answer in the live stream).
+                    if streamed_narrative and not suppress_content_until_web:
+                        yield build_sse_chunk(
+                            ChatChunk(
+                                type="draft_reset",
+                                conversation_id=str(conversation_id),
+                            )
+                        )
                     yield build_sse_chunk(
                         ChatChunk(
                             type="token",
@@ -4962,6 +5065,19 @@ class ChatOrchestrator:
                     break
             if response_call is not None:
                 tool_calls = non_response_tool_calls
+
+            # The model streamed narrative content this iteration but is about
+            # to call real tools and regenerate. Tell the UI to discard the
+            # in-progress draft so this pre-tool prose does not concatenate with
+            # the final answer the next iteration streams (live-stream
+            # de-duplication; the persisted message is already clean).
+            if assistant_content.strip() and not suppress_content_until_web:
+                yield build_sse_chunk(
+                    ChatChunk(
+                        type="draft_reset",
+                        conversation_id=str(conversation_id),
+                    )
+                )
 
             # Announce tool execution before running — lets the UI show "⚙ Running: <tool>"
             tool_call_summaries = [

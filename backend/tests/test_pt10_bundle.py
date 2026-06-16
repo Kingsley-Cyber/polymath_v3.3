@@ -169,8 +169,58 @@ from services.chat_orchestrator import (  # noqa: E402
     _chat_source_is_low_value,
     _format_retrieval_nuance_contract,
     _format_retrieval_tier_synthesis_contract,
+    _partition_known_tool_calls,
     _should_skip_hyde_for_query,
 )
+
+
+def _make_tool_call(name: str) -> dict:
+    return {"id": f"call_{name or 'empty'}", "type": "function",
+            "function": {"name": name, "arguments": "{}"}}
+
+
+def _web_schema() -> dict:
+    return {"type": "function", "function": {"name": "web_search", "parameters": {}}}
+
+
+def test_partition_known_tool_calls_drops_empty_name_calls():
+    """minimax-m2.7 emits a spurious empty-name tool call alongside its answer.
+
+    That bogus call must be dropped so the agentic loop does not 'execute' a
+    not-found tool and regenerate a second answer that duplicates in the live
+    stream. The persisted message was always clean; this guards the live stream.
+    """
+    calls = [_make_tool_call(""), _make_tool_call("web_search")]
+    kept, dropped = _partition_known_tool_calls(calls, [_web_schema()])
+
+    assert [c["function"]["name"] for c in kept] == ["web_search"]
+    assert dropped == ["<empty>"]
+
+
+def test_partition_known_tool_calls_drops_unknown_and_keeps_response():
+    """Unknown tool names are dropped; the always-valid 'response' finish tool
+    is kept even when it is not in the active schema list."""
+    calls = [
+        _make_tool_call("not_a_real_tool"),
+        _make_tool_call("response"),
+        _make_tool_call("web_search"),
+    ]
+    kept, dropped = _partition_known_tool_calls(calls, [_web_schema()])
+
+    kept_names = [c["function"]["name"] for c in kept]
+    assert "response" in kept_names
+    assert "web_search" in kept_names
+    assert "not_a_real_tool" not in kept_names
+    assert dropped == ["not_a_real_tool"]
+
+
+def test_partition_known_tool_calls_empty_only_yields_no_kept():
+    """An iteration whose only tool call is malformed becomes a final answer
+    (no kept calls), so the loop breaks instead of regenerating."""
+    kept, dropped = _partition_known_tool_calls([_make_tool_call("")], [_web_schema()])
+
+    assert kept == []
+    assert dropped == ["<empty>"]
 
 
 def test_balanced_profile_has_hyde_enabled():
@@ -279,10 +329,14 @@ def test_retrieval_tiers_have_distinct_synthesis_lenses():
     assert "relationship map" in graph.lower()
     assert "source comparison" in vector
     assert "what the selected corpus evidence specifically says" in hybrid
-    assert "Across the selected sources" in hybrid
+    # Hybrid now opens naturally instead of with a fixed "Across the selected
+    # sources" template, and must not emit a standing "does not establish" line.
+    assert "do NOT use a fixed opener" in hybrid
     assert "default short-answer compression" in hybrid
     assert "core node, connected ideas" in graph
-    assert "Weak or missing links" in graph
+    # Graph keeps the relationship shape but must not paste the fixed labels
+    # verbatim as section headers (de-templatized so weak models don't echo them).
+    assert "do not paste the fixed labels" in graph
     assert len({vector, hybrid, graph}) == 3
 
 
@@ -350,8 +404,14 @@ def test_retrieval_nuance_digest_surfaces_repeated_context():
     assert digest["recurring_documents"][0]["name"] == "Computational Linguistics Handbook.md"
     assert contract is not None
     assert "<retrieval_nuance_digest>" in contract
-    assert "high_frequency_context" in contract
-    assert "Integrate 2-5" in contract
+    # Salient terms are surfaced to the model as a hint...
+    assert "salient_terms" in contract
+    # ...but leak-prone diagnostic counters are NOT sent into the prompt, and the
+    # contract hard-forbids rendering the terms as a list / "Also X. Also Y." spam.
+    assert "recurring_documents" not in contract
+    assert "source_lane_mix" not in contract
+    assert "retrieval_additions" not in contract
+    assert "NEVER output these terms as a list" in contract
 
 
 def test_hyde_stays_available_for_open_cross_domain_discovery():
