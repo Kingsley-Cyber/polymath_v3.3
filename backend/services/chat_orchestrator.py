@@ -4108,17 +4108,10 @@ class ChatOrchestrator:
             else None
         )
         resolved_mode = resolve_search_mode(requested_mode, request.message)
-        # Phase 4 — LLM intent second-chance: when auto-mode's markers resolved to
-        # local, ask the classifier whether this is really an overview question and
-        # upgrade to global so the domain-stratified breadth path activates.
-        if (
-            (requested_mode or "auto").lower() == "auto"
-            and resolved_mode == "local"
-            and _should_run_overview_intent_classifier(request.message)
-        ):
-            if await _classify_overview_intent(request.message) == "global":
-                resolved_mode = "global"
-                logger.info("intent classifier upgraded auto/local -> global (overview)")
+        # Tier-authoritative routing: GLOBAL (the 50-summary overview) is only
+        # ever the user's explicit choice. The old LLM "overview intent" second
+        # chance silently upgraded local→global, overrode the user's tier, and
+        # added an LLM call — removed so the selected tier + mode drive the work.
         if reasoning_mode == "atomic":
             from services.reasoning import atomic_retrieve
 

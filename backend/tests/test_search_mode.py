@@ -126,15 +126,21 @@ def test_resolve_global_passes_through():
     assert resolve_search_mode("global", "any query") == "global"
 
 
-def test_resolve_auto_invokes_infer():
-    assert resolve_search_mode("auto", "summarize all my docs") == "global"
+def test_resolve_auto_resolves_to_local_not_inferred():
+    """'auto' no longer infers global — it resolves to local so the tier drives
+    the work. (infer_search_mode is still unit-tested directly above for callers
+    that opt into heuristic inference; it just isn't wired to the default mode.)"""
+    assert resolve_search_mode("auto", "summarize all my docs") == "local"
     assert resolve_search_mode("auto", "find Humanoid:MoveTo") == "local"
 
 
-def test_resolve_none_defaults_to_auto():
-    """None / empty / missing override → use the inferred mode."""
-    assert resolve_search_mode(None, "summarize all themes") == "global"
+def test_resolve_none_defaults_to_local():
+    """Tier-authoritative policy: None / empty / legacy 'auto' all resolve to
+    local. Global is NEVER auto-inferred — it is an explicit user choice only,
+    so an overview-shaped query stays local unless 'global' is requested."""
+    assert resolve_search_mode(None, "summarize all themes") == "local"
     assert resolve_search_mode("", "how does X work") == "local"
+    assert resolve_search_mode("auto", "summarize all themes") == "local"
 
 
 def test_resolve_unknown_mode_falls_back_to_local():
@@ -145,7 +151,8 @@ def test_resolve_unknown_mode_falls_back_to_local():
 def test_resolve_case_insensitive():
     assert resolve_search_mode("GLOBAL", "any") == "global"
     assert resolve_search_mode("Local", "any") == "local"
-    assert resolve_search_mode("Auto", "summarize all themes") == "global"
+    # 'Auto' is no longer inferred to global — it resolves to local now.
+    assert resolve_search_mode("Auto", "summarize all themes") == "local"
 
 
 # ─── Marker list sanity ────────────────────────────────────────────────────

@@ -178,15 +178,19 @@ def infer_search_mode(query: str) -> SearchMode:
 
 
 def resolve_search_mode(requested: SearchMode | str | None, query: str) -> SearchMode:
-    """Apply the user-facing dispatch: "auto" → infer, "local"/"global"
-    → use as-is, anything else → fall back to "local" (the safest
-    default; never global by mistake)."""
-    val = (requested or "auto").lower().strip()
+    """Apply the user-facing dispatch.
+
+    Policy (tier-authoritative): the user's retrieval tier drives the work, and
+    GLOBAL is an explicit, user-selected mode (the 50-summary overview) — never
+    auto-inferred. "global" is honored only when explicitly requested; every
+    other value (the "Default", legacy "auto", or anything unknown) resolves to
+    "local" so a query is never silently inflated into the heavier global path.
+
+    `infer_search_mode` is retained for callers that opt into heuristic
+    inference, but it is no longer triggered by the default mode.
+    """
+    val = (requested or "local").lower().strip()
     if val == "global":
         return "global"
-    if val == "local":
-        return "local"
-    if val == "auto":
-        return infer_search_mode(query)
-    logger.warning("resolve_search_mode: unknown mode=%r, defaulting to local", val)
+    # "local", "default", legacy "auto", and unknowns all → local.
     return "local"

@@ -85,8 +85,9 @@ const DEFAULT_SETTINGS: Omit<SettingsState, "selectedModel"> = {
   // Search mode dispatch (Phase 27) — "auto" lets the backend infer
   // local vs global from the query shape; "local" forces the full
   // pipeline (vector+BM25+graph+rerank+hydrate); "global" returns
-  // summaries-only for thematic / corpus-wide questions.
-  searchMode: "auto",
+  // summaries-only for thematic / corpus-wide questions. Default is the
+  // tier-driven "local" path; "global" is an explicit user choice only.
+  searchMode: "local",
 
   // Thinking-effort dial (Phase 28) — per-turn reasoning depth for
   // models that expose it (OpenAI o-series, Claude, Gemini 2.5+,
