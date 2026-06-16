@@ -665,12 +665,25 @@ class ContextManager:
                     fact_lines.append(line)
                 facts_block = "<key_facts>\n" + "\n".join(fact_lines) + "\n</key_facts>\n\n"
 
+            rag_policy = (
+                "<rag_answer_policy>\n"
+                "The retrieved context/key_facts are the answer substrate. "
+                "If a passage directly defines, explains, compares, or "
+                "exemplifies the user's terms, answer from that evidence first. "
+                "Do not replace source-backed evidence with a generic "
+                "pretrained definition. Synthesize across sources rather than "
+                "listing them. Use general knowledge only as a small bridge for "
+                "details the context does not cover, and caveat material "
+                "unsupported claims exactly where they appear.\n"
+                "</rag_answer_policy>\n\n"
+            )
+
             if facts_block and context_block:
-                base = f"{facts_block}{context_block}\n\nQuestion: {query}"
+                base = f"{rag_policy}{facts_block}{context_block}\n\nQuestion: {query}"
             elif facts_block:
-                base = f"{facts_block}Question: {query}"
+                base = f"{rag_policy}{facts_block}Question: {query}"
             else:
-                base = f"{context_block}\n\nQuestion: {query}"
+                base = f"{rag_policy}{context_block}\n\nQuestion: {query}"
 
         # Phase 24 — Skills as context. Each active skill's `instructions`
         # is wrapped in a <skill> block and prepended above <context>. Skills

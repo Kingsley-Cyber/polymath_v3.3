@@ -192,6 +192,7 @@ export function MessageBubble({
           <ProcessTimeline
             items={visibleProcessTimeline}
             isStreaming={isStreaming}
+            defaultOpen={true}
           />
         )}
 
@@ -385,12 +386,17 @@ function toolNameFromTraceTitle(title: string): string | undefined {
 function ProcessTimeline({
   items,
   isStreaming,
+  defaultOpen = false,
 }: {
   items: ProcessTimelineItem[];
   isStreaming: boolean;
+  defaultOpen?: boolean;
 }) {
   const groups = compactProcessTimeline(items);
   const [manualOpenIds, setManualOpenIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [manualClosedIds, setManualClosedIds] = useState<Set<string>>(
     () => new Set(),
   );
   const activeId = isStreaming
@@ -407,13 +413,25 @@ function ProcessTimeline({
       }
       return next;
     });
+    setManualClosedIds((previous) => {
+      const next = new Set(previous);
+      if (open) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   };
 
   return (
     <div className="mb-2 w-full max-w-[82ch]">
       {groups.map((group, index) => {
         const active = group.id === activeId;
-        const open = isStreaming || active || manualOpenIds.has(group.id);
+        const open =
+          active ||
+          manualOpenIds.has(group.id) ||
+          ((isStreaming || defaultOpen) && !manualClosedIds.has(group.id));
         return (
           <ProcessTimelineCard
             key={group.id}

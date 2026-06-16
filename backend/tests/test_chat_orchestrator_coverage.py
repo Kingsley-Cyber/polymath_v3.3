@@ -508,6 +508,7 @@ def test_chat_coverage_prompt_note_names_uncovered_and_weak_lanes():
     assert "HARD LIMIT" in note
     assert "no source-backed evidence" in note
     assert "Do not state these areas as existing capabilities" in note
+    assert "not a generic pretrained definition" in note
     assert "Do not expose internal terms like facets, lanes" in note
     assert "Do not open with a corpus audit" in note
 
@@ -518,6 +519,8 @@ def test_system_prompt_includes_agent_zero_chat_rag_shape():
     assert "Agent-Zero-inspired chat render style" in prompt
     assert "high-signal" in prompt
     assert "strongest one-sentence synthesis" in prompt
+    assert "primary answer substrate" in prompt
+    assert "instead of substituting your pretrained background knowledge" in prompt
     assert "Use tables first only when" in prompt
     assert "first substantial payload" in prompt
     assert "Use bold anchors for scanability" in prompt

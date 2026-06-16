@@ -321,7 +321,16 @@ export const useChatStore = create<ChatState>()((set) => ({
       streamingThinking: "",
       streamingTraceEvents: [],
       streamingToolActivity: [],
-      streamingProcessTimeline: [],
+      streamingProcessTimeline: [
+        {
+          id: `trace-ui-preparing-${Date.now()}`,
+          kind: "trace",
+          title: "Preparing retrieval",
+          status: "running",
+          content: "Opening the live query stream and preparing corpus retrieval.",
+          timestamp: new Date().toISOString(),
+        },
+      ],
       streamingSources: [],
     }),
 

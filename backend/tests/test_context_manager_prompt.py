@@ -29,6 +29,9 @@ def test_augmented_prompt_hides_internal_corpus_names():
     assert 'from "mobile-notes.md"' in prompt
     assert "Phase5_Luau_v4" not in prompt
     assert 'in "Phase5_Luau_v4"' not in prompt
+    assert "<rag_answer_policy>" in prompt
+    assert "answer from that evidence first" in prompt
+    assert "Do not replace source-backed evidence with a generic" in prompt
 
 
 def test_augmented_prompt_marks_web_content_as_untrusted_evidence():

@@ -217,6 +217,26 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         ),
     ),
     Requirement(
+        id="chat-rag-grounding-contract",
+        description="Chat prompts require direct retrieved evidence to drive synthesis before model background knowledge.",
+        path="backend/services/chat_orchestrator.py",
+        needles=(
+            "primary answer substrate",
+            "not a generic pretrained definition",
+            "instead of substituting your pretrained background",
+        ),
+    ),
+    Requirement(
+        id="context-rag-answer-policy",
+        description="The RAG context envelope carries an explicit answer policy next to retrieved excerpts.",
+        path="backend/services/context_manager.py",
+        needles=(
+            "<rag_answer_policy>",
+            "answer from that evidence first",
+            "Do not replace source-backed evidence with a generic",
+        ),
+    ),
+    Requirement(
         id="chat-retrieval-diagnostics-trace",
         description="Chat streaming exposes tier-specific retrieval diagnostics in the live trace lane.",
         path="backend/services/chat_orchestrator.py",
@@ -248,7 +268,9 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             "formatLiveThinkingPreview",
             "pm-live-reasoning-preview",
             "ProcessTimeline",
-            "const open = isStreaming || active || manualOpenIds.has(group.id);",
+            "defaultOpen={true}",
+            "manualClosedIds",
+            "(isStreaming || defaultOpen) && !manualClosedIds.has(group.id)",
         ),
     ),
     Requirement(
@@ -260,6 +282,16 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             "showWorkingIndicator = isLoading && !isStreaming && !hasStreamingOutput",
             "{isStreaming && (",
             "scrollIntoView({",
+        ),
+    ),
+    Requirement(
+        id="frontend-immediate-query-trace",
+        description="Starting a chat turn creates an immediate visible process item before backend trace/token events arrive.",
+        path="frontend/src/stores/chatStore.ts",
+        needles=(
+            "Preparing retrieval",
+            "Opening the live query stream and preparing corpus retrieval.",
+            "streamingProcessTimeline: [",
         ),
     ),
     Requirement(
