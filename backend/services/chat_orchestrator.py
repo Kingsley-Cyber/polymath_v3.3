@@ -2203,6 +2203,7 @@ async def _enforce_chat_query_coverage(
     final_top_k: int | None,
     source_cap: int | None = None,
     search_mode: str,
+    precomputed_facets: list[dict[str, Any]] | None = None,
 ) -> tuple[list[SourceChunk], dict[str, Any]]:
     """Add missing query-facet evidence using the same chat retrieval tier.
 
@@ -2213,10 +2214,16 @@ async def _enforce_chat_query_coverage(
     """
 
     base_sources = list(sources or [])
-    facets = await _chat_coverage_facets_for_query_with_corpus(
-        original_query,
-        corpus_ids,
-    )
+    # Facet detection (its own embed + Qdrant facet search + Mongo lookup) is
+    # independent of the main retrieval, so the caller can run it CONCURRENTLY
+    # with the main retrieve and hand the result in here — saving its full cost
+    # off the critical path. Fall back to detecting inline if not provided.
+    facets = precomputed_facets
+    if facets is None:
+        facets = await _chat_coverage_facets_for_query_with_corpus(
+            original_query,
+            corpus_ids,
+        )
     meta: dict[str, Any] = {
         "detected_facets": [],
         "selected_facets": [],
@@ -4076,6 +4083,20 @@ class ChatOrchestrator:
         )
         rag_start = perf_counter()
 
+        # Overlap facet detection (its own embed + Qdrant facet search + Mongo
+        # lookup) with the main retrieval + intent classifier so its cost is off
+        # the critical path. Awaited at the coverage step; falls back to inline
+        # detection if it fails. Only meaningful when there is a corpus to scope.
+        coverage_facets_task = (
+            asyncio.ensure_future(
+                _chat_coverage_facets_for_query_with_corpus(
+                    request.message, request.corpus_ids
+                )
+            )
+            if request.corpus_ids
+            else None
+        )
+
         # Step 3.5: Retrieval Pipeline
         #   atomic mode: decompose query → fan-out retrieval → merge
         #   all other modes: standard single-query retrieval
@@ -4135,6 +4156,12 @@ class ChatOrchestrator:
                 search_mode=resolved_mode,
             )
         coverage_start = perf_counter()
+        precomputed_coverage_facets = None
+        if coverage_facets_task is not None:
+            try:
+                precomputed_coverage_facets = await coverage_facets_task
+            except Exception as exc:
+                logger.debug("coverage facet prefetch failed; detecting inline: %s", exc)
         coverage_sources, coverage_meta = await _enforce_chat_query_coverage(
             original_query=request.message,
             retrieval_query=retrieval_query,
@@ -4153,6 +4180,7 @@ class ChatOrchestrator:
             final_top_k=profile_cfg["final_top_k"],
             source_cap=profile_cfg.get("source_cap"),
             search_mode=resolved_mode,
+            precomputed_facets=precomputed_coverage_facets,
         )
         coverage_meta["duration_s"] = perf_counter() - coverage_start
         if coverage_meta.get("added"):

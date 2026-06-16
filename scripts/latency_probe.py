@@ -12,8 +12,13 @@ model = sys.argv[2] if len(sys.argv) > 2 else ""
 query = sys.argv[3] if len(sys.argv) > 3 else "what is nlp"
 
 body = {"message": query, "corpus_ids": [CORPUS], "retrieval_tier": tier}
+overrides = {}
 if model:
-    body["overrides"] = {"model": model}
+    overrides["model"] = model
+if os.environ.get("PROBE_HYDE", "").lower() in ("off", "false", "0"):
+    overrides["hyde_enabled"] = False
+if overrides:
+    body["overrides"] = overrides
 req = urllib.request.Request(
     f"{BASE}/api/chat", data=json.dumps(body).encode(),
     headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json",
