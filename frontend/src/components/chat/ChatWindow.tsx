@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageBubble } from "./MessageBubble";
 import { useChatStore } from "../../stores/chatStore";
-import { Sparkles, Shuffle } from "lucide-react";
+import { Sparkles, Shuffle, ArrowDown } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import * as api from "../../lib/api";
 import type { GraphSuggestionItem } from "../../types/discover";
@@ -19,6 +19,11 @@ export function ChatWindow() {
   const streamingMessageRef = useRef<HTMLDivElement>(null);
   const latestAssistantMessageRef = useRef<HTMLDivElement>(null);
   const previousStreamingRef = useRef(false);
+  const prevMsgCountRef = useRef(0);
+  // Sticky-scroll state: follow the stream only while the user is near the
+  // bottom. Scrolling up "detaches" and surfaces a Jump-to-latest button so the
+  // stream never yanks the viewport away from content the user is reading.
+  const [isDetached, setIsDetached] = useState(false);
   const selectedCorpusIds = useSettingsStore((s) => s.selectedCorpusIds);
   const setPendingPrompt = useChatStore((s) => s.setPendingPrompt);
   const [graphSuggestions, setGraphSuggestions] = useState<GraphSuggestionItem[]>([]);
@@ -158,48 +163,72 @@ export function ChatWindow() {
     return () => window.clearInterval(id);
   }, [isEmptyState, promptPool.length]);
 
-  // Auto-scroll to bottom on new messages
+  const NEAR_BOTTOM_PX = 160;
+
+  // Track sticky vs detached as the user scrolls. A programmatic scroll-to-bottom
+  // keeps us near the bottom (still sticky); scrolling up past the threshold
+  // detaches and stops the stream from following.
+  const handleScroll = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setIsDetached(distance > NEAR_BOTTOM_PX);
+  };
+
+  const jumpToLatest = () => {
+    setIsDetached(false);
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    messagesEndRef.current?.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "end",
+    });
+  };
+
+  // Auto-scroll to bottom on new content — but only while sticky. Re-stick
+  // automatically when the user sends their own message (their turn just
+  // appended), so a reply they triggered is always followed.
   useEffect(() => {
     const justFinishedStreaming = previousStreamingRef.current && !isStreaming;
-    // Respect manual scroll-away: while streaming, only keep pinning the live
-    // answer into view if the user is still near the bottom. If they scrolled
-    // up to read earlier text, do not yank them back down on every token batch.
-    const container = containerRef.current;
-    const NEAR_BOTTOM_PX = 160;
-    const userScrolledAway = Boolean(
-      container &&
-        container.scrollHeight -
-          (container.scrollTop + container.clientHeight) >
-          NEAR_BOTTOM_PX,
-    );
-    requestAnimationFrame(() => {
-      if (isStreaming && userScrolledAway) {
-        // User is reading earlier content mid-stream — leave the scroll alone.
-        return;
-      }
-      if (isStreaming && streamingMessageRef.current) {
-        streamingMessageRef.current.scrollIntoView({
-          behavior: "auto",
-          block: "start",
+    const grew = conversationMessages.length > prevMsgCountRef.current;
+    const lastIsUser =
+      conversationMessages[conversationMessages.length - 1]?.role === "user";
+    let detached = isDetached;
+    if (grew && lastIsUser) {
+      // User just sent a message — force re-stick to follow the answer.
+      detached = false;
+      if (isDetached) setIsDetached(false);
+    }
+    prevMsgCountRef.current = conversationMessages.length;
+
+    if (!detached) {
+      requestAnimationFrame(() => {
+        if (isStreaming && streamingMessageRef.current) {
+          streamingMessageRef.current.scrollIntoView({
+            behavior: "auto",
+            block: "start",
+          });
+          return;
+        }
+        if (justFinishedStreaming && latestAssistantMessageRef.current) {
+          latestAssistantMessageRef.current.scrollIntoView({
+            behavior: "auto",
+            block: "start",
+          });
+          return;
+        }
+        messagesEndRef.current?.scrollIntoView({
+          behavior: isStreaming ? "auto" : "smooth",
+          block: "end",
         });
-        return;
-      }
-      if (justFinishedStreaming && latestAssistantMessageRef.current) {
-        latestAssistantMessageRef.current.scrollIntoView({
-          behavior: "auto",
-          block: "start",
-        });
-        return;
-      }
-      messagesEndRef.current?.scrollIntoView({
-        behavior: isStreaming ? "auto" : "smooth",
-        block: "end",
       });
-    });
+    }
     previousStreamingRef.current = isStreaming;
   }, [
     conversationMessages,
     isStreaming,
+    isDetached,
     streamingContent,
     streamingThinking,
     streamingTraceEvents,
@@ -255,8 +284,10 @@ export function ChatWindow() {
   }
 
   return (
+    <div className="relative flex-1 flex flex-col min-h-0">
     <div
       ref={containerRef}
+      onScroll={handleScroll}
       data-testid="response-panel"
       className="flex-1 overflow-y-auto custom-scrollbar bg-[var(--color-chat-background)]"
     >
@@ -312,6 +343,21 @@ export function ChatWindow() {
 
         <div ref={messagesEndRef} />
       </div>
+    </div>
+
+      {/* Jump to latest — appears only when the user has scrolled away while
+          content is below. Clicking re-sticks and follows the stream again. */}
+      {isDetached && (
+        <button
+          type="button"
+          onClick={jumpToLatest}
+          aria-label="Jump to latest"
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 rounded-full border border-border-minimal bg-[var(--color-chat-background)] px-3 py-1.5 text-[12px] font-medium text-content-secondary shadow-md hover:text-content-primary transition-colors"
+        >
+          <ArrowDown className="w-3.5 h-3.5" />
+          Jump to latest
+        </button>
+      )}
     </div>
   );
 }
