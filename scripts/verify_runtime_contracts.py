@@ -194,6 +194,50 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         ),
     ),
     Requirement(
+        id="reranker-bypass-score-scale",
+        description="Code-bypass reranker scores are clamped before merging with bounded prose rerank scores.",
+        path="backend/services/reranker.py",
+        needles=(
+            "_clamp_bounded_scores_inplace",
+            "_score_scale_is_bounded",
+            "absolute trump card",
+        ),
+    ),
+    Requirement(
+        id="retrieval-mixed-score-tail-guard",
+        description="Bounded rerank tail trimming refuses mixed-scale pools and never narrows hydrated tiers before final selection.",
+        path="backend/services/retriever/__init__.py",
+        needles=(
+            "mixed-scale pools",
+            "Hydrated tiers are different",
+            "richer tiers narrower than",
+            "RetrievalTier.qdrant_mongo_graph",
+            "float(chunk.score or 0.0) > 1.0001",
+        ),
+    ),
+    Requirement(
+        id="graph-rerank-window-preserves-semantic-core",
+        description="Graph Augmented keeps a wider post-expansion rerank window so graph neighbors cannot crowd out vector/lexical evidence before hydration.",
+        path="backend/services/retriever/__init__.py",
+        needles=(
+            "rerank_top_n_graph_floor",
+            "full RAG",
+            "graph_floor = max",
+            "before the cross-encoder sees hydrated text",
+        ),
+    ),
+    Requirement(
+        id="chat-frontmatter-evidence-filter",
+        description="Chat evidence filtering rejects front matter, table-of-contents, reviewer, and Discord chunks before prompt assembly.",
+        path="backend/services/chat_orchestrator.py",
+        needles=(
+            "about the reviewers?",
+            "join our (?:book'?s |community'?s )?",
+            "table of contents",
+            "title page",
+        ),
+    ),
+    Requirement(
         id="native-ollama-streaming",
         description="Ollama/Ollama Cloud chat routes bypass LiteLLM so content and native thinking chunks stream separately.",
         path="backend/services/llm.py",
@@ -224,6 +268,18 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             "primary answer substrate",
             "not a generic pretrained definition",
             "instead of substituting your pretrained background",
+            "do not introduce named libraries",
+            "explicitly asked for outside knowledge",
+        ),
+    ),
+    Requirement(
+        id="hyde-specific-query-preserves-concepts",
+        description="HyDE skips compact definition/relation queries so original query concepts remain in retrieval.",
+        path="backend/services/chat_orchestrator.py",
+        needles=(
+            "_HYDE_SPECIFIC_RELATION_MARKERS",
+            "what is",
+            "original concept surviving retrieval",
         ),
     ),
     Requirement(
@@ -234,6 +290,9 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             "<rag_answer_policy>",
             "answer from that evidence first",
             "Do not replace source-backed evidence with a generic",
+            "Do not introduce ",
+            "named libraries, frameworks",
+            "explicitly asks for outside",
         ),
     ),
     Requirement(

@@ -674,7 +674,11 @@ class ContextManager:
                 "pretrained definition. Synthesize across sources rather than "
                 "listing them. Use general knowledge only as a small bridge for "
                 "details the context does not cover, and caveat material "
-                "unsupported claims exactly where they appear.\n"
+                "unsupported claims exactly where they appear. Do not introduce "
+                "named libraries, frameworks, products, papers, metrics, "
+                "datasets, or examples unless they appear in the retrieved "
+                "context/key_facts or the user explicitly asks for outside "
+                "knowledge.\n"
                 "</rag_answer_policy>\n\n"
             )
 

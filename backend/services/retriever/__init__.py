@@ -238,19 +238,34 @@ def _trim_bounded_rerank_tail(
     *,
     rerank_enabled: bool,
     score_scale: str | None = None,
+    tier: RetrievalTier | None = None,
 ) -> list[SourceChunk]:
-    """Drop near-zero bounded rerank tails after strong matches.
+    """Drop near-zero bounded rerank tails for simple vector retrieval only.
 
     With probability/cosine-style rerankers, top hits can be very strong while
     unrelated candidates still occupy the remaining final_top_k slots with
     scores near zero. final_top_k is a cap, not a requirement to feed junk to
-    the LLM. Leave low-confidence pools untouched so difficult queries can
-    still return their best available evidence.
+    the LLM.
+
+    Hydrated tiers are different: Hybrid and Graph Augmented need the post-
+    rerank pool for Mongo/Neo4j evidence coverage. Trimming before grounding can
+    erase semantically useful chunks and make the richer tiers narrower than
+    Vector Base, so those tiers keep the full pool and let final selection cap
+    the prompt.
     """
     if not rerank_enabled or len(ranked) <= 1:
         return ranked
+    if tier in (RetrievalTier.qdrant_mongo, RetrievalTier.qdrant_mongo_graph):
+        return ranked
     scale = (score_scale or settings.RERANKER_SCORE_SCALE or "logit").lower()
     if scale not in {"probability", "cosine"}:
+        return ranked
+
+    # Safety valve for mixed-scale pools. Bypassed code/lexical candidates can
+    # preserve pre-rerank scores while prose candidates are bounded 0..1. In
+    # that state, using the raw top score to compute a tail floor can delete
+    # every useful prose result and make Hybrid/Graph worse than Vector Base.
+    if any(float(chunk.score or 0.0) > 1.0001 for chunk in ranked):
         return ranked
 
     top_score = float(ranked[0].score or 0.0)
@@ -940,6 +955,7 @@ class RetrieverOrchestrator:
                     a_results_global,
                     rerank_enabled=True,
                     score_scale=settings.RERANKER_SCORE_SCALE,
+                    tier=effective_tier,
                 )
                 if len(trimmed_global) != len(a_results_global):
                     logger.info(
@@ -1252,15 +1268,36 @@ class RetrieverOrchestrator:
             finally:
                 _add_timing("graph_boost", phase_started)
 
-        # [5a] Phase 23 — Custom profile `rerank_top_n` pool cap before reranker
-        if rerank_top_n is not None and len(merged) > rerank_top_n:
+        # [5a] Phase 23 — Custom profile `rerank_top_n` pool cap before reranker.
+        # Graph Augmented expands the Hybrid pool with Neo4j neighbors. A narrow
+        # pre-rerank cap can let graph expansion crowd out the semantic core
+        # before the cross-encoder sees hydrated text, making the "full RAG"
+        # tier worse than Hybrid/Vector. Keep a wider graph floor, then let
+        # final_top_k cap what reaches the model.
+        effective_rerank_top_n = rerank_top_n
+        if (
+            effective_tier == RetrievalTier.qdrant_mongo_graph
+            and rerank_top_n is not None
+            and merged
+        ):
+            graph_floor = max(
+                64,
+                int(final_top_k or settings.DEFAULT_RETRIEVAL_K) * 8,
+            )
+            effective_rerank_top_n = min(
+                len(merged),
+                max(int(rerank_top_n), graph_floor),
+            )
+            if effective_rerank_top_n != rerank_top_n:
+                counts["rerank_top_n_graph_floor"] = effective_rerank_top_n
+        if effective_rerank_top_n is not None and len(merged) > effective_rerank_top_n:
             pre_sorted = sorted(merged, key=lambda x: x.score, reverse=True)
-            merged = pre_sorted[:rerank_top_n]
+            merged = pre_sorted[:effective_rerank_top_n]
             counts["merged_after_rerank_cap"] = len(merged)
             logger.info(
                 "rerank_top_n=%d cap applied (dropped %d candidates)",
-                rerank_top_n,
-                len(pre_sorted) - rerank_top_n,
+                effective_rerank_top_n,
+                len(pre_sorted) - effective_rerank_top_n,
             )
 
         if effective_tier in (RetrievalTier.qdrant_mongo, RetrievalTier.qdrant_mongo_graph):
@@ -1306,6 +1343,7 @@ class RetrieverOrchestrator:
             ranked,
             rerank_enabled=rerank_enabled,
             score_scale=settings.RERANKER_SCORE_SCALE,
+            tier=effective_tier,
         )
         if len(trimmed_ranked) != len(ranked):
             logger.info(

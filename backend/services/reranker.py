@@ -67,6 +67,27 @@ def _minmax_inplace(pool: List[SourceChunk]) -> None:
         c.score = (c.score - lo) / span
 
 
+def _clamp_bounded_scores_inplace(pool: List[SourceChunk]) -> None:
+    """Clamp preserved bypass scores to the configured bounded rerank scale.
+
+    Code chunks can bypass the cross-encoder and keep their pre-rerank score.
+    Those pre-rerank scores may include lexical/BM25-style values far above 1,
+    while the active reranker is configured as probability/cosine 0..1. Once
+    mixed, a single raw lexical score can make final tail trimming delete all
+    useful prose evidence. Clamping keeps the bypass as a relevance hint, not
+    an absolute trump card.
+    """
+    for chunk in pool:
+        chunk.score = max(0.0, min(1.0, float(chunk.score or 0.0)))
+
+
+def _score_scale_is_bounded(settings: object) -> bool:
+    return str(getattr(settings, "RERANKER_SCORE_SCALE", "logit") or "logit").lower() in {
+        "probability",
+        "cosine",
+    }
+
+
 def _ranked_chunks_from_response(
     pool: List[SourceChunk],
     data: dict,
@@ -172,6 +193,11 @@ class RerankerService:
         # less harmful than the all-1.0 collapse on 1-vs-N pools because
         # raw scores at least preserve within-pool ordering.
         if len(reranked_prose) <= 1 or len(code_pool) <= 1:
+            reranked_prose = [c.model_copy() for c in reranked_prose]
+            code_pool = [c.model_copy() for c in code_pool]
+            if _score_scale_is_bounded(self._settings):
+                _clamp_bounded_scores_inplace(reranked_prose)
+                _clamp_bounded_scores_inplace(code_pool)
             merged = sorted(
                 reranked_prose + code_pool,
                 key=lambda c: c.score,

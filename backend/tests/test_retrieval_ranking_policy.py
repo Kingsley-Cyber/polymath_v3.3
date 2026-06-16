@@ -160,6 +160,7 @@ def test_probability_rerank_tail_trim_drops_near_zero_fillers():
         ranked,
         rerank_enabled=True,
         score_scale="probability",
+        tier=RetrievalTier.qdrant_only,
     )
 
     assert [c.chunk_id for c in trimmed] == ["strong", "good"]
@@ -175,9 +176,51 @@ def test_probability_rerank_tail_trim_keeps_low_confidence_pool():
         ranked,
         rerank_enabled=True,
         score_scale="probability",
+        tier=RetrievalTier.qdrant_only,
     )
 
     assert trimmed == ranked
+
+
+def test_probability_rerank_tail_trim_skips_mixed_scale_pool():
+    ranked = [
+        _chunk("raw-code-score", score=103.0),
+        _chunk("good-prose", score=0.72),
+        _chunk("good-prose-2", score=0.64),
+    ]
+
+    trimmed = _trim_bounded_rerank_tail(
+        ranked,
+        rerank_enabled=True,
+        score_scale="probability",
+        tier=RetrievalTier.qdrant_only,
+    )
+
+    assert trimmed == ranked
+
+
+def test_probability_rerank_tail_trim_disabled_for_hydrated_tiers():
+    ranked = [
+        _chunk("strong", score=0.94),
+        _chunk("good", score=0.64),
+        _chunk("low-but-possibly-useful", score=0.004),
+    ]
+
+    hybrid = _trim_bounded_rerank_tail(
+        ranked,
+        rerank_enabled=True,
+        score_scale="probability",
+        tier=RetrievalTier.qdrant_mongo,
+    )
+    graph = _trim_bounded_rerank_tail(
+        ranked,
+        rerank_enabled=True,
+        score_scale="probability",
+        tier=RetrievalTier.qdrant_mongo_graph,
+    )
+
+    assert hybrid == ranked
+    assert graph == ranked
 
 
 def test_logit_rerank_tail_trim_is_disabled():

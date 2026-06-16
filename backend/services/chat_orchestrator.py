@@ -182,7 +182,9 @@ _REFERENCE_QUERY_RE = re.compile(
     re.IGNORECASE,
 )
 _LOW_VALUE_EVIDENCE_RE = re.compile(
-    r"\b(references?|bibliography|works cited|acknowledg(?:e)?ments?)\b",
+    r"\b(references?|bibliography|works cited|acknowledg(?:e)?ments?|"
+    r"about the reviewers?|about the authors?|join our (?:book'?s |community'?s )?"
+    r"discord|discord workspace|table of contents|title page|preface)\b",
     re.IGNORECASE,
 )
 _FRONTMATTER_RE = re.compile(r"\A\s*---\s*\n.*?\n---\s*\n", re.DOTALL)
@@ -503,6 +505,19 @@ _HYDE_SOURCE_CONSTRAINT_MARKERS = (
     "citation",
 )
 
+_HYDE_SPECIFIC_RELATION_MARKERS = (
+    "how does",
+    "how do",
+    "relate to",
+    "related to",
+    "relationship between",
+    "relation between",
+    "difference between",
+    "compare",
+    "versus",
+    " vs ",
+)
+
 
 def _should_skip_hyde_for_query(query: str) -> bool:
     """Avoid query rewriting when the user is auditing source support.
@@ -510,11 +525,18 @@ def _should_skip_hyde_for_query(query: str) -> bool:
     HyDE is valuable for broad cross-domain discovery, but source-constrained
     questions need the original wording preserved. A hypothetical answer can
     accidentally smuggle in the very bridge the user is asking us to verify.
+    Likewise, compact definition/relation questions often depend on every
+    original concept surviving retrieval ("what is X and how does Y relate?").
     """
     text = (query or "").lower()
     if not text:
         return False
     if any(marker in text for marker in _HYDE_SOURCE_CONSTRAINT_MARKERS):
+        return True
+    if (
+        ("what is" in text or "define " in text or "explain " in text)
+        and any(marker in text for marker in _HYDE_SPECIFIC_RELATION_MARKERS)
+    ):
         return True
     return ("based on" in text or "according to" in text) and (
         "inferred" in text
@@ -2142,7 +2164,10 @@ def _format_chat_coverage_prompt_note(meta: dict[str, Any]) -> str | None:
         "directly answers the question, the answer must be a synthesis of that "
         "evidence, not a generic pretrained definition. Use general knowledge "
         "only for small bridges the sources do not cover, and caveat material "
-        "unsupported parts. For corpus-specific claims, do not guess. Do not "
+        "unsupported parts. Do not introduce named libraries, frameworks, "
+        "products, papers, metrics, or examples unless they appear in the "
+        "retrieved evidence or the user explicitly asked for outside knowledge. "
+        "For corpus-specific claims, do not guess. Do not "
         "expose internal terms like facets, lanes, coverage contract, packet, "
         "retrieval tier, graph query, or chunks unless the user explicitly asks "
         "about retrieval diagnostics."
@@ -3013,6 +3038,11 @@ POLYMATH_SYSTEM_PROMPT = (
     "a material claim, say that the retrieved corpus does not establish that "
     "specific part. Do not attach corpus citations to unsupported background "
     "knowledge.\n"
+    "- In RAG mode, do not introduce named libraries, frameworks, products, "
+    "papers, metrics, datasets, or examples unless they appear in the retrieved "
+    "evidence or the user explicitly asks you to use outside knowledge. If a "
+    "useful example is not in the context, describe it generically and label it "
+    "as outside the retrieved corpus.\n"
     "- Use markdown for scanability: short paragraphs, meaningful headings "
     "when the answer has sections, bold key terms sparingly, and compact "
     "bullets for grouped facts.\n"

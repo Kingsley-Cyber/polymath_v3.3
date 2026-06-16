@@ -224,6 +224,44 @@ async def test_rerank_mixed_pool_partitions(svc, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_rerank_mixed_tiny_pool_clamps_code_score_on_bounded_scale(svc, monkeypatch):
+    """A single bypassed code chunk must not keep a raw lexical score like
+    103 inside a probability/cosine rerank pool. That score later drives
+    bounded tail trimming and can delete every useful prose chunk."""
+    svc._settings = SimpleNamespace(
+        RERANKER_URL="http://reranker:8080",
+        RERANKER_BYPASS_CODE=True,
+        RERANKER_SCORE_SCALE="probability",
+    )
+
+    async def fake_rerank_pool(query, pool):
+        return [pool[0].model_copy(update={"score": 0.72})]
+
+    monkeypatch.setattr(svc, "_rerank_pool", fake_rerank_pool)
+
+    pool = [
+        _chunk(
+            text="Natural language processing is often prototyped in Python.",
+            score=0.4,
+            chunk_id="prose",
+        ),
+        _chunk(
+            text="```python\nprint('mandelbrot')\n```",
+            score=103.0,
+            language="python",
+            chunk_id="code",
+        ),
+    ]
+
+    out = await svc.rerank("what is nlp and python", pool)
+    by_id = {c.chunk_id: c for c in out}
+
+    assert by_id["code"].score == 1.0
+    assert by_id["prose"].score == 0.72
+    assert all(0.0 <= c.score <= 1.0 for c in out)
+
+
+@pytest.mark.asyncio
 async def test_rerank_bypass_disabled_skips_partition(svc, monkeypatch):
     """When RERANKER_BYPASS_CODE=False, the legacy path runs (whole pool
     through cross-encoder, no partition)."""

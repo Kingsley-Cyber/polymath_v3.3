@@ -162,9 +162,10 @@ def test_empty_input_safe():
 
 
 import services.chat_orchestrator as chat_orchestrator_module  # noqa: E402
-from models.schemas import ChatRequest, ModelOverrides  # noqa: E402
+from models.schemas import ChatRequest, ModelOverrides, SourceChunk  # noqa: E402
 from services.chat_orchestrator import (  # noqa: E402
     ChatOrchestrator,
+    _chat_source_is_low_value,
     _should_skip_hyde_for_query,
 )
 
@@ -218,6 +219,42 @@ def test_hyde_skips_source_constrained_direct_support_queries():
         "inferred design recommendations."
     )
     assert _should_skip_hyde_for_query(query) is True
+
+
+def test_hyde_skips_specific_definition_relation_queries():
+    query = "What is NLP and how does Python relate to it?"
+    assert _should_skip_hyde_for_query(query) is True
+
+
+def test_chat_evidence_filter_rejects_frontmatter_noise():
+    noisy = SourceChunk(
+        chunk_id="frontmatter",
+        parent_id="frontmatter",
+        doc_id="doc-frontmatter",
+        corpus_id="corpus",
+        text=(
+            "## Join our book's Discord space\n"
+            "# Table of Contents\n"
+            "1. Introduction to Python and Code Editors\n"
+        ),
+        score=0.9,
+        source_tier="tier_a",
+    )
+    substantive = SourceChunk(
+        chunk_id="body",
+        parent_id="body",
+        doc_id="doc-body",
+        corpus_id="corpus",
+        text="Python code examples show how natural language processing models tokenize text.",
+        score=0.9,
+        source_tier="tier_a",
+    )
+
+    assert _chat_source_is_low_value(noisy, "What is NLP and how does Python relate to it?")
+    assert not _chat_source_is_low_value(
+        substantive,
+        "What is NLP and how does Python relate to it?",
+    )
 
 
 def test_hyde_stays_available_for_open_cross_domain_discovery():
