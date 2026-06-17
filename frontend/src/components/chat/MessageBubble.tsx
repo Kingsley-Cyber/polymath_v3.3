@@ -66,7 +66,10 @@ export function MessageBubble({
     }
     const thinkingGrew = thinkingLength > previousThinkingLengthRef.current;
 
-    if (!isStreaming || hasRunningTool) {
+    // Collapse the reasoning once the answer starts (or the run ends / a tool
+    // runs) so the sequence reads "reasoning streams → answer". While it's still
+    // purely thinking, keep it open and following the live stream.
+    if (!isStreaming || hasRunningTool || hasAssistantContent) {
       setThinkingOpen(false);
     } else if (thinkingGrew) {
       setThinkingOpen(true);
@@ -74,6 +77,7 @@ export function MessageBubble({
 
     previousThinkingLengthRef.current = thinkingLength;
   }, [
+    hasAssistantContent,
     hasRunningTool,
     isStreaming,
     isUser,
@@ -149,6 +153,21 @@ export function MessageBubble({
           />
         )}
 
+        {/* Reasoning trace — ABOVE the answer: the model thinks first, then
+            writes. Streams live while thinking; once the answer begins it
+            collapses but stays visible/expandable (so a fast, ms-long reasoning
+            pass doesn't just flash and vanish). */}
+        {!isUser && message.thinking && (
+          <ReasoningPanel
+            thinking={message.thinking}
+            open={thinkingOpen}
+            active={Boolean(
+              thinkingOpen && isStreaming && !hasRunningTool && !hasAssistantContent,
+            )}
+            onToggle={setThinkingOpen}
+          />
+        )}
+
         {/* Bubble */}
         <div
           data-role={message.role}
@@ -175,9 +194,7 @@ export function MessageBubble({
               message.content
             ) : showLiveDraftPlaceholder ? (
               <LiveAnswerDraft
-                hasThinking={Boolean(message.thinking)}
                 hasProcess={hasProcessTimeline || Boolean(message.trace_events?.length)}
-                thinking={message.thinking || ""}
                 latestStep={
                   visibleProcessTimeline[visibleProcessTimeline.length - 1]?.title ||
                   message.trace_events?.[message.trace_events.length - 1]?.title ||
@@ -215,18 +232,6 @@ export function MessageBubble({
             </button>
           )}
         </div>
-
-        {/* Thinking Block */}
-        {message.thinking && (
-          <ReasoningPanel
-            thinking={message.thinking}
-            open={thinkingOpen}
-            active={Boolean(
-              thinkingOpen && isStreaming && !hasRunningTool,
-            )}
-            onToggle={setThinkingOpen}
-          />
-        )}
 
         {!hasProcessTimeline && !isUser && visibleToolActivity.length > 0 && (
           <ToolActivityPanel
@@ -267,14 +272,10 @@ export function MessageBubble({
 }
 
 function LiveAnswerDraft({
-  hasThinking,
   hasProcess,
-  thinking,
   latestStep,
 }: {
-  hasThinking: boolean;
   hasProcess: boolean;
-  thinking: string;
   latestStep?: string;
 }) {
   // Live elapsed counter so the time-to-first-token gap (seconds when warm,
@@ -289,21 +290,17 @@ function LiveAnswerDraft({
     return () => window.clearInterval(id);
   }, []);
 
-  // The live taxonomy above already names each step, so the answer placeholder
-  // stays generic instead of echoing `latestStep` (which read as a duplicate).
-  const baseLabel = hasThinking
-    ? "Reading the model's reasoning stream"
-    : hasProcess
-      ? "Drafting your answer"
-      : latestStep
-        ? latestStep
-        : "Waiting for the model's first token";
+  // The taxonomy + reasoning panel above already narrate the work, so this is
+  // just the answer placeholder — a generic "drafting" shimmer, no reasoning
+  // echo (the Reasoning trace card owns that now).
+  const baseLabel = hasProcess
+    ? "Drafting your answer"
+    : latestStep
+      ? latestStep
+      : "Waiting for the model's first token";
   const slowHint =
-    !hasThinking && elapsed >= 12
-      ? " · a cold model can take up to a minute to start"
-      : "";
+    elapsed >= 12 ? " · a cold model can take up to a minute to start" : "";
   const label = `${baseLabel} · ${elapsed}s${slowHint}`;
-  const thinkingPreview = formatLiveThinkingPreview(thinking);
 
   return (
     <div className="pm-live-answer-draft" aria-live="polite">
@@ -311,33 +308,13 @@ function LiveAnswerDraft({
         <span className="pm-live-answer-dot" />
         <span>{label}</span>
       </div>
-      {thinkingPreview ? (
-        <div className="pm-live-reasoning-preview">
-          <div className="pm-live-reasoning-label">
-            <TaxBadge kind="reason" />
-            <span>live reasoning</span>
-          </div>
-          <div className="pm-live-reasoning-text custom-scrollbar">
-            {thinkingPreview}
-          </div>
-        </div>
-      ) : (
-        <div className="pm-live-answer-lines" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-      )}
+      <div className="pm-live-answer-lines" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
     </div>
   );
-}
-
-function formatLiveThinkingPreview(thinking: string): string {
-  const cleaned = thinking.replace(/\r\n/g, "\n").trim();
-  if (!cleaned) return "";
-  const maxChars = 900;
-  if (cleaned.length <= maxChars) return cleaned;
-  return `...${cleaned.slice(cleaned.length - maxChars)}`;
 }
 
 function deriveToolActivityFromTraceEvents(
@@ -1210,10 +1187,10 @@ function ReasoningPanel({
         onClick={() => onToggle(!open)}
       >
         <span className="disclosure-caret" aria-hidden="true" />
-        <StatusBadge tag="GEN" tone="gen" />
+        <TaxBadge kind="reason" />
         <span className="pm-process-title">Reasoning trace</span>
-        {active ? <GeneratingIndicator label="THINKING" /> : <StatusBadge tag="RES" tone="res" />}
-        <span className="ml-auto text-content-tertiary/60">
+        {active && <GeneratingIndicator label="THINKING" />}
+        <span className="ml-auto text-[9px] font-bold uppercase tracking-widest text-content-tertiary/60">
           {open ? "Collapse" : "Expand"}
         </span>
       </button>
