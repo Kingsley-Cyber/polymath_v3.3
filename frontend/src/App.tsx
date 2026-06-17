@@ -201,6 +201,13 @@ function App() {
         attachments = ok.length > 0 ? ok : undefined;
       }
 
+      // Start streaming immediately — this seeds the live taxonomy and flips
+      // isStreaming/isLoading so the process trace shows the instant the query
+      // fires, even before the (async) conversation-create round-trip. Without
+      // this the first message of a new chat showed a blank screen until the
+      // POST /conversations returned.
+      chat.startStreaming();
+
       let cid = chat.activeConversationId;
       if (!cid) {
         try {
@@ -216,6 +223,7 @@ function App() {
             message_count: 0,
           });
         } catch {
+          chat.stopStreaming();
           chat.setError("Failed to create conversation");
           return;
         }
@@ -228,7 +236,6 @@ function App() {
         created_at: new Date().toISOString(),
       };
       chat.addMessage(cid, userMessage);
-      chat.startStreaming();
 
       const retrievalConfig =
         settings.retrievalTier === "qdrant_only"

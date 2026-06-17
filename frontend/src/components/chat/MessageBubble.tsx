@@ -126,6 +126,29 @@ export function MessageBubble({
           isUser ? "items-end" : "items-start"
         }`}
       >
+        {/* Process timeline (taxonomy) renders ABOVE the answer so the live
+            steps appear the instant a query fires — before any answer text —
+            and a finished message reads "work, then answer". */}
+        {hasProcessTimeline && (
+          <ProcessTimeline
+            items={visibleProcessTimeline}
+            isStreaming={isStreaming}
+            defaultOpen={!hasAssistantContent}
+          />
+        )}
+
+        {!hasProcessTimeline &&
+          !isUser &&
+          message.trace_events &&
+          message.trace_events.length > 0 && (
+          <TracePanel
+            events={message.trace_events}
+            open={traceOpen}
+            isStreaming={isStreaming}
+            onToggle={setTraceOpen}
+          />
+        )}
+
         {/* Bubble */}
         <div
           data-role={message.role}
@@ -192,26 +215,6 @@ export function MessageBubble({
             </button>
           )}
         </div>
-
-        {hasProcessTimeline && (
-          <ProcessTimeline
-            items={visibleProcessTimeline}
-            isStreaming={isStreaming}
-            defaultOpen={!hasAssistantContent}
-          />
-        )}
-
-        {!hasProcessTimeline &&
-          !isUser &&
-          message.trace_events &&
-          message.trace_events.length > 0 && (
-          <TracePanel
-            events={message.trace_events}
-            open={traceOpen}
-            isStreaming={isStreaming}
-            onToggle={setTraceOpen}
-          />
-        )}
 
         {/* Thinking Block */}
         {message.thinking && (
@@ -286,12 +289,14 @@ function LiveAnswerDraft({
     return () => window.clearInterval(id);
   }, []);
 
+  // The live taxonomy above already names each step, so the answer placeholder
+  // stays generic instead of echoing `latestStep` (which read as a duplicate).
   const baseLabel = hasThinking
     ? "Reading the model's reasoning stream"
-    : latestStep
-      ? latestStep
-      : hasProcess
-        ? "Tracing retrieval and model steps live"
+    : hasProcess
+      ? "Drafting your answer"
+      : latestStep
+        ? latestStep
         : "Waiting for the model's first token";
   const slowHint =
     !hasThinking && elapsed >= 12
@@ -309,7 +314,7 @@ function LiveAnswerDraft({
       {thinkingPreview ? (
         <div className="pm-live-reasoning-preview">
           <div className="pm-live-reasoning-label">
-            <StatusBadge tag="GEN" tone="gen" />
+            <TaxBadge kind="reason" />
             <span>live reasoning</span>
           </div>
           <div className="pm-live-reasoning-text custom-scrollbar">
@@ -409,6 +414,57 @@ function toolNameFromTraceTitle(title: string): string | undefined {
   return match?.[1];
 }
 
+// ── Trace taxonomy ──────────────────────────────────────────────────────────
+// Every trace item is classified into exactly ONE kind. Consecutive items of
+// the same kind collapse into a single expandable card: a run of retrieval
+// steps = one EXE card; if tool calls follow = a TOOL card; if retrieval
+// resumes = a fresh EXE card. Each kind has a fixed badge + colour (pm-tax-* in
+// index.css): retrieval=blue, web=green, tool=grey, reasoning=purple, gen=teal.
+type TraceKind =
+  | "retrieval"
+  | "web"
+  | "tool"
+  | "reason"
+  | "gen"
+  | "final"
+  | "warn"
+  | "info";
+
+const KIND_META: Record<TraceKind, { label: string; title: string }> = {
+  retrieval: { label: "EXE", title: "Retrieval & RAG" },
+  web: { label: "WWW", title: "Web search" },
+  tool: { label: "TOOL", title: "Tools" },
+  reason: { label: "RSN", title: "Reasoning" },
+  gen: { label: "GEN", title: "Generation" },
+  final: { label: "RES", title: "Final answer" },
+  warn: { label: "WRN", title: "Warnings & recoveries" },
+  info: { label: "INF", title: "Activity" },
+};
+
+function kindForItem(item: ProcessTimelineItem): TraceKind {
+  const t = (item.title || "").toLowerCase();
+  if (item.kind === "reasoning") return "reason";
+  if (item.status === "error" || item.status === "skipped") return "warn";
+  if (/web|search|fetch|www|browse|browser/.test(t)) return "web";
+  if (item.kind === "tool" || /\btool\b|shell|command|\bexec/.test(t)) return "tool";
+  if (/model.*stream|synthesis|generat|draft/.test(t)) return "gen";
+  if (
+    /route|hyde|retriev|\brag\b|rerank|hydrat|lens|nuance|source|coverage|funnel|graph|fact|prepar|context/.test(
+      t,
+    )
+  )
+    return "retrieval";
+  return "info";
+}
+
+function TaxBadge({ kind }: { kind: TraceKind }) {
+  return (
+    <span className={`status-badge pm-tax-badge pm-tax-${kind}`}>
+      {`<${KIND_META[kind].label}>`}
+    </span>
+  );
+}
+
 function ProcessTimeline({
   items,
   isStreaming,
@@ -418,8 +474,6 @@ function ProcessTimeline({
   isStreaming: boolean;
   defaultOpen?: boolean;
 }) {
-  // Hooks must run unconditionally (called before any early return) to keep
-  // hook order stable when isStreaming flips at finalize.
   const [manualOpenIds, setManualOpenIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -427,35 +481,32 @@ function ProcessTimeline({
     () => new Set(),
   );
 
-  // While streaming, show a live step-stream so each phase (route, HyDE,
-  // retrieval, rerank, synthesis, generation) is visible as it fires — newest
-  // active, older done — instead of collapsing into two compacted groups that
-  // hide the moment the answer starts. The finalized message uses the tidy
-  // grouped view below.
-  if (isStreaming) {
-    return <LiveProcessStream items={items} />;
-  }
-
+  // Same grouped view live AND finalized — consecutive same-kind steps form one
+  // collapsible card. While streaming, the active card is the newest group that
+  // still has a running item; only it stays expanded, older groups auto-collapse.
   const groups = compactProcessTimeline(items);
-  const activeId = undefined;
+  let activeId: string | undefined;
+  if (isStreaming) {
+    for (let i = groups.length - 1; i >= 0; i -= 1) {
+      if (groups[i].items.some((it) => it.status === "running")) {
+        activeId = groups[i].id;
+        break;
+      }
+    }
+    if (!activeId) activeId = groups[groups.length - 1]?.id;
+  }
 
   const handleToggle = (id: string, open: boolean) => {
     setManualOpenIds((previous) => {
       const next = new Set(previous);
-      if (open) {
-        next.add(id);
-      } else {
-        next.delete(id);
-      }
+      if (open) next.add(id);
+      else next.delete(id);
       return next;
     });
     setManualClosedIds((previous) => {
       const next = new Set(previous);
-      if (open) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
+      if (open) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -467,7 +518,7 @@ function ProcessTimeline({
         const open =
           active ||
           manualOpenIds.has(group.id) ||
-          ((isStreaming || defaultOpen) && !manualClosedIds.has(group.id));
+          (!isStreaming && defaultOpen && !manualClosedIds.has(group.id));
         return (
           <ProcessTimelineCard
             key={group.id}
@@ -481,126 +532,6 @@ function ProcessTimeline({
       })}
     </div>
   );
-}
-
-// Live waterfall shown WHILE streaming: one collapsible card per process step.
-// Each step generates as its phase fires; the leading (current) step is
-// expanded and — while actually running — animated (shiny) with a RUNNING
-// badge. As the next step takes over, the previous one auto-collapses to a
-// header, so the trace reads as a downward stack of completed steps led by one
-// open active card. Finished steps can be re-expanded on click.
-function LiveProcessStream({ items }: { items: ProcessTimelineItem[] }) {
-  const [manualOpen, setManualOpen] = useState<Set<string>>(() => new Set());
-  if (items.length === 0) return null;
-
-  // Leading card = the last running step (the current phase). If nothing is
-  // running this instant (brief gap between phases), lead with the newest step
-  // so there is always one open card at the bottom of the waterfall.
-  let leadingId: string | undefined;
-  for (let i = items.length - 1; i >= 0; i -= 1) {
-    if (items[i].status === "running") {
-      leadingId = items[i].id;
-      break;
-    }
-  }
-  if (!leadingId) leadingId = items[items.length - 1]?.id;
-
-  const toggle = (id: string, open: boolean) =>
-    setManualOpen((prev) => {
-      const next = new Set(prev);
-      if (open) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-
-  return (
-    <div className="mb-2 w-full max-w-[82ch]">
-      {items.map((item) => {
-        const leading = item.id === leadingId;
-        const running = item.status === "running";
-        const open = leading || manualOpen.has(item.id);
-        return (
-          <LiveStepCard
-            key={item.id}
-            item={item}
-            running={running}
-            open={open}
-            onToggle={(next) => toggle(item.id, next)}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-// One collapsible step card in the live waterfall. Reuses the process-group CSS
-// (header + animated collapsible body) so the live view matches the finalized
-// grouped view.
-function LiveStepCard({
-  item,
-  running,
-  open,
-  onToggle,
-}: {
-  item: ProcessTimelineItem;
-  running: boolean;
-  open: boolean;
-  onToggle: (open: boolean) => void;
-}) {
-  const tag = tagForTraceItem(item);
-  const content = [item.content, item.detail].filter(Boolean).join("\n\n");
-  return (
-    <div
-      className={`process-group w-full ${open ? "expanded" : ""} ${
-        running ? "process-group-active" : ""
-      }`}
-    >
-      <button
-        type="button"
-        className="process-group-header"
-        aria-expanded={open}
-        onClick={() => {
-          // The actively-running step stays open; finished steps toggle freely.
-          if (!running) onToggle(!open);
-        }}
-      >
-        <span className="disclosure-caret" aria-hidden="true" />
-        <StatusBadge tag={tag} tone={toneForTag(tag)} />
-        <span className={running ? "pm-process-title shiny-text" : "pm-process-title"}>
-          {item.title}
-        </span>
-        {running ? (
-          <GeneratingIndicator label="RUNNING" />
-        ) : (
-          <StatusBadge {...badgeForStatus(item.status)} />
-        )}
-      </button>
-      {content && (
-        <div className={`collapsible ${open ? "expanded" : ""}`}>
-          <div className="content">
-            <div className="pm-process-body custom-scrollbar pm-process-body-live">
-              <div className="pm-process-row-content custom-scrollbar">{content}</div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Per-item state badge for the live stream (the grouped view derives badges per
-// group instead). Mirrors the GEN/USE/WWW/EXE/RES/WRN/INF taxonomy.
-function tagForTraceItem(item: ProcessTimelineItem): string {
-  const t = (item.title || "").toLowerCase();
-  if (item.kind === "reasoning") return "GEN";
-  if (item.status === "error" || item.status === "skipped") return "WRN";
-  if (/web|search|fetch|www|browse/.test(t)) return "WWW";
-  if (item.kind === "tool" || /\btool\b|execut|command|shell/.test(t)) return "EXE";
-  if (/final answer|\bresponse\b/.test(t)) return "RES";
-  if (/model.*stream|synthesis|generat|draft|reasoning/.test(t)) return "GEN";
-  if (/route|hyde|retriev|\brag\b|rerank|hydrat|lens|nuance|source|coverage|funnel|graph|fact/.test(t))
-    return "USE";
-  return "INF";
 }
 
 function ProcessTimelineCard({
@@ -622,7 +553,6 @@ function ProcessTimelineCard({
     group.items[group.items.length - 1]?.detail,
     open,
   ], active);
-  const statusBadge = badgeForStatus(active ? "running" : group.status);
 
   useEffect(() => {
     if (!open || active) return;
@@ -648,9 +578,19 @@ function ProcessTimelineCard({
         }}
       >
         <span className="disclosure-caret" aria-hidden="true" />
-        <StatusBadge tag={group.kindLabel} tone={toneForTag(group.kindLabel)} />
+        <TaxBadge kind={group.kindKey} />
         <span className="pm-process-title">{group.title}</span>
-        {active ? <GeneratingIndicator label={group.kind === "gen" ? "THINKING" : "RUNNING"} /> : <StatusBadge {...statusBadge} />}
+        {active && (
+          <GeneratingIndicator
+            label={
+              group.kindKey === "reason"
+                ? "THINKING"
+                : group.kindKey === "gen"
+                  ? "GENERATING"
+                  : "RUNNING"
+            }
+          />
+        )}
         <span className="pm-process-count">
           {String(index + 1).padStart(2, "0")} / {group.items.length}
         </span>
@@ -663,7 +603,7 @@ function ProcessTimelineCard({
               active ? "pm-process-body-live" : "pm-process-body-review"
             }`}
           >
-            {group.kind === "exe" ? (
+            {group.kindKey === "tool" ? (
               <ToolTranscript group={group} />
             ) : (
               group.items.map((item, itemIndex) => (
@@ -681,12 +621,9 @@ function ProcessTimelineCard({
   );
 }
 
-type ProcessGroupKind = "setup" | "gen" | "exe" | "warn";
-
 interface ProcessGroup {
   id: string;
-  kind: ProcessGroupKind;
-  kindLabel: string;
+  kindKey: TraceKind;
   title: string;
   status: string;
   items: ProcessTimelineItem[];
@@ -699,16 +636,6 @@ function ProcessTimelineRow({
   item: ProcessTimelineItem;
   index: number;
 }) {
-  const rowLabel =
-    item.kind === "reasoning"
-      ? "GEN"
-      : item.kind === "tool"
-        ? "EXE"
-        : item.status === "error"
-          ? "ERR"
-          : item.status === "skipped"
-            ? "WRN"
-            : "LOG";
   const content = [item.content, item.detail].filter(Boolean).join("\n\n");
   const modelCall = parseModelCallBlock(content);
 
@@ -717,7 +644,6 @@ function ProcessTimelineRow({
       <span className="pm-process-row-index">
         {String(index + 1).padStart(2, "0")}
       </span>
-      <StatusBadge tag={rowLabel} tone={toneForTag(rowLabel)} />
       <div className="min-w-0 flex-1">
         <div className="pm-process-row-title">{item.title}</div>
         {modelCall ? (
@@ -1160,60 +1086,28 @@ function compactProcessTimeline(items: ProcessTimelineItem[]): ProcessGroup[] {
     }
   };
 
-  const ensure = (kind: ProcessGroupKind, title: string): ProcessGroup => {
-    if (current && current.kind === kind) return current;
-    close();
-    current = {
-      id: `${kind}-${groups.length}-${items.length}`,
-      kind,
-      kindLabel: kind === "setup" ? "USE" : kind === "gen" ? "GEN" : kind === "warn" ? "WRN" : "EXE",
-      title,
-      status: "done",
-      items: [],
-    };
-    return current;
-  };
-
   for (const item of items) {
-    if (/assistant final answer/i.test(item.title)) {
-      continue;
-    }
+    // The final answer renders in the bubble below — no redundant trace card.
+    if (/assistant final answer/i.test(item.title)) continue;
 
-    if (isSetupTrace(item)) {
-      ensure("setup", "Setup, RAG, and route checks").items.push(item);
-      continue;
+    const kindKey = kindForItem(item);
+    if (!current || current.kindKey !== kindKey) {
+      close();
+      current = {
+        id: `${kindKey}-${groups.length}`,
+        kindKey,
+        title: KIND_META[kindKey].title,
+        status: "running",
+        items: [],
+      };
     }
-
-    if (item.kind === "reasoning") {
-      ensure("gen", "Reasoning trace").items.push(item);
-      continue;
-    }
-
-    if (isModelTrace(item)) {
-      ensure(
-        "gen",
-        item.title.includes("final") ? "Final synthesis" : "Model activity",
-      ).items.push(item);
-      continue;
-    }
-
-    if (item.kind === "tool" || isToolTrace(item)) {
-      ensure("exe", titleForToolGroup(item)).items.push(item);
-      continue;
-    }
-
-    if (item.status === "error" || item.status === "skipped") {
-      ensure("warn", "Warnings and recoveries").items.push(item);
-      continue;
-    }
-
-    ensure("setup", "Setup, RAG, and route checks").items.push(item);
+    current.items.push(item);
   }
 
   close();
   return groups.map((group, index) => ({
     ...group,
-    id: `${group.kind}-${index}-${group.items[0]?.id || index}`,
+    id: `${group.kindKey}-${index}-${group.items[0]?.id || index}`,
     status: summarizeGroupStatus(group.items),
   }));
 }
@@ -1223,30 +1117,6 @@ function summarizeGroupStatus(items: ProcessTimelineItem[]): string {
   if (items.some((item) => item.status === "error")) return "error";
   if (items.every((item) => item.status === "skipped")) return "skipped";
   return "done";
-}
-
-function isSetupTrace(item: ProcessTimelineItem): boolean {
-  return (
-    item.kind === "trace" &&
-    /routed|hyde|rag retrieval|agentic web loop|retrieval finished/i.test(item.title)
-  );
-}
-
-function isModelTrace(item: ProcessTimelineItem): boolean {
-  return item.kind === "trace" && /chat model.*stream/i.test(item.title);
-}
-
-function isToolTrace(item: ProcessTimelineItem): boolean {
-  return (
-    item.kind === "trace" &&
-    /native tool|web retrieval decision/i.test(item.title)
-  );
-}
-
-function titleForToolGroup(item: ProcessTimelineItem): string {
-  if (/fetch/i.test(item.title)) return "Fetch and inspect source";
-  if (/search/i.test(item.title)) return "Search and retrieve web evidence";
-  return "Tool execution";
 }
 
 function TracePanel({
@@ -1381,18 +1251,6 @@ function StatusBadge({ tag, tone }: { tag: string; tone: StatusTone }) {
   );
 }
 
-function toneForTag(tag: string): StatusTone {
-  const normalized = tag.toLowerCase();
-  if (normalized === "gen") return "gen";
-  if (normalized === "use") return "use";
-  if (normalized === "exe") return "exe";
-  if (normalized === "www" || normalized === "web") return "www";
-  if (normalized === "res" || normalized === "done") return "res";
-  if (normalized === "wrn" || normalized === "warn") return "wrn";
-  if (normalized === "err" || normalized === "error") return "err";
-  return "inf";
-}
-
 function badgeForStatus(status: string | undefined): {
   tag: string;
   tone: StatusTone;
@@ -1403,10 +1261,16 @@ function badgeForStatus(status: string | undefined): {
   return { tag: "RES", tone: "res" };
 }
 
+// Live "running" indicator for the active card — a pulsing dot + label, NOT a
+// badge (the coloured kind badge already sits on the card's left). Keeps the
+// active card legible without a second, redundant badge.
 function GeneratingIndicator({ label = "GENERATING" }: { label?: string }) {
-  const upper = label.toUpperCase();
-  const tag = upper.includes("RUN") ? "EXE" : "GEN";
-  return <StatusBadge tag={tag} tone={tag === "EXE" ? "exe" : "gen"} />;
+  return (
+    <span className="pm-generating-indicator">
+      <span className="pm-generating-dot" aria-hidden="true" />
+      {label.toUpperCase()}
+    </span>
+  );
 }
 
 function TraceEventRow({ event }: { event: TraceEvent }) {

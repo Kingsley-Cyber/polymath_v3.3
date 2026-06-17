@@ -6,6 +6,7 @@ venv/
 frontend/dist/
 frontend/playwright-report/
 frontend/test-results/
+frontend/tab-screenshots/
 frontend/node_modules/
 graphify-out/cache/
 *.log

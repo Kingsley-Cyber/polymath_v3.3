@@ -1356,6 +1356,47 @@
 .status-badge-err { background: #e72323; color: #fff; }
 .status-badge-inf { background: var(--color-border); color: var(--color-text-muted); }
 
+/* Live-trace taxonomy badge colours — kept separate from the shared
+   status-badge-* palette so the chat trace can be recoloured without touching
+   RetrievalBadge / ChatInput / FileAttachment. One colour per kind:
+   retrieval=blue, web=green, tool=grey, reasoning=purple, generation=teal. */
+.pm-tax-retrieval { background: #2b6cb0; color: #fff; } /* blue  — EXE  */
+.pm-tax-web       { background: #2f9e44; color: #fff; } /* green — WWW  */
+.pm-tax-tool      { background: #6b7280; color: #fff; } /* grey  — TOOL */
+.pm-tax-reason    { background: #7c3aed; color: #fff; } /* purple— RSN  */
+.pm-tax-gen       { background: #0d9488; color: #fff; } /* teal  — GEN  */
+.pm-tax-final     { background: #0f766e; color: #fff; } /* d.teal— RES  */
+.pm-tax-warn      { background: #e79c23; color: #131313; }
+.pm-tax-info      { background: var(--color-border); color: var(--color-text-muted); }
+
+/* Active-card live indicator: pulsing dot + label (replaces the old redundant
+   status badge so the active card shows one coloured kind badge, not two). */
+.pm-generating-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-smaller);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.pm-generating-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: pm-gen-pulse 1s ease-in-out infinite;
+}
+@keyframes pm-gen-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pm-generating-dot { animation: none; opacity: 0.8; }
+}
+
 @keyframes message-arrive {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
