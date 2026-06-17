@@ -483,41 +483,107 @@ function ProcessTimeline({
   );
 }
 
-// Live waterfall shown WHILE streaming: one row per process step, each with its
-// own state badge, the newest running step animated (shiny), completed steps
-// quiet. This is what makes the wait feel active instead of "one log + timer".
+// Live waterfall shown WHILE streaming: one collapsible card per process step.
+// Each step generates as its phase fires; the leading (current) step is
+// expanded and — while actually running — animated (shiny) with a RUNNING
+// badge. As the next step takes over, the previous one auto-collapses to a
+// header, so the trace reads as a downward stack of completed steps led by one
+// open active card. Finished steps can be re-expanded on click.
 function LiveProcessStream({ items }: { items: ProcessTimelineItem[] }) {
+  const [manualOpen, setManualOpen] = useState<Set<string>>(() => new Set());
   if (items.length === 0) return null;
+
+  // Leading card = the last running step (the current phase). If nothing is
+  // running this instant (brief gap between phases), lead with the newest step
+  // so there is always one open card at the bottom of the waterfall.
+  let leadingId: string | undefined;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    if (items[i].status === "running") {
+      leadingId = items[i].id;
+      break;
+    }
+  }
+  if (!leadingId) leadingId = items[items.length - 1]?.id;
+
+  const toggle = (id: string, open: boolean) =>
+    setManualOpen((prev) => {
+      const next = new Set(prev);
+      if (open) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
   return (
-    <div className="mb-2 w-full max-w-[82ch] flex flex-col gap-0.5">
+    <div className="mb-2 w-full max-w-[82ch]">
       {items.map((item) => {
-        const active = item.status === "running";
-        const tag = tagForTraceItem(item);
+        const leading = item.id === leadingId;
+        const running = item.status === "running";
+        const open = leading || manualOpen.has(item.id);
         return (
-          <div
+          <LiveStepCard
             key={item.id}
-            className={`flex items-center gap-2 py-0.5 text-[9px] font-bold uppercase tracking-widest transition-opacity ${
-              active ? "opacity-100" : "opacity-60"
-            }`}
-          >
-            <StatusBadge tag={tag} tone={toneForTag(tag)} />
-            <span
-              className={
-                active
-                  ? "pm-process-title shiny-text"
-                  : "pm-process-title text-content-secondary"
-              }
-            >
-              {item.title}
-            </span>
-            {active ? (
-              <GeneratingIndicator label="RUNNING" />
-            ) : (
-              <StatusBadge {...badgeForStatus(item.status)} />
-            )}
-          </div>
+            item={item}
+            running={running}
+            open={open}
+            onToggle={(next) => toggle(item.id, next)}
+          />
         );
       })}
+    </div>
+  );
+}
+
+// One collapsible step card in the live waterfall. Reuses the process-group CSS
+// (header + animated collapsible body) so the live view matches the finalized
+// grouped view.
+function LiveStepCard({
+  item,
+  running,
+  open,
+  onToggle,
+}: {
+  item: ProcessTimelineItem;
+  running: boolean;
+  open: boolean;
+  onToggle: (open: boolean) => void;
+}) {
+  const tag = tagForTraceItem(item);
+  const content = [item.content, item.detail].filter(Boolean).join("\n\n");
+  return (
+    <div
+      className={`process-group w-full ${open ? "expanded" : ""} ${
+        running ? "process-group-active" : ""
+      }`}
+    >
+      <button
+        type="button"
+        className="process-group-header"
+        aria-expanded={open}
+        onClick={() => {
+          // The actively-running step stays open; finished steps toggle freely.
+          if (!running) onToggle(!open);
+        }}
+      >
+        <span className="disclosure-caret" aria-hidden="true" />
+        <StatusBadge tag={tag} tone={toneForTag(tag)} />
+        <span className={running ? "pm-process-title shiny-text" : "pm-process-title"}>
+          {item.title}
+        </span>
+        {running ? (
+          <GeneratingIndicator label="RUNNING" />
+        ) : (
+          <StatusBadge {...badgeForStatus(item.status)} />
+        )}
+      </button>
+      {content && (
+        <div className={`collapsible ${open ? "expanded" : ""}`}>
+          <div className="content">
+            <div className="pm-process-body custom-scrollbar pm-process-body-live">
+              <div className="pm-process-row-content custom-scrollbar">{content}</div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
