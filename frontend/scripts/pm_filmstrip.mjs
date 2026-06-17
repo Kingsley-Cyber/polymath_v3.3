@@ -41,7 +41,8 @@ for (let i = 0; i < 45; i++) {
     const draftLabel = (document.querySelector('.pm-live-answer-draft-head')?.innerText || '').slice(0, 50);
     const titles = [...document.querySelectorAll('.pm-process-title')].map((e) => e.innerText.trim()).slice(-6);
     const ans = (document.querySelector('[data-testid="response-panel"]')?.innerText || '').length;
-    return { cards, active, shiny, draft, draftLabel, titles, ans };
+    const reasoningLen = (document.querySelector('.pm-live-scroll-panel')?.innerText || '').length;
+    return { cards, active, shiny, draft, draftLabel, titles, ans, reasoningLen };
   }).catch(() => null);
   if (snap) {
     frames.push({ t, ...snap });
@@ -55,5 +56,5 @@ for (let i = 0; i < 45; i++) {
   await p.waitForTimeout(1200);
 }
 
-console.log(JSON.stringify(frames.map((f) => ({ t: f.t, cards: f.cards, active: f.active, shiny: f.shiny, draft: f.draft, label: f.draftLabel, ans: f.ans, last: f.titles[f.titles.length - 1] })), null, 0));
+console.log(JSON.stringify(frames.map((f) => ({ t: f.t, cards: f.cards, active: f.active, reasoning: f.reasoningLen, ans: f.ans, titles: f.titles })), null, 0));
 await b.close();

@@ -424,7 +424,10 @@ function kindForItem(item: ProcessTimelineItem): TraceKind {
   if (item.status === "error" || item.status === "skipped") return "warn";
   if (/web|search|fetch|www|browse|browser/.test(t)) return "web";
   if (item.kind === "tool" || /\btool\b|shell|command|\bexec/.test(t)) return "tool";
-  if (/model.*stream|synthesis|generat|draft/.test(t)) return "gen";
+  // Fold model/synthesis steps into the retrieval (EXE) card so the common flow
+  // reads as just two cards — EXE (retrieval + synthesis) and RSN (reasoning).
+  // Web/tool steps still get their own cards when they actually occur.
+  if (/model.*stream|synthesis|generat|draft/.test(t)) return "retrieval";
   if (
     /route|hyde|retriev|\brag\b|rerank|hydrat|lens|nuance|source|coverage|funnel|graph|fact|prepar|context/.test(
       t,
@@ -1172,7 +1175,44 @@ function ReasoningPanel({
   active: boolean;
   onToggle: (open: boolean) => void;
 }) {
-  const bodyRef = useAutoScroll<HTMLDivElement>([thinking]);
+  // Pace the reasoning reveal. Models often emit the whole thinking trace in a
+  // sub-second burst, which just flashes. Instead reveal it at a steady,
+  // readable rate so the thinking visibly fills the wait — but never past what
+  // has actually arrived, and snap to the full text the moment it's no longer
+  // the active (pre-answer) phase. Tune REVEAL_CHARS_PER_SEC to align the
+  // reveal duration with how long retrieval/generation typically takes.
+  const REVEAL_CHARS_PER_SEC = 320;
+  const [revealed, setRevealed] = useState(0);
+  const revealedRef = useRef(0);
+  const thinkingRef = useRef(thinking);
+  thinkingRef.current = thinking;
+
+  useEffect(() => {
+    if (!active) {
+      revealedRef.current = thinkingRef.current.length;
+      setRevealed(thinkingRef.current.length);
+      return;
+    }
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const dt = (now - last) / 1000;
+      last = now;
+      const target = thinkingRef.current.length;
+      const next = Math.min(
+        target,
+        revealedRef.current + REVEAL_CHARS_PER_SEC * dt,
+      );
+      revealedRef.current = next;
+      setRevealed(Math.floor(next));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [active]);
+
+  const shown = active ? thinking.slice(0, revealed) : thinking;
+  const bodyRef = useAutoScroll<HTMLDivElement>([shown]);
 
   return (
     <div
@@ -1202,7 +1242,7 @@ function ReasoningPanel({
               active ? "pm-live-scroll-panel-live" : "pm-live-scroll-panel-review"
             }`}
           >
-            {thinking}
+            {shown}
           </div>
         </div>
       </div>
