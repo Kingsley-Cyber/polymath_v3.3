@@ -418,16 +418,26 @@ function ProcessTimeline({
   isStreaming: boolean;
   defaultOpen?: boolean;
 }) {
-  const groups = compactProcessTimeline(items);
+  // Hooks must run unconditionally (called before any early return) to keep
+  // hook order stable when isStreaming flips at finalize.
   const [manualOpenIds, setManualOpenIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [manualClosedIds, setManualClosedIds] = useState<Set<string>>(
     () => new Set(),
   );
-  const activeId = isStreaming
-    ? [...groups].reverse().find((group) => group.status === "running")?.id
-    : undefined;
+
+  // While streaming, show a live step-stream so each phase (route, HyDE,
+  // retrieval, rerank, synthesis, generation) is visible as it fires — newest
+  // active, older done — instead of collapsing into two compacted groups that
+  // hide the moment the answer starts. The finalized message uses the tidy
+  // grouped view below.
+  if (isStreaming) {
+    return <LiveProcessStream items={items} />;
+  }
+
+  const groups = compactProcessTimeline(items);
+  const activeId = undefined;
 
   const handleToggle = (id: string, open: boolean) => {
     setManualOpenIds((previous) => {
@@ -471,6 +481,60 @@ function ProcessTimeline({
       })}
     </div>
   );
+}
+
+// Live waterfall shown WHILE streaming: one row per process step, each with its
+// own state badge, the newest running step animated (shiny), completed steps
+// quiet. This is what makes the wait feel active instead of "one log + timer".
+function LiveProcessStream({ items }: { items: ProcessTimelineItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mb-2 w-full max-w-[82ch] flex flex-col gap-0.5">
+      {items.map((item) => {
+        const active = item.status === "running";
+        const tag = tagForTraceItem(item);
+        return (
+          <div
+            key={item.id}
+            className={`flex items-center gap-2 py-0.5 text-[9px] font-bold uppercase tracking-widest transition-opacity ${
+              active ? "opacity-100" : "opacity-60"
+            }`}
+          >
+            <StatusBadge tag={tag} tone={toneForTag(tag)} />
+            <span
+              className={
+                active
+                  ? "pm-process-title shiny-text"
+                  : "pm-process-title text-content-secondary"
+              }
+            >
+              {item.title}
+            </span>
+            {active ? (
+              <GeneratingIndicator label="RUNNING" />
+            ) : (
+              <StatusBadge {...badgeForStatus(item.status)} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Per-item state badge for the live stream (the grouped view derives badges per
+// group instead). Mirrors the GEN/USE/WWW/EXE/RES/WRN/INF taxonomy.
+function tagForTraceItem(item: ProcessTimelineItem): string {
+  const t = (item.title || "").toLowerCase();
+  if (item.kind === "reasoning") return "GEN";
+  if (item.status === "error" || item.status === "skipped") return "WRN";
+  if (/web|search|fetch|www|browse/.test(t)) return "WWW";
+  if (item.kind === "tool" || /\btool\b|execut|command|shell/.test(t)) return "EXE";
+  if (/final answer|\bresponse\b/.test(t)) return "RES";
+  if (/model.*stream|synthesis|generat|draft|reasoning/.test(t)) return "GEN";
+  if (/route|hyde|retriev|\brag\b|rerank|hydrat|lens|nuance|source|coverage|funnel|graph|fact/.test(t))
+    return "USE";
+  return "INF";
 }
 
 function ProcessTimelineCard({
