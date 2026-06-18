@@ -54,6 +54,7 @@ def select_facet_final(
     lane_budget: int = 1,
     source_cap: int | None = None,
     max_per_domain: int | None = None,
+    per_doc_cap: int | None = None,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Select final context candidates using lane reservations plus score order.
 
@@ -97,6 +98,7 @@ def select_facet_final(
     selected: list[FacetCandidate] = []
     seen_keys: set[str] = set()
     seen_docs: set[str] = set()
+    doc_counts: dict[str, int] = {}
     domain_counts: dict[str, int] = {}
     lane_counts: dict[str, int] = {lane: 0 for lane in tracked}
 
@@ -118,6 +120,17 @@ def select_facet_final(
             and len(seen_docs) >= int(source_cap)
         ):
             return False
+        # Per-document chunk cap — a hard ceiling (like source_cap, NOT relaxed
+        # in the fill passes) so one book can't dominate the final context with
+        # many near-redundant chunks. Tagged with enforce_source_cap because it's
+        # a hard-cap signal, not the soft domain-spread quota.
+        if (
+            enforce_source_cap
+            and per_doc_cap is not None
+            and doc_id
+            and doc_counts.get(doc_id, 0) >= int(per_doc_cap)
+        ):
+            return False
         domain = str(getattr(candidate, "domain", "") or "")
         if (
             enforce_domain_cap
@@ -135,6 +148,9 @@ def select_facet_final(
         seen_keys.add(_candidate_key(candidate))
         if candidate.doc_id:
             seen_docs.add(str(candidate.doc_id))
+            doc_counts[str(candidate.doc_id)] = (
+                doc_counts.get(str(candidate.doc_id), 0) + 1
+            )
         domain = str(getattr(candidate, "domain", "") or "")
         if domain:
             domain_counts[domain] = domain_counts.get(domain, 0) + 1

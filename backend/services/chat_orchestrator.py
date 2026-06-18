@@ -67,6 +67,10 @@ _CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS = 4
 _CHAT_COVERAGE_THRESHOLD = 4
 _CHAT_COVERAGE_WEAK_THRESHOLD = 2
 _CHAT_COVERAGE_SOURCE_CAP = 8
+# Max chunks any single document may contribute to the final context. Stops one
+# book (or a duplicate copy) from dominating the answer with near-redundant
+# passages — a hard cap, complementary to the distinct-doc source_cap above.
+_CHAT_PER_DOC_CAP = 3
 # Per-facet coverage retrievals are independent and run concurrently; this caps
 # the fan-out so a many-facet query can't swamp Qdrant/Mongo/the reranker at once.
 _CHAT_COVERAGE_MAX_CONCURRENCY = 4
@@ -1183,10 +1187,17 @@ def _chat_source_is_low_value(source: SourceChunk, query: str) -> bool:
     heading_text = " ".join(str(h) for h in (source.heading_path or []))
     text_head = str(source.text or "")[:1200]
     summary_head = str(source.summary or "")[:500]
-    haystack = f"{heading_text}\n{summary_head}\n{text_head}"
-    if _LOW_VALUE_EVIDENCE_RE.search(haystack):
+    # Match low-value markers on the HEADING + summary only — NOT arbitrary body
+    # text. A substantive chunk that merely contains the word "references" (e.g.
+    # "BERT references the original transformer paper") is not low-value;
+    # matching it in body text was silently dropping good evidence and thinning
+    # the final set. True reference / boilerplate chunks are now caught at
+    # ingestion (chunk_kind → NOISY_KINDS retrieval filter); this stays as the
+    # heading-level backstop for legacy/unclassified chunks.
+    if _LOW_VALUE_EVIDENCE_RE.search(f"{heading_text}\n{summary_head}"):
         return True
     if re.search(r"\brelated work\b", heading_text, re.IGNORECASE):
+        haystack = f"{heading_text}\n{summary_head}\n{text_head}"
         citation_hits = len(re.findall(r"\b[A-Z][A-Za-z-]+ et al\.\s*\(\d{4}", haystack))
         year_hits = len(re.findall(r"\(\d{4}[a-z]?\)", haystack))
         if citation_hits >= 3 or year_hits >= 5:
@@ -1227,6 +1238,27 @@ def _prepare_chat_evidence_sources(
         "filtered_low_value": len(low_value),
         "cleaned_frontmatter": cleaned_frontmatter,
     }
+
+
+def _cap_chunks_per_doc(
+    sources: list[SourceChunk], cap: int = _CHAT_PER_DOC_CAP
+) -> list[SourceChunk]:
+    """Keep at most `cap` chunks per document, preserving order (sources arrive
+    in selection/score order). A universal final guard so one book — or a
+    duplicate copy of it — can't monopolize the context with near-redundant
+    passages, regardless of which coverage path produced the set."""
+    if not cap or cap <= 0:
+        return sources
+    kept: list[SourceChunk] = []
+    counts: dict[str, int] = {}
+    for source in sources:
+        doc_id = str(getattr(source, "doc_id", "") or "")
+        if doc_id:
+            if counts.get(doc_id, 0) >= cap:
+                continue
+            counts[doc_id] = counts.get(doc_id, 0) + 1
+        kept.append(source)
+    return kept
 
 
 def _chat_coverage_norm(value: Any) -> str:
@@ -1988,6 +2020,7 @@ def _select_chat_coverage_sources(
     max_sources: int,
     source_cap: int | None = None,
     max_per_domain: int | None = None,
+    per_doc_cap: int | None = None,
 ) -> tuple[list[SourceChunk], int, dict[str, Any]]:
     max_sources = max(1, int(max_sources or len(base_sources) or 1))
     all_sources = [*base_sources, *support_sources]
@@ -2004,6 +2037,7 @@ def _select_chat_coverage_sources(
         lane_budget=1,
         source_cap=source_cap or _CHAT_COVERAGE_SOURCE_CAP,
         max_per_domain=max_per_domain,
+        per_doc_cap=per_doc_cap or _CHAT_PER_DOC_CAP,
     )
     actual_support = [
         source
@@ -4116,6 +4150,10 @@ class ChatOrchestrator:
                 coverage_meta.get("lane_reports", []),
             )
         sources = _dedupe_sources_for_context(coverage_sources)
+        # Universal per-document cap — the coverage selector applies one too, but
+        # it is bypassed when no facet coverage is needed; this final guard runs
+        # on every path so one book can never dominate the answer context.
+        sources = _cap_chunks_per_doc(sources)
         effective_tier_for_trace = getattr(
             retrieval.effective_tier,
             "value",

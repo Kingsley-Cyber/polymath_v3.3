@@ -40,6 +40,7 @@ class ChunkKind:
     BACK_MATTER = "back_matter"
     CODE = "code"
     TABLE = "table"
+    LINKS = "links"
 
 
 ALL_KINDS: tuple[str, ...] = (
@@ -52,6 +53,7 @@ ALL_KINDS: tuple[str, ...] = (
     ChunkKind.BACK_MATTER,
     ChunkKind.CODE,
     ChunkKind.TABLE,
+    ChunkKind.LINKS,
 )
 
 # Kinds the default retrieval filter excludes. CODE is first-class
@@ -107,6 +109,13 @@ _RULES: list[tuple[re.Pattern[str], str]] = [
     # Back matter
     (re.compile(r"^(glossary|errata|notes?\b\s*$|endnotes?)\b"), ChunkKind.BACK_MATTER),
     (re.compile(r"^(epilogue|afterword|postscript|coda)\b"), ChunkKind.BACK_MATTER),
+
+    # Publisher boilerplate / promotional back-matter (Packt/Springer/etc.) —
+    # code-bundle pages, "Join our Discord", review/marketing asides. These are
+    # outline/link dumps with no answerable content.
+    (re.compile(r"^(code\s+bundle|colou?red?\s+images?|download\s+the\s+(example|code|colou?r))"), ChunkKind.BACK_MATTER),
+    (re.compile(r"^join\s+(our|the)\b.{0,40}\bdiscord"), ChunkKind.BACK_MATTER),
+    (re.compile(r"^(why\s+subscribe|share\s+your\s+thoughts|leave\s+a\s+review|about\s+packt|get\s+in\s+touch)\b"), ChunkKind.BACK_MATTER),
 ]
 
 # Heading prefixes Docling sometimes prepends (HTML chapter anchors, style
@@ -221,6 +230,61 @@ _INDEX_SEE_RE = re.compile(r"\bsee\s+(?:also\s+)?[A-Z]", re.IGNORECASE)
 # signal to confirm a chunk is reference material rather than prose.
 _SENTENCE_END_RE = re.compile(r"[.!?][\"')\]]?\s*$")
 
+# Reference-LIST markers that body prose with a few inline citations does NOT
+# produce: Springer/pandoc "::: Citation" entry blocks and PubMed/Crossref link
+# tags. High-precision — lets us catch a reference list sitting inside a
+# body-headed section (below the citation-density threshold) WITHOUT flagging a
+# chapter that merely quotes "(Asch, 1956)" in running prose.
+_CITATION_ENTRY_RE = re.compile(r":{2,}\s*Citation", re.IGNORECASE)
+_PMC_TAG_RE = re.compile(r"\[(?:PubMed|Crossref|Google\s+Scholar)\]", re.IGNORECASE)
+# External-link / "resources" list — lines dominated by http(s) URLs (markdown
+# `](http…)` or bare). Distinct from in-document `#anchor` links (which are TOC
+# / inline citation cross-refs, handled elsewhere).
+_EXTERNAL_LINK_RE = re.compile(r"\]\(https?://|(?:^|\s)https?://\S")
+
+
+def _is_reference_list(text: str | None) -> bool:
+    """True for a bibliographic reference LIST (≥2 explicit entry markers).
+    Keyed on list markers, not citation count, so prose citing a couple of
+    sources stays BODY."""
+    if not text:
+        return False
+    sample = text[:3000]
+    markers = len(_CITATION_ENTRY_RE.findall(sample)) + len(_PMC_TAG_RE.findall(sample))
+    return markers >= 2
+
+
+def _is_link_list(lines: list[str]) -> bool:
+    """True for an external-link / resources dump (≥4 URL lines AND ≥40% of
+    lines carry an external URL)."""
+    if len(lines) < 5:
+        return False
+    link_hits = sum(1 for ln in lines if _EXTERNAL_LINK_RE.search(ln))
+    return link_hits >= 4 and link_hits / len(lines) >= 0.40
+
+
+# A "Resources" / "External links" SUB-heading (the deepest heading segment) is
+# a strong signal — these sections are link/resource dumps. We require it to be
+# the deepest segment (a real chapter rarely ENDS a heading path on "resources")
+# plus a bulleted body, so a substantive "Computational Resources" prose section
+# is not caught. Catches resource lists whose URLs were stripped at ingest.
+_RESOURCES_HEADING_RE = re.compile(
+    r"\b(resources?|external\s+links?|useful\s+links?|online\s+resources?|web\s+resources?)\s*$"
+)
+_BULLET_LINE_RE = re.compile(r"^\s*[-*•]\s")
+
+
+def _is_resources_list(heading_path: Iterable[str] | None, text: str | None) -> bool:
+    segs = [_normalize_heading(h) for h in (heading_path or [])]
+    segs = [s for s in segs if s]
+    if not segs or not _RESOURCES_HEADING_RE.search(segs[-1]):
+        return False
+    if not text:
+        return False
+    lines = [ln for ln in text[:2000].split("\n") if ln.strip()]
+    bullets = sum(1 for ln in lines if _BULLET_LINE_RE.match(ln))
+    return bullets >= 3
+
 
 def _heading_is_inconclusive(heading_path: Iterable[str] | None) -> bool:
     """Heading provides no semantic signal — page-style or empty."""
@@ -250,6 +314,11 @@ def classify_content(text: str | None) -> str:
     sample = text[:2000]
     if not sample.strip():
         return ChunkKind.BODY
+
+    # Explicit reference-list markers (Springer "::: Citation" / PubMed tags) —
+    # high precision, catches sparse ref blocks the density rule below misses.
+    if _is_reference_list(text):
+        return ChunkKind.BIBLIOGRAPHY
 
     # Citation density → bibliography
     citation_hits = sum(len(p.findall(sample)) for p in _CITATION_PATTERNS)
@@ -286,6 +355,8 @@ def classify_content(text: str | None) -> str:
             return ChunkKind.INDEX
         if _is_partial_index(lines):
             return ChunkKind.INDEX
+        if _is_link_list(lines):
+            return ChunkKind.LINKS
 
     return ChunkKind.BODY
 
@@ -350,12 +421,19 @@ def classify_chunk(
     if _heading_is_inconclusive(heading_path):
         # No semantic signal in the heading — defer entirely to content.
         return classify_content(text)
-    # Heading says BODY confidently. Only let content override for the
-    # partial-index shape — the one signal a body chapter literally
-    # cannot produce (its lines end in sentence punctuation). Don't fire
-    # full content classification here because biblio/TOC false positives
-    # on citation-dense body chunks are a real risk.
+    # Heading says BODY confidently. Only let content override for high-precision
+    # noise shapes a body chapter literally cannot produce: a reference LIST
+    # (Springer "::: Citation"/PubMed markers), a partial index (lines that don't
+    # end in sentence punctuation), or an external-link dump. Citation-DENSITY
+    # biblio detection is intentionally NOT run here — it false-positives on
+    # citation-rich prose (e.g. a chapter quoting "(Asch, 1956)" several times).
+    if _is_resources_list(heading_path, text):
+        return ChunkKind.LINKS
+    if _is_reference_list(text):
+        return ChunkKind.BIBLIOGRAPHY
     lines = [ln for ln in text[:2000].split("\n") if ln.strip()]
     if _is_partial_index(lines):
         return ChunkKind.INDEX
+    if _is_link_list(lines):
+        return ChunkKind.LINKS
     return ChunkKind.BODY
