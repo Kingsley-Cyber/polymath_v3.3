@@ -52,6 +52,7 @@ from services.retriever.intent_policy import (
 from services.retriever.lexical import _terms, lexical_retriever
 from services.retriever.merge import merge_pools
 from services.retriever.mode_a import mode_a_expansion
+from services.graph.cache_warmup import ensure_graph_metrics_fresh
 from services.retriever.ranking_policy import (
     apply_candidate_weights,
     apply_query_grounding,
@@ -789,6 +790,12 @@ class RetrieverOrchestrator:
         _fact_seed_resolved = False
         _fact_seed_task: asyncio.Future | None = None
         if effective_tier == RetrievalTier.qdrant_mongo_graph and settings.NEO4J_ENABLED:
+            # Self-heal the graph-analytics cache (bridges / analogies / transfer
+            # candidates). Non-blocking and signature-driven: any staleness — from
+            # ingest, delete, backfill, dedup, or a lost post-ingest warm — repairs
+            # itself for the next graph query. The query never waits on it.
+            for _cid in (corpus_ids or []):
+                asyncio.ensure_future(ensure_graph_metrics_fresh(_cid))
             _fact_seed_task = asyncio.ensure_future(
                 asyncio.wait_for(
                     self._retrieve_graph_seed_facts(

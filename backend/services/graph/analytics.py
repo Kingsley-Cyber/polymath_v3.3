@@ -1788,9 +1788,49 @@ RETURN a.entity_id AS source,
        coalesce(r.eligible_for_synthesis, r.predicate <> 'related_to') AS eligible_for_synthesis
 """
 
+# Cap the metrics graph to the top-N entities by RELATES_TO degree. Bridges /
+# PageRank / betweenness only need the RELATES_TO structure, and the meaningful
+# bridges live among the high-degree hubs — loading ALL mentioned entities
+# (hundreds of thousands on a large corpus) is what made the metrics warm hang
+# (a 762k-entity stream). 25k hubs keeps the structural core and finishes in
+# seconds. The full mention set still drives domain assignment elsewhere.
+_GRAPH_METRICS_MAX_NODES = 25000
+
+# Top-N entities by RELATES_TO degree for a corpus — the bounded node set.
+_TOP_RELATED_ENTITIES_CYPHER = """
+MATCH (e:Entity)-[r:RELATES_TO]-(:Entity)
+WHERE $corpus_id IN coalesce(r.corpus_ids, [])
+WITH e, count(r) AS deg
+ORDER BY deg DESC
+LIMIT $max_nodes
+RETURN e.entity_id AS entity_id
+"""
+
+# Same projection as _ENTITY_CYPHER but restricted to a bounded entity set.
+_ENTITY_BY_IDS_CYPHER = """
+MATCH (e:Entity) WHERE e.entity_id IN $entity_ids
+MATCH (e)<-[:MENTIONS]-(:Chunk)<-[:HAS_CHUNK]-(d:Document)
+WHERE d.corpus_id = $corpus_id
+WITH e, d.doc_id AS doc_id, count(*) AS mentions
+RETURN e.entity_id AS entity_id,
+       coalesce(e.display_name, e.normalized_name, e.canonical_name) AS name,
+       coalesce(e.primary_entity_type, e.entity_type) AS entity_type,
+       e.object_kind AS object_kind,
+       e.object_kind_parent AS object_kind_parent,
+       e.object_kind_root AS object_kind_root,
+       e.domain_type AS domain_type,
+       e.domain_type_parent AS domain_type_parent,
+       e.domain_type_root AS domain_type_root,
+       e.canonical_family AS canonical_family,
+       e.observed_entity_types AS observed_entity_types,
+       e.ontology_version AS ontology_version,
+       doc_id, mentions
+"""
+
 
 async def _load_entities_with_mentions(
     session, corpus_id: str, doc_to_domain: dict[str, str],
+    entity_ids: Optional[list[str]] = None,
 ) -> tuple[
     dict[str, str],
     dict[str, str],
@@ -1808,7 +1848,12 @@ async def _load_entities_with_mentions(
     entity_mention_counts: dict[str, int] = defaultdict(int)
     entity_doc_ids: dict[str, set[str]] = defaultdict(set)
 
-    result = await session.run(_ENTITY_CYPHER, corpus_id=corpus_id)
+    if entity_ids:
+        result = await session.run(
+            _ENTITY_BY_IDS_CYPHER, corpus_id=corpus_id, entity_ids=entity_ids
+        )
+    else:
+        result = await session.run(_ENTITY_CYPHER, corpus_id=corpus_id)
     async for rec in result:
         eid = rec["entity_id"]
         if not eid:
@@ -1936,6 +1981,18 @@ async def load_graph_from_neo4j(
 
     try:
         async with neo4j_driver.session() as session:
+            # Bound the metrics graph to the top-N RELATES_TO hubs. Loading the
+            # full mentioned-entity set (hundreds of thousands on a large corpus)
+            # is what made the metrics warm hang; the bridges that matter live
+            # among the hubs. No RELATES_TO structure → no bridges to compute.
+            top = await session.run(
+                _TOP_RELATED_ENTITIES_CYPHER,
+                corpus_id=corpus_id,
+                max_nodes=_GRAPH_METRICS_MAX_NODES,
+            )
+            bounded_ids = [r["entity_id"] async for r in top if r["entity_id"]]
+            if not bounded_ids:
+                return G, {}, {}
             (
                 names,
                 types,
@@ -1943,7 +2000,9 @@ async def load_graph_from_neo4j(
                 domain_counts,
                 mention_counts,
                 doc_counts,
-            ) = await _load_entities_with_mentions(session, corpus_id, doc_to_domain)
+            ) = await _load_entities_with_mentions(
+                session, corpus_id, doc_to_domain, entity_ids=bounded_ids
+            )
             if not names:
                 return G, {}, {}
 

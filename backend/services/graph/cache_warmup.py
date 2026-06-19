@@ -33,9 +33,23 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from datetime import datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# A self-heal claim older than this (a crashed/failed warm) is reclaimable, so a
+# stuck rebuild retries instead of wedging bridges off forever. Longer than a
+# normal warm (clustering + label + metrics) but short enough to recover same
+# session.
+_WARM_CLAIM_TTL_SECONDS: float = 600.0
+
+# Hard ceiling on a single rebuild — a wedge-breaker, not a tight SLA. With the
+# metrics graph bounded to the top-N RELATES_TO hubs a real warm runs ~6.5 min
+# (mostly LLM cluster-labeling + sampled betweenness), so this is set well above
+# that; it only fires on a true hang, and the claim TTL then lets a later query
+# retry instead of leaving a wedged task holding a Neo4j session forever.
+_WARM_MAX_SECONDS: float = 600.0
 
 # Per-corpus pending warmup tasks. Each ingest completion cancels any
 # in-flight pending task and schedules a fresh one, so a 50-doc batch
@@ -174,7 +188,10 @@ def schedule_metrics_warmup_after_ingest(
                 corpus_id[:8],
                 debounce_seconds,
             )
-            await emerge_domains(qdrant, neo4j_driver, db, corpus_id)
+            await asyncio.wait_for(
+                emerge_domains(qdrant, neo4j_driver, db, corpus_id),
+                timeout=_WARM_MAX_SECONDS,
+            )
             logger.info(
                 "auto-warm: metrics rebuild complete corpus=%s",
                 corpus_id[:8],
@@ -221,3 +238,88 @@ def pending_corpus_ids() -> list[str]:
     """Diagnostic — return the corpus_ids that currently have a
     debounced warmup pending or in flight."""
     return [cid for cid, t in _PENDING_WARMUP_TASKS.items() if not t.done()]
+
+
+async def ensure_graph_metrics_fresh(corpus_id: str) -> str:
+    """Self-healing graph-analytics cache — call this on the graph query path.
+
+    The corpus_change_signature (sha256 of doc_ids + updated_at) is the universal
+    freshness oracle: it changes on ANY mutation — ingest, delete, backfill,
+    dedup, re-ingest. This checks the live signature against `graph_metrics_cache`
+    and, on a miss (missing OR stale), atomically claims and schedules a
+    background rebuild. It NEVER blocks the query — bridges simply appear on the
+    next graph query once the rebuild lands.
+
+    This is both PREVENTIVE (future staleness self-repairs on next use) and
+    CORRECTIVE (an already-empty/stale cache repairs itself), replacing the
+    fragile ingest-only, in-process, non-durable warm task as the sole producer.
+
+    Durability + no-stampede: the "warming" claim is a Mongo doc
+    (`graph_metrics_warm_state`), so it survives restarts and a claim older than
+    `_WARM_CLAIM_TTL_SECONDS` (a crashed warm) is reclaimable. Concurrent queries
+    / replicas can't double-warm. Best-effort: every failure is swallowed.
+
+    Returns one of: "fresh" | "scheduled" | "in_flight" | "skipped" | "error".
+    """
+    try:
+        from services.ingestion_service import ingestion_service
+        from services.graph.analytics import compute_corpus_change_signature
+
+        db = ingestion_service.db
+        neo4j_driver = ingestion_service.neo4j_driver
+        qdrant = ingestion_service.qdrant_client
+        if db is None or neo4j_driver is None:
+            return "skipped"
+
+        sig = await compute_corpus_change_signature(db, corpus_id)
+        fresh = await db["graph_metrics_cache"].find_one(
+            {"corpus_id": corpus_id, "corpus_change_signature": sig}, {"_id": 1}
+        )
+        if fresh:
+            return "fresh"
+
+        # Already warming THIS signature, recently? (durable across restarts.)
+        now = datetime.utcnow()
+        state = await db["graph_metrics_warm_state"].find_one({"corpus_id": corpus_id})
+        if (
+            state
+            and state.get("signature") == sig
+            and isinstance(state.get("started_at"), datetime)
+            and (now - state["started_at"]).total_seconds() < _WARM_CLAIM_TTL_SECONDS
+        ):
+            return "in_flight"
+
+        # Claim it (the in-process debounce dedups concurrent same-process calls;
+        # this marker dedups across restarts / replicas and drives retry-on-fail).
+        await db["graph_metrics_warm_state"].update_one(
+            {"corpus_id": corpus_id},
+            {"$set": {
+                "corpus_id": corpus_id,
+                "corpus_change_signature": sig,
+                "signature": sig,
+                "status": "warming",
+                "started_at": now,
+            }},
+            upsert=True,
+        )
+        schedule_metrics_warmup_after_ingest(
+            qdrant=qdrant,
+            neo4j_driver=neo4j_driver,
+            db=db,
+            corpus_id=corpus_id,
+            debounce_seconds=0.5,  # near-immediate; this is a repair, not a batch
+        )
+        logger.info(
+            "self-heal: graph-metrics cache stale/missing corpus=%s sig=%s — "
+            "scheduled background rebuild",
+            corpus_id[:8],
+            sig[:8],
+        )
+        return "scheduled"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "self-heal: ensure_graph_metrics_fresh failed corpus=%s: %s",
+            str(corpus_id)[:8],
+            exc,
+        )
+        return "error"
