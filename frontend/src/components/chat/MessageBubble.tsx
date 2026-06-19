@@ -618,9 +618,10 @@ function ProcessTimelineRow({
 }) {
   const content = [item.content, item.detail].filter(Boolean).join("\n\n");
   const modelCall = parseModelCallBlock(content);
+  const running = item.status === "running";
 
   return (
-    <div className="pm-process-row">
+    <div className={`pm-process-row ${running ? "pm-process-row-running" : ""}`}>
       <span className="pm-process-row-index">
         {String(index + 1).padStart(2, "0")}
       </span>

@@ -1578,6 +1578,78 @@
   border: 1px solid var(--color-border) !important;
 }
 
+/* ── Live "working" treatment for the ACTIVE process-group card ──────────────
+   All cues are GPU-only (transform / opacity / background) so the running card
+   reads as alive WITHOUT any per-frame JS re-render — no lag, no layout thrash.
+   A light bar sweeps the top edge, the running step pulses, and new steps fade
+   in as they stream. None of these use box-shadow/border (which the global audit
+   rules strip), so they survive untouched. */
+#root .process-group-active {
+  border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--color-border)) !important;
+}
+.process-group-active {
+  position: relative;
+  overflow: hidden;
+}
+.process-group-active::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 38%;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--accent-primary) 92%, #fff 8%),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: pm-scan 1.7s linear infinite;
+  will-change: transform;
+  pointer-events: none;
+  z-index: 1;
+}
+@keyframes pm-scan {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(360%); }
+}
+
+/* Currently-executing step — pulsing left accent so you see WHICH step runs. */
+.pm-process-row-running {
+  position: relative;
+}
+.pm-process-row-running::before {
+  content: "";
+  position: absolute;
+  left: -0.55rem;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--accent-primary);
+  animation: pm-gen-pulse 1s ease-in-out infinite;
+}
+.pm-process-row-running .pm-process-row-title {
+  color: var(--text-secondary);
+}
+
+/* New steps fade/slide in as they arrive (fires once per row mount — rows are
+   keyed by id so existing rows never re-animate on a streaming re-render). */
+.pm-process-body-live .pm-process-row {
+  animation: pm-row-in 0.26s ease-out both;
+}
+@keyframes pm-row-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .process-group-active::before { display: none; }
+  .pm-process-row-running::before,
+  .pm-process-body-live .pm-process-row { animation: none; }
+}
+
 #root .message-assistant h1,
 #root .message-assistant h2,
 #root .message-assistant h3 {
