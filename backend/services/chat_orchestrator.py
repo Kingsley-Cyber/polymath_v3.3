@@ -3579,6 +3579,16 @@ def _format_retrieval_diagnostics_trace(
         ),
         f"final_source_tiers: {final_mix}",
         (
+            # Doc-spread telemetry — distinct_docs_* are computed in the
+            # retriever but were previously dropped here; max_doc_share_final
+            # surfaces candidate-collapse (one doc dominating the final set).
+            "diversity: "
+            f"docs_merged={_count('distinct_docs_merged')} "
+            f"docs_in_pool={_count('distinct_docs_in_pool')} "
+            f"docs_final={int(diag.get('unique_docs_final') or 0)} "
+            f"max_doc_share_final={float(diag.get('max_doc_share_final') or 0.0):.2f}"
+        ),
+        (
             "limits: "
             f"child={limits.get('child_top_k', '?')} "
             f"summary={limits.get('summary_top_k', '?')} "

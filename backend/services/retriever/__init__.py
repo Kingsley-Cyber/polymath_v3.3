@@ -711,12 +711,35 @@ class RetrieverOrchestrator:
                 tier_counts[tier] = tier_counts.get(tier, 0) + 1
             return tier_counts
 
+        def _doc_concentration(
+            chunks: list[SourceChunk] | None,
+        ) -> tuple[int, float]:
+            """Final-set document spread: (distinct docs, max single-doc share).
+
+            ``max_doc_share_final`` is the fraction of the final context drawn
+            from the single most-represented document — the candidate-collapse
+            signal (e.g. 6 of 9 chunks from one book -> 0.6667). Pure read over
+            the already-selected final chunks; adds no behavior, only telemetry.
+            """
+            doc_counts: dict[str, int] = {}
+            for chunk in chunks or []:
+                doc_id = getattr(chunk, "doc_id", None)
+                if not doc_id:
+                    continue
+                key = str(doc_id)
+                doc_counts[key] = doc_counts.get(key, 0) + 1
+            total = sum(doc_counts.values())
+            if total <= 0:
+                return 0, 0.0
+            return len(doc_counts), round(max(doc_counts.values()) / total, 4)
+
         def _diagnostics(
             status: str,
             final_count: int,
             final_chunks: list[SourceChunk] | None = None,
         ) -> dict[str, Any]:
             effective = effective_tier
+            unique_docs_final, max_doc_share_final = _doc_concentration(final_chunks)
             return {
                 "status": status,
                 "requested_tier": getattr(retrieval_tier, "value", retrieval_tier),
@@ -746,6 +769,8 @@ class RetrieverOrchestrator:
                 "total_s": round(float(perf_counter() - retrieval_started), 3),
                 "final_count": int(final_count),
                 "final_source_tiers": _source_tier_counts(final_chunks),
+                "unique_docs_final": unique_docs_final,
+                "max_doc_share_final": max_doc_share_final,
             }
 
         # [0a] Filter stale corpus_ids (frontend may reference deleted corpora)
