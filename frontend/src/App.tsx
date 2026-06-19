@@ -539,6 +539,7 @@ function App() {
                   collections_queried:
                     event.collections_queried ?? requestCorpusIds,
                   chunks_returned: event.chunks_returned,
+                  facts_seeded: event.facts_seeded,
                   strategy_used: event.strategy_used,
                   query_profile_used: event.query_profile_used,
                   reasoning_mode_used: event.reasoning_mode_used,

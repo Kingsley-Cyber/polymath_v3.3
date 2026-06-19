@@ -4298,6 +4298,10 @@ class ChatOrchestrator:
                 retrieval.effective_tier,
             )
             facts = []
+        # Deterministic FACTS counter for the UI — the real number of graph facts
+        # seeded into the answer context (post tier-gating), taken straight from
+        # the retrieval result. Never an LLM-authored value, so it cannot lie.
+        facts_seeded = len(facts)
 
         # Pt 10d (Cluster 2 — Graph Decoration) — graph-tier-only
         # post-retrieval enrichment. Vector Base and Hybrid never call Neo4j
@@ -5682,6 +5686,7 @@ class ChatOrchestrator:
                 model_used,
                 trimming_applied,
                 chunks_returned=chunks_returned,
+                facts_seeded=facts_seeded,
                 strategy_used=strategy_used,
                 query_profile_used=query_profile_used,
                 reasoning_mode_used=reasoning_mode_used,
@@ -5717,6 +5722,7 @@ class ChatOrchestrator:
                 conversation_id=str(conversation_id),
                 model_used=model_used,
                 chunks_returned=chunks_returned,
+                facts_seeded=facts_seeded,
                 strategy_used=strategy_used,
                 query_profile_used=query_profile_used,
                 reasoning_mode_used=reasoning_mode_used,
@@ -6255,6 +6261,7 @@ class ChatOrchestrator:
         trimming_applied: bool,
         *,
         chunks_returned: int | None = None,
+        facts_seeded: int | None = None,
         strategy_used: str | None = None,
         query_profile_used: str | None = None,
         reasoning_mode_used: str | None = None,
@@ -6280,6 +6287,7 @@ class ChatOrchestrator:
             trimming_applied=trimming_applied,
             collections_queried=collections_queried or [],
             chunks_returned=chunks_returned,
+            facts_seeded=facts_seeded,
             sources=_compact_source_previews(sources),
             strategy_used=strategy_used,
             query_profile_used=query_profile_used,

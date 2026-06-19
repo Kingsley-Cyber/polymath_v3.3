@@ -108,6 +108,10 @@ class ChatChunk(_legacy.ChatChunk):
         description="Structured execution trace lane event for durable UI logs.",
     )
     chunks_returned: int | None = None
+    # Deterministic count of graph facts actually seeded into retrieval — the
+    # real number from the retrieval result (len of the seeded facts), never an
+    # LLM-authored value. Mirrors chunks_returned for a trustworthy UI counter.
+    facts_seeded: int | None = None
     strategy_used: str | None = None
     query_profile_used: str | None = None
     reasoning_mode_used: str | None = None
@@ -125,6 +129,7 @@ class ChatMessage(_legacy.ChatMessage):
 
     trace_events: list[dict[str, Any]] = Field(default_factory=list)
     chunks_returned: int | None = None
+    facts_seeded: int | None = None
     strategy_used: str | None = None
     query_profile_used: str | None = None
     reasoning_mode_used: str | None = None

@@ -265,6 +265,9 @@ export interface ChatMessage {
   // a populated `collections_queried`) as "RAG_GROUNDED, unknown
   // chunk count" — see RetrievalBadge.tsx for the full table.
   chunks_returned?: number;
+  /** Deterministic count of graph facts seeded into retrieval (real number from
+   *  the retrieval result, never LLM-authored). Rendered in the RetrievalBadge. */
+  facts_seeded?: number;
   /** Raw effective_tier from the backend retrieval pipeline.
    *  "qdrant_only" | "qdrant_mongo" | "qdrant_mongo_graph". Frontend
    *  humanizes via TIER_LABELS in RetrievalBadge. */
@@ -497,6 +500,7 @@ export interface SSEEvent {
   // Trust-signal fields — present on the terminal `done` frame so the live
   // message can render the RetrievalBadge before any reload.
   chunks_returned?: number;
+  facts_seeded?: number;
   strategy_used?: string;
   query_profile_used?: string;
   reasoning_mode_used?: string;

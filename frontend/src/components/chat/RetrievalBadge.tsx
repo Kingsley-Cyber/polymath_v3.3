@@ -131,6 +131,7 @@ export function RetrievalBadge({ message }: RetrievalBadgeProps) {
   const reasonMode = humanizeReason(message.reasoning_mode_used);
   const hyde = !!message.hyde_applied;
   const chunkCountKnown = typeof message.chunks_returned === "number";
+  const factsSeededKnown = typeof message.facts_seeded === "number";
   const corpusIds = message.collections_queried ?? [];
   const corpusNames = corpusIds.map((id) => {
     const found = corpora.find((c) => c.corpus_id === id);
@@ -235,11 +236,21 @@ export function RetrievalBadge({ message }: RetrievalBadgeProps) {
               {reasonMode ?? "unknown"}
             </span>
 
+            {/* Deterministic graph-fact counter — the real number of facts seeded
+                into the answer context, straight from retrieval. Never an
+                LLM-authored value, so it cannot lie. (Replaces the tool-loop row.) */}
             <span className="text-content-tertiary tracking-widest uppercase text-[9.5px]">
-              tool loop
+              facts
             </span>
-            <span className={agentic ? "text-emerald-400" : "text-content-tertiary"}>
-              {agentic ? "on" : "off"}
+            <span
+              className={
+                factsSeededKnown && (message.facts_seeded ?? 0) > 0
+                  ? "text-accent-secondary"
+                  : "text-content-tertiary"
+              }
+              title="Graph facts seeded into the answer context — deterministic count from retrieval"
+            >
+              {factsSeededKnown ? message.facts_seeded : "—"}
             </span>
 
             {/* Phase 24 — Skills row (always shown, even when empty) */}
