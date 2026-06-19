@@ -679,6 +679,9 @@ class ResolveDuplicatesRequest(BaseModel):
     # deleted, so the distinct-content cases stay safe by default.
     min_confidence: Literal["certain", "likely", "review"] | None = None
     keep_overrides: dict[str, str] = Field(default_factory=dict)
+    # Restrict the operation to specific clusters by their canonical doc_id —
+    # the panel's per-cluster "remove" action. None = every detected cluster.
+    only_canonicals: list[str] | None = None
 
 
 @router.get("/corpora/{corpus_id}/duplicates")
@@ -739,6 +742,7 @@ async def resolve_duplicate_documents(
         apply=body.apply,
         min_confidence=body.min_confidence,
         keep_overrides=body.keep_overrides,
+        only_canonicals=body.only_canonicals,
     )
     return result
 

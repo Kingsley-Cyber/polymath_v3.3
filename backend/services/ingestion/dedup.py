@@ -525,6 +525,7 @@ async def resolve_duplicate_clusters(
     apply: bool = False,
     min_confidence: Optional[str] = None,
     keep_overrides: Optional[dict[str, str]] = None,
+    only_canonicals: Optional[Iterable[str]] = None,
 ) -> dict[str, Any]:
     """CORRECT — keep one canonical per cluster, cascade-delete the rest, safely.
 
@@ -542,6 +543,7 @@ async def resolve_duplicate_clusters(
     instead (lets a human flip which copy survives).
     """
     keep_overrides = keep_overrides or {}
+    only = set(only_canonicals) if only_canonicals is not None else None
     rank = {DUP_CERTAIN: 0, DUP_LIKELY: 1, DUP_REVIEW: 2}
     # Safe by default: with no explicit floor, only near-identical ("certain")
     # copies are eligible. Broadening to "likely"/"review" is an explicit opt-in.
@@ -554,6 +556,10 @@ async def resolve_duplicate_clusters(
     skipped = 0
 
     for cluster in clusters:
+        # Per-cluster targeting: when the caller names specific canonicals (e.g.
+        # a "remove this cluster" button in the UI), only those are touched.
+        if only is not None and cluster.canonical_doc_id not in only:
+            continue
         keep_id = str(keep_overrides.get(cluster.canonical_doc_id, cluster.canonical_doc_id))
         for member in cluster.members:
             if member.doc_id == keep_id:

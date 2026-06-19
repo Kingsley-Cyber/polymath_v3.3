@@ -19,8 +19,10 @@ import {
   CheckCircle2,
   XCircle,
   RotateCcw,
+  Copy,
 } from "lucide-react";
 import * as api from "../../lib/api";
+import { DuplicatesPanel } from "./DuplicatesPanel";
 import type {
   CorpusResponse,
   DocumentResponse,
@@ -91,6 +93,7 @@ export function CorpusDetail({
   const [overrides, setOverrides] = useState<IngestOverrides>({});
   const [showOverrides, setShowOverrides] = useState(false);
   const [showLocalBatch, setShowLocalBatch] = useState(true);
+  const [showDuplicates, setShowDuplicates] = useState(false);
   const [localBatchPath, setLocalBatchPath] = useState(LOCAL_BATCH_DEFAULT_PATH);
   const [localBatchConcurrency, setLocalBatchConcurrency] = useState(1);
   const [localBatch, setLocalBatch] = useState<IngestBatchResponse | null>(null);
@@ -452,6 +455,18 @@ export function CorpusDetail({
             <span>Backend Folder</span>
           </button>
           <button
+            onClick={() => setShowDuplicates((open) => !open)}
+            className={`flex items-center gap-1.5 px-2 py-1 text-[9px] font-bold tracking-widest border transition-none uppercase ${
+              showDuplicates
+                ? "border-accent-main text-accent-main hover:bg-accent-main hover:text-bg-base"
+                : "border-border-minimal text-content-tertiary hover:border-content-secondary hover:text-content-secondary"
+            }`}
+            title="Detect and remove near-duplicate documents in this corpus"
+          >
+            <Copy className="w-3 h-3" />
+            <span>Duplicates</span>
+          </button>
+          <button
             onClick={() => quickUploadInputRef.current?.click()}
             disabled={isQuickUploading}
             className="flex items-center gap-1.5 px-2 py-1 text-[9px] font-bold tracking-widest text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-accent-main transition-none uppercase"
@@ -476,6 +491,20 @@ export function CorpusDetail({
       </div>
         <IngestionProgressBar documents={documents} />
       </div>
+
+      {showDuplicates && (
+        <DuplicatesPanel
+          corpusId={corpus.corpus_id}
+          onResolved={async () => {
+            await loadDocuments();
+            try {
+              onCorpusUpdated(await api.getCorpus(corpus.corpus_id));
+            } catch {
+              /* corpus count refresh is best-effort */
+            }
+          }}
+        />
+      )}
 
       {showLocalBatch && (
         <div className="border-b border-border-minimal bg-bg-base/70 px-4 py-3 shrink-0">

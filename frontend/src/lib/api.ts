@@ -2167,3 +2167,93 @@ export async function searchEntities(
   _entityInflight.set(key, fire);
   return fire;
 }
+
+// ── Document de-duplication (detect / correct) ──────────────────────────────
+export type DuplicateConfidence = "certain" | "likely" | "review";
+
+export interface DuplicateMember {
+  doc_id: string;
+  filename: string;
+  chunk_count: number;
+  retrievable_count: number;
+  ingested_at?: string | null;
+  ingest_stage?: string;
+  shingle_count?: number;
+  is_canonical: boolean;
+  similarity_to_canonical: number;
+  containment_to_canonical: number;
+  confidence: "" | DuplicateConfidence;
+}
+
+export interface DuplicateCluster {
+  canonical_doc_id: string;
+  confidence: DuplicateConfidence;
+  auto_safe: boolean;
+  max_similarity: number;
+  members: DuplicateMember[];
+  redundant_doc_ids: string[];
+  redundant_chunks: number;
+}
+
+export interface DuplicatesResponse {
+  corpus_id?: string;
+  threshold?: number;
+  cluster_count: number;
+  duplicate_document_count: number;
+  redundant_chunk_count: number;
+  by_confidence: { certain: number; likely: number; review: number };
+  clusters: DuplicateCluster[];
+}
+
+export interface ResolveDuplicatesRequest {
+  apply: boolean;
+  min_confidence?: DuplicateConfidence | null;
+  keep_overrides?: Record<string, string>;
+  only_canonicals?: string[] | null;
+  threshold?: number;
+}
+
+export interface ResolveDuplicatesResponse {
+  corpus_id: string;
+  applied: boolean;
+  min_confidence?: string | null;
+  clusters: number;
+  documents_deleted?: number;
+  documents_to_delete?: number;
+  chunks_freed?: number;
+  chunks_to_free?: number;
+  skipped_low_confidence: number;
+  errors: number;
+  actions: Array<{
+    keep_doc_id: string;
+    delete_doc_id: string;
+    delete_filename: string;
+    deleted_chunks: number;
+    confidence: string;
+    applied: boolean;
+    skipped_low_confidence: boolean;
+    backed_up: boolean;
+    error: string | null;
+  }>;
+}
+
+/** Corpus-wide near-duplicate scan (read-only). May take up to ~a minute on
+ *  large corpora — it is an exact all-pairs containment scan. */
+export async function getDuplicates(
+  corpusId: string,
+): Promise<DuplicatesResponse> {
+  return fetchJSON(`/corpora/${encodeURIComponent(corpusId)}/duplicates`);
+}
+
+/** Resolve duplicate clusters. Dry-run unless apply=true. Safe by default
+ *  (only `certain` near-identical copies) unless min_confidence is broadened
+ *  or specific clusters are named via only_canonicals. */
+export async function resolveDuplicates(
+  corpusId: string,
+  body: ResolveDuplicatesRequest,
+): Promise<ResolveDuplicatesResponse> {
+  return fetchJSON(
+    `/corpora/${encodeURIComponent(corpusId)}/duplicates/resolve`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
