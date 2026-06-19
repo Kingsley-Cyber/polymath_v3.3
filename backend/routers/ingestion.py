@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 from routers.auth import get_current_user
 from services.ingestion_service import FrozenFieldError, ingestion_service
 from services.ingestion import batches as ingest_batches
+from services.ingestion import dedup
 from utils.streaming import build_sse_done, build_sse_error
 
 # Phase K — strong references to in-flight ingest tasks so asyncio doesn't GC
@@ -670,6 +671,78 @@ async def delete_document(
     return {"status": "success", "doc_id": doc_id}
 
 
+class ResolveDuplicatesRequest(BaseModel):
+    apply: bool = False
+    threshold: float | None = Field(default=None, ge=0.02, le=1.0)
+    # "certain" (near-identical only — the safe-auto set), "likely", or None
+    # (every detected redundant copy). Copies below the bar are reported but not
+    # deleted, so the distinct-content cases stay safe by default.
+    min_confidence: Literal["certain", "likely", "review"] | None = None
+    keep_overrides: dict[str, str] = Field(default_factory=dict)
+
+
+@router.get("/corpora/{corpus_id}/duplicates")
+async def detect_duplicate_documents(
+    corpus_id: str,
+    threshold: float | None = Query(default=None, ge=0.02, le=1.0),
+    current_user: dict = Depends(get_current_user),
+):
+    """DETECT — corpus-wide near-duplicate document scan (read-only).
+
+    Deterministic shingle-Jaccard all-pairs clustering (services/ingestion/
+    dedup.py). Returns every cluster of near-duplicate documents already inside
+    the corpus, each with a suggested canonical copy to keep. Pair with
+    POST .../duplicates/resolve to correct them.
+    """
+    corpus = await ingestion_service.get_corpus(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    thr = threshold if threshold is not None else dedup.DEFAULT_DUPLICATE_THRESHOLD
+    clusters = await dedup.find_duplicate_clusters(
+        ingestion_service.db, corpus_id, threshold=thr
+    )
+    return {
+        "corpus_id": corpus_id,
+        "threshold": thr,
+        **dedup.summarize_clusters(clusters),
+    }
+
+
+@router.post("/corpora/{corpus_id}/duplicates/resolve")
+async def resolve_duplicate_documents(
+    corpus_id: str,
+    body: ResolveDuplicatesRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """CORRECT — keep one canonical copy per near-duplicate cluster, cascade-
+    delete the redundant ones (Qdrant -> Neo4j -> Mongo chunks -> Mongo doc).
+
+    Dry-run by default (apply=false): returns exactly what WOULD be deleted.
+    Set apply=true to execute. `keep_overrides` maps a cluster's suggested
+    canonical_doc_id -> the doc_id you want to keep instead.
+    """
+    corpus = await ingestion_service.get_corpus(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    thr = (
+        body.threshold
+        if body.threshold is not None
+        else dedup.DEFAULT_DUPLICATE_THRESHOLD
+    )
+    clusters = await dedup.find_duplicate_clusters(
+        ingestion_service.db, corpus_id, threshold=thr
+    )
+    result = await dedup.resolve_duplicate_clusters(
+        ingestion_service,
+        corpus_id,
+        clusters,
+        apply=body.apply,
+        min_confidence=body.min_confidence,
+        keep_overrides=body.keep_overrides,
+    )
+    return result
+
+
 @router.post("/corpora/{corpus_id}/documents/{doc_id}/graph-backfill")
 async def backfill_document_graph(
     corpus_id: str,
@@ -766,7 +839,39 @@ async def ingestion_audit(
     existing = await ingestion_service.get_corpus(corpus_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Corpus not found")
-    return await ingestion_service.get_ingestion_audit(corpus_id)
+    audit = await ingestion_service.get_ingestion_audit(corpus_id)
+    # Active near-duplicate surfacing — a corpus carrying redundant copies of a
+    # document is a retrieval-quality defect (it over-weights repeated concepts).
+    # The scan is O(n^2) over documents; run it inline only for modest corpora so
+    # this health endpoint stays fast. Larger corpora scan on demand via
+    # GET .../duplicates (or the dedupe_corpus.py CLI).
+    try:
+        doc_count = await ingestion_service.db["documents"].count_documents(
+            {"corpus_id": corpus_id}
+        )
+        if doc_count > 200:
+            audit["duplicates"] = {
+                "status": "scan_on_demand",
+                "doc_count": doc_count,
+                "hint": f"GET /api/corpora/{corpus_id}/duplicates",
+            }
+        else:
+            clusters = await dedup.find_duplicate_clusters(
+                ingestion_service.db, corpus_id
+            )
+            audit["duplicates"] = {
+                "cluster_count": len(clusters),
+                "duplicate_document_count": sum(len(c.redundant) for c in clusters),
+                "redundant_chunk_count": sum(
+                    m.chunk_count for c in clusters for m in c.redundant
+                ),
+            }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "duplicate scan in audit failed for %s: %s", corpus_id[:8], exc
+        )
+        audit["duplicates"] = {"error": str(exc)}
+    return audit
 
 
 @router.post("/corpora/{corpus_id}/ingest-batches/local")

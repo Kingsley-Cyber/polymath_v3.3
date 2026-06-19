@@ -213,9 +213,21 @@ class Settings(BaseSettings):
         ge=0.02,
         le=1.0,
         description=(
-            "Shingle (5-gram) Jaccard threshold for near-duplicate blocking. On "
-            "real data a same-book PDF-vs-MD pair scores ~0.32 while different "
-            "books score ~0.003, so 0.10 separates them with wide margin."
+            "Shingle (5-gram) Jaccard threshold to FLAG an incoming doc as a "
+            "near-duplicate. Low on purpose — it only gates consideration; "
+            "containment (below) decides whether to skip vs ingest-and-flag."
+        ),
+    )
+    INGEST_NEAR_DUPLICATE_BLOCK_CONTAINMENT: float = Field(
+        default=0.95,
+        ge=0.50,
+        le=1.0,
+        description=(
+            "Containment (|incoming ∩ existing| / |incoming|) at/above which an "
+            "incoming doc is SKIPPED as a near-identical reformat. Below it, a "
+            "near-duplicate is ingested and flagged for review instead of being "
+            "dropped — so a distinct work that merely shares prose (e.g. a C++ vs "
+            "Java edition, which reads as ~0.9 contained) is never silently lost."
         ),
     )
     INGEST_MAX_MODEL_PHASE_DOCS: int = Field(

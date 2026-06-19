@@ -107,7 +107,7 @@ from services.ghost_b import (
 # unchanged. Ghost A (summaries) remains the cloud path.
 from services.ghost_b_local import extract_entities
 from services.facets import build_ingest_facet_profile
-from services.ingestion import docling_adapter, tier_chunker
+from services.ingestion import dedup, docling_adapter, tier_chunker
 from services.ingestion.schema_lens import get_or_create_schema_lens
 from services.ingestion.section_classifier import (
     ChunkKind,
@@ -229,16 +229,14 @@ async def _qdrant_has_summary_points(
     return all(count == expected_count for count in counts.values())
 
 
-# Shingle (5-gram) Jaccard, not token-set: a same-book PDF-vs-MD pair scores
-# ~0.32 on real data while different books score ~0.003, so 0.10 separates them
-# with wide margin. Overridable via settings.INGEST_NEAR_DUPLICATE_THRESHOLD.
-_DUPLICATE_DOC_THRESHOLD = 0.10
-_DUPLICATE_TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9_'-]{2,}")
-_DUPLICATE_STOP_WORDS = {
-    "and", "are", "but", "for", "from", "have", "into", "not", "the", "that",
-    "this", "with", "you", "your", "their", "there", "then", "than", "was",
-    "were", "will", "would", "could", "should", "about", "which",
-}
+# Near-duplicate document detection shares ONE deterministic core with the
+# corpus-wide DETECT/CORRECT pipeline (services/ingestion/dedup.py). The
+# ingest-time PREVENT check below and the corpus scan call the same shingle_set
+# / jaccard / threshold, so they can never drift. Shingle (5-gram) Jaccard, not
+# token-set: a same-book PDF-vs-MD pair scores ~0.32 while different books score
+# ~0.003, so 0.10 separates them with a wide margin. Overridable via
+# settings.INGEST_NEAR_DUPLICATE_THRESHOLD.
+_DUPLICATE_DOC_THRESHOLD = dedup.DEFAULT_DUPLICATE_THRESHOLD
 
 
 def _is_vectorized_child(chunk) -> bool:
@@ -560,33 +558,11 @@ def _rehydrate_ghost_b_failures(rows: list[dict]) -> list[ExtractionFailureItem]
     return [failure for failure in out if failure.chunk_id]
 
 
-def _doc_token_set(texts: list[str]) -> set[str]:
-    """Compact lexical fingerprint for near-duplicate document detection."""
-    tokens: set[str] = set()
-    for text in texts:
-        for match in _DUPLICATE_TOKEN_RE.finditer(str(text or "").lower()):
-            token = match.group(0).strip("'_-")
-            if token and token not in _DUPLICATE_STOP_WORDS:
-                tokens.add(token)
-    return tokens
-
-
-def _doc_shingle_set(texts: list[str], k: int = 5) -> set[str]:
-    """Near-duplicate fingerprint keyed on shared TEXT (overlapping content-word
-    k-grams), not just shared vocabulary. Two different docs on the same topic
-    share lots of words but few k-grams, so this separates "same book, reformat"
-    (PDF vs MD — most prose k-grams survive) from "different books, same field"
-    far more reliably than a token set, which matters on boilerplate-heavy or
-    same-domain corpora."""
-    words: list[str] = []
-    for text in texts:
-        for match in _DUPLICATE_TOKEN_RE.finditer(str(text or "").lower()):
-            token = match.group(0).strip("'_-")
-            if token and token not in _DUPLICATE_STOP_WORDS:
-                words.append(token)
-    if len(words) < k:
-        return set()
-    return {" ".join(words[i : i + k]) for i in range(len(words) - k + 1)}
+def _doc_shingle_set(texts: list[str], k: int = dedup.DEFAULT_SHINGLE_K) -> set[str]:
+    """Near-duplicate fingerprint — delegates to the shared dedup core so the
+    ingest-time PREVENT check and the corpus-wide DETECT scan use the identical
+    deterministic algorithm."""
+    return dedup.shingle_set(texts, k=k)
 
 
 async def _find_near_duplicate_documents(
@@ -606,7 +582,7 @@ async def _find_near_duplicate_documents(
     corpus is overweighting repeated concepts.
     """
     incoming = _doc_shingle_set(parent_texts)
-    if len(incoming) < 24:
+    if len(incoming) < dedup.MIN_SHINGLES:
         return []
 
     candidates: list[dict] = []
@@ -628,20 +604,32 @@ async def _find_near_duplicate_documents(
         existing = _doc_shingle_set(existing_texts)
         if not existing:
             continue
-        union = incoming | existing
-        if not union:
-            continue
-        similarity = len(incoming & existing) / len(union)
+        similarity = dedup.jaccard(incoming, existing)
         if similarity >= threshold:
+            # Containment of the INCOMING doc inside the existing one — how much
+            # of what we're about to ingest is ALREADY present. This (not the
+            # symmetric Jaccard) is what decides block-vs-flag: a distinct work
+            # that merely shares prose is not fully contained, so it is flagged
+            # and ingested, never silently skipped.
+            inter = len(incoming & existing)
+            cont = inter / len(incoming) if incoming else 0.0
             candidates.append(
                 {
                     "doc_id": doc.get("doc_id"),
                     "filename": doc.get("filename") or "",
                     "similarity": round(float(similarity), 3),
+                    "containment": round(float(cont), 3),
                 }
             )
 
-    candidates.sort(key=lambda c: float(c.get("similarity") or 0.0), reverse=True)
+    # Sort by containment first (the decision signal), then Jaccard.
+    candidates.sort(
+        key=lambda c: (
+            float(c.get("containment") or 0.0),
+            float(c.get("similarity") or 0.0),
+        ),
+        reverse=True,
+    )
     return candidates[:limit]
 
 
@@ -1543,6 +1531,40 @@ async def _mark_ingest_skipped_duplicate(
     return reason
 
 
+async def _flag_document_near_duplicate(
+    *,
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+    candidates: list[dict],
+) -> str:
+    """Flag a document as a near-duplicate WITHOUT skipping ingestion. Used when
+    overlap is high but the doc is NOT near-identical to an existing one — it may
+    be a distinct work that merely shares prose (e.g. a different-language
+    edition of a textbook). The doc ingests normally and is marked for review so
+    the corpus dedup tool can surface it; it is never silently dropped."""
+    top = candidates[0] if candidates else {}
+    reason = (
+        f"Near-duplicate of '{top.get('filename') or top.get('doc_id') or '?'}' "
+        f"(overlap {top.get('similarity')}, containment {top.get('containment')}). "
+        "Ingested and FLAGGED for review — not auto-skipped because it may be a "
+        "distinct work; resolve via the corpus duplicate tool."
+    )
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {
+            "$set": {
+                "is_near_duplicate": True,
+                "near_duplicate_flagged": True,
+                "near_duplicate_of": candidates,
+                "updated_at": datetime.utcnow(),
+            },
+            "$addToSet": {"write_state.warnings": reason},
+        },
+    )
+    return reason
+
+
 async def _call_optional_callback(callback, *args) -> None:
     if callback is None:
         return
@@ -2206,7 +2228,54 @@ async def run_ingest_job(
             ),
         )
         if dup_candidates:
-            reason = await _mark_ingest_skipped_duplicate(
+            top = dup_candidates[0]
+            top_containment = float(top.get("containment") or 0.0)
+            block_containment = float(
+                getattr(settings, "INGEST_NEAR_DUPLICATE_BLOCK_CONTAINMENT", 0.95)
+            )
+            # SKIP only when the incoming doc is ~fully contained in an existing
+            # one (near-identical reformat) — losing it costs nothing. A merely
+            # near-duplicate doc may be a DISTINCT work that shares prose (e.g. a
+            # different-language edition of a textbook); ingest + flag it instead
+            # so it is never silently destroyed.
+            if top_containment >= block_containment:
+                reason = await _mark_ingest_skipped_duplicate(
+                    db=db,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    candidates=dup_candidates,
+                )
+                ws.warnings.append(reason)
+                logger.info(
+                    "phase=skipped_duplicate doc=%s corpus=%s dup_of=%s sim=%s cont=%s",
+                    doc_id[:12],
+                    cid8,
+                    str(top.get("doc_id"))[:12],
+                    top.get("similarity"),
+                    top.get("containment"),
+                )
+                await _call_optional_callback(on_doc_id, doc_id)
+                await _emit_ingest_phase(
+                    on_phase,
+                    "skipped_duplicate",
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    near_duplicate_of=dup_candidates,
+                )
+                return IngestJobResponse(
+                    job_id=job_id,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    filename=filename,
+                    source_tier=source_tier.value,
+                    status="skipped_duplicate",
+                    write_state=ws,
+                    chunk_count=0,
+                    parent_count=0,
+                    error=reason,
+                )
+            # Near-duplicate but not near-identical → INGEST and FLAG for review.
+            reason = await _flag_document_near_duplicate(
                 db=db,
                 doc_id=doc_id,
                 corpus_id=corpus_id,
@@ -2214,31 +2283,12 @@ async def run_ingest_job(
             )
             ws.warnings.append(reason)
             logger.info(
-                "phase=skipped_duplicate doc=%s corpus=%s dup_of=%s sim=%s",
+                "phase=near_duplicate_flagged doc=%s corpus=%s dup_of=%s sim=%s cont=%s",
                 doc_id[:12],
                 cid8,
-                str(dup_candidates[0].get("doc_id"))[:12],
-                dup_candidates[0].get("similarity"),
-            )
-            await _call_optional_callback(on_doc_id, doc_id)
-            await _emit_ingest_phase(
-                on_phase,
-                "skipped_duplicate",
-                doc_id=doc_id,
-                corpus_id=corpus_id,
-                near_duplicate_of=dup_candidates,
-            )
-            return IngestJobResponse(
-                job_id=job_id,
-                doc_id=doc_id,
-                corpus_id=corpus_id,
-                filename=filename,
-                source_tier=source_tier.value,
-                status="skipped_duplicate",
-                write_state=ws,
-                chunk_count=0,
-                parent_count=0,
-                error=reason,
+                str(top.get("doc_id"))[:12],
+                top.get("similarity"),
+                top.get("containment"),
             )
 
     # Phase K — signal the HTTP endpoint after the parse progress row exists,

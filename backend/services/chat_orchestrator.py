@@ -68,10 +68,14 @@ _CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS = 4
 _CHAT_COVERAGE_THRESHOLD = 4
 _CHAT_COVERAGE_WEAK_THRESHOLD = 2
 _CHAT_COVERAGE_SOURCE_CAP = 8
-# Max chunks any single document may contribute to the final context. Stops one
-# book (or a duplicate copy) from dominating the answer with near-redundant
-# passages — a hard cap, complementary to the distinct-doc source_cap above.
-_CHAT_PER_DOC_CAP = 3
+# Max chunks any single document may contribute to the final context.
+# 0 = DISABLED (uncapped). Reverted 2026-06-19: this hard cap was a band-aid for
+# duplicate-driven over-concentration (the same book ingested twice as PDF + MD).
+# The document-dedup pipeline (detect / prevent / correct, services/ingestion/
+# dedup.py) removes that root cause, so an authoritative single source may again
+# contribute as deeply as it ranks for. Set >0 to re-enable the per-doc ceiling
+# (honored by both _cap_chunks_per_doc and select_facet_final).
+_CHAT_PER_DOC_CAP = 0
 # Per-facet coverage retrievals are independent and run concurrently; this caps
 # the fan-out so a many-facet query can't swamp Qdrant/Mongo/the reranker at once.
 _CHAT_COVERAGE_MAX_CONCURRENCY = 4
@@ -2091,7 +2095,10 @@ def _select_chat_coverage_sources(
         lane_budget=1,
         source_cap=source_cap or _CHAT_COVERAGE_SOURCE_CAP,
         max_per_domain=max_per_domain,
-        per_doc_cap=per_doc_cap or _CHAT_PER_DOC_CAP,
+        # 0 disables the cap; coerce to None so the selector skips the ceiling
+        # entirely (per_doc_cap=0 would otherwise reject every candidate, since
+        # doc_counts.get(doc_id, 0) >= 0 is always true).
+        per_doc_cap=per_doc_cap or (_CHAT_PER_DOC_CAP or None),
     )
     actual_support = [
         source
