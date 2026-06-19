@@ -36,6 +36,7 @@ from services.facets import (
 )
 from services.llm import llm_service
 from services.retriever import retriever_orchestrator
+from services.ingestion.section_classifier import is_noisy
 from services.tool_registry import tool_registry
 # Phase 24 perf — hoist hot-path imports to module level so each chat turn
 # doesn't pay the import-resolution cost (was previously inside `try:` blocks
@@ -1138,13 +1139,29 @@ def _source_exact_text_key(source: Any) -> str | None:
     return f"text:{corpus_id}:{doc_id}:{len(text)}:{text[:512]}"
 
 
+def _source_neardup_key(source: Any) -> str | None:
+    """Cross-document near-duplicate key: a normalized text signature that is NOT
+    scoped by doc_id, so the SAME passage surfaced under two documents (e.g. a
+    book ingested as both a PDF and a .md) collapses to one card. Normalization
+    (lowercase, strip non-alphanumeric) absorbs whitespace/markup differences
+    between the two conversions."""
+    data = _source_to_dict(source)
+    if not data or _is_web_source_data(data):
+        return None
+    norm = re.sub(r"[^a-z0-9]+", " ", str(data.get("text") or "").lower()).strip()
+    if len(norm) < 120:
+        return None
+    return f"nd:{norm[:400]}"
+
+
 def _dedupe_sources_for_context(sources: list[Any] | None) -> list[Any]:
-    """Preserve order while removing exact duplicate source cards."""
+    """Preserve order while removing exact + near-duplicate source cards."""
     if not sources:
         return []
     deduped: list[Any] = []
     seen: set[str] = set()
     seen_exact_text: set[str] = set()
+    seen_neardup: set[str] = set()
     duplicates = 0
     for source in sources:
         key = _source_identity_key(source)
@@ -1155,10 +1172,16 @@ def _dedupe_sources_for_context(sources: list[Any] | None) -> list[Any]:
         if text_key and text_key in seen_exact_text:
             duplicates += 1
             continue
+        neardup_key = _source_neardup_key(source)
+        if neardup_key and neardup_key in seen_neardup:
+            duplicates += 1
+            continue
         if key:
             seen.add(key)
         if text_key:
             seen_exact_text.add(text_key)
+        if neardup_key:
+            seen_neardup.add(neardup_key)
         deduped.append(source)
     if duplicates:
         logger.info("source dedupe removed %d duplicate source card(s)", duplicates)
@@ -1259,6 +1282,37 @@ def _cap_chunks_per_doc(
             counts[doc_id] = counts.get(doc_id, 0) + 1
         kept.append(source)
     return kept
+
+
+async def _drop_noisy_retrieval_chunks(chunks: list[Any]) -> list[Any]:
+    """Exclude noisy chunks (bibliography / links / boilerplate) from the final
+    pool. The graph-expansion lane bypasses funnel_a's Qdrant NOISY_KINDS filter,
+    and hydrate can leave chunk_kind=body when a chunk is hydrated as its parent
+    — so after the cheap in-memory pass we confirm against the authoritative
+    child `chunks` collection in Mongo."""
+    if not chunks:
+        return chunks
+    survivors = [c for c in chunks if not is_noisy(getattr(c, "chunk_kind", None))]
+    ids = [
+        cid for cid in (str(getattr(c, "chunk_id", "") or "") for c in survivors) if cid
+    ]
+    db = getattr(conversation_service, "_db", None)
+    if db is None or not ids:
+        return survivors
+    try:
+        rows = await db["chunks"].find(
+            {"chunk_id": {"$in": ids}}, {"chunk_id": 1, "chunk_kind": 1}
+        ).to_list(length=None)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("noisy-chunk Mongo confirm failed: %s", exc)
+        return survivors
+    noisy_ids = {str(r["chunk_id"]) for r in rows if is_noisy(r.get("chunk_kind"))}
+    if not noisy_ids:
+        return survivors
+    return [
+        c for c in survivors
+        if str(getattr(c, "chunk_id", "") or "") not in noisy_ids
+    ]
 
 
 def _chat_coverage_norm(value: Any) -> str:
@@ -4111,10 +4165,13 @@ class ChatOrchestrator:
                 precomputed_coverage_facets = await coverage_facets_task
             except Exception as exc:
                 logger.debug("coverage facet prefetch failed; detecting inline: %s", exc)
+        retrieval_sources = await _drop_noisy_retrieval_chunks(
+            list(retrieval.chunks or [])
+        )
         coverage_sources, coverage_meta = await _enforce_chat_query_coverage(
             original_query=request.message,
             retrieval_query=retrieval_query,
-            sources=list(retrieval.chunks or []),
+            sources=retrieval_sources,
             corpus_ids=request.corpus_ids,
             retrieval_tier=getattr(retrieval, "effective_tier", request.retrieval_tier),
             collections=request.collections,
