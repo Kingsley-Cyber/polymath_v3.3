@@ -229,7 +229,10 @@ async def _qdrant_has_summary_points(
     return all(count == expected_count for count in counts.values())
 
 
-_DUPLICATE_DOC_THRESHOLD = 0.90
+# Shingle (5-gram) Jaccard, not token-set: a same-book PDF-vs-MD pair scores
+# ~0.32 on real data while different books score ~0.003, so 0.10 separates them
+# with wide margin. Overridable via settings.INGEST_NEAR_DUPLICATE_THRESHOLD.
+_DUPLICATE_DOC_THRESHOLD = 0.10
 _DUPLICATE_TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9_'-]{2,}")
 _DUPLICATE_STOP_WORDS = {
     "and", "are", "but", "for", "from", "have", "into", "not", "the", "that",
@@ -568,6 +571,24 @@ def _doc_token_set(texts: list[str]) -> set[str]:
     return tokens
 
 
+def _doc_shingle_set(texts: list[str], k: int = 5) -> set[str]:
+    """Near-duplicate fingerprint keyed on shared TEXT (overlapping content-word
+    k-grams), not just shared vocabulary. Two different docs on the same topic
+    share lots of words but few k-grams, so this separates "same book, reformat"
+    (PDF vs MD — most prose k-grams survive) from "different books, same field"
+    far more reliably than a token set, which matters on boilerplate-heavy or
+    same-domain corpora."""
+    words: list[str] = []
+    for text in texts:
+        for match in _DUPLICATE_TOKEN_RE.finditer(str(text or "").lower()):
+            token = match.group(0).strip("'_-")
+            if token and token not in _DUPLICATE_STOP_WORDS:
+                words.append(token)
+    if len(words) < k:
+        return set()
+    return {" ".join(words[i : i + k]) for i in range(len(words) - k + 1)}
+
+
 async def _find_near_duplicate_documents(
     *,
     db: AsyncIOMotorDatabase,
@@ -584,7 +605,7 @@ async def _find_near_duplicate_documents(
     ingestion; it stores a quality warning so RAG audits can explain why a
     corpus is overweighting repeated concepts.
     """
-    incoming = _doc_token_set(parent_texts)
+    incoming = _doc_shingle_set(parent_texts)
     if len(incoming) < 24:
         return []
 
@@ -604,7 +625,7 @@ async def _find_near_duplicate_documents(
             for p in parent_rows
             if isinstance(p, dict)
         ]
-        existing = _doc_token_set(existing_texts)
+        existing = _doc_shingle_set(existing_texts)
         if not existing:
             continue
         union = incoming | existing
@@ -1253,11 +1274,18 @@ async def _write_mongo_all(
         summaries,
         (facet_profile or {}).get("parent_facets"),
     )
-    duplicate_candidates = await _find_near_duplicate_documents(
-        db=db,
-        corpus_id=corpus_id,
-        doc_id=doc_id,
-        parent_texts=[p.get("text") or "" for p in parent_dicts],
+    # When blocking is on, near-duplicates are skipped up-front (before chunking)
+    # so anything reaching here is already non-duplicate — skip the redundant
+    # full-corpus scan. The advisory scan only runs when blocking is disabled.
+    duplicate_candidates = (
+        []
+        if settings.INGEST_BLOCK_NEAR_DUPLICATES
+        else await _find_near_duplicate_documents(
+            db=db,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+            parent_texts=[p.get("text") or "" for p in parent_dicts],
+        )
     )
     child_dicts = _build_child_dicts(
         children,
@@ -1482,6 +1510,37 @@ async def _mark_ingest_failed(
             },
         },
     )
+
+
+async def _mark_ingest_skipped_duplicate(
+    *,
+    db: AsyncIOMotorDatabase,
+    doc_id: str,
+    corpus_id: str,
+    candidates: list[dict],
+) -> str:
+    """Mark a document skipped because it near-duplicates an existing one. No
+    chunks/vectors/graph are written. Returns a human-readable reason string."""
+    top = candidates[0] if candidates else {}
+    reason = (
+        f"Near-duplicate of '{top.get('filename') or top.get('doc_id') or '?'}' "
+        f"(lexical overlap {top.get('similarity')}). Skipped to avoid doubling "
+        "corpus weight; set INGEST_BLOCK_NEAR_DUPLICATES=false to force ingest."
+    )
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {
+            "$set": {
+                "ingest_stage": "skipped_duplicate",
+                "skipped_reason": reason,
+                "near_duplicate_of": candidates,
+                "is_near_duplicate": True,
+                "updated_at": datetime.utcnow(),
+            },
+            "$addToSet": {"write_state.warnings": reason},
+        },
+    )
+    return reason
 
 
 async def _call_optional_callback(callback, *args) -> None:
@@ -2121,6 +2180,66 @@ async def run_ingest_job(
             ingestion_config=ingestion_config,
             ws=ws,
         )
+
+    # ── Near-duplicate block ─────────────────────────────────────────────
+    # Before any chunk/embed/extract work, skip a document that near-duplicates
+    # one already in this corpus (e.g. the same book ingested as PDF *and* MD —
+    # different exact hash, near-identical content). Runs once per fresh ingest
+    # against the parsed markdown token-set vs existing docs' parent chunks. A
+    # resume of a previously-skipped doc re-checks, so removing the original
+    # lets the duplicate back in.
+    _prior_stage = (existing_doc or {}).get("ingest_stage")
+    if settings.INGEST_BLOCK_NEAR_DUPLICATES and (
+        existing_doc is None or _prior_stage == "skipped_duplicate"
+    ):
+        dup_candidates = await _find_near_duplicate_documents(
+            db=db,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+            parent_texts=[parse_result.markdown or parse_result.text or ""],
+            threshold=float(
+                getattr(
+                    settings,
+                    "INGEST_NEAR_DUPLICATE_THRESHOLD",
+                    _DUPLICATE_DOC_THRESHOLD,
+                )
+            ),
+        )
+        if dup_candidates:
+            reason = await _mark_ingest_skipped_duplicate(
+                db=db,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                candidates=dup_candidates,
+            )
+            ws.warnings.append(reason)
+            logger.info(
+                "phase=skipped_duplicate doc=%s corpus=%s dup_of=%s sim=%s",
+                doc_id[:12],
+                cid8,
+                str(dup_candidates[0].get("doc_id"))[:12],
+                dup_candidates[0].get("similarity"),
+            )
+            await _call_optional_callback(on_doc_id, doc_id)
+            await _emit_ingest_phase(
+                on_phase,
+                "skipped_duplicate",
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                near_duplicate_of=dup_candidates,
+            )
+            return IngestJobResponse(
+                job_id=job_id,
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                filename=filename,
+                source_tier=source_tier.value,
+                status="skipped_duplicate",
+                write_state=ws,
+                chunk_count=0,
+                parent_count=0,
+                error=reason,
+            )
 
     # Phase K — signal the HTTP endpoint after the parse progress row exists,
     # so the frontend/SSE never observes a real running job as "not found".

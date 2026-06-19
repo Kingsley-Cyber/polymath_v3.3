@@ -392,6 +392,23 @@ def _resolve_ingest_progress(
     warnings = ws_raw.get("warnings", []) or []
     error = doc.get("error")
 
+    # Near-duplicate skip is a terminal, non-error outcome — surface it directly
+    # so the UI shows "skipped" instead of a doc stuck in "processing" (its
+    # write_state stays all-False because nothing is written).
+    if doc.get("ingest_stage") == "skipped_duplicate":
+        return {
+            "status": "skipped_duplicate",
+            "stage": "skipped_duplicate",
+            "mongo_done": mongo_done,
+            "qdrant_done": qdrant_done,
+            "summaries_indexed": summaries_indexed,
+            "neo4j_done": neo4j_done,
+            "verified": verified,
+            "verify_errors": verify_errors,
+            "warnings": warnings,
+            "error": doc.get("skipped_reason") or error,
+        }
+
     required_qdrant_done = (not qdrant_required) or qdrant_done
     required_summary_done = (not summary_required) or summaries_indexed
     required_neo4j_done = (not neo4j_required) or neo4j_done

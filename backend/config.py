@@ -199,6 +199,25 @@ class Settings(BaseSettings):
         le=16,
         description="Process-local cap for concurrent parse/chunk phases.",
     )
+    INGEST_BLOCK_NEAR_DUPLICATES: bool = Field(
+        default=True,
+        description=(
+            "Skip ingesting a document that is a near-duplicate of one already "
+            "in the same corpus (>= INGEST_NEAR_DUPLICATE_THRESHOLD lexical "
+            "overlap). Stops the same book/file ingested in two formats (PDF + "
+            "MD) from doubling a corpus's weight on those concepts."
+        ),
+    )
+    INGEST_NEAR_DUPLICATE_THRESHOLD: float = Field(
+        default=0.10,
+        ge=0.02,
+        le=1.0,
+        description=(
+            "Shingle (5-gram) Jaccard threshold for near-duplicate blocking. On "
+            "real data a same-book PDF-vs-MD pair scores ~0.32 while different "
+            "books score ~0.003, so 0.10 separates them with wide margin."
+        ),
+    )
     INGEST_MAX_MODEL_PHASE_DOCS: int = Field(
         default=1,
         ge=1,

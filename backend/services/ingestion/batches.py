@@ -1007,15 +1007,21 @@ async def _process_local_item(
             on_doc_id=_on_doc_id,
             on_phase=_on_phase,
         )
-        status = ITEM_DONE if result.status == "done" else ITEM_FAILED
+        if result.status == "done":
+            status, item_phase, failure_stage = ITEM_DONE, "complete", None
+        elif result.status == "skipped_duplicate":
+            # Deliberate skip (near-duplicate) — NOT a failure; don't retry.
+            status, item_phase, failure_stage = ITEM_SKIPPED, "skipped", None
+        else:
+            status, item_phase, failure_stage = ITEM_FAILED, "failed", "worker_result_failed"
         await _set_item_phase(
             db,
             item_id,
-            "complete" if status == ITEM_DONE else "failed",
+            item_phase,
             status=status,
             doc_id=result.doc_id,
             error=result.error,
-            failure_stage=None if status == ITEM_DONE else "worker_result_failed",
+            failure_stage=failure_stage,
             completed=True,
         )
     except Exception as exc:
