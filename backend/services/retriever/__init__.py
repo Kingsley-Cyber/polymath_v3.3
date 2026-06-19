@@ -454,7 +454,9 @@ class RetrieverOrchestrator:
                 return []
 
             entity_names: list[str] = []
+            entity_ids: list[str] = []
             seen_entities: set[str] = set()
+            seen_ids: set[str] = set()
             for cid in corpus_ids[:3]:
                 try:
                     rows = await extract_query_entities(
@@ -474,12 +476,16 @@ class RetrieverOrchestrator:
                     continue
                 for row in rows:
                     name = str(row.get("display_name") or "").strip()
+                    eid = str(row.get("entity_id") or "").strip()
                     key = name.lower()
                     if name and key not in seen_entities:
                         entity_names.append(name)
                         seen_entities.add(key)
+                    if eid and eid not in seen_ids:
+                        entity_ids.append(eid)
+                        seen_ids.add(eid)
 
-            if not entity_names:
+            if not entity_names and not entity_ids:
                 return []
 
             limit = max(0, min(int(fact_seed_limit or 12), 50))
@@ -488,13 +494,15 @@ class RetrieverOrchestrator:
 
             facts = await fact_retrieval.retrieve_facts_for_entities(
                 entity_names=entity_names[:limit],
+                entity_ids=entity_ids[:limit],
                 corpus_ids=corpus_ids,
                 fact_types=None,
                 limit=limit,
             )
             logger.info(
-                "Graph fact seeding: entities=%d facts=%d",
+                "Graph fact seeding: entities=%d ids=%d facts=%d",
                 len(entity_names),
+                len(entity_ids),
                 len(facts),
             )
             return facts
