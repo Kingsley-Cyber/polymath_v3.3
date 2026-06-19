@@ -488,7 +488,7 @@ class RetrieverOrchestrator:
             if not entity_names and not entity_ids:
                 return []
 
-            limit = max(0, min(int(fact_seed_limit or 12), 50))
+            limit = max(0, min(int(fact_seed_limit or settings.GRAPH_FACT_SEED_LIMIT), 50))
             if limit <= 0:
                 return []
 

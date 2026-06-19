@@ -69,6 +69,19 @@ class Settings(BaseSettings):
             "instead of blocking the chat turn."
         ),
     )
+    GRAPH_FACT_SEED_LIMIT: int = Field(
+        default=12,
+        ge=0,
+        le=50,
+        description=(
+            "SINGLE source for the code default number of graph facts to seed per "
+            "query. The per-user value lives in RetrievalSettings.graph_fact_seeds "
+            "(the 'Fact seeds' slider) and overrides this; a per-request override "
+            "trumps both. Used as the seeder's last-resort fallback so the default "
+            "is defined in exactly one place. Now that fact lookup is indexed "
+            "(entity_id) and no longer times out, this can be raised safely."
+        ),
+    )
 
     # === LLM GATEWAY ===
     LITELLM_URL: str = Field(

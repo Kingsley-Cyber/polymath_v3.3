@@ -5821,6 +5821,15 @@ class ChatOrchestrator:
                 extras["source_cap"] = getattr(
                     saved_retrieval_settings, "source_cap", _CHAT_COVERAGE_SOURCE_CAP
                 )
+                # Fact seeding has ONE user-facing knob — graph_fact_seeds (the
+                # "Fact seeds" slider; graph-tier scoped, since fact seeding only
+                # runs at qdrant_mongo_graph). Source it here for EVERY profile so
+                # the saved value always applies (a per-request override still
+                # wins). The legacy generic `fact_seed_limit` is just a synced
+                # alias (the settings panel mirrors it) kept for back-compat.
+                extras["fact_seed_limit"] = getattr(
+                    saved_retrieval_settings, "graph_fact_seeds", None
+                )
             except Exception as exc:
                 logger.warning(
                     "Retrieval settings load failed for %s (%s) — "
@@ -5847,7 +5856,7 @@ class ChatOrchestrator:
                         "neo4j_expansion_cap": rs.neo4j_expansion_cap,
                         "max_corpora_per_query": rs.max_corpora_per_query,
                         "final_top_k": rs.final_top_k,
-                        "fact_seed_limit": getattr(rs, "fact_seed_limit", 12),
+                        "fact_seed_limit": getattr(rs, "graph_fact_seeds", None),
                         "source_cap": getattr(
                             rs, "source_cap", _CHAT_COVERAGE_SOURCE_CAP
                         ),
