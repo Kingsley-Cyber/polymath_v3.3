@@ -4318,14 +4318,7 @@ class ChatOrchestrator:
         # here. When facts already answer the query, decoration is redundant,
         # so skip the extra traversal.
         decoration: list = []
-        if not graph_context_enabled:
-            decoration = []
-        elif len(facts) >= 3:
-            logger.info(
-                "Graph decoration skipped — %d facts answered the query (Pt 10d.1 gate)",
-                len(facts),
-            )
-        else:
+        if graph_context_enabled:
             try:
                 from services.retriever.graph_decoration import (
                     graph_decorator as _graph_decorator,
@@ -4343,6 +4336,13 @@ class ChatOrchestrator:
                     "db",
                     None,
                 )
+                # GERG: ALWAYS decorate on the graph tier. The old `facts>=3`
+                # skip suppressed typed-edge evidence in exactly the regime
+                # where graph seeding is strongest (facts=12 on this corpus).
+                # The edges are QUERY-RANKED (query=...) so only query-relevant
+                # typed relations survive — un-gating cannot flood the prompt
+                # with confidence-DESC catalog noise, and on a query with no
+                # matching typed structure the decoration is correctly empty.
                 decoration = await _graph_decorator.decorate_winners(
                     winning_chunks=sources,
                     corpus_ids=request.corpus_ids,
@@ -4350,6 +4350,7 @@ class ChatOrchestrator:
                     neighbor_limit=8,
                     chunks_per_neighbor=3,
                     db=_db_for_decoration,
+                    query=request.message,
                 )
             except Exception as exc:
                 logger.warning("Graph decoration skipped: %s", exc)

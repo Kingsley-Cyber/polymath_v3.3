@@ -55,6 +55,104 @@ GRAPH_REASONING_MODES: frozenset[str] = frozenset(
 )
 
 
+# ── GERG: query-relevance edge ranking ────────────────────────────────────
+# Generic domain tokens that must NOT, on their own, count as a query-concept
+# hit — an edge needs a real subject match (e.g. 'nlp'), not bare
+# 'model'/'fine'/'tuning'. Without this guard, ranking edges by raw confidence
+# surfaces catalog noise like 'OpenAI--works_for-->Sam Altman' on an NLP query.
+_GENERIC_QUERY_CONCEPTS: frozenset[str] = frozenset(
+    {
+        "model", "models", "modeling", "modelling", "system", "systems",
+        "method", "methods", "approach", "approaches", "technique",
+        "techniques", "data", "dataset", "datasets", "process", "processes",
+        "framework", "frameworks", "tool", "tools", "task", "tasks", "fine",
+        "tuning", "tune", "tuned", "assist", "assists", "use", "used", "using",
+        "uses", "help", "helps", "work", "works", "thing", "things", "way",
+        "ways", "type", "types", "kind", "kinds", "value", "values", "result",
+        "results",
+    }
+)
+# Predicates that are inherently definitional/explanatory — such an edge earns
+# a relevance point even without a subject-token match, so 'NLP uses X'-style
+# relations survive even when the partner entity is a generic token.
+_DEFINITIONAL_PREDICATES: frozenset[str] = frozenset(
+    {
+        "uses", "used_for", "part_of", "instance_of", "is_a", "type_of",
+        "defines", "implements", "depends_on", "produces", "enables",
+        "applies_to", "performs",
+    }
+)
+
+
+def _edge_query_relevance(
+    seed_entity: str,
+    neighbor_entity: str,
+    predicate: str,
+    groups,
+) -> int:
+    """Query-relevance score for one typed edge.
+
+    A SUBJECT MATCH IS REQUIRED: the edge's seed OR neighbor must alias-match a
+    NON-generic query concept (e.g. 'nlp'), scoring +1 per matched concept. A
+    definitional predicate adds +1 but ONLY on top of a subject match — it is
+    never a standalone qualifier (otherwise 'machine learning --uses--> JavaScript'
+    would pass on an NLP query purely because 'uses' is definitional). An edge
+    with no subject match scores 0 and is dropped. This is the floodgate guard
+    that replaces confidence-DESC catalog noise once the facts>=3 gate is gone;
+    when the graph has NO query-relevant edges, the decoration is correctly
+    EMPTY rather than padded with tangential relations.
+    """
+    from services.retriever.query_grounding import group_matches_text
+
+    subject_hits = 0
+    for group in groups:
+        if getattr(group, "key", "") in _GENERIC_QUERY_CONCEPTS:
+            continue
+        if group_matches_text(group, seed_entity) or group_matches_text(
+            group, neighbor_entity
+        ):
+            subject_hits += 1
+    if subject_hits == 0:
+        return 0
+    rel = subject_hits
+    if str(predicate or "").strip().lower() in _DEFINITIONAL_PREDICATES:
+        rel += 1
+    return rel
+
+
+def _query_rank_rows(rows: list[dict], query: str, top_k: int) -> list[dict]:
+    """Keep the top_k most query-relevant edge rows (GERG).
+
+    Ranks candidate edges by (query_relevance, edge_weight) and keeps only
+    edges clearing relevance >= 1. Returns [] when nothing is query-relevant —
+    so on a query with no matching typed structure the decoration is correctly
+    ABSENT rather than padded with confidence-ranked noise. If the query yields
+    no non-generic concept to anchor on, falls back to the edge_weight order
+    (avoids over-pruning to empty on a purely generic query).
+    """
+    from services.retriever.query_grounding import concept_groups
+
+    groups = concept_groups(query or "")
+    non_generic = [
+        g for g in groups
+        if getattr(g, "key", "") not in _GENERIC_QUERY_CONCEPTS
+    ]
+    if not non_generic:
+        return rows[:top_k]
+    scored: list[tuple[int, float, dict]] = []
+    for row in rows:
+        rel = _edge_query_relevance(
+            str(row.get("seed_entity") or ""),
+            str(row.get("neighbor_entity") or ""),
+            str(row.get("predicate") or ""),
+            groups,
+        )
+        if rel >= 1:
+            scored.append((rel, float(row.get("edge_weight") or 0.0), row))
+    scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    return [row for _, _, row in scored[:top_k]]
+
+
 def should_skip_inline_decoration(
     reasoning_mode: Optional[str],
     reasoning_blend: Optional[List[str]],
@@ -99,6 +197,7 @@ class GraphDecorator:
         neighbor_limit: int = 8,
         chunks_per_neighbor: int = 3,
         db=None,
+        query: Optional[str] = None,
     ) -> List[GraphDecoration]:
         """Attach edge-level graph context to chunks that already won retrieval.
 
@@ -127,6 +226,7 @@ class GraphDecorator:
             wanted_families=wanted_families,
             neighbor_limit=neighbor_limit,
             chunks_per_neighbor=chunks_per_neighbor,
+            query=query,
         )
         calls_decorations = await self._decorate_via_calls(
             winning_chunk_ids=winning_chunk_ids,
@@ -285,6 +385,7 @@ class GraphDecorator:
         wanted_families: Optional[List[str]],
         neighbor_limit: int,
         chunks_per_neighbor: int,
+        query: Optional[str] = None,
     ) -> List[GraphDecoration]:
         cypher = """
         // Pt 10d — graph decoration over winners (RELATES_TO walk)
@@ -318,7 +419,10 @@ class GraphDecorator:
              coalesce(neighbor.entity_id, '')  AS neighbor_entity_id,
              coalesce(r.predicate, '')        AS predicate,
              coalesce(r.relation_family, '')  AS relation_family,
-             coalesce(r.evidence_phrase, '')  AS edge_evidence,
+             // GERG: prefer the (reliably-populated) evidence_phrases[0] over
+             // the often-empty singular evidence_phrase, so the rendered edge
+             // carries real justification text the LLM can ground on.
+             coalesce(r.evidence_phrases[0], r.evidence_phrase, '') AS edge_evidence,
              coalesce(r.direction_repaired, false) AS direction_repaired,
              coalesce(r.predicate_refined,  false) AS predicate_refined,
              edge_weight,
@@ -342,17 +446,26 @@ class GraphDecorator:
         # ~200ms p95 is the threshold where users start to feel it.
         t0 = time.perf_counter()
         try:
+            # GERG: when query-ranking, fetch a wide candidate pool ($neighbor_limit
+            # is bound to a larger fetch size) and select the most query-relevant
+            # edges in Python — the Cypher only knows edge_weight. Without a query,
+            # keep the original edge_weight top-k (back-compat).
+            _fetch_limit = max(int(neighbor_limit), 200) if query else int(neighbor_limit)
             async with self._driver.session() as session:
                 result = await session.run(
                     cypher,
                     winning_chunk_ids=winning_chunk_ids,
                     corpus_ids=corpus_ids or [],
                     wanted_families=wanted_families or [],
-                    neighbor_limit=int(neighbor_limit),
+                    neighbor_limit=_fetch_limit,
                     chunks_per_neighbor=int(chunks_per_neighbor),
                 )
                 rows = [dict(r) async for r in result]
 
+            if query:
+                rows = _query_rank_rows(rows, query, int(neighbor_limit))
+            else:
+                rows = rows[: int(neighbor_limit)]
             decorations = self._rows_to_decorations(rows)
             elapsed_ms = (time.perf_counter() - t0) * 1000
             logger.info(
