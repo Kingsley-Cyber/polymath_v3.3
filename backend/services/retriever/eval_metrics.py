@@ -7,7 +7,7 @@ where speed/quality tradeoffs can be measured without slowing user queries.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import log2
 from statistics import mean
 from typing import Any, Iterable, Mapping, Sequence
@@ -21,6 +21,8 @@ class RetrievalEvalCase:
     relevance: Mapping[str, float]
     latency_ms: float | None = None
     answer_sufficient: bool | None = None
+    doc_ids: tuple[str, ...] = ()
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
 
 
 def _clean_id(value: Any) -> str:
@@ -151,20 +153,25 @@ def ndcg_at_k(
     return dcg_at_k(ranked_ids, rel, k=k) / ideal
 
 
-def route_metric_profile(route: str) -> dict[str, str]:
+def route_metric_profile(route: str) -> dict[str, Any]:
     """Document which metrics should steer each offline route eval."""
 
     normalized = route.strip().lower().replace("-", "_").replace(" ", "_")
     if normalized in {"fast", "fast_search", "vector", "vector_retrieval", "qdrant_only"}:
         return {
+            "optimize_for": ["MRR@5", "latency_p95_ms"],
             "first_hit": "MRR@5",
-            "candidate_pool": "MAP@20",
+            "latency": "latency_p95_ms",
+            "secondary_diagnostics": ["MAP@20", "NDCG@8"],
             "primary_goal": "fast broad recall",
         }
     if normalized in {"hybrid", "hybrid_search", "mongo_hybrid", "qdrant_mongo"}:
         return {
-            "candidate_pool": "MAP@20",
+            "optimize_for": ["MRR@5", "NDCG@8", "unique_doc_count", "near_duplicate_rate"],
+            "first_hit": "MRR@5",
             "final_context": "NDCG@8",
+            "source_diversity": "unique_doc_count",
+            "secondary_diagnostics": ["MAP@20", "latency_p95_ms"],
             "primary_goal": "precise multi-document text evidence",
         }
     if normalized in {
@@ -174,15 +181,28 @@ def route_metric_profile(route: str) -> dict[str, str]:
         "neo4j_graph",
     }:
         return {
-            "candidate_pool": "MAP@20",
+            "optimize_for": [
+                "NDCG@8",
+                "answer_sufficiency_rate",
+                "graph_advantage",
+                "atom_coverage",
+                "facts_used",
+                "relations_used",
+                "multi_doc_evidence_rate",
+                "near_duplicate_rate",
+                "latency_p95_ms",
+            ],
             "final_context": "NDCG@8",
             "answer": "answer_sufficiency",
+            "graph_advantage": "facts + relations + atoms + multi-doc support",
+            "secondary_diagnostics": ["MRR@5", "MAP@20"],
             "primary_goal": "structured graph evidence quality",
         }
     return {
+        "optimize_for": ["MRR@5", "NDCG@8", "latency_p95_ms"],
         "first_hit": "MRR@5",
-        "candidate_pool": "MAP@20",
         "final_context": "NDCG@8",
+        "secondary_diagnostics": ["MAP@20"],
         "primary_goal": "generic retrieval quality",
     }
 
@@ -203,6 +223,49 @@ def _percentile(values: Sequence[float], q: float) -> float | None:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * frac
 
 
+def _optional_number(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_number(*values: Any) -> float | None:
+    for value in values:
+        number = _optional_number(value)
+        if number is not None:
+            return number
+    return None
+
+
+def _unique_doc_count(case: RetrievalEvalCase) -> int | None:
+    explicit = _optional_number(case.diagnostics.get("unique_doc_count"))
+    if explicit is not None:
+        return int(explicit)
+    docs = {_clean_id(doc_id) for doc_id in case.doc_ids if _clean_id(doc_id)}
+    if docs:
+        return len(docs)
+    return None
+
+
+def _multi_doc_evidence(case: RetrievalEvalCase) -> bool | None:
+    explicit = case.diagnostics.get("multi_doc_evidence")
+    if explicit is not None:
+        return bool(explicit)
+    count = _unique_doc_count(case)
+    if count is None:
+        return None
+    return count >= 2
+
+
+def _case_diagnostic(case: RetrievalEvalCase, key: str) -> float | None:
+    return _optional_number(case.diagnostics.get(key))
+
+
 def evaluate_case(
     case: RetrievalEvalCase,
     *,
@@ -210,6 +273,8 @@ def evaluate_case(
     map_k: int = 20,
     ndcg_k: int = 8,
 ) -> dict[str, Any]:
+    unique_docs = _unique_doc_count(case)
+    multi_doc = _multi_doc_evidence(case)
     return {
         "query": case.query,
         "route": case.route,
@@ -218,6 +283,13 @@ def evaluate_case(
         f"NDCG@{ndcg_k}": ndcg_at_k(case.ranked_ids, case.relevance, k=ndcg_k),
         "latency_ms": case.latency_ms,
         "answer_sufficient": case.answer_sufficient,
+        "unique_doc_count": unique_docs,
+        "multi_doc_evidence": multi_doc,
+        "atom_coverage": _case_diagnostic(case, "atom_coverage"),
+        "facts_used": _case_diagnostic(case, "facts_used"),
+        "relations_used": _case_diagnostic(case, "relations_used"),
+        "graph_advantage": _case_diagnostic(case, "graph_advantage"),
+        "near_duplicate_rate": _case_diagnostic(case, "near_duplicate_rate"),
         "retrieved": len(_dedupe_ranked_ids(case.ranked_ids)),
         "known_relevant": sum(1 for grade in _coerce_relevance(case.relevance).values() if grade > 0),
     }
@@ -239,10 +311,17 @@ def summarize_route_eval(
     if not rows:
         return {
             "query_count": 0,
-            "MRR@5": 0.0,
-            "MAP@20": 0.0,
-            "NDCG@8": 0.0,
+            f"MRR@{mrr_k}": 0.0,
+            f"MAP@{map_k}": 0.0,
+            f"NDCG@{ndcg_k}": 0.0,
             "answer_sufficiency_rate": None,
+            "unique_doc_count_avg": None,
+            "multi_doc_evidence_rate": None,
+            "atom_coverage_avg": None,
+            "facts_used_avg": None,
+            "relations_used_avg": None,
+            "graph_advantage_avg": None,
+            "near_duplicate_rate_avg": None,
             "latency_p50_ms": None,
             "latency_p95_ms": None,
             "cases": [],
@@ -259,6 +338,16 @@ def summarize_route_eval(
         for row in rows
         if row.get("answer_sufficient") is not None
     ]
+    multi_doc_flags = [
+        bool(row["multi_doc_evidence"])
+        for row in rows
+        if row.get("multi_doc_evidence") is not None
+    ]
+
+    def average_present(key: str) -> float | None:
+        values = [float(row[key]) for row in rows if row.get(key) is not None]
+        return mean(values) if values else None
+
     return {
         "query_count": len(rows),
         **{name: mean(float(row[name]) for row in rows) for name in metric_names},
@@ -267,6 +356,17 @@ def summarize_route_eval(
             if answer_flags
             else None
         ),
+        "unique_doc_count_avg": average_present("unique_doc_count"),
+        "multi_doc_evidence_rate": (
+            mean(1.0 if flag else 0.0 for flag in multi_doc_flags)
+            if multi_doc_flags
+            else None
+        ),
+        "atom_coverage_avg": average_present("atom_coverage"),
+        "facts_used_avg": average_present("facts_used"),
+        "relations_used_avg": average_present("relations_used"),
+        "graph_advantage_avg": average_present("graph_advantage"),
+        "near_duplicate_rate_avg": average_present("near_duplicate_rate"),
         "latency_p50_ms": _percentile(latencies, 0.50),
         "latency_p95_ms": _percentile(latencies, 0.95),
         "cases": rows,
@@ -280,12 +380,58 @@ def case_from_mapping(row: Mapping[str, Any]) -> RetrievalEvalCase:
         or row.get("chunk_ids")
         or []
     )
-    if not ranked and isinstance(row.get("candidates"), Sequence):
+    candidates = row.get("candidates") if isinstance(row.get("candidates"), Sequence) else []
+    if not ranked and candidates:
         ranked = [
             item.get("chunk_id") or item.get("id")
-            for item in row["candidates"]
+            for item in candidates
             if isinstance(item, Mapping)
         ]
+    doc_ids = row.get("doc_ids") or row.get("final_doc_ids") or []
+    if not doc_ids and candidates:
+        doc_ids = [
+            item.get("doc_id") or item.get("document_id")
+            for item in candidates
+            if isinstance(item, Mapping)
+        ]
+    evidence_delta = row.get("evidence_delta") if isinstance(row.get("evidence_delta"), Mapping) else {}
+    graph_advantage = row.get("graph_advantage") if isinstance(row.get("graph_advantage"), Mapping) else {}
+    answerability = row.get("answerability") if isinstance(row.get("answerability"), Mapping) else {}
+    diagnostics = {
+        "unique_doc_count": _first_number(
+            row.get("unique_doc_count"),
+            row.get("final_docs"),
+            evidence_delta.get("final_docs"),
+        ),
+        "atom_coverage": _first_number(
+            row.get("atom_coverage"),
+            row.get("answer_atom_coverage"),
+            answerability.get("atom_coverage"),
+        ),
+        "facts_used": _first_number(
+            row.get("facts_used"),
+            graph_advantage.get("facts_used"),
+            evidence_delta.get("neo4j_facts"),
+        ),
+        "relations_used": _first_number(
+            row.get("relations_used"),
+            graph_advantage.get("relations_used"),
+            evidence_delta.get("neo4j_relations"),
+        ),
+        "graph_advantage": _first_number(
+            row.get("graph_advantage_score"),
+            graph_advantage.get("score"),
+            graph_advantage.get("graph_advantage"),
+        ),
+        "near_duplicate_rate": _first_number(
+            row.get("near_duplicate_rate"),
+            row.get("near_duplicates"),
+            evidence_delta.get("near_duplicate_rate"),
+        ),
+    }
+    if row.get("multi_doc_evidence") is not None:
+        diagnostics["multi_doc_evidence"] = bool(row.get("multi_doc_evidence"))
+    diagnostics = {key: value for key, value in diagnostics.items() if value is not None}
     return RetrievalEvalCase(
         query=str(row.get("query") or ""),
         route=str(row.get("route") or row.get("retrieval_tier") or ""),
@@ -309,4 +455,6 @@ def case_from_mapping(row: Mapping[str, Any]) -> RetrievalEvalCase:
                 else None
             )
         ),
+        doc_ids=tuple(_dedupe_ranked_ids(doc_ids)),
+        diagnostics=diagnostics,
     )

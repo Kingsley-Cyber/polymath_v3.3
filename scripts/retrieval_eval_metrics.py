@@ -11,7 +11,12 @@ Example row:
   "ranked_chunk_ids": ["chunk_a", "chunk_b", "chunk_c"],
   "relevance": {"chunk_a": 3, "chunk_b": 1},
   "latency_ms": 7200,
-  "answer_sufficient": true
+  "answer_sufficient": true,
+  "atom_coverage": 0.9,
+  "facts_used": 12,
+  "relations_used": 19,
+  "graph_advantage_score": 0.86,
+  "doc_ids": ["doc_1", "doc_2", "doc_3"]
 }
 """
 
@@ -78,10 +83,25 @@ def main() -> int:
 
     output = {
         "metric_contract": {
-            "MRR": "first relevant result appears early",
-            "MAP": "many relevant chunks retrieved early",
-            "NDCG": "graded final evidence-pack ranking quality",
+            "MRR@5": "first good hit; most important for Fast Search",
+            "MAP@20": "offline candidate-recall diagnostic; not the Graph headline metric",
+            "NDCG@8": "graded final evidence-pack quality; most important for Graph Augmentation",
             "answer_sufficiency": "selected evidence can answer the question",
+            "route_rule": {
+                "Fast Search": ["MRR@5", "latency_p95_ms"],
+                "Hybrid Search": ["MRR@5", "NDCG@8", "unique_doc_count", "near_duplicate_rate"],
+                "Graph Augmentation": [
+                    "NDCG@8",
+                    "answer_sufficiency_rate",
+                    "graph_advantage",
+                    "atom_coverage",
+                    "facts_used",
+                    "relations_used",
+                    "multi_doc_evidence_rate",
+                    "near_duplicate_rate",
+                    "latency_p95_ms",
+                ],
+            },
             "note": "Offline eval only; these metrics are not computed in the live query path.",
         },
         "routes": {},

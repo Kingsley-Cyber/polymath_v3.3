@@ -50,11 +50,30 @@ def test_duplicates_do_not_get_extra_metric_credit():
 
 
 def test_route_profiles_match_tier_goals():
-    assert route_metric_profile("Fast Search")["first_hit"] == "MRR@5"
-    assert route_metric_profile("Hybrid Search")["candidate_pool"] == "MAP@20"
+    fast = route_metric_profile("Fast Search")
+    assert fast["optimize_for"] == ["MRR@5", "latency_p95_ms"]
+
+    hybrid = route_metric_profile("Hybrid Search")
+    assert hybrid["optimize_for"] == [
+        "MRR@5",
+        "NDCG@8",
+        "unique_doc_count",
+        "near_duplicate_rate",
+    ]
+
     graph = route_metric_profile("Graph Augmentation")
-    assert graph["final_context"] == "NDCG@8"
-    assert graph["answer"] == "answer_sufficiency"
+    assert graph["optimize_for"] == [
+        "NDCG@8",
+        "answer_sufficiency_rate",
+        "graph_advantage",
+        "atom_coverage",
+        "facts_used",
+        "relations_used",
+        "multi_doc_evidence_rate",
+        "near_duplicate_rate",
+        "latency_p95_ms",
+    ]
+    assert graph["secondary_diagnostics"] == ["MRR@5", "MAP@20"]
 
 
 def test_summarize_route_eval_aggregates_quality_latency_and_answerability():
@@ -66,6 +85,14 @@ def test_summarize_route_eval_aggregates_quality_latency_and_answerability():
             relevance={"a": 3, "b": 2, "c": 1},
             latency_ms=7000,
             answer_sufficient=True,
+            doc_ids=("doc1", "doc2", "doc3"),
+            diagnostics={
+                "atom_coverage": 1.0,
+                "facts_used": 12,
+                "relations_used": 7,
+                "graph_advantage": 0.9,
+                "near_duplicate_rate": 0.0,
+            },
         ),
         RetrievalEvalCase(
             query="q2",
@@ -74,6 +101,14 @@ def test_summarize_route_eval_aggregates_quality_latency_and_answerability():
             relevance={"x": 3, "y": 2},
             latency_ms=9000,
             answer_sufficient=False,
+            doc_ids=("doc1",),
+            diagnostics={
+                "atom_coverage": 0.5,
+                "facts_used": 2,
+                "relations_used": 1,
+                "graph_advantage": 0.3,
+                "near_duplicate_rate": 0.2,
+            },
         ),
     ]
 
@@ -84,6 +119,13 @@ def test_summarize_route_eval_aggregates_quality_latency_and_answerability():
     assert 0.0 < summary["MAP@20"] <= 1.0
     assert 0.0 < summary["NDCG@8"] <= 1.0
     assert summary["answer_sufficiency_rate"] == 0.5
+    assert summary["unique_doc_count_avg"] == 2.0
+    assert summary["multi_doc_evidence_rate"] == 0.5
+    assert summary["atom_coverage_avg"] == 0.75
+    assert summary["facts_used_avg"] == 7
+    assert summary["relations_used_avg"] == 4
+    assert summary["graph_advantage_avg"] == 0.6
+    assert summary["near_duplicate_rate_avg"] == 0.1
     assert summary["latency_p50_ms"] == 8000
     assert summary["latency_p95_ms"] == 8900
 
@@ -93,10 +135,20 @@ def test_case_from_mapping_accepts_common_eval_shapes():
         {
             "query": "what is python",
             "retrieval_tier": "qdrant_mongo",
-            "candidates": [{"chunk_id": "c1"}, {"chunk_id": "c2"}],
+            "candidates": [
+                {"chunk_id": "c1", "doc_id": "doc-a"},
+                {"chunk_id": "c2", "doc_id": "doc-b"},
+            ],
             "qrels": ["c2"],
             "latency_s": 1.5,
             "answerability_pass": True,
+            "answerability": {"atom_coverage": 0.8},
+            "evidence_delta": {
+                "neo4j_facts": 4,
+                "neo4j_relations": 3,
+            },
+            "graph_advantage": {"score": 0.7},
+            "near_duplicate_rate": 0.0,
         }
     )
 
@@ -105,3 +157,9 @@ def test_case_from_mapping_accepts_common_eval_shapes():
     assert case.relevance["c2"] == 1.0
     assert case.latency_ms == 1500
     assert case.answer_sufficient is True
+    assert case.doc_ids == ("doc-a", "doc-b")
+    assert case.diagnostics["atom_coverage"] == 0.8
+    assert case.diagnostics["facts_used"] == 4
+    assert case.diagnostics["relations_used"] == 3
+    assert case.diagnostics["graph_advantage"] == 0.7
+    assert case.diagnostics["near_duplicate_rate"] == 0.0
