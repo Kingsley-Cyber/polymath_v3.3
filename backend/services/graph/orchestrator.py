@@ -7126,7 +7126,14 @@ async def _call_llm_synthesis(
         os.environ.get("GRAPH_SYNTHESIS_FALLBACK_MODEL", "deepseek/deepseek-chat")
         or ""
     ).strip()
-    if fallback_model and all((c.get("model") or "") != fallback_model for c in candidates):
+    retry_fallback_model = str(
+        os.environ.get("GRAPH_SYNTHESIS_RETRY_FALLBACK_MODEL", "false") or ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if (
+        fallback_model
+        and (not candidates or retry_fallback_model)
+        and all((c.get("model") or "") != fallback_model for c in candidates)
+    ):
         candidates.append(
             {
                 "model": fallback_model,
@@ -7321,8 +7328,9 @@ def _deterministic_prose_fallback(
 ) -> dict[str, Any]:
     """Render a prose fallback when the LLM is unreachable or empty.
 
-    We do NOT manufacture an essay; we plainly describe what the graph layer
-    surfaced so the user knows the prose isn't model-generated.
+    This is deterministic synthesis from already-loaded evidence. It should be
+    useful in the UI even when the prose model returns empty, but it must stay
+    transparent that no free-form model reasoning was used.
     """
 
     query = _text(packet.get("query") or "this query", 100)
@@ -7352,21 +7360,91 @@ def _deterministic_prose_fallback(
         b for b in (packet.get("bridges") or []) if isinstance(b, dict)
     ]
 
+    evidence_index = {id(item): idx for idx, item in enumerate(chunks, start=1)}
+    local_chunks = [
+        item for item in chunks if str(item.get("source_tier") or "") != "web_search"
+    ]
+    web_chunks = [
+        item for item in chunks if str(item.get("source_tier") or "") == "web_search"
+    ]
+    mode = str(packet.get("synthesis_mode") or "research").strip().lower()
+
+    def evidence_line(item: dict[str, Any], *, limit: int = 260) -> str:
+        idx = evidence_index.get(id(item), 1)
+        doc_id = str(item.get("doc_id") or "")
+        chunk_id = str(item.get("chunk_id") or "")
+        label = _clean_prompt_source_label(
+            _source_label_from_row(item, doc_id=doc_id, chunk_id=chunk_id),
+            source=item.get("source") if isinstance(item.get("source"), dict) else None,
+        )
+        snippet = _text(item.get("text") or item.get("summary") or "", limit)
+        if snippet:
+            return f"- [{idx}] {label}: {snippet}"
+        return f"- [{idx}] {label}"
+
+    concepts = [
+        str(item.get("canonical_name") or item.get("name") or item.get("label") or "").strip()
+        for item in (packet.get("entities") or [])
+        if isinstance(item, dict)
+    ]
+    concepts = [name for name in concepts if name][:6]
+    concept_text = ", ".join(concepts) if concepts else query
+    mode_opening = {
+        "research": (
+            f"**Research read:** the graph packet centers on {concept_text}. "
+            "The safest thesis is the one supported by local corpus chunks first, "
+            "then checked against any live web evidence."
+        ),
+        "nuance": (
+            f"**Nuance read:** the packet links {concept_text}, but the relation "
+            "strength varies. Treat local facts as grounded claims, web snippets "
+            "as current context, and weak links as hypotheses."
+        ),
+        "ideation": (
+            f"**Ideation read:** use {concept_text} as the build surface. The best "
+            "ideas should reuse corpus-backed mechanisms and then test whether web "
+            "evidence sharpens or contradicts them."
+        ),
+        "gap": (
+            f"**Gap read:** the corpus has enough structure around {concept_text} "
+            "to propose missing or under-supported connections. Those gaps should "
+            "be treated as research questions until hydrated evidence closes them."
+        ),
+    }.get(mode, f"**Graph read:** the packet centers on {concept_text}.")
+
     blurb = {
-        "llm_request_failure": "The synthesis model could not be reached on this turn.",
+        "llm_request_failure": "The synthesis model could not be reached.",
         "llm_empty_response": "The synthesis model returned an empty response.",
         "llm_import_failure": "The synthesis model layer is not available.",
-    }.get(reason, "The synthesis model is unavailable; this is a deterministic structural read.")
+    }.get(reason, "The synthesis model is unavailable.")
 
-    paragraphs: list[str] = [f"_{blurb}_ Below is what the graph layer actually loaded — no model prose was generated for this turn."]
+    paragraphs: list[str] = [
+        f"_Deterministic fallback: {blurb} This answer is assembled from the loaded graph packet and citations._",
+        mode_opening,
+    ]
 
     if chunks:
         paragraphs.append(
-            f"The packet anchored **{len(chunks)} chunks** across "
-            f"{len({str(c.get('doc_id') or '') for c in chunks if c.get('doc_id')})} sources."
+            f"The packet anchored **{len(local_chunks)} local chunks**"
+            + (
+                f" plus **{len(web_chunks)} web chunks**"
+                if web_chunks
+                else ""
+            )
+            + f" across {len({str(c.get('doc_id') or '') for c in chunks if c.get('doc_id')})} sources."
         )
     else:
         paragraphs.append("No anchored evidence chunks were retrieved for this query.")
+
+    if local_chunks:
+        paragraphs.append(
+            "Corpus evidence:\n" + "\n".join(evidence_line(item) for item in local_chunks[:4])
+        )
+
+    if web_chunks:
+        paragraphs.append(
+            "Web grounding lane:\n" + "\n".join(evidence_line(item) for item in web_chunks[:3])
+        )
 
     if groups:
         paragraphs.append(
@@ -7419,9 +7497,20 @@ def _deterministic_prose_fallback(
             )
         paragraphs.append("Bridge candidates surfaced:\n" + "\n".join(lines))
 
-    paragraphs.append(
-        "Re-run the query with any cloud model selected to get the woven synthesis."
-    )
+    if local_chunks:
+        first_idx = evidence_index.get(id(local_chunks[0]), 1)
+        if web_chunks:
+            web_idx = evidence_index.get(id(web_chunks[0]), first_idx)
+            paragraphs.append(
+                f"Bottom line: answer from corpus evidence first [{first_idx}], "
+                f"use web evidence as external grounding [{web_idx}], and keep "
+                "weak graph links framed as hypotheses until another cited chunk supports them."
+            )
+        else:
+            paragraphs.append(
+                f"Bottom line: answer from the cited corpus evidence [{first_idx}] "
+                "and keep weak graph links framed as hypotheses until another chunk supports them."
+            )
 
     markdown = "\n\n".join(paragraphs)
     return {
