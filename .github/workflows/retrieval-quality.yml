@@ -1,0 +1,48 @@
+name: retrieval-quality-invariants
+
+# Device-agnostic guard: runs the PORTABLE retrieval-quality invariant tests on
+# every push / PR. These are pure-logic unit tests (synthetic data, NO live
+# Mongo/Qdrant/Neo4j/LLM, no seeded corpus), so they prove the four retrieval
+# fixes (per-doc cap + relative floor, sparse->[0,1] fusion normalization, GERG
+# edge query-ranking, doc-concentration telemetry helpers) on any machine that
+# has only the code. This is what guarantees "works on a fresh clone, on any
+# device" and blocks silent regressions — the live e2e harnesses
+# (tests/test_*_e2e.py) validate the same behaviors against a running stack and
+# are deliberately NOT run here (no stack in CI).
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  invariants:
+    name: Portable retrieval-quality invariants (no live stack)
+    runs-on: ubuntu-latest
+    env:
+      # Dummy values so config.get_settings() validates at import time. These
+      # are NOT secrets — the portable tests never connect to any service or
+      # read these; they only need the Settings model to instantiate.
+      LITELLM_MASTER_KEY: ci-dummy
+      AUTH_SECRET_KEY: ci-dummy
+      DEFAULT_ADMIN_PASSWORD: ci-dummy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run portable retrieval-quality invariants
+        working-directory: backend
+        run: |
+          python -m pytest \
+            tests/test_retrieval_quality_invariants.py \
+            tests/test_retrieval_ranking_policy.py \
+            -q
