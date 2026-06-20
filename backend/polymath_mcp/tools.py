@@ -238,7 +238,7 @@ async def polymath_search(
         top_k_summary: Summary-vector gather budget.
         rerank_top_n: Candidate pool cap before rerank.
         similarity_threshold: Optional score floor.
-        neo4j_expansion_cap: Graph Augmented expansion cap.
+        neo4j_expansion_cap: Graph Augmentation expansion cap.
         max_corpora_per_query: Corpus breadth cap for retrieval.
         final_top_k: Final result cap after rerank/diversity selection.
         fact_seed_limit: Graph fact seed budget.
@@ -379,7 +379,7 @@ async def polymath_chat_query(
         top_k_summary: Summary-vector gather budget.
         rerank_top_n: Candidate pool cap before rerank.
         similarity_threshold: Optional retrieval score floor.
-        neo4j_expansion_cap: Graph Augmented expansion cap.
+        neo4j_expansion_cap: Graph Augmentation expansion cap.
         max_corpora_per_query: Retrieval breadth cap.
         final_top_k: Final chunks sent to the LLM.
         fact_seed_limit: Graph fact seed budget.

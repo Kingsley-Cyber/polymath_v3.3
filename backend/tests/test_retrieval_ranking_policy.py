@@ -19,6 +19,7 @@ def _chunk(
     summary: str | None = None,
     source_tier: str = "tier_a",
     provenance: list[dict] | None = None,
+    metadata: dict | None = None,
 ) -> SourceChunk:
     return SourceChunk(
         chunk_id=chunk_id,
@@ -30,6 +31,7 @@ def _chunk(
         score=score,
         source_tier=source_tier,
         provenance=provenance,
+        metadata=metadata or {},
     )
 
 
@@ -59,24 +61,25 @@ def test_broad_weighting_lifts_summary_over_near_child():
     assert weighted[0].chunk_id == "parent_summary"
 
 
-def test_diversity_adds_max_two_strong_distinct_sources_for_broad_hybrid():
+def test_mmr_keeps_final_k_and_prefers_distinct_sources_for_broad_hybrid():
     intent = infer_retrieval_intent("summarize themes across documents")
     ranked = [
         _chunk("c1", score=1.00, parent_id="p1", doc_id="d1"),
-        _chunk("c2", score=0.96, parent_id="p2", doc_id="d2"),
-        _chunk("c3", score=0.93, parent_id="p3", doc_id="d3"),
-        _chunk("c4", score=0.91, parent_id="p4", doc_id="d4"),
+        _chunk("c2", score=0.99, parent_id="p2", doc_id="d1"),
+        _chunk("c3", score=0.97, parent_id="p3", doc_id="d2"),
+        _chunk("c4", score=0.95, parent_id="p4", doc_id="d3"),
     ]
 
     result = select_with_diversity(
         ranked,
-        final_top_k=2,
+        final_top_k=3,
         intent=intent,
         tier=RetrievalTier.qdrant_mongo,
     )
 
-    assert result.added == 2
-    assert [c.chunk_id for c in result.candidates] == ["c1", "c2", "c3", "c4"]
+    assert len(result.candidates) == 3
+    assert result.added == 1
+    assert [c.chunk_id for c in result.candidates] == ["c1", "c3", "c4"]
 
 
 def test_diversity_skips_weak_or_duplicate_candidates():
@@ -97,6 +100,92 @@ def test_diversity_skips_weak_or_duplicate_candidates():
 
     assert result.added == 0
     assert [c.chunk_id for c in result.candidates] == ["c1", "c2"]
+
+
+def test_diversity_floor_rejects_low_relevance_different_doc():
+    intent = infer_retrieval_intent("what is NLP")
+    ranked = [
+        _chunk(
+            "definition",
+            score=1.00,
+            doc_id="d1",
+            text="NLP is natural language processing.",
+            metadata={"query_grounding": {"matched": ["nlp"]}},
+        ),
+        _chunk(
+            "same-doc-detail",
+            score=0.98,
+            doc_id="d1",
+            text="NLP systems process human language and text.",
+            metadata={"query_grounding": {"matched": ["nlp"]}},
+        ),
+        _chunk(
+            "weak-other-doc",
+            score=0.50,
+            doc_id="d2",
+            text="A language mention appears in a loosely related note.",
+        ),
+    ]
+
+    result = select_with_diversity(
+        ranked,
+        final_top_k=2,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+        query="what is NLP",
+    )
+
+    assert [c.chunk_id for c in result.candidates] == ["definition", "same-doc-detail"]
+    assert "weak-other-doc" not in [c.chunk_id for c in result.candidates]
+
+
+def test_sufficiency_repair_replaces_diverse_chunk_with_missing_atom():
+    intent = infer_retrieval_intent(
+        "what is nlp and how does it associate with data augmentation"
+    )
+    ranked = [
+        _chunk(
+            "definition",
+            score=1.00,
+            doc_id="d1",
+            text="NLP is natural language processing for human language.",
+            metadata={"query_grounding": {"matched": ["nlp"]}},
+        ),
+        _chunk(
+            "data-only",
+            score=0.99,
+            doc_id="d2",
+            text="Data augmentation creates additional training data.",
+            metadata={"query_grounding": {"matched": ["data", "augmentation"]}},
+        ),
+        _chunk(
+            "relationship",
+            score=0.86,
+            doc_id="d1",
+            text=(
+                "NLP is associated with data augmentation when augmented text "
+                "examples improve language model training."
+            ),
+            metadata={
+                "query_grounding": {"matched": ["nlp", "data", "augmentation"]}
+            },
+        ),
+    ]
+
+    result = select_with_diversity(
+        ranked,
+        final_top_k=2,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+        query="what is nlp and how does it associate with data augmentation",
+    )
+
+    ids = [c.chunk_id for c in result.candidates]
+    assert ids == ["definition", "relationship"]
+    repaired = result.candidates[1].metadata["diversity_rerank"]
+    assert repaired["selected_by"] == "sufficiency_repair"
+    assert result.diagnostics["sufficiency"]["answerable"] is True
+    assert result.diagnostics["repair_rounds"] == 1
 
 
 def test_diversity_includes_high_confidence_document_anchor_candidate():
@@ -127,15 +216,15 @@ def test_diversity_includes_high_confidence_document_anchor_candidate():
     )
 
     assert result.added == 1
-    assert [c.chunk_id for c in result.candidates] == ["c1", "c2", "anchor"]
+    assert [c.chunk_id for c in result.candidates] == ["c1", "anchor"]
 
 
-def test_vector_base_does_not_expand_final_sources_for_diversity():
+def test_fast_search_uses_mmr_without_expanding_final_sources():
     intent = infer_retrieval_intent("summarize themes across documents")
     ranked = [
         _chunk("c1", score=1.00, parent_id="p1", doc_id="d1"),
-        _chunk("c2", score=0.96, parent_id="p2", doc_id="d2"),
-        _chunk("c3", score=0.93, parent_id="p3", doc_id="d3"),
+        _chunk("c2", score=0.99, parent_id="p2", doc_id="d1"),
+        _chunk("c3", score=0.97, parent_id="p3", doc_id="d2"),
     ]
 
     result = select_with_diversity(
@@ -145,8 +234,8 @@ def test_vector_base_does_not_expand_final_sources_for_diversity():
         tier=RetrievalTier.qdrant_only,
     )
 
-    assert result.added == 0
-    assert [c.chunk_id for c in result.candidates] == ["c1", "c2"]
+    assert result.added == 1
+    assert [c.chunk_id for c in result.candidates] == ["c1", "c3"]
 
 
 def test_probability_rerank_tail_trim_drops_near_zero_fillers():

@@ -34,7 +34,7 @@ def test_speed_profiles_map_to_lexical_budget():
 
 def test_retrieval_store_contracts_make_tiers_observable():
     vector = _retrieval_store_contract(RetrievalTier.qdrant_only)
-    assert vector["label"] == "Vector Base"
+    assert vector["label"] == "Fast Search"
     assert vector["qdrant_vectors"] is True
     assert vector["qdrant_summaries"] is True
     assert vector["mongo_lexical"] is False
@@ -42,14 +42,14 @@ def test_retrieval_store_contracts_make_tiers_observable():
     assert vector["neo4j_expansion"] is False
 
     hybrid = _retrieval_store_contract(RetrievalTier.qdrant_mongo)
-    assert hybrid["label"] == "Hybrid"
+    assert hybrid["label"] == "Hybrid Search"
     assert hybrid["qdrant_vectors"] is True
     assert hybrid["mongo_lexical"] is True
     assert hybrid["mongo_hydration"] is True
     assert hybrid["neo4j_facts"] is False
 
     graph = _retrieval_store_contract(RetrievalTier.qdrant_mongo_graph)
-    assert graph["label"] == "Graph Augmented"
+    assert graph["label"] == "Graph Augmentation"
     assert graph["qdrant_vectors"] is True
     assert graph["mongo_lexical"] is True
     assert graph["neo4j_facts"] is True
@@ -143,19 +143,19 @@ def test_fact_seed_chunks_point_back_to_supporting_chunks():
     facts = [
         SourceFact(
             fact_id="f1",
-            subject="Graph Augmented",
+            subject="Graph Augmentation",
             fact_type="property",
             property_name="retrieval_order",
             value="fact-first",
             confidence=0.9,
-            evidence_phrase="Graph Augmented starts from facts.",
+            evidence_phrase="Graph Augmentation starts from facts.",
             chunk_id="chunk-1",
             doc_id="doc-1",
             corpus_id="corpus-1",
         ),
         SourceFact(
             fact_id="f2",
-            subject="Graph Augmented",
+            subject="Graph Augmentation",
             fact_type="property",
             property_name="duplicate",
             value="same chunk",

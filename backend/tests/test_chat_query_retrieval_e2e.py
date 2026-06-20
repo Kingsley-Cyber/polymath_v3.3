@@ -173,13 +173,13 @@ async def test_chat_query_e2e_vector_base_skips_hydrated_recall_lanes(monkeypatc
         return [_chunk("child-vector", score=0.80)]
 
     async def forbidden_lexical(*_args, **_kwargs):
-        raise AssertionError("Vector Base must not execute lexical recall")
+        raise AssertionError("Fast Search must not execute lexical recall")
 
     async def forbidden_document_anchor(*_args, **_kwargs):
-        raise AssertionError("Vector Base must not execute document-anchor recall")
+        raise AssertionError("Fast Search must not execute document-anchor recall")
 
     async def forbidden_hydrate(*_args, **_kwargs):
-        raise AssertionError("Vector Base must not hydrate Mongo parents")
+        raise AssertionError("Fast Search must not hydrate Mongo parents")
 
     monkeypatch.setattr(retriever_module.funnel_a, "search", fake_a)
     monkeypatch.setattr(retriever_module.funnel_b, "search", fake_b)

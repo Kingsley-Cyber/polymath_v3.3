@@ -121,7 +121,7 @@ def _build_mcp_server():
             "CAPABILITIES:\n"
             "  • SEARCH      polymath_search, polymath_cross_corpus_search — "
             "retrieve evidence chunks across corpora with the same vector, "
-            "hybrid, Graph Augmented, profile, rerank, and search-mode knobs "
+            "hybrid, Graph Augmentation, profile, rerank, and search-mode knobs "
             "as chat.\n"
             "  • SYNTHESIZE  polymath_chat_query — natural-language question, "
             "grounded answer using the live chat RAG path, including facet "

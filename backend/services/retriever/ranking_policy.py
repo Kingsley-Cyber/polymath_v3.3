@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from typing import Any
 
 from models.schemas import RetrievalTier, SourceChunk
 from services.retriever.intent_policy import QueryNeed, RetrievalIntent
@@ -30,12 +32,46 @@ _DISTINCT_DOC_BREADTH: dict[QueryNeed, int] = {
 _MAIN_FLOOR_RATIO: float = 0.25
 _MAIN_ABS_FLOOR: float = 0.10
 _MAIN_MIN_KEEP: int = 3
+_TOKEN_RE = re.compile(r"[a-z][a-z0-9_'\-]*", re.IGNORECASE)
+_TOKEN_STOPWORDS = frozenset(
+    {
+        "a", "about", "above", "after", "again", "against", "also", "an",
+        "and", "are", "as", "at", "because",
+        "before", "being", "between", "could", "does", "doing", "during",
+        "each", "from", "further", "have", "having", "here", "hers",
+        "itself", "just", "more", "most", "only", "other", "ours", "over",
+        "same", "should", "some", "such", "than", "that", "their", "there",
+        "these", "they", "this", "those", "through", "under", "until",
+        "very", "what", "when", "where", "which", "while", "with", "would",
+        "your",
+    }
+)
+_REQUIRED_CONCEPT_STOPWORDS = frozenset(
+    {
+        "associate",
+        "association",
+        "connect",
+        "connected",
+        "define",
+        "definition",
+        "actually",
+        "basically",
+        "explain",
+        "essentially",
+        "link",
+        "linked",
+        "relate",
+        "related",
+        "relationship",
+    }
+)
 
 
 @dataclass(frozen=True)
 class DiversityResult:
     candidates: list[SourceChunk]
     added: int
+    diagnostics: dict[str, Any] | None = None
 
 
 def _provenance_retrievers(chunk: SourceChunk) -> set[str]:
@@ -284,6 +320,709 @@ def _per_doc_cap_for(intent: RetrievalIntent, final_top_k: int) -> int:
     return max(1, -(-int(final_top_k) // breadth))
 
 
+@dataclass(frozen=True)
+class _MMRPolicy:
+    lambda_: float
+    relevance_floor: float
+    min_docs: int
+    target_docs: int
+    soft_doc_cap: int
+    hard_doc_cap: int
+    max_per_parent: int
+    near_duplicate_similarity: float
+    graph_reserve: int = 0
+    max_same_predicate: int = 999
+
+
+def _mmr_policy_for(
+    *,
+    tier: RetrievalTier,
+    intent: RetrievalIntent,
+    final_top_k: int,
+    multi_corpus: bool,
+) -> _MMRPolicy:
+    """Tier-aware MMR policy.
+
+    Fast Search fights vector-neighborhood collapse, Hybrid Search fights
+    document/section/text/atom collapse, and Graph Augmentation also fights
+    entity/fact/predicate/path collapse.
+    """
+    if intent.need == QueryNeed.SPECIFIC:
+        min_docs, target_docs = 1, 2
+        soft_doc_cap, hard_doc_cap = 2, 2
+        intent_lambda_boost = 0.08
+    elif intent.need == QueryNeed.BROAD:
+        min_docs, target_docs = 3, 4
+        soft_doc_cap, hard_doc_cap = 3, 4
+        intent_lambda_boost = 0.0
+    else:
+        min_docs, target_docs = 2, 3
+        soft_doc_cap, hard_doc_cap = 3, 4
+        intent_lambda_boost = 0.03
+
+    if multi_corpus:
+        min_docs = max(min_docs, min(3, final_top_k))
+        target_docs = max(target_docs, min(4, final_top_k))
+
+    if tier == RetrievalTier.qdrant_only:
+        base_lambda = 0.75
+        relevance_floor = 0.90
+        graph_reserve = 0
+        max_same_predicate = 999
+    elif tier == RetrievalTier.qdrant_mongo:
+        base_lambda = 0.65
+        relevance_floor = 0.85
+        graph_reserve = 0
+        max_same_predicate = 999
+    else:
+        base_lambda = 0.55
+        relevance_floor = 0.80
+        graph_reserve = 2 if intent.need == QueryNeed.BROAD else 1
+        max_same_predicate = 3
+
+    return _MMRPolicy(
+        lambda_=min(0.88, base_lambda + intent_lambda_boost),
+        relevance_floor=relevance_floor,
+        min_docs=min(min_docs, final_top_k),
+        target_docs=min(target_docs, final_top_k),
+        soft_doc_cap=soft_doc_cap,
+        hard_doc_cap=hard_doc_cap,
+        max_per_parent=2,
+        near_duplicate_similarity=0.88,
+        graph_reserve=graph_reserve,
+        max_same_predicate=max_same_predicate,
+    )
+
+
+def _chunk_text(chunk: SourceChunk) -> str:
+    return " ".join(
+        part
+        for part in [
+            chunk.text or "",
+            chunk.summary or "",
+            " / ".join(chunk.heading_path or []),
+            chunk.doc_name or "",
+        ]
+        if part
+    )
+
+
+def _token_set(text: str) -> set[str]:
+    out: set[str] = set()
+    for token in _TOKEN_RE.findall(text or ""):
+        low = token.lower().strip("-_'")
+        if low in _TOKEN_STOPWORDS:
+            continue
+        out.add(low)
+    return out
+
+
+def _jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / max(len(left | right), 1)
+
+
+def _metadata_list(metadata: dict[str, Any], *keys: str) -> list[str]:
+    values: list[str] = []
+    for key in keys:
+        raw = metadata.get(key)
+        if raw is None:
+            continue
+        if isinstance(raw, (list, tuple, set)):
+            values.extend(str(item) for item in raw if item is not None)
+        else:
+            values.append(str(raw))
+    return [value.strip() for value in values if value and value.strip()]
+
+
+def _candidate_retrievers(chunk: SourceChunk) -> set[str]:
+    retrievers = _provenance_retrievers(chunk)
+    source_tier = (chunk.source_tier or "").lower()
+    if "lexical" in source_tier:
+        retrievers.add("lexical")
+    if "document_anchor" in source_tier:
+        retrievers.add("document_anchor")
+    if "graph" in source_tier or "neo4j" in source_tier:
+        retrievers.add("neo4j_graph")
+    if "summary" in source_tier or chunk.summary:
+        retrievers.add("qdrant_summary")
+    if "vector" in source_tier or source_tier in {"child", "tier_a"}:
+        retrievers.add("qdrant_vector")
+    return retrievers or {source_tier or "unknown"}
+
+
+def _provenance_values(chunk: SourceChunk, *keys: str) -> set[str]:
+    values: set[str] = set()
+    for item in chunk.provenance or []:
+        for key in keys:
+            raw = item.get(key)
+            if raw is None:
+                continue
+            if isinstance(raw, (list, tuple, set)):
+                values.update(str(v).strip().lower() for v in raw if v)
+            else:
+                value = str(raw).strip().lower()
+                if value:
+                    values.add(value)
+    return values
+
+
+def _candidate_predicates(chunk: SourceChunk) -> set[str]:
+    metadata = chunk.metadata or {}
+    predicates = set(_metadata_list(metadata, "predicates", "predicate"))
+    predicates.update(_provenance_values(chunk, "predicate", "property_name"))
+    return {p.lower() for p in predicates if p}
+
+
+def _candidate_entities(chunk: SourceChunk) -> set[str]:
+    metadata = chunk.metadata or {}
+    entities = set(
+        _metadata_list(
+            metadata,
+            "entities",
+            "entity",
+            "matched_entities",
+            "related_entity",
+            "seed_entity",
+            "neighbor_entity",
+        )
+    )
+    entities.update(
+        _provenance_values(
+            chunk,
+            "entity",
+            "subject",
+            "surface_form",
+            "seed_entity",
+            "neighbor_entity",
+            "related_entity",
+        )
+    )
+    return {e.lower() for e in entities if e}
+
+
+def _candidate_fact_ids(chunk: SourceChunk) -> set[str]:
+    metadata = chunk.metadata or {}
+    facts = set(_metadata_list(metadata, "facts", "fact_ids", "fact_id"))
+    facts.update(_provenance_values(chunk, "fact_id"))
+    return {f.lower() for f in facts if f}
+
+
+def _candidate_atoms(chunk: SourceChunk) -> set[str]:
+    """Deterministic, lightweight evidence-atom tags for final selection."""
+    metadata = chunk.metadata or {}
+    text = _chunk_text(chunk).lower()
+    atoms: set[str] = set()
+
+    grounding = metadata.get("query_grounding")
+    if isinstance(grounding, dict):
+        for item in grounding.get("matched") or []:
+            key = str(item).strip().lower()
+            if key:
+                atoms.add(f"concept:{key}")
+
+    atoms.update(f"predicate:{p}" for p in _candidate_predicates(chunk))
+    atoms.update(f"fact:{f}" for f in _candidate_fact_ids(chunk))
+
+    if (
+        " stands for " in text
+        or " refers to " in text
+        or " defined as " in text
+        or " definition " in text
+        or re.search(r"\bis\s+(?:a|an|the)\b", text)
+        or re.search(
+            r"\b[a-z0-9][a-z0-9_+\-]*(?:\s+[a-z0-9][a-z0-9_+\-]*){0,4}"
+            r"\s+is\s+"
+            r"(?!associated\b|related\b|used\b|part\b|connected\b|linked\b|"
+            r"based\b|involved\b|not\b|often\b|commonly\b|typically\b|also\b)",
+            text,
+        )
+    ):
+        atoms.add("definition")
+    if any(
+        phrase in text
+        for phrase in (
+            " field of ",
+            " branch of ",
+            " subfield",
+            " type of ",
+            " kind of ",
+            " category of ",
+        )
+    ):
+        atoms.add("classification")
+    if any(
+        phrase in text
+        for phrase in (
+            "human language",
+            "natural language",
+            "language",
+            "text",
+            "speech",
+            "linguistic",
+        )
+    ):
+        atoms.add("language_focus")
+    if any(
+        phrase in text
+        for phrase in (
+            " related to ",
+            " relates to ",
+            " associated with ",
+            " association",
+            " part of ",
+            " uses ",
+            " used for ",
+            " enables ",
+            " supports ",
+            " requires ",
+            " causes ",
+            " connects ",
+        )
+    ):
+        atoms.add("relationship")
+    if any(
+        phrase in text
+        for phrase in (
+            " task",
+            " translation",
+            " classification",
+            " extraction",
+            " summarization",
+            " question answering",
+            " tokenization",
+            " parsing",
+            " generation",
+        )
+    ):
+        atoms.add("methods_tasks")
+    if any(
+        phrase in text
+        for phrase in (
+            " application",
+            " used in ",
+            " chatbot",
+            " search",
+            " assistant",
+            " document analysis",
+            " analytics",
+        )
+    ):
+        atoms.add("applications")
+    if any(
+        phrase in text
+        for phrase in (
+            " step",
+            " process",
+            " pipeline",
+            " workflow",
+            " retrieve",
+            " hydrate",
+            " rerank",
+        )
+    ):
+        atoms.add("procedure")
+    if any(
+        phrase in text
+        for phrase in (
+            " however",
+            " limitation",
+            " caveat",
+            " not ",
+            " rather than ",
+            " differs from ",
+            " contrast",
+        )
+    ):
+        atoms.add("distinction_caveat")
+    if _is_graph_expansion(chunk) or (chunk.source_tier or "").lower() == "graph_fact_seed":
+        atoms.add("graph_evidence")
+    if not atoms:
+        atoms.add(candidate_kind(chunk))
+    return atoms
+
+
+def _fingerprint(chunk: SourceChunk) -> dict[str, Any]:
+    parent_key = chunk.parent_id or chunk.chunk_id or ""
+    return {
+        "doc": str(chunk.doc_id or ""),
+        "parent": str(parent_key),
+        "identity": _candidate_identity(chunk),
+        "tokens": _token_set(_chunk_text(chunk)),
+        "atoms": _candidate_atoms(chunk),
+        "entities": _candidate_entities(chunk),
+        "facts": _candidate_fact_ids(chunk),
+        "predicates": _candidate_predicates(chunk),
+        "retrievers": _candidate_retrievers(chunk),
+        "graph_supported": (
+            _is_graph_expansion(chunk)
+            or (chunk.source_tier or "").lower() == "graph_fact_seed"
+            or any("neo4j" in r or "graph" in r for r in _candidate_retrievers(chunk))
+        ),
+    }
+
+
+def _score_normalizer(ranked: list[SourceChunk]) -> dict[int, float]:
+    if not ranked:
+        return {}
+    raw_scores = [float(chunk.score or 0.0) for chunk in ranked]
+    low = min(raw_scores)
+    high = max(raw_scores)
+    denom = high - low
+    last = max(len(ranked) - 1, 1)
+    bounded = 0.0 <= low <= high <= 1.0 and high > 0.0
+    normalized: dict[int, float] = {}
+    for idx, score in enumerate(raw_scores):
+        rank_component = 1.0 - (idx / last)
+        if bounded:
+            score_component = max(0.0, min(1.0, score / high))
+            normalized[idx] = (0.90 * score_component) + (0.10 * rank_component)
+        elif denom > 1e-9:
+            score_component = (score - low) / denom
+            normalized[idx] = (0.82 * score_component) + (0.18 * rank_component)
+        else:
+            normalized[idx] = rank_component
+    return normalized
+
+
+def _passes_relevance_floor(
+    *,
+    idx: int,
+    candidate: SourceChunk,
+    fp: dict[str, Any],
+    relevance_by_idx: dict[int, float],
+    policy: _MMRPolicy,
+    top_score: float,
+) -> bool:
+    """Reject fake diversity while preserving trusted non-text evidence lanes."""
+    if idx == 0:
+        return True
+    if _is_confident_document_anchor(candidate):
+        return True
+    # Graph expansion can be reranker-demoted because its value is relational.
+    # Keep it eligible only when it carries graph provenance/atoms, not merely
+    # because it is from a different document.
+    if fp["graph_supported"] and (
+        fp["facts"]
+        or fp["predicates"]
+        or "graph_evidence" in fp["atoms"]
+    ):
+        return True
+    raw_score = float(candidate.score or 0.0)
+    if 0.0 <= raw_score <= top_score <= 1.0 and top_score > 0.0:
+        return (raw_score / top_score) >= policy.relevance_floor
+    return relevance_by_idx.get(idx, 0.0) >= policy.relevance_floor
+
+
+def _similarity(
+    left: dict[str, Any],
+    right: dict[str, Any],
+    *,
+    tier: RetrievalTier,
+) -> float:
+    parent_same = 0.92 if left["parent"] and left["parent"] == right["parent"] else 0.0
+    doc_same = 0.24 if left["doc"] and left["doc"] == right["doc"] else 0.0
+    text_sim = _jaccard(left["tokens"], right["tokens"])
+    atom_sim = _jaccard(left["atoms"], right["atoms"])
+
+    if tier == RetrievalTier.qdrant_only:
+        return max(parent_same, doc_same, text_sim)
+
+    entity_sim = _jaccard(left["entities"], right["entities"])
+    fact_sim = _jaccard(left["facts"], right["facts"])
+    predicate_sim = _jaccard(left["predicates"], right["predicates"])
+
+    if tier == RetrievalTier.qdrant_mongo_graph:
+        return max(
+            parent_same,
+            text_sim,
+            doc_same,
+            0.62 * atom_sim,
+            0.66 * entity_sim,
+            0.78 * fact_sim,
+            0.58 * predicate_sim,
+        )
+
+    return max(parent_same, text_sim, doc_same, 0.68 * atom_sim)
+
+
+def _selected_counts(
+    selected_fps: list[dict[str, Any]],
+) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
+    doc_counts: dict[str, int] = {}
+    parent_counts: dict[str, int] = {}
+    predicate_counts: dict[str, int] = {}
+    for fp in selected_fps:
+        doc = fp["doc"]
+        parent = fp["parent"]
+        if doc:
+            doc_counts[doc] = doc_counts.get(doc, 0) + 1
+        if parent:
+            parent_counts[parent] = parent_counts.get(parent, 0) + 1
+        for predicate in fp["predicates"]:
+            predicate_counts[predicate] = predicate_counts.get(predicate, 0) + 1
+    return doc_counts, parent_counts, predicate_counts
+
+
+def _source_agreement_bonus(fp: dict[str, Any]) -> float:
+    retriever_count = len(fp["retrievers"])
+    if retriever_count <= 1:
+        return 0.0
+    return min(0.08, 0.025 * (retriever_count - 1))
+
+
+def _annotated_copy(
+    chunk: SourceChunk,
+    *,
+    fp: dict[str, Any],
+    order: int,
+    original_rank: int,
+    score: float,
+    policy: _MMRPolicy,
+    selected_by: str,
+    tier: RetrievalTier,
+) -> SourceChunk:
+    copied = chunk.model_copy()
+    metadata = dict(copied.metadata or {})
+    metadata["evidence_atoms"] = sorted(fp["atoms"])
+    metadata["retrieval_sources"] = sorted(fp["retrievers"])
+    metadata["diversity_rerank"] = {
+        "order": order,
+        "original_rank": original_rank,
+        "selected_by": selected_by,
+        "mmr_score": round(score, 4),
+        "mmr_lambda": policy.lambda_,
+        "tier": tier.value if hasattr(tier, "value") else str(tier),
+    }
+    copied.metadata = metadata
+    return copied
+
+
+def _required_atoms_for_query(query: str | None) -> set[str]:
+    """Cheap deterministic answerability target for the selected context."""
+    q = (query or "").lower()
+    required: set[str] = set()
+
+    for group in concept_groups(query or "", max_groups=4):
+        key = str(getattr(group, "key", "") or "").strip().lower()
+        if key and key not in _REQUIRED_CONCEPT_STOPWORDS:
+            required.add(f"concept:{key}")
+
+    if any(
+        phrase in q
+        for phrase in (
+            "what is",
+            "what are",
+            "define",
+            "definition",
+            "meaning of",
+            "stands for",
+        )
+    ):
+        required.add("definition")
+    if any(
+        phrase in q
+        for phrase in (
+            "associate",
+            "association",
+            "relate",
+            "related",
+            "relationship",
+            "connect",
+            "linked",
+            "between",
+        )
+    ):
+        required.add("relationship")
+    if any(
+        phrase in q
+        for phrase in (
+            "task",
+            "tasks",
+            "example",
+            "examples",
+            "application",
+            "applications",
+            "include",
+        )
+    ):
+        required.add("methods_tasks")
+    if any(
+        phrase in q
+        for phrase in (
+            "steps",
+            "process",
+            "procedure",
+            "workflow",
+            "how to",
+        )
+    ):
+        required.add("procedure")
+
+    return required
+
+
+def _atom_counts(selected_indices: list[int], fingerprints: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for idx in selected_indices:
+        for atom in fingerprints[idx]["atoms"]:
+            counts[atom] = counts.get(atom, 0) + 1
+    return counts
+
+
+def _near_duplicate_pairs(
+    selected_indices: list[int],
+    fingerprints: list[dict[str, Any]],
+    *,
+    threshold: float,
+) -> int:
+    pairs = 0
+    for pos, left_idx in enumerate(selected_indices):
+        left = fingerprints[left_idx]
+        for right_idx in selected_indices[pos + 1:]:
+            right = fingerprints[right_idx]
+            if _jaccard(left["tokens"], right["tokens"]) >= threshold:
+                pairs += 1
+    return pairs
+
+
+def _evaluate_sufficiency(
+    *,
+    query: str | None,
+    selected_indices: list[int],
+    fingerprints: list[dict[str, Any]],
+) -> dict[str, Any]:
+    required = _required_atoms_for_query(query)
+    atom_counts = _atom_counts(selected_indices, fingerprints)
+    covered = {atom for atom in required if atom_counts.get(atom, 0) > 0}
+    critical = required & {"definition", "relationship", "procedure"}
+    missing_critical = critical - covered
+    coverage = (len(covered) / len(required)) if required else 1.0
+    return {
+        "required_atoms": sorted(required),
+        "covered_required_atoms": sorted(covered),
+        "missing_atoms": sorted(required - covered),
+        "missing_critical_atoms": sorted(missing_critical),
+        "required_coverage": round(coverage, 4),
+        "answerable": coverage >= 0.80 and not missing_critical,
+        "atom_counts": atom_counts,
+    }
+
+
+def _repair_sufficiency(
+    *,
+    query: str | None,
+    ranked: list[SourceChunk],
+    fingerprints: list[dict[str, Any]],
+    relevance_by_idx: dict[int, float],
+    selected_indices: list[int],
+    selected_scores: dict[int, float],
+    selected_by: dict[int, str],
+    policy: _MMRPolicy,
+    final_top_k: int,
+) -> tuple[list[int], dict[int, float], dict[int, str], dict[str, Any], int]:
+    """Bounded metadata/text-atom repair using the existing ranked pool only."""
+    sufficiency = _evaluate_sufficiency(
+        query=query,
+        selected_indices=selected_indices,
+        fingerprints=fingerprints,
+    )
+    if sufficiency["answerable"]:
+        return selected_indices, selected_scores, selected_by, sufficiency, 0
+
+    selected = list(selected_indices)
+    selected_set = set(selected)
+    scores = dict(selected_scores)
+    reasons = dict(selected_by)
+    repair_rounds = 0
+
+    for _round in range(2):
+        missing = set(sufficiency.get("missing_atoms") or [])
+        if not missing:
+            break
+        current_fps = [fingerprints[idx] for idx in selected]
+        best_idx: int | None = None
+        best_score = float("-inf")
+
+        for idx, candidate in enumerate(ranked[: max(len(ranked), 1)]):
+            if idx in selected_set:
+                continue
+            fp = fingerprints[idx]
+            if not (fp["atoms"] & missing):
+                continue
+            if not _passes_relevance_floor(
+                idx=idx,
+                candidate=candidate,
+                fp=fp,
+                relevance_by_idx=relevance_by_idx,
+                policy=policy,
+                top_score=float(ranked[0].score or 0.0) if ranked else 0.0,
+            ):
+                continue
+            if any(fp["parent"] and fp["parent"] == current["parent"] for current in current_fps):
+                continue
+            if any(
+                _jaccard(fp["tokens"], current["tokens"]) >= policy.near_duplicate_similarity
+                for current in current_fps
+            ):
+                continue
+
+            atom_gain = len(fp["atoms"] & missing)
+            score = (
+                relevance_by_idx.get(idx, 0.0)
+                + 0.14 * atom_gain
+                + _source_agreement_bonus(fp)
+                + (0.08 if fp["graph_supported"] else 0.0)
+                + (0.08 if _is_confident_document_anchor(candidate) else 0.0)
+            )
+            if score > best_score:
+                best_score = score
+                best_idx = idx
+
+        if best_idx is None:
+            break
+
+        if len(selected) < final_top_k:
+            selected.append(best_idx)
+            selected_set.add(best_idx)
+        else:
+            atom_counts = _atom_counts(selected, fingerprints)
+            replace_pos = 0
+            replace_score = float("inf")
+            for pos, idx in enumerate(selected):
+                fp = fingerprints[idx]
+                unique_required = [
+                    atom
+                    for atom in fp["atoms"]
+                    if atom in sufficiency["required_atoms"] and atom_counts.get(atom, 0) == 1
+                ]
+                protected_penalty = 0.45 * len(unique_required)
+                score = selected_scores.get(idx, relevance_by_idx.get(idx, 0.0)) + protected_penalty
+                if score < replace_score:
+                    replace_score = score
+                    replace_pos = pos
+            removed = selected[replace_pos]
+            selected_set.discard(removed)
+            selected[replace_pos] = best_idx
+            selected_set.add(best_idx)
+            scores.pop(removed, None)
+            reasons.pop(removed, None)
+
+        scores[best_idx] = best_score
+        reasons[best_idx] = "sufficiency_repair"
+        repair_rounds += 1
+        sufficiency = _evaluate_sufficiency(
+            query=query,
+            selected_indices=selected,
+            fingerprints=fingerprints,
+        )
+        if sufficiency["answerable"]:
+            break
+
+    return selected, scores, reasons, sufficiency, repair_rounds
+
+
 def select_with_diversity(
     ranked: list[SourceChunk],
     *,
@@ -291,143 +1030,290 @@ def select_with_diversity(
     intent: RetrievalIntent,
     tier: RetrievalTier,
     multi_corpus: bool = False,
+    query: str | None = None,
 ) -> DiversityResult:
-    """Return final candidates plus up to two strong diverse extras.
+    """Select final context with tier-aware MMR/atomic diversity.
 
-    Diversity is only for hydrated tiers. Vector Base remains strict top-k so
-    its baseline behavior stays simple and easy to compare. For hydrated tiers
-    the main selection enforces a per-document ceiling (anti candidate-collapse)
-    and a relative noise floor (kills the lexical-rescued junk tail); graph-
-    provenance chunks are exempt from the floor and governed by the graph
-    reservation, and a MIN_KEEP guard never strands the pool.
+    Every UI route now does the same second-pass shape:
+    retrieve wide -> normalize -> dedupe upstream -> MMR/diversity here.
+    The diversity target changes by tier: Fast Search spreads vector
+    neighborhoods; Hybrid Search spreads documents/parents/text/atoms; Graph
+    Augmentation also spreads entity/fact/predicate/path evidence.
     """
     final_top_k = max(1, int(final_top_k))
-
-    # Vector Base stays strict top-k for simple, comparable baseline behavior.
-    if tier == RetrievalTier.qdrant_only:
-        return DiversityResult(candidates=list(ranked[:final_top_k]), added=0)
     if not ranked:
         return DiversityResult(candidates=[], added=0)
 
-    per_doc_cap = _per_doc_cap_for(intent, final_top_k)
+    policy = _mmr_policy_for(
+        tier=tier,
+        intent=intent,
+        final_top_k=final_top_k,
+        multi_corpus=multi_corpus,
+    )
+    relevance_by_idx = _score_normalizer(ranked)
+    fingerprints = [_fingerprint(chunk) for chunk in ranked]
     top_score = float(ranked[0].score or 0.0)
     bounded = 0.0 <= top_score <= 1.0
     rel_floor = (
         max(_MAIN_ABS_FLOOR, top_score * _MAIN_FLOOR_RATIO) if bounded else 0.0
     )
 
-    selected: list[SourceChunk] = []
-    doc_counts: dict[str, int] = {}
     chosen_idx: set[int] = set()
+    selected_indices: list[int] = []
+    selected_scores: dict[int, float] = {}
+    selected_by: dict[int, str] = {}
+    covered_atoms: set[str] = set()
 
-    def _doc_has_room(chunk: SourceChunk) -> bool:
-        doc = str(chunk.doc_id or "")
-        return (not doc) or doc_counts.get(doc, 0) < per_doc_cap
-
-    def _take(idx: int, chunk: SourceChunk) -> None:
-        selected.append(chunk)
+    def _take(idx: int, score: float, reason: str) -> None:
+        selected_indices.append(idx)
         chosen_idx.add(idx)
-        doc = str(chunk.doc_id or "")
-        if doc:
-            doc_counts[doc] = doc_counts.get(doc, 0) + 1
+        selected_scores[idx] = score
+        selected_by[idx] = reason
+        covered_atoms.update(fingerprints[idx]["atoms"])
 
-    # Main selection: walk ranked best-first, skipping sub-floor non-graph junk
-    # and documents already at the per-doc ceiling — so a lower-ranked chunk
-    # from an under-represented document can take the slot a dominant document
-    # would otherwise have collapsed.
-    for idx, candidate in enumerate(ranked):
-        if len(selected) >= final_top_k:
-            break
-        if (
-            not _is_graph_expansion(candidate)
+    def _candidate_score(idx: int, *, relaxed: bool) -> float | None:
+        candidate = ranked[idx]
+        fp = fingerprints[idx]
+        selected_fps = [fingerprints[i] for i in selected_indices]
+        doc_counts, parent_counts, predicate_counts = _selected_counts(selected_fps)
+
+        if not _passes_relevance_floor(
+            idx=idx,
+            candidate=candidate,
+            fp=fp,
+            relevance_by_idx=relevance_by_idx,
+            policy=policy,
+            top_score=top_score,
+        ):
+            return None
+
+        if not relaxed:
+            if (
+                tier != RetrievalTier.qdrant_only
+                and not fp["graph_supported"]
+                and bounded
+                and float(candidate.score or 0.0) < rel_floor
+            ):
+                return None
+            if parent_counts.get(fp["parent"], 0) >= policy.max_per_parent:
+                return None
+            if doc_counts.get(fp["doc"], 0) >= policy.hard_doc_cap:
+                return None
+            if any(
+                _jaccard(fp["tokens"], selected_fp["tokens"])
+                >= policy.near_duplicate_similarity
+                for selected_fp in selected_fps
+            ):
+                return None
+            if (
+                tier == RetrievalTier.qdrant_mongo_graph
+                and fp["predicates"]
+                and any(
+                    predicate_counts.get(predicate, 0) >= policy.max_same_predicate
+                    for predicate in fp["predicates"]
+                )
+            ):
+                return None
+        elif (
+            tier != RetrievalTier.qdrant_only
+            and not fp["graph_supported"]
             and bounded
+            and len(selected_indices) >= min(final_top_k, _MAIN_MIN_KEEP)
             and float(candidate.score or 0.0) < rel_floor
         ):
-            continue
-        if not _doc_has_room(candidate):
-            continue
-        _take(idx, candidate)
+            return None
+        elif (
+            fp["doc"]
+            and doc_counts.get(fp["doc"], 0) >= policy.hard_doc_cap
+            and len(selected_indices) >= min(final_top_k, _MAIN_MIN_KEEP)
+        ):
+            return None
+        elif (
+            fp["parent"]
+            and parent_counts.get(fp["parent"], 0) >= policy.max_per_parent
+            and len(selected_indices) >= min(final_top_k, _MAIN_MIN_KEEP)
+        ):
+            return None
 
-    # MIN_KEEP guard — if the cap/floor over-pruned, backfill the highest-ranked
-    # excluded chunks (ignoring cap/floor) so the answer is never starved.
-    min_keep = min(final_top_k, _MAIN_MIN_KEEP)
-    if len(selected) < min_keep:
-        for idx, candidate in enumerate(ranked):
-            if len(selected) >= min_keep:
+        relevance = relevance_by_idx.get(idx, 0.0)
+        redundancy = (
+            max(
+                _similarity(fp, selected_fp, tier=tier)
+                for selected_fp in selected_fps
+            )
+            if selected_fps
+            else 0.0
+        )
+        distinct_docs = len([doc for doc in doc_counts if doc])
+        doc_count = doc_counts.get(fp["doc"], 0)
+        parent_count = parent_counts.get(fp["parent"], 0)
+        new_atoms = fp["atoms"] - covered_atoms
+
+        new_doc_bonus = 0.0
+        if fp["doc"] and doc_count == 0:
+            new_doc_bonus = 0.10 if distinct_docs < policy.target_docs else 0.04
+        atom_bonus = min(0.14, 0.035 * len(new_atoms))
+        source_bonus = _source_agreement_bonus(fp)
+        graph_bonus = 0.0
+        if tier == RetrievalTier.qdrant_mongo_graph and fp["graph_supported"]:
+            graph_bonus = 0.08
+            if fp["facts"]:
+                graph_bonus += 0.04
+            if fp["predicates"]:
+                graph_bonus += 0.03
+        anchor_bonus = 0.32 if _is_confident_document_anchor(candidate) else 0.0
+
+        doc_penalty = 0.0
+        if fp["doc"] and doc_count > 0 and distinct_docs < policy.min_docs:
+            doc_penalty += 0.08
+        if doc_count >= policy.soft_doc_cap:
+            doc_penalty += 0.14 * (doc_count - policy.soft_doc_cap + 1)
+        parent_penalty = 0.10 * parent_count
+        predicate_penalty = 0.0
+        if tier == RetrievalTier.qdrant_mongo_graph and fp["predicates"]:
+            predicate_penalty = 0.04 * sum(
+                predicate_counts.get(predicate, 0) for predicate in fp["predicates"]
+            )
+
+        return (
+            policy.lambda_ * relevance
+            - (1.0 - policy.lambda_) * redundancy
+            + atom_bonus
+            + new_doc_bonus
+            + source_bonus
+            + graph_bonus
+            + anchor_bonus
+            - doc_penalty
+            - parent_penalty
+            - predicate_penalty
+        )
+
+    while len(selected_indices) < min(final_top_k, len(ranked)):
+        best_idx: int | None = None
+        best_score = float("-inf")
+        best_relaxed = False
+
+        for relaxed in (False, True):
+            for idx in range(len(ranked)):
+                if idx in chosen_idx:
+                    continue
+                score = _candidate_score(idx, relaxed=relaxed)
+                if score is None:
+                    continue
+                if score > best_score:
+                    best_score = score
+                    best_idx = idx
+                    best_relaxed = relaxed
+            if best_idx is not None:
                 break
-            if idx in chosen_idx:
-                continue
-            _take(idx, candidate)
 
-    max_extra = 2 if (intent.need == QueryNeed.BROAD or multi_corpus) else 1
-    if max_extra <= 0 or not selected:
-        return DiversityResult(candidates=selected, added=0)
+        if best_idx is None:
+            break
+        _take(best_idx, best_score, "mmr_relaxed" if best_relaxed else "mmr")
 
-    selected_identities = {_candidate_identity(chunk) for chunk in selected}
-    selected_parents = {chunk.parent_id or chunk.chunk_id for chunk in selected}
-    added = 0
-
-    # Graph tier: the cross-encoder ranks pure text similarity, which
-    # systematically demotes graph-expanded neighbors (their value is the
-    # relationship, not lexical overlap). Reserve a small dedicated budget for
-    # graph-provenance chunks MISSING from the natural top-k so graph context
-    # reaches the LLM — exempt from the per-doc ceiling, since surfacing the
-    # relation is the whole point of the tier.
-    if tier == RetrievalTier.qdrant_mongo_graph:
-        graph_reserve = 2 if intent.need == QueryNeed.BROAD else 1
-        graph_in_topk = sum(1 for c in selected if _is_graph_expansion(c))
-        graph_need = max(0, graph_reserve - graph_in_topk)
-        for idx, candidate in enumerate(ranked):
+    if tier == RetrievalTier.qdrant_mongo_graph and policy.graph_reserve > 0:
+        graph_selected = sum(
+            1 for idx in selected_indices if fingerprints[idx]["graph_supported"]
+        )
+        graph_need = max(0, policy.graph_reserve - graph_selected)
+        for idx, fp in enumerate(fingerprints):
             if graph_need <= 0:
                 break
-            if idx in chosen_idx or not _is_graph_expansion(candidate):
+            if idx in chosen_idx or not fp["graph_supported"]:
                 continue
-            identity = _candidate_identity(candidate)
-            parent_key = candidate.parent_id or candidate.chunk_id
-            if identity in selected_identities or parent_key in selected_parents:
+            selected_fps = [fingerprints[i] for i in selected_indices]
+            if any(
+                fp["parent"] and fp["parent"] == selected_fp["parent"]
+                for selected_fp in selected_fps
+            ):
                 continue
-            selected.append(candidate)
-            chosen_idx.add(idx)
-            selected_identities.add(identity)
-            selected_parents.add(parent_key)
+            reserve_score = (
+                relevance_by_idx.get(idx, 0.0)
+                + 0.12
+                + min(0.10, 0.03 * len(fp["atoms"] - covered_atoms))
+            )
+            if len(selected_indices) < final_top_k:
+                _take(idx, reserve_score, "graph_reserve")
+            else:
+                replace_idx: int | None = None
+                replace_score = float("inf")
+                for pos, selected_idx in enumerate(selected_indices):
+                    selected_fp = fingerprints[selected_idx]
+                    if selected_fp["graph_supported"]:
+                        continue
+                    score = selected_scores.get(selected_idx, 0.0)
+                    if score < replace_score:
+                        replace_score = score
+                        replace_idx = pos
+                if replace_idx is None:
+                    continue
+                removed_idx = selected_indices[replace_idx]
+                chosen_idx.discard(removed_idx)
+                selected_indices[replace_idx] = idx
+                chosen_idx.add(idx)
+                selected_scores.pop(removed_idx, None)
+                selected_by.pop(removed_idx, None)
+                selected_scores[idx] = reserve_score
+                selected_by[idx] = "graph_reserve"
+                covered_atoms.clear()
+                for selected_idx in selected_indices:
+                    covered_atoms.update(fingerprints[selected_idx]["atoms"])
             graph_need -= 1
-            added += 1
 
-    # Confident document-anchor extras — narrow but high-confidence title hits
-    # the cross-encoder demotes. Respect the per-doc ceiling.
-    for idx, candidate in enumerate(ranked):
-        if added >= max_extra:
-            break
-        if idx in chosen_idx or not _is_confident_document_anchor(candidate):
-            continue
-        identity = _candidate_identity(candidate)
-        parent_key = candidate.parent_id or candidate.chunk_id
-        if identity in selected_identities or parent_key in selected_parents:
-            continue
-        if not _doc_has_room(candidate):
-            continue
-        _take(idx, candidate)
-        selected_identities.add(identity)
-        selected_parents.add(parent_key)
-        added += 1
+    selected_indices, selected_scores, selected_by, sufficiency, repair_rounds = (
+        _repair_sufficiency(
+            query=query,
+            ranked=ranked,
+            fingerprints=fingerprints,
+            relevance_by_idx=relevance_by_idx,
+            selected_indices=selected_indices,
+            selected_scores=selected_scores,
+            selected_by=selected_by,
+            policy=policy,
+            final_top_k=final_top_k,
+        )
+    )
 
-    # Strong diverse extras — respect the per-doc ceiling.
-    for idx, candidate in enumerate(ranked):
-        if added >= max_extra:
-            break
-        if idx in chosen_idx:
-            continue
-        identity = _candidate_identity(candidate)
-        parent_key = candidate.parent_id or candidate.chunk_id
-        if identity in selected_identities or parent_key in selected_parents:
-            continue
-        if not _passes_diversity_threshold(candidate, top_score):
-            continue
-        if not _doc_has_room(candidate):
-            continue
-        _take(idx, candidate)
-        selected_identities.add(identity)
-        selected_parents.add(parent_key)
-        added += 1
-
-    return DiversityResult(candidates=selected, added=added)
+    annotated = [
+        _annotated_copy(
+            ranked[idx],
+            fp=fingerprints[idx],
+            order=order + 1,
+            original_rank=idx + 1,
+            score=selected_scores.get(idx, relevance_by_idx.get(idx, 0.0)),
+            policy=policy,
+            selected_by=selected_by.get(idx, "mmr"),
+            tier=tier,
+        )
+        for order, idx in enumerate(selected_indices[:final_top_k])
+    ]
+    diagnostics = {
+        "final_k": final_top_k,
+        "actual_output_count": len(annotated),
+        "selected_outside_raw_top_k": sum(
+            1 for idx in selected_indices[:final_top_k] if idx >= final_top_k
+        ),
+        "min_selected_relevance": round(
+            min((relevance_by_idx.get(idx, 0.0) for idx in selected_indices[:final_top_k]), default=0.0),
+            4,
+        ),
+        "relevance_floor": policy.relevance_floor,
+        "near_duplicate_pairs": _near_duplicate_pairs(
+            selected_indices[:final_top_k],
+            fingerprints,
+            threshold=policy.near_duplicate_similarity,
+        ),
+        "repair_rounds": repair_rounds,
+        "sufficiency": sufficiency,
+    }
+    for chunk in annotated:
+        metadata = dict(chunk.metadata or {})
+        metadata["answer_sufficiency"] = {
+            "answerable": sufficiency.get("answerable"),
+            "required_coverage": sufficiency.get("required_coverage"),
+            "missing_atoms": sufficiency.get("missing_atoms"),
+            "repair_rounds": repair_rounds,
+        }
+        chunk.metadata = metadata
+    added = sum(1 for idx in selected_indices[:final_top_k] if idx >= final_top_k)
+    return DiversityResult(candidates=annotated, added=added, diagnostics=diagnostics)

@@ -3,7 +3,7 @@ Retriever orchestrator — Phase 5 & 6 query pipeline (spec-locked).
 
 Flow (spec §RETRIEVAL RECIPE):
   [0] Strategy intersection — downgrade tier if any corpus lacks the capability
-  [1] Graph Augmented only: lightweight entity detection -> Neo4j facts
+  [1] Graph Augmentation only: lightweight entity detection -> Neo4j facts
       -> supporting chunk seeds
   [2] embed query
   [3] FUNNEL A (summaries, polymath_hrag) [fair-mode skips for multi-corpus]
@@ -107,7 +107,7 @@ def _lexical_limit_for(
 ) -> int:
     """Map the speed/thoroughness selector to a lexical recall budget.
 
-    Vector Base stays vector-only. Hybrid and Graph Augmented always keep a
+    Fast Search stays vector-only. Hybrid Search and Graph Augmentation always keep a
     small lexical lane, then scale it up as the retrieval pool gets wider.
     """
     if effective_tier == RetrievalTier.qdrant_only:
@@ -122,7 +122,7 @@ def _lexical_limit_for(
 def _document_anchor_limit_for(effective_tier: RetrievalTier, *, retrieval_k: int) -> int:
     """Small source-title recall budget for hydrated tiers.
 
-    This is metadata/Mongo-backed recall, so Vector Base must not use it.
+    This is metadata/Mongo-backed recall, so Fast Search must not use it.
     """
     if effective_tier == RetrievalTier.qdrant_only:
         return 0
@@ -134,7 +134,7 @@ def _retrieval_store_contract(tier: RetrievalTier) -> dict[str, Any]:
 
     if tier == RetrievalTier.qdrant_only:
         return {
-            "label": "Vector Base",
+            "label": "Fast Search",
             "qdrant_vectors": True,
             "qdrant_summaries": True,
             "mongo_lexical": False,
@@ -148,7 +148,7 @@ def _retrieval_store_contract(tier: RetrievalTier) -> dict[str, Any]:
         }
     if tier == RetrievalTier.qdrant_mongo:
         return {
-            "label": "Hybrid",
+            "label": "Hybrid Search",
             "qdrant_vectors": True,
             "qdrant_summaries": True,
             "mongo_lexical": True,
@@ -161,7 +161,7 @@ def _retrieval_store_contract(tier: RetrievalTier) -> dict[str, Any]:
             ),
         }
     return {
-        "label": "Graph Augmented",
+        "label": "Graph Augmentation",
         "qdrant_vectors": True,
         "qdrant_summaries": True,
         "mongo_lexical": True,
@@ -169,8 +169,8 @@ def _retrieval_store_contract(tier: RetrievalTier) -> dict[str, Any]:
         "neo4j_facts": True,
         "neo4j_expansion": True,
         "description": (
-            "Hybrid retrieval plus Neo4j fact seeds, mention/call walks, "
-            "bridge expansion, and graph-aware ranking signals."
+            "Highest quality: Hybrid Search plus Neo4j fact seeds, mention/call "
+            "walks, bridge expansion, and graph-aware ranking signals."
         ),
     }
 
@@ -248,10 +248,10 @@ def _trim_bounded_rerank_tail(
     scores near zero. final_top_k is a cap, not a requirement to feed junk to
     the LLM.
 
-    Hydrated tiers are different: Hybrid and Graph Augmented need the post-
+    Hydrated tiers are different: Hybrid Search and Graph Augmentation need the post-
     rerank pool for Mongo/Neo4j evidence coverage. Trimming before grounding can
     erase semantically useful chunks and make the richer tiers narrower than
-    Vector Base, so those tiers keep the full pool and let final selection cap
+    Fast Search, so those tiers keep the full pool and let final selection cap
     the prompt.
     """
     if not rerank_enabled or len(ranked) <= 1:
@@ -265,7 +265,7 @@ def _trim_bounded_rerank_tail(
     # Safety valve for mixed-scale pools. Bypassed code/lexical candidates can
     # preserve pre-rerank scores while prose candidates are bounded 0..1. In
     # that state, using the raw top score to compute a tail floor can delete
-    # every useful prose result and make Hybrid/Graph worse than Vector Base.
+    # every useful prose result and make Hybrid Search/Graph Augmentation worse than Fast Search.
     if any(float(chunk.score or 0.0) > 1.0001 for chunk in ranked):
         return ranked
 
@@ -467,7 +467,7 @@ class RetrieverOrchestrator:
         """Graph-tier fact lane: query entities -> Neo4j facts.
 
         This is called only after strategy intersection confirms the effective
-        tier is qdrant_mongo_graph. Vector Base and Hybrid never enter this
+        tier is qdrant_mongo_graph. Fast Search and Hybrid Search never enter this
         lane.
         """
         if not settings.NEO4J_ENABLED or not corpus_ids:
@@ -803,6 +803,8 @@ class RetrieverOrchestrator:
                 return 0, 0.0
             return len(doc_counts), round(max(doc_counts.values()) / total, 4)
 
+        selection_diagnostics: dict[str, Any] = {}
+
         def _diagnostics(
             status: str,
             final_count: int,
@@ -841,6 +843,7 @@ class RetrieverOrchestrator:
                 "final_source_tiers": _source_tier_counts(final_chunks),
                 "unique_docs_final": unique_docs_final,
                 "max_doc_share_final": max_doc_share_final,
+                "selection": selection_diagnostics,
             }
 
         # [0a] Filter stale corpus_ids (frontend may reference deleted corpora)
@@ -1303,7 +1306,7 @@ class RetrieverOrchestrator:
         # [4] Merge + dedupe by parent_id. Lexical and fact-seeded candidates
         # are deliberately merged before graph expansion, so exact
         # filename/heading hits and query-entity facts can seed Neo4j context
-        # when Graph Augmented is active.
+        # when Graph Augmentation is active.
         phase_started = perf_counter()
         merged = merge_pools(
             fact_seed_chunks,
@@ -1416,7 +1419,7 @@ class RetrieverOrchestrator:
                 _add_timing("graph_boost", phase_started)
 
         # [5a] Phase 23 — Custom profile `rerank_top_n` pool cap before reranker.
-        # Graph Augmented expands the Hybrid pool with Neo4j neighbors. A narrow
+        # Graph Augmentation expands the Hybrid Search pool with Neo4j neighbors. A narrow
         # pre-rerank cap can let graph expansion crowd out the semantic core
         # before the cross-encoder sees hydrated text, making the "full RAG"
         # tier worse than Hybrid/Vector. Keep a wider graph floor, then let
@@ -1426,9 +1429,8 @@ class RetrieverOrchestrator:
         # the old 64: still ~2x Hybrid's pre-rerank pool so the semantic core is
         # preserved, but ~25% fewer cross-encoder forward passes (~0.8s on the
         # linear Metal reranker). Graph-neighbor survival no longer depends on a
-        # huge window — select_with_diversity now reserves final slots for
-        # graph-provenance chunks (ranking_policy._is_graph_expansion), so
-        # narrowing here is safe.
+        # huge window — select_with_diversity now uses graph-aware MMR and a
+        # small graph-provenance reservation, so narrowing here is safe.
         effective_rerank_top_n = rerank_top_n
         if (
             effective_tier == RetrievalTier.qdrant_mongo_graph
@@ -1537,10 +1539,22 @@ class RetrieverOrchestrator:
             intent=retrieval_intent,
             tier=effective_tier,
             multi_corpus=multi,
+            query=rank_query,
         )
+        selection_diagnostics = dict(diversity.diagnostics or {})
         candidates = diversity.candidates
         counts["candidates"] = len(candidates)
         counts["diversity_added"] = diversity.added
+        if selection_diagnostics:
+            counts["sufficiency_repair_rounds"] = int(
+                selection_diagnostics.get("repair_rounds") or 0
+            )
+            counts["selected_outside_raw_top_k"] = int(
+                selection_diagnostics.get("selected_outside_raw_top_k") or 0
+            )
+            counts["near_duplicate_pairs"] = int(
+                selection_diagnostics.get("near_duplicate_pairs") or 0
+            )
         logger.info(
             "retrieval_pool_breadth: tier=%s distinct_docs_postmerge=%d distinct_docs_postrerank=%d ranked=%d final_top_k=%d diversity_added=%d",
             getattr(effective_tier, "value", effective_tier),

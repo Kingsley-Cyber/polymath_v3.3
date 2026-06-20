@@ -2203,6 +2203,52 @@ async def run_ingest_job(
             ws=ws,
         )
 
+    # Preventive retrieval setup gate. Startup tries to repair all corpora, but
+    # an ingest can start immediately after corpus creation or after a partial
+    # restore on a new machine. Enforce the same Qdrant/Neo4j readiness contract
+    # here while we have a durable doc row to mark if setup is broken.
+    try:
+        from services.retrieval_readiness import ensure_corpus_retrieval_ready
+
+        readiness = await ensure_corpus_retrieval_ready(
+            db=db,
+            qdrant_client=qdrant_client,
+            neo4j_driver=neo4j_driver,
+            corpus_id=corpus_id,
+            corpus_doc=corpus_doc,
+            corpus_name=corpus_doc.get("name"),
+            ingestion_config=ingestion_config,
+            neo4j_enabled=settings.NEO4J_ENABLED,
+            default_dim=settings.EMBEDDING_DIMENSION,
+        )
+        if not readiness.ok:
+            raise RuntimeError("; ".join(readiness.errors))
+        logger.info(
+            "phase=retrieval_setup ok=true doc=%s corpus=%s qdrant=%s neo4j=%s dim=%s",
+            doc_id[:12],
+            cid8,
+            readiness.qdrant_ready,
+            readiness.neo4j_ready,
+            readiness.embedding_dimension,
+        )
+    except Exception as exc:
+        message = f"retrieval setup failed: {exc}"
+        await _mark_ingest_failed(
+            db=db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            message=message,
+            stage="setup_failed",
+        )
+        await _emit_ingest_phase(
+            on_phase,
+            "setup_failed",
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            error=message,
+        )
+        raise RuntimeError(message) from exc
+
     # ── Near-duplicate block ─────────────────────────────────────────────
     # Before any chunk/embed/extract work, skip a document that near-duplicates
     # one already in this corpus (e.g. the same book ingested as PDF *and* MD —

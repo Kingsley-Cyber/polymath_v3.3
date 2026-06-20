@@ -3009,7 +3009,7 @@ def _compact_source_previews(sources: list[Any] | None) -> list[dict[str, Any]] 
 
 
 def _is_graph_augmented_tier(tier: Any) -> bool:
-    """True only for the Neo4j-backed Graph Augmented retrieval tier."""
+    """True only for the Neo4j-backed Graph Augmentation retrieval tier."""
     value = getattr(tier, "value", tier)
     return value == RetrievalTier.qdrant_mongo_graph.value
 
@@ -3113,8 +3113,8 @@ def _format_retrieval_tier_synthesis_contract(
                 "weak links without inventing unsupported edges."
             ),
             (
-                "The answer should feel structurally different from Vector and "
-                "Hybrid: relationship-first, not merely a definition or a list "
+                "The answer should feel structurally different from Fast Search "
+                "and Hybrid Search: relationship-first, not merely a definition or a list "
                 "of source excerpts."
             ),
         ]
@@ -3123,7 +3123,7 @@ def _format_retrieval_tier_synthesis_contract(
             "Required answer shape: hydrated corpus synthesis.",
             (
                 "This lens overrides the default short-answer compression. Do "
-                "not stop at the same generic definition Vector Base would give."
+                "not stop at the same generic definition Fast Search would give."
             ),
             (
                 "Lead with the corpus-grounded synthesis, then give 2-4 "
@@ -3142,7 +3142,7 @@ def _format_retrieval_tier_synthesis_contract(
                 "evidence is actually present."
             ),
             (
-                "The answer should feel deeper than Vector Base: more grounded, "
+                "The answer should feel deeper than Fast Search: more grounded, "
                 "more corpus-specific, more exact. Only note an evidence gap when "
                 "it materially changes the answer, and phrase it as a brief "
                 "inline caveat — never a standing 'what the corpus does not "
@@ -4314,7 +4314,7 @@ class ChatOrchestrator:
         facts_seeded = len(facts)
 
         # Pt 10d (Cluster 2 — Graph Decoration) — graph-tier-only
-        # post-retrieval enrichment. Vector Base and Hybrid never call Neo4j
+        # post-retrieval enrichment. Fast Search and Hybrid Search never call Neo4j
         # here. When facts already answer the query, decoration is redundant,
         # so skip the extra traversal.
         decoration: list = []

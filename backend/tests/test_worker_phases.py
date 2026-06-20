@@ -120,6 +120,16 @@ def _fake_summary_result(parent_id: str, doc_id: str, corpus_id: str) -> Summary
 # ── Mock harness ────────────────────────────────────────────────────────────
 
 
+def _ready_report() -> SimpleNamespace:
+    return SimpleNamespace(
+        ok=True,
+        qdrant_ready=True,
+        neo4j_ready=True,
+        embedding_dimension=1024,
+        errors=[],
+    )
+
+
 class PhaseRecorder:
     """Collects ordered phase tags from mocked boundary calls."""
 
@@ -255,6 +265,7 @@ def _install_mocks(
     checkpoint_mock = AsyncMock(side_effect=_checkpoint_side_effect)
     update_state_mock = AsyncMock()
     verify_mock = AsyncMock(return_value=(True, []))
+    readiness_mock = AsyncMock(return_value=_ready_report())
     mongo_db = MagicMock()
     # For the corpora counter update path in run_ingest_job
     mongo_db.__getitem__.return_value.update_one = AsyncMock()
@@ -274,6 +285,10 @@ def _install_mocks(
         patch.object(worker, "_checkpoint_child_chunks", checkpoint_mock),
         patch.object(worker.mongo_writer, "update_write_state", update_state_mock),
         patch("services.ingestion.verify.verify_ingest", verify_mock),
+        patch(
+            "services.retrieval_readiness.ensure_corpus_retrieval_ready",
+            readiness_mock,
+        ),
         patch.object(worker.settings, "NEO4J_ENABLED", True),
     ]
     for p in patches:
@@ -298,6 +313,7 @@ def _install_mocks(
         "checkpoint_chunks": checkpoint_mock,
         "update_state": update_state_mock,
         "verify": verify_mock,
+        "readiness": readiness_mock,
         "db": mongo_db,
         "stop_all": _stop_all,
     }
@@ -348,6 +364,7 @@ async def test_parse_progress_and_doc_id_callback_happen_before_chunk_failure():
          patch.object(worker.mongo_reader, "get_document", AsyncMock(return_value=None)), \
          patch.object(worker.docling_adapter, "parse_document", AsyncMock(side_effect=_parse)), \
          patch.object(worker.tier_chunker, "chunk", MagicMock(side_effect=_chunk)), \
+         patch("services.retrieval_readiness.ensure_corpus_retrieval_ready", AsyncMock(return_value=_ready_report())), \
          patch.object(worker, "_ensure_parse_progress_document", AsyncMock(side_effect=_parse_progress)):
         with pytest.raises(RuntimeError, match="tier_chunker failed: chunk exploded"):
             await worker.run_ingest_job(

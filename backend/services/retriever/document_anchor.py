@@ -272,7 +272,7 @@ def _candidate_text(row: dict[str, Any], document_label: str) -> str:
 
 
 class DocumentAnchorRetriever:
-    """Mongo-backed source-title recall for Hybrid and Graph Augmented tiers."""
+    """Mongo-backed source-title recall for Hybrid Search and Graph Augmentation tiers."""
 
     async def search(
         self,

@@ -89,7 +89,7 @@ class ModelOverrides(BaseModel):
         default=None,
         ge=0,
         le=100,
-        description="Per-request Graph Augmented expansion cap.",
+        description="Per-request Graph Augmentation expansion cap.",
     )
     max_corpora_per_query: int | None = Field(
         default=None,
@@ -107,7 +107,7 @@ class ModelOverrides(BaseModel):
         default=None,
         ge=0,
         le=50,
-        description="Per-request Graph Augmented fact seed budget.",
+        description="Per-request Graph Augmentation fact seed budget.",
     )
     search_mode: str | None = Field(
         default=None,

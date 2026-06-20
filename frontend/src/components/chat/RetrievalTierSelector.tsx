@@ -7,21 +7,21 @@ import type { RetrievalTier } from "../../types/chat";
 const TIERS: { id: RetrievalTier; label: string; icon: any; description: string; disabledMsg?: string }[] = [
   {
     id: "qdrant_only",
-    label: "Vector Base",
+    label: "Fast Search",
     icon: Database,
     description: "Qdrant child + summary vectors only. No MongoDB, lexical, or graph.",
   },
   {
     id: "qdrant_mongo",
-    label: "Hybrid (Default)",
+    label: "Hybrid Search",
     icon: Boxes,
     description: "Vector + lexical + summaries with MongoDB parent hydration. No graph facts.",
   },
   {
     id: "qdrant_mongo_graph",
-    label: "Graph Augmented",
+    label: "Graph Augmentation",
     icon: Network,
-    description: "Fact-first Neo4j seeding plus hybrid search, graph expansion, and graph boost.",
+    description: "Highest quality: Hybrid Search plus Neo4j facts, graph expansion, and final rerank.",
   },
 ];
 

@@ -52,18 +52,18 @@ const PANEL_META: Record<
   { title: string; subtitle: string; icon: typeof Database }
 > = {
   vector: {
-    title: "Vector Base",
+    title: "Fast Search",
     subtitle: "Wide Qdrant child + summary retrieval",
     icon: Database,
   },
   hybrid: {
-    title: "Hybrid",
+    title: "Hybrid Search",
     subtitle: "Vector, summary, lexical, and hydration",
     icon: Boxes,
   },
   graph: {
-    title: "Graph Augmented",
-    subtitle: "Hybrid retrieval with fact seeds and expansion",
+    title: "Graph Augmentation",
+    subtitle: "Highest quality with hybrid retrieval, facts, and expansion",
     icon: Network,
   },
   graphQuery: {

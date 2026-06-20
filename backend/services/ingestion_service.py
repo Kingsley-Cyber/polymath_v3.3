@@ -211,33 +211,6 @@ class IngestionService:
         )
         logger.info("IngestionService: Qdrant connected (per-corpus collections)")
 
-        # Phase 7.5 alias backfill + repair — ensure every existing corpus has
-        # its per-corpus Qdrant collections before aliasing. This self-heals a
-        # corpus row that was written to Mongo before Qdrant collection
-        # provisioning timed out.
-        try:
-            from services.storage.qdrant_writer import ensure_collections_for_corpus
-
-            cursor = db["corpora"].find({}, {"corpus_id": 1, "name": 1, "_id": 0})
-            async for row in cursor:
-                cid = row.get("corpus_id")
-                nm = row.get("name")
-                if cid and nm:
-                    try:
-                        await ensure_collections_for_corpus(
-                            self._qdrant,
-                            cid,
-                            corpus_name=nm,
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Qdrant collection repair skipped for corpus %s: %s",
-                            cid,
-                            exc,
-                        )
-        except Exception as exc:
-            logger.warning("Qdrant collection repair sweep skipped: %s", exc)
-
         if self._settings.NEO4J_ENABLED:
             from neo4j import AsyncGraphDatabase
 
@@ -245,11 +218,38 @@ class IngestionService:
                 self._settings.NEO4J_URI,
                 auth=(self._settings.NEO4J_USER, self._settings.NEO4J_PASSWORD),
             )
-            from services.graph.schema import initialize_schema
+            logger.info("IngestionService: Neo4j connected")
 
-            # initialize_schema(driver) opens its own session internally.
-            await initialize_schema(self._neo4j)
-            logger.info("IngestionService: Neo4j connected + schema initialized")
+        # Retrieval readiness repair — ensure every existing corpus has the
+        # Qdrant collection/index layout for its frozen embedding dimension and
+        # ensure Neo4j retrieval indexes when graph is enabled. Non-fatal at
+        # startup; the ingest worker enforces this per document before writes.
+        try:
+            from services.retrieval_readiness import (
+                repair_retrieval_readiness_for_all_corpora,
+            )
+
+            readiness = await repair_retrieval_readiness_for_all_corpora(
+                db=db,
+                qdrant_client=self._qdrant,
+                neo4j_driver=self._neo4j,
+                neo4j_enabled=self._settings.NEO4J_ENABLED,
+                default_dim=self._settings.EMBEDDING_DIMENSION,
+            )
+            logger.info(
+                "Retrieval readiness repair: scanned=%d ready=%d failed=%d neo4j_schema_ready=%s",
+                readiness["scanned"],
+                readiness["ready"],
+                readiness["failed"],
+                readiness["neo4j_schema_ready"],
+            )
+            if readiness["failed"]:
+                logger.warning(
+                    "Retrieval readiness repair failures: %s",
+                    readiness["reports"],
+                )
+        except Exception as exc:
+            logger.warning("Retrieval readiness repair sweep skipped: %s", exc)
 
     @property
     def neo4j_driver(self):
@@ -691,20 +691,28 @@ class IngestionService:
 
         await upsert_corpus(self._db, corpus_doc)
 
-        # Phase 7.5 — provision the 4 per-corpus Qdrant collections up front
-        # so the first ingest doesn't race with collection creation.
-        from services.storage.qdrant_writer import ensure_collections_for_corpus
+        # Provision per-corpus retrieval storage up front so the first ingest
+        # does not race collection/index creation. This uses the same readiness
+        # contract as startup repair and the ingest worker.
+        from services.retrieval_readiness import ensure_corpus_retrieval_ready
 
         try:
-            await ensure_collections_for_corpus(
-                self._qdrant,
-                corpus_doc["corpus_id"],
-                dim=self._settings.EMBEDDING_DIMENSION,
+            readiness = await ensure_corpus_retrieval_ready(
+                db=self._db,
+                qdrant_client=self._qdrant,
+                neo4j_driver=self._neo4j,
+                corpus_id=corpus_doc["corpus_id"],
+                corpus_doc=corpus_doc,
                 corpus_name=corpus_doc.get("name"),
+                ingestion_config=ingestion_config,
+                neo4j_enabled=self._settings.NEO4J_ENABLED,
+                default_dim=self._settings.EMBEDDING_DIMENSION,
             )
+            if not readiness.ok:
+                raise RuntimeError("; ".join(readiness.errors))
         except Exception as exc:
             logger.error(
-                "Failed to create Qdrant collections for corpus %s: %s",
+                "Failed to prepare retrieval storage for corpus %s: %s",
                 corpus_doc["corpus_id"],
                 exc,
             )

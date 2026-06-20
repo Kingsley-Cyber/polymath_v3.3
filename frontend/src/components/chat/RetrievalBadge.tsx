@@ -20,9 +20,9 @@ interface RetrievalBadgeProps {
 type BadgeState = "NO_RAG" | "RAG_EMPTY" | "RAG_GROUNDED";
 
 const TIER_LABELS: Record<string, string> = {
-  qdrant_only: "Vector Base",
-  qdrant_mongo: "Hybrid",
-  qdrant_mongo_graph: "Graph Augmented",
+  qdrant_only: "Fast Search",
+  qdrant_mongo: "Hybrid Search",
+  qdrant_mongo_graph: "Graph Augmentation",
 };
 
 const SPEED_LABELS: Record<string, string> = {

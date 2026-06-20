@@ -3,7 +3,7 @@
 This module deliberately uses plain heuristics instead of an LLM so the same
 query always produces the same retrieval mix. It controls child-vs-summary
 budgets and later ranking/diversity policy without adding any new data store
-to Vector Base or Hybrid.
+to Fast Search or Hybrid Search.
 """
 
 from __future__ import annotations

@@ -59,23 +59,23 @@ const RETRIEVAL_TIERS: Array<{
 }> = [
   {
     id: "qdrant_only",
-    label: "Vector Base",
-    short: "Vector",
+    label: "Fast Search",
+    short: "Fast",
     description: "Qdrant vectors only.",
     icon: Database,
   },
   {
     id: "qdrant_mongo",
-    label: "Hybrid",
+    label: "Hybrid Search",
     short: "Hybrid",
     description: "Vector + lexical + Mongo parent hydration.",
     icon: Boxes,
   },
   {
     id: "qdrant_mongo_graph",
-    label: "Graph Augmented",
+    label: "Graph Augmentation",
     short: "Graph",
-    description: "Hybrid retrieval with Neo4j fact and graph expansion.",
+    description: "Highest quality: Hybrid Search plus Neo4j facts, graph expansion, and final rerank.",
     icon: Network,
   },
 ];

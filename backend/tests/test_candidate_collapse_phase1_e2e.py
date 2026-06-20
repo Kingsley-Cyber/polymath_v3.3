@@ -7,8 +7,8 @@ ceiling + relative noise floor in select_with_diversity:
   2. kill the lexical-rescued junk tail — every NON-graph final chunk now
      scores at/above the pool-derived floor (no 0.176/0.215 fillers);
   3. keep document spread — unique_docs_final stays healthy;
-  4. do NOT regress Vector Base / Hybrid (both still return results; vector
-     base is strict top-k, untouched).
+  4. do NOT regress Fast Search / Hybrid Search (both still return results;
+     Fast Search now applies lightweight MMR without adding stores).
 
 Non-destructive (read-only retrieve). Run:
   docker cp services/retriever/ranking_policy.py polymath_v33-backend-1:/app/services/retriever/ranking_policy.py
@@ -92,7 +92,7 @@ async def main() -> None:
     for c in gchunks:
         print(f"    {float(c.score or 0.0):.4f}  {('GRAPH ' if _is_graph_expansion(c) else '      ')}{str(c.doc_id)[:36]}", flush=True)
 
-    # 4. no regression on Vector Base / Hybrid (both still return results)
+    # 4. no regression on Fast Search / Hybrid Search (both still return results)
     v = await _retrieve(RetrievalTier.qdrant_only)
     h = await _retrieve(RetrievalTier.qdrant_mongo)
     check("4a_vector_base_returns", len(v.chunks or []) > 0,

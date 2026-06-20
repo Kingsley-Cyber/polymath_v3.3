@@ -50,15 +50,15 @@ def test_per_doc_cap_for_is_intent_adaptive():
     assert _per_doc_cap_for(types.SimpleNamespace(need=QueryNeed.BROAD), 3) == 1
 
 
-def test_per_doc_cap_breaks_single_doc_domination():
+def test_same_doc_backfill_allowed_when_other_docs_below_relevance_floor():
     intent = infer_retrieval_intent("what is X and how does it relate to Y")
-    cap = _per_doc_cap_for(intent, 8)
     ranked = [_chunk(f"d{i}", score=0.95 - i * 0.01, parent_id=f"pD{i}", doc_id="DOM") for i in range(6)]
     ranked += [_chunk(f"o{j}", score=0.62 - j * 0.01, parent_id=f"pO{j}", doc_id=f"O{j}") for j in range(4)]
     res = select_with_diversity(ranked, final_top_k=8, intent=intent, tier=RetrievalTier.qdrant_mongo)
     counts = Counter(c.doc_id for c in res.candidates)
-    assert counts["DOM"] <= cap, counts            # the 6/9-from-one-book pathology
-    assert max(counts.values()) <= cap
+    assert counts["DOM"] > 0
+    assert all(doc == "DOM" for doc in counts), counts
+    assert all(float(c.score or 0.0) >= 0.85 * 0.95 for c in res.candidates)
 
 
 def test_relative_floor_drops_subfloor_nongraph_chunk():
@@ -81,7 +81,7 @@ def test_graph_chunk_exempt_from_floor():
     assert "g" in [c.chunk_id for c in res.candidates]   # reserved despite below floor
 
 
-def test_min_keep_never_strands_pool():
+def test_relevance_floor_can_return_fewer_than_final_k():
     intent = infer_retrieval_intent("define the term")
     ranked = [
         _chunk("top", score=0.90, doc_id="d1"),
@@ -89,16 +89,27 @@ def test_min_keep_never_strands_pool():
         _chunk("low2", score=0.04, doc_id="d3"),
     ]
     res = select_with_diversity(ranked, final_top_k=8, intent=intent, tier=RetrievalTier.qdrant_mongo)
-    assert len(res.candidates) >= min(8, 3)   # floor would leave 1; MIN_KEEP backfills to >=3
+    assert [c.chunk_id for c in res.candidates] == ["top"]
 
 
-def test_vector_base_unchanged_strict_topk():
+def test_fast_search_relevance_floor_can_return_less_than_final_k():
     intent = infer_retrieval_intent("summarize the themes")
     ranked = [_chunk(f"c{i}", score=0.9 - i * 0.1, doc_id="SAME") for i in range(4)]
     res = select_with_diversity(ranked, final_top_k=2, intent=intent, tier=RetrievalTier.qdrant_only)
-    # Vector base is strict top-k: no per-doc cap, no floor, no extras.
-    assert [c.chunk_id for c in res.candidates] == ["c0", "c1"]
+    # final_top_k is a cap; Fast Search does not stuff below-floor chunks.
+    assert [c.chunk_id for c in res.candidates] == ["c0"]
     assert res.added == 0
+
+
+def test_fast_search_mmr_prefers_distinct_vector_neighborhood_when_available():
+    intent = infer_retrieval_intent("summarize the themes")
+    ranked = [
+        _chunk("same-1", score=0.90, doc_id="SAME", parent_id="p1"),
+        _chunk("same-2", score=0.89, doc_id="SAME", parent_id="p2"),
+        _chunk("other", score=0.87, doc_id="OTHER", parent_id="p3"),
+    ]
+    res = select_with_diversity(ranked, final_top_k=2, intent=intent, tier=RetrievalTier.qdrant_only)
+    assert [c.chunk_id for c in res.candidates] == ["same-1", "other"]
 
 
 # ── Phase 2 — fusion normalization ────────────────────────────────────────

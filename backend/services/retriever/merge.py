@@ -1,9 +1,38 @@
 import logging
+from json import dumps
 from typing import List
 
 from models.schemas import SourceChunk
 
 logger = logging.getLogger(__name__)
+
+
+def _merge_source_tiers(*tiers: str | None) -> str:
+    parts: list[str] = []
+    seen: set[str] = set()
+    for tier in tiers:
+        for part in str(tier or "").split("+"):
+            cleaned = part.strip()
+            if not cleaned or cleaned in seen:
+                continue
+            seen.add(cleaned)
+            parts.append(cleaned)
+    return "+".join(parts) if parts else "unknown"
+
+
+def _merge_provenance(*groups: list[dict] | None) -> list[dict] | None:
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group or []:
+            if not isinstance(item, dict):
+                continue
+            key = dumps(item, sort_keys=True, default=str)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(dict(item))
+    return merged or None
 
 
 def merge_pools(*pools: List[SourceChunk]) -> List[SourceChunk]:
@@ -35,15 +64,29 @@ def merge_pools(*pools: List[SourceChunk]) -> List[SourceChunk]:
                 merged_dict[key] = chunk.model_copy()
             else:
                 existing_chunk = merged_dict[key]
+                merged_source_tier = _merge_source_tiers(
+                    existing_chunk.source_tier,
+                    chunk.source_tier,
+                )
+                merged_provenance = _merge_provenance(
+                    existing_chunk.provenance,
+                    chunk.provenance,
+                )
 
                 # Keep the maximum score among all child/summary hits for this parent
                 if chunk.score > existing_chunk.score:
-                    existing_chunk.score = chunk.score
-                    # Inherit the higher-scoring chunk's identity, but ensure
-                    # we don't lose the parent_id reference.
-                    existing_chunk.chunk_id = chunk.chunk_id
-                    existing_chunk.text = chunk.text
-                    existing_chunk.source_tier = chunk.source_tier
+                    # Inherit the higher-scoring chunk's identity/text, but keep
+                    # provenance from every retrieval lane that found this parent.
+                    replacement = chunk.model_copy()
+                    replacement.source_tier = merged_source_tier
+                    replacement.provenance = merged_provenance
+                    if existing_chunk.summary and not replacement.summary:
+                        replacement.summary = existing_chunk.summary
+                    merged_dict[key] = replacement
+                    existing_chunk = replacement
+                else:
+                    existing_chunk.source_tier = merged_source_tier
+                    existing_chunk.provenance = merged_provenance
 
                 # If we come across a summary, ensure the coalesced chunk retains the summary text
                 # (useful for Context Manager synthesis later).

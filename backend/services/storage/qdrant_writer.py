@@ -332,6 +332,50 @@ async def _create_payload_index_with_retry(
             await asyncio.sleep(0.5 * attempt)
 
 
+def _dense_vector_size(vectors_config) -> int | None:
+    """Return the dense vector size from either legacy or named-vector config."""
+    dense_config = vectors_config
+    if isinstance(vectors_config, dict):
+        dense_config = vectors_config.get("dense")
+        if dense_config is None and vectors_config:
+            dense_config = next(iter(vectors_config.values()))
+    size = getattr(dense_config, "size", None)
+    try:
+        return int(size) if size is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def _assert_collection_dimension(
+    client: AsyncQdrantClient,
+    *,
+    collection_name: str,
+    expected_dim: int,
+) -> None:
+    """Fail fast when an existing collection cannot serve this corpus.
+
+    Re-indexing is required after an embedding-dimension change. Silently
+    accepting a stale Qdrant collection makes ingestion appear successful while
+    query-time vector search returns errors or no hits.
+    """
+    try:
+        info = await client.get_collection(collection_name)
+        vectors_config = getattr(getattr(info.config, "params", None), "vectors", None)
+        actual_dim = _dense_vector_size(vectors_config)
+    except Exception as exc:
+        logger.warning("Could not inspect Qdrant collection %s: %s", collection_name, exc)
+        return
+    if actual_dim is None:
+        logger.warning("Could not determine Qdrant vector dimension for %s", collection_name)
+        return
+    if actual_dim != int(expected_dim):
+        raise RuntimeError(
+            f"Qdrant collection {collection_name!r} has vector dimension "
+            f"{actual_dim}, expected {expected_dim}. Re-index this corpus before "
+            "retrieval can be deterministic."
+        )
+
+
 async def _list_aliases_for_collection(
     client: AsyncQdrantClient, collection_name: str
 ) -> list[str]:
@@ -390,42 +434,53 @@ async def ensure_collections_for_corpus(
     for kind in chunk_kinds:
         name = _col_for_corpus(corpus_id, kind)
         if await client.collection_exists(name):
+            await _assert_collection_dimension(
+                client,
+                collection_name=name,
+                expected_dim=dim,
+            )
             logger.debug("Qdrant collection exists: %s", name)
-            continue
-
-        # Hybrid layout: named "dense" for the Qwen3 embedding + named
-        # "sparse" with server-side IDF for BM25. New corpora always get
-        # both; existing corpora (created before this change) keep their
-        # legacy unnamed-dense layout and the lexical retriever falls
-        # back to Mongo $text for those — see retriever/lexical.py.
-        await _create_collection_with_retry(
-            client,
-            collection_name=name,
-            vectors_config={"dense": VectorParams(size=dim, distance=Distance.COSINE)},
-            sparse_vectors_config={"sparse": SparseVectorParams(modifier=Modifier.IDF)},
-        )
+        else:
+            # Hybrid layout: named "dense" for the Qwen3 embedding + named
+            # "sparse" with server-side IDF for BM25. New corpora always get
+            # both; existing corpora (created before this change) keep their
+            # legacy unnamed-dense layout and the lexical retriever falls
+            # back to Mongo $text for those — see retriever/lexical.py.
+            await _create_collection_with_retry(
+                client,
+                collection_name=name,
+                vectors_config={"dense": VectorParams(size=dim, distance=Distance.COSINE)},
+                sparse_vectors_config={"sparse": SparseVectorParams(modifier=Modifier.IDF)},
+            )
         for field_name in _CHUNK_PAYLOAD_INDEXES:
             await _create_payload_index_with_retry(
                 client,
                 collection_name=name,
                 field_name=field_name,
             )
-        logger.info("Created Qdrant collection: %s (corpus %s) [hybrid]", name, corpus_id)
+        logger.info("Ensured Qdrant collection: %s (corpus %s) [hybrid]", name, corpus_id)
 
     schemas_name = _col_for_corpus(corpus_id, "schemas")
-    if not await client.collection_exists(schemas_name):
+    if await client.collection_exists(schemas_name):
+        await _assert_collection_dimension(
+            client,
+            collection_name=schemas_name,
+            expected_dim=dim,
+        )
+    else:
         await _create_collection_with_retry(
             client,
             collection_name=schemas_name,
             vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
         )
-        for field_name in _SCHEMA_PAYLOAD_INDEXES:
-            await _create_payload_index_with_retry(
-                client,
-                collection_name=schemas_name,
-                field_name=field_name,
-            )
         logger.info("Created Qdrant collection: %s (corpus %s)", schemas_name, corpus_id)
+    for field_name in _SCHEMA_PAYLOAD_INDEXES:
+        await _create_payload_index_with_retry(
+            client,
+            collection_name=schemas_name,
+            field_name=field_name,
+        )
+    logger.info("Ensured Qdrant collection: %s (corpus %s)", schemas_name, corpus_id)
 
     if corpus_name:
         await rename_corpus_aliases(client, corpus_id, corpus_name)

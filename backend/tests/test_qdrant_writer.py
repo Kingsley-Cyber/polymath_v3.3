@@ -1,4 +1,5 @@
 import hashlib
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -98,3 +99,52 @@ def test_payload_text_contract_marks_full_text_not_preview():
         "text_hash": hashlib.sha1(text.encode("utf-8")).hexdigest(),
         "is_truncated": False,
     }
+
+
+class _ExistingCollectionClient:
+    def __init__(self, *, dim: int = 1024) -> None:
+        self.dim = dim
+        self.created_indexes: list[tuple[str, str]] = []
+        self.created_collections: list[str] = []
+
+    async def collection_exists(self, collection_name: str) -> bool:
+        return True
+
+    async def get_collection(self, collection_name: str):
+        return SimpleNamespace(
+            config=SimpleNamespace(
+                params=SimpleNamespace(
+                    vectors={"dense": SimpleNamespace(size=self.dim)}
+                )
+            )
+        )
+
+    async def create_payload_index(self, **kwargs) -> None:
+        self.created_indexes.append((kwargs["collection_name"], kwargs["field_name"]))
+
+    async def create_collection(self, **kwargs) -> None:
+        self.created_collections.append(kwargs["collection_name"])
+
+
+@pytest.mark.asyncio
+async def test_existing_collections_still_get_payload_indexes_repaired():
+    client = _ExistingCollectionClient()
+
+    await qdrant_writer.ensure_collections_for_corpus(client, "abcdef123456", dim=1024)
+
+    assert client.created_collections == []
+    indexed_fields = {field for _collection, field in client.created_indexes}
+    assert {"corpus_id", "doc_id", "chunk_id", "parent_id"} <= indexed_fields
+    assert {"kind", "term"} <= indexed_fields
+
+
+@pytest.mark.asyncio
+async def test_existing_collection_dimension_mismatch_fails_loudly():
+    client = _ExistingCollectionClient(dim=768)
+
+    with pytest.raises(RuntimeError, match="vector dimension"):
+        await qdrant_writer.ensure_collections_for_corpus(
+            client,
+            "abcdef123456",
+            dim=1024,
+        )
