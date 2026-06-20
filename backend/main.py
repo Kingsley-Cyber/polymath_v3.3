@@ -142,6 +142,43 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error(f"Failed to initialize ingestion service: {e}")
         raise
 
+    # Embedder runtime-wiring self-check (NON-FATAL, ~8s budget). The embedder +
+    # reranker are reached via env that comes from the compose OVERRIDE
+    # (docker-compose.apple-mlx.yml / .override.yml). If the backend is recreated
+    # WITHOUT the override (e.g. `docker compose -f docker-compose.yml up backend`
+    # alone), EMBEDDER_URL silently reverts to the dead default `embedder:80` and
+    # vector/hybrid/graph retrieval returns nothing while health stays green.
+    # Probe a real embed at boot so a misw ired deploy SCREAMS in the logs with
+    # the fix instead of failing silently. See scripts/verify_backend_runtime.sh
+    # + CLAUDE.md. Never fatal — a transient embedder hiccup must not block boot.
+    try:
+        import asyncio as _asyncio
+        from services.embedder import embed_query as _embed_query
+
+        _dim = await _asyncio.wait_for(
+            _embed_query("polymath embedder self-check"), timeout=8.0
+        )
+        if _dim:
+            logger.info(
+                "Embedder self-check OK (EMBEDDER_URL=%s, dim=%d)",
+                settings.EMBEDDER_URL,
+                len(_dim),
+            )
+        else:
+            raise RuntimeError("embedder returned an empty vector")
+    except Exception as exc:  # noqa: BLE001 — diagnostics only, never fatal
+        logger.critical(
+            "EMBEDDER SELF-CHECK FAILED (EMBEDDER_URL=%s): %s. Vector/Hybrid/Graph "
+            "retrieval will return NO results while health stays green. The backend "
+            "was likely recreated WITHOUT the compose override — redeploy with "
+            "`docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml "
+            "up -d --build backend` (or `bash scripts/setup_apple_mlx.sh`), NEVER "
+            "`-f docker-compose.yml` alone, then run "
+            "scripts/verify_backend_runtime.sh.",
+            settings.EMBEDDER_URL,
+            exc,
+        )
+
     # Universal-schema migration: patch null/empty schemas (and coerce legacy
     # off/hard strict values) to the baked universal vocabulary. Idempotent.
     # FORCE_UNIVERSAL_SCHEMA=true overwrites every corpus.
