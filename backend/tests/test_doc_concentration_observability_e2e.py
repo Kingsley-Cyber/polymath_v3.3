@@ -83,9 +83,16 @@ async def main() -> None:
     check("2b_max_share_correct", got_share == exp_share,
           f"diag={got_share} recomputed={exp_share}")
 
-    # 3. candidate-collapse baseline captured on the graph tier for the real query
-    check("3_collapse_baseline_captured", float(got_share or 0.0) >= 0.5,
-          f"max_doc_share_final={got_share} (Denis 6/9≈0.667 expected) over {len(chunks)} final chunks / {got_unique} docs")
+    # 3. the metric is a valid share in [0,1], consistent with the final set
+    #    (the pre-Phase-1 baseline was ~0.667; Phase 1 drives it down, so this
+    #    asserts validity/exposure, not that the pathology persists).
+    valid_share = (
+        isinstance(got_share, (int, float))
+        and 0.0 <= float(got_share) <= 1.0
+        and (len(chunks) == 0 or float(got_share) > 0.0)
+    )
+    check("3_share_valid_and_consistent", valid_share,
+          f"max_doc_share_final={got_share} over {len(chunks)} final chunks / {got_unique} docs")
 
     # 4. trace renderer surfaces the metrics (previously dropped distinct_docs_* + new fields)
     trace = _format_retrieval_diagnostics_trace(

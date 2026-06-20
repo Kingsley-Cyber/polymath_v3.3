@@ -11,6 +11,26 @@ from services.retriever.query_grounding import (
     concept_groups,
 )
 
+# ── Phase 1: candidate-collapse hygiene ───────────────────────────────────
+# Intent-adaptive distinct-document breadth — a focused (SPECIFIC) query may
+# concentrate on a few authoritative sources; a broad/thematic one should fan
+# out. The per-document chunk ceiling is derived from this
+# (ceil(final_top_k / breadth), floored at 1), so no single document can
+# collapse the context window (the "6 of 9 chunks from one book" pathology).
+_DISTINCT_DOC_BREADTH: dict[QueryNeed, int] = {
+    QueryNeed.SPECIFIC: 4,
+    QueryNeed.BALANCED: 6,
+    QueryNeed.BROAD: 8,
+}
+# Relative (pool-derived) noise floor on the MAIN selection for hydrated tiers:
+# a non-graph chunk scoring below this fraction of the top score is the kind of
+# lexical-rescued junk (a ~0.02 cross-encoder chunk lifted to ~0.18 by the
+# query-grounding per-word bonus) the LLM should not see. Graph-provenance
+# chunks are exempt (their value is relational); MIN_KEEP never strands a pool.
+_MAIN_FLOOR_RATIO: float = 0.25
+_MAIN_ABS_FLOOR: float = 0.10
+_MAIN_MIN_KEEP: int = 3
+
 
 @dataclass(frozen=True)
 class DiversityResult:
@@ -253,6 +273,17 @@ def _passes_diversity_threshold(candidate: SourceChunk, top_score: float) -> boo
     return score >= top_score - 1.25
 
 
+def _per_doc_cap_for(intent: RetrievalIntent, final_top_k: int) -> int:
+    """Max chunks a single document may contribute to the final set.
+
+    Derived from intent-adaptive distinct-document breadth:
+    cap = ceil(final_top_k / breadth), floored at 1. final_top_k=8 →
+    SPECIFIC:2, BALANCED:2, BROAD:1.
+    """
+    breadth = max(1, int(_DISTINCT_DOC_BREADTH.get(intent.need, 6)))
+    return max(1, -(-int(final_top_k) // breadth))
+
+
 def select_with_diversity(
     ranked: list[SourceChunk],
     *,
@@ -264,77 +295,137 @@ def select_with_diversity(
     """Return final candidates plus up to two strong diverse extras.
 
     Diversity is only for hydrated tiers. Vector Base remains strict top-k so
-    its baseline behavior stays simple and easy to compare.
+    its baseline behavior stays simple and easy to compare. For hydrated tiers
+    the main selection enforces a per-document ceiling (anti candidate-collapse)
+    and a relative noise floor (kills the lexical-rescued junk tail); graph-
+    provenance chunks are exempt from the floor and governed by the graph
+    reservation, and a MIN_KEEP guard never strands the pool.
     """
     final_top_k = max(1, int(final_top_k))
-    selected = list(ranked[:final_top_k])
-    if tier == RetrievalTier.qdrant_only or len(ranked) <= final_top_k:
-        return DiversityResult(candidates=selected, added=0)
+
+    # Vector Base stays strict top-k for simple, comparable baseline behavior.
+    if tier == RetrievalTier.qdrant_only:
+        return DiversityResult(candidates=list(ranked[:final_top_k]), added=0)
+    if not ranked:
+        return DiversityResult(candidates=[], added=0)
+
+    per_doc_cap = _per_doc_cap_for(intent, final_top_k)
+    top_score = float(ranked[0].score or 0.0)
+    bounded = 0.0 <= top_score <= 1.0
+    rel_floor = (
+        max(_MAIN_ABS_FLOOR, top_score * _MAIN_FLOOR_RATIO) if bounded else 0.0
+    )
+
+    selected: list[SourceChunk] = []
+    doc_counts: dict[str, int] = {}
+    chosen_idx: set[int] = set()
+
+    def _doc_has_room(chunk: SourceChunk) -> bool:
+        doc = str(chunk.doc_id or "")
+        return (not doc) or doc_counts.get(doc, 0) < per_doc_cap
+
+    def _take(idx: int, chunk: SourceChunk) -> None:
+        selected.append(chunk)
+        chosen_idx.add(idx)
+        doc = str(chunk.doc_id or "")
+        if doc:
+            doc_counts[doc] = doc_counts.get(doc, 0) + 1
+
+    # Main selection: walk ranked best-first, skipping sub-floor non-graph junk
+    # and documents already at the per-doc ceiling — so a lower-ranked chunk
+    # from an under-represented document can take the slot a dominant document
+    # would otherwise have collapsed.
+    for idx, candidate in enumerate(ranked):
+        if len(selected) >= final_top_k:
+            break
+        if (
+            not _is_graph_expansion(candidate)
+            and bounded
+            and float(candidate.score or 0.0) < rel_floor
+        ):
+            continue
+        if not _doc_has_room(candidate):
+            continue
+        _take(idx, candidate)
+
+    # MIN_KEEP guard — if the cap/floor over-pruned, backfill the highest-ranked
+    # excluded chunks (ignoring cap/floor) so the answer is never starved.
+    min_keep = min(final_top_k, _MAIN_MIN_KEEP)
+    if len(selected) < min_keep:
+        for idx, candidate in enumerate(ranked):
+            if len(selected) >= min_keep:
+                break
+            if idx in chosen_idx:
+                continue
+            _take(idx, candidate)
 
     max_extra = 2 if (intent.need == QueryNeed.BROAD or multi_corpus) else 1
     if max_extra <= 0 or not selected:
         return DiversityResult(candidates=selected, added=0)
 
-    top_score = float(selected[0].score or 0.0)
     selected_identities = {_candidate_identity(chunk) for chunk in selected}
     selected_parents = {chunk.parent_id or chunk.chunk_id for chunk in selected}
-
     added = 0
 
     # Graph tier: the cross-encoder ranks pure text similarity, which
     # systematically demotes graph-expanded neighbors (their value is the
-    # relationship, not lexical overlap with the query). Without a carve-out the
-    # expensive expansion is reranked away and the tier collapses toward Hybrid.
-    # Reserve a small, dedicated number of extra slots for graph-provenance
-    # chunks — only as many as are MISSING from the natural top-k — so the
-    # graph context actually reaches the LLM. This runs first and uses its own
-    # budget (separate from max_extra) so it cannot be crowded out.
+    # relationship, not lexical overlap). Reserve a small dedicated budget for
+    # graph-provenance chunks MISSING from the natural top-k so graph context
+    # reaches the LLM — exempt from the per-doc ceiling, since surfacing the
+    # relation is the whole point of the tier.
     if tier == RetrievalTier.qdrant_mongo_graph:
         graph_reserve = 2 if intent.need == QueryNeed.BROAD else 1
         graph_in_topk = sum(1 for c in selected if _is_graph_expansion(c))
         graph_need = max(0, graph_reserve - graph_in_topk)
-        for candidate in ranked[final_top_k:]:
+        for idx, candidate in enumerate(ranked):
             if graph_need <= 0:
                 break
-            if not _is_graph_expansion(candidate):
+            if idx in chosen_idx or not _is_graph_expansion(candidate):
                 continue
             identity = _candidate_identity(candidate)
             parent_key = candidate.parent_id or candidate.chunk_id
             if identity in selected_identities or parent_key in selected_parents:
                 continue
             selected.append(candidate)
+            chosen_idx.add(idx)
             selected_identities.add(identity)
             selected_parents.add(parent_key)
             graph_need -= 1
             added += 1
 
-    # Source-constrained queries can produce high-confidence document-anchor
-    # candidates that cross-encoders still demote because the candidate text is
-    # narrow. Let at most two through when the document-title match was strong.
-    for candidate in ranked[final_top_k:]:
+    # Confident document-anchor extras — narrow but high-confidence title hits
+    # the cross-encoder demotes. Respect the per-doc ceiling.
+    for idx, candidate in enumerate(ranked):
         if added >= max_extra:
             break
-        if not _is_confident_document_anchor(candidate):
+        if idx in chosen_idx or not _is_confident_document_anchor(candidate):
             continue
         identity = _candidate_identity(candidate)
         parent_key = candidate.parent_id or candidate.chunk_id
         if identity in selected_identities or parent_key in selected_parents:
             continue
-        selected.append(candidate)
+        if not _doc_has_room(candidate):
+            continue
+        _take(idx, candidate)
         selected_identities.add(identity)
         selected_parents.add(parent_key)
         added += 1
 
-    for candidate in ranked[final_top_k:]:
+    # Strong diverse extras — respect the per-doc ceiling.
+    for idx, candidate in enumerate(ranked):
         if added >= max_extra:
             break
+        if idx in chosen_idx:
+            continue
         identity = _candidate_identity(candidate)
         parent_key = candidate.parent_id or candidate.chunk_id
         if identity in selected_identities or parent_key in selected_parents:
             continue
         if not _passes_diversity_threshold(candidate, top_score):
             continue
-        selected.append(candidate)
+        if not _doc_has_room(candidate):
+            continue
+        _take(idx, candidate)
         selected_identities.add(identity)
         selected_parents.add(parent_key)
         added += 1
