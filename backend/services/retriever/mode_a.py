@@ -98,6 +98,43 @@ class ModeAExpansion:
                     existing.score = min(1.0, existing.score + c.score)
                     if c.provenance:
                         existing.provenance = (existing.provenance or []) + c.provenance
+
+        # NOISY_KINDS filter — Neo4j Chunk nodes carry NO chunk_kind (props only
+        # doc_id/chunk_id/corpus_id), so co-mention noise (bibliography/index/toc
+        # reference-list chunks) can't be filtered in-Cypher the way the lexical
+        # lane does. ONE batched Mongo lookup over the merged union of all 3
+        # lanes asks for the small NOISY set to drop. Chunks missing chunk_kind
+        # never match $in -> kept (same legacy invariant as the lexical lane).
+        # db=None -> no-op; any Mongo error -> unfiltered (degrades to prior
+        # behavior), never raises. Runs BEFORE the [:limit] cap so the cap
+        # applies to the cleaned set.
+        if db is not None and merged:
+            try:
+                from services.ingestion.section_classifier import NOISY_KINDS
+
+                noisy_ids = {
+                    str(doc["chunk_id"])
+                    async for doc in db["chunks"].find(
+                        {
+                            "chunk_id": {"$in": list(merged.keys())},
+                            "chunk_kind": {"$in": list(NOISY_KINDS)},
+                        },
+                        {"_id": 0, "chunk_id": 1},
+                    )
+                }
+                for _nid in noisy_ids:
+                    merged.pop(_nid, None)
+                if noisy_ids:
+                    logger.info(
+                        "Mode A NOISY_KINDS filter: dropped %d co-mention chunk(s)",
+                        len(noisy_ids),
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Mode A NOISY_KINDS filter skipped (%s) — returning unfiltered",
+                    exc,
+                )
+
         expanded = sorted(merged.values(), key=lambda c: c.score, reverse=True)[:limit]
         logger.info(
             "Mode A expansion: %d unique chunks (mentions=%d, calls=%d, "

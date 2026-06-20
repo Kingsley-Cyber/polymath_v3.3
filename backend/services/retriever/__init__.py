@@ -458,6 +458,26 @@ class RetrieverOrchestrator:
             entity_ids: list[str] = []
             seen_entities: set[str] = set()
             seen_ids: set[str] = set()
+
+            # Query-relevance + junk gates for seed entities. Without these the
+            # most-MENTIONED entity wins regardless of the query — on a citation-
+            # heavy corpus that is a conference entity (e.g. "association for
+            # computational linguistics"), flooding <key_facts> with useless
+            # conference-year facts. Reuse the GERG generic-token exclusion so a
+            # seed must hit a real query concept (not bare 'model'/'data'/...).
+            from services.retriever.query_grounding import (
+                concept_groups,
+                group_matches_text,
+            )
+            from services.retriever.graph_decoration import _GENERIC_QUERY_CONCEPTS
+            from services.graph.entity_cleaning import is_junk_entity_name
+
+            _groups = concept_groups(query or "")
+            _non_generic = [
+                g for g in _groups
+                if getattr(g, "key", "") not in _GENERIC_QUERY_CONCEPTS
+            ]
+
             for cid in corpus_ids[:3]:
                 try:
                     rows = await extract_query_entities(
@@ -478,8 +498,20 @@ class RetrieverOrchestrator:
                 for row in rows:
                     name = str(row.get("display_name") or "").strip()
                     eid = str(row.get("entity_id") or "").strip()
+                    if not name:
+                        continue
+                    # Junk-name gate (catches "[12]", "page 3", single letters).
+                    if is_junk_entity_name(name):
+                        continue
+                    # Query-relevance gate — drops the off-topic high-mention
+                    # entity (the ACL conference). Over-prune guard: a purely
+                    # generic query (no anchor concept) keeps frequency order.
+                    if _non_generic and not any(
+                        group_matches_text(g, name) for g in _non_generic
+                    ):
+                        continue
                     key = name.lower()
-                    if name and key not in seen_entities:
+                    if key not in seen_entities:
                         entity_names.append(name)
                         seen_entities.add(key)
                     if eid and eid not in seen_ids:
