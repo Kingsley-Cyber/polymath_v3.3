@@ -19,6 +19,7 @@ type routing.
 from __future__ import annotations
 
 import logging
+import math
 from typing import List, Optional
 
 from config import get_settings
@@ -72,13 +73,69 @@ class FactRetrieval:
         entity_names_lc = [n for n in entity_names_lc if n]
         if not ids and not entity_names_lc:
             return []
+        per_entity_limit = (
+            max(1, math.ceil(max(1, int(limit)) / max(1, len(ids))))
+            if ids
+            else max(1, int(limit))
+        )
+
+        semantic_rank_expr = """
+            CASE
+              WHEN f.fact_type = 'property'
+                   AND toLower(coalesce(f.property_name, '')) IN [
+                     'definition', 'language', 'classification', 'category',
+                     'capability', 'focus', 'purpose', 'role', 'used_for',
+                     'primary_mechanism', 'learning_method', 'limitation'
+                   ] THEN 5
+              WHEN f.fact_type = 'property' THEN 4
+              WHEN f.fact_type IN ['category', 'status'] THEN 3
+              WHEN f.fact_type IN ['rule_condition', 'rule_action'] THEN 2
+              WHEN f.fact_type IN ['quantity', 'timestamp', 'threshold'] THEN 1
+              ELSE 0
+            END
+        """
 
         # Indexed fast path: match by entity_id (the :Entity(entity_id)
-        # constraint index) when the resolver gave us ids. The surface-name
-        # fallback below cannot use the name indexes (the toLower() wrapper
-        # forces a full Entity-label scan), so it stays gated behind the id path.
+        # constraint index) when the resolver gave us ids. Balance the budget
+        # across resolved anchors so a broad/high-confidence entity cannot
+        # crowd out the other query concepts, and sort semantic facts above
+        # numeric/timestamp/threshold facts before applying the per-entity cap.
         if ids:
-            where_clause = "WHERE e.entity_id IN $entity_ids"
+            cypher = f"""
+            UNWIND $entity_ids AS entity_id
+            MATCH (e:Entity {{entity_id: entity_id}})-[:HAS_FACT]->(f:Fact)
+            WHERE ($corpus_ids = [] OR f.corpus_id IN $corpus_ids)
+            """
+            if fact_types:
+                cypher += "  AND f.fact_type IN $fact_types\n"
+            cypher += f"""
+            WITH entity_id, e, f, {semantic_rank_expr} AS semantic_rank
+            ORDER BY entity_id, semantic_rank DESC, coalesce(f.confidence, 0.0) DESC, f.fact_id ASC
+            WITH entity_id, collect({{
+                entity: e,
+                fact: f,
+                semantic_rank: semantic_rank
+            }})[0..$per_entity_limit] AS ranked_facts
+            UNWIND ranked_facts AS ranked
+            WITH ranked.entity AS e, ranked.fact AS f, ranked.semantic_rank AS semantic_rank
+            OPTIONAL MATCH (f)<-[:SUPPORTS_FACT]-(c:Chunk)
+            RETURN
+                f.fact_id         AS fact_id,
+                f.subject         AS subject,
+                f.fact_type       AS fact_type,
+                f.property_name   AS property_name,
+                f.value           AS value,
+                f.unit            AS unit,
+                f.condition       AS condition,
+                f.confidence      AS confidence,
+                f.evidence_phrase AS evidence_phrase,
+                c.chunk_id        AS chunk_id,
+                f.doc_id          AS doc_id,
+                f.corpus_id       AS corpus_id,
+                semantic_rank     AS semantic_rank
+            ORDER BY semantic_rank DESC, coalesce(f.confidence, 0.0) DESC, f.fact_id ASC
+            LIMIT $limit
+            """
         else:
             where_clause = (
                 "WHERE (\n"
@@ -87,32 +144,34 @@ class FactRetrieval:
                 "   OR toLower(coalesce(e.normalized_name, '')) IN $entity_names_lc\n"
                 "        )"
             )
-        cypher = f"""
-        MATCH (e:Entity)-[:HAS_FACT]->(f:Fact)
-        {where_clause}
-        """
-        if corpus_ids:
-            cypher += "  AND f.corpus_id IN $corpus_ids\n"
-        if fact_types:
-            cypher += "  AND f.fact_type IN $fact_types\n"
-        cypher += "        OPTIONAL MATCH (f)<-[:SUPPORTS_FACT]-(c:Chunk)\n"
-        cypher += """
-        RETURN
-            f.fact_id         AS fact_id,
-            f.subject         AS subject,
-            f.fact_type       AS fact_type,
-            f.property_name   AS property_name,
-            f.value           AS value,
-            f.unit            AS unit,
-            f.condition       AS condition,
-            f.confidence      AS confidence,
-            f.evidence_phrase AS evidence_phrase,
-            c.chunk_id        AS chunk_id,
-            f.doc_id          AS doc_id,
-            f.corpus_id       AS corpus_id
-        ORDER BY f.confidence DESC
-        LIMIT $limit
-        """
+            cypher = f"""
+            MATCH (e:Entity)-[:HAS_FACT]->(f:Fact)
+            {where_clause}
+            """
+            if corpus_ids:
+                cypher += "  AND f.corpus_id IN $corpus_ids\n"
+            if fact_types:
+                cypher += "  AND f.fact_type IN $fact_types\n"
+            cypher += "        OPTIONAL MATCH (f)<-[:SUPPORTS_FACT]-(c:Chunk)\n"
+            cypher += f"""
+            WITH f, c, {semantic_rank_expr} AS semantic_rank
+            RETURN
+                f.fact_id         AS fact_id,
+                f.subject         AS subject,
+                f.fact_type       AS fact_type,
+                f.property_name   AS property_name,
+                f.value           AS value,
+                f.unit            AS unit,
+                f.condition       AS condition,
+                f.confidence      AS confidence,
+                f.evidence_phrase AS evidence_phrase,
+                c.chunk_id        AS chunk_id,
+                f.doc_id          AS doc_id,
+                f.corpus_id       AS corpus_id,
+                semantic_rank     AS semantic_rank
+            ORDER BY semantic_rank DESC, coalesce(f.confidence, 0.0) DESC, f.fact_id ASC
+            LIMIT $limit
+            """
 
         try:
             async with self._driver.session() as session:
@@ -123,6 +182,7 @@ class FactRetrieval:
                     corpus_ids=corpus_ids or [],
                     fact_types=fact_types or [],
                     limit=limit,
+                    per_entity_limit=per_entity_limit,
                 )
                 rows = [dict(r) async for r in result]
 
