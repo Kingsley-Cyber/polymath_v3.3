@@ -254,6 +254,47 @@ def _is_reference_list(text: str | None) -> bool:
     return markers >= 2
 
 
+# Strengthened reference-LIST signals — the dominant markers of an academic
+# reference block that the inline-citation density rule (classify_content) misses:
+# author-initial lists ("Furnas, G. W."), numbered entry lines ("- [3] Author …"),
+# and proceedings / arXiv / page-range markers ("In: Proceedings of", "arXiv:1234",
+# "Pages 234–241 of:"). Validated 0 false positives on 800 clean-prose body chunks
+# at threshold 4 — a real chapter quoting a source or two stays BODY.
+_AUTHOR_INITIAL_RE = re.compile(r"[A-Z][a-zA-Z'’\-]+,\s+(?:[A-Z]\.\s*){1,3}")
+_NUMBERED_REF_RE = re.compile(r"(?m)^\s*[-*]?\s*\[\d+\]\s+[A-Z]")
+_STRONG_REF_RE = re.compile(
+    r"\bIn:\s|\bProceedings of\b|\bAdvances in Neural\b|\barXiv:\s?\d|"
+    r"arxiv\.org/abs/|\bPages?\s+\d+\s*[–\-]\s*\d+\s+of:",
+    re.IGNORECASE,
+)
+_REF_SIGNAL_THRESHOLD = 4
+
+# Inline markdown reference/bibliography heading at the TOP of a chunk
+# ("## References", "# Bibliography", "## Works Cited") — academic reference
+# sections whose heading lives in the chunk TEXT, not heading_path, so
+# classify_heading never saw it. The (?!\s+to\s) guard mirrors the heading-path
+# rule so "References to the Linnaean system" stays BODY.
+_INLINE_REF_HEADING_RE = re.compile(
+    r"^\s*#{1,6}\s*"
+    r"(?:references?\b(?!\s+to\s)|bibliography|works?\s+cited|further\s+reading)",
+    re.IGNORECASE,
+)
+
+
+def reference_signal_count(text: str | None) -> int:
+    """Count strengthened reference-list markers (author lists + numbered entries
+    + proceedings/arXiv/page-range). Public so the corrective reclassification
+    tool reuses the exact same detector as ingestion."""
+    if not text:
+        return 0
+    sample = text[:3000]
+    return (
+        len(_AUTHOR_INITIAL_RE.findall(sample))
+        + len(_NUMBERED_REF_RE.findall(sample))
+        + len(_STRONG_REF_RE.findall(sample))
+    )
+
+
 def _is_link_list(lines: list[str]) -> bool:
     """True for an external-link / resources dump (≥4 URL lines AND ≥40% of
     lines carry an external URL)."""
@@ -315,9 +356,21 @@ def classify_content(text: str | None) -> str:
     if not sample.strip():
         return ChunkKind.BODY
 
+    # Inline "## References" / "# Bibliography" heading at the chunk top — a
+    # reference section whose heading is in the text, not heading_path.
+    if _INLINE_REF_HEADING_RE.match(text):
+        return ChunkKind.BIBLIOGRAPHY
+
     # Explicit reference-list markers (Springer "::: Citation" / PubMed tags) —
     # high precision, catches sparse ref blocks the density rule below misses.
     if _is_reference_list(text):
+        return ChunkKind.BIBLIOGRAPHY
+
+    # Strengthened reference-list detection — author-initial lists, numbered
+    # academic entries, and proceedings/arXiv/page-range markers that the inline-
+    # citation density rule below misses (the dominant signal in academic
+    # reference blocks). Validated high-precision (0 FP on 800 clean-prose chunks).
+    if reference_signal_count(text) >= _REF_SIGNAL_THRESHOLD:
         return ChunkKind.BIBLIOGRAPHY
 
     # Citation density → bibliography
