@@ -104,4 +104,9 @@ async def main() -> None:
     sys.exit(1 if _fail else 0)
 
 
-asyncio.run(main())
+# Import-safe: only runs as a script (docker exec), never at pytest collection.
+if __name__ == "__main__":
+    import os as _os
+    _sys = __import__("sys")
+    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    asyncio.run(main())

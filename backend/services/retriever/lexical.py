@@ -88,6 +88,22 @@ def _regex_score(query: str, terms: list[str], row: dict[str, Any]) -> float:
     return round(min(0.98, 0.45 + coverage * 0.35 + phrase + heading_boost), 4)
 
 
+def _normalize_scores_to_unit(chunks: list[SourceChunk]) -> None:
+    """Scale chunk scores into [0,1] in place by dividing by the pool max.
+
+    Parity with the Mongo $text path (_text_search divides by its max). Raw
+    Qdrant sparse BM25 scores run ~100-140; left unscaled, the lexical lane
+    dominates merge_pools' max()+sort and the pre-rerank cut, starving dense +
+    graph candidates before the cross-encoder. Pure, dependency-free, and safe
+    on empty/None/zero pools — unit-tested without any live service.
+    """
+    if not chunks:
+        return
+    max_score = max(float(c.score or 0.0) for c in chunks) or 1.0
+    for c in chunks:
+        c.score = round(float(c.score or 0.0) / max_score, 4)
+
+
 class LexicalRetriever:
     """BM25 lexical search. Routes to Qdrant sparse for new corpora,
     Mongo $text for legacy corpora — based on per-collection layout."""
@@ -417,16 +433,9 @@ class LexicalRetriever:
                     )
                 )
         # Normalize raw BM25/IDF scores to [0,1] for parity with the Mongo
-        # $text path (_text_search divides by its max). Raw Qdrant sparse scores
-        # run ~100-140 while dense cosine is ~0.9 and graph is [0,1]; left raw,
-        # the lexical lane categorically dominates merge_pools' max()+sort and
-        # the pre-rerank cut, starving good dense/graph candidates before the
-        # cross-encoder ever sees them. Divide-by-max makes the lanes
-        # commensurable; the cross-encoder remains the final arbiter.
-        if all_hits:
-            max_score = max(float(h.score or 0.0) for h in all_hits) or 1.0
-            for h in all_hits:
-                h.score = round(float(h.score or 0.0) / max_score, 4)
+        # $text path, so the lexical lane is commensurable with dense cosine +
+        # graph scores at merge_pools (the cross-encoder remains final arbiter).
+        _normalize_scores_to_unit(all_hits)
         return all_hits
 
     async def _text_search(
