@@ -49,7 +49,7 @@ from services.query_model_resolver import (
 )
 from services.settings import settings_service
 from utils.streaming import build_sse_chunk
-from utils.tokens import count_tokens
+from utils.tokens import count_tokens, get_model_context_limit
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -68,6 +68,7 @@ _CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS = 4
 _CHAT_COVERAGE_THRESHOLD = 4
 _CHAT_COVERAGE_WEAK_THRESHOLD = 2
 _CHAT_COVERAGE_SOURCE_CAP = 8
+_PROMPT_COMPACTION_SOURCE_CHAR_STEPS = (1400, 950, 650, 450, 320)
 # Max chunks any single document may contribute to the final context.
 # 0 = DISABLED (uncapped). Reverted 2026-06-19: this hard cap was a band-aid for
 # duplicate-driven over-concentration (the same book ingested twice as PDF + MD).
@@ -1286,6 +1287,200 @@ def _cap_chunks_per_doc(
             counts[doc_id] = counts.get(doc_id, 0) + 1
         kept.append(source)
     return kept
+
+
+def _query_terms_for_prompt_clip(query: str) -> list[str]:
+    terms: list[str] = []
+    for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9_\-]{1,}", query or ""):
+        term = token.lower().strip()
+        if not term:
+            continue
+        if len(term) <= 2 and term not in {"ai", "ml"}:
+            continue
+        if term not in terms:
+            terms.append(term)
+    return terms[:12]
+
+
+def _clip_source_text_for_prompt(text: str, query: str, max_chars: int) -> str:
+    text = str(text or "")
+    max_chars = max(120, int(max_chars or 0))
+    if len(text) <= max_chars:
+        return text
+
+    text_low = text.lower()
+    positions = [
+        pos
+        for term in _query_terms_for_prompt_clip(query)
+        if (pos := text_low.find(term)) >= 0
+    ]
+    if positions:
+        center = min(positions)
+        start = max(0, center - (max_chars // 3))
+        end = min(len(text), start + max_chars)
+        start = max(0, end - max_chars)
+        prefix = "[...source excerpt clipped before this point...]\n" if start > 0 else ""
+        suffix = "\n[...source excerpt clipped after this point...]" if end < len(text) else ""
+        return f"{prefix}{text[start:end].strip()}{suffix}"
+
+    return (
+        text[:max_chars].rstrip()
+        + "\n[...source excerpt clipped after this point...]"
+    )
+
+
+def _copy_source_for_prompt(source: SourceChunk, *, text: str) -> SourceChunk:
+    if hasattr(source, "model_copy"):
+        return source.model_copy(update={"text": text})
+    data = source.model_dump() if hasattr(source, "model_dump") else dict(source)
+    data["text"] = text
+    return SourceChunk(**data)
+
+
+def _compact_sources_for_prompt(
+    sources: list[SourceChunk],
+    *,
+    query: str,
+    source_max_chars: int | None,
+) -> list[SourceChunk]:
+    if source_max_chars is None:
+        return list(sources or [])
+    return [
+        _copy_source_for_prompt(
+            source,
+            text=_clip_source_text_for_prompt(source.text or "", query, source_max_chars),
+        )
+        for source in (sources or [])
+    ]
+
+
+def _build_budgeted_augmented_prompt(
+    *,
+    query: str,
+    sources: list[SourceChunk],
+    facts: list[Any],
+    corpus_ids: list[str] | None,
+    reasoning_mode: str | None,
+    reasoning_blend: list[str] | None,
+    active_skills: list[dict] | None,
+    analysis: str | None,
+    decoration: list[Any],
+    model: str,
+) -> tuple[str, dict[str, Any]]:
+    """Build the current RAG turn and compact it before history trimming.
+
+    History trimming can remove older turns, but it must keep the current user
+    message. A single RAG-heavy turn therefore needs its own deterministic
+    compaction path instead of merely logging that it is over budget.
+    """
+    raw_budget = get_model_context_limit(model) - int(
+        getattr(settings, "RESERVE_TOKENS", 500) or 0
+    )
+    budget_tokens = max(512, raw_budget)
+
+    def _build(
+        *,
+        source_chars: int | None,
+        fact_limit: int | None,
+        decoration_limit: int | None,
+        use_analysis: bool,
+    ) -> tuple[str, int, dict[str, Any]]:
+        prompt_sources = _compact_sources_for_prompt(
+            sources,
+            query=query,
+            source_max_chars=source_chars,
+        )
+        prompt_facts = list(facts or [])
+        if fact_limit is not None:
+            prompt_facts = prompt_facts[: max(0, fact_limit)]
+        prompt_decoration = list(decoration or [])
+        if decoration_limit is not None:
+            prompt_decoration = prompt_decoration[: max(0, decoration_limit)]
+
+        prompt = context_manager.build_augmented_prompt(
+            query=query,
+            sources=prompt_sources,
+            facts=prompt_facts,
+            corpus_ids=corpus_ids,
+            reasoning_mode=reasoning_mode,
+            reasoning_blend=reasoning_blend,
+            active_skills=active_skills or None,
+            analysis=analysis if use_analysis else None,
+            decoration=prompt_decoration,
+        )
+        return prompt, count_tokens(prompt, model), {
+            "source_chars": source_chars,
+            "facts": len(prompt_facts),
+            "decorations": len(prompt_decoration),
+            "analysis": bool(analysis and use_analysis),
+        }
+
+    full_prompt, full_tokens, full_shape = _build(
+        source_chars=None,
+        fact_limit=None,
+        decoration_limit=None,
+        use_analysis=True,
+    )
+    if full_tokens <= budget_tokens:
+        return full_prompt, {
+            "compacted": False,
+            "budget_tokens": budget_tokens,
+            "before_tokens": full_tokens,
+            "after_tokens": full_tokens,
+            "shape": full_shape,
+        }
+
+    best_prompt = full_prompt
+    best_tokens = full_tokens
+    best_shape = full_shape
+    variants: list[tuple[int | None, int | None, int | None, bool]] = []
+    for index, source_chars in enumerate(_PROMPT_COMPACTION_SOURCE_CHAR_STEPS):
+        variants.append(
+            (
+                source_chars,
+                max(4, min(len(facts or []), 12 - index * 2)),
+                max(0, min(len(decoration or []), 16 - index * 3)),
+                index < 3,
+            )
+        )
+    variants.append((220, min(len(facts or []), 4), 0, False))
+
+    for source_chars, fact_limit, decoration_limit, use_analysis in variants:
+        candidate_prompt, candidate_tokens, candidate_shape = _build(
+            source_chars=source_chars,
+            fact_limit=fact_limit,
+            decoration_limit=decoration_limit,
+            use_analysis=use_analysis,
+        )
+        best_prompt = candidate_prompt
+        best_tokens = candidate_tokens
+        best_shape = candidate_shape
+        if candidate_tokens <= budget_tokens:
+            break
+
+    hard_clipped = False
+    while best_tokens > budget_tokens and len(best_prompt) > 1000:
+        hard_clipped = True
+        ratio = max(0.2, min(0.9, budget_tokens / max(best_tokens, 1)))
+        max_chars = max(800, int(len(best_prompt) * ratio * 0.9))
+        best_prompt = (
+            best_prompt[:max_chars].rstrip()
+            + "\n\n[...current-turn RAG prompt clipped to fit model context budget...]"
+        )
+        best_tokens = count_tokens(best_prompt, model)
+
+    return best_prompt, {
+        "compacted": True,
+        "budget_tokens": budget_tokens,
+        "before_tokens": full_tokens,
+        "after_tokens": best_tokens,
+        "shape": best_shape,
+        "source_chunks": len(sources or []),
+        "facts_before": len(facts or []),
+        "decorations_before": len(decoration or []),
+        "hard_clipped": hard_clipped,
+        "over_budget_after_compaction": best_tokens > budget_tokens,
+    }
 
 
 async def _drop_noisy_retrieval_chunks(chunks: list[Any]) -> list[Any]:
@@ -4780,8 +4975,9 @@ class ChatOrchestrator:
                 else attachments_block
             )
 
+        prompt_budget_meta: dict[str, Any] = {}
         if sources or facts or active_skills_dicts or analysis_text:
-            user_message.content = context_manager.build_augmented_prompt(
+            user_message.content, prompt_budget_meta = _build_budgeted_augmented_prompt(
                 query=user_message.content,
                 sources=sources,
                 facts=facts,
@@ -4791,7 +4987,34 @@ class ChatOrchestrator:
                 active_skills=active_skills_dicts or None,
                 analysis=analysis_text,
                 decoration=inline_decoration,
+                model=model_used,
             )
+            user_message.token_count = count_tokens(user_message.content, model_used)
+            if prompt_budget_meta.get("compacted"):
+                warning = (
+                    "SYSTEM_WARN: Current RAG context compacted before model call "
+                    f"({prompt_budget_meta.get('before_tokens')} -> "
+                    f"{prompt_budget_meta.get('after_tokens')} tokens; "
+                    f"budget={prompt_budget_meta.get('budget_tokens')})."
+                )
+                logger.warning(
+                    "%s shape=%s hard_clipped=%s over_budget=%s",
+                    warning,
+                    prompt_budget_meta.get("shape"),
+                    prompt_budget_meta.get("hard_clipped"),
+                    prompt_budget_meta.get("over_budget_after_compaction"),
+                )
+                yield _record_trace_event(
+                    lane="planning",
+                    title="Context Budget",
+                    status=(
+                        "warning"
+                        if prompt_budget_meta.get("over_budget_after_compaction")
+                        else "done"
+                    ),
+                    content=warning,
+                    metadata=prompt_budget_meta,
+                )
 
         # Step 4: Prepare messages for context
         messages_for_context = existing_messages + [user_message]
@@ -4804,6 +5027,20 @@ class ChatOrchestrator:
             tokens_used_post_trim,
             tokens_max,
         ) = await self._trim_history(messages_for_context, model_used)
+        prompt_compacted = bool(prompt_budget_meta.get("compacted"))
+        effective_trimming_applied = bool(trimming_applied or prompt_compacted)
+        if prompt_compacted:
+            prompt_compaction_details = (
+                "Current RAG context compacted before model call: "
+                f"{prompt_budget_meta.get('before_tokens')} -> "
+                f"{prompt_budget_meta.get('after_tokens')} tokens "
+                f"(budget {prompt_budget_meta.get('budget_tokens')})."
+            )
+            trimming_details = (
+                f"{prompt_compaction_details} {trimming_details}"
+                if trimming_applied
+                else prompt_compaction_details
+            )
 
         # Always emit a budget frame so the UI can render "X / Y tokens"
         yield build_sse_chunk(
@@ -4812,12 +5049,12 @@ class ChatOrchestrator:
                 conversation_id=str(conversation_id),
                 tokens_used=tokens_used_post_trim,
                 tokens_max=tokens_max,
-                trimming_applied=trimming_applied,
+                trimming_applied=effective_trimming_applied,
             )
         )
 
-        # Send trimming notification if history was trimmed
-        if trimming_applied:
+        # Send trimming notification if history or the current RAG prompt was compacted.
+        if effective_trimming_applied:
             yield build_sse_chunk(
                 ChatChunk(
                     type="trimming",
@@ -5793,7 +6030,7 @@ class ChatOrchestrator:
                 assistant_content,
                 thinking_to_save,
                 model_used,
-                trimming_applied,
+                effective_trimming_applied,
                 chunks_returned=chunks_returned,
                 facts_seeded=facts_seeded,
                 strategy_used=strategy_used,

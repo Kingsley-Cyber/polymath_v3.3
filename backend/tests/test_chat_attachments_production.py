@@ -317,11 +317,12 @@ def test_injection_order_is_locked_in_source():
     attachment_anchor = (
         "inline text-file attachments into the user message"
     )
-    augment_anchor = "context_manager.build_augmented_prompt"
+    augment_anchor = "_build_budgeted_augmented_prompt("
     att_pos = source.find(attachment_anchor)
     aug_pos = source.find(augment_anchor)
     assert att_pos != -1, "attachment anchor missing — implementation changed"
-    assert aug_pos != -1, "build_augmented_prompt anchor missing"
+    aug_pos = source.find(augment_anchor, att_pos)
+    assert aug_pos != -1, "build_augmented_prompt call after attachment block missing"
     assert att_pos < aug_pos, (
         "Text-attachment inlining MUST run BEFORE build_augmented_prompt. "
         "If you moved the augmentation call, also move the attachment "

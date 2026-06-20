@@ -11,6 +11,7 @@ from services.chat_orchestrator import (
     _available_tool_schemas,
     _annotate_web_evidence_scores,
     _build_backend_retry_query,
+    _build_budgeted_augmented_prompt,
     _cap_web_sources_for_turn,
     _classify_web_evidence_sufficiency,
     _dedupe_sources_for_context,
@@ -34,6 +35,45 @@ def _tool_schema(name: str) -> dict:
         "type": "function",
         "function": {"name": name, "description": "", "parameters": {}},
     }
+
+
+def test_budgeted_augmented_prompt_compacts_oversized_current_rag_turn():
+    repeated = (
+        "Python is a programming language used around AI systems. "
+        "Artificial intelligence is not essentially Python. "
+    ) * 450
+    sources = [
+        SourceChunk(
+            chunk_id=f"chunk-{idx}",
+            parent_id=f"parent-{idx}",
+            doc_id=f"doc-{idx}",
+            corpus_id="corpus-1",
+            text=repeated,
+            summary="Python and AI relation",
+            score=0.9,
+            source_tier="qdrant_mongo_graph",
+            doc_name=f"doc-{idx}.md",
+        )
+        for idx in range(8)
+    ]
+
+    prompt, meta = _build_budgeted_augmented_prompt(
+        query="what is python and is ai essentially python",
+        sources=sources,
+        facts=[],
+        corpus_ids=["corpus-1"],
+        reasoning_mode=None,
+        reasoning_blend=None,
+        active_skills=None,
+        analysis="Use graph evidence to distinguish Python and AI.",
+        decoration=[],
+        model="unknown-test-model",
+    )
+
+    assert meta["compacted"] is True
+    assert meta["before_tokens"] > meta["after_tokens"]
+    assert meta["after_tokens"] <= meta["budget_tokens"]
+    assert "source excerpt clipped" in prompt or "current-turn RAG prompt clipped" in prompt
 
 
 def test_limit_tool_calls_allows_bounded_web_searches_per_turn():
@@ -273,7 +313,7 @@ def test_source_context_dedupes_exact_duplicate_chunk_cards():
 def test_source_context_dedupes_same_document_identical_text_chunks():
     duplicate_text = (
         "RemoteEvent validation must happen on the server. Never trust client "
-        "arguments; verify type, ownership, rate limits, and allowed state."
+        "arguments; verify type, ownership, and rate limits."
     )
     sources = [
         _source_chunk("local-1", "qdrant_mongo"),
