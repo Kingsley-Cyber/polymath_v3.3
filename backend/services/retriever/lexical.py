@@ -416,6 +416,17 @@ class LexicalRetriever:
                         provenance=[{"retriever": "qdrant_sparse"}],
                     )
                 )
+        # Normalize raw BM25/IDF scores to [0,1] for parity with the Mongo
+        # $text path (_text_search divides by its max). Raw Qdrant sparse scores
+        # run ~100-140 while dense cosine is ~0.9 and graph is [0,1]; left raw,
+        # the lexical lane categorically dominates merge_pools' max()+sort and
+        # the pre-rerank cut, starving good dense/graph candidates before the
+        # cross-encoder ever sees them. Divide-by-max makes the lanes
+        # commensurable; the cross-encoder remains the final arbiter.
+        if all_hits:
+            max_score = max(float(h.score or 0.0) for h in all_hits) or 1.0
+            for h in all_hits:
+                h.score = round(float(h.score or 0.0) / max_score, 4)
         return all_hits
 
     async def _text_search(
