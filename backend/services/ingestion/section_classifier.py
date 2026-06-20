@@ -295,6 +295,26 @@ def reference_signal_count(text: str | None) -> int:
     )
 
 
+def is_reference_block(text: str | None) -> bool:
+    """HIGH-PRECISION reference-LIST test for the corrective reclassification.
+
+    Uses ONLY structural reference-list signals — an inline "## References"
+    heading, Springer/PMC entry markers, or a dense author-list / numbered-entry
+    / proceedings-arXiv block — and DELIBERATELY EXCLUDES classify_content's
+    inline-citation DENSITY rule, which false-positives on citation-dense body
+    prose (academic methodology/abstract sections that cite prior work). Bulk
+    chunk_kind mutation demands precision over recall, so the corrective tool
+    gates on THIS, not classify_content.
+    """
+    if not text:
+        return False
+    return bool(
+        _INLINE_REF_HEADING_RE.match(text)
+        or _is_reference_list(text)
+        or reference_signal_count(text) >= _REF_SIGNAL_THRESHOLD
+    )
+
+
 def _is_link_list(lines: list[str]) -> bool:
     """True for an external-link / resources dump (≥4 URL lines AND ≥40% of
     lines carry an external URL)."""

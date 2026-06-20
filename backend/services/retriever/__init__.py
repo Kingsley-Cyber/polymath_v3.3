@@ -348,6 +348,44 @@ def _fact_seed_chunks(facts: list[SourceFact]) -> list[SourceChunk]:
     return chunks
 
 
+async def _drop_noisy_fact_seed_chunks(chunks: list[SourceChunk]) -> list[SourceChunk]:
+    """Drop fact-seed chunks whose Mongo chunk_kind is NOISY_KINDS.
+
+    The graph fact-seed lane (like mode_a) bypasses the funnels' Qdrant-payload
+    NOISY_KINDS filter, so an on-topic fact whose EVIDENCE chunk is a
+    bibliography/reference block would still inject citation noise into context.
+    The facts themselves (query-relevant) stay in <key_facts>; only their noisy
+    evidence CHUNKS are removed. Best-effort: any failure returns chunks as-is.
+    """
+    if not chunks:
+        return chunks
+    try:
+        from services.ingestion_service import ingestion_service
+        from services.ingestion.section_classifier import NOISY_KINDS
+
+        db = getattr(ingestion_service, "db", None)
+        if db is None:
+            return chunks
+        ids = [c.chunk_id for c in chunks if c.chunk_id]
+        noisy = {
+            doc["chunk_id"]
+            async for doc in db["chunks"].find(
+                {"chunk_id": {"$in": ids}, "chunk_kind": {"$in": list(NOISY_KINDS)}},
+                {"_id": 0, "chunk_id": 1},
+            )
+        }
+        if not noisy:
+            return chunks
+        logger.info(
+            "fact-seed NOISY_KINDS filter: dropped %d citation evidence chunk(s)",
+            len(noisy),
+        )
+        return [c for c in chunks if c.chunk_id not in noisy]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fact-seed NOISY_KINDS filter skipped (%s)", exc)
+        return chunks
+
+
 class RetrieverOrchestrator:
     """Orchestrates the full spec-locked retrieval pipeline."""
 
@@ -887,7 +925,9 @@ class RetrieverOrchestrator:
             except Exception as exc:  # never let seeding break retrieval
                 logger.warning("Graph fact seeding failed: %s", exc)
                 seed_facts = []
-            fact_seed_chunks = _fact_seed_chunks(seed_facts)
+            fact_seed_chunks = await _drop_noisy_fact_seed_chunks(
+                _fact_seed_chunks(seed_facts)
+            )
             counts["facts"] = len(seed_facts)
             counts["fact_seed_chunks"] = len(fact_seed_chunks)
             _add_timing("fact_seed", await_started)
