@@ -969,6 +969,7 @@ function useQueryGraph(
   synthesisQuery: string | undefined,
   synthesisMode: GraphSynthesisMode = "research",
   validateSynthesis: boolean = false,
+  webGroundingEnabled: boolean = false,
 ) {
   const graphQuerySeedEntities = useSettingsStore(
     (state) => state.graphQuerySeedEntities,
@@ -977,6 +978,8 @@ function useQueryGraph(
   const graphQueryNodeLimit = useSettingsStore(
     (state) => state.graphQueryNodeLimit,
   );
+  const webFetchDepth = useSettingsStore((state) => state.webFetchDepth);
+  const webMaxSources = useSettingsStore((state) => state.webMaxSources);
   const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "error">(
     "idle",
   );
@@ -1053,6 +1056,11 @@ function useQueryGraph(
           mode: "auto",
           synthesis_mode: synthesisMode,
           validate_synthesis: validateSynthesis,
+          web_search_enabled: webGroundingEnabled,
+          web_fetch_depth: webGroundingEnabled ? webFetchDepth : undefined,
+          web_max_results: webGroundingEnabled
+            ? Math.max(1, Math.min(10, webMaxSources || 5))
+            : undefined,
         } as any);
         // The map and synthesis run in parallel so the graph can appear first.
         // If the map request fails, this prevents the still-running synthesis
@@ -1129,6 +1137,9 @@ function useQueryGraph(
     synthesisQuery,
     synthesisMode,
     validateSynthesis,
+    webGroundingEnabled,
+    webFetchDepth,
+    webMaxSources,
     graphQuerySeedEntities,
     graphQueryMaxHops,
     graphQueryNodeLimit,
@@ -1302,6 +1313,8 @@ export function GraphViewer({
     useState<boolean>(false);
   const [executedValidateSynthesis, setExecutedValidateSynthesis] =
     useState<boolean>(false);
+  const [draftWebGrounding, setDraftWebGrounding] = useState<boolean>(false);
+  const [executedWebGrounding, setExecutedWebGrounding] = useState<boolean>(false);
   const drillStackRef = useRef(drillStack);
   drillStackRef.current = drillStack;
 
@@ -1322,6 +1335,7 @@ export function GraphViewer({
     agentSynthesisQuery,
     executedSynthesisMode,
     executedValidateSynthesis,
+    executedWebGrounding,
   );
   const lightQ = useQuestionGraph(corpusIds, questionGraphQuery);
   const heavyQueryActive = Boolean(agentQuery?.trim()) && q.phase !== "idle";
@@ -1384,6 +1398,7 @@ export function GraphViewer({
       setAgentInput(normalized);
       setExecutedSynthesisMode(draftSynthesisMode);
       setExecutedValidateSynthesis(draftValidateSynthesis);
+      setExecutedWebGrounding(draftWebGrounding);
       setAgentQuery(normalized);
       setAgentSynthesisQuery(synthesisQuery);
       setQuestionGraphQuery(undefined);
@@ -1396,6 +1411,7 @@ export function GraphViewer({
       agentInput,
       draftSynthesisMode,
       draftValidateSynthesis,
+      draftWebGrounding,
       lastGraphContext,
     ],
   );
@@ -1776,6 +1792,8 @@ export function GraphViewer({
         onSynthesisModeChange={setDraftSynthesisMode}
         validateSynthesis={draftValidateSynthesis}
         onValidateSynthesisChange={setDraftValidateSynthesis}
+        webGroundingEnabled={draftWebGrounding}
+        onWebGroundingChange={setDraftWebGrounding}
         followUpAvailable={lastGraphContext !== null}
         followUpPreview={lastGraphContext?.coreIdea || lastGraphContext?.query || ""}
         onBuildQuestionGraph={runQuestionGraph}

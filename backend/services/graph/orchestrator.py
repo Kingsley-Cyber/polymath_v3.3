@@ -158,6 +158,9 @@ async def _bounded_discover_without_legacy(
     user_id: Optional[str] = None,
     model_override: Optional[str] = None,
     validate_synthesis: bool = False,
+    web_search_enabled: bool = False,
+    web_fetch_depth: str = "normal",
+    web_max_results: int = 5,
 ) -> Any:
     """Tracked-source Mission Control graph builder when legacy .pyc is absent.
 
@@ -367,6 +370,22 @@ async def _bounded_discover_without_legacy(
         node_id = str(node.get("id") or node.get("entity_id") or "")
         node["degree"] = max(int(node.get("degree") or 0), local_degree.get(node_id, 0))
 
+    local_signals = _local_graph_structural_signals(
+        nodes=nodes,
+        links=links,
+        seeds=seeds,
+        gaps=gaps,
+        bridges=bridges,
+        max_items=12,
+    )
+    analogies = list(local_signals.get("analogies") or [])
+    weak_links = list(local_signals.get("weak_links") or [])
+    transfers = list(local_signals.get("transfers") or [])
+    bridges = list(local_signals.get("bridges") or [])
+    gaps = list(local_signals.get("gaps") or gaps)
+    frontier = list(local_signals.get("frontier") or [])
+    packet_metrics = local_signals.get("metrics")
+
     selected_edges = [
         {
             "source": str(link.get("source") or ""),
@@ -409,22 +428,18 @@ async def _bounded_discover_without_legacy(
         if node.get("id") or node.get("entity_id")
     ][: _PACKET_MAX_ENTITIES]
 
-    frontier = [
-        {
-            "entity_id": node.get("id") or node.get("entity_id"),
-            "display_name": node.get("display_name") or node.get("label"),
-            "entity_type": node.get("entity_type") or node.get("primary_entity_type"),
-            "mention_count": node.get("mention_count", 0),
-            "source_corpora": node.get("source_corpora", []),
-        }
-        for node in nodes[:12]
-    ]
     questions = [
         {
             "question": gap.get("question") or "Inspect this missing graph connection.",
+            "text": gap.get("question") or "Inspect this missing graph connection.",
             "gap_type": gap.get("gap_type", "missing_edge"),
             "entity_a": gap.get("entity_a") or gap.get("entity_a_name"),
             "entity_b": gap.get("entity_b") or gap.get("entity_b_name"),
+            "domain_pills": [
+                str(v)
+                for v in (gap.get("source_domain"), gap.get("target_domain"))
+                if v
+            ],
             "source_corpora": gap.get("source_corpora", []),
         }
         for gap in gaps[:8]
@@ -517,10 +532,10 @@ async def _bounded_discover_without_legacy(
         mode=mode or "auto",
         interpretation=interpretation,
         frontier=frontier,
-        analogies=[],
+        analogies=analogies,
         bridges=bridges,
-        weak_links=[],
-        transfers=[],
+        weak_links=weak_links,
+        transfers=transfers,
         questions=questions,
         strategic_read={
             "summary": interpretation,
@@ -537,6 +552,10 @@ async def _bounded_discover_without_legacy(
             "links": len(links),
             "bridges": len(bridges),
             "gaps": len(gaps),
+            "analogies": len(analogies),
+            "weak_links": len(weak_links),
+            "transfers": len(transfers),
+            "local_structural_signals": local_signals.get("counts") or {},
             "errors_per_corpus": errors,
         },
         domain_map_summary=[],
@@ -569,6 +588,7 @@ async def _bounded_discover_without_legacy(
             "meta": {"builder": "bounded_graph_query"},
         },
     )
+    setattr(result, "_packet_metrics", packet_metrics)
 
     corpus_for_packet = corpus_ids[0] if corpus_ids else ""
     graph_done_at = _time.perf_counter()
@@ -601,6 +621,17 @@ async def _bounded_discover_without_legacy(
             packet=packet,
             corpus_id=corpus_for_packet,
         )
+        if isinstance(result.trace, dict):
+            await _maybe_add_web_grounding_to_packet(
+                packet=packet,
+                trace=result.trace,
+                query=query,
+                user_id=user_id,
+                synthesis_mode=synthesis_mode,
+                enabled=web_search_enabled,
+                fetch_depth=web_fetch_depth,
+                max_results=web_max_results,
+            )
         if isinstance(result.trace, dict):
             result.trace["source_docs_raw"] = result.trace.get("source_docs") or []
             result.trace["source_docs"] = packet.get("evidence") or []
@@ -950,6 +981,13 @@ def _insight_packet_summary_from_result(result: Any) -> dict[str, Any]:
         "emerging_signals": len(getattr(result, "latent_topics", []) or []),
         "weak_links": len(getattr(result, "weak_links", []) or []),
         "evidence_chunks": len((trace.get("source_docs") if isinstance(trace, dict) else []) or []),
+        "web_evidence_chunks": len(
+            [
+                doc
+                for doc in ((trace.get("source_docs") if isinstance(trace, dict) else []) or [])
+                if isinstance(doc, dict) and str(doc.get("source_tier") or "") == "web_search"
+            ]
+        ),
         "context_edges": len((trace.get("selected_edges") if isinstance(trace, dict) else []) or []),
     }
     temporal_support = any(
@@ -977,6 +1015,7 @@ def _insight_packet_summary_from_result(result: Any) -> dict[str, Any]:
         "counts": counts,
         "evidence_sources": {
             "chunks": counts["evidence_chunks"],
+            "web_search": counts["web_evidence_chunks"],
             "cached_metrics": counts["themes"] + counts["bridges"] + counts["gaps"] + counts["emerging_signals"],
             "bounded_neo4j_edges": counts["context_edges"],
             "provenance_warnings": counts["weak_links"],
@@ -1360,6 +1399,699 @@ def _qdrant_collections_for_packet(corpus_id: str) -> dict[str, str]:
             "graph": f"corpus_{prefix}_graph",
             "schemas": f"corpus_{prefix}_schemas",
         }
+
+
+def _entity_label(node: dict[str, Any] | None, fallback: str = "") -> str:
+    node = node or {}
+    return str(
+        node.get("display_name")
+        or node.get("label")
+        or node.get("canonical_name")
+        or node.get("normalized_name")
+        or node.get("entity_id")
+        or node.get("id")
+        or fallback
+        or ""
+    )
+
+
+def _entity_domain(node: dict[str, Any] | None) -> str:
+    node = node or {}
+    return str(
+        node.get("domain")
+        or node.get("domain_type")
+        or node.get("primary_entity_type")
+        or node.get("entity_type")
+        or node.get("object_kind")
+        or ""
+    )
+
+
+def _local_graph_structural_signals(
+    *,
+    nodes: list[dict[str, Any]],
+    links: list[dict[str, Any]],
+    seeds: list[dict[str, Any]],
+    gaps: list[dict[str, Any]],
+    bridges: list[dict[str, Any]],
+    max_items: int = 12,
+) -> dict[str, Any]:
+    """Derive query-local graph inference signals from a bounded subgraph.
+
+    Global metrics are valuable when warm, but they can seed-filter to zero.
+    These signals are deterministic and scoped only to the graph already
+    returned for the user's query.
+    """
+
+    node_index: dict[str, dict[str, Any]] = {}
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or node.get("entity_id") or "").strip()
+        if node_id:
+            node_index[node_id] = node
+
+    seed_ids = {
+        str(seed.get("entity_id") or seed.get("id") or "").strip()
+        for seed in seeds
+        if isinstance(seed, dict) and (seed.get("entity_id") or seed.get("id"))
+    }
+    for seed_id in seed_ids:
+        if seed_id in node_index:
+            node_index[seed_id]["is_seed"] = True
+
+    adjacency: dict[str, set[str]] = {}
+    edge_by_pair: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        source = str(link.get("source") or "").strip()
+        target = str(link.get("target") or "").strip()
+        if not source or not target or source == target:
+            continue
+        adjacency.setdefault(source, set()).add(target)
+        adjacency.setdefault(target, set()).add(source)
+        edge_by_pair.setdefault(tuple(sorted((source, target))), []).append(link)
+
+    direct_seed_neighbors: set[str] = set()
+    for seed_id in seed_ids:
+        direct_seed_neighbors.update(adjacency.get(seed_id, set()))
+    query_scope = {
+        entity_id
+        for entity_id in set(node_index) & (seed_ids | direct_seed_neighbors)
+        if entity_id
+    }
+    if not query_scope:
+        query_scope = set(node_index)
+
+    def name(entity_id: str) -> str:
+        return _entity_label(node_index.get(entity_id), entity_id)
+
+    def domain(entity_id: str) -> str:
+        return _entity_domain(node_index.get(entity_id))
+
+    def pair_key(a: str, b: str) -> tuple[str, str]:
+        return tuple(sorted((str(a), str(b))))
+
+    analogies: list[dict[str, Any]] = []
+    terminological: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    candidates = sorted(
+        query_scope,
+        key=lambda eid: (
+            0 if eid in seed_ids else 1,
+            -len(adjacency.get(eid, set())),
+            name(eid).lower(),
+        ),
+    )[:32]
+    for idx, source in enumerate(candidates):
+        for target in candidates[idx + 1 :]:
+            key = pair_key(source, target)
+            if key in seen_pairs or key in edge_by_pair:
+                continue
+            seen_pairs.add(key)
+            source_neighbors = adjacency.get(source, set())
+            target_neighbors = adjacency.get(target, set())
+            shared = sorted(source_neighbors & target_neighbors, key=name)
+            if not shared:
+                continue
+            union_count = max(1, len(source_neighbors | target_neighbors))
+            jaccard = len(shared) / union_count
+            touches_seed = source in seed_ids or target in seed_ids or bool(
+                set(shared) & seed_ids
+            )
+            if not touches_seed:
+                continue
+            source_domain = domain(source)
+            target_domain = domain(target)
+            shared_names = [name(entity_id) for entity_id in shared[:4]]
+            row = {
+                "source": source,
+                "target": target,
+                "source_name": name(source),
+                "target_name": name(target),
+                "source_domain": source_domain,
+                "target_domain": target_domain,
+                "topology_sim": round(min(1.0, 0.35 + jaccard), 3),
+                "neighbor_jaccard": round(jaccard, 3),
+                "shared_terms": shared_names,
+                "coherence": {"shared_neighbors": shared_names},
+                "support_status": "local_query_subgraph",
+            }
+            if (
+                source_domain
+                and target_domain
+                and source_domain.lower() == target_domain.lower()
+                and jaccard >= 0.25
+            ):
+                terminological.append(
+                    {
+                        **row,
+                        "gap_type": "terminological",
+                        "question": (
+                            f"Are {name(source)} and {name(target)} separate concepts, "
+                            "or different labels for the same local pattern?"
+                        ),
+                        "rationale": (
+                            f"They share local neighbors ({', '.join(shared_names)}) "
+                            "but have no direct RELATES_TO edge in the query graph."
+                        ),
+                    }
+                )
+            else:
+                analogies.append(
+                    {
+                        **row,
+                        "gap_type": "analogy",
+                        "question": (
+                            f"If {name(source)} relates to its neighbors like "
+                            f"{name(target)} does, what insight follows?"
+                        ),
+                        "rationale": (
+                            f"Local shared-neighbor analogy via {', '.join(shared_names)}; "
+                            "no direct edge was present."
+                        ),
+                    }
+                )
+            if len(analogies) >= max_items and len(terminological) >= max_items:
+                break
+        if len(analogies) >= max_items and len(terminological) >= max_items:
+            break
+
+    weak_links: list[dict[str, Any]] = []
+    seen_weak: set[tuple[str, str, str]] = set()
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        source = str(link.get("source") or "").strip()
+        target = str(link.get("target") or "").strip()
+        if not source or not target:
+            continue
+        if source not in query_scope and target not in query_scope:
+            continue
+        predicate = str(link.get("predicate") or link.get("kind") or "related_to")
+        relation_family = str(link.get("relation_family") or "")
+        confidence = float(link.get("confidence") or 0.0)
+        generic = predicate.lower() in {"related_to", "references", "mentions"}
+        thin = confidence <= 0.45 or generic
+        if not thin:
+            continue
+        weakness_type = "generic_relation" if generic else "thin_evidence"
+        key = (source, target, weakness_type)
+        if key in seen_weak:
+            continue
+        seen_weak.add(key)
+        weak_links.append(
+            {
+                "source": source,
+                "target": target,
+                "source_name": name(source),
+                "target_name": name(target),
+                "source_domain": domain(source),
+                "target_domain": domain(target),
+                "weakness_type": weakness_type,
+                "severity": "medium" if confidence > 0.0 else "high",
+                "classification": weakness_type,
+                "relation_family": relation_family,
+                "path_count": 1,
+                "evidence": str(link.get("evidence") or predicate),
+                "rationale": (
+                    f"The local edge is {predicate!r} with confidence {confidence:.2f}; "
+                    "treat it as a prompt for verification, not a strong proof."
+                ),
+                "action_question": (
+                    f"What evidence would make the {name(source)} ↔ {name(target)} "
+                    "connection specific?"
+                ),
+            }
+        )
+        if len(weak_links) >= max_items:
+            break
+
+    for gap in gaps:
+        if len(weak_links) >= max_items:
+            break
+        if not isinstance(gap, dict) or gap.get("gap_type") != "terminological":
+            continue
+        source = str(gap.get("entity_a_id") or gap.get("source") or "").strip()
+        target = str(gap.get("entity_b_id") or gap.get("target") or "").strip()
+        if not source or not target:
+            continue
+        key = (source, target, "terminological_gap")
+        if key in seen_weak:
+            continue
+        seen_weak.add(key)
+        weak_links.append(
+            {
+                "source": source,
+                "target": target,
+                "source_name": str(gap.get("entity_a_name") or name(source)),
+                "target_name": str(gap.get("entity_b_name") or name(target)),
+                "source_domain": str(gap.get("source_domain") or domain(source)),
+                "target_domain": str(gap.get("target_domain") or domain(target)),
+                "weakness_type": "terminological_gap",
+                "severity": "medium",
+                "classification": "terminological",
+                "path_count": 0,
+                "rationale": str(gap.get("question") or ""),
+                "action_question": str(gap.get("question") or ""),
+            }
+        )
+
+    transfers: list[dict[str, Any]] = []
+    for hub in candidates:
+        neighbors = [
+            neighbor
+            for neighbor in sorted(adjacency.get(hub, set()), key=name)
+            if neighbor in node_index and neighbor != hub
+        ]
+        if len(neighbors) < 2:
+            continue
+        neighbor_domains = [
+            domain(neighbor) for neighbor in neighbors if domain(neighbor)
+        ]
+        target_domains = list(dict.fromkeys(neighbor_domains))[:4]
+        if not target_domains and hub not in seed_ids:
+            continue
+        analogs = [
+            {
+                "entity": neighbor,
+                "name": name(neighbor),
+                "domain": domain(neighbor),
+                "topology_sim": round(
+                    len(adjacency.get(hub, set()) & adjacency.get(neighbor, set()))
+                    / max(1, len(adjacency.get(hub, set()) | adjacency.get(neighbor, set()))),
+                    3,
+                ),
+            }
+            for neighbor in neighbors[:4]
+        ]
+        transfers.append(
+            {
+                "hub": hub,
+                "hub_name": name(hub),
+                "hub_domain": domain(hub),
+                "target": analogs[0]["entity"] if analogs else "",
+                "target_name": analogs[0]["name"] if analogs else "",
+                "target_domain": analogs[0]["domain"] if analogs else "",
+                "target_domains": target_domains,
+                "analogs": analogs,
+                "cd_pagerank": _maybe_float(node_index.get(hub, {}).get("pagerank_score")) or 0.0,
+                "rationale": (
+                    f"{name(hub)} connects multiple local neighbors "
+                    f"({', '.join(a['name'] for a in analogs[:3] if a.get('name'))}); "
+                    "inspect whether its mechanism transfers across those contexts."
+                ),
+                "action_hypothesis": (
+                    f"Use {name(hub)} as a transfer lens across "
+                    f"{', '.join(target_domains) if target_domains else 'the local neighborhood'}."
+                ),
+            }
+        )
+        if len(transfers) >= max_items:
+            break
+
+    normalized_bridges: list[dict[str, Any]] = []
+    seen_bridge: set[tuple[str, str, str]] = set()
+    for bridge in bridges:
+        if not isinstance(bridge, dict):
+            continue
+        connected_count = int(bridge.get("connected_seed_count") or 0)
+        if connected_count < 1:
+            continue
+        bridge_id = str(bridge.get("entity_id") or bridge.get("id") or "").strip()
+        connected = [
+            str(seed_id)
+            for seed_id in (bridge.get("connected_seeds") or [])
+            if str(seed_id).strip()
+        ]
+        partner = str(bridge.get("fragile_partner") or "").strip()
+        source_id = partner or (connected[0] if connected else "")
+        if not bridge_id or not source_id:
+            continue
+        key = (source_id, bridge_id, str(bridge.get("source") or "bridge"))
+        if key in seen_bridge:
+            continue
+        seen_bridge.add(key)
+        bridge_name = str(bridge.get("display_name") or name(bridge_id))
+        source_name = name(source_id)
+        bridge_type = str(bridge.get("source") or "seed_bridge")
+        normalized_bridges.append(
+            {
+                **bridge,
+                "source": source_id,
+                "target": bridge_id,
+                "source_name": source_name,
+                "target_name": bridge_name,
+                "source_domain": domain(source_id),
+                "target_domain": str(bridge.get("entity_type") or domain(bridge_id)),
+                "bridge_type": bridge_type,
+                "classification": "structural_analog" if bridge_type == "path_count" else "conceptual",
+                "path_count": connected_count,
+                "path_entity_ids": connected,
+                "path_entities": [name(seed_id) for seed_id in connected[:5]],
+                "explanation": (
+                    f"{bridge_name} is seed-connected to "
+                    f"{', '.join(name(seed_id) for seed_id in connected[:3]) or source_name}."
+                ),
+                "rationale": str(bridge.get("evidence") or ""),
+            }
+        )
+
+    frontier = [
+        {
+            "entity_id": entity_id,
+            "canonical_name": name(entity_id),
+            "display_name": name(entity_id),
+            "primary_domain": domain(entity_id),
+            "entity_type": str(
+                node_index.get(entity_id, {}).get("entity_type")
+                or node_index.get(entity_id, {}).get("primary_entity_type")
+                or ""
+            ),
+            "degree": len(adjacency.get(entity_id, set())),
+            "domains_touched": list(
+                dict.fromkeys(domain(neighbor) for neighbor in adjacency.get(entity_id, set()) if domain(neighbor))
+            )[:5],
+            "cross_domain_potential": round(
+                min(1.0, len({domain(neighbor) for neighbor in adjacency.get(entity_id, set()) if domain(neighbor)}) / 4),
+                3,
+            ),
+            "mention_count": int(node_index.get(entity_id, {}).get("mention_count") or 0),
+            "context": "seed" if entity_id in seed_ids else "direct_seed_neighbor",
+            "source_corpora": list(node_index.get(entity_id, {}).get("source_corpora") or []),
+        }
+        for entity_id in sorted(
+            query_scope,
+            key=lambda eid: (
+                eid in seed_ids,
+                eid in direct_seed_neighbors,
+                len(adjacency.get(eid, set())),
+                int(node_index.get(eid, {}).get("mention_count") or 0),
+            ),
+            reverse=True,
+        )[:12]
+    ]
+
+    local_gaps = [
+        {
+            **gap,
+            "gap_id": str(gap.get("gap_id") or f"local-gap-{idx}"),
+            "cluster_a_label": str(
+                gap.get("cluster_a_label")
+                or gap.get("entity_a_name")
+                or name(str(gap.get("entity_a_id") or ""))
+            ),
+            "cluster_b_label": str(
+                gap.get("cluster_b_label")
+                or gap.get("entity_b_name")
+                or name(str(gap.get("entity_b_id") or ""))
+            ),
+        }
+        for idx, gap in enumerate(gaps)
+        if isinstance(gap, dict)
+    ]
+    existing_gap_keys = {
+        pair_key(str(g.get("entity_a_id") or ""), str(g.get("entity_b_id") or ""))
+        for g in local_gaps
+        if g.get("entity_a_id") and g.get("entity_b_id")
+    }
+    for gap in analogies[:max_items] + terminological[:max_items]:
+        key = pair_key(str(gap.get("source") or ""), str(gap.get("target") or ""))
+        if key in existing_gap_keys:
+            continue
+        existing_gap_keys.add(key)
+        local_gaps.append(
+            {
+                "gap_id": f"local-{gap.get('gap_type')}-{len(local_gaps) + 1}",
+                "entity_a_id": gap.get("source"),
+                "entity_a_name": gap.get("source_name"),
+                "entity_b_id": gap.get("target"),
+                "entity_b_name": gap.get("target_name"),
+                "cluster_a_label": gap.get("source_name"),
+                "cluster_b_label": gap.get("target_name"),
+                "gap_type": gap.get("gap_type"),
+                "source_domain": gap.get("source_domain"),
+                "target_domain": gap.get("target_domain"),
+                "topology_sim": gap.get("topology_sim"),
+                "neighbor_jaccard": gap.get("neighbor_jaccard"),
+                "question": gap.get("question"),
+                "coherence": gap.get("coherence") or {},
+                "support_status": "local_query_subgraph",
+            }
+        )
+
+    return {
+        "analogies": analogies[:max_items],
+        "weak_links": weak_links[:max_items],
+        "transfers": transfers[:max_items],
+        "bridges": normalized_bridges[:max_items],
+        "frontier": frontier,
+        "gaps": local_gaps,
+        "metrics": types.SimpleNamespace(
+            structural_analogies=analogies[:max_items],
+            transfer_candidates=transfers[:max_items],
+            fragile_bridges=[
+                item for item in weak_links if item.get("weakness_type") in {"fragile_bridge", "thin_evidence"}
+            ][:max_items],
+            terminological_gaps=terminological[:max_items],
+        ),
+        "counts": {
+            "analogies": len(analogies),
+            "weak_links": len(weak_links),
+            "transfers": len(transfers),
+            "seed_connected_bridges": len(normalized_bridges),
+            "frontier": len(frontier),
+            "query_scope_entities": len(query_scope),
+        },
+    }
+
+
+def _public_web_grounding_terms(packet: dict[str, Any], *, limit: int = 10) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: Any, cap: int = 70) -> None:
+        text = _text(value or "", cap).strip()
+        if not text:
+            return
+        # Do not send sentence-like corpus evidence to web search; keep terms
+        # to public entity/concept labels and short relation names.
+        if len(text.split()) > 6:
+            return
+        key = text.lower()
+        if key not in seen:
+            seen.add(key)
+            terms.append(text)
+
+    for value in packet.get("anchors") or []:
+        add(value)
+    for entity in packet.get("entities") or []:
+        if isinstance(entity, dict):
+            add(entity.get("canonical_name"))
+    for bucket in ("bridges", "analogies", "transfers", "weak_links"):
+        for item in packet.get(bucket) or []:
+            if not isinstance(item, dict):
+                continue
+            for key in ("source_name", "target_name", "hub_name", "source_domain", "target_domain"):
+                add(item.get(key))
+    return terms[:limit]
+
+
+async def _retrieve_web_grounding_evidence(
+    *,
+    query: str,
+    packet: dict[str, Any],
+    user_id: Optional[str],
+    fetch_depth: str,
+    max_results: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    meta: dict[str, Any] = {
+        "enabled": True,
+        "status": "skipped",
+        "reason": "",
+        "requested_max_results": max_results,
+        "fetch_depth": fetch_depth,
+        "chunks": 0,
+    }
+    try:
+        from config import get_settings
+        from services.web_freshness import (
+            infer_web_search_time_range,
+            live_web_search,
+            refine_tool_search_query,
+            rerank_web_source_chunks,
+            web_hits_to_source_chunks,
+        )
+        from services.web_query_enrichment import enrich_web_search_query
+
+        settings = get_settings()
+        if not settings.LIVE_WEB_SEARCH_ENABLED:
+            meta.update({"status": "disabled", "reason": "LIVE_WEB_SEARCH_ENABLED=false"})
+            return [], meta
+
+        max_results = max(1, min(int(max_results or 5), 10))
+        fetch_depth = (fetch_depth or "normal").strip().lower()
+        if fetch_depth not in {"snippets", "normal", "deep"}:
+            fetch_depth = "normal"
+        public_terms = _public_web_grounding_terms(packet)
+        base_query = " ".join([query.strip(), *public_terms])[:260]
+        base_query = refine_tool_search_query(base_query, query)
+        try:
+            enrichment = await enrich_web_search_query(
+                tool_query=base_query,
+                original_query=query,
+                user_id=user_id,
+                recent_messages=[],
+            )
+            search_query = enrichment.query
+            meta["query_enrichment"] = {
+                "attempted": enrichment.attempted,
+                "applied": enrichment.applied,
+                "fallback_reason": enrichment.fallback_reason,
+                "model": enrichment.model,
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("graph web query enrichment skipped: %s", exc)
+            search_query = base_query
+            meta["query_enrichment"] = {
+                "attempted": True,
+                "applied": False,
+                "fallback_reason": "error",
+            }
+
+        candidate_limit = max(
+            max_results,
+            int(getattr(settings, "LIVE_WEB_SEARCH_CANDIDATE_RESULTS", 15) or 15),
+        )
+        time_range = infer_web_search_time_range(search_query)
+        hits = await live_web_search._search_live_web_pool(
+            search_query,
+            max_results=candidate_limit,
+            time_range=time_range,
+        )
+        fetched, fetch_stats, hits_to_fetch, pipeline = await live_web_search._fetch_pages_for_search(
+            search_query=search_query,
+            hits=hits,
+            max_results=max_results,
+            fetch_depth=fetch_depth,
+            youtube_transcripts_enabled=True,
+            max_fetch_pages=min(
+                max_results,
+                int(getattr(settings, "LIVE_WEB_FETCH_MAX_PAGES", max_results) or max_results),
+            ),
+        )
+        fetch_stats_by_url = {str(item.get("url")): item for item in fetch_stats}
+        candidates = web_hits_to_source_chunks(
+            hits,
+            fetched_markdown=fetched,
+            fetch_stats_by_url=fetch_stats_by_url,
+            search_query=search_query,
+            expanded_terms=public_terms,
+            max_chars=int(getattr(settings, "OBSCURA_MAX_CHARS", 4000) or 4000),
+        )
+        selected = await rerank_web_source_chunks(
+            search_query,
+            candidates,
+            limit=max_results,
+        )
+        rows = _source_docs_from_retrieval_chunks(selected, max_chunks=max_results)
+        for row in rows:
+            metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+            row["source_tier"] = "web_search"
+            row["retriever"] = "live_web_search"
+            row["source"] = {
+                "title": row.get("source_label") or metadata.get("title") or "",
+                "source_type": metadata.get("source_type") or "webpage",
+                "publication_date": metadata.get("published_date") or "",
+                "url": metadata.get("url") or row.get("doc_id") or "",
+            }
+        meta.update(
+            {
+                "status": "ok",
+                "search_query": search_query,
+                "public_terms": public_terms,
+                "time_range": time_range,
+                "hits": len(hits),
+                "full_page_fetches": len(fetched),
+                "fetch_attempts": len(hits_to_fetch),
+                "chunks": len(rows),
+                "pipeline": pipeline,
+            }
+        )
+        return rows, meta
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("graph web grounding skipped: %s", exc)
+        meta.update({"status": "error", "reason": str(exc)})
+        return [], meta
+
+
+async def _maybe_add_web_grounding_to_packet(
+    *,
+    packet: dict[str, Any],
+    trace: dict[str, Any],
+    query: str,
+    user_id: Optional[str],
+    synthesis_mode: str,
+    enabled: bool,
+    fetch_depth: str,
+    max_results: int,
+) -> None:
+    if not enabled:
+        trace["web_grounding"] = {"enabled": False, "status": "disabled"}
+        return
+
+    rows, meta = await _retrieve_web_grounding_evidence(
+        query=query,
+        packet=packet,
+        user_id=user_id,
+        fetch_depth=fetch_depth,
+        max_results=max_results,
+    )
+    web_evidence, rejected, temporal_support, rejection_reasons = _curated_evidence_rows(
+        rows,
+        query=query,
+        max_evidence=max_results,
+    )
+    for idx, item in enumerate(web_evidence, start=1):
+        item["evidence_id"] = f"w{idx}"
+        item["source_tier"] = "web_search"
+        source = item.get("source") if isinstance(item.get("source"), dict) else {}
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        if metadata.get("url"):
+            source = {**source, "url": metadata.get("url")}
+        if metadata.get("source_type"):
+            source = {**source, "source_type": metadata.get("source_type")}
+        item["source"] = source
+
+    caps = _packet_caps_for_mode(synthesis_mode)
+    local_evidence = [
+        item
+        for item in (packet.get("evidence") or [])
+        if isinstance(item, dict) and str(item.get("source_tier") or "") != "web_search"
+    ][: caps.evidence]
+    packet["web_evidence"] = web_evidence
+    packet["evidence"] = local_evidence + web_evidence
+    packet["temporal_support"] = bool(packet.get("temporal_support") or temporal_support)
+    evidence_filter = packet.get("evidence_filter")
+    if not isinstance(evidence_filter, dict):
+        evidence_filter = {}
+    evidence_filter["web_grounding"] = {
+        "enabled": True,
+        "accepted": len(web_evidence),
+        "rejected": rejected,
+        "rejection_reasons": rejection_reasons,
+        "source_tier": "web_search",
+    }
+    packet["evidence_filter"] = evidence_filter
+    meta.update(
+        {
+            "accepted_chunks": len(web_evidence),
+            "rejected_chunks": rejected,
+            "rejection_reasons": rejection_reasons,
+        }
+    )
+    trace["web_grounding"] = meta
 
 
 def _parent_id_from_summary_chunk(chunk_id: str) -> str:
@@ -3962,7 +4694,15 @@ def _build_insight_packet(
     anchors: list[str] = []
     for anchor in anchors_raw[:8]:
         if isinstance(anchor, dict):
-            label = str(anchor.get("label") or anchor.get("anchor_id") or "").strip()
+            label = str(
+                anchor.get("label")
+                or anchor.get("display_name")
+                or anchor.get("canonical_name")
+                or anchor.get("normalized_name")
+                or anchor.get("anchor_id")
+                or anchor.get("entity_id")
+                or ""
+            ).strip()
         else:
             label = str(getattr(anchor, "label", "") or "").strip()
         if label and label not in anchors:
@@ -4614,6 +5354,7 @@ def _llm_context_trace_from_packet(
                 "doc_id": doc_id,
                 "source_label": source_label,
                 "source": source,
+                "source_tier": str(item.get("source_tier") or ""),
                 "preview": _text(item.get("text") or "", 220),
                 "quality_flags": item.get("quality_flags") or [],
                 "score": item.get("score"),
@@ -4650,6 +5391,7 @@ def _llm_context_trace_from_packet(
         "counts": {
             "files": len(files),
             "chunks": len(chunks),
+            "web_evidence": len(packet.get("web_evidence") or []),
             "entities": len(packet.get("entities") or []),
             "communities": len(packet.get("communities") or []),
             "edges": len(packet.get("edges") or []),
@@ -4666,6 +5408,10 @@ def _llm_context_trace_from_packet(
         "visibility": {
             "max_entities": caps.entities,
             "max_evidence_chunks": caps.evidence,
+            "web_grounding": {
+                "enabled": bool(packet.get("web_evidence")),
+                "chunks": len(packet.get("web_evidence") or []),
+            },
             "mode_caps": {
                 "edges": caps.edges,
                 "gaps": caps.gaps,
@@ -5284,6 +6030,15 @@ def _render_packet_user_prompt(
         "section) and an EXCERPT (raw quote). Weave from both — summaries "
         "give thematic context, excerpts give quotable nuance."
     )
+    if any(str(item.get("source_tier") or "") == "web_search" for item in evidence):
+        lines.append(
+            "Items marked [WEB] are current external web evidence, not private "
+            "corpus evidence. Use them to ground public/current context, cite "
+            "them normally as [n], and explicitly note any tension with the "
+            "stored corpus. Do not make financial or price predictions from "
+            "web context; treat it as research/background unless a separate "
+            "forecasting evaluation is provided."
+        )
     if evidence:
         for idx, item in enumerate(evidence, start=1):
             source = item.get("source") or {}
@@ -5298,6 +6053,8 @@ def _render_packet_user_prompt(
             if len(summary) > 320:
                 summary = summary[:317] + "..."
             header = f"[{idx}] {source_label}"
+            if str(item.get("source_tier") or "") == "web_search":
+                header += " [WEB]"
             if heading:
                 header += f" · {heading}"
             lines.append(header)
@@ -5629,8 +6386,16 @@ def _compact_packet_for_prompt(
     caps = _packet_caps_for_mode(synthesis_mode)
     evidence_filter = packet.get("evidence_filter") if isinstance(packet.get("evidence_filter"), dict) else {}
     graph_context_allowed = not bool(evidence_filter.get("all_rejected"))
+    web_evidence_count = len(
+        [
+            item
+            for item in (packet.get("web_evidence") or [])
+            if isinstance(item, dict)
+        ]
+    )
+    evidence_limit = caps.evidence + web_evidence_count
     evidence = []
-    for idx, item in enumerate((packet.get("evidence") or [])[: caps.evidence], start=1):
+    for idx, item in enumerate((packet.get("evidence") or [])[:evidence_limit], start=1):
         if not isinstance(item, dict):
             continue
         brief = _source_brief_for_prompt(item)
@@ -5645,6 +6410,7 @@ def _compact_packet_for_prompt(
                 "heading_path": [str(h) for h in (item.get("heading_path") or []) if h][:6],
                 "summary": _text(item.get("summary") or "", 320),
                 "text": _text(item.get("text") or "", 360),
+                "source_tier": _text(item.get("source_tier") or "", 32),
             }
         )
     groups = [
@@ -5893,7 +6659,11 @@ def _compact_packet_for_prompt(
         "synthesis_priority": {
             "primary": ["bridges", "gaps", "emerging_signals"],
             "themes": "brief framing only",
-            "web_state": "absent; corpus-only current-state claims are not allowed",
+            "web_state": (
+                "present; web_search items are external/current grounding"
+                if packet.get("web_evidence")
+                else "absent; corpus-only current-state claims are not allowed"
+            ),
         },
         "anchors": [str(a) for a in (packet.get("anchors") or [])[:5] if a],
         "groups": groups,
@@ -6981,6 +7751,9 @@ async def discover(
     user_id: Optional[str] = None,
     model_override: Optional[str] = None,
     agentic: bool = False,
+    web_search_enabled: bool = False,
+    web_fetch_depth: str = "normal",
+    web_max_results: int = 5,
 ) -> Any:
     """Auto-Synthesis Mission Control wrapper.
 
@@ -7017,6 +7790,9 @@ async def discover(
             user_id=user_id,
             model_override=model_override,
             validate_synthesis=validate_synthesis,
+            web_search_enabled=web_search_enabled,
+            web_fetch_depth=web_fetch_depth,
+            web_max_results=web_max_results,
         )
 
     # ── Multi-corpus fan-out ──
@@ -7044,6 +7820,9 @@ async def discover(
                         user_id=user_id,
                         model_override=model_override,
                         agentic=agentic,
+                        web_search_enabled=web_search_enabled,
+                        web_fetch_depth=web_fetch_depth,
+                        web_max_results=web_max_results,
                     )
                     return cid, sub, None
                 except Exception as exc:  # pragma: no cover — defensive
@@ -7331,6 +8110,18 @@ async def discover(
                 result.trace["agentic_rounds_run"] = packet.get("agentic_rounds_run", 0)
         except Exception as exc:
             logger.warning("agentic loop failed, continuing with base packet: %s", exc)
+
+    if isinstance(result.trace, dict):
+        await _maybe_add_web_grounding_to_packet(
+            packet=packet,
+            trace=result.trace,
+            query=query,
+            user_id=user_id,
+            synthesis_mode=synthesis_mode,
+            enabled=web_search_enabled,
+            fetch_depth=web_fetch_depth,
+            max_results=web_max_results,
+        )
 
     if isinstance(result.trace, dict):
         result.trace["llm_context"] = _llm_context_trace_from_packet(

@@ -446,6 +446,10 @@ export interface GraphDiscoverRequest {
    * AgentSearchTab as a "validate" toggle next to synthesis-mode.
    */
   validate_synthesis?: boolean;
+  // Optional live-web grounding lane for graph synthesis. Off by default.
+  web_search_enabled?: boolean;
+  web_fetch_depth?: "snippets" | "normal" | "deep";
+  web_max_results?: number;
   session_id?: string;
   // Same model reference chat sends in overrides.model. May be a raw
   // LiteLLM id, pool:<id>, or profile:<id>.

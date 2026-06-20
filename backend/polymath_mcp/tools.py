@@ -599,6 +599,9 @@ async def polymath_graph_query(
     mode: Literal["auto", "connect", "gaps", "themes"] = "auto",
     synthesis_mode: Literal["research", "nuance", "ideation", "gap"] = "research",
     validate_synthesis: bool = False,
+    web_search_enabled: bool = False,
+    web_fetch_depth: Literal["snippets", "normal", "deep"] = "normal",
+    web_max_results: int = 5,
     session_id: str | None = None,
     model: str | None = None,
     agentic: bool = False,
@@ -621,6 +624,9 @@ async def polymath_graph_query(
         synthesis_mode: research | nuance | ideation. Mirrors the Graph Query
             #1 tabs in the app.
         validate_synthesis: Run the optional critique/revise loop.
+        web_search_enabled: Add bounded live-web grounding before synthesis.
+        web_fetch_depth: snippets | normal | deep for live-web page fetching.
+        web_max_results: Maximum reranked live-web sources to add.
         session_id: Optional existing Mission Control session id.
         model: Optional synthesis model override.
         agentic: Enable agentic graph retrieval scouting.
@@ -653,6 +659,9 @@ async def polymath_graph_query(
             mode=mode,
             synthesis_mode=synthesis_mode,
             validate_synthesis=validate_synthesis,
+            web_search_enabled=web_search_enabled,
+            web_fetch_depth=web_fetch_depth,
+            web_max_results=web_max_results,
             session_id=session_id,
             user_id=get_current_user_id(),
             model_override=model,

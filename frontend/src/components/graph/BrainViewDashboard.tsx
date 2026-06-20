@@ -193,6 +193,8 @@ export interface BrainViewDashboardProps {
   // Adds 2-3× latency/tokens; surfaced as a small checkbox in the tab.
   validateSynthesis?: boolean;
   onValidateSynthesisChange?: (v: boolean) => void;
+  webGroundingEnabled?: boolean;
+  onWebGroundingChange?: (v: boolean) => void;
   followUpAvailable?: boolean;
   followUpPreview?: string;
   // Pt 7: Graph Query tab — send a refined chip back to the chat.
@@ -493,6 +495,8 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     onSynthesisModeChange,
     validateSynthesis,
     onValidateSynthesisChange,
+    webGroundingEnabled,
+    onWebGroundingChange,
     followUpAvailable,
     followUpPreview,
     onSendToChat,
@@ -997,6 +1001,8 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
             onSynthesisModeChange={onSynthesisModeChange}
             validateSynthesis={validateSynthesis}
             onValidateSynthesisChange={onValidateSynthesisChange}
+            webGroundingEnabled={webGroundingEnabled}
+            onWebGroundingChange={onWebGroundingChange}
             followUpAvailable={followUpAvailable}
             followUpPreview={followUpPreview}
           />
@@ -1275,6 +1281,8 @@ interface AgentSearchTabProps {
   onSynthesisModeChange?: (m: GraphSynthesisMode) => void;
   validateSynthesis?: boolean;
   onValidateSynthesisChange?: (v: boolean) => void;
+  webGroundingEnabled?: boolean;
+  onWebGroundingChange?: (v: boolean) => void;
   followUpAvailable?: boolean;
   followUpPreview?: string;
 }
@@ -1298,6 +1306,8 @@ function AgentSearchTab(props: AgentSearchTabProps) {
     onSynthesisModeChange,
     validateSynthesis = false,
     onValidateSynthesisChange,
+    webGroundingEnabled = false,
+    onWebGroundingChange,
     followUpAvailable = false,
     followUpPreview = "",
   } = props;
@@ -1459,6 +1469,37 @@ function AgentSearchTab(props: AgentSearchTabProps) {
                 : ""}
           </div>
         </div>
+
+        {onWebGroundingChange && (
+          <label
+            className={
+              "mt-2 flex items-center gap-2 cursor-pointer select-none text-[10px] font-technical " +
+              (webGroundingEnabled ? "text-sky-300" : "text-zinc-500 hover:text-zinc-300")
+            }
+            title="Add bounded live-web grounding to the graph synthesis. The graph still leads; web sources are tagged separately and used for current/public context."
+          >
+            <input
+              type="checkbox"
+              checked={webGroundingEnabled}
+              onChange={(e) => onWebGroundingChange(e.currentTarget.checked)}
+              className="accent-sky-600"
+            />
+            <span className="flex items-center gap-1.5">
+              <Sparkles className="h-3 w-3" />
+              <span>web grounding · current sources</span>
+              <span
+                className={
+                  "px-1 py-px rounded-sm text-[9px] " +
+                  (webGroundingEnabled
+                    ? "bg-sky-900/40 text-sky-200 border border-sky-700/40"
+                    : "bg-zinc-800 text-zinc-500 border border-zinc-700")
+                }
+              >
+                opt-in
+              </span>
+            </span>
+          </label>
+        )}
 
         {onValidateSynthesisChange && (
           <label

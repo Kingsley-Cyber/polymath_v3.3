@@ -677,6 +677,27 @@ class GraphDiscoverRequest(BaseModel):
     # call to revise. Cost: 2-3× tokens. Default False to keep the hot
     # path single-call.
     validate_synthesis: bool = False
+    web_search_enabled: bool = Field(
+        default=False,
+        description=(
+            "When true, graph synthesis may add a bounded live-web evidence "
+            "lane before the final LLM synthesis. Off keeps discover corpus-only."
+        ),
+    )
+    web_fetch_depth: Literal["snippets", "normal", "deep"] = Field(
+        default="normal",
+        description=(
+            "Live-web fetch depth for graph synthesis. snippets keeps search "
+            "snippets only; normal fetches static page text; deep permits the "
+            "configured JS-render fallback for allowlisted domains."
+        ),
+    )
+    web_max_results: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="Maximum reranked live-web sources added to graph synthesis.",
+    )
     session_id: str | None = None
     model: str | None = None
     agentic: bool = False
