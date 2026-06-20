@@ -45,6 +45,7 @@ from services.retriever.hydrate import (
     hydrate_summary_rerank_texts,
 )
 from services.retriever.intent_policy import (
+    FunnelLimits,
     QueryNeed,
     adaptive_funnel_limits,
     infer_retrieval_intent,
@@ -559,22 +560,26 @@ class RetrieverOrchestrator:
             if not entity_names and not entity_ids:
                 return []
 
-            limit = max(0, min(int(fact_seed_limit or settings.GRAPH_FACT_SEED_LIMIT), 50))
+            graph_fact_limit = max(0, min(int(settings.GRAPH_FACT_SEED_LIMIT), 50))
+            limit = max(0, min(int(fact_seed_limit or graph_fact_limit), graph_fact_limit))
             if limit <= 0:
                 return []
+            entity_limit = max(1, min(int(getattr(settings, "GRAPH_ENTITY_LIMIT", 8)), 50))
 
             facts = await fact_retrieval.retrieve_facts_for_entities(
-                entity_names=entity_names[:limit],
-                entity_ids=entity_ids[:limit],
+                entity_names=entity_names[:entity_limit],
+                entity_ids=entity_ids[:entity_limit],
                 corpus_ids=corpus_ids,
                 fact_types=None,
                 limit=limit,
             )
             logger.info(
-                "Graph fact seeding: entities=%d ids=%d facts=%d",
+                "Graph fact seeding: entities=%d ids=%d facts=%d entity_limit=%d fact_limit=%d",
                 len(entity_names),
                 len(entity_ids),
                 len(facts),
+                entity_limit,
+                limit,
             )
             return facts
         except Exception as exc:
@@ -867,6 +872,41 @@ class RetrieverOrchestrator:
         effective_tier, downgrade_reason = await self._enforce_strategy_intersection(
             retrieval_tier, corpus_ids
         )
+        if effective_tier == RetrievalTier.qdrant_mongo_graph:
+            child_cap = int(getattr(settings, "GRAPH_CHILD_TOP_K", 40))
+            summary_cap = int(getattr(settings, "GRAPH_SUMMARY_TOP_K", 20))
+            capped_child_base = min(
+                int(single_limit),
+                child_cap,
+            )
+            capped_summary_base = min(
+                int(summary_base),
+                summary_cap,
+            )
+            next_funnel_limits = adaptive_funnel_limits(
+                retrieval_intent,
+                child_base=capped_child_base,
+                summary_base=capped_summary_base,
+            )
+            next_funnel_limits = FunnelLimits(
+                child_top_k=min(next_funnel_limits.child_top_k, child_cap),
+                summary_top_k=min(next_funnel_limits.summary_top_k, summary_cap),
+            )
+            if (
+                capped_child_base != single_limit
+                or capped_summary_base != summary_base
+                or next_funnel_limits != funnel_limits
+            ):
+                single_limit = capped_child_base
+                summary_base = capped_summary_base
+                funnel_limits = next_funnel_limits
+                counts["graph_child_top_k_cap"] = funnel_limits.child_top_k
+                counts["graph_summary_top_k_cap"] = funnel_limits.summary_top_k
+                logger.info(
+                    "Graph budget caps applied: child_top_k=%d summary_top_k=%d",
+                    funnel_limits.child_top_k,
+                    funnel_limits.summary_top_k,
+                )
         if dropped_ids and not downgrade_reason:
             downgrade_reason = (
                 f"Skipped {len(dropped_ids)} deleted corpus id(s): {dropped_ids}"
@@ -1346,10 +1386,23 @@ class RetrieverOrchestrator:
             phase_started = perf_counter()
             try:
                 # Phase 23 — Custom profile `neo4j_expansion_cap`
-                expand_kwargs = (
-                    {"limit": neo4j_expansion_cap}
+                graph_expansion_limit = max(
+                    0,
+                    min(int(getattr(settings, "GRAPH_EXPANSION_LIMIT", 8)), 100),
+                )
+                requested_expansion = (
+                    int(neo4j_expansion_cap)
                     if neo4j_expansion_cap is not None
-                    else {}
+                    else graph_expansion_limit
+                )
+                effective_expansion_cap = min(requested_expansion, graph_expansion_limit)
+                expand_kwargs = (
+                    {
+                        "limit": effective_expansion_cap,
+                        "seed_limit": getattr(settings, "GRAPH_SEED_CHUNKS", 8),
+                    }
+                    if effective_expansion_cap > 0
+                    else {"limit": 0, "seed_limit": getattr(settings, "GRAPH_SEED_CHUNKS", 8)}
                 )
                 # Phase 5b — pass db through so Mode A can run its
                 # cache-driven bridge bonus expansion when the flag is
@@ -1368,6 +1421,11 @@ class RetrieverOrchestrator:
                 expanded = await mode_a_expansion.expand(
                     merged, corpus_ids, db=db_for_mode_a, **expand_kwargs
                 )
+                counts["graph_seed_chunks"] = min(
+                    len(merged),
+                    int(getattr(settings, "GRAPH_SEED_CHUNKS", 8)),
+                )
+                counts["graph_expansion_cap"] = effective_expansion_cap
                 counts["graph_expanded"] = len(expanded)
                 if expanded:
                     merged = merge_pools(merged, expanded)
@@ -1431,22 +1489,33 @@ class RetrieverOrchestrator:
         # linear Metal reranker). Graph-neighbor survival no longer depends on a
         # huge window — select_with_diversity now uses graph-aware MMR and a
         # small graph-provenance reservation, so narrowing here is safe.
+        if effective_tier == RetrievalTier.qdrant_mongo_graph and merged:
+            graph_prefilter_pool = max(
+                1,
+                min(int(getattr(settings, "GRAPH_PREFILTER_POOL", 64)), 300),
+            )
+            if len(merged) > graph_prefilter_pool:
+                merged = sorted(merged, key=lambda x: x.score, reverse=True)[
+                    :graph_prefilter_pool
+                ]
+                counts["graph_prefilter_pool"] = len(merged)
+
         effective_rerank_top_n = rerank_top_n
         if (
             effective_tier == RetrievalTier.qdrant_mongo_graph
-            and rerank_top_n is not None
             and merged
         ):
-            graph_floor = max(
-                48,
-                int(final_top_k or settings.DEFAULT_RETRIEVAL_K) * 6,
+            graph_mlx_pool = max(
+                1,
+                min(int(getattr(settings, "GRAPH_MLX_RERANK_POOL", 28)), 200),
             )
             effective_rerank_top_n = min(
                 len(merged),
-                max(int(rerank_top_n), graph_floor),
+                int(rerank_top_n) if rerank_top_n is not None else graph_mlx_pool,
+                graph_mlx_pool,
             )
             if effective_rerank_top_n != rerank_top_n:
-                counts["rerank_top_n_graph_floor"] = effective_rerank_top_n
+                counts["rerank_top_n_graph_cap"] = effective_rerank_top_n
         if effective_rerank_top_n is not None and len(merged) > effective_rerank_top_n:
             pre_sorted = sorted(merged, key=lambda x: x.score, reverse=True)
             merged = pre_sorted[:effective_rerank_top_n]

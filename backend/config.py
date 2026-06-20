@@ -70,7 +70,7 @@ class Settings(BaseSettings):
         ),
     )
     GRAPH_FACT_SEED_LIMIT: int = Field(
-        default=12,
+        default=16,
         ge=0,
         le=50,
         description=(
@@ -80,6 +80,91 @@ class Settings(BaseSettings):
             "trumps both. Used as the seeder's last-resort fallback so the default "
             "is defined in exactly one place. Now that fact lookup is indexed "
             "(entity_id) and no longer times out, this can be raised safely."
+        ),
+    )
+    GRAPH_ENTITY_LIMIT: int = Field(
+        default=8,
+        ge=1,
+        le=50,
+        description=(
+            "Maximum query-resolved graph entities used for fact seeding in "
+            "Graph Augmentation. Keeps graph anchoring bounded and deterministic."
+        ),
+    )
+    GRAPH_CHILD_TOP_K: int = Field(
+        default=40,
+        ge=1,
+        le=150,
+        description="Maximum child-vector/lexical recall budget for Graph Augmentation.",
+    )
+    GRAPH_SUMMARY_TOP_K: int = Field(
+        default=20,
+        ge=0,
+        le=100,
+        description="Maximum parent-summary recall budget for Graph Augmentation.",
+    )
+    GRAPH_SEED_CHUNKS: int = Field(
+        default=8,
+        ge=1,
+        le=100,
+        description=(
+            "Maximum top hybrid chunks allowed to seed Neo4j Mode A expansion "
+            "in Graph Augmentation."
+        ),
+    )
+    GRAPH_EXPANSION_LIMIT: int = Field(
+        default=8,
+        ge=0,
+        le=100,
+        description=(
+            "Server-side cap for graph-expanded chunks. Per-user expansion "
+            "settings are clamped to this budget unless this environment value "
+            "is intentionally raised."
+        ),
+    )
+    GRAPH_PREFILTER_POOL: int = Field(
+        default=64,
+        ge=8,
+        le=300,
+        description="Maximum graph-tier candidate pool kept before MLX rerank.",
+    )
+    GRAPH_MLX_RERANK_POOL: int = Field(
+        default=16,
+        ge=1,
+        le=200,
+        description="Maximum graph-tier candidates sent to the MLX reranker.",
+    )
+    GRAPH_DECORATE_ENTITIES_PER_CHUNK: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description="Maximum mentioned seed entities expanded per final chunk during decoration.",
+    )
+    GRAPH_DECORATE_MAX_CHUNKS: int = Field(
+        default=8,
+        ge=1,
+        le=50,
+        description="Maximum final chunks decorated with detailed graph arrows.",
+    )
+    GRAPH_DECORATE_MAX_PATHS_PER_CHUNK: int = Field(
+        default=3,
+        ge=0,
+        le=20,
+        description="Maximum relation arrows requested per decorated answer.",
+    )
+    GRAPH_DECORATE_EVIDENCE_CHUNKS_PER_PATH: int = Field(
+        default=2,
+        ge=0,
+        le=10,
+        description="Maximum evidence chunk ids attached to each graph arrow.",
+    )
+    GRAPH_DECORATION_TIMEOUT_SECONDS: float = Field(
+        default=0.75,
+        ge=0.1,
+        le=20.0,
+        description=(
+            "Best-effort timeout for final-only graph decoration. If it expires, "
+            "the answer falls back to selected chunks and compact graph signals."
         ),
     )
 

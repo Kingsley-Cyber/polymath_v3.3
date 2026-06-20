@@ -99,6 +99,7 @@ _install_stubs_if_missing()
 
 
 from services.retriever.mode_a import ModeAExpansion  # noqa: E402
+from models.schemas import SourceChunk  # noqa: E402
 
 
 # ── Fake Neo4j driver — multi-script, the bonus path runs TWO queries ─
@@ -195,13 +196,56 @@ async def test_db_none_short_circuits_expand_via_bridges_in_full_expand():
         patch.object(exp, "_expand_via_bridges",
                      new=AsyncMock(return_value=[])) as bridge_mock,
     ):
-        from models.schemas import SourceChunk
         merged_pool = [SourceChunk(
             chunk_id="seed-1", parent_id="", doc_id="d",
             corpus_id="c", text="", score=1.0, source_tier="qdrant_only",
         )]
         await exp.expand(merged_pool, corpus_ids=["c"], db=None)
     bridge_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_expand_caps_seed_ids_to_top_scoring_hybrid_chunks():
+    """Graph Augmentation should expand from a bounded top hybrid seed set,
+    not from every merged candidate."""
+    exp = ModeAExpansion()
+    exp._settings.NEO4J_ENABLED = True
+    exp._settings.RETRIEVAL_CACHE_MODE_A_METRICS = False
+    exp._driver = MagicMock()
+
+    captured: dict[str, list[str]] = {}
+
+    async def _mentions(seed_ids, *_args, **_kwargs):
+        captured["seed_ids"] = list(seed_ids)
+        return []
+
+    merged_pool = [
+        SourceChunk(
+            chunk_id=f"seed-{idx}",
+            parent_id=f"p-{idx}",
+            doc_id=f"d-{idx}",
+            corpus_id="c",
+            text="",
+            score=score,
+            source_tier="qdrant_mongo",
+        )
+        for idx, score in enumerate([0.10, 0.95, 0.40, 0.80, 0.70])
+    ]
+
+    with (
+        patch.object(exp, "_expand_via_mentions", new=AsyncMock(side_effect=_mentions)),
+        patch.object(exp, "_expand_via_calls", new=AsyncMock(return_value=[])),
+        patch.object(exp, "_expand_via_bridges", new=AsyncMock(return_value=[])),
+    ):
+        await exp.expand(
+            merged_pool,
+            corpus_ids=["c"],
+            limit=3,
+            seed_limit=3,
+            db=MagicMock(),
+        )
+
+    assert captured["seed_ids"] == ["seed-1", "seed-3", "seed-4"]
 
 
 @pytest.mark.asyncio

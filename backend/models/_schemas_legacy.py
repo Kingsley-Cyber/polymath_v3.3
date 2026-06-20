@@ -596,12 +596,12 @@ class RetrievalSettings(BaseModel):
     rerank_enabled: bool = True
     similarity_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
     max_corpora_per_query: int = Field(default=3, ge=1, le=10)
-    neo4j_expansion_cap: int = Field(default=24, ge=0, le=100)
+    neo4j_expansion_cap: int = Field(default=8, ge=0, le=100)
     # DEPRECATED alias of graph_fact_seeds (the canonical "Fact seeds" knob —
     # fact seeding only runs at the graph tier). The settings panel mirrors
     # graph_fact_seeds onto this; chat resolution reads graph_fact_seeds. Kept
     # only for back-compat with stored docs — do not add new readers.
-    fact_seed_limit: int = Field(default=12, ge=0, le=50)
+    fact_seed_limit: int = Field(default=16, ge=0, le=50)
     vector_child_chunks: int = Field(default=70, ge=1, le=150)
     vector_summaries: int = Field(default=30, ge=0, le=100)
     vector_final_sources: int = Field(default=12, ge=1, le=50)
@@ -610,10 +610,10 @@ class RetrievalSettings(BaseModel):
     hybrid_summaries: int = Field(default=20, ge=0, le=100)
     hybrid_final_sources: int = Field(default=8, ge=1, le=50)
     hybrid_reranker: bool = True
-    graph_child_chunks: int = Field(default=60, ge=1, le=150)
+    graph_child_chunks: int = Field(default=40, ge=1, le=150)
     graph_summaries: int = Field(default=20, ge=0, le=100)
-    graph_fact_seeds: int = Field(default=12, ge=0, le=50)
-    graph_expansion: int = Field(default=24, ge=0, le=100)
+    graph_fact_seeds: int = Field(default=16, ge=0, le=50)
+    graph_expansion: int = Field(default=8, ge=0, le=100)
     graph_final_sources: int = Field(default=8, ge=1, le=50)
     graph_reranker: bool = True
     graph_query_seed_entities: int = Field(default=3, ge=1, le=10)

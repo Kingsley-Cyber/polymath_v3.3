@@ -3605,6 +3605,19 @@ def _format_retrieval_diagnostics_trace(
             f"hydrate={float(timings.get('hydrate') or 0):.2f}s"
         ),
     ]
+    if str(effective) == RetrievalTier.qdrant_mongo_graph.value:
+        lines.append(
+            "graph_advantage: "
+            f"facts={_count('facts')} "
+            f"fact_seed_chunks={_count('fact_seed_chunks')} "
+            f"relations={_count('graph_decorations')} "
+            f"expanded_chunks={_count('graph_expanded')} "
+            f"seed_chunks={_count('graph_seed_chunks')} "
+            f"prefilter={_count('graph_prefilter_pool') or _count('merged_after_graph_boost') or _count('merged_after_graph')} "
+            f"mlx_pool={_count('rerank_top_n_graph_cap') or _count('merged_after_rerank_cap')} "
+            f"near_duplicates={_count('near_duplicate_pairs')} "
+            f"repair_rounds={_count('sufficiency_repair_rounds')}"
+        )
     return "\n".join(lines)
 
 
@@ -4343,14 +4356,38 @@ class ChatOrchestrator:
                 # typed relations survive — un-gating cannot flood the prompt
                 # with confidence-DESC catalog noise, and on a query with no
                 # matching typed structure the decoration is correctly empty.
+                decoration_started = perf_counter()
                 decoration = await _graph_decorator.decorate_winners(
                     winning_chunks=sources,
                     corpus_ids=request.corpus_ids,
                     wanted_families=None,  # v1: no QueryFacets yet — accept all families
-                    neighbor_limit=8,
-                    chunks_per_neighbor=3,
+                    neighbor_limit=(
+                        getattr(settings, "GRAPH_DECORATE_MAX_PATHS_PER_CHUNK", 3)
+                        * getattr(settings, "GRAPH_DECORATE_MAX_CHUNKS", 8)
+                    ),
+                    chunks_per_neighbor=getattr(
+                        settings,
+                        "GRAPH_DECORATE_EVIDENCE_CHUNKS_PER_PATH",
+                        2,
+                    ),
                     db=_db_for_decoration,
                     query=request.message,
+                )
+                decoration_ms = (perf_counter() - decoration_started) * 1000
+                retrieval_diagnostics.setdefault("counts", {})[
+                    "graph_decorations"
+                ] = len(decoration)
+                retrieval_diagnostics.setdefault("timings_s", {})[
+                    "graph_decoration"
+                ] = decoration_ms / 1000.0
+                logger.info(
+                    "Graph decoration final-only: ms=%.1f chunks=%d arrows=%d",
+                    decoration_ms,
+                    min(
+                        len(sources),
+                        int(getattr(settings, "GRAPH_DECORATE_MAX_CHUNKS", 8)),
+                    ),
+                    len(decoration),
                 )
             except Exception as exc:
                 logger.warning("Graph decoration skipped: %s", exc)
@@ -4363,6 +4400,67 @@ class ChatOrchestrator:
             decoration=decoration,
             diagnostics=retrieval_diagnostics,
         )
+        if graph_context_enabled:
+            graph_counts = retrieval_diagnostics.get("counts") or {}
+            graph_timings = retrieval_diagnostics.get("timings_s") or {}
+            graph_entity_names = {
+                str(value).strip()
+                for value in [
+                    *[
+                        getattr(fact, "subject", "")
+                        for fact in facts or []
+                    ],
+                    *[
+                        getattr(edge, "seed_entity", "")
+                        for edge in decoration or []
+                    ],
+                    *[
+                        getattr(edge, "neighbor_entity", "")
+                        for edge in decoration or []
+                    ],
+                ]
+                if str(value).strip()
+            }
+            graph_advantage = {
+                "entities_resolved": len(graph_entity_names),
+                "facts_used": len(facts),
+                "relations_used": len(decoration),
+                "evidence_paths": len(decoration),
+                "graph_expanded_chunks": graph_counts.get("graph_expanded", 0),
+                "final_chunks": len(sources or []),
+                "final_docs": len(
+                    {
+                        str(getattr(source, "doc_id", "") or "")
+                        for source in sources or []
+                        if getattr(source, "doc_id", None)
+                    }
+                ),
+                "timing_s": {
+                    "graph": graph_timings.get("graph", 0.0),
+                    "rerank": graph_timings.get("rerank", 0.0),
+                    "graph_decoration": graph_timings.get("graph_decoration", 0.0),
+                },
+                "why_better_than_hybrid": [
+                    "Added Neo4j fact/entity evidence to the hybrid seed pool",
+                    "Expanded only from bounded top hybrid chunks",
+                    "Decorated only final selected chunks with graph relations",
+                    "Verified final answer context through Mongo-hydrated chunks",
+                ],
+            }
+            yield _record_trace_event(
+                lane="retrieval",
+                title="Graph Advantage",
+                status="done",
+                content=(
+                    "Graph Advantage\n"
+                    f"facts={graph_advantage['facts_used']} · "
+                    f"relations={graph_advantage['relations_used']} · "
+                    f"expanded_chunks={graph_advantage['graph_expanded_chunks']} · "
+                    f"final_docs={graph_advantage['final_docs']} · "
+                    f"decoration={float(graph_advantage['timing_s']['graph_decoration'] or 0.0):.2f}s"
+                ),
+                metadata=graph_advantage,
+            )
         retrieval_nuance_contract = _format_retrieval_nuance_contract(
             retrieval_nuance_digest,
         )

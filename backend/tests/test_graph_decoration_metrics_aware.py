@@ -129,6 +129,38 @@ def decorator():
     return d
 
 
+class _EmptyResult:
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise StopAsyncIteration
+
+
+class _CaptureSession:
+    def __init__(self, capture: dict):
+        self.capture = capture
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return None
+
+    async def run(self, query, **params):
+        self.capture["query"] = query
+        self.capture["params"] = params
+        return _EmptyResult()
+
+
+class _CaptureDriver:
+    def __init__(self, capture: dict):
+        self.capture = capture
+
+    def session(self):
+        return _CaptureSession(self.capture)
+
+
 # ── Tests ────────────────────────────────────────────────────────────
 
 
@@ -142,6 +174,32 @@ async def test_db_none_means_no_annotation(decorator):
     # checking the fields directly:
     assert decorations[0].seed_betweenness is None
     assert decorations[0].is_fragile_bridge is False
+
+
+@pytest.mark.asyncio
+async def test_relates_to_decoration_uses_evidence_chunk_ids_not_neighbor_fanout(
+    decorator,
+):
+    """Final-only decoration should not fan out from neighbor entities to all
+    mentioning chunks. It must hydrate compact relation evidence by chunk_id."""
+    capture: dict = {}
+    decorator._driver = _CaptureDriver(capture)
+
+    await decorator._decorate_via_relates_to(
+        winning_chunk_ids=["winner-1"],
+        corpus_ids=["corpus-1"],
+        wanted_families=None,
+        neighbor_limit=8,
+        chunks_per_neighbor=2,
+        query="python ai",
+    )
+
+    query = capture["query"]
+    params = capture["params"]
+    assert "(neighbor)<-[:MENTIONS]-(evidence:Chunk)" not in query
+    assert "evidence.chunk_id IN evidence_ids" in query
+    assert params["neighbor_limit"] == 24
+    assert params["chunks_per_neighbor"] == 2
 
 
 @pytest.mark.asyncio

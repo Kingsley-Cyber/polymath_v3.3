@@ -33,12 +33,27 @@ class ModeAExpansion:
         merged_pool: List[SourceChunk],
         corpus_ids: Optional[List[str]] = None,
         limit: int = 20,
+        seed_limit: int | None = None,
         db=None,
     ) -> List[SourceChunk]:
         if not self._settings.NEO4J_ENABLED or not self._driver:
             return []
+        if int(limit or 0) <= 0:
+            return []
 
-        seed_ids = [c.chunk_id for c in merged_pool if c.chunk_id]
+        effective_seed_limit = max(
+            1,
+            int(seed_limit or getattr(self._settings, "GRAPH_SEED_CHUNKS", 8)),
+        )
+        seed_ids = [
+            c.chunk_id
+            for c in sorted(
+                merged_pool,
+                key=lambda chunk: float(getattr(chunk, "score", 0.0) or 0.0),
+                reverse=True,
+            )
+            if c.chunk_id
+        ][:effective_seed_limit]
         if not seed_ids:
             return []
 
@@ -138,9 +153,11 @@ class ModeAExpansion:
         expanded = sorted(merged.values(), key=lambda c: c.score, reverse=True)[:limit]
         logger.info(
             "Mode A expansion: %d unique chunks (mentions=%d, calls=%d, "
-            "bridges=%d, top score %.3f)",
+            "bridges=%d, seeds=%d, cap=%d, top score %.3f)",
             len(expanded), len(mention_chunks), len(calls_chunks),
             len(bridge_chunks),
+            len(seed_ids),
+            int(limit),
             expanded[0].score if expanded else 0.0,
         )
         return expanded

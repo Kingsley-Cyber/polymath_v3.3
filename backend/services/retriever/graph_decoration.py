@@ -33,6 +33,7 @@ skip it entirely.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import List, Optional
@@ -216,24 +217,72 @@ class GraphDecorator:
         if not winning_chunks:
             return []
 
-        winning_chunk_ids = [c.chunk_id for c in winning_chunks if c.chunk_id]
+        max_chunks = max(1, int(getattr(self._settings, "GRAPH_DECORATE_MAX_CHUNKS", 8)))
+        max_paths = max(
+            0,
+            int(getattr(self._settings, "GRAPH_DECORATE_MAX_PATHS_PER_CHUNK", 3)),
+        )
+        max_evidence = max(
+            0,
+            int(getattr(self._settings, "GRAPH_DECORATE_EVIDENCE_CHUNKS_PER_PATH", 2)),
+        )
+        seed_entities_per_chunk = max(
+            1,
+            int(getattr(self._settings, "GRAPH_DECORATE_ENTITIES_PER_CHUNK", 3)),
+        )
+        winning_chunk_ids = [
+            c.chunk_id
+            for c in winning_chunks[:max_chunks]
+            if c.chunk_id
+        ]
         if not winning_chunk_ids:
             return []
+        neighbor_limit = min(int(neighbor_limit), max_chunks * max_paths)
+        chunks_per_neighbor = min(int(chunks_per_neighbor), max_evidence)
+        if neighbor_limit <= 0:
+            return []
 
-        relates_to_decorations = await self._decorate_via_relates_to(
-            winning_chunk_ids=winning_chunk_ids,
-            corpus_ids=corpus_ids,
-            wanted_families=wanted_families,
-            neighbor_limit=neighbor_limit,
-            chunks_per_neighbor=chunks_per_neighbor,
-            query=query,
+        timeout_s = max(
+            0.1,
+            float(getattr(self._settings, "GRAPH_DECORATION_TIMEOUT_SECONDS", 1.5)),
         )
-        calls_decorations = await self._decorate_via_calls(
-            winning_chunk_ids=winning_chunk_ids,
-            corpus_ids=corpus_ids,
-            neighbor_limit=neighbor_limit,
-            chunks_per_neighbor=chunks_per_neighbor,
-        )
+        try:
+            relates_to_decorations = await asyncio.wait_for(
+                self._decorate_via_relates_to(
+                    winning_chunk_ids=winning_chunk_ids,
+                    corpus_ids=corpus_ids,
+                    wanted_families=wanted_families,
+                    neighbor_limit=neighbor_limit,
+                    chunks_per_neighbor=chunks_per_neighbor,
+                    seed_entities_per_chunk=seed_entities_per_chunk,
+                    query=query,
+                ),
+                timeout=timeout_s,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "decorate_winners[RELATES_TO] timeout after %.2fs winners=%d",
+                timeout_s,
+                len(winning_chunk_ids),
+            )
+            relates_to_decorations = []
+        try:
+            calls_decorations = await asyncio.wait_for(
+                self._decorate_via_calls(
+                    winning_chunk_ids=winning_chunk_ids,
+                    corpus_ids=corpus_ids,
+                    neighbor_limit=neighbor_limit,
+                    chunks_per_neighbor=chunks_per_neighbor,
+                ),
+                timeout=timeout_s,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "decorate_winners[CALLS] timeout after %.2fs winners=%d",
+                timeout_s,
+                len(winning_chunk_ids),
+            )
+            calls_decorations = []
 
         # Concat; both lists already capped individually. The downstream
         # arrow renderer in context_manager has its own per-chunk and total
@@ -385,12 +434,19 @@ class GraphDecorator:
         wanted_families: Optional[List[str]],
         neighbor_limit: int,
         chunks_per_neighbor: int,
+        seed_entities_per_chunk: int | None = None,
         query: Optional[str] = None,
     ) -> List[GraphDecoration]:
         cypher = """
         // Pt 10d — graph decoration over winners (RELATES_TO walk)
-        MATCH (winner:Chunk)-[:MENTIONS]->(seed:Entity)-[r:RELATES_TO]-(neighbor:Entity)
+        MATCH (winner:Chunk)-[m:MENTIONS]->(seed:Entity)
         WHERE winner.chunk_id IN $winning_chunk_ids
+        WITH winner, seed, max(coalesce(m.confidence, 0.5)) AS mention_confidence
+        ORDER BY mention_confidence DESC
+        WITH winner, collect(seed)[..$seed_entities_per_chunk] AS seed_entities
+        UNWIND seed_entities AS seed
+        MATCH (seed)-[r:RELATES_TO]-(neighbor:Entity)
+        WHERE seed <> neighbor
           AND r.eligible_for_synthesis = true
           AND r.edge_strength IN ['strong', 'repaired']
           AND (size($wanted_families) = 0 OR r.relation_family IN $wanted_families)
@@ -400,16 +456,16 @@ class GraphDecorator:
                  WHEN 'repaired' THEN 0.7
                  ELSE 0.0
              END AS edge_weight
-        // Step 2 — find supporting chunks for the neighbor entity, parent-
-        // boost siblings of the winner's doc so cross-doc neighbors don't
-        // smuggle in opposing-argument context.
-        OPTIONAL MATCH (neighbor)<-[:MENTIONS]-(evidence:Chunk)
-        WHERE (size($corpus_ids) = 0 OR evidence.corpus_id IN $corpus_ids)
-          AND evidence.chunk_id <> winner.chunk_id
+        ORDER BY edge_weight DESC
+        LIMIT $neighbor_limit
         WITH winner, seed, neighbor, r, edge_weight,
-             evidence,
+             coalesce(r.evidence_chunk_ids, [])[..$chunks_per_neighbor] AS evidence_ids
+        OPTIONAL MATCH (evidence:Chunk)
+        WHERE evidence.chunk_id IN evidence_ids
+          AND (size($corpus_ids) = 0 OR evidence.corpus_id IN $corpus_ids)
+          AND evidence.chunk_id <> winner.chunk_id
+        WITH winner, seed, neighbor, r, edge_weight, evidence,
              CASE WHEN evidence.doc_id = winner.doc_id THEN 2 ELSE 1 END AS parent_boost
-        ORDER BY parent_boost DESC, edge_weight DESC
         WITH winner.chunk_id              AS winner_chunk_id,
              coalesce(seed.display_name, seed.normalized_name, '')     AS seed_entity,
              coalesce(neighbor.display_name, neighbor.normalized_name, '') AS neighbor_entity,
@@ -450,7 +506,11 @@ class GraphDecorator:
             # is bound to a larger fetch size) and select the most query-relevant
             # edges in Python — the Cypher only knows edge_weight. Without a query,
             # keep the original edge_weight top-k (back-compat).
-            _fetch_limit = max(int(neighbor_limit), 200) if query else int(neighbor_limit)
+            _fetch_limit = (
+                max(int(neighbor_limit), min(int(neighbor_limit) * 3, 24))
+                if query
+                else int(neighbor_limit)
+            )
             async with self._driver.session() as session:
                 result = await session.run(
                     cypher,
@@ -459,6 +519,7 @@ class GraphDecorator:
                     wanted_families=wanted_families or [],
                     neighbor_limit=_fetch_limit,
                     chunks_per_neighbor=int(chunks_per_neighbor),
+                    seed_entities_per_chunk=int(seed_entities_per_chunk or 3),
                 )
                 rows = [dict(r) async for r in result]
 
