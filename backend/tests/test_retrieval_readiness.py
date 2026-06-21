@@ -111,6 +111,13 @@ async def test_startup_repair_uses_each_corpus_dimension_and_neo4j_once(monkeypa
     assert report["ready"] == 2
     assert report["failed"] == 0
     assert neo4j_calls == 1
+    assert report["reports"][1]["neo4j_required"] is True
+    assert report["reports"][1]["qdrant_route_collections"] == {
+        "naive": "corpus_c2_naive",
+        "hrag": "corpus_c2_hrag",
+        "graph": "corpus_c2_graph",
+        "schemas": "corpus_c2_schemas",
+    }
     assert [(c["corpus_id"], c["dim"]) for c in qdrant_calls] == [
         ("c1", 384),
         ("c2", 1024),

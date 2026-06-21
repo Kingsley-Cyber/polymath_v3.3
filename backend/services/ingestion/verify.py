@@ -439,6 +439,16 @@ async def verify_ingest(
         errors.append("neo4j: required but driver is unavailable")
     elif use_neo4j and neo4j_driver is not None:
         try:
+            # A new install can create graph rows before full-text indexes have
+            # finished POPULATING. Counting HAS_CHUNK proves writes landed, but
+            # Graph Augmentation also needs indexed Entity/Fact anchors.
+            from services.graph.schema import wait_for_retrieval_indexes
+
+            try:
+                await wait_for_retrieval_indexes(neo4j_driver, timeout_s=5.0)
+            except Exception as exc:
+                errors.append(f"neo4j.retrieval_indexes: {exc}")
+
             expected_neo4j = await _expected_child_count(
                 db,
                 doc_id=doc_id,

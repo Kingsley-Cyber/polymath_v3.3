@@ -447,3 +447,74 @@ scripts/retrieval_three_tier_eval.py \
 
 The live retrieval standard is source/prework latency, not total model
 generation latency.
+
+## Fresh Install And Ingest Readiness
+
+Current status on 2026-06-21:
+
+```text
+Fresh install contract:
+  ./scripts/check-install.sh
+  Result: 0 failures, 2 model-directory warnings
+
+Static runtime contracts:
+  python3 scripts/verify_runtime_contracts.py --json
+  Result: 40 passed, 0 failed
+
+Focused ingest/readiness tests:
+  docker compose run --rm -T \
+    -v /Users/king/polymath_v3.3/backend:/app \
+    backend python -m pytest \
+    tests/test_retrieval_readiness.py \
+    tests/test_ingest_verify_graph_indexes.py \
+    tests/test_worker_phases.py -q
+  Result: 22 passed, 1 skipped
+
+Batch path coverage:
+  docker compose run --rm -T \
+    -v /Users/king/polymath_v3.3/backend:/app \
+    backend python -m pytest \
+    tests/test_ingest_batches.py \
+    tests/test_retrieval_readiness.py \
+    tests/test_ingest_verify_graph_indexes.py \
+    tests/test_worker_phases.py -q
+  Result: 35 passed, 1 skipped
+```
+
+Pinned guarantees:
+
+```text
+Startup:
+  ingestion_service.connect() calls repair_retrieval_readiness_for_all_corpora()
+  so existing corpora get Qdrant route collections and Neo4j retrieval schema.
+
+Corpus creation:
+  create_corpus() calls ensure_corpus_retrieval_ready() before returning.
+
+Worker setup:
+  run_ingest_job calls ensure_corpus_retrieval_ready() before chunk/vector/graph
+  writes. A setup failure becomes stage="setup_failed" instead of a partial
+  ingest.
+
+Qdrant:
+  new corpora get all route collections: naive, hrag, graph, schemas.
+  new collections use named dense vector "dense" and sparse vector "sparse"
+  with IDF so exact-token lanes remain available.
+
+Neo4j:
+  graph-enabled corpora initialize graph constraints, RELATES_TO property
+  indexes, and full-text indexes entity_name_ft and fact_text_ft.
+
+Post-ingest verification:
+  verify_ingest checks Mongo chunk rows, Qdrant child counts, summary counts,
+  payload text contract, probe scroll, Neo4j HAS_CHUNK count, and Neo4j
+  retrieval-index readiness. A document only reaches final done when
+  write_state.verified is true.
+
+Route validation:
+  scripts/retrieval_three_tier_eval.py remains the live route validator for
+  Fast Search, Hybrid Search, and Graph Augmentation source/prework budgets.
+```
+
+The Downloads checkout at `/Users/king/Downloads/polymath_v3.3-main` is not a
+git repository. Use `/Users/king/polymath_v3.3` for commits and validation.

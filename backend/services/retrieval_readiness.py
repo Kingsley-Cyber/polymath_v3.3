@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from config import get_settings
-from services.storage.qdrant_writer import ensure_collections_for_corpus
+from services.storage.qdrant_writer import _col_for_corpus, ensure_collections_for_corpus
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,10 @@ class CorpusReadinessReport:
     corpus_id: str
     qdrant_ready: bool = False
     neo4j_ready: bool | None = None
+    neo4j_required: bool = False
     embedding_dimension: int | None = None
     qdrant_collections: list[str] = field(default_factory=list)
+    qdrant_route_collections: dict[str, str] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -44,8 +46,10 @@ class CorpusReadinessReport:
             "ok": self.ok,
             "qdrant_ready": self.qdrant_ready,
             "neo4j_ready": self.neo4j_ready,
+            "neo4j_required": self.neo4j_required,
             "embedding_dimension": self.embedding_dimension,
             "qdrant_collections": list(self.qdrant_collections),
+            "qdrant_route_collections": dict(self.qdrant_route_collections),
             "errors": list(self.errors),
         }
 
@@ -147,6 +151,10 @@ async def ensure_corpus_retrieval_ready(
         corpus_id=corpus_id,
         embedding_dimension=dim,
         qdrant_collections=targets,
+        qdrant_route_collections={
+            kind: _col_for_corpus(corpus_id, kind)
+            for kind in ("naive", "hrag", "graph", "schemas")
+        },
     )
 
     if qdrant_client is None:
@@ -165,6 +173,7 @@ async def ensure_corpus_retrieval_ready(
 
     neo4j_enabled = settings.NEO4J_ENABLED if neo4j_enabled is None else neo4j_enabled
     neo4j_required = bool(neo4j_enabled and _uses_neo4j(corpus_doc, ingestion_config))
+    report.neo4j_required = neo4j_required
     if not neo4j_required:
         report.neo4j_ready = None
     elif neo4j_driver is None:
