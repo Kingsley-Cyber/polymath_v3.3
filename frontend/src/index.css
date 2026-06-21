@@ -1814,3 +1814,391 @@
     max-height: min(24dvh, 14rem);
   }
 }
+
+/* ────────────────────────────────────────────────────────────────────── */
+/* Premium graph builder (Pt 7d) — opinionated, research-grade styles.    */
+/* No decorative orbs/bokeh, no nested cards. The substrate is a quiet   */
+/* dark tone that lets the canvas dots and the synthesis body carry the   */
+/* visual weight.                                                         */
+/* ────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --graph-substrate: #0c0e13;
+  --graph-surface: #11141b;
+  --graph-raised: #161a23;
+  --graph-grid: rgba(148, 163, 184, 0.04);
+  --graph-vignette: radial-gradient(ellipse at center, transparent 0%, rgba(0, 0, 0, 0.35) 100%);
+}
+
+.graph-canvas-substrate {
+  background-color: var(--graph-substrate);
+  background-image: var(--graph-vignette);
+}
+
+.graph-canvas-grid {
+  background-image:
+    linear-gradient(to right, var(--graph-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--graph-grid) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+/* Subtle elevation used by the top command strip / right rail header. */
+.graph-panel-header {
+  background-color: rgba(17, 20, 27, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Refined scrollbar used inside the dashboard body and synthesis card. */
+.graph-panel-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}
+.graph-panel-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.graph-panel-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.graph-panel-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.25);
+  border-radius: 4px;
+}
+.graph-panel-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 0.45);
+}
+
+/* ────────────────────────────────────────────────────────────────────── */
+/* Premium design tokens (Pt 7d follow-up).                                */
+/* Color / spacing / type / motion / density / elevation as CSS variables */
+/* so the workspace reads as one product, not a pile of utility classes.  */
+/* TS mirror: `frontend/src/lib/design-tokens.ts`.                        */
+/* ────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Surface ladder — substrate depth, not decoration. */
+  --surface-base: #0a0d14;
+  --surface-canvas: #0c0e13;
+  --surface-panel: #11141b;
+  --surface-inset: #161a23;
+  --surface-overlay: #1c2230;
+
+  /* Ink ladder — high-legibility contrast against the dark substrate. */
+  --ink-primary: #f1f5f9;
+  --ink-secondary: #cbd5e1;
+  --ink-tertiary: #94a3b8;
+  --ink-muted: #64748b;
+  --ink-inverse: #0a0d14;
+
+  /* Border ladder. */
+  --border-thin: rgba(148, 163, 184, 0.12);
+  --border-regular: rgba(148, 163, 184, 0.18);
+  --border-strong: rgba(148, 163, 184, 0.28);
+  --border-focus: rgba(125, 211, 252, 0.85);
+
+  /* Accent. */
+  --accent-main: #fbbf24;
+  --accent-soft: rgba(251, 191, 36, 0.16);
+  --accent-strong: #f59e0b;
+  --accent-on: #0a0d14;
+
+  /* Semantic node roles — one hue per role, used everywhere a node of    */
+  /* that role is shown (canvas dot, chip, badge, synthesis pill). */
+  --role-anchor: #fcd34d;        /* amber-300 */
+  --role-hub: #7dd3fc;           /* sky-300 */
+  --role-bridge: #c4b5fd;        /* violet-300 */
+  --role-gap: #fda4af;           /* rose-300 */
+  --role-evidence: #6ee7b7;      /* emerald-300 */
+  --role-cross-corpus: #fbbf24;  /* amber-400 */
+  --role-query-matched: #a5b4fc; /* indigo-300 */
+  --role-frontier: #cbd5e1;      /* slate-300 */
+
+  /* Evidence lanes — layered above role because a node can be a hub AND   */
+  /* live in corpus evidence. Lane is provenance, role is shape. */
+  --lane-corpus-solid: #3b82f6;
+  --lane-corpus-bg: rgba(59, 130, 246, 0.10);
+  --lane-corpus-border: rgba(96, 165, 250, 0.45);
+  --lane-corpus-text: #93c5fd;
+
+  --lane-graph-solid: #a78bfa;
+  --lane-graph-bg: rgba(167, 139, 250, 0.10);
+  --lane-graph-border: rgba(167, 139, 250, 0.45);
+  --lane-graph-text: #c4b5fd;
+
+  --lane-web-solid: #38bdf8;
+  --lane-web-bg: rgba(56, 189, 248, 0.10);
+  --lane-web-border: rgba(56, 189, 248, 0.45);
+  --lane-web-text: #7dd3fc;
+
+  /* State. */
+  --state-success-solid: #10b981;
+  --state-success-bg: rgba(16, 185, 129, 0.10);
+  --state-success-text: #6ee7b7;
+
+  --state-warning-solid: #f59e0b;
+  --state-warning-bg: rgba(245, 158, 11, 0.10);
+  --state-warning-text: #fcd34d;
+
+  --state-danger-solid: #ef4444;
+  --state-danger-bg: rgba(239, 68, 68, 0.10);
+  --state-danger-text: #fca5a5;
+
+  --state-info-solid: #3b82f6;
+  --state-info-bg: rgba(59, 130, 246, 0.10);
+  --state-info-text: #93c5fd;
+
+  /* Substrate. */
+  --substrate-grid-line: rgba(148, 163, 184, 0.04);
+  --substrate-vignette: radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.35) 100%);
+
+  /* Spacing — 4pt scale. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Type. */
+  --font-ui: "Rubik", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-reading: "Atkinson Hyperlegible", "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Roboto Mono", Consolas, Monaco, monospace;
+
+  /* Modular type scale (1.125). */
+  --type-xs: 11px;
+  --type-sm: 12px;
+  --type-base: 13px;
+  --type-md: 14px;
+  --type-lg: 16px;
+  --type-xl: 20px;
+  --type-2xl: 24px;
+  --type-3xl: 32px;
+
+  /* Motion. */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 320ms;
+  --motion-slower: 480ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1.2);
+  --ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --ease-accelerate: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Density. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-full: 9999px;
+
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  --shadow-floating: 0 24px 60px -24px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.02) inset, 0 8px 24px -16px rgba(0, 0, 0, 0.5);
+}
+
+/* ─── Scoped primitives for the graph workspace only ──────────────────── */
+/* All graph-builder primitives are namespaced with the `g` prefix and      */
+/* gated behind a `.graph-surface` ancestor so they cannot bleed into the   */
+/* chat / settings / corpus chrome. The ancestor selector lets any deep    */
+/* descendant (rendered into portals, fragments, etc.) still inherit the  */
+/* styles as long as its root container carries `.graph-surface`.          */
+/*                                                                           */
+/* Naming convention:                                                        */
+/*   .gbtn / .gbtn--primary / .gbtn--sm        (button + variants + sizes)   */
+/*   .gchip / .gchip__dot                      (lane / role / status chip)    */
+/*   .gcard / .gcard--accent / .gcard--inset   (panel card)                   */
+
+.graph-surface .gbtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font-family: var(--font-ui);
+  font-weight: 500;
+  line-height: 1;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  overflow: hidden;
+  user-select: none;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+  outline: none;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 0 0 rgba(125, 211, 252, 0);
+  will-change: transform, box-shadow, background-color;
+}
+
+.graph-surface .gbtn::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(circle at 30% 0%, rgba(255, 255, 255, 0.24), transparent 38%),
+    linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, 0.12) 48%, transparent 70%);
+  transform: translateX(-22%);
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-medium) var(--ease-emphasized);
+}
+
+.graph-surface .gbtn:hover {
+  transform: translateY(-1px);
+}
+
+.graph-surface .gbtn:hover::after,
+.graph-surface .gbtn.is-active::after {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.graph-surface .gbtn:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+.graph-surface .gbtn:focus-visible {
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--accent-main),
+              0 0 0 calc(var(--focus-ring-width) + var(--focus-ring-offset)) var(--surface-canvas);
+}
+
+.graph-surface .gbtn:disabled,
+.graph-surface .gbtn[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* sizes */
+.graph-surface .gbtn--sm { height: 24px; padding: 0 var(--space-2); font-size: var(--type-xs); border-radius: var(--radius-sm); }
+.graph-surface .gbtn--md { height: 32px; padding: 0 var(--space-3); font-size: var(--type-sm); }
+.graph-surface .gbtn--lg { height: 40px; padding: 0 var(--space-4); font-size: var(--type-base); font-weight: 600; }
+
+/* variants */
+.graph-surface .gbtn--primary {
+  background:
+    radial-gradient(circle at 25% 15%, rgba(255, 255, 255, 0.26), transparent 34%),
+    linear-gradient(135deg, var(--accent-main), var(--accent-strong));
+  color: var(--accent-on);
+  border-color: rgba(125, 211, 252, 0.45);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18) inset,
+    0 8px 24px -16px rgba(125, 211, 252, 0.75),
+    0 0 0 1px rgba(125, 211, 252, 0.12);
+}
+.graph-surface .gbtn--primary:hover {
+  background:
+    radial-gradient(circle at 25% 15%, rgba(255, 255, 255, 0.32), transparent 34%),
+    linear-gradient(135deg, var(--accent-strong), var(--accent-main));
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.20) inset,
+    0 12px 32px -18px rgba(125, 211, 252, 0.95),
+    0 0 0 1px rgba(125, 211, 252, 0.24);
+}
+.graph-surface .gbtn--primary:active { background: var(--accent-strong); }
+
+.graph-surface .gbtn--secondary {
+  background: var(--surface-inset);
+  color: var(--ink-primary);
+  border-color: var(--border-regular);
+}
+.graph-surface .gbtn--secondary:hover {
+  background: var(--surface-overlay);
+  border-color: var(--accent-main);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 10px 28px -20px rgba(125, 211, 252, 0.72);
+}
+.graph-surface .gbtn--secondary:active { background: var(--surface-overlay); }
+
+.graph-surface .gbtn--tertiary {
+  background: transparent;
+  color: var(--ink-secondary);
+  border-color: transparent;
+}
+.graph-surface .gbtn--tertiary:hover { background: var(--surface-inset); color: var(--ink-primary); border-color: var(--border-thin); }
+.graph-surface .gbtn--tertiary:active { background: var(--surface-overlay); }
+
+.graph-surface .gbtn--ghost {
+  background: transparent;
+  color: var(--ink-tertiary);
+  border-color: transparent;
+}
+.graph-surface .gbtn--ghost:hover { background: rgba(148, 163, 184, 0.06); color: var(--ink-secondary); }
+.graph-surface .gbtn--ghost:active { background: rgba(148, 163, 184, 0.10); }
+
+.graph-surface .gbtn--danger {
+  background: var(--state-danger-solid);
+  color: #fff5f5;
+  border-color: transparent;
+}
+.graph-surface .gbtn--danger:hover { background: #dc2626; }
+.graph-surface .gbtn--danger:active { background: #b91c1c; transform: translateY(0.5px); }
+
+/* ─── Primitive: Chip ─────────────────────────────────────────────────── */
+/* Lane / role / state chip. Tonal: tinted bg + accent border + role text */
+
+.graph-surface .gchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--type-xs);
+  letter-spacing: var(--letter-spacing-wide, 0.04em);
+  text-transform: uppercase;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.graph-surface .gchip__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+/* ─── Primitive: Card ─────────────────────────────────────────────────── */
+
+.graph-surface .gcard {
+  background: var(--surface-inset);
+  border: 1px solid var(--border-thin);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  box-shadow: var(--shadow-card);
+}
+.graph-surface .gcard--accent {
+  border-left: 2px solid var(--accent-main);
+  border-left-width: 2px;
+}
+.graph-surface .gcard--inset {
+  background: var(--surface-base);
+}
+
+/* ─── Typography utilities (scoped) ───────────────────────────────────── */
+
+.graph-surface .gtext-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--type-xs);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+.graph-surface .gtext-mono { font-family: var(--font-mono); }
+.graph-surface .gtext-reading { font-family: var(--font-reading); }
+.graph-surface .gtext-num { font-variant-numeric: tabular-nums; }

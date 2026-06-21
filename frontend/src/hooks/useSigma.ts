@@ -26,7 +26,7 @@ import type {
   SigmaEdgeAttributes,
 } from "../lib/polymath-graph-adapter";
 import type { QueryFingerprint } from "../lib/query-fingerprint";
-import { MOTION } from "../lib/design-tokens";
+import { motion as motionTokens } from "../lib/design-tokens";
 
 // ── Color helpers (verbatim from GitNexus useSigma.ts) ────────────────────
 
@@ -54,9 +54,12 @@ const rgbToHex = (r: number, g: number, b: number): string => {
 };
 
 // Mix toward dark background — keeps a hint of color when dimmed.
+// Uses the new research-substrate tone (#0c0e13) so unselected nodes
+// dim toward the actual canvas background instead of the old night-sky
+// tone, keeping the canvas cohesive.
 const dimColor = (hex: string, amount: number): string => {
   const rgb = hexToRgb(hex);
-  const darkBg = { r: 14, g: 14, b: 22 }; // matches the canvas bg
+  const darkBg = { r: 12, g: 14, b: 19 };
   return rgbToHex(
     darkBg.r + (rgb.r - darkBg.r) * amount,
     darkBg.g + (rgb.g - darkBg.g) * amount,
@@ -110,18 +113,18 @@ interface UseSigmaReturn {
 // iterations carves real breathing room between nodes after FA2 settles.
 // Without this the no-overlap step had too little authority to undo
 // FA2's central clumping.
-const BASE_NOVERLAP_SETTINGS = {
-  maxIterations: 80,
-  ratio: 1.35,
-  margin: 22,
-  expansion: 1.2,
-};
-
 const getNoverlapSettings = (
   nodeCount: number,
   mode: "brain" | "query",
 ) => {
-  if (mode !== "query") return BASE_NOVERLAP_SETTINGS;
+  if (mode !== "query") {
+    return {
+      maxIterations: nodeCount > 2500 ? 70 : 90,
+      ratio: nodeCount > 2500 ? 1.08 : 1.14,
+      margin: nodeCount > 2500 ? 4 : 6,
+      expansion: 1.04,
+    };
+  }
   return {
     maxIterations: nodeCount > 500 ? 170 : 150,
     ratio: nodeCount > 500 ? 1.85 : 2.05,
@@ -153,7 +156,18 @@ const getFA2Settings = (
     edgeWeightInfluence: 1.0,
   };
 
-  if (mode !== "query") return base;
+  if (mode !== "query") {
+    return {
+      ...base,
+      gravity: nodeCount > 1000 ? 0.008 : 0.014,
+      scalingRatio: nodeCount > 1000 ? 118 : 94,
+      slowDown: nodeCount > 1000 ? 7.2 : 6.0,
+      barnesHutOptimize: nodeCount > 120,
+      barnesHutTheta: 0.78,
+      linLogMode: true,
+      edgeWeightInfluence: 0.12,
+    };
+  }
 
   // Query graphs should read as a curated atom: more breathing room,
   // weaker center gravity, and slightly stronger edge weights so seeds,
@@ -251,6 +265,330 @@ function enforceQueryMinimumSpacing(
   }
 }
 
+function stableUnitFromString(value: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    h ^= value.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 4294967295;
+}
+
+function finiteNumber(value: unknown, fallback = 0): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function brainClusterTarget(
+  key: string,
+  index: number,
+  total: number,
+  spread: number,
+): { x: number; y: number } {
+  if (total <= 1) return { x: 0, y: 0 };
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  if (total > 90) {
+    const radius =
+      spread *
+      (0.08 + 0.94 * Math.sqrt((index + 1) / Math.max(total, 1)));
+    const angle =
+      index * goldenAngle + stableUnitFromString(`${key}:brain-center`) * 0.22;
+    return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
+  }
+  const ring = Math.max(1, Math.ceil(Math.sqrt(total)));
+  const radius =
+    spread *
+    (0.52 + 0.2 * Math.floor(index / ring)) *
+    Math.sqrt((index + 1) / total);
+  const angle = index * goldenAngle + stableUnitFromString(`${key}:brain-center`) * 0.45;
+  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
+}
+
+function enforceBrainClusterSpacing(
+  graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>,
+  passes = 4,
+) {
+  const nodes = graph.nodes();
+  const nodeCount = nodes.length;
+  if (nodeCount < 2) return;
+
+  const groups = new Map<string, string[]>();
+  for (const id of nodes) {
+    const key = String(
+      graph.getNodeAttribute(id, "brain_cluster_key") ||
+        graph.getNodeAttribute(id, "source_corpus") ||
+        graph.getNodeAttribute(id, "nodeKind") ||
+        "corpus",
+    );
+    const list = groups.get(key) || [];
+    list.push(id);
+    groups.set(key, list);
+  }
+
+  const orderedGroups = [...groups.entries()].sort(
+    (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]),
+  );
+  const spread = Math.sqrt(Math.max(nodeCount, 120)) * (nodeCount > 1500 ? 30 : 36);
+  orderedGroups.forEach(([key, groupNodes], idx) => {
+    if (groupNodes.length === 0) return;
+    const target = brainClusterTarget(key, idx, orderedGroups.length, spread);
+    let cx = 0;
+    let cy = 0;
+    for (const id of groupNodes) {
+      cx += finiteNumber(graph.getNodeAttribute(id, "x"), target.x);
+      cy += finiteNumber(graph.getNodeAttribute(id, "y"), target.y);
+    }
+    cx /= groupNodes.length;
+    cy /= groupNodes.length;
+    const shiftX = (target.x - cx) * 0.94;
+    const shiftY = (target.y - cy) * 0.94;
+    const desiredRadius =
+      groupNodes.length <= 8
+        ? Math.max(34, Math.sqrt(groupNodes.length) * 18)
+        : Math.max(180, Math.sqrt(groupNodes.length) * 58);
+    let avgRadius = 0;
+    for (const id of groupNodes) {
+      const x = finiteNumber(graph.getNodeAttribute(id, "x"), target.x) + shiftX;
+      const y = finiteNumber(graph.getNodeAttribute(id, "y"), target.y) + shiftY;
+      graph.setNodeAttribute(id, "x", x);
+      graph.setNodeAttribute(id, "y", y);
+      avgRadius += Math.hypot(x - target.x, y - target.y);
+    }
+    avgRadius /= groupNodes.length;
+    if (avgRadius > 0 && avgRadius < desiredRadius) {
+      const scale = Math.min(2.0, desiredRadius / avgRadius);
+      for (const id of groupNodes) {
+        const x = finiteNumber(graph.getNodeAttribute(id, "x"), target.x);
+        const y = finiteNumber(graph.getNodeAttribute(id, "y"), target.y);
+        graph.setNodeAttribute(id, "x", target.x + (x - target.x) * scale);
+        graph.setNodeAttribute(id, "y", target.y + (y - target.y) * scale);
+      }
+    }
+  });
+
+  const collisionPasses = Math.max(1, Math.min(passes, nodeCount > 2200 ? 2 : 4));
+  const cellSize = nodeCount > 2500 ? 104 : 128;
+  for (let pass = 0; pass < collisionPasses; pass += 1) {
+    const grid = new Map<string, string[]>();
+    const cellFor = (x: number, y: number) => {
+      const cx = Math.floor(x / cellSize);
+      const cy = Math.floor(y / cellSize);
+      return `${cx}:${cy}`;
+    };
+
+    for (const id of nodes) {
+      const x = finiteNumber(graph.getNodeAttribute(id, "x"), 0);
+      const y = finiteNumber(graph.getNodeAttribute(id, "y"), 0);
+      const key = cellFor(x, y);
+      const list = grid.get(key) || [];
+      list.push(id);
+      grid.set(key, list);
+    }
+
+    let moved = false;
+    for (const a of nodes) {
+      let ax = finiteNumber(graph.getNodeAttribute(a, "x"), 0);
+      let ay = finiteNumber(graph.getNodeAttribute(a, "y"), 0);
+      const acx = Math.floor(ax / cellSize);
+      const acy = Math.floor(ay / cellSize);
+      const aCluster = String(graph.getNodeAttribute(a, "brain_cluster_key") || "");
+      const aSize = finiteNumber(graph.getNodeAttribute(a, "size"), 5);
+      for (let gx = acx - 1; gx <= acx + 1; gx += 1) {
+        for (let gy = acy - 1; gy <= acy + 1; gy += 1) {
+          const bucket = grid.get(`${gx}:${gy}`);
+          if (!bucket) continue;
+          for (const b of bucket) {
+            if (a >= b) continue;
+            let bx = finiteNumber(graph.getNodeAttribute(b, "x"), 0);
+            let by = finiteNumber(graph.getNodeAttribute(b, "y"), 0);
+            let dx = ax - bx;
+            let dy = ay - by;
+            let dist = Math.hypot(dx, dy);
+            if (!Number.isFinite(dist) || dist < 0.001) {
+              const angle = stableUnitFromString(`${a}:${b}:brain-collide`) * Math.PI * 2;
+              dx = Math.cos(angle) * 0.001;
+              dy = Math.sin(angle) * 0.001;
+              dist = 0.001;
+            }
+            const bCluster = String(graph.getNodeAttribute(b, "brain_cluster_key") || "");
+            const bSize = finiteNumber(graph.getNodeAttribute(b, "size"), 5);
+            const sameCluster = aCluster === bCluster;
+            const padding = sameCluster
+              ? nodeCount > 2500
+                ? 58
+                : 82
+              : nodeCount > 2500
+                ? 96
+                : 122;
+            const minDist = aSize + bSize + padding;
+            if (dist >= minDist) continue;
+            const push = ((minDist - dist) / dist) * 0.5;
+            const px = dx * push;
+            const py = dy * push;
+            ax += px;
+            ay += py;
+            bx -= px;
+            by -= py;
+            graph.setNodeAttribute(b, "x", bx);
+            graph.setNodeAttribute(b, "y", by);
+            moved = true;
+          }
+        }
+      }
+      graph.setNodeAttribute(a, "x", ax);
+      graph.setNodeAttribute(a, "y", ay);
+    }
+    if (!moved) break;
+  }
+}
+
+function nodeScreenRadius(
+  graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>,
+  id: string,
+  mode: "brain" | "query",
+): number {
+  const size = finiteNumber(graph.getNodeAttribute(id, "size"), 5);
+  const kind = String(graph.getNodeAttribute(id, "nodeKind") || "");
+  const forced = Boolean(graph.getNodeAttribute(id, "forceLabel"));
+  if (mode === "query") return Math.max(10, size * (forced ? 2.8 : 2.1));
+  if (kind === "Book") return Math.max(6, size * 1.8);
+  if (kind === "Document") return Math.max(5, size * 1.35);
+  return Math.max(3.5, size * 1.15);
+}
+
+function nodeMobility(
+  graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>,
+  id: string,
+): number {
+  const kind = String(graph.getNodeAttribute(id, "nodeKind") || "");
+  if (kind === "Book") return 0.42;
+  if (Boolean(graph.getNodeAttribute(id, "forceLabel"))) return 0.58;
+  return 1.0;
+}
+
+function enforceViewportCollision(
+  sigma: Sigma | null,
+  graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>,
+  mode: "brain" | "query",
+  passes = 3,
+) {
+  if (!sigma || mode === "query") return;
+  const graphToViewport = (sigma as any).graphToViewport?.bind(sigma);
+  const viewportToGraph = (sigma as any).viewportToGraph?.bind(sigma);
+  if (typeof graphToViewport !== "function" || typeof viewportToGraph !== "function") return;
+
+  const nodes = graph.nodes().filter((id) => !graph.getNodeAttribute(id, "hidden"));
+  if (nodes.length < 2) return;
+
+  const cellSize = 42;
+  for (let pass = 0; pass < passes; pass += 1) {
+    const points = new Map<string, { x: number; y: number; r: number; mobility: number }>();
+    const grid = new Map<string, string[]>();
+    const cellFor = (x: number, y: number) => `${Math.floor(x / cellSize)}:${Math.floor(y / cellSize)}`;
+
+    for (const id of nodes) {
+      const x = finiteNumber(graph.getNodeAttribute(id, "x"), 0);
+      const y = finiteNumber(graph.getNodeAttribute(id, "y"), 0);
+      const p = graphToViewport({ x, y });
+      if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+      const point = {
+        x: p.x,
+        y: p.y,
+        r: nodeScreenRadius(graph, id, mode),
+        mobility: nodeMobility(graph, id),
+      };
+      points.set(id, point);
+      const key = cellFor(point.x, point.y);
+      const bucket = grid.get(key) || [];
+      bucket.push(id);
+      grid.set(key, bucket);
+    }
+
+    let moved = false;
+    for (const a of nodes) {
+      const pa = points.get(a);
+      if (!pa) continue;
+      const acx = Math.floor(pa.x / cellSize);
+      const acy = Math.floor(pa.y / cellSize);
+
+      for (let gx = acx - 1; gx <= acx + 1; gx += 1) {
+        for (let gy = acy - 1; gy <= acy + 1; gy += 1) {
+          const bucket = grid.get(`${gx}:${gy}`);
+          if (!bucket) continue;
+
+          for (const b of bucket) {
+            if (a >= b) continue;
+            const pb = points.get(b);
+            if (!pb) continue;
+
+            let dx = pa.x - pb.x;
+            let dy = pa.y - pb.y;
+            let dist = Math.hypot(dx, dy);
+            if (!Number.isFinite(dist) || dist < 0.01) {
+              const angle = stableUnitFromString(`${a}:${b}:viewport-collide`) * Math.PI * 2;
+              dx = Math.cos(angle) * 0.01;
+              dy = Math.sin(angle) * 0.01;
+              dist = 0.01;
+            }
+
+            const minDist = pa.r + pb.r + 3;
+            if (dist >= minDist) continue;
+
+            const push = ((minDist - dist) / dist) * 0.56;
+            const totalMobility = Math.max(0.01, pa.mobility + pb.mobility);
+            const aShare = pb.mobility / totalMobility;
+            const bShare = pa.mobility / totalMobility;
+            const ax = dx * push * aShare;
+            const ay = dy * push * aShare;
+            const bx = -dx * push * bShare;
+            const by = -dy * push * bShare;
+
+            const aGraph = {
+              x: finiteNumber(graph.getNodeAttribute(a, "x"), 0),
+              y: finiteNumber(graph.getNodeAttribute(a, "y"), 0),
+            };
+            const bGraph = {
+              x: finiteNumber(graph.getNodeAttribute(b, "x"), 0),
+              y: finiteNumber(graph.getNodeAttribute(b, "y"), 0),
+            };
+            const aNext = viewportToGraph({ x: pa.x + ax, y: pa.y + ay });
+            const bNext = viewportToGraph({ x: pb.x + bx, y: pb.y + by });
+            if (aNext && Number.isFinite(aNext.x) && Number.isFinite(aNext.y)) {
+              graph.setNodeAttribute(a, "x", aGraph.x + (aNext.x - aGraph.x));
+              graph.setNodeAttribute(a, "y", aGraph.y + (aNext.y - aGraph.y));
+              pa.x += ax;
+              pa.y += ay;
+              moved = true;
+            }
+            if (bNext && Number.isFinite(bNext.x) && Number.isFinite(bNext.y)) {
+              graph.setNodeAttribute(b, "x", bGraph.x + (bNext.x - bGraph.x));
+              graph.setNodeAttribute(b, "y", bGraph.y + (bNext.y - bGraph.y));
+              pb.x += bx;
+              pb.y += by;
+              moved = true;
+            }
+          }
+        }
+      }
+    }
+    if (!moved) break;
+  }
+}
+
+function settleBrainAtlas(
+  graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>,
+  sigma: Sigma | null,
+) {
+  enforceBrainClusterSpacing(graph, graph.order > 1800 ? 4 : 6);
+  try {
+    noverlap.assign(graph, getNoverlapSettings(graph.order, "brain"));
+  } catch {
+    /* noverlap can throw while graphology is mid-update; spacing still holds */
+  }
+  enforceBrainClusterSpacing(graph, graph.order > 1800 ? 2 : 3);
+  enforceViewportCollision(sigma, graph, "brain", graph.order > 1800 ? 2 : 3);
+}
+
 // Cut layout duration roughly 4-5× — settles fast enough on
 // modern hardware and matches the user-perceived "load" window.
 const getLayoutDuration = (nodeCount: number): number => {
@@ -273,7 +611,7 @@ const getLayoutDuration = (nodeCount: number): number => {
 // restarts, so the graph opens pre-settled on EVERY visit, not just within
 // one tab session. Entries are keyed by graph fingerprint, so a changed
 // corpus misses the cache and animates a fresh layout as before.
-const POS_CACHE_KEY = "polymath.graph.positions.v2";
+const POS_CACHE_KEY = "polymath.graph.positions.v13";
 const POS_CACHE_MAX_ENTRIES = 8;
 const RESTORED_SETTLE_MS = 800;
 
@@ -411,8 +749,11 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
         curved: EdgeCurveProgram,
       },
 
-      // Custom hover renderer — dark pill with colored border + glow ring
-      // around the node. Verbatim signature from GitNexus.
+      // Custom hover renderer — premium redesign (Pt 7d): pill with the
+      // node's color as a 1px accent border, a soft glow ring around the
+      // node, and the label in slate-100 on a tinted chip. Verbatim
+      // signature from GitNexus so it stays compatible with sigma's
+      // internal hover hooks.
       defaultDrawNodeHover: (context: any, data: any, settings: any) => {
         const label = data.label;
         if (!label) return;
@@ -431,8 +772,10 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
         const height = size + paddingY * 2;
         const width = textWidth + paddingX * 2;
         const radius = 5;
-        // Dark pill background.
-        context.fillStyle = "#0d0d14";
+        // Tinted chip background — same substrate tone as the canvas
+        // chrome so the hover pill reads as part of the UI, not a stray
+        // tooltip.
+        context.fillStyle = "#11141b";
         context.beginPath();
         if (typeof context.roundRect === "function") {
           context.roundRect(
@@ -446,21 +789,29 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
           context.rect(x - width / 2, y - height / 2, width, height);
         }
         context.fill();
-        // Border matching node color.
+        // 1px accent border matching the node color.
         context.strokeStyle = data.color || "#6366f1";
-        context.lineWidth = 2;
+        context.lineWidth = 1;
         context.stroke();
-        // Label text — light slate.
-        context.fillStyle = "#f5f5f7";
+        // Label text — slate-100.
+        context.fillStyle = "#f1f5f9";
         context.textAlign = "center";
         context.textBaseline = "middle";
         context.fillText(label, x, y);
-        // Subtle glow ring around the node.
+        // Soft glow ring around the node — three concentric strokes so the
+        // hover reads even on densely-saturated regions of the canvas.
+        const glowColor = data.color || "#6366f1";
         context.beginPath();
-        context.arc(data.x, data.y, nodeSize + 4, 0, Math.PI * 2);
-        context.strokeStyle = data.color || "#6366f1";
-        context.lineWidth = 2;
-        context.globalAlpha = 0.5;
+        context.arc(data.x, data.y, nodeSize + 3, 0, Math.PI * 2);
+        context.strokeStyle = glowColor;
+        context.lineWidth = 1.5;
+        context.globalAlpha = 0.85;
+        context.stroke();
+        context.globalAlpha = 0.35;
+        context.beginPath();
+        context.arc(data.x, data.y, nodeSize + 7, 0, Math.PI * 2);
+        context.strokeStyle = glowColor;
+        context.lineWidth = 1;
         context.stroke();
         context.globalAlpha = 1;
       },
@@ -502,18 +853,16 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
             const isNeighbor = g.hasEdge(node, sel) || g.hasEdge(sel, node);
             if (isSelected) {
               res.color = data.color;
-              // Was *1.8 — produced 25px blobs from 14px Domain nodes
-              // on click. 1.25 keeps the highlight readable without
-              // overwhelming neighbors.
+              // 1.25 keeps the highlight readable without overwhelming
+              // neighbors on the new substrate.
               res.size = (data.size || 8) * 1.25;
               res.zIndex = 2;
               res.highlighted = true;
               res.forceLabel = true;
             } else if (isNeighbor) {
               res.color = data.color;
-              // Was *1.3 — neighbors swelled almost as much as the
-              // selection. 1.1 nudges them just enough to register
-              // visually without competing for attention.
+              // 1.1 nudges neighbors just enough to register visually
+              // without competing for attention.
               res.size = (data.size || 8) * 1.1;
               res.zIndex = 1;
               res.forceLabel = true;
@@ -532,7 +881,7 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
           res.color = brightenColor(data.color, 1.25);
           res.size = (data.size || 8) * 1.25;
           res.zIndex = 2;
-          res.forceLabel = isQueryGraph ? Boolean(data.forceLabel) : true;
+          res.forceLabel = Boolean(data.forceLabel) || isQueryGraph;
         } else if (data.isHub) {
           res.color = brightenColor(data.color, 1.1);
           res.zIndex = 1;
@@ -545,9 +894,13 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
         const sel = selectedNodeRef.current;
         const highlighted = highlightedRef.current;
         const hasHighlights = highlighted.size > 0;
-        const isQueryGraph = (optionsRef.current.layoutMode ?? "brain") === "query";
-        if (isQueryGraph && !sel) {
+        if (!sel) {
           res.label = undefined;
+          if (data.visual_scaffold) {
+            res.size = Math.max(0.01, (data.size || 0.02) * 0.35);
+            res.color = data.color || "#172033";
+            res.zIndex = 0;
+          }
         }
 
         if (hasHighlights && !sel) {
@@ -615,10 +968,11 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       // Camera tier: closer in = lower ratio. Defaults Sigma uses ~1.0.
       const zoomedFar = ratio >= 4;
       const zoomedMid = ratio >= 1.5 && ratio < 4;
-      // Take the STRICTER of zoom-tier and node-count rules.
-      const renderLabels = isQueryGraph
-        ? !zoomedFar
-        : !zoomedFar && !isLargeGraph;
+      // Overview behaves like Obsidian: labels are interaction-first.
+      // Keep label rendering enabled so `forceLabel` still works for
+      // selected nodes and drill chunks, but make normal label density
+      // effectively zero in brain mode.
+      const renderLabels = isQueryGraph ? !zoomedFar : true;
       const labelDensity =
         isQueryGraph
           ? zoomedMid || isLargeGraph
@@ -626,11 +980,7 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
               ? 0.006
               : 0.012
             : 0.018
-          : zoomedMid || isLargeGraph
-            ? isHugeGraph
-              ? 0.02
-              : 0.05
-            : 0.1;
+          : 0.001;
       const labelThreshold =
         isQueryGraph
           ? zoomedMid || isLargeGraph
@@ -638,15 +988,16 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
               ? 19
               : 16
             : 13
-          : zoomedMid || isLargeGraph
-            ? isHugeGraph
-              ? 14
-              : 11
-            : 8;
+          : 999;
       try {
         s.setSetting("renderLabels", renderLabels);
         s.setSetting("labelDensity", labelDensity);
         s.setSetting("labelRenderedSizeThreshold", labelThreshold);
+        s.setSetting("labelSize", isQueryGraph ? 12 : 9.5);
+        s.setSetting("labelWeight", isQueryGraph ? "500" : "450");
+        s.setSetting("labelColor", {
+          color: isQueryGraph ? "#e4e4ed" : "#aeb8c8",
+        });
       } catch {
         /* setSetting can throw mid-frame — ignore */
       }
@@ -802,7 +1153,7 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
           return;
         }
         sigmaRef.current?.scheduleRender();
-      }, Math.round(1000 / MOTION.ambientGraphFps));
+      }, Math.round(1000 / motionTokens.ambientGraphFps));
     };
     ambientSyncRef.current = sync;
 
@@ -853,6 +1204,13 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
 
       const inferredSettings = forceAtlas2.inferSettings(graph);
       const layoutMode = optionsRef.current.layoutMode ?? "brain";
+      if (layoutMode !== "query") {
+        settleBrainAtlas(graph, sigmaRef.current);
+        saveLayoutPositions(graph);
+        sigmaRef.current?.refresh();
+        setIsLayoutRunning(false);
+        return;
+      }
       const customSettings = getFA2Settings(
         nodeCount,
         layoutMode,
@@ -865,7 +1223,6 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       // back to cached spots would undo the user's drag).
       const restored =
         durationOverrideMs == null && restoreLayoutPositions(graph);
-
       const layout = new FA2Layout(graph, { settings });
       layoutRef.current = layout;
       layout.start();
@@ -885,6 +1242,14 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
             );
             if (layoutMode === "query") {
               enforceQueryMinimumSpacing(graph, 12);
+            } else {
+              enforceBrainClusterSpacing(graph, nodeCount > 1800 ? 3 : 5);
+              enforceViewportCollision(
+                sigmaRef.current,
+                graph,
+                layoutMode,
+                nodeCount > 1800 ? 2 : 3,
+              );
             }
           } catch {
             /* ignore */
@@ -926,18 +1291,22 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
         layoutTimeoutRef.current = null;
       }
       graphRef.current = newGraph;
-      // ── LOD: gate labels by node count (PRD §F performance rule) ──
-      // Below 800 → labels on, normal density. Above → keep only
-      // forceLabel:true nodes (Book anchors, seeds) visible, drop density
-      // and raise the size threshold so the canvas stays readable at scale.
+      // ── LOD: gate labels by route ───────────────────────────────
+      // Query graphs keep curated labels. Brain/corpus overview keeps
+      // labels interaction-first: hover/selection/drill chunks only.
       const nodeCount = newGraph.order;
       const layoutMode = optionsRef.current.layoutMode ?? "brain";
       const isQueryGraph = layoutMode === "query";
       const isLargeGraph = nodeCount > (isQueryGraph ? 500 : 800);
       const isHugeGraph = nodeCount > (isQueryGraph ? 1800 : 3000);
       try {
-        sigma.setSetting("renderLabels", isQueryGraph ? true : !isLargeGraph);
+        sigma.setSetting("renderLabels", true);
         sigma.setSetting("hideEdgesOnMove", !isQueryGraph);
+        sigma.setSetting("labelSize", isQueryGraph ? 12 : 9.5);
+        sigma.setSetting("labelWeight", isQueryGraph ? "500" : "450");
+        sigma.setSetting("labelColor", {
+          color: isQueryGraph ? "#e4e4ed" : "#aeb8c8",
+        });
         sigma.setSetting(
           "labelDensity",
           isQueryGraph
@@ -946,11 +1315,7 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
               : isLargeGraph
                 ? 0.012
                 : 0.018
-            : isHugeGraph
-              ? 0.02
-              : isLargeGraph
-                ? 0.05
-                : 0.1,
+            : 0.001,
         );
         sigma.setSetting(
           "labelRenderedSizeThreshold",
@@ -960,11 +1325,7 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
               : isLargeGraph
                 ? 16
                 : 13
-            : isHugeGraph
-              ? 14
-              : isLargeGraph
-                ? 11
-                : 8,
+            : 999,
         );
       } catch {
         /* setSetting may throw if the renderer is mid-frame — ignore */
@@ -986,6 +1347,12 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       }
       ambientSyncRef.current?.();
       sigma.getCamera().animatedReset({ duration: 500 });
+      if (!isQueryGraph) {
+        window.setTimeout(() => {
+          enforceViewportCollision(sigma, newGraph, "brain", newGraph.order > 1800 ? 2 : 3);
+          sigma.refresh();
+        }, 560);
+      }
     },
     [runLayout, setSelectedNode],
   );
@@ -1020,6 +1387,14 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
   const resetZoom = useCallback(() => {
     sigmaRef.current?.getCamera().animatedReset({ duration: 300 });
     setSelectedNode(null);
+    window.setTimeout(() => {
+      const graph = graphRef.current;
+      const sigma = sigmaRef.current;
+      const layoutMode = optionsRef.current.layoutMode ?? "brain";
+      if (!graph || !sigma || layoutMode === "query") return;
+      enforceViewportCollision(sigma, graph, layoutMode, graph.order > 1800 ? 2 : 3);
+      sigma.refresh();
+    }, 340);
   }, [setSelectedNode]);
 
   const startLayout = useCallback(() => {
@@ -1039,13 +1414,22 @@ export const useSigma = (options: UseSigmaOptions = {}): UseSigmaReturn => {
       const graph = graphRef.current;
       if (graph) {
         try {
+          const layoutMode = optionsRef.current.layoutMode ?? "brain";
           noverlap.assign(
             graph,
-            getNoverlapSettings(
-              graph.order,
-              optionsRef.current.layoutMode ?? "brain",
-            ),
+            getNoverlapSettings(graph.order, layoutMode),
           );
+          if (layoutMode === "query") {
+            enforceQueryMinimumSpacing(graph, 10);
+          } else {
+            enforceBrainClusterSpacing(graph, graph.order > 1800 ? 3 : 5);
+            enforceViewportCollision(
+              sigmaRef.current,
+              graph,
+              layoutMode,
+              graph.order > 1800 ? 2 : 3,
+            );
+          }
         } catch {
           /* ignore */
         }

@@ -27,6 +27,7 @@ import {
   type PolymathNodeKind,
 } from "./sigma-constants";
 import type { QueryFingerprint, QueryLayoutMode } from "./query-fingerprint";
+import { graphSpawnColor } from "./graph-colors";
 
 // Pt 5: cap how many outbound bridges any single book can show. Prevents
 // hub-books from creating a web that swamps the canvas; long-tail bridges
@@ -57,9 +58,13 @@ export interface SigmaNodeAttributes {
   definitional_phrase?: string | null;
   observed_entity_types?: string[] | null;
   canonical_family?: string | null;
+  visual_glow_strength?: number;
+  visual_category_genome?: string;
+  visual_dominant_category?: string;
   confidence?: number | null;
   source_corpora?: string[];
   source_corpus?: string;
+  brain_cluster_key?: string;
   primary_domain?: string;
   member_ids?: string[];
   community?: number;
@@ -94,6 +99,7 @@ export interface SigmaEdgeAttributes {
   shared_entities?: number;
   top_shared_entities?: string[];
   dangling?: boolean;
+  visual_scaffold?: boolean;
   hidden?: boolean;
   zIndex?: number;
   // Pt 7c: text label rendered at edge midpoint (gated by
@@ -113,6 +119,8 @@ export interface PolymathRawNode {
   definitional_phrase?: string | null;
   observed_entity_types?: string[] | null;
   canonical_family?: string | null;
+  dominant_family?: string | null;
+  dominant_entity_type?: string | null;
   confidence?: number | null;
   mention_count?: number;
   total_mentions?: number;
@@ -138,9 +146,19 @@ export interface PolymathRawNode {
   /** Optional explicit forceLabel — overrides the default kind-based rule.
    *  Used by the Brain View top-N forceLabel tagging. */
   forceLabel?: boolean;
+  /** Optional visual-only size/mass overrides for overview satellites. */
+  visual_size?: number;
+  visual_mass?: number;
+  visual_color?: string;
+  visual_glow?: boolean;
+  visual_glow_strength?: number;
+  visual_category_genome?: string;
+  visual_dominant_category?: string;
   /** Brain View bridge count, used by sigma-constants::nodeReducer to scale
    *  Book anchor size logarithmically (well-connected books read larger). */
   bridge_count?: number;
+  /** Optional explicit cluster key for corpus/brain layout. */
+  graph_cluster_key?: string;
 }
 
 export interface PolymathRawEdge {
@@ -216,6 +234,62 @@ function stableUnitHash(value: string): number {
     h = Math.imul(h, 16777619);
   }
   return (h >>> 0) / 4294967295;
+}
+
+function stableSignedJitter(value: string, scale: number): number {
+  return (stableUnitHash(value) - 0.5) * scale;
+}
+
+function normalizeClusterPart(value: unknown, fallback: string): string {
+  const text = String(value ?? "").trim().toLowerCase();
+  return text || fallback;
+}
+
+function brainClusterKey(raw: PolymathRawNode, multiCorpus: boolean): string {
+  if (raw.graph_cluster_key) return raw.graph_cluster_key;
+  const source = raw.source_corpus || raw.source_corpora?.[0] || "";
+  if (multiCorpus && source) return `corpus:${normalizeClusterPart(source, "unknown")}`;
+  const isBookLike = raw.kind === "book" || raw.is_cluster_anchor;
+  const family =
+    raw.dominant_family ||
+    raw.dominant_entity_type ||
+    raw.canonical_family ||
+    raw.primary_domain ||
+    raw.primary_entity_type ||
+    raw.entity_type ||
+    raw.supernode_type ||
+    raw.top_entities?.[0] ||
+    (isBookLike ? `book-bucket-${Math.floor(stableUnitHash(raw.id) * 10)}` : source) ||
+    "general";
+  return `family:${normalizeClusterPart(family, "general")}`;
+}
+
+function brainClusterCenter(
+  key: string,
+  index: number,
+  total: number,
+  spread: number,
+  goldenAngle: number,
+): { x: number; y: number } {
+  if (total <= 1) return { x: 0, y: 0 };
+  if (total > 90) {
+    const radius =
+      spread *
+      (0.08 + 0.94 * Math.sqrt((index + 1) / Math.max(total, 1)));
+    const angle =
+      index * goldenAngle + stableUnitHash(`${key}:cluster-center`) * 0.22;
+    return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
+  }
+  const ringSize = Math.max(6, Math.ceil(Math.sqrt(total) * 2.2));
+  const ringIndex = Math.floor(index / ringSize);
+  const slot = index % ringSize;
+  const radius = spread * (0.72 + ringIndex * 0.58);
+  const angle = index * goldenAngle + stableUnitHash(`${key}:cluster-center`) * 0.55;
+  const ringAngle =
+    (slot / ringSize) * Math.PI * 2 +
+    ringIndex * 0.29 +
+    stableUnitHash(`${key}:cluster-center`) * 0.45;
+  return { x: Math.cos(ringAngle || angle) * radius, y: Math.sin(ringAngle || angle) * radius };
 }
 
 type QueryShellRole = "seed" | "hub" | "bridge" | "anchor" | "concept" | "leaf";
@@ -761,11 +835,56 @@ export function polymathToGraphology(
   // first second instead of clumping for 20s while FA2 settles.
   const queryMode = opts.layoutMode === "query";
   const structuralSpread =
-    Math.sqrt(Math.max(n, queryMode ? 90 : 120)) * (queryMode ? 58 : 48);
-  const conceptOrbit = structuralSpread * (queryMode ? 0.68 : 0.55);
+    Math.sqrt(Math.max(n, queryMode ? 90 : 120)) * (queryMode ? 58 : 68);
+  const conceptOrbit = structuralSpread * (queryMode ? 0.68 : 0.7);
   const leafJitter =
-    Math.sqrt(Math.max(n, queryMode ? 70 : 50)) * (queryMode ? 7 : 4);
+    Math.sqrt(Math.max(n, queryMode ? 70 : 50)) * (queryMode ? 7 : 7.5);
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  const sourceKeys = new Set(
+    rawNodes
+      .map((raw) => raw.source_corpus || raw.source_corpora?.[0] || "")
+      .filter(Boolean),
+  );
+  const multiCorpus = sourceKeys.size > 1;
+  const clusterKeyById = new Map<string, string>();
+  rawNodes.forEach((raw) => {
+    clusterKeyById.set(raw.id, brainClusterKey(raw, multiCorpus));
+  });
+  const structuralByCluster = new Map<string, PolymathRawNode[]>();
+  structural.forEach((raw) => {
+    const key = clusterKeyById.get(raw.id) || "family:general";
+    const list = structuralByCluster.get(key) || [];
+    list.push(raw);
+    structuralByCluster.set(key, list);
+  });
+  if (structuralByCluster.size === 0 && !queryMode) {
+    for (const raw of rawNodes) {
+      const key = clusterKeyById.get(raw.id) || "family:general";
+      const list = structuralByCluster.get(key) || [];
+      list.push(raw);
+      structuralByCluster.set(key, list);
+    }
+  }
+  const clusterEntries = [...structuralByCluster.entries()].sort(
+    (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]),
+  );
+  const clusterSpread = Math.max(
+    structuralSpread * 0.5,
+    Math.sqrt(Math.max(n, 120)) * 32,
+  );
+  const clusterCenterByKey = new Map<string, { x: number; y: number }>();
+  clusterEntries.forEach(([key], idx) => {
+    clusterCenterByKey.set(
+      key,
+      brainClusterCenter(
+        key,
+        idx,
+        Math.max(clusterEntries.length, 1),
+        clusterSpread,
+        goldenAngle,
+      ),
+    );
+  });
 
   const positions = new Map<string, { x: number; y: number }>();
 
@@ -832,17 +951,45 @@ export function polymathToGraphology(
       }
     }
   } else {
-    // 1) Structural anchors → wide golden-angle radial spread.
-    structural.forEach((raw, idx) => {
-      const angle = idx * goldenAngle;
+    // 1) Structural anchors → deterministic cluster-aware spread. Corpus
+    // view should read as families/corpora, not as one central knot.
+    const seenByCluster = new Map<string, number>();
+    const totalByCluster = new Map(
+      clusterEntries.map(([key, list]) => [key, Math.max(list.length, 1)]),
+    );
+    const rankedStructural = [...structural].sort((a, b) => {
+      const ak = clusterKeyById.get(a.id) || "family:general";
+      const bk = clusterKeyById.get(b.id) || "family:general";
+      return (
+        ak.localeCompare(bk) ||
+        (degreeById.get(b.id) ?? 0) - (degreeById.get(a.id) ?? 0) ||
+        String(a.id).localeCompare(String(b.id))
+      );
+    });
+    rankedStructural.forEach((raw) => {
+      const key = clusterKeyById.get(raw.id) || "family:general";
+      const localIndex = seenByCluster.get(key) ?? 0;
+      const totalInCluster = Math.max(totalByCluster.get(key) ?? 1, 1);
+      seenByCluster.set(key, localIndex + 1);
+      const center = clusterCenterByKey.get(key) || { x: 0, y: 0 };
+      const localRadius = Math.max(30, Math.sqrt(totalInCluster) * 18);
+      const angle =
+        localIndex * goldenAngle +
+        stableUnitHash(`${raw.id}:cluster-angle`) * 0.42;
       const radius =
-        structuralSpread *
-        Math.sqrt((idx + 1) / Math.max(structural.length, 1));
-      const jitter = structuralSpread * 0.12;
-      const x = radius * Math.cos(angle) + (Math.random() - 0.5) * jitter;
-      const y = radius * Math.sin(angle) + (Math.random() - 0.5) * jitter;
+        localRadius *
+        Math.sqrt((localIndex + 1) / totalInCluster) *
+        (0.72 + stableUnitHash(`${raw.id}:cluster-radius`) * 0.2);
+      const x =
+        center.x +
+        radius * Math.cos(angle) +
+        stableSignedJitter(`${raw.id}:cluster-x`, 16);
+      const y =
+        center.y +
+        radius * Math.sin(angle) +
+        stableSignedJitter(`${raw.id}:cluster-y`, 16);
       positions.set(raw.id, { x, y });
-      addNodeToGraph(graph, raw, x, y, n, opts, degreeById);
+      addNodeToGraph(graph, raw, x, y, n, opts, degreeById, clusterKeyById);
     });
 
     // 2) Concept supernodes → orbit their primary_domain anchor when known,
@@ -858,12 +1005,17 @@ export function polymathToGraphology(
           if (p) center = p;
         }
       }
+      if (center.x === 0 && center.y === 0) {
+        const key = clusterKeyById.get(raw.id) || "family:general";
+        center = clusterCenterByKey.get(key) || center;
+      }
       const angle = idx * goldenAngle;
-      const radius = conceptOrbit * Math.sqrt((idx + 1) / Math.max(concepts.length, 1));
+      const radius =
+        conceptOrbit * Math.sqrt((idx + 1) / Math.max(concepts.length, 1));
       const x = center.x + radius * Math.cos(angle) * 0.8;
       const y = center.y + radius * Math.sin(angle) * 0.8;
       positions.set(raw.id, { x, y });
-      addNodeToGraph(graph, raw, x, y, n, opts, degreeById);
+      addNodeToGraph(graph, raw, x, y, n, opts, degreeById, clusterKeyById);
     });
 
     // 3) Leaf entities → cluster around their parent (book anchor or concept
@@ -892,6 +1044,15 @@ export function polymathToGraphology(
           positioned = true;
         }
       }
+      if (!positioned) {
+        const key = clusterKeyById.get(raw.id) || "family:general";
+        const c = clusterCenterByKey.get(key);
+        if (c) {
+          cx = c.x;
+          cy = c.y;
+          positioned = true;
+        }
+      }
       // Fallback: scatter inside the canvas.
       if (!positioned) {
         const angle = idx * goldenAngle;
@@ -913,14 +1074,14 @@ export function polymathToGraphology(
         // fallback, so satellites read as tentacle tips, not as drifters.
         const offsetX = typeof raw.x === "number" ? raw.x : 0;
         const offsetY = typeof raw.y === "number" ? raw.y : 0;
-        x = cx + offsetX + (Math.random() - 0.5) * 4;
-        y = cy + offsetY + (Math.random() - 0.5) * 4;
+        x = cx + offsetX + stableSignedJitter(`${raw.id}:sat-x`, 7);
+        y = cy + offsetY + stableSignedJitter(`${raw.id}:sat-y`, 7);
       } else {
-        x = cx + (Math.random() - 0.5) * leafJitter;
-        y = cy + (Math.random() - 0.5) * leafJitter;
+        x = cx + stableSignedJitter(`${raw.id}:leaf-x`, leafJitter);
+        y = cy + stableSignedJitter(`${raw.id}:leaf-y`, leafJitter);
       }
       positions.set(raw.id, { x, y });
-      addNodeToGraph(graph, raw, x, y, n, opts, degreeById);
+      addNodeToGraph(graph, raw, x, y, n, opts, degreeById, clusterKeyById);
     });
   }
 
@@ -936,7 +1097,8 @@ export function polymathToGraphology(
   //   • Color by dominant_relation_family from the backend (Pt 5 Cypher
   //     extension) → semantic edge color (Operational=blue, Causal=amber,
   //     Conflict=red, etc.) instead of all-violet.
-  //   • Thinner size: max ~1.8px ("thin spaghetti" per user spec).
+  //   • Thin, Obsidian-like bridges so inter-document structure is visible
+  //     without overpowering the jellyfish document heads.
   const edgeBaseSize = queryMode
     ? n > 800
       ? 1.15
@@ -944,10 +1106,10 @@ export function polymathToGraphology(
         ? 1.3
         : 1.45
     : n > 20000
-      ? 0.4
+      ? 0.18
       : n > 5000
-        ? 0.6
-        : 1.0;
+        ? 0.26
+        : 0.34;
 
   // Pre-process Brain View bridges so we can apply the strength filter +
   // per-source top-N cap before writing edges. All non-bridge edges pass
@@ -1015,12 +1177,12 @@ export function polymathToGraphology(
                 (stableUnitHash(`${s}:${t}:${i}:curve`) - 0.5) * 0.018,
             ),
           )
-        : baseCurvature + Math.random() * 0.08;
+        : baseCurvature + stableUnitHash(`${s}:${t}:${i}:brain-curve`) * 0.08;
     let color = relationFamily
       ? hexToRgba(familyStyle.color, familyStyle.opacity)
       : style.color;
     if (rel.visual_scaffold) {
-      color = "rgba(148, 163, 184, 0.4)";
+      color = graphSpawnColor("scaffold", `${s}:${t}:${i}`);
     } else if (rel.dangling) {
       color = "#d97706"; // amber for dangling edges (target outside loaded set)
     } else if (!relationFamily &&
@@ -1036,16 +1198,16 @@ export function polymathToGraphology(
     // strength: faint = weak connection, bright = strong.
     let size = edgeBaseSize * (relationFamily ? familyStyle.size : style.sizeMultiplier);
     if (rel.visual_scaffold) {
-      size = Math.max(0.7, edgeBaseSize * 0.56);
+      size = Math.max(0.01, edgeBaseSize * 0.03);
     }
     let edgeLabel: string | undefined;
     if (rel.predicate === "bridges_to" && typeof rel.weight === "number") {
       const strength = Math.max(0, rel.weight);
-      size = Math.min(0.35 + strength * 0.05, 1.8);
-      const opacity = Math.max(0.16, Math.min(0.92, 0.14 + strength * 0.06));
+      size = Math.min(0.12 + strength * 0.02, 0.62);
+      const opacity = Math.max(0.08, Math.min(0.42, 0.075 + strength * 0.024));
       const bridgeColor = relationFamily
         ? familyStyle.color
-        : EDGE_STYLES.bridges_to.color;
+        : graphSpawnColor("bridge", `${s}:${t}:${strength}`);
       color = hexToRgba(bridgeColor, opacity);
       // On-edge concept label: strongest shared entity name with
       // "+N more" overflow suffix so users see what two books share
@@ -1084,6 +1246,7 @@ export function polymathToGraphology(
       shared_entities: rel.shared_entities,
       top_shared_entities: rel.top_shared_entities,
       dangling: Boolean(rel.dangling),
+      visual_scaffold: Boolean(rel.visual_scaffold),
       label: edgeLabel,
     });
   });
@@ -1116,12 +1279,20 @@ function addNodeToGraph(
   totalCount: number,
   opts: BuildOpts,
   degreeById: Map<string, number>,
+  clusterKeyById?: Map<string, string>,
 ) {
   if (graph.hasNode(raw.id)) return;
   const kind = inferNodeKind(raw);
   const baseSize = NODE_SIZES[kind] || 4;
   const scaledSize = getScaledNodeSize(baseSize, totalCount);
-  const color = pickNodeColor(kind, raw, opts.colorMode);
+  const visualSize =
+    typeof (raw as PolymathRawNode).visual_size === "number"
+      ? Math.max(1, Number((raw as PolymathRawNode).visual_size))
+      : null;
+  const color =
+    typeof raw.visual_color === "string" && raw.visual_color.trim()
+      ? raw.visual_color
+      : pickNodeColor(kind, raw, opts.colorMode);
   // Sizing for leaf entities should weigh `total_mentions` (book mode) or
   // `mention_count` (overview / drill / query). Supernodes already get a
   // big kind-derived base so we just nudge by mention.
@@ -1163,7 +1334,12 @@ function addNodeToGraph(
   const baseMass = NODE_MASSES[kind] || 1;
   const isOctopusSatellite =
     Boolean((raw as PolymathRawNode).primary_doc_id) && kind !== "Book";
-  let mass = isOctopusSatellite ? Math.min(baseMass, 2) : baseMass;
+  let mass =
+    typeof (raw as PolymathRawNode).visual_mass === "number"
+      ? Math.max(0.1, Number((raw as PolymathRawNode).visual_mass))
+      : isOctopusSatellite
+        ? Math.min(baseMass, 2)
+        : baseMass;
   if (opts.layoutMode === "query") {
     mass += Math.min(16, Math.log2(degree + 1) * 2.2);
     if (opts.seedIds?.has(raw.id)) mass *= 1.45;
@@ -1175,8 +1351,10 @@ function addNodeToGraph(
   graph.addNode(raw.id, {
     x,
     y,
-    ...(kind === "Book" ? { type: "bookGlow" } : {}),
-    size: scaledSize + mentionBoost,
+    ...(kind === "Book" && (visualSize == null || raw.visual_glow)
+      ? { type: "bookGlow" }
+      : {}),
+    size: visualSize ?? scaledSize + mentionBoost,
     color,
     label: renderedLabel,
     nodeKind: kind,
@@ -1189,9 +1367,19 @@ function addNodeToGraph(
     definitional_phrase: raw.definitional_phrase ?? null,
     observed_entity_types: raw.observed_entity_types ?? null,
     canonical_family: raw.canonical_family ?? null,
+    visual_glow_strength:
+      typeof raw.visual_glow_strength === "number"
+        ? Math.max(0, Math.min(1, Number(raw.visual_glow_strength)))
+        : 0,
+    visual_category_genome: raw.visual_category_genome,
+    visual_dominant_category: raw.visual_dominant_category,
     confidence: raw.confidence ?? null,
     source_corpora: raw.source_corpora || [],
     source_corpus: raw.source_corpus || "",
+    brain_cluster_key:
+      clusterKeyById?.get(raw.id) ||
+      raw.graph_cluster_key ||
+      brainClusterKey(raw, false),
     primary_domain: raw.primary_domain,
     member_ids: raw.member_ids,
     hidden: false,

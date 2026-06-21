@@ -1098,11 +1098,12 @@ async def graph_book_drilldown(body: dict = Body(...)) -> dict:
         )
     other_corpus_ids = [str(c) for c in other_corpus_ids]
     limit = max(1, min(int(body.get("limit", 350) or 350), 5000))
+    chunk_limit = max(1, min(int(body.get("chunk_limit", 48) or 48), 120))
 
     from services.graph.queries import get_book_drilldown
 
     return await get_book_drilldown(
-        driver, doc_id, other_corpus_ids, limit=limit
+        driver, doc_id, other_corpus_ids, limit=limit, chunk_limit=chunk_limit
     )
 
 

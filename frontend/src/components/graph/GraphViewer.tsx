@@ -1,17 +1,24 @@
 /**
- * GraphViewer — orchestration layer over `useSigma` (hook port of
- * GitNexus's useSigma.ts) and `polymath-graph-adapter` (Polymath payload
- * → graphology). All rendering / physics / reducer logic lives in those
- * two modules; this file owns:
+ * GraphViewer — premium redesign (Pt 7d).
  *
- *   • Multi-corpus data fetch (Brain View domains/books, Query View)
- *   • Cache-warming poll
- *   • UI chrome: corpus pill stats, color/view toggles, breadcrumb,
- *     hover tooltip, selection bar, controls cluster
- *   • Drill stack management (concept community drill, book drill)
+ * Three-zone layout:
+ *   1) Top command strip (corpus pill, mode badge, live status, lane
+ *      legend). One row above the canvas — the only piece of chrome
+ *      that is NOT inside the right rail.
+ *   2) Canvas (sigma) — research substrate with subtle grid + vignette,
+ *      bottom-right control cluster (zoom/fit/pause-play), top-center
+ *      hover pill. Always uses the right rail below.
+ *   3) Right rail — Inspector/Composer/Output/Brain settings via
+ *      BrainViewDashboard.
+ *
+ * The orchestration logic (multi-corpus fetch, cache warming, sigma
+ * wiring, drill stack, follow-up context, agent queries) is unchanged
+ * from the previous design — only the chrome around it is rebuilt.
  */
 
 import {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useMemo,
@@ -19,10 +26,12 @@ import {
   useState,
 } from "react";
 import {
+  Activity,
   Loader2,
   Maximize2,
   Pause,
   Play,
+  Search,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -41,18 +50,24 @@ import {
   type DashboardTab,
   type GraphProgressStep,
 } from "./BrainViewDashboard";
-import { GalaxyBackground } from "./GalaxyBackground";
+import {
+  graphCategoryGenome,
+  graphDocumentNodeColor,
+  graphColors,
+  graphGenomePropertyColor,
+} from "../../lib/graph-colors";
+import { LaneChip, RoleChip } from "../ui/Card";
+import { Button } from "../ui/Button";
+import {
+  computeRoleContext,
+  assignNodeRole,
+} from "../../lib/role-adapter";
+
 import type { GraphSynthesisMode } from "../../types/discover";
 
-// Pt 4 polish: adaptive top-N forceLabel. At 16 books, hardcoded N=20
-// meant every label rendered every frame → overlap storm. The new
-// formula scales N with the corpus size so the canvas always has
-// breathing room: ~30% of books get the forced label, clamped to
-// [3, 24]. A 16-book brain view labels ~5 anchors; 100 books → 24;
-// 1000+ → 24 too.
-function adaptiveTopN(total: number): number {
-  return Math.min(24, Math.max(3, Math.ceil(total * 0.3)));
-}
+// Lazy-load the 3D atom so the default 2D bundle stays lean. The chunk
+// is only fetched when the user toggles 3D or auto-transition kicks in.
+const GraphAtom3D = lazy(() => import("./GraphAtom3D"));
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -64,14 +79,12 @@ interface GraphViewerProps {
   query?: string;
   onRerun?: () => void;
   onQueryPhaseChange?: (phase: "idle" | "loading" | "ready" | "error") => void;
-  /** Pt 7: callback fired when the user picks a refined chip / entity in
+  /** Callback fired when the user picks a refined chip / entity in
    *  the Graph Query tab. Parent typically closes the modal and loads
    *  the text into the chat input. */
   onSendToChat?: (text: string) => void;
 }
 
-// Books-as-clusters drill: we only ever drill into a book (no concept-
-// community drill anymore — that was the domains mode that's been retired).
 type DrillFrame = {
   docId: string;
   label: string;
@@ -135,6 +148,15 @@ function uniqueCompact(values: string[], maxItems: number, maxChars = 80): strin
     if (out.length >= maxItems) break;
   }
   return out;
+}
+
+function softGraphLabel(value: string, max = 18): string {
+  const cleaned = cleanContextText(value, max + 12)
+    .replace(/\.(pdf|md|txt|docx?|pptx?|xlsx?)$/i, "")
+    .replace(/[_-]+/g, " ")
+    .trim();
+  if (cleaned.length <= max) return cleaned;
+  return `${cleaned.slice(0, Math.max(4, max - 3)).trim()}...`;
 }
 
 function extractCoreIdea(markdown: string, fallback = ""): string {
@@ -571,11 +593,6 @@ function curateQueryGraphForCanvas(
 
 // ─── Brain mode data hook ─────────────────────────────────────────────────
 
-// Note: client-side bridge synthesis from `top_entities` intersection used to
-// live here as `computeClusterBridges`. Replaced by /api/graph/brain-view
-// which computes ground-truth bridge strengths in Cypher (shared MENTIONS
-// + RELATES_TO traversal) so we no longer approximate.
-
 function useBrainGraph(
   corpusIds: string[],
   drill: DrillFrame | null,
@@ -587,10 +604,6 @@ function useBrainGraph(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cacheWarming, setCacheWarming] = useState<string[]>([]);
-  // Per-corpus cache classification: "missing" (never built — needs manual
-  // rebuild) vs "warming" (stale signature — rebuild already needed) vs
-  // "ready". Populated by polling /api/corpora/{cid}/cache-status whenever
-  // cacheWarming is non-empty.
   const [cacheStatuses, setCacheStatuses] = useState<
     Record<string, api.CacheStatus>
   >({});
@@ -604,14 +617,16 @@ function useBrainGraph(
     setLoading(true);
     setError(null);
     try {
-      // ── DRILL: one Document anchor + its local entities + cross-book bridges ──
-      // Powered by the rich :Document anchor schema — Cypher returns the
-      // anchor's local_entities + intra-book relations + cross_book_bridges
-      // in one query. No MongoDB enrichment, no Python aggregation.
       if (drill) {
+        const DRILL_ENTITY_LIMIT = 48;
+        const DRILL_CHUNK_LIMIT = 18;
+        const DRILL_BRIDGE_LIMIT = 32;
+        const DRILL_RELATION_LIMIT = 90;
         const drillRes = await api.getBookDrilldown(
           drill.docId,
           corpusIds,
+          DRILL_ENTITY_LIMIT,
+          DRILL_CHUNK_LIMIT,
         );
 
         const anchorRaw =
@@ -623,17 +638,72 @@ function useBrainGraph(
           ? {
               id: `book:${drillRes.anchor.doc_id}`,
               display_name: anchorRaw,
-              // Sigma renders `label`; tooltip / selection bar reads
-              // `display_name` for full context.
               label: cleanBookLabel(anchorRaw) || anchorRaw,
               mention_count: drillRes.anchor.chunk_count || 1,
               kind: "book" as const,
               source_corpora: [drillRes.anchor.corpus_id],
               source_corpus: drillRes.anchor.corpus_id,
+              graph_cluster_key: `doc:${drill.docId}`,
               is_cluster_anchor: true,
               forceLabel: true,
             }
           : null;
+
+        const chunkRecords = drillRes.local_chunks || [];
+        const chunkOffsetById = new Map<string, { x: number; y: number }>();
+        const entityAnchorOffsets = new Map<string, { x: number; y: number }>();
+        const JELLY_CHUNK_R = 82;
+        const JELLY_ENTITY_R = 38;
+        const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+        const chunkNodes = chunkRecords.map((chunk, idx) => {
+          const ring = Math.floor(idx / 12);
+          const angle = idx * goldenAngle;
+          const radius = JELLY_CHUNK_R + ring * 44;
+          const x = Math.cos(angle) * radius;
+          const y = Math.sin(angle) * radius * 0.82;
+          const chunkNodeId = `chunk:${chunk.chunk_id}`;
+          chunkOffsetById.set(chunk.chunk_id, { x, y });
+          const topNames = (chunk.top_entity_names || []).filter(Boolean);
+          const topIds = (chunk.top_entity_ids || []).filter(Boolean);
+          topIds.forEach((entityId, entityIdx) => {
+            if (entityAnchorOffsets.has(entityId)) return;
+            const tipAngle =
+              angle +
+              ((entityIdx + 1) / Math.max(topIds.length + 1, 2)) * Math.PI * 0.78 -
+              Math.PI * 0.39;
+            entityAnchorOffsets.set(entityId, {
+              x: x + Math.cos(tipAngle) * JELLY_ENTITY_R,
+              y: y + Math.sin(tipAngle) * JELLY_ENTITY_R,
+            });
+          });
+          const chunkLabel = `Chunk ${idx + 1}`;
+          const chunkSummary = topNames.slice(0, 3).join(" / ");
+          return {
+            id: chunkNodeId,
+            display_name: chunkSummary
+              ? `${chunkLabel}: ${chunkSummary}`
+              : chunkLabel,
+            label: chunkLabel,
+            entity_type: "Document",
+            primary_entity_type: "Document",
+            source_corpus: chunk.corpus_id || drillRes.anchor?.corpus_id || "",
+            source_corpora: [chunk.corpus_id || drillRes.anchor?.corpus_id || ""],
+            graph_cluster_key: `doc:${drill.docId}`,
+            primary_doc_id: drill.docId,
+            mention_count: Math.max(1, Number(chunk.entity_count || 1)),
+            forceLabel: idx < 8,
+            chunk_id: chunk.chunk_id,
+            top_entities: topNames,
+            x,
+            y,
+          };
+        });
+        const chunkEntityIds = new Set<string>();
+        chunkRecords.forEach((chunk) => {
+          (chunk.top_entity_ids || []).forEach((entityId) => {
+            if (entityId) chunkEntityIds.add(entityId);
+          });
+        });
 
         const entityNodes = drillRes.local_entities.map((e) => ({
           id: e.entity_id,
@@ -645,12 +715,12 @@ function useBrainGraph(
           confidence: e.confidence,
           object_kind: e.object_kind,
           canonical_family: e.canonical_family,
+          graph_cluster_key: `doc:${drill.docId}`,
           primary_doc_id: drill.docId,
           mention_count: 1,
+          ...(entityAnchorOffsets.get(e.entity_id) || {}),
         }));
 
-        // Bridge entities (from cross-book results) become their own nodes
-        // so the user sees the literal entity that connects two books.
         const bridgeNodes = drillRes.cross_book_bridges.map((b) => ({
           id: b.bridge_entity_id,
           display_name: b.bridge_entity_name || b.bridge_entity_id,
@@ -658,22 +728,48 @@ function useBrainGraph(
           mention_count: b.strength || 1,
         }));
 
-        // Edges: book→entity (membership), entity→entity (intra-book), entity→other-book (bridge).
-        const memberEdges = entityNodes.map((e) => ({
+        const chunkEdges = chunkNodes.map((chunk) => ({
+          source: chunk.id,
+          target: `book:${drill.docId}`,
+          predicate: "has_chunk",
+          relation_family: "Structural",
+          confidence: 1,
+          weight: 0.62,
+        }));
+        const entityChunkEdges = chunkRecords.flatMap((chunk) => {
+          const chunkNodeId = `chunk:${chunk.chunk_id}`;
+          return (chunk.top_entity_ids || [])
+            .filter((entityId) => entityId && entityNodes.some((e) => e.id === entityId))
+            .map((entityId) => ({
+              source: entityId,
+              target: chunkNodeId,
+              predicate: "mentioned_in",
+              relation_family: "Structural",
+              confidence: 0.92,
+              weight: 0.34,
+            }));
+        });
+        const memberEdges = entityNodes
+          .filter((e) => !chunkEntityIds.has(e.id))
+          .map((e) => ({
           source: e.id,
           target: `book:${drill.docId}`,
           predicate: "in_book",
           confidence: 1,
-          weight: 0.4,
+          weight: 0.22,
         }));
-        const intraEdges = drillRes.local_relations.map((r) => ({
+        const intraEdges = drillRes.local_relations.slice(0, DRILL_RELATION_LIMIT).map((r) => ({
           source: r.source_id,
           target: r.target_id,
           predicate: r.predicate,
           relation_family: r.relation_family,
           confidence: r.confidence,
         }));
-        const bridgeEdges = drillRes.cross_book_bridges.flatMap((b) => [
+        const visibleCrossBookBridges = drillRes.cross_book_bridges.slice(
+          0,
+          DRILL_BRIDGE_LIMIT,
+        );
+        const bridgeEdges = visibleCrossBookBridges.flatMap((b) => [
           {
             source: b.via_entity_id,
             target: b.bridge_entity_id,
@@ -689,9 +785,7 @@ function useBrainGraph(
             confidence: 0.6,
           },
         ]);
-        // Synthetic anchors for the bridge target books so the canvas has
-        // a node to land the bridge edge on.
-        const targetAnchorNodes = drillRes.cross_book_bridges.map((b) => {
+        const targetAnchorNodes = visibleCrossBookBridges.map((b) => {
           const rawTarget = b.target_filename || b.target_doc_id.slice(0, 8);
           return {
             id: `book:${b.target_doc_id}`,
@@ -707,12 +801,11 @@ function useBrainGraph(
 
         const nodes = [
           ...(anchorNode ? [anchorNode] : []),
+          ...chunkNodes,
           ...entityNodes,
           ...bridgeNodes,
           ...targetAnchorNodes,
         ];
-        // Dedup by id (target anchors may collide with the drilled anchor on
-        // self-bridges; entity nodes can repeat across local + bridge).
         const seen = new Set<string>();
         const dedupedNodes = nodes.filter((n) => {
           if (seen.has(n.id)) return false;
@@ -722,41 +815,33 @@ function useBrainGraph(
 
         setData({
           nodes: dedupedNodes,
-          links: [...memberEdges, ...intraEdges, ...bridgeEdges],
+          links: [
+            ...chunkEdges,
+            ...entityChunkEdges,
+            ...memberEdges,
+            ...intraEdges,
+            ...bridgeEdges,
+          ],
         });
         setCacheWarming([]);
         return;
       }
 
-      // ── TOP-LEVEL: Brain View v2 — pure-Cypher anchors + bridge strengths ──
-      // POST /api/graph/brain-view keys off :Document {is_cluster_anchor: true}
-      // and computes pairwise bridge strength on the Neo4j side. Anchor
-      // metadata (filename, chunk_count, ghost_b_success_rate) lives on the
-      // Document node so no MongoDB round-trip is needed.
       const bv = await api.getBrainView(corpusIds);
-      // Backend computes the pairwise-bridge view ONCE per corpus signature
-      // (too heavy for request time at 500-book scale — it used to 504) and
-      // serves `meta.warming` until the background build lands. Poll.
       if ((bv.meta as Record<string, unknown> | undefined)?.warming) {
         window.setTimeout(() => {
           void reload();
         }, 20000);
       }
-      // Sort by bridge_count desc so we can tag the top-N anchors with
-      // forceLabel — those are the most-connected books and worth always
-      // labelling, the long tail relies on semantic zoom.
       const sortedDocs = [...bv.documents].sort(
         (a, b) => (b.bridge_count || 0) - (a.bridge_count || 0),
       );
-      const topN = adaptiveTopN(sortedDocs.length);
-
-      // Octopus / spotlight mode. The top SPOTLIGHT_COUNT docs by bridge
-      // count grow satellites (orbiting Entity nodes). The long tail stays
-      // as plain head-only anchors so the canvas doesn't drown in dots.
-      // 100 docs × 8 satellites = 800 satellite nodes max — well within
-      // sigma's smooth-render budget.
-      const SPOTLIGHT_COUNT = 100;
-      const SAT_ORBIT_R = 28; // initial orbit radius (FA2 will adjust)
+      const SPOTLIGHT_COUNT = 220;
+      const TENTACLE_CAP = 5;
+      const SAT_ORBIT_R = 32;
+      const SOFT_DOC_LABEL_COUNT = 3;
+      const SOFT_ENTITY_LABEL_COUNT = 10;
+      let softEntityLabelsUsed = 0;
 
       const anchorNodes: any[] = [];
       const satelliteNodes: any[] = [];
@@ -765,26 +850,60 @@ function useBrainGraph(
       sortedDocs.forEach((d, idx) => {
         const rawLabel = d.label || d.filename || d.doc_id.slice(0, 8);
         const bookId = `book:${d.doc_id}`;
+        // Corpus overview uses a jellyfish grammar: each document owns its
+        // local visual family. New ingests automatically fall into this
+        // structure because every document emitted by /graph/brain-view gets
+        // a unique doc cluster and bounded entity tentacles.
+        const graphClusterKey = `doc:${d.doc_id}`;
+        const topEntities = d.top_entity_records?.length
+          ? d.top_entity_records
+          : (d.top_entities || []).map((name) => ({
+              name,
+              entity_id: null,
+              entity_type: "",
+              primary_entity_type: null,
+              definitional_phrase: null,
+              observed_entity_types: null,
+              canonical_family: null,
+              confidence: null,
+              mention_count: null,
+            }));
+        const genome = graphCategoryGenome(
+          topEntities.map((entity) => ({
+            category:
+              entity.primary_entity_type ||
+              entity.entity_type ||
+              entity.canonical_family ||
+              "Other",
+            weight: entity.mention_count || 1,
+          })),
+          `${d.corpus_id}:${d.doc_id}`,
+        );
+        const docLabel = softGraphLabel(cleanBookLabel(rawLabel) || rawLabel, 20);
+        const shouldSoftLabelDoc = idx < SOFT_DOC_LABEL_COUNT;
         anchorNodes.push({
           id: bookId,
-          // Full text kept on display_name for tooltip; sigma renders `label`.
           display_name: rawLabel,
-          label: cleanBookLabel(rawLabel) || rawLabel,
-          // mention_count drives node size in the adapter — use chunk_count
-          // so a 5000-chunk book is visually larger than a 50-chunk one.
+          label: docLabel || cleanBookLabel(rawLabel) || rawLabel,
           mention_count: Math.max(1, d.chunk_count || d.actual_chunk_count || 1),
           kind: "book" as const,
           source_corpora: [d.corpus_id],
           source_corpus: d.corpus_id,
+          graph_cluster_key: graphClusterKey,
           is_cluster_anchor: true,
-          // Top-N strongest anchors keep their label visible at all zoom
-          // levels; the long tail relies on semantic-zoom logic in useSigma.
-          forceLabel: idx < topN,
-          // Pt 5: extraction-schema facets drive deterministic node color
-          // in polymath-graph-adapter::pickNodeColor.
+          visual_size: 1.38,
+          visual_mass: 0.32,
+          visual_color: graphDocumentNodeColor(),
+          visual_glow: true,
+          visual_glow_strength: 0.46,
+          visual_category_genome: genome.signature,
+          visual_dominant_category: genome.dominant,
+          // Overview should read like Obsidian: all documents are visible
+          // as dots, names appear through hover/selection/drill instead of
+          // carpeting the atlas.
+          forceLabel: shouldSoftLabelDoc,
           dominant_family: d.dominant_family,
           dominant_entity_type: d.dominant_entity_type,
-          // Pass anchor metadata through so the selection bar can render it.
           ghost_b_success_rate: d.ghost_b_success_rate,
           ghost_b_extracted: d.ghost_b_extracted,
           ghost_b_total: d.ghost_b_total,
@@ -795,38 +914,24 @@ function useBrainGraph(
           entity_count: d.entity_count,
         });
 
-        // Only the spotlight (top SPOTLIGHT_COUNT by bridge_count) gets
-        // satellites. Long-tail books read as solo dots, keeping the
-        // canvas legible at 1000+ books.
         if (idx < SPOTLIGHT_COUNT) {
-          const topEntities = d.top_entity_records?.length
-            ? d.top_entity_records
-            : (d.top_entities || []).map((name) => ({
-                name,
-                entity_id: null,
-                entity_type: "",
-                primary_entity_type: null,
-                definitional_phrase: null,
-                observed_entity_types: null,
-                canonical_family: null,
-                confidence: null,
-                mention_count: null,
-              }));
           const satCount = topEntities.length;
-          topEntities.forEach((entity, i) => {
+          topEntities.slice(0, TENTACLE_CAP).forEach((entity, i) => {
             const name = entity.name || entity.entity_id || "";
             if (!name) return;
-            // Pre-bake polar position around (0,0) — the adapter resolves
-            // the book's anchor position and adds these as offsets, so
-            // satellites start in a ring instead of being dragged into
-            // orbit by FA2.
             const angle =
-              (i / Math.max(satCount, 1)) * Math.PI * 2 + idx * 0.7;
+              (i / Math.max(Math.min(satCount, TENTACLE_CAP), 1)) * Math.PI * 2 +
+              idx * 0.7;
             const entityId = `ent:${d.doc_id}:${i}`;
+            const shouldSoftLabelEntity =
+              softEntityLabelsUsed < SOFT_ENTITY_LABEL_COUNT &&
+              idx < SPOTLIGHT_COUNT &&
+              (i === 0 || (idx < 18 && i === 1));
+            if (shouldSoftLabelEntity) softEntityLabelsUsed += 1;
             satelliteNodes.push({
               id: entityId,
               display_name: name,
-              label: name.length > 18 ? name.slice(0, 17) + "…" : name,
+              label: softGraphLabel(name, 18),
               entity_type: entity.entity_type || "",
               primary_entity_type: entity.primary_entity_type ?? null,
               definitional_phrase: entity.definitional_phrase ?? null,
@@ -835,11 +940,17 @@ function useBrainGraph(
               confidence: entity.confidence ?? null,
               source_corpus: d.corpus_id,
               source_corpora: [d.corpus_id],
-              // primary_doc_id wires the adapter's "orbit your book"
-              // positioning. Without this, FA2 would scatter satellites.
+              graph_cluster_key: graphClusterKey,
               primary_doc_id: d.doc_id,
               mention_count: entity.mention_count ?? 1,
-              // Pre-baked polar — adapter adds anchor position.
+              visual_size: 2.1,
+              visual_mass: 0.2,
+              visual_color: graphGenomePropertyColor(
+                entity.primary_entity_type || entity.entity_type || entity.canonical_family,
+                genome,
+                `${d.corpus_id}:${d.doc_id}:${name}:${i}`,
+              ),
+              forceLabel: shouldSoftLabelEntity,
               x: Math.cos(angle) * SAT_ORBIT_R,
               y: Math.sin(angle) * SAT_ORBIT_R,
             });
@@ -847,10 +958,9 @@ function useBrainGraph(
               source: bookId,
               target: entityId,
               predicate: "contains",
-              // Structural containment, not a weak semantic relation — keeps the
-              // Evidence Inspector from labeling every satellite "WeakAssociation".
               relation_family: "Structural",
-              weight: 0.2,
+              weight: 0.02,
+              visual_scaffold: true,
             });
           });
         }
@@ -860,16 +970,9 @@ function useBrainGraph(
         source: `book:${b.source}`,
         target: `book:${b.target}`,
         predicate: "bridges_to",
-        // Use strength on weight so the adapter / sigma reducer thickens
-        // bridges by how many cross-book entity pairs they represent.
         weight: b.strength,
         confidence: Math.min(1, (b.shared_entities || 0) / 12),
-        // Pt 5: passes through to the adapter, which uses
-        // EDGE_COLORS_BY_FAMILY[dominant_relation_family] for the edge color.
         dominant_relation_family: b.dominant_relation_family,
-        // Pt 7c: top shared concept names + total count. The adapter
-        // builds an on-edge label string like "Bayes' theorem +5" so
-        // users see what links two books without clicking.
         top_shared_entities: b.top_shared_entities || [],
         shared_entities: b.shared_entities,
       }));
@@ -889,9 +992,6 @@ function useBrainGraph(
     reload();
   }, [reload]);
 
-  // Whenever cacheWarming changes, fetch per-corpus statuses ONCE so the
-  // chip + Build button can show the real state (missing vs warming vs
-  // running rebuild). Then poll every 15s if any are still not ready.
   useEffect(() => {
     if (!cacheWarming.length) {
       setCacheStatuses({});
@@ -1062,9 +1162,6 @@ function useQueryGraph(
             ? Math.max(1, Math.min(10, webMaxSources || 5))
             : undefined,
         } as any);
-        // The map and synthesis run in parallel so the graph can appear first.
-        // If the map request fails, this prevents the still-running synthesis
-        // promise from surfacing as an unhandled rejection.
         void synthP.catch(() => undefined);
         const sub = await subgraphP;
         if (cancel) return;
@@ -1270,24 +1367,13 @@ export function GraphViewer({
   onQueryPhaseChange,
   onSendToChat,
 }: GraphViewerProps) {
-  // Default to entity_type so nodes are colored by their GLiNER type on first
-  // load (Person/Concept/Software/...), decoupled from relation strength.
   const [colorMode, setColorMode] = useState<ColorMode>("entity_type");
   const [drillStack, setDrillStack] = useState<DrillFrame[]>([]);
   const [hoveredName, setHoveredName] = useState<string | null>(null);
-  // Pt 5: right sidebar dashboard collapse state.
   const [dashboardCollapsed, setDashboardCollapsed] = useState(false);
-  // Pt 6: bridge filter knobs (driven by dashboard sliders). Defaults match
-  // the Pt 5 hardcoded behavior so the canvas looks the same on load.
   const [minBridgeStrength, setMinBridgeStrength] = useState(2);
-  const [maxBridgesPerBook, setMaxBridgesPerBook] = useState(3);
-  // Pt 6: re-settle FA2 layout briefly after the user releases a dragged
-  // node. Off by default; user toggles in the Layout section of the dashboard.
+  const [maxBridgesPerBook, setMaxBridgesPerBook] = useState(0);
   const [settleAfterDrag, setSettleAfterDrag] = useState(false);
-  // Pt 7: tab selection in the sidebar + Graph Query tab's local input.
-  // `agentInput` is what the user types; `agentQuery` is what useQueryGraph
-  // actually consumes (only promoted when the user hits Run). This way
-  // every keystroke doesn't refire the query.
   const [activeTab, setActiveTab] = useState<DashboardTab>("brain");
   const [agentInput, setAgentInput] = useState<string>(query ?? "");
   const [agentQuery, setAgentQuery] = useState<string | undefined>(query);
@@ -1299,22 +1385,20 @@ export function GraphViewer({
   );
   const [lastGraphContext, setLastGraphContext] =
     useState<GraphTurnContext | null>(null);
-  // Phase 3 — synthesis-mode toggle. "research" (default) gives concrete
-  // claims; "ideation" produces [BUILD IDEA] blocks; "nuance" explores gap
-  // typology, analogies, transfers, and bridges.
   const [draftSynthesisMode, setDraftSynthesisMode] =
     useState<GraphSynthesisMode>("research");
   const [executedSynthesisMode, setExecutedSynthesisMode] =
     useState<GraphSynthesisMode>("research");
-  // Sprint #2 — opt-in critique + revise loop. When true, the backend
-  // runs auditor + editor passes after the draft (2-3× LLM cost).
-  // Off by default so the common case stays single-call.
   const [draftValidateSynthesis, setDraftValidateSynthesis] =
     useState<boolean>(false);
   const [executedValidateSynthesis, setExecutedValidateSynthesis] =
     useState<boolean>(false);
   const [draftWebGrounding, setDraftWebGrounding] = useState<boolean>(false);
   const [executedWebGrounding, setExecutedWebGrounding] = useState<boolean>(false);
+  // 3D atom view mode — "2d" is the default sigma canvas, "3d" swaps in
+  // the lazy-loaded GraphAtom3D scene consuming the same `data` payload.
+  const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
+  const lastAutoTransitionFingerprintRef = useRef<string | null>(null);
   const drillStackRef = useRef(drillStack);
   drillStackRef.current = drillStack;
 
@@ -1323,12 +1407,6 @@ export function GraphViewer({
     mode === "brain" ? corpusIds : [],
     drill,
   );
-  // Pt 7: useQueryGraph now reads `agentQuery` state instead of the props.query.
-  // For mode==="query" callers, props.query seeds agentQuery on mount. For
-  // mode==="brain", the Agent Search tab inside the dashboard can drive
-  // queries by promoting agentInput → agentQuery via onAgentRun.
-  // Corpora pool is always available (regardless of mode) so users can
-  // run an agent query from the brain canvas without switching modes.
   const q = useQueryGraph(
     corpusIds,
     agentQuery,
@@ -1490,9 +1568,20 @@ export function GraphViewer({
   const loading = effectiveMode === "brain" ? brain.loading : activeQ.phase === "loading";
   const error = effectiveMode === "brain" ? brain.error : activeQ.error;
 
-  // Double-click handler — drills into a book anchor (single-click selects
-  // the node + neighbors as usual). Books-as-clusters is the only Brain
-  // View now, so the only drill target is `book:<doc_id>`.
+  // Auto-transition 2D → 3D when a heavy query completes. Keyed on a
+  // stable fingerprint of the query so re-renders without new data
+  // don't re-fire the reveal. The user can always flip back to 2D via
+  // the toggle in the top command strip — we never auto-return.
+  useEffect(() => {
+    if (effectiveMode !== "query") return;
+    if (!agentQuery?.trim() || q.phase !== "ready") return;
+    if (!data || (data.nodes?.length ?? 0) === 0) return;
+    const fingerprint = `${agentQuery.trim()}|${executedSynthesisMode}|${corpusIds.join(",")}`;
+    if (lastAutoTransitionFingerprintRef.current === fingerprint) return;
+    lastAutoTransitionFingerprintRef.current = fingerprint;
+    setViewMode("3d");
+  }, [effectiveMode, agentQuery, q.phase, q.synthesis?.markdown, data, executedSynthesisMode, corpusIds]);
+
   const handleDoubleClickNode = useCallback(
     (nodeId: string) => {
       if (effectiveMode !== "brain") return;
@@ -1521,7 +1610,6 @@ export function GraphViewer({
     settleAfterDrag,
   });
 
-  // Push new data into sigma when it lands.
   useEffect(() => {
     if (!data) return;
     const seedIds = effectiveMode === "query" ? activeQ.seedIds : new Set<string>();
@@ -1541,14 +1629,10 @@ export function GraphViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run on data change
   }, [data, effectiveMode, queryFingerprint, activeQ.seedIds, activeQ.hubIds, activeQ.bridgeIds, minBridgeStrength, maxBridgesPerBook]);
 
-  // Apply colorMode toggle without rebuilding graph.
   useEffect(() => {
     const sigmaInst = sigma.sigmaRef.current;
     const g = (sigmaInst as any)?.getGraph?.();
     if (!sigmaInst || !g || g.order === 0 || !data) return;
-    // Easiest correct path: rebuild the graph with new colorMode. The
-    // adapter is fast enough that this stays under a few ms even for
-    // overview payloads (~80 nodes).
     const seedIds = effectiveMode === "query" ? activeQ.seedIds : new Set<string>();
     const hubIds = effectiveMode === "query" ? activeQ.hubIds : new Set<string>();
     const bridgeIds = effectiveMode === "query" ? activeQ.bridgeIds : new Set<string>();
@@ -1585,7 +1669,6 @@ export function GraphViewer({
       nodeKind: (found as any).nodeKind,
       kind: (found as any).kind,
       entity_type: (found as any).entity_type,
-      // Classification surfaced in the inspector ("what is this").
       primary_entity_type: (found as any).primary_entity_type,
       definitional_phrase: (found as any).definitional_phrase,
       observed_entity_types: (found as any).observed_entity_types,
@@ -1609,225 +1692,405 @@ export function GraphViewer({
 
   if (corpusIds.length === 0) {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-[#06060a] text-zinc-400">
-        <div className="text-center">
-          <div className="text-base mb-2 font-mono">
-            Select a corpus from the sidebar to begin
+      <div className="flex h-full w-full items-center justify-center bg-[var(--bg-base)] text-content-secondary">
+        <div className="max-w-sm px-6 text-center">
+          <div className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full border border-border-minimal bg-[var(--bg-raised)]">
+            <Search className="h-5 w-5 text-content-tertiary" />
           </div>
-          <div className="text-xs text-zinc-600 font-mono">
-            Tip: select multiple corpora to see cross-book connections
+          <div className="text-base font-semibold text-content-primary">
+            Select a corpus to begin
+          </div>
+          <div className="mt-1.5 text-[12px] leading-relaxed text-content-tertiary font-mono">
+            Tip: select multiple corpora to see cross-book connections.
           </div>
         </div>
       </div>
     );
   }
 
+  // Header strip data
+  const nodeCount = data?.nodes.length ?? 0;
+  const linkCount = data?.links.length ?? 0;
+  const headerMode =
+    effectiveMode === "query" ? "Query" : "Corpora view";
+  const headerPhase = effectiveMode === "brain"
+    ? brain.loading ? "loading"
+      : brain.error ? "error"
+      : data ? "ready"
+      : "idle"
+    : activeQ.phase;
+
+  const phaseTone =
+    headerPhase === "ready"
+      ? "success"
+      : headerPhase === "loading"
+        ? "warning"
+        : headerPhase === "error"
+          ? "error"
+          : "neutral";
+
   return (
-    <div className="relative flex h-full w-full flex-col md:flex-row bg-[#06060a]">
-      {/* Canvas column (fills remaining width) */}
-      <div className="relative flex-1 min-h-0 min-w-0">
-        {/* Background gradient — same recipe as GitNexus GraphCanvas */}
-        <div className="pointer-events-none absolute inset-0">
-          <div
-            className="absolute inset-0"
+    <div className="graph-surface relative flex h-full w-full flex-col bg-[var(--bg-base)]">
+      {/* ── Top command strip ──────────────────────────────────────── */}
+      <header className="relative z-20 flex shrink-0 items-center justify-between gap-3 border-b border-border-minimal bg-[var(--bg-raised)]/95 px-3 py-2 backdrop-blur">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            {effectiveMode === "query" ? (
+              <Search className="h-3.5 w-3.5 text-accent-main" />
+            ) : (
+              <Activity className="h-3.5 w-3.5 text-content-secondary" />
+            )}
+            <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-content-tertiary">
+              {headerMode}
+            </span>
+          </div>
+          <span className="text-content-tertiary">·</span>
+          <div className="flex min-w-0 items-center gap-1.5 font-mono text-[11px] text-content-secondary">
+            <span className="tabular-nums text-content-primary">
+              {corpusIds.length} {corpusIds.length === 1 ? "corpus" : "corpora"}
+            </span>
+            <span className="text-content-tertiary">·</span>
+            <span className="tabular-nums text-content-tertiary">
+              {nodeCount}n · {linkCount}e
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <span className="hidden items-center gap-1 md:inline-flex">
+            <LaneChip lane="corpus" label="corpus" />
+          </span>
+          <span className="hidden items-center gap-1 md:inline-flex">
+            <LaneChip lane="graph" label="graph" />
+          </span>
+          {effectiveMode === "query" && (
+            <span className="hidden items-center gap-1 lg:inline-flex">
+              <RoleChip role="query_matched" />
+              <RoleChip role="anchor" />
+              <RoleChip role="bridge" />
+              <RoleChip role="gap" />
+            </span>
+          )}
+          <span
+            className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-[0.18em]"
             style={{
-              background: `
-                radial-gradient(circle at 50% 50%, rgba(124, 58, 237, 0.05) 0%, transparent 65%),
-                linear-gradient(to bottom, #06060a, #0a0a14)
-              `,
+              borderColor:
+                phaseTone === "success"
+                  ? "rgba(16, 185, 129, 0.45)"
+                  : phaseTone === "warning"
+                    ? "rgba(245, 158, 11, 0.45)"
+                    : phaseTone === "error"
+                      ? "rgba(239, 68, 68, 0.45)"
+                      : "var(--border-subtle)",
+              background:
+                phaseTone === "success"
+                  ? "rgba(16, 185, 129, 0.10)"
+                  : phaseTone === "warning"
+                    ? "rgba(245, 158, 11, 0.10)"
+                    : phaseTone === "error"
+                      ? "rgba(239, 68, 68, 0.10)"
+                      : "var(--bg-base)",
+              color:
+                phaseTone === "success"
+                  ? "#6ee7b7"
+                  : phaseTone === "warning"
+                    ? "#fcd34d"
+                    : phaseTone === "error"
+                      ? "#fca5a5"
+                      : "var(--text-tertiary, #94a3b8)",
+            }}
+          >
+            {headerPhase === "loading" && (
+              <Loader2 className="h-2.5 w-2.5 animate-spin" />
+            )}
+            <span>{headerPhase}</span>
+          </span>
+          {/* View-mode toggle: 2D sigma map vs lazy-loaded 3D atom. */}
+          <div
+            className="inline-flex items-center rounded-md p-0.5"
+            style={{
+              background: "var(--bg-base)",
+              border: "1px solid var(--border-subtle)",
+            }}
+            role="tablist"
+            aria-label="Canvas view mode"
+          >
+            <Button
+              variant={viewMode === "2d" ? "primary" : "ghost"}
+              size="sm"
+              active={viewMode === "2d"}
+              aria-pressed={viewMode === "2d"}
+              onClick={() => setViewMode("2d")}
+            >
+              2D Map
+            </Button>
+            <Button
+              variant={viewMode === "3d" ? "primary" : "ghost"}
+              size="sm"
+              active={viewMode === "3d"}
+              aria-pressed={viewMode === "3d"}
+              onClick={() => setViewMode("3d")}
+            >
+              3D Atom
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* ── Body row: canvas + right rail ──────────────────────────── */}
+      <div className="relative flex min-h-0 flex-1 flex-col md:flex-row">
+        {/* Canvas column */}
+        <div className="relative flex-1 min-h-0 min-w-0">
+          {/* Research substrate: subtle vignette. */}
+          <div
+            className="pointer-events-none absolute inset-0 z-0"
+            style={{ background: graphColors.substrate.vignette }}
+          />
+          {/* Subtle research grid (CSS — Sigma paints on its own canvas). */}
+          <div
+            className="pointer-events-none absolute inset-0 z-0"
+            style={{
+              backgroundImage:
+                "linear-gradient(to right, rgba(148,163,184,0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.04) 1px, transparent 1px)",
+              backgroundSize: "64px 64px",
             }}
           />
-        </div>
 
-      {/* Hovered node tooltip — only when nothing is selected. Stays on
-          canvas (cursor-following pill) rather than in the dashboard. */}
-      {hoveredName && !selectedId && (
-        <div className="pointer-events-none absolute top-3 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-zinc-800 bg-[#0d0d14]/95 px-3 py-1.5 backdrop-blur">
-          <span className="font-mono text-sm text-zinc-100">{hoveredName}</span>
-        </div>
-      )}
-
-      {/* Loading / error overlay */}
-      {(loading || error) && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-          {loading && !error && (
-            <div className="flex items-center gap-2 text-zinc-400 text-xs font-mono">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {effectiveMode === "query"
-                ? heavyQueryActive
-                  ? "synthesizing across corpora..."
-                  : "building question graph..."
-                : "loading graph..."}
+          {/* Hovered node tooltip — centered under the strip. */}
+          {hoveredName && !selectedId && (
+            <div className="pointer-events-none absolute top-3 left-1/2 z-20 -translate-x-1/2 rounded-md border border-border-minimal bg-[var(--bg-raised)]/95 px-3 py-1.5 backdrop-blur">
+              <span className="font-mono text-sm text-content-primary">
+                {hoveredName}
+              </span>
             </div>
           )}
-          {error && (
-            <div className="text-rose-300 text-xs font-mono pointer-events-auto bg-[#0d0d14] border border-rose-900/50 rounded px-3 py-2 max-w-md">
-              {error}
+
+          {/* Loading / error / empty overlays share the same center stage. */}
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none gap-3">
+            {loading && !error && (
+              <div className="pointer-events-auto flex items-center gap-2.5 rounded-md border border-border-minimal bg-[var(--bg-raised)]/90 px-3 py-2 text-[11px] font-mono text-content-secondary backdrop-blur">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-accent-main" />
+                <span>
+                  {effectiveMode === "query"
+                    ? heavyQueryActive
+                      ? "Synthesizing across corpora..."
+                      : "Building question graph..."
+                    : "Loading graph..."}
+                </span>
+              </div>
+            )}
+
+            {error && (
+              <div className="pointer-events-auto max-w-md rounded-md border border-error/40 bg-[var(--bg-raised)]/95 px-4 py-3 text-[13px] backdrop-blur">
+                <div className="mb-1 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-error">
+                  <span className="h-2 w-2 rounded-full bg-error" />
+                  Graph error
+                </div>
+                <p className="leading-relaxed text-content-secondary">{error}</p>
+              </div>
+            )}
+
+            {data && data.nodes.length === 0 && !loading && (
+              <EmptyDataState
+                mode={effectiveMode}
+                cacheWarming={effectiveMode === "brain" ? brain.cacheWarming : []}
+                statuses={effectiveMode === "brain" ? brain.cacheStatuses : {}}
+                rebuildingIds={effectiveMode === "brain" ? brain.rebuildingIds : new Set()}
+                onRebuild={effectiveMode === "brain" ? brain.triggerRebuild : async () => {}}
+              />
+            )}
+          </div>
+
+          {/* Sigma canvas */}
+          <div className="absolute inset-0 flex z-0">
+            <div className="relative flex-1 min-w-0">
+              <div
+                ref={sigma.containerRef}
+                className="absolute inset-0 z-10 cursor-grab active:cursor-grabbing"
+              />
+            </div>
+          </div>
+
+          {/* 3D Atom overlay — lazy-loaded; renders only when viewMode==='3d'
+              and there's data. Uses the SAME nodes/links the 2D canvas
+              has; never re-queries retrieval. Capped at 150n/350e inside
+              GraphAtom3D. */}
+          {viewMode === "3d" && data && data.nodes.length > 0 && (
+            <div className="absolute inset-0 z-20 pointer-events-auto">
+              <Suspense
+                fallback={
+                  <div
+                    className="flex h-full w-full items-center justify-center"
+                    style={{
+                      color: "var(--ink-tertiary)",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "var(--type-sm)",
+                    }}
+                  >
+                    Booting 3D atom…
+                  </div>
+                }
+              >
+                <GraphAtom3D
+                  nodes={(() => {
+                    const ctx = computeRoleContext(
+                      data.nodes,
+                      data.links,
+                      activeQ.seedIds,
+                      activeQ.hubIds,
+                      activeQ.bridgeIds,
+                      q.gaps ?? [],
+                    );
+                    return data.nodes.map((n: any) => ({
+                      id: String(n.id),
+                      label: String(n.display_name || n.label || n.id),
+                      role: assignNodeRole(n, ctx).role,
+                      weight: Number(n.mention_count ?? n.total_mentions ?? 1),
+                    }));
+                  })()}
+                  links={data.links.map((l: any) => {
+                    const source = String(
+                      l.source && typeof l.source === "object"
+                        ? (l.source as any).id ?? (l.source as any).key
+                        : l.source,
+                    );
+                    const target = String(
+                      l.target && typeof l.target === "object"
+                        ? (l.target as any).id ?? (l.target as any).key
+                        : l.target,
+                    );
+                    return {
+                      source,
+                      target,
+                      kind:
+                        l.predicate === "bridges_to"
+                          ? "bridges"
+                          : l.relation_family === "Structural" ||
+                              l.predicate === "in_book"
+                            ? "mentions"
+                            : "supports",
+                      label: String(l.predicate || "related_to"),
+                      family: l.dominant_relation_family || l.relation_family || null,
+                      confidence:
+                        typeof l.confidence === "number" ? l.confidence : null,
+                      weight:
+                        typeof l.weight === "number"
+                          ? l.weight
+                          : typeof l.shared_entities === "number"
+                            ? l.shared_entities
+                            : null,
+                      sourceLabel:
+                        l.source_label ||
+                        data.nodes.find((n: any) => String(n.id) === source)?.display_name,
+                      targetLabel:
+                        l.target_label ||
+                        data.nodes.find((n: any) => String(n.id) === target)?.display_name,
+                    };
+                  })}
+                  selectedNodeId={selectedId}
+                  onSelectNode={sigma.setSelectedNode}
+                  headline={q.synthesis?.headline || (effectiveMode === "query" ? agentInput : undefined)}
+                  synthesisHeadline={q.synthesis?.markdown?.slice(0, 320)}
+                />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Bottom-right control cluster. */}
+          <div className="absolute right-3 bottom-3 z-20 flex flex-col gap-1.5 pointer-events-auto md:right-4 md:bottom-4">
+            <ToolButton onClick={sigma.zoomIn} title="Zoom in" icon={<ZoomIn className="h-4 w-4" />} />
+            <ToolButton onClick={sigma.zoomOut} title="Zoom out" icon={<ZoomOut className="h-4 w-4" />} />
+            <ToolButton onClick={sigma.resetZoom} title="Fit to screen" icon={<Maximize2 className="h-4 w-4" />} />
+            <div className="my-0.5 h-px bg-border-minimal/60" />
+            <ToolButton
+              onClick={sigma.isLayoutRunning ? sigma.stopLayout : sigma.startLayout}
+              title={sigma.isLayoutRunning ? "Pause layout" : "Resume layout"}
+              icon={sigma.isLayoutRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+              active={sigma.isLayoutRunning}
+            />
+          </div>
+
+          {/* Layout running indicator. */}
+          {sigma.isLayoutRunning && (
+            <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-accent-main/30 bg-[var(--bg-raised)]/90 px-3 py-1.5 backdrop-blur md:bottom-4">
+              <div className="h-2 w-2 animate-ping rounded-full bg-accent-main" />
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-content-secondary">
+                Layout optimizing…
+              </span>
             </div>
           )}
         </div>
-      )}
 
-      {/* Empty data fallback */}
-      {data && data.nodes.length === 0 && !loading && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center">
-          <EmptyDataState
-            mode={effectiveMode}
-            cacheWarming={effectiveMode === "brain" ? brain.cacheWarming : []}
-            statuses={effectiveMode === "brain" ? brain.cacheStatuses : {}}
-            rebuildingIds={effectiveMode === "brain" ? brain.rebuildingIds : new Set()}
-            onRebuild={effectiveMode === "brain" ? brain.triggerRebuild : async () => {}}
-          />
-        </div>
-      )}
-
-      {/* Sigma canvas */}
-      <div className="absolute inset-0 flex">
-        <div className="relative flex-1 min-w-0">
-          {/* Pt 6: Galaxy background canvas — dust particles + family
-              nebulae + Book-anchor glow halos, all painted in lockstep
-              with sigma via its `afterRender` event. Sits BEHIND sigma's
-              own canvas (z-0) with pointer-events:none so it never
-              swallows clicks. */}
-          <GalaxyBackground
-            sigmaRef={sigma.sigmaRef as any}
-            isLayoutRunning={sigma.isLayoutRunning}
-          />
-          <div
-            ref={sigma.containerRef}
-            className="absolute inset-0 z-10 cursor-grab active:cursor-grabbing"
-          />
-        </div>
-      </div>{/* end absolute inset-0 flex */}
-
-      {/* Bottom-right control cluster — same layout as GitNexus */}
-      <div className="absolute right-3 bottom-[calc(52dvh+0.75rem)] z-20 flex flex-col gap-1 pointer-events-auto md:right-4 md:bottom-4">
-        <button
-          onClick={sigma.zoomIn}
-          className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
-          title="Zoom in"
-        >
-          <ZoomIn className="h-4 w-4" />
-        </button>
-        <button
-          onClick={sigma.zoomOut}
-          className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
-          title="Zoom out"
-        >
-          <ZoomOut className="h-4 w-4" />
-        </button>
-        <button
-          onClick={sigma.resetZoom}
-          className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
-          title="Fit to screen"
-        >
-          <Maximize2 className="h-4 w-4" />
-        </button>
-        <div className="h-px bg-zinc-800 my-1" />
-        <button
-          onClick={sigma.isLayoutRunning ? sigma.stopLayout : sigma.startLayout}
-          className={`flex h-9 w-9 items-center justify-center rounded-md border transition-all ${
-            sigma.isLayoutRunning
-              ? "animate-pulse border-violet-500 bg-violet-500/30 text-white"
-              : "border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
-          }`}
-          title={sigma.isLayoutRunning ? "Pause layout" : "Resume layout"}
-        >
-          {sigma.isLayoutRunning ? (
-            <Pause className="h-4 w-4" />
-          ) : (
-            <Play className="h-4 w-4" />
-          )}
-        </button>
+        {/* Right rail */}
+        <BrainViewDashboard
+          collapsed={dashboardCollapsed}
+          onToggle={() => setDashboardCollapsed((v) => !v)}
+          mode={effectiveMode}
+          drillStack={drillStack}
+          setDrillStack={setDrillStack}
+          corpusIds={corpusIds}
+          data={data as any}
+          cacheWarming={effectiveMode === "brain" ? brain.cacheWarming : []}
+          cacheStatuses={effectiveMode === "brain" ? brain.cacheStatuses : {}}
+          rebuildingIds={effectiveMode === "brain" ? brain.rebuildingIds : new Set()}
+          onRebuild={effectiveMode === "brain" ? brain.triggerRebuild : async () => {}}
+          colorMode={colorMode}
+          onColorModeToggle={() =>
+            setColorMode((m) =>
+              m === "entity_type"
+                ? "community"
+                : m === "community"
+                  ? "corpus"
+                  : "entity_type",
+            )
+          }
+          minBridgeStrength={minBridgeStrength}
+          onMinBridgeStrengthChange={setMinBridgeStrength}
+          maxBridgesPerBook={maxBridgesPerBook}
+          onMaxBridgesPerBookChange={setMaxBridgesPerBook}
+          settleAfterDrag={settleAfterDrag}
+          onSettleAfterDragToggle={() => setSettleAfterDrag((v) => !v)}
+          activeTab={activeTab}
+          onActiveTabChange={setActiveTab}
+          agentQuery={agentInput}
+          onAgentQueryChange={setAgentInput}
+          onAgentRun={(runMode) => runGraphQuery(undefined, runMode)}
+          synthesisMode={draftSynthesisMode}
+          onSynthesisModeChange={setDraftSynthesisMode}
+          validateSynthesis={draftValidateSynthesis}
+          onValidateSynthesisChange={setDraftValidateSynthesis}
+          webGroundingEnabled={draftWebGrounding}
+          onWebGroundingChange={setDraftWebGrounding}
+          followUpAvailable={lastGraphContext !== null}
+          followUpPreview={lastGraphContext?.coreIdea || lastGraphContext?.query || ""}
+          onBuildQuestionGraph={runQuestionGraph}
+          agentPhase={q.phase}
+          agentError={q.error}
+          agentSynthesisMarkdown={q.synthesis?.markdown ?? null}
+          agentProgressSteps={q.progressSteps}
+          questionPhase={lightQ.phase}
+          questionProgressSteps={lightQ.progressSteps}
+          agentSeedNames={agentSeedNames}
+          agentSourceNames={agentSourceNames}
+          agentBridgeNames={agentBridgeNames}
+          agentHubNames={agentHubNames}
+          agentGaps={q.gaps as any}
+          onSendToChat={onSendToChat}
+          onRerun={onRerun}
+          showQueryRerun={heavyQueryActive}
+          onClearGraphQuery={clearGraphQuery}
+          selectedDisplay={selectedDisplay}
+          onClearSelection={() => sigma.setSelectedNode(null)}
+          isLayoutRunning={sigma.isLayoutRunning}
+          startLayout={sigma.startLayout}
+          stopLayout={sigma.stopLayout}
+        />
       </div>
-
-      {/* Layout running indicator */}
-      {sigma.isLayoutRunning && (
-        <div className="absolute bottom-[calc(52dvh+0.75rem)] left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/20 px-3 py-1.5 backdrop-blur md:bottom-4">
-          <div className="h-2 w-2 animate-ping rounded-full bg-emerald-400" />
-          <span className="text-xs font-medium text-emerald-200 font-mono">
-            layout optimizing…
-          </span>
-        </div>
-      )}
-      </div>{/* end canvas column */}
-
-      {/* Right sidebar dashboard (Pt 5 — flex layout). Holds breadcrumb,
-          stats, cache health, color mode, selection info, layout controls.
-          Collapses to a 36px strip via the panel toggle. */}
-      <BrainViewDashboard
-        collapsed={dashboardCollapsed}
-        onToggle={() => setDashboardCollapsed((v) => !v)}
-        mode={effectiveMode}
-        drillStack={drillStack}
-        setDrillStack={setDrillStack}
-        corpusIds={corpusIds}
-        data={data as any}
-        cacheWarming={effectiveMode === "brain" ? brain.cacheWarming : []}
-        cacheStatuses={effectiveMode === "brain" ? brain.cacheStatuses : {}}
-        rebuildingIds={effectiveMode === "brain" ? brain.rebuildingIds : new Set()}
-        onRebuild={effectiveMode === "brain" ? brain.triggerRebuild : async () => {}}
-        colorMode={colorMode}
-        onColorModeToggle={() =>
-          setColorMode((m) =>
-            m === "entity_type"
-              ? "community"
-              : m === "community"
-                ? "corpus"
-                : "entity_type",
-          )
-        }
-        minBridgeStrength={minBridgeStrength}
-        onMinBridgeStrengthChange={setMinBridgeStrength}
-        maxBridgesPerBook={maxBridgesPerBook}
-        onMaxBridgesPerBookChange={setMaxBridgesPerBook}
-        settleAfterDrag={settleAfterDrag}
-        onSettleAfterDragToggle={() => setSettleAfterDrag((v) => !v)}
-        activeTab={activeTab}
-        onActiveTabChange={setActiveTab}
-        agentQuery={agentInput}
-        onAgentQueryChange={setAgentInput}
-        onAgentRun={(runMode) => runGraphQuery(undefined, runMode)}
-        synthesisMode={draftSynthesisMode}
-        onSynthesisModeChange={setDraftSynthesisMode}
-        validateSynthesis={draftValidateSynthesis}
-        onValidateSynthesisChange={setDraftValidateSynthesis}
-        webGroundingEnabled={draftWebGrounding}
-        onWebGroundingChange={setDraftWebGrounding}
-        followUpAvailable={lastGraphContext !== null}
-        followUpPreview={lastGraphContext?.coreIdea || lastGraphContext?.query || ""}
-        onBuildQuestionGraph={runQuestionGraph}
-        agentPhase={q.phase}
-        agentError={q.error}
-        agentSynthesisMarkdown={q.synthesis?.markdown ?? null}
-        agentProgressSteps={q.progressSteps}
-        questionProgressSteps={lightQ.progressSteps}
-        agentSeedNames={agentSeedNames}
-        agentSourceNames={agentSourceNames}
-        agentBridgeNames={agentBridgeNames}
-        agentHubNames={agentHubNames}
-        agentGaps={q.gaps as any}
-        onSendToChat={onSendToChat}
-        onRerun={onRerun}
-        showQueryRerun={heavyQueryActive}
-        onClearGraphQuery={clearGraphQuery}
-        selectedDisplay={selectedDisplay}
-        onClearSelection={() => sigma.setSelectedNode(null)}
-        isLayoutRunning={sigma.isLayoutRunning}
-        startLayout={sigma.startLayout}
-        stopLayout={sigma.stopLayout}
-      />
     </div>
   );
 }
 
 export default GraphViewer;
-
-
-// ─── Cache-warming sub-components ─────────────────────────────────────────
-// Pt 5: CacheWarmingChip + CacheChipProps removed. BrainViewDashboard
-// renders per-corpus cache health inline as a list with individual
-// build buttons, which is more informative than the aggregate chip.
 
 interface EmptyStateProps {
   mode: GraphViewerMode;
@@ -1846,18 +2109,24 @@ function EmptyDataState({
 }: EmptyStateProps) {
   if (mode !== "brain") {
     return (
-      <div className="text-center text-zinc-500 text-xs font-mono pointer-events-none">
-        <div>no query result yet</div>
-        <div className="text-zinc-700 mt-1">type a question below</div>
+      <div className="pointer-events-auto max-w-sm px-4 text-center font-mono text-content-tertiary">
+        <div className="mb-1 text-[13px] text-content-secondary">
+          No query result yet
+        </div>
+        <div className="text-[11px]">
+          Type a question in the Graph Query panel
+        </div>
       </div>
     );
   }
   if (cacheWarming.length === 0) {
     return (
-      <div className="text-center text-zinc-500 text-xs font-mono pointer-events-none">
-        <div>no graph data</div>
-        <div className="text-zinc-700 mt-1">
-          the selected corpora have empty supernode overviews
+      <div className="pointer-events-auto max-w-sm px-4 text-center font-mono text-content-tertiary">
+        <div className="mb-1 text-[13px] text-content-secondary">
+          No graph data
+        </div>
+        <div className="text-[11px]">
+          The selected corpora have empty supernode overviews
         </div>
       </div>
     );
@@ -1873,48 +2142,66 @@ function EmptyDataState({
   const rebuildingHere = cacheWarming.filter((cid) => rebuildingIds.has(cid));
   const buildable = cacheWarming.filter((cid) => !rebuildingIds.has(cid));
   return (
-    <div className="text-center text-zinc-300 text-xs font-mono max-w-xl px-6 space-y-2 pointer-events-auto">
-      <div className="text-zinc-200 text-sm mb-3">
+    <div className="pointer-events-auto max-w-lg rounded-md border border-border-minimal bg-[var(--bg-raised)]/95 p-4 font-mono text-[11px] backdrop-blur">
+      <div className="mb-3 text-[13px] font-semibold tracking-wide text-content-primary">
         Analytics cache not ready for{" "}
-        <span className="text-amber-300">{cacheWarming.length}</span> corpor
+        <span className="text-accent-main">{cacheWarming.length}</span> corpor
         {cacheWarming.length === 1 ? "us" : "a"}
       </div>
-      {missingIds.length > 0 && (
-        <div className="text-zinc-400">
-          <span className="text-rose-300">{missingIds.length} never built</span>{" "}
-          — Polymath warms the analytics cache automatically at the end of
-          ingestion, but these corpora were ingested before that hook landed
-          (or never finished). Rebuild manually below.
-        </div>
-      )}
-      {warmingIds.length > 0 && (
-        <div className="text-zinc-400">
-          <span className="text-amber-300">{warmingIds.length} stale</span> —
-          new docs were ingested since the last cache build. Rebuild to refresh.
-        </div>
-      )}
-      {rebuildingHere.length > 0 && (
-        <div className="text-violet-300">
-          {rebuildingHere.length} currently rebuilding (this can take seconds
-          for tiny corpora to several minutes for thousands of entities).
-          Frontend polls every 15s; the canvas will populate when each
-          finishes.
-        </div>
-      )}
+      <div className="space-y-2 leading-relaxed text-content-secondary">
+        {missingIds.length > 0 && (
+          <div>
+            <span className="text-error">{missingIds.length} never built</span>{" "}
+            — cache was never generated for these corpora. Rebuild manually below.
+          </div>
+        )}
+        {warmingIds.length > 0 && (
+          <div>
+            <span className="text-warning">{warmingIds.length} stale</span> —
+            new docs were ingested since the last cache build. Rebuild to refresh.
+          </div>
+        )}
+        {rebuildingHere.length > 0 && (
+          <div className="text-accent-main">
+            {rebuildingHere.length} currently rebuilding. The canvas will populate when each finishes.
+          </div>
+        )}
+      </div>
       {buildable.length > 0 && (
         <button
-          className="mt-3 text-[11px] uppercase tracking-widest text-amber-100 hover:text-amber-50 border border-amber-500/50 bg-amber-500/10 rounded px-3 py-1.5 font-mono"
+          className="btn-primary mt-3 text-[11px]"
           onClick={() => onRebuild(buildable)}
         >
           Build cache for {buildable.length} corpor{buildable.length === 1 ? "us" : "a"}
         </button>
       )}
-      <div className="text-zinc-600 text-[10px] mt-2">
-        Behind the scenes: services/graph/analytics.py:emerge_domains runs
-        Louvain on document embeddings, computes PageRank + concept
-        communities, then writes the result to graph_domain_cache and
-        graph_metrics_cache.
-      </div>
     </div>
+  );
+}
+
+function ToolButton({
+  onClick,
+  title,
+  icon,
+  active,
+}: {
+  onClick: () => void;
+  title: string;
+  icon: React.ReactNode;
+  active?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className={`flex h-9 w-9 items-center justify-center rounded-md border border-border-minimal bg-[var(--bg-raised)] text-content-secondary transition-colors hover:text-content-primary ${
+        active
+          ? "border-accent-main text-accent-main"
+          : "hover:border-content-secondary"
+      }`}
+    >
+      {icon}
+    </button>
   );
 }

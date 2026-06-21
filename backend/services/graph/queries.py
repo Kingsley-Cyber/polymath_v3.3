@@ -395,46 +395,82 @@ _DRILLDOWN_CYPHER = """
 MATCH (d:Document {doc_id: $doc_id})
 WHERE d.is_cluster_anchor = true
 
-OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
-OPTIONAL MATCH (c)-[:MENTIONS]->(e:Entity)
+CALL {
+  WITH d
+  MATCH (d)-[:HAS_CHUNK]->(chunk:Chunk)
+  OPTIONAL MATCH (chunk)-[:MENTIONS]->(ce:Entity)
+  WITH chunk,
+       count(DISTINCT ce) AS entity_count,
+       [x IN collect(DISTINCT ce.entity_id) WHERE x IS NOT NULL][..6] AS top_entity_ids,
+       [x IN collect(DISTINCT coalesce(ce.display_name, ce.canonical_name, ce.entity_id)) WHERE x IS NOT NULL][..6] AS top_entity_names
+  ORDER BY entity_count DESC, chunk.chunk_id ASC
+  LIMIT $chunk_limit
+  RETURN collect({
+    chunk_id: chunk.chunk_id,
+    doc_id: chunk.doc_id,
+    corpus_id: chunk.corpus_id,
+    entity_count: entity_count,
+    top_entity_ids: top_entity_ids,
+    top_entity_names: top_entity_names
+  }) AS local_chunks
+}
 
-WITH d, collect(DISTINCT c) AS chunks, collect(DISTINCT e) AS local_entities
+CALL {
+  WITH d
+  MATCH (d)-[:HAS_CHUNK]->(:Chunk)-[:MENTIONS]->(e:Entity)
+  WITH e, count(*) AS mentions
+  ORDER BY mentions DESC, coalesce(e.display_name, e.canonical_name, e.entity_id) ASC
+  LIMIT $limit
+  RETURN collect(e) AS local_entity_nodes,
+         collect({
+            entity_id: e.entity_id,
+            display_name: coalesce(e.display_name, e.canonical_name),
+            entity_type: coalesce(e.primary_entity_type, e.entity_type),
+            primary_entity_type: e.primary_entity_type,
+            definitional_phrase: e.definitional_phrase,
+            observed_entity_types: e.observed_entity_types,
+            confidence: coalesce(e.confidence, e.confidence_score),
+            object_kind: e.object_kind,
+            canonical_family: e.canonical_family,
+            mention_count: mentions
+         }) AS local_entities
+}
 
-UNWIND CASE WHEN size(local_entities) = 0 THEN [null] ELSE local_entities END AS le
-OPTIONAL MATCH (le)-[r:RELATES_TO]->(le2:Entity)
-WHERE le2 IS NOT NULL AND le2 IN local_entities
-WITH d, chunks, local_entities,
-     collect(DISTINCT {
+CALL {
+  WITH local_entity_nodes
+  UNWIND local_entity_nodes AS le
+  MATCH (le)-[r:RELATES_TO]->(le2:Entity)
+  WHERE le2 IN local_entity_nodes
+  RETURN collect(DISTINCT {
         source_id: le.entity_id,
         target_id: le2.entity_id,
         predicate: r.predicate,
         relation_family: coalesce(r.relation_family, 'WeakAssociation'),
         confidence: r.confidence
      }) AS local_relations_raw
+}
 
-UNWIND CASE WHEN size(local_entities) = 0 THEN [null] ELSE local_entities END AS be
-OPTIONAL MATCH (be)-[rb:RELATES_TO]->(bridge:Entity)<-[:MENTIONS]-(:Chunk)<-[:HAS_CHUNK]-(d2:Document)
-WHERE d2.corpus_id IN $other_corpus_ids
-  AND d2.doc_id <> $doc_id
-  AND d2.is_cluster_anchor = true
-WITH d, chunks, local_entities, local_relations_raw,
-     d2, be, bridge,
-     count(rb) AS strength
-WITH d, chunks, local_entities, local_relations_raw,
-     collect(DISTINCT
-        CASE WHEN d2 IS NULL THEN NULL
-             ELSE {
-               via_entity_id: be.entity_id,
-               bridge_entity_id: bridge.entity_id,
-               bridge_entity_name: coalesce(bridge.display_name, bridge.canonical_name),
-               bridge_entity_type: coalesce(bridge.primary_entity_type, bridge.entity_type, 'Other'),
-               target_doc_id: d2.doc_id,
-               target_filename: coalesce(d2.filename, d2.doc_id),
-               target_corpus_id: d2.corpus_id,
-               strength: strength
-             }
-        END
-     ) AS bridges_raw
+CALL {
+  WITH local_entity_nodes
+  UNWIND local_entity_nodes AS be
+  MATCH (be)-[rb:RELATES_TO]->(bridge:Entity)<-[:MENTIONS]-(:Chunk)<-[:HAS_CHUNK]-(d2:Document)
+  WHERE d2.corpus_id IN $other_corpus_ids
+    AND d2.doc_id <> $doc_id
+    AND d2.is_cluster_anchor = true
+  WITH d2, be, bridge, count(rb) AS strength
+  ORDER BY strength DESC
+  LIMIT 160
+  RETURN collect(DISTINCT {
+     via_entity_id: be.entity_id,
+     bridge_entity_id: bridge.entity_id,
+     bridge_entity_name: coalesce(bridge.display_name, bridge.canonical_name),
+     bridge_entity_type: coalesce(bridge.primary_entity_type, bridge.entity_type, 'Other'),
+     target_doc_id: d2.doc_id,
+     target_filename: coalesce(d2.filename, d2.doc_id),
+     target_corpus_id: d2.corpus_id,
+     strength: strength
+  }) AS bridges_raw
+}
 
 RETURN
     d {
@@ -442,17 +478,8 @@ RETURN
       label: coalesce(d.filename, d.doc_id),
       node_kind: 'Book'
     } AS anchor,
-    [e IN local_entities WHERE e IS NOT NULL | {
-        entity_id: e.entity_id,
-        display_name: coalesce(e.display_name, e.canonical_name),
-        entity_type: coalesce(e.primary_entity_type, e.entity_type),
-        primary_entity_type: e.primary_entity_type,
-        definitional_phrase: e.definitional_phrase,
-        observed_entity_types: e.observed_entity_types,
-        confidence: coalesce(e.confidence, e.confidence_score),
-        object_kind: e.object_kind,
-        canonical_family: e.canonical_family
-    }][..$limit] AS local_entities,
+    coalesce(local_chunks, []) AS local_chunks,
+    coalesce(local_entities, []) AS local_entities,
     [r IN local_relations_raw WHERE r.source_id IS NOT NULL] AS local_relations,
     [b IN bridges_raw WHERE b IS NOT NULL] AS cross_book_bridges
 """
@@ -464,6 +491,7 @@ async def get_book_drilldown(
     other_corpus_ids: list[str],
     *,
     limit: int = 350,
+    chunk_limit: int = 48,
 ) -> dict[str, Any]:
     """Single-book drill: local entities + cross-book bridges.
 
@@ -488,6 +516,7 @@ async def get_book_drilldown(
                 doc_id=doc_id,
                 other_corpus_ids=list(other_corpus_ids or []),
                 limit=int(limit),
+                chunk_limit=max(1, min(int(chunk_limit), 120)),
             )
             record = await result.single()
     except Exception as exc:
@@ -517,16 +546,19 @@ async def get_book_drilldown(
             if key in anchor:
                 anchor[key] = _iso_or_none(anchor[key])
     local_entities = list(record["local_entities"] or [])
+    local_chunks = list(record["local_chunks"] or [])
     local_relations = list(record["local_relations"] or [])
     cross_book_bridges = list(record["cross_book_bridges"] or [])
 
     return {
         "anchor": anchor,
+        "local_chunks": local_chunks,
         "local_entities": local_entities,
         "local_relations": local_relations,
         "cross_book_bridges": cross_book_bridges,
         "meta": {
             "found": True,
+            "local_chunk_count": len(local_chunks),
             "local_entity_count": len(local_entities),
             "local_relation_count": len(local_relations),
             "bridge_count": len(cross_book_bridges),

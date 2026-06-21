@@ -1939,13 +1939,24 @@ export interface BookDrilldownCrossBridge {
   strength: number;
 }
 
+export interface BookDrilldownChunk {
+  chunk_id: string;
+  doc_id?: string | null;
+  corpus_id?: string | null;
+  entity_count?: number | null;
+  top_entity_ids?: string[];
+  top_entity_names?: string[];
+}
+
 export interface BookDrilldownResponse {
   anchor: Record<string, any> | null;
+  local_chunks?: BookDrilldownChunk[];
   local_entities: BookDrilldownEntity[];
   local_relations: BookDrilldownRelation[];
   cross_book_bridges: BookDrilldownCrossBridge[];
   meta: {
     found: boolean;
+    local_chunk_count?: number;
     local_entity_count?: number;
     local_relation_count?: number;
     bridge_count?: number;
@@ -1959,6 +1970,7 @@ export async function getBookDrilldown(
   docId: string,
   otherCorpusIds: string[],
   limit = 350,
+  chunkLimit = 48,
 ): Promise<BookDrilldownResponse> {
   return fetchJSON("/graph/book-drilldown", {
     method: "POST",
@@ -1966,6 +1978,7 @@ export async function getBookDrilldown(
       doc_id: docId,
       other_corpus_ids: otherCorpusIds,
       limit,
+      chunk_limit: chunkLimit,
     }),
   });
 }

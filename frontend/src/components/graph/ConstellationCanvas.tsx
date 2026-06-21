@@ -7,14 +7,16 @@
  * expand it (drill state and panel rendering live in BookDrillPanel —
  * this component is the canvas only).
  *
- * Visual mapping:
- *   - Radius          = sqrt(entity_count) * 3
- *   - Fill            = pastel tint of the corpus_id hash
- *   - Stroke          = vivid version of same hash
- *   - Stroke width    = 1.5 (2.5 when hovered, 3.5 when drilled into)
- *   - Hover           = filename tooltip
- *
- * No external graph library (no Sigma, no D3). One Canvas, ~280 lines.
+ * Premium redesign (Pt 7d):
+ *   - Backdrop: research substrate (warm off-white → very faint grid).
+ *   - Dots: deterministic HSL hash by corpus_id with brightness ramp by
+ *     entity_count (well-connected books read brighter, isolated ones
+ *     dimmer) so the same-corpus cluster reads as one hue family.
+ *   - Labels: bounded top-N so a 1k-book corpora doesn't blanket the
+ *     canvas. Hovered + drilled labels use a pill.
+ *   - Subtle ring grid (60px) — research instrument feel, not decoration.
+ *   - Hovered dot lifts with a soft shadow; drilled dot gets a ring.
+ *   - Click → drill panel (BookDrillPanel).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -25,6 +27,7 @@ import {
   type ByDocumentNode,
 } from "../../lib/api";
 import BookDrillPanel from "./BookDrillPanel";
+import { graphColors } from "../../lib/graph-colors";
 
 type Props = {
   corpusIds: string[];
@@ -35,29 +38,40 @@ type Props = {
 type PlacedDot = ByDocumentCluster & { x: number; y: number; r: number };
 
 // Deterministic HSL by hash so the same corpus always gets the same hue.
-const HUE_BY_CORPUS = (corpusId: string): number => {
-  let h = 0;
-  for (const ch of corpusId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return h % 360;
-};
-const STROKE_BY_CORPUS = (corpusId: string, hover = false): string =>
-  `hsl(${HUE_BY_CORPUS(corpusId)}, 70%, ${hover ? 38 : 45}%)`;
+// Brightness ramp by entity_count: low-entity books stay slightly muted,
+// well-connected books read brighter. Caps at 5 buckets so the hue
+// family stays coherent.
+function hashKey(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
 
-// Fill is darker than the earlier 92% so dots feel like solid bodies
-// against the off-white background. Hovering shifts to 78% for a subtle
-// punch; gradient center is 88% so each dot has built-in depth.
-const FILL_BY_CORPUS = (corpusId: string, hover = false): string =>
-  `hsl(${HUE_BY_CORPUS(corpusId)}, 72%, ${hover ? 78 : 84}%)`;
-const FILL_CENTER_BY_CORPUS = (corpusId: string): string =>
-  `hsl(${HUE_BY_CORPUS(corpusId)}, 75%, 90%)`;
+function bucketLightness(entityCount: number): number {
+  const buckets = [62, 68, 73, 78, 82];
+  return buckets[Math.min(buckets.length - 1, Math.floor(Math.log2(Math.max(entityCount, 1)) / 2))];
+}
+
+const HUE_BY_CORPUS = (corpusId: string): number => hashKey(corpusId) % 360;
+
+const STROKE_BY_CORPUS = (corpusId: string, hover = false): string =>
+  `hsl(${HUE_BY_CORPUS(corpusId)}, 70%, ${hover ? 30 : 38}%)`;
+
+const FILL_BY_CORPUS = (corpusId: string, entityCount: number): string =>
+  `hsl(${HUE_BY_CORPUS(corpusId)}, 68%, ${bucketLightness(entityCount)}%)`;
+
+const FILL_CENTER_BY_CORPUS = (corpusId: string, entityCount: number): string =>
+  `hsl(${HUE_BY_CORPUS(corpusId)}, 75%, ${bucketLightness(entityCount) + 7}%)`;
 
 const layoutDots = (
   clusters: ByDocumentCluster[],
   width: number,
   height: number,
 ): PlacedDot[] => {
-  // Simple circular packing — golden-angle spiral so rings emerge
-  // naturally without a hand-tuned ring count.
+  // Golden-angle spiral — natural rings without a hand-tuned ring count.
   const cx = width / 2;
   const cy = height / 2;
   const sorted = [...clusters].sort(
@@ -75,7 +89,7 @@ const layoutDots = (
     const angle = i * golden;
     const x = cx + Math.cos(angle) * ringR;
     const y = cy + Math.sin(angle) * ringR;
-    const dotR = Math.max(4, Math.sqrt(Math.max(c.entity_count || 1, 1)) * 3);
+    const dotR = Math.max(5, Math.sqrt(Math.max(c.entity_count || 1, 1)) * 3.2);
     placed.push({ ...c, x, y, r: dotR });
   }
   return placed;
@@ -150,12 +164,10 @@ export default function ConstellationCanvas({
   }, [placed]);
 
   // Faint connectors between books that share a top-entity name — the
-  // "constellation" metaphor needs lines. We compute pairs once per layout
-  // change so the draw loop stays fast.
+  // "constellation" metaphor needs lines. Cap at ~120 lines total so
+  // dense corpora don't melt the canvas.
   const constellationLines = useMemo(() => {
     if (placed.length === 0) return [] as Array<[PlacedDot, PlacedDot]>;
-    // For each top entity in book A, find the next book B that also lists
-    // it. Cap at ~120 lines total so dense corpora don't melt the canvas.
     const byEntity = new Map<string, PlacedDot[]>();
     for (const d of placed) {
       for (const e of (d.top_entity_names ?? []).slice(0, 4)) {
@@ -167,8 +179,6 @@ export default function ConstellationCanvas({
     const lines: Array<[PlacedDot, PlacedDot]> = [];
     for (const dots of byEntity.values()) {
       if (dots.length < 2) continue;
-      // Connect each consecutive pair in the bucket (cheap; doesn't fan
-      // out into O(n²) cliques on common entities like "Document").
       for (let i = 0; i < dots.length - 1 && lines.length < 120; i++) {
         lines.push([dots[i], dots[i + 1]]);
       }
@@ -176,7 +186,7 @@ export default function ConstellationCanvas({
     return lines;
   }, [placed]);
 
-  // Draw — runs on every relevant state change.
+  // Draw.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || size.w === 0) return;
@@ -188,36 +198,31 @@ export default function ConstellationCanvas({
     if (!ctx) return;
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
-    // Background — soft warm off-white.
-    ctx.fillStyle = "#FAFAF7";
+    // Background — research substrate.
+    ctx.fillStyle = graphColors.atomic.background;
     ctx.fillRect(0, 0, size.w, size.h);
 
-    // Starfield — deterministic seed from size + variable star sizes so
-    // a few bright pinpricks pop against the many small ones. ~110 stars.
-    const starSeed = (size.w * 7919 + size.h * 104729) >>> 0;
-    let s = starSeed;
-    const lcg = () => {
-      s = (s * 1664525 + 1013904223) >>> 0;
-      return s / 4294967296;
-    };
-    for (let i = 0; i < 110; i++) {
-      const x = lcg() * size.w;
-      const y = lcg() * size.h;
-      const big = lcg() > 0.93; // ~7% of stars are large
-      const r = big ? lcg() * 1.4 + 1.2 : lcg() * 0.55 + 0.25;
-      ctx.fillStyle = big ? "rgba(15, 23, 42, 0.42)" : "rgba(15, 23, 42, 0.22)";
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
+    // Faint research grid (60px) — instrument feel, not decoration.
+    ctx.strokeStyle = "rgba(15, 23, 42, 0.045)";
+    ctx.lineWidth = 1;
+    const gridStep = 60;
+    ctx.beginPath();
+    for (let x = 0; x < size.w; x += gridStep) {
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, size.h);
     }
+    for (let y = 0; y < size.h; y += gridStep) {
+      ctx.moveTo(0, y);
+      ctx.lineTo(size.w, y);
+    }
+    ctx.stroke();
 
-    // Constellation lines — faint white-grey threads between books that
-    // share a top entity. Drawn BEFORE the dots so they sit underneath.
+    // Constellation lines.
     for (const [a, b] of constellationLines) {
       const dx = a.x - b.x;
       const dy = a.y - b.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      const alpha = Math.max(0.04, 0.18 - dist / 1800); // fade with distance
+      const alpha = Math.max(0.05, 0.22 - dist / 1800);
       ctx.strokeStyle = `rgba(60, 80, 105, ${alpha})`;
       ctx.lineWidth = 0.7;
       ctx.beginPath();
@@ -226,22 +231,19 @@ export default function ConstellationCanvas({
       ctx.stroke();
     }
 
-    // Book dots — radial gradient fill for depth, drop shadow for lift,
-    // smooth hover/drilled state via stroke + shadow boost.
+    // Book dots — radial gradient fill, drop shadow for lift.
     for (const dot of placed) {
       const isHover = hovered?.cluster_id === dot.cluster_id;
       const isDrilled = drilled?.cluster.cluster_id === dot.cluster_id;
 
-      // Drop shadow (resets after each dot).
       ctx.save();
       ctx.shadowColor =
         isHover || isDrilled
-          ? "rgba(15, 23, 42, 0.22)"
-          : "rgba(15, 23, 42, 0.08)";
-      ctx.shadowBlur = isHover ? 18 : isDrilled ? 14 : 7;
-      ctx.shadowOffsetY = isHover ? 4 : 2;
+          ? "rgba(15, 23, 42, 0.28)"
+          : "rgba(15, 23, 42, 0.10)";
+      ctx.shadowBlur = isHover ? 22 : isDrilled ? 16 : 8;
+      ctx.shadowOffsetY = isHover ? 5 : 2;
 
-      // Radial gradient — lighter at center, darker at rim.
       const grad = ctx.createRadialGradient(
         dot.x - dot.r * 0.25,
         dot.y - dot.r * 0.3,
@@ -250,53 +252,83 @@ export default function ConstellationCanvas({
         dot.y,
         dot.r,
       );
-      grad.addColorStop(0, FILL_CENTER_BY_CORPUS(dot.corpus_id));
-      grad.addColorStop(1, FILL_BY_CORPUS(dot.corpus_id, isHover));
+      const eCount = dot.entity_count || 1;
+      grad.addColorStop(0, FILL_CENTER_BY_CORPUS(dot.corpus_id, eCount));
+      grad.addColorStop(1, FILL_BY_CORPUS(dot.corpus_id, eCount));
 
       ctx.beginPath();
       ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
       ctx.fillStyle = grad;
       ctx.fill();
-      ctx.restore(); // drop shadow off before stroking
+      ctx.restore();
 
       ctx.strokeStyle = STROKE_BY_CORPUS(dot.corpus_id, isHover);
       ctx.lineWidth = isDrilled ? 3.2 : isHover ? 2.4 : 1.4;
       ctx.beginPath();
       ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
       ctx.stroke();
+
+      // Drilled dot gets a ring offset to read as "active".
+      if (isDrilled) {
+        ctx.strokeStyle = "rgba(15, 23, 42, 0.6)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(dot.x, dot.y, dot.r + 6, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
 
-    // Persistent labels for top-N books — small muted text under each.
+    // Persistent labels for top-N books.
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    ctx.font = "11px ui-sans-serif, system-ui, -apple-system";
-    ctx.fillStyle = "rgba(30, 41, 59, 0.75)";
     for (const dot of placed) {
       if (!labeledIds.has(dot.cluster_id)) continue;
       const label = (dot.label || "").trim();
       if (!label) continue;
-      // Trim long filenames so labels don't overlap their neighbors.
-      const trimmed = label.length > 22 ? label.slice(0, 21) + "…" : label;
-      ctx.fillText(trimmed, dot.x, dot.y + dot.r + 6);
+      const trimmed = label.length > 24 ? label.slice(0, 23) + "…" : label;
+      const padX = 6;
+      ctx.font =
+        "10.5px ui-sans-serif, system-ui, -apple-system, Inter, BlinkMacSystemFont";
+      const tw = ctx.measureText(trimmed).width;
+      const w = tw + padX * 2;
+      const h = 16;
+      const x = dot.x - w / 2;
+      const y = dot.y + dot.r + 6;
+      // Pill background — slightly tinted slate.
+      ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
+      ctx.beginPath();
+      if (typeof ctx.roundRect === "function") {
+        ctx.roundRect(x, y, w, h, 4);
+      } else {
+        ctx.rect(x, y, w, h);
+      }
+      ctx.fill();
+      ctx.fillStyle = "#e2e8f0";
+      ctx.textBaseline = "middle";
+      ctx.fillText(trimmed, dot.x, y + h / 2);
     }
 
-    // Hover label — pill above the hovered dot.
+    // Hover pill (above hovered dot).
     if (hovered) {
       const label = hovered.label || hovered.cluster_id.slice(0, 16);
       ctx.font =
-        "13px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont";
+        "13px ui-sans-serif, system-ui, -apple-system, Inter, BlinkMacSystemFont";
       ctx.textAlign = "left";
       ctx.textBaseline = "alphabetic";
-      const tw = ctx.measureText(label).width + 14;
-      const tx = Math.min(Math.max(hovered.x - tw / 2, 6), size.w - tw - 6);
-      const ty = Math.max(hovered.y - hovered.r - 26, 6);
-      ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
+      const tw = ctx.measureText(label).width + 16;
+      const tx = Math.min(Math.max(hovered.x - tw / 2, 8), size.w - tw - 8);
+      const ty = Math.max(hovered.y - hovered.r - 28, 8);
+      ctx.fillStyle = graphColors.atomic.nucleus;
       ctx.beginPath();
-      ctx.roundRect(tx, ty, tw, 22, 6);
+      if (typeof ctx.roundRect === "function") {
+        ctx.roundRect(tx, ty, tw, 24, 6);
+      } else {
+        ctx.rect(tx, ty, tw, 24);
+      }
       ctx.fill();
-      ctx.fillStyle = "#FAFAF7";
+      ctx.fillStyle = graphColors.atomic.background;
       ctx.textBaseline = "middle";
-      ctx.fillText(label, tx + 7, ty + 11);
+      ctx.fillText(label, tx + 8, ty + 12);
     }
   }, [placed, constellationLines, labeledIds, hovered, drilled, size.w, size.h]);
 
@@ -350,14 +382,26 @@ export default function ConstellationCanvas({
         onClick={handleClick}
       />
       {clusters.length === 0 && !error && (
-        <div className="absolute inset-0 flex items-center justify-center text-slate-500">
-          {corpusIds.length === 0
-            ? "Select a corpus to see the constellation"
-            : "Loading…"}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-content-tertiary">
+          {corpusIds.length === 0 ? (
+            <>
+              <div className="text-sm font-medium text-content-secondary">
+                Select a corpus
+              </div>
+              <div className="text-[11px] font-mono">
+                Books will appear as connected points
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center gap-2 text-[11px] font-mono">
+              <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent-main" />
+              Building constellation…
+            </div>
+          )}
         </div>
       )}
       {error && (
-        <div className="absolute top-4 left-4 right-4 bg-rose-50 border border-rose-200 text-rose-800 text-sm rounded p-2">
+        <div className="absolute top-4 left-4 right-4 rounded-md border border-error/40 bg-[var(--bg-raised)] p-3 text-sm text-error">
           {error}
         </div>
       )}

@@ -14,6 +14,7 @@ attribute vec2 a_position;
 attribute float a_size;
 attribute float a_angle;
 attribute float a_bridgeCount;
+attribute float a_glowStrength;
 
 uniform mat3 u_matrix;
 uniform float u_sizeRatio;
@@ -30,8 +31,13 @@ const float bias = 255.0 / 254.0;
 
 void main() {
   float bridgeGlow = min(max(a_bridgeCount, 0.0) / 20.0, 1.0);
+  float customGlow = min(max(a_glowStrength, 0.0), 1.0);
+  float hasCustomGlow = step(0.001, customGlow);
+  float effectiveGlow = mix(bridgeGlow, max(bridgeGlow, customGlow), hasCustomGlow);
   float breath = 0.97 + 0.03 * sin(u_time * 0.8 + a_position.x * 0.04 + a_position.y * 0.025);
-  float haloMultiplier = mix(3.2, 4.8, bridgeGlow) * breath;
+  float haloBase = mix(3.2, 2.18, hasCustomGlow);
+  float haloPeak = mix(4.8, 3.35, hasCustomGlow);
+  float haloMultiplier = mix(haloBase, haloPeak, effectiveGlow) * breath;
   float size = a_size * haloMultiplier * u_correctionRatio / u_sizeRatio * 4.0;
   vec2 diffVector = size * vec2(cos(a_angle), sin(a_angle));
   vec2 position = a_position + diffVector;
@@ -41,7 +47,7 @@ void main() {
   v_diffVector = diffVector;
   v_radius = size / 2.0;
   v_coreRadius = v_radius / haloMultiplier;
-  v_glow = 0.16 + bridgeGlow * 0.24;
+  v_glow = mix(0.16 + bridgeGlow * 0.24, 0.075 + customGlow * 0.22, hasCustomGlow);
 
   #ifdef PICKING_MODE
   v_color = a_id;
@@ -118,6 +124,7 @@ export default class BookGlowProgram extends NodeProgram<BookGlowUniform> {
         { name: "a_color", size: 4, type: UNSIGNED_BYTE, normalized: true },
         { name: "a_id", size: 4, type: UNSIGNED_BYTE, normalized: true },
         { name: "a_bridgeCount", size: 1, type: FLOAT },
+        { name: "a_glowStrength", size: 1, type: FLOAT },
       ],
       CONSTANT_ATTRIBUTES: [{ name: "a_angle", size: 1, type: FLOAT }],
       CONSTANT_DATA: [
@@ -135,12 +142,14 @@ export default class BookGlowProgram extends NodeProgram<BookGlowUniform> {
   ): void {
     const array = this.array;
     const bridgeCount = Math.max(0, Number((data as any).bridge_count ?? 1));
+    const glowStrength = Math.max(0, Math.min(1, Number((data as any).visual_glow_strength ?? 0)));
     array[startIndex++] = data.x;
     array[startIndex++] = data.y;
     array[startIndex++] = data.size;
     array[startIndex++] = floatColor(data.color);
     array[startIndex++] = nodeIndex;
-    array[startIndex] = bridgeCount;
+    array[startIndex++] = bridgeCount;
+    array[startIndex] = glowStrength;
   }
 
   setUniforms(

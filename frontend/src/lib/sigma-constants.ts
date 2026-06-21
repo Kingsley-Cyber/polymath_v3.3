@@ -42,27 +42,28 @@ export type PolymathNodeKind =
   | "Other";
 
 // =============== NODE COLORS ===============
-// Tuned for dark backgrounds. Books anchor the canvas in amber so the
-// cluster structure is legible before any label loads.
+// Premium redesign: aligned with graphColors.entity so the same node
+// type reads as the same color whether the user sees it in the canvas,
+// the inspector, the AtomicView, or a synthesized source pill. Books
+// keep a warm amber so the cluster anchors dominate at any zoom.
 export const NODE_COLORS: Record<PolymathNodeKind, string> = {
-  Domain: "#a855f7",        // violet — Louvain domain supernodes
-  Concept: "#818cf8",       // indigo — concept communities & entities
-  Book: "#f59e0b",          // amber — Document cluster anchors
-  Person: "#ec4899",        // rose
-  Organization: "#eab308",  // yellow
-  Location: "#0ea5e9",      // sky
-  Event: "#f97316",         // orange
-  Method: "#10b981",        // emerald
-  Product: "#06b6d4",       // cyan
-  Software: "#60a5fa",      // blue
-  Document: "#e5e7eb",      // silver — document refs must stay visible on black
-  Standard: "#14b8a6",      // teal
-  Rule: "#6366f1",          // indigo
-  Law: "#ef4444",           // red
-  Artifact: "#84cc16",      // lime
-  TimeReference: "#3b82f6", // blue
-  Other: "#64748b",         // slate-500 — mid-tone so genuinely-untyped nodes
-                            // read as a distinct grey, not near-white
+  Domain: "#c4b5fd",        // violet-300 — Louvain domain supernodes
+  Concept: "#a5b4fc",       // indigo-300 — concept communities
+  Book: "#fbbf24",          // amber-400 — Document cluster anchors
+  Person: "#7dd3fc",        // sky-300
+  Organization: "#a5b4fc",  // indigo-300
+  Location: "#86efac",      // green-300
+  Event: "#fdba74",         // orange-300
+  Method: "#c4b5fd",        // violet-300
+  Product: "#fcd34d",       // amber-300
+  Software: "#93c5fd",      // blue-300
+  Document: "#cbd5e1",      // slate-300 — doc refs stay readable
+  Standard: "#67e8f9",      // cyan-300
+  Rule: "#a5f3fc",          // sky-200
+  Law: "#fda4af",           // rose-300
+  Artifact: "#5eead4",      // teal-300
+  TimeReference: "#94a3b8", // slate-400
+  Other: "#64748b",         // slate-500 — neutral fallback
 };
 
 // =============== NODE SIZES ===============
@@ -361,19 +362,18 @@ export function nodeReducer(node: BrainViewNodePayload) {
     label,
   };
 
-  // "Stars in the night sky" — Books render as small bright dots that
-  // grow with bridge count, but the growth is now flatter + tightly
-  // capped: 1-bridge book ≈ 4px, 12-bridge ≈ 7.7px, 100+ mega-hub caps
-  // at 8px. The Math.min(4, …) ceiling on the log term prevents any
-  // single mega-hub from dominating the canvas.
+  // Books render as small bright dots that grow with bridge count. Growth
+  // is now flatter + tightly capped (4-7px) so the canvas reads as a
+  // refined substrate of points, not a blotchy field. The cap prevents
+  // mega-hubs from dominating.
   if (kind === "Book" || node.is_cluster_anchor) {
     const bridges = Math.max(0, Number(node.bridge_count ?? 1));
-    const size = 4 + Math.min(4, Math.log2(bridges + 1));
+    const size = 4 + Math.min(3, Math.log2(bridges + 1) * 0.85);
     return {
       ...base,
       size,
       mass: 22,
-      labelSize: 12,
+      labelSize: 11.5,
       labelWeight: "600",
       zIndex: 2,
     };
@@ -405,36 +405,45 @@ export function edgeReducer(edge: BrainViewEdgePayload) {
 // Single object the Brain View renderer spreads onto its `<SigmaContainer>`
 // (or its imperative Sigma constructor). Tuned for 1k–2k books + 60k+
 // inter-book bridge edges.
+//
+// Premium redesign (Pt 7d): canvas background moves from "night sky"
+// (#06060a) to a cooler research-substrate tone (#0c0e13) so the
+// workspace reads as an instrument, not a mood piece. Labels are
+// slightly larger and rendered on a barely-tinted slate chip so the
+// typographic hierarchy is unambiguous. Edge labels drop their
+// background pill (cleaner read on the lighter substrate) but keep
+// their monospace font for the metadata feel.
 export const BRAIN_VIEW_CONFIG = {
   // Renderer
   renderLabels: true,
   hideEdgesOnMove: true,
   zIndex: true,
 
-  // Canvas — deepened from slate-900 to near-black so bright Book anchors
-  // read as stars in the night sky (Pt 3 creative direction).
-  backgroundColor: "#06060a",
+  // Canvas — research substrate. Subtle radial vignette is applied via
+  // CSS over the canvas div, not baked into the canvas itself, so the
+  // GPU compositor can refresh without invalidating sigma's redraw.
+  backgroundColor: "#0c0e13",
   defaultNodeColor: NODE_COLORS.Other,
   defaultEdgeColor: EDGE_COLORS_BY_FAMILY.WeakAssociation,
 
-  // Labels
-  labelSize: 13,
+  // Labels — slightly larger, on a tinted chip so they stay legible
+  // against the substrate without competing with the dots themselves.
+  labelSize: 12.5,
   labelBackground: true,
-  labelBackgroundOpacity: 0.9,
+  labelBackgroundOpacity: 0.78,
+  labelBackgroundColor: "#1a2030",
   labelColor: "#e2e8f0",
   labelDensity: 1.0,
   labelGridCellSize: 80,             // dedupe overlapping labels at scale
   labelRenderedSizeThreshold: 6,
 
-  // Pt 7c — Edge labels (Brain View bridges).
-  // Each bridge edge gets a midpoint label like "Bayes' theorem +5" built
-  // by the adapter from `top_shared_entities`. The same slate-200 used by
-  // node labels above so edges + nodes read as one typographic family;
-  // size 10 keeps books visually dominant. Gated by the shared
-  // `labelRenderedSizeThreshold` — labels auto-hide at low zoom or when
-  // many bridges overlap, fade in when the user zooms into a region.
+  // Edge labels (Brain View bridges). Each bridge edge gets a midpoint
+  // label like "Bayes' theorem +5" built by the adapter from
+  // `top_shared_entities`. Same slate-200 as node labels so edges +
+  // nodes read as one typographic family; size 10 keeps books visually
+  // dominant. Gated by the shared `labelRenderedSizeThreshold`.
   renderEdgeLabels: true,
-  edgeLabelColor: { color: "#e2e8f0" },
+  edgeLabelColor: { color: "#cbd5e1" },
   edgeLabelSize: 10,
   edgeLabelFont:
     "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
@@ -452,8 +461,8 @@ export const BRAIN_VIEW_CONFIG = {
   // anchors and their orbiting entities settle into clear rings.
   fa2: {
     barnesHutOptimize: true,
-    gravity: 1.2,
-    scalingRatio: 12,
+    gravity: 1.0,           // slightly lower so rings breathe on the cooler bg
+    scalingRatio: 14,       // a touch wider for the lighter substrate
     slowDown: 4,
     adjustSizes: true,
     linLogMode: true,
@@ -462,7 +471,7 @@ export const BRAIN_VIEW_CONFIG = {
 
   // No-overlap pass after FA2 converges — keeps Book anchor labels readable.
   noverlap: {
-    nodeMargin: 10,
+    nodeMargin: 12,
     scaleNodes: 1.3,
     speed: 4,
   },

@@ -368,6 +368,22 @@ export interface AutoSynthesisPayload {
   fallback_reason?: string | null;
 }
 
+/** Web evidence lane — bounded live-web sources for graph synthesis. */
+export interface WebEvidenceItem {
+  title?: string;
+  url?: string;
+  snippet?: string;
+  source_tier: "web_search";
+  fetch_depth?: "snippets" | "normal" | "deep";
+}
+
+export interface WebEvidencePayload {
+  enabled: boolean;
+  fetch_depth: "snippets" | "normal" | "deep";
+  max_results: number;
+  sources: WebEvidenceItem[];
+}
+
 export interface InsightPacketSummary {
   sparse: boolean;
   temporal_support: boolean;
@@ -519,6 +535,7 @@ export interface GraphDiscoverResponse {
   tensions?: DiscoverTensionItem[];
   trace?: DiscoverTracePayload;
   auto_synthesis?: AutoSynthesisPayload;
+  web_evidence?: WebEvidencePayload;
   insight_packet_summary?: InsightPacketSummary;
   context_graph?: ContextGraphPayload;
 }

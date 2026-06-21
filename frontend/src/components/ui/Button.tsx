@@ -1,71 +1,128 @@
-// Button — the shared action-button affordance.
-//
-// The app's default surface intentionally uses `transition-none` (flat /
-// terminal aesthetic), which left action buttons feeling dead — no hover, no
-// press feedback, weak signal that they DO something. This component is the
-// deliberate exception for things-that-act (Save, Add, Validate, Delete):
-// clear color by intent, a hover state, a tactile press (active:scale), a
-// focus ring for keyboard/a11y, and proper disabled styling.
-//
-// Variants:
-//   primary    green filled — affirmative actions (Save, Add, Create)
-//   danger     red filled — destructive (Delete / confirm-delete)
-//   secondary  outlined — neutral actions (Validate, Cancel, secondary)
-//   ghost      transparent — icon buttons (edit, remove-row)
-import { ButtonHTMLAttributes, forwardRef } from "react";
+/**
+ * Button — premium research-grade primitive.
+ *
+ * Five variants × three sizes × five states (default / hover / active /
+ * focus-visible / disabled). Wraps the CSS classes defined in
+ * `index.css` so colors, spacing, type, and motion come from the
+ * token system — not from ad-hoc Tailwind utilities.
+ *
+ * Use this everywhere a button appears in the graph workspace. The
+ * legacy `btn-primary` Tailwind class still works for non-graph chrome
+ * (chat, settings) but new graph-builder code should use <Button />.
+ */
 
-type Variant = "primary" | "danger" | "secondary" | "ghost";
-type Size = "sm" | "md" | "icon";
+import { forwardRef, type ButtonHTMLAttributes } from "react";
+import type { ButtonSize, ButtonVariant } from "../../lib/design-tokens";
 
-const BASE =
-  "inline-flex items-center justify-center gap-1.5 font-medium rounded select-none " +
-  "cursor-pointer transition-[transform,background-color,border-color,color,box-shadow,opacity] " +
-  "duration-150 ease-out active:scale-[0.96] " +
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 " +
-  "focus-visible:ring-offset-transparent " +
-  "disabled:opacity-45 disabled:pointer-events-none disabled:active:scale-100 disabled:shadow-none";
-
-const SIZES: Record<Size, string> = {
-  sm: "text-[11px] px-2.5 py-1 tracking-wide",
-  md: "text-[13px] px-3.5 py-1.5",
-  icon: "p-1.5",
-};
-
-const VARIANTS: Record<Variant, string> = {
-  primary:
-    "bg-emerald-600 text-white shadow-sm shadow-emerald-950/50 " +
-    "hover:bg-emerald-500 hover:shadow-md hover:shadow-emerald-800/40 hover:-translate-y-px " +
-    "focus-visible:ring-emerald-400/70",
-  danger:
-    "bg-red-600 text-white shadow-sm shadow-red-950/50 " +
-    "hover:bg-red-500 hover:shadow-md hover:shadow-red-800/40 hover:-translate-y-px " +
-    "focus-visible:ring-red-400/70",
-  secondary:
-    "border border-white/15 text-gray-300 bg-white/[0.02] " +
-    "hover:border-emerald-400/50 hover:text-white hover:bg-emerald-400/10 " +
-    "focus-visible:ring-emerald-400/40",
-  ghost:
-    "text-gray-500 hover:text-white hover:bg-white/10 focus-visible:ring-white/25",
-};
-
-export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: Variant;
-  size?: Size;
+export interface ButtonProps
+  extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  type?: "button" | "submit" | "reset";
+  /** Visually active toggle state (e.g. tab is selected). */
+  active?: boolean;
+  /** Icon-only button — square hit area, content stays compact. */
+  iconOnly?: boolean;
 }
 
-/** Action button with hover/press/focus affordance. Defaults to a neutral
- *  outlined `secondary` at `md` size. Pass `className` to extend (it wins
- *  over the variant via source order). */
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ variant = "secondary", size = "md", className = "", type, ...props }, ref) => (
-    <button
-      ref={ref}
-      type={type ?? "button"}
-      className={`${BASE} ${SIZES[size]} ${VARIANTS[variant]} ${className}`}
-      {...props}
-    />
-  ),
-);
-Button.displayName = "Button";
+const variantClass: Record<ButtonVariant, string> = {
+  primary: "gbtn--primary",
+  secondary: "gbtn--secondary",
+  tertiary: "gbtn--tertiary",
+  ghost: "gbtn--ghost",
+  danger: "gbtn--danger",
+};
 
-export default Button;
+const sizeClass: Record<ButtonSize, string> = {
+  sm: "gbtn--sm",
+  md: "gbtn--md",
+  lg: "gbtn--lg",
+  icon: "gbtn--md",
+};
+
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
+  function Button(
+    {
+      variant = "secondary",
+      size = "md",
+      type = "button",
+      active = false,
+      iconOnly = false,
+      className = "",
+      children,
+      ...rest
+    },
+    ref,
+  ) {
+    const cls = [
+      "gbtn",
+      variantClass[variant],
+      sizeClass[size],
+      iconOnly ? "gbtn--icon" : "",
+      active ? "is-active" : "",
+      className,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const style: React.CSSProperties | undefined = active
+      ? {
+          background: "var(--accent-soft)",
+          color: "var(--accent-main)",
+          borderColor: "var(--accent-main)",
+        }
+      : undefined;
+
+    return (
+      <button
+        ref={ref}
+        type={type}
+        className={cls}
+        style={style}
+        {...rest}
+      >
+        {children}
+      </button>
+    );
+  },
+);
+
+export interface IconButtonProps
+  extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  type?: "button" | "submit" | "reset";
+  active?: boolean;
+  label: string;
+}
+
+export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
+  function IconButton(
+    {
+      variant = "ghost",
+      size = "md",
+      type = "button",
+      active = false,
+      label,
+      className = "",
+      children,
+    },
+    ref,
+  ) {
+    return (
+      <Button
+        ref={ref}
+        type={type}
+        variant={variant}
+        size={size}
+        active={active}
+        iconOnly
+        title={label}
+        aria-label={label}
+        className={`gbtn--icon ${className}`}
+      >
+        {children}
+      </Button>
+    );
+  },
+);

@@ -19,13 +19,22 @@
  * Failure mode: if discover errors or times out, the nucleus shows a
  * "Synthesis unavailable" placeholder and the rest of the atom still
  * renders. The user is never blocked on the LLM.
+ *
+ * Premium redesign (Pt 7d): nucleus + synthesis body separated cleanly,
+ * evidence pills use the lane palette (corpus/graph/web), synthesis
+ * uses the synthesis-body typography. No nested cards; the synthesis
+ * lives in a single inline expander with a clean header. Cross-corpus
+ * accent uses the refined amber tone.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { discoverGraph, queryGraph } from "../../lib/api";
-import { graphColors, nodeFillColor } from "../../lib/graph-colors";
+import {
+  graphColors,
+  nodeFillColor,
+} from "../../lib/graph-colors";
 import { useSettingsStore } from "../../stores/settingsStore";
 import type {
   GraphBridge,
@@ -38,6 +47,22 @@ import type {
   GraphDiscoverResponse,
   GraphSynthesisMode,
 } from "../../types/discover";
+import { computeRoleContext, assignNodeRole } from "../../lib/role-adapter";
+import {
+  BookOpen,
+  ChevronDown,
+  Compass,
+  Layers,
+  Link2,
+  Sparkles,
+} from "lucide-react";
+import { Button } from "../ui/Button";
+import { LaneChip } from "../ui/Card";
+
+// 3D Atom mode is heavy (~600KB gzip for three). Lazy-load so the
+// default 2D bundle stays small and the 3D payload only downloads when
+// the user opts in.
+const GraphAtom3D = lazy(() => import("./GraphAtom3D"));
 
 interface AtomicNode {
   id: string;
@@ -99,8 +124,8 @@ type Props = {
   onSelectSeed?: (entityId: string) => void;
 };
 
-const LABEL_FONT = "11px Inter, ui-sans-serif, system-ui, sans-serif";
-const NUCLEUS_FONT = "13px Inter, ui-sans-serif, system-ui, sans-serif";
+const LABEL_FONT = "11px ui-sans-serif, system-ui, -apple-system, sans-serif";
+const NUCLEUS_FONT = "13px ui-sans-serif, system-ui, -apple-system, sans-serif";
 const LABEL_HEIGHT = 16;
 const LABEL_GAP = 12;
 const HIT_PADDING = 8;
@@ -205,6 +230,13 @@ export default function AtomicView({
   const [queryError, setQueryError] = useState<string | null>(null);
   const [hoveredNode, setHoveredNode] = useState<AtomicNode | null>(null);
   const [hoveredEdgeKey, setHoveredEdgeKey] = useState<string | null>(null);
+  const [showSynthesis, setShowSynthesis] = useState(true);
+  // View mode: "2d" is the existing canvas atom; "3d" is the lazy-loaded
+  // GraphAtom3D scene that consumes the same nodes/links. Default is 2d.
+  // Auto-transition kicks in when a heavy query finishes so the user gets
+  // a 3D reveal without having to dig for the toggle.
+  const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
+  const previousQueryFingerprintRef = useRef<string | null>(null);
 
   // Resize observer.
   useEffect(() => {
@@ -249,9 +281,6 @@ export default function AtomicView({
       corpus_ids: corpusIds,
       query,
       synthesis_mode: synthesisMode,
-      // Conditionally spread so an unset model omits the field
-      // (backend then resolves the user's query-model preference)
-      // instead of explicitly sending `model: undefined`.
       ...(model ? { model } : {}),
     };
     discoverGraph(discoverReq)
@@ -276,6 +305,21 @@ export default function AtomicView({
     graphQueryMaxHops,
     graphQueryNodeLimit,
   ]);
+
+  // Auto-transition to 3D when a heavy query completes. The transition
+  // is keyed on the query fingerprint (the actual question text) so
+  // re-renders that don't change the query don't re-fire the reveal.
+  // The user can always click back to 2d; we never auto-return.
+  useEffect(() => {
+    const fingerprint = `${query.trim()}|${synthesisMode}|${corpusIds.join(",")}`;
+    if (previousQueryFingerprintRef.current === fingerprint) return;
+    previousQueryFingerprintRef.current = fingerprint;
+    // Only auto-transition when we have enough evidence (synthesis body
+    // + seeds + bridges) so the 3D scene has something to draw.
+    if (!synthesis || !queryData || queryData.seed_entities.length === 0) return;
+    setViewMode("3d");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [synthesis, queryData?.seed_entities.length, query, synthesisMode, corpusIds.join(",")]);
 
   // Build the atomic node graph from whatever has arrived so far.
   const { nodes, edges } = useMemo(() => {
@@ -402,6 +446,29 @@ export default function AtomicView({
     return { nodes, edges };
   }, [synthesis, synthError, queryData]);
 
+  // Role context — drives the 3D atom's per-node coloring and is the
+  // single source of truth for which role each seed/bridge/gap occupies.
+  const seedIdSet = useMemo(
+    () => new Set((queryData?.seed_entities ?? []).map((s: any) => String(s.id))),
+    [queryData],
+  );
+  const bridgeIdSet = useMemo(
+    () => new Set((queryData?.bridges ?? []).map((b: any) => String(b.entity_id))),
+    [queryData],
+  );
+  const roleCtx = useMemo(
+    () =>
+      computeRoleContext(
+        nodes as any[],
+        edges as any[],
+        seedIdSet,
+        new Set(),
+        bridgeIdSet,
+        (queryData?.gaps ?? []) as any[],
+      ),
+    [nodes, edges, seedIdSet, bridgeIdSet, queryData],
+  );
+
   // Position nodes on concentric orbits with label-aware angular demand.
   const placedNodes = useMemo<PlacedAtomicNode[]>(() => {
     if (size.w === 0) return [];
@@ -517,6 +584,21 @@ export default function AtomicView({
     ctx.fillStyle = graphColors.atomic.background;
     ctx.fillRect(0, 0, size.w, size.h);
 
+    // Faint research grid.
+    ctx.strokeStyle = "rgba(15, 23, 42, 0.05)";
+    ctx.lineWidth = 1;
+    const gridStep = 60;
+    ctx.beginPath();
+    for (let x = 0; x < size.w; x += gridStep) {
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, size.h);
+    }
+    for (let y = 0; y < size.h; y += gridStep) {
+      ctx.moveTo(0, y);
+      ctx.lineTo(size.w, y);
+    }
+    ctx.stroke();
+
     // Orbital rings (faint dashed).
     const cx = size.w / 2;
     const cy = size.h / 2;
@@ -592,8 +674,6 @@ export default function AtomicView({
       } else if (n.type === "seed") {
         ctx.fillStyle = provColor;
       } else if (n.type === "bridge") {
-        // Bridges keep their light fill (so they read as connectors)
-        // but get a vivid stroke colored by provenance.
         ctx.fillStyle = crossCorpus
           ? graphColors.atomic.crossCorpusBridgeFill
           : graphColors.atomic.bridgeFill;
@@ -709,50 +789,163 @@ export default function AtomicView({
     ? edges.find((edge) => edgeKey(edge) === hoveredEdgeKey) || null
     : null;
 
+  const synthesisMarkdown =
+    (synthesis?.auto_synthesis as { markdown?: string } | undefined)?.markdown ||
+    "";
+
   return (
     <div className="relative w-full h-full">
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 cursor-pointer"
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => {
-          setHoveredNode(null);
-          setHoveredEdgeKey(null);
-        }}
-        onClick={handleClick}
-      />
+      {/* Top-left legend — role swatches + lane chips + view toggle */}
+      <div className="pointer-events-none absolute top-3 left-3 z-10 flex flex-col gap-1.5">
+        <div
+          className="rounded-md border border-border-minimal px-2.5 py-1.5 backdrop-blur"
+          style={{
+            background: "rgba(17, 20, 27, 0.9)",
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--space-2)",
+          }}
+        >
+          <Compass size={12} style={{ color: "var(--ink-secondary)" }} />
+          <span
+            className="text-eyebrow"
+            style={{ color: "var(--ink-secondary)" }}
+          >
+            Atomic view
+          </span>
+          <div
+            className="ml-2 inline-flex items-center rounded-md p-0.5"
+            style={{
+              background: "var(--surface-base)",
+              border: "1px solid var(--border-thin)",
+            }}
+            role="tablist"
+            aria-label="View mode"
+          >
+            <Button
+              variant={viewMode === "2d" ? "primary" : "ghost"}
+              size="sm"
+              active={viewMode === "2d"}
+              aria-pressed={viewMode === "2d"}
+              onClick={() => setViewMode("2d")}
+              className="gbtn--view"
+            >
+              2D Map
+            </Button>
+            <Button
+              variant={viewMode === "3d" ? "primary" : "ghost"}
+              size="sm"
+              active={viewMode === "3d"}
+              aria-pressed={viewMode === "3d"}
+              onClick={() => setViewMode("3d")}
+              className="gbtn--view"
+            >
+              3D Atom
+            </Button>
+          </div>
+        </div>
 
+        <div
+          className="flex flex-wrap items-center gap-1.5 rounded-md border border-border-minimal px-2 py-1.5 backdrop-blur"
+          style={{ background: "rgba(17, 20, 27, 0.9)" }}
+        >
+          <LaneChip lane="corpus" label="corpus" />
+          <LaneChip lane="graph" label="graph" />
+          {(synthesis as any)?.web_evidence?.enabled && (
+            <LaneChip lane="web" label="web" />
+          )}
+        </div>
+      </div>
+
+      {viewMode === "2d" ? (
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 cursor-pointer"
+          onMouseMove={handleMouseMove}
+          onMouseLeave={() => {
+            setHoveredNode(null);
+            setHoveredEdgeKey(null);
+          }}
+          onClick={handleClick}
+        />
+      ) : (
+        <Suspense
+          fallback={
+            <div
+              className="absolute inset-0 flex items-center justify-center"
+              style={{
+                color: "var(--ink-tertiary)",
+                fontFamily: "var(--font-mono)",
+                fontSize: "var(--type-sm)",
+              }}
+            >
+              Booting 3D atom…
+            </div>
+          }
+        >
+          <GraphAtom3D
+            nodes={placedNodes.map((p) => {
+              const role = assignNodeRole(p, roleCtx).role;
+              return {
+                id: p.id,
+                label: p.displayLabel || p.label,
+                role,
+                weight: (p as any).mention_count ?? 1,
+              };
+            })}
+            links={edges.map((e) => ({
+              source: e.source,
+              target: e.target,
+              kind:
+                e.kind === "gap"
+                  ? "gap"
+                  : e.kind === "bridges"
+                    ? "bridges"
+                    : e.kind === "mentions"
+                      ? "mentions"
+                      : "supports",
+            }))}
+            headline={synthesis?.interpretation || synthesis?.query}
+            synthesisHeadline={synthesis?.auto_synthesis?.markdown?.slice(0, 320)}
+          />
+        </Suspense>
+      )}
+
+      {/* Error overlay (query failure). */}
       {queryError && !queryData && (
-        <div className="absolute top-4 left-4 right-4 bg-rose-50 border border-rose-200 text-rose-800 text-sm rounded p-2">
-          Graph query failed: {queryError}
+        <div className="absolute top-4 left-1/2 z-20 max-w-md -translate-x-1/2 rounded-md border border-error/40 bg-[var(--bg-raised)]/95 p-3 text-sm text-error backdrop-blur">
+          <div className="font-mono text-xs uppercase tracking-widest mb-1 text-error">
+            Graph query failed
+          </div>
+          {queryError}
         </div>
       )}
 
-      {/* Multi-corpus legend — only renders when >1 corpus is selected,
-          so the affordance disappears when the convention is irrelevant. */}
+      {/* Cross-corpus legend */}
       {corpusIds.length > 1 && (
-        <div className="absolute bottom-4 left-4 flex items-center gap-2 bg-white/95 border border-slate-200 rounded px-2.5 py-1 text-[11px] font-mono text-slate-700 shadow-sm">
+        <div className="absolute bottom-4 left-3 z-10 flex items-center gap-2 rounded-md border border-border-minimal bg-[var(--bg-raised)]/90 px-2.5 py-1.5 text-[11px] font-mono text-content-secondary backdrop-blur">
           <span
-            className="inline-block w-2.5 h-2.5 rounded-full"
+            className="inline-block h-2.5 w-2.5 rounded-full"
             style={{ background: graphColors.state.crossCorpus }}
             aria-hidden
           />
-          <span>cross-corpus entity</span>
-          <span className="text-slate-400">·</span>
+          <span>cross-corpus</span>
+          <span className="text-content-tertiary">·</span>
           <span>{corpusIds.length} corpora merged</span>
         </div>
       )}
 
+      {/* Hover node tooltip */}
       {hoveredNode?.hover && (
-        <div className="absolute top-4 right-4 max-w-md bg-slate-900 text-slate-100 text-xs rounded p-3 shadow-lg">
-          <div className="font-medium mb-1">{hoveredNode.label}</div>
-          <div className="text-slate-300">{hoveredNode.hover}</div>
+        <div className="absolute top-3 right-3 z-10 max-w-md rounded-md border border-border-minimal bg-[var(--bg-raised)]/95 p-3 text-xs text-content-secondary shadow-sm backdrop-blur">
+          <div className="font-medium text-content-primary mb-1">{hoveredNode.label}</div>
+          <div className="text-content-tertiary leading-relaxed">{hoveredNode.hover}</div>
         </div>
       )}
 
       {!hoveredNode && hoveredEdge && (
-        <div className="absolute top-4 right-4 max-w-sm bg-slate-900 text-slate-100 text-xs rounded p-3 shadow-lg">
-          <div className="font-medium mb-1">
+        <div className="absolute top-3 right-3 z-10 max-w-sm rounded-md border border-border-minimal bg-[var(--bg-raised)]/95 p-3 text-xs text-content-secondary shadow-sm backdrop-blur">
+          <div className="font-medium text-content-primary mb-1">
             {hoveredEdge.kind === "gap"
               ? "Missing connection"
               : hoveredEdge.kind === "bridges"
@@ -761,38 +954,61 @@ export default function AtomicView({
                   ? "Synthesis support"
                   : "Mention relationship"}
           </div>
-          <div className="text-slate-300">
-            {hoveredEdge.source.replace(/^[^:]+:/, "")} {"->"}{" "}
+          <div className="font-mono text-[10px] text-content-tertiary">
+            {hoveredEdge.source.replace(/^[^:]+:/, "")} {"→"}{" "}
             {hoveredEdge.target.replace(/^[^:]+:/, "")}
           </div>
         </div>
       )}
 
-      {/* Synthesis panel — slides up from the bottom when available */}
-      {synthesis?.auto_synthesis &&
-        typeof (synthesis.auto_synthesis as { markdown?: string }).markdown ===
-          "string" && (
-          <details className="absolute bottom-4 left-4 right-4 max-h-[40%] bg-white border border-slate-200 rounded-lg shadow-xl overflow-auto">
-            <summary className="px-4 py-2 cursor-pointer font-medium text-slate-800 bg-slate-50">
-              {synthesisMode === "ideation"
-                ? "Build idea"
-                : synthesisMode === "nuance"
-                  ? "Nuance"
-                  : synthesisMode === "gap"
-                    ? "Gap analysis"
-                    : "Synthesis"}
-              {" · click to expand"}
-            </summary>
-            <div className="p-4 synthesis-body">
+      {/* Synthesis expander — single panel, no nesting. */}
+      {synthesisMarkdown && (
+        <section
+          className="absolute bottom-3 left-3 right-3 z-10 max-h-[42%] overflow-hidden rounded-md border border-border-minimal bg-[var(--bg-raised)]/95 shadow-md backdrop-blur md:right-auto md:max-w-[40rem]"
+          aria-label="Synthesis"
+        >
+          <header className="flex items-center justify-between gap-2 border-b border-border-minimal px-3 py-2">
+            <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.18em] text-content-tertiary">
+              {synthesisMode === "ideation" ? (
+                <Sparkles className="h-3 w-3 text-accent-main" />
+              ) : synthesisMode === "nuance" ? (
+                <Layers className="h-3 w-3 text-accent-main" />
+              ) : synthesisMode === "gap" ? (
+                <Link2 className="h-3 w-3 text-accent-main" />
+              ) : (
+                <BookOpen className="h-3 w-3 text-accent-main" />
+              )}
+              <span className="text-content-secondary">
+                {synthesisMode === "ideation"
+                  ? "Build idea"
+                  : synthesisMode === "nuance"
+                    ? "Nuance"
+                    : synthesisMode === "gap"
+                      ? "Gap analysis"
+                      : "Synthesis"}
+              </span>
+              <span className="text-content-tertiary">· corpus lane</span>
+            </div>
+            <button
+              onClick={() => setShowSynthesis((v) => !v)}
+              className="flex h-6 w-6 items-center justify-center rounded border border-border-minimal text-content-tertiary hover:text-content-primary"
+              title={showSynthesis ? "Collapse synthesis" : "Expand synthesis"}
+              aria-expanded={showSynthesis}
+            >
+              <ChevronDown
+                className={`h-3 w-3 transition-transform ${showSynthesis ? "" : "-rotate-90"}`}
+              />
+            </button>
+          </header>
+          {showSynthesis && (
+            <div className="synthesis-body max-h-[24rem] overflow-y-auto px-4 py-3 custom-scroll">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {
-                  (synthesis.auto_synthesis as { markdown: string })
-                    .markdown
-                }
+                {synthesisMarkdown}
               </ReactMarkdown>
             </div>
-          </details>
-        )}
+          )}
+        </section>
+      )}
     </div>
   );
 }

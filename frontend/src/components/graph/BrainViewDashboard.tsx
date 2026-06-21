@@ -1,32 +1,50 @@
 /**
- * BrainViewDashboard — right-side flex panel that holds all the brain-view
- * chrome previously floated as absolute overlays on the canvas:
- *   • Mode header (Corpora View / Query View)
- *   • Breadcrumb / drill stack
- *   • Corpus + node/edge stats
- *   • Cache warming chip
- *   • Color-mode toggle (community vs corpus)
- *   • Re-run + close (query mode)
- *   • Selection info bar (book + entity details when selected)
- *   • Layout running indicator
+ * BrainViewDashboard — premium redesign (Pt 7d).
  *
- * Lives at flex-shrink:0 next to the sigma canvas. Collapses to a 36px
- * vertical strip via the toggle button so the canvas can reclaim the
- * width. Pt 5 of the Brain View refactor.
+ * Right-rail intelligence panel for the graph workspace. Owns:
+ *   • Header (mode, corpora, lane legend, collapse toggle)
+ *   • Inspector — selection, evidence, semantic map, drill back
+ *   • Composer — synthesis mode, query, run/continue, validate, web
+ *   • Output   — synthesis body, seed/source/bridge/hub pills, gaps
+ *   • Brain    — drill stack, cache health, color scheme, relation legend,
+ *               bridge filters, layout, re-run
+ *
+ * Lives at flex-shrink:0 next to the sigma canvas. Collapses to a 32px
+ * vertical strip via the toggle button so the canvas can reclaim width.
  */
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import {
+  ArrowRight,
   ChevronLeft,
+  CircleDot,
+  Compass,
+  Database,
+  Eye,
+  FileText,
+  Filter,
   GitBranch,
+  Globe2,
+  Layers,
   Loader2,
   PanelRightClose,
   PanelRightOpen,
   Pause,
   Play,
   PlusCircle,
+  Search,
   Send,
+  ShieldCheck,
   Sparkles,
+  Target,
+  Wand2,
   Zap,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -45,11 +63,17 @@ import {
   EDGE_COLORS_BY_FAMILY,
   type RelationFamily,
 } from "../../lib/sigma-constants";
+import {
+  laneBg,
+  laneBorder,
+  laneColor,
+  laneText,
+} from "../../lib/graph-colors";
 import { useQueryModelPoolStore } from "../../stores/queryModelPoolStore";
 import type { GraphNodeInsightResponse } from "../../types/chat";
 import type { GraphSynthesisMode } from "../../types/discover";
 
-export type DashboardTab = "brain" | "agent" | "graph-query";
+export type DashboardTab = "brain" | "agent";
 
 export type GraphRunMode = "new" | "followup";
 
@@ -67,44 +91,10 @@ export interface GraphProgressStep {
   detail?: string;
 }
 
-function BackToBrainButton({
-  onClick,
-  className = "",
-}: {
-  onClick: () => void;
-  className?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label="Back to Brain"
-      title="Back to Brain"
-      className={
-        "group relative flex w-full items-center justify-between overflow-hidden rounded-md border border-cyan-500/25 bg-[radial-gradient(circle_at_15%_50%,rgba(34,211,238,0.14),transparent_42%),linear-gradient(90deg,rgba(8,47,73,0.28),rgba(9,9,14,0.82))] px-3 py-2 text-[10px] font-technical uppercase tracking-widest text-cyan-100 shadow-[0_0_24px_rgba(8,145,178,0.08)] transition-all hover:border-cyan-300/55 hover:bg-cyan-500/10 hover:text-white " +
-        className
-      }
-    >
-      <span className="flex items-center gap-2">
-        <span className="relative grid h-6 w-8 place-items-center rounded border border-cyan-400/20 bg-black/20">
-          <span className="absolute left-1 top-1 h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_10px_rgba(252,211,77,0.8)] transition-transform group-hover:-translate-x-0.5" />
-          <span className="absolute right-1.5 top-1 h-1 w-1 rounded-full bg-cyan-300/80 transition-transform group-hover:translate-x-0.5" />
-          <span className="absolute bottom-1 right-2 h-1 w-1 rounded-full bg-emerald-300/80 transition-transform group-hover:translate-x-0.5" />
-          <span className="absolute bottom-1.5 left-3.5 h-1 w-1 rounded-full bg-violet-300/70 transition-transform group-hover:translate-x-0.5" />
-          <span className="absolute left-2 top-[11px] h-px w-4 origin-left rotate-[-12deg] bg-cyan-300/25" />
-          <ChevronLeft className="relative h-3.5 w-3.5 text-cyan-200 transition-transform group-hover:-translate-x-0.5" />
-        </span>
-        Back to Brain
-      </span>
-      <span className="h-1.5 w-1.5 rounded-full bg-cyan-300/70 shadow-[0_0_12px_rgba(103,232,249,0.9)]" />
-    </button>
-  );
-}
-
-// Sidebar width bounds when expanded. Default mirrors Pt 5 baseline (320).
-const SIDEBAR_MIN_W = 240;
-const SIDEBAR_MAX_W = 900;
-const SIDEBAR_DEFAULT_W = 320;
+// Sidebar width bounds when expanded.
+const SIDEBAR_MIN_W = 280;
+const SIDEBAR_MAX_W = 880;
+const SIDEBAR_DEFAULT_W = 360;
 
 export type DrillFrame = { docId: string; label: string };
 
@@ -116,7 +106,6 @@ interface SelectedDisplay {
   nodeKind?: string;
   kind?: string;
   entity_type?: string;
-  // Classification surfaced in the Selection card ("what is this").
   primary_entity_type?: string | null;
   definitional_phrase?: string | null;
   observed_entity_types?: string[] | null;
@@ -156,20 +145,19 @@ export interface BrainViewDashboardProps {
   colorMode: "entity_type" | "community" | "corpus";
   onColorModeToggle: () => void;
 
-  // Pt 6: bridge filter knobs (brain mode only)
+  // Bridge filter knobs (brain mode only)
   minBridgeStrength: number;
   onMinBridgeStrengthChange: (n: number) => void;
   maxBridgesPerBook: number;
   onMaxBridgesPerBookChange: (n: number) => void;
 
-  // Pt 6: settle-restart-after-drag toggle
+  // Settle-restart-after-drag toggle
   settleAfterDrag: boolean;
   onSettleAfterDragToggle: () => void;
 
-  // Pt 7: tab + Agent / Graph Query content
+  // Tab + Agent / Graph Query content
   activeTab: DashboardTab;
   onActiveTabChange: (t: DashboardTab) => void;
-  // Agent Search tab — wired to existing useQueryGraph state
   agentQuery: string;
   onAgentQueryChange: (q: string) => void;
   onAgentRun: (mode?: GraphRunMode) => void;
@@ -177,30 +165,22 @@ export interface BrainViewDashboardProps {
   agentError?: string | null;
   agentSynthesisMarkdown?: string | null;
   agentProgressSteps?: GraphProgressStep[];
+  questionPhase?: "idle" | "loading" | "ready" | "error";
   questionProgressSteps?: GraphProgressStep[];
   agentSeedNames?: string[];
   agentSourceNames?: string[];
   agentBridgeNames?: string[];
   agentHubNames?: string[];
   agentGaps?: Array<{ entity_a_name?: string; entity_b_name?: string }>;
-  // Phase 3 — synthesis-mode selector ("research" | "ideation" | "nuance").
-  // Forwarded into the Agent Search tab so the user can flip between
-  // concrete-claim research, [BUILD IDEA] ideation, and conceptual nuance
-  // without leaving the panel. Default "research" preserves existing UX.
   synthesisMode?: GraphSynthesisMode;
   onSynthesisModeChange?: (m: GraphSynthesisMode) => void;
-  // Sprint #2 — opt-in synthesis validation (draft → critique → revise).
-  // Adds 2-3× latency/tokens; surfaced as a small checkbox in the tab.
   validateSynthesis?: boolean;
   onValidateSynthesisChange?: (v: boolean) => void;
   webGroundingEnabled?: boolean;
   onWebGroundingChange?: (v: boolean) => void;
   followUpAvailable?: boolean;
   followUpPreview?: string;
-  // Pt 7: Graph Query tab — send a refined chip back to the chat.
   onSendToChat?: (text: string) => void;
-  // Lightweight question-builder path: build a visual query graph without
-  // invoking the heavier graph synthesis pipeline.
   onBuildQuestionGraph?: (query: string) => void;
 
   // Query mode actions
@@ -219,13 +199,170 @@ export interface BrainViewDashboardProps {
   stopLayout: () => void;
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+// ── Small primitives ─────────────────────────────────────────────────────
+
+function SectionLabel({
+  children,
+  icon,
+  hint,
+}: {
+  children: React.ReactNode;
+  icon?: React.ReactNode;
+  hint?: React.ReactNode;
+}) {
   return (
-    <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono mb-1.5">
+    <div className="flex items-center justify-between gap-2 mb-2">
+      <div className="flex items-center gap-1.5 text-[9.5px] font-mono uppercase tracking-[0.2em] text-content-tertiary">
+        {icon}
+        <span>{children}</span>
+      </div>
+      {hint && <div className="text-[10px] text-content-tertiary">{hint}</div>}
+    </div>
+  );
+}
+
+function Card({
+  children,
+  accent = false,
+  className = "",
+}: {
+  children: React.ReactNode;
+  accent?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`rounded-md border border-border-minimal bg-[var(--bg-raised)] px-3 py-3 ${
+        accent ? "border-l-2 border-l-accent-main/60" : ""
+      } ${className}`}
+    >
       {children}
     </div>
   );
 }
+
+function Badge({
+  children,
+  tone = "neutral",
+}: {
+  children: React.ReactNode;
+  tone?: "neutral" | "accent" | "success" | "error" | "warning" | "info";
+}) {
+  const toneClass =
+    tone === "accent"
+      ? "border-accent-main/40 bg-accent-main/10 text-accent-main"
+      : tone === "success"
+        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+        : tone === "error"
+          ? "border-rose-500/40 bg-rose-500/10 text-rose-300"
+          : tone === "warning"
+            ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+            : tone === "info"
+              ? "border-sky-500/40 bg-sky-500/10 text-sky-300"
+              : "border-border-minimal bg-[var(--bg-base)] text-content-tertiary";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9.5px] font-mono ${toneClass}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function LaneChip({
+  lane,
+  label,
+  count,
+}: {
+  lane: "corpus" | "graph" | "web";
+  label: string;
+  count?: number;
+}) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-widest"
+      style={{
+        borderColor: laneBorder(lane),
+        background: laneBg(lane),
+        color: laneText(lane),
+      }}
+      title={`${label} lane evidence`}
+    >
+      <span
+        className="h-1.5 w-1.5 rounded-full"
+        style={{ background: laneColor(lane) }}
+      />
+      {label}
+      {typeof count === "number" && count > 0 && (
+        <span className="ml-0.5 tabular-nums text-[9px] opacity-80">
+          ×{count}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function PrimaryButton({
+  onClick,
+  children,
+  disabled,
+  title,
+  active,
+}: {
+  onClick?: () => void;
+  children: React.ReactNode;
+  disabled?: boolean;
+  title?: string;
+  active?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`group relative inline-flex w-full cursor-pointer items-center justify-center gap-1.5 overflow-hidden rounded-md border px-3 py-2 text-[12px] font-semibold shadow-[0_8px_24px_-20px_rgba(125,211,252,0.65)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_34px_-22px_rgba(125,211,252,0.95)] active:translate-y-px active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 ${
+        active
+          ? "border-accent-main bg-accent-main/20 text-accent-main"
+          : "border-accent-main/55 bg-accent-main/10 text-accent-main hover:border-accent-main hover:bg-accent-main/18"
+      }`}
+    >
+      <span className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 bg-[radial-gradient(circle_at_26%_0%,rgba(255,255,255,0.24),transparent_36%),linear-gradient(110deg,transparent,rgba(125,211,252,0.14),transparent)]" />
+      <span className="relative z-10 inline-flex items-center justify-center gap-1.5">
+        {children}
+      </span>
+    </button>
+  );
+}
+
+function SecondaryButton({
+  onClick,
+  children,
+  disabled,
+  title,
+}: {
+  onClick?: () => void;
+  children: React.ReactNode;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="group relative inline-flex cursor-pointer items-center justify-center gap-1.5 overflow-hidden rounded-md border border-border-minimal bg-[var(--bg-base)] px-2.5 py-1.5 text-[11px] font-mono uppercase tracking-[0.16em] text-content-secondary transition-all duration-200 hover:-translate-y-0.5 hover:border-accent-main/70 hover:text-content-primary hover:shadow-[0_10px_28px_-22px_rgba(125,211,252,0.7)] active:translate-y-px active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <span className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100 bg-[linear-gradient(110deg,transparent,rgba(148,163,184,0.12),transparent)]" />
+      <span className="relative z-10 inline-flex items-center justify-center gap-1.5">
+        {children}
+      </span>
+    </button>
+  );
+}
+
+// ── Progress narrator ────────────────────────────────────────────────────
 
 function GraphProgressNarrator({ steps }: { steps?: GraphProgressStep[] }) {
   const visible = (steps || []).filter((step) => step.status !== "pending");
@@ -251,11 +388,10 @@ function GraphProgressNarrator({ steps }: { steps?: GraphProgressStep[] }) {
   if (visible.length === 0) return null;
 
   const statusClass = (status: GraphProgressStatus) => {
-    if (status === "done") return "border-emerald-500/35 bg-emerald-500/10 text-emerald-200";
-    if (status === "running") return "border-amber-500/45 bg-amber-500/10 text-amber-100";
-    if (status === "error") return "border-rose-500/40 bg-rose-500/10 text-rose-200";
-    if (status === "skipped") return "border-zinc-700 bg-zinc-950/70 text-zinc-500";
-    return "border-zinc-800 bg-zinc-950/70 text-zinc-500";
+    if (status === "done") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+    if (status === "running") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+    if (status === "error") return "border-rose-500/40 bg-rose-500/10 text-rose-300";
+    return "border-border-minimal bg-[var(--bg-base)] text-content-tertiary";
   };
   const mark = (status: GraphProgressStatus) => {
     if (status === "done") return "✓";
@@ -279,18 +415,16 @@ function GraphProgressNarrator({ steps }: { steps?: GraphProgressStep[] }) {
   };
 
   return (
-    <div className="mb-3 rounded-md border border-zinc-800 bg-zinc-950/65 px-2.5 py-2">
-      <div className="mb-1.5 text-[9px] font-technical uppercase tracking-widest text-zinc-500">
-        What I'm doing
-      </div>
+    <Card className="mb-3">
+      <SectionLabel icon={<Loader2 className="h-3 w-3" />}>Progress</SectionLabel>
       <ol className="space-y-1.5">
         {visible.map((step) => (
           <li
             key={step.id}
             className={`rounded border px-2 py-1.5 text-[11px] leading-relaxed ${statusClass(step.status)}`}
           >
-            <div className="flex gap-2">
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[11px]">
+            <div className="flex items-start gap-2">
+              <span className="flex h-4 w-4 shrink-0 items-center justify-center font-mono">
                 {step.status === "running" ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
                 ) : (
@@ -301,34 +435,38 @@ function GraphProgressNarrator({ steps }: { steps?: GraphProgressStep[] }) {
             </div>
             {step.status === "running" && (
               <div className="mt-1.5 pl-6">
-                <div className="relative h-1 overflow-hidden rounded-full bg-zinc-950/80">
+                <div className="relative h-1 overflow-hidden rounded-full bg-[var(--bg-base)]">
                   <div
-                    className="absolute top-0 h-full w-[28%] rounded-full bg-amber-300/80 shadow-[0_0_10px_rgba(252,211,77,0.45)] transition-transform duration-200"
+                    className="absolute top-0 h-full w-[28%] rounded-full bg-accent-main/80 transition-transform duration-200"
                     style={{ transform: `translateX(${meterLeft(step)})` }}
                   />
                 </div>
-                <div className="mt-1 font-mono text-[9px] uppercase tracking-widest text-amber-200/70">
+                <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.18em] text-content-tertiary">
                   running · {elapsedLabel(step)}
                 </div>
               </div>
             )}
             {step.detail && (
-              <div className="mt-1 pl-5 font-mono text-[10px] text-zinc-500">
+              <div className="mt-1 pl-5 font-mono text-[10px] text-content-tertiary">
                 {step.detail}
               </div>
             )}
           </li>
         ))}
       </ol>
-    </div>
+    </Card>
   );
 }
+
+// ── Cache helpers ────────────────────────────────────────────────────────
 
 function statusDot(s: string | undefined): string {
   if (s === "ready") return "bg-emerald-400";
   if (s === "warming") return "bg-amber-400 animate-pulse";
-  return "bg-rose-500";
+  return "bg-error";
 }
+
+// ── Graph-model control ──────────────────────────────────────────────────
 
 function GraphPathModelControl({ activeTab }: { activeTab: DashboardTab }) {
   const pool = useQueryModelPoolStore((s) => s.config.query_model_pool);
@@ -340,11 +478,7 @@ function GraphPathModelControl({ activeTab }: { activeTab: DashboardTab }) {
   const modelOptions = pool.filter((entry) => entry.enabled);
   const selectedEntryId = graphQuery?.pool_entry_id ?? "";
   const label =
-    activeTab === "graph-query"
-      ? "Refine Model"
-      : activeTab === "agent"
-        ? "Graph Synthesis Model"
-        : "Graph Question Model";
+    activeTab === "agent" ? "Graph Synthesis Model" : "Graph Question Model";
 
   const handleChange = async (entryId: string) => {
     setError(null);
@@ -360,21 +494,20 @@ function GraphPathModelControl({ activeTab }: { activeTab: DashboardTab }) {
   };
 
   return (
-    <div className="border-b border-zinc-900 px-3 py-2">
+    <div className="border-b border-border-minimal px-3 py-2">
       <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono">
+        <span className="flex items-center gap-1.5 text-[9.5px] font-mono uppercase tracking-[0.18em] text-content-tertiary">
+          <Database className="h-3 w-3" />
           {label}
         </span>
-        <span className="rounded border border-amber-500/25 bg-amber-500/5 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-widest text-amber-300/80">
-          graph role
-        </span>
+        <Badge tone="accent">graph role</Badge>
       </div>
       {modelOptions.length > 0 ? (
         <select
           value={selectedEntryId}
           onChange={(e) => void handleChange(e.currentTarget.value)}
           disabled={saving}
-          className="w-full rounded-md border border-zinc-800 bg-[#09090f] px-2 py-1.5 text-xs font-mono text-zinc-200 outline-none focus:border-amber-500/70"
+          className="w-full rounded-md border border-border-minimal bg-[var(--bg-base)] px-2 py-1.5 text-xs font-mono text-content-primary outline-none focus:border-accent-main"
           title="Graph Query and Refine use this graph-specific model role."
         >
           <option value="">Fallback to query/chat model</option>
@@ -385,16 +518,18 @@ function GraphPathModelControl({ activeTab }: { activeTab: DashboardTab }) {
           ))}
         </select>
       ) : (
-        <div className="truncate rounded-md border border-zinc-800 bg-[#09090f] px-2 py-1.5 text-xs font-mono text-zinc-500">
+        <div className="truncate rounded-md border border-border-minimal bg-[var(--bg-base)] px-2 py-1.5 text-xs font-mono text-content-tertiary">
           No models in pool
         </div>
       )}
-      <div className="mt-1 min-h-[14px] text-[10px] font-mono text-zinc-500">
+      <div className="mt-1 min-h-[14px] text-[10px] font-mono text-content-tertiary">
         {saving ? "saving..." : error ? error : "Graph Query #1 and #2 use this role."}
       </div>
     </div>
   );
 }
+
+// ── Selection helpers ────────────────────────────────────────────────────
 
 const RELATION_LEGEND_ENTRIES = Object.entries(EDGE_COLORS_BY_FAMILY) as Array<
   [RelationFamily, string]
@@ -434,8 +569,6 @@ function nodeLabel(data: { nodes: any[] }, id: string, fallback?: string): strin
 }
 
 function selectionBadgeItems(selected: SelectedDisplay): string[] {
-  // Entity type now has its own prominent chip in the Selection card, so the
-  // structural badge row carries only relation family + bridge count.
   const items = [
     selected.dominant_relation_family,
     typeof selected.bridge_count === "number"
@@ -454,6 +587,8 @@ function selectionBadgeItems(selected: SelectedDisplay): string[] {
       return true;
     });
 }
+
+// ── Main component ───────────────────────────────────────────────────────
 
 export function BrainViewDashboard(props: BrainViewDashboardProps) {
   const {
@@ -485,6 +620,7 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     agentError,
     agentSynthesisMarkdown,
     agentProgressSteps,
+    questionPhase = "idle",
     questionProgressSteps,
     agentSeedNames,
     agentSourceNames,
@@ -511,8 +647,7 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     stopLayout,
   } = props;
 
-  // Drag-resize state. Persists across renders within the component
-  // instance; resets to default when the dashboard remounts.
+  // Drag-resize state.
   const [width, setWidth] = useState<number>(SIDEBAR_DEFAULT_W);
   const [nodeInsight, setNodeInsight] =
     useState<GraphNodeInsightResponse | null>(null);
@@ -534,9 +669,6 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     const onMove = (e: MouseEvent) => {
       const drag = draggingRef.current;
       if (!drag) return;
-      // Dragging LEFT (toward canvas) widens; dragging RIGHT narrows —
-      // because the sidebar is on the right, the handle sits at the
-      // sidebar's left edge.
       const delta = drag.startX - e.clientX;
       const next = Math.max(
         SIDEBAR_MIN_W,
@@ -608,19 +740,44 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
     selectedDisplay?.top_entities,
   ]);
 
+  // Counts for header strip.
+  const corpusCount = corpusIds.length;
+  const nodeCount = data?.nodes.length ?? 0;
+  const linkCount = data?.links.length ?? 0;
+  const insightCount = nodeInsight?.related_entities?.length ?? 0;
+
+  // Lane counts (best-effort from payload + insight).
+  const corpusLaneCount = useMemo(() => {
+    let n = 0;
+    if (data?.links) {
+      for (const l of data.links) {
+        if (l?.source_corpus || l?.source_corpora?.length) n += 1;
+      }
+    }
+    return n;
+  }, [data]);
+  const graphLaneCount = useMemo(() => {
+    let n = 0;
+    if (data?.links) {
+      for (const l of data.links) {
+        if (l?.predicate === "bridges_to" || l?.dominant_relation_family) n += 1;
+      }
+    }
+    return n;
+  }, [data]);
+
   if (collapsed) {
     return (
-      <aside className="z-30 flex h-10 w-full flex-row items-center border-t border-zinc-900 bg-[#0a0a0e]/95 backdrop-blur md:h-full md:w-9 md:flex-col md:border-t-0 md:border-l">
+      <aside className="z-30 flex h-10 w-full flex-row items-center border-t border-border-minimal bg-[var(--bg-raised)] md:h-full md:w-9 md:flex-col md:border-t-0 md:border-l">
         <button
           onClick={onToggle}
-          className="flex h-9 w-9 items-center justify-center text-zinc-500 hover:text-zinc-200 md:mt-3"
+          className="flex h-9 w-9 items-center justify-center text-content-tertiary hover:text-content-primary md:mt-3"
           title="Expand dashboard"
         >
           <PanelRightOpen className="h-4 w-4" />
         </button>
-        {/* Vertical layout indicator when collapsed */}
         {isLayoutRunning && (
-          <div className="mt-3 h-2 w-2 animate-ping rounded-full bg-emerald-400" />
+          <div className="mt-3 h-2 w-2 animate-ping rounded-full bg-accent-main" />
         )}
       </aside>
     );
@@ -628,50 +785,76 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
 
   return (
     <aside
-      className="relative z-30 flex h-[52dvh] w-full shrink-0 flex-col overflow-hidden rounded-t-xl border-t border-zinc-800 bg-[#0a0a0e]/96 shadow-[0_-20px_60px_rgba(0,0,0,0.45)] backdrop-blur md:h-full md:w-[var(--dashboard-width)] md:rounded-none md:border-t-0 md:border-l md:border-zinc-900 md:shadow-none"
+      className="relative z-30 flex h-[58dvh] w-full shrink-0 flex-col overflow-hidden rounded-t-xl border-t border-border-minimal bg-[var(--bg-raised)] md:h-full md:w-[var(--dashboard-width)] md:rounded-none md:border-t-0 md:border-l"
       style={{ "--dashboard-width": `${width}px` } as CSSProperties}
     >
-      {/* Drag handle — 6px hot-zone on the sidebar's left edge. Hover
-          shows the col-resize cursor; drag adjusts width within
-          [SIDEBAR_MIN_W, SIDEBAR_MAX_W]. */}
+      {/* Drag handle */}
       <div
         onMouseDown={onResizeStart}
         className="group absolute -left-1 top-0 z-40 hidden h-full w-1.5 cursor-col-resize md:block"
         title="Drag to resize"
       >
-        <div className="h-full w-px bg-zinc-900 transition-colors group-hover:bg-amber-500/40 group-active:bg-amber-500/70" />
+        <div className="h-full w-px bg-border-minimal transition-colors group-hover:bg-accent-main" />
       </div>
-      {/* Header strip — graph close is handled by the modal-level button in
-          App.tsx. This panel only owns dashboard collapse / graph controls. */}
-      <div className="flex items-start justify-between border-b border-zinc-900 px-3 py-2.5 gap-2">
-        <div className="flex items-start gap-2 min-w-0">
-          <div className="min-w-0">
-            <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono">
-              {mode === "brain" ? "Corpora View" : "Query View"}
-            </div>
-            <div className="text-xs text-zinc-300 font-mono mt-0.5 truncate">
-              {corpusIds.length} corpora
-              {data && (
-                <span className="text-zinc-500">
-                  {" "}· {data.nodes.length}n · {data.links.length}e
-                </span>
-              )}
-            </div>
+
+      {/* Header strip */}
+      <div className="flex items-start justify-between gap-2 border-b border-border-minimal px-3 py-2.5">
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex items-center gap-1.5 text-[9.5px] font-mono uppercase tracking-[0.2em] text-content-tertiary">
+            {mode === "brain" ? (
+              <Compass className="h-3 w-3" />
+            ) : (
+              <Search className="h-3 w-3" />
+            )}
+            <span>{mode === "brain" ? "Corpora view" : "Query view"}</span>
+            {mode === "query" && agentPhase === "loading" && (
+              <Loader2 className="h-3 w-3 animate-spin text-accent-main" />
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 truncate font-mono text-[11px] text-content-secondary">
+            <span className="tabular-nums text-content-primary">
+              {corpusCount} {corpusCount === 1 ? "corpus" : "corpora"}
+            </span>
+            <span className="text-content-tertiary">·</span>
+            <span className="tabular-nums text-content-tertiary">
+              {nodeCount}n · {linkCount}e
+            </span>
           </div>
         </div>
         <button
           onClick={onToggle}
-          className="shrink-0 text-zinc-500 hover:text-zinc-200"
+          className="shrink-0 text-content-tertiary hover:text-content-primary"
           title="Collapse dashboard"
+          aria-label="Collapse dashboard"
         >
           <PanelRightClose className="h-4 w-4" />
         </button>
       </div>
 
-      {/* Pt 7: Tab strip. The lightweight question-builder now lives inside
-          Brain, so users don't have to decide between "Brain" and "Refine."
-          Graph Query remains the heavier synthesis path. */}
-      <div className="flex items-stretch border-b border-zinc-900 px-1.5 pt-1.5 pb-0 gap-0.5">
+      {/* Lane legend strip */}
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-border-minimal px-3 py-1.5">
+        <span className="text-[9px] font-mono uppercase tracking-[0.18em] text-content-tertiary">
+          Evidence lanes
+        </span>
+        <LaneChip
+          lane="corpus"
+          label="corpus"
+          count={Math.min(corpusLaneCount, 99)}
+        />
+        <LaneChip
+          lane="graph"
+          label="graph"
+          count={Math.min(graphLaneCount, 99)}
+        />
+        <LaneChip
+          lane="web"
+          label="web"
+          count={webGroundingEnabled ? 1 : 0}
+        />
+      </div>
+
+      {/* Tab strip */}
+      <div className="flex items-stretch border-b border-border-minimal px-1.5 pt-1.5">
         {([
           { id: "brain", label: "Brain" },
           { id: "agent", label: "Graph Query" },
@@ -679,10 +862,10 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           <button
             key={t.id}
             onClick={() => onActiveTabChange(t.id)}
-            className={`flex-1 px-2 py-1.5 font-mono text-[10px] uppercase tracking-widest border-b-2 transition-colors ${
+            className={`flex-1 px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] border-b-2 transition-colors ${
               activeTab === t.id
-                ? "border-amber-500/60 bg-amber-500/5 text-amber-300"
-                : "border-transparent text-zinc-500 hover:text-zinc-300"
+                ? "border-accent-main bg-accent-main/5 text-accent-main"
+                : "border-transparent text-content-tertiary hover:text-content-secondary"
             }`}
           >
             {t.label}
@@ -693,27 +876,22 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
       <GraphPathModelControl activeTab={activeTab} />
 
       {/* Scrollable body */}
-      <div className="flex-1 overscroll-contain overflow-y-auto px-3 py-3 space-y-4">
-        {/* Persistent Selection card — visible on every tab, sits at the
-            top of the body so clicking a node in the canvas always shows
-            its info regardless of which tab is active. */}
+      <div className="flex-1 overscroll-contain overflow-y-auto px-3 py-3 space-y-5 custom-scroll">
+        {/* ── Inspector ─────────────────────────────────────────────── */}
         {selectedDisplay && (
           <section>
-            <SectionLabel>Selection</SectionLabel>
-            <div className="rounded-lg border border-violet-500/30 bg-violet-500/10 p-2">
+            <SectionLabel icon={<Eye className="h-3 w-3" />}>Inspector</SectionLabel>
+            <Card accent>
               <div className="flex items-start gap-2 min-w-0">
-                <div className="h-2 w-2 animate-pulse rounded-full bg-violet-300 mt-1.5 shrink-0" />
+                <div className="h-1.5 w-1.5 mt-1.5 shrink-0 rounded-full bg-accent-main" />
                 <div
-                  className="font-mono text-xs text-zinc-100 break-words min-w-0 flex-1"
+                  className="min-w-0 flex-1 font-mono text-xs text-content-primary break-words"
                   title={selectedDisplay.display_name}
                 >
                   {cleanBookLabel(selectedDisplay.display_name) ||
                     selectedDisplay.display_name}
                 </div>
               </div>
-              {/* Classification — answers "what is this" at a glance: a typed
-                  header chip + one-line definition + secondary type/family
-                  signals, all from data already on the node (no extra fetch). */}
               {(() => {
                 const primaryType =
                   selectedDisplay.primary_entity_type ||
@@ -736,13 +914,9 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                 ].filter(Boolean);
                 return (
                   <div className="mt-2 ml-4 space-y-1.5">
-                    {primaryType && (
-                      <span className="inline-block rounded border border-violet-500/40 bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-200">
-                        {primaryType}
-                      </span>
-                    )}
+                    {primaryType && <Badge tone="accent">{primaryType}</Badge>}
                     {selectedDisplay.definitional_phrase && (
-                      <div className="text-[10px] italic leading-relaxed text-zinc-300">
+                      <div className="text-[10px] italic leading-relaxed text-content-secondary">
                         {selectedDisplay.definitional_phrase}
                       </div>
                     )}
@@ -752,20 +926,20 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                         {observed.slice(0, 3).map((t) => (
                           <span
                             key={t}
-                            className="rounded border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[10px] text-zinc-400"
+                            className="rounded border border-border-minimal bg-[var(--bg-base)] px-1.5 py-0.5 text-[10px] text-content-tertiary"
                           >
                             {t}
                           </span>
                         ))}
                         {selectedDisplay.canonical_family && (
-                          <span className="rounded border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                          <span className="rounded border border-border-minimal bg-[var(--bg-base)] px-1.5 py-0.5 text-[10px] text-content-tertiary">
                             family: {selectedDisplay.canonical_family}
                           </span>
                         )}
                       </div>
                     )}
                     {meta.length > 0 && (
-                      <div className="font-mono text-[10px] text-zinc-500">
+                      <div className="font-mono text-[10px] text-content-tertiary">
                         {meta.join(" · ")}
                       </div>
                     )}
@@ -773,58 +947,52 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                 );
               })()}
               {selectedDisplay.source_corpora.length > 0 && (
-                <div className="mt-1 ml-4 text-[10px] text-zinc-400 font-mono">
+                <div className="mt-1 ml-4 text-[10px] text-content-secondary font-mono">
                   {selectedDisplay.source_corpora.length} corpora
                 </div>
               )}
               <div className="mt-2 ml-4 flex flex-wrap gap-1">
-                {selectionBadgeItems(selectedDisplay)
-                  .map((item) => (
-                    <span
-                      key={item}
-                      className="rounded border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[10px] text-zinc-400"
-                    >
-                      {item}
-                    </span>
-                  ))}
+                {selectionBadgeItems(selectedDisplay).map((item) => (
+                  <span
+                    key={item}
+                    className="rounded border border-border-minimal bg-[var(--bg-base)] px-1.5 py-0.5 text-[10px] text-content-tertiary"
+                  >
+                    {item}
+                  </span>
+                ))}
               </div>
               {(selectedDisplay.top_entities?.length || 0) > 0 && (
-                <div className="mt-2 ml-4 line-clamp-2 text-[10px] leading-relaxed text-zinc-500">
+                <div className="mt-2 ml-4 line-clamp-2 text-[10px] leading-relaxed text-content-tertiary">
                   {selectedDisplay.top_entities?.slice(0, 5).join(" · ")}
                 </div>
               )}
               <button
                 onClick={onClearSelection}
-                className="mt-2 ml-4 rounded px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-white/10 hover:text-zinc-50"
+                className="mt-2 ml-4 rounded px-2 py-0.5 text-[11px] text-content-secondary hover:bg-white/5 hover:text-content-primary"
               >
                 Clear
               </button>
-            </div>
+            </Card>
           </section>
         )}
 
-        {/* Connections — answers "how is this node connected to others?"
-            Reads the rendered graph payload (data.links + data.nodes) and
-            lists each edge incident to the selected node with direction,
-            predicate, and weight. Closes the "dead-end click" gap where
-            selecting a node previously only showed its name. */}
+        {/* Evidence Inspector */}
         {selectedDisplay && data && (
-          <section className="mt-3">
-            <SectionLabel>Evidence Inspector</SectionLabel>
+          <section>
+            <SectionLabel icon={<Layers className="h-3 w-3" />}>
+              Relationships
+            </SectionLabel>
             <ul className="space-y-1.5 font-mono text-[11px] max-h-56 overflow-auto pr-1 custom-scroll">
               {(() => {
                 const selId = String(selectedDisplay.id);
                 const rels = (data.links || []).filter((l: any) => {
-                  // Edges arrive either flat (source: "id") or hydrated
-                  // (source: {id}) depending on the renderer pass. Handle
-                  // both shapes so this works in every code path.
                   const s = endpointId(l.source);
                   const t = endpointId(l.target);
                   return s === selId || t === selId;
                 });
                 if (rels.length === 0) {
                   return (
-                    <li className="text-zinc-600 italic">
+                    <li className="text-content-tertiary italic">
                       No visible connections
                     </li>
                   );
@@ -843,7 +1011,7 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                   return (
                     <li
                       key={`${nid}-${i}`}
-                      className="rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 text-zinc-300"
+                      className="rounded border border-border-minimal bg-[var(--bg-base)] px-2 py-1.5 text-content-secondary"
                     >
                       <div className="flex items-center gap-2">
                         <span
@@ -851,7 +1019,7 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                           style={{ backgroundColor: relationColor(l) }}
                         />
                         <span
-                          className="text-zinc-500"
+                          className="text-content-tertiary"
                           title={isSource ? "outgoing" : "incoming"}
                         >
                           {isSource ? "→" : "←"}
@@ -859,11 +1027,11 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                         <span className="min-w-0 flex-1 truncate" title={name}>
                           {name}
                         </span>
-                        <span className="shrink-0 rounded bg-zinc-900 px-1 text-[10px] text-zinc-500">
+                        <span className="shrink-0 rounded bg-[var(--bg-raised)] px-1 text-[10px] text-content-tertiary">
                           {relationLabel(l)}
                         </span>
                       </div>
-                      <div className="mt-1 ml-7 flex flex-wrap items-center gap-1 text-[10px] text-zinc-500">
+                      <div className="mt-1 ml-7 flex flex-wrap items-center gap-1 text-[10px] text-content-tertiary">
                         <span>{family}</span>
                         {typeof l.weight === "number" && (
                           <span>strength {l.weight}</span>
@@ -873,7 +1041,7 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                         )}
                       </div>
                       {shared.length > 0 && (
-                        <div className="mt-1 ml-7 truncate text-[10px] text-zinc-400">
+                        <div className="mt-1 ml-7 truncate text-[10px] text-content-secondary">
                           {shared.join(" · ")}
                           {typeof l.shared_entities === "number" &&
                             l.shared_entities > shared.length &&
@@ -888,100 +1056,91 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           </section>
         )}
 
+        {/* Semantic Map */}
         {selectedDisplay && (
-          <section className="mt-3">
-            <SectionLabel>Semantic Map</SectionLabel>
-            <div className="rounded border border-cyan-500/20 bg-cyan-500/[0.035] p-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0 truncate text-[11px] text-zinc-300">
-                  vector neighbors · read-only
-                </div>
-                <div
-                  className={
-                    "shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-mono " +
-                    (nodeInsightPhase === "loading"
-                      ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-200"
+          <section>
+            <SectionLabel
+              icon={<Compass className="h-3 w-3" />}
+              hint={
+                <Badge
+                  tone={
+                    nodeInsightPhase === "loading"
+                      ? "warning"
                       : nodeInsightPhase === "ready"
-                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                        ? "success"
                         : nodeInsightPhase === "error"
-                          ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
-                          : "border-zinc-800 bg-zinc-950/70 text-zinc-500")
+                          ? "error"
+                          : "neutral"
                   }
                 >
                   {nodeInsightPhase}
-                </div>
-              </div>
-
+                </Badge>
+              }
+            >
+              Semantic map
+            </SectionLabel>
+            <Card>
               {nodeInsightPhase === "loading" && (
-                <div className="mt-2 text-[10px] text-zinc-500">
+                <div className="text-[10px] text-content-tertiary">
                   searching nearby passages and documents…
                 </div>
               )}
-
               {nodeInsightPhase === "error" && (
-                <div className="mt-2 text-[10px] text-rose-300">
+                <div className="text-[10px] text-error">
                   {nodeInsightError || "semantic lookup failed"}
                 </div>
               )}
-
               {nodeInsightPhase === "ready" && nodeInsight && (
-                <div className="mt-2">
-                  {nodeInsight.related_entities.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-1.5">
-                      {nodeInsight.related_entities.slice(0, 8).map((entity) => {
-                        const confidence =
-                          typeof entity.confidence === "number"
-                            ? Math.round(entity.confidence * 100)
-                            : null;
-                        return (
-                          <div
-                            key={`${entity.name}-${entity.predicate || ""}`}
-                            className="rounded border border-cyan-700/30 bg-[#0d0d14] px-2 py-1.5"
-                            title={[
-                              entity.predicate,
-                              entity.relation_family,
-                              confidence != null ? `${confidence}%` : "",
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0 truncate text-[11px] font-semibold text-cyan-100">
-                                {entity.name}
-                              </div>
-                              {entity.count > 1 && (
-                                <div className="shrink-0 rounded bg-cyan-500/10 px-1.5 py-0.5 text-[9px] text-cyan-300">
-                                  {entity.count}x
-                                </div>
-                              )}
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-1 text-[9px] text-zinc-500">
-                              {entity.relation_family && (
-                                <span>{entity.relation_family}</span>
-                              )}
-                              {entity.predicate && (
-                                <span>{entity.predicate.replace(/_/g, " ")}</span>
-                              )}
-                              {confidence != null && confidence > 0 && (
-                                <span>{confidence}%</span>
-                              )}
-                            </div>
+                <div className="space-y-1.5">
+                  <div className="text-[10px] text-content-tertiary">
+                    {insightCount} vector neighbor{insightCount === 1 ? "" : "s"}
+                  </div>
+                  {insightCount > 0 ? (
+                    nodeInsight.related_entities.slice(0, 6).map((entity) => {
+                      const confidence =
+                        typeof entity.confidence === "number"
+                          ? Math.round(entity.confidence * 100)
+                          : null;
+                      return (
+                        <div
+                          key={`${entity.name}-${entity.predicate || ""}`}
+                          className="flex items-center justify-between gap-2 rounded border border-border-minimal bg-[var(--bg-base)] px-2 py-1.5"
+                          title={[
+                            entity.predicate,
+                            entity.relation_family,
+                            confidence != null ? `${confidence}%` : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        >
+                          <span className="min-w-0 truncate text-[11px] font-semibold text-content-primary">
+                            {entity.name}
+                          </span>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            {entity.count > 1 && (
+                              <Badge tone="accent">{entity.count}×</Badge>
+                            )}
+                            {confidence != null && (
+                              <span className="font-mono text-[10px] text-content-tertiary">
+                                {confidence}%
+                              </span>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
+                        </div>
+                      );
+                    })
                   ) : (
-                    <div className="text-[10px] text-zinc-500">
+                    <div className="text-[10px] text-content-tertiary">
                       No entity associations found.
                     </div>
                   )}
                 </div>
               )}
-            </div>
+            </Card>
           </section>
         )}
 
-        {/* Pt 7: Agent Search tab content — input + run + synthesis chips. */}
+        {/* ── Composer / Output (Agent tab) ───────────────────────── */}
         {activeTab === "agent" && (
           <AgentSearchTab
             query={agentQuery}
@@ -1005,17 +1164,21 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
             onWebGroundingChange={onWebGroundingChange}
             followUpAvailable={followUpAvailable}
             followUpPreview={followUpPreview}
+            onSendToChat={onSendToChat}
           />
         )}
 
-        {/* Brain tab — original sections (only render when this tab is active). */}
-        {activeTab === "brain" && mode === "brain" && (
+        {/* ── Brain tab: Quick Graph + Refine ─────────────────────── */}
+        {activeTab === "brain" && (
           <BrainQuickGraphCard
             query={agentQuery}
             onChange={onAgentQueryChange}
-            onRun={() => onAgentRun("new")}
-            phase={agentPhase}
-            progressSteps={agentProgressSteps}
+            onRun={() => {
+              const normalized = agentQuery.trim();
+              if (normalized) onBuildQuestionGraph?.(normalized);
+            }}
+            phase={questionPhase}
+            progressSteps={questionProgressSteps}
             disabled={corpusIds.length === 0}
           />
         )}
@@ -1024,51 +1187,50 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           <GraphQueryTab
             corpusIds={corpusIds}
             onSendToChat={onSendToChat}
-            onBuildGraph={onBuildQuestionGraph}
-            graphProgressSteps={questionProgressSteps}
             graphActive={mode === "query"}
             onClearGraph={onClearGraphQuery}
           />
         )}
 
+        {/* ── Brain controls ──────────────────────────────────────── */}
         {activeTab === "brain" && mode === "brain" && drillStack.length > 0 && (
           <section>
-            <SectionLabel>Drill Stack</SectionLabel>
-            <div className="space-y-1 font-mono text-xs text-zinc-300">
+            <SectionLabel icon={<Target className="h-3 w-3" />}>Drill stack</SectionLabel>
+            <Card>
               <button
-                className="block w-full text-left hover:text-amber-400 transition-colors"
+                className="block w-full text-left text-[11px] font-mono text-content-secondary hover:text-accent-main transition-colors"
                 onClick={() => setDrillStack([])}
               >
                 ← Overview
               </button>
-              {drillStack.map((f, i) => (
+              <div className="mt-1.5 space-y-0.5">
+                {drillStack.map((f, i) => (
+                  <button
+                    key={i}
+                    className="flex w-full items-center gap-1 truncate text-left text-[11px] font-mono text-content-secondary hover:text-accent-main transition-colors"
+                    onClick={() => setDrillStack(drillStack.slice(0, i + 1))}
+                    title={f.label}
+                  >
+                    <ChevronLeft className="h-3 w-3 rotate-180 text-content-tertiary shrink-0" />
+                    <span className="truncate">{f.label}</span>
+                  </button>
+                ))}
+              </div>
+              {drillStack.length > 1 && (
                 <button
-                  key={i}
-                  className="flex w-full items-center gap-1 truncate text-left hover:text-amber-400 transition-colors"
-                  onClick={() => setDrillStack(drillStack.slice(0, i + 1))}
-                  title={f.label}
+                  className="mt-1.5 text-[10px] font-mono text-content-tertiary hover:text-content-secondary"
+                  onClick={() => setDrillStack(drillStack.slice(0, -1))}
                 >
-                  <ChevronLeft className="h-3 w-3 rotate-180 text-zinc-600 shrink-0" />
-                  <span className="truncate">{f.label}</span>
+                  ↩ pop one level
                 </button>
-              ))}
-              <button
-                className="mt-1 text-[11px] text-zinc-500 hover:text-zinc-300"
-                onClick={() => setDrillStack(drillStack.slice(0, -1))}
-              >
-                ↩ pop one level
-              </button>
-            </div>
+              )}
+            </Card>
           </section>
         )}
 
-        {/* Selection card was moved up — now persistent across all tabs
-            (rendered above the tab-specific content). Removed from here. */}
-
-        {/* Cache health — brain mode + brain tab only */}
         {activeTab === "brain" && mode === "brain" && cacheWarming.length > 0 && (
           <section>
-            <SectionLabel>Cache Health</SectionLabel>
+            <SectionLabel icon={<Database className="h-3 w-3" />}>Cache health</SectionLabel>
             <ul className="space-y-1.5 font-mono text-[11px]">
               {cacheWarming.map((cid) => {
                 const s = cacheStatuses[cid];
@@ -1076,20 +1238,20 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
                 return (
                   <li
                     key={cid}
-                    className="flex items-center gap-2 rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5"
+                    className="flex items-center gap-2 rounded border border-border-minimal bg-[var(--bg-base)] px-2 py-1.5"
                   >
                     <span
                       className={`h-2 w-2 shrink-0 rounded-full ${statusDot(
                         s?.metrics_cache,
                       )}`}
                     />
-                    <span className="flex-1 truncate text-zinc-400" title={cid}>
+                    <span className="flex-1 truncate text-content-secondary" title={cid}>
                       {cid.slice(0, 8)}…
                     </span>
                     <button
                       disabled={rebuilding}
                       onClick={() => onRebuild([cid])}
-                      className="rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] uppercase text-zinc-300 hover:border-amber-700 hover:text-amber-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="rounded border border-border-minimal px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-content-secondary hover:border-accent-main hover:text-accent-main disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {rebuilding ? "…" : "build"}
                     </button>
@@ -1100,167 +1262,147 @@ export function BrainViewDashboard(props: BrainViewDashboardProps) {
           </section>
         )}
 
-        {/* Color mode — brain tab only */}
         {activeTab === "brain" && mode === "brain" && (
           <section>
-            <SectionLabel>Color Scheme</SectionLabel>
-            <button
-              className="w-full rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 text-left text-[11px] font-mono uppercase tracking-widest text-zinc-300 hover:border-amber-700 hover:text-amber-300"
-              onClick={onColorModeToggle}
-            >
+            <SectionLabel icon={<Filter className="h-3 w-3" />}>Color scheme</SectionLabel>
+            <SecondaryButton onClick={onColorModeToggle}>
+              <CircleDot className="h-3 w-3" />
               {colorMode === "entity_type"
                 ? "by type"
                 : colorMode === "community"
                   ? "by community"
                   : "by corpus"}
-              <span className="ml-2 text-zinc-500 normal-case tracking-normal">
-                (click to swap)
-              </span>
-            </button>
+            </SecondaryButton>
           </section>
         )}
 
         {activeTab === "brain" && mode === "brain" && (
           <section>
-            <SectionLabel>Relation Legend</SectionLabel>
-            <div className="grid grid-cols-1 gap-1.5 rounded border border-zinc-800 bg-[#0d0d14] p-2 min-[420px]:grid-cols-2">
-              {RELATION_LEGEND_ENTRIES.map(([family, color]) => (
-                <div
-                  key={family}
-                  className="flex min-w-0 items-center gap-1.5 text-[10px] font-mono text-zinc-400"
-                  title={`${family} relations`}
-                >
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: color }}
+            <SectionLabel icon={<Layers className="h-3 w-3" />}>Relation legend</SectionLabel>
+            <Card>
+              <div className="grid grid-cols-1 gap-1.5 min-[420px]:grid-cols-2">
+                {RELATION_LEGEND_ENTRIES.map(([family, color]) => (
+                  <div
+                    key={family}
+                    className="flex min-w-0 items-center gap-1.5 text-[10px] font-mono text-content-secondary"
+                    title={`${family} relations`}
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: color }}
+                    />
+                    <span className="truncate">{family}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </section>
+        )}
+
+        {activeTab === "brain" && mode === "brain" && (
+          <section>
+            <SectionLabel icon={<Filter className="h-3 w-3" />}>Bridge filters</SectionLabel>
+            <Card>
+              <div className="space-y-2.5">
+                <label className="block">
+                  <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-content-tertiary">
+                    <span>min strength</span>
+                    <span className="text-accent-main tabular-nums">
+                      {minBridgeStrength}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={20}
+                    step={1}
+                    value={minBridgeStrength}
+                    onChange={(e) =>
+                      onMinBridgeStrengthChange(Number(e.currentTarget.value))
+                    }
+                    className="mt-1 w-full accent-accent-main"
                   />
-                  <span className="truncate">{family}</span>
-                </div>
-              ))}
-            </div>
+                  <div className="mt-0.5 text-[10px] text-content-tertiary font-mono">
+                    hide bridges with fewer shared entities
+                  </div>
+                </label>
+                <label className="block">
+                  <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-content-tertiary">
+                    <span>top-N per book</span>
+                    <span className="text-accent-main tabular-nums">
+                      {maxBridgesPerBook}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    step={1}
+                    value={maxBridgesPerBook}
+                    onChange={(e) =>
+                      onMaxBridgesPerBookChange(Number(e.currentTarget.value))
+                    }
+                    className="mt-1 w-full accent-accent-main"
+                  />
+                  <div className="mt-0.5 text-[10px] text-content-tertiary font-mono">
+                    0 shows document jellyfish only; raise for strongest bridges
+                  </div>
+                </label>
+              </div>
+            </Card>
           </section>
         )}
 
-        {/* Pt 6: Bridge filters — brain tab only. Sliders let the user
-            tune which bridges show without re-fetching from backend. */}
-        {activeTab === "brain" && mode === "brain" && (
-          <section>
-            <SectionLabel>Bridge Filters</SectionLabel>
-            <div className="space-y-2.5">
-              <label className="block">
-                <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-widest text-zinc-400">
-                  <span>min strength</span>
-                  <span className="text-amber-300">{minBridgeStrength}</span>
-                </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={20}
-                  step={1}
-                  value={minBridgeStrength}
-                  onChange={(e) =>
-                    onMinBridgeStrengthChange(Number(e.currentTarget.value))
-                  }
-                  className="mt-1 w-full accent-amber-400"
-                />
-                <div className="mt-0.5 text-[10px] text-zinc-500 font-mono">
-                  hide bridges with fewer shared entities
-                </div>
-              </label>
-              <label className="block">
-                <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-widest text-zinc-400">
-                  <span>top-N per book</span>
-                  <span className="text-amber-300">{maxBridgesPerBook}</span>
-                </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={10}
-                  step={1}
-                  value={maxBridgesPerBook}
-                  onChange={(e) =>
-                    onMaxBridgesPerBookChange(Number(e.currentTarget.value))
-                  }
-                  className="mt-1 w-full accent-amber-400"
-                />
-                <div className="mt-0.5 text-[10px] text-zinc-500 font-mono">
-                  keep only strongest N bridges per book
-                </div>
-              </label>
-            </div>
-          </section>
-        )}
-
-        {/* Layout controls — brain tab only (Agent + Graph Query tabs have
-            their own panels and don't need pan/zoom-style layout knobs). */}
         {activeTab === "brain" && (
           <section>
-          <SectionLabel>Layout</SectionLabel>
-          <button
-            onClick={isLayoutRunning ? stopLayout : startLayout}
-            className={`flex w-full items-center gap-2 rounded border px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest ${
-              isLayoutRunning
-                ? "border-violet-500 bg-violet-500/20 text-violet-100"
-                : "border-zinc-800 bg-[#0d0d14] text-zinc-300 hover:border-amber-700 hover:text-amber-300"
-            }`}
-          >
-            {isLayoutRunning ? (
-              <>
-                <Pause className="h-3 w-3" /> pause settling
-              </>
-            ) : (
-              <>
-                <Play className="h-3 w-3" /> run layout
-              </>
-            )}
-          </button>
-          {/* Pt 6: settle-after-drag toggle. When ON, FA2 re-runs for ~5s
-              after the user releases a dragged book so neighbors re-arrange
-              around the new position. */}
-          <label className="mt-2 flex items-center gap-2 font-mono text-[11px] text-zinc-300 cursor-pointer">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 accent-amber-400 cursor-pointer"
-              checked={settleAfterDrag}
-              onChange={onSettleAfterDragToggle}
-            />
-            <span>re-settle after drag</span>
-          </label>
-          <div className="mt-1 ml-5 text-[10px] text-zinc-500 font-mono">
-            restart layout briefly after releasing a node
-          </div>
-        </section>
+            <SectionLabel icon={<Wand2 className="h-3 w-3" />}>Layout</SectionLabel>
+            <Card>
+              <SecondaryButton
+                onClick={isLayoutRunning ? stopLayout : startLayout}
+              >
+                {isLayoutRunning ? (
+                  <>
+                    <Pause className="h-3 w-3" /> pause settling
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-3 w-3" /> run layout
+                  </>
+                )}
+              </SecondaryButton>
+              <label className="mt-2 flex items-center gap-2 font-mono text-[11px] text-content-secondary cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-accent-main cursor-pointer"
+                  checked={settleAfterDrag}
+                  onChange={onSettleAfterDragToggle}
+                />
+                <span>re-settle after drag</span>
+              </label>
+              <div className="mt-1 ml-5 text-[10px] text-content-tertiary font-mono">
+                restart layout briefly after releasing a node
+              </div>
+            </Card>
+          </section>
         )}
 
-        {/* Query mode actions — only on the legacy Query mode (different
-            from the new Agent Search tab which has its own re-run button). */}
         {activeTab === "brain" && mode === "query" && showQueryRerun && onRerun && (
           <section>
-            <SectionLabel>Actions</SectionLabel>
-            <button
-              onClick={onRerun}
-              className="flex w-full items-center gap-2 rounded border border-zinc-800 bg-[#0d0d14] px-2 py-1.5 font-mono text-[11px] uppercase tracking-widest text-zinc-300 hover:border-amber-700 hover:text-amber-300"
-            >
+            <SectionLabel icon={<Zap className="h-3 w-3" />}>Actions</SectionLabel>
+            <SecondaryButton onClick={onRerun}>
               <Zap className="h-3 w-3" /> re-run synthesis
-            </button>
+            </SecondaryButton>
           </section>
         )}
       </div>
-
-      {/* Footer close button removed — relocated to the top-left of the
-          header strip (above). One escape action, surfaced where the
-          user lands first when entering the graph view. */}
     </aside>
   );
 }
 
-
 // ────────────────────────────────────────────────────────────────────────
-// Pt 7 — Agent Search tab. Wraps the existing query state that
-// GraphViewer's useQueryGraph already manages; the tab just renders
-// the input + the result summary chips. Heavy lifting (extracting
-// seeds, expanding subgraph, calling discover for synthesis) happens
-// in the parent so this component is purely presentational.
+// Agent Search tab — composer + output. The tab owns the four synthesis
+// modes, web grounding, validate, and the synthesis body with explicit
+// lane pills so the user always knows where evidence came from.
 // ────────────────────────────────────────────────────────────────────────
 
 interface AgentSearchTabProps {
@@ -1285,6 +1427,7 @@ interface AgentSearchTabProps {
   onWebGroundingChange?: (v: boolean) => void;
   followUpAvailable?: boolean;
   followUpPreview?: string;
+  onSendToChat?: (text: string) => void;
 }
 
 function AgentSearchTab(props: AgentSearchTabProps) {
@@ -1309,7 +1452,7 @@ function AgentSearchTab(props: AgentSearchTabProps) {
     webGroundingEnabled = false,
     onWebGroundingChange,
     followUpAvailable = false,
-    followUpPreview = "",
+    onSendToChat,
   } = props;
   const canRun = phase !== "loading" && query.trim().length > 0;
   const modeOptions: Array<{
@@ -1324,24 +1467,23 @@ function AgentSearchTab(props: AgentSearchTabProps) {
   ];
   return (
     <>
-      <section className="rounded-lg border border-amber-500/25 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.14),transparent_45%),linear-gradient(135deg,rgba(24,24,27,0.98),rgba(9,9,14,0.98))] p-3 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
+      <Card accent>
         <div className="mb-3 flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <SectionLabel>Query Graph</SectionLabel>
-            <div className="mt-1 text-[11px] text-zinc-400">
+            <SectionLabel icon={<Search className="h-3 w-3" />}>Composer</SectionLabel>
+            <div className="text-[11px] text-content-tertiary">
               Nodes · edges · synthesis
             </div>
           </div>
-          <div
-            className={
-              "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-technical " +
-              (phase === "loading"
-                ? "border-amber-500/50 bg-amber-500/10 text-amber-200"
+          <Badge
+            tone={
+              phase === "loading"
+                ? "warning"
                 : phase === "ready"
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                  ? "success"
                   : phase === "error"
-                    ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
-                    : "border-zinc-800 bg-zinc-950/70 text-zinc-500")
+                    ? "error"
+                    : "neutral"
             }
           >
             {phase === "loading"
@@ -1351,18 +1493,27 @@ function AgentSearchTab(props: AgentSearchTabProps) {
                 : phase === "error"
                   ? "error"
                   : "idle"}
-          </div>
+          </Badge>
         </div>
         <GraphProgressNarrator steps={progressSteps} />
         {phase === "ready" && onClear && (
-          <BackToBrainButton onClick={onClear} className="mb-3" />
+          <button
+            onClick={onClear}
+            className="mb-3 inline-flex w-full items-center justify-between rounded-md border border-border-minimal bg-[var(--bg-base)] px-3 py-1.5 text-[10px] font-mono uppercase tracking-[0.18em] text-content-secondary transition-colors hover:border-content-secondary hover:text-content-primary"
+          >
+            <span className="flex items-center gap-1.5">
+              <ChevronLeft className="h-3 w-3" />
+              Back to brain
+            </span>
+            <span className="h-1.5 w-1.5 rounded-full bg-accent-main" />
+          </button>
         )}
         <div className="space-y-3">
           {onSynthesisModeChange && (
             <div
               role="radiogroup"
               aria-label="Synthesis mode"
-              className="grid grid-cols-1 gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950/75 p-1 min-[420px]:grid-cols-2"
+              className="grid grid-cols-2 gap-1.5"
             >
               {modeOptions.map((opt) => {
                 const active = synthesisMode === opt.id;
@@ -1374,10 +1525,10 @@ function AgentSearchTab(props: AgentSearchTabProps) {
                     aria-checked={active}
                     onClick={() => onSynthesisModeChange(opt.id)}
                     className={
-                      "rounded-md border px-2 py-2 text-left transition-all " +
+                      "rounded-md border px-2 py-2 text-left transition-colors " +
                       (active
-                        ? "border-amber-400/70 bg-amber-500/15 text-amber-100 shadow-[0_0_18px_rgba(245,158,11,0.16)]"
-                        : "border-transparent bg-zinc-900/60 text-zinc-500 hover:border-zinc-700 hover:text-zinc-200")
+                        ? "border-accent-main bg-accent-main/15 text-accent-main"
+                        : "border-border-minimal bg-[var(--bg-base)] text-content-tertiary hover:border-content-secondary hover:text-content-secondary")
                     }
                   >
                     <span className="block text-[11px] font-semibold">
@@ -1385,8 +1536,8 @@ function AgentSearchTab(props: AgentSearchTabProps) {
                     </span>
                     <span
                       className={
-                        "mt-0.5 block text-[9px] font-technical " +
-                        (active ? "text-amber-300/80" : "text-zinc-600")
+                        "mt-0.5 block text-[9px] font-mono uppercase tracking-widest " +
+                        (active ? "text-accent-main/80" : "text-content-tertiary")
                       }
                     >
                       {opt.meta}
@@ -1415,41 +1566,19 @@ function AgentSearchTab(props: AgentSearchTabProps) {
                     ? "What should this corpus connect but doesn't?"
                     : "What does my library think about...?"
             }
-            className="w-full resize-none rounded-md border border-zinc-800 bg-[#09090f] px-3 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/70 focus:outline-none focus:ring-1 focus:ring-amber-500/20"
+            className="w-full resize-none rounded-md border border-border-minimal bg-[var(--bg-base)] px-3 py-2 text-[13px] leading-relaxed text-content-primary placeholder:text-content-tertiary focus:border-accent-main focus:outline-none"
           />
           {phase === "ready" && followUpAvailable ? (
-            <div className="grid grid-cols-1 gap-1.5 min-[420px]:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => onRun("new")}
-                disabled={!canRun}
-                className="flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-sky-500/35 bg-sky-500/10 px-2 py-2 text-xs font-semibold text-sky-100 transition-all hover:border-sky-300/70 hover:bg-sky-500/18 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900/60 disabled:text-zinc-600"
-                title="Start a clean graph query from the text above"
-              >
+            <div className="grid grid-cols-2 gap-1.5">
+              <SecondaryButton onClick={() => onRun("new")} disabled={!canRun}>
                 <PlusCircle className="h-3.5 w-3.5" /> New
-              </button>
-              <button
-                type="button"
-                onClick={() => onRun("followup")}
-                disabled={!canRun}
-                className="flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-amber-500/45 bg-amber-500/12 px-2 py-2 text-xs font-semibold text-amber-100 transition-all hover:border-amber-300/75 hover:bg-amber-500/22 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900/60 disabled:text-zinc-600"
-                title={followUpPreview || "Continue from the last graph answer"}
-              >
+              </SecondaryButton>
+              <PrimaryButton onClick={() => onRun("followup")} disabled={!canRun} active>
                 <GitBranch className="h-3.5 w-3.5" /> Continue
-              </button>
+              </PrimaryButton>
             </div>
           ) : (
-            <button
-              onClick={() => onRun("new")}
-              disabled={!canRun}
-              aria-busy={phase === "loading"}
-              className={
-                "flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed " +
-                (phase === "loading"
-                  ? "border-amber-500/60 bg-amber-500/15 text-amber-100"
-                  : "border-amber-500/35 bg-amber-500/10 text-amber-100 hover:border-amber-400/70 hover:bg-amber-500/20 disabled:border-zinc-800 disabled:bg-zinc-900/60 disabled:text-zinc-600")
-              }
-            >
+            <PrimaryButton onClick={() => onRun("new")} disabled={!canRun} active={phase === "loading"}>
               {phase === "loading" ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" /> Building Graph
@@ -1459,9 +1588,9 @@ function AgentSearchTab(props: AgentSearchTabProps) {
                   <Zap className="h-3.5 w-3.5" /> Run Graph Query
                 </>
               )}
-            </button>
+            </PrimaryButton>
           )}
-          <div className="min-h-4 text-[10px] text-zinc-500">
+          <div className="min-h-4 text-[10px] text-content-tertiary font-mono">
             {phase === "loading"
               ? "Building query nodes, edges, and synthesis..."
               : phase === "error"
@@ -1473,8 +1602,8 @@ function AgentSearchTab(props: AgentSearchTabProps) {
         {onWebGroundingChange && (
           <label
             className={
-              "mt-2 flex items-center gap-2 cursor-pointer select-none text-[10px] font-technical " +
-              (webGroundingEnabled ? "text-sky-300" : "text-zinc-500 hover:text-zinc-300")
+              "mt-3 flex items-center gap-2 cursor-pointer select-none text-[10px] font-mono " +
+              (webGroundingEnabled ? "text-sky-300" : "text-content-tertiary hover:text-content-secondary")
             }
             title="Add bounded live-web grounding to the graph synthesis. The graph still leads; web sources are tagged separately and used for current/public context."
           >
@@ -1482,21 +1611,12 @@ function AgentSearchTab(props: AgentSearchTabProps) {
               type="checkbox"
               checked={webGroundingEnabled}
               onChange={(e) => onWebGroundingChange(e.currentTarget.checked)}
-              className="accent-sky-600"
+              className="accent-sky-500"
             />
             <span className="flex items-center gap-1.5">
-              <Sparkles className="h-3 w-3" />
+              <Globe2 className="h-3 w-3" />
               <span>web grounding · current sources</span>
-              <span
-                className={
-                  "px-1 py-px rounded-sm text-[9px] " +
-                  (webGroundingEnabled
-                    ? "bg-sky-900/40 text-sky-200 border border-sky-700/40"
-                    : "bg-zinc-800 text-zinc-500 border border-zinc-700")
-                }
-              >
-                opt-in
-              </span>
+              <LaneChip lane="web" label="opt-in" />
             </span>
           </label>
         )}
@@ -1504,8 +1624,8 @@ function AgentSearchTab(props: AgentSearchTabProps) {
         {onValidateSynthesisChange && (
           <label
             className={
-              "mt-2 flex items-center gap-2 cursor-pointer select-none text-[10px] font-technical " +
-              (validateSynthesis ? "text-amber-300" : "text-zinc-500 hover:text-zinc-300")
+              "mt-2 flex items-center gap-2 cursor-pointer select-none text-[10px] font-mono " +
+              (validateSynthesis ? "text-amber-300" : "text-content-tertiary hover:text-content-secondary")
             }
             title="Run a second auditor + editor pass to catch fabricated terms, missing citations, and shell sentences. Costs ~3× the tokens of a normal query (draft + critique + revise calls)."
           >
@@ -1513,77 +1633,72 @@ function AgentSearchTab(props: AgentSearchTabProps) {
               type="checkbox"
               checked={validateSynthesis}
               onChange={(e) => onValidateSynthesisChange(e.currentTarget.checked)}
-              className="accent-amber-600"
+              className="accent-amber-500"
             />
             <span className="flex items-center gap-1.5">
+              <ShieldCheck className="h-3 w-3" />
               <span>validate · draft - critique - revise</span>
-              <span
-                className={
-                  "px-1 py-px rounded-sm text-[9px] " +
-                  (validateSynthesis
-                    ? "bg-amber-900/40 text-amber-200 border border-amber-700/40"
-                    : "bg-zinc-800 text-zinc-500 border border-zinc-700")
-                }
-              >
-                ~3× cost
-              </span>
+              <Badge tone={validateSynthesis ? "warning" : "neutral"}>~3× cost</Badge>
             </span>
           </label>
         )}
-      </section>
+      </Card>
 
+      {/* Synthesis output */}
       {phase === "ready" && synthesisMarkdown && (
         <section>
-          <SectionLabel>
+          <SectionLabel icon={<Sparkles className="h-3 w-3" />} hint={
+            <LaneChip lane="corpus" label="corpus" />
+          }>
             {synthesisMode === "ideation"
-              ? "Build Idea"
+              ? "Build idea"
               : synthesisMode === "nuance"
                 ? "Nuance"
                 : synthesisMode === "gap"
-                  ? "Gap Analysis"
+                  ? "Gap analysis"
                   : "Synthesis"}
           </SectionLabel>
-          <div className="rounded border border-zinc-800 bg-[#0d0d14] px-3 py-3 synthesis-body custom-scroll max-h-[70vh] overflow-y-auto">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {synthesisMarkdown || ""}
-            </ReactMarkdown>
-          </div>
+          <Card>
+            <div className="synthesis-body max-h-[70vh] overflow-y-auto custom-scroll">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {synthesisMarkdown || ""}
+              </ReactMarkdown>
+            </div>
+          </Card>
         </section>
       )}
 
-      {phase === "ready" && (seedNames?.length || 0) > 0 && (
-        <ChipList label="Seeds" items={seedNames || []} tone="cyan" />
-      )}
-      {phase === "ready" && (sourceNames?.length || 0) > 0 && (
-        <ChipList label="Files used" items={sourceNames || []} tone="emerald" />
-      )}
-      {phase === "ready" && (bridgeNames?.length || 0) > 0 && (
-        <ChipList label="Bridges" items={bridgeNames || []} tone="violet" />
-      )}
-      {phase === "ready" && (hubNames?.length || 0) > 0 && (
-        <ChipList label="Hubs" items={hubNames || []} tone="amber" />
-      )}
-      {phase === "ready" && (gaps?.length || 0) > 0 && (
-        <section>
-          <SectionLabel>Gaps</SectionLabel>
-          <ul className="flex flex-wrap gap-1.5 font-mono text-[10px]">
-            {(gaps || []).slice(0, 8).map((g, i) => (
-              <li
-                key={i}
-                className="max-w-full rounded border border-rose-700/40 bg-rose-500/5 px-1.5 py-0.5 text-rose-200"
-                title={`${g.entity_a_name || "?"} ↔ ${g.entity_b_name || "?"}`}
-              >
-                <span className="inline-block max-w-[9rem] truncate align-bottom">
-                  {g.entity_a_name || "?"}
-                </span>{" "}
-                <span className="text-rose-400">↔</span>{" "}
-                <span className="inline-block max-w-[9rem] truncate align-bottom">
-                  {g.entity_b_name || "?"}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {/* Source / seed / bridge / hub chips */}
+      {phase === "ready" && (
+        <>
+          <ChipList label="Seeds" items={seedNames || []} lane="corpus" />
+          <ChipList label="Files used" items={sourceNames || []} lane="corpus" />
+          <ChipList label="Bridges" items={bridgeNames || []} lane="graph" />
+          <ChipList label="Hubs" items={hubNames || []} lane="graph" />
+
+          {onSendToChat && (gaps?.length || 0) > 0 && (
+            <section>
+              <SectionLabel icon={<Target className="h-3 w-3" />}>Gaps</SectionLabel>
+              <ul className="flex flex-wrap gap-1.5 font-mono text-[10px]">
+                {(gaps || []).slice(0, 8).map((g, i) => (
+                  <li
+                    key={i}
+                    className="max-w-full rounded border border-rose-700/40 bg-rose-500/5 px-1.5 py-0.5 text-rose-200"
+                    title={`${g.entity_a_name || "?"} ↔ ${g.entity_b_name || "?"}`}
+                  >
+                    <span className="inline-block max-w-[9rem] truncate align-bottom">
+                      {g.entity_a_name || "?"}
+                    </span>{" "}
+                    <span className="text-rose-400">↔</span>{" "}
+                    <span className="inline-block max-w-[9rem] truncate align-bottom">
+                      {g.entity_b_name || "?"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </>
       )}
     </>
   );
@@ -1592,38 +1707,48 @@ function AgentSearchTab(props: AgentSearchTabProps) {
 function ChipList({
   label,
   items,
-  tone,
+  lane,
+  onPick,
 }: {
   label: string;
   items: string[];
-  tone: "cyan" | "violet" | "amber" | "emerald";
+  lane: "corpus" | "graph" | "web";
+  onPick?: (text: string) => void;
 }) {
-  const toneClass =
-    tone === "cyan"
-      ? "border-cyan-700/40 bg-cyan-500/5 text-cyan-200"
-      : tone === "violet"
-        ? "border-violet-700/40 bg-violet-500/5 text-violet-200"
-        : tone === "emerald"
-          ? "border-emerald-700/40 bg-emerald-500/5 text-emerald-200"
-        : "border-amber-700/40 bg-amber-500/5 text-amber-200";
+  if (items.length === 0) return null;
+  const bg = laneBg(lane);
+  const border = laneBorder(lane);
+  const text = laneText(lane);
   return (
     <section>
-      <SectionLabel>{label}</SectionLabel>
+      <SectionLabel hint={<LaneChip lane={lane} label={lane} count={items.length} />}>
+        {label}
+      </SectionLabel>
       <div className="flex flex-wrap gap-1.5">
         {items.slice(0, 12).map((name, i) => (
-          <span
+          <button
             key={`${name}-${i}`}
-            className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${toneClass}`}
-            title={name}
+            type="button"
+            onClick={() => onPick?.(name)}
+            disabled={!onPick}
+            className="group inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] hover:opacity-90 disabled:cursor-default"
+            style={{
+              borderColor: border,
+              background: bg,
+              color: text,
+            }}
+            title={onPick ? `Send "${name}" to chat` : name}
           >
-            {name.length > 28 ? name.slice(0, 28) + "…" : name}
-          </span>
+            <span className="truncate max-w-[14rem]">{name.length > 28 ? name.slice(0, 28) + "…" : name}</span>
+            {onPick && (
+              <ArrowRight className="h-2.5 w-2.5 shrink-0 opacity-50 transition-opacity group-hover:opacity-100" />
+            )}
+          </button>
         ))}
       </div>
     </section>
   );
 }
-
 
 function BrainQuickGraphCard({
   query,
@@ -1642,24 +1767,23 @@ function BrainQuickGraphCard({
 }) {
   const canRun = !disabled && phase !== "loading" && query.trim().length > 0;
   return (
-    <section className="rounded-lg border border-amber-500/25 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.14),transparent_45%),linear-gradient(135deg,rgba(24,24,27,0.98),rgba(9,9,14,0.98))] p-3 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
+    <Card accent>
       <div className="mb-3 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <SectionLabel>Build Query Graph</SectionLabel>
-          <div className="mt-1 text-[11px] text-zinc-400">
-            Quick graph from the Brain overview
+          <SectionLabel icon={<Zap className="h-3 w-3" />}>Build query graph</SectionLabel>
+          <div className="text-[11px] text-content-tertiary">
+            Builds only the graph for this query
           </div>
         </div>
-        <div
-          className={
-            "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-technical " +
-            (phase === "loading"
-              ? "border-amber-500/50 bg-amber-500/10 text-amber-200"
+        <Badge
+          tone={
+            phase === "loading"
+              ? "warning"
               : phase === "ready"
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                ? "success"
                 : phase === "error"
-                  ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
-                  : "border-zinc-800 bg-zinc-950/70 text-zinc-500")
+                  ? "error"
+                  : "neutral"
           }
         >
           {phase === "loading"
@@ -1669,7 +1793,7 @@ function BrainQuickGraphCard({
               : phase === "error"
                 ? "error"
                 : "idle"}
-        </div>
+        </Badge>
       </div>
       <GraphProgressNarrator steps={progressSteps} />
       <textarea
@@ -1684,19 +1808,9 @@ function BrainQuickGraphCard({
         }}
         placeholder="Ask the graph: how does X connect to Y across this corpus?"
         disabled={disabled}
-        className="w-full resize-none rounded-md border border-zinc-800 bg-[#09090f] px-3 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/70 focus:outline-none focus:ring-1 focus:ring-amber-500/20 disabled:opacity-50"
+        className="w-full resize-none rounded-md border border-border-minimal bg-[var(--bg-base)] px-3 py-2 text-[13px] leading-relaxed text-content-primary placeholder:text-content-tertiary focus:border-accent-main focus:outline-none disabled:opacity-50"
       />
-      <button
-        onClick={onRun}
-        disabled={!canRun}
-        aria-busy={phase === "loading"}
-        className={
-          "mt-2 flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed " +
-          (phase === "loading"
-            ? "border-amber-500/60 bg-amber-500/15 text-amber-100"
-            : "border-amber-500/35 bg-amber-500/10 text-amber-100 hover:border-amber-400/70 hover:bg-amber-500/20 disabled:border-zinc-800 disabled:bg-zinc-900/60 disabled:text-zinc-600")
-        }
-      >
+      <PrimaryButton onClick={onRun} disabled={!canRun} active={phase === "loading"}>
         {phase === "loading" ? (
           <>
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Building Graph
@@ -1706,24 +1820,24 @@ function BrainQuickGraphCard({
             <Zap className="h-3.5 w-3.5" /> Build Graph
           </>
         )}
-      </button>
-      <div className="mt-1 text-[10px] text-zinc-500 font-mono">
+      </PrimaryButton>
+      <div className="mt-1 text-[10px] text-content-tertiary font-mono">
         {disabled
           ? "select a corpus first"
           : phase === "loading"
-            ? "building query graph + synthesis..."
+            ? "building bounded query graph..."
             : "Ctrl + Enter"}
       </div>
-    </section>
+    </Card>
   );
 }
 
-
 // ────────────────────────────────────────────────────────────────────────
-// Pt 7 — Graph Query tab. Two subsections in one tab:
+// Graph Query tab — refine + contextual questions + entity filter.
+// Two subsections in one tab:
 //   (a) Entity-type search — filter the corpora's entities by type +
 //       substring. Results are clickable; clicking sends to chat or
-//       just shows the entity name (TODO: highlight on canvas).
+//       just shows the entity name.
 //   (b) HyDE refinement — user types a draft question, hits "Refine",
 //       gets back three structured chip lists (alternative phrasings /
 //       opposing framings / related questions). Each chip is clickable
@@ -1737,8 +1851,6 @@ function BrainQuickGraphCard({
 interface GraphQueryTabProps {
   corpusIds: string[];
   onSendToChat?: (text: string) => void;
-  onBuildGraph?: (query: string) => void;
-  graphProgressSteps?: GraphProgressStep[];
   graphActive?: boolean;
   onClearGraph?: () => void;
 }
@@ -1746,18 +1858,9 @@ interface GraphQueryTabProps {
 function GraphQueryTab({
   corpusIds,
   onSendToChat,
-  onBuildGraph,
-  graphProgressSteps,
   graphActive,
   onClearGraph,
 }: GraphQueryTabProps) {
-  // Pt 7b: ONE input drives both HyDE refinement AND entity extraction.
-  // The question is the all-purpose entity search — typing it surfaces:
-  //   • alternative / opposing / related question chips (LLM-driven, cached)
-  //   • entities mentioned in the question that already exist in the corpus
-  //     (pure Cypher, recomputed every call)
-  // A second optional filter at the bottom (entity-type pill row) lets the
-  // user narrow the entity list without re-running.
   const [refineQ, setRefineQ] = useState<string>("");
   const [refineLoading, setRefineLoading] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
@@ -1787,17 +1890,7 @@ function GraphQueryTab({
     setContextualCached(false);
     setContextualSource(null);
     setConceptPacket(null);
-    onBuildGraph?.(question);
     try {
-      // refineQuery is idempotent: backend has a 24h Mongo cache keyed by
-      // hash(question + corpus_ids + resolved graph model); frontend layers a 5min
-      // result cache + in-flight dedupe on top of that. Same question
-      // never triggers two LLM calls.
-      //
-      // Pt 7b: the same response now ALSO carries `entities` extracted
-      // from the question via extract_query_entities (pure Cypher, not
-      // cached on the backend so it reflects live graph state). One
-      // round trip, two outputs.
       const res = await api.refineQuery(question, corpusIds);
       setRefinement(res.result);
       setEntities(res.entities || []);
@@ -1830,22 +1923,19 @@ function GraphQueryTab({
     } finally {
       setContextualLoading(false);
     }
-  }, [canRefine, refineQ, corpusIds, onBuildGraph]);
+  }, [canRefine, refineQ, corpusIds]);
 
-  // Filter the surfaced entities by type pill (client-side, no extra fetch).
   const filteredEntities =
     entityTypeFilter === ""
       ? entities
       : entities.filter((e) => e.entity_type === entityTypeFilter);
 
-  // Build the distinct entity-type pill row from what came back.
   const typesSeen = Array.from(
     new Set(entities.map((e) => e.entity_type).filter(Boolean)),
   );
   const contextualFailedWithoutPacket = Boolean(contextualError && !contextualQuestions);
   const usingLocalFallback = contextualSource === "local_fallback";
   const questionBuilderProgressSteps: GraphProgressStep[] = [
-    ...(graphProgressSteps || []),
     {
       id: "match-concepts",
       label: "Matching your words to concepts in the corpus.",
@@ -1902,24 +1992,21 @@ function GraphQueryTab({
 
   return (
     <>
-      {/* ── A. Question input — THE primary interaction. Drives both
-              HyDE refinement and entity extraction in one call. ──── */}
-      <section className="rounded-lg border border-amber-500/25 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.14),transparent_45%),linear-gradient(135deg,rgba(24,24,27,0.98),rgba(9,9,14,0.98))] p-3 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
+      <Card accent>
         <div className="mb-3 flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <SectionLabel>Refine Query</SectionLabel>
-            <div className="mt-1 text-[11px] text-zinc-400">
-              Quick chips · graph-aware buckets
+            <SectionLabel icon={<Wand2 className="h-3 w-3" />}>Refine query</SectionLabel>
+            <div className="text-[11px] text-content-tertiary">
+              Semantic query builder
             </div>
           </div>
-          <div
-            className={
-              "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-technical " +
-              (refineLoading || contextualLoading
-                ? "border-amber-500/50 bg-amber-500/10 text-amber-200"
+          <Badge
+            tone={
+              refineLoading || contextualLoading
+                ? "warning"
                 : refinement
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-                  : "border-zinc-800 bg-zinc-950/70 text-zinc-500")
+                  ? "success"
+                  : "neutral"
             }
           >
             {refineLoading
@@ -1929,7 +2016,7 @@ function GraphQueryTab({
                 : refinement
                   ? "ready"
                   : "idle"}
-          </div>
+          </Badge>
         </div>
         <GraphProgressNarrator steps={questionBuilderProgressSteps} />
         <textarea
@@ -1943,30 +2030,20 @@ function GraphQueryTab({
             }
           }}
           placeholder="Type a question. Generate sharper corpus-aware variants."
-          className="w-full resize-none rounded-md border border-zinc-800 bg-[#09090f] px-3 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/70 focus:outline-none focus:ring-1 focus:ring-amber-500/20"
+          className="w-full resize-none rounded-md border border-border-minimal bg-[var(--bg-base)] px-3 py-2 text-[13px] leading-relaxed text-content-primary placeholder:text-content-tertiary focus:border-accent-main focus:outline-none"
         />
-        <button
-          onClick={runRefine}
-          disabled={!canRefine}
-          aria-busy={refineLoading}
-          className={
-            "mt-2 flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed " +
-            (refineLoading
-              ? "border-amber-500/60 bg-amber-500/15 text-amber-100"
-              : "border-amber-500/35 bg-amber-500/10 text-amber-100 hover:border-amber-400/70 hover:bg-amber-500/20 disabled:border-zinc-800 disabled:bg-zinc-900/60 disabled:text-zinc-600")
-          }
-        >
-        {refineLoading ? (
-          <>
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Quick Refine
+        <PrimaryButton onClick={runRefine} disabled={!canRefine} active={refineLoading}>
+          {refineLoading ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Quick Refine
             </>
           ) : (
             <>
-              <Sparkles className="h-3.5 w-3.5" /> Run + Build Questions
+              <Sparkles className="h-3.5 w-3.5" /> Refine Query
             </>
           )}
-        </button>
-        <div className="mt-1 text-[10px] text-zinc-500 font-mono">
+        </PrimaryButton>
+        <div className="mt-1 text-[10px] text-content-tertiary font-mono">
           {refineLoading
             ? "building quick phrasings + extracting entities..."
             : contextualLoading
@@ -1984,33 +2061,41 @@ function GraphQueryTab({
                 : "fresh run · cached 24h · Ctrl + Enter"}
         </div>
         {graphActive && onClearGraph && (
-          <BackToBrainButton onClick={onClearGraph} className="mt-2" />
+          <button
+            onClick={onClearGraph}
+            className="mt-2 inline-flex w-full items-center justify-between rounded-md border border-border-minimal bg-[var(--bg-base)] px-3 py-1.5 text-[10px] font-mono uppercase tracking-[0.18em] text-content-secondary transition-colors hover:border-content-secondary hover:text-content-primary"
+          >
+            <span className="flex items-center gap-1.5">
+              <ChevronLeft className="h-3 w-3" />
+              Back to brain
+            </span>
+            <span className="h-1.5 w-1.5 rounded-full bg-accent-main" />
+          </button>
         )}
-      </section>
+      </Card>
 
-      {/* ── B. HyDE chip groups (when refined) ─────────────────────── */}
       {refinement && (
         <>
           {refinement.alternative_phrasings.length > 0 && (
             <RefineChips
-              label="Alternative Phrasings"
-              tone="cyan"
+              label="Alternative phrasings"
+              lane="corpus"
               items={refinement.alternative_phrasings}
               onPick={onSendToChat}
             />
           )}
           {refinement.opposing_framings.length > 0 && (
             <RefineChips
-              label="Opposing Framings"
-              tone="rose"
+              label="Opposing framings"
+              lane="graph"
               items={refinement.opposing_framings}
               onPick={onSendToChat}
             />
           )}
           {refinement.related_questions.length > 0 && (
             <RefineChips
-              label="Related Questions"
-              tone="emerald"
+              label="Related questions"
+              lane="graph"
               items={refinement.related_questions}
               onPick={onSendToChat}
             />
@@ -2029,11 +2114,17 @@ function GraphQueryTab({
         />
       )}
 
-      {/* ── C. Entities surfaced from the question ─────────────────── */}
       {entities.length > 0 && (
         <section>
-          <SectionLabel>
-            Entities in Your Library ({filteredEntities.length}/{entities.length})
+          <SectionLabel
+            icon={<FileText className="h-3 w-3" />}
+            hint={
+              <span className="font-mono text-content-tertiary">
+                {filteredEntities.length}/{entities.length}
+              </span>
+            }
+          >
+            Entities in your library
           </SectionLabel>
           {typesSeen.length > 1 && (
             <div className="mb-2 flex flex-wrap gap-1">
@@ -2041,8 +2132,8 @@ function GraphQueryTab({
                 onClick={() => setEntityTypeFilter("")}
                 className={`rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest ${
                   entityTypeFilter === ""
-                    ? "border-amber-500/60 bg-amber-500/10 text-amber-200"
-                    : "border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:text-zinc-200"
+                    ? "border-accent-main bg-accent-main/10 text-accent-main"
+                    : "border-border-minimal bg-[var(--bg-base)] text-content-tertiary hover:text-content-secondary"
                 }`}
               >
                 all
@@ -2053,8 +2144,8 @@ function GraphQueryTab({
                   onClick={() => setEntityTypeFilter(t)}
                   className={`rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest ${
                     entityTypeFilter === t
-                      ? "border-amber-500/60 bg-amber-500/10 text-amber-200"
-                      : "border-zinc-800 bg-[#0d0d14] text-zinc-400 hover:text-zinc-200"
+                      ? "border-accent-main bg-accent-main/10 text-accent-main"
+                      : "border-border-minimal bg-[var(--bg-base)] text-content-tertiary hover:text-content-secondary"
                   }`}
                 >
                   {t}
@@ -2062,35 +2153,36 @@ function GraphQueryTab({
               ))}
             </div>
           )}
-          <div className="max-h-72 overflow-y-auto rounded border border-zinc-900">
+          <ul className="max-h-72 overflow-y-auto rounded border border-border-minimal custom-scroll">
             {filteredEntities.map((row) => (
-              <button
-                key={row.entity_id}
-                onClick={() => onSendToChat?.(row.display_name)}
-                className="flex w-full items-center justify-between gap-2 border-b border-zinc-900 px-2 py-1 text-left last:border-b-0 hover:bg-zinc-900/50"
-                title={`${row.entity_type} · ${row.mention_count} mentions${
-                  row.score != null ? ` · score ${row.score.toFixed(1)}` : ""
-                }`}
-              >
-                <span className="font-mono text-xs text-zinc-100 truncate">
-                  {row.display_name}
-                </span>
-                <span className="shrink-0 font-mono text-[9px] uppercase tracking-widest text-zinc-500">
-                  {row.entity_type}
-                </span>
-              </button>
+              <li key={row.entity_id}>
+                <button
+                  onClick={() => onSendToChat?.(row.display_name)}
+                  className="flex w-full items-center justify-between gap-2 border-b border-border-minimal px-2 py-1 text-left last:border-b-0 hover:bg-[var(--bg-base)]/50"
+                  title={`${row.entity_type} · ${row.mention_count} mentions${
+                    row.score != null ? ` · score ${row.score.toFixed(1)}` : ""
+                  }`}
+                >
+                  <span className="font-mono text-[11px] text-content-primary truncate">
+                    {row.display_name}
+                  </span>
+                  <span className="shrink-0 font-mono text-[9px] uppercase tracking-widest text-content-tertiary">
+                    {row.entity_type}
+                  </span>
+                </button>
+              </li>
             ))}
             {filteredEntities.length === 0 && (
-              <div className="px-2 py-2 text-[10px] text-zinc-600 font-mono">
+              <li className="px-2 py-2 text-[10px] text-content-tertiary font-mono">
                 no entities match this filter
-              </div>
+              </li>
             )}
-          </div>
+          </ul>
         </section>
       )}
 
       {!refinement && !refineLoading && (
-        <div className="text-[11px] text-zinc-600 font-mono">
+        <div className="text-[11px] text-content-tertiary font-mono leading-relaxed">
           Type a question above and run it. You'll get suggested phrasings +
           the actual entities your library has on the topic. Click any chip
           or entity to send it to the chat.
@@ -2102,35 +2194,35 @@ function GraphQueryTab({
 
 function RefineChips({
   label,
-  tone,
+  lane,
   items,
   onPick,
 }: {
   label: string;
-  tone: "cyan" | "rose" | "emerald";
+  lane: "corpus" | "graph" | "web";
   items: string[];
   onPick?: (text: string) => void;
 }) {
-  const toneClass =
-    tone === "cyan"
-      ? "border-cyan-700/40 bg-cyan-500/5 text-cyan-100 hover:border-cyan-500/70 hover:bg-cyan-500/15"
-      : tone === "rose"
-        ? "border-rose-700/40 bg-rose-500/5 text-rose-100 hover:border-rose-500/70 hover:bg-rose-500/15"
-        : "border-emerald-700/40 bg-emerald-500/5 text-emerald-100 hover:border-emerald-500/70 hover:bg-emerald-500/15";
+  const border = laneBorder(lane);
+  const bg = laneBg(lane);
+  const text = laneText(lane);
   return (
     <section>
-      <SectionLabel>{label}</SectionLabel>
+      <SectionLabel hint={<LaneChip lane={lane} label={lane} count={items.length} />}>
+        {label}
+      </SectionLabel>
       <ul className="space-y-1.5">
-        {items.map((text, i) => (
-          <li key={`${i}-${text.slice(0, 24)}`}>
+        {items.map((t, i) => (
+          <li key={`${i}-${t.slice(0, 24)}`}>
             <button
-              onClick={() => onPick?.(text)}
+              onClick={() => onPick?.(t)}
               disabled={!onPick}
-              className={`group flex w-full items-start gap-2 rounded border px-2 py-1.5 text-left font-mono text-[11px] leading-relaxed transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${toneClass}`}
+              className="group flex w-full items-start gap-2 rounded border px-2 py-1.5 text-left font-mono text-[11px] leading-relaxed transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:opacity-90"
+              style={{ borderColor: border, background: bg, color: text }}
               title={onPick ? "Send to chat" : "Read-only"}
             >
               <Send className="h-3 w-3 shrink-0 mt-0.5 opacity-50 group-hover:opacity-100 transition-opacity" />
-              <span className="flex-1 min-w-0 break-words">{text}</span>
+              <span className="flex-1 min-w-0 break-words">{t}</span>
             </button>
           </li>
         ))}
@@ -2158,132 +2250,111 @@ function ContextualQuestionBuckets({
     key: keyof ContextualQuestions;
     label: string;
     meta: string;
-    className: string;
+    lane: "corpus" | "graph" | "web";
   }> = [
-    {
-      key: "rag",
-      label: "RAG",
-      meta: "retrieve",
-      className:
-        "border-cyan-700/40 bg-cyan-500/5 text-cyan-100 hover:border-cyan-500/70 hover:bg-cyan-500/15",
-    },
-    {
-      key: "research",
-      label: "Research",
-      meta: "evidence",
-      className:
-        "border-amber-700/40 bg-amber-500/5 text-amber-100 hover:border-amber-500/70 hover:bg-amber-500/15",
-    },
-    {
-      key: "nuance",
-      label: "Nuance",
-      meta: "tension",
-      className:
-        "border-violet-700/40 bg-violet-500/5 text-violet-100 hover:border-violet-500/70 hover:bg-violet-500/15",
-    },
-    {
-      key: "ideation",
-      label: "Ideation",
-      meta: "build",
-      className:
-        "border-emerald-700/40 bg-emerald-500/5 text-emerald-100 hover:border-emerald-500/70 hover:bg-emerald-500/15",
-    },
-    {
-      key: "gap",
-      label: "Gap",
-      meta: "absence",
-      className:
-        "border-rose-700/40 bg-rose-500/5 text-rose-100 hover:border-rose-500/70 hover:bg-rose-500/15",
-    },
+    { key: "rag", label: "RAG", meta: "retrieve", lane: "corpus" },
+    { key: "research", label: "Research", meta: "evidence", lane: "corpus" },
+    { key: "nuance", label: "Nuance", meta: "tension", lane: "graph" },
+    { key: "ideation", label: "Ideation", meta: "build", lane: "graph" },
+    { key: "gap", label: "Gap", meta: "absence", lane: "graph" },
   ];
   const hasAny = buckets.some((b) => (questions?.[b.key]?.length || 0) > 0);
 
   return (
-    <section className="rounded-lg border border-amber-500/25 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.12),transparent_45%),linear-gradient(135deg,rgba(24,24,27,0.96),rgba(9,9,14,0.98))] p-3 shadow-[0_16px_40px_rgba(0,0,0,0.24)]">
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div>
-          <SectionLabel>Context-Aware Questions</SectionLabel>
-          <div className="mt-1 text-[11px] text-zinc-400">
-            Corpus entities · graph neighbors · source hints
-            {conceptPacket && (
-              <span className="text-zinc-500">
-                {" "}· {conceptPacket.matched_entities.length} concepts
-              </span>
-            )}
+    <section>
+      <SectionLabel
+        icon={<Sparkles className="h-3 w-3" />}
+        hint={
+          <Badge
+            tone={
+              loading
+                ? "warning"
+                : cached
+                  ? "neutral"
+                  : source === "local_fallback"
+                    ? "error"
+                    : "success"
+            }
+          >
+            {loading
+              ? "building"
+              : source === "local_fallback"
+                ? "local"
+                : cached
+                  ? "cached"
+                  : source || "ready"}
+          </Badge>
+        }
+      >
+        Context-aware questions
+      </SectionLabel>
+      <Card>
+        <div className="mb-3 text-[11px] text-content-tertiary">
+          Corpus entities · graph neighbors · source hints
+          {conceptPacket && (
+            <span className="text-content-tertiary">
+              {" "}· {conceptPacket.matched_entities.length} concepts
+            </span>
+          )}
+        </div>
+        {loading && !hasAny && (
+          <div className="flex items-center gap-2 rounded-md border border-border-minimal bg-[var(--bg-base)] px-3 py-2 text-[11px] text-content-secondary">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-accent-main" />
+            generating graph-aware question buckets
           </div>
-        </div>
-        <div
-          className={
-            "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-technical " +
-            (loading
-              ? "border-amber-500/50 bg-amber-500/10 text-amber-200"
-              : cached
-                ? "border-zinc-700 bg-zinc-950/70 text-zinc-400"
-                : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200")
-          }
-        >
-          {loading
-            ? "building"
-            : source === "local_fallback"
-              ? "local"
-              : cached
-                ? "cached"
-                : source || "ready"}
-        </div>
-      </div>
+        )}
 
-      {loading && !hasAny && (
-        <div className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-[11px] text-zinc-400">
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-300" />
-          generating graph-aware question buckets
-        </div>
-      )}
+        {!loading && !hasAny && (
+          <div className="rounded-md border border-border-minimal bg-[var(--bg-base)] px-3 py-2 text-[11px] text-content-tertiary">
+            no graph-aware buckets generated
+          </div>
+        )}
 
-      {!loading && !hasAny && (
-        <div className="rounded-md border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-[11px] text-zinc-500">
-          no graph-aware buckets generated
-        </div>
-      )}
-
-      {hasAny && (
-        <div className="grid gap-2">
-          {buckets.map((bucket) => {
-            const items = questions?.[bucket.key] || [];
-            if (items.length === 0) return null;
-            return (
-              <div
-                key={bucket.key}
-                className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2"
-              >
-                <div className="mb-1.5 flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-300">
-                    {bucket.label}
-                  </span>
-                  <span className="font-technical text-[9px] text-zinc-600">
-                    {bucket.meta}
-                  </span>
+        {hasAny && (
+          <div className="grid gap-2">
+            {buckets.map((bucket) => {
+              const items = questions?.[bucket.key] || [];
+              if (items.length === 0) return null;
+              const border = laneBorder(bucket.lane);
+              const bg = laneBg(bucket.lane);
+              const text = laneText(bucket.lane);
+              return (
+                <div
+                  key={bucket.key}
+                  className="rounded-md border border-border-minimal bg-[var(--bg-base)] p-2"
+                >
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-content-secondary">
+                      {bucket.label}
+                      <LaneChip lane={bucket.lane} label={bucket.meta} />
+                    </span>
+                    <span className="font-mono text-[9px] text-content-tertiary">
+                      {items.length}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {items.map((t, i) => (
+                      <button
+                        key={`${bucket.key}-${i}-${t.slice(0, 24)}`}
+                        onClick={() => onPick?.(t)}
+                        disabled={!onPick}
+                        className="group flex w-full items-start gap-2 rounded border px-2 py-1.5 text-left font-mono text-[11px] leading-relaxed transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:opacity-90"
+                        style={{ borderColor: border, background: bg, color: text }}
+                        title={onPick ? "Send to chat" : "Read-only"}
+                      >
+                        <Send className="mt-0.5 h-3 w-3 shrink-0 opacity-50 group-hover:opacity-100 transition-opacity" />
+                        <span className="min-w-0 flex-1 break-words">
+                          {t}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  {items.map((text, i) => (
-                    <button
-                      key={`${bucket.key}-${i}-${text.slice(0, 24)}`}
-                      onClick={() => onPick?.(text)}
-                      disabled={!onPick}
-                      className={`group flex w-full items-start gap-2 rounded border px-2 py-1.5 text-left font-mono text-[11px] leading-relaxed transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${bucket.className}`}
-                      title={onPick ? "Send to chat" : "Read-only"}
-                    >
-                      <Send className="mt-0.5 h-3 w-3 shrink-0 opacity-50 group-hover:opacity-100 transition-opacity" />
-                      <span className="min-w-0 flex-1 break-words">
-                        {text}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </Card>
     </section>
   );
 }
