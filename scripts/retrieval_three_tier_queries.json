@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "description": "Default three-tier E2E RAG query set. These cases are intentionally mixed: definition, distinction, association, ontology/graph reasoning, architecture, and exact-token retrieval.",
+  "github_reference_stack": [
+    {
+      "name": "Ragas",
+      "url": "https://github.com/vibrantlabsai/ragas",
+      "why": "RAG evaluation patterns, test data generation, and app-level eval loops."
+    },
+    {
+      "name": "DeepEval",
+      "url": "https://github.com/confident-ai/deepeval",
+      "why": "Black-box LLM/RAG E2E eval framing and regression-test style assertions."
+    },
+    {
+      "name": "Arize Phoenix",
+      "url": "https://github.com/Arize-ai/phoenix",
+      "why": "Trace-first observability and retrieval/response eval comparison."
+    },
+    {
+      "name": "Qdrant RAG Eval",
+      "url": "https://github.com/qdrant/qdrant-rag-eval",
+      "why": "Route comparison across naive, hybrid, reranked, and evaluated RAG pipelines."
+    },
+    {
+      "name": "Qdrant Improving R in RAG Workshop",
+      "url": "https://github.com/qdrant/workshop-improving-r-in-rag",
+      "why": "Hybrid retrieval, sparse/dense representations, reranking, and MMR/diversity patterns."
+    }
+  ],
+  "queries": [
+    {
+      "id": "python_ai_distinction",
+      "query": "what is python and is ai essentially python",
+      "intent": "classification and distinction",
+      "why": "Tests exact conceptual distinction and graph evidence that Python and AI are separate entities with a usage relationship.",
+      "expected_best_route": "Graph Augmentation",
+      "anchor_groups": [
+        {"name": "python", "terms": ["python"], "required": true},
+        {"name": "ai", "terms": ["ai", "artificial intelligence"], "required": true},
+        {"name": "distinction", "terms": ["programming language", "not", "different", "separate"], "required": false}
+      ],
+      "expected_atoms": [
+        "Python classification",
+        "AI classification",
+        "Python-vs-AI distinction",
+        "Python as an AI/ML implementation tool"
+      ]
+    },
+    {
+      "id": "nlp_data_augmentation",
+      "query": "natural language processing and data augmentation",
+      "intent": "concept association",
+      "why": "Tests whether each tier can find the NLP/data-augmentation passage instead of generic synthetic-data hits.",
+      "expected_best_route": "Hybrid Search",
+      "anchor_groups": [
+        {"name": "nlp", "terms": ["natural language processing", "nlp"], "required": true},
+        {"name": "data_augmentation", "terms": ["data augmentation"], "required": true},
+        {"name": "synthetic_or_training", "terms": ["synthetic", "training", "augmentation"], "required": false}
+      ],
+      "expected_atoms": [
+        "NLP definition or scope",
+        "Data augmentation role",
+        "Relationship between augmentation and NLP training"
+      ]
+    },
+    {
+      "id": "ontology_power",
+      "query": "why are ontologies so powerful",
+      "intent": "ontology and graph reasoning",
+      "why": "Tests whether retrieval can answer a broad ontology question from corpus evidence even when the query is not an exact title.",
+      "expected_best_route": "Graph Augmentation",
+      "anchor_groups": [
+        {"name": "ontology", "terms": ["ontology", "ontologies"], "required": true},
+        {"name": "relations", "terms": ["relationship", "relation", "schema", "knowledge graph", "graph"], "required": false},
+        {"name": "power", "terms": ["powerful", "reasoning", "structure", "meaning"], "required": false}
+      ],
+      "expected_atoms": [
+        "Ontology as structured concepts and relations",
+        "Why relations improve reasoning/retrieval",
+        "How ontology reduces ambiguity"
+      ]
+    },
+    {
+      "id": "rag_tier_architecture",
+      "query": "how do vector search, hybrid search, and graph augmentation work together in rag",
+      "intent": "system architecture synthesis",
+      "why": "Tests the app's own retrieval-stack corpus knowledge and whether all route names map to the intended backend behavior.",
+      "expected_best_route": "Graph Augmentation",
+      "anchor_groups": [
+        {"name": "vector_search", "terms": ["vector search", "qdrant", "semantic"], "required": true},
+        {"name": "hybrid_search", "terms": ["hybrid search", "mongo", "lexical", "bm25"], "required": true},
+        {"name": "graph_augmentation", "terms": ["graph augmentation", "neo4j", "knowledge graph", "relations"], "required": true},
+        {"name": "rag", "terms": ["rag", "retrieval augmented generation", "retrieval-augmented generation"], "required": false}
+      ],
+      "expected_atoms": [
+        "Vector recall role",
+        "Hybrid lexical/exact evidence role",
+        "Graph structure/evidence role",
+        "Mongo hydration as proof text"
+      ]
+    },
+    {
+      "id": "dense_bm25_exact_tokens",
+      "query": "why can dense retrieval miss exact tokens and how does bm25 help",
+      "intent": "exact-token retrieval quality",
+      "why": "Tests lexical evidence and sparse-vs-dense reasoning. Hybrid should beat dense-only when exact terms matter.",
+      "expected_best_route": "Hybrid Search",
+      "anchor_groups": [
+        {"name": "dense_retrieval", "terms": ["dense retrieval", "embedding", "embeddings"], "required": true},
+        {"name": "exact_tokens", "terms": ["exact token", "exact tokens", "rare tokens", "identifiers"], "required": true},
+        {"name": "bm25", "terms": ["bm25", "sparse", "lexical"], "required": true}
+      ],
+      "expected_atoms": [
+        "Dense retrieval semantic limitation",
+        "Exact-token/BM25 strength",
+        "Hybrid fusion or reranking reason"
+      ]
+    }
+  ]
+}
