@@ -19,6 +19,7 @@ class RetrievalEvalCase:
     route: str
     ranked_ids: tuple[str, ...]
     relevance: Mapping[str, float]
+    exact_source_ids: tuple[str, ...] = ()
     latency_ms: float | None = None
     answer_sufficient: bool | None = None
     doc_ids: tuple[str, ...] = ()
@@ -104,6 +105,59 @@ def average_precision_at_k(
     return precision_sum / min(len(relevant_ids), k)
 
 
+def recall_at_k(
+    ranked_ids: Sequence[Any],
+    relevance: Mapping[str, Any] | Iterable[Any],
+    *,
+    k: int = 20,
+) -> float:
+    """Recall@k for known relevant chunk ids."""
+
+    rel = _coerce_relevance(relevance)
+    relevant_ids = {item_id for item_id, grade in rel.items() if grade > 0}
+    if not relevant_ids or k <= 0:
+        return 0.0
+    retrieved = set(_dedupe_ranked_ids(ranked_ids)[:k])
+    return len(retrieved & relevant_ids) / len(relevant_ids)
+
+
+def exact_source_recall_at_k(
+    ranked_ids: Sequence[Any],
+    exact_source_ids: Sequence[Any] | Iterable[Any],
+    *,
+    k: int = 8,
+) -> float | None:
+    """Exact source-recovery slice.
+
+    This is separate from relevance. Relevance can include broad supporting
+    chunks; exact_source_ids are the gold chunks/passages that should be
+    recovered for exact-span/source-recovery tests. Returns None when the eval
+    row does not provide exact-source labels.
+    """
+
+    gold = {_clean_id(item) for item in exact_source_ids if _clean_id(item)}
+    if not gold:
+        return None
+    if k <= 0:
+        return 0.0
+    retrieved = set(_dedupe_ranked_ids(ranked_ids)[:k])
+    return len(retrieved & gold) / len(gold)
+
+
+def exact_source_hit_at_k(
+    ranked_ids: Sequence[Any],
+    exact_source_ids: Sequence[Any] | Iterable[Any],
+    *,
+    k: int = 8,
+) -> float | None:
+    """1.0 when at least one exact gold source is recovered in top-k."""
+
+    recall = exact_source_recall_at_k(ranked_ids, exact_source_ids, k=k)
+    if recall is None:
+        return None
+    return 1.0 if recall > 0.0 else 0.0
+
+
 def mean_average_precision_at_k(
     runs: Sequence[tuple[Sequence[Any], Mapping[str, Any] | Iterable[Any]]],
     *,
@@ -159,19 +213,30 @@ def route_metric_profile(route: str) -> dict[str, Any]:
     normalized = route.strip().lower().replace("-", "_").replace(" ", "_")
     if normalized in {"fast", "fast_search", "vector", "vector_retrieval", "qdrant_only"}:
         return {
-            "optimize_for": ["MRR@5", "latency_p95_ms"],
+            "optimize_for": ["MRR@5", "Recall@20", "latency_p95_ms"],
             "first_hit": "MRR@5",
+            "candidate_recall": "Recall@20",
             "latency": "latency_p95_ms",
-            "secondary_diagnostics": ["MAP@20", "NDCG@8"],
+            "secondary_diagnostics": ["MAP@20", "NDCG@8", "ExactSourceRecall@8"],
             "primary_goal": "fast broad recall",
         }
     if normalized in {"hybrid", "hybrid_search", "mongo_hybrid", "qdrant_mongo"}:
         return {
-            "optimize_for": ["MRR@5", "NDCG@8", "unique_doc_count", "near_duplicate_rate"],
+            "optimize_for": [
+                "MRR@5",
+                "Recall@20",
+                "MAP@20",
+                "NDCG@8",
+                "ExactSourceRecall@8",
+                "unique_doc_count",
+                "near_duplicate_rate",
+            ],
             "first_hit": "MRR@5",
+            "candidate_recall": "Recall@20 + MAP@20",
             "final_context": "NDCG@8",
+            "exact_source_recovery": "ExactSourceRecall@8",
             "source_diversity": "unique_doc_count",
-            "secondary_diagnostics": ["MAP@20", "latency_p95_ms"],
+            "secondary_diagnostics": ["latency_p95_ms"],
             "primary_goal": "precise multi-document text evidence",
         }
     if normalized in {
@@ -184,6 +249,7 @@ def route_metric_profile(route: str) -> dict[str, Any]:
             "optimize_for": [
                 "NDCG@8",
                 "answer_sufficiency_rate",
+                "ExactSourceRecall@8",
                 "graph_advantage",
                 "atom_coverage",
                 "facts_used",
@@ -194,15 +260,17 @@ def route_metric_profile(route: str) -> dict[str, Any]:
             ],
             "final_context": "NDCG@8",
             "answer": "answer_sufficiency",
+            "exact_source_recovery": "ExactSourceRecall@8",
             "graph_advantage": "facts + relations + atoms + multi-doc support",
-            "secondary_diagnostics": ["MRR@5", "MAP@20"],
+            "secondary_diagnostics": ["MRR@5", "Recall@20", "MAP@20"],
             "primary_goal": "structured graph evidence quality",
         }
     return {
-        "optimize_for": ["MRR@5", "NDCG@8", "latency_p95_ms"],
+        "optimize_for": ["MRR@5", "Recall@20", "NDCG@8", "latency_p95_ms"],
         "first_hit": "MRR@5",
+        "candidate_recall": "Recall@20",
         "final_context": "NDCG@8",
-        "secondary_diagnostics": ["MAP@20"],
+        "secondary_diagnostics": ["MAP@20", "ExactSourceRecall@8"],
         "primary_goal": "generic retrieval quality",
     }
 
@@ -270,17 +338,32 @@ def evaluate_case(
     case: RetrievalEvalCase,
     *,
     mrr_k: int = 5,
+    recall_k: int = 20,
     map_k: int = 20,
     ndcg_k: int = 8,
+    source_k: int = 8,
 ) -> dict[str, Any]:
     unique_docs = _unique_doc_count(case)
     multi_doc = _multi_doc_evidence(case)
+    exact_source_recall = exact_source_recall_at_k(
+        case.ranked_ids,
+        case.exact_source_ids,
+        k=source_k,
+    )
+    exact_source_hit = exact_source_hit_at_k(
+        case.ranked_ids,
+        case.exact_source_ids,
+        k=source_k,
+    )
     return {
         "query": case.query,
         "route": case.route,
         f"MRR@{mrr_k}": reciprocal_rank_at_k(case.ranked_ids, case.relevance, k=mrr_k),
+        f"Recall@{recall_k}": recall_at_k(case.ranked_ids, case.relevance, k=recall_k),
         f"MAP@{map_k}": average_precision_at_k(case.ranked_ids, case.relevance, k=map_k),
         f"NDCG@{ndcg_k}": ndcg_at_k(case.ranked_ids, case.relevance, k=ndcg_k),
+        f"ExactSourceRecall@{source_k}": exact_source_recall,
+        f"ExactSourceHit@{source_k}": exact_source_hit,
         "latency_ms": case.latency_ms,
         "answer_sufficient": case.answer_sufficient,
         "unique_doc_count": unique_docs,
@@ -299,21 +382,33 @@ def summarize_route_eval(
     cases: Sequence[RetrievalEvalCase],
     *,
     mrr_k: int = 5,
+    recall_k: int = 20,
     map_k: int = 20,
     ndcg_k: int = 8,
+    source_k: int = 8,
 ) -> dict[str, Any]:
     """Aggregate offline retrieval metrics for a route/query set."""
 
     rows = [
-        evaluate_case(case, mrr_k=mrr_k, map_k=map_k, ndcg_k=ndcg_k)
+        evaluate_case(
+            case,
+            mrr_k=mrr_k,
+            recall_k=recall_k,
+            map_k=map_k,
+            ndcg_k=ndcg_k,
+            source_k=source_k,
+        )
         for case in cases
     ]
     if not rows:
         return {
             "query_count": 0,
             f"MRR@{mrr_k}": 0.0,
+            f"Recall@{recall_k}": 0.0,
             f"MAP@{map_k}": 0.0,
             f"NDCG@{ndcg_k}": 0.0,
+            f"ExactSourceRecall@{source_k}": None,
+            f"ExactSourceHit@{source_k}": None,
             "answer_sufficiency_rate": None,
             "unique_doc_count_avg": None,
             "multi_doc_evidence_rate": None,
@@ -327,7 +422,12 @@ def summarize_route_eval(
             "cases": [],
         }
 
-    metric_names = [f"MRR@{mrr_k}", f"MAP@{map_k}", f"NDCG@{ndcg_k}"]
+    metric_names = [
+        f"MRR@{mrr_k}",
+        f"Recall@{recall_k}",
+        f"MAP@{map_k}",
+        f"NDCG@{ndcg_k}",
+    ]
     latencies = [
         float(row["latency_ms"])
         for row in rows
@@ -351,6 +451,8 @@ def summarize_route_eval(
     return {
         "query_count": len(rows),
         **{name: mean(float(row[name]) for row in rows) for name in metric_names},
+        f"ExactSourceRecall@{source_k}": average_present(f"ExactSourceRecall@{source_k}"),
+        f"ExactSourceHit@{source_k}": average_present(f"ExactSourceHit@{source_k}"),
         "answer_sufficiency_rate": (
             mean(1.0 if flag else 0.0 for flag in answer_flags)
             if answer_flags
@@ -394,6 +496,13 @@ def case_from_mapping(row: Mapping[str, Any]) -> RetrievalEvalCase:
             for item in candidates
             if isinstance(item, Mapping)
         ]
+    exact_source_ids = (
+        row.get("exact_source_ids")
+        or row.get("exact_chunk_ids")
+        or row.get("target_chunk_ids")
+        or row.get("gold_chunk_ids")
+        or []
+    )
     evidence_delta = row.get("evidence_delta") if isinstance(row.get("evidence_delta"), Mapping) else {}
     graph_advantage = row.get("graph_advantage") if isinstance(row.get("graph_advantage"), Mapping) else {}
     answerability = row.get("answerability") if isinstance(row.get("answerability"), Mapping) else {}
@@ -437,6 +546,7 @@ def case_from_mapping(row: Mapping[str, Any]) -> RetrievalEvalCase:
         route=str(row.get("route") or row.get("retrieval_tier") or ""),
         ranked_ids=tuple(_dedupe_ranked_ids(ranked)),
         relevance=_coerce_relevance(row.get("relevance") or row.get("qrels") or {}),
+        exact_source_ids=tuple(_dedupe_ranked_ids(exact_source_ids)),
         latency_ms=(
             float(row["latency_ms"])
             if row.get("latency_ms") is not None

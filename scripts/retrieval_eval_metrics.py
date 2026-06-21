@@ -10,6 +10,7 @@ Example row:
   "route": "Graph Augmentation",
   "ranked_chunk_ids": ["chunk_a", "chunk_b", "chunk_c"],
   "relevance": {"chunk_a": 3, "chunk_b": 1},
+  "exact_source_ids": ["chunk_a"],
   "latency_ms": 7200,
   "answer_sufficient": true,
   "atom_coverage": 0.9,
@@ -66,8 +67,10 @@ def main() -> int:
     )
     parser.add_argument("input", type=Path, help="Golden-set JSON or JSONL file")
     parser.add_argument("--mrr-k", type=int, default=5)
+    parser.add_argument("--recall-k", type=int, default=20)
     parser.add_argument("--map-k", type=int, default=20)
     parser.add_argument("--ndcg-k", type=int, default=8)
+    parser.add_argument("--source-k", type=int, default=8)
     parser.add_argument(
         "--pretty",
         action="store_true",
@@ -84,15 +87,26 @@ def main() -> int:
     output = {
         "metric_contract": {
             "MRR@5": "first good hit; most important for Fast Search",
+            "Recall@20": "candidate-pool recall; did enough known-relevant chunks surface?",
             "MAP@20": "offline candidate-recall diagnostic; not the Graph headline metric",
             "NDCG@8": "graded final evidence-pack quality; most important for Graph Augmentation",
+            "ExactSourceRecall@8": "exact-span/source-recovery slice; did the route recover the gold passage ids?",
             "answer_sufficiency": "selected evidence can answer the question",
             "route_rule": {
-                "Fast Search": ["MRR@5", "latency_p95_ms"],
-                "Hybrid Search": ["MRR@5", "NDCG@8", "unique_doc_count", "near_duplicate_rate"],
+                "Fast Search": ["MRR@5", "Recall@20", "latency_p95_ms"],
+                "Hybrid Search": [
+                    "MRR@5",
+                    "Recall@20",
+                    "MAP@20",
+                    "NDCG@8",
+                    "ExactSourceRecall@8",
+                    "unique_doc_count",
+                    "near_duplicate_rate",
+                ],
                 "Graph Augmentation": [
                     "NDCG@8",
                     "answer_sufficiency_rate",
+                    "ExactSourceRecall@8",
                     "graph_advantage",
                     "atom_coverage",
                     "facts_used",
@@ -112,8 +126,10 @@ def main() -> int:
             **summarize_route_eval(
                 route_cases,
                 mrr_k=args.mrr_k,
+                recall_k=args.recall_k,
                 map_k=args.map_k,
                 ndcg_k=args.ndcg_k,
+                source_k=args.source_k,
             ),
         }
 

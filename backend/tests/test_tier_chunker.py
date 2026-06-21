@@ -61,6 +61,29 @@ def test_chunking_config_reports_auto_policy_and_semantic_split_as_hint():
     assert config["page_ranges_preserved"] is True
 
 
+def test_default_chunking_contract_is_token_and_structure_based():
+    cfg = IngestionConfig()
+    parsed = _parse_result(
+        source_tier=SourceTier.tier_a,
+        text="# Ontology\n\nOntologies make concepts and relations explicit.",
+    )
+
+    config = tier_chunker.describe_chunking(parsed, cfg)
+
+    assert config["mode"] == "auto"
+    assert config["parent_strategy"] == "heading_bound"
+    assert config["child_strategy"] == "sentence_merge"
+    assert config["chunk_overlap"] == 200
+    assert config["token_budgets"] == {
+        "parent_min": 500,
+        "parent_target": 1200,
+        "parent_max": 2000,
+        "child_min": 64,
+        "child_target": 128,
+        "child_max": 256,
+    }
+
+
 def test_tier_a_child_chunks_respect_configured_child_max_tokens():
     text = ("alpha beta gamma delta epsilon. " * 260).strip()
     cfg = IngestionConfig(
@@ -598,4 +621,3 @@ def test_describe_chunking_reports_ast_bound_for_tier_code():
     )
     desc = tier_chunker.describe_chunking(pr)
     assert desc["parent_strategy"] == "ast_bound_code"
-

@@ -9,6 +9,7 @@ frontend/test-results/
 frontend/tab-screenshots/
 frontend/node_modules/
 graphify-out/cache/
+backend/.cache/
 scripts/backfill_changes_*.json
 *.log
 .env

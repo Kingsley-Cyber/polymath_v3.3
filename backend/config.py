@@ -459,12 +459,28 @@ class Settings(BaseSettings):
     )
 
     # === CHUNKING SETTINGS ===
-    CHUNK_SIZE: int = Field(default=1000, description="Parent chunk size in characters")
+    CHUNK_SIZE: int = Field(
+        default=1000,
+        description=(
+            "Legacy compatibility knob only. The ingestion hot path uses "
+            "IngestionConfig.parent_chunk_tokens plus tier-aware heading/page/"
+            "AST/table splitting, not fixed character chunking."
+        ),
+    )
     CHUNK_OVERLAP: int = Field(
-        default=200, description="Overlap between chunks in characters"
+        default=200,
+        description=(
+            "Legacy compatibility knob only. Current chunk overlap is resolved "
+            "as parent-overlap tokens from IngestionConfig.chunk_overlap."
+        ),
     )
     CHILD_CHUNK_SIZE: int = Field(
-        default=300, description="Child chunk size for fine-grained retrieval"
+        default=300,
+        description=(
+            "Legacy compatibility knob only. Current child chunks use "
+            "IngestionConfig.child_chunk_tokens with sentence-boundary merging "
+            "and embedder safety caps."
+        ),
     )
 
     # === TOKEN LIMITS ===

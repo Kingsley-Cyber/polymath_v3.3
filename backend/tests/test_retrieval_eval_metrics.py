@@ -2,8 +2,11 @@ from services.retriever.eval_metrics import (
     RetrievalEvalCase,
     average_precision_at_k,
     case_from_mapping,
+    exact_source_hit_at_k,
+    exact_source_recall_at_k,
     ndcg_at_k,
     reciprocal_rank_at_k,
+    recall_at_k,
     route_metric_profile,
     summarize_route_eval,
 )
@@ -41,6 +44,16 @@ def test_ndcg_uses_graded_relevance_and_order():
     assert 0.0 < ndcg_at_k(weak_ranked, relevance, k=3) < 1.0
 
 
+def test_recall_and_exact_source_recovery_are_separate_axes():
+    ranked = ["broad_support", "exact_passage", "other_support"]
+    relevance = {"broad_support": 1, "exact_passage": 3, "missing_support": 1}
+
+    assert recall_at_k(ranked, relevance, k=3) == 2 / 3
+    assert exact_source_recall_at_k(ranked, ["exact_passage", "missing_exact"], k=3) == 0.5
+    assert exact_source_hit_at_k(ranked, ["exact_passage", "missing_exact"], k=3) == 1.0
+    assert exact_source_recall_at_k(ranked, [], k=3) is None
+
+
 def test_duplicates_do_not_get_extra_metric_credit():
     ranked = ["good", "good", "bad", "also_good"]
     relevant = {"good": 1, "also_good": 1}
@@ -51,12 +64,15 @@ def test_duplicates_do_not_get_extra_metric_credit():
 
 def test_route_profiles_match_tier_goals():
     fast = route_metric_profile("Fast Search")
-    assert fast["optimize_for"] == ["MRR@5", "latency_p95_ms"]
+    assert fast["optimize_for"] == ["MRR@5", "Recall@20", "latency_p95_ms"]
 
     hybrid = route_metric_profile("Hybrid Search")
     assert hybrid["optimize_for"] == [
         "MRR@5",
+        "Recall@20",
+        "MAP@20",
         "NDCG@8",
+        "ExactSourceRecall@8",
         "unique_doc_count",
         "near_duplicate_rate",
     ]
@@ -65,6 +81,7 @@ def test_route_profiles_match_tier_goals():
     assert graph["optimize_for"] == [
         "NDCG@8",
         "answer_sufficiency_rate",
+        "ExactSourceRecall@8",
         "graph_advantage",
         "atom_coverage",
         "facts_used",
@@ -73,7 +90,7 @@ def test_route_profiles_match_tier_goals():
         "near_duplicate_rate",
         "latency_p95_ms",
     ]
-    assert graph["secondary_diagnostics"] == ["MRR@5", "MAP@20"]
+    assert graph["secondary_diagnostics"] == ["MRR@5", "Recall@20", "MAP@20"]
 
 
 def test_summarize_route_eval_aggregates_quality_latency_and_answerability():
@@ -83,6 +100,7 @@ def test_summarize_route_eval_aggregates_quality_latency_and_answerability():
             route="Graph Augmentation",
             ranked_ids=("a", "b", "c"),
             relevance={"a": 3, "b": 2, "c": 1},
+            exact_source_ids=("a", "missing_exact"),
             latency_ms=7000,
             answer_sufficient=True,
             doc_ids=("doc1", "doc2", "doc3"),
@@ -99,6 +117,7 @@ def test_summarize_route_eval_aggregates_quality_latency_and_answerability():
             route="Graph Augmentation",
             ranked_ids=("x", "z", "y"),
             relevance={"x": 3, "y": 2},
+            exact_source_ids=("y",),
             latency_ms=9000,
             answer_sufficient=False,
             doc_ids=("doc1",),
@@ -116,8 +135,11 @@ def test_summarize_route_eval_aggregates_quality_latency_and_answerability():
 
     assert summary["query_count"] == 2
     assert summary["MRR@5"] == 1.0
+    assert 0.0 < summary["Recall@20"] <= 1.0
     assert 0.0 < summary["MAP@20"] <= 1.0
     assert 0.0 < summary["NDCG@8"] <= 1.0
+    assert summary["ExactSourceRecall@8"] == 0.75
+    assert summary["ExactSourceHit@8"] == 1.0
     assert summary["answer_sufficiency_rate"] == 0.5
     assert summary["unique_doc_count_avg"] == 2.0
     assert summary["multi_doc_evidence_rate"] == 0.5
@@ -140,6 +162,7 @@ def test_case_from_mapping_accepts_common_eval_shapes():
                 {"chunk_id": "c2", "doc_id": "doc-b"},
             ],
             "qrels": ["c2"],
+            "exact_source_ids": ["c2", "missing_exact"],
             "latency_s": 1.5,
             "answerability_pass": True,
             "answerability": {"atom_coverage": 0.8},
@@ -155,6 +178,7 @@ def test_case_from_mapping_accepts_common_eval_shapes():
     assert case.route == "qdrant_mongo"
     assert case.ranked_ids == ("c1", "c2")
     assert case.relevance["c2"] == 1.0
+    assert case.exact_source_ids == ("c2", "missing_exact")
     assert case.latency_ms == 1500
     assert case.answer_sufficient is True
     assert case.doc_ids == ("doc-a", "doc-b")
