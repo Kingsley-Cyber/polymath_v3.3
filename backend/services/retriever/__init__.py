@@ -137,20 +137,25 @@ def _retrieval_store_contract(tier: RetrievalTier) -> dict[str, Any]:
         return {
             "label": "Fast Search",
             "qdrant_vectors": True,
+            "qdrant_sparse": True,
+            "qdrant_rrf": True,
             "qdrant_summaries": True,
             "mongo_lexical": False,
             "mongo_hydration": False,
             "neo4j_facts": False,
             "neo4j_expansion": False,
             "description": (
-                "Qdrant vector search over child chunks and parent summaries. "
-                "Mongo lexical search and Neo4j graph expansion are disabled."
+                "Qdrant dense vector search plus in-collection sparse BM25/RRF "
+                "when available, over child chunks and parent summaries. Mongo "
+                "lexical search and Neo4j graph expansion are disabled."
             ),
         }
     if tier == RetrievalTier.qdrant_mongo:
         return {
             "label": "Hybrid Search",
             "qdrant_vectors": True,
+            "qdrant_sparse": True,
+            "qdrant_rrf": True,
             "qdrant_summaries": True,
             "mongo_lexical": True,
             "mongo_hydration": True,
@@ -164,6 +169,8 @@ def _retrieval_store_contract(tier: RetrievalTier) -> dict[str, Any]:
     return {
         "label": "Graph Augmentation",
         "qdrant_vectors": True,
+        "qdrant_sparse": True,
+        "qdrant_rrf": True,
         "qdrant_summaries": True,
         "mongo_lexical": True,
         "mongo_hydration": True,
@@ -1107,7 +1114,11 @@ class RetrieverOrchestrator:
             phase_started = perf_counter()
             try:
                 a_results_global = await funnel_a.search(
-                    query_vector, corpus_ids, a_cols, top_k=global_top_k,
+                    query_vector,
+                    corpus_ids,
+                    a_cols,
+                    top_k=global_top_k,
+                    query_text=rank_query,
                 )
             except Exception as exc:
                 logger.warning("global-mode Funnel A failed: %s", exc)
@@ -1208,7 +1219,13 @@ class RetrieverOrchestrator:
                 return cols
 
             b_tasks = [
-                funnel_b.search(query_vector, [cid], _b_cols_for(cid), top_k=_PER_CORPUS_LIMIT)
+                funnel_b.search(
+                    query_vector,
+                    [cid],
+                    _b_cols_for(cid),
+                    top_k=_PER_CORPUS_LIMIT,
+                    query_text=rank_query,
+                )
                 for cid in corpus_ids  # type: ignore[union-attr]
             ]
             # Fair mode normally skips summaries for multi-corpus. Broad
@@ -1217,6 +1234,7 @@ class RetrieverOrchestrator:
             a_kwargs = {
                 "top_k": funnel_limits.summary_top_k,
                 "fair_mode": retrieval_intent.need != QueryNeed.BROAD,
+                "query_text": rank_query,
             }
             a_task = funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs)
             lexical_task = (
@@ -1262,7 +1280,10 @@ class RetrieverOrchestrator:
             ]
             b_results: list[SourceChunk] = [c for pool in per_corpus_b for c in pool]
         else:
-            a_kwargs = {"top_k": funnel_limits.summary_top_k}
+            a_kwargs = {
+                "top_k": funnel_limits.summary_top_k,
+                "query_text": rank_query,
+            }
             # Same partial-failure safety as the multi-corpus branch above.
             raw_a, raw_b, raw_lex, raw_doc_anchor = await asyncio.gather(
                 funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs),
@@ -1271,6 +1292,7 @@ class RetrieverOrchestrator:
                     corpus_ids,
                     b_cols,
                     top_k=funnel_limits.child_top_k,
+                    query_text=rank_query,
                 ),
                 (
                     lexical_retriever.search(

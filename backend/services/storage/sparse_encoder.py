@@ -24,6 +24,13 @@ Server-side IDF:
     need to send raw term frequencies as the sparse vector values. No
     corpus-statistics state on the client.
 
+Tokenization:
+    Ingest and query text are NFKC-normalized before tokenization. Tokens are
+    built from Unicode letters/numbers plus identifier connectors, with script
+    changes treated as token boundaries. That keeps exact identifiers such as
+    "NSN 5340-01-234-5678", "para 3-2.1", "Qwen3-Embedding", and code-mixed
+    Latin/CJK text searchable without routing through Mongo.
+
 Token IDs:
     Qdrant sparse vectors index by uint32. We hash each token and clamp to
     the positive 31-bit range. Hash collisions are statistically rare with
@@ -34,10 +41,10 @@ Token IDs:
 """
 from __future__ import annotations
 
-import re
 import unicodedata
 from collections import Counter
 from typing import Iterable
+import re
 
 # `qdrant_client.models.SparseVector` carries the wire format. We import
 # lazily so this module stays importable in environments where qdrant-client
@@ -48,10 +55,11 @@ except Exception:  # pragma: no cover
     SparseVector = None  # type: ignore[assignment]
 
 
-# Token-pattern: alphanumerics + underscore, length ≥ 2. Matches model
-# names ("gpt4", "qwen3"), version strings ("v1.5"), function names, etc.
-# Drops single characters and punctuation.
-_TOKEN_RE = re.compile(r"[A-Za-z0-9_]{2,}")
+# Identifier connectors kept inside sparse tokens so exact lexical lookup can
+# recover section numbers, NSNs, model names, paths, and code-ish identifiers.
+_CONNECTORS = frozenset("_-./:#")
+_CONNECTOR_SPLIT_RE = re.compile(r"[_\-./:#]+")
+_CJK_SCRIPT_BUCKETS = frozenset({"cjk", "hiragana", "katakana", "hangul"})
 
 # Stopword set — kept tight because BM25's IDF already down-weights frequent
 # terms. We only drop true high-frequency function words that have no
@@ -68,19 +76,116 @@ _STOPWORDS: frozenset[str] = frozenset({
 })
 
 
+def _script_bucket(ch: str) -> str:
+    if not ch:
+        return "other"
+    category = unicodedata.category(ch)
+    if category.startswith("N"):
+        return "number"
+    name = unicodedata.name(ch, "")
+    if not name:
+        return "other"
+    if name.startswith("CJK"):
+        return "cjk"
+    first = name.split(" ", 1)[0].lower()
+    if first in {
+        "latin",
+        "greek",
+        "cyrillic",
+        "arabic",
+        "hebrew",
+        "devanagari",
+        "hiragana",
+        "katakana",
+        "hangul",
+    }:
+        return first
+    return first
+
+
+def _is_word_char(ch: str) -> bool:
+    category = unicodedata.category(ch)
+    return category.startswith(("L", "N"))
+
+
+def _ascii_fold(token: str) -> str:
+    return (
+        unicodedata.normalize("NFKD", token)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .lower()
+    )
+
+
+def _append_token(out: list[str], token: str) -> None:
+    token = token.strip("".join(_CONNECTORS)).lower()
+    if len(token) < 2 or token in _STOPWORDS:
+        return
+    seen: set[str] = set()
+    variants = [token]
+    folded = _ascii_fold(token)
+    if folded and folded != token:
+        variants.append(folded)
+    for part in _CONNECTOR_SPLIT_RE.split(token):
+        if part and part != token:
+            variants.append(part)
+            folded_part = _ascii_fold(part)
+            if folded_part and folded_part != part:
+                variants.append(folded_part)
+
+    # CJK-style scripts often omit spaces. Keep the full run and add bigrams so
+    # shorter lexical queries can still match without a language-specific
+    # tokenizer dependency.
+    if all(_script_bucket(ch) in _CJK_SCRIPT_BUCKETS for ch in token) and len(token) > 2:
+        variants.extend(token[idx : idx + 2] for idx in range(0, len(token) - 1))
+
+    for item in variants:
+        item = item.strip("".join(_CONNECTORS)).lower()
+        if len(item) < 2 or item in _STOPWORDS or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+
+
 def _tokenize(text: str | None) -> list[str]:
-    """Lowercase + strip diacritics + regex tokenize + drop stopwords."""
+    """NFKC normalize + script-aware tokenize + stopword/variant handling."""
     if not text:
         return []
-    # NFKD normalize then ASCII-strip diacritics (résumé → resume) so
-    # query-side and ingest-side tokens match across encodings.
-    normalized = unicodedata.normalize("NFKD", text)
-    ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
-    return [
-        tok.lower()
-        for tok in _TOKEN_RE.findall(ascii_only)
-        if tok.lower() not in _STOPWORDS
-    ]
+    normalized = unicodedata.normalize("NFKC", text)
+    tokens: list[str] = []
+    buf: list[str] = []
+    current_script: str | None = None
+
+    def flush() -> None:
+        nonlocal buf, current_script
+        if buf:
+            _append_token(tokens, "".join(buf))
+        buf = []
+        current_script = None
+
+    for ch in normalized:
+        if _is_word_char(ch):
+            script = _script_bucket(ch)
+            if (
+                buf
+                and current_script
+                and script != current_script
+                and script != "number"
+                and current_script != "number"
+            ):
+                flush()
+            buf.append(ch)
+            if script != "number":
+                current_script = script
+            elif current_script is None:
+                current_script = "number"
+            continue
+        if ch in _CONNECTORS and buf:
+            buf.append(ch)
+            continue
+        flush()
+    flush()
+    return tokens
 
 
 def _token_id(token: str) -> int:
@@ -91,10 +196,12 @@ def _token_id(token: str) -> int:
     so ingest-side and query-side ids always agree, regardless of which
     process computes them.
     """
-    # FNV-1a 32-bit
+    # FNV-1a 32-bit over UTF-8 bytes. For ASCII tokens this is byte-for-byte
+    # identical to the old ord(ch) loop; for non-Latin text it hashes the full
+    # code point representation instead of truncating to the low byte.
     h = 0x811C9DC5
-    for ch in token:
-        h ^= ord(ch) & 0xFF
+    for byte in token.encode("utf-8"):
+        h ^= byte
         h = (h * 0x01000193) & 0xFFFFFFFF
     # Clamp to positive 31-bit (Qdrant uses uint32, but let's stay safe)
     return h & 0x7FFFFFFF

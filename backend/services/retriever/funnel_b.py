@@ -30,6 +30,7 @@ class FunnelB:
         corpus_ids: Optional[List[str]] = None,
         collections: Optional[List[str]] = None,
         top_k: int = 30,
+        query_text: str | None = None,
     ) -> List[SourceChunk]:
         """
         Execute precision search across target collections in parallel.
@@ -73,7 +74,13 @@ class FunnelB:
 
         # Launch searches in parallel
         tasks = [
-            self._search_collection(collection_name, query_vector, query_filter, top_k)
+            self._search_collection(
+                collection_name,
+                query_vector,
+                query_filter,
+                top_k,
+                query_text=query_text,
+            )
             for collection_name in collections
         ]
 
@@ -87,7 +94,8 @@ class FunnelB:
             else:
                 merged_chunks.extend(result)
 
-        # Global sort across all collection results by vector similarity
+        # Global sort across all collection results by retrieval score
+        # (dense cosine for legacy collections, Qdrant RRF score for hybrid).
         merged_chunks.sort(key=lambda x: x.score, reverse=True)
         return merged_chunks[:top_k]
 
@@ -97,17 +105,28 @@ class FunnelB:
         query_vector: list[float],
         query_filter: models.Filter,
         limit: int,
+        *,
+        query_text: str | None = None,
     ) -> List[SourceChunk]:
         """
         Execute search on a specific Qdrant collection.
         """
         try:
             # New corpora use named vectors {"dense", "sparse"}; legacy
-            # corpora use unnamed dense. Detect layout once per collection
-            # and pick the right call shape — `using="dense"` for named,
-            # default for unnamed.
+            # corpora use unnamed dense. When both named vectors are present,
+            # Fast Search runs native Qdrant hybrid retrieval:
+            #
+            #   dense prefetch + sparse BM25 prefetch -> FusionQuery(RRF)
+            #
+            # This keeps the Fast lane Qdrant-only while recovering exact
+            # tokens such as identifiers, acronyms, section numbers, and error
+            # codes that dense embeddings can smear away. Legacy collections
+            # stay on the previous dense-only call shape.
             from services.storage.qdrant_writer import _collection_layout
-            has_named, _ = await _collection_layout(self.client, collection_name)
+            from services.storage.sparse_encoder import encode_query
+
+            has_named, has_sparse = await _collection_layout(self.client, collection_name)
+            sparse_query = encode_query(query_text)
             kwargs = {
                 "collection_name": collection_name,
                 "query": query_vector,
@@ -115,9 +134,58 @@ class FunnelB:
                 "limit": limit,
                 "with_payload": True,
             }
-            if has_named:
+            retriever_provenance = [{"retriever": "qdrant_dense"}]
+            used_hybrid_rrf = False
+            if has_named and has_sparse and getattr(sparse_query, "indices", None):
+                kwargs = {
+                    "collection_name": collection_name,
+                    "query": models.FusionQuery(fusion=models.Fusion.RRF),
+                    "prefetch": [
+                        models.Prefetch(
+                            query=query_vector,
+                            using="dense",
+                            filter=query_filter,
+                            limit=limit,
+                        ),
+                        models.Prefetch(
+                            query=sparse_query,
+                            using="sparse",
+                            filter=query_filter,
+                            limit=limit,
+                        ),
+                    ],
+                    "limit": limit,
+                    "with_payload": True,
+                }
+                retriever_provenance = [
+                    {"retriever": "qdrant_dense"},
+                    {"retriever": "qdrant_sparse"},
+                    {"retriever": "qdrant_rrf"},
+                ]
+                used_hybrid_rrf = True
+            elif has_named:
                 kwargs["using"] = "dense"
-            resp = await self.client.query_points(**kwargs)
+
+            try:
+                resp = await self.client.query_points(**kwargs)
+            except Exception as exc:
+                if not used_hybrid_rrf:
+                    raise
+                logger.warning(
+                    "Qdrant dense+sparse RRF failed for %s; falling back to dense-only: %s",
+                    collection_name,
+                    exc,
+                )
+                fallback_kwargs = {
+                    "collection_name": collection_name,
+                    "query": query_vector,
+                    "query_filter": query_filter,
+                    "limit": limit,
+                    "with_payload": True,
+                    "using": "dense",
+                }
+                retriever_provenance = [{"retriever": "qdrant_dense"}]
+                resp = await self.client.query_points(**fallback_kwargs)
             hits = resp.points
 
             chunks = []
@@ -138,6 +206,7 @@ class FunnelB:
                         heading_path=payload.get("heading_path") or None,
                         language=payload.get("language"),
                         metadata=metadata_with_facets(payload.get("metadata"), payload),
+                        provenance=list(retriever_provenance),
                     )
                 )
             return chunks

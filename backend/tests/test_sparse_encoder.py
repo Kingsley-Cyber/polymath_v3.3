@@ -5,9 +5,9 @@ in the Qdrant hybrid-search migration.
 The encoder is stateless (server-side IDF in Qdrant), so these tests focus on:
   • token-id determinism across calls / processes (hash must NOT depend on
     PYTHONHASHSEED — that would break ingest/query symmetry)
-  • tokenization correctness (alphanumerics, underscores, length ≥ 2)
+  • tokenization correctness (Unicode scripts, identifiers, length ≥ 2)
   • stopword filtering
-  • diacritic normalization (résumé vs resume)
+  • NFKC normalization + diacritic-fold fallback (résumé vs resume)
   • Counter math (term frequencies)
   • empty-input handling
   • collision behavior (same hashed id → first occurrence wins)
@@ -78,15 +78,35 @@ def test_tokenize_drops_stopwords():
 
 
 def test_tokenize_keeps_underscores_and_alphanumerics():
-    assert _tokenize("query_planner gpt4 v1_5") == ["query_planner", "gpt4", "v1_5"]
+    out = _tokenize("query_planner gpt4 v1_5")
+    assert {"query_planner", "query", "planner", "gpt4", "v1_5", "v1"} <= set(out)
 
 
-def test_tokenize_strips_diacritics():
-    assert _tokenize("résumé café naïve") == ["resume", "cafe", "naive"]
+def test_tokenize_nfkc_and_diacritic_fold_fallback():
+    out = _tokenize("ＮＳＮ résumé café naïve")
+    assert {"nsn", "résumé", "resume", "café", "cafe", "naïve", "naive"} <= set(out)
 
 
 def test_tokenize_handles_punctuation():
-    assert _tokenize("hello, world! foo.bar") == ["hello", "world", "foo", "bar"]
+    out = _tokenize("hello, world! foo.bar")
+    assert {"hello", "world", "foo.bar", "foo", "bar"} <= set(out)
+
+
+def test_tokenize_preserves_exact_identifier_tokens_and_parts():
+    out = _tokenize("NSN 5340-01-234-5678 para 3-2.1 Qwen3-Embedding")
+    assert "nsn" in out
+    assert "5340-01-234-5678" in out
+    assert {"5340", "01", "234", "5678"} <= set(out)
+    assert "3-2.1" in out
+    assert {"qwen3-embedding", "qwen3", "embedding"} <= set(out)
+
+
+def test_tokenize_is_script_aware_for_code_mixed_text():
+    out = _tokenize("Python自然语言处理 NLP")
+    assert "python" in out
+    assert "nlp" in out
+    assert "自然语言处理" in out
+    assert "语言" in out
 
 
 def test_tokenize_empty_inputs():

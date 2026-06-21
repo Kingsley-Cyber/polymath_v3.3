@@ -1,4 +1,7 @@
+import pytest
+
 from models.schemas import RetrievalTier, SourceChunk, SourceFact
+from qdrant_client import models as qmodels
 from services.retriever import (
     _fact_seed_chunks,
     _has_query_term_overlap,
@@ -6,7 +9,36 @@ from services.retriever import (
     _retrieval_store_contract,
     _should_drop_low_confidence_rerank,
 )
+from services.retriever.funnel_a import FunnelA
+from services.retriever.funnel_b import FunnelB
 from services.retriever.lexical import _regex_score, _terms
+from services.storage import qdrant_writer
+
+
+class _FakeQdrantHit:
+    id = "point-1"
+    score = 0.77
+    payload = {
+        "chunk_id": "chunk-1",
+        "parent_id": "parent-1",
+        "doc_id": "doc-1",
+        "corpus_id": "corpus-1",
+        "chunk_text": "NSN 5340-01-234-5678 appears in this logistics note.",
+        "source_tier": "tier_a",
+        "chunk_kind": "body",
+    }
+
+
+class _FakeQdrantClient:
+    def __init__(self, *, fail_first: bool = False):
+        self.calls: list[dict] = []
+        self.fail_first = fail_first
+
+    async def query_points(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.fail_first and len(self.calls) == 1:
+            raise RuntimeError("rrf unavailable")
+        return type("Resp", (), {"points": [_FakeQdrantHit()]})()
 
 
 def test_speed_profiles_map_to_lexical_budget():
@@ -36,6 +68,8 @@ def test_retrieval_store_contracts_make_tiers_observable():
     vector = _retrieval_store_contract(RetrievalTier.qdrant_only)
     assert vector["label"] == "Fast Search"
     assert vector["qdrant_vectors"] is True
+    assert vector["qdrant_sparse"] is True
+    assert vector["qdrant_rrf"] is True
     assert vector["qdrant_summaries"] is True
     assert vector["mongo_lexical"] is False
     assert vector["neo4j_facts"] is False
@@ -44,6 +78,7 @@ def test_retrieval_store_contracts_make_tiers_observable():
     hybrid = _retrieval_store_contract(RetrievalTier.qdrant_mongo)
     assert hybrid["label"] == "Hybrid Search"
     assert hybrid["qdrant_vectors"] is True
+    assert hybrid["qdrant_sparse"] is True
     assert hybrid["mongo_lexical"] is True
     assert hybrid["mongo_hydration"] is True
     assert hybrid["neo4j_facts"] is False
@@ -51,6 +86,7 @@ def test_retrieval_store_contracts_make_tiers_observable():
     graph = _retrieval_store_contract(RetrievalTier.qdrant_mongo_graph)
     assert graph["label"] == "Graph Augmentation"
     assert graph["qdrant_vectors"] is True
+    assert graph["qdrant_sparse"] is True
     assert graph["mongo_lexical"] is True
     assert graph["neo4j_facts"] is True
     assert graph["neo4j_expansion"] is True
@@ -73,6 +109,109 @@ def test_regex_score_rewards_exact_heading_matches():
         "text": "This section evaluates implementation constraints.",
     }
     assert _regex_score(query, terms, row) > 0.7
+
+
+async def _fake_collection_layout(_client, _collection_name):
+    return True, True
+
+
+async def _fake_legacy_collection_layout(_client, _collection_name):
+    return True, False
+
+
+@pytest.mark.asyncio
+async def test_fast_funnel_b_uses_qdrant_dense_sparse_rrf_when_available(monkeypatch):
+    monkeypatch.setattr(qdrant_writer, "_collection_layout", _fake_collection_layout)
+    client = _FakeQdrantClient()
+    funnel = FunnelB()
+    funnel.client = client
+
+    chunks = await funnel._search_collection(
+        "corpus_abcd_naive",
+        [0.1, 0.2],
+        qmodels.Filter(must=[]),
+        5,
+        query_text="NSN 5340-01-234-5678",
+    )
+
+    assert len(client.calls) == 1
+    call = client.calls[0]
+    assert isinstance(call["query"], qmodels.FusionQuery)
+    assert call["query"].fusion == qmodels.Fusion.RRF
+    assert {prefetch.using for prefetch in call["prefetch"]} == {"dense", "sparse"}
+    assert "query_filter" not in call
+    assert chunks[0].chunk_id == "chunk-1"
+    retrievers = {item["retriever"] for item in chunks[0].provenance}
+    assert {"qdrant_dense", "qdrant_sparse", "qdrant_rrf"} <= retrievers
+
+
+@pytest.mark.asyncio
+async def test_fast_funnel_a_summaries_use_qdrant_dense_sparse_rrf_when_available(monkeypatch):
+    monkeypatch.setattr(qdrant_writer, "_collection_layout", _fake_collection_layout)
+    client = _FakeQdrantClient()
+    funnel = FunnelA()
+    funnel.client = client
+
+    chunks = await funnel._search_collection(
+        "corpus_abcd_hrag",
+        [0.1, 0.2],
+        qmodels.Filter(must=[]),
+        5,
+        query_text="para 3-2.1",
+    )
+
+    assert len(client.calls) == 1
+    call = client.calls[0]
+    assert isinstance(call["query"], qmodels.FusionQuery)
+    assert call["query"].fusion == qmodels.Fusion.RRF
+    assert {prefetch.using for prefetch in call["prefetch"]} == {"dense", "sparse"}
+    retrievers = {item["retriever"] for item in chunks[0].provenance}
+    assert {"qdrant_dense_summary", "qdrant_sparse_summary", "qdrant_rrf"} <= retrievers
+
+
+@pytest.mark.asyncio
+async def test_fast_funnel_b_falls_back_to_dense_for_legacy_collection(monkeypatch):
+    monkeypatch.setattr(qdrant_writer, "_collection_layout", _fake_legacy_collection_layout)
+    client = _FakeQdrantClient()
+    funnel = FunnelB()
+    funnel.client = client
+
+    chunks = await funnel._search_collection(
+        "corpus_legacy_naive",
+        [0.1, 0.2],
+        qmodels.Filter(must=[]),
+        5,
+        query_text="NSN 5340-01-234-5678",
+    )
+
+    assert len(client.calls) == 1
+    call = client.calls[0]
+    assert call["query"] == [0.1, 0.2]
+    assert call["using"] == "dense"
+    assert "prefetch" not in call
+    assert chunks[0].provenance == [{"retriever": "qdrant_dense"}]
+
+
+@pytest.mark.asyncio
+async def test_fast_funnel_b_rrf_failure_falls_back_to_dense(monkeypatch):
+    monkeypatch.setattr(qdrant_writer, "_collection_layout", _fake_collection_layout)
+    client = _FakeQdrantClient(fail_first=True)
+    funnel = FunnelB()
+    funnel.client = client
+
+    chunks = await funnel._search_collection(
+        "corpus_abcd_naive",
+        [0.1, 0.2],
+        qmodels.Filter(must=[]),
+        5,
+        query_text="NSN 5340-01-234-5678",
+    )
+
+    assert len(client.calls) == 2
+    assert isinstance(client.calls[0]["query"], qmodels.FusionQuery)
+    assert client.calls[1]["query"] == [0.1, 0.2]
+    assert client.calls[1]["using"] == "dense"
+    assert chunks[0].provenance == [{"retriever": "qdrant_dense"}]
 
 
 def test_low_confidence_guard_drops_unrelated_rerank_results():

@@ -31,6 +31,7 @@ class FunnelA:
         collections: Optional[List[str]] = None,
         top_k: int = 20,
         fair_mode: bool = True,
+        query_text: str | None = None,
     ) -> List[SourceChunk]:
         """
         Execute breadth search for summaries across target collections in parallel.
@@ -86,7 +87,13 @@ class FunnelA:
 
         # Launch searches in parallel
         tasks = [
-            self._search_collection(collection_name, query_vector, query_filter, top_k)
+            self._search_collection(
+                collection_name,
+                query_vector,
+                query_filter,
+                top_k,
+                query_text=query_text,
+            )
             for collection_name in collections
         ]
 
@@ -110,17 +117,22 @@ class FunnelA:
         query_vector: list[float],
         query_filter: models.Filter,
         limit: int,
+        *,
+        query_text: str | None = None,
     ) -> List[SourceChunk]:
         """
         Execute search on a specific Qdrant collection.
         """
         try:
             # qdrant-client ≥1.10 renamed `search()` → `query_points()`; the
-            # old name was removed in 1.13+. New corpora use named vectors —
-            # we pass `using="dense"` to disambiguate; legacy corpora keep
-            # the unnamed default.
+            # old name was removed in 1.13+. New corpora use named dense+sparse
+            # vectors, so summary search can also run Qdrant-native RRF. Legacy
+            # corpora keep the unnamed dense default.
             from services.storage.qdrant_writer import _collection_layout
-            has_named, _ = await _collection_layout(self.client, collection_name)
+            from services.storage.sparse_encoder import encode_query
+
+            has_named, has_sparse = await _collection_layout(self.client, collection_name)
+            sparse_query = encode_query(query_text)
             kwargs = {
                 "collection_name": collection_name,
                 "query": query_vector,
@@ -128,9 +140,58 @@ class FunnelA:
                 "limit": limit,
                 "with_payload": True,
             }
-            if has_named:
+            retriever_provenance = [{"retriever": "qdrant_dense_summary"}]
+            used_hybrid_rrf = False
+            if has_named and has_sparse and getattr(sparse_query, "indices", None):
+                kwargs = {
+                    "collection_name": collection_name,
+                    "query": models.FusionQuery(fusion=models.Fusion.RRF),
+                    "prefetch": [
+                        models.Prefetch(
+                            query=query_vector,
+                            using="dense",
+                            filter=query_filter,
+                            limit=limit,
+                        ),
+                        models.Prefetch(
+                            query=sparse_query,
+                            using="sparse",
+                            filter=query_filter,
+                            limit=limit,
+                        ),
+                    ],
+                    "limit": limit,
+                    "with_payload": True,
+                }
+                retriever_provenance = [
+                    {"retriever": "qdrant_dense_summary"},
+                    {"retriever": "qdrant_sparse_summary"},
+                    {"retriever": "qdrant_rrf"},
+                ]
+                used_hybrid_rrf = True
+            elif has_named:
                 kwargs["using"] = "dense"
-            resp = await self.client.query_points(**kwargs)
+
+            try:
+                resp = await self.client.query_points(**kwargs)
+            except Exception as exc:
+                if not used_hybrid_rrf:
+                    raise
+                logger.warning(
+                    "Qdrant summary dense+sparse RRF failed for %s; falling back to dense-only: %s",
+                    collection_name,
+                    exc,
+                )
+                fallback_kwargs = {
+                    "collection_name": collection_name,
+                    "query": query_vector,
+                    "query_filter": query_filter,
+                    "limit": limit,
+                    "with_payload": True,
+                    "using": "dense",
+                }
+                retriever_provenance = [{"retriever": "qdrant_dense_summary"}]
+                resp = await self.client.query_points(**fallback_kwargs)
             hits = resp.points
 
             chunks = []
@@ -155,6 +216,7 @@ class FunnelA:
                         heading_path=payload.get("heading_path") or None,
                         language=payload.get("language"),
                         metadata=metadata_with_facets(payload.get("metadata"), payload),
+                        provenance=list(retriever_provenance),
                     )
                 )
             return chunks
