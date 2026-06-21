@@ -1224,6 +1224,14 @@ def _chat_source_is_low_value(source: SourceChunk, query: str) -> bool:
     # heading-level backstop for legacy/unclassified chunks.
     if _LOW_VALUE_EVIDENCE_RE.search(f"{heading_text}\n{summary_head}"):
         return True
+    leading_body = text_head.lstrip()[:500]
+    if re.search(
+        r"(?im)^\s{0,3}#{1,6}\s*(?:table of contents|references?|"
+        r"bibliography|works cited|acknowledg(?:e)?ments?|"
+        r"join our (?:book'?s |community'?s )?discord)\b",
+        leading_body,
+    ):
+        return True
     if re.search(r"\brelated work\b", heading_text, re.IGNORECASE):
         haystack = f"{heading_text}\n{summary_head}\n{text_head}"
         citation_hits = len(re.findall(r"\b[A-Z][A-Za-z-]+ et al\.\s*\(\d{4}", haystack))
@@ -3255,6 +3263,12 @@ def _format_retrieval_tier_synthesis_contract(
             f"lexical={counts.get('lexical', 0)}; "
             f"final_mix={final_mix or 'n/a'}."
         )
+    header.append(
+        "broad_concept_rule: If the user's term is overloaded and retrieved "
+        "evidence spans multiple meanings, answer anyway. Start with the "
+        "common core, then group by meaning only where it helps; do not ask "
+        "for clarification as a substitute for answering."
+    )
 
     if value == RetrievalTier.qdrant_only.value:
         body = [
@@ -3404,6 +3418,66 @@ _RETRIEVAL_NUANCE_STOPWORDS = frozenset(
     .split()
 )
 
+_BROAD_CONCEPT_FRAME_RULES: dict[str, tuple[dict[str, Any], ...]] = {
+    "ontology": (
+        {
+            "frame": "technical ontology / knowledge graph",
+            "patterns": (
+                r"\bknowledge graphs?\b",
+                r"\bsemantic web\b",
+                r"\blinked data\b",
+                r"\brdf\b",
+                r"\bowl\b",
+                r"\bschema\b",
+                r"\bcyc\b",
+                r"\bdomain model\b",
+                r"\bupper[- ]level ontology\b",
+                r"\bformal(?:ly)? represented\b",
+                r"\bquery languages?\b",
+            ),
+        },
+        {
+            "frame": "NLP / language-system ontology",
+            "patterns": (
+                r"\bnatural language\b",
+                r"\bnlp\b",
+                r"\blanguage generation\b",
+                r"\blanguage processing\b",
+                r"\bcomputational linguistics\b",
+                r"\btext generation\b",
+                r"\bdiscourse\b",
+                r"\bsemantic types?\b",
+            ),
+        },
+        {
+            "frame": "philosophical ontology / being",
+            "patterns": (
+                r"\bbeing\b",
+                r"\bexistence\b",
+                r"\breality\b",
+                r"\bmetaphysic",
+                r"\bepistemolog",
+                r"\bstate of being\b",
+                r"\bwhat there is\b",
+                r"\btrue score\b",
+            ),
+        },
+        {
+            "frame": "social or self ontology",
+            "patterns": (
+                r"\bsocial ontology\b",
+                r"\bself\b",
+                r"\bidentity\b",
+                r"\bsubjectiv",
+                r"\bpersonal experience\b",
+                r"\bsocial construction\b",
+                r"\binstitution",
+                r"\bcollective intentionality\b",
+            ),
+        },
+    )
+}
+
 
 def _retrieval_nuance_source_text(source: Any) -> tuple[str, str]:
     data = _source_to_dict(source)
@@ -3465,9 +3539,74 @@ def _retrieval_nuance_rank_terms(
     return [term for _score, _count, term in ranked[:limit]]
 
 
+def _query_broad_concepts(query: str | None) -> list[str]:
+    text = str(query or "").lower()
+    concepts: list[str] = []
+    if re.search(r"\bontolog(?:y|ies|ical|ically)\b", text):
+        concepts.append("ontology")
+    return concepts
+
+
+def _detect_broad_concept_frames(
+    *,
+    query: str | None,
+    source_texts: list[tuple[str, str]],
+    limit: int = 4,
+) -> list[dict[str, Any]]:
+    """Detect overloaded concept frames represented in the retrieved packet.
+
+    This is deliberately tiny and deterministic. It does not classify the
+    user's intent; it tells the answer model, "the retrieved evidence spans
+    these senses, so answer the question by grouping them instead of silently
+    choosing one or asking for clarification."
+    """
+
+    concepts = _query_broad_concepts(query)
+    if not concepts or not source_texts:
+        return []
+
+    frames: list[dict[str, Any]] = []
+    for concept in concepts:
+        for rule in _BROAD_CONCEPT_FRAME_RULES.get(concept, ()):
+            patterns = [re.compile(pattern, re.IGNORECASE) for pattern in rule["patterns"]]
+            matches: list[dict[str, Any]] = []
+            terms: set[str] = set()
+            for title, text in source_texts:
+                haystack = f"{title}\n{text}"
+                matched_terms = []
+                for pattern in patterns:
+                    found = pattern.search(haystack)
+                    if not found:
+                        continue
+                    token = re.sub(r"\s+", " ", found.group(0).strip())
+                    matched_terms.append(token)
+                    terms.add(token.lower())
+                if matched_terms:
+                    matches.append(
+                        {
+                            "source": title or "retrieved source",
+                            "terms": matched_terms[:3],
+                        }
+                    )
+            if len(matches) < 1:
+                continue
+            frames.append(
+                {
+                    "concept": concept,
+                    "frame": str(rule["frame"]),
+                    "source_count": len({m["source"] for m in matches}),
+                    "terms": sorted(terms)[:6],
+                }
+            )
+
+    frames.sort(key=lambda row: (-int(row.get("source_count") or 0), row["frame"]))
+    return frames[:limit]
+
+
 def _build_retrieval_nuance_digest(
     *,
     tier: Any,
+    query: str | None = None,
     sources: list[Any] | None,
     facts: list[Any] | None,
     decoration: list[Any] | None,
@@ -3487,9 +3626,11 @@ def _build_retrieval_nuance_digest(
     phrase_df: Counter[str] = Counter()
     document_counts: Counter[str] = Counter()
     lane_mix: Counter[str] = Counter()
+    source_texts: list[tuple[str, str]] = []
 
     for source in sources or []:
         title, text = _retrieval_nuance_source_text(source)
+        source_texts.append((title, text))
         if title:
             document_counts[title] += 1
         data = _source_to_dict(source) or {}
@@ -3583,6 +3724,10 @@ def _build_retrieval_nuance_digest(
             "children": counts.get("funnel_b", 0),
         },
         "graph_relationships": graph_relationships[:8],
+        "broad_concept_frames": _detect_broad_concept_frames(
+            query=query,
+            source_texts=source_texts,
+        ),
     }
 
 
@@ -3626,7 +3771,12 @@ def _format_retrieval_nuance_contract(digest: dict[str, Any] | None) -> str | No
         ],
         limit=6,
     )
-    if not any((terms, relationships)):
+    broad_frames = [
+        item
+        for item in (digest.get("broad_concept_frames") or [])
+        if isinstance(item, dict) and item.get("concept") and item.get("frame")
+    ][:4]
+    if not any((terms, relationships, broad_frames)):
         return None
 
     lines = [
@@ -3641,6 +3791,15 @@ def _format_retrieval_nuance_contract(digest: dict[str, Any] | None) -> str | No
     if relationships:
         lines.append("salient_relationships:")
         lines.extend(f"- {relationship}" for relationship in relationships)
+    if broad_frames:
+        lines.append("broad_concept_frames:")
+        for item in broad_frames:
+            terms_text = ", ".join(str(term) for term in (item.get("terms") or [])[:4])
+            suffix = f" ({terms_text})" if terms_text else ""
+            lines.append(
+                f"- {item.get('concept')}: {item.get('frame')}"
+                f"; sources={item.get('source_count', 1)}{suffix}"
+            )
     lines.extend(
         [
             "How to use this hint:",
@@ -3657,6 +3816,13 @@ def _format_retrieval_nuance_contract(digest: dict[str, Any] | None) -> str | No
                 "- If a term is off-question, omit it. Prefer corpus-grounded "
                 "wording over generic pretrained phrasing when the evidence "
                 "supports it."
+            ),
+            (
+                "- If broad_concept_frames are present, the query term is "
+                "overloaded in the retrieved evidence. Do NOT ask the user to "
+                "clarify and do NOT silently choose one sense. Answer the "
+                "question directly first, then group the explanation by the "
+                "frames only as much as needed."
             ),
             "</retrieval_nuance_digest>",
         ]
@@ -3850,6 +4016,10 @@ POLYMATH_SYSTEM_PROMPT = (
     "explains, compares, or exemplifies the thing asked about, synthesize from "
     "that evidence first instead of substituting your pretrained background "
     "knowledge.\n"
+    "- If the user asks about a broad or overloaded concept and the retrieved "
+    "evidence frames it in multiple ways, still answer the question. Do not "
+    "stall on clarification and do not silently pick one sense. Start with the "
+    "shared answer, then group the important senses only as needed.\n"
     "- Use general knowledge only when no retrieved evidence is present, or as "
     "a small bridge for a term the sources do not explain. If you use it for a "
     "material claim, add a brief inline caveat where the claim appears (e.g. "
@@ -4590,6 +4760,7 @@ class ChatOrchestrator:
 
         retrieval_nuance_digest = _build_retrieval_nuance_digest(
             tier=retrieval.effective_tier,
+            query=request.message,
             sources=sources,
             facts=facts,
             decoration=decoration,

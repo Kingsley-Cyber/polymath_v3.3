@@ -165,6 +165,7 @@ import services.chat_orchestrator as chat_orchestrator_module  # noqa: E402
 from models.schemas import ChatRequest, ModelOverrides, SourceChunk  # noqa: E402
 from services.chat_orchestrator import (  # noqa: E402
     ChatOrchestrator,
+    _build_polymath_system_prompt,
     _build_retrieval_nuance_digest,
     _chat_source_is_low_value,
     _format_retrieval_nuance_contract,
@@ -327,6 +328,9 @@ def test_retrieval_tiers_have_distinct_synthesis_lenses():
     assert "semantic overview" in vector.lower()
     assert "hydrated corpus synthesis" in hybrid.lower()
     assert "relationship map" in graph.lower()
+    assert "broad_concept_rule" in vector
+    assert "answer anyway" in hybrid
+    assert "do not ask for clarification" in graph
     assert "source comparison" in vector
     assert "what the selected corpus evidence specifically says" in hybrid
     # Hybrid now opens naturally instead of with a fixed "Across the selected
@@ -338,6 +342,14 @@ def test_retrieval_tiers_have_distinct_synthesis_lenses():
     # verbatim as section headers (de-templatized so weak models don't echo them).
     assert "do not paste the fixed labels" in graph
     assert len({vector, hybrid, graph}) == 3
+
+
+def test_system_prompt_requires_answering_overloaded_concepts():
+    prompt = _build_polymath_system_prompt()
+
+    assert "broad or overloaded concept" in prompt
+    assert "still answer the question" in prompt
+    assert "do not silently pick one sense" in prompt
 
 
 def test_retrieval_nuance_digest_surfaces_repeated_context():
@@ -412,6 +424,69 @@ def test_retrieval_nuance_digest_surfaces_repeated_context():
     assert "source_lane_mix" not in contract
     assert "retrieval_additions" not in contract
     assert "NEVER output these terms as a list" in contract
+
+
+def test_retrieval_nuance_digest_groups_overloaded_ontology_frames():
+    sources = [
+        SourceChunk(
+            chunk_id="kg-1",
+            parent_id="parent-1",
+            doc_id="doc-kg",
+            corpus_id="corpus",
+            doc_name="Knowledge Graphs.md",
+            text=(
+                "Ontologies in knowledge graphs use RDF, OWL, schema, and "
+                "linked data to formally represent a domain model."
+            ),
+            score=1.0,
+            source_tier="qdrant_mongo_graph",
+        ),
+        SourceChunk(
+            chunk_id="phil-1",
+            parent_id="parent-2",
+            doc_id="doc-phil",
+            corpus_id="corpus",
+            doc_name="Philosophy of Mind.md",
+            text=(
+                "Ontology and epistemology ask about existence, being, "
+                "reality, and what there is."
+            ),
+            score=0.9,
+            source_tier="lexical",
+        ),
+        SourceChunk(
+            chunk_id="self-1",
+            parent_id="parent-3",
+            doc_id="doc-self",
+            corpus_id="corpus",
+            doc_name="Self and Identity.md",
+            text=(
+                "Social ontology and self identity concern subjectivity, "
+                "personal experience, and social construction."
+            ),
+            score=0.85,
+            source_tier="tier_b_child",
+        ),
+    ]
+
+    digest = _build_retrieval_nuance_digest(
+        tier="qdrant_mongo_graph",
+        query="why are ontologies so powerful",
+        sources=sources,
+        facts=[],
+        decoration=[],
+        diagnostics={},
+    )
+    frames = {item["frame"] for item in digest["broad_concept_frames"]}
+    contract = _format_retrieval_nuance_contract(digest)
+
+    assert "technical ontology / knowledge graph" in frames
+    assert "philosophical ontology / being" in frames
+    assert "social or self ontology" in frames
+    assert contract is not None
+    assert "broad_concept_frames" in contract
+    assert "Do NOT ask the user to clarify" in contract
+    assert "Answer the question directly first" in contract
 
 
 def test_hyde_stays_available_for_open_cross_domain_discovery():
