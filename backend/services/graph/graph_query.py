@@ -179,6 +179,37 @@ def _literal_overlap_count(name: str, tokens: list[str]) -> int:
     return score
 
 
+def _fulltext_anchor_query(tokens: list[str]) -> str:
+    """Build a small Lucene-safe OR query for Neo4j entity full-text lookup."""
+    contains_terms, exact_short_terms = _literal_match_terms(tokens)
+    terms = _dedupe_ordered([*contains_terms, *exact_short_terms])
+    safe: list[str] = []
+    for term in terms:
+        cleaned = re.sub(r"[^A-Za-z0-9_]+", " ", str(term)).strip()
+        if not cleaned:
+            continue
+        if " " in cleaned:
+            safe.append(f'"{cleaned}"')
+        else:
+            safe.append(cleaned)
+    return " OR ".join(safe)
+
+
+def _exact_anchor_terms(tokens: list[str]) -> list[str]:
+    """Deterministic indexed exact-name candidates from query tokens."""
+    terms: list[str] = []
+    clean_tokens = [t.strip().lower() for t in tokens if t.strip()]
+    terms.extend(clean_tokens)
+    for token in clean_tokens:
+        expansion = _SHORT_TOKEN_EXPANSIONS.get(token)
+        if expansion:
+            terms.append(" ".join(expansion))
+    for size in (2, 3):
+        for idx in range(0, max(0, len(clean_tokens) - size + 1)):
+            terms.append(" ".join(clean_tokens[idx : idx + size]))
+    return _dedupe_ordered([t for t in terms if len(t) > 1])
+
+
 async def extract_query_entities(
     query: str,
     corpus_id: str,
@@ -217,6 +248,8 @@ async def extract_query_entities(
     """
     tokens = _tokenize(query)
     contains_tokens, exact_short_tokens = _literal_match_terms(tokens)
+    fulltext_query = _fulltext_anchor_query(tokens)
+    anchor_terms = _exact_anchor_terms(tokens)
 
     # Path B — vector scope (best-effort, additive). Failures return an
     # empty set and we silently fall through to the literal path.
@@ -240,7 +273,7 @@ async def extract_query_entities(
             )
             vector_seed_ids = set()
 
-    if not contains_tokens and not exact_short_tokens and not vector_seed_ids:
+    if not fulltext_query and not contains_tokens and not exact_short_tokens and not vector_seed_ids:
         return []
     if qdrant is not None and not vector_seed_ids and not allow_literal_fallback:
         logger.info(
@@ -258,7 +291,66 @@ async def extract_query_entities(
         len(vector_seed_ids) + 10,
     )
 
-    if vector_seed_ids:
+    used_fulltext = bool(fulltext_query)
+    if fulltext_query:
+        # Indexed anchor path: use Neo4j's full-text index for property lookup,
+        # then hydrate only those entity IDs through corpus-scoped MENTIONS.
+        # This avoids the old Chunk->MENTIONS corpus scan for literal queries
+        # while still merging vector-scoped entity IDs when Qdrant is warm.
+        fulltext_limit = max(hard_limit * 4, 24)
+        cypher = """
+        CALL {
+          WITH $anchor_terms AS anchor_terms
+          MATCH (exact:Entity)
+          WHERE exact.normalized_name IN anchor_terms
+             OR exact.canonical_name IN anchor_terms
+          RETURN collect({
+              entity_id: exact.entity_id,
+              fulltext_score: 100.0
+          }) AS exact_hits
+        }
+        CALL db.index.fulltext.queryNodes("entity_name_ft", $fulltext_query)
+        YIELD node AS ft_entity, score AS ft_score
+        WHERE ft_entity:Entity
+        WITH exact_hits, collect({
+            entity_id: ft_entity.entity_id,
+            fulltext_score: ft_score
+        })[..$fulltext_limit] AS ft_hits
+        WITH exact_hits + ft_hits AS all_hits
+        WITH all_hits, [hit IN all_hits | hit.entity_id] AS hit_ids
+        WITH all_hits, hit_ids, hit_ids + $vector_seed_ids AS candidate_ids
+        MATCH (e:Entity)
+        WHERE e.entity_id IN candidate_ids
+        OPTIONAL MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(e)
+        WITH e, count(DISTINCT c) AS mention_count,
+             max(coalesce(head([hit IN all_hits WHERE hit.entity_id = e.entity_id | hit.fulltext_score]), 0.0)) AS fulltext_score,
+             toLower(coalesce(e.display_name, e.normalized_name, e.canonical_name, e.entity_id, '')) AS surface_text
+        WHERE mention_count > 0
+          AND surface_text <> ''
+          AND NOT surface_text IN $junk_exact
+          AND NOT surface_text =~ $junk_pattern
+        RETURN
+            e.entity_id     AS entity_id,
+            coalesce(e.display_name, e.normalized_name, '') AS display_name,
+            coalesce(e.primary_entity_type, e.entity_type, 'other') AS entity_type,
+            mention_count,
+            coalesce(fulltext_score, 0.0) AS fulltext_score
+        ORDER BY fulltext_score DESC, mention_count DESC, entity_id ASC
+        LIMIT $hard_limit
+        """
+        params = {
+            "corpus_id": corpus_id,
+            "fulltext_query": fulltext_query,
+            "fulltext_limit": fulltext_limit,
+            "anchor_terms": anchor_terms,
+            "contains_tokens": contains_tokens,
+            "exact_short_tokens": exact_short_tokens,
+            "vector_seed_ids": list(vector_seed_ids),
+            "hard_limit": hard_limit,
+            "junk_exact": list(_JUNK_EXACT_LOWER),
+            "junk_pattern": _JUNK_NAME_PATTERN,
+        }
+    elif vector_seed_ids:
         # Fast path: Qdrant already narrowed the query to a bounded entity-id
         # scope. Hydrate those IDs directly instead of running the expensive
         # corpus-wide literal scan.
@@ -276,7 +368,8 @@ async def extract_query_entities(
             e.entity_id     AS entity_id,
             coalesce(e.display_name, e.normalized_name, '') AS display_name,
             coalesce(e.primary_entity_type, e.entity_type, 'other') AS entity_type,
-            mention_count
+            mention_count,
+            0.0 AS fulltext_score
         ORDER BY mention_count DESC, entity_id ASC
         LIMIT $hard_limit
         """
@@ -334,9 +427,63 @@ async def extract_query_entities(
             "junk_pattern": _JUNK_NAME_PATTERN,
         }
 
-    async with driver.session() as session:
-        result = await session.run(cypher, **params)
-        rows = [dict(r) async for r in result]
+    try:
+        async with driver.session() as session:
+            result = await session.run(cypher, **params)
+            rows = [dict(r) async for r in result]
+    except Exception as exc:
+        if not used_fulltext or not allow_literal_fallback:
+            raise
+        logger.warning(
+            "extract_query_entities: full-text entity lookup failed (%s) — "
+            "falling back to bounded literal scan",
+            exc,
+        )
+        cypher = """
+        MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)
+        WITH c, e,
+             toLower(
+               coalesce(e.normalized_name, '') + ' ' +
+               coalesce(e.canonical_name, '') + ' ' +
+               coalesce(e.display_name, '')
+             ) AS name_text,
+             toLower(coalesce(e.display_name, e.normalized_name, e.canonical_name, e.entity_id, '')) AS surface_text
+        WHERE surface_text <> ''
+          AND NOT surface_text IN $junk_exact
+          AND NOT surface_text =~ $junk_pattern
+          AND (
+            (
+                size($contains_tokens) > 0
+                AND ANY(tok IN $contains_tokens WHERE name_text CONTAINS tok)
+            ) OR (
+                size($exact_short_tokens) > 0
+                AND ANY(tok IN $exact_short_tokens WHERE
+                    name_text =~ ('.*(^|[^a-z0-9])' + tok + '([^a-z0-9]|$).*')
+                )
+            ) OR e.entity_id IN $vector_seed_ids
+          )
+        WITH e, count(DISTINCT c) AS mention_count
+        RETURN
+            e.entity_id     AS entity_id,
+            coalesce(e.display_name, e.normalized_name, '') AS display_name,
+            coalesce(e.primary_entity_type, e.entity_type, 'other') AS entity_type,
+            mention_count,
+            0.0 AS fulltext_score
+        ORDER BY mention_count DESC, entity_id ASC
+        LIMIT $hard_limit
+        """
+        params = {
+            "corpus_id": corpus_id,
+            "contains_tokens": contains_tokens,
+            "exact_short_tokens": exact_short_tokens,
+            "vector_seed_ids": list(vector_seed_ids),
+            "hard_limit": hard_limit,
+            "junk_exact": list(_JUNK_EXACT_LOWER),
+            "junk_pattern": _JUNK_NAME_PATTERN,
+        }
+        async with driver.session() as session:
+            result = await session.run(cypher, **params)
+            rows = [dict(r) async for r in result]
 
     if not rows:
         logger.info(

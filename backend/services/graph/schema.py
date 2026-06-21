@@ -32,6 +32,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS FOR (c:Chunk) ON (c.doc_id, c.chunk_id)",
     "CREATE INDEX IF NOT EXISTS FOR (e:Entity) ON (e.normalized_name)",
     "CREATE INDEX IF NOT EXISTS FOR (e:Entity) ON (e.canonical_name)",
+    "CREATE INDEX IF NOT EXISTS FOR (e:Entity) ON (e.display_name)",
     "CREATE INDEX IF NOT EXISTS FOR (e:Entity) ON (e.entity_type)",
     "CREATE INDEX IF NOT EXISTS FOR (e:Entity) ON (e.primary_entity_type)",
     "CREATE INDEX IF NOT EXISTS FOR (e:Entity) ON (e.object_kind)",
@@ -44,6 +45,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS FOR (e:Entity) ON (e.ontology_version)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.relation_family)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.predicate)",
+    "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.confidence)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.edge_strength)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.eligible_for_synthesis)",
     # Bridge detection across multi-corpus selections — replaces full-graph scans.

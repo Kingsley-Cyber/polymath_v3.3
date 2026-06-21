@@ -154,6 +154,15 @@ def _row(entity_id: str, display_name: str, mention_count: int):
 # ── Tests ─────────────────────────────────────────────────────────────
 
 
+def test_exact_anchor_terms_include_acronym_expansions():
+    terms = graph_query._exact_anchor_terms(["python", "ai", "ml"])
+
+    assert "python" in terms
+    assert "ai" in terms
+    assert "artificial intelligence" in terms
+    assert "machine learning" in terms
+
+
 @pytest.mark.asyncio
 async def test_literal_only_path_when_no_qdrant():
     """Phase-1 backwards-compat: no qdrant → behaves exactly like
@@ -182,6 +191,38 @@ async def test_literal_only_path_when_no_qdrant():
     assert "vector" not in r["sources"]
     assert r["vector_match"] is False
     assert r["score"] > 0
+
+
+@pytest.mark.asyncio
+async def test_literal_anchor_uses_neo4j_fulltext_index():
+    """Literal graph anchors should call the Neo4j full-text index first.
+
+    Starting from Chunk->MENTIONS for property matching becomes a corpus-wide
+    scan on large installs. The indexed path should resolve entity IDs via
+    db.index.fulltext.queryNodes(), then hydrate those IDs through corpus
+    mentions.
+    """
+    captured = {}
+
+    def on_run(cypher, **kwargs):
+        captured["cypher"] = cypher
+        captured["kwargs"] = kwargs
+        return _FakeResult([_row("entity:python", "Python", 12)])
+
+    driver = _FakeDriver(on_run)
+    result = await graph_query.extract_query_entities(
+        "what is python",
+        "corp-1",
+        driver,
+        qdrant=None,
+    )
+
+    assert len(result) == 1
+    assert 'db.index.fulltext.queryNodes("entity_name_ft"' in captured["cypher"]
+    assert "MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)" not in captured["cypher"]
+    assert captured["kwargs"]["fulltext_query"]
+    assert captured["kwargs"]["vector_seed_ids"] == []
+    assert result[0]["sources"] == ["literal"]
 
 
 @pytest.mark.asyncio

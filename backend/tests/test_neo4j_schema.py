@@ -50,3 +50,5 @@ async def test_initialize_schema_creates_retrieval_fulltext_indexes():
     statements = [query for query, _params in driver.calls]
     assert any("CREATE FULLTEXT INDEX entity_name_ft" in stmt for stmt in statements)
     assert any("CREATE FULLTEXT INDEX fact_text_ft" in stmt for stmt in statements)
+    assert any("FOR (e:Entity) ON (e.display_name)" in stmt for stmt in statements)
+    assert any("FOR ()-[r:RELATES_TO]-() ON (r.confidence)" in stmt for stmt in statements)
