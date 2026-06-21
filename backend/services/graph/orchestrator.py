@@ -255,6 +255,7 @@ async def _bounded_discover_without_legacy(
                 "gaps": gaps,
                 "hubs": hubs,
                 "seeds": seeds,
+                "trace": subgraph.get("trace") or {},
             }, None
         except Exception as exc:  # noqa: BLE001
             logger.warning("bounded discover corpus=%s failed: %s", cid, exc)
@@ -265,6 +266,7 @@ async def _bounded_discover_without_legacy(
                 "gaps": [],
                 "hubs": [],
                 "seeds": [],
+                "trace": {"error": str(exc)},
             }, str(exc)
 
     sem = _asyncio.Semaphore(4)
@@ -282,6 +284,7 @@ async def _bounded_discover_without_legacy(
     hubs_by_id: dict[str, dict[str, Any]] = {}
     seeds_by_id: dict[str, dict[str, Any]] = {}
     errors: dict[str, str] = {}
+    graph_traces: dict[str, dict[str, Any]] = {}
 
     def _stamp(item: dict[str, Any], cid: str) -> dict[str, Any]:
         stamped = dict(item)
@@ -325,6 +328,9 @@ async def _bounded_discover_without_legacy(
             seed_id = seed.get("entity_id") or seed.get("id")
             if seed_id:
                 seeds_by_id[seed_id] = _stamp(seed, cid)
+        trace = payload.get("trace")
+        if isinstance(trace, dict) and trace:
+            graph_traces[cid] = trace
         gaps.extend(_stamp(gap, cid) for gap in payload["gaps"])
 
     nodes = list(nodes_by_id.values())
@@ -393,6 +399,12 @@ async def _bounded_discover_without_legacy(
             "predicate": str(link.get("predicate") or link.get("kind") or "related_to"),
             "relation_family": str(link.get("relation_family") or ""),
             "confidence": float(link.get("confidence") or 0.0),
+            "edge_strength": str(link.get("edge_strength") or ""),
+            "eligible_for_synthesis": bool(link.get("eligible_for_synthesis"))
+            if link.get("eligible_for_synthesis") is not None
+            else None,
+            "evidence_count": int(link.get("evidence_count") or 0),
+            "edge_rank": _maybe_float(link.get("edge_rank")) or 0.0,
             "role": str(link.get("role") or "context"),
         }
         for link in links
@@ -479,6 +491,10 @@ async def _bounded_discover_without_legacy(
         "selected_edges": selected_edges,
         "source_docs": [],
         "builder": "bounded_graph_query",
+        "graph_edge_policy": {
+            "per_corpus": graph_traces,
+            "corpus_count": len(corpus_ids),
+        },
     }
     auto_synthesis = {
         "markdown": interpretation,
@@ -556,10 +572,14 @@ async def _bounded_discover_without_legacy(
             "weak_links": len(weak_links),
             "transfers": len(transfers),
             "local_structural_signals": local_signals.get("counts") or {},
+            "graph_edge_policy": {
+                "per_corpus": graph_traces,
+                "corpus_count": len(corpus_ids),
+            },
             "errors_per_corpus": errors,
         },
         domain_map_summary=[],
-        graph={"nodes": nodes, "links": links},
+        graph={"nodes": nodes, "links": links, "trace": {"graph_edge_policy": graph_traces}},
         anchors=seeds,
         concept_communities=hubs,
         entity_concept_map={},
@@ -1592,11 +1612,21 @@ def _local_graph_structural_signals(
         predicate = str(link.get("predicate") or link.get("kind") or "related_to")
         relation_family = str(link.get("relation_family") or "")
         confidence = float(link.get("confidence") or 0.0)
+        edge_strength = str(link.get("edge_strength") or "").lower()
+        evidence_count = int(link.get("evidence_count") or 0)
         generic = predicate.lower() in {"related_to", "references", "mentions"}
-        thin = confidence <= 0.45 or generic
+        thin_edge = edge_strength in {"weak", "thin"}
+        no_evidence = evidence_count == 0 and confidence <= 0.60
+        thin = confidence <= 0.45 or generic or thin_edge or no_evidence
         if not thin:
             continue
-        weakness_type = "generic_relation" if generic else "thin_evidence"
+        weakness_type = (
+            "generic_relation"
+            if generic
+            else "thin_evidence"
+            if thin_edge or no_evidence
+            else "low_confidence"
+        )
         key = (source, target, weakness_type)
         if key in seen_weak:
             continue
@@ -1613,10 +1643,13 @@ def _local_graph_structural_signals(
                 "severity": "medium" if confidence > 0.0 else "high",
                 "classification": weakness_type,
                 "relation_family": relation_family,
+                "edge_strength": edge_strength,
+                "evidence_count": evidence_count,
                 "path_count": 1,
                 "evidence": str(link.get("evidence") or predicate),
                 "rationale": (
-                    f"The local edge is {predicate!r} with confidence {confidence:.2f}; "
+                    f"The local edge is {predicate!r} with confidence {confidence:.2f}, "
+                    f"strength {edge_strength or 'unknown'}, and {evidence_count} evidence chunks; "
                     "treat it as a prompt for verification, not a strong proof."
                 ),
                 "action_question": (

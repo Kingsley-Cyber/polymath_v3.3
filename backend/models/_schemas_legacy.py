@@ -1285,11 +1285,17 @@ class GraphQueryNode(BaseModel):
 
 
 class GraphQueryLink(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     source: str
     target: str
     predicate: str = "related_to"
     relation_family: str | None = None
     confidence: float = 0.5
+    edge_strength: str | None = None
+    eligible_for_synthesis: bool | None = None
+    evidence_count: int | None = None
+    edge_rank: float | None = None
 
 
 class GraphBridge(BaseModel):
@@ -1323,6 +1329,7 @@ class GraphQueryResponse(BaseModel):
     bridges: list[GraphBridge] = Field(default_factory=list)
     hubs: list[GraphHub] = Field(default_factory=list)
     gaps: list[GraphGap] = Field(default_factory=list)
+    trace: dict[str, Any] = Field(default_factory=dict)
     seed_entities: list[GraphQueryNode] = Field(
         default_factory=list,
         description="Entities the query tokens matched as seeds (for UI highlight)",

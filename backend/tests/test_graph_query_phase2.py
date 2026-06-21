@@ -242,6 +242,34 @@ async def test_find_bridges_path_count_fallback_when_no_metrics():
 
 
 @pytest.mark.asyncio
+async def test_find_bridges_path_count_uses_edge_pruning_policy():
+    """Fallback bridge discovery must not count weak generic edges as bridges."""
+    queries: list[str] = []
+
+    def on_run(cypher, **kwargs):
+        queries.append(cypher)
+        assert kwargs["min_edge_confidence"] == pytest.approx(0.20)
+        assert kwargs["generic_min_confidence"] == pytest.approx(0.35)
+        assert "related_to" in kwargs["generic_predicates"]
+        assert "strong" in kwargs["strong_edge_strengths"]
+        return _FakeResult([])
+
+    driver = _FakeDriver(on_run)
+    out = await graph_query.find_bridges(
+        driver=driver,
+        entity_ids=["s1", "s2"],
+        corpus_id="corp-1",
+        metrics=None,
+    )
+    joined = "\n".join(queries)
+    assert out == []
+    assert "eligible_for_synthesis" in joined
+    assert "edge_strength" in joined
+    assert "evidence_count" in joined
+    assert "$generic_min_confidence" in joined
+
+
+@pytest.mark.asyncio
 async def test_find_bridges_fragile_path_when_metrics_warm():
     """metrics with a fragile_bridge anchored to a seed → elite path
     emits the non-seed endpoint as a bridge."""

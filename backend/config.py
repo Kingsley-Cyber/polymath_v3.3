@@ -122,6 +122,36 @@ class Settings(BaseSettings):
             "is intentionally raised."
         ),
     )
+    GRAPH_REL_MIN_CONFIDENCE: float = Field(
+        default=0.20,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum RELATES_TO confidence for query-time graph traversal. This "
+            "is intentionally permissive so discovery keeps recall while still "
+            "dropping the noisiest edges."
+        ),
+    )
+    GRAPH_REL_GENERIC_MIN_CONFIDENCE: float = Field(
+        default=0.35,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Stricter confidence floor for generic RELATES_TO predicates such as "
+            "'related_to' during bounded graph expansion, especially beyond the "
+            "first hop."
+        ),
+    )
+    GRAPH_REL_HOP2_MIN_CONFIDENCE: float = Field(
+        default=0.30,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum RELATES_TO confidence after the first hop. Multi-hop graph "
+            "retrieval is useful but drifts faster, so second-hop expansion is "
+            "slightly stricter than direct seed expansion."
+        ),
+    )
     GRAPH_PREFILTER_POOL: int = Field(
         default=64,
         ge=8,

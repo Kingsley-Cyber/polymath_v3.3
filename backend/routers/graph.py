@@ -352,6 +352,7 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
             "bridges": bridges,
             "gaps": gaps,
             "seeds": seeds,
+            "trace": subgraph.get("trace") or {},
         }
 
     sem = asyncio.Semaphore(4)
@@ -375,7 +376,7 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
                 )
                 return cid, {
                     "nodes": [], "links": [], "bridges": [],
-                    "gaps": [], "seeds": [],
+                    "gaps": [], "seeds": [], "trace": {"error": str(exc)},
                 }
 
     per_corpus = await asyncio.gather(*[_gated(cid) for cid in corpus_ids])
@@ -387,6 +388,7 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
     merged_bridges: dict[str, dict] = {}
     merged_gaps: list[dict] = []
     merged_seeds: dict[str, dict] = {}
+    graph_traces: dict[str, dict] = {}
 
     def _stamp(item: dict, cid: str) -> dict:
         if not isinstance(item, dict):
@@ -439,6 +441,9 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
                 _stamp(merged_seeds[sid], cid)
             else:
                 merged_seeds[sid] = _stamp(dict(s), cid)
+        trace = payload.get("trace")
+        if isinstance(trace, dict) and trace:
+            graph_traces[cid] = trace
 
     nodes = list(merged_nodes.values())
     links = list(merged_links.values())
@@ -488,6 +493,12 @@ async def graph_query(body: GraphQueryRequest = Body(...)) -> GraphQueryResponse
         bridges=bridges,
         hubs=hubs,
         gaps=merged_gaps,
+        trace={
+            "graph_edge_policy": {
+                "per_corpus": graph_traces,
+                "corpus_count": len(corpus_ids),
+            }
+        },
         seed_entities=seeds_out,
     )
 

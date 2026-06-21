@@ -204,6 +204,44 @@ async def test_expand_subgraph_cold_cache_unannotated():
 
 
 @pytest.mark.asyncio
+async def test_expand_subgraph_prunes_edges_and_clamps_hops():
+    """Graph discovery should be broad-bounded, not broad-unbounded.
+
+    The query starts from seed IDs, clamps requested 3-hop traversal down to the
+    safe two-hop budget, and filters RELATES_TO by synthesis eligibility,
+    strength, evidence, and confidence before expanding the next frontier.
+    """
+    node_rows = [
+        {"id": "a", "display_name": "Alpha", "entity_type": "Concept",
+         "mention_count": 3, "is_seed": True},
+    ]
+    edge_rows = [
+        {"source": "a", "target": "b", "predicate": "supports",
+         "relation_family": "Evidence", "confidence": 0.8,
+         "edge_strength": "strong", "eligible_for_synthesis": True,
+         "evidence_count": 2, "edge_rank": 1.2}
+    ]
+    driver = _build_expand_driver(node_rows, edge_rows)
+    out = await graph_query.expand_subgraph(
+        entity_ids=["a"],
+        corpus_id="corp-1",
+        driver=driver,
+        max_hops=3,
+        metrics=None,
+    )
+    joined = "\n".join(driver.queries)
+    assert all("RELATES_TO*" not in q for q in driver.queries)
+    assert "eligible_for_synthesis" in joined
+    assert "edge_strength" in joined
+    assert "evidence_count" in joined
+    assert "$hop_min_confidence" in joined
+    assert "$generic_min_confidence" in joined
+    assert out["trace"]["hops_requested"] == 3
+    assert out["trace"]["hops_used"] == 2
+    assert out["trace"]["edge_policy"]["min_confidence"] == pytest.approx(0.20)
+
+
+@pytest.mark.asyncio
 async def test_expand_subgraph_warm_cache_annotates():
     """metrics warm → nodes annotated with pagerank / concept_id /
     is_working_entity. Original fields preserved."""

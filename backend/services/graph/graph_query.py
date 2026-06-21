@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import Counter
+from dataclasses import dataclass
 
 from services.graph.entity_cleaning import (
     GRAPH_STOP_WORDS,
@@ -57,6 +58,54 @@ _JUNK_NAME_PATTERN = JUNK_ENTITY_NAME_PATTERN
 _GRAPH_QUERY_MAX_SAFE_HOPS = 2
 _GRAPH_QUERY_MAX_NODE_LIMIT = 120
 _GRAPH_QUERY_MAX_EDGE_LIMIT = 360
+_DEFAULT_EDGE_MIN_CONFIDENCE = 0.20
+_DEFAULT_GENERIC_EDGE_MIN_CONFIDENCE = 0.35
+_DEFAULT_HOP2_EDGE_MIN_CONFIDENCE = 0.30
+_GENERIC_EDGE_PREDICATES = ("related_to", "references", "mentions")
+_STRONG_EDGE_STRENGTHS = ("strong", "repaired")
+
+
+@dataclass(frozen=True)
+class _EdgePolicy:
+    min_confidence: float = _DEFAULT_EDGE_MIN_CONFIDENCE
+    generic_min_confidence: float = _DEFAULT_GENERIC_EDGE_MIN_CONFIDENCE
+    hop2_min_confidence: float = _DEFAULT_HOP2_EDGE_MIN_CONFIDENCE
+
+
+def _clamped_unit(value: object, default: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(1.0, number))
+
+
+def _edge_policy() -> _EdgePolicy:
+    """Load query-time edge pruning policy without making tests depend on env.
+
+    Production reads the single source of truth from config. Unit tests that
+    import graph_query without a full .env keep deterministic defaults.
+    """
+    try:
+        from config import get_settings
+
+        settings = get_settings()
+        return _EdgePolicy(
+            min_confidence=_clamped_unit(
+                getattr(settings, "GRAPH_REL_MIN_CONFIDENCE", None),
+                _DEFAULT_EDGE_MIN_CONFIDENCE,
+            ),
+            generic_min_confidence=_clamped_unit(
+                getattr(settings, "GRAPH_REL_GENERIC_MIN_CONFIDENCE", None),
+                _DEFAULT_GENERIC_EDGE_MIN_CONFIDENCE,
+            ),
+            hop2_min_confidence=_clamped_unit(
+                getattr(settings, "GRAPH_REL_HOP2_MIN_CONFIDENCE", None),
+                _DEFAULT_HOP2_EDGE_MIN_CONFIDENCE,
+            ),
+        )
+    except Exception:
+        return _EdgePolicy()
 
 
 def _is_junk_entity_row(row: dict) -> bool:
@@ -388,6 +437,7 @@ async def expand_subgraph(
         len(entity_ids),
         min(max(1, int(limit)), _GRAPH_QUERY_MAX_NODE_LIMIT),
     )
+    edge_policy = _edge_policy()
     seed_ids = _dedupe_ordered(list(entity_ids))
     node_by_id: dict[str, dict] = {}
 
@@ -421,6 +471,26 @@ async def expand_subgraph(
     WHERE src.entity_id IN $frontier_ids
       AND NOT other.entity_id IN $seen_ids
       AND $corpus_id IN coalesce(r.corpus_ids, [])
+    WITH src, other, r,
+         coalesce(r.predicate, 'related_to') AS predicate,
+         coalesce(r.confidence, 0.0) AS rel_confidence,
+         coalesce(r.edge_strength, CASE WHEN coalesce(r.predicate, 'related_to') = 'related_to' THEN 'weak' ELSE 'strong' END) AS edge_strength,
+         coalesce(r.eligible_for_synthesis, false) AS eligible_for_synthesis,
+         size(coalesce(r.evidence_chunk_ids, [])) AS evidence_count
+    WHERE rel_confidence >= $min_edge_confidence
+      AND rel_confidence >= $hop_min_confidence
+      AND (
+          eligible_for_synthesis = true
+          OR NOT (predicate IN $generic_predicates)
+          OR edge_strength IN $strong_edge_strengths
+          OR evidence_count > 0
+      )
+      AND (
+          NOT (predicate IN $generic_predicates)
+          OR rel_confidence >= $generic_min_confidence
+          OR edge_strength IN $strong_edge_strengths
+          OR evidence_count > 0
+      )
     OPTIONAL MATCH (mc:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(other)
     WITH other,
          count(DISTINCT src.entity_id) AS frontier_hits,
@@ -471,12 +541,22 @@ async def expand_subgraph(
             if remaining <= 0 or not frontier_ids:
                 break
             hop_limit = min(max(remaining * 4, 24), 180)
+            hop_index = _hop + 1
             result = await session.run(
                 hop_cypher,
                 frontier_ids=frontier_ids,
                 seen_ids=list(node_by_id),
                 corpus_id=corpus_id,
                 hop_limit=hop_limit,
+                min_edge_confidence=edge_policy.min_confidence,
+                generic_min_confidence=edge_policy.generic_min_confidence,
+                hop_min_confidence=(
+                    edge_policy.min_confidence
+                    if hop_index <= 1
+                    else edge_policy.hop2_min_confidence
+                ),
+                generic_predicates=list(_GENERIC_EDGE_PREDICATES),
+                strong_edge_strengths=list(_STRONG_EDGE_STRENGTHS),
                 junk_exact=list(_JUNK_EXACT_LOWER),
                 junk_pattern=_JUNK_NAME_PATTERN,
             )
@@ -504,13 +584,44 @@ async def expand_subgraph(
     WHERE a.entity_id IN $node_ids AND b.entity_id IN $node_ids
       AND a.entity_id < b.entity_id  // de-dupe undirected edges
       AND $corpus_id IN coalesce(r.corpus_ids, [])
+    WITH a, b, r,
+         coalesce(r.predicate, 'related_to') AS predicate,
+         coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
+         coalesce(r.confidence, 0.0) AS confidence,
+         coalesce(r.edge_strength, CASE WHEN coalesce(r.predicate, 'related_to') = 'related_to' THEN 'weak' ELSE 'strong' END) AS edge_strength,
+         coalesce(r.eligible_for_synthesis, false) AS eligible_for_synthesis,
+         size(coalesce(r.evidence_chunk_ids, [])) AS evidence_count
+    WHERE confidence >= $min_edge_confidence
+      AND (
+          eligible_for_synthesis = true
+          OR NOT (predicate IN $generic_predicates)
+          OR edge_strength IN $strong_edge_strengths
+          OR evidence_count > 0
+      )
+      AND (
+          NOT (predicate IN $generic_predicates)
+          OR confidence >= $generic_min_confidence
+          OR edge_strength IN $strong_edge_strengths
+          OR evidence_count > 0
+      )
+    WITH a, b, predicate, relation_family, confidence, edge_strength,
+         eligible_for_synthesis, evidence_count,
+         confidence
+         + CASE WHEN eligible_for_synthesis THEN 0.20 ELSE 0.0 END
+         + CASE edge_strength WHEN 'strong' THEN 0.20 WHEN 'repaired' THEN 0.14 ELSE 0.0 END
+         + CASE WHEN predicate IN $generic_predicates THEN 0.0 ELSE 0.12 END
+         + CASE WHEN evidence_count > 0 THEN 0.08 ELSE 0.0 END AS edge_rank
     RETURN
         a.entity_id                               AS source,
         b.entity_id                               AS target,
-        coalesce(r.predicate, 'related_to')       AS predicate,
-        coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
-        coalesce(r.confidence, 0.5)               AS confidence
-    ORDER BY confidence DESC, source ASC, target ASC
+        predicate,
+        relation_family,
+        confidence,
+        edge_strength,
+        eligible_for_synthesis,
+        evidence_count,
+        edge_rank
+    ORDER BY edge_rank DESC, confidence DESC, source ASC, target ASC
     LIMIT $edge_limit
     """
 
@@ -520,6 +631,10 @@ async def expand_subgraph(
             node_ids=node_ids,
             corpus_id=corpus_id,
             edge_limit=_GRAPH_QUERY_MAX_EDGE_LIMIT,
+            min_edge_confidence=edge_policy.min_confidence,
+            generic_min_confidence=edge_policy.generic_min_confidence,
+            generic_predicates=list(_GENERIC_EDGE_PREDICATES),
+            strong_edge_strengths=list(_STRONG_EDGE_STRENGTHS),
         )
         edge_rows = [dict(r) async for r in result]
 
@@ -590,7 +705,36 @@ async def expand_subgraph(
                 "expand_subgraph: phase3 annotation skipped (%s)", exc
             )
 
-    return {"nodes": node_rows, "links": edge_rows}
+    trace = {
+        "edge_policy": {
+            "min_confidence": edge_policy.min_confidence,
+            "generic_min_confidence": edge_policy.generic_min_confidence,
+            "hop2_min_confidence": edge_policy.hop2_min_confidence,
+            "generic_predicates": list(_GENERIC_EDGE_PREDICATES),
+            "strong_edge_strengths": list(_STRONG_EDGE_STRENGTHS),
+        },
+        "hops_requested": int(max_hops),
+        "hops_used": hops,
+        "node_limit": node_limit,
+        "nodes_returned": len(node_rows),
+        "links_returned": len(edge_rows),
+        "edge_limit": _GRAPH_QUERY_MAX_EDGE_LIMIT,
+        "pruning": "query_time_edge_property_pruning",
+    }
+    logger.info(
+        "expand_subgraph: corpus=%s seeds=%d hops=%d/%d nodes=%d links=%d "
+        "edge_min=%.2f generic_min=%.2f hop2_min=%.2f",
+        corpus_id,
+        len(seed_ids),
+        hops,
+        int(max_hops),
+        len(node_rows),
+        len(edge_rows),
+        edge_policy.min_confidence,
+        edge_policy.generic_min_confidence,
+        edge_policy.hop2_min_confidence,
+    )
+    return {"nodes": node_rows, "links": edge_rows, "trace": trace}
 
 
 async def find_bridges(
@@ -726,6 +870,8 @@ async def find_bridges(
     if len(entity_ids) < 2:
         return []
 
+    edge_policy = _edge_policy()
+
     # Keep the fallback deliberately one-hop and bounded. The old
     # RELATES_TO*1..N path-count query was another corpus-scale path
     # enumerator and can exhaust Neo4j's transaction pool. Analytics warm
@@ -738,6 +884,25 @@ async def find_bridges(
     MATCH (seed)-[r:RELATES_TO]-(bridge:Entity)
     WHERE NOT bridge.entity_id IN $entity_ids
       AND $corpus_id IN coalesce(r.corpus_ids, [])
+    WITH seed, bridge, r,
+         coalesce(r.predicate, 'related_to') AS predicate,
+         coalesce(r.confidence, 0.0) AS rel_confidence,
+         coalesce(r.edge_strength, CASE WHEN coalesce(r.predicate, 'related_to') = 'related_to' THEN 'weak' ELSE 'strong' END) AS edge_strength,
+         coalesce(r.eligible_for_synthesis, false) AS eligible_for_synthesis,
+         size(coalesce(r.evidence_chunk_ids, [])) AS evidence_count
+    WHERE rel_confidence >= $min_edge_confidence
+      AND (
+          eligible_for_synthesis = true
+          OR NOT (predicate IN $generic_predicates)
+          OR edge_strength IN $strong_edge_strengths
+          OR evidence_count > 0
+      )
+      AND (
+          NOT (predicate IN $generic_predicates)
+          OR rel_confidence >= $generic_min_confidence
+          OR edge_strength IN $strong_edge_strengths
+          OR evidence_count > 0
+      )
     OPTIONAL MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(bridge)
 
     WITH bridge,
@@ -766,6 +931,10 @@ async def find_bridges(
             entity_ids=entity_ids,
             corpus_id=corpus_id,
             limit=int(limit),
+            min_edge_confidence=edge_policy.min_confidence,
+            generic_min_confidence=edge_policy.generic_min_confidence,
+            generic_predicates=list(_GENERIC_EDGE_PREDICATES),
+            strong_edge_strengths=list(_STRONG_EDGE_STRENGTHS),
             junk_exact=list(_JUNK_EXACT_LOWER),
             junk_pattern=_JUNK_NAME_PATTERN,
         )
