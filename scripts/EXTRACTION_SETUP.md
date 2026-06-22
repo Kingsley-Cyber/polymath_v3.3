@@ -80,6 +80,17 @@ The extraction service is `ghost_b_extract_svc` (FastAPI, default port 8084):
 — for ONNX — the ACTIVE execution providers, so a GPU claim that silently fell
 back to CPU is visible remotely.
 
+The backend extraction client rejects ONNX sidecars whose active providers do
+not include `CUDAExecutionProvider` unless you explicitly set:
+
+```
+LOCAL_GHOST_B_ALLOW_ONNX_CPU_FALLBACK=true
+```
+
+Leave that false for production. CPU fallback is useful for tiny smoke tests,
+but it can make real ingestions look stuck while Mongo/Qdrant/Neo4j are waiting
+for extraction slices.
+
 ## 3. Wire it up in the app
 
 Settings → Ingestion → Extraction Engines:

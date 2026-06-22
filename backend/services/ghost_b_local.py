@@ -36,6 +36,10 @@ RUNTIME TOPOLOGY (two modes, auto-detected):
   Sidecar URL: LOCAL_GHOST_B_EXTRACT_URL  (default http://host.docker.internal:8084)
   Timeout:     LOCAL_GHOST_B_EXTRACT_TIMEOUT_S (default 600 — a whole doc's
                chunks travel in one request; 230 chunks ≈ 80 s warm).
+  Safety:      LOCAL_GHOST_B_ALLOW_ONNX_CPU_FALLBACK=1 explicitly allows an
+               ONNX sidecar whose active providers do not include CUDA.
+               Default is reject, so a "GPU" sidecar that silently fell back to
+               CPU does not stall future ingestion batches.
 
 The wire format is the pipeline's native output: `ExtractionResult`-shaped
 plain dicts whose entities/relations/facts have already passed LLMEntity /
@@ -135,6 +139,42 @@ SIDECAR_TIMEOUT_S = float(os.environ.get("LOCAL_GHOST_B_EXTRACT_TIMEOUT_S", "180
 # re-prediction overlap is the accepted price of N-way parallelism).
 SIDECAR_SLICE = max(1, int(os.environ.get("LOCAL_GHOST_B_EXTRACT_SLICE", "2048")))
 EXTRACT_MODE = os.environ.get("LOCAL_GHOST_B_EXTRACT_MODE", "auto").strip().lower()
+
+
+# ---------------------------------------------------------- runtime guards
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _sidecar_health_usable(health: dict[str, Any]) -> tuple[bool, str]:
+    """Return whether a /health payload should receive extraction work.
+
+    The key production trap is ONNX Runtime reporting a healthy service while
+    only CPUExecutionProvider is active. That path can be orders of magnitude
+    slower than CUDA/MLX/MPS and makes ingestion look hung. Reject it by
+    default; operators can opt in when they truly want CPU fallback.
+    """
+    if health.get("status") != "ok":
+        return False, "health status is not ok"
+
+    gliner = health.get("gliner") or {}
+    backend = str(gliner.get("backend") or "").strip().lower()
+    device = str(gliner.get("device") or health.get("device") or "").strip().lower()
+    providers = {str(p) for p in (gliner.get("providers") or [])}
+
+    if backend == "onnx":
+        cuda_active = "CUDAExecutionProvider" in providers or device.startswith("cuda")
+        if not cuda_active and not _env_flag("LOCAL_GHOST_B_ALLOW_ONNX_CPU_FALLBACK"):
+            return (
+                False,
+                "ONNX sidecar has no CUDAExecutionProvider; set "
+                "LOCAL_GHOST_B_ALLOW_ONNX_CPU_FALLBACK=1 to allow CPU fallback",
+            )
+
+    return True, "ok"
 
 
 # --------------------------------------------------------------- path / models
@@ -760,8 +800,13 @@ async def _extract_via_sidecar(task_dicts: list[dict], do_facts: bool, lens_id: 
         for u in pref_urls:
             try:
                 r = await probe.get(f"{u}/health")
-                if r.status_code == 200 and r.json().get("status") == "ok":
+                if r.status_code != 200:
+                    continue
+                usable, reason = _sidecar_health_usable(r.json())
+                if usable:
                     live_urls.append(u)
+                else:
+                    logger.warning("ghost_b_local: skipping sidecar %s: %s", u, reason)
             except Exception:  # noqa: BLE001 — dead/off instance, skip
                 continue
     if not live_urls:
@@ -769,7 +814,9 @@ async def _extract_via_sidecar(task_dicts: list[dict], do_facts: bool, lens_id: 
             f"ghost_b_local: no extraction sidecar reachable among {pref_urls}. "
             "Enable a live endpoint in Settings -> Ingestion, start the GPU "
             "box sidecar, or start the local one "
-            "(START_GHOST_B_EXTRACT=true scripts/apple_ml_services/start.sh)."
+            "(START_GHOST_B_EXTRACT=true scripts/apple_ml_services/start.sh). "
+            "If you intentionally want ONNX CPU fallback, set "
+            "LOCAL_GHOST_B_ALLOW_ONNX_CPU_FALLBACK=1."
         )
 
     n_urls = len(live_urls)

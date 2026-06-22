@@ -45,6 +45,7 @@ interface SidebarProps {
 export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [folderOpen, setFolderOpen] = useState(true);
   const [isCorpusManagerOpen, setIsCorpusManagerOpen] = useState(false);
   // Mass-delete selection mode
@@ -81,6 +82,8 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   };
 
   const handleNewChat = async () => {
+    if (isCreatingChat) return;
+    setIsCreatingChat(true);
     try {
       const { id } = await api.createConversation({
         title: "untitled_node.md",
@@ -96,6 +99,8 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
       setActiveConversation(id);
     } catch (error) {
       console.error("Failed to create conversation:", error);
+    } finally {
+      setIsCreatingChat(false);
     }
   };
 
@@ -135,6 +140,23 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
     } catch (error) {
       console.error("Failed to load conversation:", error);
     }
+  };
+
+  const activateConversationRow = (id: string) => {
+    if (isSelectMode) {
+      toggleSelected(id);
+      return;
+    }
+    void handleSelectConversation(id);
+  };
+
+  const handleConversationKeyDown = (
+    e: React.KeyboardEvent<HTMLDivElement>,
+    id: string,
+  ) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    activateConversationRow(id);
   };
 
   const toggleSelectMode = () => {
@@ -212,7 +234,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
         // distinct from the canvas behind it when the sidebar is open,
         // so it reads as opaque even on themes where bg-base is close
         // to the page-content color.
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-[calc(100vw-1rem)] max-w-80 sm:w-64 bg-bg-base border-r border-border-minimal flex flex-col transition-transform duration-150 select-none shadow-xl lg:shadow-none ${
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-[min(20rem,calc(100vw-1rem))] sm:w-72 lg:w-64 lg:max-w-64 bg-bg-base border-r border-border-minimal flex flex-col transition-transform duration-150 select-none shadow-xl lg:shadow-none will-change-transform touch-manipulation ${
           isOpen
             ? "translate-x-0 ring-1 ring-accent-main/10 lg:ring-0"
             : "-translate-x-full lg:translate-x-0"
@@ -259,11 +281,26 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
         {/* Action: New Node */}
         <div className="p-2 border-b border-border-minimal shrink-0">
           <button
+            type="button"
             onClick={handleNewChat}
-            className="w-full flex items-center gap-2 px-2 py-1.5 text-[11px] font-bold tracking-wider text-accent-main hover:bg-accent-main hover:text-bg-base transition-none border border-transparent hover:border-accent-main uppercase group"
+            disabled={isCreatingChat}
+            aria-label="Create new chat"
+            title="Create new chat"
+            className="group w-full min-h-11 rounded-[6px] border border-accent-main/40 bg-accent-main/10 px-2.5 py-2 text-left text-accent-main shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)] transition-colors duration-150 hover:border-accent-main hover:bg-accent-main hover:text-bg-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-main/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-base active:scale-[0.99] disabled:cursor-wait disabled:opacity-70 disabled:hover:bg-accent-main/10 disabled:hover:text-accent-main touch-manipulation"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>&gt; touch new_node.md</span>
+            <span className="pointer-events-none flex items-center gap-2">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] border border-current/35 bg-bg-base/45 transition-colors group-hover:bg-bg-base/15">
+                <Plus className="h-4 w-4" />
+              </span>
+              <span className="flex min-w-0 flex-col">
+                <span className="text-[12px] font-black uppercase leading-tight tracking-[0.14em]">
+                  {isCreatingChat ? "Creating..." : "New Chat"}
+                </span>
+                <span className="font-mono text-[9px] uppercase tracking-wider opacity-75">
+                  Blank conversation
+                </span>
+              </span>
+            </span>
           </button>
         </div>
 
@@ -361,7 +398,13 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
                     return (
                       <div
                         key={conversation.id}
-                        className={`w-full flex flex-col gap-0.5 px-2 py-1.5 text-left transition-none group border-l-4 ${
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => activateConversationRow(conversation.id)}
+                        onKeyDown={(e) =>
+                          handleConversationKeyDown(e, conversation.id)
+                        }
+                        className={`w-full flex flex-col gap-0.5 px-2 py-1.5 text-left transition-colors duration-100 group border-l-4 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-main/50 focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base ${
                           isSelectMode && isSelected
                             ? "bg-accent-main border-accent-secondary text-bg-base font-bold"
                             : isActive
@@ -369,14 +412,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
                               : "border-transparent text-content-secondary hover:bg-bg-surface hover:text-content-primary"
                         }`}
                       >
-                        <div
-                          className="flex items-center gap-1.5 w-full cursor-pointer"
-                          onClick={() =>
-                            isSelectMode
-                              ? toggleSelected(conversation.id)
-                              : handleSelectConversation(conversation.id)
-                          }
-                        >
+                        <div className="flex items-center gap-1.5 w-full">
                           {isSelectMode ? (
                             isSelected ? (
                               <CheckSquare className="w-3.5 h-3.5 shrink-0 text-bg-base" />
