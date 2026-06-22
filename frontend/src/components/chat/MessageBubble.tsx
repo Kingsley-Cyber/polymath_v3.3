@@ -357,10 +357,30 @@ const markdownComponents: Components = {
   code({ className, children, ...props }) {
     const raw = String(children).replace(/\n$/, "");
     const block = raw.includes("\n") || Boolean(className);
+    const language = className?.match(/language-([\w-]+)/)?.[1]?.toLowerCase() || "";
+    const isCommand =
+      /^(bash|console|powershell|ps1|shell|sh|zsh)$/.test(language);
+    const trimmed = raw.trim();
+    const isJson =
+      language === "json" ||
+      ((trimmed.startsWith("{") || trimmed.startsWith("[")) &&
+        /"[^"]+"\s*:/.test(trimmed));
+    const isAscii =
+      language === "text" ||
+      /(?:[-=]{3,}|[┌┐└┘├┤─│╭╮╰╯▶►→←↑↓]{2,}|(?:^|\n)\s*[A-Za-z0-9 _.-]+\s*(?:->|=>|→)\s*)/.test(raw);
 
     if (block) {
       return (
-        <pre className="pm-code-block">
+        <pre
+          className={[
+            "pm-code-block",
+            isCommand ? "pm-command-block" : "",
+            isJson ? "pm-json-block" : "",
+            isAscii ? "pm-ascii-block" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
           <code className={className} {...props}>
             {children}
           </code>

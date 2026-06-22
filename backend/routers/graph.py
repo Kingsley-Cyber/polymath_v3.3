@@ -52,6 +52,36 @@ router = APIRouter(prefix="/api/corpora", tags=["graph"])
 discovery_router = APIRouter(prefix="/api/graph", tags=["graph-discovery"])
 
 
+def _discover_result_corpus_ids(result: object, fallback: list[str]) -> list[str]:
+    ids = getattr(result, "corpus_ids", None)
+    if isinstance(ids, list) and ids:
+        return [str(cid) for cid in ids if str(cid or "").strip()]
+    cid = str(getattr(result, "corpus_id", "") or "").strip()
+    if cid:
+        return [cid]
+    return list(fallback)
+
+
+def _discover_result_web_evidence(result: object) -> dict:
+    payload = getattr(result, "web_evidence", None)
+    if isinstance(payload, dict):
+        return payload
+    auto = getattr(result, "auto_synthesis", None)
+    if isinstance(auto, dict) and isinstance(auto.get("web_evidence"), dict):
+        return auto["web_evidence"]
+    trace = getattr(result, "trace", None)
+    meta = trace.get("web_grounding") if isinstance(trace, dict) else None
+    if isinstance(meta, dict):
+        return {
+            "enabled": bool(meta.get("enabled")),
+            "fetch_depth": str(meta.get("fetch_depth") or "normal"),
+            "max_results": int(meta.get("requested_max_results") or 0),
+            "sources": [],
+            "trace": meta,
+        }
+    return {}
+
+
 def _require_neo4j():
     """Return the Neo4j driver or raise 503 if not enabled."""
     driver = ingestion_service.neo4j_driver
@@ -1329,6 +1359,7 @@ async def graph_discover(
     return GraphDiscoverResponse(
         session_id=result.session_id,
         corpus_id=result.corpus_id,
+        corpus_ids=_discover_result_corpus_ids(result, discover_corpus_ids),
         query=result.query,
         mode=result.mode,
         interpretation=result.interpretation,
@@ -1358,6 +1389,7 @@ async def graph_discover(
         auto_synthesis=result.auto_synthesis,
         insight_packet_summary=result.insight_packet_summary,
         context_graph=result.context_graph,
+        web_evidence=_discover_result_web_evidence(result),
     )
 
 

@@ -35,10 +35,10 @@ def test_parser_strategy_keeps_md_txt_and_query_runtime_off_docling(adapter):
     assert adapter.parser_strategy("notes.md", "text/markdown") == "local_markdown"
     assert adapter.parser_strategy("notes.txt", "text/plain") == "local_text"
     assert adapter.parser_strategy("book.pdf", "application/pdf") == "local_pdf_fast_text"
-    assert adapter.parser_strategy("plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") == "docling_sidecar"
+    assert adapter.parser_strategy("plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") == "local_docx"
     assert adapter.docling_sidecar_needed("notes.md", "text/markdown") is False
     assert adapter.docling_sidecar_needed("notes.txt", "text/plain") is False
-    assert adapter.docling_sidecar_needed("plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") is True
+    assert adapter.docling_sidecar_needed("plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") is False
 
 
 @pytest.mark.asyncio

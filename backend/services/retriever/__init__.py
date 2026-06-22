@@ -816,6 +816,7 @@ class RetrieverOrchestrator:
             return len(doc_counts), round(max(doc_counts.values()) / total, 4)
 
         selection_diagnostics: dict[str, Any] = {}
+        reranker_diagnostics: dict[str, Any] = {}
 
         def _diagnostics(
             status: str,
@@ -856,6 +857,7 @@ class RetrieverOrchestrator:
                 "unique_docs_final": unique_docs_final,
                 "max_doc_share_final": max_doc_share_final,
                 "selection": selection_diagnostics,
+                "reranker": reranker_diagnostics,
             }
 
         # [0a] Filter stale corpus_ids (frontend may reference deleted corpora)
@@ -1376,6 +1378,7 @@ class RetrieverOrchestrator:
             b_results,
             lexical_results,
             document_anchor_results,
+            dedupe_by_parent=effective_tier != RetrievalTier.qdrant_only,
         )
         counts["merged_initial"] = len(merged)
         counts["distinct_docs_merged"] = len(
@@ -1437,11 +1440,18 @@ class RetrieverOrchestrator:
                     "db",
                     None,
                 )
-                # No arbitrary time cap — retrieval runs its natural course
-                # (often well under 30s) and scales with the corpus. A genuine
-                # Neo4j error still degrades gracefully via the except below.
-                expanded = await mode_a_expansion.expand(
-                    merged, corpus_ids, db=db_for_mode_a, **expand_kwargs
+                graph_expansion_timeout = float(
+                    getattr(settings, "GRAPH_EXPANSION_TIMEOUT_SECONDS", 4.0)
+                    or 4.0
+                )
+                counts["graph_expansion_timeout_seconds"] = round(
+                    graph_expansion_timeout, 2
+                )
+                expanded = await asyncio.wait_for(
+                    mode_a_expansion.expand(
+                        merged, corpus_ids, db=db_for_mode_a, **expand_kwargs
+                    ),
+                    timeout=graph_expansion_timeout,
                 )
                 counts["graph_seed_chunks"] = min(
                     len(merged),
@@ -1452,7 +1462,17 @@ class RetrieverOrchestrator:
                 if expanded:
                     merged = merge_pools(merged, expanded)
                     counts["merged_after_graph"] = len(merged)
+            except asyncio.TimeoutError:
+                counts["graph_expansion_timed_out"] = 1
+                logger.warning(
+                    "Mode A expansion timed out after %.2fs, continuing with hybrid seeds",
+                    float(
+                        getattr(settings, "GRAPH_EXPANSION_TIMEOUT_SECONDS", 4.0)
+                        or 4.0
+                    ),
+                )
             except Exception as exc:
+                counts["graph_expansion_failed"] = 1
                 logger.warning("Mode A expansion failed, continuing: %s", exc)
             finally:
                 _add_timing("graph", phase_started)
@@ -1558,14 +1578,28 @@ class RetrieverOrchestrator:
             logger.info("Reranker skipped by override — score-sorting directly")
             phase_started = perf_counter()
             ranked = sorted(merged, key=lambda x: x.score, reverse=True)
+            reranker_diagnostics = {
+                "status": "skipped_by_request",
+                "fallback": True,
+                "candidate_count": len(merged),
+                "score_scale": settings.RERANKER_SCORE_SCALE,
+            }
             _add_timing("rerank", phase_started)
         else:
             phase_started = perf_counter()
             try:
                 ranked = await reranker_service.rerank(rank_query, merged)
+                reranker_diagnostics = reranker_service.diagnostics()
             except Exception as exc:
                 logger.warning("Reranker failed, score-sorting: %s", exc)
                 ranked = sorted(merged, key=lambda x: x.score, reverse=True)
+                reranker_diagnostics = {
+                    "status": "exception_score_sort",
+                    "fallback": True,
+                    "candidate_count": len(merged),
+                    "score_scale": settings.RERANKER_SCORE_SCALE,
+                    "error": str(exc),
+                }
             _add_timing("rerank", phase_started)
         counts["ranked"] = len(ranked)
 

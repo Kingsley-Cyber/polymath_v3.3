@@ -35,13 +35,62 @@ def _merge_provenance(*groups: list[dict] | None) -> list[dict] | None:
     return merged or None
 
 
-def merge_pools(*pools: List[SourceChunk]) -> List[SourceChunk]:
+def _is_summary_candidate(chunk: SourceChunk) -> bool:
+    chunk_id = str(chunk.chunk_id or "").lower()
+    tier = str(chunk.source_tier or "").lower()
+    return chunk_id.endswith("_summary") or "summary" in tier
+
+
+def _representative_priority(chunk: SourceChunk) -> int:
+    """Prefer concrete child/evidence chunks over parent summaries.
+
+    The parent keeps the strongest fused score, but reranking should read the
+    most exact evidence text available for that parent whenever one exists.
+    """
+
+    return 0 if _is_summary_candidate(chunk) else 1
+
+
+def _candidate_snapshot(chunk: SourceChunk) -> dict:
+    return {
+        "chunk_id": chunk.chunk_id,
+        "parent_id": chunk.parent_id,
+        "doc_id": chunk.doc_id,
+        "score": float(chunk.score or 0.0),
+        "source_tier": chunk.source_tier,
+        "is_summary": _is_summary_candidate(chunk),
+    }
+
+
+def _merge_representative_metadata(target: SourceChunk, *chunks: SourceChunk) -> None:
+    metadata = dict(target.metadata or {})
+    reps = list(metadata.get("merged_parent_representatives") or [])
+    seen = {
+        str(item.get("chunk_id") or item.get("parent_id") or "")
+        for item in reps
+        if isinstance(item, dict)
+    }
+    for chunk in chunks:
+        key = str(chunk.chunk_id or chunk.parent_id or "")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        reps.append(_candidate_snapshot(chunk))
+    reps.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+    metadata["merged_parent_representatives"] = reps[:5]
+    target.metadata = metadata
+
+
+def merge_pools(
+    *pools: List[SourceChunk],
+    dedupe_by_parent: bool = True,
+) -> List[SourceChunk]:
     """
     Merges multiple candidate pools of SourceChunk objects into a single, deduplicated pool.
 
     Deduplication and Coalescing Rules:
     - Child hits: Deduplicate by chunk_id natively, but group by parent_id for HRAG.
-    - Summary hits: Deduplicate by parent_id.
+    - Summary hits: Deduplicate by parent_id when `dedupe_by_parent=True`.
     - Coalescence: If a summary and one or more child hits share the same parent_id,
       they are coalesced into a single candidate representing that parent.
     - The highest vector similarity score among the coalesced chunks is retained.
@@ -53,11 +102,16 @@ def merge_pools(*pools: List[SourceChunk]) -> List[SourceChunk]:
             continue
 
         for chunk in pool:
-            # Determine the grouping key.
-            # If the chunk belongs to a parent (HRAG), we group by parent_id
-            # to prevent hydrating the same parent text multiple times.
-            # If there is no parent (Naive RAG), we group by its own chunk_id.
-            key = chunk.parent_id if chunk.parent_id else chunk.chunk_id
+            # Determine the grouping key. Hydrated tiers group by parent_id to
+            # avoid hydrating the same parent text multiple times. Fast Search
+            # is a pure Qdrant route, so callers may preserve parent summaries
+            # and child vectors as distinct evidence by passing
+            # dedupe_by_parent=False.
+            key = (
+                chunk.parent_id
+                if dedupe_by_parent and chunk.parent_id
+                else chunk.chunk_id
+            )
 
             if key not in merged_dict:
                 # We do a shallow copy to avoid mutating the original chunk in case it's cached
@@ -73,20 +127,33 @@ def merge_pools(*pools: List[SourceChunk]) -> List[SourceChunk]:
                     chunk.provenance,
                 )
 
-                # Keep the maximum score among all child/summary hits for this parent
-                if chunk.score > existing_chunk.score:
-                    # Inherit the higher-scoring chunk's identity/text, but keep
-                    # provenance from every retrieval lane that found this parent.
+                keep_new_identity = (
+                    _representative_priority(chunk) > _representative_priority(existing_chunk)
+                    or (
+                        _representative_priority(chunk)
+                        == _representative_priority(existing_chunk)
+                        and chunk.score > existing_chunk.score
+                    )
+                )
+                best_score = max(float(existing_chunk.score or 0.0), float(chunk.score or 0.0))
+                if keep_new_identity:
+                    # Inherit the stronger evidence identity/text, but keep the
+                    # highest parent-level score and provenance from every lane.
+                    old_chunk = existing_chunk
                     replacement = chunk.model_copy()
+                    replacement.score = best_score
                     replacement.source_tier = merged_source_tier
                     replacement.provenance = merged_provenance
-                    if existing_chunk.summary and not replacement.summary:
-                        replacement.summary = existing_chunk.summary
+                    if old_chunk.summary and not replacement.summary:
+                        replacement.summary = old_chunk.summary
+                    _merge_representative_metadata(replacement, old_chunk, chunk)
                     merged_dict[key] = replacement
                     existing_chunk = replacement
                 else:
+                    existing_chunk.score = best_score
                     existing_chunk.source_tier = merged_source_tier
                     existing_chunk.provenance = merged_provenance
+                    _merge_representative_metadata(existing_chunk, existing_chunk, chunk)
 
                 # If we come across a summary, ensure the coalesced chunk retains the summary text
                 # (useful for Context Manager synthesis later).

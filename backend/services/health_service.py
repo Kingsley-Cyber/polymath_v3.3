@@ -319,6 +319,15 @@ class HealthService:
                 services[name] = ServiceStatus(status="error", error=str(result))
             else:
                 services[name] = result
+        if not settings.LOCAL_RERANKER_ENABLED:
+            services["reranker"] = ServiceStatus(
+                status="degraded",
+                error=(
+                    "Local reranker profile disabled; retrieval will use the "
+                    "configured reranker URL only when requests enable reranking, "
+                    "and will score-sort on sidecar failure."
+                ),
+            )
 
         required_services = set(_CORE_HEALTH_SERVICES)
         if settings.NEO4J_ENABLED:

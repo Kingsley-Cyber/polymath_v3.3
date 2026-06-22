@@ -176,7 +176,7 @@ def test_prompt_renders_optional_fact_shape_when_enabled():
     )
 
     assert '"t":"f"' in prompt
-    assert '"ft":"property|status|timestamp|threshold|category|tag|rule_condition|rule_action"' in prompt
+    assert '"ft":"property|status|timestamp|quantity|threshold|category|tag|rule_condition|rule_action"' in prompt
     assert "max 5 facts" in prompt
     assert "fact subject must match an entity canonical_name" in prompt
 

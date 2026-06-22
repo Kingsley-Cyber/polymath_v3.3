@@ -251,6 +251,26 @@ def test_graph_discover_response_has_corpus_ids_field():
     # Default-empty stays as empty list, not None.
     r2 = GraphDiscoverResponse()
     assert r2.corpus_ids == []
+    assert r2.web_evidence == {}
+
+
+def test_graph_discover_response_preserves_auto_synthesis_web_evidence():
+    from models.schemas import GraphDiscoverResponse
+
+    payload = {
+        "enabled": True,
+        "fetch_depth": "snippets",
+        "max_results": 2,
+        "sources": [{"source_tier": "web_search", "url": "https://example.test"}],
+    }
+    r = GraphDiscoverResponse(
+        auto_synthesis={"markdown": "answer", "web_evidence": payload},
+        web_evidence=payload,
+    )
+
+    dumped = r.model_dump()
+    assert dumped["web_evidence"]["enabled"] is True
+    assert dumped["auto_synthesis"]["web_evidence"]["enabled"] is True
 
 
 def test_graph_insight_packet_has_corpus_ids_field():
@@ -261,6 +281,24 @@ def test_graph_insight_packet_has_corpus_ids_field():
     # Legacy single-corpus_id construction still works.
     p_legacy = GraphInsightPacket(query="q", corpus_id="legacy")
     assert p_legacy.corpus_id == "legacy"
+
+
+def test_graph_discover_router_helpers_echo_scope_and_web_payload():
+    from types import SimpleNamespace
+
+    from routers.graph import _discover_result_corpus_ids, _discover_result_web_evidence
+
+    result = SimpleNamespace(
+        corpus_id="legacy",
+        corpus_ids=["a", "b"],
+        web_evidence={"enabled": True, "sources": [{"source_tier": "web_search"}]},
+    )
+
+    assert _discover_result_corpus_ids(result, ["fallback"]) == ["a", "b"]
+    assert _discover_result_web_evidence(result)["enabled"] is True
+
+    legacy = SimpleNamespace(corpus_id="legacy", corpus_ids=[])
+    assert _discover_result_corpus_ids(legacy, ["fallback"]) == ["legacy"]
 
 
 # ─── source_corpus on subtypes ────────────────────────────────────────────────

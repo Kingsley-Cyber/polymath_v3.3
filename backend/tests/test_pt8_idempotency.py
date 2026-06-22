@@ -129,7 +129,7 @@ def test_alias_normalization_is_stateless():
     a = normalize_relation_predicate_alias("trained_on")
     _ = [normalize_relation_predicate_alias(f"random_{i}") for i in range(50)]
     b = normalize_relation_predicate_alias("trained_on")
-    assert a == b == ("uses", False), f"Alias drifted: {a!r} -> {b!r}"
+    assert a == b == ("trained_on", False), f"Alias drifted: {a!r} -> {b!r}"
 
 
 def test_parse_does_not_leak_state_between_chunks():
@@ -191,9 +191,9 @@ def test_classify_chunk_is_deterministic():
 def test_relation_family_for_predicate_is_deterministic():
     cases = [
         ("uses",        "Operational"),
-        ("defines",     "Referential"),   # Pt 8d
-        ("example_of",  "Canonicalization"),  # Pt 8d
-        ("during",      "Causal"),         # Pt 8d
+        ("runs_on",     "Operational"),
+        ("trained_on",  "Operational"),
+        ("defines",     "Referential"),
         ("totally_made_up", "WeakAssociation"),  # default
     ]
     for pred, fam in cases:
@@ -201,11 +201,11 @@ def test_relation_family_for_predicate_is_deterministic():
             assert relation_family_for_predicate(pred) == fam, f"family drift for {pred}"
 
 
-def test_pt8d_new_predicates_survive_pydantic_literal():
-    """REGRESSION — Pt 8d added defines/example_of/during to UNIVERSAL_RELATION_SCHEMA.
-    The Pydantic Literal in ghost_b_schemas.py must include them or Pt 8b drops them.
+def test_current_graph_predicates_survive_pydantic_literal():
+    """REGRESSION — current graph contract keeps runtime/training predicates first-class.
+    The Pydantic Literal in ghost_b_schemas.py must include them or extraction drops them.
     """
-    for pred in ("defines", "example_of", "during"):
+    for pred in ("defines", "runs_on", "trained_on"):
         try:
             LLMRelation.model_validate({
                 "subject": "x", "predicate": pred, "object": "y",
@@ -216,8 +216,8 @@ def test_pt8d_new_predicates_survive_pydantic_literal():
                 f"Pt 8b Pydantic Literal rejected schema-valid predicate {pred!r}: {exc!r}. "
                 f"ghost_b_schemas.py:Predicate is out of sync with UNIVERSAL_RELATION_SCHEMA."
             )
-    # And the dropped ones must NOT be accepted (they're no longer canonical):
-    for pred in ("classifies", "runs_on", "trained_on"):
+    # And dropped/broad legacy ones must NOT be accepted as canonical:
+    for pred in ("classifies", "example_of", "during"):
         try:
             LLMRelation.model_validate({
                 "subject": "x", "predicate": pred, "object": "y",
@@ -276,9 +276,12 @@ def test_canonicalize_entity_name_collapses_case_and_whitespace():
 
 def test_alias_map_collapses_synonyms_to_one_canonical():
     """Multiple aliases for the same canonical must all resolve to it."""
-    uses_aliases = ["uses", "using", "utilizes", "consumes", "trained_on", "runs_on", "deployed_on", "executes_on", "trained_with", "tests", "activates"]
-    canons = {normalize_relation_predicate_alias(a)[0] for a in uses_aliases}
-    assert canons == {"uses"}, f"Expected all to map to 'uses', got: {canons}"
+    uses_aliases = ["uses", "using", "utilizes", "consumes", "tests", "activates"]
+    runs_on_aliases = ["runs_on", "deployed_on", "executes_on"]
+    trained_on_aliases = ["trained_on", "trained_with"]
+    assert {normalize_relation_predicate_alias(a)[0] for a in uses_aliases} == {"uses"}
+    assert {normalize_relation_predicate_alias(a)[0] for a in runs_on_aliases} == {"runs_on"}
+    assert {normalize_relation_predicate_alias(a)[0] for a in trained_on_aliases} == {"trained_on"}
 
 
 # ─── Property 5 — CACHING ─────────────────────────────────────────────────

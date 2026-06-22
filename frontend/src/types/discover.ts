@@ -191,6 +191,24 @@ export interface DiscoverGraphHintPayload {
   context_hint?: string;
 }
 
+export interface DiscoverGapProfile {
+  version?: string;
+  gap_intent?: boolean;
+  primary_domain?: string;
+  primary_label?: string;
+  secondary_domains?: string[];
+  domain_scores?: Record<string, number>;
+  confidence?: number;
+  method_frame?: string;
+  output_shape?: string;
+  required_metrics?: string[];
+  required_evidence?: string[];
+  likely_missing_data?: string[];
+  matched_indicators?: Record<string, string[]>;
+  synthesis_rule?: string;
+  calculation_policy?: string;
+}
+
 export interface DiscoverHeadline {
   kicker: string;
   headline: string;
@@ -270,6 +288,7 @@ export interface DiscoverTracePayload {
   selected_edges: Array<Record<string, any>>;
   source_docs: Array<Record<string, any>>;
   graph_hint?: DiscoverGraphHintPayload;
+  gap_profile?: DiscoverGapProfile;
   evidence_filter?: {
     raw?: number;
     accepted?: number;
@@ -322,6 +341,7 @@ export interface DiscoverTracePayload {
     counts?: Record<string, number>;
     visibility?: Record<string, any>;
     graph_hint?: DiscoverGraphHintPayload;
+    gap_profile?: DiscoverGapProfile;
   };
   stages?: Array<{
     stage: string;

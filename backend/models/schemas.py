@@ -555,6 +555,7 @@ class AutoSynthesisPayload(BaseModel):
     fallback_reason: str | None = None
     model_used: str | None = None
     model_source: str | None = None
+    web_evidence: dict[str, Any] = Field(default_factory=dict)
 
 
 class InsightPacketSummary(BaseModel):
@@ -643,6 +644,7 @@ class DiscoverTracePayload(BaseModel):
     stages: list[DiscoverTraceStage] = Field(default_factory=list)
     llm_context: dict[str, Any] = Field(default_factory=dict)
     graph_hint: dict[str, Any] = Field(default_factory=dict)
+    gap_profile: dict[str, Any] = Field(default_factory=dict)
 
 
 class GraphDiscoverRequest(BaseModel):
@@ -758,6 +760,7 @@ class GraphDiscoverResponse(BaseModel):
         default_factory=InsightPacketSummary
     )
     context_graph: ContextGraphPayload = Field(default_factory=ContextGraphPayload)
+    web_evidence: dict[str, Any] = Field(default_factory=dict)
 
 
 def _utcnow() -> datetime:
@@ -1083,6 +1086,7 @@ class GraphInsightPacket(BaseModel):
     weak_links: list[GraphInsightPacketWeakLink] = Field(default_factory=list)
     evidence: list[GraphInsightPacketEvidence] = Field(default_factory=list)
     graph_hint: dict[str, Any] = Field(default_factory=dict)
+    gap_profile: dict[str, Any] = Field(default_factory=dict)
     trace_stages: list[GraphInsightPacketTraceStage] = Field(default_factory=list)
     sparse: bool = False
     temporal_support: bool = False

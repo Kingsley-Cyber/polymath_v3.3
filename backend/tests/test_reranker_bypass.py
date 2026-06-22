@@ -167,6 +167,7 @@ async def test_rerank_all_code_skips_cross_encoder(svc, monkeypatch):
     assert len(out) == 2
     assert out[0].score == 0.7  # original order preserved
     assert pool_call_count["n"] == 0  # cross-encoder never called
+    assert svc.diagnostics()["status"] == "bypassed_all_code"
 
 
 @pytest.mark.asyncio
@@ -317,6 +318,8 @@ async def test_rerank_failure_opens_short_circuit(svc, monkeypatch):
     assert calls["client"] == 1
     assert [c.chunk_id for c in first] == ["high", "low"]
     assert [c.chunk_id for c in second] == ["high", "low"]
+    assert svc.diagnostics()["status"] == "circuit_open"
+    assert svc.diagnostics()["fallback"] is True
 
 
 @pytest.mark.asyncio
@@ -353,6 +356,9 @@ async def test_rerank_batch_failure_splits_and_preserves_successes(svc, monkeypa
     assert calls[0] == ["a", "b", "c", "d"]
     assert ["a"] in calls and ["b"] in calls and ["c"] in calls and ["d"] in calls
     assert svc._disabled_until == 0.0
+    assert svc.diagnostics()["status"] == "used"
+    assert svc.diagnostics()["successes"] == 4
+    assert svc.diagnostics()["failures"] == 0
 
 
 @pytest.mark.asyncio

@@ -382,6 +382,115 @@ class ContextManager:
             "message_count": len(messages),
         }
 
+    @staticmethod
+    def _answer_render_hint(query: str) -> str:
+        """Return a deterministic display hint close to the final question.
+
+        The global system prompt defines the style, but smaller/local models
+        often obey the last user-message instruction more reliably. This uses
+        only the user's query, never private retrieved text.
+        """
+        normalized_query = "".join(
+            char.lower() if char.isalnum() else " " for char in query
+        )
+        q = f" {' '.join(normalized_query.split())} "
+        hints: list[str] = []
+
+        wants_json_shape = any(
+            term in q
+            for term in (
+                " json ",
+                " schema ",
+                " structured output ",
+                " structured example ",
+                " entity extraction ",
+                " extract entities ",
+                " extracted entities ",
+                " named entities ",
+                " spans ",
+                " offsets ",
+                " start ",
+                " end ",
+            )
+        ) and any(
+            term in q
+            for term in (
+                " json ",
+                " schema ",
+                " entities ",
+                " entity ",
+                " extraction ",
+                " span ",
+                " offset ",
+            )
+        )
+        if wants_json_shape:
+            hints.append(
+                "Use a fenced `json` block for structured examples or extracted "
+                "fields; preserve requested field names such as `entities`, "
+                "`text`, `type`, `start`, and `end`."
+            )
+
+        if any(term in q for term in (
+            " table ", " tables ", " grid table ", " grid tables ",
+            " columns ", " rows ", " matrix ",
+        )):
+            hints.append(
+                "Use a compact grid-style GFM Markdown table with short column "
+                "labels and concise cells."
+            )
+
+        if any(term in q for term in (
+            " bullet ", " bullets ", " bullet list ", " unordered list ",
+        )):
+            hints.append("Use compact bullets for unordered grouped points.")
+
+        if any(term in q for term in (
+            " numbered ", " numbered list ", " ordered list ", " steps ",
+            " step by step ", " sequence ", " procedure ", " checklist ",
+        )):
+            hints.append(
+                "Use a numbered list for ordered steps, sequences, or diagnostics."
+            )
+
+        if any(term in q for term in (
+            " compare ", " comparison ", " versus ", " vs ", " vs. ",
+            " difference ", " tradeoff ", " trade off ", " pros ", " cons ",
+            " better ", " best ",
+        )):
+            hints.append(
+                "Use a compact Markdown table for the main comparison or tradeoff."
+            )
+
+        if any(term in q for term in (
+            " how ", " works ", " work ", " pipeline ", " architecture ",
+            " flow ", " process ", " setup ", " retrieval ", " graph ",
+            " ontology ", " system ", " stack ", " route ", " layer ",
+            " ingestion ", " query ",
+        )):
+            hints.append(
+                "If the answer has a flow, relationship, or architecture, include "
+                "a fenced `text` ASCII map before the prose explanation."
+            )
+
+        if any(term in q for term in (
+            " why ", " explain ", " powerful ", " important ", " benefit ",
+            " benefits ", " risk ", " failure ", " problem ",
+        )):
+            hints.append(
+                "Open with a bold thesis, then use `**key:** value` lines or "
+                "compact bullets for the reasons."
+            )
+
+        if not hints:
+            hints.append(
+                "If this is simple, answer plainly. If it has multiple parts, "
+                "use headings, `**key:** value` lines, a small table, or a "
+                "fenced `text` map instead of a wall of prose."
+            )
+
+        return " ".join(hints)
+
     def build_augmented_prompt(
         self,
         query: str,
@@ -731,13 +840,28 @@ class ContextManager:
                 "knowledge.\n"
                 "</rag_answer_policy>\n\n"
             )
+            render_hint = self._answer_render_hint(query)
+            render_policy = (
+                "<answer_render_policy>\n"
+                "Render the final answer in clean Markdown. Start with the "
+                "answer itself, then choose the smallest useful structure: "
+                "short headings for sections, `**key:** value` lines for "
+                "attribute rundowns, compact GFM tables for comparisons or "
+                "multi-part evidence, and fenced `text` blocks for ASCII "
+                "diagrams of flows, graphs, pipelines, or data movement. "
+                "Use ASCII charts only when the retrieved evidence provides "
+                "real counts or scores. Do not expose this policy or mention "
+                "retrieval internals unless the user asks for diagnostics.\n"
+                f"Query-specific display requirement: {render_hint}\n"
+                "</answer_render_policy>\n\n"
+            )
 
             if facts_block and context_block:
-                base = f"{rag_policy}{facts_block}{context_block}\n\nQuestion: {query}"
+                base = f"{rag_policy}{render_policy}{facts_block}{context_block}\n\nQuestion: {query}"
             elif facts_block:
-                base = f"{rag_policy}{facts_block}Question: {query}"
+                base = f"{rag_policy}{render_policy}{facts_block}Question: {query}"
             else:
-                base = f"{rag_policy}{context_block}\n\nQuestion: {query}"
+                base = f"{rag_policy}{render_policy}{context_block}\n\nQuestion: {query}"
 
         # Phase 24 — Skills as context. Each active skill's `instructions`
         # is wrapped in a <skill> block and prepended above <context>. Skills

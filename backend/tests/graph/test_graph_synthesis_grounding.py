@@ -6,6 +6,7 @@ from services.graph.orchestrator import (
     _maybe_add_web_grounding_to_packet,
     _public_web_grounding_terms,
     _render_packet_user_prompt,
+    _web_evidence_payload_from_packet,
 )
 
 
@@ -168,3 +169,43 @@ async def test_web_grounding_adds_separate_tagged_evidence(monkeypatch):
     prompt = _render_packet_user_prompt(packet, synthesis_mode="research")
     assert "[WEB]" in prompt
     assert "current external web evidence" in prompt
+
+
+def test_web_evidence_payload_is_separate_public_lane():
+    packet = {
+        "web_evidence": [
+            {
+                "evidence_id": "w1",
+                "chunk_id": "web:1",
+                "doc_id": "https://example.test/nlp",
+                "summary": "Current public source about NLP.",
+                "text": "Longer web body should only appear as a bounded snippet.",
+                "source_tier": "web_search",
+                "source_label": "Example NLP",
+                "source": {"url": "https://example.test/nlp", "source_type": "webpage"},
+            },
+            {
+                "chunk_id": "local",
+                "source_tier": "qdrant_mongo_graph",
+                "text": "Private corpus row must not appear in web lane.",
+            },
+        ],
+    }
+    trace = {
+        "web_grounding": {
+            "enabled": True,
+            "status": "ok",
+            "search_query": "NLP",
+            "requested_max_results": 5,
+        }
+    }
+
+    payload = _web_evidence_payload_from_packet(packet, trace, fetch_depth="deep")
+
+    assert payload["enabled"] is True
+    assert payload["fetch_depth"] == "deep"
+    assert payload["max_results"] == 5
+    assert len(payload["sources"]) == 1
+    assert payload["sources"][0]["source_tier"] == "web_search"
+    assert payload["sources"][0]["url"] == "https://example.test/nlp"
+    assert "Private corpus row" not in str(payload)

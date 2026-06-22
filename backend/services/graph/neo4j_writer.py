@@ -78,6 +78,8 @@ RELATION_FAMILY_MAP = {
     "part_of": "Structural",
     "member_of": "Structural",
     "uses": "Operational",
+    "runs_on": "Operational",
+    "trained_on": "Operational",
     "implements": "Operational",
     "depends_on": "Operational",
     "produces": "Operational",
@@ -101,11 +103,9 @@ RELATION_FAMILY_MAP = {
     "supports": "Operational",
     "represents": "Referential",
     "maps_to": "Referential",
-    # Pt 8d — three new first-class predicates. `defines` lives in
-    # Referential (a definition is a citation-like description of meaning);
-    # `example_of` lives in Canonicalization (entity-typing like instance_of
-    # but pedagogical); `during` lives in Causal (the temporal family,
-    # alongside preceded_by / overlaps / causes).
+    # Compatibility for historical graph edges from earlier extraction
+    # schemas. New ingestions normalize examples into instance_of and temporal
+    # containment into overlaps, but old edges can still be read and grouped.
     "defines": "Referential",
     "example_of": "Canonicalization",
     "during": "Causal",

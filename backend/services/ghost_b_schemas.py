@@ -50,8 +50,6 @@ EntityType = Literal[
 
 # Mirror of UNIVERSAL_RELATION_SCHEMA + the RELATION_SENTINEL ('related_to').
 # Keep in sync with services/ghost_b.py:UNIVERSAL_RELATION_SCHEMA.
-# Pt 8d swap: dropped `classifies` / `runs_on` / `trained_on` (aliased to
-# `detects` / `uses` / `uses`); added `defines` / `example_of` / `during`.
 Predicate = Literal[
     # Structural
     "part_of",
@@ -64,9 +62,10 @@ Predicate = Literal[
     # Canonicalization
     "synonym_of",
     "instance_of",
-    "example_of",           # Pt 8d
     # Operational
     "uses",
+    "runs_on",
+    "trained_on",
     "references",
     "implements",
     "depends_on",
@@ -82,7 +81,6 @@ Predicate = Literal[
     "preceded_by",
     "causes",
     "overlaps",
-    "during",               # Pt 8d
     # Provenance / conflict
     "derived_from",
     "contradicts",

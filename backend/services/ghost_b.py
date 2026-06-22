@@ -19,7 +19,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, ClassVar, Literal
 
 import httpx
@@ -116,9 +116,10 @@ UNIVERSAL_RELATION_SCHEMA: list[str] = [
     # in case future versions tier them out of EXTRACTION_MAX_RELATIONS_PER_CHUNK.)
     "synonym_of",
     "instance_of",
-    "example_of",    # Pt 8d — pedagogical "X is an example/case of Y" distinct from instance_of
     # Operational
-    "uses",          # absorbs the previous `calls` + `trained_on` + `runs_on` predicates
+    "uses",          # absorbs the previous `calls` predicate
+    "runs_on",       # runtime / deployment substrate
+    "trained_on",    # training data or corpus used by model/method
     "references",
     "implements",
     "depends_on",
@@ -133,8 +134,7 @@ UNIVERSAL_RELATION_SCHEMA: list[str] = [
     # Temporal
     "preceded_by",
     "causes",
-    "overlaps",      # temporal co-occurrence (Event/TimeReference overlap)
-    "during",        # Pt 8d — temporal containment "X happens during Y" (distinct from overlaps)
+    "overlaps",      # temporal co-occurrence / containment (Event/TimeReference overlap)
     # Provenance / conflict
     "derived_from",
     "contradicts",
@@ -199,6 +199,8 @@ UNIVERSAL_RELATION_GLOSSES: dict[str, str] = {
     "synonym_of":      "X same entity as Y",
     "instance_of":     "X is a Y subclass or kind",
     "uses":            "X consumes or invokes Y",
+    "runs_on":         "X executes on Y",
+    "trained_on":      "X learns from Y",
     "references":      "X cites Y",
     "implements":      "X concrete form of Y",
     "depends_on":      "X needs Y",
@@ -206,14 +208,12 @@ UNIVERSAL_RELATION_GLOSSES: dict[str, str] = {
     "stores":          "X persists Y",
     "detects":         "X identifies or pulls Y from data",
     "supports":        "X enables Y",
-    "example_of":      "X concrete instance illustrating Y",
     "defines":         "X gives meaning of Y",
     "represents":      "X models Y",
     "maps_to":         "X transforms to Y",
     "preceded_by":     "X follows Y in time",
     "causes":          "X leads to Y",
     "overlaps":        "X co-occurs in time with Y",
-    "during":          "X happens within timespan of Y",
     "derived_from":    "X evolved from Y",
     "contradicts":     "X conflicts with Y",
     "excepts":         "X carveout from Y",
@@ -411,15 +411,11 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
     "enables": ("supports", False),
     "allows": ("supports", False),
     "facilitates": ("supports", False),
-    # Pt 8d — `runs_on`, `trained_on`, `classifies` dropped from schema in
-    # favor of broader-fit `defines` / `example_of` / `during`. Their
-    # legacy aliases now route to broader operational predicates so any
-    # historical LLM emission still normalizes cleanly.
-    "runs_on": ("uses", False),
-    "deployed_on": ("uses", False),
-    "executes_on": ("uses", False),
-    "trained_on": ("uses", False),
-    "trained_with": ("uses", False),
+    "runs_on": ("runs_on", False),
+    "deployed_on": ("runs_on", False),
+    "executes_on": ("runs_on", False),
+    "trained_on": ("trained_on", False),
+    "trained_with": ("trained_on", False),
     # `extracts` was merged into `detects`; both legacy aliases route to the
     # survivor so old prompts and historical snapshots still normalize.
     "extract": ("detects", False),
@@ -448,13 +444,9 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
     "sponsored_by": ("affiliated_with", False),
     "co_occurs_with": ("overlaps", False),
     "concurrent_with": ("overlaps", False),
-    # Pt 8d — `during` is now a first-class schema member (temporal
-    # containment, distinct from `overlaps` co-occurrence). The literal
-    # word "during" is preserved as a self-routing alias so the LLM can
-    # emit it directly without confusion.
-    "during": ("during", False),
-    "within_timespan_of": ("during", False),
-    "throughout": ("during", False),
+    "during": ("overlaps", False),
+    "within_timespan_of": ("overlaps", False),
+    "throughout": ("overlaps", False),
     # Pt 8d — `classifies` dropped; route prediction-/labeling-style verbs
     # to `detects` which has identical semantic flavor (model produces
     # category).
@@ -501,11 +493,8 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
     "affects": ("causes", False),
     "reduces": ("causes", False),
     "published_by": ("created_by", False),
-    # Pt 8d — aliases for the new first-class predicates `defines` and
-    # `example_of`. The LLM may emit any of these surface forms; all
-    # normalize to the canonical schema slot so downstream queries stay
-    # bounded. Reverse-direction entries (rev=True) flip subject/object
-    # because "Y defined_in X" reads as "X defines Y".
+    # Definition/example aliases. Reverse-direction entries (rev=True) flip
+    # subject/object because "Y defined_in X" reads as "X defines Y".
     "describes": ("defines", False),
     "specifies": ("defines", False),
     "denotes": ("defines", False),
@@ -513,10 +502,11 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
     "defined_in": ("defines", True),
     "defined_by": ("defines", True),
     "explained_in": ("defines", True),
-    "exemplifies": ("example_of", False),
-    "case_of": ("example_of", False),
-    "illustrates": ("example_of", False),
-    "demonstrates_case": ("example_of", False),
+    "example_of": ("instance_of", False),
+    "exemplifies": ("instance_of", False),
+    "case_of": ("instance_of", False),
+    "illustrates": ("instance_of", False),
+    "demonstrates_case": ("instance_of", False),
     "illustrated_in": ("references", True),
     # Pt 8d — high-frequency off-schema predicates seen in the existing
     # graph (audit Pt 7c finding). Route to closest semantic-family
@@ -642,7 +632,8 @@ def _evidence_token_overlap(phrase: str, text: str, *, threshold: float = 0.6) -
         return False
     text_tokens = set(_EVIDENCE_TOKEN_RE.findall(text or ""))
     overlap = phrase_tokens & text_tokens
-    return (len(overlap) / len(phrase_tokens)) >= threshold
+    effective_threshold = max(threshold, 0.8) if len(phrase_tokens) <= 3 else threshold
+    return (len(overlap) / len(phrase_tokens)) >= effective_threshold
 
 
 def _validate_evidence(evidence_phrase: str | None, chunk_text: str) -> bool:
@@ -1423,6 +1414,7 @@ def build_user_prompt(
         f"{fact_protocol}"
         '- Finished line: {"t":"x"}\n'
         "Rules:\n"
+        f"- max {line_cap} total extraction item lines including entities, relations, and facts\n"
         f"- max {entity_cap} entities, max {relation_cap} relations\n"
         f"{fact_rules}"
         f"{table_rules}"
@@ -2142,6 +2134,17 @@ def _complete_relation_endpoint_entities(
     return out
 
 
+def _canonical_entity_type(entity_type: str | None, allowed: set[str]) -> str | None:
+    """Return schema-canonical entity type casing when the value is a case variant."""
+    raw = str(entity_type or "").strip()
+    if not raw:
+        return None
+    if raw in allowed:
+        return raw
+    by_lower = {value.lower(): value for value in allowed}
+    return by_lower.get(raw.lower())
+
+
 def _looks_like_storage_target(name: str) -> bool:
     text = _entity_key(name)
     return any(term in text for term in (
@@ -2352,8 +2355,13 @@ def _apply_schema(
     if schema.has_entity_schema:
         allowed = set(schema.entity_vocab)
         for e in entities:
-            if e.entity_type in allowed:
-                out_entities.append(e)
+            canonical_type = _canonical_entity_type(e.entity_type, allowed)
+            if canonical_type:
+                out_entities.append(
+                    replace(e, entity_type=canonical_type)
+                    if canonical_type != e.entity_type
+                    else e
+                )
             elif schema.strict == "soft":
                 out_entities.append(
                     EntityItem(
@@ -2679,19 +2687,28 @@ def _parse(
     strict_entities: list[EntityItem] = []
     strict_entity_drops = 0
     for e in entities:
+        canonical_type = _canonical_entity_type(
+            e.entity_type,
+            set(UNIVERSAL_ENTITY_SCHEMA) | {SchemaContext.ENTITY_SENTINEL},
+        )
+        candidate = (
+            replace(e, entity_type=canonical_type)
+            if canonical_type and canonical_type != e.entity_type
+            else e
+        )
         try:
             LLMEntity(
-                canonical_name=e.canonical_name,
-                surface_form=e.surface_form or "",
-                entity_type=e.entity_type,
-                confidence=float(e.confidence),
+                canonical_name=candidate.canonical_name,
+                surface_form=candidate.surface_form or "",
+                entity_type=candidate.entity_type,
+                confidence=float(candidate.confidence),
                 # Pt9b — include object_kind in Pt8b validation. Free-form
                 # str field (no Literal), so this validates length only and
                 # is bit-for-bit identical to pre-Pt9b validation when the
                 # LLM didn't emit one.
-                object_kind=getattr(e, "object_kind", "") or "",
+                object_kind=getattr(candidate, "object_kind", "") or "",
             )
-            strict_entities.append(e)
+            strict_entities.append(candidate)
         except ValidationError as ve:
             strict_entity_drops += 1
             logger.warning(
@@ -2699,7 +2716,7 @@ def _parse(
                 "name=%r type=%r reason=%s",
                 task.chunk_id,
                 (e.canonical_name or "")[:40],
-                e.entity_type,
+                candidate.entity_type,
                 str(ve)[:200],
             )
     entities = strict_entities

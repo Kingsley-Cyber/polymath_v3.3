@@ -23,10 +23,17 @@ def _stub_result(
     headline_text: str = "",
     evidence_count: int = 0,
     auto_md: str = "",
+    web_evidence: dict | None = None,
 ) -> SimpleNamespace:
     """Build a SimpleNamespace shaped like the legacy discover() Result so
     merge_discover_results can be exercised without spinning up the real
     orchestrator."""
+    web_payload = web_evidence or {
+        "enabled": False,
+        "fetch_depth": "normal",
+        "max_results": 0,
+        "sources": [],
+    }
     return SimpleNamespace(
         session_id=f"sess_{corpus_id}",
         corpus_id=corpus_id,
@@ -57,9 +64,16 @@ def _stub_result(
         latent_topics=[],
         tensions=[],
         trace={"stages": []},
-        auto_synthesis={"markdown": auto_md, "sources": [], "fallback": False, "fallback_reason": None},
+        auto_synthesis={
+            "markdown": auto_md,
+            "sources": [],
+            "fallback": False,
+            "fallback_reason": None,
+            "web_evidence": web_payload,
+        },
         insight_packet_summary={"sparse": False, "temporal_support": False, "counts": {"evidence": evidence_count, "entities": 0}, "evidence_sources": {}},
         context_graph={"nodes": [], "links": [], "meta": {}},
+        web_evidence=web_payload,
     )
 
 
@@ -151,6 +165,57 @@ def test_merger_handles_partial_failure():
     assert merged.trace["multi_corpus_meta"]["failed_ids"] == ["bad"]
     assert merged.trace["multi_corpus_meta"]["errors"]["bad"] == "Neo4j timeout"
     assert {n["id"] for n in merged.graph["nodes"]} == {"e1"}
+
+
+def test_merger_preserves_web_evidence_lane():
+    from services.graph.orchestrator import merge_discover_results
+
+    r_alpha = _stub_result(
+        corpus_id="alpha",
+        evidence_count=10,
+        web_evidence={
+            "enabled": True,
+            "fetch_depth": "normal",
+            "max_results": 3,
+            "sources": [
+                {
+                    "title": "Alpha source",
+                    "url": "https://example.test/a",
+                    "source_tier": "web_search",
+                }
+            ],
+        },
+    )
+    r_beta = _stub_result(
+        corpus_id="beta",
+        evidence_count=20,
+        web_evidence={
+            "enabled": True,
+            "fetch_depth": "deep",
+            "max_results": 3,
+            "sources": [
+                {
+                    "title": "Beta source",
+                    "url": "https://example.test/b",
+                    "source_tier": "web_search",
+                }
+            ],
+        },
+    )
+
+    merged = merge_discover_results(
+        [("alpha", r_alpha, None), ("beta", r_beta, None)],
+        query="q",
+        corpus_ids=["alpha", "beta"],
+    )
+
+    assert merged.web_evidence["enabled"] is True
+    assert merged.web_evidence["fetch_depth"] == "deep"
+    assert [s["url"] for s in merged.web_evidence["sources"]] == [
+        "https://example.test/a",
+        "https://example.test/b",
+    ]
+    assert merged.auto_synthesis["web_evidence"] == merged.web_evidence
 
 
 def test_merger_all_failures_returns_stub_with_errors():

@@ -122,6 +122,15 @@ class Settings(BaseSettings):
             "is intentionally raised."
         ),
     )
+    GRAPH_EXPANSION_TIMEOUT_SECONDS: float = Field(
+        default=4.0,
+        ge=0.2,
+        le=30.0,
+        description=(
+            "Wall-clock timeout for query-time Neo4j Mode A expansion. A timeout "
+            "degrades to the hybrid seed pool instead of stalling Graph Augmentation."
+        ),
+    )
     GRAPH_REL_MIN_CONFIDENCE: float = Field(
         default=0.20,
         ge=0.0,

@@ -1,8 +1,14 @@
+import asyncio
 from types import SimpleNamespace
 
 from models.schemas import IngestionConfig, SourceTier
 from services.ingestion import tier_chunker
-from services.ingestion.docling_adapter import _markdown_sections, _parse_local_text_document
+from services.ingestion.docling_adapter import (
+    _markdown_sections,
+    _parse_local_text_document,
+    parse_document,
+    parser_strategy,
+)
 
 
 def _parse_result(*, source_tier: SourceTier, text: str = "", pages=None):
@@ -547,6 +553,84 @@ def test_plain_text_table_promotes_to_section_aware_tier():
     assert parsed.source_tier == SourceTier.tier_b
     assert parsed.has_structure is True
     assert any(s.element_type == "table" for s in parsed.sections)
+
+
+def test_youtube_transcript_metadata_is_not_indexed_as_first_speech_chunk():
+    text = """Video:    How to build a Modern EDITABLE Grid using Gallery in Power Apps (2025)
+URL:      https://youtu.be/6h4tsfwfyzo
+Duration: 17:33
+Segments: 340
+Source:   YouTube Transcript API
+Date:     2026-06-19
+
+[0:00] hello everyone razza here in this video
+[0:03] I will show you how to create an
+[0:05] editable grid experience in canvas power
+[0:09] apps we will use the gallery control add
+[0:12] modern input controls and frame and
+[0:16] editable table like experience in power
+[0:19] apps using a very simple method so let's
+[0:22] check this video out in action
+"""
+    parsed = _parse_local_text_document(
+        text.encode("utf-8"),
+        "powerapps-transcript.txt",
+        "text/plain",
+    )
+
+    assert parsed is not None
+    assert parsed.source_tier == SourceTier.tier_b
+    assert parsed.source_format == "youtube_transcript"
+    assert parsed.has_structure is True
+    assert any(s.element_type == "transcript_block" for s in parsed.sections)
+
+    parents, children, _ = tier_chunker.chunk(
+        parsed,
+        doc_id="doc_transcript",
+        corpus_id="corpus",
+        config=IngestionConfig(chunk_overlap=0),
+    )
+
+    transcript_children = [
+        child
+        for child in children
+        if child.metadata.get("source_format") == "youtube_transcript"
+    ]
+    assert parents
+    assert transcript_children
+    assert all("https://youtu.be" not in child.text for child in transcript_children)
+    assert all("YouTube Transcript API" not in child.text for child in transcript_children)
+    assert transcript_children[0].metadata["url"] == "https://youtu.be/6h4tsfwfyzo"
+    assert transcript_children[0].metadata["time_start"] == "0:00"
+    assert transcript_children[0].metadata["time_end"] == "0:22"
+    assert "editable grid experience" in transcript_children[0].text
+
+
+def test_html_upload_defaults_to_prose_extraction_not_code_lane():
+    html = b"""<html>
+<head><title>Power Apps Grid</title><script>console.log('junk')</script></head>
+<body>
+<header>site navigation should disappear</header>
+<main>
+<h1>Editable grid in Power Apps</h1>
+<p>Use a gallery with modern input controls to create an editable table experience.</p>
+</main>
+<footer>copyright footer should disappear</footer>
+</body>
+</html>"""
+
+    assert parser_strategy("power-apps-grid.html", "text/html") == "local_html"
+    parsed = asyncio.run(
+        parse_document(html, "power-apps-grid.html", "text/html")
+    )
+
+    assert parsed.source_format == "local_html"
+    assert parsed.source_tier == SourceTier.tier_b
+    assert "Editable grid in Power Apps" in parsed.text
+    assert "modern input controls" in parsed.text
+    assert "console.log" not in parsed.text
+    assert "site navigation" not in parsed.text
+    assert "copyright footer" not in parsed.text
 
 
 def test_large_table_splits_by_row_group_and_repeats_context():

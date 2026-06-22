@@ -1159,7 +1159,7 @@
 .message-assistant h1,
 .message-assistant h2,
 .message-assistant h3 {
-  border-bottom: 1px solid var(--color-primary);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-primary) 34%, transparent);
   border-left: 0;
   color: var(--color-text);
   font-weight: 600;
@@ -1172,12 +1172,56 @@
 .message-assistant ul,
 .message-assistant ol {
   margin: 0 0 var(--spacing-sm) 0;
-  padding-left: var(--spacing-lg);
+  padding-left: 0;
 }
 
 .message-assistant li {
   line-height: 1.5;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.32rem;
+}
+
+.message-assistant ul {
+  list-style: none;
+}
+
+.message-assistant ul > li {
+  position: relative;
+  padding-left: 1.05rem;
+}
+
+.message-assistant ul > li::before {
+  background: color-mix(in srgb, var(--accent-primary) 72%, white);
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 12%, transparent);
+  content: "";
+  height: 0.34rem;
+  left: 0.15rem;
+  position: absolute;
+  top: 0.56em;
+  width: 0.34rem;
+}
+
+.message-assistant ol {
+  counter-reset: pm-answer-step;
+  list-style: none;
+}
+
+.message-assistant ol > li {
+  counter-increment: pm-answer-step;
+  padding-left: 1.55rem;
+  position: relative;
+}
+
+.message-assistant ol > li::before {
+  color: color-mix(in srgb, var(--accent-primary) 82%, white);
+  content: counter(pm-answer-step);
+  font-family: var(--font-family-mono);
+  font-size: 0.72rem;
+  font-weight: 800;
+  left: 0;
+  line-height: 1.65;
+  position: absolute;
+  top: 0;
 }
 
 .message-assistant strong {
@@ -1196,8 +1240,10 @@
 }
 
 .message-assistant pre {
-  background-color: rgba(0, 0, 0, 0.2);
-  border: 1px solid var(--color-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 42%),
+    rgba(0, 0, 0, 0.22);
+  border: 1px solid color-mix(in srgb, var(--color-border) 74%, var(--accent-primary));
   border-radius: 6px;
   margin: var(--spacing-sm) 0;
   overflow-x: auto;
@@ -1213,12 +1259,12 @@
 }
 
 .message-assistant blockquote {
-  background: transparent;
-  border-left: 0;
-  color: var(--color-text-muted);
+  background: color-mix(in srgb, var(--color-primary) 7%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--color-primary) 60%, var(--color-border));
+  color: var(--color-text);
   font-style: normal;
   margin: var(--spacing-sm) 0;
-  padding: 0 0 0 var(--spacing-md);
+  padding: 0.58rem 0.78rem;
 }
 
 .message-assistant table {
@@ -1229,7 +1275,12 @@
 }
 
 .message-assistant .pm-table-scroll {
-  margin: var(--spacing-sm) 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 34%),
+    color-mix(in srgb, var(--bg-raised) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+  border-radius: 8px;
+  margin: 0.95rem 0 1.1rem;
   max-width: 100%;
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -1245,18 +1296,33 @@
 .message-assistant th,
 .message-assistant td {
   text-align: left;
-  padding: 0.4rem var(--spacing-sm);
-  border: none;
+  padding: 0.48rem 0.68rem;
+  border: 0;
+  vertical-align: top;
 }
 
 .message-assistant th {
-  color: var(--color-primary);
-  font-weight: 600;
-  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+  color: color-mix(in srgb, var(--accent-primary) 84%, white);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
 }
 
 .message-assistant tr:nth-child(even) td {
   background-color: rgba(255, 255, 255, 0.03);
+}
+
+.message-assistant tbody tr + tr td,
+.message-assistant tbody tr:first-child td {
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 54%, transparent);
+}
+
+.message-assistant th + th,
+.message-assistant td + td {
+  border-left: 1px solid color-mix(in srgb, var(--color-border) 48%, transparent);
 }
 
 .synthesis-body table {
@@ -1283,6 +1349,42 @@
 
 .synthesis-body tr:nth-child(even) td {
   background-color: rgba(255, 255, 255, 0.026);
+}
+
+.message-assistant .pm-code-block {
+  border-radius: 8px;
+}
+
+.message-assistant .pm-command-block {
+  background:
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--accent-primary) 12%, rgba(0, 0, 0, 0.36)),
+      rgba(0, 0, 0, 0.24));
+  border-color: color-mix(in srgb, var(--accent-primary) 50%, var(--color-border));
+}
+
+.message-assistant .pm-json-block {
+  background:
+    linear-gradient(135deg,
+      color-mix(in srgb, #38bdf8 10%, rgba(0, 0, 0, 0.34)),
+      rgba(0, 0, 0, 0.24));
+  border-color: color-mix(in srgb, #38bdf8 45%, var(--color-border));
+}
+
+.message-assistant .pm-json-block code {
+  color: #dbeafe;
+}
+
+.message-assistant .pm-ascii-block {
+  color: #dbeafe;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  letter-spacing: 0;
+  tab-size: 2;
+}
+
+.message-assistant .pm-ascii-block code {
+  color: inherit;
 }
 
 .process-group {

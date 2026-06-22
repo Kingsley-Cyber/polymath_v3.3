@@ -391,6 +391,13 @@ async def _bounded_discover_without_legacy(
     gaps = list(local_signals.get("gaps") or gaps)
     frontier = list(local_signals.get("frontier") or [])
     packet_metrics = local_signals.get("metrics")
+    try:
+        from services.gap_profile import build_gap_profile
+
+        gap_profile = build_gap_profile(query)
+    except Exception as exc:  # noqa: BLE001 - profile must not block graph fallback
+        logger.debug("gap profile skipped in bounded fallback: %s", exc)
+        gap_profile = {}
 
     selected_edges = [
         {
@@ -491,6 +498,7 @@ async def _bounded_discover_without_legacy(
         "selected_edges": selected_edges,
         "source_docs": [],
         "builder": "bounded_graph_query",
+        "gap_profile": gap_profile,
         "graph_edge_policy": {
             "per_corpus": graph_traces,
             "corpus_count": len(corpus_ids),
@@ -607,6 +615,7 @@ async def _bounded_discover_without_legacy(
             "links": context_links,
             "meta": {"builder": "bounded_graph_query"},
         },
+        web_evidence={},
     )
     setattr(result, "_packet_metrics", packet_metrics)
 
@@ -682,6 +691,13 @@ async def _bounded_discover_without_legacy(
             )
             fallback["builder"] = "bounded_graph_query"
             result.auto_synthesis = fallback
+        _attach_web_evidence_payload(
+            result,
+            packet,
+            enabled=web_search_enabled,
+            fetch_depth=web_fetch_depth,
+            max_results=web_max_results,
+        )
         _sync_headline_from_auto_synthesis(result)
         result.insight_packet_summary = _insight_packet_summary_from_result(result)
         if fallback_reason:
@@ -988,6 +1004,241 @@ def _trace_with_stages(trace: dict[str, Any] | None) -> dict[str, Any]:
         },
     ]
     return trace
+
+
+def _build_weak_links(
+    metrics: Any,
+    *,
+    bridges: list[dict[str, Any]] | None = None,
+    analogies: list[dict[str, Any]] | None = None,
+    context_links: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Deterministically flag graph links that need better support."""
+
+    del metrics, analogies  # kept for backward-compatible call shape
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for bridge in bridges or []:
+        if not isinstance(bridge, dict):
+            continue
+        try:
+            path_count = int(bridge.get("path_count") or 0)
+        except Exception:
+            path_count = 0
+        if path_count != 1:
+            continue
+        source = str(bridge.get("source") or "")
+        target = str(bridge.get("target") or "")
+        key = (source, target, "fragile_bridge")
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "source": source,
+                "target": target,
+                "source_name": bridge.get("source_name") or source,
+                "target_name": bridge.get("target_name") or target,
+                "weakness_type": "fragile_bridge",
+                "severity": "high",
+                "rationale": (
+                    f"only {path_count} supporting path between the two concepts."
+                ),
+                "evidence": bridge.get("evidence") or "",
+                "path_entities": bridge.get("path_entities") or [],
+                "path_entity_ids": bridge.get("path_entity_ids") or [],
+            }
+        )
+
+    for link in context_links or []:
+        if not isinstance(link, dict):
+            continue
+        source = str(link.get("source") or "")
+        target = str(link.get("target") or "")
+        predicate = str(link.get("predicate") or link.get("kind") or "related_to")
+        try:
+            confidence = float(link.get("confidence") or link.get("weight") or 0.0)
+        except Exception:
+            confidence = 0.0
+        weakness_type = ""
+        severity = "medium"
+        if predicate in {"related_to", "references", "mentions"}:
+            weakness_type = "generic_relation"
+        if confidence and confidence < 0.35:
+            weakness_type = weakness_type or "low_confidence"
+            severity = "high" if confidence < 0.2 else "medium"
+        if not weakness_type:
+            continue
+        key = (source, target, weakness_type)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "source": source,
+                "target": target,
+                "predicate": predicate,
+                "weakness_type": weakness_type,
+                "severity": severity,
+                "confidence": confidence,
+                "rationale": (
+                    "Generic or low-confidence relation needs stronger corpus evidence."
+                ),
+            }
+        )
+
+    return out[:24]
+
+
+def _should_skip_synthesis(
+    metrics: Any,
+    *,
+    evidence_chunks: list[dict[str, Any]] | None = None,
+    intent_profile: dict[str, Any] | None = None,
+) -> bool:
+    """Legacy gate for card-style synthesis.
+
+    Text evidence for direct lookup turns is enough to synthesize even when the
+    graph metrics are thin. Pure metrics-only packets should skip the old card
+    synthesis path and let the evidence packet/fallback logic handle them.
+    """
+
+    del metrics
+    intent_type = str((intent_profile or {}).get("intent_type") or "").lower()
+    has_text_evidence = any(
+        isinstance(item, dict) and str(item.get("text") or "").strip()
+        for item in (evidence_chunks or [])
+    )
+    if intent_type == "lookup" and has_text_evidence:
+        return False
+    return True
+
+
+def _build_subgraph_payload(
+    metrics: Any,
+    *,
+    frontier: list[dict[str, Any]] | None = None,
+    analogies: list[dict[str, Any]] | None = None,
+    bridges: list[dict[str, Any]] | None = None,
+    transfers: list[dict[str, Any]] | None = None,
+    working_entity_ids: set[str] | list[str] | tuple[str, ...] | None = None,
+    context_links: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a compact visual subgraph bundle from corpus metrics.
+
+    Newer graph responses build richer payloads elsewhere, but this helper is
+    still the deterministic contract for unit tests and compact graph cards.
+    """
+
+    frontier = frontier or []
+    analogies = analogies or []
+    bridges = bridges or []
+    transfers = transfers or []
+    context_links = context_links or []
+    working_ids = {str(item) for item in (working_entity_ids or []) if str(item)}
+
+    for collection in (frontier, analogies, bridges, transfers, context_links):
+        for item in collection or []:
+            if not isinstance(item, dict):
+                continue
+            for key in ("entity_id", "source", "target"):
+                value = str(item.get(key) or "")
+                if value:
+                    working_ids.add(value)
+
+    name_map = getattr(metrics, "entity_name_map", {}) or {}
+    domain_map = getattr(metrics, "node_domain_map", {}) or {}
+    concept_map = getattr(metrics, "entity_concept_map", {}) or {}
+    facet_map = getattr(metrics, "entity_facet_map", {}) or {}
+    analogy_pairs = {
+        (str(item.get("source") or ""), str(item.get("target") or ""))
+        for item in analogies
+        if isinstance(item, dict)
+    }
+    analogy_nodes = {node_id for pair in analogy_pairs for node_id in pair if node_id}
+
+    nodes: list[dict[str, Any]] = []
+    for entity_id in sorted(working_ids):
+        concept = concept_map.get(entity_id) if isinstance(concept_map, dict) else {}
+        facets = facet_map.get(entity_id) if isinstance(facet_map, dict) else {}
+        node = {
+            "id": entity_id,
+            "label": _text(
+                (name_map.get(entity_id) if isinstance(name_map, dict) else "")
+                or (concept.get("label") if isinstance(concept, dict) else "")
+                or entity_id,
+                160,
+            ),
+            "domain": _text(
+                (domain_map.get(entity_id) if isinstance(domain_map, dict) else "")
+                or "",
+                160,
+            ),
+            "emphasis": "analogy_anchor" if entity_id in analogy_nodes else "normal",
+        }
+        if isinstance(facets, dict):
+            for key in ("object_kind", "domain_type", "canonical_family"):
+                if facets.get(key):
+                    node[key] = facets[key]
+        if isinstance(concept, dict):
+            for key in ("degree", "concept_id"):
+                if concept.get(key) is not None:
+                    node[key] = concept[key]
+        nodes.append(node)
+
+    links: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for item in context_links:
+        if not isinstance(item, dict):
+            continue
+        source = str(item.get("source") or "")
+        target = str(item.get("target") or "")
+        if not source or not target:
+            continue
+        predicate = str(item.get("predicate") or item.get("kind") or "related_to")
+        pair = (source, target)
+        reverse_pair = (target, source)
+        links[(source, target, predicate)] = {
+            "source": source,
+            "target": target,
+            "predicate": predicate,
+            "relation_family": item.get("relation_family") or item.get("role") or "",
+            "confidence": float(item.get("confidence") or item.get("weight") or 0.0),
+            "emphasis": (
+                "ghost_analogy"
+                if pair in analogy_pairs or reverse_pair in analogy_pairs
+                else "context"
+            ),
+        }
+
+    for item in analogies:
+        if not isinstance(item, dict):
+            continue
+        source = str(item.get("source") or "")
+        target = str(item.get("target") or "")
+        if not source or not target:
+            continue
+        existing_key = next(
+            (
+                key
+                for key in links
+                if (key[0], key[1]) in {(source, target), (target, source)}
+            ),
+            None,
+        )
+        if existing_key:
+            links[existing_key]["emphasis"] = "ghost_analogy"
+            continue
+        links[(source, target, "analogy")] = {
+            "source": source,
+            "target": target,
+            "predicate": "analogy",
+            "relation_family": "analogy",
+            "confidence": float(item.get("confidence") or 0.0),
+            "emphasis": "ghost_analogy",
+        }
+
+    return {"nodes": nodes, "links": list(links.values())}
 
 
 def _insight_packet_summary_from_result(result: Any) -> dict[str, Any]:
@@ -2125,6 +2376,128 @@ async def _maybe_add_web_grounding_to_packet(
         }
     )
     trace["web_grounding"] = meta
+
+
+def _web_evidence_payload_from_packet(
+    packet: dict[str, Any],
+    trace: Optional[dict[str, Any]] = None,
+    *,
+    enabled: Optional[bool] = None,
+    fetch_depth: Optional[str] = None,
+    max_results: Optional[int] = None,
+) -> dict[str, Any]:
+    """Return the public web-evidence lane for GraphDiscoverResponse.
+
+    The synthesis packet keeps full internal evidence rows. The response-level
+    payload is intentionally small and source-oriented so the frontend can show
+    the live-web lane without treating it as private corpus evidence.
+    """
+
+    trace = trace if isinstance(trace, dict) else {}
+    meta = trace.get("web_grounding") if isinstance(trace.get("web_grounding"), dict) else {}
+    raw_depth = str(fetch_depth or meta.get("fetch_depth") or "normal").lower()
+    depth = raw_depth if raw_depth in {"snippets", "normal", "deep"} else "normal"
+    rows = [
+        item
+        for item in (packet.get("web_evidence") or [])
+        if isinstance(item, dict)
+        and str(item.get("source_tier") or "") == "web_search"
+    ]
+    try:
+        requested_max = int(
+            max_results
+            if max_results is not None
+            else meta.get("requested_max_results")
+            or meta.get("web_max_results")
+            or len(rows)
+            or 0
+        )
+    except Exception:
+        requested_max = len(rows)
+
+    sources: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        source = row.get("source") if isinstance(row.get("source"), dict) else {}
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        url = _text(
+            source.get("url")
+            or metadata.get("url")
+            or row.get("url")
+            or row.get("doc_id")
+            or "",
+            512,
+        )
+        title = _text(
+            source.get("title")
+            or metadata.get("title")
+            or row.get("source_label")
+            or row.get("title")
+            or url
+            or "Web source",
+            180,
+        )
+        key = url or title or _text(row.get("chunk_id") or row.get("evidence_id") or "", 120)
+        if key in seen:
+            continue
+        seen.add(key)
+        sources.append(
+            {
+                "title": title,
+                "url": url,
+                "snippet": _text(row.get("summary") or row.get("text") or "", 320),
+                "source_tier": "web_search",
+                "fetch_depth": depth,
+                "doc_id": _text(row.get("doc_id") or url, 512),
+                "chunk_id": _text(row.get("chunk_id") or "", 160),
+                "evidence_id": _text(row.get("evidence_id") or "", 80),
+                "source_type": _text(
+                    source.get("source_type") or metadata.get("source_type") or "webpage",
+                    80,
+                ),
+            }
+        )
+
+    enabled_value = bool(rows)
+    if enabled is not None:
+        enabled_value = bool(enabled)
+    elif isinstance(meta, dict) and "enabled" in meta:
+        enabled_value = bool(meta.get("enabled"))
+
+    return {
+        "enabled": enabled_value,
+        "fetch_depth": depth,
+        "max_results": requested_max,
+        "sources": sources,
+        "trace": {
+            "status": meta.get("status") if isinstance(meta, dict) else None,
+            "search_query": meta.get("search_query") if isinstance(meta, dict) else None,
+            "result_count": len(sources),
+            "cache_status": meta.get("cache_status") if isinstance(meta, dict) else None,
+        },
+    }
+
+
+def _attach_web_evidence_payload(
+    result: Any,
+    packet: dict[str, Any],
+    *,
+    enabled: bool,
+    fetch_depth: str,
+    max_results: int,
+) -> None:
+    payload = _web_evidence_payload_from_packet(
+        packet,
+        getattr(result, "trace", {}) if isinstance(getattr(result, "trace", None), dict) else {},
+        enabled=enabled,
+        fetch_depth=fetch_depth,
+        max_results=max_results,
+    )
+    result.web_evidence = payload
+    auto = getattr(result, "auto_synthesis", None)
+    if isinstance(auto, dict):
+        auto["web_evidence"] = payload
+        result.auto_synthesis = auto
 
 
 def _parent_id_from_summary_chunk(chunk_id: str) -> str:
@@ -4717,6 +5090,13 @@ def _build_insight_packet(
 
     caps = _packet_caps_for_mode(synthesis_mode)
     trace = _coerce_dict(getattr(result, "trace", {}) or {})
+    try:
+        from services.gap_profile import build_gap_profile
+
+        gap_profile = build_gap_profile(query)
+    except Exception as exc:  # noqa: BLE001 - synthesis can proceed without it
+        logger.debug("gap profile skipped: %s", exc)
+        gap_profile = {}
     headline_payload = getattr(result, "headline", {}) or {}
     headline_text = (
         headline_payload.get("headline") if isinstance(headline_payload, dict) else ""
@@ -5312,6 +5692,7 @@ def _build_insight_packet(
             else {}
         )
         or {},
+        "gap_profile": gap_profile,
         "retrieval": trace.get("retrieval_evidence") or {},
         "anchors": anchors,
         "entities": entities,
@@ -5411,6 +5792,11 @@ def _llm_context_trace_from_packet(
         "collections": packet.get("collections") or {},
         "retrieval": packet.get("retrieval") or {},
         "graph_hint": packet.get("graph_hint") or {},
+        "gap_profile": (
+            packet.get("gap_profile")
+            if isinstance(packet.get("gap_profile"), dict)
+            else {}
+        ),
         "research_contract": research_contract,
         "files": files,
         "chunks": chunks,
@@ -5455,6 +5841,11 @@ def _llm_context_trace_from_packet(
             "evidence_text_limit": _PACKET_EVIDENCE_TEXT_LIMIT,
             "evidence_filter": packet.get("evidence_filter") or {},
             "graph_hint": packet.get("graph_hint") or {},
+            "gap_profile": (
+                packet.get("gap_profile")
+                if isinstance(packet.get("gap_profile"), dict)
+                else {}
+            ),
             "temporal_support": bool(packet.get("temporal_support")),
             "sparse": bool(packet.get("sparse")),
             "claim_levels": research_contract.get("claim_levels") or [],
@@ -5890,6 +6281,19 @@ _GAP_SYSTEM_PROMPT = (
     "travels to another domain — phrase as an opportunity, not a claim.\n"
     "- weak_link: a provenance-thin assertion the corpus leans on without "
     "support. Name what evidence is missing to firm it up.\n\n"
+    "QUERY-DETERMINED ANALYSIS FRAME:\n"
+    "- When the prompt includes a Gap analysis profile, use it as the routing "
+    "rail for the answer. A prediction gap should read like a forecasting "
+    "diagnostic; a business gap like KPI/strategy variance; a stock gap like "
+    "financial research and risk framing; a process gap like DMAIC; a market "
+    "gap like unmet-need or white-space analysis; a structural gap like graph "
+    "absence mapping.\n"
+    "- The profile selects the method, but evidence still controls the claim. "
+    "If the required metrics or data are absent, say what can be inferred and "
+    "what cannot be calculated. Do not fabricate MAE, RMSE, DCF, Cp/Cpk, TAM, "
+    "price targets, probabilities, or benchmark values.\n"
+    "- For mixed-domain profiles, lead with the primary domain and add only "
+    "secondary lenses that are supported by the packet.\n\n"
     "ATTENTION WEIGHTS:\n"
     "- Name and rank the gaps: about 60 percent. Lead with the gaps the "
     "structural signals make most credible, not the ones that sound "
@@ -6027,6 +6431,34 @@ def _render_packet_user_prompt(
             "the corpus does assert so you can argue precisely about what it "
             "does not. Lead with the most metrically-credible absences."
         )
+        gap_profile = compact.get("gap_profile") or {}
+        if gap_profile:
+            lines.append(
+                "Gap analysis profile: "
+                f"primary={gap_profile.get('primary_label') or gap_profile.get('primary_domain')} "
+                f"(confidence={gap_profile.get('confidence')}); "
+                f"secondary={', '.join(gap_profile.get('secondary_domains') or []) or 'none'}."
+            )
+            if gap_profile.get("method_frame"):
+                lines.append("Method frame: " + str(gap_profile["method_frame"]))
+            if gap_profile.get("output_shape"):
+                lines.append("Output shape to use: " + str(gap_profile["output_shape"]))
+            metrics = gap_profile.get("required_metrics") or []
+            if metrics:
+                lines.append("Metrics to look for, not invent: " + ", ".join(metrics))
+            evidence_req = gap_profile.get("required_evidence") or []
+            if evidence_req:
+                lines.append("Required evidence checklist: " + "; ".join(evidence_req))
+            missing = gap_profile.get("likely_missing_data") or []
+            if missing:
+                lines.append(
+                    "Likely missing data to call out if absent from evidence: "
+                    + "; ".join(missing)
+                )
+            if gap_profile.get("synthesis_rule"):
+                lines.append("Domain rule: " + str(gap_profile["synthesis_rule"]))
+            if gap_profile.get("calculation_policy"):
+                lines.append("Calculation policy: " + str(gap_profile["calculation_policy"]))
 
     docs_in_scope = compact.get("documents_in_scope") or []
     if docs_in_scope:
@@ -6411,6 +6843,43 @@ def _ideation_idea_budget(compact: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compact_gap_profile(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    domain_scores = raw.get("domain_scores") if isinstance(raw.get("domain_scores"), dict) else {}
+    matched = raw.get("matched_indicators") if isinstance(raw.get("matched_indicators"), dict) else {}
+    compact = {
+        "version": _text(raw.get("version") or "", 32),
+        "gap_intent": bool(raw.get("gap_intent")),
+        "primary_domain": _text(raw.get("primary_domain") or "", 32),
+        "primary_label": _text(raw.get("primary_label") or "", 80),
+        "secondary_domains": [
+            str(v)
+            for v in (raw.get("secondary_domains") or [])[:3]
+            if v
+        ],
+        "confidence": _maybe_float(raw.get("confidence")),
+        "domain_scores": {
+            str(k): _maybe_float(v)
+            for k, v in list(domain_scores.items())[:6]
+            if _maybe_float(v) is not None
+        },
+        "method_frame": _text(raw.get("method_frame") or "", 180),
+        "output_shape": _text(raw.get("output_shape") or "", 80),
+        "required_metrics": [str(v) for v in (raw.get("required_metrics") or [])[:6] if v],
+        "required_evidence": [str(v) for v in (raw.get("required_evidence") or [])[:6] if v],
+        "likely_missing_data": [str(v) for v in (raw.get("likely_missing_data") or [])[:6] if v],
+        "matched_indicators": {
+            str(k): [str(v) for v in (values or [])[:6] if v]
+            for k, values in list(matched.items())[:6]
+            if isinstance(values, list)
+        },
+        "synthesis_rule": _text(raw.get("synthesis_rule") or "", 220),
+        "calculation_policy": _text(raw.get("calculation_policy") or "", 220),
+    }
+    return {key: value for key, value in compact.items() if value not in ("", [], {}, None)}
+
+
 def _compact_packet_for_prompt(
     packet: dict[str, Any],
     *,
@@ -6680,6 +7149,7 @@ def _compact_packet_for_prompt(
             if isinstance(packet.get("intent_profile"), dict)
             else {}
         ),
+        "gap_profile": _compact_gap_profile(packet.get("gap_profile")),
         "research_contract": _research_contract_for_prompt(),
         "mode_caps": {
             "evidence": caps.evidence,
@@ -7573,13 +8043,14 @@ def _sync_headline_from_auto_synthesis(result: Any) -> None:
 
 def _snapshot_from_result(result: Any) -> dict[str, Any]:
     keys = [
-        "session_id", "corpus_id", "query", "mode", "interpretation",
+        "session_id", "corpus_id", "corpus_ids", "query", "mode", "interpretation",
         "frontier", "analogies", "bridges", "weak_links", "transfers",
         "questions", "strategic_read", "intent_profile", "atomic_trace",
         "socratic_prompts", "metrics", "domain_map_summary", "graph",
         "anchors", "concept_communities", "entity_concept_map", "headline",
         "themes", "bridges_v2", "gaps_v2", "latent_topics", "tensions",
         "trace", "auto_synthesis", "insight_packet_summary", "context_graph",
+        "web_evidence",
     ]
     return {key: getattr(result, key, None) for key in keys}
 
@@ -7954,6 +8425,13 @@ async def discover(
         merged = merge_discover_results(
             per_corpus_results, query=query, corpus_ids=ids, mode=mode
         )
+        try:
+            from services.gap_profile import build_gap_profile
+
+            merged.trace = dict(getattr(merged, "trace", {}) or {})
+            merged.trace["gap_profile"] = build_gap_profile(query)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("merged gap profile skipped: %s", exc)
         # Persist as a single multi-corpus session. The legacy persist path
         # is corpus-scoped; we reuse it on the first successful per-corpus
         # result to keep schema compatibility, then patch corpus_ids.
@@ -8128,6 +8606,7 @@ async def discover(
         result.trace["source_docs"] = packet.get("evidence") or []
         result.trace["evidence_filter"] = packet.get("evidence_filter") or {}
         result.trace["graph_hint"] = packet.get("graph_hint") or {}
+        result.trace["gap_profile"] = packet.get("gap_profile") or {}
     result.trace = dict(result.trace or {})
     packet_done_at = _time.perf_counter()
 
@@ -8268,6 +8747,13 @@ async def discover(
             result, packet, fallback_reason or "unknown"
         )
         synthesis_source = f"fallback:{fallback_reason or 'unknown'}"
+    _attach_web_evidence_payload(
+        result,
+        packet,
+        enabled=web_search_enabled,
+        fetch_depth=web_fetch_depth,
+        max_results=web_max_results,
+    )
     _sync_headline_from_auto_synthesis(result)
 
     result.insight_packet_summary = _insight_packet_summary_from_result(result)
@@ -8450,6 +8936,7 @@ def merge_discover_results(
             auto_synthesis={"markdown": "", "sources": [], "fallback": True, "fallback_reason": "all_corpora_failed"},
             insight_packet_summary={"sparse": True, "temporal_support": False, "counts": {}, "evidence_sources": {}, "fallback_reason": "all_corpora_failed"},
             context_graph={"nodes": [], "links": [], "meta": {}},
+            web_evidence={"enabled": False, "fetch_depth": "normal", "max_results": 0, "sources": []},
         )
 
     # Use the first success as the merged result template, then overlay.
@@ -8490,6 +8977,61 @@ def merge_discover_results(
         key_fn=lambda c: str((c or {}).get("concept_id") if isinstance(c, dict) else getattr(c, "concept_id", "")),
         cap=64,
     )
+
+    def _web_payload_from_result(res: Any) -> dict[str, Any]:
+        payload = getattr(res, "web_evidence", None)
+        if isinstance(payload, dict):
+            return payload
+        auto = getattr(res, "auto_synthesis", None)
+        if isinstance(auto, dict) and isinstance(auto.get("web_evidence"), dict):
+            return auto["web_evidence"]
+        return {}
+
+    merged_web_sources: list[dict[str, Any]] = []
+    web_seen: set[str] = set()
+    web_enabled = False
+    web_depth_rank = {"snippets": 0, "normal": 1, "deep": 2}
+    merged_web_depth = "normal"
+    merged_web_max = 0
+    for cid, res in successes:
+        payload = _web_payload_from_result(res)
+        if not payload:
+            continue
+        web_enabled = web_enabled or bool(payload.get("enabled"))
+        depth = str(payload.get("fetch_depth") or "normal")
+        if web_depth_rank.get(depth, 1) > web_depth_rank.get(merged_web_depth, 1):
+            merged_web_depth = depth
+        try:
+            merged_web_max += int(payload.get("max_results") or 0)
+        except Exception:
+            pass
+        for source in payload.get("sources") or []:
+            if not isinstance(source, dict):
+                continue
+            stamped = dict(source)
+            stamped["source_corpus"] = stamped.get("source_corpus") or cid
+            key = str(stamped.get("url") or stamped.get("chunk_id") or stamped.get("title") or "")
+            if key and key in web_seen:
+                continue
+            if key:
+                web_seen.add(key)
+            merged_web_sources.append(stamped)
+            if len(merged_web_sources) >= 10:
+                break
+        if len(merged_web_sources) >= 10:
+            break
+
+    merged_web_evidence = {
+        "enabled": web_enabled,
+        "fetch_depth": merged_web_depth,
+        "max_results": merged_web_max or len(merged_web_sources),
+        "sources": merged_web_sources,
+        "trace": {
+            "merged": True,
+            "result_count": len(merged_web_sources),
+            "successful_ids": [c for c, _ in successes],
+        },
+    }
 
     # Graph union — nodes by id, edges by (source, target, predicate).
     merged_nodes: dict[str, dict] = {}
@@ -8624,6 +9166,7 @@ def merge_discover_results(
     if isinstance(auto, dict):
         auto["per_corpus_synthesis"] = per_corpus_synthesis
         auto["multi_corpus"] = True
+        auto["web_evidence"] = merged_web_evidence
         merged.auto_synthesis = auto
     else:
         try:
@@ -8631,6 +9174,7 @@ def merge_discover_results(
             setattr(auto, "multi_corpus", True)
         except Exception:
             pass
+    merged.web_evidence = merged_web_evidence
 
     # Trace envelope.
     trace = getattr(merged, "trace", None) or {}

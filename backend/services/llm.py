@@ -305,13 +305,20 @@ class LLMService:
             async for line in response.aiter_lines():
                 if not line:
                     continue
+                data = line
+                if data.startswith("data: "):
+                    data = data[6:]
+                    if data.strip() == "[DONE]":
+                        break
                 try:
-                    chunk = json.loads(line)
+                    chunk = json.loads(data)
                 except json.JSONDecodeError:
                     logger.debug("Failed to parse Ollama stream chunk: %s", line)
                     continue
 
                 message = chunk.get("message") or {}
+                content = ""
+                thinking = ""
                 if isinstance(message, dict):
                     tool_calls = self._coerce_ollama_tool_calls(
                         message.get("tool_calls")
@@ -319,14 +326,20 @@ class LLMService:
                     if tool_calls:
                         yield {"tool_calls": tool_calls}
 
-                    normalized = normalizer.add(
-                        content=message.get("content") or "",
-                        thinking=message.get("thinking") or "",
-                    )
-                    if normalized["thinking"]:
-                        yield {"thinking": normalized["thinking"]}
-                    if normalized["content"]:
-                        yield {"content": normalized["content"]}
+                    content = message.get("content") or ""
+                    thinking = message.get("thinking") or ""
+
+                if not content and not thinking:
+                    content, thinking = extract_stream_delta(chunk)
+
+                normalized = normalizer.add(
+                    content=content,
+                    thinking=thinking,
+                )
+                if normalized["thinking"]:
+                    yield {"thinking": normalized["thinking"]}
+                if normalized["content"]:
+                    yield {"content": normalized["content"]}
 
                 if chunk.get("done"):
                     break

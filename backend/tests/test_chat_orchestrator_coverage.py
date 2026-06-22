@@ -530,7 +530,17 @@ def test_system_prompt_includes_agent_zero_chat_rag_shape():
     assert "primary answer substrate" in prompt
     assert "instead of substituting your pretrained background knowledge" in prompt
     assert "Use tables first only when" in prompt
+    assert "grid-style Markdown tables" in prompt
+    assert "numbered lists" in prompt
+    assert "fenced `json` block" in prompt
+    assert "{ \"entities\": [...] }" in prompt
     assert "first substantial payload" in prompt
+    assert "plain-text ASCII diagrams" in prompt
+    assert "fenced `text` block" in prompt
+    assert "tiny ASCII bar chart is allowed" in prompt
+    assert "Mandatory display contract" in prompt
+    assert "do not return a plain wall of prose" in prompt
+    assert "graph, ontology, retrieval, data-flow" in prompt
     assert "Use bold anchors for scanability" in prompt
     assert "Reasoning bridges are welcome" in prompt
     assert "Use the `→` marker sparingly" in prompt
@@ -543,6 +553,7 @@ def test_system_prompt_includes_agent_zero_chat_rag_shape():
     assert "Do not use fixed Graph Query section labels" in prompt
     assert "content-driven headings" in prompt
     assert "natural RAG" in prompt
+    assert "bold thesis → compact table or ASCII map" in prompt
     assert "pressure-tested synthesis" in prompt
     assert "what works, what is under-specified" in prompt
     assert "smallest credible prototype path" in prompt

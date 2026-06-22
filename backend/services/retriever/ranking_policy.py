@@ -111,6 +111,17 @@ def _is_graph_expansion(chunk: SourceChunk) -> bool:
     return (chunk.source_tier or "").lower().startswith("graph_mode")
 
 
+def _is_vector_child_candidate(chunk: SourceChunk) -> bool:
+    source_tier = (chunk.source_tier or "").lower()
+    if "document_anchor" in source_tier or "summary" in source_tier:
+        return False
+    return candidate_kind(chunk) == "child" and (
+        "qdrant_child" in source_tier
+        or "vector" in source_tier
+        or source_tier in {"child", "tier_a"}
+    )
+
+
 def candidate_kind(chunk: SourceChunk) -> str:
     """Classify a candidate by retrieval lane."""
     source_tier = (chunk.source_tier or "").lower()
@@ -120,7 +131,9 @@ def candidate_kind(chunk: SourceChunk) -> str:
         return "fact"
     if "+lexical" in source_tier or "lexical" in retrievers or "qdrant_sparse" in retrievers:
         return "lexical"
-    if chunk.summary and (chunk.text == chunk.summary or chunk.chunk_id.endswith("_summary")):
+    if "summary" in source_tier or (
+        chunk.summary and (chunk.text == chunk.summary or chunk.chunk_id.endswith("_summary"))
+    ):
         return "summary"
     return "child"
 
@@ -447,7 +460,11 @@ def _candidate_retrievers(chunk: SourceChunk) -> set[str]:
         retrievers.add("neo4j_graph")
     if "summary" in source_tier or chunk.summary:
         retrievers.add("qdrant_summary")
-    if "vector" in source_tier or source_tier in {"child", "tier_a"}:
+    if (
+        "vector" in source_tier
+        or "qdrant_child" in source_tier
+        or source_tier in {"child", "tier_a"}
+    ):
         retrievers.add("qdrant_vector")
     return retrievers or {source_tier or "unknown"}
 
@@ -1077,15 +1094,28 @@ def select_with_diversity(
         selected_fps = [fingerprints[i] for i in selected_indices]
         doc_counts, parent_counts, predicate_counts = _selected_counts(selected_fps)
 
-        if not _passes_relevance_floor(
+        passes_relevance_floor = _passes_relevance_floor(
             idx=idx,
             candidate=candidate,
             fp=fp,
             relevance_by_idx=relevance_by_idx,
             policy=policy,
             top_score=top_score,
-        ):
-            return None
+        )
+        if not passes_relevance_floor:
+            raw_score = float(candidate.score or 0.0)
+            if 0.0 <= raw_score <= top_score <= 1.0 and top_score > 0.0:
+                relaxed_floor_ok = (raw_score / top_score) >= 0.25
+            else:
+                relaxed_floor_ok = relevance_by_idx.get(idx, 0.0) >= 0.25
+            can_relax_relevance_floor = (
+                relaxed
+                and tier != RetrievalTier.qdrant_only
+                and len(selected_indices) < min(final_top_k, _MAIN_MIN_KEEP)
+                and relaxed_floor_ok
+            )
+            if not can_relax_relevance_floor:
+                return None
 
         if not relaxed:
             if (
@@ -1210,6 +1240,90 @@ def select_with_diversity(
         if best_idx is None:
             break
         _take(best_idx, best_score, "mmr_relaxed" if best_relaxed else "mmr")
+
+    if tier != RetrievalTier.qdrant_only and not any(
+        _is_confident_document_anchor(ranked[idx]) for idx in selected_indices
+    ):
+        for idx, candidate in enumerate(ranked):
+            if idx in chosen_idx or not _is_confident_document_anchor(candidate):
+                continue
+            anchor_score = relevance_by_idx.get(idx, 0.0) + 0.18
+            if len(selected_indices) < final_top_k:
+                _take(idx, anchor_score, "document_anchor_reserve")
+            else:
+                replace_pos: int | None = None
+                replace_score = float("inf")
+                for pos, selected_idx in enumerate(selected_indices):
+                    if _is_confident_document_anchor(ranked[selected_idx]):
+                        continue
+                    score = selected_scores.get(
+                        selected_idx,
+                        relevance_by_idx.get(selected_idx, 0.0),
+                    )
+                    if score < replace_score:
+                        replace_score = score
+                        replace_pos = pos
+                if replace_pos is None:
+                    break
+                removed_idx = selected_indices[replace_pos]
+                chosen_idx.discard(removed_idx)
+                selected_indices[replace_pos] = idx
+                chosen_idx.add(idx)
+                selected_scores.pop(removed_idx, None)
+                selected_by.pop(removed_idx, None)
+                selected_scores[idx] = anchor_score
+                selected_by[idx] = "document_anchor_reserve"
+                covered_atoms.clear()
+                for selected_idx in selected_indices:
+                    covered_atoms.update(fingerprints[selected_idx]["atoms"])
+            break
+
+    if (
+        tier == RetrievalTier.qdrant_mongo
+        and len(selected_indices) < final_top_k
+        and not any(_is_vector_child_candidate(ranked[idx]) for idx in selected_indices)
+    ):
+        for idx, candidate in enumerate(ranked[:final_top_k]):
+            if idx in chosen_idx or not _is_vector_child_candidate(candidate):
+                continue
+            fp = fingerprints[idx]
+            selected_fps = [fingerprints[i] for i in selected_indices]
+            if any(
+                fp["parent"] and fp["parent"] == selected_fp["parent"]
+                for selected_fp in selected_fps
+            ):
+                continue
+            if any(
+                _jaccard(fp["tokens"], selected_fp["tokens"])
+                >= policy.near_duplicate_similarity
+                for selected_fp in selected_fps
+            ):
+                continue
+            reserve_score = relevance_by_idx.get(idx, 0.0) + 0.08
+            _take(idx, reserve_score, "vector_child_reserve")
+            break
+
+    if (
+        tier == RetrievalTier.qdrant_only
+        and len(selected_indices) < final_top_k
+        and not any(candidate_kind(ranked[idx]) == "summary" for idx in selected_indices)
+    ):
+        for idx, candidate in enumerate(ranked[:final_top_k]):
+            if idx in chosen_idx or candidate_kind(candidate) != "summary":
+                continue
+            raw_score = float(candidate.score or 0.0)
+            if not (top_score > 0.0 and (raw_score / top_score) >= 0.75):
+                continue
+            fp = fingerprints[idx]
+            selected_fps = [fingerprints[i] for i in selected_indices]
+            if any(
+                fp["parent"] and fp["parent"] == selected_fp["parent"]
+                for selected_fp in selected_fps
+            ):
+                continue
+            reserve_score = relevance_by_idx.get(idx, 0.0) + 0.06
+            _take(idx, reserve_score, "vector_summary_reserve")
+            break
 
     if tier == RetrievalTier.qdrant_mongo_graph and policy.graph_reserve > 0:
         graph_selected = sum(

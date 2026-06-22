@@ -149,6 +149,26 @@ class RerankerService:
         self._settings = get_settings()
         self._disabled_until = 0.0
         self._last_failure = ""
+        self._last_status: dict[str, object] = {
+            "status": "never_called",
+            "fallback": False,
+            "score_scale": getattr(self._settings, "RERANKER_SCORE_SCALE", "logit"),
+        }
+
+    def _record_status(self, status: str, **extra: object) -> None:
+        self._last_status = {
+            "status": status,
+            "fallback": bool(extra.pop("fallback", False)),
+            "score_scale": getattr(self._settings, "RERANKER_SCORE_SCALE", "logit"),
+            "bypass_code": bool(getattr(self._settings, "RERANKER_BYPASS_CODE", True)),
+            "disabled_until": round(float(self._disabled_until or 0.0), 3),
+            "last_failure": self._last_failure,
+            "updated_at": round(time.time(), 3),
+            **extra,
+        }
+
+    def diagnostics(self) -> dict[str, object]:
+        return dict(self._last_status)
 
     async def rerank(self, query: str, candidate_pool: List[SourceChunk]) -> List[SourceChunk]:
         """
@@ -161,6 +181,7 @@ class RerankerService:
         the other out of the top ranks.
         """
         if not candidate_pool:
+            self._record_status("skipped_empty_pool", candidate_count=0)
             return []
 
         bypass_code = bool(getattr(self._settings, "RERANKER_BYPASS_CODE", True))
@@ -179,6 +200,12 @@ class RerankerService:
             logger.info(
                 "Reranker bypass: all %d candidates are code — skipping cross-encoder",
                 len(code_pool),
+            )
+            self._record_status(
+                "bypassed_all_code",
+                candidate_count=len(candidate_pool),
+                code_count=len(code_pool),
+                prose_count=0,
             )
             return sorted(code_pool, key=lambda c: c.score, reverse=True)
 
@@ -217,12 +244,23 @@ class RerankerService:
             "Reranker bypass: cross-encoded %d prose, kept original scores on %d code (merged %d)",
             len(reranked_prose), len(code_pool), len(merged),
         )
+        previous = self.diagnostics()
+        self._record_status(
+            "used_with_code_bypass",
+            fallback=bool(previous.get("fallback")),
+            candidate_count=len(candidate_pool),
+            prose_count=len(reranked_prose),
+            code_count=len(code_pool),
+            inner_status=previous.get("status"),
+            inner_failures=previous.get("failures", 0),
+        )
         return merged
 
     async def _rerank_pool(self, query: str, pool: List[SourceChunk]) -> List[SourceChunk]:
         """Send a single pool through the reranker sidecar. Falls
         back to vector-score sort on HTTP failure."""
         if not pool:
+            self._record_status("skipped_empty_pool", candidate_count=0)
             return []
 
         now = time.monotonic()
@@ -232,6 +270,12 @@ class RerankerService:
                 "Reranker circuit open for %.1fs after %s — falling back to score sort",
                 remaining,
                 self._last_failure or "previous failure",
+            )
+            self._record_status(
+                "circuit_open",
+                fallback=True,
+                candidate_count=len(pool),
+                remaining_seconds=round(remaining, 2),
             )
             return sorted(pool, key=lambda x: x.score, reverse=True)
 
@@ -253,7 +297,9 @@ class RerankerService:
                 )
             self._last_failure = ""
             self._disabled_until = 0.0
+            status = "used"
             if failures:
+                status = "partial_failure"
                 logger.warning(
                     "Reranker recovered from %d failing sub-batch(es); "
                     "kept original scores for those candidates",
@@ -281,6 +327,15 @@ class RerankerService:
                         _RERANK_PARTIAL_FAILURE_BUDGET,
                         breaker_seconds,
                     )
+            self._record_status(
+                status,
+                fallback=False,
+                candidate_count=len(pool),
+                successes=successes,
+                failures=failures,
+                timeout_seconds=timeout,
+                url=url,
+            )
             return sorted(ranked, key=lambda c: c.score, reverse=True)
 
         except Exception as exc:
@@ -298,6 +353,15 @@ class RerankerService:
                 f" and opening circuit for {breaker_seconds:.0f}s"
                 if breaker_seconds > 0
                 else "",
+            )
+            self._record_status(
+                "fallback_score_sort",
+                fallback=True,
+                candidate_count=len(pool),
+                timeout_seconds=timeout,
+                url=url,
+                error=str(exc),
+                circuit_breaker_seconds=breaker_seconds,
             )
             return sorted(pool, key=lambda x: x.score, reverse=True)
 

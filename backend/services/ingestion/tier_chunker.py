@@ -482,7 +482,12 @@ def _coalesce_small_blocks(
     cur_path, cur_text, cur_kind, cur_lang, cur_meta = blocks[0]
     merges = 0
     for next_path, next_text, next_kind, next_lang, next_meta in blocks[1:]:
-        if cur_kind == ChunkKind.BODY and next_kind == ChunkKind.BODY:
+        if (
+            cur_kind == ChunkKind.BODY
+            and next_kind == ChunkKind.BODY
+            and not cur_meta
+            and not next_meta
+        ):
             cur_tok = _count_tokens(cur_text)
             if cur_tok < min_parent_tokens:
                 combined = cur_text + "\n\n" + next_text
@@ -510,6 +515,8 @@ def _sections_to_parent_blocks(parse_sections) -> list[_Block]:
     Returns list[(heading_path, text, chunk_kind, language, metadata)]:
       - section_heading starts a new BODY block (heading text becomes first line).
       - paragraph / list sections accumulate into the current BODY block.
+      - transcript_block sections flush BODY and emit timestamped BODY blocks
+        carrying provenance/time metadata.
       - table sections flush the BODY buffer and emit their own TABLE block.
       - code_block sections flush the BODY buffer and emit their own CODE block
         carrying the language tag. The chunker routes CODE blocks through
@@ -548,6 +555,18 @@ def _sections_to_parent_blocks(parse_sections) -> list[_Block]:
             flush_body(drop_heading_only=True)
             table_path = _clean_heading_path(list(current_path) if current_path else list(sec.heading_path or []))
             blocks.append((table_path, sec.text, ChunkKind.TABLE, None, getattr(sec, "metadata", None) or {}))
+        elif sec.element_type == "transcript_block":
+            flush_body(drop_heading_only=True)
+            transcript_path = _clean_heading_path(
+                list(current_path) if current_path else list(sec.heading_path or [])
+            )
+            blocks.append((
+                transcript_path,
+                sec.text,
+                ChunkKind.BODY,
+                None,
+                getattr(sec, "metadata", None) or {},
+            ))
         else:
             # Paragraph / list chunk → accumulate into BODY buffer.
             if current_path is None and sec.heading_path:

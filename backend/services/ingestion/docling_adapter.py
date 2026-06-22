@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from io import BytesIO
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -48,6 +49,9 @@ _MARKDOWN_MIMES = {"text/markdown", "text/x-markdown"}
 _MARKDOWN_EXTS = {".md", ".markdown", ".mdown", ".mkd"}
 _HTML_MIMES = {"text/html", "application/xhtml+xml"}
 _HTML_EXTS = {".html", ".htm", ".xhtml"}
+_DOCX_MIMES = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 _BINARY_DOC_EXTS = {
     ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".epub", ".odt",
     ".ods", ".odp", ".rtf", ".msg", ".eml",
@@ -94,11 +98,11 @@ _CODE_EXT_TO_LANGUAGE: dict[str, str] = {
     # ─── Web frameworks ─────────────────────────────────────────────────
     ".vue": "vue",
     ".svelte": "svelte",
-    # ─── Markup + styling (preserve full structure, skip prose extract) ─
-    # .html here routes through the code lane instead of Docling's HTML
-    # prose extractor — desirable for source repos; rename to .txt if you
-    # need prose extraction from an HTML doc.
-    ".html": "html",   ".htm": "html",
+    # ─── Styling ────────────────────────────────────────────────────────
+    # HTML uploads default to the local_html prose extractor below. That is
+    # the safer RAG default for web/document exports: strip navigation,
+    # scripts, style, and markup before chunking. Source-code HTML should be
+    # wrapped in a code fence inside markdown or renamed before ingest.
     ".css": "css",     ".scss": "css",
     # ─── XML family ─────────────────────────────────────────────────────
     # Apple property lists, Storyboards, Xibs, entitlements; Roblox place
@@ -214,6 +218,10 @@ def _looks_like_html(filename: str, mime: str) -> bool:
     return (mime or "").lower() in _HTML_MIMES or _extension(filename) in _HTML_EXTS
 
 
+def _looks_like_docx(filename: str, mime: str) -> bool:
+    return (mime or "").lower() in _DOCX_MIMES or _extension(filename) == ".docx"
+
+
 def _looks_like_code(filename: str) -> bool:
     basename = Path(filename or "").name.lower()
     return basename in _CODE_FILENAME_TO_LANGUAGE or _extension(filename) in _CODE_EXT_TO_LANGUAGE
@@ -228,6 +236,8 @@ def docling_sidecar_needed(filename: str, mime: str) -> bool:
     if _looks_like_markdown(filename, mime):
         return False
     if _looks_like_html(filename, mime):
+        return False
+    if _looks_like_docx(filename, mime):
         return False
     if _looks_like_plain_text(filename, mime):
         return False
@@ -244,6 +254,8 @@ def parser_strategy(filename: str, mime: str) -> str:
         return "local_markdown"
     if _looks_like_html(filename, mime):
         return "local_html"
+    if _looks_like_docx(filename, mime):
+        return "local_docx"
     if _looks_like_plain_text(filename, mime):
         return "local_text"
     return "docling_sidecar"
@@ -330,6 +342,13 @@ def _split_markdown_table_row(line: str) -> list[str]:
 _IMG_MD_RE = re.compile(r"!\[[^\]\n]*\]\([^)\n]*\)")  # drop images entirely (alt incl.)
 _INLINE_MD_LINK_RE = re.compile(r"\[([^\]\n]*)\]\((?:[^)\s]+(?:\s+\"[^\"]*\")?)\)")
 _BARE_URL_RE = re.compile(r"https?://\S+")
+_TRANSCRIPT_HEADER_RE = re.compile(
+    r"^\s*(Video|URL|Duration|Segments|Source|Date)\s*:\s*(.*?)\s*$",
+    re.IGNORECASE,
+)
+_TRANSCRIPT_SEGMENT_RE = re.compile(
+    r"^\s*\[(?P<time>(?:\d+:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?)\]\s*(?P<text>.+?)\s*$"
+)
 
 
 def _scrub_inline_links(text: str) -> str:
@@ -340,6 +359,151 @@ def _scrub_inline_links(text: str) -> str:
     t = _BARE_URL_RE.sub("", t)
     t = t.replace("¶", "")
     return re.sub(r"[ \t]{2,}", " ", t)
+
+
+def _parse_transcript_text_document(text: str, filename: str) -> DoclingParseResult | None:
+    """Parse timestamped transcript exports into bounded semantic blocks.
+
+    Expected shape is deterministic YouTube/transcript text:
+
+        Video: ...
+        URL: ...
+        Duration: ...
+        Segments: ...
+        Source: YouTube Transcript API
+        Date: ...
+
+        [0:00] speech text
+        [0:03] more speech text
+
+    Header fields become chunk metadata; timestamped speech becomes the only
+    substantive retrieval text. This prevents the first child chunk from being
+    mostly `URL`/`Duration`/`Segments` metadata while preserving time ranges
+    for source display and later citation jumps.
+    """
+    if not text or "[" not in text:
+        return None
+
+    headers: dict[str, str] = {}
+    segments: list[dict[str, str]] = []
+    seen_segment = False
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        match = _TRANSCRIPT_SEGMENT_RE.match(line)
+        if match:
+            seen_segment = True
+            spoken = re.sub(r"\s+", " ", match.group("text")).strip()
+            if spoken:
+                segments.append(
+                    {
+                        "time": match.group("time").replace(",", "."),
+                        "text": spoken,
+                    }
+                )
+            continue
+
+        header = _TRANSCRIPT_HEADER_RE.match(line)
+        if header and not seen_segment:
+            key = header.group(1).lower()
+            value = re.sub(r"\s+", " ", header.group(2)).strip()
+            if value:
+                headers[key] = value
+            continue
+
+        # Transcript continuation line. Some transcript tools wrap long
+        # captions without repeating a timestamp. Attach those words to the
+        # previous timed segment instead of creating an untimed junk paragraph.
+        if seen_segment and segments:
+            continuation = re.sub(r"\s+", " ", line).strip()
+            segments[-1]["text"] = f"{segments[-1]['text']} {continuation}".strip()
+
+    source_hint = f" {headers.get('source', '')} {headers.get('url', '')} {filename} ".lower()
+    looks_like_transcript = (
+        len(segments) >= 3
+        and (
+            "youtube transcript" in source_hint
+            or "youtu.be" in source_hint
+            or "youtube.com" in source_hint
+            or "segments" in headers
+            or "duration" in headers
+        )
+    )
+    if not looks_like_transcript:
+        return None
+
+    title = headers.get("video") or filename or "Transcript"
+    max_words_per_block = 120
+    grouped: list[tuple[int, int, list[dict[str, str]]]] = []
+    start = 0
+    buf: list[dict[str, str]] = []
+    word_count = 0
+    for idx, segment in enumerate(segments):
+        words = len(segment["text"].split())
+        if buf and word_count + words > max_words_per_block:
+            grouped.append((start, idx - 1, buf))
+            start = idx
+            buf = []
+            word_count = 0
+        buf.append(segment)
+        word_count += words
+    if buf:
+        grouped.append((start, start + len(buf) - 1, buf))
+
+    sections: list[Section] = [
+        Section(
+            heading_path=[title],
+            text=title,
+            element_type="section_heading",
+            level=1,
+        )
+    ]
+
+    for start_idx, end_idx, group in grouped:
+        time_start = group[0]["time"]
+        time_end = group[-1]["time"]
+        speech = " ".join(item["text"] for item in group)
+        block_text = (
+            f"Video: {title}\n"
+            f"Transcript range: {time_start}-{time_end}\n\n"
+            f"{speech}"
+        )
+        sections.append(
+            Section(
+                heading_path=[title],
+                text=block_text,
+                element_type="transcript_block",
+                metadata={
+                    "source_format": "youtube_transcript",
+                    "video_title": title,
+                    "url": headers.get("url", ""),
+                    "duration": headers.get("duration", ""),
+                    "segments_declared": headers.get("segments", ""),
+                    "source": headers.get("source", ""),
+                    "date": headers.get("date", ""),
+                    "time_start": time_start,
+                    "time_end": time_end,
+                    "segment_start": start_idx,
+                    "segment_end": end_idx,
+                },
+            )
+        )
+
+    return DoclingParseResult(
+        text="\n\n".join(section.text for section in sections),
+        markdown="\n\n".join(section.text for section in sections),
+        sections=sections,
+        pages=None,
+        has_structure=True,
+        source_tier=SourceTier.tier_b,
+        h1_count=1,
+        h2_count=0,
+        source_format="youtube_transcript",
+        filename=filename,
+    )
 
 
 def _clean_heading_title(title: str) -> str:
@@ -626,8 +790,18 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
             filename=filename,
         )
 
+    if _looks_like_docx(filename, mime):
+        docx_result = _parse_local_docx_document(raw_bytes, filename)
+        if docx_result is not None:
+            return docx_result
+
     if not _looks_like_plain_text(filename, mime):
         return None
+
+    raw_text = raw_bytes.decode("utf-8", errors="replace")
+    transcript_result = _parse_transcript_text_document(raw_text, filename)
+    if transcript_result is not None:
+        return transcript_result
 
     aug_bytes, aug_filename, aug_mime, augmented, audit = _maybe_augment_plaintext(
         raw_bytes, filename, mime
@@ -653,6 +827,118 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
         source_format="local_text",
         augmented_with_synthetic_headers=augmented,
         injected_headers_audit=audit,
+        filename=filename,
+    )
+
+
+def _parse_local_docx_document(
+    raw_bytes: bytes,
+    filename: str,
+) -> DoclingParseResult | None:
+    """Parse DOCX headings/paragraphs locally when python-docx is installed."""
+    try:
+        from docx import Document
+    except Exception:
+        return None
+
+    try:
+        doc = Document(BytesIO(raw_bytes))
+    except Exception:
+        return None
+
+    sections: list[Section] = []
+    markdown_lines: list[str] = []
+    text_blocks: list[str] = []
+    heading_stack: list[str] = []
+    h1_count = 0
+    h2_count = 0
+
+    for paragraph in doc.paragraphs:
+        text = (paragraph.text or "").strip()
+        if not text:
+            continue
+        style_name = str(getattr(paragraph.style, "name", "") or "")
+        heading_match = re.match(r"Heading\s+([1-6])$", style_name, re.IGNORECASE)
+        if heading_match:
+            level = int(heading_match.group(1))
+            if level == 1:
+                h1_count += 1
+            elif level == 2:
+                h2_count += 1
+            heading_stack = heading_stack[: level - 1]
+            while len(heading_stack) < level - 1:
+                heading_stack.append("")
+            heading_stack.append(text)
+            path = [part for part in heading_stack if part]
+            markdown_lines.append(f"{'#' * level} {text}")
+            sections.append(
+                Section(
+                    heading_path=list(path),
+                    text=text,
+                    element_type="section_heading",
+                    level=level,
+                )
+            )
+            continue
+
+        path = [part for part in heading_stack if part]
+        markdown_lines.append(text)
+        text_blocks.append(text)
+        sections.append(
+            Section(
+                heading_path=list(path),
+                text=text,
+                element_type="paragraph",
+                level=None,
+            )
+        )
+
+    for table_index, table in enumerate(doc.tables, start=1):
+        rows: list[list[str]] = []
+        for row in table.rows:
+            cells = [re.sub(r"\s+", " ", (cell.text or "").strip()) for cell in row.cells]
+            if any(cells):
+                rows.append(cells)
+        if not rows:
+            continue
+        width = max(len(row) for row in rows)
+        padded = [row + [""] * (width - len(row)) for row in rows]
+        header = padded[0]
+        body = padded[1:]
+        markdown_lines.append("| " + " | ".join(header) + " |")
+        markdown_lines.append("| " + " | ".join(["---"] * width) + " |")
+        for row in body:
+            markdown_lines.append("| " + " | ".join(row) + " |")
+        text_blocks.extend(" | ".join(row) for row in padded)
+        sections.append(
+            Section(
+                heading_path=[part for part in heading_stack if part],
+                text="\n".join(" | ".join(row) for row in padded),
+                element_type="table",
+                level=None,
+                metadata={"table_index": table_index, "row_count": len(rows)},
+            )
+        )
+
+    if not sections:
+        return None
+
+    markdown = "\n\n".join(line for line in markdown_lines if line.strip())
+    text = "\n\n".join(text_blocks) or markdown
+    has_structure = (h1_count + h2_count) > 0 or any(
+        section.element_type == "table" for section in sections
+    )
+    return DoclingParseResult(
+        text=text,
+        markdown=markdown,
+        sections=sections,
+        pages=None,
+        has_structure=has_structure,
+        source_tier=SourceTier.tier_a if has_structure else SourceTier.tier_c,
+        h1_count=h1_count,
+        h2_count=h2_count,
+        num_pages=1,
+        source_format="local_docx",
         filename=filename,
     )
 

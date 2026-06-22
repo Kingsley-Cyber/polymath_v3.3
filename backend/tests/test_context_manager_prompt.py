@@ -32,6 +32,54 @@ def test_augmented_prompt_hides_internal_corpus_names():
     assert "<rag_answer_policy>" in prompt
     assert "answer from that evidence first" in prompt
     assert "Do not replace source-backed evidence with a generic" in prompt
+    assert "<answer_render_policy>" in prompt
+    assert "compact GFM tables" in prompt
+    assert "fenced `text` blocks for ASCII" in prompt
+    assert "Query-specific display requirement:" in prompt
+    assert "If the answer has a flow, relationship, or architecture" in prompt
+
+
+def test_augmented_prompt_json_render_hint_for_entity_extraction_queries():
+    source = SourceChunk(
+        chunk_id="chunk-entity",
+        parent_id="parent-entity",
+        doc_id="doc-entity",
+        corpus_id="corpus-1",
+        text="Bob moved 50 people through the intake process.",
+        score=0.9,
+        source_tier="chunk",
+        doc_name="entity-notes.md",
+    )
+
+    prompt = context_manager.build_augmented_prompt(
+        "Extract entities as JSON with text, type, start, and end fields.",
+        [source],
+    )
+
+    assert "Use a fenced `json` block" in prompt
+    assert "`entities`" in prompt
+    assert "`text`, `type`, `start`, and `end`" in prompt
+
+
+def test_augmented_prompt_honors_requested_table_and_list_shapes():
+    source = SourceChunk(
+        chunk_id="chunk-display",
+        parent_id="parent-display",
+        doc_id="doc-display",
+        corpus_id="corpus-1",
+        text="The retrieval stack has fast, hybrid, and graph routes.",
+        score=0.9,
+        source_tier="chunk",
+        doc_name="retrieval-notes.md",
+    )
+
+    prompt = context_manager.build_augmented_prompt(
+        "Use a grid table and numbered steps to explain the retrieval routes.",
+        [source],
+    )
+
+    assert "Use a compact grid-style GFM Markdown table" in prompt
+    assert "Use a numbered list" in prompt
 
 
 def test_augmented_prompt_marks_web_content_as_untrusted_evidence():

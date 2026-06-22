@@ -69,6 +69,8 @@ def test_llm_service_builds_native_ollama_chat_body():
         tools=None,
     )
 
+    keep_alive = native.pop("keep_alive", None)
+    assert keep_alive
     assert native == {
         "model": "deepseek-v4-flash:cloud",
         "messages": [{"role": "user", "content": "hi"}],
