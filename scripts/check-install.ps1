@@ -75,6 +75,7 @@ Write-Host "Repo: $repoRoot"
 
 if (-not $SkipRuntimeContracts) {
     $contractScript = Join-Path $repoRoot "scripts\verify_runtime_contracts.py"
+    $secretScanScript = Join-Path $repoRoot "scripts\scan_tracked_secrets.py"
     $python = Get-Command python3 -ErrorAction SilentlyContinue
     if (-not $python) {
         $python = Get-Command python -ErrorAction SilentlyContinue
@@ -94,8 +95,21 @@ if (-not $SkipRuntimeContracts) {
         } finally {
             Pop-Location
         }
+        Push-Location $repoRoot
+        try {
+            & $python.Source $secretScanScript --quiet
+            if ($LASTEXITCODE -eq 0) {
+                Add-Ok "No tracked API keys or secrets detected"
+            } else {
+                Add-Failure "Tracked secret scan failed"
+            }
+        } catch {
+            Add-Failure "Tracked secret scan failed"
+        } finally {
+            Pop-Location
+        }
     } else {
-        Add-Warning "Python not found; skipping runtime contract check"
+        Add-Warning "Python not found; skipping runtime contract and tracked secret checks"
     }
 }
 

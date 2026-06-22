@@ -36,6 +36,9 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
+      - name: Scan tracked files for secrets
+        run: python scripts/scan_tracked_secrets.py
+
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
 

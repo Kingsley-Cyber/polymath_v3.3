@@ -93,11 +93,17 @@ echo "Repo: $repo_root"
 
 if [[ "$skip_runtime_contracts" != "1" ]]; then
   runtime_contract_script="$repo_root/scripts/verify_runtime_contracts.py"
+  secret_scan_script="$repo_root/scripts/scan_tracked_secrets.py"
   if command -v python3 >/dev/null 2>&1; then
     if (cd "$repo_root" && python3 "$runtime_contract_script"); then
       ok "Runtime setup/worker/trigger contracts are intact"
     else
       fail "Runtime setup/worker/trigger contract check failed"
+    fi
+    if (cd "$repo_root" && python3 "$secret_scan_script" --quiet); then
+      ok "No tracked API keys or secrets detected"
+    else
+      fail "Tracked secret scan failed"
     fi
   elif command -v python >/dev/null 2>&1; then
     if (cd "$repo_root" && python "$runtime_contract_script"); then
@@ -105,8 +111,13 @@ if [[ "$skip_runtime_contracts" != "1" ]]; then
     else
       fail "Runtime setup/worker/trigger contract check failed"
     fi
+    if (cd "$repo_root" && python "$secret_scan_script" --quiet); then
+      ok "No tracked API keys or secrets detected"
+    else
+      fail "Tracked secret scan failed"
+    fi
   else
-    warn "Python not found; skipping runtime contract check"
+    warn "Python not found; skipping runtime contract and tracked secret checks"
   fi
 fi
 
