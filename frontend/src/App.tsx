@@ -13,8 +13,9 @@ import { useSettingsStore } from "./stores/settingsStore";
 import { useQueryModelPoolStore } from "./stores/queryModelPoolStore";
 import { useChatStore } from "./stores/chatStore";
 import { useAuthStore } from "./stores/authStore";
+import { UI_PROTOCOLS } from "./lib/ui-protocols";
 import * as api from "./lib/api";
-import type { ChatMessage, ChatRequest, Collection, CorpusResponse } from "./types";
+import type { ChatMessage, ChatRequest, Collection, CorpusResponse, Theme } from "./types";
 
 function summarizeToolResultDetail(name: string, result: string): string | undefined {
   try {
@@ -99,7 +100,11 @@ function summarizeToolStartDetail(
 }
 
 function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window !== "undefined"
+      ? window.matchMedia("(min-width: 1024px)").matches
+      : false,
+  );
   const [isGraphViewOpen, setIsGraphViewOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -121,7 +126,7 @@ function App() {
     setIsGraphViewOpen(false);
   }, []);
 
-  const { setSelectedModel, setModels, maxTokens, theme, selectedCorpusIds } =
+  const { setSelectedModel, setModels, maxTokens, theme, setTheme, selectedCorpusIds } =
     useSettingsStore();
 
   // Auth state — route guard depends on isAuthenticated
@@ -686,27 +691,31 @@ function App() {
   }
 
   return (
-    <div className="flex h-dvh bg-bg-base text-text-primary overflow-hidden selection:bg-accent-main/30">
+    <div className="flex h-dvh bg-[var(--bg-base)] text-[var(--text-primary)] overflow-hidden selection:bg-accent-main/30">
       {/* 1. LEFT PANE: Directory / Explorer */}
       <Sidebar
         isOpen={sidebarOpen}
-        onToggle={() => setSidebarOpen(!sidebarOpen)}
+        onToggle={() => setSidebarOpen((open) => !open)}
       />
 
       {/* 2. CENTER PANE: Active Workspace (Graph/Chat) */}
-      <main className="flex-1 flex flex-col min-w-0 border-r border-border-minimal relative bg-bg-surface">
+      <main className="flex-1 flex flex-col min-w-0 border-r border-border-minimal relative bg-[var(--bg-surface)]">
         {/* Header - Terminal Status Bar + session controls */}
-        <header className="min-h-16 md:h-24 border-b border-border-minimal flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 sm:px-6 py-2 md:py-0 bg-bg-base z-[80] shrink-0">
+        <header className="pm-chat-header min-h-16 md:h-24 border-b border-border-minimal flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 sm:px-6 py-2 md:py-0 z-30 shrink-0">
           <div className="flex w-full sm:w-auto items-center justify-between gap-3">
             <button
-              onClick={() => setSidebarOpen(true)}
-              className="lg:hidden flex h-9 w-9 items-center justify-center text-content-secondary hover:text-accent-main transition-none"
-              aria-label="Open navigation"
+              type="button"
+              onClick={() => setSidebarOpen((open) => !open)}
+              className="pm-sidebar-toggle flex h-9 w-9 items-center justify-center rounded-md border border-border-minimal text-content-secondary hover:border-accent-main/60 hover:text-accent-main transition-none"
+              aria-controls="chat-sidebar"
+              aria-expanded={sidebarOpen}
+              aria-label={sidebarOpen ? "Collapse navigation" : "Open navigation"}
+              title={sidebarOpen ? "Collapse navigation" : "Open navigation"}
             >
               <Menu className="w-4 h-4" />
             </button>
             <div className="hidden md:flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-[#1c4e80] flex items-center justify-center border border-[#2a6baf] shrink-0">
+              <div className="pm-brand-mark w-8 h-8 rounded-full flex items-center justify-center border shrink-0">
                 <Share2 className="w-4 h-4 text-white" />
               </div>
               <div>
@@ -721,10 +730,26 @@ function App() {
           </div>
 
           <div className="flex w-full min-w-0 items-center justify-end gap-2 pb-1 sm:w-auto sm:pb-0">
+            <label className="pm-protocol-switch hidden sm:flex h-9 shrink-0 items-center gap-2 rounded-md border border-border-minimal px-2 text-[10px] font-mono uppercase tracking-[0.16em] text-content-tertiary">
+              <span className="hidden lg:inline">Scheme</span>
+              <select
+                value={theme}
+                onChange={(event) => setTheme(event.target.value as Theme)}
+                className="min-w-0 bg-transparent text-[11px] font-bold uppercase tracking-[0.08em] text-content-secondary outline-none"
+                aria-label="UI Protocol color scheme"
+                title="UI Protocol color scheme"
+              >
+                {UI_PROTOCOLS.map((protocol, index) => (
+                  <option key={protocol.id} value={protocol.id}>
+                    {index + 1}. {protocol.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <ChatContextMenu collections={collections} />
             <button
               onClick={() => setIsGraphViewOpen(true)}
-              className="pm-soft-control flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border-minimal bg-bg-surface/95 text-content-secondary hover:text-accent-main"
+              className="pm-soft-control flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border-minimal bg-[var(--bg-surface)] text-content-secondary hover:text-accent-main"
               title="Global Graph"
               aria-label="Open global graph"
             >
@@ -739,7 +764,7 @@ function App() {
         </div>
 
         {/* Input Area - Command Line Interface */}
-        <div className="shrink-0 p-2 sm:p-4 bg-bg-base border-t border-border-minimal z-50">
+        <div className="shrink-0 p-2 sm:p-4 bg-[var(--bg-base)] border-t border-border-minimal z-50">
           <div className="max-w-7xl mx-auto">
             <ChatInput
               onSend={handleSend}

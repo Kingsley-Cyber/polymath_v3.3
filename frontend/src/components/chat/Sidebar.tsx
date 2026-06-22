@@ -19,23 +19,9 @@ import {
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import * as api from "../../lib/api";
+import { UI_PROTOCOLS } from "../../lib/ui-protocols";
 import { CorpusManager } from "../corpus/CorpusManager";
 import type { Theme } from "../../types";
-
-/**
- * UI Protocol theme picker entries — single source of truth for the sidebar.
- * `accent` controls which accent token highlights the active button (so
- * Gruvbox/Solar pop in their secondary color while the dark themes use main).
- */
-const THEMES: { id: Theme; label: string; accent: "main" | "secondary" }[] = [
-  { id: "ayu-mirage",  label: "Obsidian Graph",  accent: "main" },
-  { id: "gruvbox",     label: "Polymath Onto.",  accent: "secondary" },
-  { id: "serendipity", label: "Deterministic",   accent: "main" },
-  { id: "nord",        label: "Arctic Ice",      accent: "main" },
-  { id: "dracula",     label: "Neon Spectral",   accent: "main" },
-  { id: "solar",       label: "Solar Focus",     accent: "secondary" },
-  { id: "claude",      label: "???",             accent: "main" },
-];
 
 interface SidebarProps {
   isOpen: boolean;
@@ -64,6 +50,8 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   } = useChatStore();
 
   const { theme, setTheme } = useSettingsStore();
+  const activeProtocol =
+    UI_PROTOCOLS.find((protocol) => protocol.id === theme) ?? UI_PROTOCOLS[0];
 
   useEffect(() => {
     loadConversations();
@@ -219,31 +207,27 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   return (
     <>
       {isOpen && (
-        // Mobile backdrop. /80 alpha + backdrop-blur so the page behind
-        // dims visibly when the sidebar is open — without the dim, the
-        // sidebar reads as semi-transparent because the page content
-        // bleeds through at the edge of the viewport on some themes.
+        // Mobile backdrop sits above chat chrome but below the sidebar.
+        // Keeping it mostly opaque prevents the header/composer from visually
+        // bleeding through while the drawer is open.
         <div
-          className="fixed inset-0 bg-bg-base/80 backdrop-blur-sm z-40 lg:hidden"
+          className="pm-chat-backdrop fixed inset-0 z-[80] lg:hidden"
           onClick={onToggle}
         />
       )}
       <aside
-        // bg-bg-base is solid in every theme (#0f0f11 / #141416 / etc.).
-        // The shadow-xl + active-state ring make the panel visually
-        // distinct from the canvas behind it when the sidebar is open,
-        // so it reads as opaque even on themes where bg-base is close
-        // to the page-content color.
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-[min(20rem,calc(100vw-1rem))] sm:w-72 lg:w-64 lg:max-w-64 bg-bg-base border-r border-border-minimal flex flex-col transition-transform duration-150 select-none shadow-xl lg:shadow-none will-change-transform touch-manipulation ${
+        id="chat-sidebar"
+        aria-hidden={!isOpen}
+        className={`pm-chat-sidebar fixed lg:static inset-y-0 left-0 z-[90] flex flex-col border-r border-border-minimal transition-all duration-150 select-none shadow-xl lg:shadow-none will-change-transform touch-manipulation isolate overflow-hidden ${
           isOpen
-            ? "translate-x-0 ring-1 ring-accent-main/10 lg:ring-0"
-            : "-translate-x-full lg:translate-x-0"
+            ? "w-[min(20rem,calc(100vw-1rem))] sm:w-72 lg:w-64 lg:max-w-64 translate-x-0 pointer-events-auto ring-1 ring-accent-main/10 lg:ring-0"
+            : "w-[min(20rem,calc(100vw-1rem))] sm:w-72 -translate-x-full pointer-events-none lg:w-0 lg:max-w-0 lg:translate-x-0 lg:border-r-0 lg:pointer-events-none"
         }`}
       >
         {/* Header / Vault Title */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border-minimal shrink-0 bg-bg-surface">
+        <div className="pm-chat-sidebar-header flex items-center justify-between px-4 py-3 border-b border-border-minimal shrink-0">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-full bg-[#1c4e80] flex items-center justify-center border border-[#2a6baf] shrink-0">
+            <div className="pm-brand-mark w-6 h-6 rounded-full flex items-center justify-center border shrink-0">
               <Share2 className="w-3 h-3 text-white" />
             </div>
             <div className="flex flex-col leading-none">
@@ -270,8 +254,11 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
               <Settings className="w-4 h-4" />
             </button>
             <button
+              type="button"
               onClick={onToggle}
-              className="lg:hidden p-1 text-content-tertiary hover:text-accent-main transition-none"
+              className="p-1 text-content-tertiary hover:text-accent-main transition-none"
+              aria-label="Collapse navigation"
+              title="Collapse navigation"
             >
               <X className="w-4 h-4" />
             </button>
@@ -279,7 +266,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
         </div>
 
         {/* Action: New Node */}
-        <div className="p-2 border-b border-border-minimal shrink-0">
+        <div className="pm-chat-sidebar-actions p-2 border-b border-border-minimal shrink-0">
           <button
             type="button"
             onClick={handleNewChat}
@@ -289,7 +276,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
             className="group w-full min-h-11 rounded-[6px] border border-accent-main/40 bg-accent-main/10 px-2.5 py-2 text-left text-accent-main shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)] transition-colors duration-150 hover:border-accent-main hover:bg-accent-main hover:text-bg-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-main/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-base active:scale-[0.99] disabled:cursor-wait disabled:opacity-70 disabled:hover:bg-accent-main/10 disabled:hover:text-accent-main touch-manipulation"
           >
             <span className="pointer-events-none flex items-center gap-2">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] border border-current/35 bg-bg-base/45 transition-colors group-hover:bg-bg-base/15">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] border border-current/35 bg-[color-mix(in_srgb,var(--bg-base)_45%,transparent)] transition-colors group-hover:bg-[color-mix(in_srgb,var(--bg-base)_15%,transparent)]">
                 <Plus className="h-4 w-4" />
               </span>
               <span className="flex min-w-0 flex-col">
@@ -305,19 +292,19 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
         </div>
 
         {/* Search / Filter */}
-        <div className="px-2 py-2 border-b border-border-minimal shrink-0 bg-bg-base relative">
+        <div className="pm-chat-sidebar-search px-2 py-2 border-b border-border-minimal shrink-0 relative">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-3 h-3 text-content-tertiary" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder='grep -i "query"'
-            className="w-full pl-7 pr-2 py-1 bg-bg-surface border border-border-minimal text-[11px] text-content-primary placeholder:text-content-tertiary focus:outline-none focus:border-accent-main transition-none rounded-none font-mono"
+            className="w-full pl-7 pr-2 py-1 bg-[var(--bg-surface)] border border-border-minimal text-[11px] text-content-primary placeholder:text-content-tertiary focus:outline-none focus:border-accent-main transition-none rounded-none font-mono"
           />
         </div>
 
         {/* File Explorer Tree */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar py-2">
+        <div className="pm-chat-sidebar-body flex-1 overflow-y-auto custom-scrollbar py-2">
           {/* Root Folder structure simulation */}
           <div className="px-2">
             <div className="flex items-center justify-between gap-1">
@@ -350,7 +337,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
 
             {/* Mass-delete toolbar */}
             {isSelectMode && (
-              <div className="flex items-center justify-between gap-1 mt-1 px-1 py-1 border border-border-minimal bg-bg-surface">
+              <div className="flex items-center justify-between gap-1 mt-1 px-1 py-1 border border-border-minimal bg-[var(--bg-surface)]">
                 <div className="text-[10px] font-bold tracking-widest text-content-secondary uppercase">
                   {selectedIds.size}/{filteredConversations.length} selected
                 </div>
@@ -409,7 +396,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
                             ? "bg-accent-main border-accent-secondary text-bg-base font-bold"
                             : isActive
                               ? "bg-bg-raised border-accent-main text-content-primary"
-                              : "border-transparent text-content-secondary hover:bg-bg-surface hover:text-content-primary"
+                              : "border-transparent text-content-secondary hover:bg-[var(--bg-surface)] hover:text-content-primary"
                         }`}
                       >
                         <div className="flex items-center gap-1.5 w-full">
@@ -460,29 +447,29 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
         </div>
 
         {/* Footer / Theme Protocol Selector */}
-        <div className="p-3 border-t border-border-minimal mt-auto bg-bg-surface shrink-0">
+        <div className="pm-chat-sidebar-footer p-3 border-t border-border-minimal mt-auto shrink-0">
           <div className="flex items-center gap-2 mb-2 text-[10px] font-bold text-content-secondary uppercase tracking-widest">
             <Settings2 className="w-3.5 h-3.5" />
             UI Protocol
           </div>
-          <div className="flex flex-col gap-1 max-h-[160px] overflow-y-auto custom-scrollbar pr-1">
-            {THEMES.map((t, i) => {
-              const active = theme === t.id;
-              const accentClasses = active
-                ? t.accent === "secondary"
-                  ? "border-accent-secondary text-accent-secondary bg-accent-secondary/10"
-                  : "border-accent-main text-accent-main bg-accent-main/10"
-                : "border-border-minimal text-content-tertiary hover:border-content-secondary";
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => setTheme(t.id)}
-                  className={`text-left px-2 py-1 text-[10px] font-bold tracking-widest border transition-none uppercase ${accentClasses}`}
-                >
-                  [{i + 1}] {t.label}
-                </button>
-              );
-            })}
+          <label className="pm-protocol-switch flex h-9 items-center justify-between gap-2 rounded-md border border-border-minimal px-2 text-[10px] font-mono uppercase tracking-[0.14em] text-content-tertiary">
+            <span className="text-content-tertiary">Scheme</span>
+            <select
+              value={theme}
+              onChange={(event) => setTheme(event.target.value as Theme)}
+              className="min-w-0 flex-1 bg-transparent text-right text-[10px] font-bold uppercase tracking-[0.08em] text-content-secondary outline-none"
+              aria-label="UI Protocol color scheme"
+              title="UI Protocol color scheme"
+            >
+              {UI_PROTOCOLS.map((protocol, index) => (
+                <option key={protocol.id} value={protocol.id}>
+                  {index + 1}. {protocol.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="mt-2 text-[9px] font-mono uppercase tracking-[0.14em] text-content-tertiary">
+            Active: {activeProtocol.label}
           </div>
         </div>
       </aside>

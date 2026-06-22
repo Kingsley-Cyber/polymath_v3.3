@@ -74,7 +74,7 @@
 @layer base {
     /* 1. AYU MIRAGE -> Agent-zero document chrome */
     :root,
-    .theme-ayu-mirage {
+    :root.theme-ayu-mirage {
         --bg-base: var(--color-background);
         --bg-surface: var(--color-chat-background);
         --bg-raised: var(--color-panel);
@@ -90,7 +90,7 @@
     }
 
     /* 2. GRUVBOX -> Reinterpreted as TrustGraph Ontology */
-    .theme-gruvbox {
+    :root.theme-gruvbox {
         --bg-base: #111214;
         --bg-surface: #16181a;
         --bg-raised: #1e2023;
@@ -106,7 +106,7 @@
     }
 
     /* 3. SERENDIPITY -> Reinterpreted as Deterministic System Settings */
-    .theme-serendipity {
+    :root.theme-serendipity {
         --bg-base: #000000;
         --bg-surface: #0a0a0a;
         --bg-raised: #141414;
@@ -122,7 +122,7 @@
     }
 
     /* 4. NORD -> Arctic Ice Graph */
-    .theme-nord {
+    :root.theme-nord {
         --bg-base: #2e3440;
         --bg-surface: #3b4252;
         --bg-raised: #434c5e;
@@ -138,7 +138,7 @@
     }
 
     /* 5. DRACULA -> Neon Spectral */
-    .theme-dracula {
+    :root.theme-dracula {
         --bg-base: #282a36;
         --bg-surface: #353746;
         --bg-raised: #44475a;
@@ -154,7 +154,7 @@
     }
 
     /* 6. SOLAR -> High-Contrast Focus */
-    .theme-solar {
+    :root.theme-solar {
         --bg-base: #002b36;
         --bg-surface: #073642;
         --bg-raised: #0e4652;
@@ -170,7 +170,7 @@
     }
 
     /* 7. CLAUDE -> Warm cream paper, espresso ink, Claude orange (mystery slot) */
-    .theme-claude {
+    :root.theme-claude {
         --bg-base: #f5f1ea;
         --bg-surface: #ebe6dd;
         --bg-raised: #e1dccf;
@@ -187,8 +187,8 @@
 
     body {
         @apply antialiased transition-colors duration-0;
-        background-color: var(--color-background);
-        color: var(--color-text);
+        background-color: var(--bg-base);
+        color: var(--text-primary);
         font-family: var(--font-family-prose);
         letter-spacing: 0;
     }
@@ -211,7 +211,7 @@
     .chat-history,
     [class*="chat-container"],
     [class*="message-list"] {
-        background-color: var(--color-chat-background);
+        background-color: var(--bg-surface);
         max-width: 920px;
         margin: 0 auto;
         padding: 0 var(--spacing-lg);
@@ -1797,6 +1797,163 @@
 
 #root .pm-tool-decision {
   max-height: min(24vh, 11rem);
+}
+
+/* Unlayered protocol token guard.
+   The default :root token block is unlayered, so layered theme rules cannot
+   beat it reliably. Keep these selectors unlayered and root-qualified so the
+   active UI protocol actually repaints the chat shell. */
+:root.theme-ayu-mirage {
+  --bg-base: var(--color-background);
+  --bg-surface: var(--color-chat-background);
+  --bg-raised: var(--color-panel);
+  --text-primary: var(--color-text);
+  --text-secondary: var(--color-message-text);
+  --text-tertiary: var(--color-text-muted);
+  --accent-primary: var(--color-primary);
+  --accent-secondary: var(--color-highlight);
+  --border-subtle: var(--color-border);
+}
+
+:root.theme-gruvbox {
+  --bg-base: #111214;
+  --bg-surface: #16181a;
+  --bg-raised: #1e2023;
+  --text-primary: #e2cea8;
+  --text-secondary: #c4b08e;
+  --text-tertiary: #8d7e6a;
+  --accent-primary: #a9b665;
+  --accent-secondary: #e78a4e;
+  --border-subtle: #353740;
+}
+
+:root.theme-serendipity {
+  --bg-base: #000000;
+  --bg-surface: #0a0a0a;
+  --bg-raised: #141414;
+  --text-primary: #ffffff;
+  --text-secondary: #c0c0c0;
+  --text-tertiary: #808080;
+  --accent-primary: #ff3333;
+  --accent-secondary: #00ffcc;
+  --border-subtle: #2a2a2a;
+}
+
+:root.theme-nord {
+  --bg-base: #2e3440;
+  --bg-surface: #3b4252;
+  --bg-raised: #434c5e;
+  --text-primary: #eceff4;
+  --text-secondary: #d8dee9;
+  --text-tertiary: #a1adbf;
+  --accent-primary: #88c0d0;
+  --accent-secondary: #81a1c1;
+  --border-subtle: #4c566a;
+}
+
+:root.theme-dracula {
+  --bg-base: #282a36;
+  --bg-surface: #353746;
+  --bg-raised: #44475a;
+  --text-primary: #f8f8f2;
+  --text-secondary: #e0e0d8;
+  --text-tertiary: #a0a090;
+  --accent-primary: #ff79c6;
+  --accent-secondary: #50fa7b;
+  --border-subtle: #6272a4;
+}
+
+:root.theme-solar {
+  --bg-base: #002b36;
+  --bg-surface: #073642;
+  --bg-raised: #0e4652;
+  --text-primary: #fdf6e3;
+  --text-secondary: #eee8d5;
+  --text-tertiary: #93a1a1;
+  --accent-primary: #b58900;
+  --accent-secondary: #268bd2;
+  --border-subtle: #2c5964;
+}
+
+:root.theme-claude {
+  --bg-base: #f5f1ea;
+  --bg-surface: #ebe6dd;
+  --bg-raised: #e1dccf;
+  --text-primary: #2d1a0e;
+  --text-secondary: #4a342a;
+  --text-tertiary: #7a6a5a;
+  --accent-primary: #cc7a3b;
+  --accent-secondary: #8b5a2b;
+  --border-subtle: #d0c8b8;
+}
+
+#root .pm-chat-header,
+#root .pm-chat-sidebar,
+#root .pm-chat-sidebar-actions,
+#root .pm-chat-sidebar-search,
+#root .pm-chat-sidebar-body {
+  background: var(--bg-base) !important;
+  background-color: var(--bg-base) !important;
+}
+
+#root .pm-chat-sidebar {
+  isolation: isolate;
+  contain: paint;
+}
+
+#root .pm-chat-sidebar-header,
+#root .pm-chat-sidebar-footer {
+  background: var(--bg-surface) !important;
+  background-color: var(--bg-surface) !important;
+}
+
+#root .pm-chat-backdrop {
+  background: rgba(0, 0, 0, 0.46) !important;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+@supports (color: color-mix(in srgb, red, red)) {
+  #root .pm-chat-backdrop {
+    background: color-mix(in srgb, var(--bg-base) 48%, transparent) !important;
+  }
+}
+
+#root .pm-sidebar-toggle {
+  background: color-mix(in srgb, var(--bg-surface) 92%, #000 8%) !important;
+}
+
+#root .pm-brand-mark {
+  background: color-mix(in srgb, var(--accent-primary) 48%, var(--bg-raised)) !important;
+  border-color: color-mix(in srgb, var(--accent-primary) 70%, var(--border-subtle)) !important;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--accent-primary) 16%, transparent);
+}
+
+#root .pm-protocol-switch {
+  background: color-mix(in srgb, var(--bg-surface) 90%, #000 10%) !important;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background-color 140ms ease !important;
+}
+
+#root .pm-protocol-switch:hover,
+#root .pm-protocol-switch:focus-within {
+  border-color: color-mix(in srgb, var(--accent-primary) 58%, var(--color-border)) !important;
+  color: var(--accent-primary);
+}
+
+#root .pm-protocol-switch select {
+  color: var(--text-secondary);
+}
+
+#root .pm-protocol-switch select:focus {
+  color: var(--text-primary);
+}
+
+#root .pm-protocol-switch option {
+  background: var(--bg-base);
+  color: var(--text-primary);
 }
 
 #root .pm-chat-composer {
