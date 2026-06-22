@@ -9,7 +9,7 @@
 #   RERANKER_HOST / RERANKER_PORT     default 0.0.0.0 / 8081
 #   DOCLING_HOST  / DOCLING_PORT      default 0.0.0.0 / 8500
 #   START_EMBEDDER                    default true
-#   START_RERANKER                    default false
+#   START_RERANKER                    default true
 #   START_DOCLING                     default false
 #   EMBED_BATCH_SIZE                  default 32  (M-series Studio friendly; lower if memory pressure appears)
 #   EMBED_MAX_LENGTH                  default 512
@@ -45,7 +45,7 @@ export RERANKER_PORT="${RERANKER_PORT:-8081}"
 export DOCLING_HOST="${DOCLING_HOST:-0.0.0.0}"
 export DOCLING_PORT="${DOCLING_PORT:-8500}"
 export START_EMBEDDER="${START_EMBEDDER:-true}"
-export START_RERANKER="${START_RERANKER:-false}"
+export START_RERANKER="${START_RERANKER:-true}"
 export START_DOCLING="${START_DOCLING:-false}"
 export HF_HOME="${HF_HOME:-${RUNTIME_ROOT}/volumes/hf-cache}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"

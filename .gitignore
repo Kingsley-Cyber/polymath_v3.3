@@ -15,6 +15,7 @@ scripts/backfill_changes_*.json
 .env
 .env.*
 !.env.example
+docker-compose.override.yml
 # Personal scratch — session notes, ad-hoc smoke runs, etc.
 backend/TEST/
 A0_2/

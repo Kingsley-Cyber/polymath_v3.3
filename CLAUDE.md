@@ -5,25 +5,21 @@ costly mistake from recurring on any device or by any AI agent.
 
 ## 🚨 Deploying / recreating the backend — DO NOT get this wrong
 
-The backend reaches its embedder + reranker via env vars. `docker-compose.yml`
-HARDCODES the **compose defaults** `EMBEDDER_URL=http://embedder:80` and
-`RERANKER_URL=http://reranker:8080`, which point at profile-gated containers
-(`local-embed` / `local-rerank`) that **are not running on most devices** (the
-reranker image is CUDA-only). The real endpoints come from an **override file**:
+The backend reaches its embedder + reranker via env vars. The correct values are
+platform-specific:
 
-- **Apple/Mac:** `docker-compose.apple-mlx.yml` (and the auto-merged
-  `docker-compose.override.yml`) → host MLX sidecars
+- **Apple/Mac:** use `docker-compose.apple-mlx.yml` → host MLX sidecars
   `EMBEDDER_URL=http://host.docker.internal:8082`,
   `RERANKER_URL=http://host.docker.internal:8081`.
-- **Linux/NVIDIA:** the `local-embed` / `local-rerank` compose profiles.
+- **Linux/NVIDIA / Windows RTX:** use the default `docker-compose.yml` plus the
+  `local-embed` / `local-rerank` profiles from `.env`, where
+  `EMBEDDER_URL=http://embedder:80` and `RERANKER_URL=http://reranker:8080` are
+  correct internal Docker network URLs.
 
-**The trap:** Docker Compose auto-merges `docker-compose.override.yml` ONLY when
-you pass NO `-f`. Running `docker compose -f docker-compose.yml ... up backend`
-(base file alone) **silently drops the override** → the backend boots with the
-dead `embedder:80` / `reranker:8080` defaults → `embed_query` ConnectErrors with
-no fallback → **vector / hybrid / graph retrieval return 0–degraded results while
-the container still reports `healthy`** (the healthcheck is liveness-only). It is
-SILENT. This already caused an outage (2026-06-20).
+**The trap:** `docker-compose.override.yml` is auto-merged by Docker Compose and
+must stay local-only. It is gitignored. Do not commit machine-specific sidecar
+IPs or host paths. Use `docker-compose.override.example.yml` as the template if
+you need local experiments.
 
 ### ✅ The only correct ways to (re)deploy the backend
 
@@ -33,28 +29,26 @@ docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --bui
 # …or the full one-shot setup:
 bash scripts/setup_apple_mlx.sh
 
-# Any device — bare form also works (auto-merges docker-compose.override.yml),
-# but ONLY when run from the repo root with NO -f:
+# RTX/NVIDIA — canonical after bootstrap:
 cd <repo> && docker compose up -d --build backend
 ```
 
 ### ❌ NEVER do this
 ```bash
-docker compose -f docker-compose.yml up -d --build backend   # drops the override → dead embedder
+git add docker-compose.override.yml   # commits private machine routing
 ```
 
 ### ✅ ALWAYS verify after any backend (re)deploy
 ```bash
 bash scripts/verify_backend_runtime.sh
 ```
-It fails LOUD (non-zero exit) if the backend's resolved `EMBEDDER_URL` /
-`RERANKER_URL` are the dead defaults or if a live embed returns no vector — i.e.
-it catches exactly the silent misw iring above. The backend ALSO runs an
-embedder self-check at startup and logs `CRITICAL` with the fix if embedding
-fails (see `backend/main.py` lifespan), so a bad deploy can never be silent.
+It fails LOUD (non-zero exit) if a live embed through the backend returns no
+vector. The backend ALSO runs an embedder self-check at startup and logs
+`CRITICAL` with the fix if embedding fails (see `backend/main.py` lifespan), so a
+bad deploy can never be silent.
 
 Quick manual check: `docker exec polymath_v33-backend-1 sh -c 'echo $EMBEDDER_URL'`
-must show `host.docker.internal:8082` (Mac), never `embedder:80`.
+must show `host.docker.internal:8082` on Apple MLX, or `embedder:80` on RTX.
 
 ## Code & deploy mechanics
 - Backend code is **baked into the image at build time** (COPY, not a volume

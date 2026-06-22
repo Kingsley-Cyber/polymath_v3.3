@@ -173,6 +173,10 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Add-Failure "Docker is not on PATH"
 } else {
     Add-Ok "Docker is on PATH"
+    $overrideFile = Join-Path $repoRoot "docker-compose.override.yml"
+    if (Test-Path -LiteralPath $overrideFile) {
+        Add-Warning "Local docker-compose.override.yml detected; docker compose will auto-merge machine-specific overrides."
+    }
     if (-not $SkipComposeConfig) {
         Push-Location $repoRoot
         try {

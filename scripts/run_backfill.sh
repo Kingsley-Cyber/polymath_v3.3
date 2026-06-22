@@ -13,18 +13,21 @@
 # in .backfill_state so re-running this script RESUMES the same batch.
 #
 # Usage:
-#   scripts/run_backfill.sh                  # preflight + launch (or resume) + monitor
-#   SKIP_RECLAIM=1 scripts/run_backfill.sh   # skip the memory-reclaim step
+#   scripts/run_backfill.sh                         # preflight + launch/resume + monitor
+#   SKIP_RECLAIM=1 scripts/run_backfill.sh          # skip memory reclaim
+#   RTX_EXTRACT_HEALTH_URL=http://host:8086/health scripts/run_backfill.sh
 #
 # Preflights hard-fail loudly: Docker stack, backend health, RTX extraction
-# sidecar warm, native embedder, flash drive mounted, ≥25 GB free disk.
+# sidecar warm, native embedder, source directory mounted, ≥25 GB free disk.
 
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE="$REPO/.backfill_state"
-SOURCE_PATH="/ingest-source/authentic_files"   # container view of /Volumes/Flash Drive/authentic_files
-CORPUS_NAME="authentic_library"
+SOURCE_HOST_DIR="${SOURCE_HOST_DIR:-/Volumes/Flash Drive/authentic_files}"
+SOURCE_PATH="${SOURCE_PATH:-/ingest-source/authentic_files}"   # container view of SOURCE_HOST_DIR
+CORPUS_NAME="${CORPUS_NAME:-authentic_library}"
+RTX_EXTRACT_HEALTH_URL="${RTX_EXTRACT_HEALTH_URL:-http://host.docker.internal:8086/health}"
 LOG="$REPO/backfill_$(date +%Y%m%d_%H%M%S).log"
 
 # Re-exec under caffeinate so sleep prevention lives exactly as long as we do.
@@ -42,10 +45,10 @@ docker ps >/dev/null 2>&1 || { say_log "FATAL: docker daemon down — open -a Do
 say_log "preflight: backend"
 curl -s -m 5 http://localhost:8000/api/health >/dev/null || { say_log "FATAL: backend not responding"; exit 1; }
 
-say_log "preflight: RTX extraction sidecar (ONNX production :8086)"
-RTX=$(docker exec polymath_v33-backend-1 python -c "
-import urllib.request, json
-r = json.load(urllib.request.urlopen('http://192.168.1.83:8086/health', timeout=8))
+say_log "preflight: RTX extraction sidecar (${RTX_EXTRACT_HEALTH_URL})"
+RTX=$(docker exec -e RTX_EXTRACT_HEALTH_URL="$RTX_EXTRACT_HEALTH_URL" polymath_v33-backend-1 python -c "
+import os, urllib.request, json
+r = json.load(urllib.request.urlopen(os.environ['RTX_EXTRACT_HEALTH_URL'], timeout=8))
 g = r.get('gliner') or {}
 ok = (r.get('status')=='ok' and r.get('warm') and g.get('backend')=='onnx'
       and 'CUDAExecutionProvider' in (g.get('providers') or []))
@@ -56,8 +59,8 @@ say_log "preflight: embedder"
 curl -s -m 5 http://localhost:8082/health | grep -q '"status":"ok"' || { say_log "FATAL: embedder :8082 down"; exit 1; }
 
 say_log "preflight: source files"
-N_FILES=$(ls "/Volumes/Flash Drive/authentic_files/"*.md 2>/dev/null | wc -l | tr -d ' ')
-[[ "$N_FILES" -gt 400 ]] || { say_log "FATAL: expected ~498 .md files, found $N_FILES — drive mounted?"; exit 1; }
+N_FILES=$(find "$SOURCE_HOST_DIR" -maxdepth 1 -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+[[ "$N_FILES" -gt 400 ]] || { say_log "FATAL: expected ~498 .md files, found $N_FILES in $SOURCE_HOST_DIR — source mounted?"; exit 1; }
 say_log "  $N_FILES files visible"
 
 say_log "preflight: disk space"

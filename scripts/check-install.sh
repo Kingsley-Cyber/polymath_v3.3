@@ -173,6 +173,9 @@ if ! command -v docker >/dev/null 2>&1; then
   fail "Docker is not on PATH"
 else
   ok "Docker is on PATH"
+  if [[ -f "$repo_root/docker-compose.override.yml" ]]; then
+    warn "Local docker-compose.override.yml detected; docker compose will auto-merge machine-specific overrides."
+  fi
   if [[ "$skip_compose_config" != "1" ]]; then
     if (cd "$repo_root" && docker compose config --quiet); then
       ok "docker compose config is valid"

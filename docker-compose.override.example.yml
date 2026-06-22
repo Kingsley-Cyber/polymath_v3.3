@@ -1,0 +1,23 @@
+# Optional local override template.
+#
+# Copy this file to `docker-compose.override.yml` for one-machine experiments.
+# Docker Compose auto-loads `docker-compose.override.yml`, so the real override
+# is gitignored on purpose. Keep device-specific hosts, LAN IPs, and personal
+# sidecars out of source control.
+#
+# Common examples:
+# - Apple Silicon host-native MLX: prefer `docker-compose.apple-mlx.yml` and
+#   `scripts/setup_apple_mlx.sh` instead of a local override.
+# - NVIDIA RTX default: no override is needed after bootstrap; use the
+#   `local-embed,local-rerank,local-parser` profiles from `.env`.
+
+services:
+  backend:
+    environment: {}
+      # Example host-native embedder/reranker sidecars:
+      # EMBEDDER_URL: http://host.docker.internal:8082
+      # RERANKER_URL: http://host.docker.internal:8081
+      # RERANKER_SCORE_SCALE: probability
+
+      # Example remote extraction sidecar list:
+      # LOCAL_GHOST_B_EXTRACT_URL: http://host.docker.internal:8084

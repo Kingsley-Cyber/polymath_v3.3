@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Post-deploy guard against the SILENT embedder/reranker misw iring that happens
-# when the backend is recreated WITHOUT the compose override (see CLAUDE.md).
+# Post-deploy guard against SILENT embedder/reranker miswiring.
 #
 # Unlike scripts/smoke_apple_mlx.sh (which checks the HOST sidecars are up), this
-# checks that the backend CONTAINER is actually WIRED to them — the gap that let
-# a bad `docker compose -f docker-compose.yml up backend` pass smoke yet return
-# vector=0. Run after EVERY backend (re)deploy. Exits non-zero with the fix.
+# checks that the backend CONTAINER can actually embed through whatever runtime
+# it was configured for: in-cluster CUDA services on RTX, or host-native MLX
+# sidecars on Apple Silicon. Run after backend redeploys. Exits non-zero if
+# vector retrieval would be broken.
 #
 # Usage: bash scripts/verify_backend_runtime.sh [container_name]
 set -uo pipefail
@@ -20,17 +20,14 @@ if ! docker inspect "${CONTAINER}" >/dev/null 2>&1; then
   exit 2
 fi
 
-# 1) Resolved endpoints must not be the dead compose defaults.
+# 1) Print resolved endpoints. Both internal Docker URLs (RTX) and
+# host.docker.internal URLs (Apple MLX) are valid if the live embed check passes.
 urls="$(docker exec "${CONTAINER}" sh -c 'printf "%s|%s" "$EMBEDDER_URL" "$RERANKER_URL"' 2>/dev/null || true)"
 emb="${urls%%|*}"; rer="${urls##*|}"
 echo "[verify] EMBEDDER_URL=${emb:-<unset>}"
 echo "[verify] RERANKER_URL=${rer:-<unset>}"
-case "${emb}" in
-  ""|*embedder:80*) echo "[verify] FAIL: EMBEDDER_URL is the dead compose default — the override was dropped." >&2; fail=1 ;;
-esac
-case "${rer}" in
-  ""|*reranker:8080*) echo "[verify] WARN: RERANKER_URL is the compose default; rerank will fall back to score-sort." >&2 ;;
-esac
+[[ -n "${emb}" ]] || { echo "[verify] FAIL: EMBEDDER_URL is empty." >&2; fail=1; }
+[[ -n "${rer}" ]] || echo "[verify] WARN: RERANKER_URL is empty; rerank will fall back to score-sort." >&2
 
 # 2) A live embed through the backend must return a real vector.
 dim="$(docker exec "${CONTAINER}" python -c '
@@ -51,14 +48,17 @@ if [ "${fail}" -ne 0 ]; then
   cat >&2 <<'EOF'
 
 [verify] BACKEND RUNTIME WIRING IS BROKEN.
-  The backend was likely recreated WITHOUT the compose override, so it points at
-  the dead default embedder:80 / reranker:8080. Vector/Hybrid/Graph retrieval
-  returns nothing while the container reports "healthy".
+  The backend cannot produce embeddings through its configured runtime. Vector,
+  Hybrid, and Graph retrieval will return empty or degraded results while the
+  container may still report "healthy" because liveness is not retrieval quality.
 
-  FIX (Mac):
+  FIX (Apple MLX):
     docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build backend
     # or:  bash scripts/setup_apple_mlx.sh
-  NEVER:  docker compose -f docker-compose.yml up backend   (drops the override)
+
+  FIX (RTX/NVIDIA):
+    bash scripts/bootstrap-runtime.sh --generate-secrets --stage-models
+    docker compose up -d --build embedder backend
 
   Then re-run this script.
 EOF

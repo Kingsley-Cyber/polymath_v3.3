@@ -171,7 +171,7 @@ open http://localhost:3000
 Manual Apple mode is also available:
 
 ```bash
-bash scripts/install_apple_mlx_runtime.sh
+START_RERANKER=true bash scripts/install_apple_mlx_runtime.sh
 docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build
 bash scripts/smoke_apple_mlx.sh
 ```
@@ -392,10 +392,10 @@ for embeddings). **Caveat:** Qwen3-Embedding-0.6B at 1024d is the reference
 embedding shape; switching to `nomic-embed-text` (768d) means re-ingesting
 your corpus. Don't mix dimensions in the same Qdrant collection.
 
-**Option B — MLX-native embedder/reranker/docling on the host (recommended):**
+**Option B — MLX-native embedder/reranker on the host (recommended):**
 
-The repo ships an end-to-end installer that stages three host-native FastAPI
-sidecars (embedder, reranker, docling), pre-pulls the MLX model weights
+The repo ships an end-to-end installer that stages host-native FastAPI
+sidecars, starts the embedder and reranker by default, pre-pulls the MLX weights
 (~1 GB), wires a LaunchAgent for auto-restart, starts Docker with the Apple
 override, and runs a real embedding/reranking smoke. **One command:**
 
@@ -404,7 +404,7 @@ override, and runs a real embedding/reranking smoke. **One command:**
 bash scripts/setup_apple_mlx.sh
 ```
 
-Manual mode is still available: run `bash scripts/install_apple_mlx_runtime.sh`,
+Manual mode is still available: run `START_RERANKER=true bash scripts/install_apple_mlx_runtime.sh`,
 then `docker compose -f docker-compose.yml -f docker-compose.apple-mlx.yml up -d --build`,
 then `bash scripts/smoke_apple_mlx.sh`.
 
@@ -417,7 +417,7 @@ What the installer does:
 | venv | `uv` + `requirements.txt` |
 | **model pull** | `pull_apple_mlx_models.py` warms and verifies `~/PolymathRuntime/volumes/hf-cache`, then writes `polymath-apple-mlx-models.json` |
 | LaunchAgent | `~/Library/LaunchAgents/com.polymath.apple-ml.plist` with `RunAtLoad` + `KeepAlive` |
-| smoke | checks `/embeddings` returns 1024-d vectors and `/rerank` separates relevant docs from an irrelevant one |
+| smoke | checks `/embeddings` returns 1024-d vectors and `/rerank` separates relevant docs from an irrelevant one; Docling is checked only when `START_DOCLING=true` |
 
 Models pulled (CC BY-NC 4.0 for the reranker — fine for personal/research):
 - `mlx-community/Qwen3-Embedding-0.6B-mxfp8` — 1024-dim embeddings (matches Docker default)
@@ -428,7 +428,7 @@ returns cosine in 0..1, not logits. Without this, the retriever's negative-logit
 "low confidence" guard discards every result.
 
 **Implementation note on the sidecars**: the wire contracts (`/info`, `/health`,
-`/embeddings`, `/rerank`, `/parse`) are stable. The embedder and reranker now
+`/embeddings`, `/rerank`, optional `/parse`) are stable. The embedder and reranker now
 load the MLX models directly through `mlx-embeddings`; the reranker scores by
 embedding the query and candidate documents and taking the cosine/dot-product
 similarity advertised by the MLX model card.
