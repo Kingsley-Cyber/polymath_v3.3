@@ -37,6 +37,7 @@ from .auth import (
     get_current_user_id,
     resolve_request_scope,
 )
+from .app_guide import get_app_guide
 
 logger = logging.getLogger(__name__)
 
@@ -1122,6 +1123,24 @@ async def polymath_get_entity_relations(
 # ── Phase 24 — Discovery + listing tools ───────────────────────────────────
 
 
+async def polymath_app_guide(
+    detail: Literal["summary", "full"] = "summary",
+) -> dict[str, Any]:
+    """Return the agent-facing Polymath app map and workflow guide.
+
+    Use this as the first MCP call when an agent needs to understand how to
+    operate the app end to end: route names, retrieval tiers, graph modes,
+    ingestion/update workflow, tool playbook, and write-safety rules.
+
+    Args:
+        detail: "summary" returns compact guidance. "full" also includes the
+            full MCP server instruction text.
+    """
+    if detail not in ("summary", "full"):
+        raise ValueError("detail must be 'summary' or 'full'")
+    return _json_ready(get_app_guide(detail=detail))
+
+
 async def polymath_list_corpora() -> dict[str, Any]:
     """List corpora the authenticated user can access.
 
@@ -1831,6 +1850,7 @@ async def polymath_delete_document(
 # ── Registry — single source of truth for the MCP server to register ───────
 
 ALL_TOOLS = (
+    polymath_app_guide,
     polymath_search,
     polymath_cross_corpus_search,
     polymath_chat_query,
@@ -1856,6 +1876,7 @@ ALL_TOOLS = (
 
 __all__ = [
     "ALL_TOOLS",
+    "polymath_app_guide",
     "polymath_search",
     "polymath_cross_corpus_search",
     "polymath_chat_query",

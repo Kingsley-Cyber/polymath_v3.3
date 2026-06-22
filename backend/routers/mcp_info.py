@@ -13,6 +13,7 @@ import logging
 
 from config import get_settings
 from fastapi import APIRouter, Depends, HTTPException
+from polymath_mcp.app_guide import get_app_guide
 from polymath_mcp.tools import ALL_TOOLS
 from routers.auth import get_current_user
 from services.conversation import conversation_service
@@ -47,6 +48,7 @@ async def get_mcp_info(
     public_url = (getattr(s, "MCP_PUBLIC_URL", "") or "").strip()
     if not public_url:
         public_url = f"http://localhost:{s.MCP_PORT}"
+    app_guide = get_app_guide(detail="summary")
 
     return {
         "transport": s.MCP_TRANSPORT,
@@ -60,6 +62,13 @@ async def get_mcp_info(
         "user_api_key_count": len(user_keys),
         "supports_user_api_keys": True,
         "default_top_k": s.MCP_DEFAULT_TOP_K,
+        "agent_guide": app_guide,
+        "app_capabilities": app_guide["app_capabilities"],
+        "agent_workflows": app_guide["agent_workflows"],
+        "retrieval_routes": app_guide["retrieval_routes"],
+        "graph_modes": app_guide["graph_modes"],
+        "write_safety": app_guide["write_safety"],
+        "tool_playbook": app_guide["tool_playbook"],
         "tools": [
             {"name": fn.__name__, "description": (fn.__doc__ or "").split("\n")[0]}
             for fn in ALL_TOOLS

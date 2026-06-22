@@ -68,6 +68,23 @@ def system_user():
 
 
 @pytest.mark.asyncio
+async def test_mcp_app_guide_exposes_app_routes_and_update_workflow():
+    result = await mcp_tools.polymath_app_guide(detail="full")
+
+    route_names = {route["ui_name"] for route in result["retrieval_routes"]}
+    workflow_names = {workflow["name"] for workflow in result["agent_workflows"]}
+    capability_tools = result["app_capabilities"]["core_capabilities"]
+
+    assert route_names == {"Fast Search", "Hybrid Search", "Graph Augmentation"}
+    assert "ingest_and_verify" in workflow_names
+    assert "polymath_chat_query" in capability_tools["answer"]
+    assert "polymath_graph_query" in capability_tools["graph"]
+    assert "polymath_upload_document" in capability_tools["update_knowledge_base"]
+    assert "agent_instructions" in result
+    assert "API_KEY" not in result["agent_instructions"]
+
+
+@pytest.mark.asyncio
 async def test_mcp_search_forwards_current_retrieval_knobs(monkeypatch, system_user):
     captured: dict = {}
 
@@ -249,5 +266,6 @@ async def test_mcp_graph_discover_forwards_multi_corpus_modes(monkeypatch, syste
 
 def test_query_tools_in_registry():
     names = {fn.__name__ for fn in mcp_tools.ALL_TOOLS}
+    assert "polymath_app_guide" in names
     assert "polymath_graph_map_query" in names
     assert "polymath_graph_question_suggestions" in names

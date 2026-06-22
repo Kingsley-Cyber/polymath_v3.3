@@ -82,6 +82,7 @@ def _build_mcp_server():
     from mcp.server.transport_security import TransportSecuritySettings
 
     from . import tools
+    from .app_guide import MCP_APP_INSTRUCTIONS
 
     # DNS-rebinding protection. The SDK auto-enables a localhost-only allowlist
     # when the server host looks local, which 421s ("Invalid Host header") any
@@ -114,56 +115,7 @@ def _build_mcp_server():
 
     mcp = FastMCP(
         name="polymath",
-        instructions=(
-            "Polymath RAG — full read/write research toolkit. You are talking "
-            "to a knowledge base that you can search, synthesize over, and "
-            "extend with new documents.\n\n"
-            "CAPABILITIES:\n"
-            "  • SEARCH      polymath_search, polymath_cross_corpus_search — "
-            "retrieve evidence chunks across corpora with the same vector, "
-            "hybrid, Graph Augmentation, profile, rerank, and search-mode knobs "
-            "as chat.\n"
-            "  • SYNTHESIZE  polymath_chat_query — natural-language question, "
-            "grounded answer using the live chat RAG path, including facet "
-            "coverage, multi-corpus retrieval, optional web/search tools, "
-            "skills, and reasoning-cascade metadata.\n"
-            "  • ANALYZE     polymath_graph_map_query, polymath_graph_query, "
-            "polymath_graph_question_suggestions, polymath_search_entities, "
-            "polymath_get_entity_relations, polymath_get_chunk_extraction — "
-            "structural / thematic / provenance reads on the Neo4j graph.\n"
-            "  • DISCOVER    polymath_list_corpora, polymath_list_documents, "
-            "polymath_list_skills, polymath_list_tools.\n"
-            "  • EXTEND      polymath_create_corpus, polymath_ingest_from_url, "
-            "polymath_upload_document, polymath_get_ingest_status, "
-            "polymath_delete_document.\n\n"
-            "RESEARCH WORKFLOW (run in this order when extending the KB):\n"
-            "  1. DISCOVER — list_corpora to see what's already indexed.\n"
-            "  2. SEARCH   — query existing corpora before deciding to ingest "
-            "new material; avoid duplicating work the user already paid to "
-            "embed.\n"
-            "  3. PLAN     — decide whether to add to an existing corpus or "
-            "create a dedicated one for the project.\n"
-            "  4. INGEST   — create_corpus if needed, then ingest_from_url "
-            "(public URL) or upload_document (base64 body) per file.\n"
-            "  5. POLL     — get_ingest_status until status='complete'. "
-            "Ingestion is async; do not assume content is searchable until "
-            "you have seen 'complete'.\n"
-            "  6. VERIFY   — search for known terms from the new document to "
-            "confirm it is retrievable, then chat_query to summarize the "
-            "incorporated material.\n"
-            "  7. REPORT   — surface the findings + the new corpus_id(s) to "
-            "the user.\n\n"
-            "CONSTRAINTS:\n"
-            "  • All tools respect the caller's corpus ACL — you cannot read, "
-            "write, or delete a corpus the authenticated user does not own.\n"
-            "  • Ingestion size cap: 50 MB per file by default. Larger files "
-            "must go through the multipart HTTP endpoint, not MCP.\n"
-            "  • polymath_ingest_from_url blocks private/loopback IPs by "
-            "default (SSRF safety). Public arXiv / GitHub / S3 URLs are "
-            "fine; intranet URLs are not.\n"
-            "  • Deletions are not reversible. Use polymath_delete_document "
-            "only to clean up confirmed-failed ingests."
-        ),
+        instructions=MCP_APP_INSTRUCTIONS,
         transport_security=transport_security,
     )
 
