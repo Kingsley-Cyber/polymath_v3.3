@@ -21,3 +21,14 @@ services:
 
       # Example remote extraction sidecar list:
       # LOCAL_GHOST_B_EXTRACT_URL: http://host.docker.internal:8084
+
+  # IMPORTANT: mirror backend model endpoints into MCP whenever agents can
+  # ingest documents. The MCP sidecar runs the same ingestion worker path, so
+  # a backend-only override can make browser uploads succeed while remote
+  # agents fail during Embed/Qdrant with a hostname/DNS error.
+  mcp:
+    environment: {}
+      # EMBEDDER_URL: http://host.docker.internal:8082
+      # RERANKER_URL: http://host.docker.internal:8081
+      # RERANKER_SCORE_SCALE: probability
+      # LOCAL_GHOST_B_EXTRACT_URL: http://host.docker.internal:8084
