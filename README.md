@@ -91,6 +91,35 @@ Git or GitHub's green **Code -> Download ZIP** button.
 | **Apple Silicon Mac** | Docker core + host-native MLX sidecars | M1/M2/M3/M4 Macs where Docker cannot access the Apple GPU |
 | **Linux / NVIDIA** | Docker Compose + bash bootstrap | Single-GPU Linux boxes or servers |
 
+Recommended single entrypoint:
+
+```bash
+# Preview the detected device profile and exact downloads/settings.
+python3 scripts/polymath_download.py plan
+
+# Apply the deterministic profile setup.
+# Auto chooses apple-mlx on Apple Silicon, rtx when nvidia-smi is present,
+# otherwise cpu-cloud.
+python3 scripts/polymath_download.py apply --profile auto
+
+# Start separately after adding provider keys, or use --start to start at once.
+docker compose up -d --build
+
+# Validate the install.
+python3 scripts/polymath_download.py verify --check-running
+```
+
+The CLI writes `~/PolymathRuntime/polymath-download-plan.json` (or the chosen
+runtime root) so a new machine has an auditable download/configuration plan. It
+wraps the lower-level scripts below and makes the profile-specific choices
+explicit:
+
+- `apple-mlx`: host-native MLX sidecars, `docker-compose.apple-mlx.yml`,
+  cosine reranker scores, no CUDA services inside Docker.
+- `rtx`: Docker CUDA embedder/reranker/parser profiles, staged Qwen3 embedding
+  and Qwen3 reranker assets, conservative batch defaults.
+- `cpu-cloud`: no local GPU model downloads; use provider/API models first.
+
 Local extraction engines (run ingestion's entity/relation extraction on any
 machine on your network — models, sidecars, the Settings toggle list, and the
 Validate checklist): see [scripts/EXTRACTION_SETUP.md](scripts/EXTRACTION_SETUP.md).
@@ -610,6 +639,7 @@ Mongo + Qdrant write so vector RAG works for them. Tally per doc lives on
 | Fresh bootstrap (Windows) | `.\scripts\bootstrap-runtime.ps1 -GenerateSecrets -StageModels` |
 | Fresh bootstrap (Linux/macOS) | `bash scripts/bootstrap-runtime.sh --generate-secrets --stage-models` |
 | Fresh bootstrap (Apple Silicon MLX) | `bash scripts/setup_apple_mlx.sh` |
+| Profile-aware download/setup | `python3 scripts/polymath_download.py apply --profile auto` |
 | Validate install | `.\scripts\check-install.ps1` or `bash scripts/check-install.sh` |
 | Bring up | `docker compose up -d --build` |
 | Bring down | `docker compose down` |

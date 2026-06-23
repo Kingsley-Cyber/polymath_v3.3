@@ -747,6 +747,23 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         ),
     ),
     Requirement(
+        id="profile-aware-download-cli",
+        description="Fresh installs have one deterministic download/setup CLI that detects Apple MLX, RTX, or CPU/cloud profiles and writes an auditable plan.",
+        path="scripts/polymath_download.py",
+        needles=(
+            'choices=["auto", "apple-mlx", "rtx", "cpu-cloud"]',
+            "def detect_profile()",
+            "mlx-community/Qwen3-Embedding-0.6B-mxfp8",
+            "ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF",
+            "docker-compose.apple-mlx.yml",
+            "polymath-download-plan.json",
+            "scripts/bootstrap-runtime.sh",
+            "scripts/bootstrap-runtime.ps1",
+            "scripts/setup_apple_mlx.sh",
+            "scripts/check-install.ps1",
+        ),
+    ),
+    Requirement(
         id="install-check-runs-contracts",
         description="Fresh install checks invoke this runtime contract verifier.",
         path="scripts/check-install.sh",
