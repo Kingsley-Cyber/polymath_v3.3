@@ -48,14 +48,19 @@ async def get_mcp_info(
     public_url = (getattr(s, "MCP_PUBLIC_URL", "") or "").strip()
     if not public_url:
         public_url = f"http://localhost:{s.MCP_PORT}"
+    public_url = public_url.rstrip("/")
+    mcp_endpoint = public_url if public_url.endswith("/mcp") else f"{public_url}/mcp"
     app_guide = get_app_guide(detail="summary")
 
     return {
         "transport": s.MCP_TRANSPORT,
         "url": public_url,
+        "mcp_endpoint": mcp_endpoint,
         "port": s.MCP_PORT,
         "host": s.MCP_HOST,
         "require_auth": s.MCP_REQUIRE_AUTH,
+        "auth_header_name": "Authorization",
+        "auth_header_scheme": "Bearer",
         "has_api_key": bool(s.MCP_API_KEY) or bool(user_keys),
         "has_static_api_key": bool(s.MCP_API_KEY),
         "has_user_api_key": bool(user_keys),
@@ -65,6 +70,7 @@ async def get_mcp_info(
         "agent_guide": app_guide,
         "app_capabilities": app_guide["app_capabilities"],
         "agent_workflows": app_guide["agent_workflows"],
+        "remote_agent_setup": app_guide["remote_agent_setup"],
         "retrieval_routes": app_guide["retrieval_routes"],
         "graph_modes": app_guide["graph_modes"],
         "write_safety": app_guide["write_safety"],

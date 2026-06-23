@@ -80,8 +80,13 @@ async def test_mcp_app_guide_exposes_app_routes_and_update_workflow():
     assert "polymath_chat_query" in capability_tools["answer"]
     assert "polymath_graph_query" in capability_tools["graph"]
     assert "polymath_upload_document" in capability_tools["update_knowledge_base"]
+    assert result["remote_agent_setup"]["endpoint_rule"].endswith("without a trailing slash.")
+    assert result["remote_agent_setup"]["auth"]["header"] == "Authorization"
+    assert "OPENAI_API_KEY" in result["remote_agent_setup"]["model_provider_keys"]["openai"]
+    assert "ANTHROPIC_API_KEY" in result["remote_agent_setup"]["model_provider_keys"]["anthropic"]
     assert "agent_instructions" in result
-    assert "API_KEY" not in result["agent_instructions"]
+    assert "sk-" not in result["agent_instructions"]
+    assert "sk-ant-" not in result["agent_instructions"]
 
 
 @pytest.mark.asyncio

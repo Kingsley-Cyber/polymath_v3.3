@@ -605,6 +605,30 @@ MCP_PUBLIC_URL=https://mcp.example.com
 MCP_API_KEY=<openssl rand -hex 32>
 ```
 
+**Remote MCP agents:**
+
+Polymath's MCP endpoint is always the public MCP base URL plus `/mcp`
+without a trailing slash. For example:
+
+```bash
+export POLYMATH_MCP_URL="https://mcp.example.com/mcp"
+export POLYMATH_MCP_API_KEY="YOUR_POLYMATH_MCP_KEY"
+```
+
+That Polymath MCP key is separate from model-provider keys. On the machine
+running Claude Code, an OpenAI Agents SDK process, Cursor, or another agent,
+set the provider key the agent itself needs:
+
+```bash
+export OPENAI_API_KEY="YOUR_OPENAI_API_KEY"
+# or
+export ANTHROPIC_API_KEY="YOUR_ANTHROPIC_API_KEY"
+```
+
+Use Settings -> MCP Server to generate user-scoped MCP keys for remote
+agents. `MCP_API_KEY` in `.env` remains available for trusted system agents
+and automation, but it is not shown in the UI.
+
 **Ghost B (entity / relation extractor) — read this if you change the model:**
 
 The default extraction model (`deepseek/deepseek-v4-flash`) is a reasoning

@@ -1465,15 +1465,25 @@ export interface FullGraphResponse {
 export interface McpInfo {
   transport: string;
   url: string;
+  mcp_endpoint?: string;
   port: number;
   host: string;
   require_auth: boolean;
+  auth_header_name?: string;
+  auth_header_scheme?: string;
   has_api_key: boolean;
   has_static_api_key?: boolean;
   has_user_api_key?: boolean;
   user_api_key_count?: number;
   supports_user_api_keys?: boolean;
   default_top_k: number;
+  agent_guide?: Record<string, unknown>;
+  app_capabilities?: Record<string, unknown>;
+  agent_workflows?: unknown[];
+  remote_agent_setup?: Record<string, unknown>;
+  retrieval_routes?: unknown[];
+  graph_modes?: unknown[];
+  write_safety?: unknown[];
   tools: Array<{ name: string; description: string }>;
 }
 

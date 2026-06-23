@@ -127,6 +127,14 @@ export function McpTab() {
   // ── Connection snippet generators ───────────────────────────────────
   const authToken = generatedKey?.api_key || "YOUR_MCP_API_KEY";
   const hasUserKeys = Boolean(info.has_user_api_key || keys.length);
+  const mcpEndpoint =
+    info.mcp_endpoint || `${info.url.replace(/\/+$/, "")}/mcp`;
+  const authHeaderName = info.auth_header_name || "Authorization";
+  const authHeaderScheme = info.auth_header_scheme || "Bearer";
+  const authHeaderValue = `${authHeaderScheme} ${authToken}`;
+  const authHeaders = info.require_auth
+    ? { [authHeaderName]: authHeaderValue }
+    : undefined;
   const apiKeyStatus = info.has_static_api_key
     ? "static .env key configured"
     : hasUserKeys
@@ -137,10 +145,8 @@ export function McpTab() {
       mcpServers: {
         polymath: {
           type: info.transport === "stdio" ? "stdio" : "streamable-http",
-          url: `${info.url}/mcp/`,
-          ...(info.require_auth && {
-            headers: { Authorization: `Bearer ${authToken}` },
-          }),
+          url: mcpEndpoint,
+          ...(authHeaders && { headers: authHeaders }),
         },
       },
     },
@@ -154,10 +160,8 @@ export function McpTab() {
         servers: {
           polymath: {
             transport: "streamable-http",
-            url: `${info.url}/mcp/`,
-            ...(info.require_auth && {
-              headers: { Authorization: `Bearer ${authToken}` },
-            }),
+            url: mcpEndpoint,
+            ...(authHeaders && { headers: authHeaders }),
           },
         },
       },
@@ -166,9 +170,69 @@ export function McpTab() {
     2,
   );
 
-  const curlSnippet = `curl -X POST "${info.url}/mcp/" \\
+  const remoteEnvSnippet = `# On the agent machine.
+# Model-provider keys stay with the agent runtime.
+export OPENAI_API_KEY="YOUR_OPENAI_API_KEY"
+# or:
+export ANTHROPIC_API_KEY="YOUR_ANTHROPIC_API_KEY"
+
+# Polymath MCP uses its own bearer key generated below.
+export POLYMATH_MCP_URL="${mcpEndpoint}"
+export POLYMATH_MCP_API_KEY="${authToken}"`;
+
+  const claudeCodeSnippet = `claude mcp add-json polymath '${JSON.stringify({
+    type: "http",
+    url: mcpEndpoint,
+    ...(authHeaders && { headers: authHeaders }),
+  })}'`;
+
+  const anthropicConnectorSnippet = JSON.stringify(
+    {
+      mcp_servers: [
+        {
+          type: "url",
+          name: "polymath",
+          url: mcpEndpoint,
+          ...(info.require_auth && { authorization_token: authToken }),
+        },
+      ],
+    },
+    null,
+    2,
+  );
+
+  const openAiAgentsSnippet = `import os
+from agents.mcp import MCPServerStreamableHttp
+
+polymath_mcp = MCPServerStreamableHttp(
+    params={
+        "url": os.environ["POLYMATH_MCP_URL"],
+        "headers": {
+            "${authHeaderName}": "${authHeaderScheme} "
+            + os.environ["POLYMATH_MCP_API_KEY"],
+        },
+        "timeout": 30,
+        "sse_read_timeout": 300,
+    },
+    cache_tools_list=True,
+)`;
+
+  const authCurlHeader = info.require_auth
+    ? ` \\
+  -H "${authHeaderName}: ${authHeaderValue}"`
+    : "";
+  const curlSnippet = `SESSION_ID=$(curl -fsS -D /tmp/polymath-mcp.headers -o /tmp/polymath-mcp.init \\
+  -X POST "${mcpEndpoint}" \\
   -H "Content-Type: application/json" \\
-  ${info.require_auth ? `-H "Authorization: Bearer ${authToken}" \\\n  ` : ""}-d '{"jsonrpc":"2.0","method":"tools/list","id":1}'`;
+  -H "Accept: application/json, text/event-stream"${authCurlHeader} \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"polymath-smoke","version":"1.0"}}}' \\
+  && awk 'tolower($1)=="mcp-session-id:" {print $2}' /tmp/polymath-mcp.headers | tr -d '\\r')
+
+curl -fsS -X POST "${mcpEndpoint}" \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
+  -H "Mcp-Session-Id: $SESSION_ID"${authCurlHeader} \\
+  -d '{"jsonrpc":"2.0","method":"tools/list","id":2}'`;
 
   return (
     <div className="space-y-8">
@@ -202,6 +266,13 @@ export function McpTab() {
           </span>
           <span className="text-white font-mono break-all">
             {info.url}
+          </span>
+
+          <span className="text-gray-500 uppercase tracking-widest text-[10px]">
+            MCP Endpoint
+          </span>
+          <span className="text-white font-mono break-all">
+            {mcpEndpoint}
           </span>
 
           <span className="text-gray-500 uppercase tracking-widest text-[10px]">
@@ -246,7 +317,11 @@ export function McpTab() {
             hashed, shown once, and work immediately without editing{" "}
             <code className="font-mono">.env</code>. Static{" "}
             <code className="font-mono text-amber-300">MCP_API_KEY</code> is still
-            supported for trusted system agents.
+            supported for trusted system agents and is never revealed here.
+            Remote agents also need their own model-provider key, such as{" "}
+            <code className="font-mono text-amber-300">OPENAI_API_KEY</code> or{" "}
+            <code className="font-mono text-amber-300">ANTHROPIC_API_KEY</code>,
+            on the machine running that agent.
           </div>
         </div>
       )}
@@ -355,6 +430,19 @@ export function McpTab() {
           <Zap size={16} className="text-cyan-400" />
           Connection Snippets
         </h3>
+        <p className="text-[12px] text-gray-500 leading-relaxed">
+          Use the endpoint without a trailing slash. The MCP bearer key
+          authenticates the agent to Polymath; OpenAI or Anthropic keys belong
+          on the remote agent machine as model-provider credentials.
+        </p>
+
+        <SnippetBlock
+          title="Remote agent env"
+          subtitle="set on the machine running OpenAI / Anthropic / another agent"
+          code={remoteEnvSnippet}
+          copied={copied === "remote-env"}
+          onCopy={() => handleCopy(remoteEnvSnippet, "remote-env")}
+        />
 
         <SnippetBlock
           title="Claude Desktop"
@@ -362,6 +450,30 @@ export function McpTab() {
           code={claudeDesktopSnippet}
           copied={copied === "claude"}
           onCopy={() => handleCopy(claudeDesktopSnippet, "claude")}
+        />
+
+        <SnippetBlock
+          title="Claude Code"
+          subtitle="adds Polymath as a remote HTTP MCP server"
+          code={claudeCodeSnippet}
+          copied={copied === "claude-code"}
+          onCopy={() => handleCopy(claudeCodeSnippet, "claude-code")}
+        />
+
+        <SnippetBlock
+          title="Anthropic API MCP connector"
+          subtitle="remote MCP connector shape with authorization_token"
+          code={anthropicConnectorSnippet}
+          copied={copied === "anthropic"}
+          onCopy={() => handleCopy(anthropicConnectorSnippet, "anthropic")}
+        />
+
+        <SnippetBlock
+          title="OpenAI Agents SDK"
+          subtitle="streamable HTTP MCP server config for Python agents"
+          code={openAiAgentsSnippet}
+          copied={copied === "openai-agents"}
+          onCopy={() => handleCopy(openAiAgentsSnippet, "openai-agents")}
         />
 
         <SnippetBlock
@@ -374,7 +486,7 @@ export function McpTab() {
 
         <SnippetBlock
           title="curl (smoke test)"
-          subtitle="lists registered tools — sanity check the server is up"
+          subtitle="initializes a session, then lists tools"
           code={curlSnippet}
           copied={copied === "curl"}
           onCopy={() => handleCopy(curlSnippet, "curl")}

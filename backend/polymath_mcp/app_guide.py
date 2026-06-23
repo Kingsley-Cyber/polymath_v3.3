@@ -48,6 +48,13 @@ Write safety:
 - Uploads are size-capped by MCP_INGEST_MAX_BYTES.
 - Deletion is irreversible; use it only for confirmed failed or unwanted
   documents.
+
+Remote connection rules:
+- Remote agents connect to the streamable HTTP endpoint: MCP_PUBLIC_URL + /mcp.
+- Do not add a trailing slash to the endpoint; use /mcp, not /mcp/.
+- Use Authorization: Bearer <Polymath MCP key> for this app.
+- The Polymath MCP key is not an OpenAI or Anthropic model-provider key.
+  OPENAI_API_KEY / ANTHROPIC_API_KEY stay on the machine running the agent.
 """
 
 
@@ -291,6 +298,30 @@ WRITE_SAFETY_RULES: list[str] = [
 ]
 
 
+REMOTE_AGENT_SETUP: dict[str, Any] = {
+    "endpoint_rule": "Use MCP_PUBLIC_URL + /mcp without a trailing slash.",
+    "auth": {
+        "header": "Authorization",
+        "scheme": "Bearer",
+        "secret_type": "Polymath MCP API key",
+        "notes": [
+            "Generate user-scoped keys from Settings -> MCP Server when possible.",
+            "Static MCP_API_KEY remains supported for trusted system agents.",
+            "Never confuse the Polymath MCP key with model-provider keys.",
+        ],
+    },
+    "model_provider_keys": {
+        "openai": "Set OPENAI_API_KEY on the remote agent machine when the agent uses OpenAI models.",
+        "anthropic": "Set ANTHROPIC_API_KEY on the remote agent machine when the agent uses Anthropic models.",
+    },
+    "smoke_test": [
+        "POST initialize to the /mcp endpoint with Accept: application/json, text/event-stream.",
+        "Capture Mcp-Session-Id from response headers.",
+        "POST tools/list with the same Mcp-Session-Id.",
+    ],
+}
+
+
 def get_app_guide(
     detail: Literal["summary", "full"] = "summary",
 ) -> dict[str, Any]:
@@ -309,6 +340,7 @@ def get_app_guide(
         "graph_modes": deepcopy(GRAPH_MODES),
         "app_capabilities": deepcopy(APP_CAPABILITY_MAP),
         "agent_workflows": deepcopy(AGENT_WORKFLOWS),
+        "remote_agent_setup": deepcopy(REMOTE_AGENT_SETUP),
         "tool_playbook": deepcopy(TOOL_PLAYBOOK),
         "write_safety": list(WRITE_SAFETY_RULES),
     }
@@ -329,6 +361,7 @@ __all__ = [
     "AGENT_WORKFLOWS",
     "GRAPH_MODES",
     "MCP_APP_INSTRUCTIONS",
+    "REMOTE_AGENT_SETUP",
     "RETRIEVAL_ROUTES",
     "TOOL_PLAYBOOK",
     "WRITE_SAFETY_RULES",

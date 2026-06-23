@@ -62,6 +62,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                     },
                     "id": None,
                 },
+                headers={"WWW-Authenticate": 'Bearer realm="polymath-mcp"'},
             )
 
         set_current_user_id(user_id)
