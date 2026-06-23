@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from models.schemas import IngestionConfig, SourceTier
 from services.ingestion import tier_chunker
+from services.ingestion.b_plus_normalizer import inject_synthetic_headers
 from services.ingestion.docling_adapter import (
     _markdown_sections,
     _parse_local_text_document,
@@ -604,6 +605,43 @@ Date:     2026-06-19
     assert transcript_children[0].metadata["time_start"] == "0:00"
     assert transcript_children[0].metadata["time_end"] == "0:22"
     assert "editable grid experience" in transcript_children[0].text
+
+
+def test_plaintext_decimal_prices_do_not_promote_to_fake_sections():
+    normalized, audit = inject_synthetic_headers(
+        "Shopify pricing walkthrough\n\n"
+        "89.99 as the current price.\n"
+        "3.2 Retrieval Readiness\n"
+        "This is a real dotted section heading.\n"
+    )
+
+    assert "## 89.99 as the current price." not in normalized
+    assert "89.99 as the current price." in normalized
+    assert "## 3.2 Retrieval Readiness" in normalized
+    assert [row.pattern for row in audit] == ["section_dotted"]
+
+
+def test_unbracketed_timestamp_transcript_uses_transcript_lane_not_b_plus_headers():
+    text = """0:00 - Shopify allows you to create an online store
+0:04 You can add products and update pricing
+0:08 The dashboard includes themes and navigation
+0:12 89.99 as the current price for the example product
+0:16 You can publish the store after reviewing settings
+0:20 This transcript keeps timestamp ranges for source display
+"""
+    parsed = _parse_local_text_document(
+        text.encode("utf-8"),
+        "shopify_vid1_full.txt",
+        "text/plain",
+    )
+
+    assert parsed is not None
+    assert parsed.source_tier == SourceTier.tier_b
+    assert parsed.source_format == "youtube_transcript"
+    assert parsed.has_structure is True
+    assert parsed.injected_headers_audit == []
+    assert any(s.element_type == "transcript_block" for s in parsed.sections)
+    assert "89.99 as the current price" in parsed.text
 
 
 def test_html_upload_defaults_to_prose_extraction_not_code_lane():

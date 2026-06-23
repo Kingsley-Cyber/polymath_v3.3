@@ -77,6 +77,47 @@ _PATTERNS: list[tuple[str, re.Pattern[str], int]] = [
 ]
 
 
+_DOTTED_PREFIX_RE = re.compile(r"^\s*(?P<prefix>\d+(?:\.\d+)+)\b")
+_DECIMAL_VALUE_RE = re.compile(r"^\d+\.\d{1,2}$")
+_PRICE_OR_MEASUREMENT_HINT_RE = re.compile(
+    r"\b(?:price|cost|discount|dollar|usd|current|sale|retail|percent|"
+    r"rating|score|version|seconds?|minutes?|hours?|views?|subscribers?)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_probable_decimal_value_line(line: str) -> bool:
+    """Reject price/timestamp/measurement prose that looks like `1.2 Heading`.
+
+    `section_dotted` exists for real section titles such as "3.2 Retrieval".
+    Transcripts and commerce tutorials often contain lines like
+    "89.99 as the current price." after timestamp cleanup; those are content,
+    not structure, and promoting them destroys retrieval evidence.
+    """
+    match = _DOTTED_PREFIX_RE.match(line)
+    if not match:
+        return False
+
+    prefix = match.group("prefix")
+    parts = prefix.split(".")
+    if len(parts) != 2:
+        return False
+
+    left, right = parts
+    if not right.isdigit():
+        return False
+
+    decimalish = _DECIMAL_VALUE_RE.match(prefix) is not None
+    large_or_clocklike = int(left) > 20 or len(right) == 2
+    return bool(decimalish and large_or_clocklike and _PRICE_OR_MEASUREMENT_HINT_RE.search(line))
+
+
+def _should_inject_header(pattern_name: str, line: str) -> bool:
+    if pattern_name == "section_dotted" and _is_probable_decimal_value_line(line):
+        return False
+    return True
+
+
 @dataclass
 class InjectedHeader:
     """One record of a synthetic header injected into the text."""
@@ -109,7 +150,7 @@ def inject_synthetic_headers(
 
         matched = False
         for name, regex, level in _PATTERNS:
-            if regex.match(stripped):
+            if regex.match(stripped) and _should_inject_header(name, stripped):
                 prefix = "#" * level
                 normalized = f"{prefix} {stripped}"
                 out_lines.append(normalized)

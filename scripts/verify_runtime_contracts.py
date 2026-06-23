@@ -188,6 +188,33 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         ),
     ),
     Requirement(
+        id="spreadsheet-ingestion-local-table",
+        description="CSV/TSV and Excel uploads route through deterministic local table parsers instead of requiring the Docling sidecar.",
+        path="backend/services/ingestion/docling_adapter.py",
+        needles=(
+            "_parse_delimited_table_document",
+            "_parse_xlsx_table_document",
+            "_TABLE_PARSE_MAX_ROWS_PER_SHEET",
+            "local_csv",
+            "local_xlsx",
+            "openpyxl",
+            "element_type=\"table\"",
+        ),
+    ),
+    Requirement(
+        id="spreadsheet-ingestion-regression-tests",
+        description="Adapter tests prove CSV and XLSX uploads parse as local table sections without calling Docling.",
+        path="backend/tests/test_docling_adapter.py",
+        needles=(
+            "test_csv_upload_parses_as_local_table_without_docling",
+            "test_xlsx_upload_parses_as_local_table_without_docling",
+            "products.csv",
+            "inventory.xlsx",
+            "Docling sidecar should not be called for CSV",
+            "Docling sidecar should not be called for XLSX",
+        ),
+    ),
+    Requirement(
         id="summary-indexing-guard",
         description="Worker tracks summary indexing separately from child-vector writes and verifies Qdrant summary points before resume-skip.",
         path="backend/services/ingestion/worker.py",

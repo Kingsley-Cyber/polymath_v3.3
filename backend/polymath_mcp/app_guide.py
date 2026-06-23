@@ -34,6 +34,18 @@ Recommended agent workflow:
    document bytes, poll polymath_get_ingest_status until complete, then verify
    with search/chat before reporting success.
 
+Ingestion profile handshake:
+- Before ingesting ambiguous files or URLs, ask the user or calling agent which
+  profile fits the content: transcript, html_article, pdf_book_manual,
+  code_or_docs, table_or_data, or general_text.
+- Ask whether parent summaries are required. If yes, create or choose a corpus
+  with the deep preset or chunk_summarization=true; balanced corpora do not
+  generate parent summaries by default.
+- After ingest, run at least one positive query using known terms from the
+  document and one unsupported/negative query. If the negative query only
+  retrieves adjacent material, report that the corpus does not establish it
+  instead of stretching nearby evidence.
+
 Evidence rules:
 - Corpus claims should come from hydrated corpus chunks.
 - Graph claims should preserve entity/fact/relation provenance where present.
@@ -129,6 +141,59 @@ GRAPH_MODES: list[dict[str, Any]] = [
 ]
 
 
+INGESTION_PROFILES: list[dict[str, Any]] = [
+    {
+        "profile": "transcript",
+        "use_for": "YouTube/video/audio transcripts, timestamped captions, meeting logs.",
+        "verification": [
+            "known spoken phrase",
+            "timestamp-range source display",
+            "unsupported topic absent from transcript",
+        ],
+    },
+    {
+        "profile": "html_article",
+        "use_for": "Web pages, scraped articles, docs pages, exported HTML.",
+        "verification": [
+            "main heading or title",
+            "body-only phrase after nav/footer removal",
+        ],
+    },
+    {
+        "profile": "pdf_book_manual",
+        "use_for": "Books, PDFs, manuals, OCR or digital page sources.",
+        "verification": [
+            "section title",
+            "page-range citation when pages exist",
+        ],
+    },
+    {
+        "profile": "code_or_docs",
+        "use_for": "Source code, API docs, README trees, technical references.",
+        "verification": [
+            "exact identifier/acronym",
+            "semantic concept query",
+        ],
+    },
+    {
+        "profile": "table_or_data",
+        "use_for": "CSV, TSV, Excel/XLSX/XLS sheets, benchmark tables, KPI exports.",
+        "verification": [
+            "column name",
+            "known row value",
+        ],
+    },
+    {
+        "profile": "general_text",
+        "use_for": "Plain prose without reliable document structure.",
+        "verification": [
+            "distinct phrase from the body",
+            "synthetic headings only when real structure is detected",
+        ],
+    },
+]
+
+
 APP_CAPABILITY_MAP: dict[str, Any] = {
     "app_name": "Polymath",
     "app_views": [
@@ -215,10 +280,12 @@ AGENT_WORKFLOWS: list[dict[str, Any]] = [
         "name": "ingest_and_verify",
         "steps": [
             "polymath_list_corpora",
+            "choose or ask for an ingestion profile and whether summaries are required",
             "polymath_create_corpus if no existing corpus fits",
             "polymath_ingest_from_url or polymath_upload_document",
             "poll polymath_get_ingest_status until complete or failed",
             "verify with polymath_search on known document terms",
+            "run one unsupported/negative query and report if the corpus does not establish it",
             "summarize with polymath_chat_query",
         ],
     },
@@ -272,11 +339,17 @@ TOOL_PLAYBOOK: list[dict[str, Any]] = [
     },
     {
         "tool": "polymath_ingest_from_url",
-        "when_to_use": "Queue public URL content for ingestion.",
+        "when_to_use": (
+            "Queue public URL content for ingestion after the ingestion profile "
+            "and summary requirement are known."
+        ),
     },
     {
         "tool": "polymath_upload_document",
-        "when_to_use": "Queue base64 document bytes for ingestion through MCP.",
+        "when_to_use": (
+            "Queue base64 document bytes for ingestion through MCP after the "
+            "ingestion profile and summary requirement are known."
+        ),
     },
     {
         "tool": "polymath_get_ingest_status",
@@ -291,8 +364,10 @@ TOOL_PLAYBOOK: list[dict[str, Any]] = [
 
 WRITE_SAFETY_RULES: list[str] = [
     "Search existing corpora before ingesting duplicate material.",
+    "Clarify ambiguous ingestion profile and summary requirements before uploading.",
     "Poll ingestion status until complete before claiming the app was updated.",
     "Verify retrieval with known terms from the ingested document.",
+    "Verify an unsupported/negative query does not get falsely presented as supported.",
     "Do not delete unless the user asked or the ingest is confirmed unwanted/failed.",
     "Never expose or request API keys through guide metadata.",
 ]
@@ -338,6 +413,7 @@ def get_app_guide(
         ],
         "retrieval_routes": deepcopy(RETRIEVAL_ROUTES),
         "graph_modes": deepcopy(GRAPH_MODES),
+        "ingestion_profiles": deepcopy(INGESTION_PROFILES),
         "app_capabilities": deepcopy(APP_CAPABILITY_MAP),
         "agent_workflows": deepcopy(AGENT_WORKFLOWS),
         "remote_agent_setup": deepcopy(REMOTE_AGENT_SETUP),
@@ -360,6 +436,7 @@ __all__ = [
     "APP_CAPABILITY_MAP",
     "AGENT_WORKFLOWS",
     "GRAPH_MODES",
+    "INGESTION_PROFILES",
     "MCP_APP_INSTRUCTIONS",
     "REMOTE_AGENT_SETUP",
     "RETRIEVAL_ROUTES",

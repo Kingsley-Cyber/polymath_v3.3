@@ -34,10 +34,14 @@ def adapter():
 def test_parser_strategy_keeps_md_txt_and_query_runtime_off_docling(adapter):
     assert adapter.parser_strategy("notes.md", "text/markdown") == "local_markdown"
     assert adapter.parser_strategy("notes.txt", "text/plain") == "local_text"
+    assert adapter.parser_strategy("products.csv", "text/csv") == "local_csv"
+    assert adapter.parser_strategy("inventory.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") == "local_spreadsheet"
     assert adapter.parser_strategy("book.pdf", "application/pdf") == "local_pdf_fast_text"
     assert adapter.parser_strategy("plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") == "local_docx"
     assert adapter.docling_sidecar_needed("notes.md", "text/markdown") is False
     assert adapter.docling_sidecar_needed("notes.txt", "text/plain") is False
+    assert adapter.docling_sidecar_needed("products.csv", "text/csv") is False
+    assert adapter.docling_sidecar_needed("inventory.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") is False
     assert adapter.docling_sidecar_needed("plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") is False
 
 
@@ -254,3 +258,71 @@ async def test_docx_with_headings_classifies_with_structure(adapter):
     # Heading text must round-trip into the section walk.
     titles = {s.text.strip() for s in result.sections if s.element_type == "section_heading"}
     assert "Quarterly Plan" in titles
+
+
+@pytest.mark.asyncio
+async def test_csv_upload_parses_as_local_table_without_docling(adapter, monkeypatch):
+    async def fail_post(*_args, **_kwargs):  # pragma: no cover - should never run
+        raise AssertionError("Docling sidecar should not be called for CSV")
+
+    monkeypatch.setattr(adapter.httpx.AsyncClient, "post", fail_post, raising=False)
+
+    raw = (
+        "Product,Price,Category\n"
+        "Hat,19.99,Apparel\n"
+        "Box2D,0,Software\n"
+    ).encode("utf-8")
+    result = await adapter.parse_document(
+        raw_bytes=raw,
+        filename="products.csv",
+        mime="text/csv",
+        do_ocr=False,
+    )
+
+    assert result.source_format == "local_csv"
+    assert result.source_tier.value == "tier_b"
+    assert result.has_structure is True
+    tables = [section for section in result.sections if section.element_type == "table"]
+    assert tables
+    assert tables[0].metadata["columns"] == ["Product", "Price", "Category"]
+    assert tables[0].metadata["row_count"] == 2
+    assert "Row 1: Product=Hat; Price=19.99; Category=Apparel" in result.text
+    assert "Row 2: Product=Box2D; Price=0; Category=Software" in result.text
+
+
+@pytest.mark.asyncio
+async def test_xlsx_upload_parses_as_local_table_without_docling(adapter, monkeypatch):
+    pytest.importorskip("openpyxl")
+    from openpyxl import Workbook
+
+    async def fail_post(*_args, **_kwargs):  # pragma: no cover - should never run
+        raise AssertionError("Docling sidecar should not be called for XLSX")
+
+    monkeypatch.setattr(adapter.httpx.AsyncClient, "post", fail_post, raising=False)
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Inventory"
+    sheet.append(["Product", "Price", "Category"])
+    sheet.append(["Hat", 19.99, "Apparel"])
+    sheet.append(["Box2D", 0, "Software"])
+    buf = io.BytesIO()
+    workbook.save(buf)
+
+    result = await adapter.parse_document(
+        raw_bytes=buf.getvalue(),
+        filename="inventory.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        do_ocr=False,
+    )
+
+    assert result.source_format == "local_xlsx"
+    assert result.source_tier.value == "tier_b"
+    assert result.has_structure is True
+    tables = [section for section in result.sections if section.element_type == "table"]
+    assert tables
+    assert tables[0].metadata["sheet_name"] == "Inventory"
+    assert tables[0].metadata["columns"] == ["Product", "Price", "Category"]
+    assert tables[0].metadata["row_count"] == 2
+    assert "Section: inventory.xlsx > Inventory" in result.text
+    assert "Row 1: Product=Hat; Price=19.99; Category=Apparel" in result.text

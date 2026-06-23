@@ -1611,9 +1611,12 @@ async def polymath_ingest_from_url(
     """Fetch a document from a public URL and queue it for ingestion.
 
     Use this when the agent has discovered a file (arXiv PDF, GitHub raw
-    blob, etc.) and wants Polymath to learn from it. The server downloads
-    the file synchronously, then kicks off the async ingestion worker.
-    Use polymath_get_ingest_status to poll completion.
+    blob, transcript text, exported HTML, etc.) and wants Polymath to learn
+    from it. Before calling on ambiguous content, ask the user or caller for
+    the ingestion profile described by polymath_app_guide and whether parent
+    summaries are required. The server downloads the file synchronously, then
+    kicks off the async ingestion worker. Use polymath_get_ingest_status to
+    poll completion.
 
     Safety:
       - Only http(s) URLs are accepted.
@@ -1690,9 +1693,12 @@ async def polymath_upload_document(
     """Upload a document body (base64-encoded) and queue it for ingestion.
 
     Use this when the agent has the file bytes locally and there's no
-    fetchable URL. The base64 wire format is the cost of routing through
-    MCP's JSON-RPC transport — files larger than ~30 MB raw should go
-    through the multipart HTTP endpoint to avoid the 33% expansion.
+    fetchable URL. Before calling on ambiguous content, ask the user or
+    caller for the ingestion profile described by polymath_app_guide and
+    whether parent summaries are required. The base64 wire format is the
+    cost of routing through MCP's JSON-RPC transport — files larger than
+    ~30 MB raw should go through the multipart HTTP endpoint to avoid the
+    33% expansion.
 
     Args:
         corpus_id: Target corpus.

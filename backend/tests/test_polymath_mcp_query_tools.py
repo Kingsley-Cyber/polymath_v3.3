@@ -74,9 +74,18 @@ async def test_mcp_app_guide_exposes_app_routes_and_update_workflow():
     route_names = {route["ui_name"] for route in result["retrieval_routes"]}
     workflow_names = {workflow["name"] for workflow in result["agent_workflows"]}
     capability_tools = result["app_capabilities"]["core_capabilities"]
+    profile_names = {profile["profile"] for profile in result["ingestion_profiles"]}
+    ingest_steps = next(
+        workflow["steps"]
+        for workflow in result["agent_workflows"]
+        if workflow["name"] == "ingest_and_verify"
+    )
 
     assert route_names == {"Fast Search", "Hybrid Search", "Graph Augmentation"}
     assert "ingest_and_verify" in workflow_names
+    assert {"transcript", "html_article", "pdf_book_manual", "general_text"} <= profile_names
+    assert any("ingestion profile" in step for step in ingest_steps)
+    assert any("unsupported/negative query" in step for step in ingest_steps)
     assert "polymath_chat_query" in capability_tools["answer"]
     assert "polymath_graph_query" in capability_tools["graph"]
     assert "polymath_upload_document" in capability_tools["update_knowledge_base"]

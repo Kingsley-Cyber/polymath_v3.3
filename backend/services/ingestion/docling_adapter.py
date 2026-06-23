@@ -22,7 +22,8 @@ from __future__ import annotations
 import logging
 import os
 import re
-from io import BytesIO
+import csv
+from io import BytesIO, StringIO
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -52,8 +53,16 @@ _HTML_EXTS = {".html", ".htm", ".xhtml"}
 _DOCX_MIMES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
+_CSV_MIMES = {"text/csv", "application/csv", "text/tab-separated-values"}
+_CSV_EXTS = {".csv", ".tsv"}
+_SPREADSHEET_MIMES = {
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-excel.sheet.macroenabled.12",
+}
+_SPREADSHEET_EXTS = {".xlsx", ".xlsm", ".xltx", ".xltm", ".xls"}
 _BINARY_DOC_EXTS = {
-    ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".epub", ".odt",
+    ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".xlsm", ".epub", ".odt",
     ".ods", ".odp", ".rtf", ".msg", ".eml",
 }
 # Code lane Phase 1 — extension → tree-sitter language tag. Files matching
@@ -140,6 +149,8 @@ _FAST_PDF_MIN_TOTAL_CHARS = 1200
 _FAST_PDF_MIN_AVG_CHARS_PER_PAGE = 80
 _FAST_PDF_MIN_NONEMPTY_PAGE_RATIO = 0.25
 _FAST_PDF_MAX_REPLACEMENT_RATIO = 0.03
+_TABLE_PARSE_MAX_SHEETS = int(os.getenv("TABLE_PARSE_MAX_SHEETS", "20"))
+_TABLE_PARSE_MAX_ROWS_PER_SHEET = int(os.getenv("TABLE_PARSE_MAX_ROWS_PER_SHEET", "5000"))
 
 
 def _looks_like_pdf(filename: str, mime: str) -> bool:
@@ -222,6 +233,14 @@ def _looks_like_docx(filename: str, mime: str) -> bool:
     return (mime or "").lower() in _DOCX_MIMES or _extension(filename) == ".docx"
 
 
+def _looks_like_csv(filename: str, mime: str) -> bool:
+    return (mime or "").lower() in _CSV_MIMES or _extension(filename) in _CSV_EXTS
+
+
+def _looks_like_spreadsheet(filename: str, mime: str) -> bool:
+    return (mime or "").lower() in _SPREADSHEET_MIMES or _extension(filename) in _SPREADSHEET_EXTS
+
+
 def _looks_like_code(filename: str) -> bool:
     basename = Path(filename or "").name.lower()
     return basename in _CODE_FILENAME_TO_LANGUAGE or _extension(filename) in _CODE_EXT_TO_LANGUAGE
@@ -238,6 +257,8 @@ def docling_sidecar_needed(filename: str, mime: str) -> bool:
     if _looks_like_html(filename, mime):
         return False
     if _looks_like_docx(filename, mime):
+        return False
+    if _looks_like_csv(filename, mime) or _looks_like_spreadsheet(filename, mime):
         return False
     if _looks_like_plain_text(filename, mime):
         return False
@@ -256,6 +277,10 @@ def parser_strategy(filename: str, mime: str) -> str:
         return "local_html"
     if _looks_like_docx(filename, mime):
         return "local_docx"
+    if _looks_like_csv(filename, mime):
+        return "local_csv"
+    if _looks_like_spreadsheet(filename, mime):
+        return "local_spreadsheet"
     if _looks_like_plain_text(filename, mime):
         return "local_text"
     return "docling_sidecar"
@@ -347,7 +372,9 @@ _TRANSCRIPT_HEADER_RE = re.compile(
     re.IGNORECASE,
 )
 _TRANSCRIPT_SEGMENT_RE = re.compile(
-    r"^\s*\[(?P<time>(?:\d+:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?)\]\s*(?P<text>.+?)\s*$"
+    r"^\s*(?:\[(?P<bracket_time>(?:\d+:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?)\]"
+    r"|(?P<plain_time>(?:\d+:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?))"
+    r"\s*(?:[-–—]\s*)?(?P<text>.+?)\s*$"
 )
 
 
@@ -381,17 +408,19 @@ def _parse_transcript_text_document(text: str, filename: str) -> DoclingParseRes
     mostly `URL`/`Duration`/`Segments` metadata while preserving time ranges
     for source display and later citation jumps.
     """
-    if not text or "[" not in text:
+    if not text or not re.search(r"(?:^|\n)\s*(?:\[?(?:\d+:)?\d{1,2}:\d{2})", text):
         return None
 
     headers: dict[str, str] = {}
     segments: list[dict[str, str]] = []
     seen_segment = False
+    content_lines = 0
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line:
             continue
+        content_lines += 1
 
         match = _TRANSCRIPT_SEGMENT_RE.match(line)
         if match:
@@ -400,7 +429,9 @@ def _parse_transcript_text_document(text: str, filename: str) -> DoclingParseRes
             if spoken:
                 segments.append(
                     {
-                        "time": match.group("time").replace(",", "."),
+                        "time": (
+                            match.group("bracket_time") or match.group("plain_time")
+                        ).replace(",", "."),
                         "text": spoken,
                     }
                 )
@@ -422,6 +453,7 @@ def _parse_transcript_text_document(text: str, filename: str) -> DoclingParseRes
             segments[-1]["text"] = f"{segments[-1]['text']} {continuation}".strip()
 
     source_hint = f" {headers.get('source', '')} {headers.get('url', '')} {filename} ".lower()
+    timestamp_density = len(segments) / max(content_lines, 1)
     looks_like_transcript = (
         len(segments) >= 3
         and (
@@ -430,6 +462,7 @@ def _parse_transcript_text_document(text: str, filename: str) -> DoclingParseRes
             or "youtube.com" in source_hint
             or "segments" in headers
             or "duration" in headers
+            or (len(segments) >= 5 and timestamp_density >= 0.60)
         )
     )
     if not looks_like_transcript:
@@ -618,6 +651,237 @@ def _linearize_markdown_table(
     return "\n".join(lines).strip()
 
 
+def _clean_table_cell(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    return _scrub_inline_links(re.sub(r"\s+", " ", text)).strip()
+
+
+def _table_columns_and_rows(
+    rows: list[list[str]],
+    *,
+    has_header: bool = True,
+) -> tuple[list[str], list[list[str]]]:
+    cleaned_rows = [
+        [_clean_table_cell(cell) for cell in row]
+        for row in rows
+        if any(_clean_table_cell(cell) for cell in row)
+    ]
+    if not cleaned_rows:
+        return [], []
+
+    width = max(len(row) for row in cleaned_rows)
+    padded = [row + [""] * (width - len(row)) for row in cleaned_rows]
+
+    if has_header and padded:
+        raw_columns = padded[0]
+        data_rows = padded[1:]
+    else:
+        raw_columns = []
+        data_rows = padded
+
+    seen: dict[str, int] = {}
+    columns: list[str] = []
+    for idx in range(width):
+        name = _clean_table_cell(raw_columns[idx] if idx < len(raw_columns) else "")
+        if not name:
+            name = f"column_{idx + 1}"
+        count = seen.get(name.lower(), 0) + 1
+        seen[name.lower()] = count
+        columns.append(name if count == 1 else f"{name}_{count}")
+    return columns, data_rows
+
+
+def _tabular_result(
+    *,
+    filename: str,
+    source_format: str,
+    table_sections: list[Section],
+    h1_count: int = 1,
+) -> DoclingParseResult:
+    title = filename or "Table Upload"
+    sections: list[Section] = [
+        Section(
+            heading_path=[title],
+            text=title,
+            element_type="section_heading",
+            level=1,
+        )
+    ]
+    sections.extend(table_sections)
+    text = "\n\n".join(section.text for section in sections if section.text)
+    return DoclingParseResult(
+        text=text,
+        markdown=text,
+        sections=sections,
+        pages=None,
+        has_structure=bool(table_sections),
+        source_tier=SourceTier.tier_b if table_sections else SourceTier.tier_c,
+        h1_count=h1_count if table_sections else 0,
+        h2_count=0,
+        source_format=source_format,
+        filename=filename,
+    )
+
+
+def _parse_delimited_table_document(
+    raw_bytes: bytes,
+    filename: str,
+    mime: str,
+) -> DoclingParseResult | None:
+    if not _looks_like_csv(filename, mime):
+        return None
+
+    text = raw_bytes.decode("utf-8-sig", errors="replace")
+    ext = _extension(filename)
+    delimiter = "\t" if ext == ".tsv" or (mime or "").lower() == "text/tab-separated-values" else ","
+    try:
+        sniffed = csv.Sniffer().sniff(text[:8192], delimiters=",\t;|")
+        delimiter = sniffed.delimiter
+    except Exception:
+        pass
+    try:
+        has_header = csv.Sniffer().has_header(text[:8192])
+    except Exception:
+        has_header = True
+
+    rows = list(csv.reader(StringIO(text), delimiter=delimiter))
+    columns, data_rows = _table_columns_and_rows(rows, has_header=has_header)
+    if not columns and not data_rows:
+        return None
+
+    source_format = "local_tsv" if delimiter == "\t" else "local_csv"
+    table_text = _linearize_markdown_table(
+        heading_path=[filename] if filename else [],
+        caption=f"{source_format.replace('_', ' ').title()} {filename}".strip(),
+        table_index=1,
+        columns=columns,
+        rows=data_rows,
+    )
+    table = Section(
+        heading_path=[filename] if filename else [],
+        text=table_text,
+        element_type="table",
+        metadata={
+            "table_index": 1,
+            "caption": filename,
+            "columns": columns,
+            "row_count": len(data_rows),
+            "delimiter": delimiter,
+            "source_format": source_format,
+        },
+    )
+    return _tabular_result(
+        filename=filename,
+        source_format=source_format,
+        table_sections=[table],
+    )
+
+
+def _parse_xlsx_table_document(
+    raw_bytes: bytes,
+    filename: str,
+    mime: str,
+) -> DoclingParseResult | None:
+    ext = _extension(filename)
+    if not _looks_like_spreadsheet(filename, mime) or ext == ".xls":
+        return None
+    try:
+        from openpyxl import load_workbook
+    except Exception:
+        return None
+
+    try:
+        workbook = load_workbook(BytesIO(raw_bytes), read_only=True, data_only=True)
+    except Exception as exc:
+        logger.warning("openpyxl failed for %s: %s", filename, exc)
+        return None
+
+    table_sections: list[Section] = []
+    for table_index, sheet in enumerate(workbook.worksheets[:_TABLE_PARSE_MAX_SHEETS], start=1):
+        rows: list[list[str]] = []
+        truncated = False
+        for row_idx, row in enumerate(sheet.iter_rows(values_only=True), start=1):
+            if row_idx > _TABLE_PARSE_MAX_ROWS_PER_SHEET:
+                truncated = True
+                break
+            cleaned = [_clean_table_cell(cell) for cell in row]
+            if any(cleaned):
+                rows.append(cleaned)
+        columns, data_rows = _table_columns_and_rows(rows, has_header=True)
+        if not columns and not data_rows:
+            continue
+        heading_path = [filename, sheet.title] if filename else [sheet.title]
+        table_text = _linearize_markdown_table(
+            heading_path=heading_path,
+            caption=f"Sheet {sheet.title}",
+            table_index=table_index,
+            columns=columns,
+            rows=data_rows,
+        )
+        table_sections.append(
+            Section(
+                heading_path=heading_path,
+                text=table_text,
+                element_type="table",
+                metadata={
+                    "table_index": table_index,
+                    "caption": f"Sheet {sheet.title}",
+                    "sheet_name": sheet.title,
+                    "columns": columns,
+                    "row_count": len(data_rows),
+                    "source_format": "local_xlsx",
+                    "truncated": truncated,
+                    "max_rows_per_sheet": _TABLE_PARSE_MAX_ROWS_PER_SHEET,
+                },
+            )
+        )
+
+    try:
+        workbook.close()
+    except Exception:
+        pass
+
+    if not table_sections:
+        return None
+    return _tabular_result(
+        filename=filename,
+        source_format="local_xlsx",
+        table_sections=table_sections,
+    )
+
+
+def _parse_legacy_spreadsheet_document(
+    raw_bytes: bytes,
+    filename: str,
+    mime: str,
+) -> DoclingParseResult | None:
+    if not _looks_like_spreadsheet(filename, mime):
+        return None
+    from services.ingestion.format_router import route
+
+    decoded = route(raw_bytes, filename=filename, mime_hint=mime)
+    text = (decoded.text or "").strip()
+    if not text:
+        return None
+    section = Section(
+        heading_path=[filename] if filename else [],
+        text=text,
+        element_type="table",
+        metadata={
+            "table_index": 1,
+            "caption": filename,
+            "source_format": "local_spreadsheet_unstructured",
+        },
+    )
+    return _tabular_result(
+        filename=filename,
+        source_format="local_spreadsheet_unstructured",
+        table_sections=[section],
+    )
+
+
 def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
     """Local Markdown section walker, code-fence-aware.
 
@@ -751,6 +1015,18 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
     Local parsing keeps default Docker startup API-first. Docling remains an
     explicit profile for formats that truly need layout-aware conversion.
     """
+    csv_result = _parse_delimited_table_document(raw_bytes, filename, mime)
+    if csv_result is not None:
+        return csv_result
+
+    xlsx_result = _parse_xlsx_table_document(raw_bytes, filename, mime)
+    if xlsx_result is not None:
+        return xlsx_result
+
+    legacy_sheet_result = _parse_legacy_spreadsheet_document(raw_bytes, filename, mime)
+    if legacy_sheet_result is not None:
+        return legacy_sheet_result
+
     if _looks_like_html(filename, mime):
         from services.ingestion.format_router import route
 
