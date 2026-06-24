@@ -1147,7 +1147,7 @@ export async function getEntityRelations(
 /**
  * GET /api/settings
  * Get global settings for the current user.
- * Infrastructure is read-only from .env, chat + retrieval are user-mutable.
+ * Infrastructure is read-only from .env; app/runtime sections are user-mutable.
  */
 export async function getGlobalSettings(): Promise<GlobalSettingsResponse> {
   return fetchJSON("/settings");
@@ -1155,7 +1155,7 @@ export async function getGlobalSettings(): Promise<GlobalSettingsResponse> {
 
 /**
  * PUT /api/settings
- * Partial update of global settings (chat + retrieval sections only).
+ * Partial update of global settings.
  */
 export async function updateGlobalSettings(
   payload: GlobalSettingsUpdate,

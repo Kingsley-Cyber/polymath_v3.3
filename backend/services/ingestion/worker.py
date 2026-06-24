@@ -640,6 +640,7 @@ async def _run_ghosts_parallel(
     children: list,
     doc_id: str,
     corpus_id: str,
+    user_id: str | None = None,
     model: str,
     filename: str | None = None,
     db: AsyncIOMotorDatabase,
@@ -850,18 +851,44 @@ async def _run_ghosts_parallel(
             for p in body_parents
         ]
         pool = _build_ghost_pool(config.summary_models)
+        summary_max_concurrent: int | None = None
+        max_summary_tokens = config.max_summary_tokens
+        if not pool or user_id:
+            try:
+                from services.settings import settings_service
+
+                runtime_ingestion = await settings_service.get_runtime_ingestion_settings(user_id)
+                runtime_summary = runtime_ingestion.summary
+                summary_max_concurrent = runtime_summary.max_concurrent
+                default_tokens = IngestionConfig.model_fields["max_summary_tokens"].default
+                if (
+                    max_summary_tokens == default_tokens
+                    and runtime_summary.max_summary_tokens != default_tokens
+                ):
+                    max_summary_tokens = runtime_summary.max_summary_tokens
+                if not pool and runtime_summary.summary_models:
+                    pool = _build_ghost_pool(runtime_summary.summary_models)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Ghost A global summary settings unavailable doc=%s corpus=%s: %s",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    exc,
+                )
         logger.info(
-            "Ghost A start doc=%s corpus=%s parents=%d pool=%d",
+            "Ghost A start doc=%s corpus=%s parents=%d pool=%d global_cap=%s",
             doc_id[:12],
             corpus_id[:8],
             len(tasks),
             len(pool) or 1,
+            summary_max_concurrent or "-",
         )
         results = await summarize_parents(
             tasks,
-            max_summary_tokens=config.max_summary_tokens,
+            max_summary_tokens=max_summary_tokens,
             pool=pool,
             model=model,
+            global_max_concurrent=summary_max_concurrent,
         )
         if len(results) < len(tasks):
             if not results and tasks:
@@ -2485,6 +2512,7 @@ async def run_ingest_job(
             children=children,
             doc_id=doc_id,
             corpus_id=corpus_id,
+            user_id=user_id,
             filename=filename,
             model=model,
             db=db,

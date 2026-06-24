@@ -503,6 +503,48 @@ class ExtractionSettings(BaseModel):
     endpoints: list[ExtractionEndpoint] = Field(default_factory=list)
 
 
+class GlobalIngestionSummarySettings(BaseModel):
+    """Global defaults for Ghost A parent summarization.
+
+    Per-corpus ``summary_models`` still win when explicitly configured. This
+    section exists so a fresh install can define one local/cloud summary pool
+    once, have new corpora inherit it, and let the worker apply a system-wide
+    concurrency budget without hardcoding provider details in the frontend.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Default value for chunk_summarization on newly created corpora.",
+    )
+    max_summary_tokens: int = Field(
+        default=175,
+        ge=32,
+        le=1024,
+        description="Default Ghost A output token cap for new corpora.",
+    )
+    max_concurrent: int = Field(
+        default=4,
+        ge=1,
+        le=64,
+        description="Global cap on concurrent Ghost A summary calls.",
+    )
+    summary_models: list[_legacy.ModelProfileRef] = Field(
+        default_factory=list,
+        description=(
+            "Default Ghost A model pool. Entries may target local or cloud "
+            "OpenAI-compatible providers and are encrypted at rest."
+        ),
+    )
+
+
+class GlobalIngestionSettings(BaseModel):
+    """Mutable global ingestion defaults."""
+
+    summary: GlobalIngestionSummarySettings = Field(
+        default_factory=GlobalIngestionSummarySettings
+    )
+
+
 class GlobalSettings(BaseModel):
     infrastructure: _legacy.InfrastructureSettings = Field(
         default_factory=_legacy.InfrastructureSettings
@@ -514,6 +556,7 @@ class GlobalSettings(BaseModel):
     )
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
+    ingestion: GlobalIngestionSettings = Field(default_factory=GlobalIngestionSettings)
 
 
 class GlobalSettingsResponse(BaseModel):
@@ -526,6 +569,7 @@ class GlobalSettingsUpdate(BaseModel):
     modal: _legacy.ModalDeploySettings | None = None
     models: ModelsConfig | None = None
     extraction: ExtractionSettings | None = None
+    ingestion: GlobalIngestionSettings | None = None
 
 
 class SynthesisSource(BaseModel):

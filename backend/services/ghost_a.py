@@ -115,11 +115,13 @@ async def summarize_parents(
     *,
     pool: list[dict] | None = None,
     model: str | None = None,
+    global_max_concurrent: int | None = None,
 ) -> list[SummaryResult]:
     """
     Summarize parent chunks in parallel, round-robining tasks across the
-    `pool`. Each pool entry gets its own asyncio.Semaphore sized by
-    max_concurrent, so overall throughput = sum(entry.max_concurrent).
+    `pool`. Each pool entry gets worker slots sized by max_concurrent. When
+    ``global_max_concurrent`` is provided, the total active slots across all
+    lanes are capped by that system budget.
 
     pool entries (already decrypted at the worker layer):
         {
@@ -156,6 +158,40 @@ async def summarize_parents(
                 "extra_params": {},
             }
         ]
+
+    cap_logged = False
+
+    def _lane_slot_plan(*, log_cap: bool = False) -> list[int]:
+        nonlocal cap_logged
+        requested = [max(1, int(entry.get("max_concurrent") or 1)) for entry in pool]
+        for idx in disabled_lanes:
+            if 0 <= idx < len(requested):
+                requested[idx] = 0
+        if not global_max_concurrent:
+            return requested
+        cap_total = max(1, int(global_max_concurrent))
+        requested_total = sum(requested)
+        if requested_total <= cap_total:
+            return requested
+
+        plan = [0 for _ in requested]
+        remaining = cap_total
+        while remaining > 0 and any(plan[i] < requested[i] for i in range(len(requested))):
+            for idx in range(len(requested)):
+                if remaining <= 0:
+                    break
+                if plan[idx] < requested[idx]:
+                    plan[idx] += 1
+                    remaining -= 1
+        if log_cap and not cap_logged:
+            cap_logged = True
+            logger.info(
+                "GHOST A concurrency capped requested=%d active=%d lanes=%d",
+                requested_total,
+                sum(plan),
+                len(pool),
+            )
+        return plan
 
     # Phase K — WORK-STEALING POOL. See ghost_b.py for full rationale.
     # Shared task queue; one worker per lane slot; workers pull as fast
@@ -296,18 +332,24 @@ async def summarize_parents(
 
     async def _run_enabled_workers() -> None:
         workers: list[asyncio.Task] = []
+        lane_slots = _lane_slot_plan(log_cap=True)
         for pool_idx, entry in enumerate(pool):
             if pool_idx in disabled_lanes:
                 continue
-            slots = int(entry.get("max_concurrent") or 1) or 1
+            slots = lane_slots[pool_idx] if pool_idx < len(lane_slots) else 0
             for _ in range(slots):
                 workers.append(asyncio.create_task(_lane_worker(pool_idx)))
         if workers:
             await asyncio.gather(*workers, return_exceptions=False)
 
     def _enabled_lane_count() -> int:
+        lane_slots = _lane_slot_plan()
         return sum(
-            1 for pool_idx in range(len(pool)) if pool_idx not in disabled_lanes
+            1
+            for pool_idx in range(len(pool))
+            if pool_idx not in disabled_lanes
+            and pool_idx < len(lane_slots)
+            and lane_slots[pool_idx] > 0
         )
 
     async def _drain_pending_queue() -> None:

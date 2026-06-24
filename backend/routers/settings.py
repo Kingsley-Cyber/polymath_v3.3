@@ -6,7 +6,7 @@ Architecture: Settings split into Global (system-wide, mutable) and Per-Corpus
 
 Endpoints:
   GET  /api/settings                                 → GlobalSettingsResponse
-  PUT  /api/settings                                 → partial update (chat + retrieval)
+  PUT  /api/settings                                 → partial update (mutable settings)
   POST /api/settings/infrastructure/test             → test all 8 services
   POST /api/settings/infrastructure/test/{service}   → test single service
 """
@@ -200,7 +200,7 @@ async def update_settings(
     """
     Partial update of global settings.
 
-    Only 'chat' and 'retrieval' sections are mutable.
+    Chat, retrieval, modal, models, extraction, and ingestion defaults are mutable.
     'infrastructure' is always read from config.py (env vars) — cannot be changed via API.
     Omitted sections are left unchanged.
     """

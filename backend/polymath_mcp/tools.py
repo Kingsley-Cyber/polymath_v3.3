@@ -1453,6 +1453,7 @@ async def polymath_create_corpus(
     use_neo4j: bool | None = None,
     chunk_summarization: bool | None = None,
     embedding_model_id: str | None = None,
+    use_summary_settings: bool = True,
 ) -> dict[str, Any]:
     """Create a new Polymath corpus owned by the authenticated user.
 
@@ -1471,6 +1472,9 @@ async def polymath_create_corpus(
             None = honor preset.
         embedding_model_id: Override the embedder model. Defaults to server
             default. Once any document is ingested this is LOCKED.
+        use_summary_settings: When True and chunk_summarization is omitted,
+            Settings → Ingestion → Summary can promote the default balanced
+            create path to deep/summary-enabled for agents.
 
     Returns:
         {"corpus_id", "name", "description", "preset", "use_neo4j",
@@ -1488,6 +1492,17 @@ async def polymath_create_corpus(
     # rewrites toggles to match the preset for 'fast'/'balanced'/'deep'; the
     # explicit overrides below survive when preset='custom'.
     config_kwargs: dict[str, Any] = {"preset": preset}
+    if chunk_summarization is None and use_summary_settings and preset in {"balanced", "custom"}:
+        try:
+            from services.settings import settings_service
+
+            summary_defaults = (await settings_service.get_runtime_ingestion_settings(uid)).summary
+            if summary_defaults.enabled:
+                config_kwargs["chunk_summarization"] = True
+                if preset == "balanced":
+                    config_kwargs["preset"] = "deep"
+        except Exception:
+            pass
     if use_neo4j is not None:
         config_kwargs["use_neo4j"] = use_neo4j
     if chunk_summarization is not None:

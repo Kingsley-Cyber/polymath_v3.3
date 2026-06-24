@@ -6,7 +6,8 @@ Bootstrap: on first read for a user, seeds defaults from config.py so the
 frontend always gets a complete GlobalSettings object.
 
 Architecture (see .Agent/Plan/SETTINGS_ARCHITECTURE.md):
-  - Global settings = system-wide, mutable anytime (Infrastructure + Chat + Retrieval)
+  - Global settings = system-wide, mutable anytime (chat, retrieval, models,
+    extraction endpoints, and ingestion defaults; infrastructure remains env-backed)
   - Per-corpus settings = IngestionConfig, frozen after first ingest (handled by ingestion_service)
 
 Sensitive fields (API keys, service URLs) come from config.py env vars.
@@ -16,6 +17,7 @@ Infrastructure is always read from config.py at runtime.
 """
 
 import logging
+import copy
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
@@ -27,6 +29,8 @@ from models.schemas import (
     ExtractionEndpoint,
     ExtractionSettings,
     GlobalSettings,
+    GlobalIngestionSettings,
+    GlobalIngestionSummarySettings,
     InfrastructureSettings,
     ModalDeploySettings,
     ModelsConfig,
@@ -43,7 +47,7 @@ _MASK_SENTINEL = "[set]"
 _DEFAULT_CHAT_ENTRY_ID = "system-default-chat"
 
 # Sections that users CAN modify via PUT /api/settings
-_MUTABLE_SECTIONS = {"chat", "retrieval", "modal", "models", "extraction"}
+_MUTABLE_SECTIONS = {"chat", "retrieval", "modal", "models", "extraction", "ingestion"}
 
 # Sections that are always read from config.py (env vars) — never stored in MongoDB
 _IMMUTABLE_SECTIONS = {"infrastructure"}
@@ -179,6 +183,14 @@ class SettingsService:
             ),
             modal=ModalDeploySettings(),
             extraction=self._extraction_defaults_from_env(),
+            ingestion=GlobalIngestionSettings(
+                summary=GlobalIngestionSummarySettings(
+                    enabled=False,
+                    max_summary_tokens=c.SUMMARY_MAX_TOKENS,
+                    max_concurrent=c.SUMMARY_MAX_CONCURRENT,
+                    summary_models=[],
+                )
+            ),
         )
 
     def _extraction_defaults_from_env(self) -> ExtractionSettings:
@@ -219,6 +231,118 @@ class SettingsService:
                 logger.warning("get_system_extraction fell back to env: %s", exc)
         return self._extraction_defaults_from_env()
 
+    @staticmethod
+    def _mask_ingestion_keys_in_place(ingestion_raw: dict | None) -> None:
+        """Mask settings-level Ghost A API keys before returning to the UI."""
+        if not ingestion_raw:
+            return
+        summary = ingestion_raw.get("summary") or {}
+        pool = summary.get("summary_models") or []
+        for entry in pool:
+            if isinstance(entry, dict):
+                entry["api_key"] = _MASK_SENTINEL if entry.get("api_key") else None
+
+    @staticmethod
+    def _decrypt_ingestion_keys_in_place(ingestion_raw: dict | None) -> None:
+        """Decrypt settings-level Ghost A API keys for backend runtime use."""
+        if not ingestion_raw:
+            return
+        from services.secrets import decrypt
+
+        summary = ingestion_raw.get("summary") or {}
+        pool = summary.get("summary_models") or []
+        for entry in pool:
+            if not isinstance(entry, dict):
+                continue
+            raw_key = entry.get("api_key")
+            if raw_key:
+                plaintext = decrypt(raw_key)
+                entry["api_key"] = plaintext if plaintext is not None else raw_key
+
+    @staticmethod
+    def _encrypt_ingestion_keys_in_place(
+        ingestion_raw: dict,
+        existing_ingestion_raw: dict | None = None,
+    ) -> None:
+        """Encrypt settings-level Ghost A pool keys before Mongo persistence.
+
+        ``"[set]"`` and blank values preserve the existing ciphertext by index,
+        matching corpus-level ``summary_models`` update semantics.
+        """
+        from services.secrets import decrypt, encrypt
+
+        summary = ingestion_raw.get("summary") or {}
+        pool = summary.get("summary_models") or []
+        existing_summary = (existing_ingestion_raw or {}).get("summary") or {}
+        existing_pool = existing_summary.get("summary_models") or []
+
+        def _enc(new_val, existing_val):
+            if not new_val or new_val == _MASK_SENTINEL:
+                return existing_val
+            if isinstance(new_val, str) and decrypt(new_val) is not None:
+                return new_val
+            return encrypt(new_val)
+
+        for idx, entry in enumerate(pool):
+            if not isinstance(entry, dict):
+                continue
+            existing_entry = (
+                existing_pool[idx]
+                if idx < len(existing_pool) and isinstance(existing_pool[idx], dict)
+                else {}
+            )
+            entry["api_key"] = _enc(entry.get("api_key"), existing_entry.get("api_key"))
+
+    async def get_runtime_ingestion_settings(
+        self,
+        user_id: str | None = None,
+    ) -> GlobalIngestionSettings:
+        """Return ingestion settings with plaintext keys for backend-only use.
+
+        When ``user_id`` is omitted the worker reads the first persisted
+        settings document that contains an ingestion section, which matches the
+        existing single-admin pattern used by system Modal/extraction settings.
+        """
+        defaults = self._defaults().ingestion
+        if self._db is None:
+            return defaults
+
+        try:
+            query = {"user_id": user_id} if user_id else {"ingestion": {"$exists": True}}
+            doc = await self._db["settings"].find_one(query)
+            raw = copy.deepcopy((doc or {}).get("ingestion") or {})
+            if not raw:
+                return defaults
+            self._decrypt_ingestion_keys_in_place(raw)
+            return GlobalIngestionSettings(**raw)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_runtime_ingestion_settings fell back to defaults: %s", exc)
+            return defaults
+
+    async def update_ingestion_settings(
+        self,
+        user_id: str,
+        section_data: dict[str, Any],
+    ) -> GlobalIngestionSettings:
+        """Persist global ingestion defaults with encrypted summary API keys."""
+        incoming = GlobalIngestionSettings(**section_data)
+        doc = (
+            await self._db["settings"].find_one({"user_id": user_id})
+            if self._db is not None
+            else None
+        )
+        existing = copy.deepcopy((doc or {}).get("ingestion") or {})
+        to_write = incoming.model_dump()
+        self._encrypt_ingestion_keys_in_place(to_write, existing)
+        await self._db["settings"].update_one(
+            {"user_id": user_id},
+            {"$set": {"ingestion": to_write}},
+            upsert=True,
+        )
+        masked = copy.deepcopy(to_write)
+        self._mask_ingestion_keys_in_place(masked)
+        return GlobalIngestionSettings(**masked)
+
     async def get_settings(self, user_id: str) -> GlobalSettings:
         """
         Get global settings for a user.
@@ -251,6 +375,7 @@ class SettingsService:
                     "user_id": user_id,
                     "chat": defaults.chat.model_dump(),
                     "retrieval": defaults.retrieval.model_dump(),
+                    "ingestion": defaults.ingestion.model_dump(),
                 }
             )
             logger.info("Settings bootstrapped for user %s from config.py", user_id)
@@ -303,6 +428,14 @@ class SettingsService:
             else self._extraction_defaults_from_env()
         )
 
+        ingestion_raw = copy.deepcopy(doc.get("ingestion") or {})
+        self._mask_ingestion_keys_in_place(ingestion_raw)
+        ingestion_cfg = (
+            GlobalIngestionSettings(**ingestion_raw)
+            if ingestion_raw
+            else self._defaults().ingestion
+        )
+
         result = GlobalSettings(
             infrastructure=infrastructure,
             chat=chat,
@@ -310,6 +443,7 @@ class SettingsService:
             modal=modal_cfg,
             models=models_cfg,
             extraction=extraction_cfg,
+            ingestion=ingestion_cfg,
         )
         # Phase 24 perf — cache the assembled result
         self._settings_cache[user_id] = (now, result)
@@ -770,7 +904,7 @@ class SettingsService:
         """
         Partial update of global settings.
 
-        Only 'chat' and 'retrieval' sections are mutable.
+        Chat, retrieval, modal, models, extraction, and ingestion defaults are mutable.
         'infrastructure' is always read from config.py (env vars).
         """
         if self._db is None:
@@ -794,12 +928,15 @@ class SettingsService:
                 ModalDeploySettings(**section_data)
             elif section_name == "extraction":
                 ExtractionSettings(**section_data)
+            elif section_name == "ingestion":
+                await self.update_ingestion_settings(user_id, section_data)
             elif section_name == "models":
                 # Route through update_models so ciphertext handling + ref
                 # validation run. Remove from safe_patch so the blind $set
                 # below doesn't clobber the resolved ciphertext.
                 await self.update_models(user_id, section_data)
         safe_patch.pop("models", None)
+        safe_patch.pop("ingestion", None)
 
         if safe_patch:
             await self._db["settings"].update_one(

@@ -633,6 +633,77 @@ class IngestionService:
             out.append(data)
         return out
 
+    @staticmethod
+    async def _apply_global_summary_defaults(
+        *,
+        user_id: str,
+        ingestion_config: IngestionConfig,
+    ) -> IngestionConfig:
+        """Fill empty Ghost A defaults from Settings → Ingestion.
+
+        Per-corpus settings remain authoritative when supplied. This only fills
+        the common fresh-install/agent path where the client sends an otherwise
+        valid config with an empty ``summary_models`` pool.
+        """
+        try:
+            from services.settings import settings_service
+
+            global_ingestion = await settings_service.get_runtime_ingestion_settings(user_id)
+        except Exception as exc:  # noqa: BLE001 - settings defaults are best-effort
+            logger.warning("global summary defaults unavailable for user=%s: %s", user_id, exc)
+            return ingestion_config
+
+        summary = global_ingestion.summary
+        patch: dict = {}
+        runtime_summary_models = [
+            m.model_dump() if hasattr(m, "model_dump") else dict(m)
+            for m in (summary.summary_models or [])
+        ]
+        if not ingestion_config.summary_models and runtime_summary_models:
+            patch["summary_models"] = runtime_summary_models
+        elif ingestion_config.summary_models and runtime_summary_models:
+            incoming_pool = [
+                m.model_dump() if hasattr(m, "model_dump") else dict(m)
+                for m in ingestion_config.summary_models
+            ]
+
+            def _matches(a: dict, b: dict) -> bool:
+                return (
+                    (a.get("model") or "") == (b.get("model") or "")
+                    and (a.get("base_url") or None) == (b.get("base_url") or None)
+                    and (a.get("provider_preset") or "") == (b.get("provider_preset") or "")
+                )
+
+            changed = False
+            for idx, entry in enumerate(incoming_pool):
+                if not isinstance(entry, dict) or entry.get("api_key") != "[set]":
+                    continue
+                replacement = None
+                if idx < len(runtime_summary_models) and _matches(entry, runtime_summary_models[idx]):
+                    replacement = runtime_summary_models[idx]
+                else:
+                    replacement = next(
+                        (candidate for candidate in runtime_summary_models if _matches(entry, candidate)),
+                        None,
+                    )
+                if replacement and replacement.get("api_key"):
+                    entry["api_key"] = replacement["api_key"]
+                    changed = True
+            if changed:
+                patch["summary_models"] = incoming_pool
+
+        default_tokens = IngestionConfig.model_fields["max_summary_tokens"].default
+        if (
+            summary.max_summary_tokens
+            and ingestion_config.max_summary_tokens == default_tokens
+            and summary.max_summary_tokens != default_tokens
+        ):
+            patch["max_summary_tokens"] = summary.max_summary_tokens
+
+        if not patch:
+            return ingestion_config
+        return IngestionConfig(**{**ingestion_config.model_dump(), **patch})
+
     async def create_corpus(
         self,
         name: str,
@@ -645,6 +716,11 @@ class IngestionService:
             UNIVERSAL_RELATION_SCHEMA,
         )
         from services.storage.mongo_writer import upsert_corpus
+
+        ingestion_config = await self._apply_global_summary_defaults(
+            user_id=user_id,
+            ingestion_config=ingestion_config,
+        )
 
         # Preset normalization: rewrite use_neo4j / chunk_summarization /
         # target_qdrant_collections to match the chosen preset. No-op for

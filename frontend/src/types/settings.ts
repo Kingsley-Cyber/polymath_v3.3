@@ -2,6 +2,7 @@
 
 import type { Tool } from "./tools";
 import type { RetrievalTier } from "./chat";
+import type { ModelProfileRef } from "./corpus";
 
 // ============================================================================
 // GLOBAL SETTINGS (Phase 10 — server-side, from /api/settings)
@@ -258,12 +259,24 @@ export interface ExtractionValidationReport {
   deploy_ready: boolean;
 }
 
+export interface GlobalIngestionSummarySettings {
+  enabled: boolean;
+  max_summary_tokens: number;
+  max_concurrent: number;
+  summary_models: ModelProfileRef[];
+}
+
+export interface GlobalIngestionSettings {
+  summary: GlobalIngestionSummarySettings;
+}
+
 export interface GlobalSettings {
   infrastructure: InfrastructureSettings;
   chat: ChatLLMSettings;
   retrieval: RetrievalSettings;
   modal: ModalDeploySettings;
   extraction?: ExtractionSettings;
+  ingestion?: GlobalIngestionSettings;
 }
 
 export interface GlobalSettingsResponse {
@@ -275,6 +288,7 @@ export interface GlobalSettingsUpdate {
   retrieval?: RetrievalSettings | null;
   modal?: ModalDeploySettings | null;
   extraction?: ExtractionSettings | null;
+  ingestion?: GlobalIngestionSettings | null;
 }
 
 export interface InfrastructureTestResponse {

@@ -25,6 +25,7 @@ import type {
   EmbedMode,
   IngestionPreset,
   ModalStatus,
+  GlobalIngestionSettings,
 } from "../../types";
 import { DEFAULT_INGESTION_CONFIG, inferPreset } from "../../types";
 import { CorpusDetail } from "./CorpusDetail";
@@ -97,6 +98,39 @@ function applyPresetToConfig(
     },
   }[preset];
   return { ...cfg, preset, ...map };
+}
+
+function createDefaultIngestionConfig(
+  globalIngestion?: GlobalIngestionSettings | null,
+): IngestionConfig {
+  const summary = globalIngestion?.summary;
+  const patch: Partial<IngestionConfig> = {};
+  if (summary) {
+    patch.max_summary_tokens =
+      summary.max_summary_tokens || DEFAULT_INGESTION_CONFIG.max_summary_tokens;
+    if (summary.summary_models?.length) {
+      patch.summary_models = [...summary.summary_models];
+    }
+    if (summary.enabled) {
+      patch.chunk_summarization = true;
+      patch.preset = "deep";
+      patch.target_qdrant_collections = ["naive", "hrag", "graph"];
+      patch.use_neo4j = true;
+    }
+  }
+  return {
+    ...DEFAULT_INGESTION_CONFIG,
+    ...patch,
+    parent_chunk_tokens: { ...DEFAULT_INGESTION_CONFIG.parent_chunk_tokens },
+    child_chunk_tokens: { ...DEFAULT_INGESTION_CONFIG.child_chunk_tokens },
+    target_qdrant_collections: [
+      ...(patch.target_qdrant_collections ??
+        DEFAULT_INGESTION_CONFIG.target_qdrant_collections),
+    ],
+    summary_models: [...(patch.summary_models ?? DEFAULT_INGESTION_CONFIG.summary_models)],
+    extraction_models: [...DEFAULT_INGESTION_CONFIG.extraction_models],
+    embedding_models: [...DEFAULT_INGESTION_CONFIG.embedding_models],
+  };
 }
 
 interface PresetSelectorProps {
@@ -225,13 +259,15 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
   // Sprint 2B — Modal global status. Fetched once on open; gates the
   // embed_mode='modal' option in the per-corpus form.
   const [modalStatus, setModalStatus] = useState<ModalStatus | null>(null);
+  const [globalIngestionDefaults, setGlobalIngestionDefaults] =
+    useState<GlobalIngestionSettings | null>(null);
 
   // Create form state
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newConfig, setNewConfig] = useState<IngestionConfig>(
-    DEFAULT_INGESTION_CONFIG,
+    createDefaultIngestionConfig(null),
   );
   const [isCreating, setIsCreating] = useState(false);
 
@@ -289,8 +325,18 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
         .getModalStatus()
         .then(setModalStatus)
         .catch(() => setModalStatus(null));
+      api
+        .getGlobalSettings()
+        .then((resp) => {
+          const defaults = resp.settings.ingestion ?? null;
+          setGlobalIngestionDefaults(defaults);
+          if (!showCreateForm) {
+            setNewConfig(createDefaultIngestionConfig(defaults));
+          }
+        })
+        .catch(() => setGlobalIngestionDefaults(null));
     }
-  }, [isOpen, loadCorpora]);
+  }, [isOpen, loadCorpora, showCreateForm]);
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -306,7 +352,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
       setCorpora([created, ...corpora]);
       setNewName("");
       setNewDescription("");
-      setNewConfig(DEFAULT_INGESTION_CONFIG);
+      setNewConfig(createDefaultIngestionConfig(globalIngestionDefaults));
       setShowCreateForm(false);
       // UX: auto-drill into the new corpus so the user lands on the ingest screen
       setSelectedCorpus(created);
@@ -449,7 +495,13 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
           <div className="flex items-center gap-2">
             <button
               data-testid="create-corpus-btn"
-              onClick={() => setShowCreateForm(!showCreateForm)}
+              onClick={() => {
+                const next = !showCreateForm;
+                if (next) {
+                  setNewConfig(createDefaultIngestionConfig(globalIngestionDefaults));
+                }
+                setShowCreateForm(next);
+              }}
               className="flex items-center gap-2 px-3 py-1.5 text-[12px] font-medium text-accent-main border border-accent-main hover:bg-accent-main hover:text-bg-base transition-colors"
             >
               <Plus className="w-4 h-4" />
@@ -784,7 +836,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                   setShowCreateForm(false);
                   setNewName("");
                   setNewDescription("");
-                  setNewConfig(DEFAULT_INGESTION_CONFIG);
+                  setNewConfig(createDefaultIngestionConfig(globalIngestionDefaults));
                 }}
                 className="font-bold tracking-widest uppercase text-[11px]"
               >
