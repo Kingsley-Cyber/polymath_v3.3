@@ -625,6 +625,27 @@ export OPENAI_API_KEY="YOUR_OPENAI_API_KEY"
 export ANTHROPIC_API_KEY="YOUR_ANTHROPIC_API_KEY"
 ```
 
+For Hermes specifically, the configured MCP server must match this endpoint
+exactly:
+
+```yaml
+mcp_servers:
+  polymath:
+    url: https://mcp.example.com/mcp
+    headers:
+      Authorization: Bearer YOUR_POLYMATH_MCP_KEY
+```
+
+After editing Hermes config, verify the live agent path end-to-end:
+
+```bash
+scripts/verify_hermes_mcp.py
+```
+
+The verifier compares `~/.hermes/config.yaml` against this repo's
+`MCP_PUBLIC_URL`, checks that Hermes has a bearer header, then performs a live
+streamable-HTTP MCP smoke call without printing the secret token.
+
 Use Settings -> MCP Server to generate user-scoped MCP keys for remote
 agents. `MCP_API_KEY` in `.env` remains available for trusted system agents
 and automation, but it is not shown in the UI.
