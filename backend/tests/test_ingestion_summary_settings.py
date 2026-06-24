@@ -10,7 +10,7 @@ from models.schemas import (
     IngestionConfig,
 )
 from services.ingestion_service import IngestionService
-from services.secrets import decrypt
+from services.secrets import decrypt, encrypt
 from services.settings import SettingsService, settings_service
 
 
@@ -50,6 +50,47 @@ def test_global_summary_settings_encrypt_mask_and_decrypt() -> None:
     update["summary"]["max_concurrent"] = 5
     SettingsService._encrypt_ingestion_keys_in_place(update, raw)
     assert update["summary"]["summary_models"][0]["api_key"] == stored_key
+
+
+def test_keyless_ollama_summary_update_clears_stale_cloud_key() -> None:
+    existing = {
+        "summary": {
+            "enabled": True,
+            "max_summary_tokens": 175,
+            "max_concurrent": 8,
+            "summary_models": [
+                {
+                    "provider_preset": "siliconflow",
+                    "model": "openai/tencent/Hy3-preview",
+                    "base_url": "https://api.siliconflow.cn/v1",
+                    "api_key": encrypt("stale-cloud-key"),
+                    "max_concurrent": 8,
+                    "extra_params": {},
+                }
+            ],
+        }
+    }
+    update = {
+        "summary": {
+            "enabled": True,
+            "max_summary_tokens": 256,
+            "max_concurrent": 4,
+            "summary_models": [
+                {
+                    "provider_preset": "ollama",
+                    "model": "ollama/minimax-m3:cloud",
+                    "base_url": None,
+                    "api_key": None,
+                    "max_concurrent": 4,
+                    "extra_params": {},
+                }
+            ],
+        }
+    }
+
+    SettingsService._encrypt_ingestion_keys_in_place(update, existing)
+
+    assert update["summary"]["summary_models"][0]["api_key"] is None
 
 
 @pytest.mark.asyncio

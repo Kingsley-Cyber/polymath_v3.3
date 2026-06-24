@@ -17,6 +17,7 @@ Tier routing for Qdrant writes (enforced by caller):
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 
 import httpx
@@ -33,6 +34,16 @@ from services.llm_lane_pool import (
 logger = logging.getLogger(__name__)
 _SUMMARY_RETRY_ATTEMPTS = 2
 _SUMMARY_RETRY_BACKOFF_SECONDS = 1.5
+_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+-]{2,}")
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+_STOPWORDS = {
+    "about", "after", "again", "also", "because", "before", "being",
+    "between", "could", "during", "every", "following", "from", "have",
+    "here", "into", "like", "more", "most", "only", "other", "over",
+    "same", "should", "some", "such", "than", "that", "their", "there",
+    "these", "they", "this", "through", "using", "what", "when", "where",
+    "which", "while", "with", "would", "your", "and", "the", "for",
+}
 
 # Fixed domain taxonomy — mirrors scripts/backfill_parent_domains_llm.py so
 # ingest-time tags and any later backfill share one controlled vocabulary.
@@ -107,6 +118,60 @@ def _parse_summary_json(raw: str) -> tuple[str, str | None, list[str] | None]:
         except Exception:
             pass
     return text, None, None
+
+
+def _extractive_fallback_summary(
+    raw: str,
+    max_summary_tokens: int,
+) -> tuple[str, str, list[str]]:
+    """Create a deterministic local summary when model generation fails.
+
+    This is intentionally simple and dependency-free. It keeps parent-summary
+    retrieval usable on fresh installs, during provider outages, or when a
+    reasoning model returns empty assistant content. The fallback is not meant
+    to be elegant prose; it is meant to preserve searchable evidence.
+    """
+
+    text = re.sub(r"\s+", " ", (raw or "").strip())
+    if not text:
+        return "", "other", []
+
+    max_words = max(40, min(180, int(max_summary_tokens or 175)))
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
+    selected: list[str] = []
+    word_count = 0
+    for sentence in sentences[:8]:
+        words = sentence.split()
+        if not words:
+            continue
+        if selected and word_count + len(words) > max_words:
+            break
+        selected.append(sentence)
+        word_count += len(words)
+        if word_count >= max_words:
+            break
+    if not selected:
+        selected = [" ".join(text.split()[:max_words])]
+
+    summary = " ".join(selected).strip()
+    if len(summary.split()) > max_words:
+        summary = " ".join(summary.split()[:max_words]).rstrip(" ,;:") + "."
+
+    tokens: dict[str, tuple[int, int]] = {}
+    for idx, token in enumerate(_TOKEN_RE.findall(text.lower())):
+        if token in _STOPWORDS or len(token) < 3:
+            continue
+        count, first_idx = tokens.get(token, (0, idx))
+        tokens[token] = (count + 1, first_idx)
+    topics = [
+        token
+        for token, (_count, _first_idx) in sorted(
+            tokens.items(),
+            key=lambda kv: (-kv[1][0], kv[1][1], kv[0]),
+        )
+        [:4]
+    ]
+    return summary, "other", topics
 
 
 async def summarize_parents(
@@ -275,6 +340,8 @@ async def summarize_parents(
                 resp.raise_for_status()
                 raw = resp.json()["choices"][0]["message"]["content"].strip()
                 summary, domain, topics = _parse_summary_json(raw)
+                if not summary:
+                    return None
                 return SummaryResult(
                     parent_id=task.parent_id,
                     doc_id=task.doc_id,
@@ -415,6 +482,26 @@ async def summarize_parents(
 
     if not task_queue.empty():
         _clear_pending_queue()
+
+    missing_after_retries = _missing_tasks()
+    if missing_after_retries:
+        logger.warning(
+            "GHOST A using extractive fallback for %d missing parent summaries",
+            len(missing_after_retries),
+        )
+        for task in missing_after_retries:
+            summary, domain, topics = _extractive_fallback_summary(task.text, cap)
+            if not summary:
+                continue
+            results_by_parent_id[task.parent_id] = SummaryResult(
+                parent_id=task.parent_id,
+                doc_id=task.doc_id,
+                corpus_id=task.corpus_id,
+                source_tier=task.source_tier,
+                summary=summary,
+                domain=domain,
+                topics=topics,
+            )
 
     results = [
         results_by_parent_id[t.parent_id]

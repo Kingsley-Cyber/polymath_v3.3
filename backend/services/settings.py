@@ -276,10 +276,22 @@ class SettingsService:
         existing_summary = (existing_ingestion_raw or {}).get("summary") or {}
         existing_pool = existing_summary.get("summary_models") or []
 
-        def _enc(new_val, existing_val):
+        def _same_summary_target(entry: dict, existing_entry: dict) -> bool:
+            return all(
+                (entry.get(key) or None) == (existing_entry.get(key) or None)
+                for key in ("provider_preset", "model", "base_url")
+            )
+
+        def _enc(new_val, existing_val, *, same_target: bool, provider: str):
+            if provider in {"ollama", "ollama_chat", "local"} and not new_val:
+                return None
             if not new_val or new_val == _MASK_SENTINEL:
-                return existing_val
-            if isinstance(new_val, str) and decrypt(new_val) is not None:
+                return existing_val if same_target else None
+            if (
+                isinstance(new_val, str)
+                and new_val.startswith("gAAAAA")
+                and decrypt(new_val) is not None
+            ):
                 return new_val
             return encrypt(new_val)
 
@@ -291,7 +303,12 @@ class SettingsService:
                 if idx < len(existing_pool) and isinstance(existing_pool[idx], dict)
                 else {}
             )
-            entry["api_key"] = _enc(entry.get("api_key"), existing_entry.get("api_key"))
+            entry["api_key"] = _enc(
+                entry.get("api_key"),
+                existing_entry.get("api_key"),
+                same_target=_same_summary_target(entry, existing_entry),
+                provider=str(entry.get("provider_preset") or "").lower(),
+            )
 
     async def get_runtime_ingestion_settings(
         self,
@@ -611,7 +628,11 @@ class SettingsService:
             # Preserve existing ciphertext when caller signals "no change"
             if not new_val or new_val == _MASK_SENTINEL:
                 entry_dict["api_key_ciphertext"] = existing_ct
-            elif isinstance(new_val, str) and decrypt(new_val) is not None:
+            elif (
+                isinstance(new_val, str)
+                and new_val.startswith("gAAAAA")
+                and decrypt(new_val) is not None
+            ):
                 # Already-encrypted — leave as-is (idempotent round-trip).
                 pass
             else:

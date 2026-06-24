@@ -128,6 +128,20 @@ class StaleIngestReconcileRequest(BaseModel):
     auto_backfill_graph: bool = True
 
 
+class SummaryBackfillRequest(BaseModel):
+    """Repair parent summaries for an already-ingested corpus."""
+
+    generate: bool = True
+    index: bool = True
+    limit: int | None = Field(
+        default=200,
+        ge=0,
+        le=5000,
+        description="Max missing parent summaries to generate in this call.",
+    )
+    batch: int = Field(default=32, ge=1, le=128)
+
+
 class RescanIngestBatchRequest(BaseModel):
     start: bool = True
 
@@ -832,6 +846,31 @@ async def backfill_document_graph(
         "corpus_id": corpus_id,
         "failed_chunks": failure_count,
     }
+
+
+@router.post("/corpora/{corpus_id}/summaries/backfill")
+async def backfill_corpus_summaries(
+    corpus_id: str,
+    body: SummaryBackfillRequest = SummaryBackfillRequest(),
+    current_user: dict = Depends(get_current_user),
+):
+    """Generate/index missing parent summaries for an existing corpus.
+
+    This repairs the retrieval breadth lane for corpora that were originally
+    created with the balanced preset. It does not change frozen ingestion
+    fields or require document deletion/reingest.
+    """
+    corpus = await ingestion_service.get_corpus(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    return await ingestion_service.backfill_parent_summaries(
+        corpus_id,
+        user_id=current_user["user_id"],
+        generate=body.generate,
+        index=body.index,
+        limit=body.limit,
+        batch=body.batch,
+    )
 
 
 @router.get("/corpora/{corpus_id}/ingestion-audit")

@@ -41,6 +41,9 @@ Ingestion profile handshake:
 - Ask whether parent summaries are required. If yes, create or choose a corpus
   with the deep preset or chunk_summarization=true; balanced corpora do not
   generate parent summaries by default.
+- If documents are already ingested and summaries_indexed=false, do not delete
+  and reingest first. Call polymath_backfill_summaries to generate/index the
+  missing parent-summary lane from the configured global summary settings.
 - After ingest, run at least one positive query using known terms from the
   document and one unsupported/negative query. If the negative query only
   retrieves adjacent material, report that the corpus does not establish it
@@ -219,6 +222,7 @@ APP_CAPABILITY_MAP: dict[str, Any] = {
                 "polymath_ingest_from_url",
                 "polymath_upload_document",
                 "polymath_get_ingest_status",
+                "polymath_backfill_summaries",
                 "polymath_delete_document",
             ],
         },
@@ -251,6 +255,7 @@ APP_CAPABILITY_MAP: dict[str, Any] = {
             "polymath_ingest_from_url",
             "polymath_upload_document",
             "polymath_get_ingest_status",
+            "polymath_backfill_summaries",
             "polymath_delete_document",
         ],
     },

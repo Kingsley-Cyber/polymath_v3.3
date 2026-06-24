@@ -1868,6 +1868,44 @@ async def polymath_delete_document(
     }
 
 
+async def polymath_backfill_summaries(
+    corpus_id: str,
+    generate: bool = True,
+    index: bool = True,
+    limit: int | None = 200,
+    batch: int = 32,
+) -> dict[str, Any]:
+    """Repair parent summaries for an existing corpus.
+
+    Use this when a corpus was created with the balanced preset or when
+    documents show ``summaries_indexed=false`` after upload. The tool can
+    generate missing parent summaries using Settings → Ingestion → Summary
+    Defaults, index existing summaries into Qdrant, or both. It never exposes
+    provider API keys and does not require deleting/reingesting documents.
+
+    Args:
+        corpus_id: Corpus to repair. Must be accessible to the caller.
+        generate: When true, summarize missing body-parent chunks.
+        index: When true, upsert all available parent-summary vectors.
+        limit: Max missing parent summaries to generate in this call. Use None
+            only for deliberate full-corpus repair.
+        batch: Parent batch size for generation/indexing.
+
+    Returns:
+        Summary health before/after plus generated/indexed counts.
+    """
+    await assert_corpus_allowed(corpus_id)
+    scoped_uid = _require_user_id_for_write()
+    return await ingestion_service.backfill_parent_summaries(
+        corpus_id,
+        user_id=scoped_uid,
+        generate=generate,
+        index=index,
+        limit=limit,
+        batch=batch,
+    )
+
+
 # ── Registry — single source of truth for the MCP server to register ───────
 
 ALL_TOOLS = (
@@ -1893,6 +1931,7 @@ ALL_TOOLS = (
     polymath_upload_document,
     polymath_get_ingest_status,
     polymath_delete_document,
+    polymath_backfill_summaries,
 )
 
 __all__ = [
@@ -1917,5 +1956,6 @@ __all__ = [
     "polymath_upload_document",
     "polymath_get_ingest_status",
     "polymath_delete_document",
+    "polymath_backfill_summaries",
     "AuthError",
 ]

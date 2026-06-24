@@ -19,7 +19,7 @@ import hashlib
 import mimetypes
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from config import get_settings
 from models.schemas import IngestionConfig, IngestJobResponse
@@ -1419,6 +1419,357 @@ class IngestionService:
                 if totals["related_to_ratio"] > 0.35
                 else "Relation specificity is within the current target band.",
             ],
+        }
+
+    async def backfill_parent_summaries(
+        self,
+        corpus_id: str,
+        *,
+        user_id: str | None = None,
+        generate: bool = True,
+        index: bool = True,
+        limit: int | None = None,
+        batch: int = 32,
+    ) -> dict[str, Any]:
+        """Repair parent-summary retrieval for an existing corpus.
+
+        This intentionally does not mutate the frozen ``chunk_summarization``
+        ingest flag. It fills missing body-parent summaries, idempotently
+        indexes all available parent-summary text into Qdrant, and updates each
+        document's ``write_state.summaries_indexed`` when its body parents are
+        covered. That lets older balanced corpora gain the summary retrieval
+        lane without delete/reingest churn.
+        """
+
+        from pymongo import UpdateOne
+        from qdrant_client import models
+
+        from services.embedder import embed_batch
+        from services.ghost_a import SummaryTask, summarize_parents
+        from services.settings import settings_service
+        from services.storage.qdrant_writer import _col_for_corpus, upsert_summaries
+
+        corpus = await self._get_corpus_raw(corpus_id)
+        if not corpus:
+            return {"corpus_id": corpus_id, "status": "not_found", "error": "corpus not found"}
+
+        cfg = IngestionConfig(**(corpus.get("default_ingestion_config") or {}))
+        effective_user_id = user_id or str(corpus.get("user_id") or "")
+        batch = max(1, min(int(batch or 32), 128))
+        if limit is not None:
+            limit = max(0, int(limit))
+
+        body_clause = {
+            "$or": [
+                {"chunk_kind": {"$exists": False}},
+                {"chunk_kind": None},
+                {"chunk_kind": "body"},
+            ]
+        }
+        summary_text_clause = {"summary": {"$exists": True, "$nin": [None, ""]}}
+        missing_summary_clause = {
+            "$or": [{"summary": {"$exists": False}}, {"summary": None}, {"summary": ""}]
+        }
+
+        def _parent_query(*clauses: dict) -> dict:
+            return {"corpus_id": corpus_id, "$and": [body_clause, *clauses]}
+
+        async def _summary_health() -> dict[str, Any]:
+            body_parent_count = await self._db["parent_chunks"].count_documents(_parent_query())
+            with_summary_text = await self._db["parent_chunks"].count_documents(
+                _parent_query(summary_text_clause)
+            )
+            indexed_summary_points = 0
+            qdrant_error = None
+            try:
+                count_filter = models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="chunk_type",
+                            match=models.MatchValue(value="summary"),
+                        )
+                    ]
+                )
+                indexed_summary_points = (
+                    await self._qdrant.count(
+                        collection_name=_col_for_corpus(corpus_id, "hrag"),
+                        count_filter=count_filter,
+                    )
+                ).count
+            except Exception as exc:  # noqa: BLE001
+                qdrant_error = str(exc)[:300]
+
+            coverage = (
+                min(indexed_summary_points, body_parent_count) / body_parent_count
+                if body_parent_count
+                else 1.0
+            )
+            if body_parent_count == 0:
+                status = "empty"
+            elif with_summary_text >= body_parent_count and indexed_summary_points >= body_parent_count:
+                status = "healthy"
+            elif with_summary_text or indexed_summary_points:
+                status = "partial"
+            else:
+                status = "degraded"
+            health: dict[str, Any] = {
+                "body_parent_count": body_parent_count,
+                "with_summary_text": with_summary_text,
+                "missing_summary_text": max(body_parent_count - with_summary_text, 0),
+                "indexed_summary_points": indexed_summary_points,
+                "coverage": round(coverage, 4),
+                "status": status,
+            }
+            if qdrant_error:
+                health["qdrant_error"] = qdrant_error
+            return health
+
+        before = await _summary_health()
+        generated = 0
+        attempted = 0
+        generation_batches = 0
+        generation_errors: list[str] = []
+
+        if generate and (limit is None or limit > 0):
+            runtime_summary = (
+                await settings_service.get_runtime_ingestion_settings(effective_user_id)
+            ).summary
+            pool_refs = (
+                runtime_summary.summary_models
+                if runtime_summary.enabled and runtime_summary.summary_models
+                else cfg.summary_models
+            )
+            from services.secrets import decrypt
+
+            def _plaintext_key(value: str | None) -> str | None:
+                if not value:
+                    return None
+                if isinstance(value, str) and value.startswith("gAAAAA"):
+                    plaintext = decrypt(value)
+                    return plaintext if plaintext is not None else value
+                return value
+
+            pool = [
+                {
+                    "model": (ref.model if hasattr(ref, "model") else ref.get("model")),
+                    "base_url": (ref.base_url if hasattr(ref, "base_url") else ref.get("base_url")) or None,
+                    "api_key": _plaintext_key(
+                        (ref.api_key if hasattr(ref, "api_key") else ref.get("api_key"))
+                        or None
+                    ),
+                    "max_concurrent": int(
+                        (ref.max_concurrent if hasattr(ref, "max_concurrent") else ref.get("max_concurrent"))
+                        or 1
+                    ),
+                    "extra_params": (
+                        ref.extra_params if hasattr(ref, "extra_params") else ref.get("extra_params")
+                    )
+                    or {},
+                }
+                for ref in (pool_refs or [])
+            ]
+            max_summary_tokens = (
+                runtime_summary.max_summary_tokens
+                if runtime_summary.enabled
+                else cfg.max_summary_tokens
+            )
+            global_max_concurrent = runtime_summary.max_concurrent if runtime_summary.enabled else None
+
+            if not pool:
+                generation_errors.append("no summary model pool configured")
+            else:
+                while limit is None or attempted < limit:
+                    fetch = batch if limit is None else max(0, min(batch, limit - attempted))
+                    if fetch <= 0:
+                        break
+                    rows = await self._db["parent_chunks"].find(
+                        _parent_query(missing_summary_clause),
+                        {
+                            "_id": 0,
+                            "parent_id": 1,
+                            "doc_id": 1,
+                            "corpus_id": 1,
+                            "source_tier": 1,
+                            "text": 1,
+                        },
+                    ).limit(fetch).to_list(length=fetch)
+                    rows = [r for r in rows if (r.get("text") or "").strip()]
+                    if not rows:
+                        break
+                    generation_batches += 1
+                    attempted += len(rows)
+                    tasks = [
+                        SummaryTask(
+                            parent_id=r["parent_id"],
+                            doc_id=r.get("doc_id", ""),
+                            corpus_id=corpus_id,
+                            source_tier=r.get("source_tier") or "parent",
+                            text=r["text"],
+                        )
+                        for r in rows
+                    ]
+                    results = await summarize_parents(
+                        tasks,
+                        max_summary_tokens=max_summary_tokens,
+                        pool=pool,
+                        global_max_concurrent=global_max_concurrent,
+                    )
+                    results = [r for r in results if r and r.summary]
+                    if not results:
+                        generation_errors.append(
+                            f"summary pool returned 0/{len(tasks)} summaries"
+                        )
+                        break
+
+                    now = datetime.utcnow()
+                    await self._db["parent_chunks"].bulk_write(
+                        [
+                            UpdateOne(
+                                {"parent_id": r.parent_id, "corpus_id": corpus_id},
+                                {
+                                    "$set": {
+                                        "summary": r.summary,
+                                        "domain": r.domain,
+                                        "topics": r.topics,
+                                        "summary_updated_at": now,
+                                    }
+                                },
+                            )
+                            for r in results
+                        ],
+                        ordered=False,
+                    )
+                    generated += len(results)
+                    if len(results) < len(tasks):
+                        generation_errors.append(
+                            f"partial summary batch: {len(results)}/{len(tasks)}"
+                        )
+
+        indexed = 0
+        if index:
+            target_kinds = [
+                kind
+                for kind in (cfg.target_qdrant_collections or ["hrag"])
+                if kind in ("naive", "hrag")
+            ] or ["hrag"]
+            cursor = self._db["parent_chunks"].find(
+                _parent_query(summary_text_clause),
+                {
+                    "_id": 0,
+                    "parent_id": 1,
+                    "doc_id": 1,
+                    "corpus_id": 1,
+                    "source_tier": 1,
+                    "summary": 1,
+                    "heading_path": 1,
+                    "filename": 1,
+                    "doc_name": 1,
+                    "metadata": 1,
+                    "facet_ids": 1,
+                    "facet_text": 1,
+                    "content_facet_ids": 1,
+                    "content_facet_text": 1,
+                    "content_facet_source": 1,
+                    "content_facet_confidence": 1,
+                    "doc_facet_ids": 1,
+                    "facet_schema_version": 1,
+                    "chunk_kind": 1,
+                    "language": 1,
+                },
+            )
+            buf: list[dict[str, Any]] = []
+
+            async def _flush() -> None:
+                nonlocal indexed
+                if not buf:
+                    return
+                vectors = await embed_batch(
+                    [str(p.get("summary") or "") for p in buf],
+                    mode="local",
+                    expected_dim=cfg.embedding_dimension,
+                    expected_model_id=cfg.embedding_model_id,
+                )
+                payloads = [
+                    {
+                        **p,
+                        "user_id": effective_user_id,
+                        "source_tier": p.get("source_tier") or "parent",
+                    }
+                    for p in buf
+                ]
+                await upsert_summaries(
+                    self._qdrant,
+                    corpus_id,
+                    payloads,
+                    vectors,
+                    target_kinds=target_kinds,
+                )
+                indexed += len(buf)
+                buf.clear()
+
+            async for parent in cursor:
+                buf.append(parent)
+                if len(buf) >= batch:
+                    await _flush()
+            await _flush()
+
+            ready_by_doc: dict[str, bool] = {}
+            pipeline = [
+                {"$match": _parent_query()},
+                {
+                    "$group": {
+                        "_id": "$doc_id",
+                        "body_parent_count": {"$sum": 1},
+                        "with_summary": {
+                            "$sum": {
+                                "$cond": [
+                                    {
+                                        "$and": [
+                                            {"$ne": ["$summary", None]},
+                                            {"$ne": ["$summary", ""]},
+                                        ]
+                                    },
+                                    1,
+                                    0,
+                                ]
+                            }
+                        },
+                    }
+                },
+            ]
+            async for row in self._db["parent_chunks"].aggregate(pipeline):
+                ready_by_doc[str(row["_id"])] = int(row.get("body_parent_count") or 0) <= int(
+                    row.get("with_summary") or 0
+                )
+            if ready_by_doc:
+                now = datetime.utcnow()
+                await self._db["documents"].bulk_write(
+                    [
+                        UpdateOne(
+                            {"corpus_id": corpus_id, "doc_id": doc_id},
+                            {
+                                "$set": {
+                                    "write_state.summaries_indexed": ready,
+                                    "write_state.summary_backfilled_at": now,
+                                }
+                            },
+                        )
+                        for doc_id, ready in ready_by_doc.items()
+                    ],
+                    ordered=False,
+                )
+
+        after = await _summary_health()
+        return {
+            "corpus_id": corpus_id,
+            "status": after["status"],
+            "generated": generated,
+            "attempted": attempted,
+            "indexed": indexed,
+            "generation_batches": generation_batches,
+            "generation_errors": generation_errors,
+            "before": before,
+            "after": after,
         }
 
     async def preflight_document(
