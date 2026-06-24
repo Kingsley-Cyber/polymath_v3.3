@@ -144,6 +144,68 @@ GRAPH_MODES: list[dict[str, Any]] = [
 ]
 
 
+MCP_TOOLSETS: list[dict[str, Any]] = [
+    {
+        "name": "context",
+        "enabled_by_default": True,
+        "purpose": "Understand Polymath, current MCP readiness, and visible corpora.",
+        "tools": [
+            "polymath_mcp_status",
+            "polymath_app_guide",
+            "polymath_list_corpora",
+            "polymath_list_documents",
+        ],
+    },
+    {
+        "name": "retrieval",
+        "enabled_by_default": True,
+        "purpose": "Retrieve evidence and answer through the same stack as Chat Query.",
+        "tools": [
+            "polymath_search",
+            "polymath_cross_corpus_search",
+            "polymath_chat_query",
+        ],
+    },
+    {
+        "name": "graph",
+        "enabled_by_default": True,
+        "purpose": "Use Neo4j-backed graph synthesis, visual query maps, and entity inspection.",
+        "tools": [
+            "polymath_graph_query",
+            "polymath_graph_map_query",
+            "polymath_graph_question_suggestions",
+            "polymath_get_chunk_extraction",
+            "polymath_search_entities",
+            "polymath_get_entity_relations",
+        ],
+    },
+    {
+        "name": "ingestion",
+        "enabled_by_default": True,
+        "purpose": "Plan, ingest, poll, repair summaries, verify, and optionally delete.",
+        "tools": [
+            "polymath_plan_ingestion",
+            "polymath_create_corpus",
+            "polymath_ingest_from_url",
+            "polymath_upload_document",
+            "polymath_get_ingest_status",
+            "polymath_backfill_summaries",
+            "polymath_delete_document",
+        ],
+    },
+    {
+        "name": "skills",
+        "enabled_by_default": False,
+        "purpose": "Read user-authored Polymath skills and app-side tools.",
+        "tools": [
+            "polymath_list_skills",
+            "polymath_get_skill",
+            "polymath_list_tools",
+        ],
+    },
+]
+
+
 INGESTION_PROFILES: list[dict[str, Any]] = [
     {
         "profile": "transcript",
@@ -229,6 +291,7 @@ APP_CAPABILITY_MAP: dict[str, Any] = {
     ],
     "core_capabilities": {
         "discover": [
+            "polymath_mcp_status",
             "polymath_app_guide",
             "polymath_list_corpora",
             "polymath_list_documents",
@@ -251,6 +314,7 @@ APP_CAPABILITY_MAP: dict[str, Any] = {
             "polymath_get_entity_relations",
         ],
         "update_knowledge_base": [
+            "polymath_plan_ingestion",
             "polymath_create_corpus",
             "polymath_ingest_from_url",
             "polymath_upload_document",
@@ -284,6 +348,8 @@ AGENT_WORKFLOWS: list[dict[str, Any]] = [
     {
         "name": "ingest_and_verify",
         "steps": [
+            "polymath_mcp_status to confirm endpoint/auth and summary readiness",
+            "polymath_plan_ingestion to choose profile, corpus action, and verification checks",
             "polymath_list_corpora",
             "choose or ask for an ingestion profile and whether summaries are required",
             "polymath_create_corpus if no existing corpus fits",
@@ -298,6 +364,13 @@ AGENT_WORKFLOWS: list[dict[str, Any]] = [
 
 
 TOOL_PLAYBOOK: list[dict[str, Any]] = [
+    {
+        "tool": "polymath_mcp_status",
+        "when_to_use": (
+            "First call for remote agents: confirms auth mode, endpoint rules, "
+            "toolsets, ingestion limits, summary readiness, and recovery tools."
+        ),
+    },
     {
         "tool": "polymath_app_guide",
         "when_to_use": "First call when an agent needs the app map or workflow rules.",
@@ -337,6 +410,13 @@ TOOL_PLAYBOOK: list[dict[str, Any]] = [
     {
         "tool": "polymath_get_entity_relations",
         "when_to_use": "Inspect direct graph relations around one entity.",
+    },
+    {
+        "tool": "polymath_plan_ingestion",
+        "when_to_use": (
+            "Before ingesting a URL/file: infer content profile, decide whether "
+            "summaries are required, and get the exact call sequence."
+        ),
     },
     {
         "tool": "polymath_create_corpus",
@@ -418,6 +498,7 @@ def get_app_guide(
         ],
         "retrieval_routes": deepcopy(RETRIEVAL_ROUTES),
         "graph_modes": deepcopy(GRAPH_MODES),
+        "mcp_toolsets": deepcopy(MCP_TOOLSETS),
         "ingestion_profiles": deepcopy(INGESTION_PROFILES),
         "app_capabilities": deepcopy(APP_CAPABILITY_MAP),
         "agent_workflows": deepcopy(AGENT_WORKFLOWS),
@@ -442,6 +523,7 @@ __all__ = [
     "AGENT_WORKFLOWS",
     "GRAPH_MODES",
     "INGESTION_PROFILES",
+    "MCP_TOOLSETS",
     "MCP_APP_INSTRUCTIONS",
     "REMOTE_AGENT_SETUP",
     "RETRIEVAL_ROUTES",

@@ -16,6 +16,7 @@ SSRF blocking, and faithful service-call wiring.
 from __future__ import annotations
 
 import base64
+import json
 import sys
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -80,6 +81,8 @@ _install_auth_stubs_if_missing()
 
 from polymath_mcp import tools as mcp_tools  # noqa: E402
 from polymath_mcp.auth import SYSTEM_USER_ID, _current_user_id  # noqa: E402
+from models.schemas import GlobalIngestionSettings, GlobalIngestionSummarySettings  # noqa: E402
+from services.settings import settings_service  # noqa: E402
 
 
 @pytest.fixture
@@ -113,6 +116,125 @@ def anonymous():
 
 
 # ─── _safe_ingest_url — SSRF + scheme checks ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mcp_status_reports_toolsets_and_masks_summary_keys(monkeypatch, system_user):
+    async def fake_runtime_settings(user_id: str | None = None):
+        return GlobalIngestionSettings(
+            summary=GlobalIngestionSummarySettings(
+                enabled=True,
+                max_summary_tokens=256,
+                max_concurrent=4,
+                summary_models=[
+                    {
+                        "provider_preset": "siliconflow",
+                        "model": "openai/tencent/Hy3-preview",
+                        "base_url": "https://api.siliconflow.cn/v1",
+                        "api_key": "unit-secret-key",
+                        "max_concurrent": 4,
+                        "extra_params": {},
+                    }
+                ],
+            )
+        )
+
+    monkeypatch.setattr(
+        settings_service,
+        "get_runtime_ingestion_settings",
+        fake_runtime_settings,
+    )
+
+    result = await mcp_tools.polymath_mcp_status(detail="full")
+    toolset_names = {toolset["name"] for toolset in result["toolsets"]}
+    payload = json.dumps(result)
+
+    assert result["auth"]["mode"] == "system_api_key"
+    assert {"context", "retrieval", "graph", "ingestion"} <= toolset_names
+    assert "polymath_plan_ingestion" in result["registered_tools"]
+    assert result["ingestion"]["summary_defaults"]["enabled"] is True
+    assert result["ingestion"]["summary_defaults"]["models"][0]["api_key_configured"] is True
+    assert "unit-secret-key" not in payload
+
+
+@pytest.mark.asyncio
+async def test_mcp_status_treats_masked_summary_key_as_configured(monkeypatch, system_user):
+    async def fake_runtime_settings(user_id: str | None = None):
+        return GlobalIngestionSettings(
+            summary=GlobalIngestionSummarySettings(
+                enabled=True,
+                summary_models=[
+                    {
+                        "provider_preset": "siliconflow",
+                        "model": "openai/tencent/Hy3-preview",
+                        "base_url": "https://api.siliconflow.cn/v1",
+                        "api_key": "[set]",
+                        "max_concurrent": 4,
+                        "extra_params": {},
+                    }
+                ],
+            )
+        )
+
+    monkeypatch.setattr(
+        settings_service,
+        "get_runtime_ingestion_settings",
+        fake_runtime_settings,
+    )
+
+    result = await mcp_tools.polymath_mcp_status()
+
+    assert result["ingestion"]["summary_defaults"]["models"][0]["api_key_configured"] is True
+
+
+@pytest.mark.asyncio
+async def test_plan_ingestion_transcript_defaults_to_deep_summary():
+    result = await mcp_tools.polymath_plan_ingestion(
+        filename="shopify_video_transcript.txt",
+        source_url="https://example.com/shopify_video_transcript.txt",
+        content_type="text/plain",
+        summary_required="auto",
+    )
+
+    assert result["status"] == "ok"
+    assert result["profile"] == "transcript"
+    assert result["summary_required"] is True
+    assert result["ingest_tool"] == "polymath_ingest_from_url"
+    assert result["corpus_action"]["action"] == "create_corpus"
+    assert result["corpus_action"]["args"]["preset"] == "deep"
+    assert "polymath_get_ingest_status until complete" in result["call_sequence"]
+    assert result["verification"]["negative_query"]
+
+
+@pytest.mark.asyncio
+async def test_plan_ingestion_existing_balanced_corpus_adds_summary_backfill(system_user):
+    with (
+        patch.object(mcp_tools, "assert_corpus_allowed", new=AsyncMock()),
+        patch.object(
+            mcp_tools.ingestion_service,
+            "get_corpus",
+            new=AsyncMock(
+                return_value={
+                    "corpus_id": "c1",
+                    "default_ingestion_config": {
+                        "preset": "balanced",
+                        "chunk_summarization": False,
+                    },
+                }
+            ),
+        ),
+    ):
+        result = await mcp_tools.polymath_plan_ingestion(
+            filename="metrics.xlsx",
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            summary_required="yes",
+            existing_corpus_id="c1",
+        )
+
+    assert result["profile"] == "table_or_data"
+    assert result["corpus_action"]["action"] == "use_existing_corpus"
+    assert result["post_ingest_actions"][0]["tool"] == "polymath_backfill_summaries"
+    assert "polymath_backfill_summaries" in result["call_sequence"]
 
 
 @pytest.mark.parametrize(
@@ -627,6 +749,8 @@ async def test_delete_document_not_found(system_user):
 
 def test_new_tools_in_registry():
     names = {fn.__name__ for fn in mcp_tools.ALL_TOOLS}
+    assert "polymath_mcp_status" in names
+    assert "polymath_plan_ingestion" in names
     assert "polymath_create_corpus" in names
     assert "polymath_ingest_from_url" in names
     assert "polymath_upload_document" in names

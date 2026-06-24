@@ -70,6 +70,7 @@ async def get_mcp_info(
         "agent_guide": app_guide,
         "app_capabilities": app_guide["app_capabilities"],
         "agent_workflows": app_guide["agent_workflows"],
+        "mcp_toolsets": app_guide["mcp_toolsets"],
         "remote_agent_setup": app_guide["remote_agent_setup"],
         "retrieval_routes": app_guide["retrieval_routes"],
         "graph_modes": app_guide["graph_modes"],

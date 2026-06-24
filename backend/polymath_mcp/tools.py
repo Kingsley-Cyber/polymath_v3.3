@@ -37,7 +37,7 @@ from .auth import (
     get_current_user_id,
     resolve_request_scope,
 )
-from .app_guide import get_app_guide
+from .app_guide import MCP_TOOLSETS, get_app_guide
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +110,63 @@ def _neo4j_or_error() -> Any:
             "completed. Retry shortly."
         )
     return driver
+
+
+def _mask_summary_model_ref(ref: Any) -> dict[str, Any]:
+    """Return a provider/model summary with no secret material."""
+    getter = ref.get if isinstance(ref, dict) else lambda k, default=None: getattr(ref, k, default)
+    api_key = getter("api_key")
+    return {
+        "provider_preset": getter("provider_preset"),
+        "model": getter("model"),
+        "base_url_configured": bool(getter("base_url")),
+        "api_key_configured": bool(api_key),
+        "max_concurrent": int(getter("max_concurrent") or 1),
+    }
+
+
+def _infer_ingestion_profile(
+    filename: str,
+    source_url: str | None = None,
+    content_type: str | None = None,
+) -> tuple[str, str]:
+    """Infer a deterministic content profile from cheap metadata only."""
+    raw = " ".join(x for x in (filename, source_url or "", content_type or "") if x)
+    text = raw.lower()
+    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if suffix in {"srt", "vtt"} or any(
+        marker in text for marker in ("youtube", "transcript", "caption", "subtitles")
+    ):
+        return "transcript", "timestamp/caption or transcript metadata detected"
+    if suffix in {"csv", "tsv", "xlsx", "xls"} or any(
+        marker in text for marker in ("spreadsheet", "excel", "text/csv", "tab-separated")
+    ):
+        return "table_or_data", "table/spreadsheet extension or MIME detected"
+    if suffix in {"html", "htm"} or "text/html" in text:
+        return "html_article", "HTML extension or MIME detected"
+    if suffix == "pdf" or "application/pdf" in text:
+        return "pdf_book_manual", "PDF extension or MIME detected"
+    if suffix in {
+        "py", "js", "jsx", "ts", "tsx", "go", "rs", "java", "kt", "c", "h",
+        "cpp", "hpp", "cs", "php", "rb", "swift", "lua", "sql", "json", "yaml",
+        "yml", "toml", "md", "rst",
+    }:
+        return "code_or_docs", "code/docs extension detected"
+    return "general_text", "no stronger structured profile detected"
+
+
+def _summary_need_from_profile(profile: str, summary_required: str) -> bool:
+    if summary_required == "yes":
+        return True
+    if summary_required == "no":
+        return False
+    return profile in {
+        "transcript",
+        "html_article",
+        "pdf_book_manual",
+        "table_or_data",
+        "general_text",
+    }
 
 
 # ── Search tools ───────────────────────────────────────────────────────────
@@ -1123,6 +1180,233 @@ async def polymath_get_entity_relations(
 # ── Phase 24 — Discovery + listing tools ───────────────────────────────────
 
 
+async def polymath_mcp_status(
+    detail: Literal["summary", "full"] = "summary",
+) -> dict[str, Any]:
+    """Return MCP readiness, toolsets, auth mode, and ingestion defaults.
+
+    This is the safest first call for autonomous agents. It is modeled after
+    production MCP servers that expose capability groups/toolsets instead of
+    making the model infer workflow from a flat tool list.
+
+    Args:
+        detail: "summary" returns compact readiness. "full" includes all
+            registered MCP tool names and the compact app guide.
+    """
+    if detail not in ("summary", "full"):
+        raise ValueError("detail must be 'summary' or 'full'")
+
+    from .auth import SYSTEM_USER_ID, allowed_corpus_ids, get_current_user_id
+    from services.conversation import conversation_service
+    from services.settings import settings_service
+
+    settings = get_settings()
+    uid = get_current_user_id()
+    auth_mode = (
+        "system_api_key"
+        if uid == SYSTEM_USER_ID
+        else ("user_key_or_jwt" if uid else "anonymous_dev")
+    )
+    accessible = await allowed_corpus_ids(uid)
+    runtime_summary = (await settings_service.get_runtime_ingestion_settings(uid)).summary
+    summary_models = [_mask_summary_model_ref(ref) for ref in runtime_summary.summary_models]
+    public_url = (settings.MCP_PUBLIC_URL or "").strip().rstrip("/")
+    endpoint = public_url if public_url.endswith("/mcp") else f"{public_url}/mcp" if public_url else f"http://localhost:{settings.MCP_PORT}/mcp"
+
+    warnings: list[str] = []
+    if settings.MCP_REQUIRE_AUTH and uid is None:
+        warnings.append("request is unauthenticated; write tools will fail")
+    if not public_url:
+        warnings.append("MCP_PUBLIC_URL is not configured; remote agents must use a manual endpoint")
+    if not runtime_summary.enabled:
+        warnings.append("global summary defaults are disabled; use deep corpus preset when summaries are required")
+    if runtime_summary.enabled and not summary_models:
+        warnings.append("summary defaults are enabled but no summary model pool is configured")
+    if ingestion_service._qdrant is None:
+        warnings.append("Qdrant client is not initialized in the MCP sidecar")
+    if settings.NEO4J_ENABLED and ingestion_service.neo4j_driver is None:
+        warnings.append("Neo4j is enabled but the MCP sidecar has no graph driver")
+
+    payload: dict[str, Any] = {
+        "status": "degraded" if warnings else "ok",
+        "auth": {
+            "mode": auth_mode,
+            "require_auth": settings.MCP_REQUIRE_AUTH,
+            "has_subject": uid is not None,
+        },
+        "connection": {
+            "transport": settings.MCP_TRANSPORT,
+            "endpoint": endpoint,
+            "endpoint_rule": "Use /mcp with no trailing slash.",
+            "auth_header": "Authorization: Bearer <Polymath MCP key>",
+        },
+        "services": {
+            "mongodb_attached": conversation_service._db is not None,
+            "qdrant_attached": ingestion_service._qdrant is not None,
+            "neo4j_enabled": settings.NEO4J_ENABLED,
+            "neo4j_attached": ingestion_service.neo4j_driver is not None,
+        },
+        "scope": {
+            "accessible_corpus_count": len(accessible),
+        },
+        "toolsets": _json_ready(MCP_TOOLSETS),
+        "ingestion": {
+            "max_upload_bytes": settings.MCP_INGEST_MAX_BYTES,
+            "url_timeout_seconds": settings.MCP_INGEST_URL_TIMEOUT_SECONDS,
+            "private_url_ingest_enabled": settings.MCP_INGEST_URL_ALLOW_PRIVATE,
+            "profiles": [
+                "transcript",
+                "html_article",
+                "pdf_book_manual",
+                "code_or_docs",
+                "table_or_data",
+                "general_text",
+            ],
+            "summary_defaults": {
+                "enabled": runtime_summary.enabled,
+                "max_summary_tokens": runtime_summary.max_summary_tokens,
+                "max_concurrent": runtime_summary.max_concurrent,
+                "models": summary_models,
+                "repair_tool": "polymath_backfill_summaries",
+            },
+        },
+        "recommended_first_calls": [
+            "polymath_mcp_status",
+            "polymath_list_corpora",
+            "polymath_plan_ingestion before ingesting new material",
+            "polymath_search or polymath_chat_query for existing corpora",
+        ],
+        "warnings": warnings,
+    }
+    if detail == "full":
+        payload["registered_tools"] = [fn.__name__ for fn in ALL_TOOLS]
+        payload["app_guide"] = get_app_guide(detail="summary")
+    return payload
+
+
+async def polymath_plan_ingestion(
+    filename: str,
+    source_url: str | None = None,
+    content_type: str | None = None,
+    summary_required: Literal["auto", "yes", "no"] = "auto",
+    existing_corpus_id: str | None = None,
+) -> dict[str, Any]:
+    """Plan a deterministic ingestion workflow before upload or URL ingest.
+
+    This does not write anything. It helps agents pick the right content
+    profile, corpus preset, summary behavior, and verification checks before
+    they call polymath_create_corpus / polymath_ingest_from_url /
+    polymath_upload_document.
+
+    Args:
+        filename: Target filename or display name.
+        source_url: Optional public URL that will be passed to ingest_from_url.
+        content_type: Optional MIME/type hint.
+        summary_required: "yes", "no", or "auto" from inferred profile.
+        existing_corpus_id: Optional corpus to reuse; checked for access.
+    """
+    if summary_required not in ("auto", "yes", "no"):
+        raise ValueError("summary_required must be 'auto', 'yes', or 'no'")
+    if not filename or not filename.strip():
+        raise ValueError("filename must be non-empty")
+
+    profile, reason = _infer_ingestion_profile(filename, source_url, content_type)
+    wants_summary = _summary_need_from_profile(profile, summary_required)
+    ingest_tool = "polymath_ingest_from_url" if source_url else "polymath_upload_document"
+    supported = True
+    warnings: list[str] = []
+
+    corpus_action: dict[str, Any]
+    post_ingest_actions: list[dict[str, Any]] = []
+    if existing_corpus_id:
+        await assert_corpus_allowed(existing_corpus_id)
+        corpus = await ingestion_service.get_corpus(existing_corpus_id)
+        cfg = (corpus or {}).get("default_ingestion_config") or {}
+        corpus_summary_enabled = bool(cfg.get("chunk_summarization"))
+        corpus_action = {
+            "action": "use_existing_corpus",
+            "corpus_id": existing_corpus_id,
+            "current_preset": cfg.get("preset"),
+            "current_chunk_summarization": corpus_summary_enabled,
+        }
+        if wants_summary and not corpus_summary_enabled:
+            post_ingest_actions.append(
+                {
+                    "tool": "polymath_backfill_summaries",
+                    "when": "after polymath_get_ingest_status reports complete",
+                    "why": "existing corpus does not generate parent summaries during ingest",
+                }
+            )
+    else:
+        corpus_action = {
+            "action": "create_corpus",
+            "tool": "polymath_create_corpus",
+            "args": {
+                "name": "Choose a concise corpus name",
+                "preset": "deep" if wants_summary else "balanced",
+                "chunk_summarization": True if wants_summary else None,
+                "use_summary_settings": True,
+            },
+        }
+
+    if profile == "general_text" and summary_required == "auto":
+        warnings.append(
+            "general_text was inferred; ask the user for a better profile if source structure matters"
+        )
+    if source_url:
+        allowed, reason_or_empty = _safe_ingest_url(source_url)
+        supported = allowed
+        if not allowed:
+            warnings.append(f"source_url is blocked by MCP URL safety: {reason_or_empty}")
+
+    verification = {
+        "positive_queries": [
+            "Use one exact phrase or title from the document.",
+            "Use one semantic query describing the document's main topic.",
+        ],
+        "negative_query": (
+            "Ask one related but unsupported question; if retrieval only returns "
+            "adjacent material, report that the corpus does not establish it."
+        ),
+    }
+    if profile == "table_or_data":
+        verification["positive_queries"] = [
+            "Search for a known column name.",
+            "Search for a known row value or sheet/table label.",
+        ]
+    elif profile == "transcript":
+        verification["positive_queries"] = [
+            "Search for a known spoken phrase.",
+            "Ask for a summary of the exact tutorial/video topic.",
+        ]
+
+    return {
+        "status": "ok" if supported else "blocked",
+        "filename": filename,
+        "source_url": source_url,
+        "content_type": content_type,
+        "profile": profile,
+        "profile_reason": reason,
+        "summary_required": wants_summary,
+        "summary_decision": summary_required,
+        "ingest_tool": ingest_tool,
+        "corpus_action": corpus_action,
+        "call_sequence": [
+            "polymath_mcp_status",
+            "polymath_list_corpora",
+            corpus_action["tool"] if corpus_action["action"] == "create_corpus" else "reuse existing corpus",
+            ingest_tool,
+            "polymath_get_ingest_status until complete",
+            *(a["tool"] for a in post_ingest_actions),
+            "polymath_search verification",
+            "polymath_chat_query final summary if requested",
+        ],
+        "post_ingest_actions": post_ingest_actions,
+        "verification": verification,
+        "warnings": warnings,
+    }
+
+
 async def polymath_app_guide(
     detail: Literal["summary", "full"] = "summary",
 ) -> dict[str, Any]:
@@ -1909,6 +2193,8 @@ async def polymath_backfill_summaries(
 # ── Registry — single source of truth for the MCP server to register ───────
 
 ALL_TOOLS = (
+    polymath_mcp_status,
+    polymath_plan_ingestion,
     polymath_app_guide,
     polymath_search,
     polymath_cross_corpus_search,
@@ -1936,6 +2222,8 @@ ALL_TOOLS = (
 
 __all__ = [
     "ALL_TOOLS",
+    "polymath_mcp_status",
+    "polymath_plan_ingestion",
     "polymath_app_guide",
     "polymath_search",
     "polymath_cross_corpus_search",
