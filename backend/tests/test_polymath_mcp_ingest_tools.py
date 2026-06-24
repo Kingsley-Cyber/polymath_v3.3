@@ -129,8 +129,8 @@ async def test_mcp_status_reports_toolsets_and_masks_summary_keys(monkeypatch, s
                 summary_models=[
                     {
                         "provider_preset": "siliconflow",
-                        "model": "openai/tencent/Hy3-preview",
-                        "base_url": "https://api.siliconflow.cn/v1",
+                        "model": "openai/Qwen/Qwen2.5-7B-Instruct",
+                        "base_url": "https://api.siliconflow.com/v1",
                         "api_key": "unit-secret-key",
                         "max_concurrent": 4,
                         "extra_params": {},
@@ -166,8 +166,8 @@ async def test_mcp_status_treats_masked_summary_key_as_configured(monkeypatch, s
                 summary_models=[
                     {
                         "provider_preset": "siliconflow",
-                        "model": "openai/tencent/Hy3-preview",
-                        "base_url": "https://api.siliconflow.cn/v1",
+                        "model": "openai/Qwen/Qwen2.5-7B-Instruct",
+                        "base_url": "https://api.siliconflow.com/v1",
                         "api_key": "[set]",
                         "max_concurrent": 4,
                         "extra_params": {},

@@ -61,8 +61,8 @@ def test_keyless_ollama_summary_update_clears_stale_cloud_key() -> None:
             "summary_models": [
                 {
                     "provider_preset": "siliconflow",
-                    "model": "openai/tencent/Hy3-preview",
-                    "base_url": "https://api.siliconflow.cn/v1",
+                    "model": "openai/Qwen/Qwen2.5-7B-Instruct",
+                    "base_url": "https://api.siliconflow.com/v1",
                     "api_key": encrypt("stale-cloud-key"),
                     "max_concurrent": 8,
                     "extra_params": {},

@@ -244,8 +244,13 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
     name: "SiliconFlow",
     litellm_provider: "openai",
     base_url: "https://api.siliconflow.com/v1",
-    example_model: "tencent/Hy3-preview",
-    example_models: ["tencent/Hy3-preview"],
+    example_model: "Qwen/Qwen2.5-7B-Instruct",
+    example_models: [
+      "Qwen/Qwen2.5-7B-Instruct",
+      "Qwen/Qwen3-8B",
+      "deepseek-ai/DeepSeek-V4-Flash",
+      "zai-org/GLM-5.1",
+    ],
     default_max_concurrent: 8,
   },
   {

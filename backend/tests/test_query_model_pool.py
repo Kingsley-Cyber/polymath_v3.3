@@ -410,9 +410,9 @@ async def test_resolver_pool_entry_returns_decrypted_key():
                 "entry_id": "ent-resolve",
                 "label": "SiliconFlow",
                 "provider": "siliconflow",
-                "base_url": "https://api.siliconflow.cn/v1",
+                "base_url": "https://api.siliconflow.com/v1",
                 "api_key_ciphertext": "sk-resolved-plaintext",
-                "model_name": "Qwen/Qwen3-Embedding-0.6B",
+                "model_name": "Qwen/Qwen2.5-7B-Instruct",
                 "source": "cloud",
             }],
         ).model_dump())
@@ -420,8 +420,8 @@ async def test_resolver_pool_entry_returns_decrypted_key():
             user, "ent-resolve"
         )
         assert resolved is not None
-        assert resolved["model"] == "openai/Qwen/Qwen3-Embedding-0.6B"
-        assert resolved["api_base"] == "https://api.siliconflow.cn/v1"
+        assert resolved["model"] == "openai/Qwen/Qwen2.5-7B-Instruct"
+        assert resolved["api_base"] == "https://api.siliconflow.com/v1"
         assert resolved["api_key"] == "sk-resolved-plaintext"
     finally:
         await _cleanup(user)
