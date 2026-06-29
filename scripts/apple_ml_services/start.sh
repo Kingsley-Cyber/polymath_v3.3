@@ -17,7 +17,7 @@
 #   RERANKER_MAX_DOC_CHARS            default 6000
 #   RERANKER_MAX_QUERY_CHARS          default 2000
 #   GHOST_B_EXTRACT_HOST / _PORT      default 0.0.0.0 / 8084
-#   START_GHOST_B_EXTRACT             default false
+#   START_GHOST_B_EXTRACT             default true (auto-skips if its venv is absent)
 #   GHOST_B_EXTRACT_PY                default <repo>/local_ghost_b/.venv/bin/python
 #                                     (the pinned torch/gliner/glirel venv — NOT
 #                                     the shared apple_ml_services .venv)
@@ -71,7 +71,11 @@ export RERANKER_MAX_QUERY_CHARS="${RERANKER_MAX_QUERY_CHARS:-2000}"
 # Runs on the local_ghost_b venv — the pinned torch/gliner/glirel working set.
 export GHOST_B_EXTRACT_HOST="${GHOST_B_EXTRACT_HOST:-0.0.0.0}"
 export GHOST_B_EXTRACT_PORT="${GHOST_B_EXTRACT_PORT:-8084}"
-export START_GHOST_B_EXTRACT="${START_GHOST_B_EXTRACT:-false}"
+# Default ON so a fresh clone ingests out of the box. Guarded below: if the
+# pinned venv (GHOST_B_EXTRACT_PY) is absent we warn and SKIP rather than
+# crash-loop the supervisor — enabling it can never take down the embedder or
+# reranker. Set START_GHOST_B_EXTRACT=false to opt out (e.g. remote-GPU box).
+export START_GHOST_B_EXTRACT="${START_GHOST_B_EXTRACT:-true}"
 GHOST_B_EXTRACT_PY="${GHOST_B_EXTRACT_PY:-$(cd "${PROJECT_ROOT}/../.." && pwd)/local_ghost_b/.venv/bin/python}"
 
 PID_FILES=()
@@ -130,8 +134,17 @@ else
 fi
 
 if should_start "${START_GHOST_B_EXTRACT}"; then
-  start_service "ghost_b_extract" "ghost_b_extract_svc.main" \
-    GHOST_B_EXTRACT_HOST GHOST_B_EXTRACT_PORT "${GHOST_B_EXTRACT_PY}"
+  if [[ -x "${GHOST_B_EXTRACT_PY}" ]]; then
+    start_service "ghost_b_extract" "ghost_b_extract_svc.main" \
+      GHOST_B_EXTRACT_HOST GHOST_B_EXTRACT_PORT "${GHOST_B_EXTRACT_PY}"
+  else
+    echo "[apple-ml] WARNING: ghost_b_extract is enabled but its interpreter is" >&2
+    echo "[apple-ml]          missing at: ${GHOST_B_EXTRACT_PY}" >&2
+    echo "[apple-ml]          Document INGESTION will fail until the Ghost B venv" >&2
+    echo "[apple-ml]          is installed — see scripts/EXTRACTION_SETUP.md (or set" >&2
+    echo "[apple-ml]          GHOST_B_EXTRACT_PY, or START_GHOST_B_EXTRACT=false)." >&2
+    skip_service "ghost_b_extract"
+  fi
 else
   skip_service "ghost_b_extract"
 fi
