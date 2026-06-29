@@ -48,6 +48,17 @@ class Settings(BaseSettings):
     QDRANT_GRPC_PORT: int = Field(
         default=6334, description="Qdrant gRPC port (used when QDRANT_PREFER_GRPC=true)"
     )
+    HYDRATION_MODE: str = Field(
+        default="parent",
+        description=(
+            "How a matched child chunk is expanded for the LLM prompt. "
+            "'parent' (default, current behaviour) replaces the precise child "
+            "passage with the full parent body (small-to-big). 'child_summary' "
+            "keeps the precise child passage and appends the section summary as "
+            "context — ~4x denser prompt, NotebookLM-style grounding. A/B this "
+            "before defaulting it on."
+        ),
+    )
     QDRANT_COLLECTION: str = Field(
         default="polymath_chunks", description="Default Qdrant collection name"
     )

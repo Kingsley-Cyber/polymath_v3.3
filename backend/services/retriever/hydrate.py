@@ -14,9 +14,35 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
+from config import get_settings
 from models.schemas import SourceChunk
 from services.conversation import conversation_service
 from services.facets import metadata_with_facets
+
+
+def _assemble_hydrated_text(
+    mode: str,
+    *,
+    child_text: str,
+    parent_text: str,
+    summary: str,
+) -> str:
+    """Decide what text the LLM sees for a matched child chunk.
+
+    'parent' (default): the full parent body (small-to-big retrieval).
+    'child_summary': the precise child passage plus the section summary as
+    context — ~4x denser, keeps every token relevant (NotebookLM-style). Falls
+    back to the parent body when there is no usable child text.
+    """
+
+    child_text = (child_text or "").strip()
+    parent_text = (parent_text or "").strip()
+    summary = (summary or "").strip()
+    if str(mode or "").lower() == "child_summary" and child_text:
+        if summary:
+            return f"{child_text}\n\n[Section context: {summary}]"
+        return child_text
+    return parent_text or child_text
 
 logger = logging.getLogger(__name__)
 
@@ -158,12 +184,22 @@ async def hydrate_chunks(
             logger.warning("Corpus name lookup failed: %s", exc)
 
     # ── Hydrate each chunk ───────────────────────────────────────────────────
+    hydration_mode = str(getattr(get_settings(), "HYDRATION_MODE", "parent") or "parent")
     hydrated: List[SourceChunk] = []
     for chunk in chunks:
         if chunk.parent_id and chunk.doc_id:
             pc = parent_lookup.get((chunk.doc_id, chunk.parent_id))
             if pc:
-                chunk.text = pc.get("text", chunk.text)
+                # Capture the precise child passage BEFORE it is replaced — under
+                # 'child_summary' mode the LLM sees child+summary instead of the
+                # full parent body.
+                child_text = chunk.text
+                chunk.text = _assemble_hydrated_text(
+                    hydration_mode,
+                    child_text=child_text,
+                    parent_text=pc.get("text") or "",
+                    summary=pc.get("summary") or "",
+                )
                 if pc.get("summary") and not chunk.summary:
                     chunk.summary = pc["summary"]
                 # Backfill heading_path when Qdrant payload didn't carry it
