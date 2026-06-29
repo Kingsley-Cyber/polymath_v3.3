@@ -198,6 +198,26 @@ GENERIC_CONTEXT_TERMS: frozenset[str] = frozenset(
 # concept (CONCEPT_ALIASES); on its own it is skipped during lane building.
 GENERIC_CONCEPT_TOKENS: frozenset[str] = frozenset(
     {
+        # generic quantifiers / interrogatives / common verbs — question
+        # scaffolding, never the evidence anchor (e.g. "how MANY eggs", "what
+        # HAPPENS when X READS above Y"). Leaving them as required concepts makes
+        # the answerability gate refuse even when the answer is in the chunk.
+        "many",
+        "much",
+        "several",
+        "ever",
+        "been",
+        "happen",
+        "happens",
+        "happened",
+        "occur",
+        "occurs",
+        "occurred",
+        "read",
+        "reads",
+        "make",
+        "makes",
+        "made",
         "analysis",
         "analyses",
         "approach",

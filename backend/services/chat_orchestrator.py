@@ -774,6 +774,35 @@ def _selection_sufficiency_from_diagnostics(
     return None
 
 
+def _atoms_covered_by_source_text(
+    atoms: list[str], sources: list[SourceChunk] | None
+) -> set[str]:
+    """Required CONCEPT atoms whose term literally appears in the retrieved text.
+
+    The facet/concept coverage signal is metadata-based: it misses chunks that
+    answer the question in their TEXT but were never tagged with that concept
+    (unfamiliar / fictional entities the extractor never saw). This lexical pass
+    recovers them. Operator atoms (definition/relationship/…) and the
+    cross-document atom are not lexical terms, so they are skipped.
+    """
+
+    raw = " ".join(str(getattr(s, "text", "") or "") for s in (sources or []))
+    # Normalise punctuation to spaces so "eggs." matches the term "eggs".
+    haystack = re.sub(r"[^a-z0-9]+", " ", raw.lower())
+    if not haystack.strip():
+        return set()
+    padded = f" {haystack} "
+    covered: set[str] = set()
+    for atom in atoms or []:
+        a = str(atom)
+        if not a.startswith("concept:"):
+            continue
+        term = re.sub(r"[^a-z0-9]+", " ", a.split(":", 1)[1].strip().lower()).strip()
+        if len(term) >= 3 and f" {term} " in padded:
+            covered.add(a)
+    return covered
+
+
 def _build_retrieval_answerability_gate(
     *,
     query: str,
@@ -899,8 +928,33 @@ def _build_retrieval_answerability_gate(
             else 1.0
         )
 
-    effective_answerable = raw_answerable or (
-        required_coverage >= 0.80 and not missing_critical
+    # Text-answerability fallback: count a required concept as covered when its
+    # term actually appears in the retrieved source text, even if no facet was
+    # tagged for it. Only ADDS coverage, so it can never cause a refusal — it
+    # just stops the gate from discarding a chunk that visibly answers the
+    # question (the metadata-vs-text gap).
+    text_help = False
+    if required_atoms and sources:
+        text_covered = _atoms_covered_by_source_text(missing_atoms, sources)
+        if text_covered:
+            text_help = True
+            required_set = set(required_atoms)
+            covered_set = (set(covered_atoms) | text_covered) & required_set
+            covered_atoms = sorted(covered_set)
+            missing_atoms = sorted(required_set - covered_set)
+            missing_critical = [a for a in missing_critical if a not in covered_set]
+            required_coverage = (
+                len(covered_set) / len(required_set) if required_set else 1.0
+            )
+
+    effective_answerable = (
+        raw_answerable
+        or (required_coverage >= 0.80 and not missing_critical)
+        # When the retrieved TEXT covers a majority of the query concepts and
+        # nothing critical is missing, answer: the remaining uncovered atoms are
+        # generic question words (how/many/happens/reads) the corpus need not
+        # "establish" — the substantive terms are present in the evidence.
+        or (required_coverage >= 0.5 and text_help and not missing_critical)
     )
 
     if not corpus_scoped:
