@@ -51,15 +51,25 @@ from services.retriever.intent_policy import infer_retrieval_intent
 from services.retriever.evidence_plan import (
     EvidenceLane,
     EvidencePlan,
+    MULTI_CONCEPT_MIN_SOURCES,
     build_evidence_plan,
+    build_evidence_plan_from_sides,
     evidence_lane_matches_text,
     evidence_plan_to_dict,
+    parse_llm_sides,
+)
+from services.retriever.evidence_allocation import (
+    STRONG_LANE_SCORE as _EVIDENCE_LANE_STRONG_SCORE,
+    cap_chunks_per_doc as _ea_cap_chunks_per_doc,
+    per_doc_cap_for_plan as _evidence_per_doc_cap_for_plan,
+    select_lane_support as _ea_select_lane_support,
 )
 from services.retriever.query_semantics import (
     concept_groups,
     lexical_terms,
     required_atoms_for_query,
     required_operator_atoms,
+    split_query_sides,
 )
 from services.retriever.search_mode import resolve_search_mode
 from services.settings import settings_service
@@ -1760,6 +1770,26 @@ def _prepare_chat_evidence_sources(
     }
 
 
+_RESERVED_SUPPORT_ROLES = frozenset(
+    {"evidence_plan_lane", "chat_semantic_facet_coverage"}
+)
+
+
+def _is_reserved_support_chunk(source: Any) -> bool:
+    """True for chunks a coverage stage deliberately reserved.
+
+    Per-side evidence-plan support and semantic-facet coverage chunks are the
+    evidence we added on purpose to balance a multi-document answer. They are
+    protected from the per-document cap so the cap trims the dominant book, not
+    the reserved sides.
+    """
+
+    metadata = getattr(source, "metadata", None)
+    if not isinstance(metadata, dict):
+        return False
+    return str(metadata.get("support_role") or "") in _RESERVED_SUPPORT_ROLES
+
+
 def _cap_chunks_per_doc(
     sources: list[SourceChunk], cap: int = _CHAT_PER_DOC_CAP
 ) -> list[SourceChunk]:
@@ -3262,6 +3292,15 @@ def _evidence_lane_coverage(
             if score <= 0:
                 continue
             best_score = max(best_score, score)
+            # A side is only *covered* by a chunk that matches it STRONGLY (a
+            # real alias hit, score >= _EVIDENCE_LANE_STRONG_SCORE). A weak term
+            # co-occurrence — the word "type"/"character" inside a seduction
+            # passage — is informative for ranking but must NOT let a foreign
+            # book mark the personality side already covered. Combined with the
+            # multi-concept min_sources of 2, the side now needs two distinct
+            # strongly-matching documents before lane-forcing is skipped.
+            if score < _EVIDENCE_LANE_STRONG_SCORE:
+                continue
             doc_key = _evidence_source_doc_key(source)
             if doc_key and doc_key not in seen_docs:
                 seen_docs.add(doc_key)
@@ -3397,7 +3436,7 @@ async def _semantic_ingest_hints_for_evidence_lane(
     }
 
 
-def _choose_evidence_lane_candidate_with_report(
+def _choose_evidence_lane_candidates_with_report(
     candidates: list[SourceChunk],
     *,
     lane: EvidenceLane,
@@ -3405,91 +3444,53 @@ def _choose_evidence_lane_candidate_with_report(
     existing_chunk_ids: set[str],
     existing_doc_ids: set[str],
     semantic_doc_ids: set[str] | None = None,
-) -> tuple[SourceChunk | None, dict[str, Any]]:
-    best_new_doc: tuple[float, SourceChunk] | None = None
-    best_any_doc: tuple[float, SourceChunk] | None = None
-    semantic_doc_ids = semantic_doc_ids or set()
-    rejected: dict[str, int] = {
-        "low_value": 0,
-        "duplicate": 0,
-        "below_lane_floor": 0,
-    }
-    sampled: list[dict[str, Any]] = []
-    substantive = [
-        chunk
-        for chunk in candidates
-        if not _chat_source_is_low_value(_clean_chat_source_text(chunk), original_query)
-    ]
-    rejected["low_value"] = max(0, len(candidates or []) - len(substantive))
-    pool = substantive or list(candidates or [])
-    for chunk in pool:
-        chunk = _clean_chat_source_text(chunk)
-        chunk_id = str(chunk.chunk_id or "")
-        if not chunk_id or chunk_id in existing_chunk_ids:
-            rejected["duplicate"] += 1
-            if len(sampled) < 4:
-                sampled.append(
-                    _evidence_lane_candidate_snapshot(
-                        chunk,
-                        lane=lane,
-                        reason="duplicate",
-                    )
-                )
-            continue
-        lane_score = _evidence_lane_match_score(chunk, lane)
-        doc_id = _evidence_source_doc_key(chunk)
-        semantic_doc_match = bool(doc_id and doc_id in semantic_doc_ids)
-        if lane_score <= 0 and semantic_doc_match:
-            lane_score = 3
-        if lane_score <= 0:
-            rejected["below_lane_floor"] += 1
-            if len(sampled) < 4:
-                sampled.append(
-                    _evidence_lane_candidate_snapshot(
-                        chunk,
-                        lane=lane,
-                        reason="below_lane_floor",
-                    )
-                )
-            continue
-        new_doc_bonus = 5.0 if doc_id and doc_id not in existing_doc_ids else 0.0
-        semantic_doc_bonus = 7.0 if semantic_doc_match else 0.0
-        bounded_score = min(max(float(chunk.score or 0.0), 0.0), 1.0) * 2.0
-        final_score = (
-            (lane_score * 10.0)
-            + bounded_score
-            + new_doc_bonus
-            + semantic_doc_bonus
-        )
-        entry = (final_score, chunk)
-        if best_any_doc is None or final_score > best_any_doc[0]:
-            best_any_doc = entry
-        if doc_id and doc_id not in existing_doc_ids:
-            if best_new_doc is None or final_score > best_new_doc[0]:
-                best_new_doc = entry
+    target_k: int,
+) -> tuple[list[SourceChunk], dict[str, Any]]:
+    """Pick up to ``target_k`` lane-support chunks, each from a DISTINCT document.
 
-    chosen_tuple = best_new_doc or best_any_doc
-    if not chosen_tuple:
-        return None, {
-            "status": "uncovered",
-            "reason": "no_candidate_matched_lane",
-            "rejected": rejected,
-            "sampled_rejections": sampled,
-        }
-    chosen = chosen_tuple[1]
-    strength = "strong" if _evidence_lane_match_score(chosen, lane) >= 8 else "weak"
-    return chosen, {
-        "status": "selected",
-        "strength": strength,
-        "reason": "new_doc_lane_support" if chosen_tuple is best_new_doc else "lane_support",
-        "rejected": rejected,
-        "sampled_rejections": sampled,
-        "selected": _evidence_lane_candidate_snapshot(
-            chosen,
-            lane=lane,
-            reason=f"{strength}_support",
-        ),
+    This is the per-side reservation: rather than a single chunk per lane, a
+    side under-covered by the base retrieval gets real depth from several of its
+    own documents. The distinct-document selection (and new-doc / ingest-doc
+    preference) is delegated to the pure
+    :func:`evidence_allocation.select_lane_support` so it stays unit-tested;
+    production's metadata/grounding-aware scoring is supplied here via
+    ``_evidence_lane_match_score``.
+    """
+
+    cleaned = [_clean_chat_source_text(chunk) for chunk in candidates or []]
+    picks = _ea_select_lane_support(
+        cleaned,
+        lane=lane,
+        target_k=target_k,
+        existing_chunk_ids=set(existing_chunk_ids),
+        existing_doc_ids=set(existing_doc_ids),
+        semantic_doc_ids=set(semantic_doc_ids or set()),
+        score_fn=_evidence_lane_match_score,
+        chunk_id_fn=lambda c: str(c.chunk_id or ""),
+        doc_id_fn=_evidence_source_doc_key,
+        base_score_fn=lambda c: float(c.score or 0.0),
+        low_value_fn=lambda c: _chat_source_is_low_value(c, original_query),
+    )
+    report: dict[str, Any] = {
+        "status": "selected" if picks else "uncovered",
+        "selected_count": len(picks),
+        "target_k": int(target_k),
+        "reason": "per_side_lane_support" if picks else "no_candidate_matched_lane",
+        "selected": [
+            _evidence_lane_candidate_snapshot(
+                pick,
+                lane=lane,
+                reason=(
+                    "strong_support"
+                    if _evidence_lane_match_score(pick, lane)
+                    >= _EVIDENCE_LANE_STRONG_SCORE
+                    else "weak_support"
+                ),
+            )
+            for pick in picks
+        ],
     }
+    return picks, report
 
 
 def _mark_evidence_plan_chunk(
@@ -3651,16 +3652,23 @@ async def _enforce_evidence_plan_lanes(
 
     async def _cover_one_lane(
         lane: EvidenceLane,
-    ) -> tuple[EvidenceLane, SourceChunk | None, dict[str, Any], dict[str, Any], str]:
+    ) -> tuple[EvidenceLane, list[SourceChunk], dict[str, Any], dict[str, Any], str]:
         lane_report: dict[str, Any] = {
             "lane": lane.name,
             "label": lane.label,
             "status": "uncovered",
             "attempts": [],
         }
-        chosen: SourceChunk | None = None
+        # Reserve up to the side's min_sources DISTINCT-document chunks so one
+        # side of a multi-document question gets real depth, not a single quote.
+        # Documents already in the context (base + other lanes) are excluded so
+        # the side is backed by its OWN books.
+        target_k = max(1, int(getattr(lane, "min_sources", 1) or 1))
+        chosen_list: list[SourceChunk] = []
         chosen_report: dict[str, Any] = {}
         support_query = ""
+        lane_chunk_ids: set[str] = set(existing_chunk_ids)
+        lane_doc_ids: set[str] = set(existing_doc_ids)
         async with evidence_semaphore:
             semantic_hints = await _semantic_ingest_hints_for_evidence_lane(
                 lane,
@@ -3681,6 +3689,8 @@ async def _enforce_evidence_plan_lanes(
                 original_query,
                 semantic_hints=semantic_hints,
             ):
+                if len(chosen_list) >= target_k:
+                    break
                 attempt: dict[str, Any] = {
                     "query": _clip_trace_value(support_query, 220),
                     "search_mode": "local",
@@ -3701,7 +3711,9 @@ async def _enforce_evidence_plan_lanes(
                         similarity_threshold=similarity_threshold,
                         neo4j_expansion_cap=neo4j_expansion_cap,
                         max_corpora_per_query=max_corpora_per_query,
-                        final_top_k=8,
+                        # Pull a wider pool so target_k distinct documents are
+                        # actually reachable for this side.
+                        final_top_k=max(8, target_k * 6),
                         fact_seed_limit=fact_seed_limit,
                         search_mode="local",
                     )
@@ -3713,62 +3725,89 @@ async def _enforce_evidence_plan_lanes(
                     continue
                 candidates = list(getattr(result, "chunks", []) or [])
                 attempt["returned"] = len(candidates)
-                chosen, chosen_report = _choose_evidence_lane_candidate_with_report(
+                picks, chosen_report = _choose_evidence_lane_candidates_with_report(
                     candidates,
                     lane=lane,
                     original_query=original_query,
-                    existing_chunk_ids=existing_chunk_ids,
-                    existing_doc_ids=existing_doc_ids,
+                    existing_chunk_ids=lane_chunk_ids,
+                    existing_doc_ids=lane_doc_ids,
                     semantic_doc_ids=semantic_doc_ids,
+                    target_k=max(1, target_k - len(chosen_list)),
                 )
+                for pick in picks:
+                    pick_chunk_id = str(pick.chunk_id or "")
+                    pick_doc_id = _evidence_source_doc_key(pick)
+                    if pick_chunk_id and pick_chunk_id in lane_chunk_ids:
+                        continue
+                    if pick_doc_id and pick_doc_id in lane_doc_ids:
+                        continue
+                    chosen_list.append(pick)
+                    if pick_chunk_id:
+                        lane_chunk_ids.add(pick_chunk_id)
+                    if pick_doc_id:
+                        lane_doc_ids.add(pick_doc_id)
+                    if len(chosen_list) >= target_k:
+                        break
                 attempt.update(
                     {
-                        "status": chosen_report.get("status", "uncovered"),
-                        "strength": chosen_report.get("strength"),
+                        "status": "selected" if chosen_list else chosen_report.get("status", "uncovered"),
+                        "selected_count": len(chosen_list),
                         "selected": chosen_report.get("selected"),
-                        "rejected": chosen_report.get("rejected"),
-                        "sampled_rejections": chosen_report.get("sampled_rejections"),
                         "reason": chosen_report.get("reason"),
                     }
                 )
                 lane_report["attempts"].append(attempt)
-                if chosen:
-                    break
-        return lane, chosen, chosen_report, lane_report, support_query
+        return lane, chosen_list, chosen_report, lane_report, support_query
 
     lane_results = await asyncio.gather(*[_cover_one_lane(lane) for lane in missing])
-    for lane, chosen, chosen_report, lane_report, support_query in lane_results:
-        if not chosen:
+    for lane, chosen_list, chosen_report, lane_report, support_query in lane_results:
+        if not chosen_list:
             lane_report["reason"] = "no_support_chunk_selected"
             meta["lane_reports"].append(lane_report)
             continue
-        chunk_key = str(chosen.chunk_id or "")
-        if chunk_key in existing_chunk_ids:
+        added_for_lane = 0
+        selected_docs: list[str] = []
+        selected_chunks: list[str] = []
+        for chosen in chosen_list:
+            chunk_key = str(chosen.chunk_id or "")
+            if chunk_key and chunk_key in existing_chunk_ids:
+                continue
+            strength = (
+                "strong"
+                if _evidence_lane_match_score(chosen, lane) >= _EVIDENCE_LANE_STRONG_SCORE
+                else "weak"
+            )
+            marked = _mark_evidence_plan_chunk(
+                chosen,
+                lane=lane,
+                support_query=support_query,
+                support_strength=strength,
+            )
+            support_sources.append(marked)
+            existing_chunk_ids.add(str(marked.chunk_id or ""))
+            doc_key = _evidence_source_doc_key(marked)
+            if doc_key:
+                existing_doc_ids.add(doc_key)
+                selected_docs.append(doc_key)
+            selected_chunks.append(str(marked.chunk_id or ""))
+            added_for_lane += 1
+        if not added_for_lane:
             lane_report["status"] = "deduped_parallel"
             lane_report["reason"] = "duplicate_selected_by_another_lane"
             meta["lane_reports"].append(lane_report)
             continue
-        strength = str(chosen_report.get("strength") or "strong")
-        marked = _mark_evidence_plan_chunk(
-            chosen,
-            lane=lane,
-            support_query=support_query,
-            support_strength=strength,
-        )
         lane_report["status"] = "selected"
-        lane_report["strength"] = strength
-        lane_report["selected_doc_id"] = str(marked.doc_id or "")
-        lane_report["selected_doc_name"] = str(marked.doc_name or "")
-        lane_report["selected_chunk_id"] = str(marked.chunk_id or "")
-        support_sources.append(marked)
+        lane_report["selected_count"] = added_for_lane
+        lane_report["selected_doc_ids"] = selected_docs
+        lane_report["selected_chunk_ids"] = selected_chunks
         meta["lane_reports"].append(lane_report)
-        existing_chunk_ids.add(str(marked.chunk_id or ""))
-        doc_key = _evidence_source_doc_key(marked)
-        if doc_key:
-            existing_doc_ids.add(doc_key)
 
     _base_budget = int(final_top_k or len(base_sources) or 8)
-    max_sources = max(_base_budget, int(source_cap or 0), len(support_sources) or 0)
+    # Support is ADDITIVE: per-side reservations grow the final context rather
+    # than displacing the base ranking, so every side gets depth. The downstream
+    # per-doc cap (per_doc_cap_for_plan, applied in the stream path) trims any
+    # single over-represented book back to its fair share.
+    max_sources = max(_base_budget, int(source_cap or 0)) + len(support_sources)
     merged = _select_evidence_plan_sources(
         base_sources,
         support_sources,
@@ -5671,7 +5710,15 @@ class ChatOrchestrator:
             else None
         )
         resolved_mode = resolve_search_mode(requested_mode, request.message)
-        evidence_plan = build_evidence_plan(request.message)
+        evidence_plan = await self._resolve_evidence_plan(
+            request,
+            user_id=user_id,
+            llm_decompose=bool(profile_cfg.get("evidence_plan_llm_decompose")),
+            fallback_model=model_used,
+            fallback_api_base=profile_creds.get("api_base"),
+            fallback_api_key=profile_creds.get("api_key"),
+            fallback_extra=profile_creds.get("extra_params"),
+        )
         query_plan = _build_chat_query_plan(
             query=request.message,
             retrieval_query=retrieval_query,
@@ -5859,10 +5906,26 @@ class ChatOrchestrator:
                 metadata=evidence_plan_meta,
             )
         sources = _dedupe_sources_for_context(evidence_sources)
-        # Universal per-document cap — the coverage selector applies one too, but
-        # it is bypassed when no facet coverage is needed; this final guard runs
-        # on every path so one book can never dominate the answer context.
-        sources = _cap_chunks_per_doc(sources)
+        # Per-document cap. For a genuine multi-side question, no single book may
+        # contribute more than one side's worth of evidence — this is what turns
+        # "4 of 5 chunks from the title-matching book" into a balanced packet.
+        # Reserved per-side support chunks are protected so the cap trims the
+        # dominant book, not the evidence we added on purpose. Single-side /
+        # non-plan queries fall back to the legacy universal guard (a no-op
+        # unless _CHAT_PER_DOC_CAP is configured), so ordinary answers are
+        # unchanged.
+        _evidence_doc_cap = _evidence_per_doc_cap_for_plan(
+            evidence_plan, budget=len(sources)
+        )
+        if _evidence_doc_cap > 0:
+            sources = _ea_cap_chunks_per_doc(
+                sources,
+                cap=_evidence_doc_cap,
+                doc_id_fn=lambda s: str(getattr(s, "doc_id", "") or ""),
+                protect_fn=_is_reserved_support_chunk,
+            )
+        else:
+            sources = _cap_chunks_per_doc(sources)
         effective_tier_for_trace = getattr(
             retrieval.effective_tier,
             "value",
@@ -7741,6 +7804,7 @@ class ChatOrchestrator:
             "final_top_k": None,
             "fact_seed_limit": None,
             "source_cap": None,
+            "evidence_plan_llm_decompose": False,
         }
 
         saved_retrieval_settings = None
@@ -7751,6 +7815,13 @@ class ChatOrchestrator:
                 extras["final_top_k"] = saved_retrieval_settings.final_top_k
                 extras["source_cap"] = getattr(
                     saved_retrieval_settings, "source_cap", _CHAT_COVERAGE_SOURCE_CAP
+                )
+                extras["evidence_plan_llm_decompose"] = bool(
+                    getattr(
+                        saved_retrieval_settings,
+                        "evidence_plan_llm_decompose",
+                        False,
+                    )
                 )
                 # Fact seeding has ONE user-facing knob — graph_fact_seeds (the
                 # "Fact seeds" slider; graph-tier scoped, since fact seeding only
@@ -7790,6 +7861,9 @@ class ChatOrchestrator:
                         "fact_seed_limit": getattr(rs, "graph_fact_seeds", None),
                         "source_cap": getattr(
                             rs, "source_cap", _CHAT_COVERAGE_SOURCE_CAP
+                        ),
+                        "evidence_plan_llm_decompose": bool(
+                            getattr(rs, "evidence_plan_llm_decompose", False)
                         ),
                     }
                 )
@@ -8048,6 +8122,95 @@ class ChatOrchestrator:
                 exc,
             )
             return request.message, False
+
+    async def _llm_decompose_sides(
+        self,
+        query: str,
+        *,
+        route: dict[str, Any] | None,
+    ) -> list[dict]:
+        """Optional LLM decomposition of a query into source sides (E).
+
+        Behind the ``evidence_plan_llm_decompose`` setting (default off). Reuses
+        the HyDE model route and the same short-leash completion client. Any
+        failure or malformed reply yields ``[]`` so the deterministic plan
+        stands — the LLM only proposes the *sides*; documents are still grounded
+        downstream from ingestion metadata.
+        """
+
+        route = route or {}
+        model = route.get("model") or settings.HYDE_MODEL
+        if not model:
+            return []
+        prompt = (
+            "Split the user's question into the 2-4 DISTINCT topics or sources "
+            "it needs as separate evidence; each topic should map to a different "
+            "body of material. Reply ONLY with JSON of the form "
+            '{"sides": [{"name": "...", "search_terms": ["...", "..."]}]}. '
+            "Use 3-6 concrete search terms per side (titles, named frameworks, "
+            "key nouns). If the question is really about a single topic, return a "
+            "single side.\n\nQuestion: " + str(query or "")
+        )
+        try:
+            reply = await llm_service.complete_sync(
+                messages=[{"role": "user", "content": prompt}],
+                model=model,
+                temperature=0.0,
+                max_tokens=300,
+                api_base=route.get("api_base"),
+                api_key=route.get("api_key"),
+                extra_params=route.get("extra_params") or None,
+                timeout=getattr(settings, "HYDE_TIMEOUT_SECONDS", 8.0),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("evidence-plan LLM decomposition failed: %s", exc)
+            return []
+        sides = parse_llm_sides(reply)
+        return sides if len(sides) >= 2 else []
+
+    async def _resolve_evidence_plan(
+        self,
+        request: ChatRequest,
+        *,
+        user_id: str | None,
+        llm_decompose: bool,
+        fallback_model: str | None = None,
+        fallback_api_base: str | None = None,
+        fallback_api_key: str | None = None,
+        fallback_extra: dict | None = None,
+    ) -> EvidencePlan:
+        """Build the evidence plan, generalizing beyond the curated concepts (E).
+
+        1. Deterministic plan (curated concepts + token lanes).
+        2. If not already multi-side, try the no-LLM heuristic side split
+           ("X versus Y", "between A and B") — any corpus, zero added latency.
+        3. If still single-side and the LLM decomposer is enabled, ask the model
+           to name the sides. Always falls back to the deterministic plan.
+        """
+
+        query = request.message
+        plan = build_evidence_plan(query)
+        if len(plan.required_lanes) >= 2:
+            return plan
+
+        heuristic_sides = split_query_sides(query)
+        if len(heuristic_sides) >= 2:
+            return build_evidence_plan_from_sides(query, heuristic_sides)
+
+        if llm_decompose:
+            route = await self._resolve_hyde_route(
+                request,
+                user_id=user_id,
+                fallback_model=fallback_model,
+                fallback_api_base=fallback_api_base,
+                fallback_api_key=fallback_api_key,
+                fallback_extra=fallback_extra,
+            )
+            sides = await self._llm_decompose_sides(query, route=route)
+            if len(sides) >= 2:
+                return build_evidence_plan_from_sides(query, sides)
+
+        return plan
 
     def _resolve_reasoning(
         self, request: ChatRequest

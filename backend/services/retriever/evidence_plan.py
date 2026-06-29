@@ -110,7 +110,7 @@ def _lane_search_terms(group: ConceptGroup) -> tuple[str, ...]:
     return _dedupe_terms(terms)[:_MAX_LANE_ALIASES]
 
 
-def _lane_from_group(group: ConceptGroup) -> EvidenceLane:
+def _lane_from_group(group: ConceptGroup, *, min_sources: int = 1) -> EvidenceLane:
     search_terms = _lane_search_terms(group)
     aliases = _dedupe_terms([group.key.replace("_", " "), *group.aliases, *search_terms])
     query_terms = search_terms[:12] or aliases[:12]
@@ -121,7 +121,14 @@ def _lane_from_group(group: ConceptGroup) -> EvidenceLane:
         aliases=aliases,
         search_terms=search_terms,
         query=" ".join(query_terms),
+        min_sources=min_sources,
     )
+
+
+# Multi-concept queries reserve >=2 distinct-document sources per side. One
+# chunk is a quote, not a lane of evidence; requiring two distinct documents is
+# what stops a title-matching book from satisfying the *other* side by itself.
+MULTI_CONCEPT_MIN_SOURCES = 2
 
 
 def build_evidence_plan(
@@ -159,7 +166,10 @@ def build_evidence_plan(
             lanes=lanes,
             bridge_query=query_text,
         )
-    lanes = tuple(_lane_from_group(group) for group in groups[:max_lanes])
+    lanes = tuple(
+        _lane_from_group(group, min_sources=MULTI_CONCEPT_MIN_SOURCES)
+        for group in groups[:max_lanes]
+    )
     return EvidencePlan(
         mode=(
             "multi_concept_relationship"
@@ -204,3 +214,117 @@ def evidence_plan_to_dict(plan: EvidencePlan) -> dict[str, object]:
 def evidence_lane_matches_text(lane: EvidenceLane, text: str | None) -> bool:
     haystack = clean_text(text or "")
     return any(clean_text(alias) in haystack for alias in lane.aliases)
+
+
+def _slug(value: str) -> str:
+    text = clean_text(value).strip()
+    return "_".join(text.split())[:48]
+
+
+def build_evidence_plan_from_sides(
+    query: str | None,
+    sides: list[dict] | tuple[dict, ...],
+    *,
+    max_lanes: int = 4,
+) -> EvidencePlan:
+    """Build a multi-side plan from externally-provided sides (E: generalization).
+
+    ``sides`` come from the no-LLM heuristic splitter or the optional LLM
+    decomposer. Each side is a dict with a ``name``/``label`` and a list of
+    ``search_terms`` (and optionally a ``query``). This lets an *arbitrary*
+    multi-document question get the same per-side, distinct-document allocation
+    as the curated concepts — the lanes are still grounded to real documents
+    downstream via the ingestion-metadata hints. Falls back to the deterministic
+    plan when fewer than two usable sides are provided.
+    """
+
+    lanes: list[EvidenceLane] = []
+    seen: set[str] = set()
+    for side in list(sides or [])[:max_lanes]:
+        if not isinstance(side, dict):
+            continue
+        name = _slug(str(side.get("name") or side.get("label") or ""))
+        if not name or name in seen:
+            continue
+        raw_terms = side.get("search_terms") or side.get("aliases") or []
+        if isinstance(raw_terms, str):
+            raw_terms = [raw_terms]
+        if not raw_terms and side.get("query"):
+            raw_terms = [side["query"]]
+        search_terms = _dedupe_terms([*raw_terms])[:_MAX_LANE_ALIASES]
+        if not search_terms:
+            continue
+        aliases = _dedupe_terms(
+            [name.replace("_", " "), *(side.get("aliases") or []), *search_terms]
+        )
+        query_terms = search_terms[:12] or aliases[:12]
+        lanes.append(
+            EvidenceLane(
+                name=name,
+                label=str(side.get("label") or name.replace("_", " ")),
+                concept_key=name,
+                aliases=aliases,
+                search_terms=search_terms,
+                query=str(side.get("query") or " ".join(query_terms)),
+                min_sources=MULTI_CONCEPT_MIN_SOURCES,
+            )
+        )
+        seen.add(name)
+
+    if len(lanes) < 2:
+        return build_evidence_plan(query, max_lanes=max_lanes)
+
+    operators = tuple(sorted(required_operator_atoms(query or "")))
+    return EvidencePlan(
+        mode="multi_concept_sourced",
+        reason="query_decomposed_into_source_sides",
+        operators=operators,
+        lanes=tuple(lanes),
+        bridge_query=query or "",
+    )
+
+
+def parse_llm_sides(text: str | None) -> list[dict]:
+    """Parse an LLM decomposition reply into side dicts; tolerant and safe.
+
+    Accepts a JSON object ``{"sides": [...]}`` or a bare JSON array, possibly
+    wrapped in prose / code fences. Returns ``[]`` on anything unparseable so a
+    malformed model reply never breaks retrieval.
+    """
+
+    import json
+    import re
+
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    match = re.search(r"\{.*\}|\[.*\]", raw, re.DOTALL)
+    if not match:
+        return []
+    try:
+        data = json.loads(match.group(0))
+    except Exception:
+        return []
+    sides_raw = data.get("sides") if isinstance(data, dict) else data
+    if not isinstance(sides_raw, list):
+        return []
+    out: list[dict] = []
+    for item in sides_raw:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or item.get("label") or "").strip()
+        terms = item.get("search_terms") or item.get("terms") or []
+        if isinstance(terms, str):
+            terms = [terms]
+        terms = [str(t).strip() for t in terms if str(t).strip()]
+        if not name or not terms:
+            continue
+        out.append(
+            {
+                "name": name,
+                "label": str(item.get("label") or name),
+                "search_terms": terms,
+                "query": str(item.get("query") or " ".join(terms)),
+            }
+        )
+    return out

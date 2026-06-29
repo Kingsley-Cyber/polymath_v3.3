@@ -479,6 +479,16 @@ class RetrievalSettings(_legacy.RetrievalSettings):
             "semantic-facet cap."
         ),
     )
+    evidence_plan_llm_decompose: bool = Field(
+        default=False,
+        description=(
+            "When on, a multi-document question that the deterministic concept "
+            "detector and the no-LLM heuristic splitter both fail to decompose "
+            "is sent to a small LLM (the HyDE route) to name its evidence sides. "
+            "Adds one short model call to such queries; off by default. The "
+            "grounded, no-LLM decomposition always runs regardless of this flag."
+        ),
+    )
 
 
 class ExtractionEndpoint(BaseModel):

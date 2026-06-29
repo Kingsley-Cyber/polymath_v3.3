@@ -467,3 +467,68 @@ def required_atoms_for_query(query: str | None, *, max_concepts: int = 4) -> set
     }
     required.update(required_operator_atoms(query))
     return required
+
+
+_SIDE_SPLIT_SEPARATORS: tuple[str, ...] = (
+    " versus ",
+    " vs. ",
+    " vs ",
+    " compared with ",
+    " compared to ",
+    " contrasted with ",
+)
+
+
+def split_query_sides(query: str | None, *, max_sides: int = 2) -> list[dict]:
+    """Heuristic, no-LLM split of a clearly binary question into source sides.
+
+    Handles "relationship/difference between A and B" and "A versus / compared
+    to B". Returns side dicts ``{name, label, search_terms, query}`` only when a
+    clean two-part split is found; otherwise ``[]``. Deliberately conservative:
+    it does NOT split on a bare "and"/"with" (which would mangle ordinary
+    questions) — the curated ``concept_groups`` path already covers those. This
+    is the no-LLM half of the generalization: an arbitrary "X vs Y" over books
+    the alias table has never seen still decomposes into two grounded sides.
+    """
+
+    normalized = normalize_query(query)
+    if not normalized:
+        return []
+
+    parts: list[str] = []
+    between = re.search(r"\bbetween\s+(.+?)\s+and\s+(.+)$", normalized)
+    if between:
+        parts = [between.group(1), between.group(2)]
+    else:
+        for sep in _SIDE_SPLIT_SEPARATORS:
+            if sep in normalized:
+                left, _, right = normalized.partition(sep)
+                parts = [left, right]
+                break
+    if len(parts) < 2:
+        return []
+
+    sides: list[dict] = []
+    seen: set[str] = set()
+    for part in parts[:max_sides]:
+        tokens = query_tokens(part, stop_words=CONCEPT_STOP_WORDS)
+        if not tokens:
+            continue
+        phrase = " ".join(part.split()).strip()
+        name = "_".join(tokens[:3])
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        terms: list[str] = []
+        if phrase:
+            terms.append(phrase)
+        terms.extend(tokens[:6])
+        sides.append(
+            {
+                "name": name,
+                "label": phrase or name.replace("_", " "),
+                "search_terms": terms,
+                "query": phrase or " ".join(tokens[:6]),
+            }
+        )
+    return sides if len(sides) >= 2 else []
