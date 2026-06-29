@@ -204,7 +204,13 @@ class IngestionConfig(BaseModel):
     chunk_overlap: int = Field(default=200)
     max_summary_tokens: int = Field(default=175)
     child_chunk_algorithm: Literal["sentence_merge", "semantic_split"] = Field(
-        default="sentence_merge"
+        default="semantic_split",
+        description=(
+            "Child-chunk splitter. 'semantic_split' (default for NEW corpora): "
+            "one child per paragraph/idea — finer, single-idea retrieval units. "
+            "'sentence_merge': legacy paragraph-packing. Existing corpora keep "
+            "their frozen value, so already-ingested data is unchanged."
+        ),
     )
     semantic_split_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
 

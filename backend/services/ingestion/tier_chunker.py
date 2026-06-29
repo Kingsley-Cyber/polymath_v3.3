@@ -49,6 +49,12 @@ PARENT_TARGET_TOKENS = 1200
 # ChildTokenBudget defaults in models/_schemas_legacy.py; corpus config wins
 # when present.
 CHILD_TARGET_TOKENS = 128
+# semantic_split coalesce floor. The normal child_min (64) would re-merge
+# idea-separated short paragraphs straight back into one chunk, undoing the
+# split. For semantic_split we only absorb true FRAGMENTS (a stray heading or
+# one-line sentence) below this floor, so single-idea paragraphs of ~30-60 tok
+# survive as their own retrieval units.
+_SEMANTIC_FRAGMENT_FLOOR = 24
 # Phase K — adaptive parent sizing. Heading-aware tiers (A/B/B+) sometimes
 # produce many small parents when docs have dense subheadings. The coalesce
 # pass merges consecutive below-MIN sections up to MAX to keep parents near
@@ -130,9 +136,11 @@ def _budget_value(budget, field_name: str, default: int) -> int:
 def _build_policy(config=None) -> ChunkingPolicy:
     """Resolve the corpus settings into the per-file auto chunking policy.
 
-    The backend treats `child_chunk_algorithm` as a requested policy hint, not
-    a hard file-type decision. Semantic splitting is intentionally resolved to
-    sentence_merge until the semantic splitter is fully implemented.
+    `child_chunk_algorithm` now drives the splitter:
+    - "semantic_split" (default for NEW corpora): one child per paragraph/idea
+      via `_split_by_paragraph_idea` — finer, single-idea retrieval units.
+    - "sentence_merge": legacy paragraph-packing via `_split_at_boundary`.
+    Existing corpora keep their FROZEN config, so old data is grandfathered.
     """
     parent_budget = getattr(config, "parent_chunk_tokens", None)
     child_budget = getattr(config, "child_chunk_tokens", None)
@@ -142,7 +150,8 @@ def _build_policy(config=None) -> ChunkingPolicy:
     child_target = max(100, _budget_value(child_budget, "target_tokens", CHILD_TARGET_TOKENS))
     child_min = max(50, min(_budget_value(child_budget, "min_tokens", 128), child_target))
     child_max = max(child_target, _budget_value(child_budget, "max_tokens", 512))
-    requested = str(getattr(config, "child_chunk_algorithm", "sentence_merge") or "sentence_merge")
+    requested = str(getattr(config, "child_chunk_algorithm", "semantic_split") or "semantic_split")
+    resolved = "semantic_split" if requested == "semantic_split" else "sentence_merge"
     raw_overlap = getattr(config, "chunk_overlap", 200)
     try:
         overlap = int(raw_overlap)
@@ -158,7 +167,7 @@ def _build_policy(config=None) -> ChunkingPolicy:
         child_max_tokens=child_max,
         parent_overlap_tokens=overlap,
         requested_child_strategy=requested,
-        resolved_child_strategy="sentence_merge",
+        resolved_child_strategy=resolved,
     )
 
 
@@ -451,6 +460,48 @@ def _split_at_boundary(
     return _apply_overlap(chunks, overlap_tokens)
 
 
+def _split_by_paragraph_idea(
+    text: str, target_tokens: int, max_tokens: int
+) -> list[str]:
+    """Semantic/proposition split: ONE chunk per paragraph (idea), instead of
+    PACKING several paragraphs to fill the token budget the way
+    ``_split_at_boundary`` does. A paragraph is usually a single idea, so this
+    keeps each child focused on one thing → cleaner embedding, more precise
+    retrieval (a 128-tok child no longer blends 2-3 unrelated paragraphs).
+
+    Oversize paragraphs (> ``max_tokens``) split at sentence boundaries, greedy
+    to ``target_tokens``. Tiny fragments are merged downstream by
+    ``_coalesce_small_child_texts`` — which only touches sub-min pieces, so the
+    paragraph (idea) separation survives. Children are variable-size by design.
+    """
+
+    paragraphs = [p.strip() for p in re.split(r"\n\n+", text) if p.strip()]
+    if not paragraphs:
+        return [text.strip()] if text.strip() else []
+    out: list[str] = []
+    for para in paragraphs:
+        if _count_tokens(para) <= max_tokens:
+            out.append(para)
+            continue
+        sentences = _split_at_sentences(para)
+        if len(sentences) <= 1:
+            out.append(para)  # pathological (code/table) — _hard_split handles it
+            continue
+        s_buf: list[str] = []
+        s_tok = 0
+        for s in sentences:
+            st = _count_tokens(s)
+            if s_tok + st > target_tokens and s_buf:
+                out.append(" ".join(s_buf))
+                s_buf, s_tok = [s], st
+            else:
+                s_buf.append(s)
+                s_tok += st
+        if s_buf:
+            out.append(" ".join(s_buf))
+    return [c for c in out if c.strip()]
+
+
 _Block = tuple[list[str] | None, str, str, str | None, dict]
 # 5-tuple: (heading_path, text, chunk_kind, language, metadata)
 
@@ -670,16 +721,39 @@ def _make_children(
     chunk_kind: str = ChunkKind.BODY,
     language: str | None = None,
     metadata: dict | None = None,
+    child_strategy: str = "sentence_merge",
 ) -> tuple[list[ChildChunk], int]:
-    texts = _split_at_boundary(parent_text, child_target_tokens) or [parent_text.strip()]
+    # semantic_split is a PROSE strategy: one child per paragraph/idea. Scope it
+    # to plain body prose — structured content (tables = TABLE kind, code = CODE
+    # kind, timed transcripts = a source_format) keeps its specialized splitter,
+    # otherwise paragraph-splitting would shear off transcript headers / table
+    # row groups.
+    use_semantic = (
+        str(child_strategy or "").lower() == "semantic_split"
+        and chunk_kind == ChunkKind.BODY
+        and not (metadata or {}).get("source_format")
+    )
+    if use_semantic:
+        texts = _split_by_paragraph_idea(
+            parent_text, child_target_tokens, child_max_tokens
+        ) or [parent_text.strip()]
+    else:
+        texts = _split_at_boundary(parent_text, child_target_tokens) or [parent_text.strip()]
     # Hard cap: any child still over `child_max_tokens` after the boundary
     # splitter (rare but happens on long unbroken code blocks / tables) gets
     # force-broken at exact token boundaries so the embedder doesn't silently
     # truncate at its 1024 ceiling.
     texts = _hard_split_oversize(texts, child_max_tokens)
+    # For semantic_split, coalesce only true fragments (below the fragment
+    # floor), not whole short paragraphs — otherwise the idea-separated children
+    # would be re-packed straight back into one chunk. sentence_merge keeps the
+    # normal child_min behaviour.
+    coalesce_min = (
+        min(child_min_tokens, _SEMANTIC_FRAGMENT_FLOOR) if use_semantic else child_min_tokens
+    )
     texts = _coalesce_small_child_texts(
         texts,
-        child_min_tokens=child_min_tokens,
+        child_min_tokens=coalesce_min,
         child_max_tokens=child_max_tokens,
     )
     children: list[ChildChunk] = []
@@ -792,10 +866,10 @@ def describe_chunking(parse_result, config=None) -> dict:
         "parent_strategy": parent_strategy,
         "child_strategy": policy.resolved_child_strategy,
         "requested_child_strategy": policy.requested_child_strategy,
-        "semantic_split_enabled": False,
+        "semantic_split_enabled": policy.resolved_child_strategy == "semantic_split",
         "semantic_split_reason": (
-            "semantic_split is treated as a policy hint until the splitter is implemented"
-            if policy.requested_child_strategy == "semantic_split"
+            "one child per paragraph/idea (finer, single-idea retrieval units)"
+            if policy.resolved_child_strategy == "semantic_split"
             else None
         ),
         "chunk_overlap": policy.parent_overlap_tokens,
@@ -987,6 +1061,7 @@ def chunk(
                 page_start=page_start,
                 page_end=page_end,
                 chunk_kind=kind,
+                child_strategy=policy.resolved_child_strategy,
             )
             parents.append(
                 ParentChunk(
@@ -1097,6 +1172,7 @@ def chunk(
                     child_max_tokens=policy.child_max_tokens,
                     chunk_kind=kind,
                     metadata=metadata,
+                    child_strategy=policy.resolved_child_strategy,
                 )
                 parents.append(
                     ParentChunk(
@@ -1143,6 +1219,7 @@ def chunk(
                 child_min_tokens=policy.child_min_tokens,
                 child_max_tokens=policy.child_max_tokens,
                 chunk_kind=kind,
+                child_strategy=policy.resolved_child_strategy,
             )
             parents.append(
                 ParentChunk(

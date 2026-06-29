@@ -771,8 +771,8 @@ class IngestionConfig(BaseModel):
         default=175, description="Token cap per parent summary (GHOST A)"
     )
     child_chunk_algorithm: Literal["sentence_merge", "semantic_split"] = Field(
-        default="sentence_merge",
-        description="sentence_merge: split on sentence boundaries → merge to ~300-400 tok. semantic_split: embedding similarity (only if >max_tokens)",
+        default="semantic_split",
+        description="semantic_split (default, NEW corpora): one child per paragraph/idea — finer, single-idea retrieval units. sentence_merge: legacy paragraph-packing to the token budget. Existing corpora keep their frozen value.",
     )
     semantic_split_threshold: float = Field(
         default=0.65,

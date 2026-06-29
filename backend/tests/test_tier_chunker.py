@@ -54,7 +54,9 @@ def test_pdf_pages_group_into_token_sized_parents_with_page_ranges():
     assert all(c.page_start is not None and c.page_end is not None for c in children)
 
 
-def test_chunking_config_reports_auto_policy_and_semantic_split_as_hint():
+def test_chunking_config_resolves_semantic_split():
+    # semantic_split is now a real strategy (one child per paragraph/idea),
+    # not a hint that falls back to sentence_merge.
     cfg = IngestionConfig(child_chunk_algorithm="semantic_split")
     parsed = _parse_result(source_tier=SourceTier.ocr_ast, pages=["alpha beta"])
 
@@ -63,8 +65,8 @@ def test_chunking_config_reports_auto_policy_and_semantic_split_as_hint():
     assert config["mode"] == "auto"
     assert config["parent_strategy"] == "pdf_page_grouped"
     assert config["requested_child_strategy"] == "semantic_split"
-    assert config["child_strategy"] == "sentence_merge"
-    assert config["semantic_split_enabled"] is False
+    assert config["child_strategy"] == "semantic_split"
+    assert config["semantic_split_enabled"] is True
     assert config["page_ranges_preserved"] is True
 
 
@@ -79,7 +81,8 @@ def test_default_chunking_contract_is_token_and_structure_based():
 
     assert config["mode"] == "auto"
     assert config["parent_strategy"] == "heading_bound"
-    assert config["child_strategy"] == "sentence_merge"
+    # New default for fresh configs is semantic_split (one child per idea).
+    assert config["child_strategy"] == "semantic_split"
     assert config["chunk_overlap"] == 200
     assert config["token_budgets"] == {
         "parent_min": 500,
