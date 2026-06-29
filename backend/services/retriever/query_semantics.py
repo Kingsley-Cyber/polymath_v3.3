@@ -191,6 +191,52 @@ GENERIC_CONTEXT_TERMS: frozenset[str] = frozenset(
     }
 )
 
+# Abstract scaffolding nouns. They are meaningful for *lexical* recall, but they
+# must not become a standalone evidence LANE: "analysis" alone embeds near "data
+# analysis", so an arbitrary technical book gets pulled into a psychology side.
+# A token here only anchors a lane when it is part of a curated multi-word
+# concept (CONCEPT_ALIASES); on its own it is skipped during lane building.
+GENERIC_CONCEPT_TOKENS: frozenset[str] = frozenset(
+    {
+        "analysis",
+        "analyses",
+        "approach",
+        "approaches",
+        "aspect",
+        "aspects",
+        "area",
+        "areas",
+        "concept",
+        "concepts",
+        "element",
+        "elements",
+        "factor",
+        "factors",
+        "framework",
+        "frameworks",
+        "idea",
+        "ideas",
+        "method",
+        "methods",
+        "methodology",
+        "notion",
+        "perspective",
+        "perspectives",
+        "principle",
+        "principles",
+        "technique",
+        "techniques",
+        "theory",
+        "theories",
+        "thing",
+        "things",
+        "topic",
+        "topics",
+        "way",
+        "ways",
+    }
+)
+
 CONCEPT_ONLY_STOP_WORDS: frozenset[str] = frozenset(
     {
         "use",
@@ -411,6 +457,12 @@ def concept_groups(query: str, *, max_groups: int = 8) -> list[ConceptGroup]:
         # substantive side of the question.
         if token == "art" and "art of" in normalized:
             continue
+        # Abstract scaffolding nouns ("analysis", "approach", "theory") don't
+        # identify a document set on their own and embed near unrelated
+        # technical content, so they must not become a standalone evidence lane.
+        # They still anchor a lane when curated (a named multi-word concept).
+        if token in GENERIC_CONCEPT_TOKENS and token not in CONCEPT_ALIASES:
+            continue
         if token in seen:
             continue
         aliases = CONCEPT_ALIASES.get(token) or token_variants(token)
@@ -458,6 +510,14 @@ def required_operator_atoms(query: str | None) -> set[str]:
     if has_marker(q, PROCEDURE_MARKERS):
         required.add("procedure")
     return required
+
+
+def is_curated_concept(key: str | None) -> bool:
+    """True when a concept key is a curated alias entry (a strong, named concept)
+    rather than a bare query token. Used to decide whether a deterministic
+    evidence plan is strong enough or should be re-decomposed (LLM path)."""
+
+    return str(key or "") in CONCEPT_ALIASES
 
 
 def required_atoms_for_query(query: str | None, *, max_concepts: int = 4) -> set[str]:

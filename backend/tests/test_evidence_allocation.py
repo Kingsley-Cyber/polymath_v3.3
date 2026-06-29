@@ -21,7 +21,11 @@ from services.retriever.evidence_plan import (  # noqa: E402
     build_evidence_plan_from_sides,
     parse_llm_sides,
 )
-from services.retriever.query_semantics import split_query_sides  # noqa: E402
+from services.retriever.query_semantics import (  # noqa: E402
+    concept_groups,
+    is_curated_concept,
+    split_query_sides,
+)
 from services.retriever.evidence_allocation import (  # noqa: E402
     DEFAULT_PER_SIDE_SOURCES,
     cap_chunks_per_doc,
@@ -293,6 +297,24 @@ def test_parse_llm_sides_is_tolerant():
     assert parse_llm_sides("not json at all") == []
     assert parse_llm_sides("") == []
     assert parse_llm_sides('{"sides": "oops"}') == []
+
+
+def test_generic_token_does_not_become_a_standalone_lane():
+    # "analysis" alone embeds near "data analysis" and must NOT anchor a lane;
+    # the specific concept ("personality") still does.
+    keys = [g.key for g in concept_groups("how does analysis relate to personality")]
+    assert "analysis" not in keys, keys
+    assert "personality" in keys, keys
+    # A specific compound token is still kept.
+    assert "metacognition" in [g.key for g in concept_groups("metacognition and habit")]
+
+
+def test_is_curated_concept():
+    assert is_curated_concept("personality")
+    assert is_curated_concept("seduction")
+    assert not is_curated_concept("metacognition")
+    assert not is_curated_concept("")
+    assert not is_curated_concept(None)
 
 
 def _run_all():

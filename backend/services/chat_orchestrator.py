@@ -66,6 +66,7 @@ from services.retriever.evidence_allocation import (
 )
 from services.retriever.query_semantics import (
     concept_groups,
+    is_curated_concept,
     lexical_terms,
     required_atoms_for_query,
     required_operator_atoms,
@@ -8190,7 +8191,15 @@ class ChatOrchestrator:
 
         query = request.message
         plan = build_evidence_plan(query)
-        if len(plan.required_lanes) >= 2:
+        # A deterministic plan is good as-is only when it already has >=2 sides
+        # AND none of them is a bare token lane. A token lane ("metacognition",
+        # "self-analysis") retrieves on a generic embedding and can pull
+        # cross-domain noise, so a multi-side-but-weak plan is still a candidate
+        # for sharper re-decomposition.
+        weak = any(
+            not is_curated_concept(lane.concept_key) for lane in plan.required_lanes
+        )
+        if len(plan.required_lanes) >= 2 and not weak:
             return plan
 
         heuristic_sides = split_query_sides(query)
