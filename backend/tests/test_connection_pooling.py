@@ -81,6 +81,30 @@ def test_multi_corpus_config_query_skips_lookup_entirely():
     assert asyncio.run(retriever_orchestrator._embedding_config_for_query(None)) is None
 
 
+def test_query_embedding_is_cached():
+    calls = {"n": 0}
+
+    async def fake_local(texts, dim):
+        calls["n"] += 1
+        return [[0.1, 0.2, 0.3]]
+
+    embedder._QUERY_EMBED_CACHE.clear()
+    old = embedder._embed_batch_local
+    embedder._embed_batch_local = fake_local
+    try:
+        v1 = asyncio.run(embedder.embed_query("hello world"))
+        v2 = asyncio.run(embedder.embed_query("hello world"))
+        assert v1 == [0.1, 0.2, 0.3]
+        assert v2 == v1
+        assert calls["n"] == 1, f"second embed should hit cache, got {calls['n']} sidecar calls"
+        # distinct text must miss and re-embed
+        asyncio.run(embedder.embed_query("a different query"))
+        assert calls["n"] == 2
+    finally:
+        embedder._embed_batch_local = old
+        embedder._QUERY_EMBED_CACHE.clear()
+
+
 def _run_all():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

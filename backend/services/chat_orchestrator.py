@@ -5828,72 +5828,108 @@ class ChatOrchestrator:
                 search_mode=resolved_mode,
             )
         coverage_start = perf_counter()
-        precomputed_coverage_facets = None
-        if coverage_facets_task is not None:
-            try:
-                precomputed_coverage_facets = await coverage_facets_task
-            except Exception as exc:
-                logger.debug("coverage facet prefetch failed; detecting inline: %s", exc)
         retrieval_sources = await _drop_noisy_retrieval_chunks(
             list(retrieval.chunks or [])
         )
-        coverage_sources, coverage_meta = await _enforce_chat_query_coverage(
-            original_query=request.message,
-            retrieval_query=retrieval_query,
-            sources=retrieval_sources,
-            corpus_ids=request.corpus_ids,
-            retrieval_tier=getattr(retrieval, "effective_tier", request.retrieval_tier),
-            collections=request.collections,
-            retrieval_k=profile_k,
-            rerank_enabled=profile_rerank,
-            top_k_summary=profile_cfg["top_k_summary"],
-            rerank_top_n=profile_cfg["rerank_top_n"],
-            similarity_threshold=profile_cfg["similarity_threshold"],
-            neo4j_expansion_cap=profile_cfg["neo4j_expansion_cap"],
-            max_corpora_per_query=profile_cfg["max_corpora_per_query"],
-            fact_seed_limit=profile_cfg["fact_seed_limit"],
-            final_top_k=profile_cfg["final_top_k"],
-            source_cap=profile_cfg.get("source_cap"),
-            search_mode=resolved_mode,
-            precomputed_facets=precomputed_coverage_facets,
+        # Fast path: a SPECIFIC single-concept lookup gains nothing from facet
+        # coverage or per-side evidence-plan retrievals — each is an extra full
+        # retrieve() round-trip that only pays off for broad / multi-document
+        # questions. Skip both and answer from the base retrieval. Gated tightly
+        # (deterministic intent=specific + <2 evidence lanes + not global mode) so
+        # comparative / broad questions keep the full machinery.
+        try:
+            _fast_intent = infer_retrieval_intent(request.message).need.value
+        except Exception:
+            _fast_intent = ""
+        _retrieval_fast_path = (
+            str(_fast_intent or "").lower() == "specific"
+            and len(evidence_plan.required_lanes) < 2
+            and str(resolved_mode or "").lower() != "global"
         )
-        coverage_meta["duration_s"] = perf_counter() - coverage_start
-        if coverage_meta.get("added"):
+        if _retrieval_fast_path:
+            # Don't leak the concurrently-started coverage-facet prefetch.
+            if coverage_facets_task is not None:
+                try:
+                    await coverage_facets_task
+                except Exception:
+                    pass
+            coverage_sources = retrieval_sources
+            coverage_meta = {
+                "fast_path": True,
+                "skipped": "facet_coverage+evidence_plan",
+                "intent": _fast_intent,
+                "duration_s": perf_counter() - coverage_start,
+            }
+            evidence_sources = coverage_sources
+            evidence_plan_meta = {"active": False, "fast_path": True, "duration_s": 0.0}
             logger.info(
-                "chat_semantic_coverage: tier=%s selected=%s added=%s docs=%s uncovered=%s",
-                coverage_meta.get("effective_tier"),
-                coverage_meta.get("selected_facets"),
-                coverage_meta.get("added"),
-                coverage_meta.get("support_doc_ids"),
-                coverage_meta.get("coverage_uncovered_lanes", []),
+                "chat_fast_path: specific single-concept query — skipped coverage+evidence (%d sources)",
+                len(coverage_sources),
             )
-        elif coverage_meta.get("selected_facets"):
-            logger.info(
-                "chat_semantic_coverage: tier=%s selected=%s added=0 uncovered=%s reports=%s",
-                coverage_meta.get("effective_tier"),
-                coverage_meta.get("selected_facets"),
-                coverage_meta.get("coverage_uncovered_lanes", []),
-                coverage_meta.get("lane_reports", []),
+        else:
+            precomputed_coverage_facets = None
+            if coverage_facets_task is not None:
+                try:
+                    precomputed_coverage_facets = await coverage_facets_task
+                except Exception as exc:
+                    logger.debug("coverage facet prefetch failed; detecting inline: %s", exc)
+            coverage_sources, coverage_meta = await _enforce_chat_query_coverage(
+                original_query=request.message,
+                retrieval_query=retrieval_query,
+                sources=retrieval_sources,
+                corpus_ids=request.corpus_ids,
+                retrieval_tier=getattr(retrieval, "effective_tier", request.retrieval_tier),
+                collections=request.collections,
+                retrieval_k=profile_k,
+                rerank_enabled=profile_rerank,
+                top_k_summary=profile_cfg["top_k_summary"],
+                rerank_top_n=profile_cfg["rerank_top_n"],
+                similarity_threshold=profile_cfg["similarity_threshold"],
+                neo4j_expansion_cap=profile_cfg["neo4j_expansion_cap"],
+                max_corpora_per_query=profile_cfg["max_corpora_per_query"],
+                fact_seed_limit=profile_cfg["fact_seed_limit"],
+                final_top_k=profile_cfg["final_top_k"],
+                source_cap=profile_cfg.get("source_cap"),
+                search_mode=resolved_mode,
+                precomputed_facets=precomputed_coverage_facets,
             )
-        evidence_plan_start = perf_counter()
-        evidence_sources, evidence_plan_meta = await _enforce_evidence_plan_lanes(
-            original_query=request.message,
-            sources=coverage_sources,
-            evidence_plan=evidence_plan,
-            corpus_ids=request.corpus_ids,
-            retrieval_tier=getattr(retrieval, "effective_tier", request.retrieval_tier),
-            collections=request.collections,
-            retrieval_k=profile_k,
-            top_k_summary=profile_cfg["top_k_summary"],
-            rerank_top_n=profile_cfg["rerank_top_n"],
-            similarity_threshold=profile_cfg["similarity_threshold"],
-            neo4j_expansion_cap=profile_cfg["neo4j_expansion_cap"],
-            max_corpora_per_query=profile_cfg["max_corpora_per_query"],
-            fact_seed_limit=profile_cfg["fact_seed_limit"],
-            final_top_k=profile_cfg["final_top_k"],
-            source_cap=profile_cfg.get("source_cap"),
-        )
-        evidence_plan_meta["duration_s"] = perf_counter() - evidence_plan_start
+            coverage_meta["duration_s"] = perf_counter() - coverage_start
+            if coverage_meta.get("added"):
+                logger.info(
+                    "chat_semantic_coverage: tier=%s selected=%s added=%s docs=%s uncovered=%s",
+                    coverage_meta.get("effective_tier"),
+                    coverage_meta.get("selected_facets"),
+                    coverage_meta.get("added"),
+                    coverage_meta.get("support_doc_ids"),
+                    coverage_meta.get("coverage_uncovered_lanes", []),
+                )
+            elif coverage_meta.get("selected_facets"):
+                logger.info(
+                    "chat_semantic_coverage: tier=%s selected=%s added=0 uncovered=%s reports=%s",
+                    coverage_meta.get("effective_tier"),
+                    coverage_meta.get("selected_facets"),
+                    coverage_meta.get("coverage_uncovered_lanes", []),
+                    coverage_meta.get("lane_reports", []),
+                )
+            evidence_plan_start = perf_counter()
+            evidence_sources, evidence_plan_meta = await _enforce_evidence_plan_lanes(
+                original_query=request.message,
+                sources=coverage_sources,
+                evidence_plan=evidence_plan,
+                corpus_ids=request.corpus_ids,
+                retrieval_tier=getattr(retrieval, "effective_tier", request.retrieval_tier),
+                collections=request.collections,
+                retrieval_k=profile_k,
+                top_k_summary=profile_cfg["top_k_summary"],
+                rerank_top_n=profile_cfg["rerank_top_n"],
+                similarity_threshold=profile_cfg["similarity_threshold"],
+                neo4j_expansion_cap=profile_cfg["neo4j_expansion_cap"],
+                max_corpora_per_query=profile_cfg["max_corpora_per_query"],
+                fact_seed_limit=profile_cfg["fact_seed_limit"],
+                final_top_k=profile_cfg["final_top_k"],
+                source_cap=profile_cfg.get("source_cap"),
+            )
+            evidence_plan_meta["duration_s"] = perf_counter() - evidence_plan_start
         if evidence_plan_meta.get("active"):
             if evidence_plan_meta.get("added") or evidence_plan_meta.get("missing_lanes"):
                 logger.info(

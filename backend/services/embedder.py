@@ -29,6 +29,7 @@ from typing import Any
 import httpx
 
 from config import get_settings
+from services.cache_util import TTLCache, hash_key
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,12 @@ _DEFAULT_BATCH_SIZE = 32
 _MAX_BATCH_SIZE = 512
 _LOCAL_TIMEOUT = 600.0
 _DEFAULT_DIM = 1024  # fallback when caller doesn't specify (e.g. query path on Qwen3-0.6B)
+# Query-embedding cache: a chat turn embeds the main query plus every facet/lane
+# support-query (each retrieve() re-embeds independently), and the same text
+# recurs across turns. Embeddings are deterministic for a fixed model+dim, so a
+# content-addressed cache turns those repeats into zero-cost hits. Vector-only
+# (~8KB each), in-process, short TTL.
+_QUERY_EMBED_CACHE = TTLCache(maxsize=4096, ttl_seconds=600.0)
 
 
 _LEGACY_MODE_ALIASES = {
@@ -436,6 +443,21 @@ async def embed_query(text: str, config: dict[str, Any] | None = None) -> list[f
     Callers without corpus context retain the local fallback path.
     """
     if config:
+        cache_key = hash_key(
+            "api",
+            config.get("embed_mode") or "local",
+            config.get("embedding_model_id"),
+            config.get("embedding_dimension") or _DEFAULT_DIM,
+            config.get("embed_base_url"),
+            text,
+        )
+    else:
+        cache_key = hash_key("local", _DEFAULT_DIM, text)
+    cached = _QUERY_EMBED_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    if config:
         raw_key = config.get("embed_api_key")
         api_pool = _plaintext_embedding_pool(config.get("embedding_models"))
         results = await embed_batch(
@@ -449,9 +471,13 @@ async def embed_query(text: str, config: dict[str, Any] | None = None) -> list[f
             modal_containers=config.get("modal_containers"),
             api_pool=api_pool,
         )
-        return results[0]
-    results = await _embed_batch_local([text], _DEFAULT_DIM)
-    return results[0]
+        vector = results[0]
+    else:
+        results = await _embed_batch_local([text], _DEFAULT_DIM)
+        vector = results[0]
+
+    _QUERY_EMBED_CACHE.set(cache_key, vector)
+    return vector
 
 
 # Pooled HTTP client for the local embedder sidecar. A chat turn issues ~6-9
