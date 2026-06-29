@@ -35,6 +35,19 @@ class Settings(BaseSettings):
         default=120.0,
         description="HTTP timeout for Qdrant operations such as per-corpus collection provisioning",
     )
+    QDRANT_PREFER_GRPC: bool = Field(
+        default=False,
+        description=(
+            "Use gRPC for the hot search clients (funnel_a/funnel_b/lexical). "
+            "Lower per-request overhead than HTTP/REST, which helps because a "
+            "multi-lane turn issues many small query_points calls. OFF by default "
+            "— enable only after confirming the Qdrant gRPC port is reachable from "
+            "the backend (default 6334, internal to the docker network)."
+        ),
+    )
+    QDRANT_GRPC_PORT: int = Field(
+        default=6334, description="Qdrant gRPC port (used when QDRANT_PREFER_GRPC=true)"
+    )
     QDRANT_COLLECTION: str = Field(
         default="polymath_chunks", description="Default Qdrant collection name"
     )

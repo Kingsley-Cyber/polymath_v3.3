@@ -22,6 +22,8 @@ class FunnelB:
         self.client = AsyncQdrantClient(
             url=settings.QDRANT_URL,
             timeout=settings.QDRANT_TIMEOUT_SECONDS,
+            prefer_grpc=settings.QDRANT_PREFER_GRPC,
+            grpc_port=settings.QDRANT_GRPC_PORT,
         )
 
     async def search(

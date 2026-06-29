@@ -283,13 +283,13 @@ class RerankerService:
         timeout = float(getattr(self._settings, "RERANKER_TIMEOUT_SECONDS", 4.0) or 4.0)
 
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                ranked, successes, failures = await self._rerank_batch_or_split(
-                    client=client,
-                    url=url,
-                    query=query,
-                    pool=pool,
-                )
+            client = self._get_http_client(timeout)
+            ranked, successes, failures = await self._rerank_batch_or_split(
+                client=client,
+                url=url,
+                query=query,
+                pool=pool,
+            )
 
             if successes <= 0:
                 raise RuntimeError(
@@ -364,6 +364,24 @@ class RerankerService:
                 circuit_breaker_seconds=breaker_seconds,
             )
             return sorted(pool, key=lambda x: x.score, reverse=True)
+
+    def _get_http_client(self, timeout: float) -> httpx.AsyncClient:
+        """Pooled HTTP client to the reranker sidecar, reused across rerank
+        calls (and per-batch splits) so cross-encoder requests share keep-alive
+        connections instead of opening a fresh socket each time. Instance-scoped
+        so the singleton service pools in production while tests stay isolated."""
+        client = getattr(self, "_http_client", None)
+        if client is None or client.is_closed:
+            client = httpx.AsyncClient(
+                timeout=timeout,
+                limits=httpx.Limits(
+                    max_keepalive_connections=8,
+                    max_connections=16,
+                    keepalive_expiry=30.0,
+                ),
+            )
+            self._http_client = client
+        return client
 
     async def _rerank_batch_or_split(
         self,

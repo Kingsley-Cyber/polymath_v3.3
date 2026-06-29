@@ -46,7 +46,14 @@ class ConversationService:
             return
 
         try:
-            self._client = AsyncIOMotorClient(settings.MONGODB_URI)
+            # Pool sizing: concurrent facet/lane hydration reads fan out within
+            # one chat turn, so keep warm connections (minPoolSize) instead of
+            # opening fresh sockets under load. Overridable via env.
+            self._client = AsyncIOMotorClient(
+                settings.MONGODB_URI,
+                maxPoolSize=int(getattr(settings, "MONGO_MAX_POOL_SIZE", 50) or 50),
+                minPoolSize=int(getattr(settings, "MONGO_MIN_POOL_SIZE", 5) or 5),
+            )
             self._db = self._client[settings.MONGODB_DATABASE]
             self._conversations = self._db["conversations"]
             self._messages = self._db["messages"]

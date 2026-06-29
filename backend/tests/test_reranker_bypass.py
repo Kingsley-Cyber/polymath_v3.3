@@ -296,7 +296,7 @@ async def test_rerank_failure_opens_short_circuit(svc, monkeypatch):
     calls = {"client": 0}
 
     class FailingClient:
-        def __init__(self, timeout):
+        def __init__(self, timeout, **kwargs):
             calls["client"] += 1
             assert timeout == 0.5
 

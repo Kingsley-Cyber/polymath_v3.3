@@ -454,6 +454,28 @@ async def embed_query(text: str, config: dict[str, Any] | None = None) -> list[f
     return results[0]
 
 
+# Pooled HTTP client for the local embedder sidecar. A chat turn issues ~6-9
+# embed calls (main query + each facet/lane support query); a per-call
+# AsyncClient paid TCP setup every time. One reused, keep-alive client removes
+# that overhead. Lazily created inside the running event loop (httpx binds its
+# transport on first request, so module-level construction is safe).
+_LOCAL_HTTP_CLIENT: httpx.AsyncClient | None = None
+
+
+def _get_local_http_client() -> httpx.AsyncClient:
+    global _LOCAL_HTTP_CLIENT
+    if _LOCAL_HTTP_CLIENT is None or _LOCAL_HTTP_CLIENT.is_closed:
+        _LOCAL_HTTP_CLIENT = httpx.AsyncClient(
+            timeout=_LOCAL_TIMEOUT,
+            limits=httpx.Limits(
+                max_keepalive_connections=20,
+                max_connections=40,
+                keepalive_expiry=30.0,
+            ),
+        )
+    return _LOCAL_HTTP_CLIENT
+
+
 async def _embed_batch_local(
     texts: list[str],
     expected_dim: int,
@@ -464,16 +486,16 @@ async def _embed_batch_local(
     vectors: list[list[float]] = []
     batch_size = _embedding_batch_size()
 
-    async with httpx.AsyncClient(timeout=_LOCAL_TIMEOUT) as client:
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            batch_vectors = await _embed_local_batch_with_split(
-                client=client,
-                url=url,
-                batch=batch,
-                expected_dim=expected_dim,
-            )
-            vectors.extend(batch_vectors)
+    client = _get_local_http_client()
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        batch_vectors = await _embed_local_batch_with_split(
+            client=client,
+            url=url,
+            batch=batch,
+            expected_dim=expected_dim,
+        )
+        vectors.extend(batch_vectors)
 
     return vectors
 

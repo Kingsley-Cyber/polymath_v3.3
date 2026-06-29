@@ -66,6 +66,12 @@ settings = get_settings()
 _PER_CORPUS_LIMIT = 20   # spec: 20 per corpus for round-robin
 _SINGLE_CORPUS_LIMIT = 40  # spec §5.9a: retrieve 40 pre-rerank for single-corpus
 _DEFAULT_SUMMARY_LIMIT = 20
+# Single-corpus embedding config is frozen after ingest, but
+# _embedding_config_for_query did an uncached Mongo find_one on EVERY retrieve()
+# (so every facet/lane support retrieval re-fetched it). Cache by corpus_id with
+# a short TTL — bounds staleness if a corpus is ever re-ingested with new config.
+_EMBED_CONFIG_CACHE: dict[str, tuple[float, "dict[str, Any] | None"]] = {}
+_EMBED_CONFIG_TTL_SECONDS = 300.0
 
 
 def _unwrap_funnel_result(
@@ -599,6 +605,10 @@ class RetrieverOrchestrator:
         """Use the selected corpus's embedding provider for single-corpus search."""
         if not corpus_ids or len(corpus_ids) != 1:
             return None
+        cid = corpus_ids[0]
+        cached = _EMBED_CONFIG_CACHE.get(cid)
+        if cached is not None and (perf_counter() - cached[0]) < _EMBED_CONFIG_TTL_SECONDS:
+            return cached[1]
         try:
             from services.conversation import conversation_service
 
@@ -606,10 +616,12 @@ class RetrieverOrchestrator:
             if db is None:
                 return None
             doc = await db["corpora"].find_one(
-                {"corpus_id": corpus_ids[0]},
+                {"corpus_id": cid},
                 {"default_ingestion_config": 1, "_id": 0},
             )
-            return (doc or {}).get("default_ingestion_config")
+            cfg = (doc or {}).get("default_ingestion_config")
+            _EMBED_CONFIG_CACHE[cid] = (perf_counter(), cfg)
+            return cfg
         except Exception as exc:
             logger.warning("Corpus embedding config lookup failed: %s", exc)
             return None

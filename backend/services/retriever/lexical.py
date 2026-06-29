@@ -100,6 +100,8 @@ class LexicalRetriever:
             self._qdrant = AsyncQdrantClient(
                 url=_settings.QDRANT_URL,
                 timeout=_settings.QDRANT_TIMEOUT_SECONDS,
+                prefer_grpc=_settings.QDRANT_PREFER_GRPC,
+                grpc_port=_settings.QDRANT_GRPC_PORT,
             )
         return self._qdrant
 
