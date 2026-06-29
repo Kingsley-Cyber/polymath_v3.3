@@ -90,6 +90,15 @@ _MAX_TOOL_CALLS_PER_TURN = 5
 _MAX_WEB_SEARCH_CALLS_PER_TURN = 3
 _MAX_WEB_SEARCH_RESULTS_PER_CALL = 20
 _DEFAULT_EVIDENCE_MAX_SOURCES = 9
+# Pre-retrieval LLM decomposition (optional, flag-gated) emits ~300 tokens of
+# JSON — longer than HyDE's ~2 sentences. The 8s HyDE budget silently truncated
+# it to an empty string; even 25s clipped slower models. This is an opt-in,
+# latency-tolerant quality step, so give it generous headroom. For lower
+# latency, point the HyDE route at a fast JSON-reliable instruct model.
+_EVIDENCE_LLM_DECOMPOSE_TIMEOUT = 40.0
+# Thinking models occasionally return empty content; retry a bounded number of
+# times before falling back to the deterministic plan.
+_EVIDENCE_LLM_DECOMPOSE_ATTEMPTS = 3
 _CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS = 4
 _CHAT_COVERAGE_THRESHOLD = 4
 _CHAT_COVERAGE_WEAK_THRESHOLD = 2
@@ -8143,31 +8152,46 @@ class ChatOrchestrator:
         model = route.get("model") or settings.HYDE_MODEL
         if not model:
             return []
+        # Keep the instruction TERSE. A verbose prompt makes thinking-capable
+        # models (minimax) over-reason and return empty content; the concise
+        # form below is reliably answered with clean JSON.
         prompt = (
-            "Split the user's question into the 2-4 DISTINCT topics or sources "
-            "it needs as separate evidence; each topic should map to a different "
-            "body of material. Reply ONLY with JSON of the form "
-            '{"sides": [{"name": "...", "search_terms": ["...", "..."]}]}. '
-            "Use 3-6 concrete search terms per side (titles, named frameworks, "
-            "key nouns). If the question is really about a single topic, return a "
-            "single side.\n\nQuestion: " + str(query or "")
+            "Reply ONLY with JSON of the form "
+            '{"sides": [{"name": "topic", "search_terms": ["term", "term", "term"]}]} '
+            "splitting the question into its 2-4 distinct evidence topics, each "
+            "with 3-6 search terms.\n\nQuestion: " + str(query or "")
         )
-        try:
-            reply = await llm_service.complete_sync(
-                messages=[{"role": "user", "content": prompt}],
-                model=model,
-                temperature=0.0,
-                max_tokens=300,
-                api_base=route.get("api_base"),
-                api_key=route.get("api_key"),
-                extra_params=route.get("extra_params") or None,
-                timeout=getattr(settings, "HYDE_TIMEOUT_SECONDS", 8.0),
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("evidence-plan LLM decomposition failed: %s", exc)
-            return []
-        sides = parse_llm_sides(reply)
-        return sides if len(sides) >= 2 else []
+        # Thinking-capable HyDE models (e.g. minimax) are high-variance: the same
+        # prompt occasionally returns empty content even with an ample token and
+        # time budget. A bounded retry turns a ~70%-reliable model into a
+        # dependable decomposer without unbounded latency.
+        for attempt in range(_EVIDENCE_LLM_DECOMPOSE_ATTEMPTS):
+            try:
+                reply = await llm_service.complete_sync(
+                    messages=[{"role": "user", "content": prompt}],
+                    model=model,
+                    temperature=0.0,
+                    # At 300 tokens a thinking model spends the budget reasoning
+                    # and the visible content comes back EMPTY; 800 fits both.
+                    max_tokens=800,
+                    api_base=route.get("api_base"),
+                    api_key=route.get("api_key"),
+                    extra_params=route.get("extra_params") or None,
+                    # A JSON decomposition needs far more than HyDE's ~2-sentence
+                    # budget; HYDE_TIMEOUT_SECONDS (8s) silently truncates to "".
+                    timeout=_EVIDENCE_LLM_DECOMPOSE_TIMEOUT,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "evidence-plan LLM decomposition attempt %d failed: %s",
+                    attempt,
+                    exc,
+                )
+                continue
+            sides = parse_llm_sides(reply)
+            if len(sides) >= 2:
+                return sides
+        return []
 
     async def _resolve_evidence_plan(
         self,
