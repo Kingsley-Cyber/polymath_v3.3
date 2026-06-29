@@ -34,33 +34,15 @@ from services.retriever.query_grounding import (
     concept_groups,
     group_matches_text,
 )
+from services.retriever.query_semantics import lexical_terms
 
 logger = logging.getLogger(__name__)
 _settings = get_settings()
 
-_STOP_WORDS = frozenset(
-    {
-        "a", "an", "and", "are", "as", "at", "be", "but", "by", "for",
-        "from", "has", "have", "in", "into", "is", "it", "its", "of",
-        "on", "or", "that", "the", "this", "to", "was", "were", "what",
-        "when", "where", "which", "who", "why", "will", "with", "how",
-        "do", "does", "did", "about", "between", "vs", "versus",
-    }
-)
-_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_'\-]{1,}")
-
 
 def _terms(query: str) -> list[str]:
     """Extract lexical terms worth matching in Mongo text/regex search."""
-    seen: set[str] = set()
-    out: list[str] = []
-    for term in _TOKEN_RE.findall(query or ""):
-        low = term.lower().strip("-_'")
-        if len(low) < 2 or low in _STOP_WORDS or low in seen:
-            continue
-        seen.add(low)
-        out.append(low)
-    return out
+    return lexical_terms(query)
 
 
 def _regex_score(query: str, terms: list[str], row: dict[str, Any]) -> float:

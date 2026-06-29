@@ -165,12 +165,19 @@ import services.chat_orchestrator as chat_orchestrator_module  # noqa: E402
 from models.schemas import ChatRequest, ModelOverrides, SourceChunk  # noqa: E402
 from services.chat_orchestrator import (  # noqa: E402
     ChatOrchestrator,
+    _build_chat_query_plan,
+    _build_retrieval_answerability_gate,
     _build_polymath_system_prompt,
     _build_retrieval_nuance_digest,
+    _format_evidence_plan_prompt_note,
+    _format_retrieval_answerability_prompt_note,
+    _format_answerability_short_circuit_response,
     _chat_source_is_low_value,
     _format_retrieval_nuance_contract,
+    _format_chat_query_plan_trace,
     _format_retrieval_tier_synthesis_contract,
     _partition_known_tool_calls,
+    _should_short_circuit_answerability,
     _should_skip_hyde_for_query,
 )
 
@@ -178,6 +185,18 @@ from services.chat_orchestrator import (  # noqa: E402
 def _make_tool_call(name: str) -> dict:
     return {"id": f"call_{name or 'empty'}", "type": "function",
             "function": {"name": name, "arguments": "{}"}}
+
+
+def _source_chunk(text: str = "Personality and seduction evidence.") -> SourceChunk:
+    return SourceChunk(
+        chunk_id="chunk-1",
+        parent_id="parent-1",
+        doc_id="doc-1",
+        corpus_id="corpus-1",
+        text=text,
+        score=0.9,
+        source_tier="tier_b",
+    )
 
 
 def _web_schema() -> dict:
@@ -278,6 +297,323 @@ def test_hyde_skips_source_constrained_direct_support_queries():
 def test_hyde_skips_specific_definition_relation_queries():
     query = "What is NLP and how does Python relate to it?"
     assert _should_skip_hyde_for_query(query) is True
+
+
+def test_chat_query_plan_exposes_relationship_search_contract():
+    query = (
+        "how does different personality correlate to the art of seduction "
+        "with people as men dating women"
+    )
+    plan = _build_chat_query_plan(
+        query=query,
+        retrieval_query=query,
+        requested_tier="qdrant_mongo",
+        corpus_ids=["corpus-1"],
+        collections=None,
+        profile_cfg={
+            "query_profile": "balanced",
+            "retrieval_k": 40,
+            "top_k_summary": 20,
+            "rerank_enabled": True,
+            "rerank_top_n": 24,
+            "final_top_k": 8,
+            "source_cap": 8,
+        },
+        search_mode="local",
+        hyde_applied=False,
+    )
+
+    concept_keys = [item["key"] for item in plan["concepts"]]
+    assert concept_keys[:3] == [
+        "personality_framework",
+        "personality",
+        "seduction",
+    ]
+    assert "correlate" not in concept_keys
+    assert "art" not in concept_keys
+    assert "relationship" in plan["operators"]
+    assert "relationship" in plan["required_atoms"]
+    assert "concept:personality_framework" in plan["required_atoms"]
+    assert "concept:art" not in plan["required_atoms"]
+    assert plan["evidence_plan"]["mode"] == "multi_concept_relationship"
+    assert [lane["name"] for lane in plan["evidence_plan"]["lanes"]] == [
+        "personality_framework",
+        "seduction",
+    ]
+    assert plan["stores"] == ["qdrant_vectors", "mongo_lexical_hydration"]
+    trace = _format_chat_query_plan_trace(plan)
+    assert "scope=selected_corpora" in trace
+    assert "evidence_lanes: personality_framework, seduction" in trace
+    assert "answerability: enforce_retrieved_evidence" in trace
+
+
+def test_answerability_gate_marks_missing_relationship_unanswerable():
+    query = "How does personality correlate with seduction?"
+    diagnostics = {
+        "selection": {
+            "sufficiency": {
+                "required_atoms": [
+                    "concept:personality",
+                    "concept:seduction",
+                    "relationship",
+                ],
+                "covered_required_atoms": [
+                    "concept:personality",
+                    "concept:seduction",
+                ],
+                "missing_atoms": ["relationship"],
+                "missing_critical_atoms": ["relationship"],
+                "required_coverage": 0.6667,
+                "answerable": False,
+            }
+        }
+    }
+
+    gate = _build_retrieval_answerability_gate(
+        query=query,
+        diagnostics=diagnostics,
+        sources=[_source_chunk()],
+        facts=[],
+        corpus_ids=["corpus-1"],
+        web_search_enabled=False,
+    )
+
+    assert gate["status"] == "unanswerable"
+    assert gate["answerable"] is False
+    assert gate["missing_critical_atoms"] == ["relationship"]
+    note = _format_retrieval_answerability_prompt_note(gate)
+    assert "HARD LIMIT" in note
+    assert "relationship" in note
+
+
+def test_answerability_short_circuit_only_for_unrepairable_corpus_gaps():
+    gate = {
+        "status": "unanswerable",
+        "corpus_scoped": True,
+        "source_count": 1,
+        "missing_atoms": ["relationship"],
+    }
+
+    assert _should_short_circuit_answerability(
+        gate,
+        web_search_enabled=False,
+        selected_tools=None,
+    )
+    assert not _should_short_circuit_answerability(
+        gate,
+        web_search_enabled=True,
+        selected_tools=None,
+    )
+    assert not _should_short_circuit_answerability(
+        gate,
+        web_search_enabled=False,
+        selected_tools=["web_search"],
+    )
+
+    response = _format_answerability_short_circuit_response(
+        gate,
+        query="How does personality correlate with seduction?",
+    )
+    assert "cannot answer" in response
+    assert "relationship" in response
+
+
+def test_answerability_gate_allows_source_backed_answer():
+    query = "How does personality correlate with seduction?"
+    diagnostics = {
+        "selection": {
+            "sufficiency": {
+                "required_atoms": [
+                    "concept:personality",
+                    "concept:seduction",
+                    "relationship",
+                ],
+                "covered_required_atoms": [
+                    "concept:personality",
+                    "concept:seduction",
+                    "relationship",
+                ],
+                "missing_atoms": [],
+                "missing_critical_atoms": [],
+                "required_coverage": 1.0,
+                "answerable": True,
+            }
+        }
+    }
+
+    gate = _build_retrieval_answerability_gate(
+        query=query,
+        diagnostics=diagnostics,
+        sources=[_source_chunk("A passage connects personality types to seductive roles.")],
+        facts=[],
+        corpus_ids=["corpus-1"],
+        web_search_enabled=False,
+    )
+
+    assert gate["status"] == "answerable"
+    assert gate["answerable"] is True
+    note = _format_retrieval_answerability_prompt_note(gate)
+    assert "Answer directly" in note
+
+
+def test_answerability_gate_uses_evidence_plan_to_repair_stale_sufficiency():
+    query = "how does different personality correlate to the art of seduction"
+    diagnostics = {
+        "selection": {
+            "sufficiency": {
+                "required_atoms": [
+                    "concept:personality_framework",
+                    "concept:seduction",
+                    "relationship",
+                    "cross_document_relationship_evidence",
+                ],
+                "covered_required_atoms": [
+                    "concept:seduction",
+                    "relationship",
+                ],
+                "missing_atoms": [
+                    "concept:personality_framework",
+                    "cross_document_relationship_evidence",
+                ],
+                "missing_critical_atoms": [
+                    "cross_document_relationship_evidence",
+                ],
+                "required_coverage": 0.5,
+                "answerable": False,
+            }
+        }
+    }
+    evidence_plan_meta = {
+        "active": True,
+        "required_lanes": ["personality_framework", "seduction"],
+        "covered_lanes": ["personality_framework", "seduction"],
+        "missing_lanes": [],
+        "final": {
+            "distinct_doc_count": 2,
+            "lane_doc_ids": {
+                "personality_framework": ["personality-book"],
+                "seduction": ["seduction-book"],
+            },
+        },
+    }
+
+    gate = _build_retrieval_answerability_gate(
+        query=query,
+        diagnostics=diagnostics,
+        sources=[_source_chunk()],
+        facts=[],
+        corpus_ids=["corpus-1"],
+        web_search_enabled=False,
+        evidence_plan_meta=evidence_plan_meta,
+    )
+
+    assert gate["status"] == "answerable"
+    assert "concept:personality_framework" in gate["covered_required_atoms"]
+    assert "cross_document_relationship_evidence" in gate["covered_required_atoms"]
+    assert gate["missing_atoms"] == []
+    note = _format_evidence_plan_prompt_note(evidence_plan_meta)
+    assert "contains evidence for every required lane" in note
+
+
+def test_answerability_gate_blocks_when_evidence_plan_lane_is_missing():
+    query = "how does different personality correlate to the art of seduction"
+    diagnostics = {
+        "selection": {
+            "sufficiency": {
+                "required_atoms": [
+                    "concept:personality_framework",
+                    "concept:seduction",
+                    "relationship",
+                ],
+                "covered_required_atoms": [
+                    "concept:seduction",
+                    "relationship",
+                ],
+                "missing_atoms": ["concept:personality_framework"],
+                "missing_critical_atoms": [],
+                "required_coverage": 0.6667,
+                "answerable": False,
+            }
+        }
+    }
+    evidence_plan_meta = {
+        "active": True,
+        "required_lanes": ["personality_framework", "seduction"],
+        "covered_lanes": ["seduction"],
+        "missing_lanes": ["personality_framework"],
+        "final": {
+            "distinct_doc_count": 1,
+            "lane_doc_ids": {"seduction": ["seduction-book"]},
+        },
+    }
+
+    gate = _build_retrieval_answerability_gate(
+        query=query,
+        diagnostics=diagnostics,
+        sources=[_source_chunk()],
+        facts=[],
+        corpus_ids=["corpus-1"],
+        web_search_enabled=False,
+        evidence_plan_meta=evidence_plan_meta,
+    )
+
+    assert gate["status"] == "unanswerable"
+    assert "concept:personality_framework" in gate["missing_critical_atoms"]
+    assert "cross_document_relationship_evidence" in gate["missing_atoms"]
+    note = _format_evidence_plan_prompt_note(evidence_plan_meta)
+    assert "HARD LIMIT" in note
+
+
+def test_answerability_gate_does_not_require_cross_doc_for_plain_multi_concept():
+    query = "personality seduction"
+    diagnostics = {
+        "selection": {
+            "sufficiency": {
+                "required_atoms": [
+                    "concept:personality",
+                    "concept:seduction",
+                ],
+                "covered_required_atoms": [
+                    "concept:personality",
+                    "concept:seduction",
+                ],
+                "missing_atoms": [],
+                "missing_critical_atoms": [],
+                "required_coverage": 1.0,
+                "answerable": True,
+            }
+        }
+    }
+    evidence_plan_meta = {
+        "active": True,
+        "plan": {
+            "mode": "multi_concept",
+            "operators": [],
+        },
+        "required_lanes": ["personality", "seduction"],
+        "covered_lanes": ["personality", "seduction"],
+        "missing_lanes": [],
+        "final": {
+            "distinct_doc_count": 1,
+            "lane_doc_ids": {
+                "personality": ["same-book"],
+                "seduction": ["same-book"],
+            },
+        },
+    }
+
+    gate = _build_retrieval_answerability_gate(
+        query=query,
+        diagnostics=diagnostics,
+        sources=[_source_chunk()],
+        facts=[],
+        corpus_ids=["corpus-1"],
+        web_search_enabled=False,
+        evidence_plan_meta=evidence_plan_meta,
+    )
+
+    assert gate["status"] == "answerable"
+    assert "cross_document_relationship_evidence" not in gate["required_atoms"]
 
 
 def test_chat_evidence_filter_rejects_frontmatter_noise():

@@ -18,6 +18,10 @@ from services.retriever.search_mode import (
     _count_phrase_hits,
     _has_code_entity,
 )
+from services.retriever.query_semantics import (
+    RELATIONSHIP_MARKERS,
+    has_marker,
+)
 
 _QUOTE_RE = re.compile(r"(['\"])(?:(?=(\\?))\2.)*?\1")
 _MULTI_DOC_MARKERS: tuple[str, ...] = (
@@ -33,8 +37,6 @@ _MULTI_DOC_MARKERS: tuple[str, ...] = (
     "corpora",
     "library",
 )
-
-
 class QueryNeed(str, Enum):
     BROAD = "broad"
     BALANCED = "balanced"
@@ -85,6 +87,11 @@ def infer_retrieval_intent(query: str) -> RetrievalIntent:
 
     if any(marker in normalized for marker in _MULTI_DOC_MARKERS):
         broad_score += 1
+    if has_marker(normalized, RELATIONSHIP_MARKERS):
+        # Relationship questions usually need evidence from both sides of
+        # the relation. Balance them against "how does" local markers unless
+        # a code/entity or quoted exact-match signal makes the query specific.
+        broad_score += 2
     if _has_code_entity(query):
         specific_score += 3
     if _QUOTE_RE.search(query or ""):

@@ -38,6 +38,19 @@ def test_ambiguous_query_uses_balanced_mix():
     assert limits.summary_top_k == 21
 
 
+def test_relationship_query_uses_balanced_mix():
+    intent = infer_retrieval_intent(
+        "how does different personality correlate to the art of seduction"
+    )
+    limits = adaptive_funnel_limits(intent, child_base=40, summary_base=20)
+
+    assert intent.need == QueryNeed.BALANCED
+    assert intent.child_ratio == 0.65
+    assert intent.summary_ratio == 0.35
+    assert limits.child_top_k == 39
+    assert limits.summary_top_k == 21
+
+
 def test_intent_is_deterministic_and_idempotent():
     query = "Summarize how Humanoid MoveTo works"
 

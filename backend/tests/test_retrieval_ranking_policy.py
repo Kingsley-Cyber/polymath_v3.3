@@ -2,6 +2,7 @@ from models.schemas import RetrievalTier, SourceChunk
 from services.retriever.intent_policy import infer_retrieval_intent
 from services.retriever import _trim_bounded_rerank_tail
 from services.retriever.ranking_policy import (
+    _required_atoms_for_query,
     apply_candidate_weights,
     apply_query_grounding,
     candidate_kind,
@@ -384,6 +385,137 @@ def test_query_grounding_expands_nlp_acronym_alias():
 
     assert grounded[0].chunk_id == "expanded"
     assert grounded[0].metadata["query_grounding"]["matched"] == ["nlp"]
+
+
+def test_correlation_is_relationship_operator_not_content_concept():
+    required = _required_atoms_for_query(
+        "how does personality correlate with seduction"
+    )
+
+    assert "relationship" in required
+    assert "concept:correlate" not in required
+    assert "concept:correlation" not in required
+
+
+def test_query_grounding_ignores_correlation_as_standalone_concept():
+    ranked = [
+        _chunk(
+            "stats-only",
+            score=1.0,
+            text="A model correlation differs across slices of data.",
+        ),
+        _chunk(
+            "semantic-match",
+            score=0.70,
+            text=(
+                "Personality profiles shape how seductive character and "
+                "seduction tactics are interpreted."
+            ),
+        ),
+    ]
+
+    grounded = apply_query_grounding(
+        ranked,
+        query=(
+            "different personality correlation seduction with people as men "
+            "dating women"
+        ),
+        tier=RetrievalTier.qdrant_mongo,
+        score_scale="probability",
+    )
+
+    assert grounded[0].chunk_id == "semantic-match"
+    assert grounded[0].metadata["query_grounding"]["matched"] == [
+        "personality",
+        "seduction",
+    ]
+
+
+def test_query_grounding_maps_personality_to_character_types():
+    ranked = [
+        _chunk(
+            "victim-types",
+            score=0.50,
+            text=(
+                "The seducer studies victim types, character traits, and "
+                "seductive behavior."
+            ),
+        ),
+        _chunk(
+            "literal-only",
+            score=0.80,
+            text="A personality inventory lists neutral questionnaire scales.",
+        ),
+    ]
+
+    grounded = apply_query_grounding(
+        ranked,
+        query="personality seduction",
+        tier=RetrievalTier.qdrant_mongo,
+        score_scale="probability",
+    )
+
+    assert grounded[0].chunk_id == "victim-types"
+    assert grounded[0].metadata["query_grounding"]["matched"] == [
+        "personality",
+        "seduction",
+    ]
+
+
+def test_personality_framework_relationship_requires_second_source():
+    intent = infer_retrieval_intent(
+        "how does different personality correlate to the art of seduction"
+    )
+    ranked = [
+        _chunk(
+            "seduction-core",
+            score=1.00,
+            doc_id="seduction-book",
+            text=(
+                "Seduction relates to seductive character and the way a "
+                "person excites desire."
+            ),
+            metadata={"query_grounding": {"matched": ["personality", "seduction"]}},
+        ),
+        _chunk(
+            "seduction-detail",
+            score=0.98,
+            doc_id="seduction-book",
+            text="The seducer studies character traits and seductive behavior.",
+            metadata={"query_grounding": {"matched": ["personality", "seduction"]}},
+        ),
+        _chunk(
+            "personality-framework",
+            score=0.70,
+            doc_id="personality-book",
+            text=(
+                "The Four Tendencies is a personality framework for explaining "
+                "how different personality tendencies respond to expectations."
+            ),
+            metadata={
+                "query_grounding": {
+                    "matched": ["personality_framework", "personality"]
+                }
+            },
+        ),
+    ]
+
+    result = select_with_diversity(
+        ranked,
+        final_top_k=3,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+        query="how does different personality correlate to the art of seduction",
+    )
+
+    ids = [c.chunk_id for c in result.candidates]
+    assert "personality-framework" in ids
+    assert {c.doc_id for c in result.candidates} == {
+        "seduction-book",
+        "personality-book",
+    }
+    assert result.diagnostics["sufficiency"]["answerable"] is True
+    assert result.diagnostics["sufficiency"]["relationship_distinct_docs"] == 2
 
 
 def test_graph_tier_reserves_slot_for_demoted_graph_expansion():

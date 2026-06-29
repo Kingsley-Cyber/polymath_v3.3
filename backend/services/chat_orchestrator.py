@@ -47,6 +47,21 @@ from services.query_model_resolver import (
     resolve as resolve_query_model_kind,
     resolve_by_entry_id,
 )
+from services.retriever.intent_policy import infer_retrieval_intent
+from services.retriever.evidence_plan import (
+    EvidenceLane,
+    EvidencePlan,
+    build_evidence_plan,
+    evidence_lane_matches_text,
+    evidence_plan_to_dict,
+)
+from services.retriever.query_semantics import (
+    concept_groups,
+    lexical_terms,
+    required_atoms_for_query,
+    required_operator_atoms,
+)
+from services.retriever.search_mode import resolve_search_mode
 from services.settings import settings_service
 from utils.streaming import build_sse_chunk
 from utils.tokens import count_tokens, get_model_context_limit
@@ -563,6 +578,475 @@ def _safe_int(value: Any, default: int, *, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(parsed, maximum))
+
+
+def _planned_store_names(tier: Any) -> list[str]:
+    value = str(getattr(tier, "value", tier) or "")
+    if value == RetrievalTier.qdrant_only.value:
+        return ["qdrant_vectors"]
+    if value == RetrievalTier.qdrant_mongo_graph.value:
+        return ["qdrant_vectors", "mongo_lexical_hydration", "neo4j_graph"]
+    if value == RetrievalTier.qdrant_mongo.value:
+        return ["qdrant_vectors", "mongo_lexical_hydration"]
+    return ["selected_retrieval_tier"]
+
+
+def _operator_labels_for_query(query: str | None) -> list[str]:
+    atoms = required_operator_atoms(query)
+    labels: list[str] = []
+    if "definition" in atoms:
+        labels.append("definition")
+    if "relationship" in atoms:
+        labels.append("relationship")
+    if "procedure" in atoms:
+        labels.append("procedure")
+    if "methods_tasks" in atoms:
+        labels.append("methods/tasks")
+    return labels
+
+
+def _build_chat_query_plan(
+    *,
+    query: str,
+    retrieval_query: str,
+    requested_tier: Any,
+    corpus_ids: list[str] | None,
+    collections: list[str] | None,
+    profile_cfg: dict[str, Any],
+    search_mode: str,
+    hyde_applied: bool,
+) -> dict[str, Any]:
+    """Deterministic query plan used for trace and downstream guardrails."""
+
+    intent = infer_retrieval_intent(query)
+    concepts = [
+        {"key": group.key, "aliases": list(group.aliases[:8])}
+        for group in concept_groups(query, max_groups=8)
+    ]
+    evidence_plan = build_evidence_plan(query)
+    tier_value = str(getattr(requested_tier, "value", requested_tier) or "")
+    corpus_count = len(corpus_ids or [])
+    plan = {
+        "query": query,
+        "retrieval_query": retrieval_query,
+        "query_rewritten": bool(retrieval_query != query),
+        "hyde_applied": bool(hyde_applied),
+        "requested_tier": tier_value,
+        "search_mode": str(search_mode or "auto"),
+        "stores": _planned_store_names(requested_tier),
+        "corpus_scope": "selected_corpora" if corpus_count else "no_corpus_selected",
+        "corpus_count": corpus_count,
+        "collection_count": len(collections or []),
+        "concepts": concepts,
+        "lexical_terms": lexical_terms(query)[:12],
+        "operators": _operator_labels_for_query(query),
+        "required_atoms": sorted(required_atoms_for_query(query, max_concepts=4)),
+        "evidence_plan": evidence_plan_to_dict(evidence_plan),
+        "intent": {
+            "need": intent.need.value,
+            "broad_score": intent.broad_score,
+            "specific_score": intent.specific_score,
+            "child_ratio": intent.child_ratio,
+            "summary_ratio": intent.summary_ratio,
+        },
+        "budget": {
+            "profile": profile_cfg.get("query_profile"),
+            "retrieval_k": profile_cfg.get("retrieval_k"),
+            "top_k_summary": profile_cfg.get("top_k_summary"),
+            "rerank_enabled": bool(profile_cfg.get("rerank_enabled")),
+            "rerank_top_n": profile_cfg.get("rerank_top_n"),
+            "final_top_k": profile_cfg.get("final_top_k"),
+            "source_cap": profile_cfg.get("source_cap"),
+        },
+        "answerability_policy": (
+            "enforce_retrieved_evidence"
+            if corpus_count
+            else "general_chat_no_corpus_gate"
+        ),
+    }
+    return plan
+
+
+def _format_chat_query_plan_trace(plan: dict[str, Any]) -> str:
+    concepts = [
+        str(item.get("key") or "").strip()
+        for item in plan.get("concepts") or []
+        if isinstance(item, dict) and str(item.get("key") or "").strip()
+    ]
+    budget = plan.get("budget") if isinstance(plan.get("budget"), dict) else {}
+    intent = plan.get("intent") if isinstance(plan.get("intent"), dict) else {}
+    evidence_plan = (
+        plan.get("evidence_plan") if isinstance(plan.get("evidence_plan"), dict) else {}
+    )
+    evidence_lanes = [
+        str(lane.get("name") or "").strip()
+        for lane in (evidence_plan.get("lanes") or [])
+        if isinstance(lane, dict) and str(lane.get("name") or "").strip()
+    ]
+    lines = [
+        "[Query plan]",
+        (
+            "search: "
+            f"scope={plan.get('corpus_scope')} "
+            f"corpora={plan.get('corpus_count')} "
+            f"tier={plan.get('requested_tier')} "
+            f"mode={plan.get('search_mode')}"
+        ),
+        f"stores: {', '.join(plan.get('stores') or []) or 'none'}",
+        f"intent: {intent.get('need') or 'balanced'}",
+        f"concepts: {', '.join(concepts) if concepts else 'none detected'}",
+        (
+            "evidence_lanes: "
+            f"{', '.join(evidence_lanes) if evidence_lanes else 'none'}"
+        ),
+        (
+            "operators: "
+            f"{', '.join(plan.get('operators') or []) or 'none'}"
+        ),
+        (
+            "required_evidence: "
+            f"{', '.join(plan.get('required_atoms') or []) or 'none'}"
+        ),
+        (
+            "budget: "
+            f"profile={budget.get('profile')} "
+            f"k={budget.get('retrieval_k')} "
+            f"summaries={budget.get('top_k_summary')} "
+            f"rerank={'on' if budget.get('rerank_enabled') else 'off'} "
+            f"rerank_top_n={budget.get('rerank_top_n')} "
+            f"final={budget.get('final_top_k')}"
+        ),
+        f"answerability: {plan.get('answerability_policy')}",
+    ]
+    if plan.get("query_rewritten"):
+        lines.append("query_rewrite: retrieval query differs from user query")
+    return "\n".join(lines)
+
+
+def _as_answerability_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _selection_sufficiency_from_diagnostics(
+    diagnostics: dict[str, Any] | None,
+    sources: list[SourceChunk] | None = None,
+) -> dict[str, Any] | None:
+    diag = diagnostics if isinstance(diagnostics, dict) else {}
+    selection = diag.get("selection") if isinstance(diag.get("selection"), dict) else {}
+    sufficiency = (
+        selection.get("sufficiency")
+        if isinstance(selection.get("sufficiency"), dict)
+        else None
+    )
+    if sufficiency:
+        return dict(sufficiency)
+
+    for source in sources or []:
+        metadata = getattr(source, "metadata", None)
+        if not isinstance(metadata, dict):
+            continue
+        value = metadata.get("answer_sufficiency")
+        if isinstance(value, dict):
+            return dict(value)
+    return None
+
+
+def _build_retrieval_answerability_gate(
+    *,
+    query: str,
+    diagnostics: dict[str, Any] | None,
+    sources: list[SourceChunk] | None,
+    facts: list[Any] | None,
+    corpus_ids: list[str] | None,
+    web_search_enabled: bool,
+    evidence_plan_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Convert retriever sufficiency diagnostics into a chat-time contract."""
+
+    expected_atoms = sorted(required_atoms_for_query(query, max_concepts=4))
+    sufficiency = _selection_sufficiency_from_diagnostics(diagnostics, sources) or {}
+    required_atoms = sorted(
+        str(atom)
+        for atom in (sufficiency.get("required_atoms") or expected_atoms)
+        if str(atom).strip()
+    )
+    covered_atoms = sorted(
+        str(atom)
+        for atom in (sufficiency.get("covered_required_atoms") or [])
+        if str(atom).strip()
+    )
+    missing_atoms = sorted(
+        str(atom)
+        for atom in (
+            sufficiency.get("missing_atoms")
+            if sufficiency.get("missing_atoms") is not None
+            else [atom for atom in required_atoms if atom not in set(covered_atoms)]
+        )
+        if str(atom).strip()
+    )
+    missing_critical = sorted(
+        str(atom)
+        for atom in (sufficiency.get("missing_critical_atoms") or [])
+        if str(atom).strip()
+    )
+    required_coverage = _as_answerability_float(
+        sufficiency.get("required_coverage"),
+        1.0 if not required_atoms else 0.0,
+    )
+    corpus_scoped = bool(corpus_ids)
+    evidence_count = len(sources or []) + len(facts or [])
+    raw_answerable = bool(sufficiency.get("answerable"))
+
+    plan_meta = evidence_plan_meta if isinstance(evidence_plan_meta, dict) else {}
+    if plan_meta.get("active"):
+        required_set = set(required_atoms)
+        covered_set = set(covered_atoms)
+        missing_set = set(missing_atoms)
+        critical_set = set(missing_critical)
+        required_lanes = {
+            str(name)
+            for name in (plan_meta.get("required_lanes") or [])
+            if str(name).strip()
+        }
+        covered_lanes = {
+            str(name)
+            for name in (plan_meta.get("covered_lanes") or [])
+            if str(name).strip()
+        }
+        missing_lanes = {
+            str(name)
+            for name in (plan_meta.get("missing_lanes") or [])
+            if str(name).strip()
+        }
+        final_plan = (
+            plan_meta.get("final")
+            if isinstance(plan_meta.get("final"), dict)
+            else {}
+        )
+        plan_payload = (
+            plan_meta.get("plan")
+            if isinstance(plan_meta.get("plan"), dict)
+            else {}
+        )
+        plan_operators = {
+            str(operator)
+            for operator in (plan_payload.get("operators") or [])
+            if str(operator).strip()
+        }
+        relationship_plan = (
+            "relationship" in plan_operators
+            or "relationship" in required_set
+            or str(plan_payload.get("mode") or plan_meta.get("mode") or "")
+            == "multi_concept_relationship"
+        )
+        distinct_doc_count = int(final_plan.get("distinct_doc_count") or 0)
+        for lane_name in required_lanes:
+            required_set.add(f"concept:{lane_name}")
+        for lane_name in covered_lanes:
+            atom = f"concept:{lane_name}"
+            required_set.add(atom)
+            covered_set.add(atom)
+            missing_set.discard(atom)
+            critical_set.discard(atom)
+        for lane_name in missing_lanes:
+            atom = f"concept:{lane_name}"
+            required_set.add(atom)
+            missing_set.add(atom)
+            critical_set.add(atom)
+        if relationship_plan and len(required_lanes) >= 2:
+            cross_doc_atom = "cross_document_relationship_evidence"
+            required_set.add(cross_doc_atom)
+            if missing_lanes or distinct_doc_count < min(2, len(required_lanes)):
+                missing_set.add(cross_doc_atom)
+                critical_set.add(cross_doc_atom)
+            else:
+                covered_set.add(cross_doc_atom)
+                missing_set.discard(cross_doc_atom)
+                critical_set.discard(cross_doc_atom)
+        missing_set.update(required_set - covered_set)
+        missing_set -= covered_set
+        critical_set &= missing_set
+        required_atoms = sorted(required_set)
+        covered_atoms = sorted(covered_set & required_set)
+        missing_atoms = sorted(missing_set)
+        missing_critical = sorted(critical_set)
+        required_coverage = (
+            len(covered_set & required_set) / len(required_set)
+            if required_set
+            else 1.0
+        )
+
+    effective_answerable = raw_answerable or (
+        required_coverage >= 0.80 and not missing_critical
+    )
+
+    if not corpus_scoped:
+        status = "not_enforced"
+    elif evidence_count <= 0:
+        status = "unanswerable"
+    elif effective_answerable:
+        status = "answerable"
+    elif missing_critical:
+        status = "unanswerable"
+    elif required_coverage >= 0.5:
+        status = "partial"
+    else:
+        status = "weak"
+
+    return {
+        "status": status,
+        "answerable": status == "answerable",
+        "raw_answerable": raw_answerable,
+        "corpus_scoped": corpus_scoped,
+        "web_search_enabled": bool(web_search_enabled),
+        "evidence_count": evidence_count,
+        "source_count": len(sources or []),
+        "fact_count": len(facts or []),
+        "required_atoms": required_atoms,
+        "covered_required_atoms": covered_atoms,
+        "missing_atoms": missing_atoms,
+        "missing_critical_atoms": missing_critical,
+        "required_coverage": round(required_coverage, 4),
+        "diagnostic_source": (
+            "retriever_sufficiency+evidence_plan"
+            if sufficiency and plan_meta.get("active")
+            else "evidence_plan"
+            if plan_meta.get("active")
+            else "retriever_sufficiency"
+            if sufficiency
+            else "fallback"
+        ),
+        "evidence_plan": plan_meta,
+    }
+
+
+def _format_retrieval_answerability_trace(gate: dict[str, Any]) -> str:
+    status = str(gate.get("status") or "unknown")
+    missing = [str(atom) for atom in gate.get("missing_atoms") or []]
+    covered = [str(atom) for atom in gate.get("covered_required_atoms") or []]
+    rule = (
+        "normal synthesis"
+        if status == "answerable"
+        else "answer only supported parts and caveat missing evidence"
+    )
+    if status == "not_enforced":
+        rule = "no selected corpus; normal chat path"
+    if gate.get("web_search_enabled") and status != "answerable":
+        rule += "; web/tool evidence may repair gaps"
+    return "\n".join(
+        [
+            "[Answerability gate]",
+            f"status: {status}",
+            f"coverage: {gate.get('required_coverage')}",
+            (
+                "required: "
+                f"{', '.join(gate.get('required_atoms') or []) or 'none'}"
+            ),
+            f"covered: {', '.join(covered) if covered else 'none'}",
+            f"missing: {', '.join(missing) if missing else 'none'}",
+            f"rule: {rule}",
+        ]
+    )
+
+
+def _format_retrieval_answerability_prompt_note(
+    gate: dict[str, Any] | None,
+) -> str | None:
+    if not gate or not gate.get("corpus_scoped"):
+        return None
+    status = str(gate.get("status") or "unknown")
+    required = ", ".join(gate.get("required_atoms") or []) or "none"
+    covered = ", ".join(gate.get("covered_required_atoms") or []) or "none"
+    missing = ", ".join(gate.get("missing_atoms") or []) or "none"
+    lines = [
+        "Internal retrieval answerability contract (do not mention this block):",
+        f"- Required evidence atoms for the user's query: {required}.",
+        f"- Retrieved evidence coverage: {status}; covered={covered}; missing={missing}.",
+    ]
+    if status == "answerable":
+        lines.append(
+            "- The selected corpus evidence covers the query-level requirements. "
+            "Answer directly from the retrieved sources and synthesize across them."
+        )
+    elif status == "partial":
+        lines.append(
+            "- The selected corpus evidence is partial. Answer only the parts "
+            "the retrieved sources support, and mark the missing part as not "
+            "established by the retrieved sources."
+        )
+    else:
+        lines.append(
+            "- HARD LIMIT: the selected corpus retrieval is not sufficient to "
+            "answer the user's full question as a source-backed claim."
+        )
+        lines.append(
+            "- Say briefly what the selected sources did not establish, name "
+            "the missing concept or relationship in ordinary language, and "
+            "suggest broadening corpus/search scope only if that would help."
+        )
+    if gate.get("web_search_enabled") and status != "answerable":
+        lines.append(
+            "- If web/tool evidence is gathered later and covers the missing "
+            "atoms, you may use that new evidence. Otherwise keep the caveat."
+        )
+    lines.append(
+        "- Do not fill missing corpus evidence with generic knowledge while "
+        "presenting it as retrieved or source-backed."
+    )
+    return "\n".join(lines)
+
+
+def _should_short_circuit_answerability(
+    gate: dict[str, Any] | None,
+    *,
+    web_search_enabled: bool,
+    selected_tools: list[str] | None,
+) -> bool:
+    if not gate or not gate.get("corpus_scoped"):
+        return False
+    if web_search_enabled or selected_tools:
+        return False
+    return str(gate.get("status") or "") in {"unanswerable", "weak"}
+
+
+def _friendly_missing_atom(atom: str) -> str:
+    text = str(atom or "").strip()
+    if text.startswith("concept:"):
+        return text.split(":", 1)[1].replace("_", " ")
+    if text == "methods_tasks":
+        return "methods or examples"
+    if text == "cross_document_relationship_evidence":
+        return "evidence from both sides of the relationship"
+    return text.replace("_", " ")
+
+
+def _format_answerability_short_circuit_response(
+    gate: dict[str, Any],
+    *,
+    query: str,
+) -> str:
+    missing = [
+        _friendly_missing_atom(atom)
+        for atom in (gate.get("missing_atoms") or [])
+        if str(atom).strip()
+    ]
+    missing_text = ", ".join(dict.fromkeys(missing)) or "the required evidence"
+    if int(gate.get("source_count") or 0) > 0:
+        return (
+            "I cannot answer that as a source-backed result from the selected "
+            f"corpus. The retrieval found some related material, but it did not "
+            f"establish {missing_text} strongly enough to support the question. "
+            "Try a broader corpus/search scope or ask for the narrower part the "
+            "retrieved sources do cover."
+        )
+    return (
+        "I cannot answer that from the selected corpus because retrieval did "
+        f"not find source evidence for {missing_text}. Try selecting the repo "
+        "or corpus that contains that material, or broaden the search scope."
+    )
 
 
 def _resolve_web_evidence_options(request: ChatRequest | None) -> dict[str, Any]:
@@ -2718,6 +3202,660 @@ async def _enforce_chat_query_coverage(
     return merged, meta
 
 
+def _evidence_source_doc_key(source: SourceChunk) -> str:
+    return str(source.doc_id or source.doc_name or source.parent_id or source.chunk_id or "")
+
+
+def _evidence_lane_match_score(source: SourceChunk, lane: EvidenceLane) -> int:
+    cleaned = _clean_chat_source_text(source)
+    metadata = cleaned.metadata if isinstance(cleaned.metadata, dict) else {}
+    score = 0
+
+    support_lane = str(metadata.get("support_lane") or "")
+    if support_lane == f"evidence:{lane.name}":
+        score += 20
+    support_plan = (
+        metadata.get("evidence_plan_lane")
+        if isinstance(metadata.get("evidence_plan_lane"), dict)
+        else {}
+    )
+    if str(support_plan.get("name") or "") == lane.name:
+        score += 12
+
+    grounding = (
+        metadata.get("query_grounding")
+        if isinstance(metadata.get("query_grounding"), dict)
+        else {}
+    )
+    grounded = {str(item).strip().lower() for item in (grounding.get("matched") or [])}
+    if lane.name.lower() in grounded or lane.concept_key.lower() in grounded:
+        score += 10
+
+    text = _chat_source_text(cleaned)
+    if evidence_lane_matches_text(lane, text):
+        score += 8
+    padded = f" {text} "
+    for term in lane.search_terms[:10]:
+        norm = _chat_coverage_norm(term)
+        if norm and f" {norm} " in padded:
+            score += 2
+    return score
+
+
+def _evidence_lane_coverage(
+    sources: list[SourceChunk],
+    plan: EvidencePlan,
+) -> dict[str, Any]:
+    lane_doc_ids: dict[str, list[str]] = {}
+    lane_doc_names: dict[str, list[str]] = {}
+    lane_chunk_ids: dict[str, list[str]] = {}
+    lane_scores: dict[str, int] = {}
+    for lane in plan.required_lanes:
+        doc_ids: list[str] = []
+        doc_names: list[str] = []
+        chunk_ids: list[str] = []
+        best_score = 0
+        seen_docs: set[str] = set()
+        seen_chunks: set[str] = set()
+        for source in sources or []:
+            score = _evidence_lane_match_score(source, lane)
+            if score <= 0:
+                continue
+            best_score = max(best_score, score)
+            doc_key = _evidence_source_doc_key(source)
+            if doc_key and doc_key not in seen_docs:
+                seen_docs.add(doc_key)
+                doc_ids.append(doc_key)
+                doc_names.append(str(source.doc_name or source.doc_id or doc_key))
+            chunk_key = str(source.chunk_id or "")
+            if chunk_key and chunk_key not in seen_chunks:
+                seen_chunks.add(chunk_key)
+                chunk_ids.append(chunk_key)
+        lane_doc_ids[lane.name] = doc_ids
+        lane_doc_names[lane.name] = doc_names
+        lane_chunk_ids[lane.name] = chunk_ids
+        lane_scores[lane.name] = best_score
+
+    covered = [
+        lane.name
+        for lane in plan.required_lanes
+        if len(lane_doc_ids.get(lane.name) or []) >= max(1, lane.min_sources)
+    ]
+    missing = [
+        lane.name
+        for lane in plan.required_lanes
+        if lane.name not in set(covered)
+    ]
+    distinct_docs = sorted(
+        {
+            doc_id
+            for doc_ids in lane_doc_ids.values()
+            for doc_id in doc_ids
+            if doc_id
+        }
+    )
+    return {
+        "covered_lanes": covered,
+        "missing_lanes": missing,
+        "lane_doc_ids": lane_doc_ids,
+        "lane_doc_names": lane_doc_names,
+        "lane_chunk_ids": lane_chunk_ids,
+        "lane_scores": lane_scores,
+        "distinct_doc_ids": distinct_docs,
+        "distinct_doc_count": len(distinct_docs),
+    }
+
+
+def _evidence_lane_candidate_snapshot(
+    chunk: SourceChunk,
+    *,
+    lane: EvidenceLane,
+    reason: str,
+) -> dict[str, Any]:
+    cleaned = _clean_chat_source_text(chunk)
+    return {
+        "chunk_id": str(cleaned.chunk_id or ""),
+        "doc_id": str(cleaned.doc_id or ""),
+        "doc_name": str(cleaned.doc_name or ""),
+        "score": float(cleaned.score or 0.0),
+        "lane_score": _evidence_lane_match_score(cleaned, lane),
+        "reason": reason,
+    }
+
+
+def _evidence_facet_hint_terms(facets: list[dict[str, Any]] | None) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for facet in facets or []:
+        if not isinstance(facet, dict):
+            continue
+        values: list[Any] = [
+            facet.get("label"),
+            str(facet.get("name") or "").replace("_", " "),
+            *(facet.get("matched") or []),
+            *(facet.get("support_terms") or []),
+            *(facet.get("triggers") or []),
+        ]
+        for doc in facet.get("facet_docs") or []:
+            if isinstance(doc, dict):
+                values.append(doc.get("filename"))
+        for value in values:
+            text = " ".join(str(value or "").split()).strip()
+            key = _chat_coverage_norm(text)
+            if text and key and key not in seen:
+                seen.add(key)
+                terms.append(text)
+    return terms[:18]
+
+
+def _evidence_facet_hint_doc_ids(facets: list[dict[str, Any]] | None) -> set[str]:
+    doc_ids: set[str] = set()
+    for facet in facets or []:
+        if not isinstance(facet, dict):
+            continue
+        doc_ids.update(str(doc_id) for doc_id in (facet.get("facet_doc_ids") or []) if doc_id)
+        for doc in facet.get("facet_docs") or []:
+            if isinstance(doc, dict) and doc.get("doc_id"):
+                doc_ids.add(str(doc.get("doc_id")))
+    return doc_ids
+
+
+async def _semantic_ingest_hints_for_evidence_lane(
+    lane: EvidenceLane,
+    corpus_ids: list[str] | None,
+) -> dict[str, Any]:
+    if not corpus_ids:
+        return {"facets": [], "terms": [], "doc_ids": []}
+    try:
+        facets = await _chat_coverage_facets_for_query_with_corpus(
+            lane.query,
+            corpus_ids,
+        )
+    except Exception as exc:
+        logger.debug("evidence-plan semantic ingest hints skipped for %s: %s", lane.name, exc)
+        facets = []
+    terms = _evidence_facet_hint_terms(facets)
+    doc_ids = sorted(_evidence_facet_hint_doc_ids(facets))
+    return {
+        "facets": [
+            {
+                "name": str(facet.get("name") or ""),
+                "label": str(facet.get("label") or ""),
+                "source": str(facet.get("source") or ""),
+                "matched": facet.get("matched") or [],
+                "support_terms": facet.get("support_terms") or [],
+                "facet_doc_ids": facet.get("facet_doc_ids") or [],
+                "facet_docs": facet.get("facet_docs") or [],
+                "match_score": facet.get("match_score"),
+                "vector_score": facet.get("vector_score"),
+            }
+            for facet in facets[:6]
+            if isinstance(facet, dict)
+        ],
+        "terms": terms,
+        "doc_ids": doc_ids,
+    }
+
+
+def _choose_evidence_lane_candidate_with_report(
+    candidates: list[SourceChunk],
+    *,
+    lane: EvidenceLane,
+    original_query: str,
+    existing_chunk_ids: set[str],
+    existing_doc_ids: set[str],
+    semantic_doc_ids: set[str] | None = None,
+) -> tuple[SourceChunk | None, dict[str, Any]]:
+    best_new_doc: tuple[float, SourceChunk] | None = None
+    best_any_doc: tuple[float, SourceChunk] | None = None
+    semantic_doc_ids = semantic_doc_ids or set()
+    rejected: dict[str, int] = {
+        "low_value": 0,
+        "duplicate": 0,
+        "below_lane_floor": 0,
+    }
+    sampled: list[dict[str, Any]] = []
+    substantive = [
+        chunk
+        for chunk in candidates
+        if not _chat_source_is_low_value(_clean_chat_source_text(chunk), original_query)
+    ]
+    rejected["low_value"] = max(0, len(candidates or []) - len(substantive))
+    pool = substantive or list(candidates or [])
+    for chunk in pool:
+        chunk = _clean_chat_source_text(chunk)
+        chunk_id = str(chunk.chunk_id or "")
+        if not chunk_id or chunk_id in existing_chunk_ids:
+            rejected["duplicate"] += 1
+            if len(sampled) < 4:
+                sampled.append(
+                    _evidence_lane_candidate_snapshot(
+                        chunk,
+                        lane=lane,
+                        reason="duplicate",
+                    )
+                )
+            continue
+        lane_score = _evidence_lane_match_score(chunk, lane)
+        doc_id = _evidence_source_doc_key(chunk)
+        semantic_doc_match = bool(doc_id and doc_id in semantic_doc_ids)
+        if lane_score <= 0 and semantic_doc_match:
+            lane_score = 3
+        if lane_score <= 0:
+            rejected["below_lane_floor"] += 1
+            if len(sampled) < 4:
+                sampled.append(
+                    _evidence_lane_candidate_snapshot(
+                        chunk,
+                        lane=lane,
+                        reason="below_lane_floor",
+                    )
+                )
+            continue
+        new_doc_bonus = 5.0 if doc_id and doc_id not in existing_doc_ids else 0.0
+        semantic_doc_bonus = 7.0 if semantic_doc_match else 0.0
+        bounded_score = min(max(float(chunk.score or 0.0), 0.0), 1.0) * 2.0
+        final_score = (
+            (lane_score * 10.0)
+            + bounded_score
+            + new_doc_bonus
+            + semantic_doc_bonus
+        )
+        entry = (final_score, chunk)
+        if best_any_doc is None or final_score > best_any_doc[0]:
+            best_any_doc = entry
+        if doc_id and doc_id not in existing_doc_ids:
+            if best_new_doc is None or final_score > best_new_doc[0]:
+                best_new_doc = entry
+
+    chosen_tuple = best_new_doc or best_any_doc
+    if not chosen_tuple:
+        return None, {
+            "status": "uncovered",
+            "reason": "no_candidate_matched_lane",
+            "rejected": rejected,
+            "sampled_rejections": sampled,
+        }
+    chosen = chosen_tuple[1]
+    strength = "strong" if _evidence_lane_match_score(chosen, lane) >= 8 else "weak"
+    return chosen, {
+        "status": "selected",
+        "strength": strength,
+        "reason": "new_doc_lane_support" if chosen_tuple is best_new_doc else "lane_support",
+        "rejected": rejected,
+        "sampled_rejections": sampled,
+        "selected": _evidence_lane_candidate_snapshot(
+            chosen,
+            lane=lane,
+            reason=f"{strength}_support",
+        ),
+    }
+
+
+def _mark_evidence_plan_chunk(
+    chunk: SourceChunk,
+    *,
+    lane: EvidenceLane,
+    support_query: str,
+    support_strength: str,
+) -> SourceChunk:
+    chunk = _clean_chat_source_text(chunk)
+    data = chunk.model_dump()
+    metadata = dict(data.get("metadata") or {})
+    lane_score = _evidence_lane_match_score(chunk, lane)
+    support_query_score = float(data.get("score") or 0.0)
+    selection_score = min(
+        0.97,
+        (min(lane_score, 24) / 24.0 * 0.82)
+        + (max(0.0, min(support_query_score, 1.0)) * 0.18),
+    )
+    data["score"] = round(selection_score, 6)
+    metadata["support_role"] = "evidence_plan_lane"
+    metadata["support_lane"] = f"evidence:{lane.name}"
+    metadata["support_query"] = _clip_trace_value(support_query, 220)
+    metadata["support_query_score"] = support_query_score
+    metadata["support_selection_score"] = round(selection_score, 6)
+    metadata["support_lane_score"] = lane_score
+    metadata["support_strength"] = support_strength
+    metadata["evidence_plan_lane"] = {
+        "name": lane.name,
+        "label": lane.label,
+        "concept_key": lane.concept_key,
+    }
+    data["metadata"] = metadata
+    return SourceChunk(**data)
+
+
+def _evidence_support_query_variants(
+    lane: EvidenceLane,
+    original_query: str,
+    semantic_hints: dict[str, Any] | None = None,
+) -> list[str]:
+    hint_terms = [
+        str(term)
+        for term in ((semantic_hints or {}).get("terms") or [])
+        if str(term).strip()
+    ]
+    variants = [
+        " ".join([*hint_terms[:8], *lane.search_terms[:8]]),
+        lane.query,
+        " ".join([lane.label, *lane.search_terms[:10]]),
+        " ".join([lane.query, original_query]),
+    ]
+    queries: list[str] = []
+    seen: set[str] = set()
+    for variant in variants:
+        text = " ".join(str(variant or "").split())
+        key = text.lower()
+        if text and key not in seen:
+            queries.append(text)
+            seen.add(key)
+    return queries[:3]
+
+
+def _select_evidence_plan_sources(
+    base_sources: list[SourceChunk],
+    support_sources: list[SourceChunk],
+    *,
+    max_sources: int,
+) -> list[SourceChunk]:
+    max_sources = max(1, int(max_sources or len(base_sources) or len(support_sources) or 1))
+    if not support_sources:
+        return base_sources[:max_sources]
+    support_keys = {str(source.chunk_id or "") for source in support_sources}
+    deduped_base = [
+        source
+        for source in base_sources
+        if str(source.chunk_id or "") not in support_keys
+    ]
+    base_budget = max(0, max_sources - len(support_sources))
+    selected = [*deduped_base[:base_budget], *support_sources[:max_sources]]
+    if len(selected) < max_sources:
+        used = {str(source.chunk_id or "") for source in selected}
+        for source in deduped_base[base_budget:]:
+            key = str(source.chunk_id or "")
+            if key in used:
+                continue
+            selected.append(source)
+            used.add(key)
+            if len(selected) >= max_sources:
+                break
+    return selected[:max_sources]
+
+
+async def _enforce_evidence_plan_lanes(
+    *,
+    original_query: str,
+    sources: list[SourceChunk],
+    evidence_plan: EvidencePlan,
+    corpus_ids: list[str] | None,
+    retrieval_tier: RetrievalTier,
+    collections: list[str] | None,
+    retrieval_k: int | None,
+    top_k_summary: int | None,
+    rerank_top_n: int | None,
+    similarity_threshold: float | None,
+    neo4j_expansion_cap: int | None,
+    max_corpora_per_query: int | None,
+    fact_seed_limit: int | None,
+    final_top_k: int | None,
+    source_cap: int | None = None,
+) -> tuple[list[SourceChunk], dict[str, Any]]:
+    base_sources = list(sources or [])
+    meta: dict[str, Any] = {
+        "active": evidence_plan.active,
+        "plan": evidence_plan_to_dict(evidence_plan),
+        "mode": evidence_plan.mode,
+        "reason": evidence_plan.reason,
+        "required_lanes": [lane.name for lane in evidence_plan.required_lanes],
+        "initial": {},
+        "final": {},
+        "covered_lanes": [],
+        "missing_lanes": [],
+        "added": 0,
+        "support_doc_ids": [],
+        "support_lanes": [],
+        "lane_reports": [],
+        "support_search_mode": None,
+    }
+    if not evidence_plan.active:
+        return base_sources, meta
+
+    initial = _evidence_lane_coverage(base_sources, evidence_plan)
+    meta["initial"] = initial
+    missing = [
+        lane
+        for lane in evidence_plan.required_lanes
+        if lane.name in set(initial.get("missing_lanes") or [])
+    ]
+    if not corpus_ids or not missing:
+        meta["final"] = initial
+        meta["covered_lanes"] = initial.get("covered_lanes", [])
+        meta["missing_lanes"] = initial.get("missing_lanes", [])
+        return base_sources, meta
+
+    meta["support_search_mode"] = "local"
+    existing_chunk_ids = {str(source.chunk_id or "") for source in base_sources}
+    existing_doc_ids = {
+        _evidence_source_doc_key(source)
+        for source in base_sources
+        if _evidence_source_doc_key(source)
+    }
+    support_sources: list[SourceChunk] = []
+    support_tier = (
+        RetrievalTier.qdrant_mongo
+        if retrieval_tier == RetrievalTier.qdrant_mongo_graph
+        else retrieval_tier
+    )
+    evidence_semaphore = asyncio.Semaphore(_CHAT_COVERAGE_MAX_CONCURRENCY)
+
+    async def _cover_one_lane(
+        lane: EvidenceLane,
+    ) -> tuple[EvidenceLane, SourceChunk | None, dict[str, Any], dict[str, Any], str]:
+        lane_report: dict[str, Any] = {
+            "lane": lane.name,
+            "label": lane.label,
+            "status": "uncovered",
+            "attempts": [],
+        }
+        chosen: SourceChunk | None = None
+        chosen_report: dict[str, Any] = {}
+        support_query = ""
+        async with evidence_semaphore:
+            semantic_hints = await _semantic_ingest_hints_for_evidence_lane(
+                lane,
+                corpus_ids,
+            )
+            lane_report["semantic_ingest_hints"] = {
+                "terms": semantic_hints.get("terms", [])[:10],
+                "doc_ids": semantic_hints.get("doc_ids", [])[:8],
+                "facets": semantic_hints.get("facets", [])[:4],
+            }
+            semantic_doc_ids = {
+                str(doc_id)
+                for doc_id in (semantic_hints.get("doc_ids") or [])
+                if str(doc_id).strip()
+            }
+            for support_query in _evidence_support_query_variants(
+                lane,
+                original_query,
+                semantic_hints=semantic_hints,
+            ):
+                attempt: dict[str, Any] = {
+                    "query": _clip_trace_value(support_query, 220),
+                    "search_mode": "local",
+                    "returned": 0,
+                    "status": "started",
+                }
+                try:
+                    result = await retriever_orchestrator.retrieve(
+                        query=support_query,
+                        corpus_ids=corpus_ids,
+                        retrieval_tier=support_tier,
+                        collections=collections,
+                        retrieval_k=max(24, min(int(retrieval_k or 40), 56)),
+                        rerank_enabled=False,
+                        ranking_query=support_query,
+                        top_k_summary=top_k_summary,
+                        rerank_top_n=max(12, min(int(rerank_top_n or 24), 32)),
+                        similarity_threshold=similarity_threshold,
+                        neo4j_expansion_cap=neo4j_expansion_cap,
+                        max_corpora_per_query=max_corpora_per_query,
+                        final_top_k=8,
+                        fact_seed_limit=fact_seed_limit,
+                        search_mode="local",
+                    )
+                except Exception as exc:
+                    attempt["status"] = "retrieval_error"
+                    attempt["error"] = _clip_trace_value(exc, 180)
+                    lane_report["attempts"].append(attempt)
+                    logger.debug("evidence-plan support retrieval skipped for %s: %s", lane.name, exc)
+                    continue
+                candidates = list(getattr(result, "chunks", []) or [])
+                attempt["returned"] = len(candidates)
+                chosen, chosen_report = _choose_evidence_lane_candidate_with_report(
+                    candidates,
+                    lane=lane,
+                    original_query=original_query,
+                    existing_chunk_ids=existing_chunk_ids,
+                    existing_doc_ids=existing_doc_ids,
+                    semantic_doc_ids=semantic_doc_ids,
+                )
+                attempt.update(
+                    {
+                        "status": chosen_report.get("status", "uncovered"),
+                        "strength": chosen_report.get("strength"),
+                        "selected": chosen_report.get("selected"),
+                        "rejected": chosen_report.get("rejected"),
+                        "sampled_rejections": chosen_report.get("sampled_rejections"),
+                        "reason": chosen_report.get("reason"),
+                    }
+                )
+                lane_report["attempts"].append(attempt)
+                if chosen:
+                    break
+        return lane, chosen, chosen_report, lane_report, support_query
+
+    lane_results = await asyncio.gather(*[_cover_one_lane(lane) for lane in missing])
+    for lane, chosen, chosen_report, lane_report, support_query in lane_results:
+        if not chosen:
+            lane_report["reason"] = "no_support_chunk_selected"
+            meta["lane_reports"].append(lane_report)
+            continue
+        chunk_key = str(chosen.chunk_id or "")
+        if chunk_key in existing_chunk_ids:
+            lane_report["status"] = "deduped_parallel"
+            lane_report["reason"] = "duplicate_selected_by_another_lane"
+            meta["lane_reports"].append(lane_report)
+            continue
+        strength = str(chosen_report.get("strength") or "strong")
+        marked = _mark_evidence_plan_chunk(
+            chosen,
+            lane=lane,
+            support_query=support_query,
+            support_strength=strength,
+        )
+        lane_report["status"] = "selected"
+        lane_report["strength"] = strength
+        lane_report["selected_doc_id"] = str(marked.doc_id or "")
+        lane_report["selected_doc_name"] = str(marked.doc_name or "")
+        lane_report["selected_chunk_id"] = str(marked.chunk_id or "")
+        support_sources.append(marked)
+        meta["lane_reports"].append(lane_report)
+        existing_chunk_ids.add(str(marked.chunk_id or ""))
+        doc_key = _evidence_source_doc_key(marked)
+        if doc_key:
+            existing_doc_ids.add(doc_key)
+
+    _base_budget = int(final_top_k or len(base_sources) or 8)
+    max_sources = max(_base_budget, int(source_cap or 0), len(support_sources) or 0)
+    merged = _select_evidence_plan_sources(
+        base_sources,
+        support_sources,
+        max_sources=max_sources,
+    )
+    actual_support = [
+        source
+        for source in merged
+        if isinstance(source.metadata, dict)
+        and source.metadata.get("support_role") == "evidence_plan_lane"
+    ]
+    final = _evidence_lane_coverage(merged, evidence_plan)
+    meta["final"] = final
+    meta["covered_lanes"] = final.get("covered_lanes", [])
+    meta["missing_lanes"] = final.get("missing_lanes", [])
+    meta["added"] = len(actual_support)
+    meta["support_doc_ids"] = [
+        _evidence_source_doc_key(source)
+        for source in actual_support
+        if _evidence_source_doc_key(source)
+    ]
+    meta["support_lanes"] = [
+        str(source.metadata.get("support_lane") or "")
+        for source in actual_support
+        if isinstance(source.metadata, dict)
+    ]
+    for report in meta.get("lane_reports", []):
+        lane = str(report.get("lane") or "")
+        if lane in meta["missing_lanes"] and report.get("status") == "selected":
+            report["status"] = "selected_but_not_in_final_packet"
+    return merged, meta
+
+
+def _format_evidence_plan_trace(meta: dict[str, Any]) -> str:
+    plan = meta.get("plan") if isinstance(meta.get("plan"), dict) else {}
+    lanes = [
+        str(lane.get("name") or "")
+        for lane in (plan.get("lanes") or [])
+        if isinstance(lane, dict) and str(lane.get("name") or "")
+    ]
+    covered = [str(name) for name in (meta.get("covered_lanes") or []) if name]
+    missing = [str(name) for name in (meta.get("missing_lanes") or []) if name]
+    final = meta.get("final") if isinstance(meta.get("final"), dict) else {}
+    lines = [
+        "[Evidence plan]",
+        f"mode: {meta.get('mode') or plan.get('mode') or 'unknown'}",
+        f"required_lanes: {', '.join(lanes) if lanes else 'none'}",
+        f"covered: {', '.join(covered) if covered else 'none'}",
+        f"missing: {', '.join(missing) if missing else 'none'}",
+        (
+            "support: "
+            f"added={meta.get('added', 0)} "
+            f"docs={', '.join(meta.get('support_doc_ids') or []) or 'none'}"
+        ),
+        (
+            "lane_docs: "
+            f"{json.dumps(final.get('lane_doc_names', {}), sort_keys=True) if final else '{}'}"
+        ),
+        "rule: each required lane must have retrieved source evidence before synthesis.",
+    ]
+    return "\n".join(lines)
+
+
+def _format_evidence_plan_prompt_note(meta: dict[str, Any] | None) -> str | None:
+    if not meta or not meta.get("active"):
+        return None
+    required = ", ".join(meta.get("required_lanes") or []) or "none"
+    covered = ", ".join(meta.get("covered_lanes") or []) or "none"
+    missing = ", ".join(meta.get("missing_lanes") or []) or "none"
+    lines = [
+        "Internal evidence plan contract (do not mention this block):",
+        f"- Required source-backed evidence lanes: {required}.",
+        f"- Retrieved lane coverage: covered={covered}; missing={missing}.",
+    ]
+    if meta.get("missing_lanes"):
+        lines.append(
+            "- HARD LIMIT: do not synthesize a full relationship answer across "
+            "lanes that are still missing retrieved evidence."
+        )
+    else:
+        lines.append(
+            "- The retrieved packet contains evidence for every required lane. "
+            "Synthesize across lanes, but keep claims tied to what the sources show."
+        )
+    return "\n".join(lines)
+
+
 def _clip_trace_value(value: Any, max_chars: int = 180) -> str:
     text = " ".join(str(value or "").split())
     if len(text) <= max_chars:
@@ -3923,6 +5061,15 @@ def _format_retrieval_diagnostics_trace(
         if isinstance(final_source_tiers, dict) and final_source_tiers
         else "none"
     )
+    sufficiency = {}
+    selection = diag.get("selection") if isinstance(diag.get("selection"), dict) else {}
+    if isinstance(selection.get("sufficiency"), dict):
+        sufficiency = selection["sufficiency"]
+    suff_missing = [
+        str(atom)
+        for atom in (sufficiency.get("missing_atoms") or [])
+        if str(atom).strip()
+    ]
 
     lines = [
         "[Retrieval tier trace]",
@@ -3939,6 +5086,14 @@ def _format_retrieval_diagnostics_trace(
             f"final={context_chunks}/{raw_chunks}"
         ),
         f"final_source_tiers: {final_mix}",
+        (
+            "answerability: "
+            f"{'yes' if sufficiency.get('answerable') else 'no'} "
+            f"coverage={sufficiency.get('required_coverage', '?')} "
+            f"missing={', '.join(suff_missing) if suff_missing else 'none'}"
+        )
+        if sufficiency
+        else "answerability: unavailable",
         (
             # Doc-spread telemetry — distinct_docs_* are computed in the
             # retriever but were previously dropped here; max_doc_share_final
@@ -4510,6 +5665,31 @@ class ChatOrchestrator:
                 },
             )
 
+        requested_mode = (
+            getattr(request.overrides, "search_mode", None)
+            if request.overrides
+            else None
+        )
+        resolved_mode = resolve_search_mode(requested_mode, request.message)
+        evidence_plan = build_evidence_plan(request.message)
+        query_plan = _build_chat_query_plan(
+            query=request.message,
+            retrieval_query=retrieval_query,
+            requested_tier=request.retrieval_tier,
+            corpus_ids=request.corpus_ids,
+            collections=request.collections,
+            profile_cfg=profile_cfg,
+            search_mode=resolved_mode,
+            hyde_applied=hyde_applied,
+        )
+        yield _record_trace_event(
+            lane="planning",
+            title="Query plan",
+            status="done",
+            content=_format_chat_query_plan_trace(query_plan),
+            metadata=query_plan,
+        )
+
         yield _record_trace_event(
             lane="retrieval",
             title="Local RAG retrieval",
@@ -4550,14 +5730,6 @@ class ChatOrchestrator:
         # Step 3.5: Retrieval Pipeline
         #   atomic mode: decompose query → fan-out retrieval → merge
         #   all other modes: standard single-query retrieval
-        from services.retriever.search_mode import resolve_search_mode
-
-        requested_mode = (
-            getattr(request.overrides, "search_mode", None)
-            if request.overrides
-            else None
-        )
-        resolved_mode = resolve_search_mode(requested_mode, request.message)
         # Tier-authoritative routing: GLOBAL (the 50-summary overview) is only
         # ever the user's explicit choice. The old LLM "overview intent" second
         # chance silently upgraded local→global, overrode the user's tier, and
@@ -4646,7 +5818,47 @@ class ChatOrchestrator:
                 coverage_meta.get("coverage_uncovered_lanes", []),
                 coverage_meta.get("lane_reports", []),
             )
-        sources = _dedupe_sources_for_context(coverage_sources)
+        evidence_plan_start = perf_counter()
+        evidence_sources, evidence_plan_meta = await _enforce_evidence_plan_lanes(
+            original_query=request.message,
+            sources=coverage_sources,
+            evidence_plan=evidence_plan,
+            corpus_ids=request.corpus_ids,
+            retrieval_tier=getattr(retrieval, "effective_tier", request.retrieval_tier),
+            collections=request.collections,
+            retrieval_k=profile_k,
+            top_k_summary=profile_cfg["top_k_summary"],
+            rerank_top_n=profile_cfg["rerank_top_n"],
+            similarity_threshold=profile_cfg["similarity_threshold"],
+            neo4j_expansion_cap=profile_cfg["neo4j_expansion_cap"],
+            max_corpora_per_query=profile_cfg["max_corpora_per_query"],
+            fact_seed_limit=profile_cfg["fact_seed_limit"],
+            final_top_k=profile_cfg["final_top_k"],
+            source_cap=profile_cfg.get("source_cap"),
+        )
+        evidence_plan_meta["duration_s"] = perf_counter() - evidence_plan_start
+        if evidence_plan_meta.get("active"):
+            if evidence_plan_meta.get("added") or evidence_plan_meta.get("missing_lanes"):
+                logger.info(
+                    "chat_evidence_plan: mode=%s added=%s covered=%s missing=%s docs=%s",
+                    evidence_plan_meta.get("mode"),
+                    evidence_plan_meta.get("added"),
+                    evidence_plan_meta.get("covered_lanes"),
+                    evidence_plan_meta.get("missing_lanes"),
+                    evidence_plan_meta.get("support_doc_ids"),
+                )
+            yield _record_trace_event(
+                lane="planning",
+                title="Evidence plan",
+                status=(
+                    "done"
+                    if not evidence_plan_meta.get("missing_lanes")
+                    else "warning"
+                ),
+                content=_format_evidence_plan_trace(evidence_plan_meta),
+                metadata=evidence_plan_meta,
+            )
+        sources = _dedupe_sources_for_context(evidence_sources)
         # Universal per-document cap — the coverage selector applies one too, but
         # it is bypassed when no facet coverage is needed; this final guard runs
         # on every path so one book can never dominate the answer context.
@@ -4697,6 +5909,19 @@ class ChatOrchestrator:
                 "coverage_lane_counts": coverage_meta.get("coverage_lane_counts", {}),
                 "coverage_uncovered_lanes": coverage_meta.get("coverage_uncovered_lanes", []),
                 "coverage_lane_reports": coverage_meta.get("lane_reports", []),
+                "evidence_plan": evidence_plan_meta.get("plan", {}),
+                "evidence_plan_added": evidence_plan_meta.get("added", 0),
+                "evidence_plan_required_lanes": evidence_plan_meta.get(
+                    "required_lanes", []
+                ),
+                "evidence_plan_covered_lanes": evidence_plan_meta.get(
+                    "covered_lanes", []
+                ),
+                "evidence_plan_missing_lanes": evidence_plan_meta.get(
+                    "missing_lanes", []
+                ),
+                "evidence_plan_lane_reports": evidence_plan_meta.get("lane_reports", []),
+                "evidence_plan_duration_s": evidence_plan_meta.get("duration_s", 0.0),
             },
         )
         retrieval_diagnostics = getattr(retrieval, "diagnostics", {}) or {}
@@ -4735,6 +5960,27 @@ class ChatOrchestrator:
         # seeded into the answer context (post tier-gating), taken straight from
         # the retrieval result. Never an LLM-authored value, so it cannot lie.
         facts_seeded = len(facts)
+
+        answerability_gate = _build_retrieval_answerability_gate(
+            query=request.message,
+            diagnostics=retrieval_diagnostics,
+            sources=sources,
+            facts=facts,
+            corpus_ids=request.corpus_ids,
+            web_search_enabled=web_search_enabled,
+            evidence_plan_meta=evidence_plan_meta,
+        )
+        yield _record_trace_event(
+            lane="planning",
+            title="Answerability gate",
+            status=(
+                "done"
+                if answerability_gate.get("status") in {"answerable", "not_enforced"}
+                else "warning"
+            ),
+            content=_format_retrieval_answerability_trace(answerability_gate),
+            metadata=answerability_gate,
+        )
 
         # Pt 10d (Cluster 2 — Graph Decoration) — graph-tier-only
         # post-retrieval enrichment. Fast Search and Hybrid Search never call Neo4j
@@ -4947,6 +6193,117 @@ class ChatOrchestrator:
                 )
             )
 
+        if _should_short_circuit_answerability(
+            answerability_gate,
+            web_search_enabled=web_search_enabled,
+            selected_tools=request.selected_tools,
+        ):
+            assistant_content = _format_answerability_short_circuit_response(
+                answerability_gate,
+                query=request.message,
+            )
+            user_saved = await conversation_service.append_message(
+                str(conversation_id),
+                self._create_user_message(request.message, model_used),
+            )
+            if not user_saved:
+                logger.error("Failed to persist user message for %s", conversation_id)
+                yield build_sse_chunk(
+                    ChatChunk(
+                        type="error",
+                        content="Failed to save the user message. Please retry.",
+                        conversation_id=str(conversation_id),
+                    )
+                )
+                return
+            yield _record_trace_event(
+                lane="final",
+                title="Assistant final answer",
+                status="done",
+                content=(
+                    "Answerability gate completed the turn without a chat "
+                    "model call because selected corpus evidence was "
+                    f"{answerability_gate.get('status')}."
+                ),
+                metadata={
+                    "model_skipped": True,
+                    "answerability": answerability_gate,
+                    "content_chars": len(assistant_content),
+                },
+            )
+            yield build_sse_chunk(
+                ChatChunk(
+                    type="token",
+                    content=assistant_content,
+                    conversation_id=str(conversation_id),
+                )
+            )
+            try:
+                await self._save_assistant_message(
+                    conversation_id,
+                    assistant_content,
+                    None,
+                    model_used,
+                    False,
+                    chunks_returned=chunks_returned,
+                    facts_seeded=facts_seeded,
+                    strategy_used=strategy_used,
+                    query_profile_used=query_profile_used,
+                    reasoning_mode_used=reasoning_mode_used,
+                    hyde_applied=hyde_applied,
+                    agentic_mode_used=agentic_mode_used,
+                    downgrade_reason=downgrade_reason,
+                    collections_queried=collections_queried_for_msg,
+                    skills_used=[],
+                    tools_used=[],
+                    reasoning_cascade_applied=False,
+                    sources=sources,
+                    trace_events=trace_events,
+                )
+            except Exception as exc:
+                logger.error(
+                    "Failed to persist answerability-gated assistant message for %s: %s",
+                    conversation_id,
+                    exc,
+                )
+                yield build_sse_chunk(
+                    ChatChunk(
+                        type="error",
+                        content=(
+                            "The retrieval answerability result was generated, "
+                            "but the backend could not save it. Please retry."
+                        ),
+                        conversation_id=str(conversation_id),
+                    )
+                )
+                return
+            yield build_sse_chunk(
+                ChatChunk(
+                    type="done",
+                    conversation_id=str(conversation_id),
+                    model_used=model_used,
+                    chunks_returned=chunks_returned,
+                    facts_seeded=facts_seeded,
+                    strategy_used=strategy_used,
+                    query_profile_used=query_profile_used,
+                    reasoning_mode_used=reasoning_mode_used,
+                    hyde_applied=hyde_applied,
+                    agentic_mode_used=agentic_mode_used,
+                    downgrade_reason=downgrade_reason,
+                    collections_queried=collections_queried_for_msg,
+                    skills_used=[],
+                    tools_used=[],
+                    reasoning_cascade_applied=False,
+                )
+            )
+            logger.info(
+                "Chat answerability short-circuited conv=%s status=%s chunks=%d",
+                conversation_id,
+                answerability_gate.get("status"),
+                chunks_returned,
+            )
+            return
+
         # Phase 24 — Skills (multi-select) + Tools, fetched in PARALLEL.
         # Both are independent Mongo reads; running serially wasted ~50-100ms
         # per turn. asyncio.gather collapses them to one round-trip's worth
@@ -5073,6 +6430,10 @@ class ChatOrchestrator:
             except Exception as exc:
                 logger.warning("Reasoning cascade failed: %s", exc)
 
+        answerability_prompt_note = _format_retrieval_answerability_prompt_note(
+            answerability_gate
+        )
+        evidence_plan_prompt_note = _format_evidence_plan_prompt_note(evidence_plan_meta)
         coverage_prompt_note = _format_chat_coverage_prompt_note(coverage_meta)
         analysis_blocks = [
             block
@@ -5080,6 +6441,8 @@ class ChatOrchestrator:
                 analysis_text,
                 synthesis_lens_contract,
                 retrieval_nuance_contract,
+                evidence_plan_prompt_note,
+                answerability_prompt_note,
                 coverage_prompt_note,
             )
             if block and block.strip()

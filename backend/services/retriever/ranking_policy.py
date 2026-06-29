@@ -12,6 +12,10 @@ from services.retriever.query_grounding import (
     chunk_concept_hits,
     concept_groups,
 )
+from services.retriever.query_semantics import (
+    required_atoms_for_query as semantic_required_atoms_for_query,
+    token_display_terms,
+)
 
 # ── Phase 1: candidate-collapse hygiene ───────────────────────────────────
 # Intent-adaptive distinct-document breadth — a focused (SPECIFIC) query may
@@ -32,41 +36,16 @@ _DISTINCT_DOC_BREADTH: dict[QueryNeed, int] = {
 _MAIN_FLOOR_RATIO: float = 0.25
 _MAIN_ABS_FLOOR: float = 0.10
 _MAIN_MIN_KEEP: int = 3
-_TOKEN_RE = re.compile(r"[a-z][a-z0-9_'\-]*", re.IGNORECASE)
-_TOKEN_STOPWORDS = frozenset(
-    {
-        "a", "about", "above", "after", "again", "against", "also", "an",
-        "and", "are", "as", "at", "because",
-        "before", "being", "between", "could", "does", "doing", "during",
-        "each", "from", "further", "have", "having", "here", "hers",
-        "itself", "just", "more", "most", "only", "other", "ours", "over",
-        "same", "should", "some", "such", "than", "that", "their", "there",
-        "these", "they", "this", "those", "through", "under", "until",
-        "very", "what", "when", "where", "which", "while", "with", "would",
-        "your",
-    }
+_CROSS_DOCUMENT_RELATIONSHIP_ATOM = "cross_document_relationship_evidence"
+_PERSONALITY_FRAMEWORK_RE = re.compile(
+    r"\b("
+    r"personality\s+(?:frameworks?|tests?|assessments?|inventor(?:y|ies)|"
+    r"types?|traits?|scales?|questionnaires?)|"
+    r"four\s+tendencies|big\s+five|ocean|myers\s+briggs|mbti|enneagram|"
+    r"temperament\s+theory|personality\s+typology|rubin|handbook\s+of\s+personality"
+    r")\b",
+    re.IGNORECASE,
 )
-_REQUIRED_CONCEPT_STOPWORDS = frozenset(
-    {
-        "associate",
-        "association",
-        "connect",
-        "connected",
-        "define",
-        "definition",
-        "actually",
-        "basically",
-        "explain",
-        "essentially",
-        "link",
-        "linked",
-        "relate",
-        "related",
-        "relationship",
-    }
-)
-
-
 @dataclass(frozen=True)
 class DiversityResult:
     candidates: list[SourceChunk]
@@ -421,13 +400,7 @@ def _chunk_text(chunk: SourceChunk) -> str:
 
 
 def _token_set(text: str) -> set[str]:
-    out: set[str] = set()
-    for token in _TOKEN_RE.findall(text or ""):
-        low = token.lower().strip("-_'")
-        if low in _TOKEN_STOPWORDS:
-            continue
-        out.add(low)
-    return out
+    return token_display_terms(text)
 
 
 def _jaccard(left: set[str], right: set[str]) -> float:
@@ -538,6 +511,8 @@ def _candidate_atoms(chunk: SourceChunk) -> set[str]:
             key = str(item).strip().lower()
             if key:
                 atoms.add(f"concept:{key}")
+    if _PERSONALITY_FRAMEWORK_RE.search(_chunk_text(chunk)):
+        atoms.add("concept:personality_framework")
 
     atoms.update(f"predicate:{p}" for p in _candidate_predicates(chunk))
     atoms.update(f"fact:{f}" for f in _candidate_fact_ids(chunk))
@@ -818,66 +793,7 @@ def _annotated_copy(
 
 def _required_atoms_for_query(query: str | None) -> set[str]:
     """Cheap deterministic answerability target for the selected context."""
-    q = (query or "").lower()
-    required: set[str] = set()
-
-    for group in concept_groups(query or "", max_groups=4):
-        key = str(getattr(group, "key", "") or "").strip().lower()
-        if key and key not in _REQUIRED_CONCEPT_STOPWORDS:
-            required.add(f"concept:{key}")
-
-    if any(
-        phrase in q
-        for phrase in (
-            "what is",
-            "what are",
-            "define",
-            "definition",
-            "meaning of",
-            "stands for",
-        )
-    ):
-        required.add("definition")
-    if any(
-        phrase in q
-        for phrase in (
-            "associate",
-            "association",
-            "relate",
-            "related",
-            "relationship",
-            "connect",
-            "linked",
-            "between",
-        )
-    ):
-        required.add("relationship")
-    if any(
-        phrase in q
-        for phrase in (
-            "task",
-            "tasks",
-            "example",
-            "examples",
-            "application",
-            "applications",
-            "include",
-        )
-    ):
-        required.add("methods_tasks")
-    if any(
-        phrase in q
-        for phrase in (
-            "steps",
-            "process",
-            "procedure",
-            "workflow",
-            "how to",
-        )
-    ):
-        required.add("procedure")
-
-    return required
+    return semantic_required_atoms_for_query(query, max_concepts=4)
 
 
 def _atom_counts(selected_indices: list[int], fingerprints: list[dict[str, Any]]) -> dict[str, int]:
@@ -886,6 +802,16 @@ def _atom_counts(selected_indices: list[int], fingerprints: list[dict[str, Any]]
         for atom in fingerprints[idx]["atoms"]:
             counts[atom] = counts.get(atom, 0) + 1
     return counts
+
+
+def _selected_doc_count(selected_indices: list[int], fingerprints: list[dict[str, Any]]) -> int:
+    return len(
+        {
+            fingerprints[idx]["doc"]
+            for idx in selected_indices
+            if fingerprints[idx].get("doc")
+        }
+    )
 
 
 def _near_duplicate_pairs(
@@ -914,6 +840,19 @@ def _evaluate_sufficiency(
     atom_counts = _atom_counts(selected_indices, fingerprints)
     covered = {atom for atom in required if atom_counts.get(atom, 0) > 0}
     critical = required & {"definition", "relationship", "procedure"}
+    required_concepts = {atom for atom in required if atom.startswith("concept:")}
+    relationship_doc_count = _selected_doc_count(selected_indices, fingerprints)
+    cross_doc_required = (
+        "relationship" in required
+        and "concept:personality_framework" in required_concepts
+        and len(required_concepts) >= 2
+        and relationship_doc_count < 2
+    )
+    if cross_doc_required:
+        required = set(required)
+        required.add(_CROSS_DOCUMENT_RELATIONSHIP_ATOM)
+        critical = set(critical)
+        critical.add(_CROSS_DOCUMENT_RELATIONSHIP_ATOM)
     missing_critical = critical - covered
     coverage = (len(covered) / len(required)) if required else 1.0
     return {
@@ -924,6 +863,7 @@ def _evaluate_sufficiency(
         "required_coverage": round(coverage, 4),
         "answerable": coverage >= 0.80 and not missing_critical,
         "atom_counts": atom_counts,
+        "relationship_distinct_docs": relationship_doc_count,
     }
 
 
@@ -959,6 +899,13 @@ def _repair_sufficiency(
         if not missing:
             break
         current_fps = [fingerprints[idx] for idx in selected]
+        current_docs = {fp["doc"] for fp in current_fps if fp.get("doc")}
+        needs_cross_doc = _CROSS_DOCUMENT_RELATIONSHIP_ATOM in missing
+        required_concepts = {
+            atom
+            for atom in set(sufficiency.get("required_atoms") or [])
+            if str(atom).startswith("concept:")
+        }
         best_idx: int | None = None
         best_score = float("-inf")
 
@@ -966,16 +913,31 @@ def _repair_sufficiency(
             if idx in selected_set:
                 continue
             fp = fingerprints[idx]
-            if not (fp["atoms"] & missing):
+            direct_gain = fp["atoms"] & missing
+            cross_doc_gain = (
+                needs_cross_doc
+                and fp.get("doc")
+                and fp["doc"] not in current_docs
+                and bool(fp["atoms"] & required_concepts)
+            )
+            if not direct_gain and not cross_doc_gain:
                 continue
-            if not _passes_relevance_floor(
+            passes_floor = _passes_relevance_floor(
                 idx=idx,
                 candidate=candidate,
                 fp=fp,
                 relevance_by_idx=relevance_by_idx,
                 policy=policy,
                 top_score=float(ranked[0].score or 0.0) if ranked else 0.0,
-            ):
+            )
+            if not passes_floor and cross_doc_gain:
+                raw_score = float(candidate.score or 0.0)
+                top_score = float(ranked[0].score or 0.0) if ranked else 0.0
+                if 0.0 <= raw_score <= top_score <= 1.0 and top_score > 0.0:
+                    passes_floor = (raw_score / top_score) >= 0.25
+                else:
+                    passes_floor = relevance_by_idx.get(idx, 0.0) >= 0.25
+            if not passes_floor:
                 continue
             if any(fp["parent"] and fp["parent"] == current["parent"] for current in current_fps):
                 continue
@@ -985,7 +947,9 @@ def _repair_sufficiency(
             ):
                 continue
 
-            atom_gain = len(fp["atoms"] & missing)
+            atom_gain = len(direct_gain)
+            if cross_doc_gain:
+                atom_gain += 1 + len(fp["atoms"] & required_concepts)
             score = (
                 relevance_by_idx.get(idx, 0.0)
                 + 0.14 * atom_gain
