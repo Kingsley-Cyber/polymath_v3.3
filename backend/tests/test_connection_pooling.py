@@ -105,6 +105,48 @@ def test_query_embedding_is_cached():
         embedder._QUERY_EMBED_CACHE.clear()
 
 
+def test_retrieval_result_is_cached_by_query_params():
+    from models.schemas import RetrievalResult, RetrievalTier, SourceChunk
+    import services.retriever as ret
+    from services.retriever import retriever_orchestrator
+
+    calls = {"n": 0}
+
+    async def fake_impl(*a, **k):
+        calls["n"] += 1
+        return RetrievalResult(
+            chunks=[
+                SourceChunk(
+                    chunk_id="c1", parent_id="p1", doc_id="d1", corpus_id="x",
+                    text="hello", score=0.5, source_tier="chunk",
+                )
+            ],
+            requested_tier=RetrievalTier.qdrant_mongo,
+            effective_tier=RetrievalTier.qdrant_mongo,
+        )
+
+    ret._RETRIEVAL_CACHE.clear()
+    old = retriever_orchestrator._retrieve_uncached
+    retriever_orchestrator._retrieve_uncached = fake_impl
+    try:
+        kw = dict(
+            query="q1", corpus_ids=["c1"],
+            retrieval_tier=RetrievalTier.qdrant_mongo,
+            collections=None, search_mode="local",
+        )
+        r1 = asyncio.run(retriever_orchestrator.retrieve(**kw))
+        r2 = asyncio.run(retriever_orchestrator.retrieve(**kw))
+        assert len(r1.chunks) == 1 and len(r2.chunks) == 1
+        assert calls["n"] == 1, f"identical retrieve should hit cache, got {calls['n']} runs"
+        assert r1 is not r2, "cache must return a fresh deep copy, not the same object"
+        # a different query must miss and re-run
+        asyncio.run(retriever_orchestrator.retrieve(**{**kw, "query": "q2"}))
+        assert calls["n"] == 2
+    finally:
+        retriever_orchestrator._retrieve_uncached = old
+        ret._RETRIEVAL_CACHE.clear()
+
+
 def _run_all():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

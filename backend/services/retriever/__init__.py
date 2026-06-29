@@ -30,6 +30,7 @@ from typing import Any
 
 from config import get_settings
 from models.schemas import RetrievalResult, RetrievalTier, SourceChunk, SourceFact
+from services.cache_util import TTLCache, hash_key
 from services.embedder import embed_query
 from services.reranker import reranker_service
 from services.retriever.document_anchor import document_anchor_retriever
@@ -72,6 +73,12 @@ _DEFAULT_SUMMARY_LIMIT = 20
 # a short TTL — bounds staleness if a corpus is ever re-ingested with new config.
 _EMBED_CONFIG_CACHE: dict[str, tuple[float, "dict[str, Any] | None"]] = {}
 _EMBED_CONFIG_TTL_SECONDS = 300.0
+# Retrieval-result cache: deterministic facet/lane support queries recur within
+# a turn and across turns, and identical questions repeat. Caching the assembled
+# RetrievalResult by (query, corpus, tier, mode, knobs) skips the whole
+# funnel+hydrate+rerank on a hit. Short TTL bounds re-ingest staleness; results
+# are deep-copied on store/return so downstream mutation can't poison the cache.
+_RETRIEVAL_CACHE = TTLCache(maxsize=512, ttl_seconds=120.0)
 
 
 def _unwrap_funnel_result(
@@ -691,7 +698,58 @@ class RetrieverOrchestrator:
 
     # ── main entry ─────────────────────────────────────────────────────────────
 
-    async def retrieve(
+    async def retrieve(self, *args, **kwargs) -> RetrievalResult:
+        """Cache wrapper around the retrieval pipeline.
+
+        Deterministic facet/lane support-query retrievals recur within a turn and
+        across turns, and identical questions repeat — so caching the assembled
+        result by (query, corpus, tier, mode, knobs) skips the whole
+        funnel + hydrate + rerank on a hit. HyDE-expanded main queries vary per
+        turn (cache miss, no harm). Results are deep-copied on store and return so
+        downstream mutation (e.g. hydration) can't poison the cache. Positional
+        calls bypass the cache, since the key is built from the kwargs.
+        """
+
+        key = None
+        if not args:
+            try:
+                corpus_ids = kwargs.get("corpus_ids") or []
+                key = hash_key(
+                    "retrieval_v1",
+                    kwargs.get("query"),
+                    tuple(sorted(str(c) for c in corpus_ids)),
+                    str(kwargs.get("retrieval_tier")),
+                    tuple(str(c) for c in (kwargs.get("collections") or ())),
+                    kwargs.get("retrieval_k"),
+                    bool(kwargs.get("rerank_enabled", True)),
+                    kwargs.get("ranking_query"),
+                    kwargs.get("top_k_summary"),
+                    kwargs.get("rerank_top_n"),
+                    kwargs.get("similarity_threshold"),
+                    kwargs.get("neo4j_expansion_cap"),
+                    kwargs.get("max_corpora_per_query"),
+                    kwargs.get("final_top_k"),
+                    kwargs.get("fact_seed_limit"),
+                    kwargs.get("search_mode"),
+                )
+            except Exception:
+                key = None
+        if key is not None:
+            hit = _RETRIEVAL_CACHE.get(key)
+            if hit is not None:
+                try:
+                    return hit.model_copy(deep=True)
+                except Exception:
+                    return hit
+        result = await self._retrieve_uncached(*args, **kwargs)
+        if key is not None and getattr(result, "chunks", None):
+            try:
+                _RETRIEVAL_CACHE.set(key, result.model_copy(deep=True))
+            except Exception:
+                pass
+        return result
+
+    async def _retrieve_uncached(
         self,
         query: str,
         corpus_ids: list[str] | None,

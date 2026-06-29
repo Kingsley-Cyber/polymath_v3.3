@@ -26,3 +26,30 @@ def pytest_collection_modifyitems(
     for item in items:
         if "integration" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def _clear_rag_caches():
+    """Clear in-process RAG caches between tests so a cached retrieval/embedding
+    result from one test cannot leak into another. These caches are correct in
+    production (identical queries SHOULD reuse results); the isolation matters
+    only for tests that re-run the same query params expecting a fresh pipeline."""
+
+    def _clear() -> None:
+        try:
+            import services.retriever as _ret
+
+            _ret._RETRIEVAL_CACHE.clear()
+            _ret._EMBED_CONFIG_CACHE.clear()
+        except Exception:
+            pass
+        try:
+            import services.embedder as _emb
+
+            _emb._QUERY_EMBED_CACHE.clear()
+        except Exception:
+            pass
+
+    _clear()
+    yield
+    _clear()
