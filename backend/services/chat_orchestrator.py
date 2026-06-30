@@ -64,6 +64,19 @@ from services.retriever.evidence_allocation import (
     per_doc_cap_for_plan as _evidence_per_doc_cap_for_plan,
     select_lane_support as _ea_select_lane_support,
 )
+from services.answerability_tuning import (
+    CROSS_DOCUMENT_RELATIONSHIP_ATOM as _CROSS_DOC_ATOM,
+    coverage_threshold as _answerability_coverage_threshold,
+    cross_doc_atom_is_critical as _cross_doc_atom_is_critical,
+    inject_cross_doc_atom as _inject_cross_doc_atom,
+    lane_strong_score as _lane_strong_score,
+    missing_is_relationship_only as _missing_is_relationship_only,
+    relationship_lane_min_sources as _relationship_lane_min_sources,
+    neutralize_relationship_critical as _neutralize_relationship_critical,
+    partial_floor as _answerability_partial_floor,
+    relationship_min_distinct_docs as _relationship_min_distinct_docs,
+    text_help_threshold as _answerability_text_help_threshold,
+)
 from services.retriever.query_semantics import (
     concept_groups,
     is_curated_concept,
@@ -905,12 +918,21 @@ def _build_retrieval_answerability_gate(
             required_set.add(atom)
             missing_set.add(atom)
             critical_set.add(atom)
-        if relationship_plan and len(required_lanes) >= 2:
-            cross_doc_atom = "cross_document_relationship_evidence"
+        if relationship_plan and len(required_lanes) >= 2 and _inject_cross_doc_atom():
+            cross_doc_atom = _CROSS_DOC_ATOM
             required_set.add(cross_doc_atom)
-            if missing_lanes or distinct_doc_count < min(2, len(required_lanes)):
+            bridge_thin = bool(missing_lanes) or distinct_doc_count < min(
+                _relationship_min_distinct_docs(), len(required_lanes)
+            )
+            if bridge_thin:
                 missing_set.add(cross_doc_atom)
-                critical_set.add(cross_doc_atom)
+                # The corpus lacks an explicit cross-document link. Only strict
+                # mode treats that as a refusal; lenient/off trust the LLM to
+                # bridge the grounded sides with its own reasoning.
+                if _cross_doc_atom_is_critical():
+                    critical_set.add(cross_doc_atom)
+                else:
+                    critical_set.discard(cross_doc_atom)
             else:
                 covered_set.add(cross_doc_atom)
                 missing_set.discard(cross_doc_atom)
@@ -918,6 +940,11 @@ def _build_retrieval_answerability_gate(
         missing_set.update(required_set - covered_set)
         missing_set -= covered_set
         critical_set &= missing_set
+        # Soften relationship-family criticality (cross-doc bridge + the bare
+        # "relationship" operator) unless RELATIONSHIP_GATE=strict. Concept
+        # lanes (a side with zero evidence) and definition/procedure stay
+        # critical — that is the honesty floor the LLM must not paper over.
+        critical_set = _neutralize_relationship_critical(critical_set)
         required_atoms = sorted(required_set)
         covered_atoms = sorted(covered_set & required_set)
         missing_atoms = sorted(missing_set)
@@ -947,14 +974,17 @@ def _build_retrieval_answerability_gate(
                 len(covered_set) / len(required_set) if required_set else 1.0
             )
 
+    _cov_floor = _answerability_coverage_threshold()
+    _text_floor = _answerability_text_help_threshold()
+    _partial_floor = _answerability_partial_floor()
     effective_answerable = (
         raw_answerable
-        or (required_coverage >= 0.80 and not missing_critical)
+        or (required_coverage >= _cov_floor and not missing_critical)
         # When the retrieved TEXT covers a majority of the query concepts and
         # nothing critical is missing, answer: the remaining uncovered atoms are
         # generic question words (how/many/happens/reads) the corpus need not
         # "establish" — the substantive terms are present in the evidence.
-        or (required_coverage >= 0.5 and text_help and not missing_critical)
+        or (required_coverage >= _text_floor and text_help and not missing_critical)
     )
 
     if not corpus_scoped:
@@ -963,9 +993,15 @@ def _build_retrieval_answerability_gate(
         status = "unanswerable"
     elif effective_answerable:
         status = "answerable"
+    elif _missing_is_relationship_only(missing_critical) and required_coverage >= _partial_floor:
+        # The ONLY thing missing is the cross-document relationship bridge — the
+        # grounded sides are present and the LLM can synthesize the link. Answer
+        # with a "synthesized across sources" caveat instead of refusing. This
+        # carve-out also softens strict mode when coverage is healthy.
+        status = "partial"
     elif missing_critical:
         status = "unanswerable"
-    elif required_coverage >= 0.5:
+    elif required_coverage >= _partial_floor:
         status = "partial"
     else:
         status = "weak"
@@ -3357,13 +3393,13 @@ def _evidence_lane_coverage(
                 continue
             best_score = max(best_score, score)
             # A side is only *covered* by a chunk that matches it STRONGLY (a
-            # real alias hit, score >= _EVIDENCE_LANE_STRONG_SCORE). A weak term
+            # real alias hit, score >= LANE_STRONG_SCORE). A weak term
             # co-occurrence — the word "type"/"character" inside a seduction
             # passage — is informative for ranking but must NOT let a foreign
-            # book mark the personality side already covered. Combined with the
-            # multi-concept min_sources of 2, the side now needs two distinct
-            # strongly-matching documents before lane-forcing is skipped.
-            if score < _EVIDENCE_LANE_STRONG_SCORE:
+            # book mark the personality side already covered. The strong-score
+            # bar and RELATIONSHIP_LANE_MIN_SOURCES (per-lane distinct-doc count)
+            # are both tunable via Settings; defaults: score>=8, min_sources=1.
+            if score < _lane_strong_score():
                 continue
             doc_key = _evidence_source_doc_key(source)
             if doc_key and doc_key not in seen_docs:
@@ -3379,10 +3415,16 @@ def _evidence_lane_coverage(
         lane_chunk_ids[lane.name] = chunk_ids
         lane_scores[lane.name] = best_score
 
+    # A lane counts as covered for ANSWERABILITY once it has this many distinct
+    # strong docs (RELATIONSHIP_LANE_MIN_SOURCES, default 1). Allocation still
+    # reserves up to lane.min_sources for breadth, and the per-doc cap still
+    # prevents one book from dominating — but a side backed by a single strong
+    # source no longer drags the query into a refusal.
+    _lane_floor = _relationship_lane_min_sources()
     covered = [
         lane.name
         for lane in plan.required_lanes
-        if len(lane_doc_ids.get(lane.name) or []) >= max(1, lane.min_sources)
+        if len(lane_doc_ids.get(lane.name) or []) >= max(1, min(_lane_floor, lane.min_sources))
     ]
     missing = [
         lane.name

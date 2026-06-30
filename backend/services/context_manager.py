@@ -838,6 +838,16 @@ class ContextManager:
                 "datasets, or examples unless they appear in the retrieved "
                 "context/key_facts or the user explicitly asks for outside "
                 "knowledge.\n"
+                "Relationship & synthesis: when the question asks how concepts "
+                "relate, connect, or compare, you MAY draw the connection across "
+                "the retrieved sources using your own reasoning even when no "
+                "single passage states the link outright — that bridging IS the "
+                "answer. The hard rule is on FACTS, not on reasoning: every "
+                "concrete fact, definition, name, number, or claim must come "
+                "from the retrieved context/key_facts; never invent evidence "
+                "that was not retrieved. If one side of a comparison is thin or "
+                "absent in the sources, say so plainly and answer the part the "
+                "evidence supports rather than fabricating the rest.\n"
                 "</rag_answer_policy>\n\n"
             )
             render_hint = self._answer_render_hint(query)

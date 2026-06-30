@@ -953,6 +953,14 @@ def _evaluate_sufficiency(
     selected_indices: list[int],
     fingerprints: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    # NOTE: this gate is the REPAIR / quality driver, not the user-facing
+    # refusal. It deliberately keeps the relationship + cross-doc atoms CRITICAL
+    # so sufficiency-repair keeps pulling a bridging chunk into the evidence
+    # while one exists. The actual refusal decision (and all RELATIONSHIP_GATE
+    # loosening) lives in chat_orchestrator._build_retrieval_answerability_gate,
+    # which neutralizes relationship-family criticality from this output before
+    # deciding. Do not loosen criticality here — it would silently stop repair
+    # from grounding relationships.
     required = _required_atoms_for_query(query)
     atom_counts = _atom_counts(selected_indices, fingerprints)
     covered = {atom for atom in required if atom_counts.get(atom, 0) > 0}

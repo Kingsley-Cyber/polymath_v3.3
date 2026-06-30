@@ -79,6 +79,79 @@ class Settings(BaseSettings):
             "or below this length are returned whole."
         ),
     )
+    # ── Answerability / relationship gate (fluid cross-document synthesis) ──
+    # The corpus supplies facts; the LLM supplies the bridge. These knobs move
+    # both mirror gates (chat + retriever sufficiency) in lockstep via
+    # services.answerability_tuning. Defaults are the LOOSENED settings so a
+    # "how does X relate to Y" query answers whenever each side has >=1 source.
+    RELATIONSHIP_GATE: str = Field(
+        default="lenient",
+        description=(
+            "Strictness for the cross_document_relationship_evidence bridge atom. "
+            "'strict' = legacy: the bridge atom is CRITICAL and a relationship "
+            "query refuses unless lanes carry enough distinct docs. 'lenient' "
+            "(default) = bridge atom is required-but-not-critical, so the LLM "
+            "synthesizes the link and the query answers (with a 'partial' caveat "
+            "when coverage is mid). 'off' = never inject the bridge atom; "
+            "relationship queries answer on per-lane coverage alone."
+        ),
+    )
+    RELATIONSHIP_MIN_DISTINCT_DOCS: int = Field(
+        default=1,
+        ge=1,
+        le=3,
+        description=(
+            "Distinct documents across relationship lanes before the cross-doc "
+            "bridge atom counts as covered. Replaces the hardcoded min(2, lanes). "
+            "1 lets a single distinct doc satisfy the bridge."
+        ),
+    )
+    RELATIONSHIP_LANE_MIN_SOURCES: int = Field(
+        default=1,
+        ge=1,
+        le=3,
+        description=(
+            "Distinct STRONG docs each relationship lane needs to be 'covered'. "
+            "Replaces MULTI_CONCEPT_MIN_SOURCES=2. At 1, a side backed by one "
+            "strong doc is enough; a side with zero evidence still refuses."
+        ),
+    )
+    LANE_STRONG_SCORE: int = Field(
+        default=8,
+        ge=4,
+        le=12,
+        description=(
+            "Minimum evidence_lane_match_score for a chunk to count toward lane "
+            "coverage. Lower toward 5 to let alias/term co-occurrence count."
+        ),
+    )
+    ANSWERABILITY_COVERAGE_THRESHOLD: float = Field(
+        default=0.80,
+        ge=0.40,
+        le=0.95,
+        description=(
+            "Required-atom coverage to answer without the text-help branch. "
+            "Shared by both gates. Lower toward 0.70 to widen answerability."
+        ),
+    )
+    ANSWERABILITY_TEXT_HELP_THRESHOLD: float = Field(
+        default=0.50,
+        ge=0.30,
+        le=0.80,
+        description=(
+            "Coverage floor for the lexical text-help answer branch (a concept "
+            "whose term appears in retrieved text counts as covered)."
+        ),
+    )
+    ANSWERABILITY_PARTIAL_FLOOR: float = Field(
+        default=0.50,
+        ge=0.20,
+        le=0.70,
+        description=(
+            "Coverage boundary between 'partial' (caveat answer) and 'weak' "
+            "(refuse), and the floor for the relationship carve-out."
+        ),
+    )
     QDRANT_COLLECTION: str = Field(
         default="polymath_chunks", description="Default Qdrant collection name"
     )
