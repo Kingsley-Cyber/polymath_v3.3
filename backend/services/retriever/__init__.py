@@ -1146,7 +1146,9 @@ class RetrieverOrchestrator:
                     counts["ranked"] = len(ranked)
                     counts["ranked_query_grounded"] = len(ranked)
                     counts["candidates"] = min(len(ranked), effective_final_k)
-                    hydrated = await hydrate_chunks(ranked[:effective_final_k], corpus_ids)
+                    hydrated = await hydrate_chunks(
+                        ranked[:effective_final_k], corpus_ids, query=rank_query
+                    )
                     _log_timings("embed_failed_fallback", len(hydrated))
                     return RetrievalResult(
                         chunks=hydrated,
@@ -1772,7 +1774,7 @@ class RetrieverOrchestrator:
         if effective_tier in (RetrievalTier.qdrant_mongo, RetrievalTier.qdrant_mongo_graph):
             phase_started = perf_counter()
             try:
-                hydrated = await hydrate_chunks(candidates, corpus_ids)
+                hydrated = await hydrate_chunks(candidates, corpus_ids, query=rank_query)
                 _add_timing("hydrate", phase_started)
                 _log_timings("ok_hydrated", len(hydrated))
                 return _result(hydrated, status="ok_hydrated")

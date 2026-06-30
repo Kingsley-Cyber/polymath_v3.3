@@ -13,6 +13,7 @@ from services.retriever.query_grounding import (
     concept_groups,
 )
 from services.retriever.query_semantics import (
+    lexical_terms,
     required_atoms_for_query as semantic_required_atoms_for_query,
     token_display_terms,
 )
@@ -175,6 +176,113 @@ def apply_candidate_weights(
     return weighted
 
 
+# ── C3 / B4: metadata-aware final re-rank signals ─────────────────────────
+# C3 reuses metadata we already store at ingestion (heading_path, chunk_kind)
+# to gently demote peripheral apparatus — a footnote/appendix/caption chunk is
+# rarely where a substantive question is actually answered. B4 rewards chunks
+# that lexically carry the query's content terms ("answer-bearingness") so the
+# final order prefers passages that develop the topic over ones that mention it
+# in passing. Both are bounded perturbations on the grounded score: the
+# cross-encoder remains the dominant signal, and penalties are subtractive /
+# bonuses additive so an unbounded (possibly negative) score never flips sign.
+_PERIPHERAL_HEADING_MARKERS: frozenset[str] = frozenset(
+    {
+        "footnote",
+        "endnote",
+        "sidebar",
+        "appendix",
+        "appendices",
+        "bibliography",
+        "references",
+        "works cited",
+        "glossary",
+        "acknowledg",
+        "about the author",
+        "further reading",
+        "see also",
+        "table of contents",
+        "copyright",
+        "colophon",
+        "review questions",
+    }
+)
+# chunk_kind values that are structural apparatus rather than prose answer text.
+_PERIPHERAL_CHUNK_KINDS: frozenset[str] = frozenset(
+    {"caption", "footnote", "header", "footer", "toc", "nav"}
+)
+_HEADING_PENALTY: float = 0.08
+_KIND_PENALTY: float = 0.04
+_BEARING_BONUS: float = 0.06
+# Unbounded grounded scores span ~±1.25; scale the bounded nudges up to match.
+_UNBOUNDED_SCALE: float = 5.0
+
+
+def _heading_section_penalty(chunk: SourceChunk) -> float:
+    """C3: 0.0 for core content, larger for peripheral sections detected from
+    the stored heading_path / chunk_kind. Bounded-scale magnitude."""
+    penalty = 0.0
+    path = getattr(chunk, "heading_path", None) or []
+    haystack = " ".join(str(h or "") for h in path).lower()
+    if haystack and any(m in haystack for m in _PERIPHERAL_HEADING_MARKERS):
+        penalty += _HEADING_PENALTY
+    kind = str(getattr(chunk, "chunk_kind", "") or "").lower()
+    if kind in _PERIPHERAL_CHUNK_KINDS:
+        penalty += _KIND_PENALTY
+    return penalty
+
+
+def _answer_bearingness(text: str, terms: tuple[str, ...]) -> tuple[int, int]:
+    """B4: how strongly a chunk carries the query's content terms.
+
+    Returns (distinct_terms_present, total_occurrences). Distinct coverage is
+    the 'does this passage speak to the question' signal; density breaks ties
+    toward the chunk that develops the topic. Word-boundary matching on a
+    punctuation-normalised copy keeps 'eggs.' matching the term 'eggs' and
+    avoids 'ai' matching inside 'air'.
+    """
+    if not text or not terms:
+        return (0, 0)
+    hay = " " + re.sub(r"[^a-z0-9]+", " ", text.lower()).strip() + " "
+    distinct = 0
+    density = 0
+    for term in terms:
+        occ = hay.count(" " + term + " ")
+        if occ:
+            distinct += 1
+            density += occ
+    return (distinct, density)
+
+
+def _apply_metadata_signals(
+    score: float,
+    chunk: SourceChunk,
+    terms: tuple[str, ...],
+    *,
+    bounded: bool,
+) -> tuple[float, dict[str, float | int]]:
+    """Fold C3 (heading penalty) + B4 (answer-bearingness bonus) into a grounded
+    score. Returns the adjusted score plus a small diagnostics dict for the
+    trace. Penalty subtracts, bonus adds — sign-safe on unbounded scores."""
+    penalty = _heading_section_penalty(chunk)
+    distinct, density = _answer_bearingness(
+        chunk.text or chunk.summary or "", terms
+    )
+    coverage = (distinct / len(terms)) if terms else 0.0
+    delta = (coverage * _BEARING_BONUS) - penalty
+    if not bounded:
+        delta *= _UNBOUNDED_SCALE
+    adjusted = score + delta
+    if bounded:
+        adjusted = min(1.0, max(0.0, adjusted))
+    adjusted = round(adjusted, 4)
+    return adjusted, {
+        "heading_penalty": round(penalty, 4),
+        "answer_bearing_distinct": distinct,
+        "answer_bearing_density": density,
+        "answer_terms_total": len(terms),
+    }
+
+
 def _grounded_score(
     score: float,
     *,
@@ -244,6 +352,8 @@ def apply_query_grounding(
         return chunks
 
     total = len(groups)
+    terms = tuple(lexical_terms(query))
+    scale = (score_scale or "").lower()
     grounded: list[tuple[SourceChunk, int, float]] = []
     for chunk, hits, matched in scored:
         copied = chunk.model_copy()
@@ -256,11 +366,16 @@ def apply_query_grounding(
             rarity = min(1.0, rarity)
         else:
             rarity = 0.0
-        copied.score = _grounded_score(
+        grounded_score = _grounded_score(
             original_score,
             hits=hits,
             total=total,
             score_scale=score_scale,
+        )
+        # C3 + B4 — metadata-aware nudge on top of the concept-coverage score.
+        bounded = scale in {"probability", "cosine"} or 0.0 <= grounded_score <= 1.0
+        copied.score, signals = _apply_metadata_signals(
+            grounded_score, copied, terms, bounded=bounded
         )
         copied.metadata = dict(copied.metadata or {})
         copied.metadata["query_grounding"] = {
@@ -268,8 +383,10 @@ def apply_query_grounding(
             "matched_count": hits,
             "matched": list(matched),
             "original_score": original_score,
+            "grounded_score": grounded_score,
             "adjusted_score": copied.score,
             "tier": tier.value if hasattr(tier, "value") else str(tier),
+            **signals,
         }
         grounded.append((copied, hits, rarity))
 

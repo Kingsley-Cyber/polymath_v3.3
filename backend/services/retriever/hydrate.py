@@ -11,6 +11,7 @@ Mode A expansion note:
   Mode A results are hydrated correctly rather than passing through with empty text.
 """
 import logging
+import re
 from pathlib import Path
 from typing import List, Optional
 
@@ -18,6 +19,88 @@ from config import get_settings
 from models.schemas import SourceChunk
 from services.conversation import conversation_service
 from services.facets import metadata_with_facets
+from services.retriever.query_semantics import lexical_terms
+
+_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])")
+
+
+def _bearing_count(text: str, terms: tuple[str, ...]) -> int:
+    """How many distinct query content terms appear in a passage (word-boundary,
+    punctuation-tolerant). Shared answer-bearingness signal for B2 excerpting."""
+    if not text or not terms:
+        return 0
+    hay = " " + re.sub(r"[^a-z0-9]+", " ", text.lower()).strip() + " "
+    return sum(1 for t in terms if (" " + t + " ") in hay)
+
+
+def _query_guided_excerpt(
+    parent_text: str,
+    *,
+    child_text: str,
+    query: str,
+    max_chars: int,
+) -> str:
+    """B2 — return a query-centered window of the parent body.
+
+    Always includes the matched child passage and its immediate neighbours,
+    then greedily adds the highest answer-bearing paragraphs (by query-term
+    coverage) in original order until the char budget is reached. Returns the
+    full parent unchanged when it already fits, or when inputs are too thin to
+    excerpt safely. Elisions between kept blocks are marked with '[…]'.
+    """
+    parent_text = (parent_text or "").strip()
+    if len(parent_text) <= max_chars:
+        return parent_text
+    # Paragraph units preserve structure better than raw sentences.
+    paras = [p.strip() for p in re.split(r"\n\s*\n", parent_text) if p.strip()]
+    if len(paras) <= 1:
+        paras = [s.strip() for s in _SENT_SPLIT.split(parent_text) if s.strip()]
+    if len(paras) <= 1:
+        return parent_text[:max_chars].rstrip()
+
+    terms = tuple(lexical_terms(query)) if query else ()
+    child_norm = " ".join((child_text or "").lower().split())
+
+    # Anchor = paragraph that contains the matched child passage.
+    anchor = 0
+    probe = child_norm[:60]
+    if probe:
+        for i, p in enumerate(paras):
+            if probe in " ".join(p.lower().split()):
+                anchor = i
+                break
+
+    selected: set[int] = set()
+    budget = 0
+    # 1) anchor + immediate neighbours (always kept; the child must survive).
+    for i in (anchor, anchor - 1, anchor + 1):
+        if 0 <= i < len(paras) and i not in selected:
+            if not selected or budget + len(paras[i]) <= max_chars:
+                selected.add(i)
+                budget += len(paras[i])
+    # 2) greedily add the most answer-bearing remaining paragraphs.
+    ranked = sorted(
+        (i for i in range(len(paras)) if i not in selected),
+        key=lambda i: (-_bearing_count(paras[i], terms), i),
+    )
+    for i in ranked:
+        if _bearing_count(paras[i], terms) <= 0:
+            break
+        if budget + len(paras[i]) > max_chars:
+            continue
+        selected.add(i)
+        budget += len(paras[i])
+    if not selected:
+        return parent_text[:max_chars].rstrip()
+
+    out_parts: list[str] = []
+    prev: int | None = None
+    for i in sorted(selected):
+        if prev is not None and i != prev + 1:
+            out_parts.append("[…]")
+        out_parts.append(paras[i])
+        prev = i
+    return "\n\n".join(out_parts)
 
 
 def _assemble_hydrated_text(
@@ -26,10 +109,15 @@ def _assemble_hydrated_text(
     child_text: str,
     parent_text: str,
     summary: str,
+    query: str | None = None,
+    excerpt_enabled: bool = False,
+    excerpt_max_chars: int = 1600,
 ) -> str:
     """Decide what text the LLM sees for a matched child chunk.
 
-    'parent' (default): the full parent body (small-to-big retrieval).
+    'parent' (default): the parent body (small-to-big retrieval). When B2 is on
+    (excerpt_enabled) and the parent exceeds the budget, return a query-guided
+    excerpt centred on the matched child instead of the whole block.
     'child_summary': the precise child passage plus the section summary as
     context — ~4x denser, keeps every token relevant (NotebookLM-style). Falls
     back to the parent body when there is no usable child text.
@@ -42,7 +130,15 @@ def _assemble_hydrated_text(
         if summary:
             return f"{child_text}\n\n[Section context: {summary}]"
         return child_text
-    return parent_text or child_text
+    body = parent_text or child_text
+    if excerpt_enabled and query and body and len(body) > excerpt_max_chars:
+        body = _query_guided_excerpt(
+            body,
+            child_text=child_text,
+            query=query,
+            max_chars=excerpt_max_chars,
+        )
+    return body
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +164,10 @@ def _document_display_name(doc: dict) -> str:
 
 
 async def hydrate_chunks(
-    chunks: List[SourceChunk], corpus_ids: Optional[List[str]] = None
+    chunks: List[SourceChunk],
+    corpus_ids: Optional[List[str]] = None,
+    *,
+    query: Optional[str] = None,
 ) -> List[SourceChunk]:
     """
     Hydrate candidates with parent text + corpus/doc metadata from MongoDB.
@@ -184,7 +283,10 @@ async def hydrate_chunks(
             logger.warning("Corpus name lookup failed: %s", exc)
 
     # ── Hydrate each chunk ───────────────────────────────────────────────────
-    hydration_mode = str(getattr(get_settings(), "HYDRATION_MODE", "parent") or "parent")
+    _settings = get_settings()
+    hydration_mode = str(getattr(_settings, "HYDRATION_MODE", "parent") or "parent")
+    excerpt_enabled = bool(getattr(_settings, "PARENT_EXCERPT_ENABLED", False))
+    excerpt_max_chars = int(getattr(_settings, "PARENT_EXCERPT_MAX_CHARS", 1600))
     hydrated: List[SourceChunk] = []
     for chunk in chunks:
         if chunk.parent_id and chunk.doc_id:
@@ -199,6 +301,9 @@ async def hydrate_chunks(
                     child_text=child_text,
                     parent_text=pc.get("text") or "",
                     summary=pc.get("summary") or "",
+                    query=query,
+                    excerpt_enabled=excerpt_enabled,
+                    excerpt_max_chars=excerpt_max_chars,
                 )
                 if pc.get("summary") and not chunk.summary:
                     chunk.summary = pc["summary"]

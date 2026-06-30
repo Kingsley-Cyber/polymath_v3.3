@@ -59,6 +59,26 @@ class Settings(BaseSettings):
             "before defaulting it on."
         ),
     )
+    PARENT_EXCERPT_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "B2 — query-guided parent excerpt. When on, 'parent' hydration "
+            "returns a query-centered window of the parent body (the matched "
+            "child passage plus its neighbours and the highest answer-bearing "
+            "paragraphs) instead of the full 1200-token block, once the parent "
+            "exceeds PARENT_EXCERPT_MAX_CHARS. Denser prompt, same grounding. "
+            "Off by default — A/B before defaulting on, like HYDRATION_MODE."
+        ),
+    )
+    PARENT_EXCERPT_MAX_CHARS: int = Field(
+        default=1600,
+        ge=400,
+        le=8000,
+        description=(
+            "Character budget for a B2 query-guided parent excerpt. Parents at "
+            "or below this length are returned whole."
+        ),
+    )
     QDRANT_COLLECTION: str = Field(
         default="polymath_chunks", description="Default Qdrant collection name"
     )
