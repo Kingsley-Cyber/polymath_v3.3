@@ -390,21 +390,28 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # "request rejected, no response" issues can be diagnosed. FastAPI's default
 # handler returns the details in the response body but never logs server-side.
 from fastapi import Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
 @app.exception_handler(RequestValidationError)
 async def _log_validation_error(request: Request, exc: RequestValidationError):
+    # Pydantic v2 can embed a raw exception (e.g. ValueError) in an error's
+    # `ctx`, which plain json.dumps cannot serialize. Run the errors through
+    # jsonable_encoder first — the same thing FastAPI's default handler does —
+    # so the handler never crashes (which previously masked the real 422 and
+    # surfaced as a 500/blank response under load).
+    safe_errors = jsonable_encoder(exc.errors())
     logging.getLogger("validation").warning(
         "422 on %s %s — errors=%s",
         request.method,
         request.url.path,
-        exc.errors(),
+        safe_errors,
     )
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors()},
+        content={"detail": safe_errors},
     )
 
 # Compress JSON responses — the UI's hottest payloads (batch detail ~585 KB,

@@ -244,22 +244,41 @@ def _score_doc(query: str, doc: dict[str, Any]) -> tuple[float, str, set[str]]:
 
 
 def _chunk_search_terms(query: str, anchor_terms: set[str]) -> list[str]:
-    scored: list[tuple[float, int, str]] = []
+    # Curated query concepts (_CONCEPT_RECALL_HINTS) are the recall payload, so
+    # they are kept in full and a long filler word can never push them out of
+    # the bounded term list. Non-concept terms compete for the remaining budget
+    # by length/compound score. A concept-heavy query (>14 hints) keeps them all
+    # rather than silently truncating the tail (e.g. dropping navigation/workflow
+    # from a UI/UX question) — that was a real anchor-recall gap.
     raw_terms = _terms(query)
+    # Some curated concepts (workflow, process, application, steps, task…) double
+    # as operator/intent markers and are stripped by the lexical stop-word filter
+    # even when used as CONTENT here. Recover any concept hint that literally
+    # appears in the query — anchor chunk-search wants the content noun back.
+    present = set(re.findall(r"[a-z0-9]+", query.lower()))
+    seen = set(raw_terms)
+    for hint in _CONCEPT_RECALL_HINTS:
+        if hint in present and hint not in seen:
+            raw_terms.append(hint)
+            seen.add(hint)
+    concept_terms: list[str] = []
+    other_scored: list[tuple[float, int, str]] = []
     for index, term in enumerate(raw_terms):
         if term in anchor_terms or term in _CHUNK_QUERY_NOISE:
             continue
-        score = 0.0
         if term in _CONCEPT_RECALL_HINTS:
-            score += 1.0
+            concept_terms.append(term)
+            continue
+        score = 0.0
         if len(term) >= 8:
             score += 0.25
         if "_" in term or "-" in term:
             score += 0.1
-        scored.append((score, index, term))
-    scored.sort(key=lambda item: (-item[0], item[1]))
-    terms = [term for _score, _index, term in scored]
-    return terms[:14] or raw_terms[:14]
+        other_scored.append((score, index, term))
+    other_scored.sort(key=lambda item: (-item[0], item[1]))
+    others = [term for _score, _index, term in other_scored]
+    budget = max(14, len(concept_terms))
+    return (concept_terms + others)[:budget] or raw_terms[:14]
 
 
 def _candidate_text(row: dict[str, Any], document_label: str) -> str:
