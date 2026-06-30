@@ -8171,6 +8171,17 @@ class ChatOrchestrator:
         overrides = request.overrides
         if not (overrides and overrides.hyde_enabled):
             return request.message, False
+        # Global master switch: HyDE is opt-in. Unless HYDE_ENABLED is on, it
+        # runs ONLY when the request EXPLICITLY toggled it (hyde_explicit). A
+        # profile preset that merely defaults hyde_enabled=True is not enough —
+        # HyDE costs an extra pre-retrieval LLM round-trip, so it stays off the
+        # hot path until a user asks for it.
+        if not settings.HYDE_ENABLED and not hyde_explicit:
+            logger.info(
+                "HyDE skipped (global default off; not explicitly toggled): '%s'",
+                request.message[:80],
+            )
+            return request.message, False
         source_constrained = _should_skip_hyde_for_query(request.message)
         if source_constrained and not hyde_explicit:
             logger.info(

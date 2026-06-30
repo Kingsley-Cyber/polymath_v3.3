@@ -36,27 +36,26 @@ class Settings(BaseSettings):
         description="HTTP timeout for Qdrant operations such as per-corpus collection provisioning",
     )
     QDRANT_PREFER_GRPC: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Use gRPC for the hot search clients (funnel_a/funnel_b/lexical). "
-            "Lower per-request overhead than HTTP/REST, which helps because a "
-            "multi-lane turn issues many small query_points calls. OFF by default "
-            "— enable only after confirming the Qdrant gRPC port is reachable from "
-            "the backend (default 6334, internal to the docker network)."
+            "Lower per-request overhead than HTTP/REST (~60x faster per call), "
+            "which helps because a multi-lane turn issues many small query_points "
+            "calls. ON by default after validation — the Qdrant gRPC port (6334) "
+            "is internal to the docker network. Set false to fall back to HTTP/REST."
         ),
     )
     QDRANT_GRPC_PORT: int = Field(
         default=6334, description="Qdrant gRPC port (used when QDRANT_PREFER_GRPC=true)"
     )
     HYDRATION_MODE: str = Field(
-        default="parent",
+        default="child_summary",
         description=(
             "How a matched child chunk is expanded for the LLM prompt. "
-            "'parent' (default, current behaviour) replaces the precise child "
-            "passage with the full parent body (small-to-big). 'child_summary' "
-            "keeps the precise child passage and appends the section summary as "
-            "context — ~4x denser prompt, NotebookLM-style grounding. A/B this "
-            "before defaulting it on."
+            "'child_summary' (default) keeps the precise child passage and "
+            "appends the section summary as context — ~4x denser prompt, "
+            "NotebookLM-style grounding; validated as the default. 'parent' "
+            "replaces the child with the full parent body (legacy small-to-big)."
         ),
     )
     PARENT_EXCERPT_ENABLED: bool = Field(
@@ -151,6 +150,35 @@ class Settings(BaseSettings):
             "Coverage boundary between 'partial' (caveat answer) and 'weak' "
             "(refuse), and the floor for the relationship carve-out."
         ),
+    )
+    # ── HyDE: opt-in, not on every query (it costs an extra LLM round-trip) ──
+    HYDE_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Global master switch for HyDE (hypothetical-document retrieval "
+            "rewrite). OFF by default — HyDE adds a pre-retrieval LLM call and is "
+            "not worth it on most queries. When off, HyDE runs ONLY when a request "
+            "explicitly toggles overrides.hyde_enabled. When on, profile presets "
+            "decide (and source-constrained queries are still auto-skipped)."
+        ),
+    )
+    # ── Resilience: retry the streaming LLM connection on transient blips ──
+    LLM_STREAM_MAX_RETRIES: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description=(
+            "Retries for the streaming chat completion on TRANSIENT connection "
+            "errors (DNS getaddrinfo, connect reset/refused/timeout) that happen "
+            "BEFORE the first token — so a burst-load DNS blip no longer surfaces "
+            "as a blank answer. Never retries after a token has streamed."
+        ),
+    )
+    LLM_STREAM_RETRY_BACKOFF_SECONDS: float = Field(
+        default=0.4,
+        ge=0.0,
+        le=5.0,
+        description="Linear backoff between streaming-connection retries (s * attempt).",
     )
     QDRANT_COLLECTION: str = Field(
         default="polymath_chunks", description="Default Qdrant collection name"

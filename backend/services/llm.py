@@ -16,6 +16,34 @@ from services.streaming_normalizer import StreamingNormalizer, extract_stream_de
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+# Markers for TRANSIENT connection failures worth retrying before the first
+# token streams (a burst-load DNS blip on the LiteLLM endpoint, a dropped
+# connect). Matched case-insensitively against str(exc). Deliberately narrow —
+# HTTP status errors, auth failures, and model errors must NOT retry.
+_TRANSIENT_STREAM_ERROR_MARKERS = (
+    "name or service not known",        # getaddrinfo errno -2 (the burst DNS blip)
+    "temporary failure in name resolution",  # errno -3
+    "getaddrinfo",
+    "errno -2",
+    "errno -3",
+    "connection reset",
+    "connection refused",
+    "connection aborted",
+    "server disconnected",
+    "timed out",
+    "timeout",
+)
+
+
+def _is_transient_stream_error(exc: Exception) -> bool:
+    """True for connection-level blips that a quick retry typically clears."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return False  # a real HTTP error (4xx/5xx) — do not retry blindly
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)):
+        return True
+    text = str(exc).lower()
+    return any(marker in text for marker in _TRANSIENT_STREAM_ERROR_MARKERS)
+
 
 class LLMService:
     """
@@ -648,6 +676,64 @@ class LLMService:
         }
 
     async def stream_chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        overrides: ModelOverrides | None = None,
+        tools: list[dict] | None = None,
+        *,
+        tool_choice: dict | str | None = None,
+        api_base: str | None = None,
+        api_key: str | None = None,
+        extra_params: dict | None = None,
+    ) -> AsyncGenerator[dict, None]:
+        """Stream chat completion, retrying the CONNECTION on transient blips.
+
+        Thin wrapper over ``_stream_chat_once``. If the underlying stream fails
+        with a transient connection error (DNS getaddrinfo, connect reset) BEFORE
+        any token has been emitted, retry up to ``LLM_STREAM_MAX_RETRIES`` with a
+        short linear backoff — this kills the burst-load blank-answer where a
+        momentary DNS hiccup on the LiteLLM endpoint surfaced as the answer. Once
+        a token has streamed, the error propagates unchanged (never duplicate
+        output); the caller's model-fallback handles post-token failures.
+        """
+        max_retries = max(0, int(getattr(settings, "LLM_STREAM_MAX_RETRIES", 2)))
+        backoff = float(getattr(settings, "LLM_STREAM_RETRY_BACKOFF_SECONDS", 0.4))
+        attempt = 0
+        while True:
+            started = False
+            try:
+                async for item in self._stream_chat_once(
+                    messages,
+                    model,
+                    overrides,
+                    tools,
+                    tool_choice=tool_choice,
+                    api_base=api_base,
+                    api_key=api_key,
+                    extra_params=extra_params,
+                ):
+                    started = True
+                    yield item
+                return
+            except Exception as e:  # noqa: BLE001 — classify then re-raise
+                if (
+                    not started
+                    and attempt < max_retries
+                    and _is_transient_stream_error(e)
+                ):
+                    attempt += 1
+                    await asyncio.sleep(backoff * attempt)
+                    logger.warning(
+                        "Transient stream connect error (attempt %d/%d), retrying: %s",
+                        attempt,
+                        max_retries,
+                        e,
+                    )
+                    continue
+                raise
+
+    async def _stream_chat_once(
         self,
         # Phase 29 — message content may be a plain string (text-only)
         # OR a list of multimodal content blocks ({"type": "text", ...}
