@@ -122,6 +122,26 @@ BASE_STOP_WORDS: frozenset[str] = frozenset(
         "our",
         "entire",
         "overall",
+        # attribution scaffolding ("ACCORDING to Eric Berne...", "what does
+        # Cialdini SAY about..."). These words describe the query's relationship
+        # to a source, not a concept the corpus must establish. Live-probe
+        # evidence (2026-07-01): 'according' survived to concept_groups(),
+        # minted a fake evidence lane, and triggered a wasted gap-fill support
+        # retrieval. The proper names beside them ("eric", "berne") correctly
+        # survive as concepts.
+        "according",
+        "per",
+        "say",
+        "says",
+        "said",
+        "wrote",
+        "writes",
+        "citing",
+        "cited",
+        "referenced",
+        "noted",
+        "stated",
+        "mentioned",
     }
 )
 

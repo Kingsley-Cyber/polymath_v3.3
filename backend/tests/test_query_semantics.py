@@ -58,3 +58,21 @@ def test_art_of_seduction_does_not_make_art_a_required_concept():
     ]
     assert "concept:art" not in required_atoms_for_query(query)
     assert "concept:personality_framework" in required_atoms_for_query(query)
+
+
+def test_attribution_scaffolding_does_not_mint_concepts():
+    # Live-probe regression (2026-07-01): "According to Eric Berne..." minted
+    # 'according' as a concept -> fake evidence lane -> wasted gap-fill
+    # support retrieval. Attribution verbs describe the query's relationship
+    # to a source, never a corpus concept. Proper names must still survive.
+    query = "according to Eric Berne what is transactional analysis"
+    keys = [group.key for group in concept_groups(query)]
+    assert "according" not in keys
+    assert "eric" in keys
+    assert "berne" in keys
+
+    keys2 = [group.key for group in concept_groups("what does Cialdini say about persuasion")]
+    assert "say" not in keys2
+    assert "says" not in keys2
+    assert "cialdini" in keys2
+    assert "persuasion" in keys2
