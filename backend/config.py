@@ -105,6 +105,19 @@ class Settings(BaseSettings):
             "1 lets a single distinct doc satisfy the bridge."
         ),
     )
+    RERANK_EVIDENCE_SUPPORT: bool = Field(
+        default=True,
+        description=(
+            "Cross-encoder rerank for evidence-plan SUPPORT retrievals (the "
+            "per-lane gap-fill passes). Lane selection is lexical "
+            "(evidence_lane_match_score); reranking the support pool surfaces "
+            "the right PASSAGE within the right book (live probe 2026-07-01: "
+            "Le Guin doc-hit/passage-miss). Coverage support retrievals stay "
+            "un-reranked — they pick one chunk by facet fit and the parallel "
+            "passes would contend on the Metal reranker. Flip off to revert "
+            "without a redeploy."
+        ),
+    )
     RELATIONSHIP_LANE_MIN_SOURCES: int = Field(
         default=1,
         ge=1,

@@ -33,6 +33,7 @@ class _FakeSettings:
         self.ANSWERABILITY_COVERAGE_THRESHOLD = kw.get("cov", 0.80)
         self.ANSWERABILITY_TEXT_HELP_THRESHOLD = kw.get("text", 0.50)
         self.ANSWERABILITY_PARTIAL_FLOOR = kw.get("partial", 0.50)
+        self.RERANK_EVIDENCE_SUPPORT = kw.get("support_rerank", True)
 
 
 def _patch_settings(**kw):
@@ -201,3 +202,14 @@ def _run_all():
 
 if __name__ == "__main__":
     sys.exit(1 if _run_all() else 0)
+
+
+def test_rerank_evidence_support_defaults_on_and_flips_off():
+    # Fix 4 (2026-07-01): evidence-plan support retrievals rerank by default
+    # so the right PASSAGE inside the right book surfaces; the knob's off
+    # position must restore the legacy un-reranked shape without a redeploy.
+    _patch_settings()
+    assert at.rerank_evidence_support() is True
+    _patch_settings(support_rerank=False)
+    assert at.rerank_evidence_support() is False
+    _restore()

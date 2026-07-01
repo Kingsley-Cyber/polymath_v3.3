@@ -75,6 +75,7 @@ from services.answerability_tuning import (
     neutralize_relationship_critical as _neutralize_relationship_critical,
     partial_floor as _answerability_partial_floor,
     relationship_min_distinct_docs as _relationship_min_distinct_docs,
+    rerank_evidence_support as _rerank_evidence_support,
     text_help_threshold as _answerability_text_help_threshold,
 )
 from services.retriever.query_semantics import (
@@ -4216,23 +4217,39 @@ async def _enforce_evidence_plan_lanes(
                     "returned": 0,
                     "status": "started",
                 }
+                # Cross-encoder rerank for support pools (RERANK_EVIDENCE_SUPPORT,
+                # default on): lane selection is lexical, so an un-reranked pool
+                # surfaces the right BOOK but often the wrong PASSAGE (live probe
+                # 2026-07-01: Le Guin doc-hit/passage-miss). When reranking, pull
+                # a tighter pool — the cross-encoder pays per candidate and the
+                # lane selector only needs target_k good rows. The knob's off
+                # position restores the previous shape exactly.
+                support_rerank = _rerank_evidence_support()
                 try:
                     result = await retriever_orchestrator.retrieve(
                         query=support_query,
                         corpus_ids=corpus_ids,
                         retrieval_tier=support_tier,
                         collections=collections,
-                        retrieval_k=max(24, min(int(retrieval_k or 40), 56)),
-                        rerank_enabled=False,
+                        retrieval_k=(
+                            max(16, min(int(retrieval_k or 24), 32))
+                            if support_rerank
+                            else max(24, min(int(retrieval_k or 40), 56))
+                        ),
+                        rerank_enabled=support_rerank,
                         ranking_query=support_query,
                         top_k_summary=top_k_summary,
                         rerank_top_n=max(12, min(int(rerank_top_n or 24), 32)),
                         similarity_threshold=similarity_threshold,
                         neo4j_expansion_cap=neo4j_expansion_cap,
                         max_corpora_per_query=max_corpora_per_query,
-                        # Pull a wider pool so target_k distinct documents are
-                        # actually reachable for this side.
-                        final_top_k=max(8, target_k * 6),
+                        # Pull a wide-enough pool so target_k distinct documents
+                        # are actually reachable for this side.
+                        final_top_k=(
+                            max(6, target_k * 4)
+                            if support_rerank
+                            else max(8, target_k * 6)
+                        ),
                         fact_seed_limit=fact_seed_limit,
                         search_mode="local",
                     )

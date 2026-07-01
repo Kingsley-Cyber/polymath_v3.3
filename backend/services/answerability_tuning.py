@@ -51,6 +51,18 @@ def relationship_gate() -> str:
     return val if val in _VALID_GATES else "lenient"
 
 
+def rerank_evidence_support() -> bool:
+    """Cross-encoder rerank for evidence-plan support retrievals (default on).
+
+    Passage-level precision knob: lane selection scores are lexical, so
+    un-reranked support pools surface the right book but often the wrong
+    passage (live probe 2026-07-01: Le Guin doc-hit/passage-miss). Coverage
+    support retrievals are NOT governed by this — they stay un-reranked by
+    design (one chunk per facet; the parallel passes would contend on the
+    Metal reranker)."""
+    return bool(getattr(get_settings(), "RERANK_EVIDENCE_SUPPORT", True))
+
+
 def relationship_min_distinct_docs() -> int:
     """Distinct docs across relationship lanes before the cross-doc atom counts
     as covered. Default 1 (a single distinct doc satisfies the bridge)."""
