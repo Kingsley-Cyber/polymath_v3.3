@@ -4159,6 +4159,7 @@ async def _enforce_evidence_plan_lanes(
 
     async def _cover_one_lane(
         lane: EvidenceLane,
+        semantic_hints: dict[str, Any],
     ) -> tuple[EvidenceLane, list[SourceChunk], dict[str, Any], dict[str, Any], str]:
         lane_report: dict[str, Any] = {
             "lane": lane.name,
@@ -4190,10 +4191,6 @@ async def _enforce_evidence_plan_lanes(
         lane_chunk_ids: set[str] = set(existing_chunk_ids)
         lane_doc_ids: set[str] = set(existing_doc_ids)
         async with evidence_semaphore:
-            semantic_hints = await _semantic_ingest_hints_for_evidence_lane(
-                lane,
-                corpus_ids,
-            )
             lane_report["semantic_ingest_hints"] = {
                 "terms": semantic_hints.get("terms", [])[:10],
                 "doc_ids": semantic_hints.get("doc_ids", [])[:8],
@@ -4300,7 +4297,35 @@ async def _enforce_evidence_plan_lanes(
                 lane_report["attempts"].append(attempt)
         return lane, chosen_list, chosen_report, lane_report, support_query
 
-    lane_results = await asyncio.gather(*[_cover_one_lane(lane) for lane in missing])
+    # De-stagger (task #6, probe-driven 2026-07-01): hints used to be awaited
+    # per-lane INSIDE the semaphore, so lanes started their retrievals at
+    # different moments — their query embeds missed the _QueryEmbedBatcher
+    # window and serialized on the Metal GPU (measured embed= 0.13s -> 2.5-4.2s).
+    # Phase 1: fan out ALL lane hint lookups concurrently (independent, light).
+    # Phase 2: lanes proceed to retrieval together; simultaneous embeds coalesce.
+    _EMPTY_HINTS: dict[str, Any] = {"facets": [], "terms": [], "doc_ids": []}
+    hint_results = await asyncio.gather(
+        *[
+            _semantic_ingest_hints_for_evidence_lane(lane, corpus_ids)
+            for lane in missing
+        ],
+        return_exceptions=True,
+    )
+    lane_hints: list[dict[str, Any]] = []
+    for lane, hints in zip(missing, hint_results):
+        if isinstance(hints, dict):
+            lane_hints.append(hints)
+        else:
+            logger.debug(
+                "evidence-plan semantic hints failed for %s: %s", lane.name, hints
+            )
+            lane_hints.append(dict(_EMPTY_HINTS))
+    lane_results = await asyncio.gather(
+        *[
+            _cover_one_lane(lane, hints)
+            for lane, hints in zip(missing, lane_hints)
+        ]
+    )
     for lane, chosen_list, chosen_report, lane_report, support_query in lane_results:
         if not chosen_list:
             lane_report["reason"] = "no_support_chunk_selected"
