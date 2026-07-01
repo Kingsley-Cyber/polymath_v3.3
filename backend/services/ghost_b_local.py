@@ -140,6 +140,20 @@ SIDECAR_TIMEOUT_S = float(os.environ.get("LOCAL_GHOST_B_EXTRACT_TIMEOUT_S", "180
 SIDECAR_SLICE = max(1, int(os.environ.get("LOCAL_GHOST_B_EXTRACT_SLICE", "2048")))
 EXTRACT_MODE = os.environ.get("LOCAL_GHOST_B_EXTRACT_MODE", "auto").strip().lower()
 
+# Liveness probing is RETRIED with capped exponential backoff. A single
+# transient blip — Docker Desktop dropping its host.docker.internal route after
+# the Mac sleeps/wakes, a sidecar still warming, a momentary connection reset —
+# must not fail a whole ingest batch off one bad /health round-trip. Only
+# UNREACHABLE endpoints are retried; a sidecar that answers but is unusable
+# (e.g. ONNX-CPU with fallback off) is a stable verdict and fails fast. Defaults
+# absorb a ~14 s blip (2+4+8) before giving up; set PROBE_ATTEMPTS=1 to restore
+# the old single-shot behaviour.
+PROBE_ATTEMPTS = max(1, int(os.environ.get("LOCAL_GHOST_B_PROBE_ATTEMPTS", "5")))
+PROBE_BACKOFF_S = max(0.0, float(os.environ.get("LOCAL_GHOST_B_PROBE_BACKOFF_S", "2.0")))
+PROBE_BACKOFF_MAX_S = max(
+    PROBE_BACKOFF_S, float(os.environ.get("LOCAL_GHOST_B_PROBE_BACKOFF_MAX_S", "8.0"))
+)
+
 
 # ---------------------------------------------------------- runtime guards
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -795,23 +809,58 @@ async def _extract_via_sidecar(task_dicts: list[dict], do_facts: bool, lens_id: 
     # Settings-UI endpoints (RUNTIME_ENDPOINT_URLS, set by the worker per
     # ingest) take precedence over the env list.
     pref_urls = RUNTIME_ENDPOINT_URLS or SIDECAR_URLS
+    # Retry the liveness sweep with capped exponential backoff: a transient
+    # blip (a wedged host.docker.internal route after sleep/wake, a sidecar
+    # still warming) must not fail the batch on one bad round-trip. Keep
+    # retrying only while at least one endpoint was UNREACHABLE this pass; if
+    # every endpoint answered but was unusable (e.g. ONNX-CPU with fallback
+    # off), retrying cannot change that, so stop and report it.
     live_urls: list[str] = []
-    async with httpx.AsyncClient(timeout=3.0) as probe:
-        for u in pref_urls:
-            try:
-                r = await probe.get(f"{u}/health")
-                if r.status_code != 200:
+    unusable: dict[str, str] = {}
+    for attempt in range(PROBE_ATTEMPTS):
+        live_urls = []
+        unusable = {}
+        had_unreachable = False
+        async with httpx.AsyncClient(timeout=3.0) as probe:
+            for u in pref_urls:
+                try:
+                    r = await probe.get(f"{u}/health")
+                    if r.status_code != 200:
+                        had_unreachable = True
+                        continue
+                    usable, reason = _sidecar_health_usable(r.json())
+                    if usable:
+                        live_urls.append(u)
+                    else:
+                        unusable[u] = reason
+                        logger.warning(
+                            "ghost_b_local: skipping sidecar %s: %s", u, reason)
+                except Exception:  # noqa: BLE001 — dead/off instance, skip
+                    had_unreachable = True
                     continue
-                usable, reason = _sidecar_health_usable(r.json())
-                if usable:
-                    live_urls.append(u)
-                else:
-                    logger.warning("ghost_b_local: skipping sidecar %s: %s", u, reason)
-            except Exception:  # noqa: BLE001 — dead/off instance, skip
-                continue
+        if live_urls:
+            if attempt:
+                logger.info(
+                    "ghost_b_local: sidecar live on probe attempt %d/%d",
+                    attempt + 1, PROBE_ATTEMPTS)
+            break
+        # Nothing live. Retry only helps an UNREACHABLE endpoint (the route may
+        # re-establish); a reachable-but-unusable verdict is stable.
+        if not had_unreachable or attempt == PROBE_ATTEMPTS - 1:
+            break
+        wait = min(PROBE_BACKOFF_MAX_S, PROBE_BACKOFF_S * (2 ** attempt))
+        logger.warning(
+            "ghost_b_local: no live sidecar among %s (probe attempt %d/%d); "
+            "retrying in %.1fs", pref_urls, attempt + 1, PROBE_ATTEMPTS, wait)
+        await _asyncio.sleep(wait)
     if not live_urls:
+        detail = ""
+        if unusable:
+            detail = " Reachable but unusable: " + "; ".join(
+                f"{u} ({why})" for u, why in unusable.items()) + "."
         raise RuntimeError(
-            f"ghost_b_local: no extraction sidecar reachable among {pref_urls}. "
+            f"ghost_b_local: no extraction sidecar reachable among {pref_urls} "
+            f"after {PROBE_ATTEMPTS} probe attempt(s).{detail} "
             "Enable a live endpoint in Settings -> Ingestion, start the GPU "
             "box sidecar, or start the local one "
             "(START_GHOST_B_EXTRACT=true scripts/apple_ml_services/start.sh). "
