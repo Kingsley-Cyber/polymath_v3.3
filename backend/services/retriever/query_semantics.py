@@ -238,6 +238,16 @@ GENERIC_CONCEPT_TOKENS: frozenset[str] = frozenset(
         "make",
         "makes",
         "made",
+        # generic "apply/model" scaffolding — "how does the Big Five MODEL APPLY
+        # to game design" must decompose to [personality_framework, game], not
+        # sprout standalone "model" / "apply" lanes. Mirrors framework/method
+        # (already generic): the substantive concept, not the verb wrapping it.
+        "apply",
+        "applies",
+        "applied",
+        "applying",
+        "model",
+        "models",
         "analysis",
         "analyses",
         "approach",

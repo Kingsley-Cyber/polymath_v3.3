@@ -67,6 +67,21 @@ def test_possessive_pronoun_my_is_never_a_lane():
     assert "my" not in {lane.name for lane in plan.lanes}
 
 
+def test_cross_domain_model_apply_query_drops_verb_scaffolding():
+    # "How does the Big Five personality MODEL APPLY to game design mechanics?"
+    # must decompose into the two real sides, not sprout "model"/"apply" lanes
+    # (observed live: required_lanes = [personality_framework, model, apply, game]).
+    plan = build_evidence_plan(
+        "How does the Big Five personality model apply to game design mechanics?"
+    )
+    lane_names = [lane.name for lane in plan.lanes]
+    assert "model" not in lane_names, lane_names
+    assert "apply" not in lane_names, lane_names
+    assert "personality_framework" in lane_names, lane_names
+    # the game-design side is a REAL second domain and must survive.
+    assert "game" in lane_names, lane_names
+
+
 def test_survey_filler_is_stripped_but_real_concepts_survive():
     # Same thematic wrapper, but now two genuine concepts are present. The
     # filler must drop out while the real concepts remain as clean lanes.
