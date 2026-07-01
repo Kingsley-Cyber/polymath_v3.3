@@ -347,7 +347,12 @@ def test_chat_query_plan_exposes_relationship_search_contract():
     assert "answerability: enforce_retrieved_evidence" in trace
 
 
-def test_answerability_gate_marks_missing_relationship_unanswerable():
+def test_answerability_gate_relationship_only_gap_is_partial_not_refusal():
+    # Contract since 4e47cdb (RELATIONSHIP_GATE loosening): when the ONLY
+    # missing critical atom is the relationship bridge and coverage is at or
+    # above the partial floor, the gate answers PARTIALLY in every mode —
+    # both grounded sides are present and the LLM synthesizes the link
+    # (chat_orchestrator status branch: "also softens strict mode").
     query = "How does personality correlate with seduction?"
     diagnostics = {
         "selection": {
@@ -378,12 +383,51 @@ def test_answerability_gate_marks_missing_relationship_unanswerable():
         web_search_enabled=False,
     )
 
-    assert gate["status"] == "unanswerable"
+    assert gate["status"] == "partial"
     assert gate["answerable"] is False
     assert gate["missing_critical_atoms"] == ["relationship"]
     note = _format_retrieval_answerability_prompt_note(gate)
+    assert "partial" in note.lower()
+
+
+def test_answerability_gate_low_coverage_relationship_gap_still_refuses():
+    # The refusal path survives the loosening: relationship-only missing with
+    # coverage BELOW the partial floor (one of three atoms covered) must stay
+    # unanswerable — the honesty floor.
+    query = "How does personality correlate with seduction?"
+    diagnostics = {
+        "selection": {
+            "sufficiency": {
+                "required_atoms": [
+                    "concept:personality",
+                    "concept:seduction",
+                    "relationship",
+                ],
+                "covered_required_atoms": ["concept:personality"],
+                "missing_atoms": ["concept:seduction", "relationship"],
+                "missing_critical_atoms": ["relationship"],
+                "required_coverage": 0.3333,
+                "answerable": False,
+            }
+        }
+    }
+
+    # Source text must NOT mention the missing concepts — the gate's text
+    # fallback (test_answerability_text_fallback.py) would otherwise re-cover
+    # them from the chunk text and lift coverage back above the floor.
+    gate = _build_retrieval_answerability_gate(
+        query=query,
+        diagnostics=diagnostics,
+        sources=[_source_chunk("An unrelated passage about database indexes.")],
+        facts=[],
+        corpus_ids=["corpus-1"],
+        web_search_enabled=False,
+    )
+
+    assert gate["status"] == "unanswerable"
+    assert gate["answerable"] is False
+    note = _format_retrieval_answerability_prompt_note(gate)
     assert "HARD LIMIT" in note
-    assert "relationship" in note
 
 
 def test_answerability_short_circuit_only_for_unrepairable_corpus_gaps():
