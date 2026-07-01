@@ -37,6 +37,10 @@ _DISTINCT_DOC_BREADTH: dict[QueryNeed, int] = {
 _MAIN_FLOOR_RATIO: float = 0.25
 _MAIN_ABS_FLOOR: float = 0.10
 _MAIN_MIN_KEEP: int = 3
+# SPECIFIC-intent post-MMR trim floor (ratio of top score). Deliberately
+# stricter than _MAIN_FLOOR_RATIO: tangential cross-encoder scores cluster in
+# the 0.25-0.5 band, genuinely relevant secondary passages score above it.
+_SPECIFIC_FLOOR_RATIO: float = 0.5
 _CROSS_DOCUMENT_RELATIONSHIP_ATOM = "cross_document_relationship_evidence"
 _PERSONALITY_FRAMEWORK_RE = re.compile(
     r"\b("
@@ -458,7 +462,13 @@ def _mmr_policy_for(
     """
     if intent.need == QueryNeed.SPECIFIC:
         min_docs, target_docs = 1, 2
-        soft_doc_cap, hard_doc_cap = 2, 2
+        # hard_doc_cap 2 -> 4 (2026-07-01 live probe): with final_top_k=8 a
+        # cap of 2 left the query's target book only 2 seats and FORCED the
+        # other 6 to weaker docs, which the novelty bonuses then rewarded
+        # ("Flutter for Jobseekers" seated in an Eric Berne query). Soft cap
+        # stays 2 so seats 3-4 from the same doc still pay the doc_penalty —
+        # relevance has to earn them, but they are no longer forbidden.
+        soft_doc_cap, hard_doc_cap = 2, 4
         intent_lambda_boost = 0.08
     elif intent.need == QueryNeed.BROAD:
         min_docs, target_docs = 3, 4
@@ -1330,6 +1340,41 @@ def select_with_diversity(
             break
         _take(best_idx, best_score, "mmr_relaxed" if best_relaxed else "mmr")
 
+    # SPECIFIC intent: diversity must not seat weakly-scored chunks. The MMR
+    # novelty bonuses (new_doc/new_atom) reward off-topic docs precisely for
+    # being unrelated, and the shared 0.25 floor ratio is where tangential
+    # cross-encoder scores live (live probe 2026-07-01: "Flutter for
+    # Jobseekers" seated at ~0.3-0.5 in an Eric Berne query). For a focused
+    # query, hold seated chunks to a stricter floor — better to return fewer,
+    # on-topic chunks. The reserve passes below still re-fill deliberately
+    # when their own guards fire, and graph-supported chunks keep their
+    # existing floor exemption.
+    specific_floor_trimmed = 0
+    if (
+        intent.need == QueryNeed.SPECIFIC
+        and tier != RetrievalTier.qdrant_only
+        and bounded
+        and selected_indices
+    ):
+        specific_floor = max(_MAIN_ABS_FLOOR, top_score * _SPECIFIC_FLOOR_RATIO)
+        kept: list[int] = []
+        for idx in selected_indices:
+            if (
+                float(ranked[idx].score or 0.0) >= specific_floor
+                or fingerprints[idx]["graph_supported"]
+            ):
+                kept.append(idx)
+                continue
+            chosen_idx.discard(idx)
+            selected_scores.pop(idx, None)
+            selected_by.pop(idx, None)
+            specific_floor_trimmed += 1
+        if specific_floor_trimmed:
+            selected_indices = kept
+            covered_atoms.clear()
+            for idx in selected_indices:
+                covered_atoms.update(fingerprints[idx]["atoms"])
+
     if tier != RetrievalTier.qdrant_only and not any(
         _is_confident_document_anchor(ranked[idx]) for idx in selected_indices
     ):
@@ -1496,6 +1541,7 @@ def select_with_diversity(
         "selected_outside_raw_top_k": sum(
             1 for idx in selected_indices[:final_top_k] if idx >= final_top_k
         ),
+        "specific_floor_trimmed": specific_floor_trimmed,
         "min_selected_relevance": round(
             min((relevance_by_idx.get(idx, 0.0) for idx in selected_indices[:final_top_k]), default=0.0),
             4,

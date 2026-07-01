@@ -556,3 +556,72 @@ def test_hybrid_tier_does_not_reserve_graph_slot():
     )
     ids = [c.chunk_id for c in result.candidates]
     assert "graph-neighbor" not in ids
+
+
+def test_specific_intent_allows_target_doc_beyond_two_seats():
+    # Live-probe regression (2026-07-01): SPECIFIC hard_doc_cap=2 forced 6 of
+    # 8 final seats to off-topic docs when the query targeted one book.
+    # The target doc's 3rd-best chunk must be able to out-compete weak
+    # foreign chunks (it pays the soft-cap penalty but is not forbidden).
+    intent = infer_retrieval_intent(
+        "According to Eric Berne, what is a game in human relationships "
+        "and what are its key elements?"
+    )
+    assert str(intent.need) == "QueryNeed.SPECIFIC"
+    ranked = [
+        _chunk("b1", score=0.98, parent_id="p1", doc_id="berne",
+               text="games are patterned transactions with a concealed payoff"),
+        _chunk("b2", score=0.97, parent_id="p2", doc_id="berne",
+               text="every game has a gimmick a switch and a payoff element"),
+        _chunk("b3", score=0.96, parent_id="p3", doc_id="berne",
+               text="ulterior transactions distinguish games from pastimes and rituals"),
+        _chunk("j1", score=0.55, parent_id="p4", doc_id="flutter",
+               text="widget trees rebuild when state changes in the framework"),
+        _chunk("j2", score=0.54, parent_id="p5", doc_id="refactoring-ui",
+               text="visual hierarchy is established with font size and color"),
+        _chunk("j3", score=0.53, parent_id="p6", doc_id="c-stdlib",
+               text="the allocator returns aligned storage for object lifetimes"),
+    ]
+
+    result = select_with_diversity(
+        ranked,
+        final_top_k=5,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+    )
+
+    berne_seats = sum(1 for c in result.candidates if c.doc_id == "berne")
+    assert berne_seats >= 3
+
+
+def test_specific_intent_trims_weak_diversity_fillers():
+    # Live-probe regression (2026-07-01): tangential chunks scoring in the
+    # 0.25-0.5 band ("Flutter for Jobseekers" in an Eric Berne query) were
+    # seated by the relaxed door / novelty bonuses. For SPECIFIC intent the
+    # post-MMR trim holds seats to a 0.5-of-top floor — fewer, on-topic
+    # chunks beat a padded final set.
+    intent = infer_retrieval_intent(
+        "According to Eric Berne, what is a game in human relationships "
+        "and what are its key elements?"
+    )
+    ranked = [
+        _chunk("b1", score=0.98, parent_id="p1", doc_id="berne",
+               text="games are patterned transactions with a concealed payoff"),
+        _chunk("b2", score=0.95, parent_id="p2", doc_id="berne",
+               text="every game has a gimmick a switch and a payoff element"),
+        _chunk("j1", score=0.30, parent_id="p3", doc_id="flutter",
+               text="widget trees rebuild when state changes in the framework"),
+        _chunk("j2", score=0.28, parent_id="p4", doc_id="refactoring-ui",
+               text="visual hierarchy is established with font size and color"),
+    ]
+
+    result = select_with_diversity(
+        ranked,
+        final_top_k=4,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+    )
+
+    final_docs = {c.doc_id for c in result.candidates}
+    assert final_docs == {"berne"}, f"weak fillers must be trimmed, got {final_docs}"
+    assert result.diagnostics.get("specific_floor_trimmed", 0) >= 1
