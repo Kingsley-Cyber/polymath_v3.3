@@ -159,6 +159,27 @@ def test_coverage_ignores_weak_term_only_match_from_foreign_doc():
     assert PERSONALITY.name in cov["missing_lanes"], cov
 
 
+def test_select_lane_support_rejects_weak_foreign_docs():
+    candidates = [
+        Chunk("s1", "strategy_book", "generic tactics and types", score=0.95),
+        Chunk("p1", "personality_book", "personality assessment and big five traits", score=0.5),
+    ]
+    picks = select_lane_support(
+        candidates,
+        lane=PERSONALITY,
+        target_k=2,
+        existing_chunk_ids=set(),
+        existing_doc_ids=set(),
+        semantic_doc_ids=set(),
+        score_fn=_score,
+        chunk_id_fn=_cid,
+        doc_id_fn=_did,
+        base_score_fn=_base,
+    )
+
+    assert [p.chunk_id for p in picks] == ["p1"]
+
+
 def test_cap_chunks_per_doc_limits_dominant_doc_but_protects_support():
     # Final set: 4 from the title book + 2 reserved personality support chunks.
     sources = [
@@ -256,8 +277,38 @@ def test_seduction_personality_prompt_stays_broadly_decomposed():
     assert plan.mode.startswith("multi_concept")
     assert "seduction" in lane_names
     assert "personality_framework" in lane_names
+    assert "tactics" not in lane_names
+    assert "vulnerable" not in lane_names
     for lane in plan.required_lanes:
         assert lane.min_sources >= 2
+
+
+def test_seduction_personality_across_books_does_not_make_modifier_lanes():
+    plan = build_evidence_plan(
+        "How do personality frameworks relate to the Art of Seduction tactics across these books?"
+    )
+    lane_names = {lane.name for lane in plan.required_lanes}
+
+    assert "personality_framework" in lane_names
+    assert "seduction" in lane_names
+    assert "across" not in lane_names
+    assert "books" not in lane_names
+    assert "tactics" not in lane_names
+
+
+def test_full_spectrum_request_does_not_anchor_on_scaffolding_words():
+    plan = build_evidence_plan(
+        "Give me a full spectrum overview across all personality and seduction books in this corpus."
+    )
+    lane_names = {lane.name for lane in plan.required_lanes}
+
+    assert {"personality", "seduction"} <= lane_names
+    assert "give" not in lane_names
+    assert "full" not in lane_names
+    assert "across" not in lane_names
+    assert "spectrum" not in lane_names
+    assert "all" not in lane_names
+    assert "corpus" not in lane_names
 
 
 def test_split_query_sides_generalizes_to_unseen_book_pair():

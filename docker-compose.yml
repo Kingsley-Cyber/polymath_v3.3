@@ -495,6 +495,7 @@ services:
       RERANKER_SCORE_SCALE: ${RERANKER_SCORE_SCALE:-probability}
       RERANKER_LOW_CONFIDENCE_THRESHOLD: ${RERANKER_LOW_CONFIDENCE_THRESHOLD:--2.5}
       RERANKER_TIMEOUT_SECONDS: ${RERANKER_TIMEOUT_SECONDS:-4}
+      ANSWERABILITY_CHUNK_GATE: ${ANSWERABILITY_CHUNK_GATE:-soft}
       # Per-doc char cap for cross-encoder rerank. 768 fits a child chunk
       # (128-256 tok) with headroom while trimming the leading-window cost vs
       # the 1000-char code default. Cuts rerank time without truncating the

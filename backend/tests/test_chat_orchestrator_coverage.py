@@ -103,6 +103,54 @@ async def test_named_ingest_facets_are_query_explicit():
 
 
 @pytest.mark.asyncio
+async def test_generic_framework_token_does_not_trigger_unrelated_ingest_facet():
+    db = _FakeFacetDb(
+        [
+            {
+                "doc_id": "security-doc",
+                "corpus_id": "c1",
+                "filename": "Building Secure and Reliable Systems.md",
+                "facet_profile": {
+                    "doc_facets": [
+                        {
+                            "facet_id": "frameworks_enforce_security",
+                            "display_name": "Frameworks Enforce Security",
+                            "aliases": ["security frameworks", "secure systems"],
+                            "search_terms": ["frameworks enforce security"],
+                        }
+                    ]
+                },
+            },
+            {
+                "doc_id": "personality-doc",
+                "corpus_id": "c1",
+                "filename": "The Handbook of Personality Assessment.md",
+                "facet_profile": {
+                    "doc_facets": [
+                        {
+                            "facet_id": "personality_assessment",
+                            "display_name": "Personality Assessment",
+                            "aliases": ["personality tests", "personality framework"],
+                            "search_terms": ["personality assessment"],
+                        }
+                    ]
+                },
+            },
+        ]
+    )
+
+    rows = await matching_ingest_facets(
+        db,
+        "How do personality frameworks relate to seduction tactics?",
+        ["c1"],
+    )
+
+    names = {row["name"] for row in rows}
+    assert "personality_assessment" in names
+    assert "frameworks_enforce_security" not in names
+
+
+@pytest.mark.asyncio
 async def test_chat_semantic_coverage_adds_missing_query_facets(monkeypatch):
     base_sources = [
         _chunk(
@@ -396,6 +444,138 @@ def test_final_context_answerability_gate_soft_drops_non_answering_chunks():
     )
 
 
+def test_final_context_answerability_gate_ignores_generic_modifier_terms():
+    query = "Which personality types are vulnerable to seduction tactics?"
+    plan = chat_module.build_evidence_plan(query)
+    sources = [
+        _chunk(
+            "typescript-1",
+            doc_id="programming-typescript.md",
+            text=(
+                "TypeScript uses structural types, generic frameworks, and "
+                "implementation tactics for safer APIs."
+            ),
+        ),
+        _chunk(
+            "seduction-1",
+            doc_id="art-of-seduction.md",
+            text="Seduction exploits vulnerability by shaping attention and desire.",
+        ),
+        _chunk(
+            "personality-1",
+            doc_id="personality-assessment.md",
+            text="Personality assessment describes stable traits and motivations.",
+        ),
+    ]
+
+    gated, meta = chat_module._apply_final_context_answerability_gate(
+        sources,
+        query=query,
+        evidence_plan=plan,
+        mode="soft",
+        min_keep=2,
+    )
+
+    assert [chunk.chunk_id for chunk in gated] == ["seduction-1", "personality-1"]
+    assert meta["dropped_chunk_ids"] == ["typescript-1"]
+
+
+def test_seduction_body_personality_mention_does_not_cover_personality_lane():
+    plan = chat_module.build_evidence_plan(
+        "How do personality frameworks relate to the Art of Seduction tactics?"
+    )
+    personality_lane = next(
+        lane for lane in plan.required_lanes if lane.name == "personality_framework"
+    )
+    seduction_chunk = _chunk(
+        "seduction-personality",
+        doc_id="The Art of Seduction.md",
+        text=(
+            "A seductive personality can create desire, but this passage does "
+            "not describe a psychological instrument or trait model."
+        ),
+    )
+    personality_chunk = _chunk(
+        "personality-assessment",
+        doc_id="The Handbook of Personality Assessment.md",
+        text="Personality assessment compares inventories, traits, and test validity.",
+    )
+
+    assert (
+        chat_module._evidence_lane_match_score(seduction_chunk, personality_lane)
+        < chat_module._lane_strong_score()
+    )
+    assert (
+        chat_module._evidence_lane_match_score(personality_chunk, personality_lane)
+        >= chat_module._lane_strong_score()
+    )
+
+
+def test_personality_query_grounding_alone_does_not_cover_personality_lane():
+    query = "Give me the full spectrum across all personality books and Art of Seduction."
+    plan = chat_module.build_evidence_plan(query)
+    personality_lane = next(
+        lane for lane in plan.required_lanes if lane.name == "personality"
+    )
+    software_chunk = _chunk(
+        "software-grounded-personality",
+        doc_id="software-architecture.md",
+        text="Cross-cutting forces act across architecture dimensions and service boundaries.",
+        metadata={"query_grounding": {"matched": ["personality"]}},
+    )
+
+    assert (
+        chat_module._evidence_lane_match_score(software_chunk, personality_lane)
+        < chat_module._lane_strong_score()
+    )
+
+    gated, meta = chat_module._apply_final_context_answerability_gate(
+        [software_chunk],
+        query=query,
+        evidence_plan=plan,
+        mode="soft",
+        min_keep=1,
+    )
+
+    assert gated == []
+    assert meta["dropped_chunk_ids"] == ["software-grounded-personality"]
+
+
+def test_evidence_lane_support_can_deepen_existing_single_source_lane():
+    plan = chat_module.build_evidence_plan(
+        "Give me the full spectrum across personality books and Art of Seduction."
+    )
+    seduction_lane = next(lane for lane in plan.required_lanes if lane.name == "seduction")
+    candidates = [
+        _chunk(
+            "art-2",
+            doc_id="art-of-seduction",
+            text="The seducer creates desire through attention and suggestion.",
+            score=0.9,
+        ),
+        _chunk(
+            "software-1",
+            doc_id="software-patterns",
+            text="Design patterns coordinate services across modules.",
+            score=0.95,
+        ),
+    ]
+
+    picks, report = chat_module._choose_evidence_lane_candidates_with_report(
+        candidates,
+        lane=seduction_lane,
+        original_query="Give me the full spectrum across personality books and Art of Seduction.",
+        existing_chunk_ids={"art-1"},
+        existing_doc_ids={"art-of-seduction"},
+        semantic_doc_ids=set(),
+        target_k=1,
+        same_doc_target_k=1,
+    )
+
+    assert [chunk.chunk_id for chunk in picks] == ["art-2"]
+    assert report["reason"] == "same_doc_deepening_after_new_doc_exhausted"
+
+
 def test_final_context_answerability_gate_demotes_to_honor_min_keep():
     query = "How do personality frameworks relate to seduction tactics?"
     sources = [
@@ -437,6 +617,71 @@ def test_final_context_answerability_gate_demotes_to_honor_min_keep():
         for chunk in gated
         if chunk.chunk_id.startswith("noise")
     } == {"demoted_min_keep"}
+
+
+def test_final_context_answerability_gate_filters_full_spectrum_off_domain_chunks():
+    query = "Give me the full spectrum across all personality books and Art of Seduction."
+    plan = chat_module.build_evidence_plan(query)
+    sources = [
+        _chunk(
+            "personality-1",
+            doc_id="personality-assessment.md",
+            text="Personality assessment compares stable traits and inventories.",
+        ),
+        _chunk(
+            "seduction-1",
+            doc_id="art-of-seduction.md",
+            text="Seduction shapes attention through desire and vulnerability.",
+        ),
+        _chunk(
+            "software-1",
+            doc_id="software-patterns.md",
+            text="Implementation patterns coordinate services across a system.",
+        ),
+    ]
+
+    gated, meta = chat_module._apply_final_context_answerability_gate(
+        sources,
+        query=query,
+        evidence_plan=plan,
+        mode="soft",
+        min_keep=3,
+    )
+
+    assert [chunk.chunk_id for chunk in gated] == ["personality-1", "seduction-1"]
+    assert meta["enabled"] is True
+    assert meta["broad_spectrum"] is True
+    assert meta["multi_side_plan"] is True
+    assert meta["dropped_chunk_ids"] == ["software-1"]
+
+
+def test_final_context_answerability_gate_skips_global_search_mode():
+    sources = [
+        _chunk(
+            "global-1",
+            doc_id="book-a.md",
+            text="A global answer may need a source that carries a weak local term match.",
+        ),
+        _chunk(
+            "global-2",
+            doc_id="book-b.md",
+            text="A second source broadens the corpus map.",
+        ),
+    ]
+
+    gated, meta = chat_module._apply_final_context_answerability_gate(
+        sources,
+        query="What themes show up in this library?",
+        search_mode="global",
+        mode="soft",
+        min_keep=1,
+    )
+
+    assert [chunk.chunk_id for chunk in gated] == ["global-1", "global-2"]
+    assert meta["enabled"] is True
+    assert meta["skipped"] is True
+    assert meta["skip_reason"] == "global_search_mode"
+    assert meta["dropped"] == 0
 
 
 def test_compound_query_phrase_promotes_privacy_and_on_device_lanes():

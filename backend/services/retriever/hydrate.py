@@ -557,7 +557,15 @@ async def hydrate_summary_rerank_texts(
             by_parent[parent_id] = parent
 
     if not by_doc_parent and not by_parent:
-        return chunks
+        if not doc_names:
+            return chunks
+        hydrated_names: List[SourceChunk] = []
+        for chunk in chunks:
+            copied = chunk.model_copy()
+            if not copied.doc_name:
+                copied.doc_name = doc_names.get(copied.doc_id or "") or copied.doc_name
+            hydrated_names.append(copied)
+        return hydrated_names
 
     hydrated: List[SourceChunk] = []
     replaced = 0

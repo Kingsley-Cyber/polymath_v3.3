@@ -343,7 +343,7 @@ async def test_chat_query_e2e_graph_pipeline_seeds_facts_before_expand(monkeypat
         events.append(("rerank", tuple(chunk.chunk_id for chunk in chunks)))
         return sorted(chunks, key=lambda chunk: chunk.score, reverse=True)
 
-    async def fake_hydrate(chunks, _corpus_ids):
+    async def fake_hydrate(chunks, _corpus_ids, **_kwargs):
         events.append(("hydrate", tuple(chunk.chunk_id for chunk in chunks)))
         return list(chunks)
 

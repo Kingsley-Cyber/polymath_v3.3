@@ -87,23 +87,33 @@ def _collapse_overlapping_groups(groups: list[ConceptGroup]) -> list[ConceptGrou
 
 
 def _lane_search_terms(group: ConceptGroup) -> tuple[str, ...]:
-    if group.key == "personality_framework":
+    if group.key in {"personality", "personality_framework"}:
         terms = [
             "personality framework",
             "personality test",
             "personality type",
             "personality assessment",
+            "personality traits",
+            "personality development",
+            "personality inventory",
             "four tendencies",
             "handbook of personality",
             "the handbook of personality",
             "personality handbook",
+            "handbook of personality assessment",
+            "art and science of personality development",
             "big five",
             "myers briggs",
             "mbti",
             "enneagram",
+            "gifts differing",
             "gretchen rubin",
             "rubin four tendencies",
-            *group.aliases,
+            *[
+                alias
+                for alias in group.aliases
+                if alias not in {"type", "types", "profile", "profiles"}
+            ],
         ]
     else:
         terms = [group.key.replace("_", " "), *group.aliases]

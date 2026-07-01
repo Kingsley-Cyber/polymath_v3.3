@@ -94,8 +94,9 @@ def select_lane_support(
     Guarantees:
     * never two chunks from the same document,
     * never a chunk already chosen (``existing_chunk_ids``),
-    * never a chunk that does not match the lane at all (lane score <= 0),
-      unless the ingest layer says its document belongs to the side.
+    * never a weak off-lane chunk: support must match the lane strongly
+      (``STRONG_LANE_SCORE``) unless the ingest layer says its document belongs
+      to the side.
     """
 
     semantic_doc_ids = semantic_doc_ids or set()
@@ -114,6 +115,8 @@ def select_lane_support(
         if lane_score <= 0 and semantic_doc_match:
             lane_score = _SEMANTIC_FLOOR_SCORE
         if lane_score <= 0:
+            continue
+        if lane_score < STRONG_LANE_SCORE and not semantic_doc_match:
             continue
         new_doc = bool(doc_id and doc_id not in existing_doc_ids)
         bounded_base = min(max(float(base_score_fn(chunk) or 0.0), 0.0), 1.0)

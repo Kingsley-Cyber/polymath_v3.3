@@ -84,6 +84,18 @@ def _chunk(**overrides):
 
 @pytest.mark.asyncio
 async def test_hydrate_chunks_prefers_filename_when_source_path_missing(monkeypatch):
+    monkeypatch.setattr(
+        "services.retriever.hydrate.get_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "HYDRATION_MODE": "parent",
+                "PARENT_EXCERPT_ENABLED": False,
+                "PARENT_EXCERPT_MAX_CHARS": 1600,
+            },
+        )(),
+    )
     fake_db = _Db(
         documents=_Collection(
             [
@@ -167,6 +179,32 @@ async def test_summary_hydration_sets_doc_name_for_global_mode(monkeypatch):
     assert hydrated[0].doc_name == "aws.txt"
     assert hydrated[0].summary == "Lambda is the event-driven compute choice."
     assert hydrated[0].chunk_kind == "table"
+
+
+@pytest.mark.asyncio
+async def test_summary_hydration_sets_doc_name_when_parent_summary_missing(monkeypatch):
+    fake_db = _Db(
+        documents=_Collection(
+            [
+                {
+                    "doc_id": "doc-1",
+                    "corpus_id": "corpus-1",
+                    "filename": "Personality Assessment Handbook.md",
+                    "parent_chunks": [],
+                }
+            ]
+        ),
+        parent_chunks=_Collection([]),
+    )
+    monkeypatch.setattr(conversation_service, "_db", fake_db)
+
+    hydrated = await hydrate_summary_rerank_texts(
+        [_chunk(chunk_id="parent-1_summary", text="preview", summary="preview")],
+        ["corpus-1"],
+    )
+
+    assert hydrated[0].doc_name == "Personality Assessment Handbook.md"
+    assert hydrated[0].text == "preview"
 
 
 @pytest.mark.asyncio

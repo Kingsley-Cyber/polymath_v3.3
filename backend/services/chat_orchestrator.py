@@ -78,6 +78,7 @@ from services.answerability_tuning import (
     text_help_threshold as _answerability_text_help_threshold,
 )
 from services.retriever.query_semantics import (
+    GENERIC_CONCEPT_TOKENS,
     concept_groups,
     is_curated_concept,
     lexical_terms,
@@ -172,6 +173,16 @@ _LOW_VALUE_EVIDENCE_RE = re.compile(
     re.IGNORECASE,
 )
 _FRONTMATTER_RE = re.compile(r"\A\s*---\s*\n.*?\n---\s*\n", re.DOTALL)
+_BROAD_SPECTRUM_QUERY_RE = re.compile(
+    r"\b("
+    r"full\s+spectrum|whole\s+picture|big\s+picture|broad\s+(?:view|overview|survey|map)|"
+    r"overview|survey|map\s+(?:my|the|this)\s+(?:corpus|library|books|documents)|"
+    r"across\s+(?:my|the|this|all)\s+(?:corpus|library|books|documents|sources)|"
+    r"entire\s+(?:corpus|library|set|collection)|all\s+(?:books|documents|sources)|"
+    r"themes?\s+across|landscape|taxonomy|synthesize\s+everything"
+    r")\b",
+    re.IGNORECASE,
+)
 
 _CHAT_COVERAGE_FACETS: tuple[dict[str, Any], ...] = (
     {
@@ -1918,13 +1929,21 @@ def _answerability_contains(text: str, term: str) -> bool:
 
 
 def _answerability_terms_for_gate(query: str) -> list[str]:
-    terms = list(lexical_terms(query or ""))
+    terms = [
+        term
+        for term in lexical_terms(query or "")
+        if term not in GENERIC_CONCEPT_TOKENS
+    ]
     normalized = f" {_chat_coverage_norm(query)} "
     # In "the art of seduction", art is part of the title phrase, not a useful
     # answer-bearing anchor. Keeping it makes unrelated "art" passages survive.
     if " art of " in normalized:
         terms = [term for term in terms if term != "art"]
     return terms
+
+
+def _query_requests_broad_spectrum(query: str | None) -> bool:
+    return bool(_BROAD_SPECTRUM_QUERY_RE.search(str(query or "")))
 
 
 def _score_answerability_chunk(
@@ -1943,10 +1962,13 @@ def _score_answerability_chunk(
         }
 
     text = _answerability_chunk_text(source)
-    groups = concept_groups(query or "", max_groups=4)
-    terms = _answerability_terms_for_gate(query or "")
     plan = evidence_plan if isinstance(evidence_plan, EvidencePlan) else None
     lanes = list(plan.required_lanes) if plan and plan.active else []
+    # When an evidence plan exists, trust its collapsed semantic lanes. Raw
+    # concept aliases include intentionally broad surfaces ("type", "profile")
+    # that are useful for recall but too loose for final answer-bearing proof.
+    groups = [] if lanes else concept_groups(query or "", max_groups=4)
+    terms = _answerability_terms_for_gate(query or "")
 
     if not groups and not terms and not lanes:
         return 1.0, {
@@ -1979,21 +2001,26 @@ def _score_answerability_chunk(
 
     matched_lanes: list[str] = []
     for lane in lanes:
-        lane_terms = [
-            lane.name.replace("_", " "),
-            lane.concept_key.replace("_", " "),
-            *lane.aliases,
-            *lane.search_terms,
-        ]
-        if _chat_coverage_norm(lane.name) in grounded or any(
-            _answerability_contains(text, term) for term in lane_terms
+        grounded_lane_match = (
+            _chat_coverage_norm(lane.name) in grounded
+            or _chat_coverage_norm(lane.concept_key) in grounded
+        )
+        # For personality lanes, grounding metadata may only say that the broad
+        # word "personality" appeared in the query. That is useful telemetry,
+        # not answer-bearing proof that this chunk comes from a personality
+        # framework/book.
+        if lane.concept_key in {"personality", "personality_framework"}:
+            grounded_lane_match = False
+        if (
+            _evidence_lane_match_score(source, lane) >= _lane_strong_score()
+            or grounded_lane_match
         ):
             matched_lanes.append(lane.name)
 
     matched_terms = [term for term in terms if _answerability_contains(text, term)]
     lexical_score = len(matched_terms) / len(terms) if terms else 0.0
     side_score = 1.0 if matched_concepts or matched_lanes else 0.0
-    score = max(side_score, lexical_score)
+    score = side_score if len(lanes) >= 2 else max(side_score, lexical_score)
     return score, {
         "reason": "answer_bearing" if score > 0 else "no_answer_bearing_overlap",
         "protected": False,
@@ -2034,6 +2061,7 @@ def _apply_final_context_answerability_gate(
     *,
     query: str,
     evidence_plan: EvidencePlan | None = None,
+    search_mode: str | None = None,
     mode: str | None = None,
     min_keep: int | None = None,
     strict_floor: float | None = None,
@@ -2061,6 +2089,18 @@ def _apply_final_context_answerability_gate(
             "demoted": 0,
         }
 
+    if str(search_mode or "").lower() == "global":
+        return list(sources or []), {
+            "enabled": True,
+            "mode": active_mode,
+            "skipped": True,
+            "skip_reason": "global_search_mode",
+            "input": len(sources or []),
+            "kept": len(sources or []),
+            "dropped": 0,
+            "demoted": 0,
+        }
+
     floor = (
         0.0
         if active_mode == "soft"
@@ -2079,9 +2119,13 @@ def _apply_final_context_answerability_gate(
         ),
     )
 
+    plan_for_gate = evidence_plan if isinstance(evidence_plan, EvidencePlan) else None
+    gate_lanes = list(plan_for_gate.required_lanes) if plan_for_gate and plan_for_gate.active else []
+    multi_side_plan = len(gate_lanes) >= 2
+    broad_spectrum = _query_requests_broad_spectrum(query)
+
     strong: list[SourceChunk] = []
-    weak: list[SourceChunk] = []
-    dropped_candidates: list[SourceChunk] = []
+    weak_rows: list[tuple[SourceChunk, SourceChunk, float, dict[str, Any]]] = []
     score_rows: list[dict[str, Any]] = []
     for source in sources or []:
         score, detail = _score_answerability_chunk(
@@ -2114,11 +2158,18 @@ def _apply_final_context_answerability_gate(
         if passes:
             strong.append(annotated)
         else:
-            weak.append(source)
-            dropped_candidates.append(annotated)
+            weak_rows.append((source, annotated, float(score or 0.0), detail))
 
     needed = max(0, keep_floor - len(strong))
-    recovered_raw = weak[:needed]
+    recoverable_rows = weak_rows
+    if multi_side_plan and active_mode == "soft":
+        # For a decomposed multi-side question, do not refill the prompt with
+        # zero-evidence chunks just to satisfy min_keep. This preserves answer
+        # breadth without letting a broad word like "personality" pull software
+        # passages back into the final context.
+        recoverable_rows = [row for row in weak_rows if row[2] > 0]
+    recovered_rows = recoverable_rows[:needed]
+    recovered_raw = [row[0] for row in recovered_rows]
     recovered: list[SourceChunk] = []
     for source in recovered_raw:
         score, detail = _score_answerability_chunk(
@@ -2136,7 +2187,16 @@ def _apply_final_context_answerability_gate(
             )
         )
     kept = [*strong, *recovered]
-    dropped = dropped_candidates[needed:]
+    recovered_keys = {
+        str(getattr(source, "chunk_id", "") or f"object:{id(source)}")
+        for source in recovered_raw
+    }
+    dropped = [
+        annotated
+        for source, annotated, _score, _detail in weak_rows
+        if str(getattr(source, "chunk_id", "") or f"object:{id(source)}")
+        not in recovered_keys
+    ]
     return kept, {
         "enabled": True,
         "mode": active_mode,
@@ -2144,6 +2204,8 @@ def _apply_final_context_answerability_gate(
         "kept": len(kept),
         "dropped": len(dropped),
         "demoted": len(recovered),
+        "broad_spectrum": broad_spectrum,
+        "multi_side_plan": multi_side_plan,
         "min_keep": keep_floor,
         "floor": round(floor, 4),
         "dropped_chunk_ids": [
@@ -3625,10 +3687,51 @@ def _evidence_lane_match_score(source: SourceChunk, lane: EvidenceLane) -> int:
     )
     grounded = {str(item).strip().lower() for item in (grounding.get("matched") or [])}
     if lane.name.lower() in grounded or lane.concept_key.lower() in grounded:
-        score += 10
+        if lane.concept_key in {"personality", "personality_framework"}:
+            # Query grounding can record the broad query word "personality" for
+            # semantically adjacent but foreign documents (software books, app
+            # design books, etc.). Personality lanes need source/text evidence
+            # below; grounding alone must not satisfy the lane.
+            score += 2
+        else:
+            score += 10
 
     text = _chat_source_text(cleaned)
-    if evidence_lane_matches_text(lane, text):
+    if lane.concept_key in {"personality", "personality_framework"}:
+        high_text = _chat_coverage_norm(
+            " ".join(
+                str(v)
+                for v in (
+                    cleaned.doc_name,
+                    cleaned.doc_id,
+                    " ".join(str(h) for h in (cleaned.heading_path or [])),
+                    metadata.get("title"),
+                    metadata.get("filename"),
+                    " ".join(metadata_facet_terms(metadata)),
+                )
+                if v
+            )
+        )
+        strong_personality_terms = [
+            term
+            for term in lane.search_terms
+            if term not in {"personality", "character", "trait", "traits", "type", "types"}
+        ]
+        if any(
+            f" {_chat_coverage_norm(term)} " in f" {high_text} "
+            for term in strong_personality_terms
+        ):
+            score += 10
+        elif any(
+            f" {_chat_coverage_norm(term)} " in f" {text} "
+            for term in strong_personality_terms
+        ):
+            score += 8
+        elif " personality " in f" {text} ":
+            # A stray body mention ("seductive personality") is useful for
+            # ranking but must not mark the personality side covered by itself.
+            score += 4
+    elif evidence_lane_matches_text(lane, text):
         score += 8
     padded = f" {text} "
     for term in lane.search_terms[:10]:
@@ -3681,16 +3784,14 @@ def _evidence_lane_coverage(
         lane_chunk_ids[lane.name] = chunk_ids
         lane_scores[lane.name] = best_score
 
-    # A lane counts as covered for ANSWERABILITY once it has this many distinct
-    # strong docs (RELATIONSHIP_LANE_MIN_SOURCES, default 1). Allocation still
-    # reserves up to lane.min_sources for breadth, and the per-doc cap still
-    # prevents one book from dominating — but a side backed by a single strong
-    # source no longer drags the query into a refusal.
-    _lane_floor = _relationship_lane_min_sources()
+    # Evidence allocation uses the plan's own breadth floor. For multi-side
+    # synthesis, one strong chunk is not enough to stop support retrieval; each
+    # side needs its requested distinct-document depth before it is considered
+    # covered in the evidence packet.
     covered = [
         lane.name
         for lane in plan.required_lanes
-        if len(lane_doc_ids.get(lane.name) or []) >= max(1, min(_lane_floor, lane.min_sources))
+        if len(lane_doc_ids.get(lane.name) or []) >= max(1, int(lane.min_sources or 1))
     ]
     missing = [
         lane.name
@@ -3817,6 +3918,7 @@ def _choose_evidence_lane_candidates_with_report(
     existing_doc_ids: set[str],
     semantic_doc_ids: set[str] | None = None,
     target_k: int,
+    same_doc_target_k: int = 0,
 ) -> tuple[list[SourceChunk], dict[str, Any]]:
     """Pick up to ``target_k`` lane-support chunks, each from a DISTINCT document.
 
@@ -3843,11 +3945,37 @@ def _choose_evidence_lane_candidates_with_report(
         base_score_fn=lambda c: float(c.score or 0.0),
         low_value_fn=lambda c: _chat_source_is_low_value(c, original_query),
     )
+    reason = "per_side_lane_support" if picks else "no_candidate_matched_lane"
+    same_doc_target_k = max(0, int(same_doc_target_k or 0))
+    if not picks and same_doc_target_k > 0:
+        same_doc_candidates: list[tuple[float, SourceChunk]] = []
+        for chunk in cleaned:
+            chunk_id = str(chunk.chunk_id or "")
+            if not chunk_id or chunk_id in existing_chunk_ids:
+                continue
+            if _chat_source_is_low_value(chunk, original_query):
+                continue
+            doc_id = _evidence_source_doc_key(chunk)
+            if not doc_id or doc_id not in set(existing_doc_ids):
+                continue
+            lane_score = _evidence_lane_match_score(chunk, lane)
+            if lane_score < _lane_strong_score():
+                continue
+            same_doc_candidates.append(
+                (
+                    lane_score * 10.0 + min(max(float(chunk.score or 0.0), 0.0), 1.0),
+                    chunk,
+                )
+            )
+        same_doc_candidates.sort(key=lambda row: row[0], reverse=True)
+        if same_doc_candidates:
+            picks = [chunk for _score, chunk in same_doc_candidates[:same_doc_target_k]]
+            reason = "same_doc_deepening_after_new_doc_exhausted"
     report: dict[str, Any] = {
         "status": "selected" if picks else "uncovered",
         "selected_count": len(picks),
         "target_k": int(target_k),
-        "reason": "per_side_lane_support" if picks else "no_candidate_matched_lane",
+        "reason": reason,
         "selected": [
             _evidence_lane_candidate_snapshot(
                 pick,
@@ -4035,7 +4163,20 @@ async def _enforce_evidence_plan_lanes(
         # side of a multi-document question gets real depth, not a single quote.
         # Documents already in the context (base + other lanes) are excluded so
         # the side is backed by its OWN books.
-        target_k = max(1, int(getattr(lane, "min_sources", 1) or 1))
+        initial_lane_doc_count = len(
+            (initial.get("lane_doc_ids") or {}).get(lane.name, [])
+        )
+        initial_lane_chunk_count = len(
+            (initial.get("lane_chunk_ids") or {}).get(lane.name, [])
+        )
+        target_k = max(
+            1,
+            int(getattr(lane, "min_sources", 1) or 1) - initial_lane_doc_count,
+        )
+        same_doc_target_k = max(
+            0,
+            int(getattr(lane, "min_sources", 1) or 1) - initial_lane_chunk_count,
+        )
         chosen_list: list[SourceChunk] = []
         chosen_report: dict[str, Any] = {}
         support_query = ""
@@ -4105,18 +4246,23 @@ async def _enforce_evidence_plan_lanes(
                     existing_doc_ids=lane_doc_ids,
                     semantic_doc_ids=semantic_doc_ids,
                     target_k=max(1, target_k - len(chosen_list)),
+                    same_doc_target_k=max(0, same_doc_target_k - len(chosen_list)),
+                )
+                allow_same_doc_deepening = (
+                    chosen_report.get("reason")
+                    == "same_doc_deepening_after_new_doc_exhausted"
                 )
                 for pick in picks:
                     pick_chunk_id = str(pick.chunk_id or "")
                     pick_doc_id = _evidence_source_doc_key(pick)
                     if pick_chunk_id and pick_chunk_id in lane_chunk_ids:
                         continue
-                    if pick_doc_id and pick_doc_id in lane_doc_ids:
+                    if pick_doc_id and pick_doc_id in lane_doc_ids and not allow_same_doc_deepening:
                         continue
                     chosen_list.append(pick)
                     if pick_chunk_id:
                         lane_chunk_ids.add(pick_chunk_id)
-                    if pick_doc_id:
+                    if pick_doc_id and not allow_same_doc_deepening:
                         lane_doc_ids.add(pick_doc_id)
                     if len(chosen_list) >= target_k:
                         break
@@ -4192,9 +4338,26 @@ async def _enforce_evidence_plan_lanes(
         and source.metadata.get("support_role") == "evidence_plan_lane"
     ]
     final = _evidence_lane_coverage(merged, evidence_plan)
+    final_undercovered = [str(name) for name in (final.get("missing_lanes") or []) if name]
+    final_lane_doc_ids = final.get("lane_doc_ids") if isinstance(final.get("lane_doc_ids"), dict) else {}
+    final_thin_lanes = [
+        lane_name
+        for lane_name in final_undercovered
+        if final_lane_doc_ids.get(lane_name)
+    ]
+    final_missing_lanes = [
+        lane_name
+        for lane_name in final_undercovered
+        if lane_name not in set(final_thin_lanes)
+    ]
+    final["undercovered_lanes"] = final_undercovered
+    final["thin_lanes"] = final_thin_lanes
+    final["missing_lanes"] = final_missing_lanes
     meta["final"] = final
     meta["covered_lanes"] = final.get("covered_lanes", [])
-    meta["missing_lanes"] = final.get("missing_lanes", [])
+    meta["missing_lanes"] = final_missing_lanes
+    meta["undercovered_lanes"] = final_undercovered
+    meta["thin_lanes"] = final_thin_lanes
     meta["added"] = len(actual_support)
     meta["support_doc_ids"] = [
         _evidence_source_doc_key(source)
@@ -4222,12 +4385,14 @@ def _format_evidence_plan_trace(meta: dict[str, Any]) -> str:
     ]
     covered = [str(name) for name in (meta.get("covered_lanes") or []) if name]
     missing = [str(name) for name in (meta.get("missing_lanes") or []) if name]
+    thin = [str(name) for name in (meta.get("thin_lanes") or []) if name]
     final = meta.get("final") if isinstance(meta.get("final"), dict) else {}
     lines = [
         "[Evidence plan]",
         f"mode: {meta.get('mode') or plan.get('mode') or 'unknown'}",
         f"required_lanes: {', '.join(lanes) if lanes else 'none'}",
         f"covered: {', '.join(covered) if covered else 'none'}",
+        f"thin: {', '.join(thin) if thin else 'none'}",
         f"missing: {', '.join(missing) if missing else 'none'}",
         (
             "support: "
@@ -4249,15 +4414,22 @@ def _format_evidence_plan_prompt_note(meta: dict[str, Any] | None) -> str | None
     required = ", ".join(meta.get("required_lanes") or []) or "none"
     covered = ", ".join(meta.get("covered_lanes") or []) or "none"
     missing = ", ".join(meta.get("missing_lanes") or []) or "none"
+    thin = ", ".join(meta.get("thin_lanes") or []) or "none"
     lines = [
         "Internal evidence plan contract (do not mention this block):",
         f"- Required source-backed evidence lanes: {required}.",
-        f"- Retrieved lane coverage: covered={covered}; missing={missing}.",
+        f"- Retrieved lane coverage: covered={covered}; thin={thin}; missing={missing}.",
     ]
     if meta.get("missing_lanes"):
         lines.append(
             "- HARD LIMIT: do not synthesize a full relationship answer across "
             "lanes that are still missing retrieved evidence."
+        )
+    elif meta.get("thin_lanes"):
+        lines.append(
+            "- The retrieved packet has at least one source for every required "
+            "lane, but some lanes are thin. Synthesize carefully and avoid "
+            "overstating the thin lanes."
         )
     else:
         lines.append(
@@ -6339,6 +6511,7 @@ class ChatOrchestrator:
             sources,
             query=request.message,
             evidence_plan=evidence_plan,
+            search_mode=resolved_mode,
         )
         if answerability_chunk_gate_meta.get("enabled"):
             retrieval_diagnostics["answerability_chunk_gate"] = answerability_chunk_gate_meta
