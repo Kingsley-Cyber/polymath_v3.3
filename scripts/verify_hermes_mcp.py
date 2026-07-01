@@ -131,6 +131,7 @@ def _run_smoke(url: str, token: str) -> dict[str, Any]:
     }
     required = {
         "polymath_mcp_status",
+        "polymath_check_source",
         "polymath_plan_ingestion",
         "polymath_backfill_summaries",
     }

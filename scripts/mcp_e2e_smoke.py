@@ -142,7 +142,12 @@ def main() -> int:
         tool["name"]
         for tool in ((tools.get("result") or {}).get("tools") or [])
     }
-    required = {"polymath_mcp_status", "polymath_plan_ingestion", "polymath_backfill_summaries"}
+    required = {
+        "polymath_mcp_status",
+        "polymath_check_source",
+        "polymath_plan_ingestion",
+        "polymath_backfill_summaries",
+    }
     missing = sorted(required - tool_names)
     if missing:
         raise RuntimeError(f"missing expected MCP tools: {missing}")

@@ -27,6 +27,10 @@ from services.ingestion.admission import (
     release_ingest_slot as _release_ingest_slot,
     try_acquire_ingest_slot as _try_acquire_ingest_slot,
 )
+from services.ingestion.source_identity import (
+    build_deterministic_filename,
+    build_source_identity,
+)
 from services.ingestion_service import ingestion_service
 from services.retriever import retriever_orchestrator
 
@@ -122,6 +126,152 @@ def _mask_summary_model_ref(ref: Any) -> dict[str, Any]:
         "base_url_configured": bool(getter("base_url")),
         "api_key_configured": bool(api_key),
         "max_concurrent": int(getter("max_concurrent") or 1),
+    }
+
+
+_STRONG_SOURCE_KINDS = {"youtube_video", "url", "content_hash"}
+
+
+async def _find_existing_source_matches(
+    source_identity: dict[str, Any] | None,
+    *,
+    corpus_ids: list[str] | None = None,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    """Find documents with the same deterministic source identity."""
+    if not source_identity:
+        return []
+    source_key = source_identity.get("source_key")
+    source_kind = source_identity.get("source_kind")
+    if not source_key or source_kind not in _STRONG_SOURCE_KINDS:
+        return []
+    db = ingestion_service.db
+    if db is None:
+        return []
+
+    scoped = await _scope_corpus_ids(corpus_ids, default_to_all=True)
+    if not scoped:
+        return []
+    safe_limit = max(1, min(int(limit or 8), 25))
+    query = {
+        "corpus_id": {"$in": scoped},
+        "$or": [
+            {"source_identity.source_key": source_key},
+            {"source_key": source_key},
+        ],
+    }
+    projection = {
+        "_id": 0,
+        "doc_id": 1,
+        "corpus_id": 1,
+        "filename": 1,
+        "source_url": 1,
+        "source_tier": 1,
+        "source_kind": 1,
+        "source_key": 1,
+        "youtube_video_id": 1,
+        "source_identity": 1,
+        "parent_count": 1,
+        "child_count": 1,
+        "write_state": 1,
+        "ingest_stage": 1,
+        "error": 1,
+        "created_at": 1,
+        "updated_at": 1,
+        "ingested_at": 1,
+    }
+    docs = await (
+        db["documents"]
+        .find(query, projection)
+        .sort("updated_at", -1)
+        .limit(safe_limit)
+        .to_list(length=safe_limit)
+    )
+    if not docs:
+        return []
+
+    corpus_lookup = {
+        row.get("corpus_id"): row.get("name")
+        for row in await db["corpora"].find(
+            {"corpus_id": {"$in": sorted({d["corpus_id"] for d in docs})}},
+            {"_id": 0, "corpus_id": 1, "name": 1},
+        ).to_list(length=None)
+    }
+    matches: list[dict[str, Any]] = []
+    for doc in docs:
+        status = _summarize_write_state(doc)
+        matches.append(
+            {
+                "corpus_id": doc.get("corpus_id"),
+                "corpus_name": corpus_lookup.get(doc.get("corpus_id")),
+                "doc_id": doc.get("doc_id"),
+                "filename": doc.get("filename"),
+                "source_url": doc.get("source_url"),
+                "source_tier": doc.get("source_tier"),
+                "ingest_status": status,
+                "ingest_stage": doc.get("ingest_stage"),
+                "parent_count": doc.get("parent_count", 0),
+                "child_count": doc.get("child_count", 0),
+                "updated_at": (
+                    doc.get("updated_at").isoformat()
+                    if hasattr(doc.get("updated_at"), "isoformat")
+                    else doc.get("updated_at")
+                ),
+                "error": doc.get("error"),
+            }
+        )
+    return matches
+
+
+def _duplicate_guard_payload(
+    source_identity: dict[str, Any] | None,
+    matches: list[dict[str, Any]],
+) -> dict[str, Any]:
+    source_key = (source_identity or {}).get("source_key")
+    source_kind = (source_identity or {}).get("source_kind")
+    if matches:
+        first = matches[0]
+        return {
+            "status": "already_ingested",
+            "default_policy": "skip",
+            "message": (
+                "This source is already tracked in "
+                f"{first.get('corpus_name') or first.get('corpus_id')} as "
+                f"{first.get('filename') or first.get('doc_id')}. Use that corpus/doc "
+                "or pass duplicate_policy='allow' to force another ingest."
+            ),
+        }
+    if not source_key or source_kind not in _STRONG_SOURCE_KINDS:
+        return {
+            "status": "unknown",
+            "default_policy": "skip_when_known",
+            "message": (
+                "No stable source URL/video id/content hash was available. "
+                "Upload can proceed, but Polymath cannot prove this source is new."
+            ),
+        }
+    return {
+        "status": "clear",
+        "default_policy": "skip",
+        "message": "No matching tracked source was found in accessible corpora.",
+    }
+
+
+def _already_exists_response(
+    *,
+    corpus_id: str,
+    filename: str,
+    source_identity: dict[str, Any],
+    matches: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "status": "already_exists",
+        "action": "skipped",
+        "corpus_id": corpus_id,
+        "filename": filename,
+        "source_identity": _json_ready(source_identity),
+        "duplicate_guard": _duplicate_guard_payload(source_identity, matches),
+        "existing_source_matches": matches,
     }
 
 
@@ -1273,6 +1423,7 @@ async def polymath_mcp_status(
         "recommended_first_calls": [
             "polymath_mcp_status",
             "polymath_list_corpora",
+            "polymath_check_source before ingesting URLs/transcripts",
             "polymath_plan_ingestion before ingesting new material",
             "polymath_search or polymath_chat_query for existing corpora",
         ],
@@ -1359,6 +1510,25 @@ async def polymath_plan_ingestion(
         if not allowed:
             warnings.append(f"source_url is blocked by MCP URL safety: {reason_or_empty}")
 
+    source_identity = build_source_identity(
+        filename=filename,
+        source_url=source_url,
+        content_type=content_type,
+    )
+    deterministic_filename = build_deterministic_filename(
+        filename=filename,
+        source_url=source_url,
+        content_type=content_type,
+        source_identity=source_identity,
+    )
+    source_identity = dict(source_identity)
+    source_identity.setdefault("original_filename", filename)
+    source_identity["deterministic_filename"] = deterministic_filename
+    existing_matches = await _find_existing_source_matches(source_identity)
+    duplicate_guard = _duplicate_guard_payload(source_identity, existing_matches)
+    if existing_matches:
+        warnings.append(duplicate_guard["message"])
+
     verification = {
         "positive_queries": [
             "Use one exact phrase or title from the document.",
@@ -1380,30 +1550,109 @@ async def polymath_plan_ingestion(
             "Ask for a summary of the exact tutorial/video topic.",
         ]
 
+    if not supported:
+        status = "blocked"
+    elif existing_matches:
+        status = "already_ingested"
+    else:
+        status = "ok"
+
+    call_sequence = [
+        "polymath_mcp_status",
+        "polymath_list_corpora",
+        corpus_action["tool"] if corpus_action["action"] == "create_corpus" else "reuse existing corpus",
+        ingest_tool,
+        "polymath_get_ingest_status until complete",
+        *(a["tool"] for a in post_ingest_actions),
+        "polymath_search verification",
+        "polymath_chat_query final summary if requested",
+    ]
+    if existing_matches:
+        call_sequence = [
+            "polymath_check_source",
+            "reuse the matching existing corpus/doc",
+            "polymath_search or polymath_chat_query against the existing corpus",
+            "only call ingest with duplicate_policy='allow' if the user explicitly wants another copy",
+        ]
+
     return {
-        "status": "ok" if supported else "blocked",
+        "status": status,
         "filename": filename,
+        "deterministic_filename": deterministic_filename,
+        "filename_policy": {
+            "enforced": True,
+            "message": (
+                "The server will ingest using deterministic_filename. Agents "
+                "may suggest names, but Polymath normalizes video/document names "
+                "from source URL, transcript header, document title, or stable hash."
+            ),
+        },
         "source_url": source_url,
         "content_type": content_type,
+        "source_identity": _json_ready(source_identity),
+        "duplicate_guard": duplicate_guard,
+        "existing_source_matches": existing_matches,
         "profile": profile,
         "profile_reason": reason,
         "summary_required": wants_summary,
         "summary_decision": summary_required,
         "ingest_tool": ingest_tool,
         "corpus_action": corpus_action,
-        "call_sequence": [
-            "polymath_mcp_status",
-            "polymath_list_corpora",
-            corpus_action["tool"] if corpus_action["action"] == "create_corpus" else "reuse existing corpus",
-            ingest_tool,
-            "polymath_get_ingest_status until complete",
-            *(a["tool"] for a in post_ingest_actions),
-            "polymath_search verification",
-            "polymath_chat_query final summary if requested",
-        ],
+        "call_sequence": call_sequence,
         "post_ingest_actions": post_ingest_actions,
         "verification": verification,
         "warnings": warnings,
+    }
+
+
+async def polymath_check_source(
+    source_url: str | None = None,
+    filename: str | None = None,
+    content_type: str | None = None,
+    content_text_sample: str | None = None,
+    corpus_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Check whether a URL/video/transcript source is already in Polymath.
+
+    This is the guardrail agents should call before uploading transcripts or
+    files. It recognizes YouTube URLs in either ``source_url`` or a transcript
+    header/sample, then searches accessible corpora for the stored source key.
+
+    Args:
+        source_url: Public source URL, ideally the original YouTube/video URL.
+        filename: Optional filename/display name.
+        content_type: Optional MIME/type hint.
+        content_text_sample: Optional leading text from a transcript/header.
+        corpus_ids: Optional corpus scope; omitted means all accessible corpora.
+    """
+    if not source_url and not filename and not content_text_sample:
+        raise ValueError("Provide source_url, filename, or content_text_sample")
+    source_identity = build_source_identity(
+        filename=filename,
+        source_url=source_url,
+        content_type=content_type,
+        data=content_text_sample,
+    )
+    deterministic_filename = build_deterministic_filename(
+        filename=filename,
+        source_url=source_url,
+        content_type=content_type,
+        data=content_text_sample,
+        source_identity=source_identity,
+    )
+    source_identity = dict(source_identity)
+    source_identity.setdefault("original_filename", filename)
+    source_identity["deterministic_filename"] = deterministic_filename
+    matches = await _find_existing_source_matches(
+        source_identity,
+        corpus_ids=corpus_ids,
+    )
+    return {
+        "status": "ok",
+        "deterministic_filename": deterministic_filename,
+        "source_identity": _json_ready(source_identity),
+        "duplicate_guard": _duplicate_guard_payload(source_identity, matches),
+        "existing_source_matches": matches,
     }
 
 
@@ -1500,6 +1749,15 @@ async def polymath_list_documents(
                 "doc_id": d.get("doc_id"),
                 "filename": d.get("filename"),
                 "source_tier": d.get("source_tier"),
+                "source_url": d.get("source_url"),
+                "source_kind": d.get("source_kind")
+                or (d.get("source_identity") or {}).get("source_kind"),
+                "source_key": d.get("source_key")
+                or (d.get("source_identity") or {}).get("source_key"),
+                "youtube_video_id": d.get("youtube_video_id")
+                or (d.get("source_identity") or {}).get("youtube_video_id"),
+                "deterministic_filename": d.get("deterministic_filename")
+                or (d.get("source_identity") or {}).get("deterministic_filename"),
                 "chunk_count": d.get("chunk_count", 0),
                 "parent_count": int(
                     d.get("parent_count") or len(d.get("parent_chunks") or [])
@@ -1830,6 +2088,10 @@ async def _ingest_bytes(
     filename: str,
     corpus_id: str,
     user_id: str,
+    source_url: str | None = None,
+    content_type: str | None = None,
+    source_identity: dict[str, Any] | None = None,
+    duplicate_policy: Literal["skip", "allow"] = "skip",
 ) -> dict[str, Any]:
     """Shared ingestion path used by both polymath_ingest_from_url and
     polymath_upload_document. Builds the effective IngestionConfig from the
@@ -1840,6 +2102,8 @@ async def _ingest_bytes(
     """
     from models.schemas import IngestionConfig
 
+    if duplicate_policy not in ("skip", "allow"):
+        raise ValueError("duplicate_policy must be 'skip' or 'allow'")
     if not data:
         raise ValueError("Document is empty")
     max_bytes = get_settings().MCP_INGEST_MAX_BYTES
@@ -1859,6 +2123,31 @@ async def _ingest_bytes(
     base_cfg_dict = corpus.get("default_ingestion_config") or {}
     cfg = IngestionConfig(**base_cfg_dict)
 
+    source_identity = source_identity or build_source_identity(
+        filename=filename,
+        source_url=source_url,
+        content_type=content_type,
+        data=data,
+    )
+    deterministic_filename = build_deterministic_filename(
+        filename=filename,
+        source_url=source_url,
+        content_type=content_type,
+        data=data,
+        source_identity=source_identity,
+    )
+    source_identity = dict(source_identity)
+    source_identity.setdefault("original_filename", filename)
+    source_identity["deterministic_filename"] = deterministic_filename
+    existing_matches = await _find_existing_source_matches(source_identity)
+    if existing_matches and duplicate_policy == "skip":
+        return _already_exists_response(
+            corpus_id=corpus_id,
+            filename=deterministic_filename,
+            source_identity=source_identity,
+            matches=existing_matches,
+        )
+
     # Admission gate — share the per-process slot pool with the HTTP router
     # so an agent looping over 500 docs through MCP can't bypass the
     # INGEST_MAX_ACTIVE_JOBS cap that the 0a47b8f fix established for the
@@ -1877,11 +2166,13 @@ async def _ingest_bytes(
         # back-compat single-model override.
         result = await ingestion_service.ingest(
             data=data,
-            filename=filename,
+            filename=deterministic_filename,
             corpus_id=corpus_id,
             user_id=user_id,
             ingestion_config=cfg,
             model="",
+            source_url=source_url,
+            source_identity=source_identity,
         )
         return {
             "status": "queued",
@@ -1889,8 +2180,15 @@ async def _ingest_bytes(
             "job_id": result.job_id,
             "corpus_id": corpus_id,
             "filename": result.filename,
+            "original_filename": filename,
+            "deterministic_filename": deterministic_filename,
             "source_tier": result.source_tier,
             "size_bytes": len(data),
+            "source_identity": _json_ready(source_identity),
+            "duplicate_guard": _duplicate_guard_payload(
+                source_identity,
+                existing_matches,
+            ),
         }
     finally:
         # Slot is held for the full duration of ingest() — unlike the
@@ -1906,6 +2204,7 @@ async def polymath_ingest_from_url(
     corpus_id: str,
     url: str,
     filename: str | None = None,
+    duplicate_policy: Literal["skip", "allow"] = "skip",
 ) -> dict[str, Any]:
     """Fetch a document from a public URL and queue it for ingestion.
 
@@ -1928,6 +2227,8 @@ async def polymath_ingest_from_url(
         corpus_id: Target corpus. Must be user-accessible.
         url: Public http(s) URL to the file.
         filename: Optional override; inferred from URL tail if omitted.
+        duplicate_policy: "skip" (default) refuses already-tracked sources;
+            "allow" forces a new ingest.
 
     Returns:
         {"status": "queued", "doc_id", "job_id", "corpus_id", "filename",
@@ -1941,6 +2242,26 @@ async def polymath_ingest_from_url(
     allowed, reason = _safe_ingest_url(url)
     if not allowed:
         raise ValueError(f"URL refused: {reason}")
+    if duplicate_policy not in ("skip", "allow"):
+        raise ValueError("duplicate_policy must be 'skip' or 'allow'")
+
+    pre_identity = build_source_identity(filename=filename, source_url=url)
+    pre_filename = build_deterministic_filename(
+        filename=filename,
+        source_url=url,
+        source_identity=pre_identity,
+    )
+    pre_identity = dict(pre_identity)
+    pre_identity.setdefault("original_filename", filename)
+    pre_identity["deterministic_filename"] = pre_filename
+    pre_matches = await _find_existing_source_matches(pre_identity)
+    if pre_matches and duplicate_policy == "skip":
+        return _already_exists_response(
+            corpus_id=corpus_id,
+            filename=pre_filename,
+            source_identity=pre_identity,
+            matches=pre_matches,
+        )
 
     settings = get_settings()
     timeout = settings.MCP_INGEST_URL_TIMEOUT_SECONDS
@@ -1981,6 +2302,9 @@ async def polymath_ingest_from_url(
         filename=filename,
         corpus_id=corpus_id,
         user_id=uid,
+        source_url=url,
+        source_identity=None,
+        duplicate_policy=duplicate_policy,
     )
 
 
@@ -1988,6 +2312,8 @@ async def polymath_upload_document(
     corpus_id: str,
     filename: str,
     content_base64: str,
+    source_url: str | None = None,
+    duplicate_policy: Literal["skip", "allow"] = "skip",
 ) -> dict[str, Any]:
     """Upload a document body (base64-encoded) and queue it for ingestion.
 
@@ -2005,6 +2331,10 @@ async def polymath_upload_document(
         content_base64: Base64-encoded file bytes. Strip any
             `data:...;base64,` prefix before sending — this tool decodes
             raw base64 only.
+        source_url: Optional original public source URL, e.g. the YouTube URL
+            for a transcript file fetched elsewhere.
+        duplicate_policy: "skip" (default) refuses already-tracked sources;
+            "allow" forces a new ingest.
 
     Returns:
         {"status": "queued", "doc_id", "job_id", "corpus_id", "filename",
@@ -2037,6 +2367,8 @@ async def polymath_upload_document(
         filename=filename.strip(),
         corpus_id=corpus_id,
         user_id=uid,
+        source_url=source_url,
+        duplicate_policy=duplicate_policy,
     )
 
 
@@ -2195,6 +2527,7 @@ async def polymath_backfill_summaries(
 ALL_TOOLS = (
     polymath_mcp_status,
     polymath_plan_ingestion,
+    polymath_check_source,
     polymath_app_guide,
     polymath_search,
     polymath_cross_corpus_search,
@@ -2224,6 +2557,7 @@ __all__ = [
     "ALL_TOOLS",
     "polymath_mcp_status",
     "polymath_plan_ingestion",
+    "polymath_check_source",
     "polymath_app_guide",
     "polymath_search",
     "polymath_cross_corpus_search",

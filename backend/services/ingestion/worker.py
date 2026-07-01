@@ -114,6 +114,7 @@ from services.ingestion.section_classifier import (
     is_noisy,
     should_skip_ghost_b,
 )
+from services.ingestion.source_identity import source_identity_doc_fields
 from services.secrets import decrypt as _decrypt_api_key
 from services.storage import mongo_reader, mongo_writer, qdrant_writer
 from services.storage.qdrant_writer import retrieve_schema_for_chunk
@@ -1277,6 +1278,8 @@ async def _write_mongo_all(
     ghost_b_metrics: dict | None,
     facet_profile: dict | None,
     ws: WriteState,
+    source_url: str | None = None,
+    source_identity: dict | None = None,
 ) -> None:
     """Persist compact document metadata and split durable ingest artifacts.
 
@@ -1344,6 +1347,12 @@ async def _write_mongo_all(
         "created_at": now,
         "updated_at": now,
     }
+    doc_record.update(
+        source_identity_doc_fields(
+            source_url=source_url,
+            source_identity=source_identity,
+        )
+    )
     if duplicate_candidates:
         logger.warning(
             "phase=duplicate_check doc=%s corpus=%s filename=%s candidates=%s",
@@ -1385,6 +1394,8 @@ async def _ensure_progress_document(
     parents,
     facet_profile: dict | None,
     ws: WriteState,
+    source_url: str | None = None,
+    source_identity: dict | None = None,
 ) -> None:
     """Create a compact progress document and checkpoint parent rows early."""
     from services.ingestion_service import freeze_snapshot
@@ -1395,32 +1406,36 @@ async def _ensure_progress_document(
         None,
         (facet_profile or {}).get("parent_facets"),
     )
-    await mongo_writer.upsert_document(
-        db,
-        {
-            "doc_id": doc_id,
-            "corpus_id": corpus_id,
-            "user_id": user_id,
-            "file_id": file_id,
-            "filename": filename,
-            "source_mime": source_mime,
-            "source_tier": source_tier.value,
-            "ingestion_config": freeze_snapshot(ingestion_config),
-            "chunking_config": chunking_config,
-            "write_state": ws.model_dump(),
-            "parent_count": len(parent_dicts),
-            "child_count": 0,
-            "summary_count": 0,
-            "ghost_b_staging_count": 0,
-            "ghost_b_failure_count": 0,
-            "facet_profile": _document_facet_profile(facet_profile),
-            "ghost_b_failures": [],
-            "ghost_b_metrics": {},
-            "ingest_stage": "chunked",
-            "created_at": now,
-            "updated_at": now,
-        },
+    doc_record = {
+        "doc_id": doc_id,
+        "corpus_id": corpus_id,
+        "user_id": user_id,
+        "file_id": file_id,
+        "filename": filename,
+        "source_mime": source_mime,
+        "source_tier": source_tier.value,
+        "ingestion_config": freeze_snapshot(ingestion_config),
+        "chunking_config": chunking_config,
+        "write_state": ws.model_dump(),
+        "parent_count": len(parent_dicts),
+        "child_count": 0,
+        "summary_count": 0,
+        "ghost_b_staging_count": 0,
+        "ghost_b_failure_count": 0,
+        "facet_profile": _document_facet_profile(facet_profile),
+        "ghost_b_failures": [],
+        "ghost_b_metrics": {},
+        "ingest_stage": "chunked",
+        "created_at": now,
+        "updated_at": now,
+    }
+    doc_record.update(
+        source_identity_doc_fields(
+            source_url=source_url,
+            source_identity=source_identity,
+        )
     )
+    await mongo_writer.upsert_document(db, doc_record)
     await mongo_writer.upsert_parent_chunks(db, parent_dicts)
 
 
@@ -1436,37 +1451,43 @@ async def _ensure_parse_progress_document(
     source_mime: str,
     ingestion_config: IngestionConfig,
     ws: WriteState,
+    source_url: str | None = None,
+    source_identity: dict | None = None,
 ) -> None:
     """Create the first compact row as soon as parse resolves doc_id."""
     from services.ingestion_service import freeze_snapshot
 
     now = datetime.utcnow()
-    await mongo_writer.upsert_document(
-        db,
-        {
-            "doc_id": doc_id,
-            "corpus_id": corpus_id,
-            "user_id": user_id,
-            "file_id": file_id,
-            "filename": filename,
-            "source_mime": source_mime,
-            "source_tier": source_tier.value,
-            "ingestion_config": freeze_snapshot(ingestion_config),
-            "chunking_config": {},
-            "write_state": ws.model_dump(),
-            "parent_count": 0,
-            "child_count": 0,
-            "summary_count": 0,
-            "ghost_b_staging_count": 0,
-            "ghost_b_failure_count": 0,
-            "facet_profile": {},
-            "ghost_b_failures": [],
-            "ghost_b_metrics": {},
-            "ingest_stage": "chunking",
-            "created_at": now,
-            "updated_at": now,
-        },
+    doc_record = {
+        "doc_id": doc_id,
+        "corpus_id": corpus_id,
+        "user_id": user_id,
+        "file_id": file_id,
+        "filename": filename,
+        "source_mime": source_mime,
+        "source_tier": source_tier.value,
+        "ingestion_config": freeze_snapshot(ingestion_config),
+        "chunking_config": {},
+        "write_state": ws.model_dump(),
+        "parent_count": 0,
+        "child_count": 0,
+        "summary_count": 0,
+        "ghost_b_staging_count": 0,
+        "ghost_b_failure_count": 0,
+        "facet_profile": {},
+        "ghost_b_failures": [],
+        "ghost_b_metrics": {},
+        "ingest_stage": "chunking",
+        "created_at": now,
+        "updated_at": now,
+    }
+    doc_record.update(
+        source_identity_doc_fields(
+            source_url=source_url,
+            source_identity=source_identity,
+        )
     )
+    await mongo_writer.upsert_document(db, doc_record)
 
 
 async def _checkpoint_child_chunks(
@@ -2125,6 +2146,8 @@ async def run_ingest_job(
     neo4j_driver,
     model: str,
     ingest_overrides: dict | None = None,
+    source_url: str | None = None,
+    source_identity: dict | None = None,
     # Phase K — called with the resolved doc_id as soon as docling parse
     # completes, BEFORE the expensive ghost + embed + write phases run.
     # The HTTP endpoint uses this to return {doc_id, status: "queued"} in
@@ -2228,6 +2251,8 @@ async def run_ingest_job(
             source_mime=source_mime,
             ingestion_config=ingestion_config,
             ws=ws,
+            source_url=source_url,
+            source_identity=source_identity,
         )
 
     # Preventive retrieval setup gate. Startup tries to repair all corpora, but
@@ -2484,6 +2509,8 @@ async def run_ingest_job(
             parents=parents,
             facet_profile=base_facet_profile,
             ws=ws,
+            source_url=source_url,
+            source_identity=source_identity,
         )
 
     if not ws.mongo_written:
@@ -2599,6 +2626,8 @@ async def run_ingest_job(
             ghost_b_metrics=ghost_b_metrics,
             facet_profile=facet_profile,
             ws=ws,
+            source_url=source_url,
+            source_identity=source_identity,
         )
         await mongo_writer.update_write_state(
             db,

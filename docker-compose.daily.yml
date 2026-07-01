@@ -1,0 +1,34 @@
+# Conservative local profile for a 32 GB Mac Studio daily driver.
+# Use with docker-compose.yml + docker-compose.override.yml + docker-compose.apple-mlx.yml.
+
+services:
+  mongodb:
+    mem_limit: 3g
+    command: ["mongod", "--wiredTigerCacheSizeGB", "1.5"]
+
+  qdrant:
+    mem_limit: 4g
+
+  neo4j:
+    mem_limit: 3g
+    environment:
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1g
+      NEO4J_server_memory_pagecache_size: 1g
+
+  redis:
+    mem_limit: 512m
+
+  backend:
+    environment:
+      EXTRACTION_MAX_ACTIVE_DOCS: "1"
+      INGEST_MAX_PARSE_JOBS: "4"
+      INGEST_MAX_MODEL_PHASE_DOCS: "2"
+      INGEST_MAX_ACTIVE_JOBS: "6"
+      INGEST_BATCH_WORKERS: "1"
+      EMBED_BATCH_SIZE: "32"
+
+  mcp:
+    environment:
+      EXTRACTION_MAX_ACTIVE_DOCS: "1"
+      EMBED_BATCH_SIZE: "32"

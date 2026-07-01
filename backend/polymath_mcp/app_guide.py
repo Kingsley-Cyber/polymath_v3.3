@@ -24,8 +24,8 @@ Canonical route names:
 Recommended agent workflow:
 1. Discover: call polymath_app_guide, then polymath_list_corpora and
    polymath_list_documents when scope matters.
-2. Search before writing: use polymath_search or polymath_cross_corpus_search
-   to avoid duplicate ingestion.
+2. Check before writing: use polymath_check_source for URLs/transcripts, then
+   polymath_search or polymath_cross_corpus_search to avoid duplicate ingestion.
 3. Answer: use polymath_chat_query when the user needs a grounded answer.
 4. Inspect graph meaning: use polymath_graph_query for research, nuance,
    ideation, or gap synthesis. Use polymath_graph_map_query for visual graph
@@ -38,6 +38,12 @@ Ingestion profile handshake:
 - Before ingesting ambiguous files or URLs, ask the user or calling agent which
   profile fits the content: transcript, html_article, pdf_book_manual,
   code_or_docs, table_or_data, or general_text.
+- Before ingesting YouTube/video transcripts or URL-fetched files, call
+  polymath_check_source. If it returns already_ingested, reuse that corpus/doc
+  unless the user explicitly asks for a duplicate copy.
+- The server enforces deterministic filenames. Agents may provide an original
+  filename, but Polymath stores a normalized video/document name derived from
+  transcript title, source URL, YouTube video id, document title, or stable hash.
 - Ask whether parent summaries are required. If yes, create or choose a corpus
   with the deep preset or chunk_summarization=true; balanced corpora do not
   generate parent summaries by default.
@@ -184,6 +190,7 @@ MCP_TOOLSETS: list[dict[str, Any]] = [
         "enabled_by_default": True,
         "purpose": "Plan, ingest, poll, repair summaries, verify, and optionally delete.",
         "tools": [
+            "polymath_check_source",
             "polymath_plan_ingestion",
             "polymath_create_corpus",
             "polymath_ingest_from_url",
@@ -314,6 +321,7 @@ APP_CAPABILITY_MAP: dict[str, Any] = {
             "polymath_get_entity_relations",
         ],
         "update_knowledge_base": [
+            "polymath_check_source",
             "polymath_plan_ingestion",
             "polymath_create_corpus",
             "polymath_ingest_from_url",
@@ -349,6 +357,7 @@ AGENT_WORKFLOWS: list[dict[str, Any]] = [
         "name": "ingest_and_verify",
         "steps": [
             "polymath_mcp_status to confirm endpoint/auth and summary readiness",
+            "polymath_check_source for URL/video/transcript identity and duplicate guard",
             "polymath_plan_ingestion to choose profile, corpus action, and verification checks",
             "polymath_list_corpora",
             "choose or ask for an ingestion profile and whether summaries are required",
@@ -412,6 +421,13 @@ TOOL_PLAYBOOK: list[dict[str, Any]] = [
         "when_to_use": "Inspect direct graph relations around one entity.",
     },
     {
+        "tool": "polymath_check_source",
+        "when_to_use": (
+            "Before ingesting URLs, YouTube/video transcripts, or repeated agent "
+            "uploads: detect whether the source already exists in accessible corpora."
+        ),
+    },
+    {
         "tool": "polymath_plan_ingestion",
         "when_to_use": (
             "Before ingesting a URL/file: infer content profile, decide whether "
@@ -450,6 +466,7 @@ TOOL_PLAYBOOK: list[dict[str, Any]] = [
 WRITE_SAFETY_RULES: list[str] = [
     "Search existing corpora before ingesting duplicate material.",
     "Clarify ambiguous ingestion profile and summary requirements before uploading.",
+    "Use the deterministic_filename returned by polymath_check_source or polymath_plan_ingestion when referencing future uploads.",
     "Poll ingestion status until complete before claiming the app was updated.",
     "Verify retrieval with known terms from the ingested document.",
     "Verify an unsupported/negative query does not get falsely presented as supported.",

@@ -197,13 +197,72 @@ async def test_plan_ingestion_transcript_defaults_to_deep_summary():
     )
 
     assert result["status"] == "ok"
+    assert result["filename_policy"]["enforced"] is True
+    assert result["deterministic_filename"].endswith(".txt")
     assert result["profile"] == "transcript"
     assert result["summary_required"] is True
     assert result["ingest_tool"] == "polymath_ingest_from_url"
+    assert result["duplicate_guard"]["status"] == "clear"
     assert result["corpus_action"]["action"] == "create_corpus"
     assert result["corpus_action"]["args"]["preset"] == "deep"
     assert "polymath_get_ingest_status until complete" in result["call_sequence"]
     assert result["verification"]["negative_query"]
+
+
+@pytest.mark.asyncio
+async def test_plan_ingestion_reports_existing_youtube_source(monkeypatch):
+    async def fake_matches(source_identity, *, corpus_ids=None, limit=8):
+        assert source_identity["source_key"] == "youtube:6h4tsfwfyzo"
+        return [
+            {
+                "corpus_id": "c-shopify",
+                "corpus_name": "shopify",
+                "doc_id": "doc-1",
+                "filename": "shopify_vid1_full.txt",
+                "ingest_status": "complete",
+            }
+        ]
+
+    monkeypatch.setattr(mcp_tools, "_find_existing_source_matches", fake_matches)
+
+    result = await mcp_tools.polymath_plan_ingestion(
+        filename="video.txt",
+        source_url="https://youtu.be/6h4tsfwfyzo?t=12",
+        content_type="text/plain",
+    )
+
+    assert result["status"] == "already_ingested"
+    assert result["deterministic_filename"] == "video-yt-6h4tsfwfyzo.txt"
+    assert result["duplicate_guard"]["status"] == "already_ingested"
+    assert result["existing_source_matches"][0]["corpus_name"] == "shopify"
+    assert "duplicate_policy='allow'" in result["call_sequence"][-1]
+
+
+@pytest.mark.asyncio
+async def test_check_source_reads_youtube_url_from_transcript_sample(monkeypatch):
+    async def fake_matches(source_identity, *, corpus_ids=None, limit=8):
+        assert source_identity["source_key"] == "youtube:6h4tsfwfyzo"
+        return [
+            {
+                "corpus_id": "c1",
+                "corpus_name": "youtube_simple",
+                "doc_id": "d1",
+                "filename": "power-apps-grid.txt",
+                "ingest_status": "complete",
+            }
+        ]
+
+    monkeypatch.setattr(mcp_tools, "_find_existing_source_matches", fake_matches)
+
+    result = await mcp_tools.polymath_check_source(
+        filename="transcript.txt",
+        content_text_sample="Video: demo\nURL: https://youtu.be/6h4tsfwfyzo\n[0:00] hello",
+    )
+
+    assert result["duplicate_guard"]["status"] == "already_ingested"
+    assert result["deterministic_filename"] == "demo-yt-6h4tsfwfyzo.txt"
+    assert result["source_identity"]["source_kind"] == "youtube_video"
+    assert result["existing_source_matches"][0]["filename"] == "power-apps-grid.txt"
 
 
 @pytest.mark.asyncio
@@ -531,11 +590,13 @@ async def test_upload_document_decodes_base64_and_queues(system_user):
 
     assert result["status"] == "queued"
     assert result["doc_id"] == "d1"
+    assert result["deterministic_filename"] == "hello.txt"
     assert result["size_bytes"] == len(payload)
     ingest_mock.assert_awaited_once()
     call_kwargs = ingest_mock.await_args.kwargs
     assert call_kwargs["data"] == payload
     assert call_kwargs["filename"] == "hello.txt"
+    assert call_kwargs["source_identity"]["deterministic_filename"] == "hello.txt"
     assert call_kwargs["corpus_id"] == "c1"
     assert call_kwargs["model"] == ""  # signals "use corpus default pools"
 
@@ -569,6 +630,51 @@ async def test_upload_document_strips_data_url_prefix(system_user):
         )
     assert result["status"] == "queued"
     assert ingest_mock.await_args.kwargs["data"] == payload
+
+
+@pytest.mark.asyncio
+async def test_upload_document_skips_tracked_source_before_ingest(monkeypatch, system_user):
+    payload = b"Video\nURL: https://youtu.be/6h4tsfwfyzo\n[0:00] hello"
+    b64 = base64.b64encode(payload).decode("ascii")
+
+    async def fake_matches(source_identity, *, corpus_ids=None, limit=8):
+        assert source_identity["source_key"] == "youtube:6h4tsfwfyzo"
+        return [
+            {
+                "corpus_id": "c1",
+                "corpus_name": "shopify",
+                "doc_id": "existing-doc",
+                "filename": "shopify_vid1_full.txt",
+                "ingest_status": "complete",
+            }
+        ]
+
+    monkeypatch.setattr(mcp_tools, "_find_existing_source_matches", fake_matches)
+
+    with (
+        patch.object(mcp_tools, "assert_corpus_allowed", new=AsyncMock()),
+        patch.object(
+            mcp_tools.ingestion_service,
+            "_get_corpus_raw",
+            new=AsyncMock(return_value={"corpus_id": "c1", "default_ingestion_config": {}}),
+        ),
+        patch.object(
+            mcp_tools.ingestion_service,
+            "ingest",
+            new=AsyncMock(),
+        ) as ingest_mock,
+    ):
+        result = await mcp_tools.polymath_upload_document(
+            corpus_id="c1",
+            filename="transcript.txt",
+            content_base64=b64,
+        )
+
+    assert result["status"] == "already_exists"
+    assert result["action"] == "skipped"
+    assert result["filename"] == "youtube-video-yt-6h4tsfwfyzo.txt"
+    assert result["existing_source_matches"][0]["doc_id"] == "existing-doc"
+    ingest_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -751,6 +857,7 @@ def test_new_tools_in_registry():
     names = {fn.__name__ for fn in mcp_tools.ALL_TOOLS}
     assert "polymath_mcp_status" in names
     assert "polymath_plan_ingestion" in names
+    assert "polymath_check_source" in names
     assert "polymath_create_corpus" in names
     assert "polymath_ingest_from_url" in names
     assert "polymath_upload_document" in names

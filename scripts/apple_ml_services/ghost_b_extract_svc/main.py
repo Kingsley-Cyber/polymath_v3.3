@@ -47,6 +47,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 # Make backend/ importable (services.ghost_b_local and friends). The module
@@ -67,6 +68,44 @@ logger = logging.getLogger("ghost_b_extract_svc")
 app = FastAPI(title="ghost_b_extract_svc", version="1.0")
 
 _WARM = {"done": False, "error": ""}
+_IDLE_SHUTDOWN_SECONDS = int(os.environ.get("GHOST_B_IDLE_SHUTDOWN_SECONDS", "3600") or "0")
+_ACTIVITY_LOCK = threading.Lock()
+_ACTIVE_REQUESTS = 0
+_LAST_ACTIVE_AT = time.monotonic()
+
+
+def _activity_snapshot() -> tuple[int, float]:
+    with _ACTIVITY_LOCK:
+        return _ACTIVE_REQUESTS, time.monotonic() - _LAST_ACTIVE_AT
+
+
+def _mark_request_start() -> None:
+    global _ACTIVE_REQUESTS, _LAST_ACTIVE_AT
+    with _ACTIVITY_LOCK:
+        _ACTIVE_REQUESTS += 1
+        _LAST_ACTIVE_AT = time.monotonic()
+
+
+def _mark_request_end() -> None:
+    global _ACTIVE_REQUESTS, _LAST_ACTIVE_AT
+    with _ACTIVITY_LOCK:
+        _ACTIVE_REQUESTS = max(0, _ACTIVE_REQUESTS - 1)
+        _LAST_ACTIVE_AT = time.monotonic()
+
+
+def _idle_watchdog() -> None:
+    if _IDLE_SHUTDOWN_SECONDS <= 0:
+        return
+    logger.info("idle shutdown enabled: %ss", _IDLE_SHUTDOWN_SECONDS)
+    while True:
+        time.sleep(min(60, max(5, _IDLE_SHUTDOWN_SECONDS // 6)))
+        active, idle_for = _activity_snapshot()
+        if active == 0 and idle_for >= _IDLE_SHUTDOWN_SECONDS:
+            logger.info(
+                "idle for %.0fs with no active extraction; exiting to release model memory",
+                idle_for,
+            )
+            os._exit(0)
 
 
 class TaskIn(BaseModel):
@@ -103,6 +142,8 @@ def _warm_models() -> None:
 
 @app.on_event("startup")
 def _startup() -> None:
+    if _IDLE_SHUTDOWN_SECONDS > 0:
+        threading.Thread(target=_idle_watchdog, name="ghost-b-idle-watchdog", daemon=True).start()
     if (os.environ.get("GHOST_B_EXTRACT_WARM", "true").strip().lower()
             in ("1", "true", "yes", "on")):
         threading.Thread(target=_warm_models, name="ghost-b-warmup", daemon=True).start()
@@ -187,12 +228,16 @@ def health() -> dict:
         gliner = gliner_backend_info()
     except Exception as exc:  # noqa: BLE001
         gliner = {"introspect_error": str(exc)}
+    active_requests, idle_for = _activity_snapshot()
     return {
         "status": "ok",
         "service": "ghost_b_extract",
         "pipeline_version": version,
         "warm": _WARM["done"],
         "warm_error": _WARM["error"],
+        "active_requests": active_requests,
+        "idle_for_seconds": round(idle_for, 1),
+        "idle_shutdown_seconds": _IDLE_SHUTDOWN_SECONDS,
         "device": device,
         "gliner": gliner,
         "gpu_memory": _gpu_memory_info(),
@@ -201,6 +246,14 @@ def health() -> dict:
 
 @app.post("/extract")
 def extract(body: ExtractIn) -> dict:
+    _mark_request_start()
+    try:
+        return _extract_impl(body)
+    finally:
+        _mark_request_end()
+
+
+def _extract_impl(body: ExtractIn) -> dict:
     # Sync endpoint on purpose: FastAPI runs it in the threadpool, the event
     # loop stays free for /health, and ghost_b_local._INFER_LOCK serializes
     # concurrent extraction requests onto the single Metal device.

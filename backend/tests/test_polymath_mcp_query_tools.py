@@ -91,6 +91,7 @@ async def test_mcp_app_guide_exposes_app_routes_and_update_workflow():
     assert "polymath_chat_query" in capability_tools["answer"]
     assert "polymath_mcp_status" in capability_tools["discover"]
     assert "polymath_graph_query" in capability_tools["graph"]
+    assert "polymath_check_source" in capability_tools["update_knowledge_base"]
     assert "polymath_plan_ingestion" in capability_tools["update_knowledge_base"]
     assert "polymath_upload_document" in capability_tools["update_knowledge_base"]
     assert result["remote_agent_setup"]["endpoint_rule"].endswith("without a trailing slash.")

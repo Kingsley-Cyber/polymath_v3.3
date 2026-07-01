@@ -210,6 +210,7 @@ class IngestionService:
             timeout=self._settings.QDRANT_TIMEOUT_SECONDS,
         )
         logger.info("IngestionService: Qdrant connected (per-corpus collections)")
+        await self._ensure_source_identity_indexes()
 
         if self._settings.NEO4J_ENABLED:
             from neo4j import AsyncGraphDatabase
@@ -267,6 +268,26 @@ class IngestionService:
     def db(self):
         """Expose the shared Motor database handle."""
         return self._db
+
+    async def _ensure_source_identity_indexes(self) -> None:
+        """Indexes for deterministic agent/source duplicate guardrails."""
+        if self._db is None:
+            return
+        try:
+            await self._db["documents"].create_index(
+                [("source_identity.source_key", 1), ("corpus_id", 1)],
+                name="documents_source_identity_key_corpus_idx",
+                sparse=True,
+                background=True,
+            )
+            await self._db["documents"].create_index(
+                [("youtube_video_id", 1), ("corpus_id", 1)],
+                name="documents_youtube_video_corpus_idx",
+                sparse=True,
+                background=True,
+            )
+        except Exception as exc:
+            logger.warning("Source identity index setup skipped: %s", exc)
 
     async def disconnect(self) -> None:
         if self._qdrant:
@@ -553,6 +574,8 @@ class IngestionService:
         ingestion_config: IngestionConfig,
         model: str,
         ingest_overrides: dict | None = None,
+        source_url: str | None = None,
+        source_identity: dict | None = None,
         on_doc_id: "Any | None" = None,
         on_phase: "Any | None" = None,
     ) -> IngestJobResponse:
@@ -571,6 +594,27 @@ class IngestionService:
         neo4j, verifying, complete, or failed.
         """
         from services.ingestion.worker import run_ingest_job
+        from services.ingestion.source_identity import (
+            build_deterministic_filename,
+            build_source_identity,
+        )
+
+        if source_identity is None:
+            source_identity = build_source_identity(
+                filename=filename,
+                source_url=source_url,
+                data=data,
+            )
+        deterministic_filename = build_deterministic_filename(
+            filename=filename,
+            source_url=source_url,
+            data=data,
+            source_identity=source_identity,
+        )
+        source_identity = dict(source_identity)
+        source_identity.setdefault("original_filename", filename)
+        source_identity["deterministic_filename"] = deterministic_filename
+        filename = deterministic_filename
 
         return await run_ingest_job(
             job_id=str(uuid.uuid4()),
@@ -584,6 +628,8 @@ class IngestionService:
             neo4j_driver=self._neo4j,
             model=model,
             ingest_overrides=ingest_overrides,
+            source_url=source_url,
+            source_identity=source_identity,
             on_doc_id=on_doc_id,
             on_phase=on_phase,
         )

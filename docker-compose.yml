@@ -28,8 +28,8 @@ services:
   mongodb:
     <<: *default-logging
     image: mongo:7
-    mem_limit: 7g
-    command: ["mongod", "--wiredTigerCacheSizeGB", "5"]
+    mem_limit: ${MONGO_MEM_LIMIT:-3g}
+    command: ["mongod", "--wiredTigerCacheSizeGB", "${MONGO_WIREDTIGER_CACHE_GB:-1.5}"]
     ports:
       - "27017:27017"
     volumes:
@@ -65,6 +65,7 @@ services:
   qdrant:
     <<: *default-logging
     image: qdrant/qdrant:latest
+    mem_limit: ${QDRANT_MEM_LIMIT:-4g}
     ports:
       - "6333:6333"
     volumes:
@@ -86,12 +87,16 @@ services:
   neo4j:
     <<: *default-logging
     image: neo4j:5-community
+    mem_limit: ${NEO4J_MEM_LIMIT:-3g}
     ports:
       - "7474:7474"
       - "7687:7687"
     environment:
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
       NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP_INITIAL:-512m}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP_MAX:-1g}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE_SIZE:-1g}
     volumes:
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/neo4j/data:/data"
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/neo4j/plugins:/plugins"
@@ -111,6 +116,7 @@ services:
   redis:
     <<: *default-logging
     image: redis:7-alpine
+    mem_limit: ${REDIS_MEM_LIMIT:-512m}
     ports:
       - "6379:6379"
     volumes:
@@ -126,6 +132,7 @@ services:
   searxng:
     <<: *default-logging
     image: searxng/searxng:latest
+    mem_limit: ${SEARXNG_MEM_LIMIT:-512m}
     ports:
       - "8080:8080"
     volumes:
@@ -169,6 +176,7 @@ services:
     # works DB-less; bump carefully only after validating master-key path.
     <<: *default-logging
     image: ghcr.io/berriai/litellm:main-v1.60.0
+    mem_limit: ${LITELLM_MEM_LIMIT:-1g}
     ports:
       - "4000:4000"
     volumes:
@@ -361,6 +369,7 @@ services:
   # ============================================================
   autoheal:
     image: willfarrell/autoheal:latest
+    mem_limit: ${AUTOHEAL_MEM_LIMIT:-128m}
     restart: always
     environment:
       AUTOHEAL_CONTAINER_LABEL: autoheal
@@ -453,6 +462,7 @@ services:
   backend:
     <<: *default-logging
     build: ./backend
+    mem_limit: ${BACKEND_MEM_LIMIT:-2g}
     ports:
       - "8000:8000"
     volumes:
@@ -641,6 +651,7 @@ services:
   mcp:
     <<: *default-logging
     profiles: ["mcp"]
+    mem_limit: ${MCP_MEM_LIMIT:-1g}
     build:
       context: ./backend
       dockerfile: Dockerfile.mcp
@@ -717,6 +728,7 @@ services:
   frontend:
     <<: *default-logging
     build: ./frontend
+    mem_limit: ${FRONTEND_MEM_LIMIT:-512m}
     ports:
       - "3000:80"
     depends_on:
@@ -749,6 +761,7 @@ services:
   cloudflared:
     <<: *default-logging
     image: cloudflare/cloudflared:latest
+    mem_limit: ${CLOUDFLARED_MEM_LIMIT:-256m}
     profiles: ["cloudflare"]
     # Remote-managed tunnel: ingress + DNS hostnames live in the Cloudflare
     # Zero Trust dashboard; the connector authenticates with CLOUDFLARE_TUNNEL_TOKEN.

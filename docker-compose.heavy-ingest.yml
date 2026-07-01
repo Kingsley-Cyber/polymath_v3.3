@@ -1,0 +1,37 @@
+# Temporary high-throughput profile for ingestion/backfill sessions.
+# This spends more memory on DB caches and model-phase parallelism, then you
+# should return to docker-compose.daily.yml when the batch is done.
+
+services:
+  mongodb:
+    mem_limit: 5g
+    command: ["mongod", "--wiredTigerCacheSizeGB", "3"]
+
+  qdrant:
+    mem_limit: 4g
+
+  neo4j:
+    mem_limit: 4g
+    environment:
+      NEO4J_server_memory_heap_initial__size: 1g
+      NEO4J_server_memory_heap_max__size: 1536m
+      NEO4J_server_memory_pagecache_size: 1536m
+
+  redis:
+    mem_limit: 1g
+
+  backend:
+    mem_limit: 3g
+    environment:
+      EXTRACTION_MAX_ACTIVE_DOCS: "4"
+      INGEST_MAX_PARSE_JOBS: "8"
+      INGEST_MAX_MODEL_PHASE_DOCS: "8"
+      INGEST_MAX_ACTIVE_JOBS: "16"
+      INGEST_BATCH_WORKERS: "2"
+      EMBED_BATCH_SIZE: "64"
+
+  mcp:
+    mem_limit: 2g
+    environment:
+      EXTRACTION_MAX_ACTIVE_DOCS: "4"
+      EMBED_BATCH_SIZE: "64"
