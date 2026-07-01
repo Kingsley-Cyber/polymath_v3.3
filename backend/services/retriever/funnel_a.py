@@ -43,19 +43,62 @@ class FunnelA:
             corpus_ids: List of allowed corpus IDs to scope the search.
             collections: Qdrant collections to search in parallel.
             top_k: Max results to return.
-            fair_mode: If True, omits summary searches for multi-corpus queries
-                       so summary-heavy corpora don't dominate the results.
+            fair_mode: If True, multi-corpus queries run one summary search PER
+                       corpus with an equal share of ``top_k`` each, so a
+                       summary-heavy corpus cannot dominate the pool. (This
+                       used to skip summaries entirely for multi-corpus, which
+                       threw away the broadest cross-corpus signal.)
         """
         if not collections:
             logger.warning("No collections specified for Funnel A search.")
             return []
 
-        # Fair mode: Omit summary search if searching across multiple corpora
+        # Fair mode: balanced per-corpus summary search instead of a blackout.
+        # Each corpus gets its own budget; the summary-heavy corpus is capped
+        # at its share, but every corpus still contributes breadth.
         if fair_mode and corpus_ids and len(corpus_ids) > 1:
+            per_corpus_k = max(2, top_k // len(corpus_ids))
             logger.info(
-                "Fair mode active for cross-corpus: skipping Funnel A (summaries)."
+                "Fair mode cross-corpus: per-corpus Funnel A (%d corpora × k=%d).",
+                len(corpus_ids),
+                per_corpus_k,
             )
-            return []
+            per_corpus_pools = await asyncio.gather(
+                *[
+                    self._search_scoped(
+                        query_vector,
+                        corpus_scope=[corpus_id],
+                        collections=collections,
+                        top_k=per_corpus_k,
+                        query_text=query_text,
+                    )
+                    for corpus_id in corpus_ids
+                ]
+            )
+            merged: List[SourceChunk] = []
+            for pool in per_corpus_pools:
+                merged.extend(pool)
+            merged.sort(key=lambda x: x.score, reverse=True)
+            return merged[:top_k]
+
+        return await self._search_scoped(
+            query_vector,
+            corpus_scope=corpus_ids,
+            collections=collections,
+            top_k=top_k,
+            query_text=query_text,
+        )
+
+    async def _search_scoped(
+        self,
+        query_vector: list[float],
+        *,
+        corpus_scope: Optional[List[str]],
+        collections: List[str],
+        top_k: int,
+        query_text: str | None = None,
+    ) -> List[SourceChunk]:
+        """One summary search over ``collections`` scoped to ``corpus_scope``."""
 
         # Build Qdrant filter
         must_conditions = [
@@ -66,11 +109,11 @@ class FunnelA:
         ]
 
         # Scope strictly to allowed corpus IDs to prevent data leakage
-        if corpus_ids:
+        if corpus_scope:
             must_conditions.append(
                 models.FieldCondition(
                     key="corpus_id",
-                    match=models.MatchAny(any=corpus_ids),
+                    match=models.MatchAny(any=corpus_scope),
                 )
             )
 
