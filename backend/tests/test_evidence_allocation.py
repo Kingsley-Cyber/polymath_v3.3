@@ -28,6 +28,8 @@ from services.retriever.query_semantics import (  # noqa: E402
 )
 from services.retriever.evidence_allocation import (  # noqa: E402
     DEFAULT_PER_SIDE_SOURCES,
+    STRONG_LANE_SCORE,
+    WEAK_LANE_SUPPORT_FLOOR,
     cap_chunks_per_doc,
     lane_alias_score,
     lane_coverage,
@@ -178,6 +180,58 @@ def test_select_lane_support_rejects_weak_foreign_docs():
     )
 
     assert [p.chunk_id for p in picks] == ["p1"]
+
+
+def test_select_lane_support_admits_weak_but_present_match_above_floor():
+    # Regression fix H: a chunk scoring in [WEAK_LANE_SUPPORT_FLOOR,
+    # STRONG_LANE_SCORE) is a weak-but-present lane match — now eligible to
+    # COMPETE for a support slot (previously the hard STRONG floor rejected it
+    # outright). A chunk below the weak floor stays out. Uses a controlled
+    # score_fn to pin the boundary exactly.
+    assert WEAK_LANE_SUPPORT_FLOOR < STRONG_LANE_SCORE
+    fixed = {"weak": WEAK_LANE_SUPPORT_FLOOR + 1, "below": WEAK_LANE_SUPPORT_FLOOR - 1}
+    candidates = [
+        Chunk("weak", "adjacent_book", "adjacent-vocabulary personality passage"),
+        Chunk("below", "noise_book", "barely related"),
+    ]
+    picks = select_lane_support(
+        candidates,
+        lane=PERSONALITY,
+        target_k=2,
+        existing_chunk_ids=set(),
+        existing_doc_ids=set(),
+        semantic_doc_ids=set(),
+        score_fn=lambda c, lane: fixed[c.chunk_id],
+        chunk_id_fn=_cid,
+        doc_id_fn=_did,
+        base_score_fn=_base,
+    )
+    ids = [p.chunk_id for p in picks]
+    assert "weak" in ids, ids  # in [4, 8) -> now admitted
+    assert "below" not in ids, ids  # < 4 -> still rejected
+
+
+def test_strong_match_still_outranks_weak_support_when_slots_are_scarce():
+    # Admitting weak matches must NOT let them displace a strong candidate: with
+    # one slot, the STRONG (>=8) new-doc pick still wins.
+    fixed = {"weak": WEAK_LANE_SUPPORT_FLOOR + 1, "strong": STRONG_LANE_SCORE + 1}
+    candidates = [
+        Chunk("weak", "weak_book", "weak adjacent match", score=0.99),
+        Chunk("strong", "strong_book", "strong on-lane match", score=0.10),
+    ]
+    picks = select_lane_support(
+        candidates,
+        lane=PERSONALITY,
+        target_k=1,
+        existing_chunk_ids=set(),
+        existing_doc_ids=set(),
+        semantic_doc_ids=set(),
+        score_fn=lambda c, lane: fixed[c.chunk_id],
+        chunk_id_fn=_cid,
+        doc_id_fn=_did,
+        base_score_fn=_base,
+    )
+    assert [p.chunk_id for p in picks] == ["strong"], [p.chunk_id for p in picks]
 
 
 def test_cap_chunks_per_doc_limits_dominant_doc_but_protects_support():

@@ -2020,7 +2020,13 @@ def _score_answerability_chunk(
     matched_terms = [term for term in terms if _answerability_contains(text, term)]
     lexical_score = len(matched_terms) / len(terms) if terms else 0.0
     side_score = 1.0 if matched_concepts or matched_lanes else 0.0
-    score = side_score if len(lanes) >= 2 else max(side_score, lexical_score)
+    # Restore lexical coverage as a floor even for multi-lane queries. The lane
+    # strictness in _evidence_lane_match_score plus generic-token stripping in
+    # _answerability_terms_for_gate already block false lane satisfaction, so
+    # zeroing lexical for >=2 lanes was redundant and only cost legitimate
+    # term-bearing chunks (the cross-domain bridge that uses neither lane's
+    # exact aliases but does carry the query terms).
+    score = max(side_score, lexical_score)
     return score, {
         "reason": "answer_bearing" if score > 0 else "no_answer_bearing_overlap",
         "protected": False,

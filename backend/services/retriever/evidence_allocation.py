@@ -41,6 +41,15 @@ DEFAULT_PER_SIDE_SOURCES = 2
 # allowed to mark the side "already covered".
 STRONG_LANE_SCORE = 8
 
+# Support-SELECTION floor — softer than STRONG_LANE_SCORE. A chunk scoring in
+# [WEAK_LANE_SUPPORT_FLOOR, STRONG_LANE_SCORE) is a weak-but-present lane match:
+# eligible to COMPETE for a support slot, but stronger (>=8) candidates still
+# outrank it (lane_score * _LANE_SCORE_WEIGHT dominates), and it never marks the
+# side "covered" — coverage still requires STRONG_LANE_SCORE upstream. This lets
+# a side backed only by adjacent-vocabulary evidence get real breadth instead of
+# an empty lane, without letting a stray cross-domain mention satisfy coverage.
+WEAK_LANE_SUPPORT_FLOOR = 4
+
 # Scoring weights for ranking lane-support candidates. Mirrors the production
 # heuristic so the pure path and the wired path agree.
 _LANE_SCORE_WEIGHT = 10.0
@@ -94,9 +103,10 @@ def select_lane_support(
     Guarantees:
     * never two chunks from the same document,
     * never a chunk already chosen (``existing_chunk_ids``),
-    * never a weak off-lane chunk: support must match the lane strongly
-      (``STRONG_LANE_SCORE``) unless the ingest layer says its document belongs
-      to the side.
+    * never a fully off-lane chunk: support must match the lane at least weakly
+      (``WEAK_LANE_SUPPORT_FLOOR``) unless the ingest layer says its document
+      belongs to the side. Strong (>=``STRONG_LANE_SCORE``) matches still
+      outrank weak ones, and a weak support pick never marks the side "covered".
     """
 
     semantic_doc_ids = semantic_doc_ids or set()
@@ -116,7 +126,7 @@ def select_lane_support(
             lane_score = _SEMANTIC_FLOOR_SCORE
         if lane_score <= 0:
             continue
-        if lane_score < STRONG_LANE_SCORE and not semantic_doc_match:
+        if lane_score < WEAK_LANE_SUPPORT_FLOOR and not semantic_doc_match:
             continue
         new_doc = bool(doc_id and doc_id not in existing_doc_ids)
         bounded_base = min(max(float(base_score_fn(chunk) or 0.0), 0.0), 1.0)

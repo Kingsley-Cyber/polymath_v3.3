@@ -655,6 +655,45 @@ def test_final_context_answerability_gate_filters_full_spectrum_off_domain_chunk
     assert meta["dropped_chunk_ids"] == ["software-1"]
 
 
+def test_final_context_gate_credits_lexical_term_in_multi_lane_query():
+    # Regression fix G: with 2+ lanes the gate must still credit lexical term
+    # overlap. A chunk that carries a query term but matches no lane strongly
+    # (a cross-domain / bridge passage) must NOT be zeroed and dropped just
+    # because the query decomposed into multiple lanes.
+    query = "compare personality frameworks with the art of seduction"
+    plan = chat_module.build_evidence_plan(query)
+    assert len(plan.required_lanes) >= 2
+    seduction = _chunk(
+        "sed-1",
+        doc_id="art-of-seduction.md",
+        text="Seduction shapes desire through attention and vulnerability.",
+    )
+    # Names "personality" (a query term) but no framework/instrument and no
+    # seducer -> matches neither lane strongly. Pre-fix this scored 0 (side_score
+    # only) and was dropped; post-fix it survives on lexical term overlap.
+    bridge = _chunk(
+        "bridge-1",
+        doc_id="cross-domain.md",
+        text=(
+            "A workplace productivity note that mentions personality once in "
+            "passing and otherwise discusses meeting schedules and deadlines."
+        ),
+    )
+    gated, meta = chat_module._apply_final_context_answerability_gate(
+        [seduction, bridge],
+        query=query,
+        evidence_plan=plan,
+        mode="soft",
+        min_keep=1,  # satisfied by seduction alone -> bridge is NOT min-keep rescued
+    )
+    assert "bridge-1" in {chunk.chunk_id for chunk in gated}
+    assert meta["dropped"] == 0
+    row = next(r for r in meta["scores"] if r["chunk_id"] == "bridge-1")
+    assert row["score"] > 0
+    assert not row.get("matched_lanes")  # kept on lexical term, not a lane match
+    assert "personality" in (row.get("matched_terms") or [])
+
+
 def test_final_context_answerability_gate_skips_global_search_mode():
     sources = [
         _chunk(
