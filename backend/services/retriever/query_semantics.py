@@ -142,6 +142,20 @@ BASE_STOP_WORDS: frozenset[str] = frozenset(
         "noted",
         "stated",
         "mentioned",
+        # verbs-of-saying, same family (post-deploy probe caught 'describes'
+        # minting a concept in "as Eric Berne DESCRIBES it")
+        "describe",
+        "describes",
+        "described",
+        "explain",
+        "explains",
+        "explained",
+        "discuss",
+        "discusses",
+        "discussed",
+        "argue",
+        "argues",
+        "argued",
     }
 )
 

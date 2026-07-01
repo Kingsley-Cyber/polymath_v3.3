@@ -76,3 +76,11 @@ def test_attribution_scaffolding_does_not_mint_concepts():
     assert "says" not in keys2
     assert "cialdini" in keys2
     assert "persuasion" in keys2
+
+    # verbs-of-saying family (post-deploy probe caught 'describes' surviving)
+    keys3 = [group.key for group in concept_groups(
+        "what is the payoff of a game as Eric Berne describes it"
+    )]
+    assert "describes" not in keys3
+    assert "berne" in keys3
+    assert "payoff" in keys3
