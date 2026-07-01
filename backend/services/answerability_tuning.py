@@ -52,15 +52,15 @@ def relationship_gate() -> str:
 
 
 def rerank_evidence_support() -> bool:
-    """Cross-encoder rerank for evidence-plan support retrievals (default on).
+    """Cross-encoder rerank for evidence-plan support retrievals (default OFF).
 
-    Passage-level precision knob: lane selection scores are lexical, so
-    un-reranked support pools surface the right book but often the wrong
-    passage (live probe 2026-07-01: Le Guin doc-hit/passage-miss). Coverage
-    support retrievals are NOT governed by this — they stay un-reranked by
-    design (one chunk per facet; the parallel passes would contend on the
-    Metal reranker)."""
-    return bool(getattr(get_settings(), "RERANK_EVIDENCE_SUPPORT", True))
+    Passage-level precision knob, A/B validated 2026-07-01: ON makes the
+    Le Guin rhythm probe quote the actual passage instead of just landing in
+    the right book — but support rerank contends with the embedder on the
+    single Metal GPU and retrieval-phase p50 went ~12s -> ~31s. Opt in for
+    quality-first sessions via RERANK_EVIDENCE_SUPPORT=true. Coverage support
+    retrievals are never governed by this knob."""
+    return bool(getattr(get_settings(), "RERANK_EVIDENCE_SUPPORT", False))
 
 
 def relationship_min_distinct_docs() -> int:

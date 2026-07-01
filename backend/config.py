@@ -106,16 +106,19 @@ class Settings(BaseSettings):
         ),
     )
     RERANK_EVIDENCE_SUPPORT: bool = Field(
-        default=True,
+        default=False,
         description=(
             "Cross-encoder rerank for evidence-plan SUPPORT retrievals (the "
             "per-lane gap-fill passes). Lane selection is lexical "
             "(evidence_lane_match_score); reranking the support pool surfaces "
-            "the right PASSAGE within the right book (live probe 2026-07-01: "
-            "Le Guin doc-hit/passage-miss). Coverage support retrievals stay "
-            "un-reranked — they pick one chunk by facet fit and the parallel "
-            "passes would contend on the Metal reranker. Flip off to revert "
-            "without a redeploy."
+            "the right PASSAGE within the right book — A/B validated on the "
+            "Le Guin sentence-rhythm probe (2026-07-01): off = right book, "
+            "wrong passage; on = quotes the actual rhythm passage. Default "
+            "OFF: the same A/B measured retrieval-phase p50 ~12s -> ~31s, "
+            "because support rerank contends with the embedder on the single "
+            "Metal GPU (embed stage spiked to 8.6s). Turn on for "
+            "quality-first sessions; the durable passage-precision fix is "
+            "query-guided excerpts (roadmap B2), which costs CPU not GPU."
         ),
     )
     RELATIONSHIP_LANE_MIN_SOURCES: int = Field(
