@@ -151,6 +151,33 @@ class Settings(BaseSettings):
             "(refuse), and the floor for the relationship carve-out."
         ),
     )
+    ANSWERABILITY_CHUNK_GATE: Literal["off", "soft", "strict"] = Field(
+        default="off",
+        description=(
+            "Final-context per-chunk answerability filter. 'off' leaves the "
+            "selected evidence packet unchanged. 'soft' demotes/drops chunks "
+            "with no answer-bearing overlap when enough evidence remains. "
+            "'strict' also drops weak partial overlaps. Default off until A/B "
+            "evaluation proves it improves final evidence quality."
+        ),
+    )
+    ANSWERABILITY_CHUNK_GATE_MIN_KEEP: int = Field(
+        default=4,
+        ge=1,
+        le=20,
+        description=(
+            "Minimum final chunks retained when ANSWERABILITY_CHUNK_GATE is on. "
+            "Weak chunks may be demoted instead of dropped to honor this floor."
+        ),
+    )
+    ANSWERABILITY_CHUNK_GATE_STRICT_FLOOR: float = Field(
+        default=0.20,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Per-chunk answerability score below which strict mode drops a chunk."
+        ),
+    )
     # ── HyDE: opt-in, not on every query (it costs an extra LLM round-trip) ──
     HYDE_ENABLED: bool = Field(
         default=False,

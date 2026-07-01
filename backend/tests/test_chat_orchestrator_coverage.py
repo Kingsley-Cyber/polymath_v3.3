@@ -320,6 +320,125 @@ def test_chat_evidence_cleaner_strips_frontmatter():
     assert meta["cleaned_frontmatter"] == 1
 
 
+def test_final_context_answerability_gate_off_is_noop():
+    sources = [
+        _chunk(
+            "noise-1",
+            doc_id="appendix.md",
+            text="Appendix permissions, illustration credits, and page numbers.",
+        )
+    ]
+
+    gated, meta = chat_module._apply_final_context_answerability_gate(
+        sources,
+        query="How do personality frameworks relate to seduction tactics?",
+        mode="off",
+    )
+
+    assert [chunk.chunk_id for chunk in gated] == ["noise-1"]
+    assert meta["enabled"] is False
+    assert meta["dropped"] == 0
+
+
+def test_final_context_answerability_gate_soft_drops_non_answering_chunks():
+    query = "How do personality frameworks relate to seduction tactics?"
+    plan = chat_module.build_evidence_plan(query)
+    sources = [
+        _chunk(
+            "noise-1",
+            doc_id="appendix.md",
+            text="Appendix permissions, illustration credits, and page numbers.",
+        ),
+        _chunk(
+            "seduction-1",
+            doc_id="art-of-seduction.md",
+            text=(
+                "Seduction tactics create desire by reading vulnerability and "
+                "adopting a role such as the ideal lover."
+            ),
+        ),
+        _chunk(
+            "personality-1",
+            doc_id="four-tendencies.md",
+            text=(
+                "Personality frameworks such as the Big Five and the Four "
+                "Tendencies describe stable patterns in motivation."
+            ),
+        ),
+        _chunk(
+            "reserved-personality",
+            doc_id="handbook-personality.md",
+            text="Obligers respond to outer expectations more than inner expectations.",
+            metadata={"support_role": "evidence_plan_lane"},
+        ),
+    ]
+
+    gated, meta = chat_module._apply_final_context_answerability_gate(
+        sources,
+        query=query,
+        evidence_plan=plan,
+        mode="soft",
+        min_keep=2,
+    )
+
+    assert [chunk.chunk_id for chunk in gated] == [
+        "seduction-1",
+        "personality-1",
+        "reserved-personality",
+    ]
+    assert meta["enabled"] is True
+    assert meta["dropped"] == 1
+    assert meta["dropped_chunk_ids"] == ["noise-1"]
+    by_id = {chunk.chunk_id: chunk for chunk in gated}
+    assert (
+        by_id["reserved-personality"].metadata["answerability_chunk_gate"]["reason"]
+        == "reserved_support"
+    )
+
+
+def test_final_context_answerability_gate_demotes_to_honor_min_keep():
+    query = "How do personality frameworks relate to seduction tactics?"
+    sources = [
+        _chunk(
+            "noise-before",
+            doc_id="appendix-a.md",
+            text="Appendix permissions, illustration credits, and page numbers.",
+        ),
+        _chunk(
+            "seduction-1",
+            doc_id="art-of-seduction.md",
+            text="Seduction tactics create desire by reading vulnerability.",
+        ),
+        _chunk(
+            "noise-after",
+            doc_id="appendix-b.md",
+            text="Publication history and printing information.",
+        ),
+    ]
+
+    gated, meta = chat_module._apply_final_context_answerability_gate(
+        sources,
+        query=query,
+        mode="soft",
+        min_keep=3,
+    )
+
+    # Non-answering chunks survive only because the minimum context floor would
+    # otherwise be violated, and they move behind the answer-bearing chunk.
+    assert [chunk.chunk_id for chunk in gated] == [
+        "seduction-1",
+        "noise-before",
+        "noise-after",
+    ]
+    assert meta["dropped"] == 0
+    assert meta["demoted"] == 2
+    assert {
+        chunk.metadata["answerability_chunk_gate"]["status"]
+        for chunk in gated
+        if chunk.chunk_id.startswith("noise")
+    } == {"demoted_min_keep"}
+
+
 def test_compound_query_phrase_promotes_privacy_and_on_device_lanes():
     facets = chat_module._chat_coverage_facets_for_query(
         "How could privacy-preserving on-device AI help users reflect locally?"

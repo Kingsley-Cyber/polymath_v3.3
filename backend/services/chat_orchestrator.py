@@ -1890,6 +1890,272 @@ def _is_reserved_support_chunk(source: Any) -> bool:
     return str(metadata.get("support_role") or "") in _RESERVED_SUPPORT_ROLES
 
 
+def _answerability_chunk_text(source: SourceChunk) -> str:
+    """Body-focused text used by the final-context chunk gate.
+
+    This intentionally excludes doc_id/doc_name. A chunk from an on-topic book
+    still needs answer-bearing passage text, summary text, heading text, or
+    semantic facet text to survive the gate.
+    """
+
+    metadata = source.metadata if isinstance(source.metadata, dict) else {}
+    values: list[Any] = [
+        source.text,
+        source.summary,
+        " ".join(str(v) for v in (source.heading_path or [])),
+        metadata.get("title"),
+        metadata.get("section"),
+        " ".join(metadata_facet_terms(metadata)),
+    ]
+    return _chat_coverage_norm(" ".join(str(v) for v in values if v))
+
+
+def _answerability_contains(text: str, term: str) -> bool:
+    norm = _chat_coverage_norm(term)
+    if not norm:
+        return False
+    return f" {norm} " in f" {text} "
+
+
+def _answerability_terms_for_gate(query: str) -> list[str]:
+    terms = list(lexical_terms(query or ""))
+    normalized = f" {_chat_coverage_norm(query)} "
+    # In "the art of seduction", art is part of the title phrase, not a useful
+    # answer-bearing anchor. Keeping it makes unrelated "art" passages survive.
+    if " art of " in normalized:
+        terms = [term for term in terms if term != "art"]
+    return terms
+
+
+def _score_answerability_chunk(
+    source: SourceChunk,
+    *,
+    query: str,
+    evidence_plan: EvidencePlan | None = None,
+) -> tuple[float, dict[str, Any]]:
+    if _is_reserved_support_chunk(source):
+        return 1.0, {
+            "reason": "reserved_support",
+            "protected": True,
+            "matched_concepts": [],
+            "matched_lanes": [],
+            "matched_terms": [],
+        }
+
+    text = _answerability_chunk_text(source)
+    groups = concept_groups(query or "", max_groups=4)
+    terms = _answerability_terms_for_gate(query or "")
+    plan = evidence_plan if isinstance(evidence_plan, EvidencePlan) else None
+    lanes = list(plan.required_lanes) if plan and plan.active else []
+
+    if not groups and not terms and not lanes:
+        return 1.0, {
+            "reason": "no_query_anchors",
+            "protected": False,
+            "matched_concepts": [],
+            "matched_lanes": [],
+            "matched_terms": [],
+        }
+
+    metadata = source.metadata if isinstance(source.metadata, dict) else {}
+    grounding = (
+        metadata.get("query_grounding")
+        if isinstance(metadata.get("query_grounding"), dict)
+        else {}
+    )
+    grounded = {
+        _chat_coverage_norm(item)
+        for item in (grounding.get("matched") or [])
+        if str(item).strip()
+    }
+
+    matched_concepts: list[str] = []
+    for group in groups:
+        aliases = [group.key.replace("_", " "), *group.aliases]
+        if _chat_coverage_norm(group.key) in grounded or any(
+            _answerability_contains(text, alias) for alias in aliases
+        ):
+            matched_concepts.append(group.key)
+
+    matched_lanes: list[str] = []
+    for lane in lanes:
+        lane_terms = [
+            lane.name.replace("_", " "),
+            lane.concept_key.replace("_", " "),
+            *lane.aliases,
+            *lane.search_terms,
+        ]
+        if _chat_coverage_norm(lane.name) in grounded or any(
+            _answerability_contains(text, term) for term in lane_terms
+        ):
+            matched_lanes.append(lane.name)
+
+    matched_terms = [term for term in terms if _answerability_contains(text, term)]
+    lexical_score = len(matched_terms) / len(terms) if terms else 0.0
+    side_score = 1.0 if matched_concepts or matched_lanes else 0.0
+    score = max(side_score, lexical_score)
+    return score, {
+        "reason": "answer_bearing" if score > 0 else "no_answer_bearing_overlap",
+        "protected": False,
+        "matched_concepts": matched_concepts,
+        "matched_lanes": matched_lanes,
+        "matched_terms": matched_terms,
+        "lexical_coverage": round(lexical_score, 4),
+    }
+
+
+def _annotate_answerability_chunk_gate(
+    source: SourceChunk,
+    *,
+    score: float,
+    status: str,
+    detail: dict[str, Any],
+    mode: str,
+) -> SourceChunk:
+    data = source.model_dump()
+    metadata = dict(data.get("metadata") or {})
+    metadata["answerability_chunk_gate"] = {
+        "mode": mode,
+        "status": status,
+        "score": round(float(score or 0.0), 4),
+        "reason": detail.get("reason"),
+        "protected": bool(detail.get("protected")),
+        "matched_concepts": list(detail.get("matched_concepts") or [])[:6],
+        "matched_lanes": list(detail.get("matched_lanes") or [])[:6],
+        "matched_terms": list(detail.get("matched_terms") or [])[:10],
+        "lexical_coverage": detail.get("lexical_coverage", 0.0),
+    }
+    data["metadata"] = metadata
+    return SourceChunk(**data)
+
+
+def _apply_final_context_answerability_gate(
+    sources: list[SourceChunk],
+    *,
+    query: str,
+    evidence_plan: EvidencePlan | None = None,
+    mode: str | None = None,
+    min_keep: int | None = None,
+    strict_floor: float | None = None,
+) -> tuple[list[SourceChunk], dict[str, Any]]:
+    """Flag-gated per-chunk filter for the final prompt context.
+
+    This is softer than the answer/refuse gate: it only shapes which selected
+    chunks the LLM sees. Multi-side support chunks are protected, so the broad
+    decomposition layer cannot be undone by a late lexical pass.
+    """
+
+    active_mode = str(
+        mode
+        if mode is not None
+        else getattr(settings, "ANSWERABILITY_CHUNK_GATE", "off")
+        or "off"
+    ).lower()
+    if active_mode not in {"soft", "strict"}:
+        return list(sources or []), {
+            "enabled": False,
+            "mode": active_mode,
+            "input": len(sources or []),
+            "kept": len(sources or []),
+            "dropped": 0,
+            "demoted": 0,
+        }
+
+    floor = (
+        0.0
+        if active_mode == "soft"
+        else float(
+            strict_floor
+            if strict_floor is not None
+            else getattr(settings, "ANSWERABILITY_CHUNK_GATE_STRICT_FLOOR", 0.20)
+        )
+    )
+    keep_floor = max(
+        1,
+        int(
+            min_keep
+            if min_keep is not None
+            else getattr(settings, "ANSWERABILITY_CHUNK_GATE_MIN_KEEP", _CHAT_EVIDENCE_MIN_KEEP_AFTER_FILTER)
+        ),
+    )
+
+    strong: list[SourceChunk] = []
+    weak: list[SourceChunk] = []
+    dropped_candidates: list[SourceChunk] = []
+    score_rows: list[dict[str, Any]] = []
+    for source in sources or []:
+        score, detail = _score_answerability_chunk(
+            source,
+            query=query,
+            evidence_plan=evidence_plan,
+        )
+        protected = bool(detail.get("protected"))
+        passes = protected or (score > floor if active_mode == "soft" else score >= floor)
+        status = "kept" if passes else "drop_candidate"
+        annotated = _annotate_answerability_chunk_gate(
+            source,
+            score=score,
+            status=status,
+            detail=detail,
+            mode=active_mode,
+        )
+        score_rows.append(
+            {
+                "chunk_id": str(getattr(source, "chunk_id", "") or ""),
+                "doc_id": str(getattr(source, "doc_id", "") or ""),
+                "score": round(float(score or 0.0), 4),
+                "status": status,
+                "reason": detail.get("reason"),
+                "matched_concepts": list(detail.get("matched_concepts") or [])[:4],
+                "matched_lanes": list(detail.get("matched_lanes") or [])[:4],
+                "matched_terms": list(detail.get("matched_terms") or [])[:6],
+            }
+        )
+        if passes:
+            strong.append(annotated)
+        else:
+            weak.append(source)
+            dropped_candidates.append(annotated)
+
+    needed = max(0, keep_floor - len(strong))
+    recovered_raw = weak[:needed]
+    recovered: list[SourceChunk] = []
+    for source in recovered_raw:
+        score, detail = _score_answerability_chunk(
+            source,
+            query=query,
+            evidence_plan=evidence_plan,
+        )
+        recovered.append(
+            _annotate_answerability_chunk_gate(
+                source,
+                score=score,
+                status="demoted_min_keep",
+                detail=detail,
+                mode=active_mode,
+            )
+        )
+    kept = [*strong, *recovered]
+    dropped = dropped_candidates[needed:]
+    return kept, {
+        "enabled": True,
+        "mode": active_mode,
+        "input": len(sources or []),
+        "kept": len(kept),
+        "dropped": len(dropped),
+        "demoted": len(recovered),
+        "min_keep": keep_floor,
+        "floor": round(floor, 4),
+        "dropped_chunk_ids": [
+            str(getattr(source, "chunk_id", "") or "") for source in dropped
+        ],
+        "demoted_chunk_ids": [
+            str(getattr(source, "chunk_id", "") or "") for source in recovered
+        ],
+        "scores": score_rows[:12],
+    }
+
+
 def _cap_chunks_per_doc(
     sources: list[SourceChunk], cap: int = _CHAT_PER_DOC_CAP
 ) -> list[SourceChunk]:
@@ -6068,6 +6334,14 @@ class ChatOrchestrator:
             )
         else:
             sources = _cap_chunks_per_doc(sources)
+        retrieval_diagnostics = getattr(retrieval, "diagnostics", {}) or {}
+        sources, answerability_chunk_gate_meta = _apply_final_context_answerability_gate(
+            sources,
+            query=request.message,
+            evidence_plan=evidence_plan,
+        )
+        if answerability_chunk_gate_meta.get("enabled"):
+            retrieval_diagnostics["answerability_chunk_gate"] = answerability_chunk_gate_meta
         effective_tier_for_trace = getattr(
             retrieval.effective_tier,
             "value",
@@ -6087,7 +6361,8 @@ class ChatOrchestrator:
                 "duration_s": perf_counter() - rag_start,
                 "effective_tier": str(effective_tier_for_trace),
                 "chunks": len(sources or []),
-                "retrieval_diagnostics": getattr(retrieval, "diagnostics", {}),
+                "retrieval_diagnostics": retrieval_diagnostics,
+                "answerability_chunk_gate": answerability_chunk_gate_meta,
                 "coverage_detected_facets": coverage_meta.get("detected_facets", []),
                 "coverage_query_facet_breakdown": coverage_meta.get("query_facet_breakdown", []),
                 "coverage_selected_facets": coverage_meta.get("selected_facets", []),
@@ -6129,7 +6404,6 @@ class ChatOrchestrator:
                 "evidence_plan_duration_s": evidence_plan_meta.get("duration_s", 0.0),
             },
         )
-        retrieval_diagnostics = getattr(retrieval, "diagnostics", {}) or {}
         synthesis_lens_contract = _format_retrieval_tier_synthesis_contract(
             retrieval.effective_tier,
             retrieval_diagnostics,

@@ -247,6 +247,19 @@ def test_end_to_end_distribution_for_seduction_plus_personality():
     assert max(by_doc.values()) <= cap, by_doc
 
 
+def test_seduction_personality_prompt_stays_broadly_decomposed():
+    plan = build_evidence_plan(
+        "Which personality types are most vulnerable to the Art of Seduction tactics?"
+    )
+    lane_names = {lane.name for lane in plan.required_lanes}
+
+    assert plan.mode.startswith("multi_concept")
+    assert "seduction" in lane_names
+    assert "personality_framework" in lane_names
+    for lane in plan.required_lanes:
+        assert lane.min_sources >= 2
+
+
 def test_split_query_sides_generalizes_to_unseen_book_pair():
     # A query over books the alias table has NEVER seen must still split into two
     # source sides (the no-LLM generalization).
