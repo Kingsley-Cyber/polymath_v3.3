@@ -434,6 +434,109 @@ async def _embed_batch_api_pool(
     return [v for v in ordered if v is not None]
 
 
+class _QueryEmbedBatcher:
+    """Coalesce concurrent embed_query calls into one embed_batch request.
+
+    A chat turn embeds the main query plus every facet/lane support query,
+    and the coverage / evidence-plan passes launch theirs in PARALLEL
+    (asyncio.gather in chat_orchestrator). The local MLX sidecar processes
+    requests serially on Metal, so N parallel one-text requests serialize:
+    live probe (2026-07-01) measured embed= 0.13s -> 3.1s under that
+    contention. Cache-missing calls that arrive within _WINDOW seconds and
+    share an embedding backend are flushed as ONE batch request instead —
+    transparent to callers, and future call sites are covered automatically.
+
+    Single-event-loop by construction (asyncio, no threads), so plain dict
+    state needs no locking. Identical texts within a window share one
+    embedding row (in-flight dedup).
+    """
+
+    _WINDOW_SECONDS = 0.015
+    _MAX_BATCH = 16
+
+    def __init__(self) -> None:
+        # group_key -> {"config": ..., "items": {text: [futures]}}
+        self._pending: dict[str, dict[str, Any]] = {}
+
+    @staticmethod
+    def _group_key(config: dict[str, Any] | None) -> str:
+        if not config:
+            return "local"
+        return hash_key(
+            "group",
+            config.get("embed_mode") or "local",
+            config.get("embedding_model_id"),
+            config.get("embedding_dimension") or _DEFAULT_DIM,
+            config.get("embed_base_url"),
+            config.get("embed_api_key"),
+            config.get("embed_max_concurrent"),
+            config.get("modal_containers"),
+            repr(config.get("embedding_models")),
+        )
+
+    async def embed(self, text: str, config: dict[str, Any] | None) -> list[float]:
+        loop = asyncio.get_running_loop()
+        group_key = self._group_key(config)
+        batch = self._pending.get(group_key)
+        if batch is None:
+            batch = {"config": config, "items": {}}
+            self._pending[group_key] = batch
+            asyncio.create_task(self._flush_after_window(group_key))
+        future: asyncio.Future[list[float]] = loop.create_future()
+        batch["items"].setdefault(text, []).append(future)
+        if len(batch["items"]) >= self._MAX_BATCH:
+            await self._flush(group_key)
+        return await future
+
+    async def _flush_after_window(self, group_key: str) -> None:
+        await asyncio.sleep(self._WINDOW_SECONDS)
+        await self._flush(group_key)
+
+    async def _flush(self, group_key: str) -> None:
+        batch = self._pending.pop(group_key, None)
+        if not batch:
+            return  # already flushed by the max-batch fast path
+        texts = list(batch["items"].keys())
+        try:
+            vectors = await self._embed_texts(texts, batch["config"])
+            if len(vectors) != len(texts):
+                raise ValueError(
+                    f"embed batch returned {len(vectors)} vectors for {len(texts)} texts"
+                )
+            for text, vector in zip(texts, vectors):
+                for future in batch["items"][text]:
+                    if not future.done():
+                        future.set_result(vector)
+        except Exception as exc:
+            for futures in batch["items"].values():
+                for future in futures:
+                    if not future.done():
+                        future.set_exception(exc)
+
+    @staticmethod
+    async def _embed_texts(
+        texts: list[str], config: dict[str, Any] | None
+    ) -> list[list[float]]:
+        if config:
+            raw_key = config.get("embed_api_key")
+            api_pool = _plaintext_embedding_pool(config.get("embedding_models"))
+            return await embed_batch(
+                texts,
+                mode=config.get("embed_mode") or "local",
+                expected_dim=config.get("embedding_dimension") or _DEFAULT_DIM,
+                expected_model_id=config.get("embedding_model_id"),
+                base_url=config.get("embed_base_url"),
+                api_key=_decrypt_api_key(raw_key),
+                max_concurrent=config.get("embed_max_concurrent"),
+                modal_containers=config.get("modal_containers"),
+                api_pool=api_pool,
+            )
+        return await _embed_batch_local(texts, _DEFAULT_DIM)
+
+
+_QUERY_BATCHER = _QueryEmbedBatcher()
+
+
 async def embed_query(text: str, config: dict[str, Any] | None = None) -> list[float]:
     """
     Single query embedding.
@@ -441,6 +544,10 @@ async def embed_query(text: str, config: dict[str, Any] | None = None) -> list[f
     When a corpus config is supplied, use its frozen embedding provider so
     SiliconFlow/API-ingested corpora are queried in the same vector space.
     Callers without corpus context retain the local fallback path.
+
+    Cache-missing calls are coalesced by _QueryEmbedBatcher: concurrent
+    callers within a ~15ms window that share a backend go out as one batch
+    request (see the class docstring for the contention evidence).
     """
     if config:
         cache_key = hash_key(
@@ -457,24 +564,7 @@ async def embed_query(text: str, config: dict[str, Any] | None = None) -> list[f
     if cached is not None:
         return cached
 
-    if config:
-        raw_key = config.get("embed_api_key")
-        api_pool = _plaintext_embedding_pool(config.get("embedding_models"))
-        results = await embed_batch(
-            [text],
-            mode=config.get("embed_mode") or "local",
-            expected_dim=config.get("embedding_dimension") or _DEFAULT_DIM,
-            expected_model_id=config.get("embedding_model_id"),
-            base_url=config.get("embed_base_url"),
-            api_key=_decrypt_api_key(raw_key),
-            max_concurrent=config.get("embed_max_concurrent"),
-            modal_containers=config.get("modal_containers"),
-            api_pool=api_pool,
-        )
-        vector = results[0]
-    else:
-        results = await _embed_batch_local([text], _DEFAULT_DIM)
-        vector = results[0]
+    vector = await _QUERY_BATCHER.embed(text, config)
 
     _QUERY_EMBED_CACHE.set(cache_key, vector)
     return vector

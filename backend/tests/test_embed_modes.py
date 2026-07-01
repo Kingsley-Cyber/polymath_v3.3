@@ -313,3 +313,103 @@ async def test_legacy_mode_values_coerced_in_dispatcher():
         local_mock.return_value = [[0.0] * 1024]
         await embedder.embed_batch(["x"], mode="local_st", expected_dim=1024)
     local_mock.assert_awaited_once()
+
+
+# ── _QueryEmbedBatcher — in-flight coalescing (live-probe fix 2026-07-01) ───
+
+
+@pytest.mark.asyncio
+async def test_concurrent_embed_queries_coalesce_into_one_batch(monkeypatch):
+    """4 parallel cache-missing embed_query calls -> ONE _embed_batch_local call."""
+    import asyncio
+
+    calls: list[list[str]] = []
+
+    async def fake_local(texts, dim):
+        calls.append(list(texts))
+        return [[float(len(t))] * 4 for t in texts]
+
+    monkeypatch.setattr(embedder, "_embed_batch_local", fake_local)
+    monkeypatch.setattr(embedder, "_QUERY_EMBED_CACHE", embedder.TTLCache(maxsize=64, ttl_seconds=60))
+    monkeypatch.setattr(embedder, "_QUERY_BATCHER", embedder._QueryEmbedBatcher())
+
+    texts = [f"support query {i}" for i in range(4)]
+    vectors = await asyncio.gather(*[embedder.embed_query(t) for t in texts])
+
+    assert len(calls) == 1, f"expected one coalesced batch, got {len(calls)}: {calls}"
+    assert sorted(calls[0]) == sorted(texts)
+    for text, vector in zip(texts, vectors):
+        assert vector == [float(len(text))] * 4
+    # cache is populated per text — a repeat is a pure hit, no new batch
+    again = await embedder.embed_query(texts[0])
+    assert again == vectors[0]
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_batcher_dedupes_identical_inflight_texts(monkeypatch):
+    import asyncio
+
+    calls: list[list[str]] = []
+
+    async def fake_local(texts, dim):
+        calls.append(list(texts))
+        return [[1.0] * 4 for _ in texts]
+
+    monkeypatch.setattr(embedder, "_embed_batch_local", fake_local)
+    monkeypatch.setattr(embedder, "_QUERY_EMBED_CACHE", embedder.TTLCache(maxsize=64, ttl_seconds=60))
+    monkeypatch.setattr(embedder, "_QUERY_BATCHER", embedder._QueryEmbedBatcher())
+
+    vectors = await asyncio.gather(*[embedder.embed_query("same text") for _ in range(3)])
+
+    assert len(calls) == 1
+    assert calls[0] == ["same text"]  # one row, three callers share it
+    assert all(v == [1.0] * 4 for v in vectors)
+
+
+@pytest.mark.asyncio
+async def test_batcher_propagates_backend_failure_to_all_callers(monkeypatch):
+    import asyncio
+
+    async def fake_local(texts, dim):
+        raise RuntimeError("sidecar down")
+
+    monkeypatch.setattr(embedder, "_embed_batch_local", fake_local)
+    monkeypatch.setattr(embedder, "_QUERY_EMBED_CACHE", embedder.TTLCache(maxsize=64, ttl_seconds=60))
+    monkeypatch.setattr(embedder, "_QUERY_BATCHER", embedder._QueryEmbedBatcher())
+
+    results = await asyncio.gather(
+        *[embedder.embed_query(f"q{i}") for i in range(3)],
+        return_exceptions=True,
+    )
+    assert all(isinstance(r, RuntimeError) for r in results)
+
+
+@pytest.mark.asyncio
+async def test_batcher_separates_different_backend_groups(monkeypatch):
+    """Different embed configs must not share a batch (different vector spaces)."""
+    import asyncio
+
+    batch_calls: list[tuple[str, list[str]]] = []
+
+    async def fake_embed_batch(texts, mode="local", **kwargs):
+        batch_calls.append((kwargs.get("expected_model_id") or "none", list(texts)))
+        return [[2.0] * 4 for _ in texts]
+
+    async def fake_local(texts, dim):
+        batch_calls.append(("local", list(texts)))
+        return [[1.0] * 4 for _ in texts]
+
+    monkeypatch.setattr(embedder, "embed_batch", fake_embed_batch)
+    monkeypatch.setattr(embedder, "_embed_batch_local", fake_local)
+    monkeypatch.setattr(embedder, "_QUERY_EMBED_CACHE", embedder.TTLCache(maxsize=64, ttl_seconds=60))
+    monkeypatch.setattr(embedder, "_QUERY_BATCHER", embedder._QueryEmbedBatcher())
+
+    config = {"embed_mode": "api", "embedding_model_id": "model-a", "embedding_dimension": 4}
+    v1, v2 = await asyncio.gather(
+        embedder.embed_query("query one"),
+        embedder.embed_query("query two", config=config),
+    )
+    assert v1 == [1.0] * 4
+    assert v2 == [2.0] * 4
+    assert len(batch_calls) == 2  # one per backend group
