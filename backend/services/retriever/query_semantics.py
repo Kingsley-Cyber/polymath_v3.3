@@ -115,6 +115,13 @@ BASE_STOP_WORDS: frozenset[str] = frozenset(
         "libraries",
         "source",
         "sources",
+        # possessive pronouns + generic scope modifiers ("across MY ENTIRE
+        # library", "the OVERALL picture"). Function words with no answer-bearing
+        # signal — they must never survive as a concept/lane or a lexical anchor.
+        "my",
+        "our",
+        "entire",
+        "overall",
     }
 )
 
@@ -270,6 +277,24 @@ GENERIC_CONCEPT_TOKENS: frozenset[str] = frozenset(
         "topic",
         "topics",
         "spectrum",
+        # thematic-survey scaffolding — "what are the MAJOR RECURRING THEMES
+        # across my library". These describe the SHAPE of a broad overview
+        # request, never a substantive evidence anchor, so they must not
+        # decompose into standalone lanes (which the answerability gate would
+        # then enforce on stopword overlap, dropping otherwise-valid breadth).
+        "theme",
+        "themes",
+        "thematic",
+        "major",
+        "minor",
+        "recurring",
+        "overarching",
+        "commonality",
+        "commonalities",
+        "motif",
+        "motifs",
+        "throughline",
+        "throughlines",
         "type",
         "types",
         "vulnerabilities",
