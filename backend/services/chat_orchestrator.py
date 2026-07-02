@@ -78,6 +78,7 @@ from services.answerability_tuning import (
     rerank_evidence_support as _rerank_evidence_support,
     text_help_threshold as _answerability_text_help_threshold,
 )
+from services.retriever.excerpt import query_guided_excerpt as _query_guided_excerpt
 from services.retriever.query_semantics import (
     GENERIC_CONCEPT_TOKENS,
     concept_groups,
@@ -1241,7 +1242,9 @@ def _source_title(data: dict[str, Any]) -> str:
     return "source"
 
 
-def _source_excerpt(data: dict[str, Any], *, max_chars: int) -> str:
+def _source_excerpt(
+    data: dict[str, Any], *, max_chars: int, query: str | None = None
+) -> str:
     text = str(data.get("text") or data.get("summary") or "").strip()
     marker = "\nContent: "
     if marker in text:
@@ -1249,6 +1252,13 @@ def _source_excerpt(data: dict[str, Any], *, max_chars: int) -> str:
     text = " ".join(text.split())
     if len(text) <= max_chars:
         return text
+    if query:
+        # B2: fill the budget with the query's best sentence window instead
+        # of the chunk head — the final model should argue from the passage
+        # that matched, not from whatever the chunk opens with.
+        windowed = _query_guided_excerpt(text, query, max_chars=max_chars - 1)
+        if windowed:
+            return windowed.rstrip() + "..."
     return text[: max_chars - 1].rstrip() + "..."
 
 
@@ -1678,7 +1688,9 @@ def _format_evidence_packet_block(
             label = _source_title(data)
             score = data.get("score")
             kind = data.get("source_tier") or metadata.get("chunk_kind") or "corpus"
-            excerpt = _source_excerpt(data, max_chars=700)
+            excerpt = _source_excerpt(
+                data, max_chars=700, query=getattr(request, "message", None)
+            )
             lines.append(
                 f"{idx}. {label} | kind={kind} | score={score}\n"
                 f"   {excerpt or '(no excerpt)'}"
@@ -1701,7 +1713,9 @@ def _format_evidence_packet_block(
                 if isinstance(score, dict)
                 else None
             )
-            excerpt = _source_excerpt(data, max_chars=1100)
+            excerpt = _source_excerpt(
+                data, max_chars=1100, query=getattr(request, "message", None)
+            )
             lines.append(
                 f"{idx}. {label} | {url} | provider={provider or 'unknown'} "
                 f"| type={source_type} | mode={mode} | fetch={method}"

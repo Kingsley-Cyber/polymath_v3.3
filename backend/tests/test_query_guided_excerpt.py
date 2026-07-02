@@ -66,3 +66,17 @@ def test_handles_single_sentence_longer_than_budget():
     out = query_guided_excerpt(long_sentence, "prose rhythm", max_chars=300)
     assert out
     assert len(out) <= 300
+
+
+def test_source_excerpt_uses_query_window(monkeypatch):
+    # Site 2 (evidence packet): _source_excerpt must surface the query's
+    # passage, not the chunk head, when a query is provided.
+    from services.chat_orchestrator import _source_excerpt
+
+    data = {"text": FILLER + TARGET + FILLER}
+    with_query = _source_excerpt(
+        data, max_chars=300, query="prose rhythm and the sound of sentences"
+    )
+    without_query = _source_excerpt(data, max_chars=300)
+    assert "rhythm" in with_query
+    assert "rhythm" not in without_query  # head window is filler
