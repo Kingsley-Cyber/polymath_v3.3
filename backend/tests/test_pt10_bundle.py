@@ -263,7 +263,7 @@ def test_fast_profile_still_has_hyde_disabled():
 def test_thorough_profile_unchanged():
     presets = ChatOrchestrator._QUERY_PROFILE_PRESETS
     assert presets["thorough"]["hyde_enabled"] is True
-    assert presets["thorough"]["retrieval_k"] == 60
+    assert presets["thorough"]["retrieval_k"] == 160
     assert presets["thorough"]["rerank_top_n"] == 40
 
 

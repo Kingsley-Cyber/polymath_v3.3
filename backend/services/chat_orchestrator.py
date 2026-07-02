@@ -8519,7 +8519,10 @@ class ChatOrchestrator:
     # Preset defaults. Profile is a speed preset that bundles retrieval_k +
     # rerank + HyDE. Individual overrides on ModelOverrides take precedence.
     _QUERY_PROFILE_PRESETS: dict[str, dict] = {
-        "fast": {"retrieval_k": 10, "rerank_enabled": False, "hyde_enabled": False},
+        # v4 fetch ladder (owner-directed 2026-07-02): fetch depth is cheap
+        # (Qdrant ms-level); recall INTO the rank-fused pool is what feeds
+        # the cross-encoder. fast 10->70, balanced 40->100, thorough 60->160.
+        "fast": {"retrieval_k": 70, "rerank_enabled": False, "hyde_enabled": False},
         # Pt10c — balanced now enables HyDE by default. Cross-domain
         # queries on heterogeneous libraries (e.g. "how does generative
         # AI apply to urban planning?") were producing wrong-domain
@@ -8532,13 +8535,13 @@ class ChatOrchestrator:
         # v4 P1: pools widened toward the listwise reranker's 64-doc
         # capacity (one forward pass). balanced 24->32, thorough 32->40.
         "balanced": {
-            "retrieval_k": 40,
+            "retrieval_k": 100,
             "rerank_enabled": True,
             "hyde_enabled": True,
             "rerank_top_n": 32,
         },
         "thorough": {
-            "retrieval_k": 60,
+            "retrieval_k": 160,
             "rerank_enabled": True,
             "hyde_enabled": True,
             "rerank_top_n": 40,
