@@ -50,7 +50,7 @@ _RERANK_QUERY_GUIDED_EXCERPT = (
 # split-recovery path below still isolates a poisoned document on failure.
 _RERANK_HTTP_BATCH_SIZE = max(
     1,
-    int(os.environ.get("RERANKER_HTTP_BATCH_SIZE", "40") or 40),
+    int(os.environ.get("RERANKER_HTTP_BATCH_SIZE", "50") or 50),
 )
 _RERANK_PARTIAL_FAILURE_BUDGET = max(
     1,

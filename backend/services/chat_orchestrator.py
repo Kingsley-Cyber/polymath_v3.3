@@ -8534,17 +8534,19 @@ class ChatOrchestrator:
         # knowledge-graph application where quality > speed.
         # v4 P1: pools widened toward the listwise reranker's 64-doc
         # capacity (one forward pass). balanced 24->32, thorough 32->40.
+        # Owner budget shape: retrieve 70-200 -> rerank <=50 with the CE ->
+        # return 8-16. fp16 CE cost: 40 docs ~4.3s, 50 docs ~5.4s per pass.
         "balanced": {
             "retrieval_k": 100,
             "rerank_enabled": True,
             "hyde_enabled": True,
-            "rerank_top_n": 32,
+            "rerank_top_n": 40,
         },
         "thorough": {
             "retrieval_k": 160,
             "rerank_enabled": True,
             "hyde_enabled": True,
-            "rerank_top_n": 40,
+            "rerank_top_n": 50,
         },
     }
 

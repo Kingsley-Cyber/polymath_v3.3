@@ -250,7 +250,7 @@ def test_balanced_profile_has_hyde_enabled():
     presets = ChatOrchestrator._QUERY_PROFILE_PRESETS
     assert presets["balanced"]["hyde_enabled"] is True
     # v4 P1: pool widened toward the 64-doc listwise capacity.
-    assert presets["balanced"]["rerank_top_n"] == 32
+    assert presets["balanced"]["rerank_top_n"] == 40
 
 
 def test_fast_profile_still_has_hyde_disabled():
@@ -264,7 +264,7 @@ def test_thorough_profile_unchanged():
     presets = ChatOrchestrator._QUERY_PROFILE_PRESETS
     assert presets["thorough"]["hyde_enabled"] is True
     assert presets["thorough"]["retrieval_k"] == 160
-    assert presets["thorough"]["rerank_top_n"] == 40
+    assert presets["thorough"]["rerank_top_n"] == 50
 
 
 @pytest.mark.asyncio
@@ -281,8 +281,8 @@ async def test_profile_rerank_caps_resolve_from_presets():
         )
     )
 
-    assert balanced["rerank_top_n"] == 32
-    assert thorough["rerank_top_n"] == 40
+    assert balanced["rerank_top_n"] == 40
+    assert thorough["rerank_top_n"] == 50
 
 
 def test_hyde_skips_source_constrained_direct_support_queries():
