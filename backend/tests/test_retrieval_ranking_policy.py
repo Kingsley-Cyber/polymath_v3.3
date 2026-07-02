@@ -357,9 +357,16 @@ def test_query_grounding_promotes_complete_concept_coverage():
         score_scale="probability",
     )
 
-    assert grounded[0].chunk_id == "nlp-python"
-    assert grounded[-1].chunk_id == "sql-only"
-    assert grounded[0].metadata["query_grounding"]["matched"] == ["nlp", "python"]
+    # v4 P1 (scoring wall): grounding is ANNOTATION-ONLY. The cross-encoder
+    # ordering and scores stand; concept coverage is recorded per chunk for
+    # diagnostics/curation, never applied to score or order (task #12).
+    assert [c.chunk_id for c in grounded] == [c.chunk_id for c in ranked]
+    assert [float(c.score or 0.0) for c in grounded] == [
+        float(c.score or 0.0) for c in ranked
+    ]
+    nlp = next(c for c in grounded if c.chunk_id == "nlp-python")
+    assert nlp.metadata["query_grounding"]["matched"] == ["nlp", "python"]
+    assert nlp.metadata["query_grounding"]["annotation_only"] is True
 
 
 def test_query_grounding_expands_nlp_acronym_alias():
@@ -424,8 +431,10 @@ def test_query_grounding_ignores_correlation_as_standalone_concept():
         score_scale="probability",
     )
 
-    assert grounded[0].chunk_id == "semantic-match"
-    assert grounded[0].metadata["query_grounding"]["matched"] == [
+    # v4 P1: annotation-only — order preserved, coverage recorded.
+    assert [c.chunk_id for c in grounded] == ["stats-only", "semantic-match"]
+    semantic = next(c for c in grounded if c.chunk_id == "semantic-match")
+    assert semantic.metadata["query_grounding"]["matched"] == [
         "personality",
         "seduction",
     ]

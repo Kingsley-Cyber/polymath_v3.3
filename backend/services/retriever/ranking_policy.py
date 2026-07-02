@@ -355,56 +355,46 @@ def apply_query_grounding(
     if max_hits <= 0:
         return chunks
 
+    # Retrieval Layer v4 Phase 1 (scoring wall): grounding is ANNOTATION-ONLY.
+    # This function runs AFTER the cross-encoder; its old behavior re-sorted
+    # by concept-hit count and OVERWROTE chunk.score with grounded/metadata-
+    # adjusted values — the measured re-boost path that seated off-topic
+    # chunks carrying fabricated 0.88-0.92 scores above real evidence at
+    # 0.54 (seducer incident, task #12). Concept coverage is still computed
+    # and recorded per chunk for diagnostics and downstream curation
+    # constraints, but the cross-encoder's ordering and scores stand.
     total = len(groups)
     terms = tuple(lexical_terms(query))
     scale = (score_scale or "").lower()
-    grounded: list[tuple[SourceChunk, int, float]] = []
+    annotated: list[SourceChunk] = []
     for chunk, hits, matched in scored:
         copied = chunk.model_copy()
         original_score = float(copied.score or 0.0)
-        rarity = 0.0
-        for key in matched:
-            count = max(group_counts.get(key, 0), 1)
-            rarity += 1.0 / count
-        if total > 1:
-            rarity = min(1.0, rarity)
-        else:
-            rarity = 0.0
         grounded_score = _grounded_score(
             original_score,
             hits=hits,
             total=total,
             score_scale=score_scale,
         )
-        # C3 + B4 — metadata-aware nudge on top of the concept-coverage score.
         bounded = scale in {"probability", "cosine"} or 0.0 <= grounded_score <= 1.0
-        copied.score, signals = _apply_metadata_signals(
+        would_be_score, signals = _apply_metadata_signals(
             grounded_score, copied, terms, bounded=bounded
         )
         copied.metadata = dict(copied.metadata or {})
         copied.metadata["query_grounding"] = {
+            "annotation_only": True,
             "concept_count": total,
             "matched_count": hits,
             "matched": list(matched),
             "original_score": original_score,
-            "grounded_score": grounded_score,
-            "adjusted_score": copied.score,
+            # Diagnostic what-ifs — NEVER applied to chunk.score.
+            "grounded_score_diagnostic": grounded_score,
+            "adjusted_score_diagnostic": would_be_score,
             "tier": tier.value if hasattr(tier, "value") else str(tier),
             **signals,
         }
-        grounded.append((copied, hits, rarity))
-
-    grounded.sort(
-        key=lambda item: (
-            -item[1],
-            -item[2],
-            -float(item[0].score or 0.0),
-            item[0].parent_id or "",
-            item[0].doc_id or "",
-            item[0].chunk_id or "",
-        )
-    )
-    return [chunk for chunk, _, _ in grounded]
+        annotated.append(copied)
+    return annotated
 
 
 def _candidate_identity(chunk: SourceChunk) -> tuple[str, str, str]:

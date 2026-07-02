@@ -428,10 +428,14 @@ class LexicalRetriever:
                         provenance=[{"retriever": "qdrant_sparse"}],
                     )
                 )
-        # Normalize raw BM25/IDF scores to [0,1] for parity with the Mongo
-        # $text path, so the lexical lane is commensurable with dense cosine +
-        # graph scores at merge_pools (the cross-encoder remains final arbiter).
-        _normalize_scores_to_unit(all_hits)
+        # v4 P1 (scoring wall): pool-max normalization DELETED. It fabricated
+        # a ~1.0 top lexical score BY CONSTRUCTION regardless of absolute
+        # quality, and those scores survived fusion above real cross-encoder
+        # evidence (task #12: Flame 0.92 vs Art of Seduction 0.54). Lexical
+        # hits are returned in raw BM25 rank order; pool selection is now
+        # rank-fused per lane and the cross-encoder is the only score that
+        # orders the packet, so cross-lane score parity is a non-goal.
+        all_hits.sort(key=lambda c: (-float(c.score or 0.0), c.doc_id or "", c.chunk_id or ""))
         return all_hits
 
     async def _text_search(

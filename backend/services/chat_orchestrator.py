@@ -6586,6 +6586,68 @@ class ChatOrchestrator:
                     continue
                 _merged_ids.add(_cid)
                 evidence_sources.append(chunk)
+            # v4 P1 (scoring wall): support-pass picks were chosen by
+            # facet-fit / lane-match heuristics — NOT by the scoring
+            # authority — and historically carried heuristic scores into the
+            # packet. Every pass-added chunk now earns a cross-encoder score
+            # in ONE batched call; below-floor picks are dropped (coverage
+            # floor 0.22; evidence-plan side seats keep a relaxed 0.15 floor
+            # because their value is allocation, and the gate reports an
+            # absent side honestly when its pick dies). Reranker failure
+            # keeps the picks and marks the turn degraded.
+            _base_ids = {str(c.chunk_id or "") for c in retrieval_sources}
+            _support_added = [
+                c
+                for c in evidence_sources
+                if str(c.chunk_id or "") and str(c.chunk_id or "") not in _base_ids
+            ]
+            if _support_added:
+                from services.reranker import reranker_service as _rr
+
+                try:
+                    _scored = await _rr.rerank(request.message, _support_added)
+                    _score_by_id = {
+                        str(c.chunk_id or ""): float(c.score or 0.0)
+                        for c in _scored
+                    }
+                    _kept: list[SourceChunk] = []
+                    _dropped = 0
+                    for chunk in evidence_sources:
+                        _cid = str(chunk.chunk_id or "")
+                        if _cid not in _score_by_id:
+                            _kept.append(chunk)
+                            continue
+                        _p = _score_by_id[_cid]
+                        _is_side = (
+                            (chunk.metadata or {}).get("support_role")
+                            == "evidence_plan_lane"
+                        )
+                        _floor = 0.15 if _is_side else 0.22
+                        if _p < _floor:
+                            _dropped += 1
+                            continue
+                        chunk.score = _p
+                        _md = dict(chunk.metadata or {})
+                        _md["support_authority"] = {
+                            "cross_encoder_score": round(_p, 4),
+                            "floor": _floor,
+                        }
+                        chunk.metadata = _md
+                        _kept.append(chunk)
+                    if _dropped:
+                        logger.info(
+                            "support authority floor dropped %d/%d pass-added chunks",
+                            _dropped,
+                            len(_support_added),
+                        )
+                    evidence_sources = _kept
+                    evidence_plan_meta["support_authority_dropped"] = _dropped
+                except Exception as _exc:  # noqa: BLE001
+                    logger.warning(
+                        "support authority rerank failed — keeping picks, degraded: %s",
+                        _exc,
+                    )
+                    evidence_plan_meta["support_authority_degraded"] = True
             evidence_plan_meta["duration_s"] = perf_counter() - evidence_plan_start
             evidence_plan_meta["parallel_with_coverage"] = True
         if evidence_plan_meta.get("active"):
@@ -8467,17 +8529,19 @@ class ChatOrchestrator:
         # retrieves — which routes the search to the actually-relevant
         # documents. The ~1-2s latency cost is acceptable for a
         # knowledge-graph application where quality > speed.
+        # v4 P1: pools widened toward the listwise reranker's 64-doc
+        # capacity (one forward pass). balanced 24->32, thorough 32->40.
         "balanced": {
             "retrieval_k": 40,
             "rerank_enabled": True,
             "hyde_enabled": True,
-            "rerank_top_n": 24,
+            "rerank_top_n": 32,
         },
         "thorough": {
             "retrieval_k": 60,
             "rerank_enabled": True,
             "hyde_enabled": True,
-            "rerank_top_n": 32,
+            "rerank_top_n": 40,
         },
     }
 

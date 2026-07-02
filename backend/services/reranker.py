@@ -50,7 +50,7 @@ _RERANK_QUERY_GUIDED_EXCERPT = (
 # split-recovery path below still isolates a poisoned document on failure.
 _RERANK_HTTP_BATCH_SIZE = max(
     1,
-    int(os.environ.get("RERANKER_HTTP_BATCH_SIZE", "24") or 24),
+    int(os.environ.get("RERANKER_HTTP_BATCH_SIZE", "40") or 40),
 )
 _RERANK_PARTIAL_FAILURE_BUDGET = max(
     1,
@@ -207,6 +207,17 @@ class RerankerService:
 
         if not code_pool:
             return await self._rerank_pool(query, prose_pool)
+        # v4 P1 (scoring wall): the bypass exists for CODE-INTENT queries,
+        # where prose cross-encoders misorder code. On a PROSE-dominant pool
+        # the query is almost certainly prose, and bypassed code chunks kept
+        # fabricated (min-max normalized) ~1.0 scores that outranked real
+        # evidence (seducer incident: C++/Flutter chunks at 0.88-0.92 above
+        # Art of Seduction at 0.54). Pool composition is the deterministic,
+        # list-free intent signal: bypass only when code is >= half the pool;
+        # otherwise EVERYTHING goes through the cross-encoder and off-topic
+        # code dies on the one true scale.
+        if len(code_pool) < len(prose_pool):
+            return await self._rerank_pool(query, candidate_pool)
         if not prose_pool:
             # All-code pool — cross-encoder would systematically misorder.
             # Keep the pre-rerank order (vector + BM25 fusion already gave

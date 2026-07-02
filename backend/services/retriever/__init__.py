@@ -1503,6 +1503,59 @@ class RetrieverOrchestrator:
                 diagnostics=_diagnostics(status, len(chunks), chunks),
             )
 
+        # Retrieval Layer v4 Phase 1 (scoring wall): record each lane's OWN
+        # rank order before merging. Pool selection (which candidates the
+        # cross-encoder sees) is rank-fused across lanes — raw lane scores are
+        # NOT comparable (dense cosine vs sparse BM25 vs anchor heuristics)
+        # and score-sorting the merged pool let scale artifacts crowd out
+        # genuine evidence (task #12).
+        _LANE_RRF_WEIGHTS = {
+            "b": 1.0,       # dense/hybrid children — the semantic core
+            "anchor": 0.9,  # title-anchored recall
+            "lex": 0.8,     # sparse/lexical recall
+            "graph": 0.9,   # Mode A expansion (added later)
+            "a": 0.7,       # summaries
+            "fact": 0.9,    # fact-seed evidence
+        }
+        _lane_ranks: dict[str, dict[str, int]] = {}
+
+        def _record_lane_ranks(lane: str, chunks_in_lane: list[SourceChunk]) -> None:
+            table = _lane_ranks.setdefault(lane, {})
+            for _rank, _c in enumerate(chunks_in_lane):
+                _key = str(_c.chunk_id or _c.parent_id or "")
+                if _key and _key not in table:
+                    table[_key] = _rank
+
+        def _rrf_fused(chunk: SourceChunk) -> float:
+            _key = str(chunk.chunk_id or chunk.parent_id or "")
+            _pkey = str(chunk.parent_id or "")
+            fused = 0.0
+            for _lane, _table in _lane_ranks.items():
+                _rank = _table.get(_key)
+                if _rank is None and _pkey:
+                    _rank = _table.get(_pkey)
+                if _rank is not None:
+                    fused += _LANE_RRF_WEIGHTS.get(_lane, 0.8) / (60.0 + _rank)
+            return fused
+
+        def _rank_fused_order(chunks_to_sort: list[SourceChunk]) -> list[SourceChunk]:
+            """Deterministic rank-only ordering: RRF over lane ranks, with the
+            global total-order tie-break. Never reads chunk.score."""
+            return sorted(
+                chunks_to_sort,
+                key=lambda c: (
+                    -_rrf_fused(c),
+                    c.doc_id or "",
+                    c.chunk_id or "",
+                ),
+            )
+
+        _record_lane_ranks("fact", fact_seed_chunks)
+        _record_lane_ranks("a", a_results)
+        _record_lane_ranks("b", b_results)
+        _record_lane_ranks("lex", lexical_results)
+        _record_lane_ranks("anchor", document_anchor_results)
+
         # [4] Merge + dedupe by parent_id. Lexical and fact-seeded candidates
         # are deliberately merged before graph expansion, so exact
         # filename/heading hits and query-entity facts can seed Neo4j context
@@ -1596,6 +1649,7 @@ class RetrieverOrchestrator:
                 counts["graph_expansion_cap"] = effective_expansion_cap
                 counts["graph_expanded"] = len(expanded)
                 if expanded:
+                    _record_lane_ranks("graph", expanded)
                     merged = merge_pools(merged, expanded)
                     counts["merged_after_graph"] = len(merged)
             except asyncio.TimeoutError:
@@ -1673,9 +1727,7 @@ class RetrieverOrchestrator:
                 min(int(getattr(settings, "GRAPH_PREFILTER_POOL", 64)), 300),
             )
             if len(merged) > graph_prefilter_pool:
-                merged = sorted(merged, key=lambda x: x.score, reverse=True)[
-                    :graph_prefilter_pool
-                ]
+                merged = _rank_fused_order(merged)[:graph_prefilter_pool]
                 counts["graph_prefilter_pool"] = len(merged)
 
         effective_rerank_top_n = rerank_top_n
@@ -1695,11 +1747,14 @@ class RetrieverOrchestrator:
             if effective_rerank_top_n != rerank_top_n:
                 counts["rerank_top_n_graph_cap"] = effective_rerank_top_n
         if effective_rerank_top_n is not None and len(merged) > effective_rerank_top_n:
-            pre_sorted = sorted(merged, key=lambda x: x.score, reverse=True)
+            # v4 P1: pool selection is RANK-FUSED (RRF over per-lane ranks),
+            # never score-sorted — lane scores live on incomparable scales.
+            pre_sorted = _rank_fused_order(merged)
             merged = pre_sorted[:effective_rerank_top_n]
             counts["merged_after_rerank_cap"] = len(merged)
+            counts["pool_rank_fused"] = 1
             logger.info(
-                "rerank_top_n=%d cap applied (dropped %d candidates)",
+                "rerank_top_n=%d cap applied via rank fusion (dropped %d candidates)",
                 effective_rerank_top_n,
                 len(pre_sorted) - effective_rerank_top_n,
             )
@@ -1711,12 +1766,15 @@ class RetrieverOrchestrator:
 
         # [6] Rerank ONCE on full pool (Phase 18 — skippable per-request)
         if not rerank_enabled:
-            logger.info("Reranker skipped by override — score-sorting directly")
+            # v4 P1: the no-rerank path orders by rank fusion — scale-free and
+            # deterministic — never by mixed-scale raw scores.
+            logger.info("Reranker skipped by override — rank-fusion ordering")
             phase_started = perf_counter()
-            ranked = sorted(merged, key=lambda x: x.score, reverse=True)
+            ranked = _rank_fused_order(merged)
             reranker_diagnostics = {
                 "status": "skipped_by_request",
                 "fallback": True,
+                "ordering": "rrf_rank_fusion",
                 "candidate_count": len(merged),
                 "score_scale": settings.RERANKER_SCORE_SCALE,
             }
@@ -1727,11 +1785,15 @@ class RetrieverOrchestrator:
                 ranked = await reranker_service.rerank(rank_query, merged)
                 reranker_diagnostics = reranker_service.diagnostics()
             except Exception as exc:
-                logger.warning("Reranker failed, score-sorting: %s", exc)
-                ranked = sorted(merged, key=lambda x: x.score, reverse=True)
+                logger.warning(
+                    "Reranker failed — DEGRADED rank-fusion ordering: %s", exc
+                )
+                ranked = _rank_fused_order(merged)
                 reranker_diagnostics = {
-                    "status": "exception_score_sort",
+                    "status": "exception_rank_fusion",
                     "fallback": True,
+                    "degraded": True,
+                    "ordering": "rrf_rank_fusion",
                     "candidate_count": len(merged),
                     "score_scale": settings.RERANKER_SCORE_SCALE,
                     "error": str(exc),

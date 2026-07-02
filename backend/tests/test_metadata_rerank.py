@@ -128,11 +128,18 @@ def test_core_chunk_outranks_footnote_on_equal_coverage():
     ranked = apply_query_grounding(
         [note, body], query=query, tier=RetrievalTier.qdrant_mongo, score_scale="probability"
     )
-    # Same concept coverage, but the footnote is penalised → body ranks first.
-    assert ranked[0].chunk_id == "body"
+    # v4 P1 (scoring wall): grounding is annotation-only — the peripheral
+    # penalty is RECORDED as a diagnostic what-if, but the cross-encoder's
+    # order and scores stand (score mutation was the measured re-boost path,
+    # task #12). Peripheral demotion moves to curation constraints in P4.
+    assert [c.chunk_id for c in ranked] == ["note", "body"]
     body_out = next(c for c in ranked if c.chunk_id == "body")
     note_out = next(c for c in ranked if c.chunk_id == "note")
-    assert body_out.score > note_out.score
+    assert body_out.score == note_out.score == 0.6
+    assert (
+        note_out.metadata["query_grounding"]["adjusted_score_diagnostic"]
+        < body_out.metadata["query_grounding"]["adjusted_score_diagnostic"]
+    )
 
 
 # ── B2: query-guided parent excerpt ────────────────────────────────────────
