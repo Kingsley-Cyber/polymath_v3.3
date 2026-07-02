@@ -26,7 +26,13 @@ _DOC_ANCHOR_MAX_DOCS = 4
 _DOC_ANCHOR_THRESHOLD = 0.72
 # Doc-label table cache (speed campaign 2026-07-02). Keyed by corpus set;
 # entries are (labels, slim_doc) tuples. See _doc_label_table for why.
-_DOC_LABEL_CACHE = TTLCache(maxsize=32, ttl_seconds=120.0)
+# TTL raised 120s -> 900s after live evidence: real-world queries arrive
+# minutes apart, so a 2-minute TTL made nearly EVERY turn pay the cold
+# 486-doc fetch (observed anchor:9.64s cold vs 0.53s warm). Doc labels only
+# change at ingest; a new book being invisible to title-anchor recall for
+# up to 15 minutes is an acceptable trade until ingest-time invalidation
+# is wired.
+_DOC_LABEL_CACHE = TTLCache(maxsize=32, ttl_seconds=900.0)
 _CHUNK_QUERY_NOISE = frozenset(
     {
         "according",

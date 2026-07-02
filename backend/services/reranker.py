@@ -42,9 +42,15 @@ _RERANK_QUERY_GUIDED_EXCERPT = (
     os.environ.get("RERANKER_QUERY_GUIDED_EXCERPT", "true").strip().lower()
     not in {"0", "false", "no", "off"}
 )
+# Speed campaign (2026-07-02): jina-reranker-v3 is LISTWISE — it scores up
+# to 64 documents in one forward pass (independently benchmarked ~188ms/query;
+# our own sidecar probe measured 40 docs / 1.3s in ONE call). The old batch=8
+# split a 24-candidate pool into 3 sequential HTTP calls and tripled the
+# stage. 24 covers the rerank_top_n cap in one call; the recursive
+# split-recovery path below still isolates a poisoned document on failure.
 _RERANK_HTTP_BATCH_SIZE = max(
     1,
-    int(os.environ.get("RERANKER_HTTP_BATCH_SIZE", "8") or 8),
+    int(os.environ.get("RERANKER_HTTP_BATCH_SIZE", "24") or 24),
 )
 _RERANK_PARTIAL_FAILURE_BUDGET = max(
     1,
