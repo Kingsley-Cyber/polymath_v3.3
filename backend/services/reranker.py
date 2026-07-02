@@ -20,19 +20,27 @@ from typing import List
 import httpx
 from config import get_settings
 from models.schemas import SourceChunk
+from services.retriever.excerpt import query_guided_excerpt
 
 logger = logging.getLogger(__name__)
 
-# Per-document character cap for rerank requests. The reranker (llama.cpp
-# Qwen3-Reranker) processes each (query, doc) pair against its context window
-# and returns HTTP 500 — not a truncated score — when a pair overflows it.
-# Large parent chunks / summaries in the candidate pool blow past it. The
-# current llama.cpp Qwen3 sidecar hard-fails around a 512-token physical batch;
-# a real 3.8k-char chunk still produced 655 tokens at the old 2k-char cap.
-# A cross-encoder only needs the leading evidence window, so keep this tight.
+# Per-document character cap for rerank requests. The reranker sidecar
+# (MLX jina-v3 in the current deploy; llama.cpp Qwen3 historically) processes
+# each (query, doc) pair against its context window and returns HTTP 500 —
+# not a truncated score — when a pair overflows it. Large parent chunks /
+# summaries in the candidate pool blow past it, so each doc is capped tight.
 _RERANK_MAX_DOC_CHARS = max(
     256,
     int(os.environ.get("RERANKER_MAX_DOC_CHARS", "1000") or 1000),
+)
+# B2 (2026-07-01): WHICH window of the doc fills that cap matters. The old
+# leading-window cut meant the cross-encoder often never saw the passage that
+# matched the query (live probe: Le Guin doc-hit/passage-miss).
+# query_guided_excerpt picks the best sentence window instead — CPU-only.
+# Env kill-switch restores the leading window without a redeploy.
+_RERANK_QUERY_GUIDED_EXCERPT = (
+    os.environ.get("RERANKER_QUERY_GUIDED_EXCERPT", "true").strip().lower()
+    not in {"0", "false", "no", "off"}
 )
 _RERANK_HTTP_BATCH_SIZE = max(
     1,
@@ -465,8 +473,18 @@ class RerankerService:
         pool: List[SourceChunk],
     ) -> List[SourceChunk]:
         # Cap each doc so no single (query, doc) pair overflows the reranker's
-        # context and 500s the whole batch (the cross-encoder truncates anyway).
-        documents = [(c.text or "")[:_RERANK_MAX_DOC_CHARS] for c in pool]
+        # context and 500s the whole batch. B2: fill the cap with the QUERY'S
+        # best sentence window, not the chunk's leading chars — the passage
+        # that matched retrieval is what the cross-encoder must score.
+        if _RERANK_QUERY_GUIDED_EXCERPT:
+            documents = [
+                query_guided_excerpt(
+                    c.text or "", query, max_chars=_RERANK_MAX_DOC_CHARS
+                )
+                for c in pool
+            ]
+        else:
+            documents = [(c.text or "")[:_RERANK_MAX_DOC_CHARS] for c in pool]
         resp = await client.post(
             url,
             json={"query": query, "documents": documents},
