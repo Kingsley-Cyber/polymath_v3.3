@@ -64,6 +64,11 @@ _SYSTEM = (
     'Respond with ONLY a JSON object: {"summary": "...", "domain": '
     '"<one taxonomy value>", "topics": ["kw1", "kw2"]}.'
 )
+# NOTE (bridge retrieval B1, 2026-07-02): mechanisms extraction is done by
+# scripts/backfill_mechanisms.py over existing parent SUMMARIES (independent of
+# this live prompt, so the ingest pipeline is unchanged). Fold mechanisms into
+# this _SYSTEM prompt + SummaryResult only after the backfill validates the
+# vocabulary — see CONTINUITY/BRIDGE_RETRIEVAL_DESIGN.md.
 
 _USER = (
     "Summarize the following passage in {max_tokens} tokens or fewer, then "
