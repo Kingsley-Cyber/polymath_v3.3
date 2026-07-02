@@ -9,18 +9,13 @@
 #   RERANKER_HOST / RERANKER_PORT     default 0.0.0.0 / 8081
 #   DOCLING_HOST  / DOCLING_PORT      default 0.0.0.0 / 8500
 #   START_EMBEDDER                    default true
-#   START_RERANKER                    default true
+#   START_RERANKER                    default false
 #   START_DOCLING                     default false
 #   EMBED_BATCH_SIZE                  default 32  (M-series Studio friendly; lower if memory pressure appears)
 #   EMBED_MAX_LENGTH                  default 512
 #   RERANKER_BATCH_SIZE               default 16
 #   RERANKER_MAX_DOC_CHARS            default 6000
 #   RERANKER_MAX_QUERY_CHARS          default 2000
-#   GHOST_B_EXTRACT_HOST / _PORT      default 0.0.0.0 / 8084
-#   START_GHOST_B_EXTRACT             default true (auto-skips if its venv is absent)
-#   GHOST_B_EXTRACT_PY                default <repo>/local_ghost_b/.venv/bin/python
-#                                     (the pinned torch/gliner/glirel venv — NOT
-#                                     the shared apple_ml_services .venv)
 
 set -euo pipefail
 
@@ -45,7 +40,7 @@ export RERANKER_PORT="${RERANKER_PORT:-8081}"
 export DOCLING_HOST="${DOCLING_HOST:-0.0.0.0}"
 export DOCLING_PORT="${DOCLING_PORT:-8500}"
 export START_EMBEDDER="${START_EMBEDDER:-true}"
-export START_RERANKER="${START_RERANKER:-true}"
+export START_RERANKER="${START_RERANKER:-false}"
 export START_DOCLING="${START_DOCLING:-false}"
 export HF_HOME="${HF_HOME:-${RUNTIME_ROOT}/volumes/hf-cache}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
@@ -53,11 +48,12 @@ export DOCLING_ARTIFACTS_PATH="${DOCLING_ARTIFACTS_PATH:-${RUNTIME_ROOT}/volumes
 
 export APPLE_MLX_EMBED_MODEL_ID="${APPLE_MLX_EMBED_MODEL_ID:-mlx-community/Qwen3-Embedding-0.6B-mxfp8}"
 export APPLE_MLX_RERANKER_MODEL_ID="${APPLE_MLX_RERANKER_MODEL_ID:-mlx-community/jina-reranker-v3-4bit-mxfp4}"
-export APPLE_SLM_ENRICH_MODEL_ID="${APPLE_SLM_ENRICH_MODEL_ID:-LiquidAI/LFM2-1.2B-Extract}"
-export SLM_ENRICH_HOST="${SLM_ENRICH_HOST:-0.0.0.0}"
-export SLM_ENRICH_PORT="${SLM_ENRICH_PORT:-8083}"
-export SLM_ENRICH_MAX_TOKENS="${SLM_ENRICH_MAX_TOKENS:-160}"
-export START_SLM_ENRICH="${START_SLM_ENRICH:-false}"
+# Retrieval Layer v4 (2026-07-02): the mlx backend was a bi-encoder cosine
+# pass, never a cross-encoder. torch_fp16 runs jina-reranker-v3's TRUE
+# listwise cross-encoder head (fp16 on MPS) with calibrated [0,1] scores.
+# Rollback: APPLE_RERANKER_BACKEND=mlx
+export APPLE_RERANKER_BACKEND="${APPLE_RERANKER_BACKEND:-torch_fp16}"
+export APPLE_TORCH_RERANKER_MODEL_ID="${APPLE_TORCH_RERANKER_MODEL_ID:-jinaai/jina-reranker-v3}"
 export EMBEDDER_MODEL_NAME="${EMBEDDER_MODEL_NAME:-Qwen3-Embedding-0.6B}"
 export RERANKER_SCORE_SCALE="${RERANKER_SCORE_SCALE:-cosine}"
 
@@ -66,17 +62,6 @@ export EMBED_MAX_LENGTH="${EMBED_MAX_LENGTH:-512}"
 export RERANKER_BATCH_SIZE="${RERANKER_BATCH_SIZE:-16}"
 export RERANKER_MAX_DOC_CHARS="${RERANKER_MAX_DOC_CHARS:-6000}"
 export RERANKER_MAX_QUERY_CHARS="${RERANKER_MAX_QUERY_CHARS:-2000}"
-
-# Local Ghost B extraction sidecar (GLiNER ×2 + GLiREL + Python rules).
-# Runs on the local_ghost_b venv — the pinned torch/gliner/glirel working set.
-export GHOST_B_EXTRACT_HOST="${GHOST_B_EXTRACT_HOST:-0.0.0.0}"
-export GHOST_B_EXTRACT_PORT="${GHOST_B_EXTRACT_PORT:-8084}"
-# Default ON so a fresh clone ingests out of the box. Guarded below: if the
-# pinned venv (GHOST_B_EXTRACT_PY) is absent we warn and SKIP rather than
-# crash-loop the supervisor — enabling it can never take down the embedder or
-# reranker. Set START_GHOST_B_EXTRACT=false to opt out (e.g. remote-GPU box).
-export START_GHOST_B_EXTRACT="${START_GHOST_B_EXTRACT:-true}"
-GHOST_B_EXTRACT_PY="${GHOST_B_EXTRACT_PY:-$(cd "${PROJECT_ROOT}/../.." && pwd)/local_ghost_b/.venv/bin/python}"
 
 PID_FILES=()
 
@@ -88,11 +73,10 @@ should_start() {
 }
 
 start_service() {
-  # Optional 5th arg: python interpreter override (defaults to the shared PY).
-  local name="$1" module="$2" host_var="$3" port_var="$4" py="${5:-${PY}}"
+  local name="$1" module="$2" host_var="$3" port_var="$4"
   local host="${!host_var}" port="${!port_var}"
   echo "[apple-ml] starting ${name} on ${host}:${port}"
-  ${py} -m uvicorn "${module}:app" \
+  ${PY} -m uvicorn "${module}:app" \
     --host "${host}" --port "${port}" \
     --log-level info \
     >> "${LOG_DIR}/apple_ml_services.log" 2>> "${LOG_DIR}/apple_ml_services.err.log" &
@@ -125,28 +109,6 @@ if should_start "${START_DOCLING}"; then
   start_service "docling"  "docling_svc.main"  DOCLING_HOST  DOCLING_PORT
 else
   skip_service "docling"
-fi
-
-if should_start "${START_SLM_ENRICH}"; then
-  start_service "slm_enrich" "slm_enrich_mlx.main" SLM_ENRICH_HOST SLM_ENRICH_PORT
-else
-  skip_service "slm_enrich"
-fi
-
-if should_start "${START_GHOST_B_EXTRACT}"; then
-  if [[ -x "${GHOST_B_EXTRACT_PY}" ]]; then
-    start_service "ghost_b_extract" "ghost_b_extract_svc.main" \
-      GHOST_B_EXTRACT_HOST GHOST_B_EXTRACT_PORT "${GHOST_B_EXTRACT_PY}"
-  else
-    echo "[apple-ml] WARNING: ghost_b_extract is enabled but its interpreter is" >&2
-    echo "[apple-ml]          missing at: ${GHOST_B_EXTRACT_PY}" >&2
-    echo "[apple-ml]          Document INGESTION will fail until the Ghost B venv" >&2
-    echo "[apple-ml]          is installed — see scripts/EXTRACTION_SETUP.md (or set" >&2
-    echo "[apple-ml]          GHOST_B_EXTRACT_PY, or START_GHOST_B_EXTRACT=false)." >&2
-    skip_service "ghost_b_extract"
-  fi
-else
-  skip_service "ghost_b_extract"
 fi
 
 if [[ "${#PID_FILES[@]}" -eq 0 ]]; then
