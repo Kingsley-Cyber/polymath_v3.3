@@ -272,6 +272,25 @@ GENERIC_CONCEPT_TOKENS: frozenset[str] = frozenset(
         "make",
         "makes",
         "made",
+        # generic descriptors / stage markers / action verbs — live-probe
+        # regression (2026-07-02): "What is a COMMON trait that GREAT seducers
+        # EXECUTE and LEARN EARLY, MID..." minted lanes for common/great and a
+        # concept for mid — the lexical lane then matched LaTeX "\\mid" in a
+        # math textbook and "looks great" in a design book, dragging 5 junk
+        # docs into an Art of Seduction question. Adjectives of degree and
+        # bare action verbs describe the QUESTION's shape, not the evidence.
+        "common",
+        "great",
+        "mid",
+        "early",
+        "execute",
+        "executes",
+        "learn",
+        "learns",
+        "learned",
+        "show",
+        "shows",
+        "showed",
         # generic "apply/model" scaffolding — "how does the Big Five MODEL APPLY
         # to game design" must decompose to [personality_framework, game], not
         # sprout standalone "model" / "apply" lanes. Mirrors framework/method

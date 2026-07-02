@@ -61,12 +61,24 @@ def _regex_score(query: str, terms: list[str], row: dict[str, Any]) -> float:
     if not haystack:
         return 0.0
 
-    hits = sum(1 for term in terms if term in haystack)
+    # Word-boundary matching, NOT substring (live regression 2026-07-02: a
+    # seduction question's lexical terms scored a Flutter chapter 0.92
+    # because 'life' substring-matched "LIFEcycle", 'mid' matched "MIDdle" —
+    # cross-domain polysemy amplified by partial-word hits).
+    def _whole_word(term: str, hay: str) -> bool:
+        return bool(
+            re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", hay)
+        )
+
+    hits = sum(1 for term in terms if _whole_word(term, haystack))
     if hits <= 0:
         return 0.0
     coverage = hits / max(len(terms), 1)
     phrase = 0.18 if query.strip().lower() in haystack else 0.0
-    heading_boost = 0.12 if any(term in heading.lower() for term in terms) else 0.0
+    heading_lower = heading.lower()
+    heading_boost = (
+        0.12 if any(_whole_word(term, heading_lower) for term in terms) else 0.0
+    )
     return round(min(0.98, 0.45 + coverage * 0.35 + phrase + heading_boost), 4)
 
 

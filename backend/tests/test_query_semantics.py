@@ -84,3 +84,18 @@ def test_attribution_scaffolding_does_not_mint_concepts():
     assert "describes" not in keys3
     assert "berne" in keys3
     assert "payoff" in keys3
+
+
+def test_generic_descriptors_do_not_anchor_lanes():
+    # Live regression (2026-07-02): "a COMMON trait that GREAT seducers
+    # EXECUTE and LEARN EARLY, MID..." minted lanes for common/great and a
+    # 'mid' concept that lexically matched LaTeX "\\mid" in a math book,
+    # dragging 5 off-topic docs into an Art of Seduction question.
+    keys = [g.key for g in concept_groups(
+        "What is a common trait that great seducers execute and learn "
+        "early, mid, and change during their life. How do they show this"
+    )]
+    for junk in ("common", "great", "mid", "early", "execute", "learn", "show"):
+        assert junk not in keys, f"{junk} must not anchor a lane"
+    assert "seducers" in keys
+    assert "trait" in keys
