@@ -1232,20 +1232,70 @@ def _resolve_web_evidence_options(request: ChatRequest | None) -> dict[str, Any]
     }
 
 
+# Domain values that are real taxonomy labels (Ghost A) vs. the cluster/outlier
+# placeholders some parents carry — only real labels are shown to the model,
+# so "Domain: Cluster 3" never leaks into evidence. Deterministic, list-free
+# test: a taxonomy label is lowercase snake/alpha and not a cluster marker.
+def _is_taxonomy_domain(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    if not text or text in {"other", "outliers", "unknown", "null", "none"}:
+        return False
+    if text.startswith("cluster"):
+        return False
+    return True
+
+
+def _clean_source_label(raw: str) -> str:
+    """Human-friendly source label from a filename/title — never an ID.
+
+    Strips the .md/.pdf/.epub extension and the common Anna's-Archive /
+    libgen provenance tails so the model sees "The Art of Seduction" not
+    "The Art of Seduction -- Robert Greene -- 2005 -- Anna's Archive.md".
+    """
+    text = str(raw or "").strip()
+    for ext in (".md", ".pdf", ".epub", ".txt", ".html"):
+        if text.lower().endswith(ext):
+            text = text[: -len(ext)]
+            break
+    # Provenance tail: "… -- Author -- Year -- Anna's Archive" / "… libgen.li"
+    for sep in (" -- ", "{", "(z-lib", "libgen", "Anna’s Archive", "Anna's Archive"):
+        idx = text.find(sep)
+        if idx > 12:  # keep at least a plausible title before cutting
+            text = text[:idx]
+    return text.strip(" -_.") or "Untitled source"
+
+
+def _source_section_label(data: dict[str, Any]) -> str:
+    """Human-readable section from heading_path — the last 2 non-empty
+    segments (e.g. 'Chapter 3 › The Charmer'). Document structure the model
+    otherwise never sees. Empty string when no heading is available."""
+    heading = data.get("heading_path")
+    if not heading:
+        meta = _source_metadata(data)
+        heading = meta.get("heading_path")
+    if not isinstance(heading, (list, tuple)):
+        return ""
+    segments = [str(h).strip() for h in heading if str(h or "").strip()]
+    if not segments:
+        return ""
+    return " › ".join(segments[-2:])
+
+
 def _source_title(data: dict[str, Any]) -> str:
+    """Human-facing source label. NEVER falls back to an internal doc_id /
+    chunk_id (that leaked DB identifiers into model input and citations);
+    an unnamed source is labeled generically instead."""
     metadata = _source_metadata(data)
     for value in (
         data.get("doc_name"),
         metadata.get("title"),
         metadata.get("filename"),
         metadata.get("url"),
-        data.get("doc_id"),
-        data.get("chunk_id"),
     ):
         text = str(value or "").strip()
         if text:
-            return text
-    return "source"
+            return _clean_source_label(text)
+    return "Untitled source"
 
 
 def _source_excerpt(
@@ -1693,13 +1743,32 @@ def _format_evidence_packet_block(
             metadata = _source_metadata(data)
             label = _source_title(data)
             score = data.get("score")
-            kind = data.get("source_tier") or metadata.get("chunk_kind") or "corpus"
             excerpt = _source_excerpt(
                 data, max_chars=700, query=getattr(request, "message", None)
             )
+            # Metadata prefix (M1): surface the provenance the model needs to
+            # reason about source discipline and structure — Title, Section,
+            # Domain, semantic/structural Kind. All fields are already on the
+            # hydrated SourceChunk (domain + heading_path via parent lookup);
+            # internal IDs, hashes, paths, and token counts are deliberately
+            # NOT included. Domain shown only when it is a real taxonomy label.
+            prefix_bits: list[str] = [f"{idx}. {label}"]
+            section = _source_section_label(data)
+            if section:
+                prefix_bits.append(f"§ {section}")
+            domain = data.get("domain") or metadata.get("domain")
+            if _is_taxonomy_domain(domain):
+                prefix_bits.append(f"domain={str(domain).strip()}")
+            kind = (
+                metadata.get("semantic_chunk_type")
+                or data.get("chunk_kind")
+                or metadata.get("chunk_kind")
+                or "body"
+            )
+            prefix_bits.append(f"kind={kind}")
+            prefix_bits.append(f"score={score}")
             lines.append(
-                f"{idx}. {label} | kind={kind} | score={score}\n"
-                f"   {excerpt or '(no excerpt)'}"
+                " | ".join(prefix_bits) + f"\n   {excerpt or '(no excerpt)'}"
             )
 
     if web_selected:

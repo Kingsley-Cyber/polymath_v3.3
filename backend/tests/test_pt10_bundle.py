@@ -794,7 +794,7 @@ def test_retrieval_nuance_digest_surfaces_repeated_context():
 
     assert "natural language" in digest["high_frequency_context"]
     assert "language models" in digest["high_frequency_context"]
-    assert digest["recurring_documents"][0]["name"] == "Computational Linguistics Handbook.md"
+    assert digest["recurring_documents"][0]["name"] == "Computational Linguistics Handbook"  # M1: .md extension stripped
     assert contract is not None
     assert "<retrieval_nuance_digest>" in contract
     # Salient terms are surfaced to the model as a hint...
