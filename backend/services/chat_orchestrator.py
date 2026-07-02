@@ -111,10 +111,16 @@ _DEFAULT_EVIDENCE_MAX_SOURCES = 9
 # it to an empty string; even 25s clipped slower models. This is an opt-in,
 # latency-tolerant quality step, so give it generous headroom. For lower
 # latency, point the HyDE route at a fast JSON-reliable instruct model.
-_EVIDENCE_LLM_DECOMPOSE_TIMEOUT = 40.0
+_EVIDENCE_LLM_DECOMPOSE_TIMEOUT = 15.0
 # Thinking models occasionally return empty content; retry a bounded number of
 # times before falling back to the deterministic plan.
-_EVIDENCE_LLM_DECOMPOSE_ATTEMPTS = 3
+_EVIDENCE_LLM_DECOMPOSE_ATTEMPTS = 2
+# Total wall budget for the decomposition step. The racers run CONCURRENTLY
+# and the step overlaps the main retrieval (launched as a background task,
+# awaited only before the evidence-plan pass), so this deadline is nearly
+# free — it exists to cap the tail (observed 26s turns when the old
+# sequential 3x40s retry budget met a slow thinking model).
+_EVIDENCE_LLM_DECOMPOSE_DEADLINE = 10.0
 _CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS = 4
 _CHAT_COVERAGE_THRESHOLD = 4
 _CHAT_COVERAGE_WEAK_THRESHOLD = 2
@@ -6324,7 +6330,7 @@ class ChatOrchestrator:
             else None
         )
         resolved_mode = resolve_search_mode(requested_mode, request.message)
-        evidence_plan = await self._resolve_evidence_plan(
+        evidence_plan, evidence_plan_llm_task = await self._resolve_evidence_plan(
             request,
             user_id=user_id,
             llm_decompose=bool(profile_cfg.get("evidence_plan_llm_decompose")),
@@ -6451,6 +6457,8 @@ class ChatOrchestrator:
             and str(resolved_mode or "").lower() != "global"
         )
         if _retrieval_fast_path:
+            if evidence_plan_llm_task is not None:
+                evidence_plan_llm_task.cancel()
             # Don't leak the concurrently-started coverage-facet prefetch.
             if coverage_facets_task is not None:
                 try:
@@ -6487,6 +6495,17 @@ class ChatOrchestrator:
             # _CHAT_COVERAGE_MAX_CONCURRENCY — without it the parallel passes
             # would double Metal/event-loop pressure and re-create the
             # uniform-stall regime the funnel_detail probes measured.
+            # Adopt the LLM-refined plan if its background racer finished in
+            # time (it overlapped the main retrieval; internally bounded by
+            # _EVIDENCE_LLM_DECOMPOSE_DEADLINE).
+            if evidence_plan_llm_task is not None:
+                try:
+                    refined_plan = await evidence_plan_llm_task
+                except (asyncio.CancelledError, Exception) as exc:  # noqa: BLE001
+                    logger.debug("evidence-plan LLM refinement dropped: %s", exc)
+                    refined_plan = None
+                if refined_plan is not None:
+                    evidence_plan = refined_plan
             shared_support_semaphore = asyncio.Semaphore(
                 _CHAT_COVERAGE_MAX_CONCURRENCY
             )
@@ -8856,24 +8875,26 @@ class ChatOrchestrator:
             "splitting the question into its 2-4 distinct evidence topics, each "
             "with 3-6 search terms.\n\nQuestion: " + str(query or "")
         )
-        # Thinking-capable HyDE models (e.g. minimax) are high-variance: the same
-        # prompt occasionally returns empty content even with an ample token and
-        # time budget. A bounded retry turns a ~70%-reliable model into a
-        # dependable decomposer without unbounded latency.
-        for attempt in range(_EVIDENCE_LLM_DECOMPOSE_ATTEMPTS):
+        # Thinking-capable HyDE models (e.g. minimax) are high-variance: the
+        # same prompt occasionally returns empty content even with an ample
+        # budget. RACE the attempts concurrently (ElevenLabs pattern) — first
+        # valid decomposition wins — under one hard deadline. The old shape
+        # (3 SEQUENTIAL retries x 40s timeout) budgeted up to 120s inside the
+        # retrieval block and produced observed 26s turns.
+        async def _one_attempt(attempt: int) -> list[dict]:
             try:
                 reply = await llm_service.complete_sync(
                     messages=[{"role": "user", "content": prompt}],
                     model=model,
-                    temperature=0.0,
+                    # Identical temp-0 racers can collapse to the same failure;
+                    # a slightly warmed second racer decorrelates them.
+                    temperature=0.0 if attempt == 0 else 0.2,
                     # At 300 tokens a thinking model spends the budget reasoning
                     # and the visible content comes back EMPTY; 800 fits both.
                     max_tokens=800,
                     api_base=route.get("api_base"),
                     api_key=route.get("api_key"),
                     extra_params=route.get("extra_params") or None,
-                    # A JSON decomposition needs far more than HyDE's ~2-sentence
-                    # budget; HYDE_TIMEOUT_SECONDS (8s) silently truncates to "".
                     timeout=_EVIDENCE_LLM_DECOMPOSE_TIMEOUT,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -8882,10 +8903,31 @@ class ChatOrchestrator:
                     attempt,
                     exc,
                 )
-                continue
+                return []
             sides = parse_llm_sides(reply)
-            if len(sides) >= 2:
-                return sides
+            return sides if len(sides) >= 2 else []
+
+        tasks = [
+            asyncio.create_task(_one_attempt(attempt))
+            for attempt in range(_EVIDENCE_LLM_DECOMPOSE_ATTEMPTS)
+        ]
+        try:
+            for completed in asyncio.as_completed(
+                tasks, timeout=_EVIDENCE_LLM_DECOMPOSE_DEADLINE
+            ):
+                sides = await completed
+                if sides:
+                    return sides
+        except (asyncio.TimeoutError, TimeoutError):
+            logger.info(
+                "evidence-plan LLM decomposition hit the %.0fs deadline — "
+                "deterministic plan stands",
+                _EVIDENCE_LLM_DECOMPOSE_DEADLINE,
+            )
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
         return []
 
     async def _resolve_evidence_plan(
@@ -8898,8 +8940,13 @@ class ChatOrchestrator:
         fallback_api_base: str | None = None,
         fallback_api_key: str | None = None,
         fallback_extra: dict | None = None,
-    ) -> EvidencePlan:
+    ) -> tuple[EvidencePlan, "asyncio.Task[EvidencePlan | None] | None"]:
         """Build the evidence plan, generalizing beyond the curated concepts (E).
+
+        Returns ``(plan, llm_refinement_task)``. The task is non-None only
+        when the LLM decomposer is enabled AND the deterministic plan is
+        weak — the caller overlaps it with the main retrieval and awaits it
+        just before the evidence-plan pass.
 
         1. Deterministic plan (curated concepts + token lanes).
         2. If not already multi-side, try the no-LLM heuristic side split
@@ -8919,26 +8966,36 @@ class ChatOrchestrator:
             not is_curated_concept(lane.concept_key) for lane in plan.required_lanes
         )
         if len(plan.required_lanes) >= 2 and not weak:
-            return plan
+            return plan, None
 
         heuristic_sides = split_query_sides(query)
         if len(heuristic_sides) >= 2:
-            return build_evidence_plan_from_sides(query, heuristic_sides)
+            return build_evidence_plan_from_sides(query, heuristic_sides), None
 
         if llm_decompose:
-            route = await self._resolve_hyde_route(
-                request,
-                user_id=user_id,
-                fallback_model=fallback_model,
-                fallback_api_base=fallback_api_base,
-                fallback_api_key=fallback_api_key,
-                fallback_extra=fallback_extra,
-            )
-            sides = await self._llm_decompose_sides(query, route=route)
-            if len(sides) >= 2:
-                return build_evidence_plan_from_sides(query, sides)
+            # Speed campaign (2026-07-02): do NOT await the LLM here. The
+            # refined plan is consumed only by the evidence-plan pass, which
+            # runs AFTER the main retrieval — so the decomposition runs as a
+            # background task that hides behind ~5-8s of retrieval work. The
+            # caller awaits the task (deadline-bounded) right before the pass
+            # and keeps the deterministic plan when the LLM loses the race.
+            async def _refine() -> EvidencePlan | None:
+                route = await self._resolve_hyde_route(
+                    request,
+                    user_id=user_id,
+                    fallback_model=fallback_model,
+                    fallback_api_base=fallback_api_base,
+                    fallback_api_key=fallback_api_key,
+                    fallback_extra=fallback_extra,
+                )
+                sides = await self._llm_decompose_sides(query, route=route)
+                if len(sides) >= 2:
+                    return build_evidence_plan_from_sides(query, sides)
+                return None
 
-        return plan
+            return plan, asyncio.create_task(_refine())
+
+        return plan, None
 
     def _resolve_reasoning(
         self, request: ChatRequest
