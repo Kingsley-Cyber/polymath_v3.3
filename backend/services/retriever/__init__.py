@@ -731,6 +731,7 @@ class RetrieverOrchestrator:
                     kwargs.get("final_top_k"),
                     kwargs.get("fact_seed_limit"),
                     kwargs.get("search_mode"),
+                    bool(kwargs.get("support_profile", False)),
                 )
             except Exception:
                 key = None
@@ -778,6 +779,13 @@ class RetrieverOrchestrator:
         # The caller resolves "auto" to local|global before this point
         # (see services/retriever/search_mode.py:resolve_search_mode).
         search_mode: str = "local",
+        # Speed campaign (2026-07-02) — lightweight profile for gap-fill
+        # SUPPORT retrievals (coverage facets / evidence-plan lanes). They
+        # select by facet-fit / lane-match scoring over chunk TEXT, so the
+        # summary funnel (A) and the document-title anchor lane add wall
+        # time (anchor measured 1.7-4.2s per support) without changing the
+        # pick. Children (Funnel B) + lexical only.
+        support_profile: bool = False,
     ) -> RetrievalResult:
         """
         Execute the full retrieval pipeline.
@@ -1289,6 +1297,13 @@ class RetrieverOrchestrator:
             effective_tier,
             retrieval_k=single_limit,
         )
+        if support_profile:
+            # Gap-fill supports: children + lexical only (see param doc).
+            document_anchor_limit = 0
+            funnel_limits = FunnelLimits(
+                child_top_k=funnel_limits.child_top_k,
+                summary_top_k=0,
+            )
 
         # [3] Parallel Funnel A + B (+ lexical for hybrid/graph tiers)
         multi = corpus_ids is not None and len(corpus_ids) > 1
@@ -1326,7 +1341,11 @@ class RetrieverOrchestrator:
                 "fair_mode": retrieval_intent.need != QueryNeed.BROAD,
                 "query_text": rank_query,
             }
-            a_task = funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs)
+            a_task = (
+                funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs)
+                if funnel_limits.summary_top_k > 0
+                else asyncio.sleep(0, result=[])
+            )
             lexical_task = (
                 lexical_retriever.search(
                     rank_query,
@@ -1377,7 +1396,12 @@ class RetrieverOrchestrator:
             # Same partial-failure safety as the multi-corpus branch above.
             raw_a, raw_b, raw_lex, raw_doc_anchor = await asyncio.gather(
                 _timed_funnel(
-                    "a", funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs)
+                    "a",
+                    (
+                        funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs)
+                        if funnel_limits.summary_top_k > 0
+                        else asyncio.sleep(0, result=[])
+                    ),
                 ),
                 _timed_funnel(
                     "b",

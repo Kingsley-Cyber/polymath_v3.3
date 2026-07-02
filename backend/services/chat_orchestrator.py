@@ -3387,6 +3387,7 @@ async def _enforce_chat_query_coverage(
     source_cap: int | None = None,
     search_mode: str,
     precomputed_facets: list[dict[str, Any]] | None = None,
+    support_semaphore: "asyncio.Semaphore | None" = None,
 ) -> tuple[list[SourceChunk], dict[str, Any]]:
     """Add missing query-facet evidence using the same chat retrieval tier.
 
@@ -3495,7 +3496,9 @@ async def _enforce_chat_query_coverage(
     # same BASE snapshot of already-chosen chunks/docs; cross-facet de-dup is
     # re-applied in `missing` order after the gather so the final selection
     # matches the old serial behavior. A semaphore bounds the fan-out.
-    coverage_semaphore = asyncio.Semaphore(_CHAT_COVERAGE_MAX_CONCURRENCY)
+    coverage_semaphore = support_semaphore or asyncio.Semaphore(
+        _CHAT_COVERAGE_MAX_CONCURRENCY
+    )
 
     # Coverage support retrievals fill per-facet TEXT gaps; they do NOT need
     # graph expansion (the relational context comes from the MAIN graph
@@ -3551,6 +3554,7 @@ async def _enforce_chat_query_coverage(
                         # distinct-doc cap, and the MAIN answer retrieval still
                         # reranks fully.
                         rerank_enabled=False,
+                        support_profile=True,
                         ranking_query=support_query,
                         top_k_summary=top_k_summary,
                         rerank_top_n=max(12, min(int(rerank_top_n or 24), 32)),
@@ -4122,6 +4126,7 @@ async def _enforce_evidence_plan_lanes(
     fact_seed_limit: int | None,
     final_top_k: int | None,
     source_cap: int | None = None,
+    support_semaphore: "asyncio.Semaphore | None" = None,
 ) -> tuple[list[SourceChunk], dict[str, Any]]:
     base_sources = list(sources or [])
     meta: dict[str, Any] = {
@@ -4169,7 +4174,9 @@ async def _enforce_evidence_plan_lanes(
         if retrieval_tier == RetrievalTier.qdrant_mongo_graph
         else retrieval_tier
     )
-    evidence_semaphore = asyncio.Semaphore(_CHAT_COVERAGE_MAX_CONCURRENCY)
+    evidence_semaphore = support_semaphore or asyncio.Semaphore(
+        _CHAT_COVERAGE_MAX_CONCURRENCY
+    )
 
     async def _cover_one_lane(
         lane: EvidenceLane,
@@ -4248,6 +4255,7 @@ async def _enforce_evidence_plan_lanes(
                             else max(24, min(int(retrieval_k or 40), 56))
                         ),
                         rerank_enabled=support_rerank,
+                        support_profile=True,
                         ranking_query=support_query,
                         top_k_summary=top_k_summary,
                         rerank_top_n=max(12, min(int(rerank_top_n or 24), 32)),
@@ -6469,27 +6477,66 @@ class ChatOrchestrator:
                     precomputed_coverage_facets = await coverage_facets_task
                 except Exception as exc:
                     logger.debug("coverage facet prefetch failed; detecting inline: %s", exc)
-            coverage_sources, coverage_meta = await _enforce_chat_query_coverage(
-                original_query=request.message,
-                retrieval_query=retrieval_query,
-                sources=retrieval_sources,
-                corpus_ids=request.corpus_ids,
-                retrieval_tier=getattr(retrieval, "effective_tier", request.retrieval_tier),
-                collections=request.collections,
-                retrieval_k=profile_k,
-                rerank_enabled=profile_rerank,
-                top_k_summary=profile_cfg["top_k_summary"],
-                rerank_top_n=profile_cfg["rerank_top_n"],
-                similarity_threshold=profile_cfg["similarity_threshold"],
-                neo4j_expansion_cap=profile_cfg["neo4j_expansion_cap"],
-                max_corpora_per_query=profile_cfg["max_corpora_per_query"],
-                fact_seed_limit=profile_cfg["fact_seed_limit"],
-                final_top_k=profile_cfg["final_top_k"],
-                source_cap=profile_cfg.get("source_cap"),
-                search_mode=resolved_mode,
-                precomputed_facets=precomputed_coverage_facets,
+            # Speed campaign (2026-07-02): coverage and evidence-plan used to
+            # run SEQUENTIALLY (~8s + ~7.5s measured) even though they fill
+            # ORTHOGONAL gaps — coverage adds facet evidence, evidence-plan
+            # adds per-lane depth. Both now run in parallel against the MAIN
+            # retrieval's sources; the chunk_id-deduped union below plus the
+            # existing per-doc cap absorb any overlap. One SHARED semaphore
+            # keeps total concurrent support retrievals at
+            # _CHAT_COVERAGE_MAX_CONCURRENCY — without it the parallel passes
+            # would double Metal/event-loop pressure and re-create the
+            # uniform-stall regime the funnel_detail probes measured.
+            shared_support_semaphore = asyncio.Semaphore(
+                _CHAT_COVERAGE_MAX_CONCURRENCY
+            )
+            evidence_plan_start = perf_counter()
+            (
+                (coverage_sources, coverage_meta),
+                (evidence_only_sources, evidence_plan_meta),
+            ) = await asyncio.gather(
+                _enforce_chat_query_coverage(
+                    original_query=request.message,
+                    retrieval_query=retrieval_query,
+                    sources=retrieval_sources,
+                    corpus_ids=request.corpus_ids,
+                    retrieval_tier=getattr(retrieval, "effective_tier", request.retrieval_tier),
+                    collections=request.collections,
+                    retrieval_k=profile_k,
+                    rerank_enabled=profile_rerank,
+                    top_k_summary=profile_cfg["top_k_summary"],
+                    rerank_top_n=profile_cfg["rerank_top_n"],
+                    similarity_threshold=profile_cfg["similarity_threshold"],
+                    neo4j_expansion_cap=profile_cfg["neo4j_expansion_cap"],
+                    max_corpora_per_query=profile_cfg["max_corpora_per_query"],
+                    fact_seed_limit=profile_cfg["fact_seed_limit"],
+                    final_top_k=profile_cfg["final_top_k"],
+                    source_cap=profile_cfg.get("source_cap"),
+                    search_mode=resolved_mode,
+                    precomputed_facets=precomputed_coverage_facets,
+                    support_semaphore=shared_support_semaphore,
+                ),
+                _enforce_evidence_plan_lanes(
+                    original_query=request.message,
+                    sources=retrieval_sources,
+                    evidence_plan=evidence_plan,
+                    corpus_ids=request.corpus_ids,
+                    retrieval_tier=getattr(retrieval, "effective_tier", request.retrieval_tier),
+                    collections=request.collections,
+                    retrieval_k=profile_k,
+                    top_k_summary=profile_cfg["top_k_summary"],
+                    rerank_top_n=profile_cfg["rerank_top_n"],
+                    similarity_threshold=profile_cfg["similarity_threshold"],
+                    neo4j_expansion_cap=profile_cfg["neo4j_expansion_cap"],
+                    max_corpora_per_query=profile_cfg["max_corpora_per_query"],
+                    fact_seed_limit=profile_cfg["fact_seed_limit"],
+                    final_top_k=profile_cfg["final_top_k"],
+                    source_cap=profile_cfg.get("source_cap"),
+                    support_semaphore=shared_support_semaphore,
+                ),
             )
             coverage_meta["duration_s"] = perf_counter() - coverage_start
+            coverage_meta["parallel_with_evidence_plan"] = True
             if coverage_meta.get("added"):
                 logger.info(
                     "chat_semantic_coverage: tier=%s selected=%s added=%s docs=%s uncovered=%s",
@@ -6507,25 +6554,21 @@ class ChatOrchestrator:
                     coverage_meta.get("coverage_uncovered_lanes", []),
                     coverage_meta.get("lane_reports", []),
                 )
-            evidence_plan_start = perf_counter()
-            evidence_sources, evidence_plan_meta = await _enforce_evidence_plan_lanes(
-                original_query=request.message,
-                sources=coverage_sources,
-                evidence_plan=evidence_plan,
-                corpus_ids=request.corpus_ids,
-                retrieval_tier=getattr(retrieval, "effective_tier", request.retrieval_tier),
-                collections=request.collections,
-                retrieval_k=profile_k,
-                top_k_summary=profile_cfg["top_k_summary"],
-                rerank_top_n=profile_cfg["rerank_top_n"],
-                similarity_threshold=profile_cfg["similarity_threshold"],
-                neo4j_expansion_cap=profile_cfg["neo4j_expansion_cap"],
-                max_corpora_per_query=profile_cfg["max_corpora_per_query"],
-                fact_seed_limit=profile_cfg["fact_seed_limit"],
-                final_top_k=profile_cfg["final_top_k"],
-                source_cap=profile_cfg.get("source_cap"),
-            )
+            # Union of the two parallel passes: evidence-plan output first
+            # (its lane-marked support chunks must survive), then any
+            # coverage-added chunks not already present.
+            _merged_ids = {
+                str(chunk.chunk_id or "") for chunk in evidence_only_sources
+            }
+            evidence_sources = list(evidence_only_sources)
+            for chunk in coverage_sources:
+                _cid = str(chunk.chunk_id or "")
+                if _cid and _cid in _merged_ids:
+                    continue
+                _merged_ids.add(_cid)
+                evidence_sources.append(chunk)
             evidence_plan_meta["duration_s"] = perf_counter() - evidence_plan_start
+            evidence_plan_meta["parallel_with_coverage"] = True
         if evidence_plan_meta.get("active"):
             if evidence_plan_meta.get("added") or evidence_plan_meta.get("missing_lanes"):
                 logger.info(
