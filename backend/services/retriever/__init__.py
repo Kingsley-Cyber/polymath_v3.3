@@ -80,6 +80,13 @@ _EMBED_CONFIG_TTL_SECONDS = 300.0
 # are deep-copied on store/return so downstream mutation can't poison the cache.
 _RETRIEVAL_CACHE = TTLCache(maxsize=512, ttl_seconds=120.0)
 
+# Document-anchor wall budget (speed campaign 2026-07-02). The anchor lane is
+# an optional recall boost — its per-doc chunk recall ($text plus a bounded
+# regex fallback per anchored doc) measured 11.8s on a multi-doc anchor at
+# the graph tier. Recall help is never worth stalling the funnels gather;
+# past the budget the lane degrades to no candidates.
+_DOC_ANCHOR_BUDGET_SECONDS = 2.5
+
 
 def _unwrap_funnel_result(
     raw: list[SourceChunk] | BaseException,
@@ -1356,10 +1363,13 @@ class RetrieverOrchestrator:
                 else asyncio.sleep(0, result=[])
             )
             document_anchor_task = (
-                document_anchor_retriever.search(
-                    rank_query,
-                    corpus_ids,
-                    top_k=document_anchor_limit,
+                asyncio.wait_for(
+                    document_anchor_retriever.search(
+                        rank_query,
+                        corpus_ids,
+                        top_k=document_anchor_limit,
+                    ),
+                    timeout=_DOC_ANCHOR_BUDGET_SECONDS,
                 )
                 if document_anchor_limit > 0
                 else asyncio.sleep(0, result=[])
@@ -1428,10 +1438,13 @@ class RetrieverOrchestrator:
                 _timed_funnel(
                     "anchor",
                     (
-                        document_anchor_retriever.search(
-                            rank_query,
-                            corpus_ids,
-                            top_k=document_anchor_limit,
+                        asyncio.wait_for(
+                            document_anchor_retriever.search(
+                                rank_query,
+                                corpus_ids,
+                                top_k=document_anchor_limit,
+                            ),
+                            timeout=_DOC_ANCHOR_BUDGET_SECONDS,
                         )
                         if document_anchor_limit > 0
                         else asyncio.sleep(0, result=[])
