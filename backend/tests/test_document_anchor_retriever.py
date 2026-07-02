@@ -166,3 +166,41 @@ async def test_document_anchor_retriever_returns_chunks_from_named_books(monkeyp
     assert {chunk.doc_id for chunk in chunks} == {"fowler", "gifts"}
     assert all(chunk.source_tier == "document_anchor+lexical" for chunk in chunks)
     assert all(chunk.text.startswith("Document: ") for chunk in chunks)
+
+
+@pytest.mark.asyncio
+async def test_doc_label_table_is_cached_across_retrievals(monkeypatch):
+    # Speed campaign (2026-07-02): _matching_docs used to fetch EVERY document
+    # record from Mongo on EVERY retrieval (main + each support pass), which
+    # stalled the event loop under concurrency. The label table must be built
+    # once per corpus set and served from cache afterwards.
+    import services.retriever.document_anchor as da
+
+    find_calls = {"documents": 0}
+
+    class _CountingCollection(_Collection):
+        def find(self, query, projection=None):
+            find_calls["documents"] += 1
+            return super().find(query, projection)
+
+    docs = [
+        {
+            "doc_id": "doc-1",
+            "corpus_id": "corpus-1",
+            "title": "Patterns of Enterprise Application Architecture",
+            "filename": "fowler.md",
+        }
+    ]
+    db = _Db({"documents": _CountingCollection(docs)})
+    monkeypatch.setattr(
+        da, "_DOC_LABEL_CACHE", da.TTLCache(maxsize=8, ttl_seconds=60.0)
+    )
+
+    table1 = await document_anchor_retriever._doc_label_table(db, ["corpus-1"])
+    table2 = await document_anchor_retriever._doc_label_table(db, ["corpus-1"])
+
+    assert find_calls["documents"] == 1  # second call served from cache
+    assert table1 == table2
+    labels, slim = table1[0]
+    assert any("enterprise" in label.lower() for label in labels)
+    assert set(slim) == {"doc_id", "corpus_id"}  # metadata blobs excluded

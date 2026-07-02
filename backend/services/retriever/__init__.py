@@ -833,14 +833,23 @@ class RetrieverOrchestrator:
             "hydrate": 0.0,
         }
         counts: dict[str, int] = {}
+        funnel_durations: dict[str, float] = {}
 
         def _add_timing(label: str, started: float) -> None:
             timings[label] = timings.get(label, 0.0) + (perf_counter() - started)
 
+        async def _timed_funnel(name: str, awaitable):
+            """Record per-funnel wall time inside the funnels gather."""
+            _started = perf_counter()
+            try:
+                return await awaitable
+            finally:
+                funnel_durations[name] = perf_counter() - _started
+
         def _log_timings(status: str, final_count: int) -> None:
             logger.info(
                 "Retrieval timings status=%s total=%.2fs setup=%.2fs fact_seed=%.2fs embed=%.2fs "
-                "funnels=%.2fs merge=%.2fs graph=%.2fs rerank=%.2fs hydrate=%.2fs "
+                "funnels=%.2fs funnel_detail=%s merge=%.2fs graph=%.2fs rerank=%.2fs hydrate=%.2fs "
                 "counts=%s final=%d",
                 status,
                 perf_counter() - retrieval_started,
@@ -848,6 +857,13 @@ class RetrieverOrchestrator:
                 timings.get("fact_seed", 0.0),
                 timings.get("embed", 0.0),
                 timings.get("funnels", 0.0),
+                # Per-funnel wall inside the gather — the aggregate stage time
+                # hides WHICH store is slow under concurrency (speed campaign
+                # 2026-07-02: support funnels 5-7s vs 2-3.5s solo, cause unknown
+                # until this breakdown existed).
+                ",".join(
+                    f"{name}:{dur:.2f}s" for name, dur in sorted(funnel_durations.items())
+                ) or "none",
                 timings.get("merge", 0.0),
                 timings.get("graph", 0.0),
                 timings.get("rerank", 0.0),
@@ -1336,10 +1352,10 @@ class RetrieverOrchestrator:
             # `_unwrap` then converts to an empty list with a warning log.
             # Pre-fix: any funnel raise = entire chat/graph query 500.
             raw_a, raw_lex, raw_doc_anchor, *raw_b = await asyncio.gather(
-                a_task,
-                lexical_task,
-                document_anchor_task,
-                *b_tasks,
+                _timed_funnel("a", a_task),
+                _timed_funnel("lex", lexical_task),
+                _timed_funnel("anchor", document_anchor_task),
+                *[_timed_funnel(f"b{i}", t) for i, t in enumerate(b_tasks)],
                 return_exceptions=True,
             )
             a_results = _unwrap_funnel_result(raw_a, "funnel_a")
@@ -1360,31 +1376,42 @@ class RetrieverOrchestrator:
             }
             # Same partial-failure safety as the multi-corpus branch above.
             raw_a, raw_b, raw_lex, raw_doc_anchor = await asyncio.gather(
-                funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs),
-                funnel_b.search(
-                    query_vector,
-                    corpus_ids,
-                    b_cols,
-                    top_k=funnel_limits.child_top_k,
-                    query_text=rank_query,
+                _timed_funnel(
+                    "a", funnel_a.search(query_vector, corpus_ids, a_cols, **a_kwargs)
                 ),
-                (
-                    lexical_retriever.search(
-                        rank_query,
+                _timed_funnel(
+                    "b",
+                    funnel_b.search(
+                        query_vector,
                         corpus_ids,
-                        top_k=lexical_limit,
-                    )
-                    if lexical_limit > 0
-                    else asyncio.sleep(0, result=[])
+                        b_cols,
+                        top_k=funnel_limits.child_top_k,
+                        query_text=rank_query,
+                    ),
                 ),
-                (
-                    document_anchor_retriever.search(
-                        rank_query,
-                        corpus_ids,
-                        top_k=document_anchor_limit,
-                    )
-                    if document_anchor_limit > 0
-                    else asyncio.sleep(0, result=[])
+                _timed_funnel(
+                    "lex",
+                    (
+                        lexical_retriever.search(
+                            rank_query,
+                            corpus_ids,
+                            top_k=lexical_limit,
+                        )
+                        if lexical_limit > 0
+                        else asyncio.sleep(0, result=[])
+                    ),
+                ),
+                _timed_funnel(
+                    "anchor",
+                    (
+                        document_anchor_retriever.search(
+                            rank_query,
+                            corpus_ids,
+                            top_k=document_anchor_limit,
+                        )
+                        if document_anchor_limit > 0
+                        else asyncio.sleep(0, result=[])
+                    ),
                 ),
                 return_exceptions=True,
             )

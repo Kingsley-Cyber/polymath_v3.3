@@ -15,6 +15,7 @@ from typing import Any
 
 from models.schemas import SourceChunk
 from pymongo.errors import OperationFailure
+from services.cache_util import TTLCache
 from services.conversation import conversation_service
 from services.facets import metadata_with_facets
 from services.retriever.lexical import _regex_score, _terms
@@ -23,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 _DOC_ANCHOR_MAX_DOCS = 4
 _DOC_ANCHOR_THRESHOLD = 0.72
+# Doc-label table cache (speed campaign 2026-07-02). Keyed by corpus set;
+# entries are (labels, slim_doc) tuples. See _doc_label_table for why.
+_DOC_LABEL_CACHE = TTLCache(maxsize=32, ttl_seconds=120.0)
 _CHUNK_QUERY_NOISE = frozenset(
     {
         "according",
@@ -230,19 +234,6 @@ def _score_doc_match(query: str, label: str) -> float:
     return min(0.94, 0.56 + 0.30 * coverage + 0.08 * query_coverage)
 
 
-def _score_doc(query: str, doc: dict[str, Any]) -> tuple[float, str, set[str]]:
-    best_score = 0.0
-    best_label = ""
-    best_terms: set[str] = set()
-    for label in _doc_labels(doc):
-        score = _score_doc_match(query, label)
-        if score > best_score:
-            best_score = score
-            best_label = label
-            best_terms = _tokens(label)
-    return best_score, best_label, best_terms
-
-
 def _chunk_search_terms(query: str, anchor_terms: set[str]) -> list[str]:
     # Curated query concepts (_CONCEPT_RECALL_HINTS) are the recall payload, so
     # they are kept in full and a long filler word can never push them out of
@@ -369,12 +360,26 @@ class DocumentAnchorRetriever:
             )
         return out
 
-    async def _matching_docs(
+    async def _doc_label_table(
         self,
         db,
-        query: str,
         corpus_ids: list[str],
-    ) -> list[tuple[float, str, set[str], dict[str, Any]]]:
+    ) -> list[tuple[list[str], dict[str, Any]]]:
+        """Cached (labels, slim_doc) table per corpus set.
+
+        Speed campaign (2026-07-02, funnel_detail evidence): _matching_docs
+        used to fetch EVERY document record — metadata blobs included — from
+        Mongo and recompute the label variants on EVERY retrieval, main and
+        each support pass alike. Under 3-4 concurrent retrievals the repeated
+        fetch + BSON decode + label derivation stalled the event loop
+        uniformly (all four funnels inflated together to ~3s, anchor the
+        slowest at 4.4s). Doc titles/authors change only at ingest; 120s of
+        staleness for brand-new docs is acceptable for anchor recall.
+        """
+        key = "|".join(sorted(corpus_ids))
+        cached = _DOC_LABEL_CACHE.get(key)
+        if cached is not None:
+            return cached
         cursor = db["documents"].find(
             {"corpus_id": {"$in": corpus_ids}},
             {
@@ -390,11 +395,40 @@ class DocumentAnchorRetriever:
             },
         )
         docs = await cursor.to_list(length=None)
-        scored: list[tuple[float, str, set[str], dict[str, Any]]] = []
+        table: list[tuple[list[str], dict[str, Any]]] = []
         for doc in docs:
-            score, label, label_terms = _score_doc(query, doc)
-            if score >= _DOC_ANCHOR_THRESHOLD:
-                scored.append((score, label, label_terms, doc))
+            labels = _doc_labels(doc)
+            if not labels:
+                continue
+            # Only identifiers survive into the cache — downstream
+            # (_chunks_for_doc) reads doc_id/corpus_id; the metadata blobs
+            # stay out of memory.
+            slim = {
+                "doc_id": doc.get("doc_id"),
+                "corpus_id": doc.get("corpus_id"),
+            }
+            table.append((labels, slim))
+        _DOC_LABEL_CACHE.set(key, table)
+        return table
+
+    async def _matching_docs(
+        self,
+        db,
+        query: str,
+        corpus_ids: list[str],
+    ) -> list[tuple[float, str, set[str], dict[str, Any]]]:
+        table = await self._doc_label_table(db, corpus_ids)
+        scored: list[tuple[float, str, set[str], dict[str, Any]]] = []
+        for labels, doc in table:
+            best_score = 0.0
+            best_label = ""
+            for label in labels:
+                score = _score_doc_match(query, label)
+                if score > best_score:
+                    best_score = score
+                    best_label = label
+            if best_score >= _DOC_ANCHOR_THRESHOLD:
+                scored.append((best_score, best_label, _tokens(best_label), doc))
         scored.sort(key=lambda item: (item[0], len(item[1])), reverse=True)
         return scored[:_DOC_ANCHOR_MAX_DOCS]
 
