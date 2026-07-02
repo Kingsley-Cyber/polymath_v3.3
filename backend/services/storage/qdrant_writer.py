@@ -229,6 +229,9 @@ _CHUNK_PAYLOAD_INDEXES: tuple[str, ...] = (
     # /rust, /luau, etc.
     "chunk_kind",
     "language",
+    # M1 (2026-07-02): domain denormalized from Ghost-A parents, indexed so a
+    # future query-domain pre-filter (must=domain) is O(log n). Keyword index.
+    "domain",
 )
 _SCHEMA_PAYLOAD_INDEXES: tuple[str, ...] = ("corpus_id", "kind", "term")
 
@@ -609,6 +612,9 @@ async def upsert_children(
             # retrieval excludes non-body via a `must_not` filter on this
             # field; missing field treated as body for backwards compat.
             "chunk_kind": c.get("chunk_kind", "body"),
+            # M1: domain denormalized from Ghost-A parent for pre-retrieval
+            # filtering (real taxonomy label or None; backfilled + forward).
+            "domain": c.get("domain"),
             # Code lane (Phase 1) — language tag + AST-derived metadata
             # (symbols_defined / symbols_called / imports / ast_signature /
             # file_path). Empty for prose chunks. Used at retrieval time for

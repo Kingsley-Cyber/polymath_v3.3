@@ -633,9 +633,9 @@ class Settings(BaseSettings):
         ),
     )
     RERANKER_TIMEOUT_SECONDS: float = Field(
-        default=4.0,
+        default=30.0,
         ge=0.2,
-        le=30.0,
+        le=60.0,
         description=(
             "HTTP timeout for the reranker sidecar. Retrieval may call the "
             "reranker more than once during coverage repair, so this must stay "

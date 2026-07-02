@@ -1243,6 +1243,11 @@ def _build_child_dicts(
                 "page_end": getattr(c, "page_end", None),
                 "chunk_kind": getattr(c, "chunk_kind", ChunkKind.BODY),
                 "language": getattr(c, "language", None),
+                # M1: domain is a parent-level Ghost-A signal; on the child it
+                # is populated by scripts/backfill_child_domain.py (Mongo +
+                # Qdrant) after Ghost A. Present here as None so the schema is
+                # consistent and a later set_payload can update it in place.
+                "domain": getattr(c, "domain", None),
                 "metadata": _metadata_with_facets(
                     getattr(c, "metadata", {}) or {},
                     facet_meta,

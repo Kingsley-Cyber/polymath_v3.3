@@ -305,7 +305,13 @@ class RerankerService:
             return sorted(pool, key=lambda x: x.score, reverse=True)
 
         url = f"{self._settings.RERANKER_URL}/rerank"
-        timeout = float(getattr(self._settings, "RERANKER_TIMEOUT_SECONDS", 4.0) or 4.0)
+        # The 4.0s default fit the old MLX bi-encoder cosine sham (~0.4s/pool).
+        # The TRUE fp16 listwise cross-encoder needs ~5.7s for a 40-doc pool
+        # (measured 2026-07-02) — under 4s EVERY call timed out, cascaded
+        # through the split-recovery path, tripped the circuit breaker, and
+        # dumped raw lexical scores (197.x) into the packet. 30s covers a
+        # 50-doc fp16 pass with generous headroom on contended Metal.
+        timeout = float(getattr(self._settings, "RERANKER_TIMEOUT_SECONDS", 30.0) or 30.0)
 
         try:
             client = self._get_http_client(timeout)

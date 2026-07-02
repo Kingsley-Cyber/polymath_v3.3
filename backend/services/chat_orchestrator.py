@@ -112,6 +112,9 @@ _DEFAULT_EVIDENCE_MAX_SOURCES = 9
 # latency-tolerant quality step, so give it generous headroom. For lower
 # latency, point the HyDE route at a fast JSON-reliable instruct model.
 _EVIDENCE_LLM_DECOMPOSE_TIMEOUT = 15.0
+# Support-chunk score cap (v4): supplementary facet/lane gap-fills sit below
+# CE-confirmed evidence. Reserved side-seats are protected by curation.
+_SUPPORT_SCORE_CAP = 0.50
 # Thinking models occasionally return empty content; retry a bounded number of
 # times before falling back to the deterministic plan.
 _EVIDENCE_LLM_DECOMPOSE_ATTEMPTS = 2
@@ -6655,68 +6658,36 @@ class ChatOrchestrator:
                     continue
                 _merged_ids.add(_cid)
                 evidence_sources.append(chunk)
-            # v4 P1 (scoring wall): support-pass picks were chosen by
-            # facet-fit / lane-match heuristics — NOT by the scoring
-            # authority — and historically carried heuristic scores into the
-            # packet. Every pass-added chunk now earns a cross-encoder score
-            # in ONE batched call; below-floor picks are dropped (coverage
-            # floor 0.22; evidence-plan side seats keep a relaxed 0.15 floor
-            # because their value is allocation, and the gate reports an
-            # absent side honestly when its pick dies). Reranker failure
-            # keeps the picks and marks the turn degraded.
+            # v4 scoring-wall — support chunks scored DETERMINISTICALLY, no 2nd
+            # CE pass. Support picks are chosen by facet-fit / lane-match
+            # heuristics, NOT the cross-encoder. A second CE pass to re-score
+            # them cost ~5s on the serialized Metal GPU (measured 2026-07-02)
+            # and, when it timed out, leaked raw lexical scores (Expert-Systems
+            # at 194) into the packet. Instead we treat support additions as
+            # SUPPLEMENTARY: cap their score into a band strictly BELOW the
+            # CE-confirmed main evidence, so they fill genuine gaps but can
+            # never outrank a chunk the authority actually scored. Reserved
+            # side-guarantee seats are protected by curation's per-side
+            # reservation regardless of score, so coverage is preserved.
+            #   _SUPPORT_SCORE_CAP = 0.50  (< typical strong CE ~0.6-0.95)
+            #   raw >1.0 (never CE-scored) -> 0.10 (junk floor)
             _base_ids = {str(c.chunk_id or "") for c in retrieval_sources}
-            _support_added = [
-                c
-                for c in evidence_sources
-                if str(c.chunk_id or "") and str(c.chunk_id or "") not in _base_ids
-            ]
-            if _support_added:
-                from services.reranker import reranker_service as _rr
-
+            _support_capped = 0
+            for _chunk in evidence_sources:
+                _cid = str(_chunk.chunk_id or "")
                 try:
-                    _scored = await _rr.rerank(request.message, _support_added)
-                    _score_by_id = {
-                        str(c.chunk_id or ""): float(c.score or 0.0)
-                        for c in _scored
-                    }
-                    _kept: list[SourceChunk] = []
-                    _dropped = 0
-                    for chunk in evidence_sources:
-                        _cid = str(chunk.chunk_id or "")
-                        if _cid not in _score_by_id:
-                            _kept.append(chunk)
-                            continue
-                        _p = _score_by_id[_cid]
-                        _is_side = (
-                            (chunk.metadata or {}).get("support_role")
-                            == "evidence_plan_lane"
-                        )
-                        _floor = 0.15 if _is_side else 0.22
-                        if _p < _floor:
-                            _dropped += 1
-                            continue
-                        chunk.score = _p
-                        _md = dict(chunk.metadata or {})
-                        _md["support_authority"] = {
-                            "cross_encoder_score": round(_p, 4),
-                            "floor": _floor,
-                        }
-                        chunk.metadata = _md
-                        _kept.append(chunk)
-                    if _dropped:
-                        logger.info(
-                            "support authority floor dropped %d/%d pass-added chunks",
-                            _dropped,
-                            len(_support_added),
-                        )
-                    evidence_sources = _kept
-                    evidence_plan_meta["support_authority_dropped"] = _dropped
-                except Exception as _exc:  # noqa: BLE001
-                    logger.warning(
-                        "support authority rerank failed — keeping picks, degraded: %s",
-                        _exc,
-                    )
-                    evidence_plan_meta["support_authority_degraded"] = True
+                    _s = float(_chunk.score or 0.0)
+                except (TypeError, ValueError):
+                    _s = 0.0
+                if _s > 1.0:  # raw lexical/BM25 leak — never faced the authority
+                    _chunk.score = 0.10
+                    _support_capped += 1
+                elif _cid not in _base_ids and _s > _SUPPORT_SCORE_CAP:
+                    # Heuristic-scored support add sitting in the CE band — cap
+                    # it below CE-confirmed evidence.
+                    _chunk.score = _SUPPORT_SCORE_CAP
+                    _support_capped += 1
+            evidence_plan_meta["support_scores_capped"] = _support_capped
             evidence_plan_meta["duration_s"] = perf_counter() - evidence_plan_start
             evidence_plan_meta["parallel_with_coverage"] = True
         if evidence_plan_meta.get("active"):
@@ -8591,7 +8562,7 @@ class ChatOrchestrator:
         # v4 fetch ladder (owner-directed 2026-07-02): fetch depth is cheap
         # (Qdrant ms-level); recall INTO the rank-fused pool is what feeds
         # the cross-encoder. fast 10->70, balanced 40->100, thorough 60->160.
-        "fast": {"retrieval_k": 70, "rerank_enabled": False, "hyde_enabled": False},
+        "fast": {"retrieval_k": 50, "rerank_enabled": False, "hyde_enabled": False},
         # Pt10c — balanced now enables HyDE by default. Cross-domain
         # queries on heterogeneous libraries (e.g. "how does generative
         # AI apply to urban planning?") were producing wrong-domain
@@ -8603,19 +8574,23 @@ class ChatOrchestrator:
         # knowledge-graph application where quality > speed.
         # v4 P1: pools widened toward the listwise reranker's 64-doc
         # capacity (one forward pass). balanced 24->32, thorough 32->40.
-        # Owner budget shape: retrieve 70-200 -> rerank <=50 with the CE ->
-        # return 8-16. fp16 CE cost: 40 docs ~4.3s, 50 docs ~5.4s per pass.
+        # Owner budget shape: retrieve 70-200 (cheap Qdrant fetch) -> rerank
+        # with the TRUE fp16 cross-encoder -> return 8-16. The fp16 CE is
+        # ~3.4s/32 docs on the single contended Metal GPU, and each turn also
+        # spends a support-authority CE pass — so the rerank pool is held at
+        # 32/40 where the GPU keeps up. The owner's 50-doc pool lands after
+        # serving consolidation (task #11, one continuous-batching server).
         "balanced": {
-            "retrieval_k": 100,
+            "retrieval_k": 70,
+            "rerank_enabled": True,
+            "hyde_enabled": True,
+            "rerank_top_n": 32,
+        },
+        "thorough": {
+            "retrieval_k": 120,
             "rerank_enabled": True,
             "hyde_enabled": True,
             "rerank_top_n": 40,
-        },
-        "thorough": {
-            "retrieval_k": 160,
-            "rerank_enabled": True,
-            "hyde_enabled": True,
-            "rerank_top_n": 50,
         },
     }
 

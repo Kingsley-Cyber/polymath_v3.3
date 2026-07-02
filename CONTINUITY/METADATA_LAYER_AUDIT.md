@@ -95,6 +95,18 @@ forever (near-dup flag is informational; dedup resolution is a manual admin acti
 
 ## Patch plan (M-series; each flag-gated, golden-battery + packet-hash verified)
 
+### STATUS: M1 SHIPPED 2026-07-02 (commit 8639b0b + domain denorm)
+- ✅ Evidence-packet prefix now emits `Title | § Section | domain=X | kind=Y | score=Z`
+  (E2E-verified); internal doc_id/chunk_id ID-leak fixed; taxonomy-domain gate rejects
+  Cluster*/Outliers placeholders. `_clean_source_label` strips extensions + Anna's/libgen tails.
+- ✅ Domain denormalized to child chunks: `scripts/backfill_child_domain.py` (Mongo + Qdrant
+  set_payload, valid-taxonomy-only, idempotent, resumable) — authentic_library 517,857 children
+  across 18 domains; `domain` added to Qdrant child payload + `_CHUNK_PAYLOAD_INDEXES` +
+  worker child dict (forward field).
+- ⏳ Remaining M1: near-dup suppression at curation; enforce-or-delete similarity_threshold.
+- ⏳ M-next: query-domain classifier (list-free) → Qdrant `must=domain` HARD pre-filter now
+  that children carry an indexed domain.
+
 **M1 — Wire what already exists (days, no schema change)**
 1. Evidence-packet prefix: `Title · Section (heading_path tail) · Domain · Kind` — and kill
    the internal-ID fallback leak. Files: chat_orchestrator.py `_source_title`/`_format_evidence_packet_block`.
