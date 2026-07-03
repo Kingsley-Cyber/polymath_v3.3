@@ -440,3 +440,95 @@ enforcement in retriever · W6 Ghost A minimal schema (mechanisms/key_terms/sema
 · W7 writers → typed contracts · W8 Neo4j Chunk.parent_id + Entity.corpus_ids[] · W9 facets-as-
 projection + Funnel A retirement behind probes (+ topics migration, temporal fields with M2
 versioning logic).
+
+
+---
+
+## 10. SEMANTIC SUMMARY PLAN + INITIAL WATERFALL INTEGRATION (owner-steered 2026-07-03)
+**CONTINUATION DIRECTIVE: on session resume/compaction, execute THIS section in order.
+It supersedes the generic W1–W6 ordering in §9 where they overlap.**
+
+### 10.1 Parent summary — SEMANTIC STRUCTURE (replaces prose-only Ghost A output)
+A parent summary is a structured object, not a blob. Stored FLAT on parent_chunks
+(prose stays in `summary` for back-compat — it is the embeddable/waterfall "summary" rung;
+the gist-risk gate keeps prose as the vector text):
+
+```
+summary                : str   — 2-3 dense sentences ("gist"; the waterfall summary rung)
+semantic_chunk_type    : enum  — definition|claim|procedure|principle|framework|example|
+                                 comparison|warning|narrative   (clamped; unknown → narrative)
+key_terms              : list[str]  — <=8 proper nouns / defined terms found IN the parent
+mechanisms             : list[str]  — <=5 transferable snake_case mechanisms
+topic_key              : str   — f"{domain}.{slug(top_heading)}" (derived, deterministic)
+domain                 : str   — existing taxonomy field (unchanged)
+```
+
+**Generation (one JSON call per BODY parent):** upgrade Ghost A prompt (services/ghost_a.py)
+to return `{summary, semantic_chunk_type, key_terms, mechanisms}` as JSON; parse defensively
+(clamp enum, snake_case+dedupe mechanisms, cap counts). The summary_tree HEAL guard produces
+the SAME shape (shared prompt/parse helper — one implementation, two callers).
+**Determinism guards:** extractive fallback fills `summary` only and leaves semantic fields
+empty — never fabricate structure; `topic_key` computed in code, not by the LLM.
+**Storage:** worker `_build_parent_dicts` + heal `$set` write the new fields; `topics` field:
+STOP WRITING in the same change (subsumed by key_terms — the §3.S3 retirement step 1).
+**Promotion:** promote() lifts `semantic_chunk_type`, `mechanisms[]`, `key_terms[]`,
+`topic_key` from the chunk's PARENT onto the child Qdrant payload + Mongo child (closing the
+§9 NOT-BUILT RetrievalPayload fields). Indexes ship in the same change.
+**Consumers (stage contract):** summary rung text → waterfall; semantic_chunk_type → operator
+match + diversity (rank-only, never a score multiplier); mechanisms → bridge/diversity lanes;
+key_terms → concept recall; topic_key → routing + dedupe.
+
+### 10.2 Document summary — USAGE CONTRACT
+The doc profile (documents.doc_profile, L4 of the tree) is a ROUTING CARD, never evidence
+(exception: explicit corpus-overview queries). Jobs, in order:
+1. **Tier-0 routing:** query → vector search over `polymath_doc_summaries` (+ concept/topic_key
+   overlap) → top-N candidate doc_ids with routing scores.
+2. **Waterfall lane hints:** routed doc_ids bias candidate retrieval (soft boost — never a hard
+   gate unless the doc is an ANCHOR from §5.1 title/author match).
+3. **Coarse-to-fine descent map:** profile.section_ids → summary_tree sections → rollups →
+   parent_ids gives a deterministic drill path for broad queries.
+4. **Source card:** profile.summary supplies the "Best used for questions about…" line for
+   citations/UI — display only.
+
+**Structure (extend the L4 node + doc_profile mirror; owner card + tree fields):**
+```
+summary_id, doc_id, corpus_id, summary_type="document"
+title, source_type, domain, topic_keys[]           (topic_keys = union of parent topic_keys)
+concepts[], mechanisms[], patterns[]                (rolled up from parents, capped 12/8/8)
+summary                                             ("what it is; what it covers; Best used for…")
+section_ids[], parent_count, doc_date, status, latest
+```
+
+### 10.3 INITIAL WATERFALL PLAN (the first wiring — W2', behind WATERFALL_ASSEMBLY flag)
+Data flow, deterministic end to end:
+```
+query ──► Tier-0: doc_summaries search ──► routed doc_ids (soft)      (10.2 job 1)
+      └─► anchor_detect vs M2 title/author ──► anchor doc_ids (hard lanes)
+existing funnels+rerank ──► ranked CHILDREN ──► group by parent_id:
+    parent.score = max(child score) · lane = "anchor" if doc in anchors else ""
+    ParentCandidate(full_text=parent.text, summary=parent.summary/gist)
+orphan children = top-scored children whose parent didn't place (cross-domain)
+entities = graph facts/relations lines (existing Mode A output)
+allocate(ranked_parents, budget=CONTEXT_BUDGET_TOKENS(default 4000),
+         orphans, entities, anchor_quota=0.6, spillover_threshold=rerank floor)
+──► Packet ──► context_manager renders packet items IN ORDER (full/summary/child/entity)
+──► packet_hash logged on every response (determinism receipt)
+```
+Rules already implemented in waterfall.py — this step is PURE WIRING + a renderer.
+**Flags:** WATERFALL_ASSEMBLY=false (off until A/B green) · TWO_LANE_ANCHORING=false gates
+only the anchor-lane tagging inside the flow. **A/B gate:** golden battery + habits-NN + the
+5-doc corpus probes, legacy vs waterfall, before any default flip.
+
+### 10.4 EXECUTION ORDER (do these IN ORDER on continuation)
+1. **10.1 semantic parent summaries** — ghost_a JSON schema + shared heal helper + worker
+   persist (+stop writing topics) + promote() lift + payload indexes + tests
+   (parse-clamp determinism; heal shape; promote lift) + live 1-doc receipt.
+2. **W1 Tier-0** — auto-embed doc_profile at ingest (summary_tree hook tail; reuse
+   migrate script's embed logic) into polymath_doc_summaries; add retriever Tier-0 probe
+   (flagged TIER0_ROUTING=false) returning routed doc_ids + scores; unit + live receipt.
+3. **10.3 waterfall wiring** — WATERFALL_ASSEMBLY flag; parent grouping + orphan/entity
+   assembly; packet renderer in context_manager; packet_hash in response metadata;
+   A/B probe script (same query → legacy vs waterfall packets side by side).
+4. Then resume §9 Wire Phase order (W4 v2-on-wire, W5 barrier enforcement, …).
+Each step: asserting tests → docker cp iterate → REBUILD (CLAUDE.md stipulations) → live
+receipt on the contract_preflight corpus → commit+push with proof → update §9 ledger row.
