@@ -674,6 +674,19 @@ A3 **retrieval_role on summary records** (owner object): tag tree nodes bridge_s
 A4 Authority field: source_type-derived rank (standard>paper>book>blog) for the temporal
    tie-break — deterministic map, owner-tunable.
 
-### 12.5 Order update
+### 12.5 Order update — OWNER STEER: GRAPH PACKAGE FIRST
+Owner intent (2026-07-03): the §12 material exists to improve GRAPH AUGMENTATION — expansions,
+seeds, and HOP TIME. Execute the G-PACK before W1/W2:
+  P1 precompute-promote: promote() adds per-chunk `related_entities[]` (doc-local, from the
+     chunk's extraction relations — endpoints as entity ids) + `graph_neighbors[]` (cross-doc
+     1-hop from Neo4j at promote time, capped 12, sorted/deterministic, best-effort) — indexed.
+     Hops become payload reads; live Cypher reserved for true multi-hop/path traversal.
+  P2 Mode A upgrades: (a) A1 query-side entity linking — query concept slugs → indexed Neo4j
+     entity_id existence check → DIRECT seeds (the graph starts from the question);
+     (b) payload-first 1-hop expansion using graph_neighbors, Cypher fallback;
+     (c) G3 expansion TTL cache (seed-set keyed, ~180s); (d) G1 seed preference for
+     has_relations=true chunks.
+  P3 G2 rerank-pool raise 16→32 rides the first graph A/B.
+Then W1 Tier-0 → W2 waterfall → temporal W-T as previously ordered.
 Temporal layer lands as **W-T** after Q2 (needs M2 versioning population + topic_key, which
 §10.1 shipped). Graph precompute lands with Q2/G1 (same promote() pass). §11.6 otherwise stands.
