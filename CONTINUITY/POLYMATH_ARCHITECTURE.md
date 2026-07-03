@@ -532,3 +532,83 @@ only the anchor-lane tagging inside the flow. **A/B gate:** golden battery + hab
 4. Then resume §9 Wire Phase order (W4 v2-on-wire, W5 barrier enforcement, …).
 Each step: asserting tests → docker cp iterate → REBUILD (CLAUDE.md stipulations) → live
 receipt on the contract_preflight corpus → commit+push with proof → update §9 ledger row.
+
+
+---
+
+## 11. QUERY-LAYER REVIEW — faster · more precise · deeper · cross-domain (investigated 2026-07-03)
+Grounded in a live query-path sweep (funnels/budgets/timings cited from retriever/__init__.py,
+mode_a.py, ranking_policy.py). Owner question resolved first:
+
+### 11.0 Universal document-summary collection — YES (ratified)
+`polymath_doc_summaries` stays ONE collection across ALL corpora (corpus_id payload, indexed).
+Reasons: (1) routing must SEE across corpora to route — per-corpus profile shards would
+reintroduce cross-collection score stitching at the routing layer, the worst place; (2) it makes
+cross-domain emphasis a single cheap vector search (the entry point, not an afterthought);
+(3) enables corpus auto-selection for unscoped queries. Guards: ROUTING-ONLY (never evidence,
+§10.2) so a wrong-corpus hit can never leak text; future isolation via `security_scope` payload
+(owner index list) — property-based, never identity-splitting.
+
+### 11.1 What the sweep found (the honest baseline)
+- All funnels run CONCURRENTLY per tier (good), but every lane searches the FULL corpus scope —
+  nothing prunes the universe before the expensive work. Budgets: Fast=A20+B40; Hybrid adds
+  lexical 6–18 + anchors 4–8 (2.5s wall); Graph adds fact-seed 16 (5s, overlapped with embed) +
+  Mode A (seed 8, limit 8, 4s, 3 parallel passes) → prefilter pool 64 → **rerank pool capped 16**.
+- Hot spots: support_profile gap-fill funnels **5–7s vs 2–3.5s solo (cause unknown — investigate
+  first)**; document_anchor 1.7–4.2s; Mode A ~7s tamed by concurrency.
+- Diversity is doc-count-based MMR (tier-aware λ, graph reserve, sufficiency repair). **NO
+  domain/mechanism/family-based diversity exists at query time**; concepts[]/relation_families[]
+  are indexed-but-never-filtered; Funnel A still double-represents parents vs children.
+- Caches: retrieval-result 120s, embed-config 300s, graph-metrics per-corpus. **Mode A expansion
+  and rerank are UNCACHED.**
+
+### 11.2 Universal levers (all tiers)
+U1 **Tier-0 routing first** (W1): one doc_summaries search prunes the doc universe before every
+   lane — speed (smaller pools), precision (on-topic docs), cross-domain (routes across corpora).
+   Soft boost only; hard filter only for §5.1 anchors.
+U2 **Promoted-payload soft prefilter with fallback**: query concepts → Qdrant filter on
+   concepts[]/entity_ids; DETERMINISTIC fallback = if filtered candidate count < K_min, rerun
+   unfiltered (never strands recall). semantic_chunk_type ↔ operator atoms as RANK-ONLY bonus
+   (definition query prefers definition/principle chunks) — never a score multiplier.
+U3 **Mode A expansion TTL cache** (entity-seed-set keyed, ~180s) + keep rerank uncached (CE is
+   the authority; caching it risks staleness for marginal gain).
+U4 Per-phase timing report already instrumented — surface it in trace metadata for tuning.
+
+### 11.3 Fast tier
+F1 Align to owner §5.5: Fast = CHILDREN only — drop Funnel A from qdrant_only (removes
+   double-representation + one vector search). F2 U2 soft prefilter. Expected: sub-second
+   retrieval phase.
+
+### 11.4 Hybrid tier (default — biggest wins)
+H1 **Replace Funnel A's parent-summary lane with the summary TREE**: rollup/section nodes as the
+   breadth/enumeration lane (Tier-0 descent map §10.2-3), retiring per-parent summary vectors
+   (the §4 policy) behind the probe battery. Breadth quality goes UP (rollups are already
+   deduplicated meaning), candidate competition goes DOWN.
+H2 **Waterfall packet** (§10.3) = depth + determinism (full 1–4, summaries 5–8, orphan children).
+H3 **RerankerInput prefix** ("Book › Section\n…") — cheap CE precision, contract already exists.
+H4 **Cross-domain in MMR**: add distinct-DOMAIN breadth (payload `domain`) next to distinct-doc
+   breadth for BROAD/multi-lane queries + a mechanisms[]-overlap bonus (bridge emphasis) — both
+   rank-only.
+H5 **Investigate the support_profile 5–7s anomaly** (likely duplicate embeds or sequential lane
+   searches in gap-fill) — halves multi-concept latency if fixed.
+H6 document_anchor should match M2 title/author via anchor_detect (fast, indexed) before its
+   heavy Mongo text path.
+
+### 11.5 Graph tier (the cross-domain flagship)
+G1 **Pre-expansion relation prefilter**: filter funnel-B candidates has_relations=true (+
+   relation_families matched to query operators: causal→Causal) BEFORE Mode A seeding — less
+   junk fan-out, faster Cypher, better seeds. (Sweep confirmed NO prefilter exists today.)
+G2 **Raise GRAPH_MLX_RERANK_POOL 16 → 32–40**: the 16 cap is MLX-era conservatism; the fp16
+   llama reranker handles 40 docs ≈1s. Depth win; verify Metal headroom (§4.5 targets).
+G3 Mode A cache (U3). G4 **CROSS_DOMAIN_EMPHASIS knob (off|balanced|strong)**: scales the Phase
+   5b bridge-lane bonus cap (fragile bridges / structural analogies / transfer candidates exist
+   TODAY but are capped to limit//4), adds an entity_families/domain diversity reserve (≥1 slot
+   from a different domain than the top doc on BROAD queries), and gates 2-hop expansion
+   (GRAPH_REL_HOP2 knobs exist, unexposed).
+G5 topic_key dedupe: two chunks sharing topic_key are near-siblings — MMR redundancy signal.
+
+### 11.6 Execution order (extends §10.4; do AFTER #31/#32)
+Q1 = H5 support-profile latency investigation · Q2 = U2 soft prefilter + G1 relation prefilter ·
+Q3 = H3 RerankerInput + G2 pool raise (one A/B) · Q4 = H4+G4 cross-domain emphasis knob ·
+Q5 = H1 tree-as-breadth-lane behind flag + Funnel A probes · each step probe-gated
+(golden + habits-NN + seducer + packet_hash + latency per §4.5 targets).
