@@ -26,6 +26,7 @@ export interface InfrastructureSettings {
   redis_url: string;
   embedder_url: string;
   reranker_url: string;
+  extraction_url?: string;
   // Modal cloud GPU (Phase 14.3) — primary ingestion embed path
   modal_enabled: boolean;
   modal_embedder_url: string;
@@ -220,6 +221,7 @@ export interface ExtractionEndpoint {
 }
 
 export interface ExtractionSettings {
+  engine?: "local" | "cloud" | "local_then_cloud";
   endpoints: ExtractionEndpoint[];
 }
 

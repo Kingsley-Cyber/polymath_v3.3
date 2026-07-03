@@ -516,6 +516,14 @@ class ExtractionSettings(BaseModel):
     wiring in the UI; edits persist in Mongo and apply on the next ingest
     without a backend restart (same pattern as Modal settings)."""
 
+    engine: Literal["local", "cloud", "local_then_cloud"] = Field(
+        default="local",
+        description=(
+            "Which Ghost B engine runs extraction: 'local' = GLiNER/GLiREL "
+            "sidecars (endpoints below); 'cloud' = the EXTRACTION MODELS LLM "
+            "pool; 'local_then_cloud' = local first, cloud fallback on failure."
+        ),
+    )
     endpoints: list[ExtractionEndpoint] = Field(default_factory=list)
 
 

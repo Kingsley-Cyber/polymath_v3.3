@@ -101,6 +101,13 @@ const SERVICES: {
     urlKey: "reranker_url",
   },
   {
+    key: "extraction",
+    label: "Extraction (GLiNER/GLiREL)",
+    icon: Cloud,
+    iconColor: "text-emerald-400",
+    urlKey: "extraction_url",
+  },
+  {
     key: "modal",
     label: "Modal GPU",
     icon: Cloud,

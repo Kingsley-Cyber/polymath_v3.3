@@ -491,6 +491,7 @@ class InfrastructureSettings(BaseModel):
     redis_url: str = "redis://redis:6379"
     embedder_url: str = "http://embedder:80"
     reranker_url: str = "http://reranker:8080"
+    extraction_url: str = ""
     # Modal cloud GPU (Phase 14.3) — primary ingestion embed path
     modal_enabled: bool = False
     modal_embedder_url: str = ""  # masked/empty when not configured

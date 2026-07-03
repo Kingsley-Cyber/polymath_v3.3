@@ -1025,11 +1025,13 @@ async def _run_ghosts_parallel(
             # effect on the next ingest without a restart — same pattern as
             # the Modal embedder config. Falls back to env wiring on any
             # error or when the user disabled everything (env is the floor).
+            extraction_engine = "local"
             try:
                 from services import ghost_b_local as _gbl
                 from services.settings import settings_service as _ss
 
                 ext = await _ss.get_system_extraction()
+                extraction_engine = str(getattr(ext, "engine", "local") or "local")
                 urls = [
                     e.url.strip().rstrip("/")
                     for e in (ext.endpoints or [])
@@ -1039,8 +1041,7 @@ async def _run_ghosts_parallel(
             except Exception as exc:  # noqa: BLE001 — env fallback is fine
                 logger.warning("extraction endpoint settings unavailable: %s", exc)
             ghost_b_run_id = str(uuid.uuid4())
-            report = await extract_entities(
-                tasks,
+            _extract_kwargs = dict(
                 schema=schema_ctx,
                 schema_lens=schema_lens,
                 chunk_vectors=None,
@@ -1055,6 +1056,25 @@ async def _run_ghosts_parallel(
                 ),
                 audit_run_id=ghost_b_run_id,
             )
+            # Owner-selectable engine (Settings → Ingestion): local GLiNER/
+            # GLiREL sidecars, the cloud Ghost B LLM pool, or local-then-cloud.
+            if extraction_engine == "cloud":
+                from services.ghost_b import extract_entities as _cloud_extract
+
+                report = await _cloud_extract(tasks, **_extract_kwargs)
+            elif extraction_engine == "local_then_cloud":
+                try:
+                    report = await extract_entities(tasks, **_extract_kwargs)
+                except Exception as _local_exc:  # noqa: BLE001
+                    logger.warning(
+                        "phase=ghost_b local engine failed (%s) — cloud fallback",
+                        _local_exc,
+                    )
+                    from services.ghost_b import extract_entities as _cloud_extract
+
+                    report = await _cloud_extract(tasks, **_extract_kwargs)
+            else:
+                report = await extract_entities(tasks, **_extract_kwargs)
         if not isinstance(report, ExtractionBatchReport):
             fresh_results = report
             failures: list[ExtractionFailureItem] = []

@@ -266,6 +266,7 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
+  const [showChunkTokens, setShowChunkTokens] = useState(false);
   const [newConfig, setNewConfig] = useState<IngestionConfig>(
     createDefaultIngestionConfig(null),
   );
@@ -570,6 +571,15 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               modalStatus={modalStatus}
             />
 
+            <button
+              type="button"
+              onClick={() => setShowChunkTokens((v) => !v)}
+              className="text-[10px] tracking-widest text-content-tertiary uppercase hover:text-content-primary"
+            >
+              {showChunkTokens ? "▾" : "▸"} Advanced token budgets (auto-tuned — override only for experiments)
+            </button>
+            {showChunkTokens && (
+            <>
             {/* Token Budget — Parent */}
             <div>
               <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
@@ -707,6 +717,8 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                 </div>
               </div>
             </div>
+            </>
+            )}
 
             {/* Chunking extras */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
@@ -733,12 +745,12 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                 </label>
                 <div
                   className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary"
-                  title="Resolved per file after parsing. Children currently use sentence_merge; semantic_split is held back until implemented."
+                  title="Resolved per file after parsing: prose \u2192 semantic_split (one idea per child); lists/lines/code/tables/transcripts auto-route; SaT sentence engine; topic-fused paragraphs escalate via embeddings; structureless docs get semantic parents."
                 >
                   AUTO
                 </div>
                 <div className="mt-1 text-[8px] text-content-tertiary leading-tight">
-                  file-type policy · child: sentence_merge
+                  file-type routers · child: semantic_split
                 </div>
               </div>
               <div>

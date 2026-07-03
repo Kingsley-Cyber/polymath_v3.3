@@ -120,12 +120,16 @@ function ExtractionEnginesCard() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [engine, setEngine] = useState<"local" | "cloud" | "local_then_cloud">("local");
   const [validating, setValidating] = useState(false);
   const [report, setReport] = useState<ExtractionValidationReport | null>(null);
 
   useEffect(() => {
     getGlobalSettings()
-      .then((r) => setEndpoints(r.settings.extraction?.endpoints ?? []))
+      .then((r) => {
+        setEndpoints(r.settings.extraction?.endpoints ?? []);
+        setEngine(r.settings.extraction?.engine ?? "local");
+      })
       .catch((e) => setError(String(e)));
   }, []);
 
@@ -140,7 +144,7 @@ function ExtractionEnginesCard() {
     setSaving(true);
     setError(null);
     try {
-      await updateGlobalSettings({ extraction: { endpoints } });
+      await updateGlobalSettings({ extraction: { endpoints, engine } });
       setDirty(false);
       setReport(null);
     } catch (e) {
@@ -194,6 +198,28 @@ function ExtractionEnginesCard() {
             {saving ? "Saving…" : dirty ? "Save" : "Saved"}
           </Button>
         </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] tracking-widest text-gray-500 uppercase">Engine</span>
+        {([
+          ["local", "LOCAL (GLiNER/GLiREL)"],
+          ["cloud", "CLOUD (LLM pool)"],
+          ["local_then_cloud", "LOCAL → CLOUD"],
+        ] as const).map(([val, label]) => (
+          <button
+            key={val}
+            type="button"
+            onClick={() => { setEngine(val); setDirty(true); }}
+            className={
+              "px-2 py-1 text-[10px] tracking-wider border " +
+              (engine === val
+                ? "border-accent-main text-content-primary bg-bg-base"
+                : "border-border-minimal text-content-tertiary hover:text-content-primary")
+            }
+          >
+            {label}
+          </button>
+        ))}
       </div>
       <p className="text-[12px] text-gray-500">
         Machines that run entity/relation extraction during ingestion. The

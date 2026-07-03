@@ -17,6 +17,7 @@ Infrastructure is always read from config.py at runtime.
 """
 
 import logging
+import os
 import copy
 from datetime import datetime
 from typing import Any
@@ -126,6 +127,7 @@ class SettingsService:
             redis_url=c.REDIS_URL,
             embedder_url=c.EMBEDDER_URL,
             reranker_url=c.RERANKER_URL,
+            extraction_url=(os.environ.get("LOCAL_GHOST_B_EXTRACT_URL", "") or "").split(",")[0].strip(),
             modal_enabled=c.MODAL_ENABLED,
             modal_embedder_url=masked_modal_url,
             auth=AuthConfig(
