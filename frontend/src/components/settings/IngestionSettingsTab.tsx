@@ -624,8 +624,8 @@ export function IngestionSettingsTab() {
         />
         <ReadOnlyField
           label="Child Splitter"
-          value="AUTO → sentence_merge"
-          hint="semantic_split remains disabled until the backend splitter is fully implemented"
+          value="AUTO → semantic_split + structured routers"
+          hint="One idea per child; lists/lines/code/tables/transcripts auto-route; SaT sentence engine; semantic escalation for topic-fused paragraphs"
           mono
         />
       </SectionCard>

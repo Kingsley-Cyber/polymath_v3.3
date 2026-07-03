@@ -193,14 +193,14 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
   embedding_models: [],
   modal_containers: null,
   parent_chunk_tokens: {
-    min_tokens: 500,
+    min_tokens: 400,
     target_tokens: 1200,
-    max_tokens: 2000,
+    max_tokens: 1800,
   },
-  child_chunk_tokens: { min_tokens: 128, target_tokens: 350, max_tokens: 512 },
+  child_chunk_tokens: { min_tokens: 64, target_tokens: 128, max_tokens: 256 },
   chunk_overlap: 200,
   max_summary_tokens: 175,
-  child_chunk_algorithm: "sentence_merge",
+  child_chunk_algorithm: "semantic_split",
   // Phase 24 — empty by default. The corpus editor populates real entries
   // from the user's pool (Settings → Models). Hardcoding ollama/llama3.2:3b
   // silently bound new corpora to a model the user may not have pulled.
