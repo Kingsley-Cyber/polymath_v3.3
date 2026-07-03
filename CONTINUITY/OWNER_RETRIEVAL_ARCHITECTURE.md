@@ -1,3 +1,5 @@
+> **Consolidated into [POLYMATH_ARCHITECTURE.md](POLYMATH_ARCHITECTURE.md) (canonical, 2026-07-03). Retained as history.**
+
 # Owner Retrieval Architecture — Deterministic Hydration Waterfall + Two-Lane Anchoring
 
 **Author: King (owner-designed and planned).** Recorded + repo-validated 2026-07-02.

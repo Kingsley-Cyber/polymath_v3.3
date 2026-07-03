@@ -1,3 +1,5 @@
+> **Consolidated into [POLYMATH_ARCHITECTURE.md](POLYMATH_ARCHITECTURE.md) (canonical, 2026-07-03). Retained as history — the red-team blockers (§8) survive there; the tier/sequence sections are superseded by the owner design.**
+
 # Ingestion → Retrieval Rebuild — Implementation Plan
 
 **Date:** 2026-07-02 · **Scope (owner-set):** the ingestion→retrieval FLOW only — extraction,

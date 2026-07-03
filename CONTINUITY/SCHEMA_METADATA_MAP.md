@@ -1,3 +1,5 @@
+> **Consolidated into [POLYMATH_ARCHITECTURE.md](POLYMATH_ARCHITECTURE.md) (canonical, 2026-07-03). Retained as history — the full field-level gap matrix lives here.**
+
 # Schema vs Metadata — The Complete Map (re-architecture foundation)
 
 **Date:** 2026-07-02 · **Method:** 4 parallel code sweeps (extraction shapes · parent/child+Qdrant

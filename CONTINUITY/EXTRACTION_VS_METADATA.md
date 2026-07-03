@@ -1,3 +1,5 @@
+> **Consolidated into [POLYMATH_ARCHITECTURE.md](POLYMATH_ARCHITECTURE.md) (canonical, 2026-07-03). Retained as history — the 5-schema derivation + evidence tables live here.**
+
 # Extraction Schema vs Retrieval Metadata — Validation + Production Shape
 
 **Date:** 2026-07-02 · **Owner insight (validated):** extraction ≠ metadata. Extraction is *what
