@@ -59,11 +59,15 @@ _SYSTEM = (
     "You are a precise document summarizer and classifier. First produce a "
     "factual, dense summary that preserves key terms, proper nouns, and "
     "technical language; do not add information not present in the passage. Then "
-    "classify the passage into exactly one domain from the taxonomy and extract "
-    "2-4 lowercase topic keywords.\nTaxonomy: " + ", ".join(_DOMAIN_TAXONOMY) + "\n"
-    'Respond with ONLY a JSON object: {"summary": "...", "domain": '
-    '"<one taxonomy value>", "topics": ["kw1", "kw2"]}.'
+    "classify the passage into exactly one domain from the taxonomy, name its "
+    "semantic chunk type, and extract key terms and mechanisms.\nTaxonomy: " + ", ".join(_DOMAIN_TAXONOMY) + "\n"
+    "__SEMANTIC_INSTRUCTION__"
 )
+from services.ingestion.summary_semantics import (  # noqa: E402
+    SEMANTIC_SUMMARY_INSTRUCTION as _SEM_INSTR,
+    parse_semantic_summary,
+)
+_SYSTEM = _SYSTEM.replace("__SEMANTIC_INSTRUCTION__", _SEM_INSTR)
 # NOTE (bridge retrieval B1, 2026-07-02): mechanisms extraction is done by
 # scripts/backfill_mechanisms.py over existing parent SUMMARIES (independent of
 # this live prompt, so the ingest pipeline is unchanged). Fold mechanisms into
@@ -93,7 +97,10 @@ class SummaryResult:
     source_tier: str
     summary: str
     domain: str | None = None
-    topics: list[str] | None = None
+    topics: list[str] | None = None  # DEPRECATED (retirement step 1: no longer written)
+    semantic_chunk_type: str | None = None
+    key_terms: list[str] | None = None
+    mechanisms: list[str] | None = None
 
 
 def _parse_summary_json(raw: str) -> tuple[str, str | None, list[str] | None]:
@@ -344,7 +351,11 @@ async def summarize_parents(
                 )
                 resp.raise_for_status()
                 raw = resp.json()["choices"][0]["message"]["content"].strip()
-                summary, domain, topics = _parse_summary_json(raw)
+                _sem = parse_semantic_summary(raw)
+                summary = _sem["summary"]
+                _dom = _sem["domain"]
+                domain = _dom if _dom in _DOMAIN_TAXONOMY else ("other" if _dom else None)
+                topics = None  # retired
                 if not summary:
                     return None
                 return SummaryResult(
@@ -355,6 +366,9 @@ async def summarize_parents(
                     summary=summary,
                     domain=domain,
                     topics=topics,
+                    semantic_chunk_type=_sem["semantic_chunk_type"],
+                    key_terms=_sem["key_terms"] or None,
+                    mechanisms=_sem["mechanisms"] or None,
                 )
         except Exception as exc:
             if is_fatal_provider_error(exc):

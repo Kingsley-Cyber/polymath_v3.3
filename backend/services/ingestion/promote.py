@@ -17,6 +17,8 @@ from typing import Any, Callable, Optional
 
 PROMOTE_VERSION = "polymath.promote.v1"
 _PROMOTED_LIST_FIELDS = (
+    "mechanisms",
+    "key_terms",
     "concepts",
     "entity_ids",
     "entity_families",
@@ -97,7 +99,11 @@ def promote(
 def promoted_index_fields() -> list[tuple[str, str]]:
     """(field, qdrant schema type) — the index ships in the SAME migration as
     the field (Stage-Contract rule)."""
-    return [(f, "keyword") for f in _PROMOTED_LIST_FIELDS] + [("has_relations", "bool")]
+    return [(f, "keyword") for f in _PROMOTED_LIST_FIELDS] + [
+        ("has_relations", "bool"),
+        ("semantic_chunk_type", "keyword"),
+        ("topic_key", "keyword"),
+    ]
 
 
 async def promote_doc(db, corpus_id: str, doc_id: str) -> dict[str, Any]:
@@ -150,12 +156,36 @@ async def promote_doc(db, corpus_id: str, doc_id: str) -> dict[str, Any]:
         rows = await db["ghost_b_extractions"].find(
             {"corpus_id": corpus_id, "doc_id": doc_id, "status": "ok"}
         ).to_list(length=None)
+        # §10.1 — parent semantics lift: child inherits its parent's
+        # semantic_chunk_type / mechanisms / key_terms / topic_key.
+        parent_sem: dict[str, dict] = {}
+        async for pr in db["parent_chunks"].find(
+            {"corpus_id": corpus_id, "doc_id": doc_id},
+            {"parent_id": 1, "semantic_chunk_type": 1, "key_terms": 1,
+             "mechanisms": 1, "topic_key": 1},
+        ):
+            parent_sem[str(pr["parent_id"])] = pr
+        child_parent: dict[str, str] = {}
+        async for cr in db["chunks"].find(
+            {"corpus_id": corpus_id, "doc_id": doc_id},
+            {"chunk_id": 1, "parent_id": 1},
+        ):
+            child_parent[str(cr["chunk_id"])] = str(cr.get("parent_id") or "")
         done = warn = 0
         for row in rows:
             chunk_id = str(row.get("chunk_id") or "")
             if not chunk_id:
                 continue
             delta = promote(row, entity_id_fn=_eid)
+            ps = parent_sem.get(child_parent.get(chunk_id, ""), {})
+            if ps.get("semantic_chunk_type"):
+                delta["semantic_chunk_type"] = ps["semantic_chunk_type"]
+            if ps.get("topic_key"):
+                delta["topic_key"] = ps["topic_key"]
+            if ps.get("mechanisms"):
+                delta["mechanisms"] = ps["mechanisms"]
+            if ps.get("key_terms"):
+                delta["key_terms"] = ps["key_terms"]
             pid = qw._uuid_from_str(chunk_id)
             for col in cols:
                 try:

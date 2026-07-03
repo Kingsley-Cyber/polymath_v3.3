@@ -391,7 +391,7 @@ alone does nothing — wiring is the remaining work) · **PARTIAL** · **NOT BUI
 | S1 M2 capture (title/author/date/source_type) + routing_trace persisted | **LIVE** (docling_adapter finalize_source_meta; worker source_meta) |
 | S2 chunker: semantic_split + routers 1–5 + escalation + semantic tier_c parents | **LIVE** (tier_chunker; probe-verified) |
 | S3 Ghost A prose summary + domain | **LIVE** · `topics` still written (retirement pending) |
-| S3 minimal schema (mechanisms / key_terms / semantic_chunk_type) at ingest | **NOT BUILT** (mechanisms = backfill script only) |
+| S3 semantic schema (§10.1: semantic_chunk_type/key_terms/mechanisms/topic_key via Ghost A JSON + heal; topics RETIRED; promote lifts onto children) | **LIVE** (2026-07-03 receipt: healed parent → full shape; 28 children lifted) |
 | S4/S5 promote-at-ingest (concepts/entity_ids/relation aggregates + stamps) | **LIVE** — after ws.qdrant_written (placement bug caught+fixed by live receipt) |
 | S5 summary tree + heal guard + documents.doc_profile | **LIVE** (heal proven: blanked parent → healed → tree) |
 | S6 write barrier | **PARTIAL** — flags tracked (mongo/qdrant_written, qdrant_failed); no complete-enum; **retriever does NOT skip incomplete docs** |

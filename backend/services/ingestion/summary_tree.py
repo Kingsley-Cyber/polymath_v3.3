@@ -278,18 +278,32 @@ async def build_and_store_tree(
             text = (r.get("text") or "")[:6000]
             if not text.strip():
                 continue
+            from services.ingestion.summary_semantics import (
+                SEMANTIC_SUMMARY_INSTRUCTION,
+                parse_semantic_summary,
+                topic_key_for,
+            )
             try:
-                out = (await fn(
-                    "Summarize this passage in 2-3 dense sentences. "
-                    "No preamble.\n\n" + text
+                raw = (await fn(
+                    "Summarize and classify this passage. "
+                    + SEMANTIC_SUMMARY_INSTRUCTION + "\n\nPASSAGE:\n" + text
                 ) or "").strip()
             except Exception:  # noqa: BLE001 — guard rail never fails the tree
-                out = ""
-            if out:
-                r["summary"] = out
+                raw = ""
+            sem = parse_semantic_summary(raw)
+            if sem["summary"]:
+                r["summary"] = sem["summary"]
                 await db["parent_chunks"].update_one(
                     {"corpus_id": corpus_id, "parent_id": r["parent_id"]},
-                    {"$set": {"summary": out}},
+                    {"$set": {
+                        "summary": sem["summary"],
+                        "semantic_chunk_type": sem["semantic_chunk_type"],
+                        "key_terms": sem["key_terms"] or None,
+                        "mechanisms": sem["mechanisms"] or None,
+                        "topic_key": topic_key_for(
+                            sem["domain"] or r.get("domain"), r.get("heading_path")
+                        ),
+                    }},
                 )
                 healed += 1
 

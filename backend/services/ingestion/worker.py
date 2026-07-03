@@ -108,6 +108,7 @@ from services.ghost_b import (
 from services.ghost_b_local import extract_entities
 from services.facets import build_ingest_facet_profile
 from services.ingestion import dedup, docling_adapter, tier_chunker
+from services.ingestion.summary_semantics import topic_key_for as _topic_key_for
 from services.ingestion.schema_lens import get_or_create_schema_lens
 from services.ingestion.section_classifier import (
     ChunkKind,
@@ -1249,7 +1250,12 @@ def _build_parent_dicts(
                 "page_end": getattr(p, "page_end", None),
                 "summary": getattr(sr, "summary", None) if sr else None,
                 "domain": getattr(sr, "domain", None) if sr else None,
-                "topics": getattr(sr, "topics", None) if sr else None,
+                "semantic_chunk_type": getattr(sr, "semantic_chunk_type", None) if sr else None,
+                "key_terms": getattr(sr, "key_terms", None) if sr else None,
+                "mechanisms": getattr(sr, "mechanisms", None) if sr else None,
+                "topic_key": _topic_key_for(
+                    getattr(sr, "domain", None) if sr else None, p.heading_path
+                ),
                 "child_ids": [c.chunk_id for c in p.children],
                 "chunk_kind": getattr(p, "chunk_kind", ChunkKind.BODY),
                 "language": getattr(p, "language", None),
