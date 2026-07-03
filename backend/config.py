@@ -206,6 +206,26 @@ class Settings(BaseSettings):
             "pre-router paragraph/sentence-only behaviour."
         ),
     )
+    QDRANT_SHARED_COLLECTIONS: bool = Field(
+        default=False,
+        description=(
+            "B4 — retrieval reads the SHARED multitenant collections "
+            "(polymath_children / polymath_doc_summaries, corpus_id-filtered) "
+            "instead of per-corpus collections. OFF until the owner flips it; "
+            "scripts_migrate_multitenant.py populates the shared side "
+            "additively (sources untouched, reversible)."
+        ),
+    )
+    TWO_LANE_ANCHORING: bool = Field(
+        default=False,
+        description=(
+            "B5 — two-lane anchored retrieval (anchor lane hard-filtered to "
+            "docs whose title/author is NAMED in the query, expansion lane "
+            "for the rest; quota'd waterfall w/ threshold spillover). OFF "
+            "until owner flips; services/retriever/anchor_detect.py is the "
+            "deterministic lexical detector, waterfall.allocate() the packer."
+        ),
+    )
     SUMMARY_TREE_ENABLED: bool = Field(
         default=True,
         description=(
