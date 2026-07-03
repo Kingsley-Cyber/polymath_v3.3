@@ -58,6 +58,35 @@ class EmbeddingsResponse(BaseModel):
 
 
 app = FastAPI(title="Polymath Apple MLX Embedder", version="0.1.0")
+
+
+def _apply_mlx_memory_guardrails() -> None:
+    """Owner infra rule (POLYMATH_ARCHITECTURE §4.5): MLX services cap their
+    Metal buffer cache so embedder + reranker + (future) answer LLM never
+    fight for unified memory. Tunable via MLX_CACHE_LIMIT_GB (default 1.0);
+    startup metrics logged so memory_pressure investigations have a baseline.
+    """
+    import os
+
+    try:
+        import mlx.core as mx
+
+        gb = 1024 ** 3
+        limit = float(os.environ.get("MLX_CACHE_LIMIT_GB", "1.0") or 1.0)
+        mx.set_cache_limit(int(limit * gb))
+        print(
+            f"[mlx-guardrail] cache_limit={limit:.1f}GB "
+            f"metal={getattr(mx, 'metal', None) and mx.metal.is_available()} "
+            f"active={mx.get_active_memory() / gb:.2f}GB "
+            f"peak={mx.get_peak_memory() / gb:.2f}GB "
+            f"cache={mx.get_cache_memory() / gb:.2f}GB",
+            flush=True,
+        )
+    except Exception as exc:  # never block startup on metrics
+        print(f"[mlx-guardrail] unavailable: {exc}", flush=True)
+
+
+_apply_mlx_memory_guardrails()
 _model: Any = None
 _tokenizer: Any = None
 _generate: Any = None

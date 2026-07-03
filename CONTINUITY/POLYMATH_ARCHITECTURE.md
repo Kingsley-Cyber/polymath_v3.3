@@ -227,6 +227,48 @@ replayable (fixes the ghost_b-staging orphan fragility).
 
 ---
 
+## 4.5 Host/Container topology (owner-ratified 2026-07-03)
+
+**Docker Desktop for infrastructure ONLY; MLX models run directly on macOS.**
+Apple Silicon unified memory (24GB shared CPU/GPU) is MLX's native model —
+containerizing Metal loses acceleration. Apple's `container` tool REJECTED
+(VM-per-container, immature compose, no host.docker.internal ergonomics).
+
+```
+macOS host                          Docker Desktop (infra only)
+├── MLX embedder      :8082        ├── backend API + frontend
+├── reranker (llama)  :8081        ├── Qdrant / MongoDB / Neo4j / Redis
+├── GLiNER/GLiREL     :8084        └── (caps: ~8GB mem · 4.5 CPU · 3.5 swap)
+└── inference discipline            macOS + MLX reserve ≈ 12GB
+```
+
+**Metal-contention rules (the "biggest thing"):**
+1. ONE model inference at a time per GPU-bound service class — the existing
+   rule (never rerank parallel support passes; RERANK_EVIDENCE_SUPPORT opt-in)
+   generalizes to an inference semaphore across embed/rerank/LLM when a local
+   answer model lands.
+2. Every MLX service caps its buffer cache: `mx.set_cache_limit`
+   (`MLX_CACHE_LIMIT_GB`, default 1.0) + startup metrics (active/peak/cache)
+   — shipped in embedder_mlx; propagate on next sidecar re-install.
+3. **GLiNER/GLiREL are INGESTION-ONLY** — enrich chunks, then idle/stop; they
+   must never contend with query-time embed/rerank. (LaunchAgent lifecycle
+   wiring = pending chip.)
+4. Verification targets: memory_pressure normal · Docker <8-10GB ·
+   32-doc rerank under timeout · no circuit-breaker opens · no raw-score
+   fallback.
+
+**Qdrant: payload indexes BEFORE data, only on filtered fields** (owner list —
+create in the same migration as the field, CI-asserted): corpus_id ·
+document_status · source_book · domain · chunk_type · chunk_kind ·
+mechanisms · abstract_patterns · is_latest · document_date · security_scope ·
+parent_id · concepts · entity_ids · relation_families · fact_types.
+
+**Mac Studio vs RTX box gaps (identify, don't assume):** CUDA-only tooling
+(Unsloth etc.) never on Mac; quantization differs (fp16/mxfp8 MLX vs CUDA
+fp16); extraction endpoint list spans both machines with health-probe
+preference order — a powered-off RTX box must degrade silently to the Mac
+sidecar, never fail the batch.
+
 ## 5. Retrieval (P4) — owner design
 
 ### 5.1 Tier-0: routing + anchor detection (deterministic)

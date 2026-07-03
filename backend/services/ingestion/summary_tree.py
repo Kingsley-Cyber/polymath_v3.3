@@ -238,6 +238,8 @@ async def build_and_store_tree(
     corpus_id: str,
     llm_fn: LlmFn | None = None,
     use_llm: bool = True,
+    heal_missing: bool = True,
+    heal_limit: int = 2000,
 ) -> dict[str, Any]:
     """Read PARENT-level summaries (parent_chunks.summary — Ghost A output;
     never child chunks), build the L2→L4 tree, upsert nodes into the
@@ -255,8 +257,42 @@ async def build_and_store_tree(
         return {"skipped": "no_document"}
     rows = await db["parent_chunks"].find(
         {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"parent_id": 1, "summary": 1, "heading_path": 1, "domain": 1, "chunk_kind": 1},
+        {"parent_id": 1, "summary": 1, "heading_path": 1, "domain": 1,
+         "chunk_kind": 1, "text": 1},
     ).sort("parent_id", 1).to_list(length=None)  # {doc}_parent_NNNN → lexical = doc order
+    body_rows = [r for r in rows if (r.get("chunk_kind") or "body") == "body"]
+    fn = llm_fn if llm_fn is not None else (_default_llm if use_llm else None)
+
+    # GUARD RAIL — the summarized-parent invariant. Ghost A is conditional
+    # (global enabled flag + model pool); this backstop ensures every BODY
+    # parent carries a summary before the tree builds. Deterministic
+    # identification (chunk_kind == body via section_classifier), bounded,
+    # best-effort per parent, persisted so re-runs skip healed rows.
+    healed = 0
+    if fn is not None and heal_missing:
+        for r in body_rows:
+            if healed >= heal_limit:
+                break
+            if (r.get("summary") or "").strip():
+                continue
+            text = (r.get("text") or "")[:6000]
+            if not text.strip():
+                continue
+            try:
+                out = (await fn(
+                    "Summarize this passage in 2-3 dense sentences. "
+                    "No preamble.\n\n" + text
+                ) or "").strip()
+            except Exception:  # noqa: BLE001 — guard rail never fails the tree
+                out = ""
+            if out:
+                r["summary"] = out
+                await db["parent_chunks"].update_one(
+                    {"corpus_id": corpus_id, "parent_id": r["parent_id"]},
+                    {"$set": {"summary": out}},
+                )
+                healed += 1
+
     parents = [
         ParentSummaryIn(
             parent_id=str(r["parent_id"]),
@@ -264,13 +300,10 @@ async def build_and_store_tree(
             heading_path=tuple(r.get("heading_path") or ()),
             domain=str(r.get("domain") or ""),
         )
-        for r in rows
-        if (r.get("chunk_kind") or "body") == "body"
+        for r in body_rows
     ]
     if not any(p.summary for p in parents):
-        return {"skipped": "no_parent_summaries", "parents": len(parents)}
-
-    fn = llm_fn if llm_fn is not None else (_default_llm if use_llm else None)
+        return {"skipped": "no_parent_summaries", "parents": len(parents), "healed": healed}
     nodes = await build_tree(
         doc_id=doc_id,
         corpus_id=corpus_id,
@@ -301,4 +334,5 @@ async def build_and_store_tree(
     for n in nodes:
         counts[n.node_type] = counts.get(n.node_type, 0) + 1
     counts["parents_in"] = len(parents)
+    counts["summaries_healed"] = healed
     return counts
