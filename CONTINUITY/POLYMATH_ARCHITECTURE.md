@@ -425,7 +425,7 @@ alone does nothing — wiring is the remaining work) · **PARTIAL** · **NOT BUI
 |---|---|
 | Waterfall allocate() (all 6 rules, byte-identical, 10/10) | **GATED** — zero call sites; assembly = legacy hydrate.py (child_summary default + B2 knob LIVE on that path) |
 | Two-lane anchoring (detector 6/6 + lane-aware packer) | **GATED** — detect_anchor_doc_ids never called; TWO_LANE_ANCHORING read by nothing |
-| Tier-0 doc_summaries routing | **GATED** — profiles exist (Mongo + 7 embedded via script); NO query-time search of polymath_doc_summaries |
+| Tier-0 doc_summaries routing | **PARTIAL** 2026-07-03 — W1a LIVE: ingest auto-embeds doc_profile per doc (phase=tier0 hook, TIER0_AUTO_EMBED=true; real-ingest receipt, probe ranks fresh card #1 cross-corpus). W1b query-time routing still GATED (TIER0_ROUTING=false, zero call sites; probe = scripts_probe_tier0.py). Stale cards from deleted corpora persist (delete-cleanup TODO); tiny-doc batch verifier mismatch chipped |
 | Promoted payload consumption | **PARTIAL** — entity_ids LIVE at graph tier (the vector↔graph join works); concepts[]/relation_families[] indexed-but-never-filtered |
 | C3/B4 rank signals, answerability gates, stream retry, HyDE toggle | **LIVE** (earlier arcs) |
 | G-PACK P1 offline fields (related_entities/graph_neighbors/neighbor_chunks/graph_degree at promote, integer+keyword Qdrant indexes) | **LIVE** 2026-07-03 (94c87eb+55d5b19; receipt 27/28 children, range filter 27 pts) |
