@@ -428,6 +428,9 @@ alone does nothing — wiring is the remaining work) · **PARTIAL** · **NOT BUI
 | Tier-0 doc_summaries routing | **GATED** — profiles exist (Mongo + 7 embedded via script); NO query-time search of polymath_doc_summaries |
 | Promoted payload consumption | **PARTIAL** — entity_ids LIVE at graph tier (the vector↔graph join works); concepts[]/relation_families[] indexed-but-never-filtered |
 | C3/B4 rank signals, answerability gates, stream retry, HyDE toggle | **LIVE** (earlier arcs) |
+| G-PACK P1 offline fields (related_entities/graph_neighbors/neighbor_chunks/graph_degree at promote, integer+keyword Qdrant indexes) | **LIVE** 2026-07-03 (94c87eb+55d5b19; receipt 27/28 children, range filter 27 pts) |
+| G-PACK P2 Mode A serving (§12.6 ladder: G3 TTL cache → G1 seed pref → A1 query entity linking → payload-first mentions hop, Cypher only under floor) | **LIVE** 2026-07-03 (b40da18; /api/chat log payload=13 linked=4 mentions_cypher=skipped, 32ms; 6 kill-switch knobs) |
+| ENTITY-ID LAW: canonical = neo4j_writer.entity_id_from_name (HYPHENS) — underscore-slug fallback bug fixed; multi-word entities now join | **LIVE** 2026-07-03 (b40da18) |
 
 ### VERDICT: ~60–65% of the full plan. Ingestion half ≈ complete and live-receipted;
 retrieval-consumption half is tested groundwork awaiting WIRING (not just flag flips).
@@ -681,11 +684,26 @@ seeds, and HOP TIME. Execute the G-PACK before W1/W2:
      chunk's extraction relations — endpoints as entity ids) + `graph_neighbors[]` (cross-doc
      1-hop from Neo4j at promote time, capped 12, sorted/deterministic, best-effort) — indexed.
      Hops become payload reads; live Cypher reserved for true multi-hop/path traversal.
-  P2 Mode A upgrades: (a) A1 query-side entity linking — query concept slugs → indexed Neo4j
-     entity_id existence check → DIRECT seeds (the graph starts from the question);
-     (b) payload-first 1-hop expansion using graph_neighbors, Cypher fallback;
-     (c) G3 expansion TTL cache (seed-set keyed, ~180s); (d) G1 seed preference for
-     has_relations=true chunks.
+  P2 Mode A upgrades — **SHIPPED 2026-07-03 (55d5b19 offline + b40da18 serving)**:
+     (a) A1 query entity linking (query n-grams → canonical entity_id existence → DIRECT
+     seeds AND direct evidence, `relation_family=query_entity_link`); (b) payload-first
+     mentions hop via `neighbor_chunks[]` (doc-local python adjacency + cross-doc MENTIONS,
+     cap 8) — live co-mention Cypher ONLY when validated payload candidates <
+     GRAPH_PAYLOAD_MIN_CANDIDATES (default 4); (c) G3 TTL cache 180s keyed
+     (corpora, seed window, limit, query); (d) G1 has_relations seed preference.
+     ONE Mongo $in read serves (b)+(d). Kill-switches: GRAPH_PAYLOAD_FIRST,
+     GRAPH_QUERY_ENTITY_LINKING, GRAPH_EXPANSION_CACHE_TTL_SECONDS,
+     GRAPH_SEED_PREFER_RELATIONS. Receipt: 32ms/8 chunks, payload=13 linked=4
+     mentions_cypher=skipped; cache hit 0ms; same line observed in live /api/chat.
+     **ENTITY-ID LAW (bug fixed here): canonical id = neo4j_writer.entity_id_from_name
+     (NFKD → strip punctuation → collapse spaces → HYPHENS, alias-map resolved).
+     promote/backfill had probed non-existent fn names and silently fell back to an
+     underscore slug — every multi-word entity failed the vector↔graph join. Any new
+     code minting entity ids MUST import entity_id_from_name (or replicate exactly);
+     never underscore slugs. Fallback replicas live in promote._default_entity_id and
+     graph_payload._default_entity_id.**
+     Still open in expanded P2 scope: bridge_concepts[] promotion, graph_roles[],
+     fact-seed cache, deep-2-hop explicit-intent knob.
   P3 G2 rerank-pool raise 16→32 rides the first graph A/B.
 Then W1 Tier-0 → W2 waterfall → temporal W-T as previously ordered.
 Temporal layer lands as **W-T** after Q2 (needs M2 versioning population + topic_key, which
