@@ -690,3 +690,37 @@ seeds, and HOP TIME. Execute the G-PACK before W1/W2:
 Then W1 Tier-0 → W2 waterfall → temporal W-T as previously ordered.
 Temporal layer lands as **W-T** after Q2 (needs M2 versioning population + topic_key, which
 §10.1 shipped). Graph precompute lands with Q2/G1 (same promote() pass). §11.6 otherwise stands.
+
+
+### 12.6 GRAPH DOCTRINE (owner, 2026-07-03): monolithic intelligence OFFLINE · waterfall serving ONLINE
+**"Do the expensive graph thinking before the query. Use waterfall only during the live query."**
+
+Offline (ingestion/background — the graph may be HEAVY here):
+GLiNER/GLiREL → entities → relations → facts → concept bridges → mechanism bridges → entity
+neighborhoods → graph cache tables. Cheap graph-derived fields ride the chunk/summary payloads:
+```
+concepts[] mechanisms[]                       (§10.1 — SHIPPED)
+related_entities[] graph_neighbors[]          (P1 — SHIPPED, entity-id level)
+neighbor_chunks[]      ← NEW: top-8 graph-adjacent CHUNK ids (precomputed mention-walk;
+                          query-time expansion becomes a pure id lookup)
+bridge_concepts[]      ← NEW: cross-domain bridge concepts from Phase-5b analogy/gap metrics
+graph_degree           ← NEW: connectivity scalar (payload-read graph boost, replaces live
+                          PageRank lookup in the hot path)
+graph_roles[]          ← NEW: bridge|hub|definition|supporting_fact (graph-derived; merges
+                          with §12.4 A3 retrieval_role)
+fact_seed cache        ← NEW: per-entity top facts precomputed (today's live 5s fact-seed
+                          lane becomes a read)
+path sketches          (§12.4 A2 — planned)
+```
+
+Online (query time — the ESCALATION LADDER, never pay full graph cost by default):
+```
+Hybrid lanes ──► cached graph signals (payload reads: neighbors/degree/bridges/facts)
+            ──► SHALLOW live expansion ONLY IF: graph-supported candidates < floor OR a
+                relationship atom is uncovered by cached signals
+            ──► DEEP live traversal (2-hop/paths) ONLY IF: explicit path/multi-hop intent
+                or owner knob — one CE rerank once, hydrate winners only
+```
+This SUBSUMES §12.3 and expands P2: escalation triggers are deterministic (candidate-count
+floor + atom coverage), never LLM judgment. P2 scope now includes neighbor_chunks,
+bridge_concepts, graph_degree promotion, fact-seed cache, and the ladder in Mode A.
