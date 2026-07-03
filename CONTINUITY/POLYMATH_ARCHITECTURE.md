@@ -102,10 +102,18 @@ author/title metadata that does not exist today.*
 Payload index created in the SAME migration as the field; CI asserts index presence before any
 filter uses it.
 
-### 2.4 `GraphWriteModel` — Neo4j (exists; keep, plus Chunk.parent_id)
+### 2.4 `GraphWriteModel` — Neo4j (exists; keep, plus Chunk.parent_id + Entity.corpus_ids[])
 Entity (ontology-enriched: object_kind/domain_type/canonical_family/ontology_version, all
 indexed) · RELATES_TO (predicate, relation_family, edge_strength, eligible_for_synthesis,
 evidence arrays) · Fact (+HAS_FACT/SUPPORTS_FACT) · MENTIONS. Constraints in `graph/schema.py`.
+**Multi-corpus isolation: PROPERTY-based, never ID-prefixing.** Entity identity stays GLOBAL
+(`entity:{slug}`) — prefixing (`corpus::entity_x`) would split identity and destroy cross-corpus
+bridges + the `entity_ids[]` vector↔graph join, which are core goals. Corpus scoping lives on
+properties: `corpus_ids[]` arrays on RELATES_TO (exists, indexed), corpus_id on
+MENTIONS/Fact/Document/Chunk (exists), **plus ADD an accumulated `Entity.corpus_ids[]` array**
+(union at write, like query_aliases) so corpus-scoped traversals filter directly on the node
+with prefix-grade ergonomics and zero identity split — same match-any idiom as Qdrant
+multitenancy.
 
 ### 2.5 `RerankerInput` — short text actually scored
 ```
@@ -120,11 +128,30 @@ No ids/hashes/paths ever reach the reranker or the answer model.
 **S1 Parse** (docling) → clean text + `{title, author, source_type, document_date}` captured AT
 PARSE (today: filename only). Consumers: ChunkMetadata, packet prefix, anchor matching, temporal.
 
-**S2 Chunk** (tier_chunker) → parents ≈1200 tok / children ≈128 tok via `semantic_split`
-(paragraph-idea; verified live default). Add: token-budget cap + timeout→`sentence_merge`
-fallback WITH logged reason (never silent). Embedding-similarity splitting stays an OPEN option —
-it needs a pre-chunk embed pass (chicken-egg with Phase-5 embeddings) and must prove a measured
-precision gain first. The waterfall does not depend on this choice.
+**S2 Chunk** (tier_chunker) → parents ≈1200 tok / children ≈128 tok via `semantic_split`.
+**Spectrum audit 2026-07-03 (3 sweeps + empirical container probes):** the splitter is
+**100% STRUCTURAL — zero embeddings/similarity.** `\n\n+` paragraphs → one child per paragraph;
+oversize paragraphs fall to sentence-regex packing; degenerate text falls to a mid-word hard
+split at the 256 cap. Everything hinges on blank lines: with them, structure is preserved
+exactly (tables/code fences isolate cleanly); without them (bullet lists, non-YouTube
+transcripts, chat logs, poetry — single-`\n` text), it collapses to arbitrary sentence packing.
+A 40-sentence 3-topic single paragraph stays ONE fused child — no topic detection.
+Per-type routers already EXEMPLARY: tables (rows never split, headers repeated per chunk, all 5
+formats one linearizer), code (AST-bound, fenced-in-prose routed correctly), YouTube transcripts
+(time-grouped, guarded). Confirmed layer-2 gaps: **lists flattened to prose (worst gap)** ·
+single-newline text · topic-fused paragraphs · VTT/SRT/speaker-turn transcripts · layout-vs-data
+tables · formulas/figures/footnotes dropped · mid-word hard split.
+**S2 upgrades (resolved recommendation — deterministic rules first, embeddings last):**
+(1) list-aware router — regex bullet/number detection, split at item boundaries, keep items
+intact (pure rules); (2) single-newline pseudo-paragraph fallback — a block with no `\n\n` but
+many `\n` lines splits on lines before sentence regex (fixes transcripts/lists/poetry shape);
+(3) hard-split prefers the nearest sentence/whitespace boundary, never mid-word; (4) VTT/SRT +
+speaker-turn detection extending the existing transcript path; (5) ONLY THEN, targeted
+embedding-deviation splitting (the TechViz method: consecutive-sentence cosine, boundary at
+deviation spikes) as an ESCALATION applied solely to pathological blocks (no blank lines >M
+tokens, or single paragraphs >N tokens) — bounded cost on the local embedder, deterministic
+given fixed model+text, and it resolves the chicken-egg since only flagged blocks embed at
+chunk time. The waterfall depends on none of this.
 
 **S3 Ghost A** → per-parent `{summary(prose), domain(soft), mechanisms[], key_terms[],
 semantic_chunk_type}` **+ NEW doc-level summary** (feeds `doc_summaries`, §4). `topics` is
@@ -277,8 +304,12 @@ arbiter, LENIENT via `answerability_tuning.py`). Relationship queries answer whe
 bridges CE-scored) · seducer (0 off-topic) · packet_hash determinism · latency per tier.
 
 ## 8. Open decisions & carried risks
-- **Chunker upgrade** (a) keep paragraph-idea (works today, zero cost) vs (b) embedding-similarity
-  splitter (pre-chunk embed pass; needs measured precision gain). Waterfall independent of this.
+- **Chunker upgrade — RESOLVED by the 2026-07-03 spectrum audit (owner to ratify):** hybrid.
+  Keep the structural paragraph-idea spine (a) — probes show it preserves structure exactly when
+  blank lines exist. Add the four deterministic layer-2 routers (lists, single-newline fallback,
+  boundary-aware hard split, VTT/SRT) BEFORE any embeddings; then embedding-deviation splitting
+  (b) only as a targeted escalation for pathological blocks (see §3.S2). Full evidence:
+  CHUNKER audit reports (routing matrix · empirical probes · non-prose lanes).
 - **B2 excerpt rung** in the waterfall ladder — optional, owner's call.
 - **Doc-summary gist risk** — short-text embedding merge-gate (§4).
 - **`topics` retirement** — coordinated migration only (live field).
