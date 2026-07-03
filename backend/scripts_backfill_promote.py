@@ -62,9 +62,11 @@ async def main(corpus_id: str) -> None:
                 await client.create_payload_index(
                     collection_name=col,
                     field_name=field,
-                    field_schema=qm.PayloadSchemaType.KEYWORD
-                    if ftype == "keyword"
-                    else qm.PayloadSchemaType.BOOL,
+                    field_schema={
+                        "keyword": qm.PayloadSchemaType.KEYWORD,
+                        "bool": qm.PayloadSchemaType.BOOL,
+                        "integer": qm.PayloadSchemaType.INTEGER,
+                    }[ftype],
                 )
             except Exception:
                 pass  # exists — idempotent

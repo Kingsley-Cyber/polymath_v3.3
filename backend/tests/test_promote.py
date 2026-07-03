@@ -72,6 +72,29 @@ def test_index_ships_with_fields():
     for f in ("concepts", "entity_ids", "relation_families", "fact_types"):
         assert fields[f] == "keyword"
     assert fields["has_relations"] == "bool"
+    assert fields["neighbor_chunks"] == "keyword"
+    assert fields["graph_degree"] == "integer"
+
+
+def test_doc_local_neighbor_chunks_ranked_and_capped():
+    from services.ingestion.promote import doc_local_neighbor_chunks
+
+    adj = doc_local_neighbor_chunks({
+        "c1": ["entity:a", "entity:b"],
+        "c2": ["entity:a", "entity:b"],   # shares 2 with c1 -> ranks first
+        "c3": ["entity:b"],               # shares 1 with c1
+        "c4": ["entity:z"],               # isolated
+    })
+    assert adj["c1"] == ["c2", "c3"]
+    assert adj["c2"] == ["c1", "c3"]
+    assert adj["c4"] == []
+    # deterministic tie-break by chunk_id
+    assert adj["c3"] == ["c1", "c2"]
+    # cap honored
+    big = doc_local_neighbor_chunks(
+        {f"c{i}": ["entity:x"] for i in range(12)}, cap=8
+    )
+    assert len(big["c0"]) == 8
 
 
 def _run_all():

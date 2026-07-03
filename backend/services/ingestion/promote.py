@@ -12,8 +12,11 @@ corpora with NO re-extraction.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 PROMOTE_VERSION = "polymath.promote.v1"
 _PROMOTED_LIST_FIELDS = (
@@ -120,7 +123,31 @@ def promoted_index_fields() -> list[tuple[str, str]]:
         ("has_relations", "bool"),
         ("semantic_chunk_type", "keyword"),
         ("topic_key", "keyword"),
+        ("neighbor_chunks", "keyword"),
+        ("graph_degree", "integer"),
     ]
+
+
+def doc_local_neighbor_chunks(
+    chunk_eids: dict[str, list[str]], cap: int = 8
+) -> dict[str, list[str]]:
+    """§12.6 offline graph: chunks in the SAME doc sharing entities are
+    graph-adjacent — computable in pure python from extraction rows, zero
+    Cypher, deterministic (ranked by shared-entity count, then chunk_id)."""
+    by_entity: dict[str, list[str]] = {}
+    for cid, eids in chunk_eids.items():
+        for e in eids:
+            by_entity.setdefault(e, []).append(cid)
+    out: dict[str, list[str]] = {}
+    for cid, eids in chunk_eids.items():
+        shared: dict[str, int] = {}
+        for e in eids:
+            for other in by_entity.get(e, []):
+                if other != cid:
+                    shared[other] = shared.get(other, 0) + 1
+        ranked = sorted(shared.items(), key=lambda kv: (-kv[1], kv[0]))
+        out[cid] = [c for c, _ in ranked[:cap]]
+    return out
 
 
 async def promote_doc(db, corpus_id: str, doc_id: str) -> dict[str, Any]:
@@ -164,9 +191,11 @@ async def promote_doc(db, corpus_id: str, doc_id: str) -> dict[str, Any]:
                     await client.create_payload_index(
                         collection_name=col,
                         field_name=field_name,
-                        field_schema=qm.PayloadSchemaType.KEYWORD
-                        if ftype == "keyword"
-                        else qm.PayloadSchemaType.BOOL,
+                        field_schema={
+                            "keyword": qm.PayloadSchemaType.KEYWORD,
+                            "bool": qm.PayloadSchemaType.BOOL,
+                            "integer": qm.PayloadSchemaType.INTEGER,
+                        }[ftype],
                     )
                 except Exception:
                     pass  # exists — idempotent
@@ -192,10 +221,37 @@ async def promote_doc(db, corpus_id: str, doc_id: str) -> dict[str, Any]:
         # capped + sorted (deterministic), best-effort (Neo4j down → field
         # simply absent; Mode A falls back to live expansion).
         neighbor_map: dict[str, list[str]] = {}
+        degree_map: dict[str, int] = {}
+        foreign_chunks_map: dict[str, list[str]] = {}
+        chunk_eids_local: dict[str, list[str]] = {
+            str(row.get("chunk_id")): promote(row, entity_id_fn=_eid).get("entity_ids", [])
+            for row in rows
+            if row.get("chunk_id")
+        }
+        local_adjacency = doc_local_neighbor_chunks(chunk_eids_local)
+        transient_driver = None
         try:
             from services.ingestion_service import ingestion_service as _ing
 
             driver = getattr(_ing, "neo4j_driver", None)
+            if driver is None:
+                # script/backfill process — app lifespan never connected the
+                # service; build a transient driver from settings instead of
+                # silently skipping every graph field.
+                try:
+                    from config import get_settings as _gs
+
+                    _st = _gs()
+                    if _st.NEO4J_ENABLED:
+                        from neo4j import AsyncGraphDatabase
+
+                        transient_driver = AsyncGraphDatabase.driver(
+                            _st.NEO4J_URI,
+                            auth=(_st.NEO4J_USER, _st.NEO4J_PASSWORD),
+                        )
+                        driver = transient_driver
+                except Exception:
+                    driver = None
             all_eids = sorted({
                 e for row in rows
                 for e in promote(row, entity_id_fn=_eid).get("entity_ids", [])
@@ -205,14 +261,35 @@ async def promote_doc(db, corpus_id: str, doc_id: str) -> dict[str, Any]:
                     res = await sess.run(
                         "MATCH (e:Entity)-[r:RELATES_TO]-(n:Entity) "
                         "WHERE e.entity_id IN $ids "
-                        "WITH e, n ORDER BY r.confidence DESC "
-                        "RETURN e.entity_id AS eid, collect(DISTINCT n.entity_id)[..12] AS nbrs",
+                        "WITH e, n, r ORDER BY r.confidence DESC "
+                        "RETURN e.entity_id AS eid, "
+                        "collect(DISTINCT n.entity_id)[..12] AS nbrs, "
+                        "count(DISTINCT n) AS deg",
                         ids=all_eids,
                     )
                     async for rec in res:
                         neighbor_map[rec["eid"]] = list(rec["nbrs"] or [])
-        except Exception:  # noqa: BLE001 — hops fall back to live Cypher
+                        degree_map[rec["eid"]] = int(rec["deg"] or 0)
+                    res2 = await sess.run(
+                        "MATCH (e:Entity)<-[:MENTIONS]-(n:Chunk) "
+                        "WHERE e.entity_id IN $ids "
+                        "AND NOT n.chunk_id STARTS WITH $doc_prefix "
+                        "RETURN e.entity_id AS eid, "
+                        "collect(DISTINCT n.chunk_id)[..8] AS chunks",
+                        ids=all_eids,
+                        doc_prefix=doc_id,
+                    )
+                    async for rec in res2:
+                        foreign_chunks_map[rec["eid"]] = list(rec["chunks"] or [])
+        except Exception as exc:  # noqa: BLE001 — hops fall back to live Cypher
+            logger.warning("promote_doc graph pass failed (fields skipped): %s", exc)
             neighbor_map = {}
+        finally:
+            if transient_driver is not None:
+                try:
+                    await transient_driver.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
         done = warn = 0
         for row in rows:
@@ -229,14 +306,27 @@ async def promote_doc(db, corpus_id: str, doc_id: str) -> dict[str, Any]:
                 delta["mechanisms"] = ps["mechanisms"]
             if ps.get("key_terms"):
                 delta["key_terms"] = ps["key_terms"]
+            own = set(delta.get("entity_ids") or [])
             if neighbor_map:
-                own = set(delta.get("entity_ids") or [])
                 nbrs: set[str] = set()
                 for e in own:
                     nbrs.update(neighbor_map.get(e, []))
                 nbrs -= own
                 if nbrs:
                     delta["graph_neighbors"] = sorted(nbrs)[:12]
+            # §12.6 — chunk-level adjacency: doc-local (python) first, then
+            # cross-doc mention neighbors (Neo4j), deduped, capped 8.
+            ncs: list[str] = list(local_adjacency.get(chunk_id, []))
+            seen_nc = set(ncs)
+            for e in sorted(own):
+                for fc in foreign_chunks_map.get(e, []):
+                    if fc not in seen_nc and fc != chunk_id:
+                        ncs.append(fc)
+                        seen_nc.add(fc)
+            if ncs:
+                delta["neighbor_chunks"] = ncs[:8]
+            if degree_map and own:
+                delta["graph_degree"] = max(degree_map.get(e, 0) for e in own)
             pid = qw._uuid_from_str(chunk_id)
             for col in cols:
                 try:
