@@ -612,3 +612,68 @@ Q1 = H5 support-profile latency investigation · Q2 = U2 soft prefilter + G1 rel
 Q3 = H3 RerankerInput + G2 pool raise (one A/B) · Q4 = H4+G4 cross-domain emphasis knob ·
 Q5 = H1 tree-as-breadth-lane behind flag + Funnel A probes · each step probe-gated
 (golden + habits-NN + seducer + packet_hash + latency per §4.5 targets).
+
+
+---
+
+## 12. TEMPORAL LAYER + GRAPH PRECOMPUTE + EMBEDDING-JOBS DOCTRINE (owner research 2026-07-03)
+
+### 12.0 Confirmations (no change — owner research restates ratified design)
+Doc profile answers ONLY: should this doc be searched / which sections / what topics — never a
+1,727-parent digest. Final rule stands: parent=evidence map · rollup=local topic map ·
+section=chapter map · document=routing card. Shared base contract (plan → fetch IDs+lane ranks →
+merge/dedupe → prune/cap → light-hydrate → CE once → diversity curation → full-hydrate winners →
+answer) = the §10.3 waterfall pipeline.
+
+### 12.1 ONE TENSION, RECONCILED — what gets embedded
+Owner research proposes purpose-built embeddings (child_text / parent_summary / mechanism /
+book_concept: "don't make one embedding do every job") while §4 (owner-ratified) retires
+per-parent summary vectors as duplicate representation. **Reconciliation (adopted):**
+- PER-PARENT summary vectors stay RETIRED (a parent gist ≈ its own children = double hits).
+- The embedding-jobs doctrine applies to TREE levels, which aggregate meaning children can't
+  duplicate: **rollup/section embeddings = bridge/enumeration recall lane** (replaces Funnel A,
+  = §11 H1) · **doc-profile embeddings = routing** (exists) · optional **mechanism-view
+  embeddings** (short "mechanisms: compounding, feedback_loop — context…" strings per
+  section) = cross-domain bridge recall. Each in its own small shared collection
+  (polymath_tree_summaries, polymath_mechanisms) with corpus_id payload — same multitenancy
+  doctrine as doc_summaries. Job-specific vectors, zero double representation.
+
+### 12.2 TEMPORAL LAYER (new — closes the §9 'versioning NOT BUILT' row with real machinery)
+Retrieval order for temporal queries: **1 time-validity (HARD) → 2 relevance → 3 authority →
+4 recency → 5 diversity** — never "newest wins" (newest may be irrelevant).
+- Hard filter: document_status=active · document_date<=as_of · effective_start<=as_of ·
+  (effective_end null OR >as_of). Then relevance; curation tie-breaks: authority → newer
+  document_date → better topic match.
+- M2 versioning population becomes REAL: is_latest/supersedes derived at ingest by
+  (source_identity, topic_key) grouping; denormalize document_status/is_latest/document_date to
+  child payloads (fields already in RetrievalPayload + owner index list).
+- **Temporal summary types** (summary_tree extension, embeddable in the tree collection):
+  current_state · version_delta · supersession · timeline · **topic_latest** (primary:
+  {topic_key, latest_summary, latest_source_date, is_latest, evidence[]}) — generated per
+  topic_key from the latest active parents; answers frame as "As of <date>, based on the latest
+  active documents…". Every retrieved unit must know: its date · active? · superseded by what ·
+  which topic/version.
+
+### 12.3 GRAPH PRECOMPUTE (new — live Cypher only for true traversal)
+Precompute graph-derived metadata at INGEST onto summary/chunk records:
+`related_entities[] · graph_neighbors[] (1-hop entity ids) · bridge_candidates[]` — extending
+what Phase 5b's metrics cache started. Mode A becomes payload-lookup-FIRST (neighbors/bridges
+read from promoted metadata), live Neo4j ONLY for genuine path/relationship traversal (2-hop,
+path questions). Speed: removes per-query 1-hop Cypher; cross-domain: bridge_candidates are
+pre-scored at ingest where compute is free.
+
+### 12.4 ADDITIONS (assistant, answering "anything missing?")
+A1 **Query-side entity linking (graph expansion via concepts)**: today Mode A seeds ONLY from
+   retrieved chunks' mentions. Add: query terms → concepts[]/entity_ids payload match → DIRECT
+   entity seeds even when no chunk surfaced the entity yet — the graph can now start from the
+   QUESTION, not just the results. Deterministic (indexed lookup, no LLM).
+A2 **Path micro-summaries** (optional, later): precompute embeddable one-liners for strong
+   RELATES_TO paths ("A —uses→ B —enables→ C", w/ evidence chunk ids) for relationship recall.
+A3 **retrieval_role on summary records** (owner object): tag tree nodes bridge_summary |
+   enumeration | routing so lanes select by role, not heuristics.
+A4 Authority field: source_type-derived rank (standard>paper>book>blog) for the temporal
+   tie-break — deterministic map, owner-tunable.
+
+### 12.5 Order update
+Temporal layer lands as **W-T** after Q2 (needs M2 versioning population + topic_key, which
+§10.1 shipped). Graph precompute lands with Q2/G1 (same promote() pass). §11.6 otherwise stands.
