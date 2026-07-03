@@ -423,7 +423,7 @@ alone does nothing — wiring is the remaining work) · **PARTIAL** · **NOT BUI
 ### §5 Retrieval (owner assembly design) — ~25% wired
 | Item | Status |
 |---|---|
-| Waterfall allocate() (all 6 rules, byte-identical, 10/10) | **GATED** — zero call sites; assembly = legacy hydrate.py (child_summary default + B2 knob LIVE on that path) |
+| Waterfall allocate() (all 6 rules, byte-identical, 10/10) | **WIRED-GATED** 2026-07-03 (0bb421c) — W2 call sites live end-to-end behind WATERFALL_ASSEMBLY=false: assembly.py (parent grouping/orphans/entity lines, ONE parent \$in read) → RetrievalResult.packet → context_manager renders packet in allocator order → packet_hash in diagnostics. Probe: legacy vs waterfall side-by-side, hash-identical across runs (scripts_probe_waterfall.py); entity rung fed by P2 graph provenance. Legacy path bit-for-bit when off. A/B gate (golden battery + 5-doc probes) before flip; anchor lanes activate with TWO_LANE_ANCHORING |
 | Two-lane anchoring (detector 6/6 + lane-aware packer) | **GATED** — detect_anchor_doc_ids never called; TWO_LANE_ANCHORING read by nothing |
 | Tier-0 doc_summaries routing | **PARTIAL** 2026-07-03 — W1a LIVE: ingest auto-embeds doc_profile per doc (phase=tier0 hook, TIER0_AUTO_EMBED=true; real-ingest receipt, probe ranks fresh card #1 cross-corpus). W1b query-time routing still GATED (TIER0_ROUTING=false, zero call sites; probe = scripts_probe_tier0.py). Stale cards from deleted corpora persist (delete-cleanup TODO); tiny-doc batch verifier mismatch chipped |
 | Promoted payload consumption | **PARTIAL** — entity_ids LIVE at graph tier (the vector↔graph join works); concepts[]/relation_families[] indexed-but-never-filtered |
