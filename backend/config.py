@@ -392,6 +392,23 @@ class Settings(BaseSettings):
             "degrades to the hybrid seed pool instead of stalling Graph Augmentation."
         ),
     )
+    # W1 Tier-0 — routing-card groundwork (§10.2: doc_profile = routing card)
+    TIER0_AUTO_EMBED: bool = Field(
+        default=True,
+        description=(
+            "Embed documents.doc_profile.summary into the universal "
+            "polymath_doc_summaries collection at ingest (additive, best-effort). "
+            "Gives Tier-0 routing a vector without a manual migration run."
+        ),
+    )
+    TIER0_ROUTING: bool = Field(
+        default=False,
+        description=(
+            "GATED groundwork — query-time Tier-0 routing over "
+            "polymath_doc_summaries. No query-path call sites yet; probe via "
+            "scripts_probe_tier0.py. Flipping this alone does nothing."
+        ),
+    )
     # §12.6 waterfall graph serving — P2 Mode A knobs (each a kill-switch)
     GRAPH_PAYLOAD_FIRST: bool = Field(
         default=True,

@@ -3040,6 +3040,27 @@ async def run_ingest_job(
                     "phase=promote doc=%s FAILED (non-fatal): %s",
                     doc_id[:12], _promo_exc,
                 )
+            # W1 Tier-0 — embed the doc routing card into the universal
+            # polymath_doc_summaries collection. Additive + best-effort;
+            # consumption stays gated behind TIER0_ROUTING.
+            try:
+                from config import get_settings as _gs3
+                if bool(getattr(_gs3(), "TIER0_AUTO_EMBED", True)):
+                    from services.ingestion.tier0 import embed_doc_profile
+                    _t0 = await embed_doc_profile(
+                        db, qdrant_client,
+                        corpus_id=corpus_id, doc_id=doc_id,
+                        dim=int(getattr(ingestion_config, "embedding_dimension", 1024)),
+                    )
+                    logger.info(
+                        "phase=tier0 doc=%s corpus=%s %s",
+                        doc_id[:12], corpus_id[:8], _t0,
+                    )
+            except Exception as _t0_exc:  # noqa: BLE001
+                logger.warning(
+                    "phase=tier0 doc=%s FAILED (non-fatal): %s",
+                    doc_id[:12], _t0_exc,
+                )
             if summary_write_required:
                 ws.summaries_indexed = True
             logger.info(
