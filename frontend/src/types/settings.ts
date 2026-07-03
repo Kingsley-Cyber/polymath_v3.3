@@ -221,7 +221,7 @@ export interface ExtractionEndpoint {
 }
 
 export interface ExtractionSettings {
-  engine?: "local" | "cloud" | "local_then_cloud";
+  engine?: "local" | "cloud" | "local_then_cloud" | "dual";
   endpoints: ExtractionEndpoint[];
 }
 

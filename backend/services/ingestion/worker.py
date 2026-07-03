@@ -1062,6 +1062,35 @@ async def _run_ghosts_parallel(
                 from services.ghost_b import extract_entities as _cloud_extract
 
                 report = await _cloud_extract(tasks, **_extract_kwargs)
+            elif extraction_engine == "dual":
+                # DUAL (owner: throughput) — split the doc across BOTH engines
+                # concurrently: even-index chunks → local GLiNER/GLiREL, odd →
+                # cloud pool. Deterministic split; downstream maps results by
+                # chunk_id so interleaved order is irrelevant. Dual is a SPEED
+                # mode, not a fallback: either engine failing fails the doc
+                # loudly (use local_then_cloud for resilience instead).
+                from services.ghost_b import extract_entities as _cloud_extract
+
+                _local_part = tasks[0::2]
+                _cloud_part = tasks[1::2]
+                _rep_local, _rep_cloud = await asyncio.gather(
+                    extract_entities(_local_part, **_extract_kwargs),
+                    _cloud_extract(_cloud_part, **_extract_kwargs),
+                )
+                if isinstance(_rep_local, ExtractionBatchReport) and isinstance(
+                    _rep_cloud, ExtractionBatchReport
+                ):
+                    report = ExtractionBatchReport(
+                        results=list(_rep_local.results) + list(_rep_cloud.results),
+                        failures=list(_rep_local.failures) + list(_rep_cloud.failures),
+                        metrics={
+                            "engine": "dual",
+                            "local": _rep_local.metrics,
+                            "cloud": _rep_cloud.metrics,
+                        },
+                    )
+                else:  # return_report=False shape (raw result lists)
+                    report = list(_rep_local) + list(_rep_cloud)
             elif extraction_engine == "local_then_cloud":
                 try:
                     report = await extract_entities(tasks, **_extract_kwargs)

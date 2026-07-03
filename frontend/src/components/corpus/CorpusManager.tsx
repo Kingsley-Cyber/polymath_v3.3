@@ -234,12 +234,66 @@ function PresetModeSelector({ config, onChange, idPrefix }: PresetSelectorProps)
         <div className="text-[10px] font-bold tracking-widest uppercase text-emerald-400">
           Extraction · local engines
         </div>
-        <div className="text-[11px] text-content-secondary">
-          Entities, relations &amp; facts run locally via GLiNER ×2 + GLiREL —
-          no cloud calls. Engine machines (and their GPU/health checks) are
-          managed in Settings → Ingestion → Extraction Engines.
+        <ExtractionEngineSelector />
+        <div className="mt-1 text-[10px] text-content-tertiary">
+          LOCAL = GLiNER ×2 + GLiREL sidecars (no cloud calls). CLOUD = the
+          Ghost B LLM pool. DUAL splits each document across both engines
+          concurrently for speed. Endpoints &amp; health: Settings → Ingestion.
         </div>
       </div>
+    </div>
+  );
+}
+
+function ExtractionEngineSelector() {
+  const [engine, setEngineState] = useState<string>("local");
+  const [endpoints, setEndpoints] = useState<unknown[]>([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api
+      .getGlobalSettings()
+      .then((r: { settings: { extraction?: { engine?: string; endpoints?: unknown[] } } }) => {
+        setEngineState(r.settings.extraction?.engine ?? "local");
+        setEndpoints(r.settings.extraction?.endpoints ?? []);
+      })
+      .catch(() => {});
+  }, []);
+  const choose = async (val: string) => {
+    setEngineState(val);
+    setBusy(true);
+    try {
+      await api.updateGlobalSettings({
+        extraction: { endpoints, engine: val },
+      } as Parameters<typeof api.updateGlobalSettings>[0]);
+    } catch {
+      /* settings tab surfaces errors; keep optimistic UI here */
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mt-1 flex items-center gap-1.5">
+      {[
+        ["local", "LOCAL"],
+        ["cloud", "CLOUD"],
+        ["local_then_cloud", "LOCAL → CLOUD"],
+        ["dual", "DUAL (SPEED)"],
+      ].map(([val, label]) => (
+        <button
+          key={val}
+          type="button"
+          disabled={busy}
+          onClick={() => choose(val)}
+          className={
+            "px-2 py-0.5 text-[10px] tracking-wider border " +
+            (engine === val
+              ? "border-emerald-400 text-emerald-300 bg-bg-base"
+              : "border-border-minimal text-content-tertiary hover:text-content-primary")
+          }
+        >
+          {label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -266,7 +320,6 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
-  const [showChunkTokens, setShowChunkTokens] = useState(false);
   const [newConfig, setNewConfig] = useState<IngestionConfig>(
     createDefaultIngestionConfig(null),
   );
@@ -571,154 +624,9 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               modalStatus={modalStatus}
             />
 
-            <button
-              type="button"
-              onClick={() => setShowChunkTokens((v) => !v)}
-              className="text-[10px] tracking-widest text-content-tertiary uppercase hover:text-content-primary"
-            >
-              {showChunkTokens ? "▾" : "▸"} Advanced token budgets (auto-tuned — override only for experiments)
-            </button>
-            {showChunkTokens && (
-            <>
-            {/* Token Budget — Parent */}
-            <div>
-              <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
-                Parent Chunk Tokens
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
-                <div>
-                  <label className="text-[9px] text-content-tertiary tracking-wider">
-                    MIN
-                  </label>
-                  <input
-                    type="number"
-                    min={100}
-                    value={newConfig.parent_chunk_tokens.min_tokens}
-                    onChange={(e) =>
-                      setNewConfig((prev) => ({
-                        ...prev,
-                        parent_chunk_tokens: {
-                          ...prev.parent_chunk_tokens,
-                          min_tokens: parseInt(e.target.value) || 500,
-                        },
-                      }))
-                    }
-                    className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
-                  />
-                </div>
-                <div>
-                  <label className="text-[9px] text-content-tertiary tracking-wider">
-                    TARGET
-                  </label>
-                  <input
-                    type="number"
-                    min={200}
-                    value={newConfig.parent_chunk_tokens.target_tokens}
-                    onChange={(e) =>
-                      setNewConfig((prev) => ({
-                        ...prev,
-                        parent_chunk_tokens: {
-                          ...prev.parent_chunk_tokens,
-                          target_tokens: parseInt(e.target.value) || 1200,
-                        },
-                      }))
-                    }
-                    className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
-                  />
-                </div>
-                <div>
-                  <label className="text-[9px] text-content-tertiary tracking-wider">
-                    MAX
-                  </label>
-                  <input
-                    type="number"
-                    min={500}
-                    value={newConfig.parent_chunk_tokens.max_tokens}
-                    onChange={(e) =>
-                      setNewConfig((prev) => ({
-                        ...prev,
-                        parent_chunk_tokens: {
-                          ...prev.parent_chunk_tokens,
-                          max_tokens: parseInt(e.target.value) || 2000,
-                        },
-                      }))
-                    }
-                    className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Token Budget — Child */}
-            <div>
-              <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
-                Child Chunk Tokens
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
-                <div>
-                  <label className="text-[9px] text-content-tertiary tracking-wider">
-                    MIN
-                  </label>
-                  <input
-                    type="number"
-                    min={50}
-                    value={newConfig.child_chunk_tokens.min_tokens}
-                    onChange={(e) =>
-                      setNewConfig((prev) => ({
-                        ...prev,
-                        child_chunk_tokens: {
-                          ...prev.child_chunk_tokens,
-                          min_tokens: parseInt(e.target.value) || 128,
-                        },
-                      }))
-                    }
-                    className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
-                  />
-                </div>
-                <div>
-                  <label className="text-[9px] text-content-tertiary tracking-wider">
-                    TARGET
-                  </label>
-                  <input
-                    type="number"
-                    min={100}
-                    value={newConfig.child_chunk_tokens.target_tokens}
-                    onChange={(e) =>
-                      setNewConfig((prev) => ({
-                        ...prev,
-                        child_chunk_tokens: {
-                          ...prev.child_chunk_tokens,
-                          target_tokens: parseInt(e.target.value) || 350,
-                        },
-                      }))
-                    }
-                    className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
-                  />
-                </div>
-                <div>
-                  <label className="text-[9px] text-content-tertiary tracking-wider">
-                    MAX
-                  </label>
-                  <input
-                    type="number"
-                    min={256}
-                    value={newConfig.child_chunk_tokens.max_tokens}
-                    onChange={(e) =>
-                      setNewConfig((prev) => ({
-                        ...prev,
-                        child_chunk_tokens: {
-                          ...prev.child_chunk_tokens,
-                          max_tokens: parseInt(e.target.value) || 512,
-                        },
-                      }))
-                    }
-                    className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
-                  />
-                </div>
-              </div>
-            </div>
-            </>
-            )}
+            {/* Parent/child token budgets are AUTO-TUNED (validated defaults
+                sent on create). Overrides remain available via the API only —
+                deliberately absent from the UI (owner decision 2026-07-03). */}
 
             {/* Chunking extras */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">

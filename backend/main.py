@@ -433,6 +433,7 @@ app.add_middleware(
         "http://localhost:5173",  # Vite dev server default
         "https://kingsleylab.xyz",  # Production domain
         "https://app.kingsleylab.xyz",  # Production app subdomain
+        "https://rag.kingsleylab.xyz",  # Production RAG frontend (the one actually used)
     ],
     allow_credentials=True,
     allow_methods=["*"],

@@ -120,7 +120,7 @@ function ExtractionEnginesCard() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [engine, setEngine] = useState<"local" | "cloud" | "local_then_cloud">("local");
+  const [engine, setEngine] = useState<"local" | "cloud" | "local_then_cloud" | "dual">("local");
   const [validating, setValidating] = useState(false);
   const [report, setReport] = useState<ExtractionValidationReport | null>(null);
 
@@ -205,6 +205,7 @@ function ExtractionEnginesCard() {
           ["local", "LOCAL (GLiNER/GLiREL)"],
           ["cloud", "CLOUD (LLM pool)"],
           ["local_then_cloud", "LOCAL → CLOUD"],
+          ["dual", "DUAL (LOCAL + CLOUD)"],
         ] as const).map(([val, label]) => (
           <button
             key={val}
