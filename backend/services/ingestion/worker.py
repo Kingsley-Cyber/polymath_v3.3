@@ -2651,6 +2651,24 @@ async def run_ingest_job(
             warnings=ws.warnings,
         )
         ws.mongo_written = True
+        # B3 — owner summary tree (parent summaries → rollups → sections →
+        # document profile). Best-effort: never fails the ingest.
+        try:
+            from config import get_settings as _gs
+            if bool(getattr(_gs(), "SUMMARY_TREE_ENABLED", True)):
+                from services.ingestion.summary_tree import build_and_store_tree
+                _tree_counts = await build_and_store_tree(
+                    db=db, doc_id=doc_id, corpus_id=corpus_id
+                )
+                logger.info(
+                    "phase=summary_tree doc=%s corpus=%s %s",
+                    doc_id[:12], corpus_id[:8], _tree_counts,
+                )
+        except Exception as _tree_exc:  # noqa: BLE001
+            logger.warning(
+                "phase=summary_tree doc=%s FAILED (non-fatal): %s",
+                doc_id[:12], _tree_exc,
+            )
         logger.info(
             "phase=mongo duration=%.2fs doc=%s corpus=%s parents=%d children=%d summaries=%d",
             time.monotonic() - t0,

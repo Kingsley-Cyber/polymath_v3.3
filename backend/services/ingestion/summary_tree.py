@@ -222,3 +222,83 @@ async def build_tree(
     )
     nodes.append(profile)
     return nodes
+
+
+# ── persistence + ingest hook (PARENT summaries in → DOCUMENT profile out) ──
+async def _default_llm(prompt: str) -> str:
+    from services.llm import llm_service
+
+    return await llm_service.complete_chat([{"role": "user", "content": prompt}])
+
+
+async def build_and_store_tree(
+    *,
+    db,
+    doc_id: str,
+    corpus_id: str,
+    llm_fn: LlmFn | None = None,
+    use_llm: bool = True,
+) -> dict[str, Any]:
+    """Read PARENT-level summaries (parent_chunks.summary — Ghost A output;
+    never child chunks), build the L2→L4 tree, upsert nodes into the
+    `summary_tree` collection (stable node_id ⇒ idempotent/resumable), and
+    stamp the L4 profile onto the documents record as `doc_profile` — the
+    document-level summary the system never had. Best-effort by design."""
+    from dataclasses import asdict
+    from datetime import datetime
+
+    doc = await db["documents"].find_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {"title": 1, "filename": 1, "source_type": 1},
+    )
+    if not doc:
+        return {"skipped": "no_document"}
+    rows = await db["parent_chunks"].find(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {"parent_id": 1, "summary": 1, "heading_path": 1, "domain": 1, "chunk_kind": 1},
+    ).sort("parent_id", 1).to_list(length=None)  # {doc}_parent_NNNN → lexical = doc order
+    parents = [
+        ParentSummaryIn(
+            parent_id=str(r["parent_id"]),
+            summary=str(r.get("summary") or ""),
+            heading_path=tuple(r.get("heading_path") or ()),
+            domain=str(r.get("domain") or ""),
+        )
+        for r in rows
+        if (r.get("chunk_kind") or "body") == "body"
+    ]
+    if not any(p.summary for p in parents):
+        return {"skipped": "no_parent_summaries", "parents": len(parents)}
+
+    fn = llm_fn if llm_fn is not None else (_default_llm if use_llm else None)
+    nodes = await build_tree(
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        title=str(doc.get("title") or doc.get("filename") or doc_id[:12]),
+        source_type=str(doc.get("source_type") or ""),
+        parents=parents,
+        llm_fn=fn,
+    )
+    now = datetime.utcnow()
+    for n in nodes:
+        rec = asdict(n)
+        rec["updated_at"] = now
+        await db["summary_tree"].replace_one({"node_id": n.node_id}, rec, upsert=True)
+    profile = nodes[-1]
+    await db["documents"].update_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {"$set": {"doc_profile": {
+            "summary_id": profile.node_id,
+            "summary": profile.summary,
+            "concepts": profile.concepts,
+            "domains": profile.domains,
+            "section_ids": profile.child_node_ids,
+            "schema_version": profile.schema_version,
+            "updated_at": now,
+        }}},
+    )
+    counts: dict[str, Any] = {}
+    for n in nodes:
+        counts[n.node_type] = counts.get(n.node_type, 0) + 1
+    counts["parents_in"] = len(parents)
+    return counts

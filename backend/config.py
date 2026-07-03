@@ -206,6 +206,16 @@ class Settings(BaseSettings):
             "pre-router paragraph/sentence-only behaviour."
         ),
     )
+    SUMMARY_TREE_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "B3 — build the owner summary tree at ingest (PARENT summaries -> "
+            "rollups -> sections -> document PROFILE). Best-effort post-ingest "
+            "hook: LLM failures fall back extractively and can never fail the "
+            "ingest. Profile lands on documents.doc_profile; nodes in the "
+            "summary_tree collection."
+        ),
+    )
     CHUNKER_SEMANTIC_PARENTS: bool = Field(
         default=True,
         description=(
