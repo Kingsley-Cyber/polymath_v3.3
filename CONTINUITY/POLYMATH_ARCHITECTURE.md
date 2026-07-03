@@ -376,3 +376,67 @@ bridges CE-scored) · seducer (0 off-topic) · packet_hash determinism · latenc
 - **Doc-summary gist risk** — short-text embedding merge-gate (§4).
 - **`topics` retirement** — coordinated migration only (live field).
 - Reranker fp16 determinism re-verify before packet_hash gate is enforced.
+
+
+---
+
+## 9. IMPLEMENTATION STATUS LEDGER (code-verified 2026-07-03, 3-agent sweep + live 15/15 ingest receipt)
+
+Legend: **LIVE** = wired + proven · **GATED** = built/tested, zero query-path call sites (flag flip
+alone does nothing — wiring is the remaining work) · **PARTIAL** · **NOT BUILT**.
+
+### §3 Ingestion — ~85% (the strong column; everything the 5-doc A/B exercises)
+| Item | Status |
+|---|---|
+| S1 M2 capture (title/author/date/source_type) + routing_trace persisted | **LIVE** (docling_adapter finalize_source_meta; worker source_meta) |
+| S2 chunker: semantic_split + routers 1–5 + escalation + semantic tier_c parents | **LIVE** (tier_chunker; probe-verified) |
+| S3 Ghost A prose summary + domain | **LIVE** · `topics` still written (retirement pending) |
+| S3 minimal schema (mechanisms / key_terms / semantic_chunk_type) at ingest | **NOT BUILT** (mechanisms = backfill script only) |
+| S4/S5 promote-at-ingest (concepts/entity_ids/relation aggregates + stamps) | **LIVE** — after ws.qdrant_written (placement bug caught+fixed by live receipt) |
+| S5 summary tree + heal guard + documents.doc_profile | **LIVE** (heal proven: blanked parent → healed → tree) |
+| S6 write barrier | **PARTIAL** — flags tracked (mongo/qdrant_written, qdrant_failed); no complete-enum; **retriever does NOT skip incomplete docs** |
+| Version stamps | **PARTIAL** — children get them via promote(); initial upsert + parent_chunks lack them |
+| M2 versioning population (document_status/is_latest/supersedes) | **NOT BUILT** (schema defaults only) |
+
+### §2 Contracts — ~50%
+| Item | Status |
+|---|---|
+| 5 typed models + Stage-Contract CI test | **LIVE** (contracts.py, test_contracts.py) |
+| Writers accept ONLY typed models | **NOT BUILT** — _build_parent/child_dicts, upsert_children, stash_ghost_b still untyped dicts |
+| extract.v2 + `extractor` provenance ON THE WIRE | **NOT BUILT** — local emits v1; cloud defaults v1; ExtractionResult dataclass has no extractor field (contract exists on paper only) |
+| RerankerInput consumed | **NOT BUILT** — reranker sends bare excerpt, no "Book › Section" prefix |
+
+### §1 Identity spine — ~60%
+| Item | Status |
+|---|---|
+| corpus/doc/parent/chunk/entity/fact keys across stores | **LIVE** (pre-existing + entity_ids payload join) |
+| Neo4j Chunk.parent_id (ADD) | **NOT BUILT** |
+| Entity.corpus_ids[] (ADD) | **PARTIAL** — RELATES_TO edges only, not Entity nodes |
+
+### §4 Storage & summary policy — ~70%
+| Item | Status |
+|---|---|
+| Host/container topology (§4.5), MLX guardrails, engine select (local/cloud/fallback/dual) | **LIVE** |
+| Shared collections populated (children + doc_summaries w/ 7 profiles) | **GATED** — migration script only; ingest doesn't auto-embed profiles; QDRANT_SHARED_COLLECTIONS read by NOTHING |
+| Parent summaries NEVER embedded (Funnel A retirement) | **NOT BUILT** — funnel_a still searches chunk_type='summary' unconditionally |
+
+### §5 Retrieval (owner assembly design) — ~25% wired
+| Item | Status |
+|---|---|
+| Waterfall allocate() (all 6 rules, byte-identical, 10/10) | **GATED** — zero call sites; assembly = legacy hydrate.py (child_summary default + B2 knob LIVE on that path) |
+| Two-lane anchoring (detector 6/6 + lane-aware packer) | **GATED** — detect_anchor_doc_ids never called; TWO_LANE_ANCHORING read by nothing |
+| Tier-0 doc_summaries routing | **GATED** — profiles exist (Mongo + 7 embedded via script); NO query-time search of polymath_doc_summaries |
+| Promoted payload consumption | **PARTIAL** — entity_ids LIVE at graph tier (the vector↔graph join works); concepts[]/relation_families[] indexed-but-never-filtered |
+| C3/B4 rank signals, answerability gates, stream retry, HyDE toggle | **LIVE** (earlier arcs) |
+
+### VERDICT: ~60–65% of the full plan. Ingestion half ≈ complete and live-receipted;
+retrieval-consumption half is tested groundwork awaiting WIRING (not just flag flips).
+
+### Close-out order (the Wire Phase, W1→W9)
+W1 auto-embed doc_profile at ingest + Tier-0 doc_summaries query search · W2 waterfall wired
+behind flag (replaces hydrate assembly when on) · W3 two-lane anchoring wired (detector →
+lane tags → allocate) · W4 extract.v2 + extractor provenance on the wire · W5 write-barrier
+enforcement in retriever · W6 Ghost A minimal schema (mechanisms/key_terms/semantic_chunk_type)
+· W7 writers → typed contracts · W8 Neo4j Chunk.parent_id + Entity.corpus_ids[] · W9 facets-as-
+projection + Funnel A retirement behind probes (+ topics migration, temporal fields with M2
+versioning logic).
