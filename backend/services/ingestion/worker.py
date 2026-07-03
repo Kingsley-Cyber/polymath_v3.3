@@ -1285,6 +1285,7 @@ async def _write_mongo_all(
     ws: WriteState,
     source_url: str | None = None,
     source_identity: dict | None = None,
+    source_meta: dict | None = None,
 ) -> None:
     """Persist compact document metadata and split durable ingest artifacts.
 
@@ -1335,6 +1336,9 @@ async def _write_mongo_all(
         "filename": filename,
         "source_mime": source_mime,
         "source_tier": source_tier.value,
+        # M2 parse-time metadata + per-document routing report
+        **{k: v for k, v in (source_meta or {}).items()
+           if k in ("title", "author", "document_date", "source_type", "routing_trace")},
         "ingestion_config": freeze_snapshot(ingestion_config),
         "chunking_config": chunking_config,
         "write_state": ws.model_dump(),
@@ -2217,6 +2221,7 @@ async def run_ingest_job(
             mime=mime_hint or "application/octet-stream",
             do_ocr=False,
         )
+    docling_adapter.finalize_source_meta(parse_result, filename)  # M2 + routing_trace
     _norm = re.sub(
         r"\s+", " ", (parse_result.markdown or parse_result.text or "").strip()
     )
@@ -2633,6 +2638,10 @@ async def run_ingest_job(
             ws=ws,
             source_url=source_url,
             source_identity=source_identity,
+            source_meta={
+                k: getattr(parse_result, k, None)
+                for k in ("title", "author", "document_date", "source_type", "routing_trace")
+            },
         )
         await mongo_writer.update_write_state(
             db,

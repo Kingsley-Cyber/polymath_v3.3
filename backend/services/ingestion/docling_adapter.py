@@ -178,6 +178,153 @@ _FRONTMATTER_RE = re.compile(
 )
 
 
+_HTML_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+_HTML_AUTHOR_RE = re.compile(
+    r'<meta[^>]+name=["\']author["\'][^>]*content=["\']([^"\']+)', re.I
+)
+
+
+def _meta_from_frontmatter(text: str) -> dict:
+    """M2 — read title/author/date out of the YAML frontmatter BEFORE it is
+    stripped (it was provenance being thrown away). Line-level parse, no yaml
+    dependency; quoted values unwrapped."""
+    clean = text.lstrip("\ufeff")
+    if not clean.startswith("---"):
+        return {}
+    m = _FRONTMATTER_RE.match(clean)
+    if not m:
+        return {}
+    out: dict = {}
+    for line in m.group(0).splitlines()[1:-1]:
+        k, _, v = line.partition(":")
+        k, v = k.strip().lower(), v.strip().strip("'\"")
+        if not v or ":" not in line:
+            continue
+        if k == "title" and "title" not in out:
+            out["title"] = v[:300]
+        elif k in ("author", "authors", "creator", "by") and "author" not in out:
+            out["author"] = v[:200]
+        elif k in ("date", "created", "published", "publish_date", "pubdate") and "document_date" not in out:
+            out["document_date"] = v[:40]
+    return out
+
+
+def _meta_from_html(raw_bytes: bytes) -> dict:
+    try:
+        head = raw_bytes[:65536].decode("utf-8", errors="replace")
+    except Exception:
+        return {}
+    out: dict = {}
+    m = _HTML_TITLE_RE.search(head)
+    if m:
+        t = re.sub(r"\s+", " ", m.group(1)).strip()
+        if t:
+            out["title"] = t[:300]
+    m = _HTML_AUTHOR_RE.search(head)
+    if m:
+        out["author"] = m.group(1).strip()[:200]
+    return out
+
+
+def _meta_from_docx(raw_bytes: bytes) -> dict:
+    try:
+        from docx import Document
+
+        cp = Document(BytesIO(raw_bytes)).core_properties
+        out: dict = {}
+        if cp.title:
+            out["title"] = str(cp.title).strip()[:300]
+        if cp.author:
+            out["author"] = str(cp.author).strip()[:200]
+        if cp.created:
+            out["document_date"] = cp.created.date().isoformat()
+        return out
+    except Exception:
+        return {}
+
+
+def _meta_from_pdf(raw_bytes: bytes) -> dict:
+    try:
+        from pypdf import PdfReader
+
+        md = PdfReader(BytesIO(raw_bytes)).metadata or {}
+        out: dict = {}
+        t = str(md.get("/Title") or "").strip()
+        a = str(md.get("/Author") or "").strip()
+        d = str(md.get("/CreationDate") or "").strip()
+        if t:
+            out["title"] = t[:300]
+        if a:
+            out["author"] = a[:200]
+        if d.startswith("D:") and len(d) >= 10 and d[2:10].isdigit():
+            out["document_date"] = f"{d[2:6]}-{d[6:8]}-{d[8:10]}"
+        return out
+    except Exception:
+        return {}
+
+
+def _apply_meta(result: "DoclingParseResult", meta: dict) -> None:
+    for k in ("title", "author", "document_date"):
+        if meta.get(k) and not getattr(result, k, None):
+            setattr(result, k, meta[k])
+
+
+_SOURCE_TYPE_BY_FORMAT = {
+    "local_html": "webpage",
+    "pypdf_fast_text": "pdf",
+    "local_docx": "document",
+    "local_markdown": "markdown",
+    "local_text": "text",
+    "youtube_transcript": "transcript",
+    "subtitle_vtt": "transcript",
+    "subtitle_srt": "transcript",
+    "local_csv": "table",
+    "local_tsv": "table",
+    "local_xlsx": "table",
+    "local_spreadsheet_unstructured": "table",
+}
+
+
+def finalize_source_meta(result: "DoclingParseResult", filename: str | None) -> None:
+    """M2 + routing_trace finalizer — called once at the worker boundary.
+
+    Fills fallbacks (title ← cleaned filename stem), a deterministic
+    format-family source_type (semantic refinement is Ghost A's job later),
+    and the per-document routing_trace (every cascade decision). Idempotent.
+    """
+    fname = filename or result.filename or ""
+    stem = Path(fname).stem
+    stem_title = re.sub(r"[_\-]+", " ", stem).strip()[:300] or None
+    # stable across repeat calls: a title equal to the stem fallback counts as
+    # filename-derived even if set by a prior finalize pass (idempotency)
+    title_from_metadata = bool(result.title) and result.title != stem_title
+    if not result.title:
+        result.title = stem_title
+    if not result.source_type:
+        fmt = result.source_format or ""
+        if fmt.startswith("code_"):
+            result.source_type = "code"
+        else:
+            result.source_type = _SOURCE_TYPE_BY_FORMAT.get(fmt, "document")
+    tier = getattr(result.source_tier, "value", str(result.source_tier))
+    parent_strategy = {
+        "ocr_ast": "pdf_page_grouped",
+        "tier_code": "ast_bound_code",
+        "tier_c": "semantic_parents_or_token_window",
+    }.get(tier, "heading_bound")
+    result.routing_trace = {
+        "parser": result.source_format or "docling_sidecar",
+        "tier": tier,
+        "has_structure": bool(result.has_structure),
+        "augmented_headers": bool(result.augmented_with_synthetic_headers),
+        "language": result.language,
+        "num_pages": result.num_pages,
+        "parent_strategy": parent_strategy,
+        "child_strategy": "semantic_split+routers",
+        "title_source": "metadata" if title_from_metadata else "filename",
+    }
+
+
 def _strip_yaml_frontmatter(text: str) -> str:
     if not text or not text.lstrip("﻿").startswith("---"):
         return text
@@ -320,6 +467,17 @@ class DoclingParseResult:
     # Original upload filename — needed by tier_chunker to stamp file_path
     # into per-chunk metadata for the code lane.
     filename: str | None = None
+    # M2 — parse-time source metadata (POLYMATH_ARCHITECTURE §2.2 / §3.S1).
+    # Filled by each parser from its format (PDF info, DOCX core-props, MD
+    # frontmatter, HTML meta); filename-stem fallback applied downstream.
+    # Prerequisite for two-lane anchoring + the summary-tree compact schema.
+    title: str | None = None
+    author: str | None = None
+    document_date: str | None = None  # ISO date string when the format has one
+    source_type: str | None = None    # book|paper|standard|manual|blog|... (heuristic)
+    # Per-document routing report — cascade decisions (intercept → sniff →
+    # tier → parent strategy) recorded for /documents/{id} visibility.
+    routing_trace: dict = field(default_factory=dict)
 
 
 def _looks_like_plain_text(filename: str, mime: str) -> bool:
@@ -512,6 +670,7 @@ def _parse_subtitle_file(raw_bytes: bytes, filename: str, mime: str):
         h2_count=0,
         source_format=fmt,
         filename=filename,
+        title=title,
     )
 
 
@@ -663,6 +822,7 @@ def _parse_transcript_text_document(text: str, filename: str) -> DoclingParseRes
         h2_count=0,
         source_format="youtube_transcript",
         filename=filename,
+        title=title,
     )
 
 
@@ -1167,11 +1327,15 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
             has_structure=False,
             source_tier=SourceTier.tier_b,
             source_format="local_html",
+            filename=filename,
+            **{k: v for k, v in _meta_from_html(raw_bytes).items()
+               if k in ("title", "author", "document_date")},
         )
 
     if _looks_like_markdown(filename, mime):
-        markdown = _strip_leading_metadata_block(
-            _strip_yaml_frontmatter(raw_bytes.decode("utf-8", errors="replace")))
+        raw_text = raw_bytes.decode("utf-8", errors="replace")
+        fm_meta = _meta_from_frontmatter(raw_text)  # M2: read before stripping
+        markdown = _strip_leading_metadata_block(_strip_yaml_frontmatter(raw_text))
         sections, h1, h2 = _markdown_sections(markdown)
         has_tables = any(s.element_type == "table" for s in sections)
         has_structure = (h1 + h2) > 0 or has_tables
@@ -1191,11 +1355,15 @@ def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> Do
             h2_count=h2,
             source_format="local_markdown",
             filename=filename,
+            title=fm_meta.get("title"),
+            author=fm_meta.get("author"),
+            document_date=fm_meta.get("document_date"),
         )
 
     if _looks_like_docx(filename, mime):
         docx_result = _parse_local_docx_document(raw_bytes, filename)
         if docx_result is not None:
+            _apply_meta(docx_result, _meta_from_docx(raw_bytes))  # M2 core-props
             return docx_result
 
     if not _looks_like_plain_text(filename, mime):
@@ -1567,6 +1735,7 @@ async def parse_document(
 
     if _looks_like_pdf(filename, mime):
         fast_result = _parse_pdf_fast_text(raw_bytes, filename, mime)
+        _apply_meta(fast_result, _meta_from_pdf(raw_bytes))  # M2 pdf info
         if not do_ocr or _fast_pdf_text_is_usable(fast_result):
             return fast_result
 
