@@ -26,6 +26,8 @@ _PROMOTED_LIST_FIELDS = (
     "relation_predicates",
     "relation_families",
     "fact_types",
+    "related_entities",
+    "graph_neighbors",
 )
 
 
@@ -74,6 +76,20 @@ def promote(
         if e.get("domain_type"):
             domains.add(_norm_term(e["domain_type"]))
 
+    # P1 — doc-local graph precompute: relation ENDPOINTS as entity ids.
+    # A chunk's related_entities are the entities it asserts relations about —
+    # the zero-Cypher first hop (POLYMATH_ARCHITECTURE §12.3/§12.5 P1).
+    related: set[str] = set()
+    for r in relations:
+        s_name = _norm_term(r.get("subject"))
+        if s_name:
+            related.add(eid(s_name))
+        if (r.get("object_kind") or "entity") == "entity":
+            o_name = _norm_term(r.get("object"))
+            if o_name:
+                related.add(eid(o_name))
+    related.discard("")
+
     predicates = {_norm_term(r.get("predicate")) for r in relations if r.get("predicate")}
     rel_families = {
         _norm_term(r.get("relation_family")) for r in relations if r.get("relation_family")
@@ -88,6 +104,7 @@ def promote(
         "relation_predicates": sorted(predicates),
         "relation_families": sorted(rel_families),
         "fact_types": sorted(fact_types),
+        "related_entities": sorted(related),
         "has_relations": bool(relations),
         "extract_schema_version": str(
             extraction.get("schema_version") or "polymath.extract.v1"
@@ -171,6 +188,32 @@ async def promote_doc(db, corpus_id: str, doc_id: str) -> dict[str, Any]:
             {"chunk_id": 1, "parent_id": 1},
         ):
             child_parent[str(cr["chunk_id"])] = str(cr.get("parent_id") or "")
+        # P1 — cross-doc 1-hop neighborhood, ONE Cypher for the whole doc,
+        # capped + sorted (deterministic), best-effort (Neo4j down → field
+        # simply absent; Mode A falls back to live expansion).
+        neighbor_map: dict[str, list[str]] = {}
+        try:
+            from services.ingestion_service import ingestion_service as _ing
+
+            driver = getattr(_ing, "neo4j_driver", None)
+            all_eids = sorted({
+                e for row in rows
+                for e in promote(row, entity_id_fn=_eid).get("entity_ids", [])
+            })
+            if driver is not None and all_eids:
+                async with driver.session() as sess:
+                    res = await sess.run(
+                        "MATCH (e:Entity)-[r:RELATES_TO]-(n:Entity) "
+                        "WHERE e.entity_id IN $ids "
+                        "WITH e, n ORDER BY r.confidence DESC "
+                        "RETURN e.entity_id AS eid, collect(DISTINCT n.entity_id)[..12] AS nbrs",
+                        ids=all_eids,
+                    )
+                    async for rec in res:
+                        neighbor_map[rec["eid"]] = list(rec["nbrs"] or [])
+        except Exception:  # noqa: BLE001 — hops fall back to live Cypher
+            neighbor_map = {}
+
         done = warn = 0
         for row in rows:
             chunk_id = str(row.get("chunk_id") or "")
@@ -186,6 +229,14 @@ async def promote_doc(db, corpus_id: str, doc_id: str) -> dict[str, Any]:
                 delta["mechanisms"] = ps["mechanisms"]
             if ps.get("key_terms"):
                 delta["key_terms"] = ps["key_terms"]
+            if neighbor_map:
+                own = set(delta.get("entity_ids") or [])
+                nbrs: set[str] = set()
+                for e in own:
+                    nbrs.update(neighbor_map.get(e, []))
+                nbrs -= own
+                if nbrs:
+                    delta["graph_neighbors"] = sorted(nbrs)[:12]
             pid = qw._uuid_from_str(chunk_id)
             for col in cols:
                 try:
