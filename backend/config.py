@@ -206,6 +206,17 @@ class Settings(BaseSettings):
             "pre-router paragraph/sentence-only behaviour."
         ),
     )
+    CHUNKER_SEMANTIC_PARENTS: bool = Field(
+        default=True,
+        description=(
+            "Semantic PARENT formation for structureless text (tier_c): parent "
+            "boundaries at embedding-deviation dips between paragraph units "
+            "instead of blind 1200-token windows, budget-clamped to "
+            "[parent_min, parent_max]. Deterministic (fixed model+text → same "
+            "boundaries); latched token-window fallback when the embedder is "
+            "down. Structured tiers (headings/AST/pages) are unaffected."
+        ),
+    )
     CHUNKER_SEMANTIC_ESCALATION: bool = Field(
         default=True,
         description=(

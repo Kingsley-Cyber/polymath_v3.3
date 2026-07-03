@@ -256,6 +256,75 @@ def test_uniform_text_declines_escalation():
         tc._embed_for_escalation = orig
 
 
+# ── Semantic parents for structureless text (tier_c) ───────────────────────
+def _three_topic_doc():
+    t = []
+    for topic in range(3):
+        for p in range(8):
+            t.append(f"topic{topic} paragraph {p}. " + f"More topic{topic} discussion sentence {p} with enough words to carry token weight across the budget. " * 4)
+    return "\n\n".join(t)
+
+
+def _fake_topic_vecs(units):
+    vecs = []
+    for u in units:
+        t = 0 if "topic0" in u else (1 if "topic1" in u else 2)
+        v = [0.0, 0.0, 0.0]
+        v[t] = 1.0
+        vecs.append(v)
+    return vecs
+
+
+def test_semantic_parents_align_to_topics():
+    doc = _three_topic_doc()
+    orig = tc._embed_for_escalation
+    tc._embed_for_escalation = _fake_topic_vecs
+    try:
+        parents = tc._semantic_parent_blocks(doc, min_tokens=100, target_tokens=400, max_tokens=1800)
+        assert parents is not None and len(parents) == 3
+        for t, p in enumerate(parents):
+            assert f"topic{t}" in p and f"topic{(t + 1) % 3}" not in p
+    finally:
+        tc._embed_for_escalation = orig
+
+
+def test_semantic_parents_deterministic():
+    doc = _three_topic_doc()
+    orig = tc._embed_for_escalation
+    tc._embed_for_escalation = _fake_topic_vecs
+    try:
+        a = tc._semantic_parent_blocks(doc, min_tokens=100, target_tokens=400, max_tokens=1800)
+        b = tc._semantic_parent_blocks(doc, min_tokens=100, target_tokens=400, max_tokens=1800)
+        assert a == b                                  # byte-identical, twice
+    finally:
+        tc._embed_for_escalation = orig
+
+
+def test_semantic_parents_respect_max_budget():
+    # single-topic long doc: no semantic dips → budget cap still slices
+    doc = "\n\n".join(f"same topic paragraph {i}. " + "filler sentence with several words here. " * 6 for i in range(40))
+    orig = tc._embed_for_escalation
+    tc._embed_for_escalation = lambda units: [[1.0, 0.0]] * len(units)
+    try:
+        parents = tc._semantic_parent_blocks(doc, min_tokens=100, target_tokens=400, max_tokens=600)
+        assert parents is not None and len(parents) >= 2
+        assert all(_tok(p) <= 600 for p in parents)
+    finally:
+        tc._embed_for_escalation = orig
+
+
+def test_semantic_parents_fallback_contract():
+    doc = _three_topic_doc()
+    orig = tc._embed_for_escalation
+    tc._embed_for_escalation = lambda units: None      # embedder down
+    try:
+        assert tc._semantic_parent_blocks(doc, min_tokens=100, target_tokens=400, max_tokens=1800) is None
+    finally:
+        tc._embed_for_escalation = orig
+    # small doc → None (single parent, nothing to gain)
+    assert tc._semantic_parent_blocks("short doc.", min_tokens=100, target_tokens=400, max_tokens=1800) is None
+
+
 def _run_all():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

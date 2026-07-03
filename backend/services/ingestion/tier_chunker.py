@@ -668,6 +668,87 @@ def _semantic_deviation_split(
     return out
 
 
+def _semantic_parent_blocks(
+    text: str, *, min_tokens: int, target_tokens: int, max_tokens: int
+) -> list[str] | None:
+    """Semantic PARENT formation for structureless text (tier_c).
+
+    Token-window parents on a structureless doc straddle topics — children
+    retrieve precisely but hydrate to diluted parents. This draws parent
+    boundaries at semantic-deviation dips between paragraph units instead of
+    blind token cuts, budget-clamped to [min_tokens, max_tokens].
+
+    DETERMINISTIC by construction: fixed embedder model + same text → same
+    vectors → same cosine sequence → same mean−std threshold → same
+    boundaries; pure arithmetic, no RNG, no dict-order dependence. The only
+    environment dependence is embedder availability — a failure latches OFF
+    (logged) and the caller falls back to the legacy token-window split.
+    Returns None whenever there is nothing to gain (small doc, <4 units,
+    embedder down, no topical structure) — caller keeps legacy behaviour.
+    """
+    try:
+        from config import get_settings
+
+        if not bool(getattr(get_settings(), "CHUNKER_SEMANTIC_PARENTS", True)):
+            return None
+    except Exception:
+        return None
+    if _count_tokens(text) <= max_tokens:
+        return None  # fits one parent — nothing to segment
+    units = [p.strip() for p in re.split(r"\n\n+", text) if p.strip()]
+    if len(units) < 4:
+        units = _split_at_sentences(text)  # giant single paragraph → SaT units
+    if len(units) < 4:
+        return None
+    vecs = _embed_for_escalation(units)
+    if vecs is None:
+        return None
+    import math
+
+    def _cos(a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        na = math.sqrt(sum(x * x for x in a)) or 1e-9
+        nb = math.sqrt(sum(x * x for x in b)) or 1e-9
+        return dot / (na * nb)
+
+    sims = [_cos(vecs[i], vecs[i + 1]) for i in range(len(vecs) - 1)]
+    mean = sum(sims) / len(sims)
+    std = math.sqrt(sum((x - mean) ** 2 for x in sims) / len(sims))
+    threshold = mean - std
+    # boundary BEFORE unit i+1 when the dip crosses the threshold
+    boundaries = {i + 1 for i, sim in enumerate(sims) if sim < threshold}
+
+    parents: list[str] = []
+    buf: list[str] = []
+    buf_tok = 0
+    for i, unit in enumerate(units):
+        ut = _count_tokens(unit)
+        if buf and (
+            buf_tok + ut > max_tokens
+            or (i in boundaries and buf_tok >= min_tokens)
+        ):
+            parents.append("\n\n".join(buf))
+            buf, buf_tok = [], 0
+        buf.append(unit)
+        buf_tok += ut
+    if buf:
+        tail = "\n\n".join(buf)
+        if (
+            parents
+            and buf_tok < min_tokens
+            and _count_tokens(parents[-1]) + buf_tok <= max_tokens
+        ):
+            parents[-1] = parents[-1] + "\n\n" + tail  # merge small tail back
+        else:
+            parents.append(tail)
+    if len(parents) <= 1:
+        return None
+    logger.info(
+        "semantic parent formation: %d units → %d topic-aligned parents", len(units), len(parents)
+    )
+    return parents
+
+
 def _tail_token_text(text: str, overlap_tokens: int) -> str:
     if overlap_tokens <= 0:
         return ""
@@ -1509,7 +1590,14 @@ def chunk(
         # Plain-text uploads (which classify as tier_c) sometimes carry pandoc
         # / EPUB residue when they were generated from converted ebooks.
         text = _scrub_markup_noise(parse_result.text or parse_result.markdown or "")
-        parent_texts = _split_at_boundary(
+        # Semantic parents first (topic-aligned, deterministic); legacy
+        # token-window split is the always-available fallback.
+        parent_texts = _semantic_parent_blocks(
+            text,
+            min_tokens=policy.parent_min_tokens,
+            target_tokens=policy.parent_target_tokens,
+            max_tokens=policy.parent_max_tokens,
+        ) or _split_at_boundary(
             text,
             policy.parent_target_tokens,
             overlap_tokens=policy.parent_overlap_tokens,

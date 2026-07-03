@@ -166,6 +166,12 @@ API (7 formats): lists item-intact · timestamped chat → transcript lane w/ ti
 SRT speakers ALICE/BOB · VTT voice tags stripped · CSV kind=table rows intact · py AST lane ·
 3-topic essay → 3 single-topic children via the REAL MLX embedder. 19 router tests +
 43 chunker regressions green.
+**+ SEMANTIC PARENTS (tier_c) SHIPPED 2026-07-03:** structureless text draws PARENT boundaries
+at embedding-deviation dips between paragraph units (budget-clamped, `CHUNKER_SEMANTIC_PARENTS`,
+deterministic: fixed model+text → identical boundaries, latched token-window fallback). Live:
+3360-token 3-topic dump → exactly 3 single-topic parents, byte-identical twice. Structured tiers
+(headings/AST/pages) unchanged; OCR page-grouping keeps physical pages (follow-up can reuse the
+same helper). 23 router tests green.
 
 **S3 Ghost A** → per-parent `{summary(prose), domain(soft), mechanisms[], key_terms[],
 semantic_chunk_type}` **+ NEW doc-level summary** (feeds `doc_summaries`, §4). `topics` is
