@@ -4316,7 +4316,8 @@ async def _enforce_evidence_plan_lanes(
                     "status": "started",
                 }
                 # Cross-encoder rerank for support pools (RERANK_EVIDENCE_SUPPORT,
-                # default on): lane selection is lexical, so an un-reranked pool
+                # default OFF — Metal contention A/B, see config.py; Q1 2026-07-03
+                # re-verified in situ): lane selection is lexical, so an un-reranked pool
                 # surfaces the right BOOK but often the wrong PASSAGE (live probe
                 # 2026-07-01: Le Guin doc-hit/passage-miss). When reranking, pull
                 # a tighter pool — the cross-encoder pays per candidate and the
