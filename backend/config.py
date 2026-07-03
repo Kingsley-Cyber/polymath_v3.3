@@ -216,6 +216,22 @@ class Settings(BaseSettings):
             "additively (sources untouched, reversible)."
         ),
     )
+    WATERFALL_ASSEMBLY: bool = Field(
+        default=False,
+        description=(
+            "W2 §10.3 — assemble the model context as the deterministic "
+            "budgeted waterfall packet (full -> summary -> skip; orphan "
+            "children; entity lines) instead of the legacy per-source render. "
+            "OFF until the A/B gate (golden battery + 5-doc probes) is green. "
+            "When off, the packet is not even built."
+        ),
+    )
+    WATERFALL_BUDGET_TOKENS: int = Field(
+        default=4000,
+        ge=256,
+        le=32768,
+        description="§10.3 fixed context budget for waterfall allocate().",
+    )
     TWO_LANE_ANCHORING: bool = Field(
         default=False,
         description=(

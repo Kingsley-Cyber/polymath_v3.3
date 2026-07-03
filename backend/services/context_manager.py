@@ -502,6 +502,7 @@ class ContextManager:
         analysis: Optional[str] = None,
         facts: Optional[list] = None,
         decoration: Optional[list] = None,
+        packet: Optional[dict] = None,
     ) -> str:
         """
         Build the RAG-augmented prompt from retrieved local sources.
@@ -575,7 +576,41 @@ class ContextManager:
             # removed as redundant.
             passages: list[str] = []
             has_web_sources = False
-            for s in sources:
+            # W2 §10.3 — waterfall packet renders IN ALLOCATOR ORDER (full
+            # parents -> summaries -> orphan children -> entity lines) and
+            # REPLACES the per-source loop. Everything downstream (facts
+            # block, skills, reasoning template) is unchanged. packet=None
+            # (flag off / assembly failed) keeps the legacy path bit-for-bit.
+            if packet and packet.get("items"):
+                _doc_names = {
+                    str(getattr(s, "doc_id", "") or ""): (
+                        getattr(s, "doc_name", None) or getattr(s, "doc_id", "") or "Unknown"
+                    )
+                    for s in sources
+                }
+                _entity_lines: list[str] = []
+                for _it in packet["items"]:
+                    _kind = _it.get("kind")
+                    _text = str(_it.get("text") or "").strip()
+                    if not _text:
+                        continue
+                    if _kind == "entity":
+                        _entity_lines.append(_text)
+                        continue
+                    _label = _doc_names.get(str(_it.get("doc_id") or ""), "") or (
+                        _it.get("doc_id") or "Unknown"
+                    )
+                    if _kind == "full":
+                        passages.append(f'From "{_label}": {_text}')
+                    elif _kind == "summary":
+                        passages.append(f'Section summary from "{_label}": {_text}')
+                    else:  # child — cross-domain fragment
+                        passages.append(f'Fragment from "{_label}": {_text}')
+                if _entity_lines:
+                    passages.append(
+                        "Related graph signals: " + " | ".join(_entity_lines)
+                    )
+            for s in ([] if passages else sources):
                 doc_label = s.doc_name or s.doc_id or "Unknown"
                 source_tier = str(getattr(s, "source_tier", "") or "")
                 metadata = getattr(s, "metadata", None) or {}

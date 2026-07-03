@@ -1905,8 +1905,32 @@ class RetrieverOrchestrator:
             try:
                 hydrated = await hydrate_chunks(candidates, corpus_ids, query=rank_query)
                 _add_timing("hydrate", phase_started)
+                result = _result(hydrated, status="ok_hydrated")
+                # W2 §10.3 — waterfall packet rides ALONGSIDE the legacy
+                # chunks (renderer picks it downstream); OFF -> not even built.
+                if bool(getattr(settings, "WATERFALL_ASSEMBLY", False)):
+                    phase_started = perf_counter()
+                    from services.retriever.assembly import (
+                        build_waterfall_packet,
+                        packet_to_dict,
+                    )
+
+                    packet = await build_waterfall_packet(
+                        hydrated, corpus_ids, query=query, settings=settings
+                    )
+                    _add_timing("waterfall_assembly", phase_started)
+                    if packet is not None:
+                        result.packet = packet_to_dict(packet)
+                        result.diagnostics["packet_hash"] = packet.packet_hash
+                        result.diagnostics["packet_items"] = len(packet.items)
+                        result.diagnostics["packet_used_tokens"] = packet.used_tokens
+                        logger.info(
+                            "Waterfall packet: %d items, %d/%d tokens, hash=%s",
+                            len(packet.items), packet.used_tokens,
+                            packet.budget_tokens, packet.packet_hash[:12],
+                        )
                 _log_timings("ok_hydrated", len(hydrated))
-                return _result(hydrated, status="ok_hydrated")
+                return result
             except Exception as exc:
                 _add_timing("hydrate", phase_started)
                 logger.warning("Hydration failed, returning unhydrated: %s", exc)

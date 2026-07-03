@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from bson import ObjectId
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -1167,6 +1167,14 @@ class RetrievalResult(BaseModel):
     diagnostics: dict[str, Any] = Field(
         default_factory=dict,
         description="Observable retrieval lane counts, timings, and tier contract metadata.",
+    )
+    packet: Optional[dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "W2 §10.3 — deterministic waterfall context packet (items in "
+            "render order + packet_hash). Present ONLY when WATERFALL_ASSEMBLY "
+            "is on; None keeps the legacy per-source assembly."
+        ),
     )
 
 

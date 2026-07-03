@@ -2415,6 +2415,7 @@ def _build_budgeted_augmented_prompt(
     analysis: str | None,
     decoration: list[Any],
     model: str,
+    packet: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Build the current RAG turn and compact it before history trimming.
 
@@ -2456,6 +2457,7 @@ def _build_budgeted_augmented_prompt(
             active_skills=active_skills or None,
             analysis=analysis if use_analysis else None,
             decoration=prompt_decoration,
+            packet=packet,
         )
         return prompt, count_tokens(prompt, model), {
             "source_chars": source_chars,
@@ -7434,6 +7436,18 @@ class ChatOrchestrator:
 
         prompt_budget_meta: dict[str, Any] = {}
         if sources or facts or active_skills_dicts or analysis_text:
+            # W2 §10.3 — the waterfall packet replaces the CORPUS context
+            # render only; web-blended turns keep the legacy per-source loop
+            # (the packet was allocated from corpus chunks alone).
+            _wf_packet = None
+            try:
+                _wf_packet = getattr(retrieval, "packet", None)
+            except NameError:  # no corpus retrieval this turn (web/pure chat)
+                _wf_packet = None
+            if _wf_packet and any(
+                str(getattr(s, "source_tier", "") or "") == "web_search" for s in sources
+            ):
+                _wf_packet = None
             user_message.content, prompt_budget_meta = _build_budgeted_augmented_prompt(
                 query=user_message.content,
                 sources=sources,
@@ -7445,6 +7459,7 @@ class ChatOrchestrator:
                 analysis=analysis_text,
                 decoration=inline_decoration,
                 model=model_used,
+                packet=_wf_packet,
             )
             user_message.token_count = count_tokens(user_message.content, model_used)
             if prompt_budget_meta.get("compacted"):
