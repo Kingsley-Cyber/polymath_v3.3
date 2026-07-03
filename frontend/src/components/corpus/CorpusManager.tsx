@@ -272,7 +272,7 @@ function ExtractionEngineSelector() {
     }
   };
   return (
-    <div className="mt-1 flex items-center gap-1.5">
+    <div className="mt-1.5 flex flex-wrap items-center gap-2">
       {[
         ["local", "LOCAL"],
         ["cloud", "CLOUD"],
@@ -285,10 +285,10 @@ function ExtractionEngineSelector() {
           disabled={busy}
           onClick={() => choose(val)}
           className={
-            "px-2 py-0.5 text-[10px] tracking-wider border " +
+            "px-3 py-1.5 text-[11px] font-semibold tracking-wider rounded-sm border transition-colors " +
             (engine === val
-              ? "border-emerald-400 text-emerald-300 bg-bg-base"
-              : "border-border-minimal text-content-tertiary hover:text-content-primary")
+              ? "border-emerald-400 bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/40"
+              : "border-border-minimal bg-bg-base/60 text-content-tertiary hover:text-content-primary hover:border-content-tertiary")
           }
         >
           {label}
@@ -628,55 +628,21 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                 sent on create). Overrides remain available via the API only —
                 deliberately absent from the UI (owner decision 2026-07-03). */}
 
-            {/* Chunking extras */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
-              <div>
-                <label className="text-[9px] text-content-tertiary tracking-wider">
-                  OVERLAP
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  value={newConfig.chunk_overlap}
-                  onChange={(e) =>
-                    setNewConfig((prev) => ({
-                      ...prev,
-                      chunk_overlap: parseInt(e.target.value) || 200,
-                    }))
-                  }
-                  className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
-                />
+            {/* Chunking is AUTO-tuned end to end — token budgets, overlap and
+                summary caps all ship validated defaults on create; overrides
+                are deliberately API-only (owner decision 2026-07-03). */}
+            <div>
+              <label className="text-[9px] text-content-tertiary tracking-wider">
+                CHUNKING
+              </label>
+              <div
+                className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary"
+                title="Resolved per file after parsing: prose → semantic_split (one idea per child); lists/lines/code/tables/transcripts auto-route; SaT sentence engine; topic-fused paragraphs escalate via embeddings; structureless docs get semantic parents."
+              >
+                AUTO
               </div>
-              <div>
-                <label className="text-[9px] text-content-tertiary tracking-wider">
-                  CHUNKING
-                </label>
-                <div
-                  className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary"
-                  title="Resolved per file after parsing: prose \u2192 semantic_split (one idea per child); lists/lines/code/tables/transcripts auto-route; SaT sentence engine; topic-fused paragraphs escalate via embeddings; structureless docs get semantic parents."
-                >
-                  AUTO
-                </div>
-                <div className="mt-1 text-[8px] text-content-tertiary leading-tight">
-                  file-type routers · child: semantic_split
-                </div>
-              </div>
-              <div>
-                <label className="text-[9px] text-content-tertiary tracking-wider">
-                  MAX SUMMARY
-                </label>
-                <input
-                  type="number"
-                  min={50}
-                  value={newConfig.max_summary_tokens}
-                  onChange={(e) =>
-                    setNewConfig((prev) => ({
-                      ...prev,
-                      max_summary_tokens: parseInt(e.target.value) || 175,
-                    }))
-                  }
-                  className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
-                />
+              <div className="mt-1 text-[8px] text-content-tertiary leading-tight">
+                file-type routers · child: semantic_split · budgets, overlap &amp; summaries auto-tuned
               </div>
             </div>
 
