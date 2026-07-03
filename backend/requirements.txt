@@ -39,7 +39,14 @@ modal==0.64.170
 
 # === Token Counting ===
 tiktoken==0.5.2
-transformers==4.36.2
+# transformers==4.36.2 REMOVED 2026-07-03: dead pin — zero backend imports (all
+# model inference lives on sidecars; modal_embedder.py pins its own transformers
+# inside the Modal image). It conflicted with wtpsplit-lite's tokenizers>=0.20.
+
+# === Chunker sentence engine (router 2, POLYMATH_ARCHITECTURE §3.S2) ===
+# SaT sat-3l-sm — punctuation-agnostic sentence segmentation (ONNX, CPU-light).
+# Lazy-loaded singleton in tier_chunker; regex fallback if unavailable.
+wtpsplit-lite==0.2.0
 
 # === Document Parsing ===
 pypdf==4.2.0

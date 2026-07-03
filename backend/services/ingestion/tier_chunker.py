@@ -304,10 +304,11 @@ def _hard_split_oversize(chunks: list[str], max_tokens: int) -> list[str]:
     Without this guard those chunks silently truncate at the embedder's
     1024-token ceiling, dropping the tail content.
 
-    The split lands at exact token boundaries via re-encoding through the
-    cl100k_base tokenizer. Boundaries can land mid-word — that's still
-    better than letting the embedder truncate randomly, since both halves
-    of the split survive in Qdrant with their full text in Mongo.
+    The split works at token boundaries via the cl100k_base tokenizer, but
+    prefers a WHITESPACE-LEADING token near the cap (router 2: never cut
+    mid-word when a word boundary exists in the back half of the window —
+    a mid-word cut corrupts both halves' embeddings). Texts with no
+    whitespace tokens (CJK, minified blobs) still cut at the exact cap.
     """
     if max_tokens <= 0:
         return chunks
@@ -319,10 +320,28 @@ def _hard_split_oversize(chunks: list[str], max_tokens: int) -> list[str]:
             out.append(c)
             continue
         over_count += 1
-        for i in range(0, len(toks), max_tokens):
-            sub = _TOKENIZER.decode(toks[i:i + max_tokens]).strip()
+        i = 0
+        n = len(toks)
+        while i < n:
+            end = min(i + max_tokens, n)
+            if end < n:
+                # Backtrack to the nearest token that STARTS a new word
+                # (leading space/newline/tab) so the cut lands on a word
+                # boundary. Only scan the back half — never shrink a chunk
+                # below half the cap chasing a boundary.
+                j = end
+                floor = i + max(1, (end - i) // 2)
+                while j > floor:
+                    piece = _TOKENIZER.decode([toks[j]])
+                    if piece[:1] in (" ", "\n", "\t"):
+                        break
+                    j -= 1
+                if j > floor:
+                    end = j
+            sub = _TOKENIZER.decode(toks[i:end]).strip()
             if sub:
                 out.append(sub)
+            i = end
     if over_count:
         logger.info(
             "tier_chunker hard-split: %d/%d chunks force-broken at max_tokens=%d",
@@ -372,8 +391,173 @@ def _coalesce_small_child_texts(
     return out
 
 
+# ── Structured-text routers (POLYMATH_ARCHITECTURE §3.S2, routers 1+2) ──────
+# Deterministic layer-2 routing for text shapes the paragraph splitter shreds:
+# list blocks split at ITEM boundaries (items never broken), low-punctuation
+# multi-line blocks group by LINES, and sentence splitting can use the SaT
+# model (wtpsplit, punctuation-agnostic) instead of the [.!?] regex. All rules;
+# the only model (SaT) is deterministic for a fixed model+text and gated by
+# CHUNKER_SENTENCE_ENGINE with a logged regex fallback.
+
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+_LIST_MARKER_RE = re.compile(
+    r"^\s{0,8}(?:[-*+•▪◦‣]|\d{1,3}[.)]|\(\d{1,3}\)|[a-zA-Z][.)])\s+"
+)
+_SENT_FINAL_RE = re.compile(r"[.!?][\"')\]]?(?:\s|$)")
+
+
+def _routers_enabled() -> bool:
+    try:
+        from config import get_settings
+
+        return bool(getattr(get_settings(), "CHUNKER_STRUCTURED_ROUTERS", True))
+    except Exception:  # config unavailable in some tooling contexts
+        return True
+
+
+def _nonempty_lines(text: str) -> list[str]:
+    return [ln for ln in text.splitlines() if ln.strip()]
+
+
+def _is_list_block(text: str) -> bool:
+    """A block is list-shaped when >=3 lines carry list markers and markers
+    cover at least half the non-empty lines (bullets, 1./1)/(1), a./a))."""
+    lines = _nonempty_lines(text)
+    if len(lines) < 3:
+        return False
+    markers = sum(1 for ln in lines if _LIST_MARKER_RE.match(ln))
+    return markers >= 3 and markers * 2 >= len(lines)
+
+
+def _split_list_items(text: str) -> list[str]:
+    """One unit per list item: a marker line plus its continuation lines.
+    Preamble lines before the first marker become their own unit."""
+    items: list[str] = []
+    current: list[str] = []
+    for ln in text.splitlines():
+        if not ln.strip():
+            continue
+        if _LIST_MARKER_RE.match(ln):
+            if current:
+                items.append("\n".join(current))
+            current = [ln]
+        else:
+            current.append(ln)
+    if current:
+        items.append("\n".join(current))
+    return items
+
+
+def _is_low_punct_multiline(text: str) -> bool:
+    """Line-structured text (transcripts, poetry, chat logs, logs): many lines,
+    few sentence-final punctuation marks. Sentence splitting has nothing to
+    grip there — lines are the real units."""
+    lines = _nonempty_lines(text)
+    if len(lines) < 5:
+        return False
+    punct = len(_SENT_FINAL_RE.findall(text))
+    return punct * 3 < len(lines)
+
+
+def _pack_units(
+    units: list[str], target_tokens: int, max_tokens: int, *, joiner: str = "\n"
+) -> list[str]:
+    """Greedily pack whole units (list items / lines / sentences) to
+    ~target_tokens without ever splitting inside a unit. A single unit above
+    max_tokens falls to sentence packing; a unit with no sentence boundaries
+    stays whole for the downstream hard splitter."""
+    out: list[str] = []
+    buf: list[str] = []
+    buf_tok = 0
+    for unit in units:
+        ut = _count_tokens(unit)
+        if ut > max_tokens:
+            if buf:
+                out.append(joiner.join(buf))
+                buf, buf_tok = [], 0
+            sentences = _split_at_sentences(unit)
+            if len(sentences) <= 1:
+                out.append(unit)  # pathological — _hard_split_oversize catches it
+            else:
+                out.extend(
+                    _pack_units(sentences, target_tokens, max_tokens, joiner=" ")
+                )
+            continue
+        if buf and buf_tok + ut > target_tokens:
+            out.append(joiner.join(buf))
+            buf, buf_tok = [unit], ut
+        else:
+            buf.append(unit)
+            buf_tok += ut
+    if buf:
+        out.append(joiner.join(buf))
+    return [c for c in out if c.strip()]
+
+
+def _route_structured_block(
+    para: str, target_tokens: int, max_tokens: int
+) -> list[str] | None:
+    """Router 1+2a: oversize blocks that are list-shaped split at item
+    boundaries; line-structured low-punctuation blocks group by lines.
+    Returns None when the block is ordinary prose (caller sentence-splits)."""
+    if not _routers_enabled():
+        return None
+    if _is_list_block(para):
+        return _pack_units(_split_list_items(para), target_tokens, max_tokens)
+    if _is_low_punct_multiline(para):
+        return _pack_units(_nonempty_lines(para), target_tokens, max_tokens)
+    return None
+
+
+# ── Sentence engine (router 2b): SaT (wtpsplit) with regex fallback ─────────
+_SAT_MODEL = None
+_SAT_FAILED = False
+
+
+def _sat_split(text: str) -> list[str] | None:
+    """Punctuation-agnostic sentence segmentation via SaT (sat-3l-sm).
+    Returns None when disabled/unavailable — caller uses the regex. The model
+    is a lazy module singleton; a load failure is logged ONCE and latches."""
+    global _SAT_MODEL, _SAT_FAILED
+    if _SAT_FAILED:
+        return None
+    try:
+        from config import get_settings
+
+        engine = str(
+            getattr(get_settings(), "CHUNKER_SENTENCE_ENGINE", "sat") or "sat"
+        ).lower()
+    except Exception:
+        engine = "sat"
+    if engine != "sat":
+        return None
+    if _SAT_MODEL is None:
+        try:
+            try:
+                from wtpsplit_lite import SaT  # minimal ONNX build
+            except ImportError:
+                from wtpsplit import SaT  # full package fallback
+            _SAT_MODEL = SaT("sat-3l-sm")
+            logger.info("tier_chunker sentence engine: SaT sat-3l-sm loaded")
+        except Exception as exc:
+            _SAT_FAILED = True
+            logger.warning(
+                "SaT sentence engine unavailable (%s) — regex fallback in effect",
+                exc,
+            )
+            return None
+    try:
+        return [s.strip() for s in _SAT_MODEL.split(text) if s.strip()]
+    except Exception as exc:  # never let the model kill ingestion
+        logger.warning("SaT split failed (%s) — regex fallback for this block", exc)
+        return None
+
+
 def _split_at_sentences(text: str) -> list[str]:
-    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    sats = _sat_split(text)
+    if sats and len(sats) > 1:
+        return sats
+    return [s.strip() for s in _SENTENCE_RE.split(text) if s.strip()]
 
 
 def _tail_token_text(text: str, overlap_tokens: int) -> str:
@@ -417,6 +601,15 @@ def _split_at_boundary(
             if buf:
                 chunks.append("\n\n".join(buf))
                 buf, buf_tok = [], 0
+            # Router 1+2a — same structured routing as the semantic splitter,
+            # so sentence_merge mode and parent formation keep list items and
+            # line-structured text intact too.
+            routed = _route_structured_block(
+                para, target_tokens, max(int(target_tokens * 1.5), target_tokens + 1)
+            )
+            if routed is not None:
+                chunks.extend(routed)
+                continue
             sentences = _split_at_sentences(para)
             # Pathological-paragraph bailout. Code listings, inline math,
             # stringified tables, and other no-sentence-boundary content
@@ -482,6 +675,13 @@ def _split_by_paragraph_idea(
     for para in paragraphs:
         if _count_tokens(para) <= max_tokens:
             out.append(para)
+            continue
+        # Router 1+2a — oversize list blocks split at item boundaries and
+        # line-structured blocks group by lines BEFORE sentence splitting
+        # shreds them at arbitrary points (probes C/D).
+        routed = _route_structured_block(para, target_tokens, max_tokens)
+        if routed is not None:
+            out.extend(routed)
             continue
         sentences = _split_at_sentences(para)
         if len(sentences) <= 1:

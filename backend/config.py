@@ -194,6 +194,28 @@ class Settings(BaseSettings):
             "Per-chunk answerability score below which strict mode drops a chunk."
         ),
     )
+    # ── Chunker routers (POLYMATH_ARCHITECTURE §3.S2, routers 1+2) ──
+    CHUNKER_STRUCTURED_ROUTERS: bool = Field(
+        default=True,
+        description=(
+            "Layer-2 structured-text routing in the child/parent splitters: "
+            "oversize LIST blocks split at item boundaries (items never broken) "
+            "and line-structured low-punctuation blocks (transcripts, poetry, "
+            "chat logs) group by lines instead of being shredded by sentence "
+            "packing. Pure deterministic rules. Set false to revert to the "
+            "pre-router paragraph/sentence-only behaviour."
+        ),
+    )
+    CHUNKER_SENTENCE_ENGINE: str = Field(
+        default="sat",
+        description=(
+            "Sentence segmentation engine for oversize-paragraph splitting. "
+            "'sat' (default) = wtpsplit SaT sat-3l-sm — punctuation-agnostic, "
+            "85 languages, fixes no-punctuation text the [.!?] regex cannot "
+            "split; falls back to the regex with a logged warning when the "
+            "package/model is unavailable. 'regex' = legacy [.!?] splitting."
+        ),
+    )
     # ── HyDE: opt-in, not on every query (it costs an extra LLM round-trip) ──
     HYDE_ENABLED: bool = Field(
         default=False,

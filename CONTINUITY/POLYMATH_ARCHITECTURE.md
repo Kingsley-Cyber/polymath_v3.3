@@ -152,6 +152,12 @@ deviation spikes) as an ESCALATION applied solely to pathological blocks (no bla
 tokens, or single paragraphs >N tokens) — bounded cost on the local embedder, deterministic
 given fixed model+text, and it resolves the chicken-egg since only flagged blocks embed at
 chunk time. The waterfall depends on none of this.
+**STATUS: routers (1)(2)(3) SHIPPED 2026-07-03** — list item-boundary splitting +
+line-grouping for low-punctuation blocks (`CHUNKER_STRUCTURED_ROUTERS`, default on) + SaT
+sentence engine via wtpsplit-lite sat-3l-sm (`CHUNKER_SENTENCE_ENGINE=sat`, logged regex
+fallback) + whitespace-boundary hard split. Probe-verified: bullets item-intact, chat logs cut
+only at line boundaries, no-punct mega-sentence 1→25 segments, 0 mid-word fragments;
+43 chunker regression tests green. Routers (4) VTT/SRT and (5) escalation remain.
 
 **S3 Ghost A** → per-parent `{summary(prose), domain(soft), mechanisms[], key_terms[],
 semantic_chunk_type}` **+ NEW doc-level summary** (feeds `doc_summaries`, §4). `topics` is
