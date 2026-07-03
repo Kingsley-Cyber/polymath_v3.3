@@ -3017,6 +3017,23 @@ async def run_ingest_job(
                 db, doc_id, corpus_id=corpus_id, **write_updates
             )
             ws.qdrant_written = True
+            # B2 promote-at-ingest — MUST run after the Qdrant upserts (the
+            # points now exist; at the Mongo barrier they don't yet). Best
+            # effort: never fails the ingest.
+            try:
+                from config import get_settings as _gs2
+                if bool(getattr(_gs2(), "SUMMARY_TREE_ENABLED", True)):
+                    from services.ingestion.promote import promote_doc
+                    _promo = await promote_doc(db, corpus_id=corpus_id, doc_id=doc_id)
+                    logger.info(
+                        "phase=promote doc=%s corpus=%s %s",
+                        doc_id[:12], corpus_id[:8], _promo,
+                    )
+            except Exception as _promo_exc:  # noqa: BLE001
+                logger.warning(
+                    "phase=promote doc=%s FAILED (non-fatal): %s",
+                    doc_id[:12], _promo_exc,
+                )
             if summary_write_required:
                 ws.summaries_indexed = True
             logger.info(
