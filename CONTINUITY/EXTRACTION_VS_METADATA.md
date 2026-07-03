@@ -110,6 +110,27 @@ clamp) lives here, once, instead of scattered.
   `concepts[]` Qdrant payload (indexed) turns dead extraction into entity/alias recall WITHOUT any
   new model work — pure mapping over data you already extracted.
 
+## Amendments — local/cloud extractor bridge (reconciled 2026-07-02, second review)
+An independent pass over the same code converged on this doc's verdict and adds four deltas so
+ONE envelope serves both the local (GLiNER/GLiREL) and cloud extraction paths:
+
+1. **`extractor` provenance on `ExtractionOutput`** — `"gliner_glirel_local" | "cloud_llm"`.
+   Both paths already normalize to the same `ExtractionResult` (`polymath.extract.v1`, verified:
+   ghost_b_local.py wire dicts and all 3 cloud modes `_parse()` to it), but nothing records WHICH
+   extractor produced a row. Confidence semantics differ (GLiNER softmax vs LLM self-report), so
+   promotion thresholds and audits need the tag. Add `char_start/char_end` spans (local has them;
+   cloud may null) and bump the envelope tag to `polymath.extract.v2`.
+2. **Promote relations too, not only entities** — add to `RetrievalPayload`:
+   `relation_predicates[]`, `relation_families[]`, `fact_types[]`, `has_relations` (aggregated
+   per chunk, indexed). Lets the vector layer pre-filter "chunks carrying Causal/Operational
+   links" for the Graph tier without a live Neo4j hop.
+3. **`entity_ids[]` alongside `concepts[]`** — `concepts[]` (lexical names+aliases) is the RECALL
+   field; `entity_ids[]` (`entity:{slug}`, same deterministic ID as Neo4j) is the exact-filter and
+   Qdrant↔Neo4j JOIN key. They serve different consumers; promote both.
+4. **promote() placement** — per REBUILD_IMPLEMENTATION §8 BLOCKER-1/2: ghosts run in parallel and
+   children are written before ghosts finish, so promote() output is applied as an idempotent
+   post-ghost promotion write (pure function, re-runnable on resume), not a pre-write barrier.
+
 ## Migration (introduce the layer without breaking partial promotions)
 1. Define the 5 Pydantic schemas in `models/` (extraction, chunk_meta, retrieval_payload,
    graph_write, reranker_input).
