@@ -34,9 +34,10 @@ the summary/metadata layer and solves the huge-document case.
 1. Parse document → 2. create child chunks → 3. extract entities/concepts/relations from
 children → 4. group children into parent chunks → 5. parent summaries from children →
 6. document summary from parent summaries → 7. promote metadata into Qdrant/Mongo/Neo4j.
-*(Scribe flag: steps 2→4 imply BOTTOM-UP parent formation — children first, then grouped into
-parents. Current code is top-down (parents → children). Semantic-parents (f554fe4) is a step
-toward this; full inversion is a design decision to settle at build time.)*
+*(DECIDED by owner 2026-07-03: **TOP-DOWN stays** — parents form first (heading/AST/page/
+semantic-deviation boundaries), children split within parents. Steps 5–7 (summaries bottom-up
+from children → parents → rollups → profile) are unaffected; only chunk FORMATION stays
+top-down. No pipeline inversion.)*
 
 ## 4. HUGE documents — the summary TREE (the core insight)
 Real case: `Charles_F_Goldfarb_definitive_XML_series` = **1,727 parent chunks** → 1,727×60 tok
