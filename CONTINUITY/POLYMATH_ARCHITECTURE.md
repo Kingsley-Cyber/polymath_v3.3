@@ -592,8 +592,21 @@ H3 **RerankerInput prefix** ("Book › Section\n…") — cheap CE precision, co
 H4 **Cross-domain in MMR**: add distinct-DOMAIN breadth (payload `domain`) next to distinct-doc
    breadth for BROAD/multi-lane queries + a mechanisms[]-overlap bonus (bridge emphasis) — both
    rank-only.
-H5 **Investigate the support_profile 5–7s anomaly** (likely duplicate embeds or sequential lane
-   searches in gap-fill) — halves multi-concept latency if fixed.
+H5 **CLOSED 2026-07-03 (Q1 investigation — no fix needed).** The 5–7s anomaly no longer
+   exists: it was killed by three earlier arcs (coverage passes rerank_enabled=False; coverage
+   tier downgraded graph→hybrid; RERANK_EVIDENCE_SUPPORT default False after the Metal A/B —
+   NOTE the code comment at chat_orchestrator ~4318 claiming "default on" is STALE, config is
+   authoritative). Receipts on authentic_library (486 docs): isolated gap-fill shape
+   (4 facets × 3 sequential variants, support_profile=True) TOTAL 1.51s, per-call 0.13–0.95s;
+   in-situ during a real graph-tier turn: 8 support retrieves at 0.06–1.85s (p50 ~0.6s). Only
+   residual: a 3-concurrent support burst right after the main pass showed embed=1.18s each
+   (Metal embed queueing; solo=0.05–0.13s) — not on the turn's critical path, not worth fixing.
+   **Where main-pass latency ACTUALLY lives now (real turn, main retrieval 10.89s):**
+   rerank 3.47s (fp16 CE, pool 16 — Q3 territory) · funnels 2.52s of which anchor=2.50s
+   (document_anchor dominates the funnel gather — H6 is the next latency prize) ·
+   graph 2.25s (Mode A escalated to live Cypher because authentic_library has NO promoted
+   neighbor_chunks yet — payload-first activates there only after re-promote/backfill) ·
+   fact_seed 2.01s (overlapped with embed by design).
 H6 document_anchor should match M2 title/author via anchor_detect (fast, indexed) before its
    heavy Mongo text path.
 
@@ -611,7 +624,9 @@ G3 Mode A cache (U3). G4 **CROSS_DOMAIN_EMPHASIS knob (off|balanced|strong)**: s
 G5 topic_key dedupe: two chunks sharing topic_key are near-siblings — MMR redundancy signal.
 
 ### 11.6 Execution order (extends §10.4; do AFTER #31/#32)
-Q1 = H5 support-profile latency investigation · Q2 = U2 soft prefilter + G1 relation prefilter ·
+Q1 = H5 support-profile latency investigation — **DONE 2026-07-03, closed no-fix (see H5);
+     next latency prize per its receipts = H6 document_anchor (2.50s of the 2.52s funnel gather)** ·
+Q2 = U2 soft prefilter + G1 relation prefilter ·
 Q3 = H3 RerankerInput + G2 pool raise (one A/B) · Q4 = H4+G4 cross-domain emphasis knob ·
 Q5 = H1 tree-as-breadth-lane behind flag + Funnel A probes · each step probe-gated
 (golden + habits-NN + seducer + packet_hash + latency per §4.5 targets).
