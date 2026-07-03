@@ -437,6 +437,17 @@ def _walk_sections(doc) -> tuple[list[Section], int, int]:
                 h1 += 1
             elif level == 2:
                 h2 += 1
+        elif label == "list_item":
+            # Preserve list structure (POLYMATH_ARCHITECTURE §3.S2 router 1):
+            # docling emits ListItem elements but their marker glyphs are not
+            # in `text`. Re-prefix "- " and merge consecutive items into ONE
+            # buffered entry joined by single newlines, so downstream the
+            # chunker's list router sees a marker-lined block and splits at
+            # item boundaries instead of shredding items as prose.
+            if buf and buf[-1].startswith("- "):
+                buf[-1] = buf[-1] + "\n- " + text
+            else:
+                buf.append("- " + text)
         else:
             buf.append(text)
 

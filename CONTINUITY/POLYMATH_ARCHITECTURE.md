@@ -152,12 +152,20 @@ deviation spikes) as an ESCALATION applied solely to pathological blocks (no bla
 tokens, or single paragraphs >N tokens) — bounded cost on the local embedder, deterministic
 given fixed model+text, and it resolves the chicken-egg since only flagged blocks embed at
 chunk time. The waterfall depends on none of this.
-**STATUS: routers (1)(2)(3) SHIPPED 2026-07-03** — list item-boundary splitting +
-line-grouping for low-punctuation blocks (`CHUNKER_STRUCTURED_ROUTERS`, default on) + SaT
-sentence engine via wtpsplit-lite sat-3l-sm (`CHUNKER_SENTENCE_ENGINE=sat`, logged regex
-fallback) + whitespace-boundary hard split. Probe-verified: bullets item-intact, chat logs cut
-only at line boundaries, no-punct mega-sentence 1→25 segments, 0 mid-word fragments;
-43 chunker regression tests green. Routers (4) VTT/SRT and (5) escalation remain.
+**STATUS: ALL ROUTERS (1)–(5) SHIPPED 2026-07-03, E2E-verified 7/7.**
+(1) list item-boundary splitting + (2) line-grouping (`CHUNKER_STRUCTURED_ROUTERS`) + SaT
+sentence engine (wtpsplit-lite sat-3l-sm, `CHUNKER_SENTENCE_ENGINE=sat`, latched regex
+fallback) + (3) whitespace-boundary hard split + (4) VTT/SRT subtitle lane (stdlib cue parser →
+transcript_block sections w/ time ranges + speakers; `source_format=subtitle_vtt|subtitle_srt`)
++ (5) semantic-deviation escalation (`CHUNKER_SEMANTIC_ESCALATION`: oversize >=8-sentence
+paragraphs batch-embed via the local embedder, boundaries at cosine-deviation dips, one chunk
+per topic segment, latched greedy fallback). Also: docling sidecar re-prefixes ListItem markers
+("- ") joined by single newlines so PDF lists reach router 1; upload DEFAULT_EXTENSIONS aligned
+to adapter capability (+vtt/srt/csv/tsv/xlsx/log/code exts). Live E2E through the real upload
+API (7 formats): lists item-intact · timestamped chat → transcript lane w/ time metadata ·
+SRT speakers ALICE/BOB · VTT voice tags stripped · CSV kind=table rows intact · py AST lane ·
+3-topic essay → 3 single-topic children via the REAL MLX embedder. 19 router tests +
+43 chunker regressions green.
 
 **S3 Ghost A** → per-parent `{summary(prose), domain(soft), mechanisms[], key_terms[],
 semantic_chunk_type}` **+ NEW doc-level summary** (feeds `doc_summaries`, §4). `topics` is

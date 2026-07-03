@@ -560,6 +560,114 @@ def _split_at_sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE_RE.split(text) if s.strip()]
 
 
+# ── Router 5: semantic-deviation escalation (topic-fused paragraphs) ────────
+# The TechViz method: embed consecutive sentences, place chunk boundaries at
+# similarity-deviation dips so an oversize multi-topic paragraph splits at
+# TOPIC shifts instead of arbitrary token counts. Applied ONLY to flagged
+# pathological blocks (oversize paragraph, >= _ESCALATION_MIN_SENTENCES
+# sentences), batched into ONE embedder call, deterministic for a fixed
+# model+text, and every failure falls back to greedy sentence packing.
+_ESCALATION_MIN_SENTENCES = 8
+_ESCALATION_FAILED = False
+
+
+def _escalation_enabled() -> bool:
+    try:
+        from config import get_settings
+
+        return bool(getattr(get_settings(), "CHUNKER_SEMANTIC_ESCALATION", True))
+    except Exception:
+        return False
+
+
+def _embed_for_escalation(sentences: list[str]) -> list[list[float]] | None:
+    """One batched call to the OpenAI-compatible local embedder sidecar.
+    Latches off after the first failure (bulk ingests must not retry a dead
+    sidecar per paragraph)."""
+    global _ESCALATION_FAILED
+    if _ESCALATION_FAILED:
+        return None
+    try:
+        import httpx
+        from config import get_settings
+
+        s = get_settings()
+        url = str(getattr(s, "EMBEDDER_URL", "") or "").rstrip("/")
+        if not url:
+            _ESCALATION_FAILED = True
+            return None
+        if not url.endswith("/embeddings"):
+            url = url + "/embeddings"
+        resp = httpx.post(
+            url,
+            json={
+                "input": sentences,
+                "model": str(getattr(s, "EMBEDDER_MODEL_NAME", "") or "local"),
+            },
+            timeout=8.0,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data") or []
+        vecs = [row.get("embedding") for row in data]
+        if len(vecs) != len(sentences) or any(not v for v in vecs):
+            raise ValueError("embedding count/shape mismatch")
+        return vecs
+    except Exception as exc:  # noqa: BLE001
+        _ESCALATION_FAILED = True
+        logger.warning(
+            "semantic escalation embedder unavailable (%s) — greedy packing in effect",
+            exc,
+        )
+        return None
+
+
+def _semantic_deviation_split(
+    sentences: list[str], target_tokens: int, max_tokens: int
+) -> list[str] | None:
+    """Boundaries where consecutive-sentence cosine dips below mean − std,
+    with a 3-sentence minimum segment. Returns None on any failure."""
+    vecs = _embed_for_escalation(sentences)
+    if vecs is None:
+        return None
+    import math
+
+    def _cos(a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        na = math.sqrt(sum(x * x for x in a)) or 1e-9
+        nb = math.sqrt(sum(x * x for x in b)) or 1e-9
+        return dot / (na * nb)
+
+    sims = [_cos(vecs[i], vecs[i + 1]) for i in range(len(vecs) - 1)]
+    if not sims:
+        return None
+    mean = sum(sims) / len(sims)
+    var = sum((x - mean) ** 2 for x in sims) / len(sims)
+    threshold = mean - math.sqrt(var)
+
+    segments: list[list[str]] = [[sentences[0]]]
+    since_boundary = 1
+    for i, sim in enumerate(sims):
+        if sim < threshold and since_boundary >= 3:
+            segments.append([sentences[i + 1]])
+            since_boundary = 1
+        else:
+            segments[-1].append(sentences[i + 1])
+            since_boundary += 1
+    if len(segments) <= 1:
+        return None  # no topical structure found — greedy packing is fine
+    # One chunk PER topic segment (idea-per-chunk, like semantic_split's
+    # paragraphs) — never re-pack segments together; only split a segment that
+    # alone exceeds the cap. Tiny segments coalesce downstream at the floor.
+    out: list[str] = []
+    for seg in segments:
+        seg_text = " ".join(seg)
+        if _count_tokens(seg_text) <= max_tokens:
+            out.append(seg_text)
+        else:
+            out.extend(_pack_units(seg, target_tokens, max_tokens, joiner=" "))
+    return out
+
+
 def _tail_token_text(text: str, overlap_tokens: int) -> str:
     if overlap_tokens <= 0:
         return ""
@@ -687,6 +795,13 @@ def _split_by_paragraph_idea(
         if len(sentences) <= 1:
             out.append(para)  # pathological (code/table) — _hard_split handles it
             continue
+        # Router 5 — topic-fused oversize paragraphs split at semantic
+        # deviation boundaries instead of arbitrary token counts (probe B).
+        if len(sentences) >= _ESCALATION_MIN_SENTENCES and _escalation_enabled():
+            escalated = _semantic_deviation_split(sentences, target_tokens, max_tokens)
+            if escalated is not None:
+                out.extend(escalated)
+                continue
         s_buf: list[str] = []
         s_tok = 0
         for s in sentences:

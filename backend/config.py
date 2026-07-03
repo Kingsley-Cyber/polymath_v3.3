@@ -206,6 +206,16 @@ class Settings(BaseSettings):
             "pre-router paragraph/sentence-only behaviour."
         ),
     )
+    CHUNKER_SEMANTIC_ESCALATION: bool = Field(
+        default=True,
+        description=(
+            "Router 5 — semantic-deviation splitting for topic-fused oversize "
+            "paragraphs (>=8 sentences): sentences batch-embedded via the local "
+            "embedder, chunk boundaries at cosine-deviation dips (topic shifts) "
+            "instead of arbitrary token counts. One embedder call per flagged "
+            "block; latched greedy-packing fallback if the sidecar is down."
+        ),
+    )
     CHUNKER_SENTENCE_ENGINE: str = Field(
         default="sat",
         description=(

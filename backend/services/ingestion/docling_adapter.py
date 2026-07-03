@@ -55,6 +55,7 @@ _DOCX_MIMES = {
 }
 _CSV_MIMES = {"text/csv", "application/csv", "text/tab-separated-values"}
 _CSV_EXTS = {".csv", ".tsv"}
+_SUBTITLE_EXTS = {".vtt", ".srt"}  # router 4 — subtitle/caption transcripts
 _SPREADSHEET_MIMES = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-excel",
@@ -386,6 +387,132 @@ def _scrub_inline_links(text: str) -> str:
     t = _BARE_URL_RE.sub("", t)
     t = t.replace("¶", "")
     return re.sub(r"[ \t]{2,}", " ", t)
+
+
+_SUB_TIME_RE = re.compile(
+    r"(?:(\d{1,2}):)?(\d{1,2}):(\d{2})[.,](\d{3})\s*-->\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{2})[.,](\d{3})"
+)
+_SUB_SPEAKER_VTT_RE = re.compile(r"<v\s+([^>]+)>")
+_SUB_SPEAKER_LINE_RE = re.compile(r"^([A-Z][\w .'-]{0,24}):\s+")
+_SUB_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _parse_subtitle_file(raw_bytes: bytes, filename: str, mime: str):
+    """Router 4 (POLYMATH_ARCHITECTURE §3.S2): VTT/SRT subtitle transcripts.
+
+    Stdlib cue parsing → the SAME transcript_block sections the YouTube path
+    emits (time ranges + speakers in metadata, semantic_split guarded off via
+    source_format), so retrieval/hydration treat all transcripts identically.
+    Returns None when the file is not a subtitle (falls through to other lanes).
+    """
+    ext = _extension(filename)
+    if ext not in _SUBTITLE_EXTS and (mime or "").lower() not in ("text/vtt",):
+        return None
+    try:
+        text = raw_bytes.decode("utf-8", errors="replace")
+    except Exception:
+        return None
+    is_vtt = ext == ".vtt" or text.lstrip()[:6].upper().startswith("WEBVTT")
+
+    cues: list[tuple[str, str, str, str]] = []  # (start, end, speaker, text)
+    cur_time: tuple[str, str] | None = None
+    cur_lines: list[str] = []
+
+    def _flush_cue():
+        nonlocal cur_time, cur_lines
+        if cur_time and cur_lines:
+            body = " ".join(ln.strip() for ln in cur_lines if ln.strip())
+            speaker = ""
+            m = _SUB_SPEAKER_VTT_RE.search(body)
+            if m:
+                speaker = m.group(1).strip()
+            body = _SUB_TAG_RE.sub("", body).strip()
+            if not speaker:
+                m2 = _SUB_SPEAKER_LINE_RE.match(body)
+                if m2:
+                    speaker = m2.group(1).strip()
+                    body = body[m2.end():].strip()
+            if body:
+                cues.append((cur_time[0], cur_time[1], speaker, body))
+        cur_time, cur_lines = None, []
+
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            _flush_cue()
+            continue
+        tm = _SUB_TIME_RE.search(s)
+        if tm:
+            _flush_cue()
+
+            def _fmt(h, m, sec):
+                return f"{h}:{m}:{sec}" if h else f"{m}:{sec}"
+
+            cur_time = (
+                _fmt(tm.group(1), tm.group(2), tm.group(3)),
+                _fmt(tm.group(5), tm.group(6), tm.group(7)),
+            )
+            continue
+        if cur_time is None:
+            continue  # WEBVTT header, cue ids, NOTE/STYLE blocks
+        cur_lines.append(s)
+    _flush_cue()
+
+    if len(cues) < 3:
+        return None  # not a real subtitle file — let other lanes try
+
+    title = Path(filename or "subtitle").stem or "subtitle"
+    fmt = "subtitle_vtt" if is_vtt else "subtitle_srt"
+    sections: list[Section] = []
+    group: list[tuple[str, str, str, str]] = []
+    words = 0
+    start_idx = 0
+
+    def _emit_group(first_idx: int):
+        nonlocal group, words
+        if not group:
+            return
+        speakers = sorted({c[2] for c in group if c[2]})
+        lines = [(f"{c[2]}: {c[3]}" if c[2] else c[3]) for c in group]
+        sections.append(
+            Section(
+                heading_path=[title],
+                text=f"[{group[0][0]} - {group[-1][1]}]\n" + "\n".join(lines),
+                element_type="transcript_block",
+                metadata={
+                    "source_format": fmt,
+                    "video_title": title,
+                    "time_start": group[0][0],
+                    "time_end": group[-1][1],
+                    "segment_start": first_idx,
+                    "segment_end": first_idx + len(group) - 1,
+                    "speakers": speakers,
+                },
+            )
+        )
+        group, words = [], 0
+
+    for i, cue in enumerate(cues):
+        w = len(cue[3].split())
+        if group and words + w > 120:
+            _emit_group(start_idx)
+            start_idx = i
+        group.append(cue)
+        words += w
+    _emit_group(start_idx)
+
+    return DoclingParseResult(
+        text="\n\n".join(s.text for s in sections),
+        markdown="\n\n".join(s.text for s in sections),
+        sections=sections,
+        pages=None,
+        has_structure=True,
+        source_tier=SourceTier.tier_b,
+        h1_count=1,
+        h2_count=0,
+        source_format=fmt,
+        filename=filename,
+    )
 
 
 def _parse_transcript_text_document(text: str, filename: str) -> DoclingParseResult | None:
@@ -1433,6 +1560,10 @@ async def parse_document(
             language=code_lang,
             filename=filename,
         )
+
+    sub_result = _parse_subtitle_file(raw_bytes, filename, mime)
+    if sub_result is not None:
+        return sub_result
 
     if _looks_like_pdf(filename, mime):
         fast_result = _parse_pdf_fast_text(raw_bytes, filename, mime)

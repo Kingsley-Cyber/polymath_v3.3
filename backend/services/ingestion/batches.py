@@ -62,6 +62,14 @@ DEFAULT_EXTENSIONS = {
     ".html",
     ".htm",
     ".xhtml",
+    # Aligned with docling_adapter capability (2026-07-03) — the adapter has
+    # dedicated lanes for all of these; rejecting them at upload was the only
+    # thing stopping them (POLYMATH_ARCHITECTURE §3.S2 "all reasonable files").
+    ".vtt", ".srt",                                  # subtitle transcripts (router 4)
+    ".csv", ".tsv", ".xlsx", ".xlsm", ".log",        # tabular + logs
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java",  # code lane (AST)
+    ".c", ".cpp", ".h", ".hpp", ".cs", ".rb", ".php", ".swift",
+    ".kt", ".lua", ".luau", ".sh", ".sql", ".yaml", ".yml", ".json", ".toml",
 }
 
 _RUNNING_BATCHES: dict[str, asyncio.Task] = {}

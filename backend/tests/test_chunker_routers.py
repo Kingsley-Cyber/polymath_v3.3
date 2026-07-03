@@ -178,6 +178,84 @@ def test_sentence_engine_contract():
     tc._SAT_FAILED = True                                  # restore determinism for reruns
 
 
+# ── Router 4: VTT/SRT subtitle lane ────────────────────────────────────────
+def test_srt_parses_to_transcript_blocks():
+    from services.ingestion.docling_adapter import _parse_subtitle_file
+
+    srt = "\n".join(
+        f"{i + 1}\n00:00:{i:02d},000 --> 00:00:{i + 1:02d},500\nALICE: line number {i} spoken here\n"
+        for i in range(20)
+    )
+    res = _parse_subtitle_file(srt.encode(), "meeting.srt", "")
+    assert res is not None
+    assert res.source_format == "subtitle_srt"
+    assert res.sections and res.sections[0].element_type == "transcript_block"
+    md = res.sections[0].metadata
+    assert md["source_format"] == "subtitle_srt"
+    assert md["time_start"] and md["time_end"]
+    assert "ALICE" in md["speakers"]
+    assert "ALICE: line number 0" in res.sections[0].text
+
+
+def test_vtt_parses_with_voice_tags():
+    from services.ingestion.docling_adapter import _parse_subtitle_file
+
+    cues = "\n\n".join(
+        f"00:0{i}.000 --> 00:0{i + 1}.000\n<v Bob>utterance {i} continues</v>"
+        for i in range(1, 8)
+    )
+    vtt = "WEBVTT\n\n" + cues.replace("00:0", "00:00:0")
+    res = _parse_subtitle_file(vtt.encode(), "talk.vtt", "")
+    assert res is not None
+    assert res.source_format == "subtitle_vtt"
+    assert "Bob" in res.sections[0].metadata["speakers"]
+    assert "<v" not in res.sections[0].text          # tags stripped
+
+
+def test_non_subtitle_text_returns_none():
+    from services.ingestion.docling_adapter import _parse_subtitle_file
+
+    assert _parse_subtitle_file(b"just some prose text", "notes.txt", "") is None
+    assert _parse_subtitle_file(b"not really cues", "fake.srt", "") is None  # <3 cues
+
+
+# ── Router 5: semantic-deviation escalation (fake embedder) ────────────────
+def test_deviation_split_finds_topic_boundaries():
+    # 3 synthetic topics: sentences within a topic share a vector direction.
+    topics = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    sentences = [f"topic{t} sentence {i} content." for t in range(3) for i in range(4)]
+    fake_vecs = [topics[t] for t in range(3) for _ in range(4)]
+    orig = tc._embed_for_escalation
+    tc._embed_for_escalation = lambda s: fake_vecs
+    try:
+        out = tc._semantic_deviation_split(sentences, TARGET, MAX)
+        assert out is not None and len(out) == 3          # one chunk per topic
+        for t, chunk in enumerate(out):
+            assert all(f"topic{t}" in s for s in chunk.split(".") if s.strip())
+    finally:
+        tc._embed_for_escalation = orig
+
+
+def test_escalation_falls_back_when_embedder_down():
+    orig = tc._embed_for_escalation
+    tc._embed_for_escalation = lambda s: None
+    try:
+        assert tc._semantic_deviation_split(["a."] * 10, TARGET, MAX) is None
+    finally:
+        tc._embed_for_escalation = orig
+
+
+def test_uniform_text_declines_escalation():
+    # No topical structure → returns None → caller greedy-packs.
+    sentences = [f"same topic sentence {i}." for i in range(10)]
+    orig = tc._embed_for_escalation
+    tc._embed_for_escalation = lambda s: [[1.0, 0.0]] * len(s)
+    try:
+        assert tc._semantic_deviation_split(sentences, TARGET, MAX) is None
+    finally:
+        tc._embed_for_escalation = orig
+
+
 def _run_all():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
