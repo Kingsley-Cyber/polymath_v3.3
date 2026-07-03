@@ -28,7 +28,7 @@ from services.graph import neo4j_writer as nw  # noqa: E402
 
 def _entity_id_fn(name: str) -> str:
     # the REAL graph identity fn so vector entity_ids == Neo4j entity_id
-    for cand in ("entity_id_for", "_entity_id_for", "_entity_id", "make_entity_id"):
+    for cand in ("entity_id_from_name", "entity_id_for", "make_entity_id"):
         fn = getattr(nw, cand, None)
         if callable(fn):
             try:

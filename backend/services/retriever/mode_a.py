@@ -10,6 +10,13 @@ from config import get_settings
 from models.schemas import SourceChunk
 from neo4j import AsyncGraphDatabase
 
+from services.retriever.graph_payload import (
+    ExpansionCache,
+    prefer_relation_seeds,
+    score_payload_neighbors,
+    slug_candidates,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,6 +25,7 @@ class ModeAExpansion:
 
     def __init__(self):
         self._settings = get_settings()
+        self._cache: ExpansionCache | None = None
         self._driver = None
         if self._settings.NEO4J_ENABLED:
             try:
@@ -35,17 +43,19 @@ class ModeAExpansion:
         limit: int = 20,
         seed_limit: int | None = None,
         db=None,
+        query: Optional[str] = None,
     ) -> List[SourceChunk]:
         if not self._settings.NEO4J_ENABLED or not self._driver:
             return []
         if int(limit or 0) <= 0:
             return []
 
+        st = self._settings
         effective_seed_limit = max(
             1,
-            int(seed_limit or getattr(self._settings, "GRAPH_SEED_CHUNKS", 8)),
+            int(seed_limit or getattr(st, "GRAPH_SEED_CHUNKS", 8)),
         )
-        seed_ids = [
+        ordered_pool_ids = [
             c.chunk_id
             for c in sorted(
                 merged_pool,
@@ -53,9 +63,213 @@ class ModeAExpansion:
                 reverse=True,
             )
             if c.chunk_id
-        ][:effective_seed_limit]
+        ]
+        if not ordered_pool_ids:
+            return []
+        # G1 preference may reorder within this window but never reach past it,
+        # so a rank-40 relation-bearing chunk cannot displace the true top pool.
+        candidate_ids = ordered_pool_ids[: max(effective_seed_limit * 3, effective_seed_limit)]
+
+        # G3 — whole-result TTL cache. Everything below is deterministic given
+        # (corpora, candidate window, limit, query) + DB state; TTL bounds staleness.
+        ttl = float(getattr(st, "GRAPH_EXPANSION_CACHE_TTL_SECONDS", 180.0) or 0.0)
+        _copy = lambda lst: [c.model_copy(deep=True) for c in lst]  # noqa: E731
+        ckey = None
+        if ttl > 0:
+            if self._cache is None or self._cache.ttl != ttl:
+                self._cache = ExpansionCache(ttl)
+            ckey = ExpansionCache.key(corpus_ids, candidate_ids, limit, query)
+            cached = self._cache.get(ckey, _copy)
+            if cached is not None:
+                logger.info(
+                    "Mode A expansion cache HIT (%d chunks, hits=%d misses=%d)",
+                    len(cached), self._cache.hits, self._cache.misses,
+                )
+                return cached
+
+        # §12.6 offline-graph payload read — ONE indexed Mongo $in over the
+        # candidate window serves BOTH G1 seed preference (has_relations) and
+        # the payload-first mentions rung (neighbor_chunks). db=None or old
+        # unpromoted docs -> empty map -> exactly the legacy path.
+        payload_map: dict[str, dict] = {}
+        if db is not None and (
+            getattr(st, "GRAPH_SEED_PREFER_RELATIONS", True)
+            or getattr(st, "GRAPH_PAYLOAD_FIRST", True)
+        ):
+            try:
+                async for d in db["chunks"].find(
+                    {"chunk_id": {"$in": candidate_ids}},
+                    {"_id": 0, "chunk_id": 1, "has_relations": 1,
+                     "neighbor_chunks": 1, "entity_ids": 1},
+                ):
+                    payload_map[str(d["chunk_id"])] = d
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Mode A payload read failed (%s) — legacy path", exc)
+                payload_map = {}
+
+        if getattr(st, "GRAPH_SEED_PREFER_RELATIONS", True) and payload_map:
+            seed_ids = prefer_relation_seeds(
+                candidate_ids,
+                {cid: bool(d.get("has_relations")) for cid, d in payload_map.items()},
+                effective_seed_limit,
+            )
+        else:
+            seed_ids = candidate_ids[:effective_seed_limit]
         if not seed_ids:
             return []
+
+        # A1 — query-side entity linking: query n-gram slugs -> indexed
+        # entity_id existence -> top-mention chunks become DIRECT seeds AND
+        # direct evidence candidates. Two small indexed lookups.
+        linked_chunks: List[SourceChunk] = []
+        if (
+            getattr(st, "GRAPH_QUERY_ENTITY_LINKING", True)
+            and query
+            and int(getattr(st, "GRAPH_ENTITY_LINK_MAX_SEEDS", 4)) > 0
+        ):
+            try:
+                from services.graph.neo4j_writer import entity_id_from_name
+
+                cands = slug_candidates(query, entity_id_fn=entity_id_from_name)
+                if cands:
+                    async with self._driver.session() as session:
+                        res = await session.run(
+                            "MATCH (e:Entity) WHERE e.entity_id IN $cands "
+                            "RETURN e.entity_id AS eid",
+                            cands=cands,
+                        )
+                        linked = sorted({r["eid"] async for r in res})
+                    if linked:
+                        link_cypher = (
+                            "MATCH (e:Entity)<-[m:MENTIONS]-(c:Chunk) "
+                            "WHERE e.entity_id IN $linked "
+                        )
+                        if corpus_ids:
+                            link_cypher += "AND c.corpus_id IN $corpus_ids "
+                        link_cypher += (
+                            "WITH c, max(coalesce(m.confidence, 0.5)) AS conf, "
+                            "collect(DISTINCT e.entity_id)[..3] AS eids "
+                            "ORDER BY conf DESC, c.chunk_id "
+                            "LIMIT $k "
+                            "RETURN c.chunk_id AS chunk_id, c.doc_id AS doc_id, "
+                            "c.corpus_id AS corpus_id, conf, eids"
+                        )
+                        async with self._driver.session() as session:
+                            res = await session.run(
+                                link_cypher,
+                                linked=linked,
+                                corpus_ids=corpus_ids or [],
+                                k=int(getattr(st, "GRAPH_ENTITY_LINK_MAX_SEEDS", 4)),
+                            )
+                            rows = [dict(r) async for r in res]
+                        seen_seeds = set(seed_ids)
+                        for row in rows:
+                            cid = row.get("chunk_id") or ""
+                            if not cid:
+                                continue
+                            if cid not in seen_seeds:
+                                seed_ids.append(cid)
+                                seen_seeds.add(cid)
+                            if cid in set(ordered_pool_ids):
+                                continue  # already evidence — seed only
+                            linked_chunks.append(SourceChunk(
+                                chunk_id=cid,
+                                parent_id="",
+                                doc_id=row.get("doc_id") or "",
+                                corpus_id=row.get("corpus_id") or "",
+                                text="",
+                                summary=None,
+                                score=min(1.0, float(row.get("conf") or 0.5)),
+                                source_tier="graph_mode_a",
+                                provenance=[{
+                                    "entity": str(e).removeprefix("entity:").replace("_", " "),
+                                    "confidence": float(row.get("conf") or 0.5),
+                                    "surface_form": "",
+                                    "evidence_phrase": "",
+                                    "domain_type": "",
+                                    "canonical_family": "",
+                                    "entity_type": "",
+                                    "definitional_phrase": "",
+                                    "predicate": None,
+                                    "relation_family": "query_entity_link",
+                                } for e in (row.get("eids") or [])[:3]],
+                            ))
+                        if linked:
+                            logger.info(
+                                "Mode A entity linking: %d linked entities, "
+                                "%d direct chunks", len(linked), len(rows),
+                            )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Mode A entity linking failed (%s) — skipped", exc)
+
+        # §12.6 payload rung — serve the mentions hop from neighbor_chunks[]
+        # (zero Cypher). Escalate to the live co-mention Cypher ONLY when the
+        # validated payload candidates land under the floor.
+        payload_chunks: List[SourceChunk] = []
+        run_mentions_cypher = True
+        if getattr(st, "GRAPH_PAYLOAD_FIRST", True) and payload_map and db is not None:
+            seed_union_eids: set[str] = set()
+            for cid in seed_ids:
+                seed_union_eids.update((payload_map.get(cid) or {}).get("entity_ids") or [])
+            ranked = score_payload_neighbors(
+                {cid: (payload_map.get(cid) or {}).get("neighbor_chunks") or []
+                 for cid in seed_ids},
+                exclude=set(ordered_pool_ids),
+                cap=max(int(limit) * 2, 16),
+            )
+            if ranked:
+                try:
+                    from services.ingestion.section_classifier import NOISY_KINDS
+
+                    meta = {
+                        str(d["chunk_id"]): d
+                        async for d in db["chunks"].find(
+                            {"chunk_id": {"$in": [cid for cid, _, _ in ranked]}},
+                            {"_id": 0, "chunk_id": 1, "doc_id": 1, "corpus_id": 1,
+                             "chunk_kind": 1, "entity_ids": 1},
+                        )
+                    }
+                    allowed = set(corpus_ids or [])
+                    for cid, votes, score in ranked:
+                        m = meta.get(cid)
+                        if not m:
+                            continue
+                        if allowed and m.get("corpus_id") not in allowed:
+                            continue
+                        if m.get("chunk_kind") in NOISY_KINDS:
+                            continue
+                        shared = sorted(
+                            set(m.get("entity_ids") or []) & seed_union_eids
+                        )[:3]
+                        payload_chunks.append(SourceChunk(
+                            chunk_id=cid,
+                            parent_id="",
+                            doc_id=m.get("doc_id") or "",
+                            corpus_id=m.get("corpus_id") or "",
+                            text="",
+                            summary=None,
+                            score=score,
+                            source_tier="graph_mode_a",
+                            provenance=[{
+                                "entity": str(e).removeprefix("entity:").replace("_", " "),
+                                "confidence": score,
+                                "surface_form": "",
+                                "evidence_phrase": "",
+                                "domain_type": "",
+                                "canonical_family": "",
+                                "entity_type": "",
+                                "definitional_phrase": "",
+                                "predicate": None,
+                                "relation_family": "graph_payload",
+                            } for e in shared] or None,
+                        ))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Mode A payload validation failed (%s) — escalating", exc,
+                    )
+                    payload_chunks = []
+            if len(payload_chunks) >= int(getattr(st, "GRAPH_PAYLOAD_MIN_CANDIDATES", 4)):
+                run_mentions_cypher = False
 
         # Phase 16.1 — confidence-weighted expansion via MENTIONS co-reference.
         # Phase 4.5 — adds a parallel CALLS-walk pass so code chunks reachable
@@ -92,14 +306,21 @@ class ModeAExpansion:
                 )
                 return []
 
+        async def _mentions() -> List[SourceChunk]:
+            # §12.6 ladder — the payload rung covered this hop; skip the
+            # (historically multi-second) co-mention traversal entirely.
+            if not run_mentions_cypher:
+                return []
+            return await self._expand_via_mentions(seed_ids, corpus_ids, limit)
+
         mention_chunks, calls_chunks, bridge_chunks = await asyncio.gather(
-            self._expand_via_mentions(seed_ids, corpus_ids, limit),
+            _mentions(),
             self._expand_via_calls(seed_ids, corpus_ids, limit),
             _bridges(),
         )
 
         merged: dict[str, SourceChunk] = {}
-        for pool in (mention_chunks, calls_chunks, bridge_chunks):
+        for pool in (payload_chunks, linked_chunks, mention_chunks, calls_chunks, bridge_chunks):
             for c in pool:
                 if not c.chunk_id:
                     continue
@@ -152,14 +373,19 @@ class ModeAExpansion:
 
         expanded = sorted(merged.values(), key=lambda c: c.score, reverse=True)[:limit]
         logger.info(
-            "Mode A expansion: %d unique chunks (mentions=%d, calls=%d, "
-            "bridges=%d, seeds=%d, cap=%d, top score %.3f)",
-            len(expanded), len(mention_chunks), len(calls_chunks),
+            "Mode A expansion: %d unique chunks (payload=%d, linked=%d, "
+            "mentions=%d, calls=%d, bridges=%d, seeds=%d, cap=%d, "
+            "mentions_cypher=%s, top score %.3f)",
+            len(expanded), len(payload_chunks), len(linked_chunks),
+            len(mention_chunks), len(calls_chunks),
             len(bridge_chunks),
             len(seed_ids),
             int(limit),
+            "ran" if run_mentions_cypher else "skipped",
             expanded[0].score if expanded else 0.0,
         )
+        if ckey is not None and self._cache is not None:
+            self._cache.put(ckey, expanded, _copy)
         return expanded
 
     async def _expand_via_bridges(

@@ -1614,6 +1614,9 @@ class RetrieverOrchestrator:
                     {
                         "limit": effective_expansion_cap,
                         "seed_limit": getattr(settings, "GRAPH_SEED_CHUNKS", 8),
+                        # P2 A1 — the RAW user query drives entity linking
+                        # (ranking_query/HyDE prose would slug to junk grams)
+                        "query": query,
                     }
                     if effective_expansion_cap > 0
                     else {"limit": 0, "seed_limit": getattr(settings, "GRAPH_SEED_CHUNKS", 8)}

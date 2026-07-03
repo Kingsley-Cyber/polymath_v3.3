@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -35,9 +36,15 @@ _PROMOTED_LIST_FIELDS = (
 
 
 def _default_entity_id(canonical_name: str) -> str:
-    """Fallback slug — the backfill passes the REAL neo4j_writer fn so the
-    vector-side entity_ids match graph identity exactly."""
-    slug = re.sub(r"[^a-z0-9]+", "_", (canonical_name or "").lower()).strip("_")
+    """Fallback slug — a faithful replica of neo4j_writer.entity_id_from_name
+    (lowercase -> NFKD -> strip punctuation -> collapse spaces -> hyphens),
+    minus the alias map. Callers in-app get the REAL fn via _eid; this exists
+    for dependency-free tests. Convention is HYPHENS: the graph writes
+    entity:layered-indexing, and an underscore slug silently breaks the
+    vector<->graph join for every multi-word entity."""
+    name = unicodedata.normalize("NFKD", (canonical_name or "").lower().strip())
+    name = re.sub(r"[^\w\s]", "", name)
+    slug = re.sub(r"\s+", " ", name).strip().replace(" ", "-")
     return f"entity:{slug}" if slug else ""
 
 
@@ -166,7 +173,7 @@ async def promote_doc(db, corpus_id: str, doc_id: str) -> dict[str, Any]:
         try:
             from services.graph import neo4j_writer as nw
 
-            for cand in ("entity_id_for", "_entity_id_for", "_entity_id", "make_entity_id"):
+            for cand in ("entity_id_from_name", "entity_id_for", "make_entity_id"):
                 fn = getattr(nw, cand, None)
                 if callable(fn):
                     try:

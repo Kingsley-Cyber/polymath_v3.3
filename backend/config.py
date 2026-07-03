@@ -392,6 +392,57 @@ class Settings(BaseSettings):
             "degrades to the hybrid seed pool instead of stalling Graph Augmentation."
         ),
     )
+    # §12.6 waterfall graph serving — P2 Mode A knobs (each a kill-switch)
+    GRAPH_PAYLOAD_FIRST: bool = Field(
+        default=True,
+        description=(
+            "Serve the mentions-expansion rung from precomputed neighbor_chunks[] "
+            "payload (one Mongo $in read) instead of the live co-mention Cypher. "
+            "Escalates to Cypher when payload candidates < GRAPH_PAYLOAD_MIN_CANDIDATES "
+            "(old docs without promoted fields keep exactly the old path)."
+        ),
+    )
+    GRAPH_PAYLOAD_MIN_CANDIDATES: int = Field(
+        default=4,
+        ge=0,
+        le=64,
+        description=(
+            "Escalation floor for the §12.6 ladder: fewer validated payload "
+            "adjacency candidates than this triggers the shallow live Cypher pass."
+        ),
+    )
+    GRAPH_QUERY_ENTITY_LINKING: bool = Field(
+        default=True,
+        description=(
+            "A1 — link query n-gram slugs to indexed Neo4j entity_ids and add "
+            "their top-mention chunks as DIRECT expansion seeds (two small "
+            "indexed lookups), so graph hops key off the question itself, not "
+            "only the vector pool."
+        ),
+    )
+    GRAPH_ENTITY_LINK_MAX_SEEDS: int = Field(
+        default=4,
+        ge=0,
+        le=16,
+        description="Max direct seeds the query-entity-linking pass may add.",
+    )
+    GRAPH_EXPANSION_CACHE_TTL_SECONDS: float = Field(
+        default=180.0,
+        ge=0.0,
+        le=3600.0,
+        description=(
+            "G3 — TTL for the Mode A expansion result cache keyed on "
+            "(corpora, vector seed set, limit, query). 0 disables."
+        ),
+    )
+    GRAPH_SEED_PREFER_RELATIONS: bool = Field(
+        default=True,
+        description=(
+            "G1 — prefer has_relations=true chunks when picking expansion seeds "
+            "from the vector pool (relation-bearing seeds are graph-productive); "
+            "score order is kept within each group."
+        ),
+    )
     GRAPH_REL_MIN_CONFIDENCE: float = Field(
         default=0.20,
         ge=0.0,
