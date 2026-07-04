@@ -916,6 +916,17 @@ async def _run_ghosts_parallel(
         return results
 
     async def _b_branch() -> list[ExtractionResult] | None:
+        # TWO-PHASE INGEST (§12.6-aligned, gated OFF): defer extraction so
+        # the doc is QUERYABLE right after embed; the post-qdrant hook fires
+        # the existing graph-backfill machinery as background enrichment.
+        from config import get_settings as _gs_tp
+
+        if bool(getattr(_gs_tp(), "TWO_PHASE_INGEST", False)):
+            logger.info(
+                "phase=ghost_b DEFERRED (two-phase) doc=%s — enrichment "
+                "runs post-qdrant in background", doc_id[:12],
+            )
+            return ghost_b_from_staging
         if not need_ghost_b:
             # Either Ghost B is disabled / already done, or staging already
             # rehydrated the previous run's output. Return staging (None
@@ -3068,6 +3079,27 @@ async def run_ingest_job(
                     "phase=tier0 doc=%s FAILED (non-fatal): %s",
                     doc_id[:12], _t0_exc,
                 )
+            # TWO-PHASE: doc is queryable NOW — fire enrichment (extraction
+            # retry via the receipted graph-backfill path, then promote) as a
+            # detached task. Best-effort; failures land in ghost_b_failures
+            # exactly like a normal failed lane and remain retryable.
+            try:
+                from config import get_settings as _gs_tp2
+                if bool(getattr(_gs_tp2(), "TWO_PHASE_INGEST", False)):
+                    async def _enrich(cid=corpus_id, did=doc_id):
+                        try:
+                            from services.ingestion_service import ingestion_service as _svc
+                            await _svc.backfill_graph_failures(cid, did)
+                            from services.ingestion.promote import promote_doc
+                            await promote_doc(db, corpus_id=cid, doc_id=did)
+                            logger.info("phase=enrich done doc=%s", did[:12])
+                        except Exception as _en_exc:  # noqa: BLE001
+                            logger.warning("phase=enrich FAILED doc=%s: %s",
+                                           did[:12], _en_exc)
+                    asyncio.create_task(_enrich())
+                    logger.info("phase=enrich scheduled doc=%s", doc_id[:12])
+            except Exception:  # noqa: BLE001
+                pass
             if summary_write_required:
                 ws.summaries_indexed = True
                 ws.summary_points = expected_summary_points

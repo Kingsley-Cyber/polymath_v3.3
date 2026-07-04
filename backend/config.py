@@ -789,6 +789,18 @@ class Settings(BaseSettings):
             "Requests over this cap fail fast with 429 instead of holding uploaded bytes."
         ),
     )
+    TWO_PHASE_INGEST: bool = Field(
+        default=False,
+        description=(
+            "GATED groundwork (§12.6 two-phase): defer Ghost B extraction so "
+            "a document is QUERYABLE right after the embed phase (~90s for a "
+            "1MB file); enrichment (extraction -> graph -> promote) runs as a "
+            "background task via the receipted graph-backfill path. OFF until "
+            "the A/B receipt on a fresh doc; flipping requires verifying "
+            "backfill_graph_failures covers never-extracted (not just failed) "
+            "chunks on the target corpus."
+        ),
+    )
     INGEST_PREFLIGHT_CANARY: bool = Field(
         default=True,
         description=(
