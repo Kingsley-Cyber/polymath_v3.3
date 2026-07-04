@@ -789,6 +789,15 @@ class Settings(BaseSettings):
             "Requests over this cap fail fast with 429 instead of holding uploaded bytes."
         ),
     )
+    INGEST_PREFLIGHT_CANARY: bool = Field(
+        default=True,
+        description=(
+            "Run ONE real summary-shaped call through the batch's model path "
+            "before processing any file; empty/unreachable output fails the "
+            "batch with an actionable error instead of silently burning books "
+            "(two full runs lost to a thinking-mode chip before this existed)."
+        ),
+    )
     INGEST_GLOBAL_MAX_DOCS: int = Field(
         default=2,
         ge=1,

@@ -1048,6 +1048,108 @@ async def _process_local_item(
             await admission.release_ingest_slot()
 
 
+async def _preflight_summary_canary(db, batch: dict) -> str | None:
+    """One real call through the batch's summary model path; None = pass.
+    Validates CONTENT EXISTS and the §10.1 JSON parses to structure —
+    exactly the two failure modes that burned real runs (empty thinking-mode
+    responses; prose-only fallback swallowing structure)."""
+    import httpx as _hx
+
+    from services.ingestion.summary_semantics import (
+        SEMANTIC_SUMMARY_INSTRUCTION,
+        parse_semantic_summary,
+    )
+
+    settings = get_settings()
+    corpus = await db["corpora"].find_one({"corpus_id": batch.get("corpus_id")}) or {}
+    pool = ((corpus.get("default_ingestion_config") or {}).get("summary_model_pool")
+            or [])
+    entry = dict(pool[0]) if pool else {"model": getattr(
+        settings, "GHOST_A_DEFAULT_MODEL", "") or settings.DEFAULT_COMPLETION_MODEL}
+    model = str(entry.get("model") or "")
+    if not model:
+        return "no summary model configured (chip empty and no default)"
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content":
+            "Passage:\nCompounding: small consistent gains accumulate into "
+            "large outcomes over time.\n\n" + SEMANTIC_SUMMARY_INSTRUCTION}],
+        "temperature": 0,
+        "max_tokens": 400,
+    }
+    if entry.get("base_url"):
+        payload["api_base"] = entry["base_url"]
+    if entry.get("api_key"):
+        payload["api_key"] = entry["api_key"]
+    _m = model.lower()
+    if "v4-flash" in _m or "v4-pro" in _m or "deepseek-v4" in _m:
+        payload.setdefault("thinking", {"type": "disabled"})
+    try:
+        async with _hx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post(
+                f"{settings.LITELLM_URL}/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {settings.LITELLM_MASTER_KEY}"},
+            )
+            resp.raise_for_status()
+            content = (resp.json().get("choices") or [{}])[0].get(
+                "message", {}).get("content") or ""
+    except Exception as exc:  # noqa: BLE001
+        return f"summary model {model} unreachable/errored: {str(exc)[:180]}"
+    if not content.strip():
+        return (f"summary model {model} returned EMPTY content — thinking-mode "
+                "model without thinking disabled, or wrong model for bounded output")
+    parsed = parse_semantic_summary(content)
+    if not parsed.get("summary"):
+        return f"summary model {model} output unparseable: {content[:120]!r}"
+    if not parsed.get("semantic_chunk_type"):
+        logger.warning(
+            "Preflight canary: %s returns prose but NOT §10.1 JSON structure "
+            "— summaries will lack semantic fields (batch proceeds)", model,
+        )
+    logger.info("Preflight canary PASSED for %s (structure=%s)",
+                model, bool(parsed.get("semantic_chunk_type")))
+    return None
+
+
+async def _batch_quality_report(db, batch: dict) -> dict[str, Any]:
+    """Fallback ACCOUNTING (owner principle: graceful degradation without
+    degradation accounting is slow-motion data loss). Aggregated per batch,
+    persisted on the batch row, cheap indexed counts only."""
+    corpus_id = batch.get("corpus_id")
+    doc_ids = [
+        d["doc_id"] async for d in db["documents"].find(
+            {"corpus_id": corpus_id}, {"doc_id": 1})
+    ]
+    q = {"corpus_id": corpus_id}
+    parents = await db["parent_chunks"].count_documents(q)
+    summarized = await db["parent_chunks"].count_documents(
+        {**q, "summary": {"$nin": [None, ""]}})
+    structured = await db["parent_chunks"].count_documents(
+        {**q, "semantic_chunk_type": {"$nin": [None, ""]}})
+    children = await db["chunks"].count_documents(q)
+    promoted = await db["chunks"].count_documents(
+        {**q, "promote_version": {"$exists": True}})
+    verified = await db["documents"].count_documents(
+        {**q, "write_state.verified": True})
+    report = {
+        "docs": len(doc_ids),
+        "docs_verified": verified,
+        "parents": parents,
+        "parents_summarized": summarized,
+        "parents_structured": structured,
+        "summary_fallback_rate": round(1 - (summarized / parents), 3) if parents else None,
+        "structure_rate": round(structured / parents, 3) if parents else None,
+        "children": children,
+        "children_promoted": promoted,
+    }
+    if parents and summarized < parents * 0.5:
+        report["alert"] = "over half of parents have NO summary — model path degraded"
+    elif parents and structured < summarized * 0.5:
+        report["alert"] = "summaries exist but structure rate <50% — JSON schema not honored"
+    return report
+
+
 async def run_local_batch(
     *,
     db: AsyncIOMotorDatabase,
@@ -1060,6 +1162,23 @@ async def run_local_batch(
         raise ValueError("Batch not found")
     if batch.get("source") not in RUNNABLE_SOURCES:
         raise ValueError("Only durable ingest batches can be run by the backend")
+
+    # Preflight canary (owner-agreed 2026-07-04): ONE real summary-shaped
+    # call through the batch's actual model path BEFORE any book is spent.
+    # 5 seconds to save 30 minutes — a misconfigured chip (deprecated model,
+    # thinking-mode empties, bad key) burned two full runs before this
+    # existed. Failure marks the batch failed with an actionable error.
+    if bool(getattr(get_settings(), "INGEST_PREFLIGHT_CANARY", True)):
+        canary_err = await _preflight_summary_canary(db, batch)
+        if canary_err:
+            await db[BATCHES].update_one(
+                {"batch_id": batch_id},
+                {"$set": {"status": "failed",
+                          "error": f"Preflight canary failed: {canary_err}",
+                          "updated_at": _now()}},
+            )
+            logger.error("Batch %s preflight canary FAILED: %s", batch_id[:8], canary_err)
+            return await refresh_batch_counts(db, batch_id, user_id=user_id)
 
     await reconcile_stale_items(db, batch_id=batch_id, user_id=user_id)
     await db[BATCHES].update_one(
@@ -1106,6 +1225,15 @@ async def run_local_batch(
             await refresh_batch_counts(db, batch_id, user_id=user_id)
 
     await asyncio.gather(*[_worker(idx) for idx in range(concurrency)])
+    try:
+        report = await _batch_quality_report(db, batch)
+        await db[BATCHES].update_one(
+            {"batch_id": batch_id},
+            {"$set": {"report": report, "updated_at": _now()}},
+        )
+        logger.info("Batch %s quality report: %s", batch_id[:8], report)
+    except Exception as exc:  # noqa: BLE001 — reporting never fails the batch
+        logger.warning("Batch quality report failed: %s", exc)
     return await refresh_batch_counts(db, batch_id, user_id=user_id)
 
 
