@@ -1617,6 +1617,16 @@ class RetrieverOrchestrator:
                 if boosted:
                     merged.sort(key=lambda x: x.score, reverse=True)
                     counts["semantic_type_boosted"] = boosted
+        # Q4 H4 — mechanisms[]-overlap bridge bonus (rank-only, cross-doc
+        # only; inert until promoted mechanisms exist on payloads).
+        _cd_mode = str(getattr(settings, "CROSS_DOMAIN_EMPHASIS", "balanced"))
+        if _cd_mode != "off":
+            from services.retriever.cross_domain import mechanisms_overlap_bonus
+
+            _mech_boosted = mechanisms_overlap_bonus(merged, mode=_cd_mode)
+            if _mech_boosted:
+                merged.sort(key=lambda x: x.score, reverse=True)
+                counts["mechanisms_boosted"] = _mech_boosted
 
         # [4a] Phase 23 — Custom profile `similarity_threshold` noise filter.
         # Drops anything below the cosine score floor. Applied before graph
@@ -1909,6 +1919,26 @@ class RetrieverOrchestrator:
         )
         selection_diagnostics = dict(diversity.diagnostics or {})
         candidates = diversity.candidates
+        # Q4 H4 — distinct-DOMAIN reserve: when the whole final cut shares
+        # the top chunk's domain on a breadth-shaped query, the best
+        # different-domain candidate takes the LAST slot. Rank-only; inert
+        # on corpora without promoted/denormalized domain payloads.
+        if str(getattr(settings, "CROSS_DOMAIN_EMPHASIS", "balanced")) != "off":
+            from services.retriever.cross_domain import domain_reserve_swap
+
+            candidates, _swapped_domain = domain_reserve_swap(
+                candidates,
+                ranked,
+                mode=str(getattr(settings, "CROSS_DOMAIN_EMPHASIS", "balanced")),
+                broad=retrieval_intent.need == QueryNeed.BROAD,
+                balanced_intent=retrieval_intent.need == QueryNeed.BALANCED,
+            )
+            if _swapped_domain:
+                counts["domain_reserve_swap"] = 1
+                logger.info(
+                    "Q4 domain reserve: last slot -> %s (top domain was uniform)",
+                    _swapped_domain,
+                )
         counts["candidates"] = len(candidates)
         counts["diversity_added"] = diversity.added
         if selection_diagnostics:

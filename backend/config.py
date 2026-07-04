@@ -216,6 +216,18 @@ class Settings(BaseSettings):
             "additively (sources untouched, reversible)."
         ),
     )
+    CROSS_DOMAIN_EMPHASIS: str = Field(
+        default="balanced",
+        pattern="^(off|balanced|strong)$",
+        description=(
+            "Q4 (owner steer) — cross-domain emphasis. balanced = pre-Q4 "
+            "behavior EXACTLY (bridge lane at limit//4; domain reserve on "
+            "BROAD queries; mechanisms bonus on). strong = bridges compete "
+            "for limit//2, domain reserve also on BALANCED intent. off = "
+            "bridge lane dark, no reserve, no bonus. All rank/budget-shaping "
+            "only — the cross-encoder stays the scoring authority."
+        ),
+    )
     PAYLOAD_SOFT_PREFILTER: bool = Field(
         default=True,
         description=(

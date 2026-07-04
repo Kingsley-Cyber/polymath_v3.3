@@ -78,7 +78,13 @@ class ModeAExpansion:
         if ttl > 0:
             if self._cache is None or self._cache.ttl != ttl:
                 self._cache = ExpansionCache(ttl)
-            ckey = ExpansionCache.key(corpus_ids, candidate_ids, limit, query)
+            # Q4 — the emphasis mode changes the bridge-lane budget, so it
+            # must be part of the cache identity or a mode flip inside the
+            # TTL serves the previous mode's expansion.
+            _cd = str(getattr(st, "CROSS_DOMAIN_EMPHASIS", "balanced"))
+            ckey = ExpansionCache.key(
+                corpus_ids, candidate_ids, limit, f"{query or ''}|cd={_cd}"
+            )
             cached = self._cache.get(ckey, _copy)
             if cached is not None:
                 logger.info(
@@ -293,11 +299,19 @@ class ModeAExpansion:
             if not bridge_enabled:
                 return []
             try:
+                from services.retriever.cross_domain import bridge_cap, normalize_mode
+
+                cap = bridge_cap(
+                    limit,
+                    normalize_mode(getattr(st, "CROSS_DOMAIN_EMPHASIS", "balanced")),
+                )
+                if cap <= 0:
+                    return []
                 return await self._expand_via_bridges(
                     seed_ids=seed_ids,
                     corpus_ids=corpus_ids,
                     db=db,
-                    limit=max(2, limit // 4),
+                    limit=cap,
                 )
             except Exception as exc:
                 logger.warning(

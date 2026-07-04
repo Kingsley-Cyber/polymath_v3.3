@@ -245,10 +245,13 @@ class FunnelB:
                         doc_name=payload.get("doc_name") or payload.get("filename"),
                         heading_path=payload.get("heading_path") or None,
                         language=payload.get("language"),
+                        domain=payload.get("domain") or None,
                         metadata={
                             **metadata_with_facets(payload.get("metadata"), payload),
                             **({"semantic_chunk_type": payload["semantic_chunk_type"]}
                                if payload.get("semantic_chunk_type") else {}),
+                            **({"mechanisms": payload["mechanisms"]}
+                               if payload.get("mechanisms") else {}),
                         },
                         provenance=list(retriever_provenance),
                     )
