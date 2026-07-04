@@ -649,7 +649,14 @@ G5 topic_key dedupe: two chunks sharing topic_key are near-siblings — MMR redu
 Q1 = H5 support-profile latency investigation — **DONE 2026-07-03, closed no-fix (see H5);
      next latency prize per its receipts = H6 document_anchor (2.50s of the 2.52s funnel gather)** ·
 Q2 = U2 soft prefilter + G1 relation prefilter ·
-Q3 = H3 RerankerInput + G2 pool raise (one A/B) · Q4 = H4+G4 cross-domain emphasis knob ·
+Q3 = DONE 2026-07-04 (pool landed at 24, contract consumed — see H3/G2) ·
+Q4 = **DONE 2026-07-04** — CROSS_DOMAIN_EMPHASIS off|balanced|strong (cross_domain.py):
+     bridge-lane budget scales (live receipt bridges 2→4→0), domain reserve takes the LAST
+     final slot on breadth queries when the cut is domain-uniform, mechanisms[]-overlap
+     cross-doc bonus. balanced = pre-Q4 EXACTLY (default). Emphasis mode is part of the Mode A
+     expansion-cache key (probe caught stale-mode serving). Reserve+mechanisms INERT until
+     promoted payloads land per corpus. 2-hop gating deferred (only HOP2_MIN_CONFIDENCE
+     exists — no enable wire point) ·
 Q5 = H1 tree-as-breadth-lane behind flag + Funnel A probes · each step probe-gated
 (golden + habits-NN + seducer + packet_hash + latency per §4.5 targets).
 
