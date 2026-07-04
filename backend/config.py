@@ -927,6 +927,17 @@ class Settings(BaseSettings):
     )
 
     # === TOKEN LIMITS ===
+    DEFAULT_MODEL_CONTEXT_LIMIT: int = Field(
+        default=131_072,
+        ge=4096,
+        le=2_000_000,
+        description=(
+            "Context-window assumption for models NOT in utils/tokens "
+            "CONTEXT_LIMITS. The old hardcoded 4096 made every RAG turn on "
+            "unlisted models (minimax/deepseek/glm/kimi) trim its context "
+            "and starve the completion."
+        ),
+    )
     MAX_CONTEXT_TOKENS: int = Field(
         default=4096, description="Maximum context window tokens"
     )

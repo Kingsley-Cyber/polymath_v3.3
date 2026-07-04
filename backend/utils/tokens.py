@@ -350,9 +350,28 @@ def get_model_context_limit(model: str) -> int:
         "gemma:2b": 8192,
         # Embedding models (typically not used for chat)
         "nomic-embed-text": 8192,
+        # Live router models (2026-07-04): the unknown-model fallback was
+        # 4096, so EVERY chat turn on these compacted its RAG context
+        # ("CONTEXT TRIMMED" on every reply) and starved the completion.
+        "minimax-m2.7": 196_608,
+        "minimax-m2": 196_608,
+        "deepseek-chat": 131_072,
+        "deepseek-reasoner": 131_072,
+        "glm-5": 131_072,
+        "kimi-k2": 131_072,
     }
 
-    return _lookup_model_limit(model, CONTEXT_LIMITS, 4096)
+    # Unknown models: a 4096 default is a 2023 relic — every model the
+    # router serves is >=128k. Configurable floor, provider stays authority.
+    try:
+        from config import get_settings
+
+        default_limit = int(
+            getattr(get_settings(), "DEFAULT_MODEL_CONTEXT_LIMIT", 131_072)
+        )
+    except Exception:
+        default_limit = 131_072
+    return _lookup_model_limit(model, CONTEXT_LIMITS, default_limit)
 
 
 def get_model_output_limit(model: str) -> int:
