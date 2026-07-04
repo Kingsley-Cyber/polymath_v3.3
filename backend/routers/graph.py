@@ -1020,6 +1020,24 @@ async def graph_brain_view(body: dict = Body(...)) -> dict:
             sig_parts.append(f"nosig:{cid}")
     signature = "|".join(sig_parts)
 
+    # Index guard (2026-07-04): a STALE unique index from an older schema
+    # generation (cache_key/detail/limit/bridge_entity_cap — fields this
+    # code never writes) made every cache upsert collide on all-null keys,
+    # so the cache could never store and every open paid the full live
+    # rebuild (observed: 23s + DuplicateKeyError on Fable_test). Ensure the
+    # correct shape once per process; drop the relic if it reappears.
+    global _BRAIN_VIEW_INDEX_READY
+    if not _BRAIN_VIEW_INDEX_READY:
+        try:
+            idx = await db["graph_brain_view_cache"].index_information()
+            if "brain_view_cache_unique" in idx:
+                await db["graph_brain_view_cache"].drop_index("brain_view_cache_unique")
+            await db["graph_brain_view_cache"].create_index(
+                [("key", 1)], name="brain_view_key_unique", unique=True
+            )
+            _BRAIN_VIEW_INDEX_READY = True
+        except Exception:  # noqa: BLE001 — cache is best-effort either way
+            pass
     cached = await db["graph_brain_view_cache"].find_one(
         {"key": key, "signature": signature}, {"_id": 0, "payload": 1}
     )
@@ -1758,6 +1776,7 @@ async def graph_cache_status(corpus_id: str) -> dict:
 # frontend can poll for completion without spinning up a new task each time.
 _CACHE_REBUILD_TASKS: dict[str, asyncio.Task] = {}
 _BRAIN_VIEW_BUILD_TASKS: dict[str, asyncio.Task] = {}
+_BRAIN_VIEW_INDEX_READY = False
 
 # Self-heal cap: a multi-corpus overview over many cold corpora kicks at most
 # this many rebuilds per read — Brain View polls while warming, so the rest
