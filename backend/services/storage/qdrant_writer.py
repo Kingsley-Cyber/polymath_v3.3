@@ -232,6 +232,14 @@ _CHUNK_PAYLOAD_INDEXES: tuple[str, ...] = (
     # M1 (2026-07-02): domain denormalized from Ghost-A parents, indexed so a
     # future query-domain pre-filter (must=domain) is O(log n). Keyword index.
     "domain",
+    # Q2/U2 (2026-07-04): the funnel-B soft prefilter should-matches these
+    # promoted fields. WITHOUT the index Qdrant full-scans payloads - a
+    # filtered query on an unpromoted 561k-chunk corpus measured 21.6s; with
+    # the index an empty match returns in ms and the deterministic fallback
+    # fires cheaply. Promote also creates them, but readiness must guarantee
+    # them on EVERY corpus, promoted or not.
+    "concepts",
+    "entity_ids",
 )
 _SCHEMA_PAYLOAD_INDEXES: tuple[str, ...] = ("corpus_id", "kind", "term")
 

@@ -33,9 +33,20 @@ class FunnelB:
         collections: Optional[List[str]] = None,
         top_k: int = 30,
         query_text: str | None = None,
+        concept_terms: Optional[List[str]] = None,
+        entity_ids: Optional[List[str]] = None,
+        min_filtered: int = 0,
     ) -> List[SourceChunk]:
         """
         Execute precision search across target collections in parallel.
+
+        Q2/U2 — when `concept_terms`/`entity_ids` are provided, a should-
+        clause prefilter (concepts[] OR entity_ids[] payload match) prunes
+        the candidate universe BEFORE the vector search. DETERMINISTIC
+        fallback: if the filtered fan-out returns fewer than `min_filtered`
+        merged candidates (e.g. an unpromoted corpus where the fields don't
+        exist), the whole fan-out reruns unfiltered — recall is never
+        stranded, and knob-off behavior is byte-identical.
         """
         if not collections:
             logger.warning("No collections specified for Funnel B search.")
@@ -72,29 +83,56 @@ class FunnelB:
             )
         ]
 
-        query_filter = models.Filter(must=must_conditions, must_not=must_not_conditions)
-
-        # Launch searches in parallel
-        tasks = [
-            self._search_collection(
-                collection_name,
-                query_vector,
-                query_filter,
-                top_k,
-                query_text=query_text,
+        base_filter = models.Filter(must=must_conditions, must_not=must_not_conditions)
+        soft_should = []
+        if concept_terms:
+            soft_should.append(models.FieldCondition(
+                key="concepts", match=models.MatchAny(any=list(concept_terms)),
+            ))
+        if entity_ids:
+            soft_should.append(models.FieldCondition(
+                key="entity_ids", match=models.MatchAny(any=list(entity_ids)),
+            ))
+        query_filter = (
+            models.Filter(
+                must=must_conditions,
+                must_not=must_not_conditions,
+                should=soft_should,
             )
-            for collection_name in collections
-        ]
+            if soft_should
+            else base_filter
+        )
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        async def _fan_out(flt: models.Filter) -> List[SourceChunk]:
+            tasks = [
+                self._search_collection(
+                    collection_name,
+                    query_vector,
+                    flt,
+                    top_k,
+                    query_text=query_text,
+                )
+                for collection_name in collections
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            merged: List[SourceChunk] = []
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Funnel B search task failed: {result}")
+                else:
+                    merged.extend(result)
+            return merged
 
-        # Merge, dedupe gracefully, and flatten
-        merged_chunks = []
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Funnel B search task failed: {result}")
-            else:
-                merged_chunks.extend(result)
+        merged_chunks = await _fan_out(query_filter)
+        if soft_should and len(merged_chunks) < max(0, int(min_filtered)):
+            # U2 deterministic fallback — never strand recall behind the
+            # payload filter (unpromoted corpora legitimately match nothing).
+            filtered_n = len(merged_chunks)
+            merged_chunks = await _fan_out(base_filter)
+            logger.info(
+                "Funnel B soft-prefilter fallback: filtered=%d < min=%d -> "
+                "unfiltered=%d", filtered_n, int(min_filtered), len(merged_chunks),
+            )
 
         # Global sort across all collection results by retrieval score
         # (dense cosine for legacy collections, Qdrant RRF score for hybrid).
@@ -207,7 +245,11 @@ class FunnelB:
                         doc_name=payload.get("doc_name") or payload.get("filename"),
                         heading_path=payload.get("heading_path") or None,
                         language=payload.get("language"),
-                        metadata=metadata_with_facets(payload.get("metadata"), payload),
+                        metadata={
+                            **metadata_with_facets(payload.get("metadata"), payload),
+                            **({"semantic_chunk_type": payload["semantic_chunk_type"]}
+                               if payload.get("semantic_chunk_type") else {}),
+                        },
                         provenance=list(retriever_provenance),
                     )
                 )

@@ -216,6 +216,34 @@ class Settings(BaseSettings):
             "additively (sources untouched, reversible)."
         ),
     )
+    PAYLOAD_SOFT_PREFILTER: bool = Field(
+        default=True,
+        description=(
+            "Q2/U2 — funnel-B should-filter on promoted concepts[]/entity_ids "
+            "derived from the query, with a deterministic unfiltered rerun when "
+            "fewer than PAYLOAD_PREFILTER_MIN_RESULTS candidates survive "
+            "(unpromoted corpora keep exactly the old pool). False disables "
+            "both the filter and the rerun."
+        ),
+    )
+    PAYLOAD_PREFILTER_MIN_RESULTS: int = Field(
+        default=8,
+        ge=0,
+        le=100,
+        description="U2 fallback floor: filtered funnel-B results below this rerun unfiltered.",
+    )
+    SEMANTIC_TYPE_RANK_BONUS: float = Field(
+        default=0.03,
+        ge=0.0,
+        le=0.2,
+        description=(
+            "Q2/U2 — RANK-ONLY additive bonus when a candidate's promoted "
+            "semantic_chunk_type matches the query operator's preference "
+            "(definition query prefers definition/principle chunks). Applied "
+            "before rerank-pool selection; the cross-encoder remains the "
+            "scoring authority. 0 disables."
+        ),
+    )
     DOCUMENT_ANCHOR_INDEXED: bool = Field(
         default=True,
         description=(

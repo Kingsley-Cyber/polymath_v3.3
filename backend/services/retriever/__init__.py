@@ -1295,6 +1295,18 @@ class RetrieverOrchestrator:
                 diagnostics=_diagnostics("global_done", len(top), top),
             )
 
+        # Q2/U2 — payload soft-prefilter inputs, derived ONCE from the RAW
+        # query (rank_query/HyDE prose would emit junk grams). Empty lists
+        # disable the should-filter entirely inside funnel B.
+        soft_concepts: list[str] = []
+        soft_entity_ids: list[str] = []
+        prefilter_min = 0
+        if bool(getattr(settings, "PAYLOAD_SOFT_PREFILTER", True)):
+            from services.retriever.prefilter import query_payload_terms
+
+            soft_concepts, soft_entity_ids = query_payload_terms(query)
+            prefilter_min = int(getattr(settings, "PAYLOAD_PREFILTER_MIN_RESULTS", 8))
+
         lexical_limit = _lexical_limit_for(
             effective_tier,
             retrieval_k=single_limit,
@@ -1337,6 +1349,9 @@ class RetrieverOrchestrator:
                     _b_cols_for(cid),
                     top_k=_PER_CORPUS_LIMIT,
                     query_text=rank_query,
+                    concept_terms=soft_concepts,
+                    entity_ids=soft_entity_ids,
+                    min_filtered=prefilter_min,
                 )
                 for cid in corpus_ids  # type: ignore[union-attr]
             ]
@@ -1421,6 +1436,9 @@ class RetrieverOrchestrator:
                         b_cols,
                         top_k=funnel_limits.child_top_k,
                         query_text=rank_query,
+                        concept_terms=soft_concepts,
+                        entity_ids=soft_entity_ids,
+                        min_filtered=prefilter_min,
                     ),
                 ),
                 _timed_funnel(
@@ -1577,6 +1595,28 @@ class RetrieverOrchestrator:
         if not merged:
             _log_timings("empty_after_merge", 0)
             return _result([], status="empty_after_merge")
+
+        # Q2/U2 — semantic_chunk_type <-> query-operator RANK-ONLY bonus
+        # (additive, tiny, pre-rerank; the cross-encoder re-scores its pool
+        # so this only steers POOL SELECTION toward answer-shaped chunks).
+        sem_bonus = float(getattr(settings, "SEMANTIC_TYPE_RANK_BONUS", 0.03) or 0.0)
+        if sem_bonus > 0:
+            from services.retriever.prefilter import query_operator, semantic_rank_bonus
+
+            _op = query_operator(query)
+            if _op:
+                boosted = 0
+                for c in merged:
+                    b = semantic_rank_bonus(
+                        _op, (getattr(c, "metadata", None) or {}).get("semantic_chunk_type"),
+                        bonus=sem_bonus,
+                    )
+                    if b:
+                        c.score = min(1.0, float(c.score or 0.0) + b)
+                        boosted += 1
+                if boosted:
+                    merged.sort(key=lambda x: x.score, reverse=True)
+                    counts["semantic_type_boosted"] = boosted
 
         # [4a] Phase 23 — Custom profile `similarity_threshold` noise filter.
         # Drops anything below the cosine score floor. Applied before graph
