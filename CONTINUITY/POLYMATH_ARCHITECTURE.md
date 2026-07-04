@@ -663,6 +663,32 @@ Q5 = H1 tree-as-breadth-lane behind flag + Funnel A probes · each step probe-ga
 
 ---
 
+## 11.9 SESSION CLOSE 2026-07-04 — operational hardening day (read this before resuming)
+
+The retrieval plan held (107-assertion CI battery green, Q1–Q4 + H6 receipted); the day's
+failures were all OPERATIONAL, each fixed with a live receipt:
+- context-limit relic (4096 default starved every chat) → per-model table + DEFAULT_MODEL_CONTEXT_LIMIT (734d336)
+- Brain View cache dead on a stale Mongo index → self-heal guard, 23s+error → 0.28s (061859f)
+- reranker DEATH SPIRAL (timeout × split-recursion = 15–31 min dead chat under swap pressure)
+  → first TimeoutException aborts the pass to rank-fusion + 120s breaker (4ff671e)
+- Ghost A on deepseek-v4* auto-injects thinking:{type:disabled} — v4-flash thinking mode
+  returned EMPTY summaries (156/156, 128/148); disabled = 1.6–2.0s valid §10.1 JSON on the
+  owner's key. SUMMARY_MAX_CONCURRENT 1→8. GHOST_A_DEFAULT_MODEL=deepseek/deepseek-v4-flash;
+  .env DEFAULT_COMPLETION_MODEL moved off deprecated deepseek-chat (4ff671e)
+- corpus DELETE cancels running batch items (zombie burned 127s GPU into a deleted corpus)
+- ingest isolation: INGEST_GLOBAL_MAX_DOCS=2 across ALL batches + healthcheck grace 120s (860d799)
+- host truth: 96%-full swap was the amplifier; post-reboot receipts: query 38.4s/2,760 chars
+  graph tier rerank-on (was 240s dead); fable_test_2 5/5 done; structured parents 6→121.
+
+NEXT (owner-agreed): (1) owner uploads ONE fresh ~1MB doc → "verify the ingest" = the #35
+closure receipt (structured summaries on every body parent + per-stage timing vs the 2-min
+target + query receipts). (2) "build two-phase ingest" — queryable after embed (~90s), graph
+extraction async (§12.6-aligned) — the real path to the 2-min production target. (3) "build
+the canary" — preflight one real summarize+extract call per batch before spending books +
+per-stage run report card (fallback-rate accounting; graceful degradation without accounting
+is slow-motion data loss). Held: Q5 probes, waterfall/Tier-0/two-lane flag flips (need the
+golden battery), promote backfill on authentic_library.
+
 ## 12. TEMPORAL LAYER + GRAPH PRECOMPUTE + EMBEDDING-JOBS DOCTRINE (owner research 2026-07-03)
 
 ### 12.0 Confirmations (no change — owner research restates ratified design)
