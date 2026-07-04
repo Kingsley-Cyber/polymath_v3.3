@@ -1082,6 +1082,51 @@ async def create_upload_ingest_batch(
     return {**batch, "runner_started": started}
 
 
+@router.get("/ingestion/ingest-source/browse")
+async def browse_ingest_source(
+    path: str = "",
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """Server-side folder browser for the mounted ingest source.
+
+    Owner design (2026-07-04): the UI's folder picker cannot read absolute
+    host paths (browser sandbox), so the BACKEND lists the /ingest-source
+    mount and the picker submits a server path to the durable folder-batch
+    runner — no byte upload, no HTTP timeout, full queue semantics for any
+    file count. JAILED: resolved paths must stay under /ingest-source; the
+    mount is read-only by compose.
+    """
+    import os as _os
+
+    ROOT = "/ingest-source"
+    rel = (path or "").strip().lstrip("/")
+    target = _os.path.realpath(_os.path.join(ROOT, rel))
+    if target != ROOT and not target.startswith(ROOT + _os.sep):
+        raise HTTPException(status_code=400, detail="Path escapes ingest source")
+    if not _os.path.isdir(target):
+        raise HTTPException(status_code=404, detail="Folder not found (is the drive mounted?)")
+    dirs, files = [], []
+    try:
+        with _os.scandir(target) as it:
+            for e in sorted(it, key=lambda x: x.name.lower()):
+                if e.name.startswith("."):
+                    continue
+                if e.is_dir(follow_symlinks=False):
+                    try:
+                        n = sum(1 for c in _os.scandir(e.path)
+                                if c.is_file() and not c.name.startswith("."))
+                    except Exception:  # noqa: BLE001
+                        n = -1
+                    dirs.append({"name": e.name, "path": e.path, "file_count": n})
+                elif e.is_file(follow_symlinks=False):
+                    files.append({"name": e.name, "path": e.path,
+                                  "size": e.stat().st_size})
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Folder not readable")
+    return {"root": ROOT, "path": target, "dirs": dirs[:500], "files": files[:1000],
+            "truncated": len(dirs) > 500 or len(files) > 1000}
+
+
 @router.get("/corpora/{corpus_id}/ingest-batches")
 async def list_ingest_batches(
     corpus_id: str,
