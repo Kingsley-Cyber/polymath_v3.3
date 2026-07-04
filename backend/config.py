@@ -789,6 +789,18 @@ class Settings(BaseSettings):
             "Requests over this cap fail fast with 429 instead of holding uploaded bytes."
         ),
     )
+    INGEST_GLOBAL_MAX_DOCS: int = Field(
+        default=2,
+        ge=1,
+        le=16,
+        description=(
+            "Ingest isolation (2026-07-04): GLOBAL cap on documents ingesting "
+            "concurrently across ALL batches. Uploading any number of files/"
+            "batches queues behind this instead of stacking workers — the "
+            "API event loop stays responsive and the healthcheck/autoheal "
+            "restart loop (RestartCount=37) cannot re-trigger."
+        ),
+    )
     INGEST_BATCH_WORKERS: int = Field(
         default=1,
         ge=1,

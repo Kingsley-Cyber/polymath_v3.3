@@ -1075,6 +1075,13 @@ async def run_local_batch(
         raise ValueError("Batch not found")
 
     owner_prefix = f"{os.getpid()}:{batch_id[:8]}"
+    # Ingest isolation (owner directive 2026-07-04): a GLOBAL in-flight
+    # document cap across ALL batches. Each batch used to bring its own
+    # worker pool, so 3 uploaded batches = 3+ docs ingesting concurrently
+    # inside the API process — event loop saturated, healthcheck failed,
+    # autoheal SIGTERMed the backend (RestartCount=37, Cloudflare 502s).
+    # Batches now QUEUE behind this semaphore instead of stacking.
+    sem = _global_doc_semaphore()
     lease_seconds = max(60, int(get_settings().INGEST_STALE_JOB_MINUTES * 60))
     concurrency = max(1, int((batch.get("options") or {}).get("concurrency") or 1))
 
@@ -1089,16 +1096,32 @@ async def run_local_batch(
             )
             if not item:
                 return
-            await _process_local_item(
-                db=db,
-                ingestion_service=ingestion_service,
-                batch=batch,
-                item=item,
-            )
+            async with sem:
+                await _process_local_item(
+                    db=db,
+                    ingestion_service=ingestion_service,
+                    batch=batch,
+                    item=item,
+                )
             await refresh_batch_counts(db, batch_id, user_id=user_id)
 
     await asyncio.gather(*[_worker(idx) for idx in range(concurrency)])
     return await refresh_batch_counts(db, batch_id, user_id=user_id)
+
+
+_GLOBAL_DOC_SEM: "asyncio.Semaphore | None" = None
+_GLOBAL_DOC_SEM_SIZE: int = 0
+
+
+def _global_doc_semaphore() -> "asyncio.Semaphore":
+    """Process-wide document-ingest semaphore, sized by
+    INGEST_GLOBAL_MAX_DOCS (re-created if the knob changes)."""
+    global _GLOBAL_DOC_SEM, _GLOBAL_DOC_SEM_SIZE
+    size = max(1, int(getattr(get_settings(), "INGEST_GLOBAL_MAX_DOCS", 2)))
+    if _GLOBAL_DOC_SEM is None or size != _GLOBAL_DOC_SEM_SIZE:
+        _GLOBAL_DOC_SEM = asyncio.Semaphore(size)
+        _GLOBAL_DOC_SEM_SIZE = size
+    return _GLOBAL_DOC_SEM
 
 
 def start_local_batch_runner(

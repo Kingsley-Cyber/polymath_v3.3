@@ -637,7 +637,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 40s
+      # 40s was too short when startup coincides with batch resume — the
+      # healthcheck failed under load and autoheal SIGTERMed the backend
+      # into a restart loop (2026-07-04, RestartCount=37).
+      start_period: 120s
     restart: unless-stopped
     stop_grace_period: 30s
 
