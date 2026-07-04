@@ -404,7 +404,7 @@ alone does nothing — wiring is the remaining work) · **PARTIAL** · **NOT BUI
 | 5 typed models + Stage-Contract CI test | **LIVE** (contracts.py, test_contracts.py) |
 | Writers accept ONLY typed models | **NOT BUILT** — _build_parent/child_dicts, upsert_children, stash_ghost_b still untyped dicts |
 | extract.v2 + `extractor` provenance ON THE WIRE | **NOT BUILT** — local emits v1; cloud defaults v1; ExtractionResult dataclass has no extractor field (contract exists on paper only) |
-| RerankerInput consumed | **NOT BUILT** — reranker sends bare excerpt, no "Book › Section" prefix |
+| RerankerInput consumed | **LIVE** 2026-07-04 (3e95d9e) — reranker renders via the contract; RERANKER_INPUT_CONTEXT kill-switch |
 
 ### §1 Identity spine — ~60%
 | Item | Status |
@@ -593,7 +593,10 @@ H1 **Replace Funnel A's parent-summary lane with the summary TREE**: rollup/sect
    (the §4 policy) behind the probe battery. Breadth quality goes UP (rollups are already
    deduplicated meaning), candidate competition goes DOWN.
 H2 **Waterfall packet** (§10.3) = depth + determinism (full 1–4, summaries 5–8, orphan children).
-H3 **RerankerInput prefix** ("Book › Section\n…") — cheap CE precision, contract already exists.
+H3 **DONE 2026-07-04 (3e95d9e).** Reranker renders every scored doc via
+   models/contracts.RerankerInput ("Book › Section\n" + query-guided excerpt) — the contract is
+   now CONSUMED, not paper. Env kill-switch RERANKER_INPUT_CONTEXT (default on). Receipt:
+   title-anchored Deep Work query promotes a 2nd Deep Work passage into top-3; ~+0.3s at pool 24.
 H4 **Cross-domain in MMR**: add distinct-DOMAIN breadth (payload `domain`) next to distinct-doc
    breadth for BROAD/multi-lane queries + a mechanisms[]-overlap bonus (bridge emphasis) — both
    rank-only.
@@ -630,8 +633,11 @@ G1 **HALF-DONE / HALF-DEFERRED (2026-07-04).** has_relations seed preference shi
    populates canonical_family), so the matcher would be dead, untestable code. Revisit after
    promote backfill/extraction lands families — the operator detector it needs already exists
    (prefilter.query_operator).
-G2 **Raise GRAPH_MLX_RERANK_POOL 16 → 32–40**: the 16 cap is MLX-era conservatism; the fp16
-   llama reranker handles 40 docs ≈1s. Depth win; verify Metal headroom (§4.5 targets).
+G2 **DONE 2026-07-04 (3e95d9e) — landed at 24, NOT 32–40.** The "40 docs ≈1s" premise was the
+   retired MLX LISTWISE sidecar; the live torch fp16 CE is POINTWISE (linear in pool). A/B:
+   16→2.53s p50/3.0 docs · 24→3.42s/4.7 docs (full breadth gain) · 32→4.50s/4.3 docs (+1.1s for
+   nothing). Default=24 (the measured knee); embed unaffected (no Metal contention). Raising
+   past 24 is a knob for quality-first sessions, receipts in the config description.
 G3 Mode A cache (U3). G4 **CROSS_DOMAIN_EMPHASIS knob (off|balanced|strong)**: scales the Phase
    5b bridge-lane bonus cap (fragile bridges / structural analogies / transfer candidates exist
    TODAY but are capped to limit//4), adds an entity_families/domain diversity reserve (≥1 slot
@@ -735,7 +741,7 @@ seeds, and HOP TIME. Execute the G-PACK before W1/W2:
      graph_payload._default_entity_id.**
      Still open in expanded P2 scope: bridge_concepts[] promotion, graph_roles[],
      fact-seed cache, deep-2-hop explicit-intent knob.
-  P3 G2 rerank-pool raise 16→32 rides the first graph A/B.
+  P3 G2 rerank-pool raise — DONE 2026-07-04, landed at 24 per the A/B (see §11.5 G2).
 Then W1 Tier-0 → W2 waterfall → temporal W-T as previously ordered.
 Temporal layer lands as **W-T** after Q2 (needs M2 versioning population + topic_key, which
 §10.1 shipped). Graph precompute lands with Q2/G1 (same promote() pass). §11.6 otherwise stands.
