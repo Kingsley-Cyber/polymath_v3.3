@@ -653,6 +653,18 @@ class LLMService:
                     continue
                 body[key] = value
         self._reapply_explicit_thinking_effort(body, model, overrides)
+        # Default thinking posture (2026-07-04): when the per-turn selector is
+        # untouched, thinking-default-ON models (deepseek-v4*) burned 91s of a
+        # 99s RAG answer on reasoning tokens. RAG chat pre-retrieves the
+        # evidence — apply the server default (settings, "none") unless the
+        # user explicitly set the dial this turn (the reapply above wins).
+        _explicit = overrides is not None and getattr(overrides, "thinking_effort", None) is not None
+        if not _explicit:
+            _dflt = str(getattr(
+                settings, "CHAT_DEFAULT_THINKING_EFFORT", "none",
+            ) or "").strip().lower()
+            if _dflt in ("none", "low", "medium", "high"):
+                self._apply_thinking_effort(body, body.get("model") or model, _dflt)
 
         client = await self._get_client()
         resp = await client.post(
@@ -801,6 +813,18 @@ class LLMService:
                 if _k not in ("model", "messages", "stream", "tools", "tool_choice"):
                     body[_k] = _v
         self._reapply_explicit_thinking_effort(body, model, overrides)
+        # Default thinking posture (2026-07-04): when the per-turn selector is
+        # untouched, thinking-default-ON models (deepseek-v4*) burned 91s of a
+        # 99s RAG answer on reasoning tokens. RAG chat pre-retrieves the
+        # evidence — apply the server default (settings, "none") unless the
+        # user explicitly set the dial this turn (the reapply above wins).
+        _explicit = overrides is not None and getattr(overrides, "thinking_effort", None) is not None
+        if not _explicit:
+            _dflt = str(getattr(
+                settings, "CHAT_DEFAULT_THINKING_EFFORT", "none",
+            ) or "").strip().lower()
+            if _dflt in ("none", "low", "medium", "high"):
+                self._apply_thinking_effort(body, body.get("model") or model, _dflt)
 
         if self._is_ollama_chat_route(model):
             async for chunk in self._stream_ollama_chat_native(

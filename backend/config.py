@@ -894,6 +894,18 @@ class Settings(BaseSettings):
     # rule. The user's per-pool entries (Settings → Models) supply real
     # values; resolution falls back to the active chat model for HyDE /
     # Reasoning Cascade and raises a clear error when nothing is configured.
+    CHAT_DEFAULT_THINKING_EFFORT: str = Field(
+        default="none",
+        pattern="^(none|low|medium|high|auto)$",
+        description=(
+            "Thinking posture for chat when the per-turn UI dial is untouched. "
+            "Thinking-default-ON models (deepseek-v4*) burned 91s of a 99s RAG "
+            "answer on reasoning tokens (2026-07-04). 'none' disables thinking "
+            "by default; the UI selector still wins per turn; models without a "
+            "thinking dial (minimax etc.) are unaffected. 'auto' restores "
+            "provider defaults."
+        ),
+    )
     GHOST_A_DEFAULT_MODEL: str = Field(
         default="deepseek/deepseek-v4-flash",
         description=(
