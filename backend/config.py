@@ -894,6 +894,16 @@ class Settings(BaseSettings):
     # rule. The user's per-pool entries (Settings → Models) supply real
     # values; resolution falls back to the active chat model for HyDE /
     # Reasoning Cascade and raises a clear error when nothing is configured.
+    GHOST_A_DEFAULT_MODEL: str = Field(
+        default="deepseek/deepseek-v4-flash",
+        description=(
+            "Ghost A summary model when no per-corpus chip is configured. "
+            "deepseek-v4-flash with thinking auto-disabled (ghost_a injects "
+            "it): 1.6-2.0s/call with valid section-10.1 JSON, measured on "
+            "the owner's provider 2026-07-04. The prior fallback "
+            "(deepseek/deepseek-chat) is deprecated."
+        ),
+    )
     DEFAULT_COMPLETION_MODEL: str = Field(
         default="",
         description=(
@@ -1124,8 +1134,13 @@ class Settings(BaseSettings):
 
     # === GHOST A — PARENT SUMMARIZATION ===
     SUMMARY_MAX_CONCURRENT: int = Field(
-        default=1,
-        description="Max concurrent LiteLLM calls for parent summarization (GHOST A)",
+        default=8,
+        description=(
+            "Max concurrent LiteLLM calls for parent summarization (GHOST A). "
+            "Was 1 — a 100-parent book paid 5+ min of SERIAL summary calls "
+            "(2026-07-04 receipt). Cloud endpoints handle 8 trivially; lower "
+            "this only for a local single-stream model."
+        ),
     )
     SUMMARY_MAX_TOKENS: int = Field(
         default=175,

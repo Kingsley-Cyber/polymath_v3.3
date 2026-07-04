@@ -670,6 +670,39 @@ async def delete_corpus(
     if not existing:
         raise HTTPException(status_code=404, detail="Corpus not found")
 
+    # Zombie-batch guard (2026-07-04): deleting a corpus mid-ingest left its
+    # batch workers running — one burned 127s of GPU embedding 963 children
+    # into collections that no longer existed (embed_qdrant 404s). Cancel the
+    # corpus's queued/running batch items FIRST so leases die cleanly.
+    try:
+        db = ingestion_service.db
+        if db is not None:
+            batch_ids = [
+                b["batch_id"]
+                async for b in db["ingest_batches"].find(
+                    {"corpus_id": corpus_id,
+                     "status": {"$in": ["queued", "running"]}},
+                    {"batch_id": 1},
+                )
+            ]
+            if batch_ids:
+                res = await db["ingest_batch_items"].update_many(
+                    {"batch_id": {"$in": batch_ids},
+                     "status": {"$in": ["queued", "running", "leased"]}},
+                    {"$set": {"status": "cancelled",
+                              "error": "Corpus deleted while ingest active"}},
+                )
+                await db["ingest_batches"].update_many(
+                    {"batch_id": {"$in": batch_ids}},
+                    {"$set": {"status": "cancelled"}},
+                )
+                logger.info(
+                    "Corpus delete: cancelled %d batch(es), %d item(s) for %s",
+                    len(batch_ids), res.modified_count, corpus_id,
+                )
+    except Exception as exc:  # noqa: BLE001 — delete must still proceed
+        logger.warning("Corpus delete: batch cancel failed (%s)", exc)
+
     deleted = await ingestion_service.delete_corpus(corpus_id)
     if not deleted:
         raise HTTPException(status_code=500, detail="Failed to delete corpus")

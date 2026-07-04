@@ -163,6 +163,11 @@ def _ranked_chunks_from_response(
     raise ValueError("Unsupported reranker response shape")
 
 
+class RerankPassAborted(Exception):
+    """One sidecar timeout aborts the whole rerank pass — never split-retry
+    a slow reranker (each split level pays the full timeout serially)."""
+
+
 class RerankerService:
     """HTTP client for the configured reranker sidecar."""
 
@@ -462,6 +467,19 @@ class RerankerService:
                 query=query,
                 pool=pool,
             ), 1, 0
+        except httpx.TimeoutException as exc:
+            # Death-spiral guard (2026-07-04): the split logic below assumes
+            # FAST failures (llama.cpp 500s on batch shape). A TIMEOUT means
+            # the sidecar is slow (Metal contention / fp16 weights paging at
+            # 96% swap) — splitting then burns the FULL timeout serially per
+            # sub-batch: a 32-pool pass measured 15-31 min of dead air while
+            # the chat stream sent zero bytes. Abort the whole pass instead;
+            # the caller falls back to rank-fusion ordering in milliseconds.
+            logger.warning(
+                "Reranker TIMEOUT on batch of %d — aborting rerank pass "
+                "(rank-fusion fallback), not splitting: %s", len(pool), exc,
+            )
+            raise RerankPassAborted(str(exc)) from exc
         except Exception as exc:
             if len(pool) <= 1:
                 logger.warning(

@@ -228,7 +228,9 @@ async def summarize_parents(
     if not pool:
         pool = [
             {
-                "model": model or settings.DEFAULT_COMPLETION_MODEL,
+                "model": model
+                or getattr(settings, "GHOST_A_DEFAULT_MODEL", "")
+                or settings.DEFAULT_COMPLETION_MODEL,
                 "base_url": None,
                 "api_key": None,
                 "max_concurrent": settings.SUMMARY_MAX_CONCURRENT,
@@ -342,6 +344,15 @@ async def summarize_parents(
         for _k, _v in (entry.get("extra_params") or {}).items():
             if _k not in ("model", "messages"):
                 payload[_k] = _v
+        # DeepSeek v4 models default to THINKING mode, which returns EMPTY
+        # content at bounded max_tokens — 156/156 and 128/148 parent
+        # summaries came back blank on real ingests (2026-07-04). Disabling
+        # thinking measured 1.6-2.0s with valid §10.1 JSON via the same
+        # litellm hop. Injected only for deepseek-v4* and only when the
+        # chip's extra_params didn't already set it.
+        _mdl = str(entry.get("model") or "").lower()
+        if "v4-flash" in _mdl or "v4-pro" in _mdl or "deepseek-v4" in _mdl:
+            payload.setdefault("thinking", {"type": "disabled"})
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(
