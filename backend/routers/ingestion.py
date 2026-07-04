@@ -187,6 +187,25 @@ async def _model_ref_for_test(
     data = body.entry.model_dump()
     raw_key = data.get("api_key")
 
+    # Non-ASCII guard (2026-07-04): keys/urls pasted from formatted sources
+    # arrive with smart dashes/quotes (em-dash \u2014 etc.). They end up in
+    # HTTP headers, which must be ASCII — litellm then 500s with a cryptic
+    # "'ascii' codec can't encode character" from deep inside the provider
+    # client. Fail HERE with a message that names the field and character.
+    for fld in ("api_key", "base_url", "model"):
+        val = data.get(fld)
+        if isinstance(val, str) and val and val != "[set]":
+            cleaned = val.strip()
+            for i, chx in enumerate(cleaned):
+                if ord(chx) > 127:
+                    return data, (
+                        f"{fld} contains a non-ASCII character {chx!r} at "
+                        f"position {i} — usually a smart dash/quote from "
+                        "copy-paste. Re-paste it from the provider console "
+                        "as plain text."
+                    )
+            data[fld] = cleaned
+
     if raw_key == "[set]":
         if not (body.corpus_id and body.pool_field is not None and body.index is not None):
             return data, "Saved API key is masked. Type a new key or save the corpus first."
