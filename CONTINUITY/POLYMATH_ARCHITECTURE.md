@@ -624,9 +624,12 @@ H6 **DONE 2026-07-03 (7a4594f).** Root cause was worse than slow: the 486-doc la
    anchor 2.50s-timeout->0.02s WITH results. Stopword-only-title edge documented on the knob.
 
 ### 11.5 Graph tier (the cross-domain flagship)
-G1 **Pre-expansion relation prefilter**: filter funnel-B candidates has_relations=true (+
-   relation_families matched to query operators: causal→Causal) BEFORE Mode A seeding — less
-   junk fan-out, faster Cypher, better seeds. (Sweep confirmed NO prefilter exists today.)
+G1 **HALF-DONE / HALF-DEFERRED (2026-07-04).** has_relations seed preference shipped in P2
+   (prefer_relation_seeds, GRAPH_SEED_PREFER_RELATIONS). The relation_families ↔ operator
+   matcher is DEFERRED WITH CAUSE: `relation_families` is empty corpus-wide (extraction never
+   populates canonical_family), so the matcher would be dead, untestable code. Revisit after
+   promote backfill/extraction lands families — the operator detector it needs already exists
+   (prefilter.query_operator).
 G2 **Raise GRAPH_MLX_RERANK_POOL 16 → 32–40**: the 16 cap is MLX-era conservatism; the fp16
    llama reranker handles 40 docs ≈1s. Depth win; verify Metal headroom (§4.5 targets).
 G3 Mode A cache (U3). G4 **CROSS_DOMAIN_EMPHASIS knob (off|balanced|strong)**: scales the Phase
