@@ -553,10 +553,17 @@ class Settings(BaseSettings):
         description="Maximum graph-tier candidate pool kept before MLX rerank.",
     )
     GRAPH_MLX_RERANK_POOL: int = Field(
-        default=16,
+        default=24,
         ge=1,
         le=200,
-        description="Maximum graph-tier candidates sent to the MLX reranker.",
+        description=(
+            "Maximum graph-tier candidates sent to the cross-encoder. Q3 A/B "
+            "(2026-07-04, torch fp16 CE, pointwise = LINEAR cost in pool "
+            "size): pool 16 p50 2.53s / 3.0 distinct docs; 24 -> 3.42s / 4.7 "
+            "docs (full breadth gain); 32 -> 4.50s / 4.3 docs (pays ~+1.1s "
+            "for nothing over 24). The old '40 docs ~1s' premise was the "
+            "retired MLX listwise sidecar. 24 is the measured knee."
+        ),
     )
     GRAPH_DECORATE_ENTITIES_PER_CHUNK: int = Field(
         default=3,

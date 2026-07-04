@@ -42,6 +42,13 @@ _RERANK_QUERY_GUIDED_EXCERPT = (
     os.environ.get("RERANKER_QUERY_GUIDED_EXCERPT", "true").strip().lower()
     not in {"0", "false", "no", "off"}
 )
+# H3 (Q3, 2026-07-04): prepend "Book > Section" to each reranker document so
+# the cross-encoder scores passages WITH their source frame. Env-gated like
+# its siblings; default set by the Q3 A/B.
+_RERANKER_INPUT_CONTEXT = (
+    os.environ.get("RERANKER_INPUT_CONTEXT", "true").strip().lower()
+    not in {"0", "false", "no", "off"}
+)
 # Speed campaign (2026-07-02): jina-reranker-v3 is LISTWISE — it scores up
 # to 64 documents in one forward pass (independently benchmarked ~188ms/query;
 # our own sidecar probe measured 40 docs / 1.3s in ONE call). The old batch=8
@@ -508,6 +515,29 @@ class RerankerService:
             ]
         else:
             documents = [(c.text or "")[:_RERANK_MAX_DOC_CHARS] for c in pool]
+        # H3 (Q3) — RerankerInput context prefix: "Book > Section" ahead of
+        # the excerpt so the CE scores the passage WITH its source frame
+        # (title-anchored / section-scoped queries stop losing to look-alike
+        # passages from the wrong book). Additive to the document STRING only
+        # — the sidecar payload contract {query, documents} is unchanged.
+        # Missing doc_name/heading -> no prefix (graceful).
+        if _RERANKER_INPUT_CONTEXT:
+            from models.contracts import RerankerInput
+
+            prefixed = []
+            for c, doc in zip(pool, documents):
+                name = str(getattr(c, "doc_name", "") or "").strip()[:80]
+                heads = [
+                    str(h).strip()
+                    for h in (getattr(c, "heading_path", None) or [])
+                    if str(h).strip()
+                ]
+                prefixed.append(RerankerInput(
+                    source_book=name,
+                    section=" › ".join(heads[:2])[:80],
+                    excerpt=doc,
+                ).render())
+            documents = prefixed
         resp = await client.post(
             url,
             json={"query": query, "documents": documents},
