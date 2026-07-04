@@ -301,6 +301,14 @@ class WriteState(BaseModel):
     mongo_written: bool = False
     qdrant_written: bool = False
     summaries_indexed: bool = False
+    # Writer-intent stamp (2026-07-04): how many summary vectors THIS ingest
+    # actually decided to write. The verifier prefers this over re-deriving
+    # from Mongo parents — the summary-tree HEAL guard writes parent
+    # summaries AFTER the qdrant phase, so Mongo-derived expectations drift
+    # (tiny-doc receipt: successful ingest flagged "expected=1 summary
+    # vectors but ... has 0"). None = legacy doc / write failed -> verifier
+    # falls back to the strict Mongo derivation.
+    summary_points: int | None = None
     neo4j_written: bool = False
     warnings: list[str] = Field(default_factory=list)
     verified: bool | None = None

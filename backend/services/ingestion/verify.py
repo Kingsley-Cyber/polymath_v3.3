@@ -52,6 +52,25 @@ async def _expected_child_count(
     return int(await db["chunks"].count_documents(query))
 
 
+def expected_summary_points_from_state(write_state: Any) -> int | None:
+    """Writer-intent expectation (2026-07-04): the qdrant phase stamps
+    write_state.summary_points with the number of summary vectors it ACTUALLY
+    wrote. Prefer that stamp — the summary-tree heal guard adds Mongo parent
+    summaries after the vectors are written, so re-deriving from Mongo
+    over-expects on docs the writer legitimately skipped (tiny docs / lanes
+    with summarization off). Returns None when unstamped (legacy docs, or a
+    gate-required-but-none-produced failure) so the caller falls back to the
+    strict Mongo derivation and real missing-vector cases still fail."""
+    if not isinstance(write_state, dict):
+        return None
+    pts = write_state.get("summary_points")
+    if isinstance(pts, bool):  # bool is an int subclass — reject explicitly
+        return None
+    if isinstance(pts, int) and pts >= 0:
+        return pts
+    return None
+
+
 async def _expected_summary_count(
     db: AsyncIOMotorDatabase,
     *,
@@ -59,6 +78,15 @@ async def _expected_summary_count(
     corpus_id: str,
 ) -> int:
     """Return Mongo parent summaries that should have Qdrant summary points."""
+    doc_state = await db["documents"].find_one(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {"_id": 0, "write_state.summary_points": 1},
+    )
+    stamped = expected_summary_points_from_state(
+        (doc_state or {}).get("write_state")
+    )
+    if stamped is not None:
+        return stamped
     projection = {"_id": 0, "parent_id": 1, "summary": 1, "chunk_kind": 1}
     parents = await db["parent_chunks"].find(
         {"doc_id": doc_id, "corpus_id": corpus_id},
