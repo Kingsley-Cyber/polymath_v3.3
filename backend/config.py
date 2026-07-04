@@ -1182,8 +1182,15 @@ class Settings(BaseSettings):
 
     # === GHOST B — ENTITY EXTRACTION ===
     EXTRACTION_MAX_CONCURRENT: int = Field(
-        default=1,
-        description="Max concurrent LiteLLM calls for entity extraction (GHOST B)",
+        default=8,
+        description=(
+            "Max concurrent LiteLLM calls for entity extraction (GHOST B "
+            "cloud lanes; the local sidecar batches separately). Was 1 — "
+            "serial cloud extraction ran ~4.3s/chunk (Hy3 via SiliconFlow, "
+            "2026-07-04), making a 2-doc test ~2.7h. Cloud APIs take 8 "
+            "concurrent trivially; provider 429s land in ghost_b_error_events "
+            "— if those appear, lower this. 8 => ~8x throughput."
+        ),
     )
     EXTRACTION_MAX_TOKENS: int = Field(
         default=6144,
