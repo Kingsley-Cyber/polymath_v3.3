@@ -211,15 +211,26 @@ def _doc_labels(doc: dict[str, Any]) -> list[str]:
     return labels
 
 
-def _score_doc_match(query: str, label: str) -> float:
-    query_norm = _norm(query)
-    label_norm = _norm(label)
+def _score_doc_match(
+    query: str,
+    label: str,
+    *,
+    query_norm: str | None = None,
+    q_tokens: set[str] | None = None,
+    label_norm: str | None = None,
+    label_tokens: set[str] | None = None,
+) -> float:
+    # H6 fast path: callers scoring ~4k labels per retrieve pass precomputed
+    # norms/tokens (query once, labels from the cached table). Defaults keep
+    # the one-off signature identical for tests/back-compat.
+    query_norm = _norm(query) if query_norm is None else query_norm
+    label_norm = _norm(label) if label_norm is None else label_norm
     if not query_norm or not label_norm:
         return 0.0
     if query_norm == label_norm:
         return 1.0
-    q_tokens = _tokens(query_norm)
-    label_tokens = _tokens(label_norm)
+    q_tokens = _tokens(query_norm) if q_tokens is None else q_tokens
+    label_tokens = _tokens(label_norm) if label_tokens is None else label_tokens
     if not q_tokens or not label_tokens:
         return 0.0
     if len(label_tokens) >= 2 and label_norm in query_norm:
@@ -314,14 +325,23 @@ class DocumentAnchorRetriever:
         for _doc_score, _label, anchor_terms, _doc in docs[:_DOC_ANCHOR_MAX_DOCS]:
             all_anchor_terms.update(anchor_terms)
 
-        for doc_score, label, anchor_terms, doc in docs[:_DOC_ANCHOR_MAX_DOCS]:
-            terms = _chunk_search_terms(query, anchor_terms | all_anchor_terms)
-            rows = await self._chunks_for_doc(
+        # H6 — the ≤4 per-doc chunk lookups are independent ($text per doc,
+        # regex fallback per doc); run them CONCURRENTLY and assemble in doc
+        # order below, so wall = slowest doc instead of the sum. Selection is
+        # identical: per-doc rows never depended on earlier docs.
+        import asyncio as _asyncio
+
+        matched = docs[:_DOC_ANCHOR_MAX_DOCS]
+        rows_per_doc = await _asyncio.gather(*[
+            self._chunks_for_doc(
                 db,
                 doc,
-                terms=terms,
+                terms=_chunk_search_terms(query, anchor_terms | all_anchor_terms),
                 per_doc=max(1, per_doc),
             )
+            for _doc_score, _label, anchor_terms, doc in matched
+        ])
+        for (doc_score, label, anchor_terms, doc), rows in zip(matched, rows_per_doc):
             for row, chunk_score in rows:
                 chunk_id = str(row.get("chunk_id") or "")
                 if not chunk_id or chunk_id in seen:
@@ -366,6 +386,102 @@ class DocumentAnchorRetriever:
             )
         return out
 
+    _anchor_index_state: bool | None = None
+
+    async def _ensure_anchor_index(self, db) -> bool:
+        """H6 — one compound TEXT index over every label source _doc_labels
+        reads. Idempotent create on first use; any failure (permissions, a
+        conflicting text index, fake test db) downgrades this process to the
+        legacy cached-table path permanently. Index name is stable so
+        re-creates are no-ops."""
+        if self._anchor_index_state is not None:
+            return self._anchor_index_state
+        fields = [("title", "text"), ("filename", "text")]
+        for blob in ("metadata", "document_metadata", "source_metadata"):
+            for key_ in ("title", "book_title", "name", "author", "authors",
+                         "creator", "creators"):
+                fields.append((f"{blob}.{key_}", "text"))
+        fields += [
+            ("facet_profile.doc_facets.display_name", "text"),
+            ("facet_profile.doc_facets.aliases", "text"),
+            ("facet_profile.doc_facets.search_terms", "text"),
+        ]
+        try:
+            await db["documents"].create_index(
+                fields, name="documents_anchor_text", background=True
+            )
+            self._anchor_index_state = True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "documents anchor text index unavailable (%s) — using the "
+                "cached label-table path", exc,
+            )
+            self._anchor_index_state = False
+        return self._anchor_index_state
+
+    async def _matching_docs_indexed(
+        self,
+        db,
+        query: str,
+        corpus_ids: list[str],
+    ) -> list[tuple[float, str, set[str], dict[str, Any]]] | None:
+        """H6 — indexed candidate lookup: ONE $text query over the documents
+        anchor index returns <=24 candidate docs; scoring (same fn, same
+        threshold) runs on those alone. Cold cost = one indexed query instead
+        of fetching + decoding every document record (486 docs ≈ seconds).
+        Side-win: no label-table TTL — new books anchor instantly.
+
+        Returns None when the indexed path is unavailable (caller falls back
+        to the cached-table scan). Known edge: a label made ENTIRELY of text-
+        index stopwords can be missed here; DOCUMENT_ANCHOR_INDEXED=false
+        restores the exhaustive scan.
+        """
+        from pymongo.errors import OperationFailure as _OpFail
+
+        if not await self._ensure_anchor_index(db):
+            return None
+        projection: dict[str, int] = {
+            "_id": 0, "doc_id": 1, "corpus_id": 1, "filename": 1, "title": 1,
+            "facet_profile.doc_facets.display_name": 1,
+            "facet_profile.doc_facets.facet_id": 1,
+            "facet_profile.doc_facets.aliases": 1,
+            "facet_profile.doc_facets.search_terms": 1,
+        }
+        for blob in ("metadata", "document_metadata", "source_metadata"):
+            for subkey in ("title", "book_title", "name", "author", "authors",
+                           "creator", "creators"):
+                projection[f"{blob}.{subkey}"] = 1
+        try:
+            candidates = await db["documents"].find(
+                {"corpus_id": {"$in": corpus_ids}, "$text": {"$search": query}},
+                projection,
+            ).limit(24).to_list(length=24)
+        except _OpFail:
+            self._anchor_index_state = False
+            return None
+        query_norm = _norm(query)
+        q_tokens = _tokens(query_norm)
+        scored: list[tuple[float, str, set[str], dict[str, Any]]] = []
+        for doc in candidates:
+            best_score, best_label, best_tokens = 0.0, "", set()
+            for label in _doc_labels(doc):
+                label_norm = _norm(label)
+                label_tokens = _tokens(label_norm)
+                score = _score_doc_match(
+                    query, label,
+                    query_norm=query_norm, q_tokens=q_tokens,
+                    label_norm=label_norm, label_tokens=label_tokens,
+                )
+                if score > best_score:
+                    best_score, best_label, best_tokens = score, label, label_tokens
+            if best_score >= _DOC_ANCHOR_THRESHOLD:
+                scored.append((
+                    best_score, best_label, set(best_tokens),
+                    {"doc_id": doc.get("doc_id"), "corpus_id": doc.get("corpus_id")},
+                ))
+        scored.sort(key=lambda item: (item[0], len(item[1])), reverse=True)
+        return scored[:_DOC_ANCHOR_MAX_DOCS]
+
     async def _doc_label_table(
         self,
         db,
@@ -386,26 +502,42 @@ class DocumentAnchorRetriever:
         cached = _DOC_LABEL_CACHE.get(key)
         if cached is not None:
             return cached
+        # H6 — project ONLY the subfields _doc_labels reads. The old
+        # whole-blob projection decoded every doc's full metadata/docling
+        # payload on a cold fetch (486 docs ≈ seconds of BSON decode).
+        _META_SUBKEYS = (
+            "title", "book_title", "name",
+            "author", "authors", "creator", "creators",
+        )
+        projection: dict[str, int] = {
+            "_id": 0,
+            "doc_id": 1,
+            "corpus_id": 1,
+            "filename": 1,
+            "title": 1,
+            "facet_profile.doc_facets.display_name": 1,
+            "facet_profile.doc_facets.facet_id": 1,
+            "facet_profile.doc_facets.aliases": 1,
+            "facet_profile.doc_facets.search_terms": 1,
+        }
+        for blob in ("metadata", "document_metadata", "source_metadata"):
+            for subkey in _META_SUBKEYS:
+                projection[f"{blob}.{subkey}"] = 1
         cursor = db["documents"].find(
-            {"corpus_id": {"$in": corpus_ids}},
-            {
-                "_id": 0,
-                "doc_id": 1,
-                "corpus_id": 1,
-                "filename": 1,
-                "title": 1,
-                "metadata": 1,
-                "document_metadata": 1,
-                "source_metadata": 1,
-                "facet_profile": 1,
-            },
+            {"corpus_id": {"$in": corpus_ids}}, projection
         )
         docs = await cursor.to_list(length=None)
-        table: list[tuple[list[str], dict[str, Any]]] = []
+        table: list[tuple[list[tuple[str, str, set[str]]], dict[str, Any]]] = []
         for doc in docs:
             labels = _doc_labels(doc)
             if not labels:
                 continue
+            # Precompute (label, norm, tokens) once at table build — scoring
+            # runs per retrieve over every label; tokenizing ~4k labels per
+            # call was pure waste (labels change only at ingest).
+            label_structs = [
+                (label, _norm(label), _tokens(label)) for label in labels
+            ]
             # Only identifiers survive into the cache — downstream
             # (_chunks_for_doc) reads doc_id/corpus_id; the metadata blobs
             # stay out of memory.
@@ -413,7 +545,7 @@ class DocumentAnchorRetriever:
                 "doc_id": doc.get("doc_id"),
                 "corpus_id": doc.get("corpus_id"),
             }
-            table.append((labels, slim))
+            table.append((label_structs, slim))
         _DOC_LABEL_CACHE.set(key, table)
         return table
 
@@ -423,18 +555,32 @@ class DocumentAnchorRetriever:
         query: str,
         corpus_ids: list[str],
     ) -> list[tuple[float, str, set[str], dict[str, Any]]]:
+        from config import get_settings as _gs
+
+        if bool(getattr(_gs(), "DOCUMENT_ANCHOR_INDEXED", True)):
+            indexed = await self._matching_docs_indexed(db, query, corpus_ids)
+            if indexed is not None:
+                return indexed
         table = await self._doc_label_table(db, corpus_ids)
+        query_norm = _norm(query)
+        q_tokens = _tokens(query_norm)
         scored: list[tuple[float, str, set[str], dict[str, Any]]] = []
-        for labels, doc in table:
+        for label_structs, doc in table:
             best_score = 0.0
             best_label = ""
-            for label in labels:
-                score = _score_doc_match(query, label)
+            best_tokens: set[str] = set()
+            for label, label_norm, label_tokens in label_structs:
+                score = _score_doc_match(
+                    query, label,
+                    query_norm=query_norm, q_tokens=q_tokens,
+                    label_norm=label_norm, label_tokens=label_tokens,
+                )
                 if score > best_score:
                     best_score = score
                     best_label = label
+                    best_tokens = label_tokens
             if best_score >= _DOC_ANCHOR_THRESHOLD:
-                scored.append((best_score, best_label, _tokens(best_label), doc))
+                scored.append((best_score, best_label, set(best_tokens), doc))
         scored.sort(key=lambda item: (item[0], len(item[1])), reverse=True)
         return scored[:_DOC_ANCHOR_MAX_DOCS]
 

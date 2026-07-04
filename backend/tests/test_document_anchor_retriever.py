@@ -201,6 +201,37 @@ async def test_doc_label_table_is_cached_across_retrievals(monkeypatch):
 
     assert find_calls["documents"] == 1  # second call served from cache
     assert table1 == table2
-    labels, slim = table1[0]
-    assert any("enterprise" in label.lower() for label in labels)
+    label_structs, slim = table1[0]
+    # H6 — table entries carry precomputed (label, norm, tokens) so scoring
+    # never re-tokenizes ~4k labels per retrieve; structs must stay faithful.
+    from services.retriever.document_anchor import _norm, _tokens
+
+    assert any("enterprise" in label.lower() for label, _n, _t in label_structs)
+    for label, norm, tokens in label_structs:
+        assert norm == _norm(label) and tokens == _tokens(label)
     assert set(slim) == {"doc_id", "corpus_id"}  # metadata blobs excluded
+
+
+def test_score_fast_path_equivalent_to_default():
+    # H6 — precomputed-arg scoring MUST be bit-identical to the default path.
+    from services.retriever.document_anchor import _norm, _tokens
+
+    cases = [
+        ("compare fowler patterns of enterprise application architecture layering",
+         "Patterns of Enterprise Application Architecture"),
+        ("how do habits compound", "Atomic Habits"),
+        ("deep work and focus", "Deep Work"),
+        ("unrelated question about pottery", "Thinking, Fast and Slow"),
+        ("gifts differing myers briggs", "Isabel Briggs Myers Gifts Differing"),
+        ("", "Deep Work"),
+        ("deep work", ""),
+    ]
+    for query, label in cases:
+        slow = _score_doc_match(query, label)
+        qn = _norm(query)
+        fast = _score_doc_match(
+            query, label,
+            query_norm=qn, q_tokens=_tokens(qn),
+            label_norm=_norm(label), label_tokens=_tokens(label),
+        )
+        assert fast == slow, (query, label, fast, slow)

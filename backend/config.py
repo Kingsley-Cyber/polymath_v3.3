@@ -216,6 +216,18 @@ class Settings(BaseSettings):
             "additively (sources untouched, reversible)."
         ),
     )
+    DOCUMENT_ANCHOR_INDEXED: bool = Field(
+        default=True,
+        description=(
+            "H6 — document_anchor candidate lookup via the documents_anchor_text "
+            "Mongo text index (ONE indexed query) instead of fetching + scoring "
+            "every document's labels in python (486-doc cold fetch repeatedly "
+            "blew the funnel's 2.5s wall, silently dropping the lane). False "
+            "restores the exhaustive cached-table scan (also the automatic "
+            "fallback when the index can't be created). Edge: labels made "
+            "entirely of text-index stopwords can be missed on the indexed path."
+        ),
+    )
     WATERFALL_ASSEMBLY: bool = Field(
         default=False,
         description=(
