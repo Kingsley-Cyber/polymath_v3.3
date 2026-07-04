@@ -569,10 +569,15 @@ cross-domain emphasis a single cheap vector search (the entry point, not an afte
 U1 **Tier-0 routing first** (W1): one doc_summaries search prunes the doc universe before every
    lane — speed (smaller pools), precision (on-topic docs), cross-domain (routes across corpora).
    Soft boost only; hard filter only for §5.1 anchors.
-U2 **Promoted-payload soft prefilter with fallback**: query concepts → Qdrant filter on
-   concepts[]/entity_ids; DETERMINISTIC fallback = if filtered candidate count < K_min, rerun
-   unfiltered (never strands recall). semantic_chunk_type ↔ operator atoms as RANK-ONLY bonus
-   (definition query prefers definition/principle chunks) — never a score multiplier.
+U2 **DONE 2026-07-04 (2c475ed).** Funnel-B should-filter on promoted concepts[]/entity_ids
+   (terms from the RAW query; conventions locked to promote._norm_term + ENTITY-ID LAW), with
+   the deterministic < K_min unfiltered rerun (PAYLOAD_PREFILTER_MIN_RESULTS=8; live receipt:
+   unpromoted library results IDENTICAL to knob-off). semantic_chunk_type ↔ query operator
+   (definition/comparison/procedure/causal, prefilter.py) as a RANK-ONLY +0.03 bonus
+   (SEMANTIC_TYPE_RANK_BONUS; CE stays the authority). GOTCHA CAUGHT LIVE: the should-filter
+   on an UNINDEXED payload field full-scanned 561k chunks (21.6s) — concepts/entity_ids are
+   now in _CHUNK_PAYLOAD_INDEXES so startup readiness guarantees them per corpus
+   (21.6s → 0.88s incl. fallback). Kill-switch PAYLOAD_SOFT_PREFILTER.
 U3 **Mode A expansion TTL cache** (entity-seed-set keyed, ~180s) + keep rerank uncached (CE is
    the authority; caching it risks staleness for marginal gain).
 U4 Per-phase timing report already instrumented — surface it in trace metadata for tuning.
