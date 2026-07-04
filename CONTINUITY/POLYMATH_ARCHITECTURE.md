@@ -607,8 +607,16 @@ H5 **CLOSED 2026-07-03 (Q1 investigation — no fix needed).** The 5–7s anomal
    graph 2.25s (Mode A escalated to live Cypher because authentic_library has NO promoted
    neighbor_chunks yet — payload-first activates there only after re-promote/backfill) ·
    fact_seed 2.01s (overlapped with embed by design).
-H6 document_anchor should match M2 title/author via anchor_detect (fast, indexed) before its
-   heavy Mongo text path.
+H6 **DONE 2026-07-03 (7a4594f).** Root cause was worse than slow: the 486-doc label fetch +
+   ~4k in-python label scorings blew the funnel's 2.5s wall on cold turns — funnel_detail
+   anchor:2.50s was a TIMEOUT and the lane's results were silently DROPPED (both Q1 baseline
+   turns). Now: documents_anchor_text Mongo TEXT index (title/author/facet label subfields),
+   ONE indexed $text query -> <=24 candidates -> same scoring/threshold
+   (DOCUMENT_ANCHOR_INDEXED=true kill-switch; auto-fallback to a slimmed+precomputed+
+   parallelized legacy table path). No label-table TTL on the indexed path — new books anchor
+   instantly. Receipts: isolated cold 0.39s incl. create_index (was 2.5-9.6s), non-matching
+   8ms; in situ same graph turn: MAIN retrieval 10.89s->4.59s, funnels 2.52s->0.81s,
+   anchor 2.50s-timeout->0.02s WITH results. Stopword-only-title edge documented on the knob.
 
 ### 11.5 Graph tier (the cross-domain flagship)
 G1 **Pre-expansion relation prefilter**: filter funnel-B candidates has_relations=true (+
