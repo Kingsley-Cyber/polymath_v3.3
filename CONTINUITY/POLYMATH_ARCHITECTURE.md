@@ -709,15 +709,30 @@ the global cap (semaphores are the governors; worker count just exploits them).
 RECEIPT: sidecar idle <10% over 1h (was ~40%), files/hour >=1.5x, site stays responsive.
 RISK: chunker CPU on the extra doc — watch /api/health during receipt; default stays 3 not 4.
 
-**P1 STATUS (live, receipt pending — ACTIVE TASK as of 2026-07-05 05:45):** deployed 05:37
-(26fcb69) onto the running batch a6aae588 at 101/498 done. 3 in-flight confirmed; services
-200 under load; sidecar pid 8399 running with GHOST_B_IDLE_SHUTDOWN_SECONDS=0 (idle-death
-disabled for the measurement). A one-shot session cron fires ~06:51 to compute the verdict:
-files/hour since 05:37 (baseline ~9/hr, target >=14), GPU duty (ghosts+embed log seconds /
-elapsed, target >85%), health held, failed count vs 5 (4x libgen chunker-timeout cohort +
-1 neo4j gap — known, non-blocking). If the cron was lost to a session restart, compute those
-three numbers manually from docker logs + Mongo. PASS -> consider INGEST_GLOBAL_MAX_DOCS=4,
-then P2/P3. FAIL -> diagnose which stage starved before touching anything.
+**P1 VERDICT (computed manually 2026-07-05 06:56 — cron lost to session lifecycle):**
+window 05:37→06:56 (79 min): 10 files done = 7.6/hr (target >=14) FAIL · GPU duty 542s
+ghosts+embed / 4,740s elapsed = ~11% (target >85%) FAIL · health held PASS · failures 6
+vs 5 known — the +1 is a deploy-restart casualty (coll_Standards mid-embed at the 05:39
+bounce, verify caught 1621/1641 vectors; re-queue post-batch) PASS-with-note.
+
+DIAGNOSIS (per the fail rule, before touching anything): the window is contaminated —
+the 05:39 deploy restart stale-leased the 3 in-flight docs and the lease sweep re-leased
+them SIMULTANEOUSLY (~20 min reduced flow, observed RUNNING 0 / RECOVERABLE 3 at ~06:10),
+synchronizing the workers into phase lockstep. Observed live at 06:56: ALL THREE running
+docs in phase=chunking at once (976KB + 1344KB + 1331KB code-heavy books, code_splitter
+hard-split storms) while the Metal gate idled. P1's supply floor WORKED (3 in flight the
+whole window — supply was never the constraint after the restart); the constraint is
+correlated phases + heavyweight docs dominating the tail. Cap 3->4 does NOT follow (rule
+requires PASS; more docs in lockstep chunking feed CPU contention, not the GPU gate).
+
+NEXT (in order): (1) clean 60-90 min re-measure window with ZERO restarts before any
+further P1 conclusion; (2) P4 longest-first ordering + (3) P5 TWO_PHASE_INGEST flip at
+the NEXT batch — both attack lockstep directly; (4) STRATEGIC: the RTX vLLM lane
+(192.168.1.83:8000, polymath-extract, wired via ghost_b extract_entities pool
+base_url/api_key passthrough — probe scripts/probe_rtx_extraction.py) moves ghosts off
+Metal entirely; §13 measured ghosts = 84% of Metal seconds, so cloud-routing extraction
+shrinks the duty problem to embed alone. Blocked 06:56 on the Windows firewall inbound
+rule (box unreachable LAN-wide; owner has the one-line admin command).
 
 **P2 — GLiREL surgery (attacks the 75%).** (a) set GHOST_B_GLIREL_BATCH on the Mac (unset;
 Windows runner uses 512); (b) pair pruning — GLiREL scales with entity-PAIRS: cap pairs/chunk
