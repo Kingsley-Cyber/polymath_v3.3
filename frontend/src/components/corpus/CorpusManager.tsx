@@ -31,6 +31,7 @@ import type {
   ModelProfileRef,
 } from "../../types";
 import { DEFAULT_INGESTION_CONFIG, inferPreset } from "../../types";
+import { composeModelString, findPreset } from "../../types";
 import { CorpusDetail } from "./CorpusDetail";
 import { IngestionModelPool } from "../settings/IngestionModelPool";
 import { Button } from "../ui/Button";
@@ -73,6 +74,109 @@ const PRESET_META: {
     key: "custom",
     label: "Custom",
     tooltip: "Reveal the underlying toggles and set them by hand.",
+  },
+];
+
+type IngestionWorkflowId =
+  | "local_only"
+  | "rtx_only"
+  | "cloud_only"
+  | "local_cloud"
+  | "local_rtx"
+  | "cloud_rtx"
+  | "all_lanes"
+  | "vectors_only"
+  | "custom";
+
+const WORKFLOW_META: {
+  key: IngestionWorkflowId;
+  label: string;
+  detail: string;
+  engine: ExtractionEngine;
+  needsCloudPool: boolean;
+  needsRtx: boolean;
+  needsCloudApi: boolean;
+}[] = [
+  {
+    key: "local_only",
+    label: "Local only",
+    detail: "Mac sidecars run extraction; no LLM extraction API calls.",
+    engine: "local",
+    needsCloudPool: false,
+    needsRtx: false,
+    needsCloudApi: false,
+  },
+  {
+    key: "rtx_only",
+    label: "RTX vLLM only",
+    detail: "Windows vLLM server receives the cloud-shaped extraction contract.",
+    engine: "cloud",
+    needsCloudPool: true,
+    needsRtx: true,
+    needsCloudApi: false,
+  },
+  {
+    key: "cloud_only",
+    label: "Cloud API only",
+    detail: "Extraction goes to configured cloud/API model chips.",
+    engine: "cloud",
+    needsCloudPool: true,
+    needsRtx: false,
+    needsCloudApi: true,
+  },
+  {
+    key: "local_cloud",
+    label: "Local + cloud",
+    detail: "Local sidecars and cloud chips split chunks deterministically.",
+    engine: "dual",
+    needsCloudPool: true,
+    needsRtx: false,
+    needsCloudApi: true,
+  },
+  {
+    key: "local_rtx",
+    label: "Local + RTX",
+    detail: "Mac sidecars and RTX vLLM split extraction chunks.",
+    engine: "dual",
+    needsCloudPool: true,
+    needsRtx: true,
+    needsCloudApi: false,
+  },
+  {
+    key: "cloud_rtx",
+    label: "Cloud + RTX",
+    detail: "Cloud/API and RTX chips share the extraction pool.",
+    engine: "cloud",
+    needsCloudPool: true,
+    needsRtx: true,
+    needsCloudApi: true,
+  },
+  {
+    key: "all_lanes",
+    label: "Local + cloud + RTX",
+    detail: "Mac sidecars plus all configured cloud/RTX extraction chips.",
+    engine: "dual",
+    needsCloudPool: true,
+    needsRtx: true,
+    needsCloudApi: true,
+  },
+  {
+    key: "vectors_only",
+    label: "Vectors only",
+    detail: "Skip graph extraction; vector/hybrid retrieval only.",
+    engine: "off",
+    needsCloudPool: false,
+    needsRtx: false,
+    needsCloudApi: false,
+  },
+  {
+    key: "custom",
+    label: "Custom",
+    detail: "Keep the current engine and pools exactly as configured.",
+    engine: "inherit",
+    needsCloudPool: false,
+    needsRtx: false,
+    needsCloudApi: false,
   },
 ];
 
@@ -136,6 +240,111 @@ function createDefaultIngestionConfig(
   };
 }
 
+function isRtxModel(entry: ModelProfileRef): boolean {
+  const provider = (entry.provider_preset || "").toLowerCase();
+  const model = (entry.model || "").toLowerCase();
+  const base = (entry.base_url || "").toLowerCase();
+  const lifecycle = (entry.lifecycle_base_url || "").toLowerCase();
+  const extra = entry.extra_params || {};
+  return (
+    provider === "vllm-rtx" ||
+    provider === "vllm" ||
+    Boolean(extra.managed_vllm) ||
+    extra.resource_class === "rtx" ||
+    model.includes("polymath-extract") ||
+    model.includes("vllm") ||
+    base.includes(":8000") ||
+    lifecycle.includes(":8085")
+  );
+}
+
+function hasNonRtxCloudModel(entries: ModelProfileRef[]): boolean {
+  return entries.some((entry) => !isRtxModel(entry));
+}
+
+function makeRtxExtractionModel(): ModelProfileRef {
+  const preset = findPreset("vllm-rtx");
+  return {
+    provider_preset: "vllm-rtx",
+    model: composeModelString("vllm-rtx", preset?.example_model ?? "polymath-extract"),
+    base_url: preset?.base_url ?? "http://192.168.1.83:8000/v1",
+    api_key: null,
+    max_concurrent: preset?.default_max_concurrent ?? 60,
+    lifecycle_base_url: preset?.lifecycle?.base_url ?? "http://192.168.1.83:8085",
+    lifecycle_api_key: null,
+    lifecycle_auto_start: preset?.lifecycle?.auto_start ?? true,
+    lifecycle_auto_stop: preset?.lifecycle?.auto_stop ?? false,
+    lifecycle_up_path: "/up",
+    lifecycle_status_path: "/status",
+    lifecycle_down_path: "/down",
+    lifecycle_ready_timeout_seconds:
+      preset?.lifecycle?.ready_timeout_seconds ?? 360,
+    extra_params: {
+      ...(preset?.kwargs ?? {}),
+      managed_vllm: true,
+      resource_class: "rtx",
+      supports_json_schema: true,
+    },
+  };
+}
+
+function ensureRtxExtractionModel(entries: ModelProfileRef[]): ModelProfileRef[] {
+  if (entries.some(isRtxModel)) return entries;
+  return [makeRtxExtractionModel(), ...entries];
+}
+
+function inferWorkflow(config: IngestionConfig): IngestionWorkflowId {
+  const engine = draftEngine(config.extraction_engine, "local");
+  const pool = config.extraction_models ?? [];
+  const hasRtx = pool.some(isRtxModel);
+  const hasCloud = hasNonRtxCloudModel(pool);
+  if (engine === "off") return "vectors_only";
+  if (engine === "local") return "local_only";
+  if (engine === "cloud") {
+    if (hasRtx && hasCloud) return "cloud_rtx";
+    if (hasRtx) return "rtx_only";
+    return "cloud_only";
+  }
+  if (engine === "dual" || engine === "local_then_cloud") {
+    if (hasRtx && hasCloud) return "all_lanes";
+    if (hasRtx) return "local_rtx";
+    return "local_cloud";
+  }
+  return "custom";
+}
+
+function applyWorkflowToConfig(
+  cfg: IngestionConfig,
+  workflowId: IngestionWorkflowId,
+): IngestionConfig {
+  const workflow = WORKFLOW_META.find((item) => item.key === workflowId);
+  if (!workflow || workflowId === "custom") return cfg;
+
+  let next: IngestionConfig = {
+    ...cfg,
+    extraction_engine: workflow.engine,
+    // New workflow choices are explicit. Ghost B never silently borrows
+    // Summary chips unless a legacy corpus still carries models_linked=true.
+    models_linked: false,
+  };
+  if (workflowId === "vectors_only") {
+    next = applyPresetToConfig(next, "fast");
+  } else if (next.preset === "fast" || inferPreset(next) === "fast") {
+    next = applyPresetToConfig(next, "balanced");
+  }
+  if (workflow.needsRtx) {
+    next.extraction_models = ensureRtxExtractionModel(next.extraction_models ?? []);
+  }
+  return next;
+}
+
+function poolLabel(entries: ModelProfileRef[]): string {
+  if (!entries.length) return "empty";
+  return entries
+    .map((entry) => `${entry.provider_preset || "custom"}:${entry.model} @${entry.max_concurrent}`)
+    .join(", ");
+}
+
 interface PresetSelectorProps {
   config: IngestionConfig;
   onChange: (next: IngestionConfig) => void;
@@ -148,11 +357,11 @@ function PresetModeSelector({ config, onChange, idPrefix }: PresetSelectorProps)
   return (
     <div>
       <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
-        Preset Mode
+        Retrieval Depth
       </div>
       <div
         role="radiogroup"
-        aria-label="Ingestion preset"
+        aria-label="Retrieval depth"
         className="grid grid-cols-2 sm:grid-cols-4 gap-1.5"
       >
         {PRESET_META.map((p) => {
@@ -228,6 +437,89 @@ function PresetModeSelector({ config, onChange, idPrefix }: PresetSelectorProps)
         </div>
       )}
 
+    </div>
+  );
+}
+
+function IngestionWorkflowSelector({
+  config,
+  onChange,
+  idPrefix,
+}: {
+  config: IngestionConfig;
+  onChange: (next: IngestionConfig) => void;
+  idPrefix: string;
+}) {
+  const current = inferWorkflow(config);
+  const currentMeta = WORKFLOW_META.find((item) => item.key === current) ?? WORKFLOW_META[0];
+  const extractionPool = config.extraction_models ?? [];
+  const summaryPool = config.summary_models ?? [];
+  const cloudActive = usesCloudEngine(draftEngine(config.extraction_engine, "local"));
+
+  return (
+    <div className="border border-accent-main/25 bg-bg-base/50 px-3 py-2 space-y-2">
+      <div>
+        <label
+          htmlFor={`${idPrefix}-ingestion-workflow`}
+          className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase"
+        >
+          Ingestion workflow
+        </label>
+        <select
+          id={`${idPrefix}-ingestion-workflow`}
+          data-testid={`${idPrefix}-ingestion-workflow`}
+          value={current}
+          onChange={(event) =>
+            onChange(applyWorkflowToConfig(config, event.target.value as IngestionWorkflowId))
+          }
+          className="mt-1 w-full px-2 py-1.5 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
+        >
+          {WORKFLOW_META.map((item) => (
+            <option key={item.key} value={item.key}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+        <div className="mt-1 text-[10px] text-content-tertiary leading-snug">
+          {currentMeta.detail}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-[10px]">
+        <div className="border border-border-minimal bg-bg-surface/50 px-2 py-1.5">
+          <div className="text-content-tertiary uppercase tracking-widest text-[8px]">
+            Extraction
+          </div>
+          <div className="text-content-primary font-bold uppercase mt-0.5">
+            {draftEngine(config.extraction_engine, "local").replace(/_/g, " ")}
+          </div>
+          <div className="text-content-tertiary mt-0.5">
+            {cloudActive ? poolLabel(extractionPool) : "cloud pool inactive"}
+          </div>
+        </div>
+        <div className="border border-border-minimal bg-bg-surface/50 px-2 py-1.5">
+          <div className="text-content-tertiary uppercase tracking-widest text-[8px]">
+            Summary
+          </div>
+          <div className="text-content-primary font-bold uppercase mt-0.5">
+            {config.chunk_summarization ? "enabled" : "off"}
+          </div>
+          <div className="text-content-tertiary mt-0.5">
+            {summaryPool.length ? poolLabel(summaryPool) : "configure below"}
+          </div>
+        </div>
+        <div className="border border-border-minimal bg-bg-surface/50 px-2 py-1.5">
+          <div className="text-content-tertiary uppercase tracking-widest text-[8px]">
+            Embedding
+          </div>
+          <div className="text-content-primary font-bold uppercase mt-0.5">
+            {config.embed_mode ?? "local"}
+          </div>
+          <div className="text-content-tertiary mt-0.5">
+            {config.embedding_model} ({config.embedding_dimension}d)
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -535,27 +827,17 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               placeholder="corpus_name"
               className="w-full px-2 py-1.5 bg-bg-base border border-border-minimal text-[12px] text-content-primary placeholder:text-content-tertiary focus:outline-none focus:border-accent-main"
             />
+            <IngestionWorkflowSelector
+              config={newConfig}
+              onChange={setNewConfig}
+              idPrefix="create"
+            />
             <input
               type="text"
               value={newDescription}
               onChange={(e) => setNewDescription(e.target.value)}
               placeholder="description (optional)"
               className="w-full px-2 py-1.5 bg-bg-base border border-border-minimal text-[12px] text-content-primary placeholder:text-content-tertiary focus:outline-none focus:border-accent-main"
-            />
-            {/* Preset Mode — radio group. Custom reveals the raw toggles. */}
-            <PresetModeSelector
-              config={newConfig}
-              onChange={setNewConfig}
-              idPrefix="create"
-            />
-
-            {/* Embed dispatch — three-way selector + per-mode credentials */}
-            <EmbedSection
-              config={newConfig}
-              onPatch={(patch) =>
-                setNewConfig((prev) => ({ ...prev, ...patch }))
-              }
-              modalStatus={modalStatus}
             />
 
             {/* Parent/child token budgets are AUTO-TUNED (validated defaults
@@ -587,6 +869,21 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                 setNewConfig((prev) => ({ ...prev, ...patch }))
               }
               editing={true}
+            />
+
+            {/* Embed dispatch — three-way selector + per-mode credentials */}
+            <EmbedSection
+              config={newConfig}
+              onPatch={(patch) =>
+                setNewConfig((prev) => ({ ...prev, ...patch }))
+              }
+              modalStatus={modalStatus}
+            />
+
+            <PresetModeSelector
+              config={newConfig}
+              onChange={setNewConfig}
+              idPrefix="create"
             />
 
             {/* Confidence threshold sits on its own because it's GHOST-B-specific
@@ -875,6 +1172,12 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                           </div>
                         )}
 
+                        <IngestionWorkflowSelector
+                          config={editConfig}
+                          onChange={(next) => setEditConfig(next)}
+                          idPrefix={`edit-${corpus.corpus_id}`}
+                        />
+
                         <div>
                           <label className="text-[9px] text-content-tertiary tracking-wider">
                             DESCRIPTION
@@ -1105,35 +1408,6 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
 // mirrors the Summary pool's chips (since the worker reuses summary_models
 // for GHOST B in that mode).
 
-// Two-toggle contract model (owner-specified): local on → "local", cloud on →
-// "cloud", both on → "dual" (even/odd chunk split across both engines),
-// neither → "off" (vectors-only). The resolved truth line below the toggles is
-// fetched from the backend and shows EXACTLY what the worker will run —
-// including sidecar liveness and which pool actually fires — so the active
-// workflow is never hidden across two screens again (§13 correction).
-function engineToggles(
-  engine: ExtractionEngine | undefined,
-  inheritedEngine?: ResolvedDraftEngine,
-): {
-  local: boolean;
-  cloud: boolean;
-} {
-  const resolved = engine && engine !== "inherit" ? engine : (inheritedEngine ?? "local");
-  switch (resolved) {
-    case "local":
-      return { local: true, cloud: false };
-    case "cloud":
-      return { local: false, cloud: true };
-    case "dual":
-    case "local_then_cloud":
-      return { local: true, cloud: true };
-    case "off":
-      return { local: false, cloud: false };
-    default:
-      return { local: true, cloud: false }; // "inherit"/unset — resolver floor
-  }
-}
-
 type ResolvedDraftEngine = Exclude<ExtractionEngine, "inherit">;
 
 function draftEngine(
@@ -1184,7 +1458,6 @@ function IngestionModelsSection({
 
   const engine = config.extraction_engine;
   const draft = draftEngine(engine, contract?.engine);
-  const toggles = engineToggles(engine, contract?.engine);
   const draftUsesLocal = usesLocalEngine(draft);
   const draftUsesCloud = usesCloudEngine(draft);
   const draftPoolSource = draftUsesCloud
@@ -1213,12 +1486,6 @@ function IngestionModelsSection({
       (draftUsesCloud &&
         contract.pool.map(formatExtractionPoolEntry).join("|") !==
           draftPool.map(formatExtractionPoolEntry).join("|")));
-  const setToggles = (local: boolean, cloud: boolean) => {
-    onPatch({
-      extraction_engine:
-        local && cloud ? "dual" : local ? "local" : cloud ? "cloud" : "off",
-    });
-  };
 
   useEffect(() => {
     if (!corpusId) return;
@@ -1245,36 +1512,8 @@ function IngestionModelsSection({
         <div className="text-[12px] font-bold tracking-widest text-content-tertiary uppercase">
           Ingestion Models
         </div>
-        <div className="flex items-center gap-1.5 text-[10px] tracking-wider">
-          <span className="text-content-tertiary uppercase">Cloud extraction source</span>
-          <button
-            type="button"
-            disabled={!editing}
-            onClick={() => onPatch({ models_linked: false })}
-            className={
-              "px-2 py-1 rounded-sm border font-bold uppercase transition-colors " +
-              (!linked
-                ? "border-accent-main bg-accent-main/10 text-accent-main"
-                : "border-border-minimal text-content-tertiary hover:text-content-primary")
-            }
-            title="Use the dedicated Extraction Models pool for Ghost B."
-          >
-            Extraction pool
-          </button>
-          <button
-            type="button"
-            disabled={!editing}
-            onClick={() => onPatch({ models_linked: true })}
-            className={
-              "px-2 py-1 rounded-sm border font-bold uppercase transition-colors " +
-              (linked
-                ? "border-accent-main bg-accent-main/10 text-accent-main"
-                : "border-border-minimal text-content-tertiary hover:text-content-primary")
-            }
-            title="Explicitly reuse the Summary Models pool for cloud extraction."
-          >
-            Summary pool
-          </button>
+        <div className="text-[10px] text-content-tertiary tracking-wider uppercase">
+          {draftUsesCloud ? "extraction pool active" : "cloud pool hidden"}
         </div>
       </div>
 
@@ -1283,33 +1522,11 @@ function IngestionModelsSection({
         className="border border-border-minimal bg-bg-base/50 px-3 py-2 space-y-1.5"
         data-testid="extraction-contract-block"
       >
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-[10px] font-bold tracking-widest text-content-tertiary uppercase">
-            Extraction runs on
+            Extraction workflow
           </span>
-          <label className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider cursor-pointer">
-            <input
-              type="checkbox"
-              data-testid="extract-local-toggle"
-              checked={toggles.local}
-              disabled={!editing}
-              onChange={(e) => setToggles(e.target.checked, toggles.cloud)}
-              className="accent-accent-main"
-            />
-            LOCAL sidecars (GLiNER/GLiREL)
-          </label>
-          <label className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider cursor-pointer">
-            <input
-              type="checkbox"
-              data-testid="extract-cloud-toggle"
-              checked={toggles.cloud}
-              disabled={!editing}
-              onChange={(e) => setToggles(toggles.local, e.target.checked)}
-              className="accent-accent-main"
-            />
-            CLOUD model pool
-          </label>
-          <span className="ml-auto text-[10px] font-bold tracking-widest text-accent-secondary uppercase">
+          <span className="text-[10px] font-bold tracking-widest text-accent-secondary uppercase">
             {draftUsesLocal && draftUsesCloud
               ? "DUAL - both, chunks split"
               : draftUsesLocal
@@ -1320,7 +1537,27 @@ function IngestionModelsSection({
             {engine === "inherit" || engine === undefined ? " (inherited)" : ""}
             {engine === "local_then_cloud" ? " (local->cloud rescue)" : ""}
           </span>
+          <span className="ml-auto text-[10px] text-content-tertiary">
+            Change via Ingestion workflow above.
+          </span>
         </div>
+        {linked && draftUsesCloud && (
+          <div className="flex flex-wrap items-center gap-2 border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+            <span>
+              Legacy summary reuse is active: cloud extraction borrows Summary
+              Models. New workflows use a dedicated Extraction pool.
+            </span>
+            {editing && (
+              <button
+                type="button"
+                onClick={() => onPatch({ models_linked: false })}
+                className="px-2 py-0.5 border border-amber-300/50 text-amber-200 uppercase tracking-widest"
+              >
+                Detach
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Resolved truth line — what the worker will actually run NOW */}
         <div className="text-[10px] leading-relaxed" data-testid="extraction-contract-truth">
@@ -1446,28 +1683,31 @@ function IngestionModelsSection({
         testContext={{ corpusId, poolField: "summary_models" }}
       />
 
-      <IngestionModelPool
-        title="Extraction Models (GHOST B)"
-        subtitle={
-          linked
-            ? "Explicitly using Summary pool as the cloud extraction lane"
-            : draftUsesCloud
-              ? "Cloud/OpenAI-compatible extraction lane · tasks work-steal across chips"
-              : "Configured cloud extraction lane · inactive until CLOUD is enabled above"
-        }
-        value={extractionPool}
-        onChange={(next) => onPatch({ extraction_models: next })}
-        editing={editing}
-        readOnly={linked}
-        readOnlyHint={
-          "Choose Extraction pool above to configure Ghost B independently."
-        }
-        testKind="chat"
-        testContext={{
-          corpusId,
-          poolField: linked ? "summary_models" : "extraction_models",
-        }}
-      />
+      {draftUsesCloud ? (
+        <IngestionModelPool
+          title="Extraction Models (GHOST B)"
+          subtitle={
+            linked
+              ? "Legacy mode: Summary pool is currently reused for cloud extraction"
+              : "Cloud/OpenAI-compatible extraction lane · RTX and API chips share this pool"
+          }
+          value={extractionPool}
+          onChange={(next) => onPatch({ extraction_models: next })}
+          editing={editing}
+          readOnly={linked}
+          readOnlyHint="Detach legacy summary reuse to configure a dedicated extraction pool."
+          testKind="chat"
+          testContext={{
+            corpusId,
+            poolField: linked ? "summary_models" : "extraction_models",
+          }}
+        />
+      ) : (
+        <div className="border border-border-minimal bg-bg-base/40 px-3 py-2 text-[10px] text-content-tertiary leading-snug">
+          Extraction model pool hidden because this workflow does not send Ghost
+          B to cloud or RTX. Local sidecars are configured globally in Settings.
+        </div>
+      )}
     </div>
   );
 }

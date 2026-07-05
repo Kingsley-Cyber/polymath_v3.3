@@ -115,6 +115,11 @@ from services.ingestion.section_classifier import (
     is_noisy,
     should_skip_ghost_b,
 )
+from services.ingestion.resource_planner import (
+    ResourceProfile,
+    log_resource_profile,
+    plan_ingestion_resources,
+)
 from services.ingestion.source_identity import source_identity_doc_fields
 from services.secrets import decrypt as _decrypt_api_key
 from services.storage import mongo_reader, mongo_writer, qdrant_writer
@@ -127,6 +132,10 @@ _MODEL_PHASE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
 _MODEL_PHASE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
 _GHOST_B_FILE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
 _GHOST_B_FILE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
+_QDRANT_WRITE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
+_QDRANT_WRITE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
+_NEO4J_WRITE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
+_NEO4J_WRITE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
 
 
 def _plain_model_ref(ref: Any) -> dict[str, Any]:
@@ -149,22 +158,40 @@ def _pool_entry_uses_managed_vllm(entry: dict[str, Any] | Any) -> bool:
     return "vllm" in model or "vllm" in base_url or "vllm" in lifecycle_base
 
 
-def _config_uses_managed_vllm(config: IngestionConfig) -> bool:
-    refs: list[Any] = list(getattr(config, "extraction_models", []) or [])
-    if getattr(config, "models_linked", False):
-        refs.extend(list(getattr(config, "summary_models", []) or []))
-    return any(_pool_entry_uses_managed_vllm(ref) for ref in refs)
+def _cloud_pool_refs_for_config(config: IngestionConfig) -> list[Any]:
+    if getattr(config, "models_linked", True):
+        return list(getattr(config, "summary_models", []) or [])
+    return list(getattr(config, "extraction_models", []) or [])
+
+
+def _resource_profile_for_config(
+    config: IngestionConfig,
+    *,
+    extraction_engine: str | None = None,
+    pool: list[Any] | None = None,
+    source_location: str | None = None,
+) -> ResourceProfile:
+    return plan_ingestion_resources(
+        config=config,
+        extraction_engine=extraction_engine
+        if extraction_engine is not None
+        else getattr(config, "extraction_engine", None),
+        extraction_pool=pool if pool is not None else _cloud_pool_refs_for_config(config),
+        source_location=source_location,
+        settings=get_settings(),
+    )
 
 
 def _model_phase_doc_limit(config: IngestionConfig) -> int:
-    current = get_settings()
-    if _config_uses_managed_vllm(config):
-        return max(1, int(getattr(current, "INGEST_MANAGED_VLLM_MODEL_PHASE_DOCS", 2)))
-    return max(1, int(getattr(current, "INGEST_MAX_MODEL_PHASE_DOCS", 1)))
+    profile = _resource_profile_for_config(config)
+    return max(1, int(profile.model_phase_docs))
 
 
 def _model_phase_gate_key(config: IngestionConfig) -> str:
-    return "managed_vllm" if _config_uses_managed_vllm(config) else "default"
+    profile = _resource_profile_for_config(config)
+    if "remote_vllm" in profile.extraction_lanes:
+        return "remote_vllm"
+    return "default"
 
 
 def _shared_semaphore(
@@ -201,7 +228,15 @@ def _ghost_b_active_doc_limit(
     *,
     pool: list[dict[str, Any]],
     extraction_engine: str,
+    config: IngestionConfig | None = None,
 ) -> int:
+    if config is not None:
+        profile = _resource_profile_for_config(
+            config,
+            extraction_engine=extraction_engine,
+            pool=pool,
+        )
+        return max(1, int(profile.extraction_active_docs))
     current = get_settings()
     cloud_lane_active = extraction_engine in {"cloud", "dual", "local_then_cloud"}
     if cloud_lane_active and any(_pool_entry_uses_managed_vllm(entry) for entry in pool):
@@ -213,10 +248,19 @@ def _ghost_b_file_gate_key(
     *,
     pool: list[dict[str, Any]],
     extraction_engine: str,
+    config: IngestionConfig | None = None,
 ) -> str:
+    if config is not None:
+        profile = _resource_profile_for_config(
+            config,
+            extraction_engine=extraction_engine,
+            pool=pool,
+        )
+        if "remote_vllm" in profile.extraction_lanes:
+            return "remote_vllm"
     cloud_lane_active = extraction_engine in {"cloud", "dual", "local_then_cloud"}
     if cloud_lane_active and any(_pool_entry_uses_managed_vllm(entry) for entry in pool):
-        return "managed_vllm"
+        return "remote_vllm"
     return "default"
 
 
@@ -224,12 +268,39 @@ def _ghost_b_file_semaphore(
     *,
     pool: list[dict[str, Any]],
     extraction_engine: str,
+    config: IngestionConfig | None = None,
 ) -> asyncio.Semaphore:
     return _shared_semaphore(
         _GHOST_B_FILE_SEMAPHORES,
         _GHOST_B_FILE_SEMAPHORE_STATE,
-        key=_ghost_b_file_gate_key(pool=pool, extraction_engine=extraction_engine),
-        limit=_ghost_b_active_doc_limit(pool=pool, extraction_engine=extraction_engine),
+        key=_ghost_b_file_gate_key(
+            pool=pool,
+            extraction_engine=extraction_engine,
+            config=config,
+        ),
+        limit=_ghost_b_active_doc_limit(
+            pool=pool,
+            extraction_engine=extraction_engine,
+            config=config,
+        ),
+    )
+
+
+def _qdrant_write_semaphore() -> asyncio.Semaphore:
+    return _shared_semaphore(
+        _QDRANT_WRITE_SEMAPHORES,
+        _QDRANT_WRITE_SEMAPHORE_STATE,
+        key="qdrant",
+        limit=max(1, int(getattr(get_settings(), "QDRANT_INGEST_WRITE_CONCURRENCY", 2))),
+    )
+
+
+def _neo4j_write_semaphore() -> asyncio.Semaphore:
+    return _shared_semaphore(
+        _NEO4J_WRITE_SEMAPHORES,
+        _NEO4J_WRITE_SEMAPHORE_STATE,
+        key="neo4j",
+        limit=max(1, int(getattr(get_settings(), "NEO4J_INGEST_WRITE_CONCURRENCY", 1))),
     )
 
 
@@ -1131,6 +1202,11 @@ async def _run_ghosts_parallel(
             else config.extraction_models
         )
         pool = _build_ghost_pool(cloud_pool_refs)
+        resource_profile = _resource_profile_for_config(
+            config,
+            extraction_engine=extraction_engine,
+            pool=pool,
+        )
         cloud_primary = contract.engine in {"cloud", "dual"}
         if cloud_primary and pool:
             from services.ingestion.model_lifecycle import ensure_model_lifecycle_ready
@@ -1190,10 +1266,12 @@ async def _run_ghosts_parallel(
         active_doc_limit = _ghost_b_active_doc_limit(
             pool=pool,
             extraction_engine=extraction_engine,
+            config=config,
         )
         async with _ghost_b_file_semaphore(
             pool=pool,
             extraction_engine=extraction_engine,
+            config=config,
         ):
             logger.info(
                 "phase=ghost_b_file_gate doc=%s corpus=%s active_doc_limit=%d children=%d",
@@ -1201,6 +1279,16 @@ async def _run_ghosts_parallel(
                 corpus_id[:8],
                 active_doc_limit,
                 len(tasks),
+            )
+            log_resource_profile(
+                resource_profile,
+                extra={
+                    "doc": doc_id[:12],
+                    "corpus": corpus_id[:8],
+                    "phase": "ghost_b",
+                    "contract_engine": extraction_engine,
+                    "pool_size": len(pool),
+                },
             )
             logger.info(
                 "phase=ghost_b_contract doc=%s corpus=%s engine=%s source=%s "
@@ -2461,6 +2549,19 @@ async def run_ingest_job(
     )
     # Rebind the name so all downstream reads use the effective config.
     ingestion_config = effective_config
+    startup_profile = _resource_profile_for_config(
+        ingestion_config,
+        source_location=source_url,
+    )
+    log_resource_profile(
+        startup_profile,
+        extra={
+            "doc": "preparse",
+            "corpus": cid8,
+            "filename": filename,
+            "phase": "startup",
+        },
+    )
 
     # ── Phase 1: Parse ───────────────────────────────────────────────────
     async with _PARSE_SEMAPHORE:
@@ -3195,21 +3296,32 @@ async def run_ingest_job(
                 stage="qdrant",
                 on_phase=on_phase,
             )
-            await _write_qdrant_for_doc(
-                qdrant_client=qdrant_client,
-                corpus_id=corpus_id,
-                user_id=user_id,
-                filename=filename,
-                parents=parents,
-                children=children,
-                vec_map=vec_map,
-                summaries=summaries,
-                summary_vec_map=summary_vec_map,
-                config=ingestion_config,
-                child_sparse_map=child_sparse_map,
-                summary_sparse_map=summary_sparse_map,
-                facet_profile=facet_profile,
-            )
+            qdrant_sem = _qdrant_write_semaphore()
+            qdrant_wait_started = time.monotonic()
+            async with qdrant_sem:
+                qdrant_wait = time.monotonic() - qdrant_wait_started
+                logger.info(
+                    "phase=qdrant_write_gate doc=%s corpus=%s wait=%.2fs limit=%d",
+                    doc_id[:12],
+                    cid8,
+                    qdrant_wait,
+                    max(1, int(getattr(settings, "QDRANT_INGEST_WRITE_CONCURRENCY", 2))),
+                )
+                await _write_qdrant_for_doc(
+                    qdrant_client=qdrant_client,
+                    corpus_id=corpus_id,
+                    user_id=user_id,
+                    filename=filename,
+                    parents=parents,
+                    children=children,
+                    vec_map=vec_map,
+                    summaries=summaries,
+                    summary_vec_map=summary_vec_map,
+                    config=ingestion_config,
+                    child_sparse_map=child_sparse_map,
+                    summary_sparse_map=summary_sparse_map,
+                    facet_profile=facet_profile,
+                )
             write_updates: dict[str, Any] = {"qdrant_written": True}
             if summary_write_required:
                 write_updates["summaries_indexed"] = True
@@ -3359,19 +3471,30 @@ async def run_ingest_job(
                 stage="neo4j",
                 on_phase=on_phase,
             )
-            await _write_neo4j_for_doc(
-                neo4j_driver=neo4j_driver,
-                doc_id=doc_id,
-                corpus_id=corpus_id,
-                user_id=user_id,
-                file_id=file_id,
-                children=children,
-                ghost_b_out=ghost_b_out,
-                filename=filename,
-                parents=parents,
-                ghost_b_metrics=ghost_b_metrics,
-                graphify_enrichment=graphify_enrichment,
-            )
+            neo4j_sem = _neo4j_write_semaphore()
+            neo4j_wait_started = time.monotonic()
+            async with neo4j_sem:
+                neo4j_wait = time.monotonic() - neo4j_wait_started
+                logger.info(
+                    "phase=neo4j_write_gate doc=%s corpus=%s wait=%.2fs limit=%d",
+                    doc_id[:12],
+                    cid8,
+                    neo4j_wait,
+                    max(1, int(getattr(settings, "NEO4J_INGEST_WRITE_CONCURRENCY", 1))),
+                )
+                await _write_neo4j_for_doc(
+                    neo4j_driver=neo4j_driver,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    user_id=user_id,
+                    file_id=file_id,
+                    children=children,
+                    ghost_b_out=ghost_b_out,
+                    filename=filename,
+                    parents=parents,
+                    ghost_b_metrics=ghost_b_metrics,
+                    graphify_enrichment=graphify_enrichment,
+                )
             await mongo_writer.update_write_state(
                 db, doc_id, corpus_id=corpus_id, neo4j_written=True
             )

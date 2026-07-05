@@ -3394,6 +3394,25 @@ async def extract_entities(
         settings.EXTRACTION_GLOBAL_MAX_CONCURRENT,
         configured_lane_concurrency,
     )
+    try:
+        from services.ingestion.resource_planner import throttle_concurrency_for_rss
+
+        throttled, throttle_meta = throttle_concurrency_for_rss(
+            global_max_concurrent,
+            settings=settings,
+        )
+        if throttled < global_max_concurrent:
+            logger.warning(
+                "GHOST B concurrency throttled for memory: requested=%d effective=%d rss=%sMB soft_limit=%sMB cap=%sMB",
+                global_max_concurrent,
+                throttled,
+                throttle_meta.get("rss_mb"),
+                throttle_meta.get("rss_soft_limit_mb"),
+                throttle_meta.get("ram_cap_mb"),
+            )
+            global_max_concurrent = throttled
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("GHOST B memory throttle unavailable: %s", exc)
     global_sem = _global_extraction_semaphore(global_max_concurrent)
     lane_sems = [
         _model_lane_semaphore(entry, idx, lane_limits[idx])

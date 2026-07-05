@@ -42,6 +42,7 @@ from services.ghost_b import (
     UNIVERSAL_RELATION_SCHEMA,
 )
 from services.ingestion import worker
+from services.ingestion.resource_planner import ResourceProfile
 from services.ingestion.worker import (
     GhostAFailure,
     GhostBFailure,
@@ -893,7 +894,32 @@ async def test_managed_vllm_file_gate_caps_at_two_concurrent_documents():
     worker._GHOST_B_FILE_SEMAPHORE_STATE.clear()
     with patch("services.ghost_b.extract_entities", fake_cloud_extract), \
          patch.object(worker, "get_or_create_schema_lens", AsyncMock(return_value=lens)), \
-         patch.object(worker.settings, "NEO4J_ENABLED", True):
+         patch.object(worker.settings, "NEO4J_ENABLED", True), \
+         patch.object(
+             worker,
+             "plan_ingestion_resources",
+             return_value=ResourceProfile(
+                 name="remote_vllm+local_metal+local_disk",
+                 extraction_backend="remote_vllm",
+                 extraction_lanes=("remote_vllm",),
+                 embedding_backend="local_metal",
+                 storage_mode="local_disk",
+                 cpu_cores=12,
+                 ram_total_mb=65_536,
+                 ram_available_mb=40_000,
+                 cgroup_limit_mb=32_768,
+                 process_rss_mb=1_024,
+                 ram_cap_mb=16_384,
+                 rss_soft_limit_mb=13_926,
+                 metal_available=True,
+                 extraction_max_concurrent=60,
+                 extraction_active_docs=2,
+                 model_phase_docs=2,
+                 embedding_batch_size=64,
+                 qdrant_write_concurrency=2,
+                 neo4j_write_concurrency=1,
+             ),
+         ):
         results = await asyncio.gather(
             run_doc("doc-a"),
             run_doc("doc-b"),

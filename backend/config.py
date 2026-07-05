@@ -377,6 +377,16 @@ class Settings(BaseSettings):
             "huge HTTP payload is brittle under load."
         ),
     )
+    QDRANT_INGEST_WRITE_CONCURRENCY: int = Field(
+        default=2,
+        ge=1,
+        le=16,
+        description=(
+            "Process-local cap for concurrent ingest-time Qdrant write phases. "
+            "This bounds dense/sparse payload memory and creates backpressure "
+            "when vector writes fall behind extraction."
+        ),
+    )
 
     # === GRAPH DATABASE ===
     NEO4J_ENABLED: bool = Field(
@@ -387,6 +397,16 @@ class Settings(BaseSettings):
     )
     NEO4J_USER: str = Field(default="neo4j", description="Neo4j username")
     NEO4J_PASSWORD: str = Field(default="", description="Neo4j password")
+    NEO4J_INGEST_WRITE_CONCURRENCY: int = Field(
+        default=1,
+        ge=1,
+        le=8,
+        description=(
+            "Process-local cap for concurrent ingest-time Neo4j graph writes. "
+            "Keep low for large extraction runs so graph promotion cannot build "
+            "unbounded in-memory write pressure."
+        ),
+    )
     GRAPH_FACT_SEED_TIMEOUT_SECONDS: float = Field(
         default=5.0,
         ge=0.2,
@@ -778,6 +798,26 @@ class Settings(BaseSettings):
         description=(
             "Process-local cap for documents concurrently running LLM/embed "
             "model phases. Per-entry model concurrency still applies inside a slot."
+        ),
+    )
+    INGEST_BACKEND_RAM_TARGET_MB: int = Field(
+        default=16_384,
+        ge=512,
+        le=262_144,
+        description=(
+            "Target RAM budget for the backend ingestion process. The resource "
+            "planner clamps this to the detected container/cgroup limit when "
+            "available, so a 4 GiB container does not pretend to have 16 GiB."
+        ),
+    )
+    INGEST_RSS_SOFT_LIMIT_RATIO: float = Field(
+        default=0.85,
+        ge=0.50,
+        le=0.95,
+        description=(
+            "Soft RSS threshold as a fraction of INGEST_BACKEND_RAM_TARGET_MB "
+            "(after cgroup clamping). At or above this level, remote vLLM doc "
+            "fanout is reduced and extraction concurrency may be throttled."
         ),
     )
     INGEST_MANAGED_VLLM_MODEL_PHASE_DOCS: int = Field(
