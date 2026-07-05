@@ -1,0 +1,18 @@
+{
+  "bert_only": {
+    "precision": 0.9886877828054299,
+    "coverage": 0.8230912476722533,
+    "n_exact": 442,
+    "correct": 437,
+    "n": 537
+  },
+  "hybrid": {
+    "precision": 0.9383177570093458,
+    "coverage": 0.9962756052141527,
+    "n_exact": 535,
+    "correct": 502,
+    "n": 537
+  },
+  "qwen_committed": 93,
+  "qwen_correct": 65
+}

@@ -42,6 +42,9 @@ local_ghost_b/heads/*/training_args.bin
 local_ghost_b/*.jsonl
 local_ghost_b/*.bak
 local_ghost_b/batch_out*/
+local_ghost_b/qwen_resolver_merged/
+local_ghost_b/qwen_resolver_mlx/
+local_ghost_b/reports/random_quality_seed_*.json
 # extra venv variants (the base .venv/ already covered above)
 .venv-*/
 .venv_*/
