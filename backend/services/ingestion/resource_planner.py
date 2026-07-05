@@ -351,11 +351,20 @@ def plan_ingestion_resources(
             1,
             int(getattr(settings, "EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS", 2)),
         )
+        # Remote vLLM keeps model/KV memory on the RTX host, so Mac/backend
+        # RAM mainly covers orchestration buffers, validation, and DB writes.
+        # Prefer 2 active docs only when memory pressure is comfortably low;
+        # if RSS climbs, future docs fall back to the one-doc gate.
+        rss_low = (
+            resources.process_rss_mb is None
+            or resources.process_rss_mb < int(rss_soft_limit_mb * 0.60)
+        )
         roomy = (
-            ram_cap_mb >= 16_384
-            and not rss_high
+            not rss_high
+            and rss_low
             and storage_mode != "network_share"
             and resources.cpu_cores >= 8
+            and ram_cap_mb >= 4_096
         )
         extraction_active_docs = min(requested_doc_cap, 2 if roomy else 1)
         model_phase_docs = min(

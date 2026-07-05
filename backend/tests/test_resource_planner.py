@@ -96,6 +96,32 @@ def test_remote_vllm_profile_can_admit_two_docs_when_roomy():
     assert "does not reserve Mac Metal" in " ".join(profile.notes)
 
 
+def test_remote_vllm_profile_admits_two_docs_under_low_4gb_pressure():
+    cfg = IngestionConfig(
+        extraction_engine="cloud",
+        models_linked=False,
+        extraction_models=_rtx_pool(),
+        embed_mode="local",
+    )
+    profile = plan_ingestion_resources(
+        config=cfg,
+        extraction_engine="cloud",
+        extraction_pool=cfg.extraction_models,
+        settings=_settings(),
+        resources=SystemResources(
+            cpu_cores=10,
+            ram_total_mb=12_288,
+            cgroup_limit_mb=4_096,
+            process_rss_mb=1_024,
+            metal_available=False,
+        ),
+    )
+
+    assert profile.extraction_active_docs == 2
+    assert profile.model_phase_docs == 2
+    assert profile.extraction_max_concurrent == 60
+
+
 def test_openai_cloud_pool_is_not_classified_as_remote_vllm():
     cfg = IngestionConfig(
         extraction_engine="cloud",
@@ -155,4 +181,3 @@ def test_storage_mode_classification():
     assert classify_storage_mode("/Users/king/library") == "local_disk"
     assert classify_storage_mode("/Volumes/Flash Drive/books") == "mounted_volume"
     assert classify_storage_mode("smb://nas/books") == "network_share"
-
