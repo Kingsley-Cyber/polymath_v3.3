@@ -123,8 +123,114 @@ from services.storage.qdrant_writer import retrieve_schema_for_chunk
 logger = logging.getLogger(__name__)
 settings = get_settings()
 _PARSE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_PARSE_JOBS))
-_MODEL_PHASE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_MODEL_PHASE_DOCS))
-_GHOST_B_FILE_SEMAPHORE = asyncio.Semaphore(max(1, settings.EXTRACTION_MAX_ACTIVE_DOCS))
+_MODEL_PHASE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
+_MODEL_PHASE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
+_GHOST_B_FILE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
+_GHOST_B_FILE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
+
+
+def _plain_model_ref(ref: Any) -> dict[str, Any]:
+    return ref.model_dump() if hasattr(ref, "model_dump") else dict(ref or {})
+
+
+def _pool_entry_uses_managed_vllm(entry: dict[str, Any] | Any) -> bool:
+    data = _plain_model_ref(entry)
+    provider = str(data.get("provider_preset") or "").strip().lower()
+    model = str(data.get("model") or "").strip().lower()
+    base_url = str(data.get("base_url") or "").strip().lower()
+    lifecycle_base = str(data.get("lifecycle_base_url") or "").strip().lower()
+    extra = data.get("extra_params") or {}
+    if not isinstance(extra, dict):
+        extra = {}
+    if provider in {"vllm", "vllm-rtx"}:
+        return True
+    if bool(extra.get("managed_vllm")) or str(extra.get("resource_class") or "").lower() == "rtx":
+        return True
+    return "vllm" in model or "vllm" in base_url or "vllm" in lifecycle_base
+
+
+def _config_uses_managed_vllm(config: IngestionConfig) -> bool:
+    refs: list[Any] = list(getattr(config, "extraction_models", []) or [])
+    if getattr(config, "models_linked", False):
+        refs.extend(list(getattr(config, "summary_models", []) or []))
+    return any(_pool_entry_uses_managed_vllm(ref) for ref in refs)
+
+
+def _model_phase_doc_limit(config: IngestionConfig) -> int:
+    current = get_settings()
+    if _config_uses_managed_vllm(config):
+        return max(1, int(getattr(current, "INGEST_MANAGED_VLLM_MODEL_PHASE_DOCS", 2)))
+    return max(1, int(getattr(current, "INGEST_MAX_MODEL_PHASE_DOCS", 1)))
+
+
+def _model_phase_gate_key(config: IngestionConfig) -> str:
+    return "managed_vllm" if _config_uses_managed_vllm(config) else "default"
+
+
+def _shared_semaphore(
+    semaphores: dict[str, asyncio.Semaphore],
+    state: dict[str, tuple[int, asyncio.AbstractEventLoop]],
+    *,
+    key: str,
+    limit: int,
+) -> asyncio.Semaphore:
+    normalized = max(1, int(limit or 1))
+    loop = asyncio.get_running_loop()
+    previous = state.get(key)
+    if (
+        key not in semaphores
+        or previous is None
+        or previous[0] != normalized
+        or previous[1] is not loop
+    ):
+        semaphores[key] = asyncio.Semaphore(normalized)
+        state[key] = (normalized, loop)
+    return semaphores[key]
+
+
+def _model_phase_semaphore(config: IngestionConfig) -> asyncio.Semaphore:
+    return _shared_semaphore(
+        _MODEL_PHASE_SEMAPHORES,
+        _MODEL_PHASE_SEMAPHORE_STATE,
+        key=_model_phase_gate_key(config),
+        limit=_model_phase_doc_limit(config),
+    )
+
+
+def _ghost_b_active_doc_limit(
+    *,
+    pool: list[dict[str, Any]],
+    extraction_engine: str,
+) -> int:
+    current = get_settings()
+    cloud_lane_active = extraction_engine in {"cloud", "dual", "local_then_cloud"}
+    if cloud_lane_active and any(_pool_entry_uses_managed_vllm(entry) for entry in pool):
+        return max(1, int(getattr(current, "EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS", 2)))
+    return max(1, int(getattr(current, "EXTRACTION_MAX_ACTIVE_DOCS", 1)))
+
+
+def _ghost_b_file_gate_key(
+    *,
+    pool: list[dict[str, Any]],
+    extraction_engine: str,
+) -> str:
+    cloud_lane_active = extraction_engine in {"cloud", "dual", "local_then_cloud"}
+    if cloud_lane_active and any(_pool_entry_uses_managed_vllm(entry) for entry in pool):
+        return "managed_vllm"
+    return "default"
+
+
+def _ghost_b_file_semaphore(
+    *,
+    pool: list[dict[str, Any]],
+    extraction_engine: str,
+) -> asyncio.Semaphore:
+    return _shared_semaphore(
+        _GHOST_B_FILE_SEMAPHORES,
+        _GHOST_B_FILE_SEMAPHORE_STATE,
+        key=_ghost_b_file_gate_key(pool=pool, extraction_engine=extraction_engine),
+        limit=_ghost_b_active_doc_limit(pool=pool, extraction_engine=extraction_engine),
+    )
 
 
 class GhostAFailure(RuntimeError):
@@ -454,6 +560,7 @@ def _build_ghost_pool(refs) -> list[dict]:
                 data[secret_field] = pt if pt is not None else ct
         out.append(
             {
+                "provider_preset": data.get("provider_preset") or "",
                 "model": data.get("model"),
                 "base_url": data.get("base_url") or None,
                 "api_key": data.get("api_key") or None,
@@ -1080,12 +1187,19 @@ async def _run_ghosts_parallel(
             len(pool) or 1,
             schema_ctx.strict,
         )
-        async with _GHOST_B_FILE_SEMAPHORE:
+        active_doc_limit = _ghost_b_active_doc_limit(
+            pool=pool,
+            extraction_engine=extraction_engine,
+        )
+        async with _ghost_b_file_semaphore(
+            pool=pool,
+            extraction_engine=extraction_engine,
+        ):
             logger.info(
                 "phase=ghost_b_file_gate doc=%s corpus=%s active_doc_limit=%d children=%d",
                 doc_id[:12],
                 corpus_id[:8],
-                settings.EXTRACTION_MAX_ACTIVE_DOCS,
+                active_doc_limit,
                 len(tasks),
             )
             logger.info(
@@ -2678,7 +2792,7 @@ async def run_ingest_job(
         stage="ghosts",
         on_phase=on_phase,
     )
-    async with _MODEL_PHASE_SEMAPHORE:
+    async with _model_phase_semaphore(ingestion_config):
         t0 = time.monotonic()
         ghost_result = await _run_ghosts_parallel(
             config=ingestion_config,
@@ -3024,7 +3138,7 @@ async def run_ingest_job(
                 stage="embedding",
                 on_phase=on_phase,
             )
-            async with _MODEL_PHASE_SEMAPHORE:
+            async with _model_phase_semaphore(ingestion_config):
                 t0 = time.monotonic()
                 vec_map, summary_vec_map = await _embed_batch_for_doc(
                     children=children,

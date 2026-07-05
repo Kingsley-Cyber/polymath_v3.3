@@ -8,6 +8,7 @@ crosses SCHEMA_INLINE_LIMIT) flips ghost_b into degraded retrieval mode.
 """
 
 import asyncio
+import copy
 import json
 import logging
 from types import SimpleNamespace
@@ -474,7 +475,7 @@ async def test_extraction_repairs_once_and_merges_accepted_primary_lines(monkeyp
             return None
 
         async def post(self, url, json, headers):
-            calls.append(json)
+            calls.append(copy.deepcopy(json))
             return FakeResponse(responses[len(calls) - 1])
 
     fake_settings = SimpleNamespace(
@@ -593,7 +594,7 @@ async def test_deepseek_auto_uses_json_schema_payload_on_primary(monkeypatch):
             return None
 
         async def post(self, url, json, headers):
-            calls.append(json)
+            calls.append(copy.deepcopy(json))
             return FakeResponse()
 
     fake_settings = SimpleNamespace(
@@ -698,7 +699,7 @@ async def test_mimo_auto_disables_thinking_for_extraction(monkeypatch):
             return None
 
         async def post(self, url, json, headers):
-            calls.append(json)
+            calls.append(copy.deepcopy(json))
             return FakeResponse()
 
     fake_settings = SimpleNamespace(

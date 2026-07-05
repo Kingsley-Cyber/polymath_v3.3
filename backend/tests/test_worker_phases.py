@@ -59,11 +59,18 @@ def _parse_result(tier: SourceTier = SourceTier.tier_a) -> Any:
         sections=[],
         pages=None,
         has_structure=True,
+        filename="doc.txt",
+        title=None,
+        author=None,
+        document_date=None,
+        source_type=None,
         source_tier=tier,
         h1_count=1,
         h2_count=0,
         num_pages=1,
         source_format="md",
+        language=None,
+        routing_trace={},
         augmented_with_synthetic_headers=False,
         injected_headers_audit=[],
     )
@@ -814,14 +821,87 @@ async def test_ghost_b_file_gate_serializes_concurrent_documents():
             ws=WriteState(),
         )
 
+    worker._GHOST_B_FILE_SEMAPHORES.clear()
+    worker._GHOST_B_FILE_SEMAPHORE_STATE.clear()
     with patch.object(worker, "extract_entities", fake_extract), \
          patch.object(worker, "get_or_create_schema_lens", AsyncMock(return_value=lens)), \
-         patch.object(worker, "_GHOST_B_FILE_SEMAPHORE", asyncio.Semaphore(1)), \
          patch.object(worker.settings, "NEO4J_ENABLED", True):
         results = await asyncio.gather(run_doc("doc-a"), run_doc("doc-b"))
 
     assert max_active == 1
     assert [len(result.ghost_b_out or []) for result in results] == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_managed_vllm_file_gate_caps_at_two_concurrent_documents():
+    active = 0
+    max_active = 0
+
+    async def fake_cloud_extract(tasks, **kwargs):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return ExtractionBatchReport(
+            results=[
+                _fake_extraction_result(t.chunk_id, t.doc_id, t.corpus_id)
+                for t in tasks
+            ],
+            failures=[],
+            metrics={
+                "requested_chunks": len(tasks),
+                "extracted_chunks": len(tasks),
+                "failed_chunks": 0,
+            },
+        )
+
+    lens = SimpleNamespace(to_dict=lambda: {"lens_id": "test-lens"})
+
+    async def run_doc(doc_id: str):
+        parent, child = _parent(doc_id, "c" * 36, child_id=f"{doc_id}-c0")
+        cfg = IngestionConfig(
+            use_neo4j=True,
+            chunk_summarization=False,
+            target_qdrant_collections=["naive", "hrag", "graph"],
+            extraction_engine="cloud",
+            models_linked=False,
+            extraction_models=[
+                ModelProfileRef(
+                    provider_preset="vllm-rtx",
+                    model="openai/polymath-extract",
+                    base_url="http://192.168.1.83:8000/v1",
+                    max_concurrent=60,
+                ),
+            ],
+        )
+        return await worker._run_ghosts_parallel(
+            config=cfg,
+            parents=[parent],
+            children=[child],
+            doc_id=doc_id,
+            corpus_id="c" * 36,
+            model="m",
+            db=MagicMock(),
+            qdrant_client=MagicMock(),
+            neo4j_driver=MagicMock(),
+            existing_doc=None,
+            ws=WriteState(),
+        )
+
+    worker._GHOST_B_FILE_SEMAPHORES.clear()
+    worker._GHOST_B_FILE_SEMAPHORE_STATE.clear()
+    with patch("services.ghost_b.extract_entities", fake_cloud_extract), \
+         patch.object(worker, "get_or_create_schema_lens", AsyncMock(return_value=lens)), \
+         patch.object(worker.settings, "NEO4J_ENABLED", True):
+        results = await asyncio.gather(
+            run_doc("doc-a"),
+            run_doc("doc-b"),
+            run_doc("doc-c"),
+        )
+
+    assert max_active == 2
+    assert [len(result.ghost_b_out or []) for result in results] == [1, 1, 1]
 
 
 # ── Hard-abort tests ────────────────────────────────────────────────────────
@@ -894,9 +974,13 @@ def test_per_corpus_concurrency_preserved_in_pool():
     ]
     pool = _build_ghost_pool(refs)
     assert [entry["max_concurrent"] for entry in pool] == [3, 7]
+    assert [entry["provider_preset"] for entry in pool] == ["openai", "ollama"]
     # Raw dict input still works (ops / migration shape)
-    pool2 = _build_ghost_pool([{"model": "x", "max_concurrent": 5}])
+    pool2 = _build_ghost_pool([
+        {"provider_preset": "vllm-rtx", "model": "x", "max_concurrent": 5}
+    ])
     assert pool2[0]["max_concurrent"] == 5
+    assert pool2[0]["provider_preset"] == "vllm-rtx"
 
 
 def test_build_ghost_pool_defaults_to_one_when_missing():

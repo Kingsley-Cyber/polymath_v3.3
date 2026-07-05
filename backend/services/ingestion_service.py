@@ -1923,6 +1923,36 @@ class IngestionService:
             if ingestion_config.models_linked
             else ingestion_config.extraction_models
         )
+
+        def _uses_managed_vllm(ref) -> bool:
+            data = ref.model_dump() if hasattr(ref, "model_dump") else dict(ref or {})
+            provider = str(data.get("provider_preset") or "").lower()
+            model_name = str(data.get("model") or "").lower()
+            base_url = str(data.get("base_url") or "").lower()
+            lifecycle = str(data.get("lifecycle_base_url") or "").lower()
+            extra = data.get("extra_params") or {}
+            if not isinstance(extra, dict):
+                extra = {}
+            return (
+                provider in {"vllm", "vllm-rtx"}
+                or bool(extra.get("managed_vllm"))
+                or str(extra.get("resource_class") or "").lower() == "rtx"
+                or "vllm" in model_name
+                or "vllm" in base_url
+                or "vllm" in lifecycle
+            )
+
+        managed_vllm = any(_uses_managed_vllm(m) for m in extraction_pool)
+        active_extraction_docs = (
+            settings.EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS
+            if managed_vllm
+            else settings.EXTRACTION_MAX_ACTIVE_DOCS
+        )
+        model_phase_doc_concurrency = (
+            settings.INGEST_MANAGED_VLLM_MODEL_PHASE_DOCS
+            if managed_vllm
+            else settings.INGEST_MAX_MODEL_PHASE_DOCS
+        )
         extraction_concurrency = sum(
             max(1, int(getattr(m, "max_concurrent", 1) or 1))
             for m in extraction_pool
@@ -1940,7 +1970,7 @@ class IngestionService:
         )
         per_process_extraction_ceiling = min(
             settings.EXTRACTION_GLOBAL_MAX_CONCURRENT,
-            settings.EXTRACTION_MAX_ACTIVE_DOCS * extraction_concurrency,
+            extraction_concurrency,
         )
         warnings: list[str] = []
         if len(children) > 500:
@@ -1965,7 +1995,7 @@ class IngestionService:
             "extraction_risk": {
                 "foreground_facts_enabled": settings.EXTRACTION_ENABLE_FACTS,
                 "facts_configured": settings.EXTRACTION_ENABLE_FACTS,
-                "output_mode": "jsonl",
+                "output_mode": "json_schema_for_structured_lanes",
                 "configured_output_mode": settings.EXTRACTION_OUTPUT_MODE,
                 "repair_strategy": "one_jsonl_repair_resume",
                 "max_input_tokens": settings.EXTRACTION_MAX_INPUT_TOKENS,
@@ -1976,8 +2006,9 @@ class IngestionService:
                 "rescue_max_total_lines": settings.EXTRACTION_RESCUE_MAX_TOTAL_LINES,
                 "calls_per_child": foreground_calls_per_child,
                 "extraction_concurrency": extraction_concurrency,
-                "model_phase_doc_concurrency": settings.INGEST_MAX_MODEL_PHASE_DOCS,
-                "active_extraction_docs": settings.EXTRACTION_MAX_ACTIVE_DOCS,
+                "model_phase_doc_concurrency": model_phase_doc_concurrency,
+                "active_extraction_docs": active_extraction_docs,
+                "managed_vllm": managed_vllm,
                 "global_max_concurrent": settings.EXTRACTION_GLOBAL_MAX_CONCURRENT,
                 "per_process_extraction_ceiling": per_process_extraction_ceiling,
                 "failure_pause_percent": settings.EXTRACTION_FAILURE_PAUSE_PERCENT,

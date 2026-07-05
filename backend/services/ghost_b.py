@@ -3604,7 +3604,9 @@ async def extract_entities(
             attempt: int,
             profile: ExtractionAttemptProfile,
             output_mode: str,
-            raw: str = "",
+            prompt_hash: str | None = None,
+            prompt_chars: int | None = None,
+            raw_fingerprint: dict[str, Any] | None = None,
             result: ExtractionResult | None = None,
             jsonl_chunk: JsonlParseChunk | None = None,
             jsonl_items: list[dict[str, Any]] | None = None,
@@ -3632,6 +3634,8 @@ async def extract_entities(
                 "lane": pool_idx,
                 "input_tokens": input_token_count,
                 "input_truncated": input_truncated,
+                "prompt_hash": prompt_hash,
+                "prompt_chars": prompt_chars,
                 "output_mode": output_mode,
                 "max_tokens": max_tokens,
                 "completion_tokens": (usage or {}).get("completion_tokens"),
@@ -3670,8 +3674,8 @@ async def extract_entities(
                 "error_message": (error_message or "")[:1000],
             }
             if event == "ghost_b_attempt_failed":
-                body["raw"] = _raw_output_fingerprint(
-                    raw,
+                body["raw"] = raw_fingerprint or _raw_output_fingerprint(
+                    "",
                     first_chars=audit_raw_first_chars,
                     last_chars=audit_raw_last_chars,
                 )
@@ -3710,6 +3714,10 @@ async def extract_entities(
                         failure_reason=last_error_type,
                     )
                 )
+            prompt_chars = len(prompt)
+            prompt_hash = hashlib.sha256(
+                prompt.encode("utf-8", errors="replace")
+            ).hexdigest()
             attempt_payload = dict(payload_base)
             attempt_payload["messages"] = [
                 {
@@ -3735,11 +3743,15 @@ async def extract_entities(
                 async with lane_sems[pool_idx]:
                     async with global_sem:
                         async with httpx.AsyncClient(timeout=120.0) as client:
-                            resp = await client.post(
-                                f"{settings.LITELLM_URL}/chat/completions",
-                                json=attempt_payload,
-                                headers=headers,
-                            )
+                            try:
+                                resp = await client.post(
+                                    f"{settings.LITELLM_URL}/chat/completions",
+                                    json=attempt_payload,
+                                    headers=headers,
+                                )
+                            finally:
+                                attempt_payload["messages"] = []
+                                prompt = ""
                     duration = time.perf_counter() - started
                     resp.raise_for_status()
                     call_attempts += 1
@@ -3765,7 +3777,11 @@ async def extract_entities(
                         attempt + 1,
                         profile_output_mode,
                     )
-                    raw = choice.get("message", {}).get("content", "")
+                    raw = str(choice.get("message", {}).get("content") or "")
+                    body = {}
+                    choices = []
+                    choice = {}
+                    resp = None
                     _debug_log_raw_jsonl_lines(
                         raw,
                         chunk_id=task.chunk_id,
@@ -3912,6 +3928,8 @@ async def extract_entities(
                             "finish_reason": finish_reason,
                             "max_tokens": attempt_max_tokens,
                             "max_total_lines": profile.max_total_lines,
+                            "prompt_hash": prompt_hash,
+                            "prompt_chars": prompt_chars,
                             "global_max_concurrent": global_max_concurrent,
                             "model_lane_max_concurrent": lane_limits[pool_idx],
                             "input_tokens": input_token_count,
@@ -3931,6 +3949,8 @@ async def extract_entities(
                             attempt=attempt + 1,
                             profile=profile,
                             output_mode=profile_output_mode,
+                            prompt_hash=prompt_hash,
+                            prompt_chars=prompt_chars,
                             result=result,
                             jsonl_chunk=jsonl_chunk,
                             jsonl_items=jsonl_items,
@@ -3942,6 +3962,7 @@ async def extract_entities(
                             usage=usage,
                             max_tokens=attempt_max_tokens,
                         )
+                        raw = ""
                         logger.debug(
                             "GHOST B: chunk_id=%s entities=%d relations=%d "
                             "(attempt=%d lane=%d profile=%s jsonl_items=%d)",
@@ -3959,7 +3980,13 @@ async def extract_entities(
                         attempt=attempt + 1,
                         profile=profile,
                         output_mode=profile_output_mode,
-                        raw=raw,
+                        prompt_hash=prompt_hash,
+                        prompt_chars=prompt_chars,
+                        raw_fingerprint=_raw_output_fingerprint(
+                            raw,
+                            first_chars=audit_raw_first_chars,
+                            last_chars=audit_raw_last_chars,
+                        ),
                         result=result,
                         jsonl_chunk=jsonl_chunk,
                         jsonl_items=jsonl_items,
@@ -3973,6 +4000,7 @@ async def extract_entities(
                         error_type=attempt_error_type,
                         error_message=str(attempt_error_type or last_exc or ""),
                     )
+                    raw = ""
                     if (
                         jsonl_items
                         or empty_after_claimed_items
@@ -4072,6 +4100,8 @@ async def extract_entities(
                             "completion_tokens": 0,
                             "finish_reason": None,
                             "max_tokens": attempt_payload.get("max_tokens"),
+                            "prompt_hash": prompt_hash,
+                            "prompt_chars": prompt_chars,
                             "success": False,
                             "error_type": last_error_type,
                         }
@@ -4081,6 +4111,8 @@ async def extract_entities(
                         attempt=attempt + 1,
                         profile=profile,
                         output_mode=profile_output_mode,
+                        prompt_hash=prompt_hash,
+                        prompt_chars=prompt_chars,
                         hit_output_cap=False,
                         finish_reason=None,
                         usage={},
@@ -4113,6 +4145,8 @@ async def extract_entities(
                         "completion_tokens": 0,
                         "finish_reason": None,
                         "max_tokens": attempt_payload.get("max_tokens"),
+                        "prompt_hash": prompt_hash,
+                        "prompt_chars": prompt_chars,
                         "success": False,
                         "error_type": (
                             f"{fatal_tier}_fatal_lane_error"
@@ -4126,6 +4160,8 @@ async def extract_entities(
                     attempt=attempt + 1,
                     profile=profile,
                     output_mode=profile_output_mode,
+                    prompt_hash=prompt_hash,
+                    prompt_chars=prompt_chars,
                     hit_output_cap=False,
                     finish_reason=None,
                     usage={},

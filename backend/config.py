@@ -780,6 +780,17 @@ class Settings(BaseSettings):
             "model phases. Per-entry model concurrency still applies inside a slot."
         ),
     )
+    INGEST_MANAGED_VLLM_MODEL_PHASE_DOCS: int = Field(
+        default=2,
+        ge=1,
+        le=4,
+        description=(
+            "Process-local cap for documents concurrently admitted to model "
+            "phases when the corpus extraction pool uses a managed vLLM/RTX "
+            "lane. This lets two documents share the same remote GPU pool "
+            "without multiplying per-lane request concurrency."
+        ),
+    )
     INGEST_MAX_ACTIVE_JOBS: int = Field(
         default=16,
         ge=1,
@@ -1711,6 +1722,17 @@ class Settings(BaseSettings):
             "Maximum documents allowed to run foreground Ghost B extraction at "
             "once. Default 1 keeps extraction concurrency targeted at one file's "
             "child queue instead of multiplying by model-phase document fanout."
+        ),
+    )
+    EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS: int = Field(
+        default=2,
+        ge=1,
+        le=4,
+        description=(
+            "Maximum documents allowed to run foreground Ghost B extraction "
+            "when the selected extraction pool contains a managed vLLM/RTX "
+            "lane. Chunk requests still share the pool's max_concurrent budget "
+            "(for example, two docs share 60 total requests; they do not become 120)."
         ),
     )
     EXTRACTION_FAILURE_PAUSE_PERCENT: float = Field(
