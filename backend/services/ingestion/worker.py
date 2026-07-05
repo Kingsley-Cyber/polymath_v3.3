@@ -534,6 +534,19 @@ def _reconstruct_summaries_from_mongo(
                 summary=summary,
                 domain=ep.get("domain"),
                 topics=ep.get("topics"),
+                semantic_chunk_type=ep.get("semantic_chunk_type"),
+                key_terms=ep.get("key_terms"),
+                mechanisms=ep.get("mechanisms"),
+                schema_version=ep.get("schema_version"),
+                summary_type=ep.get("summary_type"),
+                central_claim=ep.get("central_claim"),
+                key_points=ep.get("key_points"),
+                main_mechanism=ep.get("main_mechanism"),
+                concept_tags=ep.get("concept_tags"),
+                entity_hints=ep.get("entity_hints"),
+                retrieval_uses=ep.get("retrieval_uses"),
+                abstraction_level=ep.get("abstraction_level"),
+                source_child_ids=ep.get("source_child_ids") or ep.get("child_ids"),
             )
         )
     return out
@@ -849,6 +862,10 @@ async def _run_ghosts_parallel(
                 corpus_id=p.corpus_id,
                 text=p.text,
                 source_tier=p.source_tier,
+                source_child_ids=[c.chunk_id for c in getattr(p, "children", [])],
+                child_boundaries="\n\n".join(
+                    f"[{c.chunk_id}]\n{c.text}" for c in getattr(p, "children", [])
+                ),
             )
             for p in body_parents
         ]
@@ -1260,6 +1277,20 @@ def _build_parent_dicts(
                 "page_start": getattr(p, "page_start", None),
                 "page_end": getattr(p, "page_end", None),
                 "summary": getattr(sr, "summary", None) if sr else None,
+                "schema_version": getattr(sr, "schema_version", None) if sr else None,
+                "summary_type": getattr(sr, "summary_type", None) if sr else None,
+                "central_claim": getattr(sr, "central_claim", None) if sr else None,
+                "key_points": getattr(sr, "key_points", None) if sr else None,
+                "main_mechanism": getattr(sr, "main_mechanism", None) if sr else None,
+                "concept_tags": getattr(sr, "concept_tags", None) if sr else None,
+                "entity_hints": getattr(sr, "entity_hints", None) if sr else None,
+                "retrieval_uses": getattr(sr, "retrieval_uses", None) if sr else None,
+                "abstraction_level": getattr(sr, "abstraction_level", None) if sr else None,
+                "source_child_ids": (
+                    getattr(sr, "source_child_ids", None)
+                    if sr and getattr(sr, "source_child_ids", None)
+                    else [c.chunk_id for c in p.children]
+                ),
                 "domain": getattr(sr, "domain", None) if sr else None,
                 "semantic_chunk_type": getattr(sr, "semantic_chunk_type", None) if sr else None,
                 "key_terms": getattr(sr, "key_terms", None) if sr else None,
@@ -1916,6 +1947,16 @@ async def _write_qdrant_for_doc(
                     "filename": filename,
                     "doc_name": filename,
                     "summary": s.summary,
+                    "schema_version": getattr(s, "schema_version", None),
+                    "summary_type": getattr(s, "summary_type", None),
+                    "central_claim": getattr(s, "central_claim", None),
+                    "key_points": getattr(s, "key_points", None),
+                    "main_mechanism": getattr(s, "main_mechanism", None),
+                    "concept_tags": getattr(s, "concept_tags", None),
+                    "entity_hints": getattr(s, "entity_hints", None),
+                    "retrieval_uses": getattr(s, "retrieval_uses", None),
+                    "abstraction_level": getattr(s, "abstraction_level", None),
+                    "source_child_ids": getattr(s, "source_child_ids", None),
                     "heading_path": hp_map.get(s.parent_id),
                     "user_id": user_id,
                     "chunk_kind": kind_map.get(s.parent_id, ChunkKind.BODY),
