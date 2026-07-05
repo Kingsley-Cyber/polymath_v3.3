@@ -734,6 +734,35 @@ Metal entirely; §13 measured ghosts = 84% of Metal seconds, so cloud-routing ex
 shrinks the duty problem to embed alone. Blocked 06:56 on the Windows firewall inbound
 rule (box unreachable LAN-wide; owner has the one-line admin command).
 
+**§13 GROUND-TRUTH CORRECTION (2026-07-05 07:10 — supersedes the ghosts premise above):**
+the a6aae588 batch has been running CLOUD extraction since its FIRST file (07-04 22:46),
+not local. Resolution chain (worker.py:1040-1120): global settings.extraction.engine =
+"cloud" -> ghost_b cloud extract_entities -> pool = summary_models (models_linked=true,
+extraction_models=[]) = 3 DUPLICATE chips of openai/Qwen/Qwen2.5-7B-Instruct @SiliconFlow
+(max_concurrent 2 each). The three enabled sidecar endpoints (Mac 8084, RTX 8084/8086)
+are DORMANT in cloud mode; the warm Mac sidecar idles. Qwen2.5-7B cannot hold the
+30-predicate JSONL contract: 6h error histogram = 734 parse_error / 599 jsonl_incomplete
+/ 349 empty_after_validation / 140 empty-response ReadTimeout (~2k events); per-doc
+failure budget then aborts (signature: first ~4-8 chunks succeed, rest skipped).
+DAMAGE CENSUS (documents.ghost_b_metrics, 07:05): 120 docs — 0 full (>=90% extracted),
+3 partial (50-90%), 110 DEAD (<50%, e.g. 7/1485, 8/407), 7 no-metrics. Text+vectors are
+GREEN (mongo/qdrant/verified) — the corpus retrieves on vectors; the GRAPH lane is ~3%
+populated. Partials are staged (ghost_b_staging + per-doc ghost_b_failures) -> graph
+backfill can re-run extraction for failed chunks AFTER the engine contract is fixed.
+CONSEQUENCE for §13: the measured "ghosts" seconds were cloud failure churn (retries/
+rescue profiles/timeouts), NOT Metal work — GPU-duty math and P1 premise must be
+re-grounded after the contract fix. CONFUSION ROOT (owner-flagged): Corpus Manager
+shows extraction chips + "Reuse Summary pool" but never the ACTIVE engine; Settings
+shows engine + endpoints but not the corpus pools — neither screen tells the whole
+contract. FIX DIRECTION: (a) resolved-contract truth line in Corpus Manager ("cloud ->
+summary pool: 3x Qwen2.5-7B @6" / "local -> sidecars: Mac UP, RTX DOWN"), (b) per-corpus
+extraction_engine override (inherit|local|cloud|...) so a test corpus can run the RTX
+cloud lane while other corpora stay local — REQUIRED for RTX validation without
+hijacking a live batch, (c) graph-coverage chip on library rows (done-but-graph-dead
+docs currently read as clean "done"). Owner decides: flip engine for the remaining ~378
+files (local = proven 0.28s/chunk 57% typed $0) vs pause vs ride; backfill sweep for the
+110 dead docs once the lane is trustworthy.
+
 **P2 — GLiREL surgery (attacks the 75%).** (a) set GHOST_B_GLIREL_BATCH on the Mac (unset;
 Windows runner uses 512); (b) pair pruning — GLiREL scales with entity-PAIRS: cap pairs/chunk
 to top-K by GLiNER confidence, skip <2-entity chunks; (c) pre-split >128-token sentences
