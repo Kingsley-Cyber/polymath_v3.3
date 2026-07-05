@@ -1202,15 +1202,7 @@ async def run_local_batch(
     # Batches now QUEUE behind this semaphore instead of stacking.
     sem = _global_doc_semaphore()
     lease_seconds = max(60, int(get_settings().INGEST_STALE_JOB_MINUTES * 60))
-    # §13 P1 — worker count floors to the GLOBAL doc cap: the semaphores
-    # (global doc cap + model-phase gate) are the real governors; workers
-    # beyond a cap just wait at it. Fewer workers than the cap, however,
-    # silently starves the GPU gate (measured: ~40% GPU idle at 2 workers
-    # while both docs sat in write stages). Explicit per-batch concurrency
-    # can still raise it further; it can no longer accidentally starve.
-    _configured = int((batch.get("options") or {}).get("concurrency") or 0)
-    _cap = max(1, int(getattr(get_settings(), "INGEST_GLOBAL_MAX_DOCS", 3)))
-    concurrency = max(1, _configured, _cap)
+    concurrency = _runtime_batch_concurrency(batch, get_settings())
 
     async def _worker(worker_idx: int) -> None:
         owner = f"{owner_prefix}:{worker_idx}"
@@ -1243,6 +1235,21 @@ async def run_local_batch(
     except Exception as exc:  # noqa: BLE001 — reporting never fails the batch
         logger.warning("Batch quality report failed: %s", exc)
     return await refresh_batch_counts(db, batch_id, user_id=user_id)
+
+
+def _runtime_batch_concurrency(batch: dict[str, Any], settings: Any) -> int:
+    """Resolve actual worker count for a durable batch.
+
+    ``INGEST_GLOBAL_MAX_DOCS`` is a cap across batches, not a floor. Forcing
+    every resumed batch up to that value can lease more large books than the
+    API container can hold, which turns startup recovery into an OOM loop.
+    """
+
+    configured = int((batch.get("options") or {}).get("concurrency") or 0)
+    requested = configured or int(getattr(settings, "INGEST_BATCH_WORKERS", 1))
+    global_cap = max(1, int(getattr(settings, "INGEST_GLOBAL_MAX_DOCS", 1)))
+    active_cap = max(1, int(getattr(settings, "INGEST_MAX_ACTIVE_JOBS", 1)))
+    return max(1, min(requested, global_cap, active_cap))
 
 
 _GLOBAL_DOC_SEM: "asyncio.Semaphore | None" = None

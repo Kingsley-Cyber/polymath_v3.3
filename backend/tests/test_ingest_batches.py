@@ -43,6 +43,28 @@ def test_discover_local_files_respects_max_files(tmp_path):
     assert len(files) == 2
 
 
+def test_runtime_batch_concurrency_caps_instead_of_floors():
+    settings = SimpleNamespace(
+        INGEST_BATCH_WORKERS=2,
+        INGEST_GLOBAL_MAX_DOCS=3,
+        INGEST_MAX_ACTIVE_JOBS=16,
+    )
+    batch = {"options": {"concurrency": 2}}
+
+    assert batches._runtime_batch_concurrency(batch, settings) == 2
+
+
+def test_runtime_batch_concurrency_uses_worker_default_when_unset():
+    settings = SimpleNamespace(
+        INGEST_BATCH_WORKERS=4,
+        INGEST_GLOBAL_MAX_DOCS=2,
+        INGEST_MAX_ACTIVE_JOBS=16,
+    )
+    batch = {"options": {}}
+
+    assert batches._runtime_batch_concurrency(batch, settings) == 2
+
+
 def test_storage_quota_counts_existing_bytes(tmp_path):
     storage = tmp_path / "spool"
     storage.mkdir()
