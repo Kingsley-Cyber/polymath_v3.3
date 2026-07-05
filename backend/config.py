@@ -1258,6 +1258,15 @@ class Settings(BaseSettings):
             "Parser truncation remains a final safety net."
         ),
     )
+    EXTRACTION_DROP_UNKNOWN_RELATIONS: bool = Field(
+        default=True,
+        description=(
+            "Production ontology gate for Ghost B. When true, off-vocabulary "
+            "relation predicates are dropped instead of being silently remapped "
+            "to related_to. A model-emitted related_to remains valid; this only "
+            "blocks accidental catchall edges caused by invented predicate names."
+        ),
+    )
     EXTRACTION_FACT_VALUE_MAX_CHARS: int = Field(
         default=160,
         ge=20,

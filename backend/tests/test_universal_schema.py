@@ -141,6 +141,7 @@ def test_prompt_renders_universal_vocab():
     assert "other=fallback [FALLBACK]" in prompt
     assert "related_to=use only when no specific predicate fits [FALLBACK]" in prompt
     assert "evidence_phrase" in prompt
+    assert "every relation must include evidence_phrase copied from TEXT" in prompt
     assert "Output JSONL only" in prompt
     assert '"t":"e"' in prompt
     assert '"t":"r"' in prompt
@@ -211,6 +212,7 @@ def test_json_object_prompt_renders_strict_primary_contract():
     assert "relations: max 12" in prompt
     assert "facts: max 4" in prompt
     assert "evidence_phrase <= 120 chars" in prompt
+    assert "every relation must include evidence_phrase copied from TEXT" in prompt
     assert "value <= 160 chars" in prompt
     assert "entity_type one of: Person=human individual" in prompt
     assert "predicate one of: part_of=X subcomponent of Y" in prompt
@@ -551,13 +553,21 @@ async def test_extraction_repairs_once_and_merges_accepted_primary_lines(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_deepseek_auto_uses_jsonl_payload_on_primary(monkeypatch):
+async def test_deepseek_auto_uses_json_schema_payload_on_primary(monkeypatch):
     calls: list[dict] = []
-    content = "\n".join(
-        [
-            '{"t":"e","cn":"alpha","sf":"Alpha","et":"Concept","cf":0.95}',
-            '{"t":"x"}',
-        ]
+    content = json.dumps(
+        {
+            "entities": [
+                {
+                    "canonical_name": "alpha",
+                    "surface_form": "Alpha",
+                    "entity_type": "Concept",
+                    "confidence": 0.95,
+                }
+            ],
+            "relations": [],
+            "facts": [],
+        }
     )
 
     class FakeResponse:
@@ -643,12 +653,13 @@ async def test_deepseek_auto_uses_jsonl_payload_on_primary(monkeypatch):
 
     assert len(calls) == 1
     assert calls[0]["thinking"] == {"type": "disabled"}
-    assert "response_format" not in calls[0]
-    assert "Output EXACTLY one JSON object per line" in calls[0]["messages"][0]["content"]
-    assert "Output JSONL only" in calls[0]["messages"][1]["content"]
-    assert "max 14 entities" in calls[0]["messages"][1]["content"]
-    assert "max 20 relations" in calls[0]["messages"][1]["content"]
-    assert '{"t":"x"}' in calls[0]["messages"][1]["content"]
+    assert calls[0]["response_format"]["type"] == "json_schema"
+    assert calls[0]["response_format"]["json_schema"]["strict"] is True
+    assert "Return exactly one valid JSON object" in calls[0]["messages"][1]["content"]
+    assert "Output JSONL only" not in calls[0]["messages"][1]["content"]
+    assert "entities: max 14" in calls[0]["messages"][1]["content"]
+    assert "relations: max 20" in calls[0]["messages"][1]["content"]
+    assert "every relation must include evidence_phrase copied from TEXT" in calls[0]["messages"][1]["content"]
     assert report.results and report.results[0].entities[0].canonical_name == "alpha"
     assert report.metrics["attempt_count"] == 1
     assert report.metrics["completion_tokens"] == 30
@@ -1283,6 +1294,99 @@ def test_domain_range_remaps_invalid_relation_softly():
     assert out_relations[0].source_predicate == "depends_on"
     assert out_relations[0].validation_status == "domain_range_mismatch"
     assert counters["domain_range_remap_count"] == 1
+
+
+def test_unknown_relation_predicate_drops_in_soft_mode_by_default():
+    ctx = SchemaContext(
+        entity_schema=UNIVERSAL_ENTITY_SCHEMA,
+        relation_schema=UNIVERSAL_RELATION_SCHEMA,
+        strict="soft",
+    )
+    entities = [
+        EntityItem("alpha", "Alpha", "Concept", 0.9),
+        EntityItem("beta", "Beta", "Concept", 0.9),
+    ]
+    relations = [
+        RelationItem(
+            "alpha",
+            "glorps",
+            "beta",
+            "entity",
+            0.9,
+            evidence_phrase="Alpha interoperates with Beta.",
+        )
+    ]
+
+    _, out_relations, counters = _apply_schema(entities, relations, ctx)
+
+    assert out_relations == []
+    assert counters["relation_drop_count"] == 1
+    assert counters["relation_remap_count"] == 0
+
+
+def test_intentional_related_to_still_passes_soft_schema():
+    ctx = SchemaContext(
+        entity_schema=UNIVERSAL_ENTITY_SCHEMA,
+        relation_schema=UNIVERSAL_RELATION_SCHEMA,
+        strict="soft",
+    )
+    entities = [
+        EntityItem("alpha", "Alpha", "Concept", 0.9),
+        EntityItem("beta", "Beta", "Concept", 0.9),
+    ]
+    relations = [
+        RelationItem(
+            "alpha",
+            "related_to",
+            "beta",
+            "entity",
+            0.65,
+            evidence_phrase="Alpha is discussed alongside Beta.",
+        )
+    ]
+
+    _, out_relations, counters = _apply_schema(entities, relations, ctx)
+
+    assert len(out_relations) == 1
+    assert out_relations[0].predicate == "related_to"
+    assert counters["relation_drop_count"] == 0
+    assert counters["relation_remap_count"] == 0
+
+
+def test_unknown_relation_predicate_can_legacy_remap_when_gate_disabled(monkeypatch):
+    monkeypatch.setattr(
+        ghost_b,
+        "get_settings",
+        lambda: SimpleNamespace(EXTRACTION_DROP_UNKNOWN_RELATIONS=False),
+    )
+    ctx = SchemaContext(
+        entity_schema=UNIVERSAL_ENTITY_SCHEMA,
+        relation_schema=UNIVERSAL_RELATION_SCHEMA,
+        strict="soft",
+    )
+    entities = [
+        EntityItem("alpha", "Alpha", "Concept", 0.9),
+        EntityItem("beta", "Beta", "Concept", 0.9),
+    ]
+    relations = [
+        RelationItem(
+            "alpha",
+            "glorps",
+            "beta",
+            "entity",
+            0.9,
+            evidence_phrase="Alpha interoperates with Beta.",
+        )
+    ]
+
+    _, out_relations, counters = _apply_schema(entities, relations, ctx)
+
+    assert len(out_relations) == 1
+    assert out_relations[0].predicate == "related_to"
+    assert out_relations[0].source_predicate == "glorps"
+    assert out_relations[0].validation_status == "schema_predicate_remap"
+    assert counters["relation_drop_count"] == 0
+    assert counters["relation_remap_count"] == 1
 
 
 def test_endpoint_completion_adds_missing_relation_entities():

@@ -6,9 +6,10 @@ pattern that drove Pt8b's drop-rate problem. These tests pin:
   • ExtractionResponse generates a well-formed JSON Schema from Pydantic
   • _pin_all_required adapts the schema for OpenAI strict mode
   • The response_format payload matches the json_schema spec contract
-  • _lane_supports_json_schema gates on explicit extra_params opt-in only
-  • _select_extraction_output_mode returns "json_schema" only when the
-    flag is set AND the profile is "normal"
+  • _lane_supports_json_schema defaults on for known structured-output lanes,
+    while preserving explicit opt-out
+  • _select_extraction_output_mode returns "json_schema" for known lanes
+    when the profile is "normal"
   • Source-pin: the 5 sites in _process_one all recognize the new mode
 
 The actual end-to-end LLM call is exercised by integration tests; these
@@ -159,6 +160,19 @@ def test_llm_fact_schema_uses_fact_type_enum():
     }
 
 
+def test_relation_and_fact_evidence_required_non_empty():
+    """Production graph writes need traceable evidence, not just valid JSON.
+    The provider schema must force a non-empty evidence phrase for the two
+    write paths that can otherwise hallucinate silently."""
+    relation_schema = LLMRelation.model_json_schema()
+    fact_schema = LLMFact.model_json_schema()
+
+    assert "evidence_phrase" in relation_schema["required"]
+    assert relation_schema["properties"]["evidence_phrase"]["minLength"] == 1
+    assert "evidence_phrase" in fact_schema["required"]
+    assert fact_schema["properties"]["evidence_phrase"]["minLength"] == 1
+
+
 # ── _pin_all_required ────────────────────────────────────────────────
 
 
@@ -288,17 +302,40 @@ def test_json_schema_response_format_includes_object_kind():
     assert "object_kind" in entity_def["required"]
 
 
+def test_json_schema_response_format_requires_evidence():
+    payload = _json_schema_response_format()
+    defs = payload["json_schema"]["schema"]["$defs"]
+
+    relation_def = defs["LLMRelation"]
+    fact_def = defs["LLMFact"]
+    assert relation_def["properties"]["evidence_phrase"]["minLength"] == 1
+    assert fact_def["properties"]["evidence_phrase"]["minLength"] == 1
+
+
 # ── _lane_supports_json_schema gating ───────────────────────────────
 
 
-def test_lane_supports_json_schema_defaults_false():
-    """Critical: unlike json_object (which defaults true for DeepSeek/OpenAI
-    based on training-data familiarity), json_schema requires explicit
-    opt-in. New models can't accidentally turn it on."""
-    # Even with a known-supporting provider, the default is False.
+def test_lane_supports_json_schema_defaults_true_for_known_providers():
+    """Production extraction uses provider-native schema enforcement for
+    known capable lanes by default."""
     entry = {"model": "deepseek/deepseek-chat", "base_url": "https://api.deepseek.com/v1"}
-    assert _lane_supports_json_schema(entry) is False
+    assert _lane_supports_json_schema(entry) is True
     entry = {"model": "gpt-4o", "base_url": "https://api.openai.com/v1"}
+    assert _lane_supports_json_schema(entry) is True
+    entry = {"model": "openai/polymath-extract", "provider_preset": "vllm-rtx"}
+    assert _lane_supports_json_schema(entry) is True
+    entry = {
+        "model": "openai/polymath-extract",
+        "base_url": "http://192.168.1.83:8000/v1",
+    }
+    assert _lane_supports_json_schema(entry) is True
+
+
+def test_lane_supports_json_schema_defaults_false_for_unknown_custom_provider():
+    entry = {
+        "model": "openai/mimo-v2.5",
+        "base_url": "https://token-plan-sgp.xiaomimimo.com/v1",
+    }
     assert _lane_supports_json_schema(entry) is False
 
 
@@ -311,10 +348,10 @@ def test_lane_supports_json_schema_explicit_bool_true():
 
 
 def test_lane_supports_json_schema_explicit_bool_false():
-    """Explicit False overrides any provider default (none today, but
-    documents the precedence)."""
+    """Explicit False overrides provider defaults."""
     entry = {
         "model": "gpt-4o",
+        "base_url": "https://api.openai.com/v1",
         "extra_params": {"supports_json_schema": False},
     }
     assert _lane_supports_json_schema(entry) is False
@@ -347,15 +384,24 @@ def test_lane_supports_json_schema_string_falsy():
 
 
 def test_select_mode_returns_jsonl_by_default():
-    """No flags, no opt-in — JSONL is the production default."""
-    entry = {"model": "deepseek/deepseek-chat"}
+    """Unknown lanes stay on JSONL unless explicitly schema-capable."""
+    entry = {"model": "test-model"}
     mode = _select_extraction_output_mode(None, entry, profile_name="normal")
     assert mode == "jsonl"
 
 
-def test_select_mode_returns_json_schema_when_flag_set():
+def test_select_mode_returns_json_schema_for_known_lane():
     entry = {
-        "model": "deepseek/deepseek-chat",
+        "model": "openai/polymath-extract",
+        "provider_preset": "vllm-rtx",
+    }
+    mode = _select_extraction_output_mode(None, entry, profile_name="normal")
+    assert mode == "json_schema"
+
+
+def test_select_mode_returns_json_schema_when_flag_set_for_unknown_lane():
+    entry = {
+        "model": "test-model",
         "extra_params": {"supports_json_schema": True},
     }
     mode = _select_extraction_output_mode(None, entry, profile_name="normal")

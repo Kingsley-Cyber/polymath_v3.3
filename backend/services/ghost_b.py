@@ -1116,28 +1116,54 @@ def _lane_supports_json_schema(entry: dict) -> bool:
     the model generates. Contrast with json_object, which only guarantees
     valid JSON syntax (not shape).
 
-    Unlike json_object, we do NOT default to True for any provider — this
-    requires explicit opt-in via `extra_params.supports_json_schema` because
-    coverage is uneven across providers and model versions. The verification
-    step is a 5-minute API ping, not training-data familiarity.
-
-    Known-supporting providers (as of 2025):
-      - OpenAI (gpt-4o, gpt-4o-mini, gpt-4-turbo)
-      - DeepSeek V3+ (deepseek-chat, deepseek-reasoner)
-      - Mistral (via tool-use / strict mode)
-      - vLLM with grammar constraints (any model)
-      - Anthropic (via tool-use schema enforcement; not a native response_format)
-
-    For each model, the operator flips `supports_json_schema: true` in the
-    model profile after verifying a one-shot test call succeeds. Defaults
-    to False everywhere so adding a new model can't accidentally turn it on.
+    Production extraction should use this for known capable lanes by default:
+    OpenAI, DeepSeek, and managed vLLM. Operators can still set
+    extra_params.supports_json_schema=false to force JSONL for a broken or
+    nonconformant provider. If a lane claims support but rejects the payload,
+    _process_one records json_schema_unsupported and falls back to JSONL once.
     """
+    model = str(entry.get("model") or "").lower()
+    base_url = str(entry.get("base_url") or "").lower()
+    provider = str(entry.get("provider_preset") or "").lower()
     extra_params = entry.get("extra_params") or {}
     explicit = extra_params.get("supports_json_schema")
     if isinstance(explicit, bool):
         return explicit
     if isinstance(explicit, str):
         return explicit.strip().lower() in {"1", "true", "yes", "on"}
+    if provider in {"openai", "deepseek", "vllm", "vllm-rtx"}:
+        return True
+    if "api.openai.com" in base_url or "api.deepseek.com" in base_url:
+        return True
+    if "vllm" in provider or "vllm" in model:
+        return True
+    private_openai_compatible = model.startswith("openai/") and any(
+        marker in base_url
+        for marker in (
+            "localhost",
+            "127.0.0.1",
+            "192.168.",
+            "10.",
+            "172.16.",
+            "172.17.",
+            "172.18.",
+            "172.19.",
+            "172.20.",
+            "172.21.",
+            "172.22.",
+            "172.23.",
+            "172.24.",
+            "172.25.",
+            "172.26.",
+            "172.27.",
+            "172.28.",
+            "172.29.",
+            "172.30.",
+            "172.31.",
+        )
+    )
+    if private_openai_compatible:
+        return True
     return False
 
 
@@ -1149,14 +1175,12 @@ def _select_extraction_output_mode(
 ) -> Literal["json_object", "jsonl", "json_schema"]:
     """Resolve the actual Ghost B output contract for one lane attempt.
 
-    JSONL is the production default. json_schema (Pt9c) is opt-in per-model
-    via extra_params.supports_json_schema; when enabled, the LLM is
-    token-masked at generation time to match the ExtractionResponse Pydantic
-    model exactly — eliminating off-vocab leaks at the source rather than
-    catching them post-hoc in Pt8b validation. json_object (legacy) is
-    deprecated for foreground extraction but stays reachable for rescue
-    profiles and as an honest fallback if a provider's json_schema
-    implementation is flaky.
+    JSONL is the compatibility fallback. json_schema (Pt9c) is the production
+    default for known capable lanes; when enabled, the LLM is token-masked at
+    generation time to match the ExtractionResponse Pydantic model exactly —
+    eliminating off-vocab leaks at the source rather than catching them
+    post-hoc in Pt8b validation. json_object (legacy) is retained for explicit
+    fallback behavior.
 
     Rescue profiles stay on JSONL — the rescue prompt is JSONL-shaped and
     its merge logic with accepted_jsonl_items depends on the line format.
@@ -1164,11 +1188,11 @@ def _select_extraction_output_mode(
     """
     if profile_name != "normal":
         return "jsonl"
-    # Explicit json_schema opt-in wins.
+    # Known-capable json_schema lanes win unless explicitly disabled.
     if _lane_supports_json_schema(entry):
         return "json_schema"
     # configured_mode is a legacy hook — kept callable, but the default
-    # is JSONL across the board unless json_schema is explicitly enabled.
+    # for unknown lanes is JSONL.
     _ = configured_mode
     return "jsonl"
 
@@ -1422,6 +1446,8 @@ def build_user_prompt(
         "- canonical_name: lowercase, strip punctuation\n"
         "- confidence in [0,1]; drop low-confidence entries\n"
         "- evidence_phrase: short exact phrase from text\n"
+        "- every relation must include evidence_phrase copied from TEXT; "
+        "if no exact supporting phrase exists, do not emit that relation\n"
         "- if evidence_phrase contains a newline, escape it as \\n or rewrite it as one sentence\n"
         "- object_kind=entity only if object is a named entity in text and also listed in entities\n"
         f"- pick the narrowest predicate; use '{SchemaContext.RELATION_SENTINEL}' only when no specific predicate fits. Never invent a new predicate\n"
@@ -1619,6 +1645,8 @@ def build_json_object_prompt(
         f"{fact_rule}"
         f"{table_rules}"
         f"- evidence_phrase <= {evidence_cap} chars and must be an exact phrase from TEXT\n"
+        "- every relation must include evidence_phrase copied from TEXT; "
+        "if no exact supporting phrase exists, do not emit that relation\n"
         "- if evidence_phrase contains a newline, escape it as \\n or rewrite it as one sentence\n"
         "- confidence in [0,1]; drop low-confidence or redundant items\n"
         "- prefer fewer correct items over broad coverage; "
@@ -1873,6 +1901,17 @@ def _result_has_items(result: ExtractionResult | None) -> bool:
     if result is None:
         return False
     return bool(result.entities or result.relations or result.facts)
+
+
+def _json_object_claims_items(raw: str) -> bool:
+    """Return True when a JSON-object response claimed graph items pre-validation."""
+    try:
+        data = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    return any(bool(data.get(key)) for key in ("entities", "relations", "facts"))
 
 
 def summarize_extraction_batch(
@@ -2406,6 +2445,9 @@ def _apply_schema(
     out_relations: list[RelationItem] = []
     if schema.has_relation_schema:
         allowed = set(schema.relation_vocab)
+        drop_unknown_relations = bool(
+            getattr(get_settings(), "EXTRACTION_DROP_UNKNOWN_RELATIONS", True)
+        )
         for r in relations:
             normalized_predicate, reverse = normalize_relation_predicate_alias(r.predicate)
             candidate = (
@@ -2421,15 +2463,29 @@ def _apply_schema(
             if candidate.predicate in allowed:
                 out_relations.append(candidate)
             elif schema.strict == "soft":
-                out_relations.append(_relation_with_remap(r, validation_status="schema_predicate_remap"))
-                counters["relation_remap_count"] += 1
-                logger.debug(
-                    "GHOST B remap predicate %r -> %r (subject=%r object=%r)",
-                    r.predicate,
-                    SchemaContext.RELATION_SENTINEL,
-                    r.subject,
-                    r.object,
-                )
+                if drop_unknown_relations:
+                    counters["relation_drop_count"] += 1
+                    logger.debug(
+                        "GHOST B drop unknown predicate %r "
+                        "(subject=%r object=%r) — production gate",
+                        r.predicate,
+                        r.subject,
+                        r.object,
+                    )
+                else:
+                    out_relations.append(
+                        _relation_with_remap(
+                            r, validation_status="schema_predicate_remap"
+                        )
+                    )
+                    counters["relation_remap_count"] += 1
+                    logger.debug(
+                        "GHOST B remap predicate %r -> %r (subject=%r object=%r)",
+                        r.predicate,
+                        SchemaContext.RELATION_SENTINEL,
+                        r.subject,
+                        r.object,
+                    )
             else:  # hard
                 counters["relation_drop_count"] += 1
                 logger.debug(
@@ -3734,12 +3790,16 @@ async def extract_entities(
                     merged_jsonl_items: list[dict[str, Any]] = []
                     line_cap_exceeded = False
                     empty_after_claimed_items = False
+                    object_mode = profile_output_mode in ("json_object", "json_schema")
+                    object_claimed_items = False
+                    used_jsonl_fallback = False
                     # Pt9c — json_schema produces the same single-JSON-object
                     # shape as json_object (same _parse_object_with_repair
                     # path). The provider's constrained decoder guarantees
                     # validity, but the repair fallback still runs as
                     # defense-in-depth if something exotic comes back.
-                    if profile_output_mode in ("json_object", "json_schema"):
+                    if object_mode:
+                        object_claimed_items = _json_object_claims_items(raw)
                         result = _parse_object_with_repair(
                             raw,
                             prompt_task,
@@ -3750,6 +3810,7 @@ async def extract_entities(
                             max_facts=profile.max_facts,
                         )
                         if result is None:
+                            used_jsonl_fallback = True
                             jsonl_chunk = _parse_jsonl_lines(raw)
                             jsonl_items, line_cap_exceeded = _cap_jsonl_items(
                                 jsonl_chunk.items,
@@ -3800,15 +3861,25 @@ async def extract_entities(
                     result = _cap_result(result, profile)
                     empty_after_claimed_items = (
                         result is not None
-                        and bool(merged_jsonl_items)
+                        and (
+                            bool(merged_jsonl_items)
+                            or (object_mode and object_claimed_items)
+                        )
                         and not _result_has_items(result)
                     )
-                    complete = (
-                        jsonl_chunk.finished
-                        and result is not None
-                        and not empty_after_claimed_items
-                        and not line_cap_exceeded
-                    )
+                    if object_mode and not used_jsonl_fallback:
+                        complete = (
+                            result is not None
+                            and not empty_after_claimed_items
+                            and not line_cap_exceeded
+                        )
+                    else:
+                        complete = (
+                            jsonl_chunk.finished
+                            and result is not None
+                            and not empty_after_claimed_items
+                            and not line_cap_exceeded
+                        )
                     attempt_error_type = None
                     if not complete:
                         if line_cap_exceeded:

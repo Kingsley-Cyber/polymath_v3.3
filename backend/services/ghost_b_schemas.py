@@ -148,7 +148,7 @@ class LLMRelation(BaseModel):
     object: str = Field(min_length=1, max_length=200)
     object_kind: Literal["entity", "literal"] = "literal"
     confidence: float = Field(ge=0.0, le=1.0)
-    evidence_phrase: str = Field(default="", max_length=500)
+    evidence_phrase: str = Field(..., min_length=1, max_length=500)
     relation_cue: str = Field(default="", max_length=120)
 
 
@@ -183,7 +183,7 @@ class LLMFact(BaseModel):
     unit: str = Field(default="", max_length=40)
     condition: str = Field(default="", max_length=300)
     confidence: float = Field(ge=0.0, le=1.0)
-    evidence_phrase: str = Field(default="", max_length=500)
+    evidence_phrase: str = Field(..., min_length=1, max_length=500)
 
 
 class ExtractionResponse(BaseModel):
