@@ -229,6 +229,9 @@ _CHUNK_PAYLOAD_INDEXES: tuple[str, ...] = (
     # /rust, /luau, etc.
     "chunk_kind",
     "language",
+    "schema_version",
+    "summary_type",
+    "source_child_ids",
     # M1 (2026-07-02): domain denormalized from Ghost-A parents, indexed so a
     # future query-domain pre-filter (must=domain) is O(log n). Keyword index.
     "domain",
@@ -705,6 +708,17 @@ async def upsert_summaries(
             "chunk_id": f"{p['parent_id']}_summary",
             "parent_id": p["parent_id"],
             "chunk_type": "summary",
+            "schema_version": p.get("schema_version") or "parent_summary.v1",
+            "summary_type": p.get("summary_type") or "parent_retrieval_replacement",
+            "summary_text": p["summary"],
+            "central_claim": p.get("central_claim") or "",
+            "key_points": p.get("key_points") or [],
+            "main_mechanism": p.get("main_mechanism") or "",
+            "concept_tags": p.get("concept_tags") or [],
+            "entity_hints": p.get("entity_hints") or [],
+            "retrieval_uses": p.get("retrieval_uses") or [],
+            "abstraction_level": p.get("abstraction_level") or "medium",
+            "source_child_ids": p.get("source_child_ids") or p.get("child_ids") or [],
             "source_tier": p["source_tier"],
             "heading_path": p.get("heading_path"),
             "chunk_text": p["summary"],
