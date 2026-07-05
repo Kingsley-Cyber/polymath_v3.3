@@ -784,6 +784,58 @@ $0). All levers compound with the RTX endpoints when powered (Settings rows exis
 tasks: 3451928). Sequencing: P1 alone first with full section-10.4 discipline; P2/P3
 independent after.
 
+### §13-H HYBRID EXTRACTION ARCHITECTURE (OWNER-RATIFIED 2026-07-05 — governs E-work)
+
+Owner directive, verbatim intent: "use GLiNER/GLiREL as the cheap first-pass engine, not
+as the only engine. RTX vLLM as the enrichment engine for facts, low-coverage files, and
+ambiguous relation mapping. RTX is a precision booster, not the entire extraction engine.
+Deterministic facts (definitions, titles, dates, measurements, citations, headings, table
+rows, 'X is Y', aliases, enumerated claims, doc metadata) should not require an LLM."
+
+MACHINE SPLIT: Mac Studio = parse, chunk, deterministic facts/entities/aliases, GLiNER
+entities, GLiREL relations, validation, staging/writes. RTX = LLM extraction ONLY where
+it adds value: fact enrichment requiring reasoning, ambiguous predicate mapping,
+low-coverage files, thin-local fallback.
+
+PIPELINE: file -> parse -> deterministic lane (first-class, engine-independent, always
+runs) -> GLiNER/GLiREL -> per-doc quality score -> RTX enrichment queue ONLY below
+thresholds. Quality gate inputs (all already computed in ghost_b_metrics): coverage %
+(<80% triggers), facts/chunk (<1.0 triggers), related_to ratio (>40% triggers — GLiREL
+predicate ambiguity signal). Enrichment reuses EXISTING machinery: staging + backfill +
+cloud pool lanes; the queue is a threshold rule, not new plumbing.
+
+DESIGN CORRECTION to the owner spec (ratified by consequence, not contradiction): chunk
+shape CANNOT be engine-specific at the corpus level — hybrid means both engines touch the
+same corpus, and retrieval owns the stored chunk shape. RESOLUTION: decouple EXTRACTION
+WINDOWS from RETRIEVAL CHUNKS. Storage chunks once at LLM shape (sentence_merge 512/700 —
+committed default for cloud/dual workflows, 1080994). The local lane derives its own
+sentence-sized GLiREL windows from parent text at extraction time (the sidecar already
+sentence-splits; §13 P2c pre-split work folds in here). No corpus-level chunk fork, no
+double storage.
+
+FILE-LEVEL STATES (owner metric = FILES + MB, never chunks): parsed -> chunked ->
+extracted -> summarized -> embedded -> graph-promoted -> queryable. "extracted" milestone
+SHIPPED (a9bb4f9: batch progress{files/mb done|extracted|total} + EXTRACTED header cell).
+Remaining states ride TWO_PHASE_INGEST (P5) when flipped: local extraction marks files
+extracted fast; summaries/embed/graph run as follow-up lanes.
+
+GLiREL calibration prereq (from the bundled eval): per-predicate thresholds + a
+verifier/merge step before local relations write at full trust — weak predicates
+(related_to confusables: part_of/uses) route to RTX enrichment instead of writing junk.
+
+UI CONTRACT: Corpus Manager must render the resolved lane sentence — e.g. "Extraction:
+local GLiNER/GLiREL first; RTX fills low-coverage/fact gaps (threshold: cov<80% |
+facts<1.0/chunk | related_to>40%)" — via the extraction-contract truth endpoint, never
+implied by toggles alone.
+
+BUILD ORDER: E1 engine mode `local_then_enrich` (resolver + worker dispatch + threshold
+knobs in answerability_tuning-style shared module) -> E2 deterministic-fact lane promoted
+first-class (runs on every engine incl. off? no — off stays vectors-only) -> E3 GLiREL
+per-predicate thresholds + verifier -> E4 remaining file-level states on TWO_PHASE -> E5
+UI lane sentence + enrichment-queue visibility. Receipts per §10.4: fixed 500-chunk
+sample, coverage/typed%/facts-per-chunk vs the 2026-07-05 baselines (local 62%/57%/0.4,
+RTX 91%/75-100%/2.35), file-rate on a 20-file probe corpus.
+
 
 ## 12. TEMPORAL LAYER + GRAPH PRECOMPUTE + EMBEDDING-JOBS DOCTRINE (owner research 2026-07-03)
 
