@@ -3,7 +3,10 @@ param(
     # and :8085 (two sidecar instances on one box = 2-way slice parallelism).
     # Start each:  .\run_sidecar_windows.ps1            (defaults to 8084)
     #              .\run_sidecar_windows.ps1 -Port 8085
-    [int]$Port = 8084
+    [int]$Port = 8084,
+    # Dedicated GPU boxes should NEVER idle-suicide (the 1h default exists
+    # for the shared Mac). The boot-task installer passes this.
+    [switch]$NoIdleShutdown
 )
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -18,6 +21,10 @@ $env:GHOST_B_GLIREL_BATCH = "512"
 $env:GHOST_B_FACET_BATCH  = "256"
 $env:GLIREL_CKPT_DIR      = "E:\Polymath_Training\ghost_b_dataset\runs\glirel_ghost_b_v1\best"
 $env:PYTHONUNBUFFERED     = "1"
+if ($NoIdleShutdown) { $env:GHOST_B_IDLE_SHUTDOWN_SECONDS = "0" }
+# Pin the HF model cache to the repo so the service works identically under
+# the SYSTEM account (whose default cache lives in systemprofile).
+if (-not $env:HF_HOME) { $env:HF_HOME = Join-Path $repo ".hf_cache" }
 
 Set-Location $svcDir
 # Use cmd.exe for redirection. PowerShell's `*>>` wraps native-process stderr
