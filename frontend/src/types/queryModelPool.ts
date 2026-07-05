@@ -96,10 +96,31 @@ export interface PoolProviderPreset {
   example_models?: string[];
   /** When true, render example_models as the only selectable model choices. */
   model_dropdown_only?: boolean;
+  lifecycle?: {
+    base_url: string;
+    auto_start?: boolean;
+    auto_stop?: boolean;
+    ready_timeout_seconds?: number;
+  };
   kwargs?: Record<string, unknown>;
 }
 
 export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
+  {
+    id: "vllm-rtx",
+    name: "vLLM RTX",
+    litellm_provider: "openai",
+    base_url: "http://192.168.1.83:8000/v1",
+    example_model: "polymath-extract",
+    example_models: ["polymath-extract", "qwen3-30b-a3b-2507"],
+    default_max_concurrent: 60,
+    lifecycle: {
+      base_url: "http://192.168.1.83:8085",
+      auto_start: true,
+      auto_stop: false,
+      ready_timeout_seconds: 360,
+    },
+  },
   {
     id: "openai",
     name: "OpenAI",

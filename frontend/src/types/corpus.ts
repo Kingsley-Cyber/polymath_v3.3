@@ -46,6 +46,15 @@ export interface ModelProfileRef {
   /** "[set]" on GET; plaintext on POST/PUT; Fernet at rest. */
   api_key: string | null;
   max_concurrent: number;
+  lifecycle_base_url?: string | null;
+  /** "[set]" on GET; plaintext on POST/PUT; Fernet at rest. */
+  lifecycle_api_key?: string | null;
+  lifecycle_auto_start?: boolean;
+  lifecycle_auto_stop?: boolean;
+  lifecycle_up_path?: string;
+  lifecycle_status_path?: string;
+  lifecycle_down_path?: string;
+  lifecycle_ready_timeout_seconds?: number;
   extra_params: Record<string, unknown>;
 }
 
@@ -86,7 +95,7 @@ export interface IngestionConfig {
   summary_models: ModelProfileRef[];
 
   // GHOST B — Extraction Model Pool (round-robin dispatch)
-  // Empty when models_linked === true (worker reuses summary_models).
+  // Used when cloud extraction is enabled and models_linked === false.
   extraction_models: ModelProfileRef[];
   entity_confidence_threshold: number;
 
@@ -216,7 +225,7 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
   summary_models: [],
   extraction_models: [],
   entity_confidence_threshold: 0.5,
-  models_linked: true,
+  models_linked: false,
   // New corpora are EXPLICIT about the extraction workflow — never "inherit"
   // (§13: the silent global fallback is how a corpus ran the wrong engine
   // for 14 hours). Local sidecars are the proven $0 default.
@@ -427,6 +436,9 @@ export interface ExtractionContractResponse {
     model: string;
     base_url?: string | null;
     max_concurrent?: number | null;
+    lifecycle_base_url?: string | null;
+    lifecycle_auto_start?: boolean | null;
+    lifecycle_auto_stop?: boolean | null;
   }>;
   endpoints: Array<{
     label?: string | null;

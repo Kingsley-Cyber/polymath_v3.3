@@ -720,8 +720,28 @@ class ModelProfileRef(BaseModel):
         description="Per-entry api_key (Fernet ciphertext at rest; masked as '[set]' on GET).",
     )
     max_concurrent: int = Field(
-        default=1, ge=1, le=64, description="Max in-flight calls against this entry."
+        default=1, ge=1, le=256, description="Max in-flight calls against this entry."
     )
+    lifecycle_base_url: str | None = Field(
+        default=None,
+        description="Optional control-plane base URL for managed remote runtimes.",
+    )
+    lifecycle_api_key: str | None = Field(
+        default=None,
+        description="Optional X-Api-Key for the managed runtime control plane.",
+    )
+    lifecycle_auto_start: bool = Field(
+        default=False,
+        description="POST lifecycle_up_path and poll lifecycle_status_path before use.",
+    )
+    lifecycle_auto_stop: bool = Field(
+        default=False,
+        description="POST lifecycle_down_path after this model-pool call finishes.",
+    )
+    lifecycle_up_path: str = Field(default="/up")
+    lifecycle_status_path: str = Field(default="/status")
+    lifecycle_down_path: str = Field(default="/down")
+    lifecycle_ready_timeout_seconds: int = Field(default=360, ge=5, le=1800)
     extra_params: dict = Field(
         default_factory=dict,
         description="Extra LiteLLM body params merged in. 'model', 'messages', 'response_format' reserved.",
@@ -859,13 +879,12 @@ class IngestionConfig(BaseModel):
         ),
     )
 
-    # UI hint — also load-bearing at runtime for the extraction pool.
-    # When True: worker reuses summary_models for GHOST B (extraction_models is
-    # expected empty and ignored). The UI renders one combined "Summary +
-    # Extraction" chip pool. When False: worker uses extraction_models as an
-    # independent pool, UI renders two split chip pools.
+    # Load-bearing extraction pool source.
+    # When True: worker reuses summary_models for GHOST B. When False: worker
+    # uses extraction_models independently. New corpora default False so
+    # Summary and Extraction are visibly separate unless explicitly linked.
     models_linked: bool = Field(
-        default=True,
+        default=False,
         description=(
             "When True, worker reuses summary_models for extraction (GHOST B). "
             "When False, extraction_models is required and used independently."

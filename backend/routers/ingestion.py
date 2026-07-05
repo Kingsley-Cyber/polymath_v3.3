@@ -185,14 +185,13 @@ async def _model_ref_for_test(
     user_id: str,
 ) -> tuple[dict, str | None]:
     data = body.entry.model_dump()
-    raw_key = data.get("api_key")
 
     # Non-ASCII guard (2026-07-04): keys/urls pasted from formatted sources
     # arrive with smart dashes/quotes (em-dash \u2014 etc.). They end up in
     # HTTP headers, which must be ASCII — litellm then 500s with a cryptic
     # "'ascii' codec can't encode character" from deep inside the provider
     # client. Fail HERE with a message that names the field and character.
-    for fld in ("api_key", "base_url", "model"):
+    for fld in ("api_key", "base_url", "model", "lifecycle_base_url", "lifecycle_api_key"):
         val = data.get(fld)
         if isinstance(val, str) and val and val != "[set]":
             cleaned = val.strip()
@@ -206,9 +205,14 @@ async def _model_ref_for_test(
                     )
             data[fld] = cleaned
 
-    if raw_key == "[set]":
+    masked_secret_fields = [
+        field
+        for field in ("api_key", "lifecycle_api_key")
+        if data.get(field) == "[set]"
+    ]
+    if masked_secret_fields:
         if not (body.corpus_id and body.pool_field is not None and body.index is not None):
-            return data, "Saved API key is masked. Type a new key or save the corpus first."
+            return data, "Saved key is masked. Type a new key or save the corpus first."
 
         corpus = await ingestion_service._get_corpus_raw(body.corpus_id)
         if not corpus or corpus.get("user_id") != user_id:
@@ -235,19 +239,22 @@ async def _model_ref_for_test(
                 None,
             )
         if saved_entry is None:
-            return data, "Saved API key could not be resolved for this model chip."
+            return data, "Saved key could not be resolved for this model chip."
 
-        raw_key = saved_entry.get("api_key")
-        if not raw_key:
-            return data, "No API key is saved for this model chip."
-        data["api_key"] = raw_key
+        for field in masked_secret_fields:
+            raw_key = saved_entry.get(field)
+            if not raw_key:
+                return data, f"No {field} is saved for this model chip."
+            data[field] = raw_key
 
-    if data.get("api_key"):
+    if data.get("api_key") or data.get("lifecycle_api_key"):
         from services.secrets import decrypt
 
-        plaintext = decrypt(data["api_key"])
-        if plaintext is not None:
-            data["api_key"] = plaintext
+        for field in ("api_key", "lifecycle_api_key"):
+            if data.get(field):
+                plaintext = decrypt(data[field])
+                if plaintext is not None:
+                    data[field] = plaintext
 
     return data, None
 
@@ -279,7 +286,13 @@ async def _test_chat_model_ref(entry: dict) -> ModelRefTestResult:
         "Content-Type": "application/json",
     }
     started = time.monotonic()
+    from services.ingestion.model_lifecycle import (
+        ensure_model_lifecycle_ready,
+        shutdown_model_lifecycle,
+    )
+
     try:
+        await ensure_model_lifecycle_ready([entry], purpose="model_ref_test")
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(
                 f"{settings.LITELLM_URL}/chat/completions",
@@ -322,6 +335,8 @@ async def _test_chat_model_ref(entry: dict) -> ModelRefTestResult:
             base_url=base_url,
             error=_safe_provider_text(str(exc)),
         )
+    finally:
+        await shutdown_model_lifecycle([entry], purpose="model_ref_test")
 
 
 async def _test_embedding_model_ref(entry: dict) -> ModelRefTestResult:
@@ -643,6 +658,9 @@ async def get_extraction_contract(
                 "model": m.model,
                 "base_url": m.base_url,
                 "max_concurrent": m.max_concurrent,
+                "lifecycle_base_url": m.lifecycle_base_url,
+                "lifecycle_auto_start": m.lifecycle_auto_start,
+                "lifecycle_auto_stop": m.lifecycle_auto_stop,
             }
             for m in (pool_refs or [])
         ]

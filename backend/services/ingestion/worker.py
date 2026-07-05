@@ -439,24 +439,35 @@ def _ghost_b_metrics_with_failures(
 def _build_ghost_pool(refs) -> list[dict]:
     """
     Turn a list[ModelProfileRef] (Pydantic) or list[dict] into the plain-dict
-    pool that ghost_a / ghost_b accept. Decrypts each entry's api_key exactly
-    once here so the ghost layers stay ignorant of the secret format.
+    pool that ghost_a / ghost_b accept. Decrypts each entry's secrets exactly
+    once here so the ghost layers stay ignorant of the storage format.
     """
     if not refs:
         return []
     out: list[dict] = []
     for ref in refs:
         data = ref.model_dump() if hasattr(ref, "model_dump") else dict(ref)
-        ct = data.get("api_key")
-        if ct:
-            pt = _decrypt_api_key(ct)
-            data["api_key"] = pt if pt is not None else ct
+        for secret_field in ("api_key", "lifecycle_api_key"):
+            ct = data.get(secret_field)
+            if ct:
+                pt = _decrypt_api_key(ct)
+                data[secret_field] = pt if pt is not None else ct
         out.append(
             {
                 "model": data.get("model"),
                 "base_url": data.get("base_url") or None,
                 "api_key": data.get("api_key") or None,
                 "max_concurrent": int(data.get("max_concurrent") or 1) or 1,
+                "lifecycle_base_url": data.get("lifecycle_base_url") or None,
+                "lifecycle_api_key": data.get("lifecycle_api_key") or None,
+                "lifecycle_auto_start": bool(data.get("lifecycle_auto_start")),
+                "lifecycle_auto_stop": bool(data.get("lifecycle_auto_stop")),
+                "lifecycle_up_path": data.get("lifecycle_up_path") or "/up",
+                "lifecycle_status_path": data.get("lifecycle_status_path") or "/status",
+                "lifecycle_down_path": data.get("lifecycle_down_path") or "/down",
+                "lifecycle_ready_timeout_seconds": int(
+                    data.get("lifecycle_ready_timeout_seconds") or 360
+                ),
                 "extra_params": data.get("extra_params") or {},
             }
         )
@@ -1013,6 +1024,11 @@ async def _run_ghosts_parallel(
             else config.extraction_models
         )
         pool = _build_ghost_pool(cloud_pool_refs)
+        cloud_primary = contract.engine in {"cloud", "dual"}
+        if cloud_primary and pool:
+            from services.ingestion.model_lifecycle import ensure_model_lifecycle_ready
+
+            await ensure_model_lifecycle_ready(pool, purpose="schema_lens")
         # Exclude noisy parents/children from the schema lens — letting
         # bibliography page entries (publishers, ISBNs, citation bric-a-brac)
         # influence which schema terms get retrieved would erode entity
@@ -1033,9 +1049,9 @@ async def _run_ghosts_parallel(
             children=body_children_for_lens or children,
             entity_schema=config.entity_schema,
             relation_schema=config.relation_schema,
-            pool=pool if contract.uses_cloud else [],
+            pool=pool if cloud_primary else [],
             model=model,
-            allow_llm=contract.uses_cloud,
+            allow_llm=cloud_primary,
         )
 
         async def _schema_resolver(

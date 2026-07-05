@@ -718,7 +718,7 @@ class IngestionService:
 
     @staticmethod
     def _plaintext_model_pool(refs) -> list[dict]:
-        """Return a pool with decrypted api_key values for embedder dispatch."""
+        """Return a pool with decrypted per-entry secret values for dispatch."""
         if not refs:
             return []
         from services.secrets import decrypt
@@ -726,10 +726,11 @@ class IngestionService:
         out: list[dict] = []
         for ref in refs:
             data = ref.model_dump() if hasattr(ref, "model_dump") else dict(ref)
-            raw_key = data.get("api_key")
-            if raw_key:
-                plaintext = decrypt(raw_key)
-                data["api_key"] = plaintext if plaintext is not None else raw_key
+            for secret_field in ("api_key", "lifecycle_api_key"):
+                raw_key = data.get(secret_field)
+                if raw_key:
+                    plaintext = decrypt(raw_key)
+                    data[secret_field] = plaintext if plaintext is not None else raw_key
             out.append(data)
         return out
 
@@ -776,7 +777,14 @@ class IngestionService:
 
             changed = False
             for idx, entry in enumerate(incoming_pool):
-                if not isinstance(entry, dict) or entry.get("api_key") != "[set]":
+                if not isinstance(entry, dict):
+                    continue
+                masked_fields = [
+                    field
+                    for field in ("api_key", "lifecycle_api_key")
+                    if entry.get(field) == "[set]"
+                ]
+                if not masked_fields:
                     continue
                 replacement = None
                 if idx < len(runtime_summary_models) and _matches(entry, runtime_summary_models[idx]):
@@ -786,9 +794,11 @@ class IngestionService:
                         (candidate for candidate in runtime_summary_models if _matches(entry, candidate)),
                         None,
                     )
-                if replacement and replacement.get("api_key"):
-                    entry["api_key"] = replacement["api_key"]
-                    changed = True
+                if replacement:
+                    for field in masked_fields:
+                        if replacement.get(field):
+                            entry[field] = replacement[field]
+                            changed = True
             if changed:
                 patch["summary_models"] = incoming_pool
 
@@ -1028,8 +1038,9 @@ class IngestionService:
             for entry in pool:
                 if not isinstance(entry, dict):
                     continue
-                raw = entry.get("api_key")
-                entry["api_key"] = "[set]" if raw else None
+                for secret_field in ("api_key", "lifecycle_api_key"):
+                    raw = entry.get(secret_field)
+                    entry[secret_field] = "[set]" if raw else None
 
         # Top-level mutable api keys (Phase 21 — embed provider wiring).
         if "embed_api_key" in config_dict:
@@ -1077,7 +1088,8 @@ class IngestionService:
     ) -> None:
         """
         Walk summary_models and extraction_models; for each entry, ensure
-        `api_key` holds Fernet ciphertext (or None) before it lands in Mongo.
+        `api_key` / `lifecycle_api_key` hold Fernet ciphertext (or None)
+        before they land in Mongo.
 
         Per-entry semantics (matched against the existing pool by index when
         available, so a user editing chip #3 doesn't wipe chip #1's key):
@@ -1112,7 +1124,11 @@ class IngestionService:
                     if idx < len(existing_pool) and isinstance(existing_pool[idx], dict)
                     else {}
                 )
-                entry["api_key"] = _enc(entry.get("api_key"), existing_entry.get("api_key"))
+                for secret_field in ("api_key", "lifecycle_api_key"):
+                    entry[secret_field] = _enc(
+                        entry.get(secret_field),
+                        existing_entry.get(secret_field),
+                    )
 
         # Top-level embed_api_key — same "[set]" preserve + encrypt-plaintext
         # semantics as the per-entry pool keys.

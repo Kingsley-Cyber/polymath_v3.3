@@ -238,6 +238,13 @@ async def summarize_parents(
             }
         ]
 
+    from services.ingestion.model_lifecycle import (
+        ensure_model_lifecycle_ready,
+        shutdown_model_lifecycle,
+    )
+
+    await ensure_model_lifecycle_ready(pool, purpose="ghost_a")
+
     cap_logged = False
 
     def _lane_slot_plan(*, log_cap: bool = False) -> list[int]:
@@ -552,4 +559,5 @@ async def summarize_parents(
         len(pool),
         ", ".join(e["model"] for e in pool),
     )
+    await shutdown_model_lifecycle(pool, purpose="ghost_a")
     return results

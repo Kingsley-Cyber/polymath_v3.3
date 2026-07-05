@@ -28,6 +28,7 @@ import type {
   GlobalIngestionSettings,
   ExtractionEngine,
   ExtractionContractResponse,
+  ModelProfileRef,
 } from "../../types";
 import { DEFAULT_INGESTION_CONFIG, inferPreset } from "../../types";
 import { CorpusDetail } from "./CorpusDetail";
@@ -1150,6 +1151,18 @@ function usesCloudEngine(engine: ResolvedDraftEngine): boolean {
   return engine === "cloud" || engine === "dual" || engine === "local_then_cloud";
 }
 
+function formatExtractionPoolEntry(
+  entry:
+    | ModelProfileRef
+    | ExtractionContractResponse["pool"][number],
+): string {
+  const base = `${entry.model} @${entry.max_concurrent ?? 1}`;
+  if (entry.lifecycle_auto_start && entry.lifecycle_base_url) {
+    return `${base} warms ${entry.lifecycle_base_url}`;
+  }
+  return base;
+}
+
 function IngestionModelsSection({
   config,
   onPatch,
@@ -1197,7 +1210,9 @@ function IngestionModelsSection({
     !!contract &&
     (contract.engine !== draft ||
       contract.models_linked !== linked ||
-      (draftUsesCloud && contract.pool.length !== draftPool.length));
+      (draftUsesCloud &&
+        contract.pool.map(formatExtractionPoolEntry).join("|") !==
+          draftPool.map(formatExtractionPoolEntry).join("|")));
   const setToggles = (local: boolean, cloud: boolean) => {
     onPatch({
       extraction_engine:
@@ -1230,27 +1245,37 @@ function IngestionModelsSection({
         <div className="text-[12px] font-bold tracking-widest text-content-tertiary uppercase">
           Ingestion Models
         </div>
-        <label
-          className={`flex items-center gap-1.5 text-[11px] tracking-wider ${
-            toggles.cloud
-              ? "text-content-secondary cursor-pointer"
-              : "text-content-tertiary/50 cursor-not-allowed"
-          }`}
-          title={
-            toggles.cloud
-              ? "ON = Extraction reuses the Summary pool. OFF = two independent pools."
-              : "Only relevant when CLOUD extraction is enabled below."
-          }
-        >
-          <input
-            type="checkbox"
-            checked={linked}
-            disabled={!toggles.cloud}
-            onChange={(e) => onPatch({ models_linked: e.target.checked })}
-            className="accent-accent-main"
-          />
-          Reuse Summary pool for Extraction
-        </label>
+        <div className="flex items-center gap-1.5 text-[10px] tracking-wider">
+          <span className="text-content-tertiary uppercase">Cloud extraction source</span>
+          <button
+            type="button"
+            disabled={!editing}
+            onClick={() => onPatch({ models_linked: false })}
+            className={
+              "px-2 py-1 rounded-sm border font-bold uppercase transition-colors " +
+              (!linked
+                ? "border-accent-main bg-accent-main/10 text-accent-main"
+                : "border-border-minimal text-content-tertiary hover:text-content-primary")
+            }
+            title="Use the dedicated Extraction Models pool for Ghost B."
+          >
+            Extraction pool
+          </button>
+          <button
+            type="button"
+            disabled={!editing}
+            onClick={() => onPatch({ models_linked: true })}
+            className={
+              "px-2 py-1 rounded-sm border font-bold uppercase transition-colors " +
+              (linked
+                ? "border-accent-main bg-accent-main/10 text-accent-main"
+                : "border-border-minimal text-content-tertiary hover:text-content-primary")
+            }
+            title="Explicitly reuse the Summary Models pool for cloud extraction."
+          >
+            Summary pool
+          </button>
+        </div>
       </div>
 
       {/* ── Extraction contract — the deterministic workflow switch ── */}
@@ -1320,7 +1345,7 @@ function IngestionModelsSection({
                   {draftPool.length === 0
                     ? "EMPTY"
                     : draftPool
-                        .map((p) => `${p.model} @${p.max_concurrent ?? 1}`)
+                        .map(formatExtractionPoolEntry)
                         .join(", ")}
                 </span>
               )}
@@ -1374,7 +1399,7 @@ function IngestionModelsSection({
                   {contract.pool.length === 0
                     ? "EMPTY"
                     : contract.pool
-                        .map((p) => `${p.model} @${p.max_concurrent ?? 1}`)
+                        .map(formatExtractionPoolEntry)
                         .join(", ")}
                 </span>
               )}
@@ -1395,7 +1420,7 @@ function IngestionModelsSection({
                     ? ` · ${draftPoolSource === "summary_models" ? "summary" : "extraction"} pool: ${
                         draftPool.length === 0
                           ? "EMPTY"
-                          : draftPool.map((p) => `${p.model} @${p.max_concurrent ?? 1}`).join(", ")
+                          : draftPool.map(formatExtractionPoolEntry).join(", ")
                       }`
                     : ""}
                 </div>
@@ -1425,17 +1450,17 @@ function IngestionModelsSection({
         title="Extraction Models (GHOST B)"
         subtitle={
           linked
-            ? "Using Summary pool (link toggle above)"
-            : "Entity + relation extraction · tasks round-robined across chips"
+            ? "Explicitly using Summary pool as the cloud extraction lane"
+            : draftUsesCloud
+              ? "Cloud/OpenAI-compatible extraction lane · tasks work-steal across chips"
+              : "Configured cloud extraction lane · inactive until CLOUD is enabled above"
         }
         value={extractionPool}
         onChange={(next) => onPatch({ extraction_models: next })}
         editing={editing}
-        readOnly={!draftUsesCloud || linked}
+        readOnly={linked}
         readOnlyHint={
-          !draftUsesCloud
-            ? "Enable CLOUD extraction above to use this pool."
-            : "Uncheck 'Reuse Summary pool' to configure Extraction independently."
+          "Choose Extraction pool above to configure Ghost B independently."
         }
         testKind="chat"
         testContext={{

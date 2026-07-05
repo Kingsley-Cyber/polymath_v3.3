@@ -217,7 +217,7 @@ class IngestionConfig(BaseModel):
     summary_models: list[_legacy.ModelProfileRef] = Field(default_factory=list)
     extraction_models: list[_legacy.ModelProfileRef] = Field(default_factory=list)
     entity_confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-    models_linked: bool = True
+    models_linked: bool = False
     # Per-corpus extraction contract (owner two-toggle model: local on ->
     # 'local', cloud on -> 'cloud', both -> 'dual', neither -> 'off').
     # 'inherit' = legacy fallback to the global Settings engine; the lifespan

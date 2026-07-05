@@ -3319,6 +3319,13 @@ async def extract_entities(
             }
         ]
 
+    from services.ingestion.model_lifecycle import (
+        ensure_model_lifecycle_ready,
+        shutdown_model_lifecycle,
+    )
+
+    await ensure_model_lifecycle_ready(pool, purpose="ghost_b")
+
     lane_limits = [max(1, int(entry.get("max_concurrent") or 1) or 1) for entry in pool]
     configured_lane_concurrency = sum(lane_limits) or max(1, settings.EXTRACTION_MAX_CONCURRENT)
     global_max_concurrent = min(
@@ -4271,6 +4278,7 @@ async def extract_entities(
         total_entity_drops,
         total_relation_drops,
     )
+    await shutdown_model_lifecycle(pool, purpose="ghost_b")
     if return_report:
         return ExtractionBatchReport(
             results=results,

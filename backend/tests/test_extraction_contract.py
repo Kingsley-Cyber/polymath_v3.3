@@ -90,6 +90,17 @@ def test_unlinked_but_empty_extraction_pool_fails_fast():
     assert c.errors and "extraction_models" in c.errors[0]
 
 
+def test_missing_link_flag_does_not_borrow_summary_pool():
+    c = _c(
+        corpus_engine="cloud",
+        models_linked=None,
+        summary_model_count=2,
+        extraction_model_count=0,
+    )
+    assert c.pool_source == "none" and c.pool_size == 0
+    assert c.errors and "extraction_models" in c.errors[0]
+
+
 def test_dual_requires_pool_too():
     c = _c(corpus_engine="dual", summary_model_count=0)
     assert c.errors

@@ -92,7 +92,7 @@ def resolve_extraction_contract(
     # Cloud pool resolution mirrors the worker rule EXACTLY:
     # linked -> summary pool; unlinked -> extraction pool. Never silently fall
     # back to Summary when the user explicitly split the pools.
-    linked = models_linked is not False
+    linked = models_linked is True
     if linked:
         pool_size = max(0, int(summary_model_count))
         pool_source = "summary_models" if pool_size else "none"

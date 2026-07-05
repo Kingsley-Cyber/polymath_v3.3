@@ -14,6 +14,7 @@ import {
   Zap,
   CheckCircle,
   AlertTriangle,
+  Power,
 } from "lucide-react";
 import type { ModelProfileRef } from "../../types";
 import { PROVIDER_PRESETS, composeModelString } from "../../types";
@@ -32,6 +33,12 @@ type PoolPreset = {
   default_max_concurrent?: number;
   example_models?: string[];
   model_dropdown_only?: boolean;
+  lifecycle?: {
+    base_url: string;
+    auto_start?: boolean;
+    auto_stop?: boolean;
+    ready_timeout_seconds?: number;
+  };
   kwargs?: Record<string, unknown>;
 };
 
@@ -61,6 +68,11 @@ const EMPTY_DRAFT = {
   base_url: "",
   api_key: "",
   max_concurrent: 1,
+  lifecycle_base_url: "",
+  lifecycle_api_key: "",
+  lifecycle_auto_start: false,
+  lifecycle_auto_stop: false,
+  lifecycle_ready_timeout_seconds: 360,
 };
 
 export function IngestionModelPool({
@@ -128,7 +140,18 @@ export function IngestionModelPool({
       model: composeModel(draft.provider_preset, bare),
       base_url: draft.base_url.trim() || null,
       api_key: draft.api_key ? draft.api_key : null,
-      max_concurrent: Math.max(1, Math.min(64, Number(draft.max_concurrent) || 1)),
+      max_concurrent: Math.max(1, Math.min(256, Number(draft.max_concurrent) || 1)),
+      lifecycle_base_url: draft.lifecycle_base_url.trim() || null,
+      lifecycle_api_key: draft.lifecycle_api_key ? draft.lifecycle_api_key : null,
+      lifecycle_auto_start: Boolean(draft.lifecycle_auto_start),
+      lifecycle_auto_stop: Boolean(draft.lifecycle_auto_stop),
+      lifecycle_up_path: "/up",
+      lifecycle_status_path: "/status",
+      lifecycle_down_path: "/down",
+      lifecycle_ready_timeout_seconds: Math.max(
+        5,
+        Math.min(1800, Number(draft.lifecycle_ready_timeout_seconds) || 360),
+      ),
       extra_params: extraParams,
     };
   };
@@ -174,6 +197,11 @@ export function IngestionModelPool({
       // field alone.
       model: p?.example_model ? composeModel(presetId, p.example_model) : d.model,
       max_concurrent: p?.default_max_concurrent ?? d.max_concurrent,
+      lifecycle_base_url: p?.lifecycle?.base_url ?? d.lifecycle_base_url,
+      lifecycle_auto_start: p?.lifecycle?.auto_start ?? d.lifecycle_auto_start,
+      lifecycle_auto_stop: p?.lifecycle?.auto_stop ?? d.lifecycle_auto_stop,
+      lifecycle_ready_timeout_seconds:
+        p?.lifecycle?.ready_timeout_seconds ?? d.lifecycle_ready_timeout_seconds,
     }));
   };
 
@@ -219,7 +247,11 @@ export function IngestionModelPool({
                   ? "border-accent-main bg-accent-main/15 scale-[1.03]"
                   : "border-white/10 bg-[#0b0c10]"
               }`}
-              title={`${m.provider_preset || "custom"} • ${m.base_url || "default gateway"} • conc=${m.max_concurrent}`}
+              title={`${m.provider_preset || "custom"} • ${m.base_url || "default gateway"} • conc=${m.max_concurrent}${
+                m.lifecycle_auto_start && m.lifecycle_base_url
+                  ? ` • warms ${m.lifecycle_base_url}`
+                  : ""
+              }`}
             >
               <span className="text-content-tertiary uppercase text-[8px]">
                 {m.provider_preset || "custom"}
@@ -229,6 +261,12 @@ export function IngestionModelPool({
                 <Cpu className="w-2.5 h-2.5" />
                 {m.max_concurrent}
               </span>
+              {m.lifecycle_auto_start && m.lifecycle_base_url && (
+                <span className="flex items-center gap-0.5 text-cyan-300">
+                  <Power className="w-2.5 h-2.5" />
+                  up
+                </span>
+              )}
               {m.api_key && (
                 <KeyRound
                   className="w-2.5 h-2.5 text-emerald-400"
@@ -340,7 +378,7 @@ export function IngestionModelPool({
           <input
             type="number"
             min={1}
-            max={64}
+            max={256}
             value={draft.max_concurrent}
             onChange={(e) =>
               setDraft({ ...draft, max_concurrent: Number(e.target.value) || 1 })
@@ -355,6 +393,70 @@ export function IngestionModelPool({
             placeholder="api_key"
             className="w-full sm:w-[110px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono placeholder:text-content-tertiary"
           />
+          <label className="flex items-center gap-1.5 px-1.5 py-1 text-[10px] font-bold uppercase tracking-widest text-content-secondary">
+            <input
+              type="checkbox"
+              checked={draft.lifecycle_auto_start}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  lifecycle_auto_start: e.target.checked,
+                })
+              }
+              className="accent-accent-main"
+            />
+            Managed
+          </label>
+          {draft.lifecycle_auto_start && (
+            <div className="flex flex-wrap items-center gap-1.5 basis-full">
+              <input
+                type="text"
+                value={draft.lifecycle_base_url}
+                onChange={(e) =>
+                  setDraft({ ...draft, lifecycle_base_url: e.target.value })
+                }
+                placeholder="control base_url for /up + /status"
+                className="flex-1 min-w-full sm:min-w-[220px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono placeholder:text-content-tertiary"
+              />
+              <input
+                type="password"
+                value={draft.lifecycle_api_key}
+                onChange={(e) =>
+                  setDraft({ ...draft, lifecycle_api_key: e.target.value })
+                }
+                placeholder="X-Api-Key"
+                className="w-full sm:w-[120px] bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono placeholder:text-content-tertiary"
+              />
+              <input
+                type="number"
+                min={5}
+                max={1800}
+                value={draft.lifecycle_ready_timeout_seconds}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    lifecycle_ready_timeout_seconds: Number(e.target.value) || 360,
+                  })
+                }
+                title="Seconds to wait for ready:true after /up"
+                className="w-16 bg-[#0b0c10] text-white border border-white/10 rounded px-1.5 py-1 text-[10px] font-mono text-center"
+              />
+              <label className="flex items-center gap-1.5 px-1.5 py-1 text-[10px] text-content-secondary">
+                <input
+                  type="checkbox"
+                  checked={draft.lifecycle_auto_stop}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      lifecycle_auto_stop: e.target.checked,
+                    })
+                  }
+                  className="accent-accent-main"
+                />
+                down after call
+              </label>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => testEntry("draft", "draft model", buildDraftRef())}
