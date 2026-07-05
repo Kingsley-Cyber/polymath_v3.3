@@ -689,6 +689,48 @@ per-stage run report card (fallback-rate accounting; graceful degradation withou
 is slow-motion data loss). Held: Q5 probes, waterfall/Tier-0/two-lane flag flips (need the
 golden battery), promote backfill on authentic_library.
 
+## 13. LOCAL INGESTION SPEED PLAN (planned 2026-07-05, measured on the live 498-book batch)
+
+**Measured reality (Mac Studio, 3h telemetry):** GPU duty cycle = ~59% — GPU-stage work
+(ghosts 10,694s + embed 1,985s) over 2 slots x 3h; the sidecar sat idle 34 min straight while
+both doc slots ground through summary-tree/Mongo/Qdrant/Neo4j writes. Within extraction,
+GLiREL = ~75% of cost (282s of a 377s pass), GLiNER ~11%, facts ~14%. Embedding runs an
+anomalous ~132 ms/chunk (client batch 32, and embed bursts collide with the other doc's
+extraction on the one Metal GPU). Core flaw: the pipeline is doc-phase-LOCKSTEP — each doc
+slot alternates GPU and CPU/IO phases, so the scarcest resource starves whenever both slots
+write. Architecture rule: schedule around the hardest resource — a GPU lane that never
+starves; CPU/IO flows around it.
+
+**P1 — Phase-aware concurrency (est 1.5-1.7x).** Split the single doc cap into two governors:
+NEW INGEST_GPU_MAX_DOCS (default 2 — preserves today's exact GPU pressure) acquired ONLY
+around the GPU phases (ghosts, embed); INGEST_GLOBAL_MAX_DOCS becomes total docs in flight
+(default 2->3) so a third doc chunks/writes while two extract. Batch worker count floors to
+the global cap (semaphores are the governors; worker count just exploits them).
+RECEIPT: sidecar idle <10% over 1h (was ~40%), files/hour >=1.5x, site stays responsive.
+RISK: chunker CPU on the extra doc — watch /api/health during receipt; default stays 3 not 4.
+
+**P2 — GLiREL surgery (attacks the 75%).** (a) set GHOST_B_GLIREL_BATCH on the Mac (unset;
+Windows runner uses 512); (b) pair pruning — GLiREL scales with entity-PAIRS: cap pairs/chunk
+to top-K by GLiNER confidence, skip <2-entity chunks; (c) pre-split >128-token sentences
+(GLiREL truncates them anyway — pure waste today). RECEIPT: ms/chunk on a fixed 500-chunk
+sample before/after; typed-predicate % within 2 points.
+
+**P3 — Embedding fix (132 -> <30 ms/chunk).** EMBED_BATCH_SIZE 32->128-256; under P1,
+interleave embed bursts into extraction gaps instead of co-scheduling. RECEIPT: 900-chunk
+embed phase ~120s -> ~30s.
+
+**P4 — Longest-first doc ordering.** LPT scheduling: start mega-books first so the batch tail
+is not one 15-min book on a lone slot. RECEIPT: batch tail time. (~10-15%.)
+
+**P5 — TWO_PHASE_INGEST flip** (built, gated, c25b70b): queryable-in-minutes; converts
+remaining wall into background enrichment. Flip after P1 proves stable.
+
+Combined honest estimate: 3-4x on the Mac alone (~460 remaining books: ~2 days -> 12-16h,
+$0). All levers compound with the RTX endpoints when powered (Settings rows exist; boot
+tasks: 3451928). Sequencing: P1 alone first with full section-10.4 discipline; P2/P3
+independent after.
+
+
 ## 12. TEMPORAL LAYER + GRAPH PRECOMPUTE + EMBEDDING-JOBS DOCTRINE (owner research 2026-07-03)
 
 ### 12.0 Confirmations (no change — owner research restates ratified design)
