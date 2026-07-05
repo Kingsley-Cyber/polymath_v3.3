@@ -458,6 +458,20 @@ def _resolve_ingest_progress(
             "error": doc.get("skipped_reason") or error,
         }
 
+    if doc.get("ingest_stage") == "awaiting_summary":
+        return {
+            "status": "awaiting_summary",
+            "stage": "awaiting_summary",
+            "mongo_done": mongo_done,
+            "qdrant_done": qdrant_done,
+            "summaries_indexed": summaries_indexed,
+            "neo4j_done": neo4j_done,
+            "verified": verified,
+            "verify_errors": verify_errors,
+            "warnings": warnings,
+            "error": doc.get("summary_pending_reason"),
+        }
+
     required_qdrant_done = (not qdrant_required) or qdrant_done
     required_summary_done = (not summary_required) or summaries_indexed
     required_neo4j_done = (not neo4j_required) or neo4j_done

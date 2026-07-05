@@ -1453,7 +1453,25 @@ async def _run_ghosts_parallel(
     # summary/extraction pool concurrency already fans out within each branch;
     # running both branches at once doubles provider pressure and makes
     # high-throughput API settings unsafe during batch ingest.
-    summaries = await _a_branch()
+    summaries: list[SummaryResult] | None = None
+    try:
+        summaries = await _a_branch()
+    except GhostAFailure as exc:
+        if not bool(getattr(settings, "INGEST_SAFE_SUMMARY_FAILURES", True)):
+            raise
+        warning = (
+            "Ghost A parent summarization deferred: "
+            f"{exc}. Continuing ingest so chunks/extractions can be staged; "
+            "rerun this document later to fill summaries."
+        )
+        warnings.append(warning)
+        ws.summaries_indexed = False
+        logger.warning(
+            "phase=ghost_a_deferred doc=%s corpus=%s reason=%s",
+            doc_id[:12],
+            corpus_id[:8],
+            exc,
+        )
     ghost_b_out = await _b_branch()
     # Phase A: deterministic enrichment (numeric + qualitative facts, in-text
     # aliases) now runs INSIDE services.ghost_b_local per chunk, so the former
@@ -3557,7 +3575,8 @@ async def run_ingest_job(
             exc,
         )
 
-    if ws.qdrant_written and ws.neo4j_written:
+    summary_complete_for_cleanup = (not summary_gate_required) or ws.summaries_indexed
+    if ws.qdrant_written and ws.neo4j_written and summary_complete_for_cleanup:
         # Schedule post-ingest graph cache warmup. The orchestrator wrapper
         # fans out to the tracked analytics warmup worker, and also calls the
         # legacy warm function if that artifact is restored on a deployment.
@@ -3618,6 +3637,14 @@ async def run_ingest_job(
 
     neo4j_required = bool(ingestion_config.use_neo4j and settings.NEO4J_ENABLED)
     summary_complete = (not summary_gate_required) or ws.summaries_indexed
+    awaiting_summary = bool(
+        summary_gate_required
+        and not summary_complete
+        and ws.mongo_written
+        and ws.qdrant_written
+        and ((not neo4j_required) or ws.neo4j_written)
+        and bool(getattr(settings, "INGEST_SAFE_SUMMARY_FAILURES", True))
+    )
     storage_complete = (
         ws.mongo_written
         and ws.qdrant_written
@@ -3625,9 +3652,18 @@ async def run_ingest_job(
         and ((not neo4j_required) or ws.neo4j_written)
     )
     verified_complete = storage_complete and ws.verified is True
-    final_status = "done" if verified_complete else "failed"
+    final_status = (
+        "done"
+        if verified_complete
+        else ("awaiting_summary" if awaiting_summary else "failed")
+    )
     final_error = None
-    if ws.verified is False and ws.verify_errors:
+    if awaiting_summary:
+        final_error = (
+            "Summary pending: chunks, vectors, and available graph extractions "
+            "were persisted; rerun this document when the summary lane is healthy."
+        )
+    elif ws.verified is False and ws.verify_errors:
         final_error = "; ".join(ws.verify_errors)
     elif not verified_complete:
         missing = []
@@ -3642,13 +3678,21 @@ async def run_ingest_job(
         if ws.verified is not True:
             missing.append("verification")
         final_error = "Ingest incomplete: " + ", ".join(missing)
-    final_stage = "complete" if verified_complete else "failed"
+    final_stage = (
+        "complete"
+        if verified_complete
+        else ("awaiting_summary" if awaiting_summary else "failed")
+    )
     final_update: dict[str, Any] = {
         "ingest_stage": final_stage,
         "updated_at": datetime.utcnow(),
     }
     final_unset: dict[str, str] = {}
-    if verified_complete:
+    if awaiting_summary:
+        final_update["summary_pending_reason"] = final_error
+        final_update["write_state.warnings"] = ws.warnings
+        final_unset["error"] = ""
+    elif verified_complete:
         # A resumed ingest can repair an earlier phase failure. Clear the
         # stale top-level error and remove only the synthetic failure warning;
         # genuine coverage warnings such as Ghost B partial extraction remain.
@@ -3658,6 +3702,7 @@ async def run_ingest_job(
         if repaired_warnings != ws.warnings:
             ws.warnings = repaired_warnings
         final_update["write_state.warnings"] = ws.warnings
+        final_unset["summary_pending_reason"] = ""
         final_unset["error"] = ""
     else:
         final_update["error"] = final_error

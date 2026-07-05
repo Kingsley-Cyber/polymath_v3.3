@@ -433,6 +433,40 @@ async def test_phase_order_deep_mode():
 
 
 @pytest.mark.asyncio
+async def test_deep_mode_without_summaries_finishes_awaiting_summary():
+    """Safe mode should keep child vectors and graph writes even when Ghost A is pending."""
+    rec = PhaseRecorder()
+    p, c = _parent("stub-doc", "c" * 36)
+    ghost_b_out = [_fake_extraction_result(c.chunk_id, "stub-doc", "c" * 36)]
+    m = _install_mocks(
+        rec,
+        parents=[p],
+        children=[c],
+        summaries=None,
+        ghost_b_out=ghost_b_out,
+    )
+    try:
+        cfg = IngestionConfig(
+            use_neo4j=True,
+            chunk_summarization=True,
+            target_qdrant_collections=["naive", "hrag", "graph"],
+        )
+        result = await _run_job(m, cfg)
+        assert result.status == "awaiting_summary"
+        assert result.error is not None
+        assert result.error.startswith("Summary pending:")
+        assert rec.events == [
+            "parse", "chunk", "chunk_checkpoint", "ghosts_parallel",
+            "mongo_write", "embed", "qdrant_write", "neo4j_write",
+        ]
+        assert m["db"].__getitem__.return_value.update_one.await_args_list[-1].args[1]["$set"][
+            "ingest_stage"
+        ] == "awaiting_summary"
+    finally:
+        m["stop_all"]()
+
+
+@pytest.mark.asyncio
 async def test_phase_order_fast_mode():
     """Fast mode: both ghosts disabled, Neo4j branch skipped entirely."""
     rec = PhaseRecorder()
@@ -679,9 +713,62 @@ async def test_ghost_a_partial_summarization_warns_and_continues():
 
 
 @pytest.mark.asyncio
-async def test_ghost_a_zero_summaries_still_hard_aborts():
-    """Zero Ghost A output is treated as provider outage and aborts the doc."""
+async def test_ghost_a_zero_summaries_safe_mode_continues_to_extraction():
+    """Safe mode preserves expensive Ghost B progress when summary quota dies."""
     doc_id, corpus_id = "doc-ghost-a-zero", "c" * 36
+    p1, c1 = _parent(doc_id, corpus_id, pid="p0", child_id="c0")
+    parents = [p1]
+    children = [c1]
+    ws = WriteState()
+    cfg = IngestionConfig(
+        use_neo4j=True,
+        chunk_summarization=True,
+        target_qdrant_collections=["naive", "hrag"],
+        extraction_engine="local",
+    )
+
+    summarize_mock = AsyncMock(return_value=[])
+    lens = SimpleNamespace(to_dict=lambda: {"lens_id": "test-lens"})
+
+    async def fake_extract(tasks, **kwargs):
+        return ExtractionBatchReport(
+            results=[
+                _fake_extraction_result(t.chunk_id, t.doc_id, t.corpus_id)
+                for t in tasks
+            ],
+            failures=[],
+            metrics={
+                "requested_chunks": len(tasks),
+                "extracted_chunks": len(tasks),
+                "failed_chunks": 0,
+            },
+        )
+
+    with patch.object(worker, "summarize_parents", summarize_mock), \
+         patch.object(worker, "extract_entities", fake_extract), \
+         patch.object(worker, "get_or_create_schema_lens", AsyncMock(return_value=lens)), \
+         patch.object(worker.settings, "NEO4J_ENABLED", True), \
+         patch.object(worker.settings, "INGEST_SAFE_SUMMARY_FAILURES", True):
+        result = await worker._run_ghosts_parallel(
+            config=cfg, parents=parents, children=children,
+            doc_id=doc_id, corpus_id=corpus_id,
+            model="m",
+            db=MagicMock(), qdrant_client=MagicMock(),
+            neo4j_driver=MagicMock(),
+            existing_doc=None, ws=ws,
+        )
+
+    assert result.summaries is None
+    assert result.ghost_b_out is not None
+    assert len(result.ghost_b_out) == 1
+    assert result.warnings
+    assert result.warnings[0].startswith("Ghost A parent summarization deferred:")
+
+
+@pytest.mark.asyncio
+async def test_ghost_a_zero_summaries_hard_aborts_when_safe_mode_off():
+    """Operators can restore the old hard-abort behavior with the flag off."""
+    doc_id, corpus_id = "doc-ghost-a-zero-hard", "c" * 36
     p1, c1 = _parent(doc_id, corpus_id, pid="p0", child_id="c0")
     p2, c2 = _parent(doc_id, corpus_id, pid="p1", child_id="c1")
     parents = [p1, p2]
@@ -696,14 +783,20 @@ async def test_ghost_a_zero_summaries_still_hard_aborts():
     summarize_mock = AsyncMock(return_value=[])
     with patch.object(worker, "summarize_parents", summarize_mock), \
          patch.object(worker.settings, "NEO4J_ENABLED", True), \
+         patch.object(worker.settings, "INGEST_SAFE_SUMMARY_FAILURES", False), \
          pytest.raises(GhostAFailure, match="Ghost A produced 0/2 summaries"):
         await worker._run_ghosts_parallel(
-            config=cfg, parents=parents, children=children,
-            doc_id=doc_id, corpus_id=corpus_id,
+            config=cfg,
+            parents=parents,
+            children=children,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
             model="m",
-            db=MagicMock(), qdrant_client=MagicMock(),
+            db=MagicMock(),
+            qdrant_client=MagicMock(),
             neo4j_driver=MagicMock(),
-            existing_doc=None, ws=ws,
+            existing_doc=None,
+            ws=ws,
         )
 
 

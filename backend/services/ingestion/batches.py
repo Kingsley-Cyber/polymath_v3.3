@@ -1017,6 +1017,8 @@ async def _process_local_item(
         )
         if result.status == "done":
             status, item_phase, failure_stage = ITEM_DONE, "complete", None
+        elif result.status == "awaiting_summary":
+            status, item_phase, failure_stage = ITEM_DONE, "awaiting_summary", None
         elif result.status == "skipped_duplicate":
             # Deliberate skip (near-duplicate) — NOT a failure; don't retry.
             status, item_phase, failure_stage = ITEM_SKIPPED, "skipped", None

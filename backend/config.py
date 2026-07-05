@@ -820,6 +820,15 @@ class Settings(BaseSettings):
             "fanout is reduced and extraction concurrency may be throttled."
         ),
     )
+    INGEST_SAFE_SUMMARY_FAILURES: bool = Field(
+        default=True,
+        description=(
+            "When Ghost A returns zero summaries, keep ingesting: chunk data "
+            "and Ghost B extractions are persisted, graph/vector writes proceed "
+            "where possible, and the document ends as awaiting_summary instead "
+            "of failing before extraction can run."
+        ),
+    )
     INGEST_MANAGED_VLLM_MODEL_PHASE_DOCS: int = Field(
         default=2,
         ge=1,
