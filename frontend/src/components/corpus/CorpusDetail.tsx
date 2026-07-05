@@ -20,8 +20,11 @@ import {
   XCircle,
   RotateCcw,
   Copy,
+  BookOpen,
+  Search,
 } from "lucide-react";
 import * as api from "../../lib/api";
+import { parseBookMeta } from "../../lib/label-utils";
 import { DuplicatesPanel } from "./DuplicatesPanel";
 import type {
   CorpusResponse,
@@ -71,6 +74,51 @@ function getBatchItemStatusLabel(item: IngestBatchItemResponse): string {
     return item.phase === "stale" ? "stale" : "recoverable";
   }
   return item.status;
+}
+
+// Pipeline phase → words a human can read. Raw phase stays in tooltips.
+const PHASE_LABELS: Record<string, string> = {
+  parse: "parsing",
+  chunk: "chunking",
+  chunking: "chunking",
+  ghosts: "extracting entities",
+  summary: "summarizing",
+  mongo: "writing text",
+  embed: "embedding",
+  qdrant: "writing vectors",
+  neo4j: "writing graph",
+  verify: "verifying",
+};
+
+function phaseLabel(phase?: string | null): string {
+  if (!phase) return "queued";
+  return PHASE_LABELS[phase] ?? phase;
+}
+
+/** Plain-English reason for a failed ingest. Raw error text → tooltip. */
+function humanizeIngestFailure(
+  rawError: string | null | undefined,
+  stage?: string,
+): string {
+  const e = (rawError || "").toLowerCase();
+  if (e.includes("tier_chunker exceeded"))
+    return "chunking timed out — pathological layout (huge index / table / code blocks)";
+  if (e.includes("has_chunk") || (e.includes("neo4j") && e.includes("expected")))
+    return "knowledge-graph links missing — try Backfill on the document";
+  if (e.includes("child vectors") || e.includes("vectors but"))
+    return "vector store incomplete — some embeddings missing (re-ingest to repair)";
+  if (e.includes("timeout") || e.includes("timed out")) return "a pipeline stage timed out";
+  if (e) return e.length > 100 ? `${e.slice(0, 100)}…` : e;
+  switch (stage) {
+    case "parse/ghosts":
+      return "failed while parsing / extracting";
+    case "embed/qdrant":
+      return "failed while embedding";
+    case "neo4j":
+      return "failed while writing the knowledge graph";
+    default:
+      return "failed final verification";
+  }
 }
 
 export function CorpusDetail({
@@ -140,6 +188,22 @@ export function CorpusDetail({
         setLocalBatch(latest);
         if (["queued", "running"].includes(latest.status)) {
           setShowLocalBatch(true);
+        }
+        // The library's PROCESSING / FAILED sections need the item list; the
+        // list endpoint may return counts only. Hydrate items once — the 3s
+        // poll runs include_items=false and preserves whatever we load here.
+        if (!latest.items?.length) {
+          api
+            .getIngestBatch(latest.batch_id)
+            .then((full) => {
+              if (cancelled) return;
+              setLocalBatch((prev) =>
+                prev && prev.batch_id === full.batch_id
+                  ? { ...prev, items: full.items ?? prev.items }
+                  : prev,
+              );
+            })
+            .catch(() => undefined);
         }
       })
       .catch(() => undefined);
@@ -719,15 +783,37 @@ export function CorpusDetail({
                     {/* Icon */}
                     <FileText className="w-3.5 h-3.5 text-content-tertiary shrink-0" />
 
-                    {/* Filename — prefer doc.filename, fall back to source_path */}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[11px] font-bold text-content-primary truncate">
-                        {doc.filename || (doc.source_path ? doc.source_path.split("/").pop() : doc.doc_id?.slice(0, 12) || "unknown")}
-                      </div>
-                      <div className="text-[9px] text-content-tertiary truncate">
-                        {doc.source_path || doc.source_mime || doc.source_tier || ""}
-                      </div>
-                    </div>
+                    {/* Parsed book title; author · year under it. Raw
+                        filename + source path stay on the tooltip. */}
+                    {(() => {
+                      const rawName =
+                        doc.filename ||
+                        (doc.source_path
+                          ? doc.source_path.split("/").pop()
+                          : doc.doc_id?.slice(0, 12)) ||
+                        "unknown";
+                      const meta = parseBookMeta(rawName);
+                      const subtitle = [meta.author, meta.year]
+                        .filter(Boolean)
+                        .join(" · ");
+                      return (
+                        <div
+                          className="flex-1 min-w-0"
+                          title={`${meta.raw}${doc.source_path ? `\n${doc.source_path}` : ""}`}
+                        >
+                          <div className="text-[11px] font-bold text-content-primary truncate">
+                            {meta.title || rawName}
+                          </div>
+                          <div className="text-[9px] text-content-tertiary truncate">
+                            {subtitle ||
+                              doc.source_path ||
+                              doc.source_mime ||
+                              doc.source_tier ||
+                              ""}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Stats — child chunk count matches corpus header;
                          parent count in parens for context. */}
@@ -1001,6 +1087,7 @@ export function CorpusDetail({
         <LibraryPanel
           widthPct={100 - leftPct}
           documents={documents}
+          batchItems={localBatch?.items ?? []}
           onDeleteOne={handleDeleteDoc}
           onBulkDelete={handleBulkDelete}
           onRetry={handleRetryDoc}
@@ -1202,12 +1289,14 @@ function classifyDoc(doc: DocumentResponse): DocStatus {
 function LibraryPanel({
   widthPct,
   documents,
+  batchItems,
   onDeleteOne,
   onBulkDelete,
   onRetry,
 }: {
   widthPct: number;
   documents: DocumentResponse[];
+  batchItems: IngestBatchItemResponse[];
   onDeleteOne: (docId: string) => void | Promise<void>;
   onBulkDelete: (docIds: string[]) => void | Promise<void>;
   onRetry: (doc: DocumentResponse) => void;
@@ -1215,17 +1304,70 @@ function LibraryPanel({
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [query, setQuery] = useState("");
 
-  const { completed, failed } = useMemo(() => {
-    const c: DocumentResponse[] = [];
-    const f: DocumentResponse[] = [];
-    for (const d of documents) {
-      const s = classifyDoc(d);
-      if (s === "completed") c.push(d);
-      else if (s === "failed") f.push(d);
-    }
-    return { completed: c, failed: f };
-  }, [documents]);
+  const { ready, processingDocs, runningItems, failed, failedBatchOnly, queuedCount } =
+    useMemo(() => {
+      const readyDocs: DocumentResponse[] = [];
+      const inProgress: DocumentResponse[] = [];
+      const failedDocs: DocumentResponse[] = [];
+      const docNames = new Set<string>();
+      for (const d of documents) {
+        if (d.filename) docNames.add(d.filename.toLowerCase());
+        const s = classifyDoc(d);
+        if (s === "completed") readyDocs.push(d);
+        else if (s === "failed") failedDocs.push(d);
+        else inProgress.push(d);
+      }
+      // Books currently moving through the pipeline (live phase per item).
+      const running = batchItems.filter((i) => i.status === "running");
+      const runningNames = new Set(
+        running.map((i) => (i.filename || "").toLowerCase()),
+      );
+      // Docs mid-write not covered by a running batch item.
+      const inProgressOnly = inProgress.filter(
+        (d) => !runningNames.has((d.filename || "").toLowerCase()),
+      );
+      // Batch failures that never produced a document (e.g. chunker timeouts)
+      // are invisible in `documents` — without these rows the library
+      // undercounts failures vs the batch header.
+      const batchOnly = batchItems.filter(
+        (i) =>
+          i.status === "failed" &&
+          !docNames.has((i.filename || "").toLowerCase()),
+      );
+      const queued = batchItems.filter((i) => i.status === "queued").length;
+      // Ready books alphabetized by parsed title — findable, not insertion order.
+      readyDocs.sort((a, b) =>
+        parseBookMeta(a.filename || "").title.localeCompare(
+          parseBookMeta(b.filename || "").title,
+        ),
+      );
+      return {
+        ready: readyDocs,
+        processingDocs: inProgressOnly,
+        runningItems: running,
+        failed: failedDocs,
+        failedBatchOnly: batchOnly,
+        queuedCount: queued,
+      };
+    }, [documents, batchItems]);
+
+  // One filter across every section: parsed title + author + raw filename.
+  const q = query.trim().toLowerCase();
+  const nameMatches = useCallback(
+    (name: string | null | undefined) => {
+      if (!q) return true;
+      const m = parseBookMeta(name || "");
+      return `${m.title} ${m.author} ${name || ""}`.toLowerCase().includes(q);
+    },
+    [q],
+  );
+  const readyView = ready.filter((d) => nameMatches(d.filename));
+  const processingDocsView = processingDocs.filter((d) => nameMatches(d.filename));
+  const runningView = runningItems.filter((i) => nameMatches(i.filename));
+  const failedView = failed.filter((d) => nameMatches(d.filename));
+  const failedBatchView = failedBatchOnly.filter((i) => nameMatches(i.filename));
 
   const toggle = (docId: string) => {
     setSelected((prev) => {
@@ -1261,18 +1403,42 @@ function LibraryPanel({
     }
   };
 
-  const total = completed.length + failed.length;
+  const failedTotal = failedView.length + failedBatchView.length;
+  const total =
+    ready.length +
+    processingDocs.length +
+    runningItems.length +
+    failed.length +
+    failedBatchOnly.length;
 
   return (
     <div
       style={{ "--library-panel-width": `${widthPct}%` } as CSSProperties}
       className="h-1/2 w-full flex flex-col overflow-hidden shrink-0 md:h-auto md:w-[var(--library-panel-width)]"
     >
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border-minimal bg-bg-surface/50 shrink-0">
-        <div className="text-[9px] font-bold tracking-widest text-content-tertiary uppercase">
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-border-minimal bg-bg-surface/50 shrink-0">
+        <div className="text-[9px] font-bold tracking-widest text-content-tertiary uppercase shrink-0">
           LIBRARY · {total}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex-1 flex items-center gap-1.5 min-w-0 px-2 py-1 border border-border-minimal bg-bg-base focus-within:border-content-secondary">
+          <Search className="w-3 h-3 text-content-tertiary shrink-0" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="filter by title or author…"
+            data-testid="library-filter"
+            className="w-full bg-transparent text-[10px] text-content-primary placeholder:text-content-tertiary/60 outline-none"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              className="text-content-tertiary hover:text-content-primary"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
           {selectMode ? (
             <>
               <button
@@ -1308,50 +1474,107 @@ function LibraryPanel({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
+      <div className="flex-1 overflow-y-auto custom-scrollbar" data-testid="library-panel">
         {total === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-[10px] text-content-tertiary tracking-widest">
+          <div className="flex flex-col items-center justify-center py-12 px-6 text-center text-[10px] text-content-tertiary">
             <FileText className="w-8 h-8 mb-3 text-content-tertiary/50" />
-            <span>[EMPTY_LIBRARY]</span>
+            <span className="tracking-widest">[EMPTY_LIBRARY]</span>
+            <span className="mt-1 opacity-70">
+              Ingested books and files appear here — start a folder batch or
+              upload above.
+            </span>
           </div>
         ) : (
           <>
-            {/* Completed section */}
+            {/* Processing — live view of the current batch; previously these
+                docs were hidden here entirely ("where did my book go?"). */}
+            {(runningView.length > 0 ||
+              processingDocsView.length > 0 ||
+              queuedCount > 0) && (
+              <>
+                <LibrarySection
+                  label="PROCESSING"
+                  icon={
+                    <Loader2 className="w-3 h-3 text-accent-secondary animate-spin" />
+                  }
+                  accentColor="text-accent-secondary"
+                  count={runningView.length + processingDocsView.length}
+                  hint="being ingested now"
+                />
+                <div className="divide-y divide-border-minimal">
+                  {runningView.map((item) => (
+                    <LibraryBatchRow
+                      key={item.item_id}
+                      item={item}
+                      mode="processing"
+                    />
+                  ))}
+                  {processingDocsView.map((doc) => (
+                    <LibraryRow
+                      key={doc.doc_id}
+                      doc={doc}
+                      status="processing"
+                      selectMode={selectMode}
+                      checked={selected.has(doc.doc_id)}
+                      onToggle={() => toggle(doc.doc_id)}
+                      onDelete={() => onDeleteOne(doc.doc_id)}
+                      onRetry={() => onRetry(doc)}
+                    />
+                  ))}
+                  {queuedCount > 0 && (
+                    <div className="px-4 py-2 text-[9px] text-content-tertiary tracking-wider">
+                      + {queuedCount} more queued in the current batch
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Ready — alphabetized by parsed title */}
             <LibrarySection
-              label="COMPLETED"
+              label="READY"
               icon={<CheckCircle2 className="w-3 h-3 text-accent-main" />}
               accentColor="text-accent-main"
-              count={completed.length}
+              count={readyView.length}
+              hint="indexed · searchable in chat"
             />
-            <div className="divide-y divide-border-minimal">
-              {completed.map((doc) => (
-                <LibraryRow
-                  key={doc.doc_id}
-                  doc={doc}
-                  status="completed"
-                  selectMode={selectMode}
-                  checked={selected.has(doc.doc_id)}
-                  onToggle={() => toggle(doc.doc_id)}
-                  onDelete={() => onDeleteOne(doc.doc_id)}
-                  onRetry={() => onRetry(doc)}
-                />
-              ))}
-            </div>
+            {readyView.length === 0 ? (
+              <div className="px-4 py-3 text-[9px] text-content-tertiary tracking-widest uppercase">
+                {q ? "[NO_MATCHES]" : "[NONE_YET]"}
+              </div>
+            ) : (
+              <div className="divide-y divide-border-minimal">
+                {readyView.map((doc) => (
+                  <LibraryRow
+                    key={doc.doc_id}
+                    doc={doc}
+                    status="completed"
+                    selectMode={selectMode}
+                    checked={selected.has(doc.doc_id)}
+                    onToggle={() => toggle(doc.doc_id)}
+                    onDelete={() => onDeleteOne(doc.doc_id)}
+                    onRetry={() => onRetry(doc)}
+                  />
+                ))}
+              </div>
+            )}
 
-            {/* Failed section */}
+            {/* Failed — documents that failed AND batch files that never
+                became documents (chunker timeouts et al). Reason on each row. */}
             <LibrarySection
               label="FAILED"
               icon={<XCircle className="w-3 h-3 text-error" />}
               accentColor="text-error"
-              count={failed.length}
+              count={failedTotal}
+              hint="reason on each row"
             />
-            {failed.length === 0 ? (
+            {failedTotal === 0 ? (
               <div className="px-4 py-3 text-[9px] text-content-tertiary tracking-widest uppercase">
-                [NO_FAILURES]
+                {q ? "[NO_MATCHES]" : "[NO_FAILURES] — every document ingested clean"}
               </div>
             ) : (
               <div className="divide-y divide-border-minimal">
-                {failed.map((doc) => (
+                {failedView.map((doc) => (
                   <LibraryRow
                     key={doc.doc_id}
                     doc={doc}
@@ -1361,6 +1584,13 @@ function LibraryPanel({
                     onToggle={() => toggle(doc.doc_id)}
                     onDelete={() => onDeleteOne(doc.doc_id)}
                     onRetry={() => onRetry(doc)}
+                  />
+                ))}
+                {failedBatchView.map((item) => (
+                  <LibraryBatchRow
+                    key={item.item_id}
+                    item={item}
+                    mode="failed"
                   />
                 ))}
               </div>
@@ -1377,17 +1607,24 @@ function LibrarySection({
   icon,
   accentColor,
   count,
+  hint,
 }: {
   label: string;
   icon: React.ReactNode;
   accentColor: string;
   count: number;
+  hint?: string;
 }) {
   return (
     <div className="flex items-center gap-2 px-4 py-1.5 bg-bg-base/50 border-y border-border-minimal text-[9px] font-bold tracking-widest uppercase sticky top-0 z-10">
       {icon}
       <span className={accentColor}>{label}</span>
       <span className="text-content-tertiary">({count})</span>
+      {hint && (
+        <span className="ml-auto font-normal normal-case tracking-normal text-content-tertiary/70">
+          {hint}
+        </span>
+      )}
     </div>
   );
 }
@@ -1402,19 +1639,25 @@ function LibraryRow({
   onRetry,
 }: {
   doc: DocumentResponse;
-  status: "completed" | "failed";
+  status: "completed" | "failed" | "processing";
   selectMode: boolean;
   checked: boolean;
   onToggle: () => void;
   onDelete: () => void;
   onRetry: () => void;
 }) {
-  const name =
+  const rawName =
     doc.filename || doc.source_path?.split("/").pop() || doc.doc_id.slice(0, 12);
+  const meta = parseBookMeta(rawName);
+  const title = meta.title || rawName;
   const chunks = doc.chunk_count ?? 0;
   const parents = getParentCount(doc);
-  const failedStage = deriveFailedStage(doc);
   const stateMessages = getWriteStateMessages(doc.write_state);
+  const failureReason = humanizeIngestFailure(
+    stateMessages[0],
+    deriveFailedStage(doc),
+  );
+  const Icon = meta.author ? BookOpen : FileText;
 
   return (
     <div
@@ -1435,15 +1678,33 @@ function LibraryRow({
         </div>
       )}
 
-      <FileText className="w-3.5 h-3.5 text-content-tertiary shrink-0" />
+      <Icon className="w-3.5 h-3.5 text-content-tertiary shrink-0" />
 
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0" title={meta.raw}>
         <div className="text-[11px] font-bold text-content-primary truncate">
-          {name}
+          {title}
         </div>
-        {status === "completed" ? (
+        {status === "failed" ? (
+          <div
+            className="text-[9px] text-error truncate"
+            title={stateMessages.join("\n") || failureReason}
+          >
+            {failureReason}
+          </div>
+        ) : (
           <div className="flex items-center gap-2 text-[9px] text-content-tertiary">
-            <span>{chunks}c / {parents}p</span>
+            {meta.author && <span className="truncate">{meta.author}</span>}
+            {meta.year && <span className="shrink-0">· {meta.year}</span>}
+            <span
+              className="shrink-0"
+              title={`${chunks} retrieval chunks · ${parents} parent sections`}
+            >
+              {meta.author || meta.year ? "· " : ""}
+              {chunks} chunks
+            </span>
+            {status === "processing" && (
+              <span className="shrink-0 text-accent-secondary">· writing…</span>
+            )}
             {doc.is_near_duplicate && (
               <span
                 className="inline-flex items-center gap-1 text-amber-300"
@@ -1466,10 +1727,6 @@ function LibraryRow({
                 warning
               </span>
             )}
-          </div>
-        ) : (
-          <div className="text-[9px] text-error truncate">
-            killed at {failedStage}
           </div>
         )}
       </div>
@@ -1500,6 +1757,54 @@ function LibraryRow({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// A batch item with no document row yet: either mid-pipeline (processing) or
+// failed before its first write (e.g. chunker timeout) — previously these
+// were invisible here, so the library's FAILED count disagreed with the batch.
+function LibraryBatchRow({
+  item,
+  mode,
+}: {
+  item: IngestBatchItemResponse;
+  mode: "processing" | "failed";
+}) {
+  const rawName = item.filename || item.relative_path || item.item_id;
+  const meta = parseBookMeta(rawName);
+  const title = meta.title || rawName;
+  const Icon = meta.author ? BookOpen : FileText;
+  const size =
+    typeof item.size_bytes === "number" ? formatBytes(item.size_bytes) : "";
+
+  return (
+    <div className="flex items-center gap-2 px-4 py-2.5 hover:bg-bg-surface/50 transition-none">
+      <Icon className="w-3.5 h-3.5 text-content-tertiary shrink-0" />
+      <div className="flex-1 min-w-0" title={meta.raw}>
+        <div className="text-[11px] font-bold text-content-primary truncate">
+          {title}
+        </div>
+        {mode === "processing" ? (
+          <div className="flex items-center gap-2 text-[9px] text-content-tertiary">
+            {meta.author && <span className="truncate">{meta.author}</span>}
+            {meta.year && <span className="shrink-0">· {meta.year}</span>}
+            <span className="shrink-0 text-accent-secondary" title={item.phase || ""}>
+              {meta.author || meta.year ? "· " : ""}
+              {phaseLabel(item.phase)}…
+            </span>
+            {size && <span className="shrink-0">· {size}</span>}
+          </div>
+        ) : (
+          <div
+            className="text-[9px] text-error truncate"
+            title={item.error || item.failure_stage || ""}
+          >
+            {humanizeIngestFailure(item.error)}
+            {size ? ` · ${size}` : ""}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
