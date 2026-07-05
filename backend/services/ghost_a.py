@@ -57,7 +57,7 @@ _DOMAIN_TAXONOMY = [
 
 _SYSTEM = (
     "You are a precise document summarizer and classifier. First produce a "
-    "factual, dense summary that preserves key terms, proper nouns, and "
+    "factual, dense parent-level retrieval replacement summary that preserves key terms, proper nouns, and "
     "technical language; do not add information not present in the passage. Then "
     "classify the passage into exactly one domain from the taxonomy, name its "
     "semantic chunk type, and extract key terms and mechanisms.\nTaxonomy: " + ", ".join(_DOMAIN_TAXONOMY) + "\n"
@@ -75,8 +75,13 @@ _SYSTEM = _SYSTEM.replace("__SEMANTIC_INSTRUCTION__", _SEM_INSTR)
 # vocabulary — see CONTINUITY/BRIDGE_RETRIEVAL_DESIGN.md.
 
 _USER = (
-    "Summarize the following passage in {max_tokens} tokens or fewer, then "
-    "classify it. Return only the JSON object.\n\nPASSAGE:\n{text}"
+    "Create a parent_summary.v1 compiler artifact for the following parent "
+    "passage in {max_tokens} tokens or fewer, then classify it. Use only the "
+    "parent passage. Do not invent IDs or source metadata. Do not summarize "
+    "each child separately; summarize the parent as one coherent unit. Every "
+    "key_point must cite supporting_child_ids from source_child_ids. Return "
+    "only the JSON object.\n\nsource_child_ids: {source_child_ids}\n\n"
+    "PARENT PASSAGE:\n{text}\n\nCHILD BOUNDARIES:\n{child_boundaries}"
 )
 
 
@@ -87,6 +92,8 @@ class SummaryTask:
     corpus_id: str
     text: str
     source_tier: str  # tier_a | tier_b | tier_c | ocr_ast
+    source_child_ids: list[str] | None = None
+    child_boundaries: str = ""
 
 
 @dataclass
@@ -101,6 +108,16 @@ class SummaryResult:
     semantic_chunk_type: str | None = None
     key_terms: list[str] | None = None
     mechanisms: list[str] | None = None
+    schema_version: str | None = None
+    summary_type: str | None = None
+    central_claim: str | None = None
+    key_points: list[dict] | None = None
+    main_mechanism: str | None = None
+    concept_tags: list[str] | None = None
+    entity_hints: list[str] | None = None
+    retrieval_uses: list[str] | None = None
+    abstraction_level: str | None = None
+    source_child_ids: list[str] | None = None
 
 
 def _parse_summary_json(raw: str) -> tuple[str, str | None, list[str] | None]:
@@ -339,7 +356,12 @@ async def summarize_parents(
             "model": entry["model"],
             "messages": [
                 {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": _USER.format(max_tokens=cap, text=task.text)},
+                {"role": "user", "content": _USER.format(
+                    max_tokens=cap,
+                    text=task.text,
+                    source_child_ids=json.dumps(task.source_child_ids or []),
+                    child_boundaries=task.child_boundaries or "",
+                )},
             ],
             "temperature": 0,
             "max_tokens": cap,
@@ -369,7 +391,11 @@ async def summarize_parents(
                 )
                 resp.raise_for_status()
                 raw = resp.json()["choices"][0]["message"]["content"].strip()
-                _sem = parse_semantic_summary(raw)
+                _sem = parse_semantic_summary(
+                    raw,
+                    source_child_ids=task.source_child_ids or [],
+                    source_text=task.text,
+                )
                 summary = _sem["summary"]
                 _dom = _sem["domain"]
                 domain = _dom if _dom in _DOMAIN_TAXONOMY else ("other" if _dom else None)
@@ -387,6 +413,16 @@ async def summarize_parents(
                     semantic_chunk_type=_sem["semantic_chunk_type"],
                     key_terms=_sem["key_terms"] or None,
                     mechanisms=_sem["mechanisms"] or None,
+                    schema_version=_sem["schema_version"],
+                    summary_type=_sem["summary_type"],
+                    central_claim=_sem["central_claim"],
+                    key_points=_sem["key_points"] or None,
+                    main_mechanism=_sem["main_mechanism"],
+                    concept_tags=_sem["concept_tags"] or None,
+                    entity_hints=_sem["entity_hints"] or None,
+                    retrieval_uses=_sem["retrieval_uses"] or None,
+                    abstraction_level=_sem["abstraction_level"],
+                    source_child_ids=_sem["source_child_ids"] or None,
                 )
         except Exception as exc:
             if is_fatal_provider_error(exc):
@@ -530,6 +566,11 @@ async def summarize_parents(
             summary, domain, topics = _extractive_fallback_summary(task.text, cap)
             if not summary:
                 continue
+            _sem = parse_semantic_summary(
+                summary,
+                source_child_ids=task.source_child_ids or [],
+                source_text=task.text,
+            )
             results_by_parent_id[task.parent_id] = SummaryResult(
                 parent_id=task.parent_id,
                 doc_id=task.doc_id,
@@ -538,6 +579,16 @@ async def summarize_parents(
                 summary=summary,
                 domain=domain,
                 topics=topics,
+                schema_version=_sem["schema_version"],
+                summary_type=_sem["summary_type"],
+                central_claim=_sem["central_claim"],
+                key_points=_sem["key_points"] or None,
+                main_mechanism=_sem["main_mechanism"],
+                concept_tags=(_sem["concept_tags"] or topics or None),
+                entity_hints=_sem["entity_hints"] or None,
+                retrieval_uses=_sem["retrieval_uses"] or None,
+                abstraction_level=_sem["abstraction_level"],
+                source_child_ids=_sem["source_child_ids"] or None,
             )
 
     results = [

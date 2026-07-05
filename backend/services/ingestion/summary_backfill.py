@@ -187,6 +187,19 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
                              {"$set": {"summary": r.summary,
                                        "domain": getattr(r, "domain", None),
                                        "topics": getattr(r, "topics", None),
+                                       "semantic_chunk_type": getattr(r, "semantic_chunk_type", None),
+                                       "key_terms": getattr(r, "key_terms", None),
+                                       "mechanisms": getattr(r, "mechanisms", None),
+                                       "schema_version": getattr(r, "schema_version", None),
+                                       "summary_type": getattr(r, "summary_type", None),
+                                       "central_claim": getattr(r, "central_claim", None),
+                                       "key_points": getattr(r, "key_points", None),
+                                       "main_mechanism": getattr(r, "main_mechanism", None),
+                                       "concept_tags": getattr(r, "concept_tags", None),
+                                       "entity_hints": getattr(r, "entity_hints", None),
+                                       "retrieval_uses": getattr(r, "retrieval_uses", None),
+                                       "abstraction_level": getattr(r, "abstraction_level", None),
+                                       "source_child_ids": getattr(r, "source_child_ids", None),
                                        "summary_updated_at": datetime.now(timezone.utc)}})
                    for r in results]
             if ops:
