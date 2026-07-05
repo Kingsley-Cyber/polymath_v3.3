@@ -3584,9 +3584,11 @@ async def extract_entities(
             payload_base["api_base"] = entry["base_url"]
         if entry.get("api_key"):
             payload_base["api_key"] = entry["api_key"]
-        for _k, _v in (entry.get("extra_params") or {}).items():
-            if _k not in ("model", "messages", "response_format"):
-                payload_base[_k] = _v
+        # Internal flags (supports_json_schema, managed_vllm, …) stay OUT of
+        # provider bodies — Groq 400s on unknown keys (2026-07-05).
+        from services.ingestion.extraction_contract import provider_payload_extras
+
+        payload_base.update(provider_payload_extras(entry.get("extra_params")))
         model_name = str(entry["model"])
         base_url = str(entry.get("base_url") or "")
         model_key = model_name.lower()

@@ -387,6 +387,17 @@ export interface IngestBatchResponse {
   status: "queued" | "running" | "done" | "partial" | "failed";
   total: number;
   counts: Record<string, number>;
+  /** Owner metric: FILES + MB with an explicit "extracted" milestone —
+   * extraction finished (phase past ghosts) even while embeds/writes
+   * continue. Computed by refresh_batch_counts on every item completion. */
+  progress?: {
+    files_done: number;
+    files_total: number;
+    files_extracted: number;
+    mb_done: number;
+    mb_extracted: number;
+    mb_total: number;
+  };
   options?: Record<string, unknown>;
   runner_started?: boolean;
   appended_items?: number;

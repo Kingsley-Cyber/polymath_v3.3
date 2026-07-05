@@ -28,6 +28,34 @@ from dataclasses import dataclass, field
 
 ENGINES = ("off", "local", "cloud", "dual", "local_then_cloud")
 
+# Internal model-chip flags: routing/validation hints read by Polymath itself
+# (output-mode selection, resource planning, save-time validation). They are
+# NEVER valid provider request-body params — Groq 400s on unknown keys
+# (observed 2026-07-05 with supports_json_schema leaking into the body).
+INTERNAL_MODEL_FLAGS = frozenset(
+    {
+        "supports_json_object",
+        "supports_json_schema",
+        "skip_model_validation",
+        "managed_vllm",
+        "resource_class",
+    }
+)
+
+# Keys the caller always owns — chip extras must never override them.
+_RESERVED_PAYLOAD_KEYS = frozenset({"model", "messages", "response_format"})
+
+
+def provider_payload_extras(extra_params: dict | None) -> dict:
+    """The ONLY dict safe to merge into a provider request body: chip
+    extra_params minus internal flags and reserved keys. Every payload merge
+    site (ghost_a summaries, ghost_b extraction) must go through this."""
+    return {
+        k: v
+        for k, v in (extra_params or {}).items()
+        if k not in INTERNAL_MODEL_FLAGS and k not in _RESERVED_PAYLOAD_KEYS
+    }
+
 # Engines that REQUIRE a non-empty cloud pool to honor the contract.
 _CLOUD_REQUIRED = ("cloud", "dual")
 # Engines where cloud is optional rescue capacity.

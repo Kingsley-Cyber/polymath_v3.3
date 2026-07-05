@@ -648,7 +648,7 @@ export function CorpusDetail({
             </button>
           </div>
           {localBatch && (
-            <div className="mt-2 grid grid-cols-1 sm:grid-cols-4 xl:grid-cols-9 gap-2 text-[9px] font-mono">
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-4 xl:grid-cols-10 gap-2 text-[9px] font-mono">
               <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Status</div>
                 <div className="text-content-primary">{localBatch.status}</div>
@@ -667,8 +667,30 @@ export function CorpusDetail({
               </div>
               <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Done</div>
-                <div className="text-green-500">{localBatch.counts?.done ?? 0}</div>
+                <div className="text-green-500">
+                  {localBatch.counts?.done ?? 0}
+                  {localBatch.progress && (
+                    <span className="text-content-tertiary">
+                      {" "}· {localBatch.progress.mb_done} MB
+                    </span>
+                  )}
+                </div>
               </div>
+              {localBatch.progress && (
+                <div
+                  className="border border-accent-secondary/40 px-2 py-1"
+                  title="Extraction finished (knowledge pulled by the extraction lane) — embeds/graph writes may still be running. This is the milestone the RTX box controls."
+                >
+                  <div className="text-content-tertiary uppercase">Extracted</div>
+                  <div className="text-accent-secondary">
+                    {localBatch.progress.files_extracted}
+                    <span className="text-content-tertiary">
+                      {" "}· {localBatch.progress.mb_extracted}/
+                      {localBatch.progress.mb_total} MB
+                    </span>
+                  </div>
+                </div>
+              )}
               <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Failed</div>
                 <div className="text-error">{localBatch.counts?.failed ?? 0}</div>

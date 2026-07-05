@@ -18,6 +18,38 @@ _mod = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _mod  # dataclasses resolve ClassVar via sys.modules
 _spec.loader.exec_module(_mod)
 resolve = _mod.resolve_extraction_contract
+provider_payload_extras = _mod.provider_payload_extras
+
+
+def test_payload_extras_strip_internal_flags():
+    # The live RTX chip shape (2026-07-05) — routing flags must not leak.
+    out = provider_payload_extras(
+        {"managed_vllm": True, "resource_class": "rtx", "top_p": 0.9}
+    )
+    assert out == {"top_p": 0.9}
+
+
+def test_payload_extras_strip_json_capability_flags():
+    out = provider_payload_extras(
+        {"supports_json_schema": False, "supports_json_object": True}
+    )
+    assert out == {}
+
+
+def test_payload_extras_reserved_keys_never_overridden():
+    out = provider_payload_extras(
+        {"model": "evil", "messages": [], "response_format": {"type": "json"}}
+    )
+    assert out == {}
+
+
+def test_payload_extras_passes_legit_provider_params():
+    extras = {"thinking": {"type": "disabled"}, "temperature": 0.1, "seed": 7}
+    assert provider_payload_extras(extras) == extras
+
+
+def test_payload_extras_none_safe():
+    assert provider_payload_extras(None) == {}
 
 
 def _c(**kw):

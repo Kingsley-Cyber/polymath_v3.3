@@ -690,9 +690,84 @@ async def refresh_batch_counts(
     else:
         status = BATCH_DONE
 
+    # Owner metric (2026-07-05): progress in FILES and MB, with an explicit
+    # "extracted" milestone — the extraction lane's own deliverable — distinct
+    # from fully indexed. An item counts as extracted once its phase moves
+    # PAST ghosts (embedding/writes/complete). Phases are enumerated on the
+    # PRE side so any future post-extraction phase counts correctly by
+    # default; "summaries" is pre because summary generation precedes ghosts
+    # in the current pipeline order.
+    pre_extraction_phases = [
+        "queued",
+        "reading",
+        "starting_worker",
+        "parse",
+        "retrieval_setup",
+        "chunking",
+        "summaries",
+        "summary",
+        "summary_tree",
+        "ghosts",
+        "paused_cost_brake",
+        "failed",
+        "stale",
+    ]
+    extracted_cond = {
+        "$or": [
+            {"$eq": ["$status", ITEM_DONE]},
+            {
+                "$and": [
+                    {"$eq": ["$status", ITEM_RUNNING]},
+                    {
+                        "$not": [
+                            {
+                                "$in": [
+                                    {"$ifNull": ["$phase", "queued"]},
+                                    pre_extraction_phases,
+                                ]
+                            }
+                        ]
+                    },
+                ]
+            },
+        ]
+    }
+    size_of = {"$ifNull": ["$size_bytes", 0]}
+    rows = await db[ITEMS].aggregate(
+        [
+            {"$match": {"batch_id": batch_id}},
+            {
+                "$group": {
+                    "_id": None,
+                    "total_bytes": {"$sum": size_of},
+                    "done_bytes": {
+                        "$sum": {
+                            "$cond": [{"$eq": ["$status", ITEM_DONE]}, size_of, 0]
+                        }
+                    },
+                    "extracted_files": {"$sum": {"$cond": [extracted_cond, 1, 0]}},
+                    "extracted_bytes": {
+                        "$sum": {"$cond": [extracted_cond, size_of, 0]}
+                    },
+                }
+            },
+        ]
+    ).to_list(1)
+    sizes = rows[0] if rows else {}
+    _mb = lambda b: round(float(b or 0) / 1048576, 1)  # noqa: E731
+    progress = {
+        "files_done": counts[ITEM_DONE],
+        "files_total": total,
+        "files_extracted": int(sizes.get("extracted_files") or 0),
+        "mb_done": _mb(sizes.get("done_bytes")),
+        "mb_extracted": _mb(sizes.get("extracted_bytes")),
+        "mb_total": _mb(sizes.get("total_bytes")),
+    }
+
     update: dict[str, Any] = {
         "counts": counts,
         "total": total,
+        "progress": progress,
         "status": status,
         "updated_at": _now(),
     }

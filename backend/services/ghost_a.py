@@ -370,9 +370,12 @@ async def summarize_parents(
             payload["api_base"] = entry["base_url"]
         if entry.get("api_key"):
             payload["api_key"] = entry["api_key"]
-        for _k, _v in (entry.get("extra_params") or {}).items():
-            if _k not in ("model", "messages"):
-                payload[_k] = _v
+        # Same filter as ghost_b: internal chip flags (supports_json_schema,
+        # managed_vllm, …) never reach providers, and response_format joins
+        # model/messages as caller-owned (Groq 400s on unknown keys).
+        from services.ingestion.extraction_contract import provider_payload_extras
+
+        payload.update(provider_payload_extras(entry.get("extra_params")))
         # DeepSeek v4 models default to THINKING mode, which returns EMPTY
         # content at bounded max_tokens — 156/156 and 128/148 parent
         # summaries came back blank on real ingests (2026-07-04). Disabling
