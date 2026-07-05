@@ -1202,7 +1202,15 @@ async def run_local_batch(
     # Batches now QUEUE behind this semaphore instead of stacking.
     sem = _global_doc_semaphore()
     lease_seconds = max(60, int(get_settings().INGEST_STALE_JOB_MINUTES * 60))
-    concurrency = max(1, int((batch.get("options") or {}).get("concurrency") or 1))
+    # §13 P1 — worker count floors to the GLOBAL doc cap: the semaphores
+    # (global doc cap + model-phase gate) are the real governors; workers
+    # beyond a cap just wait at it. Fewer workers than the cap, however,
+    # silently starves the GPU gate (measured: ~40% GPU idle at 2 workers
+    # while both docs sat in write stages). Explicit per-batch concurrency
+    # can still raise it further; it can no longer accidentally starve.
+    _configured = int((batch.get("options") or {}).get("concurrency") or 0)
+    _cap = max(1, int(getattr(get_settings(), "INGEST_GLOBAL_MAX_DOCS", 3)))
+    concurrency = max(1, _configured, _cap)
 
     async def _worker(worker_idx: int) -> None:
         owner = f"{owner_prefix}:{worker_idx}"

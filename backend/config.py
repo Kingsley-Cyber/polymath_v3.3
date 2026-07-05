@@ -811,15 +811,18 @@ class Settings(BaseSettings):
         ),
     )
     INGEST_GLOBAL_MAX_DOCS: int = Field(
-        default=2,
+        default=3,
         ge=1,
         le=16,
         description=(
-            "Ingest isolation (2026-07-04): GLOBAL cap on documents ingesting "
-            "concurrently across ALL batches. Uploading any number of files/"
-            "batches queues behind this instead of stacking workers — the "
-            "API event loop stays responsive and the healthcheck/autoheal "
-            "restart loop (RestartCount=37) cannot re-trigger."
+            "GLOBAL cap on documents in flight across ALL batches (ingest "
+            "isolation, 2026-07-04). §13 P1 (2026-07-05): raised 2->3 so the "
+            "GPU gate never starves — INGEST_MAX_MODEL_PHASE_DOCS(=1) already "
+            "serializes the GPU phases (ghosts/embed, Metal-safe); this knob "
+            "governs how many docs may occupy the CPU/IO phases around it. "
+            "Measured at 2: GPU idle ~40% (both slots writing, none ready to "
+            "extract). At 3: one doc extracting + one writing + one chunking. "
+            "Raise to 4 only after the P1 receipt shows the API stays healthy."
         ),
     )
     INGEST_BATCH_WORKERS: int = Field(
