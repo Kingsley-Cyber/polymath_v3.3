@@ -1394,6 +1394,13 @@ def test_relation_aliases_normalize_before_soft_remap():
     assert counters["relation_remap_count"] == 0
 
 
+def test_defines_alias_preserves_canonical_predicate():
+    predicate, reverse = normalize_relation_predicate_alias("defines")
+
+    assert predicate == "defines"
+    assert reverse is False
+
+
 def test_relation_alias_normalizer_reports_direction():
     assert normalize_relation_predicate_alias("used_by") == ("uses", True)
     assert normalize_relation_predicate_alias("provides") == ("supports", False)

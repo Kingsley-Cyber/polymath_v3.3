@@ -463,7 +463,7 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
     "discusses": ("references", False),
     "covers": ("references", False),
     "teaches": ("references", False),
-    "defines": ("references", False),
+    "defines": ("defines", False),
     "shows": ("references", False),
     "demonstrates": ("references", False),
     "based_on": ("derived_from", False),
@@ -1442,7 +1442,10 @@ def build_user_prompt(
         "teacher, student, human, people, individual) unless the text is defining or "
         "specifying THIS one; generic abstract nouns standing alone (state, system, "
         "time, language, subject, data, object, action, rule) unless the text is treating "
-        "them as a specific named concept; "
+        "them as a specific named concept; relation/predicate vocabulary words "
+        "(uses, runs_on, produces, defines, stores, maps_to, references, owns, "
+        "supports, implements, related_to, etc.) when they are merely listed as "
+        "allowed labels rather than discussed as domain concepts; "
         # Pt10a — bibliographic citations are not entities. Drop them
         # at the source so they don't pollute the graph as Person /
         # Document / Concept.
@@ -1636,7 +1639,10 @@ def build_json_object_prompt(
         "teacher, student, human, people, individual) unless the text is defining or "
         "specifying THIS one; generic abstract nouns standing alone (state, system, "
         "time, language, subject, data, object, action, rule) unless the text is treating "
-        "them as a specific named concept; "
+        "them as a specific named concept; relation/predicate vocabulary words "
+        "(uses, runs_on, produces, defines, stores, maps_to, references, owns, "
+        "supports, implements, related_to, etc.) when they are merely listed as "
+        "allowed labels rather than discussed as domain concepts; "
         # Pt10a — bibliographic citations are not entities. Drop them
         # at the source so they don't pollute the graph as Person /
         # Document / Concept.

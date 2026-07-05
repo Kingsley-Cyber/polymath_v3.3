@@ -210,6 +210,8 @@ def test_jsonl_prompt_omits_entity_type_bias():
     # full menu — verified via the existing pre-Pt9b enum string:
     assert "Software" in prompt
     assert "Standard" in prompt
+    assert "relation/predicate vocabulary words" in prompt
+    assert "when they are merely listed as allowed labels" in prompt
 
 
 def test_json_object_prompt_omits_entity_type_bias():
@@ -231,6 +233,8 @@ def test_json_object_prompt_omits_entity_type_bias():
     assert "prefer these approved entity_type values" not in prompt
     assert "Software" in prompt
     assert "Standard" in prompt
+    assert "relation/predicate vocabulary words" in prompt
+    assert "when they are merely listed as allowed labels" in prompt
 
 
 # ── SchemaLens dataclass: field still exists (no schema regression) ─
