@@ -85,6 +85,67 @@ async def _embed(texts: list[str]) -> list[list[float]]:
     return await embed_batch(texts, mode="local", expected_dim=_EMBED_DIM)
 
 
+def _row_child_ids(row: dict) -> list[str]:
+    values = row.get("source_child_ids") or row.get("child_ids") or []
+    return [str(v) for v in values if str(v)]
+
+
+async def _child_context_for_rows(db, corpus_id: str, rows: list[dict]) -> dict[str, dict]:
+    """Hydrate child anchors for parent-summary generation.
+
+    The summary artifact contract needs stable child IDs even during backfill.
+    We fetch children once per batch and keep the prompt context bounded by the
+    current parent batch, not the full corpus.
+    """
+
+    parent_ids = [str(r["parent_id"]) for r in rows if r.get("parent_id")]
+    explicit_ids: list[str] = []
+    for row in rows:
+        explicit_ids.extend(_row_child_ids(row))
+    q = {"corpus_id": corpus_id, "parent_id": {"$in": parent_ids}}
+    if explicit_ids:
+        q = {
+            "corpus_id": corpus_id,
+            "$or": [
+                {"parent_id": {"$in": parent_ids}},
+                {"chunk_id": {"$in": list(dict.fromkeys(explicit_ids))}},
+            ],
+        }
+    cursor = db["chunks"].find(q, {"_id": 0, "chunk_id": 1, "parent_id": 1, "text": 1})
+    chunks_by_parent: dict[str, list[dict]] = {}
+    chunks_by_id: dict[str, dict] = {}
+    async for child in cursor:
+        cid = str(child.get("chunk_id") or "")
+        pid = str(child.get("parent_id") or "")
+        if cid:
+            chunks_by_id[cid] = child
+        if pid:
+            chunks_by_parent.setdefault(pid, []).append(child)
+
+    out: dict[str, dict] = {}
+    for row in rows:
+        parent_id = str(row["parent_id"])
+        ids = _row_child_ids(row)
+        if ids:
+            child_rows = [chunks_by_id[cid] for cid in ids if cid in chunks_by_id]
+        else:
+            child_rows = sorted(
+                chunks_by_parent.get(parent_id, []),
+                key=lambda c: str(c.get("chunk_id") or ""),
+            )
+            ids = [str(c.get("chunk_id")) for c in child_rows if c.get("chunk_id")]
+        boundaries = "\n\n".join(
+            f"[{c.get('chunk_id')}]\n{str(c.get('text') or '')[:1500]}"
+            for c in child_rows
+            if c.get("chunk_id")
+        )
+        out[parent_id] = {
+            "source_child_ids": ids,
+            "child_boundaries": boundaries,
+        }
+    return out
+
+
 # ── index (free) ─────────────────────────────────────────────────────────────
 async def index_existing(corpus_id: str, *, batch: int = 256) -> dict:
     """Embed + upsert summary points for every parent that has summary text."""
@@ -150,15 +211,29 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
             fetch_q = {**q, "parent_id": {"$nin": list(failed_ids)}} if failed_ids else q
             rows = await db["parent_chunks"].find(
                 fetch_q, {"parent_id": 1, "doc_id": 1, "corpus_id": 1, "source_tier": 1,
-                    "text": 1, "_id": 0}
+                    "text": 1, "child_ids": 1, "source_child_ids": 1, "_id": 0}
             ).limit(fetch).to_list(length=fetch)
             rows = [r for r in rows if (r.get("text") or "").strip()]
             if not rows:
                 break
             batches += 1
-            tasks = [SummaryTask(parent_id=r["parent_id"], doc_id=r.get("doc_id", ""),
-                                 corpus_id=corpus_id, source_tier=r.get("source_tier", "parent"),
-                                 text=r["text"]) for r in rows]
+            child_context = await _child_context_for_rows(db, corpus_id, rows)
+            tasks = [
+                SummaryTask(
+                    parent_id=r["parent_id"],
+                    doc_id=r.get("doc_id", ""),
+                    corpus_id=corpus_id,
+                    source_tier=r.get("source_tier", "parent"),
+                    text=r["text"],
+                    source_child_ids=child_context.get(r["parent_id"], {}).get(
+                        "source_child_ids", []
+                    ),
+                    child_boundaries=child_context.get(r["parent_id"], {}).get(
+                        "child_boundaries", ""
+                    ),
+                )
+                for r in rows
+            ]
             results = await summarize_parents(tasks, pool=pool)
             results = [x for x in results if x and getattr(x, "summary", None)]
             # parents attempted but not summarized (thinking-empty / transient):

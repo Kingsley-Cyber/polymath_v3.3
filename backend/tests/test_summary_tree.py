@@ -15,6 +15,7 @@ if _BACKEND not in sys.path:
 
 from services.ingestion.summary_tree import (  # noqa: E402
     ParentSummaryIn,
+    build_and_store_tree,
     build_profile_input,
     build_tree,
     group_by_section,
@@ -122,6 +123,106 @@ def test_single_rollup_section_reuses_summary():
     r = [n for n in nodes if n.node_type == "rollup"][0]
     s = [n for n in nodes if n.node_type == "section"][0]
     assert s.summary == r.summary                     # no wasted LLM call
+
+
+class _FakeFind:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def sort(self, *_args, **_kwargs):
+        return self
+
+    async def to_list(self, length=None):
+        return list(self.rows if length is None else self.rows[:length])
+
+
+class _FakeCollection:
+    def __init__(self, rows=None):
+        self.rows = list(rows or [])
+        self.updates = []
+        self.replacements = []
+
+    async def find_one(self, *_args, **_kwargs):
+        return dict(self.rows[0]) if self.rows else None
+
+    def find(self, *_args, **_kwargs):
+        return _FakeFind(self.rows)
+
+    async def update_one(self, query, update):
+        self.updates.append((query, update))
+        for row in self.rows:
+            if all(row.get(k) == v for k, v in query.items()):
+                row.update(update.get("$set", {}))
+                break
+
+    async def replace_one(self, query, record, upsert=False):
+        self.replacements.append((query, record, upsert))
+
+
+class _FakeDb:
+    def __init__(self):
+        self.collections = {
+            "documents": _FakeCollection([{
+                "doc_id": "doc_1",
+                "corpus_id": "corpus_1",
+                "filename": "artifact.md",
+                "source_type": "markdown",
+            }]),
+            "parent_chunks": _FakeCollection([{
+                "parent_id": "parent_1",
+                "doc_id": "doc_1",
+                "corpus_id": "corpus_1",
+                "summary": None,
+                "text": "Polymath summaries preserve child evidence anchors.",
+                "heading_path": ["Overview"],
+                "domain": "machine_learning",
+                "chunk_kind": "body",
+                "child_ids": ["child_1"],
+            }]),
+            "summary_tree": _FakeCollection(),
+        }
+
+    def __getitem__(self, name):
+        return self.collections[name]
+
+
+def test_heal_missing_summary_persists_parent_artifact_fields():
+    db = _FakeDb()
+
+    async def fake_llm(prompt):
+        if "source_child_ids" in prompt:
+            return """
+            {
+              "summary": "Polymath summaries preserve child evidence anchors.",
+              "domain": "machine_learning",
+              "semantic_chunk_type": "claim",
+              "key_terms": ["Polymath"],
+              "mechanisms": ["evidence_anchoring"],
+              "central_claim": "Summaries preserve child evidence anchors.",
+              "key_points": [
+                {"point": "Summaries keep evidence anchors.", "supporting_child_ids": ["child_1"]}
+              ],
+              "concept_tags": ["summary artifact", "evidence anchors"],
+              "entity_hints": ["Polymath"],
+              "retrieval_uses": ["claim", "evidence"],
+              "abstraction_level": "medium"
+            }
+            """
+        return "Merged summary."
+
+    result = asyncio.run(build_and_store_tree(
+        db=db,
+        doc_id="doc_1",
+        corpus_id="corpus_1",
+        llm_fn=fake_llm,
+    ))
+
+    assert result["summaries_healed"] == 1
+    update = db["parent_chunks"].updates[0][1]["$set"]
+    assert update["schema_version"] == "parent_summary.v1"
+    assert update["summary_type"] == "parent_retrieval_replacement"
+    assert update["source_child_ids"] == ["child_1"]
+    assert update["key_points"][0]["supporting_child_ids"] == ["child_1"]
 
 
 def _run_all():

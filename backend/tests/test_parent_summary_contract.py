@@ -1,17 +1,48 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import unittest
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-BACKEND = ROOT / "backend"
-if str(BACKEND) not in sys.path:
-    sys.path.insert(0, str(BACKEND))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from services.ingestion.summary_semantics import parse_semantic_summary
+from services.ingestion.summary_backfill import _child_context_for_rows
 from services.storage import qdrant_writer
+
+
+class _FakeAsyncCursor:
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def __aiter__(self):
+        self._iter = iter(self._rows)
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._iter)
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
+
+
+class _FakeChunks:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def find(self, *_args, **_kwargs):
+        return _FakeAsyncCursor(self.rows)
+
+
+class _FakeDb:
+    def __init__(self, chunks):
+        self.chunks = _FakeChunks(chunks)
+
+    def __getitem__(self, name):
+        if name != "chunks":
+            raise KeyError(name)
+        return self.chunks
 
 
 class ParentSummaryContractTests(unittest.TestCase):
@@ -108,6 +139,32 @@ class ParentSummaryContractTests(unittest.TestCase):
         self.assertEqual(payload["summary_text"], "Parent-level retrieval replacement summary.")
         self.assertEqual(payload["source_child_ids"], ["child_1", "child_2"])
         self.assertEqual(payload["chunk_type"], "summary")
+
+    def test_summary_backfill_hydrates_child_anchor_context(self):
+        async def run():
+            return await _child_context_for_rows(
+                _FakeDb([
+                    {
+                        "parent_id": "parent_1",
+                        "chunk_id": "child_b",
+                        "text": "Second child evidence.",
+                    },
+                    {
+                        "parent_id": "parent_1",
+                        "chunk_id": "child_a",
+                        "text": "First child evidence.",
+                    },
+                ]),
+                "corpus_1",
+                [{"parent_id": "parent_1", "child_ids": ["child_a", "child_b"]}],
+            )
+
+        context = asyncio.run(run())["parent_1"]
+        self.assertEqual(context["source_child_ids"], ["child_a", "child_b"])
+        self.assertLess(
+            context["child_boundaries"].find("[child_a]"),
+            context["child_boundaries"].find("[child_b]"),
+        )
 
 
 if __name__ == "__main__":

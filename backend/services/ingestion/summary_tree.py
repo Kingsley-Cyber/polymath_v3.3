@@ -15,6 +15,7 @@ a failed node yields a deterministic extractive fallback, never an exception.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Sequence
 
@@ -258,7 +259,7 @@ async def build_and_store_tree(
     rows = await db["parent_chunks"].find(
         {"doc_id": doc_id, "corpus_id": corpus_id},
         {"parent_id": 1, "summary": 1, "heading_path": 1, "domain": 1,
-         "chunk_kind": 1, "text": 1},
+         "chunk_kind": 1, "text": 1, "child_ids": 1, "source_child_ids": 1},
     ).sort("parent_id", 1).to_list(length=None)  # {doc}_parent_NNNN → lexical = doc order
     body_rows = [r for r in rows if (r.get("chunk_kind") or "body") == "body"]
     fn = llm_fn if llm_fn is not None else (_default_llm if use_llm else None)
@@ -283,27 +284,52 @@ async def build_and_store_tree(
                 parse_semantic_summary,
                 topic_key_for,
             )
+            source_child_ids = [
+                str(v)
+                for v in (r.get("source_child_ids") or r.get("child_ids") or [])
+                if str(v)
+            ]
             try:
                 raw = (await fn(
                     "Summarize and classify this passage. "
-                    + SEMANTIC_SUMMARY_INSTRUCTION + "\n\nPASSAGE:\n" + text
+                    + SEMANTIC_SUMMARY_INSTRUCTION
+                    + "\n\nsource_child_ids: "
+                    + json.dumps(source_child_ids)
+                    + "\n\nPASSAGE:\n"
+                    + text
                 ) or "").strip()
             except Exception:  # noqa: BLE001 — guard rail never fails the tree
                 raw = ""
-            sem = parse_semantic_summary(raw)
+            sem = parse_semantic_summary(
+                raw,
+                source_child_ids=source_child_ids,
+                source_text=text,
+            )
             if sem["summary"]:
+                domain = sem["domain"] or r.get("domain")
+                update_fields = {
+                    "summary": sem["summary"],
+                    "domain": domain,
+                    "semantic_chunk_type": sem["semantic_chunk_type"],
+                    "key_terms": sem["key_terms"] or None,
+                    "mechanisms": sem["mechanisms"] or None,
+                    "schema_version": sem["schema_version"],
+                    "summary_type": sem["summary_type"],
+                    "central_claim": sem["central_claim"],
+                    "key_points": sem["key_points"] or None,
+                    "main_mechanism": sem["main_mechanism"],
+                    "concept_tags": sem["concept_tags"] or None,
+                    "entity_hints": sem["entity_hints"] or None,
+                    "retrieval_uses": sem["retrieval_uses"] or None,
+                    "abstraction_level": sem["abstraction_level"],
+                    "source_child_ids": sem["source_child_ids"] or source_child_ids,
+                    "topic_key": topic_key_for(domain, r.get("heading_path")),
+                }
                 r["summary"] = sem["summary"]
+                r["domain"] = domain
                 await db["parent_chunks"].update_one(
                     {"corpus_id": corpus_id, "parent_id": r["parent_id"]},
-                    {"$set": {
-                        "summary": sem["summary"],
-                        "semantic_chunk_type": sem["semantic_chunk_type"],
-                        "key_terms": sem["key_terms"] or None,
-                        "mechanisms": sem["mechanisms"] or None,
-                        "topic_key": topic_key_for(
-                            sem["domain"] or r.get("domain"), r.get("heading_path")
-                        ),
-                    }},
+                    {"$set": update_fields},
                 )
                 healed += 1
 
