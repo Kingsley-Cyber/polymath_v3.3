@@ -313,6 +313,17 @@ function inferWorkflow(config: IngestionConfig): IngestionWorkflowId {
   return "custom";
 }
 
+// GLiNER-era factory chunk shape: tiny single-idea children sized for the
+// local classifier. LLM extraction lanes want LLM-sized windows instead.
+function hasFactoryChunkShape(cfg: IngestionConfig): boolean {
+  const t = cfg.child_chunk_tokens;
+  return (
+    cfg.child_chunk_algorithm === "semantic_split" &&
+    t?.target_tokens === 128 &&
+    t?.max_tokens === 256
+  );
+}
+
 function applyWorkflowToConfig(
   cfg: IngestionConfig,
   workflowId: IngestionWorkflowId,
@@ -334,6 +345,22 @@ function applyWorkflowToConfig(
   }
   if (workflow.needsRtx) {
     next.extraction_models = ensureRtxExtractionModel(next.extraction_models ?? []);
+  }
+  // Cloud-LLM extraction (RTX vLLM / API) reads context, not GLiNER spans:
+  // 512-token children ≈ 4× fewer extraction calls per file at equal
+  // coverage (measured on polymath_v2, 2026-07-05: 128-tok chunks made a
+  // 508KB book cost 1,201 calls). Only applied when the corpus still has the
+  // factory shape — user-customized chunking is never overridden, and the
+  // backend freeze keeps already-populated corpora unchanged.
+  if (
+    (workflow.engine === "cloud" || workflow.engine === "dual") &&
+    hasFactoryChunkShape(next)
+  ) {
+    next = {
+      ...next,
+      child_chunk_algorithm: "sentence_merge",
+      child_chunk_tokens: { min_tokens: 128, target_tokens: 512, max_tokens: 700 },
+    };
   }
   return next;
 }
