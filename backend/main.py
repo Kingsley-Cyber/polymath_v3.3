@@ -337,6 +337,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning("graph_sessions multi-corpus migration failed (non-fatal): %s", exc)
 
     try:
+        # Readiness gate (2026-07-05): after a Docker VM restart the backend
+        # boots FASTER than Qdrant/Neo4j accept connections. Resuming batches
+        # immediately burned 81 docs on retrieval_setup connection-refused in
+        # one storm. Wait (bounded) for both stores to answer before starting
+        # batch runners — on timeout, resume anyway and let per-item retry
+        # handle it (better late than never, never worse than before).
+        async def _stores_ready() -> bool:
+            import httpx as _hx
+
+            try:
+                async with _hx.AsyncClient(timeout=2.0) as cli:
+                    q = await cli.get(f"{settings.QDRANT_URL}/readyz")
+                    if q.status_code != 200:
+                        return False
+                if ingestion_service.neo4j_driver is not None:
+                    await ingestion_service.neo4j_driver.verify_connectivity()
+                return True
+            except Exception:  # noqa: BLE001
+                return False
+
+        for _attempt in range(24):  # up to ~120s
+            if await _stores_ready():
+                if _attempt:
+                    logger.info(
+                        "Ingest recovery readiness gate: stores ready after %ds",
+                        _attempt * 5,
+                    )
+                break
+            await asyncio.sleep(5)
+        else:
+            logger.warning(
+                "Ingest recovery readiness gate: stores not ready after 120s — "
+                "resuming anyway (per-item failures will surface)"
+            )
+
         result = await ingest_batches.recover_local_batch_runners(
             db=conversation_service._db,
             ingestion_service=ingestion_service,
