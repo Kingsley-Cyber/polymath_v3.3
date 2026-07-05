@@ -820,6 +820,16 @@ class Settings(BaseSettings):
             "fanout is reduced and extraction concurrency may be throttled."
         ),
     )
+    INGEST_REMOTE_VLLM_TWO_DOC_RSS_RATIO: float = Field(
+        default=0.75,
+        ge=0.50,
+        le=0.95,
+        description=(
+            "Remote vLLM profile admits the second active document while backend "
+            "RSS is below this fraction of the soft RSS limit. Above it, new "
+            "documents run one at a time until pressure drops."
+        ),
+    )
     INGEST_SAFE_SUMMARY_FAILURES: bool = Field(
         default=True,
         description=(

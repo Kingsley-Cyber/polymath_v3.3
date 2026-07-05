@@ -1671,6 +1671,7 @@ async def _write_mongo_all(
     ghost_b_metrics: dict | None,
     facet_profile: dict | None,
     ws: WriteState,
+    replace_existing_artifacts: bool = False,
     source_url: str | None = None,
     source_identity: dict | None = None,
     source_meta: dict | None = None,
@@ -1757,6 +1758,12 @@ async def _write_mongo_all(
             corpus_id[:8],
             filename,
             duplicate_candidates,
+        )
+    if replace_existing_artifacts:
+        await db["parent_chunks"].delete_many({"doc_id": doc_id, "corpus_id": corpus_id})
+        await db["chunks"].delete_many({"doc_id": doc_id, "corpus_id": corpus_id})
+        await db["ghost_b_extractions"].delete_many(
+            {"doc_id": doc_id, "corpus_id": corpus_id}
         )
     await mongo_writer.upsert_document(db, doc_record)
     await mongo_writer.upsert_parent_chunks(db, parent_dicts)
@@ -2126,6 +2133,7 @@ async def _embed_batch_for_doc(
 async def _write_qdrant_for_doc(
     *,
     qdrant_client: AsyncQdrantClient,
+    doc_id: str,
     corpus_id: str,
     user_id: str,
     filename: str,
@@ -2194,6 +2202,10 @@ async def _write_qdrant_for_doc(
             "doc_facet_ids": doc_facet_ids,
             "facet_schema_version": schema_version,
         }
+
+    # Replace the document's vector surface, don't only upsert. Retries and
+    # chunker/schema changes can remove chunk ids; stale points break verify.
+    await qdrant_writer.delete_points_by_doc(qdrant_client, corpus_id, doc_id)
 
     if "naive" in target_cols:
         dicts = [_as_payload(c) for c in vector_children]
@@ -2447,7 +2459,7 @@ async def _write_neo4j_for_doc(
     three ghost_b_* metrics are flattened out of the nested metrics dict for
     Neo4j (which doesn't accept dict-valued node properties).
     """
-    from services.graph.neo4j_writer import write_document_graph
+    from services.graph.neo4j_writer import delete_document_graph, write_document_graph
     from services.ingestion.section_classifier import NOISY_KINDS
 
     metrics = ghost_b_metrics or {}
@@ -2486,6 +2498,10 @@ async def _write_neo4j_for_doc(
         )
 
     all_extraction_results = list(ghost_b_out or []) + code_extraction_results
+
+    # Neo4j MERGE is idempotent for existing chunk ids, but it cannot remove
+    # chunk ids that disappeared on retry. Replace this doc before rewriting.
+    await delete_document_graph(neo4j_driver, corpus_id=corpus_id, doc_id=doc_id)
 
     await write_document_graph(
         driver=neo4j_driver,
@@ -2655,6 +2671,25 @@ async def run_ingest_job(
         ws = WriteState(**existing_doc["write_state"])
     else:
         ws = WriteState()
+    repairing_verify_failure = bool(
+        existing_doc
+        and ws.verified is False
+        and (ws.verify_errors or existing_doc.get("ingest_stage") == "failed")
+    )
+    if repairing_verify_failure:
+        logger.warning(
+            "phase=verify_repair_reset doc=%s corpus=%s errors=%s",
+            doc_id[:12],
+            cid8,
+            ws.verify_errors[:3],
+        )
+        ws.mongo_written = False
+        ws.qdrant_written = False
+        ws.summaries_indexed = False
+        ws.summary_points = None
+        ws.neo4j_written = False
+        ws.verified = None
+        ws.verify_errors = []
     file_id = (
         existing_doc.get("file_id", str(uuid.uuid4()))
         if existing_doc
@@ -3047,6 +3082,7 @@ async def run_ingest_job(
             ghost_b_metrics=ghost_b_metrics,
             facet_profile=facet_profile,
             ws=ws,
+            replace_existing_artifacts=repairing_verify_failure,
             source_url=source_url,
             source_identity=source_identity,
             source_meta={
@@ -3368,6 +3404,7 @@ async def run_ingest_job(
                 )
                 await _write_qdrant_for_doc(
                     qdrant_client=qdrant_client,
+                    doc_id=doc_id,
                     corpus_id=corpus_id,
                     user_id=user_id,
                     filename=filename,

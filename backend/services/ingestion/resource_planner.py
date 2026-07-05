@@ -353,15 +353,19 @@ def plan_ingestion_resources(
         )
         # Remote vLLM keeps model/KV memory on the RTX host, so Mac/backend
         # RAM mainly covers orchestration buffers, validation, and DB writes.
-        # Prefer 2 active docs only when memory pressure is comfortably low;
-        # if RSS climbs, future docs fall back to the one-doc gate.
-        rss_low = (
+        # Prefer 2 active docs while orchestration memory is moderate. The hard
+        # RSS cap below still halves chunk-call concurrency at the soft limit.
+        two_doc_rss_ratio = float(
+            getattr(settings, "INGEST_REMOTE_VLLM_TWO_DOC_RSS_RATIO", 0.75)
+        )
+        two_doc_rss_ratio = min(0.95, max(0.50, two_doc_rss_ratio))
+        rss_allows_two_docs = (
             resources.process_rss_mb is None
-            or resources.process_rss_mb < int(rss_soft_limit_mb * 0.60)
+            or resources.process_rss_mb < int(rss_soft_limit_mb * two_doc_rss_ratio)
         )
         roomy = (
             not rss_high
-            and rss_low
+            and rss_allows_two_docs
             and storage_mode != "network_share"
             and resources.cpu_cores >= 8
             and ram_cap_mb >= 4_096
@@ -372,6 +376,12 @@ def plan_ingestion_resources(
             extraction_active_docs,
         )
         notes.append("remote_vllm extraction does not reserve Mac Metal")
+        if not roomy and not rss_high and resources.process_rss_mb is not None:
+            notes.append(
+                "remote_vllm second doc held by RSS pressure "
+                f"({resources.process_rss_mb}MB >= "
+                f"{int(rss_soft_limit_mb * two_doc_rss_ratio)}MB)"
+            )
     else:
         extraction_active_docs = max(
             1,

@@ -20,6 +20,7 @@ def _settings(**overrides):
         "INGEST_MANAGED_VLLM_MODEL_PHASE_DOCS": 2,
         "INGEST_BACKEND_RAM_TARGET_MB": 16_384,
         "INGEST_RSS_SOFT_LIMIT_RATIO": 0.85,
+        "INGEST_REMOTE_VLLM_TWO_DOC_RSS_RATIO": 0.75,
         "EMBED_BATCH_SIZE": 32,
         "QDRANT_INGEST_WRITE_CONCURRENCY": 2,
         "NEO4J_INGEST_WRITE_CONCURRENCY": 1,
@@ -120,6 +121,32 @@ def test_remote_vllm_profile_admits_two_docs_under_low_4gb_pressure():
     assert profile.extraction_active_docs == 2
     assert profile.model_phase_docs == 2
     assert profile.extraction_max_concurrent == 60
+
+
+def test_remote_vllm_profile_keeps_two_docs_under_moderate_5gb_pressure():
+    cfg = IngestionConfig(
+        extraction_engine="cloud",
+        models_linked=False,
+        extraction_models=_rtx_pool(),
+        embed_mode="local",
+    )
+    profile = plan_ingestion_resources(
+        config=cfg,
+        extraction_engine="cloud",
+        extraction_pool=cfg.extraction_models,
+        settings=_settings(),
+        resources=SystemResources(
+            cpu_cores=12,
+            ram_total_mb=65_536,
+            cgroup_limit_mb=5_120,
+            process_rss_mb=2_747,
+            metal_available=True,
+        ),
+    )
+
+    assert profile.rss_soft_limit_mb == 4_352
+    assert profile.extraction_active_docs == 2
+    assert profile.model_phase_docs == 2
 
 
 def test_openai_cloud_pool_is_not_classified_as_remote_vllm():

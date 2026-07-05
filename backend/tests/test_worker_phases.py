@@ -433,6 +433,49 @@ async def test_phase_order_deep_mode():
 
 
 @pytest.mark.asyncio
+async def test_verify_failed_resume_rewrites_store_surfaces():
+    rec = PhaseRecorder()
+    p, c = _parent("stub-doc", "c" * 36)
+    summaries = [_fake_summary_result(p.parent_id, "stub-doc", "c" * 36)]
+    ghost_b_out = [_fake_extraction_result(c.chunk_id, "stub-doc", "c" * 36)]
+    existing_doc = {
+        "file_id": "file-1",
+        "ingest_stage": "failed",
+        "write_state": WriteState(
+            mongo_written=True,
+            qdrant_written=True,
+            summaries_indexed=True,
+            neo4j_written=True,
+            verified=False,
+            verify_errors=["mismatch: stale qdrant vectors"],
+        ).model_dump(),
+    }
+    m = _install_mocks(
+        rec,
+        parents=[p],
+        children=[c],
+        summaries=summaries,
+        ghost_b_out=ghost_b_out,
+        existing_doc=existing_doc,
+    )
+    try:
+        cfg = IngestionConfig(
+            use_neo4j=True,
+            chunk_summarization=True,
+            target_qdrant_collections=["naive", "hrag", "graph"],
+        )
+        result = await _run_job(m, cfg)
+
+        assert result.status == "done"
+        assert "mongo_write" in rec.events
+        assert "qdrant_write" in rec.events
+        assert "neo4j_write" in rec.events
+        assert m["mongo_write"].await_args.kwargs["replace_existing_artifacts"] is True
+    finally:
+        m["stop_all"]()
+
+
+@pytest.mark.asyncio
 async def test_deep_mode_without_summaries_finishes_awaiting_summary():
     """Safe mode should keep child vectors and graph writes even when Ghost A is pending."""
     rec = PhaseRecorder()
@@ -519,6 +562,101 @@ async def test_phase_order_balanced_mode():
         assert kwargs["ghost_b_out"] == ghost_b_out
     finally:
         m["stop_all"]()
+
+
+@pytest.mark.asyncio
+async def test_qdrant_write_replaces_doc_points_before_upsert(monkeypatch):
+    calls: list[tuple[str, Any]] = []
+    child = SimpleNamespace(
+        chunk_id="chunk-1",
+        parent_id="parent-1",
+        doc_id="doc-1",
+        corpus_id="corpus-1",
+        text="Body text",
+        source_tier=SourceTier.tier_a.value,
+        heading_path=["Section"],
+        chunk_kind="body",
+    )
+
+    async def fake_delete(_client, corpus_id, doc_id):
+        calls.append(("delete", corpus_id, doc_id))
+
+    async def fake_upsert_children(
+        _client,
+        corpus_id,
+        chunks,
+        vectors,
+        target_kinds,
+        **_kwargs,
+    ):
+        calls.append(
+            ("upsert_children", corpus_id, tuple(target_kinds), len(chunks), len(vectors))
+        )
+
+    async def fake_upsert_summaries(*_args, **_kwargs):
+        calls.append(("upsert_summaries",))
+
+    monkeypatch.setattr(worker.qdrant_writer, "delete_points_by_doc", fake_delete)
+    monkeypatch.setattr(worker.qdrant_writer, "upsert_children", fake_upsert_children)
+    monkeypatch.setattr(worker.qdrant_writer, "upsert_summaries", fake_upsert_summaries)
+
+    await worker._write_qdrant_for_doc(
+        qdrant_client=MagicMock(),
+        doc_id="doc-1",
+        corpus_id="corpus-1",
+        user_id="u1",
+        filename="doc.txt",
+        parents=[],
+        children=[child],
+        vec_map={"chunk-1": [0.0, 0.1]},
+        summaries=None,
+        summary_vec_map={},
+        config=IngestionConfig(target_qdrant_collections=["naive", "graph"]),
+    )
+
+    assert calls[0] == ("delete", "corpus-1", "doc-1")
+    assert ("upsert_children", "corpus-1", ("naive",), 1, 1) in calls
+    assert ("upsert_children", "corpus-1", ("graph",), 1, 1) in calls
+
+
+@pytest.mark.asyncio
+async def test_neo4j_write_replaces_doc_graph_before_upsert(monkeypatch):
+    calls: list[tuple[str, str, str]] = []
+    parent, child = _parent("doc-1", "corpus-1")
+    child.chunk_kind = "body"
+    ghost_b_out = [_fake_extraction_result(child.chunk_id, "doc-1", "corpus-1")]
+
+    async def fake_delete(_driver, *, corpus_id, doc_id):
+        calls.append(("delete", corpus_id, doc_id))
+
+    async def fake_write(*, corpus_id, doc_id, **_kwargs):
+        calls.append(("write", corpus_id, doc_id))
+
+    monkeypatch.setattr(
+        "services.graph.neo4j_writer.delete_document_graph",
+        fake_delete,
+    )
+    monkeypatch.setattr(
+        "services.graph.neo4j_writer.write_document_graph",
+        fake_write,
+    )
+
+    await worker._write_neo4j_for_doc(
+        neo4j_driver=MagicMock(),
+        doc_id="doc-1",
+        corpus_id="corpus-1",
+        user_id="u1",
+        file_id="file-1",
+        children=[child],
+        ghost_b_out=ghost_b_out,
+        filename="doc.txt",
+        parents=[parent],
+    )
+
+    assert calls[:2] == [
+        ("delete", "corpus-1", "doc-1"),
+        ("write", "corpus-1", "doc-1"),
+    ]
 
 
 # ── Resume-gate tests ───────────────────────────────────────────────────────
