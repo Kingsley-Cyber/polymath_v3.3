@@ -1366,6 +1366,7 @@ export const api = {
   updateCorpus,
   deleteCorpus,
   testIngestionModelRef,
+  getExtractionContract,
   listDocuments,
   createLocalIngestBatch,
   createUploadIngestBatch,
@@ -1539,6 +1540,16 @@ export async function listInstalledOllamaModels(): Promise<import("../types").Ol
 
 export async function getModalStatus(): Promise<import("../types").ModalStatus> {
   return fetchJSON("/infrastructure/modal/status");
+}
+
+/** Resolved extraction contract — exactly what the worker will run for this
+ * corpus right now (engine, active pool, sidecar liveness, violations). */
+export async function getExtractionContract(
+  corpusId: string,
+): Promise<import("../types").ExtractionContractResponse> {
+  return fetchJSON(
+    `/corpora/${encodeURIComponent(corpusId)}/extraction-contract`,
+  );
 }
 
 export async function deployModal(body: Record<string, unknown>): Promise<any> {

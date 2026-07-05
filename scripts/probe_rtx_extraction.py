@@ -31,26 +31,32 @@ async def main() -> int:
     api_key = sys.argv[2]
     n = int(sys.argv[3]) if len(sys.argv) > 3 else 24
     conc = int(sys.argv[4]) if len(sys.argv) > 4 else 24
+    # Skip the first K usable chunks — fresh texts defeat litellm response
+    # caching so wall time measures the live lane, not a replay.
+    offset = int(sys.argv[5]) if len(sys.argv) > 5 else 0
 
     settings = get_settings()
     db = AsyncIOMotorClient(settings.MONGODB_URI).get_default_database()
 
     # Real body chunks, max 2 per doc for diversity, substantial text only.
+    # No scan cap: corpus docs hold 1,000+ chunks each, so a capped scan only
+    # crosses 2-3 docs before the per-doc limit starves the sample.
     rows: list[dict] = []
     per_doc: dict[str, int] = {}
     async for r in db.chunks.find(
         {"corpus_id": CORPUS, "chunk_kind": "body"},
         {"chunk_id": 1, "doc_id": 1, "text": 1},
-    ).limit(4000):
+    ):
         t = r.get("text") or ""
-        if len(t) < 400:
+        if len(t) < 300:
             continue
         if per_doc.get(r["doc_id"], 0) >= 2:
             continue
         per_doc[r["doc_id"]] = per_doc.get(r["doc_id"], 0) + 1
         rows.append(r)
-        if len(rows) >= n:
+        if len(rows) >= n + offset:
             break
+    rows = rows[offset:]
     if len(rows) < n:
         print(f"FATAL: only {len(rows)} usable chunks found (wanted {n})")
         return 1

@@ -96,6 +96,15 @@ export interface IngestionConfig {
    */
   models_linked: boolean;
 
+  /**
+   * Per-corpus extraction contract (owner two-toggle model): local sidecars
+   * on → "local", cloud pool on → "cloud", both → "dual", neither → "off".
+   * "inherit" = legacy fallback to the global Settings engine (the lifespan
+   * migration stamps existing corpora explicit). Resolved truthfully by
+   * GET /api/corpora/{id}/extraction-contract.
+   */
+  extraction_engine?: ExtractionEngine;
+
   // GHOST B — Universal schema (baked backend-side, see ghost_b.UNIVERSAL_*_SCHEMA).
   // The create/edit UI no longer exposes these. Fields retained on the
   // interface because GET responses still include them (useful for the
@@ -208,6 +217,10 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
   extraction_models: [],
   entity_confidence_threshold: 0.5,
   models_linked: true,
+  // New corpora are EXPLICIT about the extraction workflow — never "inherit"
+  // (§13: the silent global fallback is how a corpus ran the wrong engine
+  // for 14 hours). Local sidecars are the proven $0 default.
+  extraction_engine: "local",
   // entity_schema / relation_schema / schema_strict intentionally omitted —
   // backend fills them from the universal schema on POST.
   use_neo4j: true,
@@ -289,6 +302,8 @@ export interface DocumentResponse {
     related_to_count?: number;
     related_to_ratio?: number;
     domain_range_remap_count?: number;
+    /** "off" when the corpus contract disabled extraction (vectors-only). */
+    engine?: string;
   };
   write_state: WriteState;
   ingested_at?: string;
@@ -387,4 +402,39 @@ export interface LocalIngestBatchRequest {
 export interface CorpusDeleteResponse {
   status: string;
   message: string;
+}
+
+/**
+ * Per-corpus extraction workflow. Two-toggle mental model: local on →
+ * "local", cloud on → "cloud", both → "dual", neither → "off"; "inherit"
+ * is the legacy global-Settings fallback (stamped away by migration).
+ */
+export type ExtractionEngine =
+  | "inherit"
+  | "off"
+  | "local"
+  | "cloud"
+  | "dual"
+  | "local_then_cloud";
+
+/** GET /api/corpora/{id}/extraction-contract — the resolved truth. */
+export interface ExtractionContractResponse {
+  engine: Exclude<ExtractionEngine, "inherit">;
+  source: "corpus" | "global" | "default";
+  models_linked: boolean;
+  pool_source: "extraction_models" | "summary_models" | "none";
+  pool: Array<{
+    model: string;
+    base_url?: string | null;
+    max_concurrent?: number | null;
+  }>;
+  endpoints: Array<{
+    label?: string | null;
+    url: string;
+    enabled: boolean;
+    /** null = not probed (engine does not use local sidecars) */
+    alive: boolean | null;
+  }>;
+  errors: string[];
+  warnings: string[];
 }

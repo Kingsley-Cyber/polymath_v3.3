@@ -26,6 +26,8 @@ import type {
   IngestionPreset,
   ModalStatus,
   GlobalIngestionSettings,
+  ExtractionEngine,
+  ExtractionContractResponse,
 } from "../../types";
 import { DEFAULT_INGESTION_CONFIG, inferPreset } from "../../types";
 import { CorpusDetail } from "./CorpusDetail";
@@ -1171,6 +1173,31 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
 // mirrors the Summary pool's chips (since the worker reuses summary_models
 // for GHOST B in that mode).
 
+// Two-toggle contract model (owner-specified): local on → "local", cloud on →
+// "cloud", both on → "dual" (even/odd chunk split across both engines),
+// neither → "off" (vectors-only). The resolved truth line below the toggles is
+// fetched from the backend and shows EXACTLY what the worker will run —
+// including sidecar liveness and which pool actually fires — so the active
+// workflow is never hidden across two screens again (§13 correction).
+function engineToggles(engine: ExtractionEngine | undefined): {
+  local: boolean;
+  cloud: boolean;
+} {
+  switch (engine) {
+    case "local":
+      return { local: true, cloud: false };
+    case "cloud":
+      return { local: false, cloud: true };
+    case "dual":
+    case "local_then_cloud":
+      return { local: true, cloud: true };
+    case "off":
+      return { local: false, cloud: false };
+    default:
+      return { local: true, cloud: false }; // "inherit"/unset — resolver floor
+  }
+}
+
 function IngestionModelsSection({
   config,
   onPatch,
@@ -1186,6 +1213,37 @@ function IngestionModelsSection({
   const summaryPool = config.summary_models ?? [];
   const extractionPool = linked ? summaryPool : (config.extraction_models ?? []);
 
+  const engine = config.extraction_engine;
+  const toggles = engineToggles(engine);
+  const setToggles = (local: boolean, cloud: boolean) => {
+    onPatch({
+      extraction_engine:
+        local && cloud ? "dual" : local ? "local" : cloud ? "cloud" : "off",
+    });
+  };
+
+  // Resolved contract (SAVED state) from the backend truth endpoint.
+  const [contract, setContract] = useState<ExtractionContractResponse | null>(null);
+  const [contractDown, setContractDown] = useState(false);
+  useEffect(() => {
+    if (!corpusId) return;
+    let gone = false;
+    api
+      .getExtractionContract(corpusId)
+      .then((c) => {
+        if (!gone) {
+          setContract(c);
+          setContractDown(false);
+        }
+      })
+      .catch(() => {
+        if (!gone) setContractDown(true);
+      });
+    return () => {
+      gone = true;
+    };
+  }, [corpusId, config.extraction_engine, config.models_linked]);
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -1193,17 +1251,135 @@ function IngestionModelsSection({
           Ingestion Models
         </div>
         <label
-          className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider cursor-pointer"
-          title="ON = Extraction reuses the Summary pool. OFF = two independent pools."
+          className={`flex items-center gap-1.5 text-[11px] tracking-wider ${
+            toggles.cloud
+              ? "text-content-secondary cursor-pointer"
+              : "text-content-tertiary/50 cursor-not-allowed"
+          }`}
+          title={
+            toggles.cloud
+              ? "ON = Extraction reuses the Summary pool. OFF = two independent pools."
+              : "Only relevant when CLOUD extraction is enabled below."
+          }
         >
           <input
             type="checkbox"
             checked={linked}
+            disabled={!toggles.cloud}
             onChange={(e) => onPatch({ models_linked: e.target.checked })}
             className="accent-accent-main"
           />
           Reuse Summary pool for Extraction
         </label>
+      </div>
+
+      {/* ── Extraction contract — the deterministic workflow switch ── */}
+      <div
+        className="border border-border-minimal bg-bg-base/50 px-3 py-2 space-y-1.5"
+        data-testid="extraction-contract-block"
+      >
+        <div className="flex items-center gap-4">
+          <span className="text-[10px] font-bold tracking-widest text-content-tertiary uppercase">
+            Extraction runs on
+          </span>
+          <label className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider cursor-pointer">
+            <input
+              type="checkbox"
+              data-testid="extract-local-toggle"
+              checked={toggles.local}
+              disabled={!editing}
+              onChange={(e) => setToggles(e.target.checked, toggles.cloud)}
+              className="accent-accent-main"
+            />
+            LOCAL sidecars (GLiNER/GLiREL)
+          </label>
+          <label className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider cursor-pointer">
+            <input
+              type="checkbox"
+              data-testid="extract-cloud-toggle"
+              checked={toggles.cloud}
+              disabled={!editing}
+              onChange={(e) => setToggles(toggles.local, e.target.checked)}
+              className="accent-accent-main"
+            />
+            CLOUD model pool
+          </label>
+          <span className="ml-auto text-[10px] font-bold tracking-widest text-accent-secondary uppercase">
+            {toggles.local && toggles.cloud
+              ? "DUAL — both, chunks split"
+              : toggles.local
+                ? "LOCAL"
+                : toggles.cloud
+                  ? "CLOUD"
+                  : "OFF — vectors only"}
+            {engine === "inherit" || engine === undefined ? " (inherited)" : ""}
+            {engine === "local_then_cloud" ? " (local→cloud rescue)" : ""}
+          </span>
+        </div>
+
+        {/* Resolved truth line — what the worker will actually run NOW */}
+        <div className="text-[10px] leading-relaxed" data-testid="extraction-contract-truth">
+          {contractDown ? (
+            <span className="text-content-tertiary">
+              [SAVED_CONTRACT_UNAVAILABLE] — backend build without the contract
+              endpoint; showing config only
+            </span>
+          ) : !contract ? (
+            <span className="text-content-tertiary">resolving saved contract…</span>
+          ) : (
+            <>
+              <span className="text-content-tertiary tracking-wider">SAVED CONTRACT: </span>
+              <span className="text-content-primary font-bold uppercase">{contract.engine}</span>
+              <span className="text-content-tertiary"> ({contract.source})</span>
+              {(contract.engine === "local" ||
+                contract.engine === "dual" ||
+                contract.engine === "local_then_cloud") && (
+                <span className="text-content-secondary">
+                  {" · sidecars: "}
+                  {contract.endpoints.filter((e) => e.enabled).length === 0
+                    ? "none enabled (env floor)"
+                    : contract.endpoints
+                        .filter((e) => e.enabled)
+                        .map(
+                          (e) =>
+                            `${e.label || e.url}${
+                              e.alive === null ? "" : e.alive ? " UP" : " DOWN"
+                            }`,
+                        )
+                        .join(" · ")}
+                </span>
+              )}
+              {(contract.engine === "cloud" ||
+                contract.engine === "dual" ||
+                contract.engine === "local_then_cloud") && (
+                <span className="text-content-secondary">
+                  {" · pool ("}
+                  {contract.pool_source === "summary_models"
+                    ? linked
+                      ? "summary, linked"
+                      : "summary, fallback"
+                    : "extraction"}
+                  {"): "}
+                  {contract.pool.length === 0
+                    ? "EMPTY"
+                    : contract.pool
+                        .map((p) => `${p.model} @${p.max_concurrent ?? 1}`)
+                        .join(", ")}
+                </span>
+              )}
+              {contract.errors.map((e, i) => (
+                <div key={`ce-${i}`} className="text-error">
+                  ✗ {e}
+                </div>
+              ))}
+              {contract.warnings.map((w, i) => (
+                <div key={`cw-${i}`} className="text-amber-300">
+                  ⚠ {w}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
       </div>
 
       <IngestionModelPool

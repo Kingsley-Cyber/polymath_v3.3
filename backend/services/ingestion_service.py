@@ -296,6 +296,58 @@ class IngestionService:
             await self._neo4j.close()
         logger.info("IngestionService: clients closed")
 
+    async def migrate_extraction_engine(self, global_engine: str) -> dict:
+        """Lifespan migration — stamp an EXPLICIT extraction_engine on every
+        corpus whose config is missing/'inherit'.
+
+        §13 ground-truth correction: the global Settings engine silently
+        governed every corpus (a corpus ran cloud Qwen2.5-7B while its enabled
+        sidecars idled and every screen looked green). Stamping the current
+        global value preserves observed behavior exactly, but makes the
+        contract per-corpus, visible, and deterministic from then on — the
+        global engine remains only as the seed for legacy/unset configs.
+
+        Idempotent: corpora already carrying an explicit engine are untouched.
+        """
+        if self._db is None:
+            logger.warning("migrate_extraction_engine: DB not connected — skipping")
+            return {"scanned": 0, "stamped": 0, "engine": global_engine}
+
+        valid = {"off", "local", "cloud", "dual", "local_then_cloud"}
+        engine = (global_engine or "").strip().lower()
+        if engine not in valid:
+            engine = "local"  # deterministic floor — never silently cloud
+
+        scanned = 0
+        stamped: list[str] = []
+        cursor = self._db["corpora"].find(
+            {},
+            projection={
+                "corpus_id": 1,
+                "default_ingestion_config.extraction_engine": 1,
+            },
+        )
+        async for doc in cursor:
+            scanned += 1
+            current = str(
+                ((doc.get("default_ingestion_config") or {}).get("extraction_engine"))
+                or ""
+            ).strip().lower()
+            if current in valid:
+                continue  # already explicit
+            await self._db["corpora"].update_one(
+                {"corpus_id": doc["corpus_id"]},
+                {"$set": {"default_ingestion_config.extraction_engine": engine}},
+            )
+            stamped.append(doc["corpus_id"])
+        if stamped:
+            logger.info(
+                "migrate_extraction_engine: stamped %d corpora with engine=%r",
+                len(stamped),
+                engine,
+            )
+        return {"scanned": scanned, "stamped": len(stamped), "engine": engine}
+
     async def migrate_universal_schema(self, force: bool = False) -> dict:
         """Lifespan migration — patch corpora to the universal baked schema.
 

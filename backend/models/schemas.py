@@ -218,6 +218,15 @@ class IngestionConfig(BaseModel):
     extraction_models: list[_legacy.ModelProfileRef] = Field(default_factory=list)
     entity_confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     models_linked: bool = True
+    # Per-corpus extraction contract (owner two-toggle model: local on ->
+    # 'local', cloud on -> 'cloud', both -> 'dual', neither -> 'off').
+    # 'inherit' = legacy fallback to the global Settings engine; the lifespan
+    # migration stamps existing corpora explicit so the resolved workflow is
+    # deterministic per corpus. Resolution + fail-fast validation:
+    # services/ingestion/extraction_contract.py.
+    extraction_engine: Literal[
+        "inherit", "off", "local", "cloud", "dual", "local_then_cloud"
+    ] = Field(default="inherit")
 
     # Default to the universal vocab so freshly-instantiated configs match
     # what the lifespan migration patches existing corpora to. Ghost B's

@@ -1033,25 +1033,61 @@ async def _run_ghosts_parallel(
                 settings.EXTRACTION_MAX_ACTIVE_DOCS,
                 len(tasks),
             )
-            # Settings-UI extraction endpoints (toggleable per machine) take
-            # effect on the next ingest without a restart — same pattern as
-            # the Modal embedder config. Falls back to env wiring on any
-            # error or when the user disabled everything (env is the floor).
-            extraction_engine = "local"
+            # Deterministic per-corpus extraction contract (§13 ground-truth
+            # correction): the corpus engine wins, 'inherit' falls back to the
+            # global Settings engine, and contract violations fail the doc
+            # HERE with one clear error instead of thousands of silent chunk
+            # failures. Sidecar endpoints stay global (they are machines, not
+            # corpus concerns) and apply on the next doc without a restart.
+            from services.ingestion.extraction_contract import (
+                resolve_extraction_contract,
+            )
+
+            _global_engine = "local"
+            _endpoint_urls: list[str] = []
             try:
                 from services import ghost_b_local as _gbl
                 from services.settings import settings_service as _ss
 
                 ext = await _ss.get_system_extraction()
-                extraction_engine = str(getattr(ext, "engine", "local") or "local")
-                urls = [
+                _global_engine = str(getattr(ext, "engine", "local") or "local")
+                _endpoint_urls = [
                     e.url.strip().rstrip("/")
                     for e in (ext.endpoints or [])
                     if e.enabled and e.url and e.url.strip()
                 ]
-                _gbl.RUNTIME_ENDPOINT_URLS = urls or None
+                _gbl.RUNTIME_ENDPOINT_URLS = _endpoint_urls or None
             except Exception as exc:  # noqa: BLE001 — env fallback is fine
                 logger.warning("extraction endpoint settings unavailable: %s", exc)
+
+            contract = resolve_extraction_contract(
+                corpus_engine=getattr(config, "extraction_engine", None),
+                global_engine=_global_engine,
+                models_linked=getattr(config, "models_linked", True),
+                summary_model_count=len(config.summary_models or []),
+                extraction_model_count=len(config.extraction_models or []),
+                enabled_endpoint_urls=_endpoint_urls,
+            )
+            extraction_engine = contract.engine
+            logger.info(
+                "phase=ghost_b_contract doc=%s corpus=%s engine=%s source=%s "
+                "pool=%s/%d endpoints=%d errors=%d warnings=%d",
+                doc_id[:12],
+                corpus_id[:8],
+                contract.engine,
+                contract.source,
+                contract.pool_source,
+                contract.pool_size,
+                len(contract.endpoint_urls),
+                len(contract.errors),
+                len(contract.warnings),
+            )
+            for _w in contract.warnings:
+                logger.warning("ghost_b_contract doc=%s: %s", doc_id[:12], _w)
+            if contract.errors:
+                raise RuntimeError(
+                    "extraction contract violation — " + "; ".join(contract.errors)
+                )
             ghost_b_run_id = str(uuid.uuid4())
             _extract_kwargs = dict(
                 schema=schema_ctx,
@@ -1068,9 +1104,23 @@ async def _run_ghosts_parallel(
                 ),
                 audit_run_id=ghost_b_run_id,
             )
-            # Owner-selectable engine (Settings → Ingestion): local GLiNER/
-            # GLiREL sidecars, the cloud Ghost B LLM pool, or local-then-cloud.
-            if extraction_engine == "cloud":
+            # Owner-selectable engine (per-corpus contract; two-toggle model):
+            # off = vectors-only (explicit), local = GLiNER/GLiREL sidecars,
+            # cloud = Ghost B LLM pool, dual = both (even/odd chunk split),
+            # local_then_cloud = local primary with cloud rescue.
+            if extraction_engine == "off":
+                report = ExtractionBatchReport(
+                    results=[],
+                    failures=[],
+                    metrics={
+                        "engine": "off",
+                        "requested_chunks": len(tasks),
+                        "extracted_chunks": 0,
+                        "failed_chunks": 0,
+                        "skipped": True,
+                    },
+                )
+            elif extraction_engine == "cloud":
                 from services.ghost_b import extract_entities as _cloud_extract
 
                 report = await _cloud_extract(tasks, **_extract_kwargs)

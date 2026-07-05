@@ -573,6 +573,103 @@ async def test_ingestion_model_ref(
     return await _test_chat_model_ref(entry)
 
 
+@router.get("/corpora/{corpus_id}/extraction-contract")
+async def get_extraction_contract(
+    corpus_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Resolved extraction contract for this corpus — EXACTLY as the worker
+    resolves it (services/ingestion/extraction_contract.py), plus live sidecar
+    probes. The Corpus Manager renders this as its truth line so the active
+    workflow is visible in the same screen where models are configured (§13
+    ground-truth correction: engine and pools lived on different screens and
+    neither showed the resolved contract)."""
+    import asyncio as _asyncio
+
+    import httpx as _httpx
+
+    from services.ingestion.extraction_contract import resolve_extraction_contract
+    from services.settings import settings_service as _ss
+
+    corpus = await ingestion_service.get_corpus(corpus_id)
+    if not corpus:
+        raise HTTPException(status_code=404, detail="Corpus not found")
+    cfg = IngestionConfig(**(corpus.get("default_ingestion_config") or {}))
+
+    engine_global = "local"
+    endpoints = []
+    try:
+        ext = await _ss.get_system_extraction()
+        engine_global = str(getattr(ext, "engine", "local") or "local")
+        endpoints = list(ext.endpoints or [])
+    except Exception:  # noqa: BLE001 — resolver defaults are the floor
+        pass
+
+    enabled_urls = [
+        e.url.strip().rstrip("/")
+        for e in endpoints
+        if e.enabled and e.url and e.url.strip()
+    ]
+    contract = resolve_extraction_contract(
+        corpus_engine=getattr(cfg, "extraction_engine", None),
+        global_engine=engine_global,
+        models_linked=cfg.models_linked,
+        summary_model_count=len(cfg.summary_models or []),
+        extraction_model_count=len(cfg.extraction_models or []),
+        enabled_endpoint_urls=enabled_urls,
+    )
+
+    async def _probe(url: str) -> bool:
+        try:
+            async with _httpx.AsyncClient(timeout=1.5) as cli:
+                r = await cli.get(f"{url}/health")
+                return r.status_code == 200
+        except Exception:  # noqa: BLE001
+            return False
+
+    alive: dict[str, bool] = {}
+    if contract.uses_local and enabled_urls:
+        flags = await _asyncio.gather(*[_probe(u) for u in enabled_urls])
+        alive = dict(zip(enabled_urls, flags))
+
+    pool_refs = (
+        cfg.extraction_models
+        if contract.pool_source == "extraction_models"
+        else cfg.summary_models
+    )
+    pool = (
+        [
+            {
+                "model": m.model,
+                "base_url": m.base_url,
+                "max_concurrent": m.max_concurrent,
+            }
+            for m in (pool_refs or [])
+        ]
+        if contract.uses_cloud and contract.pool_source != "none"
+        else []
+    )
+
+    return {
+        "engine": contract.engine,
+        "source": contract.source,
+        "models_linked": cfg.models_linked,
+        "pool_source": contract.pool_source if contract.uses_cloud else "none",
+        "pool": pool,
+        "endpoints": [
+            {
+                "label": e.label,
+                "url": (e.url or "").strip().rstrip("/"),
+                "enabled": bool(e.enabled),
+                "alive": alive.get((e.url or "").strip().rstrip("/")),
+            }
+            for e in endpoints
+        ],
+        "errors": list(contract.errors),
+        "warnings": list(contract.warnings),
+    }
+
+
 @router.get("/corpora/{corpus_id}", response_model=CorpusResponse)
 async def get_corpus(
     corpus_id: str,

@@ -220,6 +220,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings_service.attach(conversation_service._db)
     logger.info("Settings service attached")
 
+    # Extraction-engine migration (§13 correction) — stamp every corpus with
+    # an EXPLICIT engine seeded from the current global Settings value, so the
+    # extraction contract is per-corpus and deterministic. Idempotent; corpora
+    # already explicit are untouched. Needs settings_service attached above.
+    try:
+        _ext = await settings_service.get_system_extraction()
+        result = await ingestion_service.migrate_extraction_engine(
+            str(getattr(_ext, "engine", "local") or "local")
+        )
+        logger.info(
+            "Extraction engine migration: scanned=%d stamped=%d engine=%s",
+            result["scanned"],
+            result["stamped"],
+            result["engine"],
+        )
+    except Exception as e:
+        logger.error(f"Extraction engine migration failed: {e}")
+        # Non-fatal: unstamped corpora resolve via 'inherit' -> global engine,
+        # identical to pre-migration behavior.
+
     # Model Profiles service (Phase 19.3): attach same DB handle
     model_profiles_service.attach(conversation_service._db)
     logger.info("Model profiles service attached")

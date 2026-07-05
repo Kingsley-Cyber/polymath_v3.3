@@ -95,6 +95,22 @@ function phaseLabel(phase?: string | null): string {
   return PHASE_LABELS[phase] ?? phase;
 }
 
+// Graph-lane coverage from ghost_b_metrics: extracted/requested chunks.
+// §13 correction — a doc can be mongo/qdrant/verified GREEN while its knowledge
+// graph is ~empty (the Qwen2.5-7B collapse left 110/113 docs graph-dead reading
+// as clean "done"). Returns null when the corpus doesn't use the graph, when
+// extraction was explicitly OFF, or when metrics are absent.
+function graphCoverage(
+  doc: DocumentResponse,
+): { pct: number; extracted: number; requested: number } | null {
+  const m = doc.ghost_b_metrics;
+  if (!m || m.engine === "off") return null;
+  const requested = m.requested_chunks ?? 0;
+  if (!requested) return null;
+  const extracted = m.extracted_chunks ?? 0;
+  return { pct: Math.round((extracted / requested) * 100), extracted, requested };
+}
+
 /** Plain-English reason for a failed ingest. Raw error text → tooltip. */
 function humanizeIngestFailure(
   rawError: string | null | undefined,
@@ -1705,6 +1721,25 @@ function LibraryRow({
             {status === "processing" && (
               <span className="shrink-0 text-accent-secondary">· writing…</span>
             )}
+            {status === "completed" &&
+              (() => {
+                const g = graphCoverage(doc);
+                if (g === null || g.pct >= 90) return null;
+                const dead = g.pct < 10;
+                return (
+                  <span
+                    className={`inline-flex items-center gap-1 shrink-0 ${
+                      dead ? "text-error" : "text-amber-300"
+                    }`}
+                    title={`Knowledge-graph coverage: ${g.extracted}/${g.requested} chunks extracted (${g.pct}%). Text and vectors are complete; the graph lane ${
+                      dead ? "is effectively empty" : "is partial"
+                    }. Use Backfill (expand the doc in the left list) to re-run extraction on the missing chunks.`}
+                  >
+                    <AlertTriangle className="w-2.5 h-2.5" />
+                    graph {dead ? "dead" : `${g.pct}%`}
+                  </span>
+                );
+              })()}
             {doc.is_near_duplicate && (
               <span
                 className="inline-flex items-center gap-1 text-amber-300"
