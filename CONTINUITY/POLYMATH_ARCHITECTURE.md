@@ -709,6 +709,16 @@ the global cap (semaphores are the governors; worker count just exploits them).
 RECEIPT: sidecar idle <10% over 1h (was ~40%), files/hour >=1.5x, site stays responsive.
 RISK: chunker CPU on the extra doc — watch /api/health during receipt; default stays 3 not 4.
 
+**P1 STATUS (live, receipt pending — ACTIVE TASK as of 2026-07-05 05:45):** deployed 05:37
+(26fcb69) onto the running batch a6aae588 at 101/498 done. 3 in-flight confirmed; services
+200 under load; sidecar pid 8399 running with GHOST_B_IDLE_SHUTDOWN_SECONDS=0 (idle-death
+disabled for the measurement). A one-shot session cron fires ~06:51 to compute the verdict:
+files/hour since 05:37 (baseline ~9/hr, target >=14), GPU duty (ghosts+embed log seconds /
+elapsed, target >85%), health held, failed count vs 5 (4x libgen chunker-timeout cohort +
+1 neo4j gap — known, non-blocking). If the cron was lost to a session restart, compute those
+three numbers manually from docker logs + Mongo. PASS -> consider INGEST_GLOBAL_MAX_DOCS=4,
+then P2/P3. FAIL -> diagnose which stage starved before touching anything.
+
 **P2 — GLiREL surgery (attacks the 75%).** (a) set GHOST_B_GLIREL_BATCH on the Mac (unset;
 Windows runner uses 512); (b) pair pruning — GLiREL scales with entity-PAIRS: cap pairs/chunk
 to top-K by GLiNER confidence, skip <2-entity chunks; (c) pre-split >128-token sentences
