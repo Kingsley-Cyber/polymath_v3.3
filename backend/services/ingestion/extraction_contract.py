@@ -90,27 +90,24 @@ def resolve_extraction_contract(
                 )
 
     # Cloud pool resolution mirrors the worker rule EXACTLY:
-    # linked (or empty extraction pool) -> summary pool; else extraction pool.
+    # linked -> summary pool; unlinked -> extraction pool. Never silently fall
+    # back to Summary when the user explicitly split the pools.
     linked = models_linked is not False
-    if linked or extraction_model_count <= 0:
+    if linked:
         pool_size = max(0, int(summary_model_count))
         pool_source = "summary_models" if pool_size else "none"
-        if not linked and extraction_model_count <= 0 and engine in _CLOUD_REQUIRED:
-            warnings.append(
-                "models_linked=false but the Extraction pool is empty — "
-                "falling back to the Summary pool"
-            )
     else:
         pool_size = max(0, int(extraction_model_count))
-        pool_source = "extraction_models"
+        pool_source = "extraction_models" if pool_size else "none"
 
     urls = tuple(u.strip().rstrip("/") for u in (enabled_endpoint_urls or []) if u and u.strip())
 
     if engine in _CLOUD_REQUIRED and pool_size == 0:
         errors.append(
             f"engine={engine!r} requires a cloud model pool but the resolved "
-            f"pool ({pool_source}) is EMPTY — configure Extraction models (or "
-            f"link a non-empty Summary pool), or switch the corpus to 'local'"
+            f"pool ({'summary_models' if linked else 'extraction_models'}) is "
+            f"EMPTY — {'enable Reuse Summary pool with a non-empty Summary pool' if not linked else 'configure Summary models'} "
+            f"or switch the corpus to 'local'"
         )
     if engine in _CLOUD_OPTIONAL and pool_size == 0:
         warnings.append(

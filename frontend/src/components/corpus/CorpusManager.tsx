@@ -227,75 +227,6 @@ function PresetModeSelector({ config, onChange, idPrefix }: PresetSelectorProps)
         </div>
       )}
 
-      {/* Local extraction is the engine for every preset — say so where the
-          user makes ingestion choices, instead of leaving it implicit. */}
-      <div
-        className="mt-2 px-2 py-1.5 border border-border-minimal bg-bg-base/50"
-        data-testid={`${idPrefix}-local-extraction-note`}
-      >
-        <div className="text-[10px] font-bold tracking-widest uppercase text-emerald-400">
-          Extraction · local engines
-        </div>
-        <ExtractionEngineSelector />
-        <div className="mt-1 text-[10px] text-content-tertiary">
-          LOCAL = GLiNER ×2 + GLiREL sidecars (no cloud calls). CLOUD = the
-          Ghost B LLM pool. DUAL splits each document across both engines
-          concurrently for speed. Endpoints &amp; health: Settings → Ingestion.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ExtractionEngineSelector() {
-  const [engine, setEngineState] = useState<string>("local");
-  const [endpoints, setEndpoints] = useState<unknown[]>([]);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    api
-      .getGlobalSettings()
-      .then((r: { settings: { extraction?: { engine?: string; endpoints?: unknown[] } } }) => {
-        setEngineState(r.settings.extraction?.engine ?? "local");
-        setEndpoints(r.settings.extraction?.endpoints ?? []);
-      })
-      .catch(() => {});
-  }, []);
-  const choose = async (val: string) => {
-    setEngineState(val);
-    setBusy(true);
-    try {
-      await api.updateGlobalSettings({
-        extraction: { endpoints, engine: val },
-      } as Parameters<typeof api.updateGlobalSettings>[0]);
-    } catch {
-      /* settings tab surfaces errors; keep optimistic UI here */
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-2">
-      {[
-        ["local", "LOCAL"],
-        ["cloud", "CLOUD"],
-        ["local_then_cloud", "LOCAL → CLOUD"],
-        ["dual", "DUAL (SPEED)"],
-      ].map(([val, label]) => (
-        <button
-          key={val}
-          type="button"
-          disabled={busy}
-          onClick={() => choose(val)}
-          className={
-            "px-3 py-1.5 text-[11px] font-semibold tracking-wider rounded-sm border transition-colors " +
-            (engine === val
-              ? "border-emerald-400 bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/40"
-              : "border-border-minimal bg-bg-base/60 text-content-tertiary hover:text-content-primary hover:border-content-tertiary")
-          }
-        >
-          {label}
-        </button>
-      ))}
     </div>
   );
 }
@@ -1179,11 +1110,15 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
 // fetched from the backend and shows EXACTLY what the worker will run —
 // including sidecar liveness and which pool actually fires — so the active
 // workflow is never hidden across two screens again (§13 correction).
-function engineToggles(engine: ExtractionEngine | undefined): {
+function engineToggles(
+  engine: ExtractionEngine | undefined,
+  inheritedEngine?: ResolvedDraftEngine,
+): {
   local: boolean;
   cloud: boolean;
 } {
-  switch (engine) {
+  const resolved = engine && engine !== "inherit" ? engine : (inheritedEngine ?? "local");
+  switch (resolved) {
     case "local":
       return { local: true, cloud: false };
     case "cloud":
@@ -1196,6 +1131,23 @@ function engineToggles(engine: ExtractionEngine | undefined): {
     default:
       return { local: true, cloud: false }; // "inherit"/unset — resolver floor
   }
+}
+
+type ResolvedDraftEngine = Exclude<ExtractionEngine, "inherit">;
+
+function draftEngine(
+  engine: ExtractionEngine | undefined,
+  inheritedEngine?: ResolvedDraftEngine,
+): ResolvedDraftEngine {
+  return engine && engine !== "inherit" ? engine : (inheritedEngine ?? "local");
+}
+
+function usesLocalEngine(engine: ResolvedDraftEngine): boolean {
+  return engine === "local" || engine === "dual" || engine === "local_then_cloud";
+}
+
+function usesCloudEngine(engine: ResolvedDraftEngine): boolean {
+  return engine === "cloud" || engine === "dual" || engine === "local_then_cloud";
 }
 
 function IngestionModelsSection({
@@ -1213,8 +1165,39 @@ function IngestionModelsSection({
   const summaryPool = config.summary_models ?? [];
   const extractionPool = linked ? summaryPool : (config.extraction_models ?? []);
 
+  // Resolved contract (SAVED state) from the backend truth endpoint.
+  const [contract, setContract] = useState<ExtractionContractResponse | null>(null);
+  const [contractDown, setContractDown] = useState(false);
+
   const engine = config.extraction_engine;
-  const toggles = engineToggles(engine);
+  const draft = draftEngine(engine, contract?.engine);
+  const toggles = engineToggles(engine, contract?.engine);
+  const draftUsesLocal = usesLocalEngine(draft);
+  const draftUsesCloud = usesCloudEngine(draft);
+  const draftPoolSource = draftUsesCloud
+    ? linked
+      ? "summary_models"
+      : "extraction_models"
+    : "none";
+  const draftPool =
+    draftPoolSource === "summary_models"
+      ? summaryPool
+      : draftPoolSource === "extraction_models"
+        ? (config.extraction_models ?? [])
+        : [];
+  const draftErrors =
+    draftUsesCloud && draftPool.length === 0
+      ? [
+          linked
+            ? "CLOUD extraction needs at least one Summary model chip."
+            : "CLOUD extraction needs at least one Extraction model chip.",
+        ]
+      : [];
+  const draftChanged =
+    !!contract &&
+    (contract.engine !== draft ||
+      contract.models_linked !== linked ||
+      (draftUsesCloud && contract.pool.length !== draftPool.length));
   const setToggles = (local: boolean, cloud: boolean) => {
     onPatch({
       extraction_engine:
@@ -1222,9 +1205,6 @@ function IngestionModelsSection({
     });
   };
 
-  // Resolved contract (SAVED state) from the backend truth endpoint.
-  const [contract, setContract] = useState<ExtractionContractResponse | null>(null);
-  const [contractDown, setContractDown] = useState(false);
   useEffect(() => {
     if (!corpusId) return;
     let gone = false;
@@ -1305,21 +1285,52 @@ function IngestionModelsSection({
             CLOUD model pool
           </label>
           <span className="ml-auto text-[10px] font-bold tracking-widest text-accent-secondary uppercase">
-            {toggles.local && toggles.cloud
-              ? "DUAL — both, chunks split"
-              : toggles.local
+            {draftUsesLocal && draftUsesCloud
+              ? "DUAL - both, chunks split"
+              : draftUsesLocal
                 ? "LOCAL"
-                : toggles.cloud
+                : draftUsesCloud
                   ? "CLOUD"
-                  : "OFF — vectors only"}
+                  : "OFF - vectors only"}
             {engine === "inherit" || engine === undefined ? " (inherited)" : ""}
-            {engine === "local_then_cloud" ? " (local→cloud rescue)" : ""}
+            {engine === "local_then_cloud" ? " (local->cloud rescue)" : ""}
           </span>
         </div>
 
         {/* Resolved truth line — what the worker will actually run NOW */}
         <div className="text-[10px] leading-relaxed" data-testid="extraction-contract-truth">
-          {contractDown ? (
+          {!corpusId ? (
+            <>
+              <span className="text-content-tertiary tracking-wider">
+                NEW CONTRACT:{" "}
+              </span>
+              <span className="text-content-primary font-bold uppercase">{draft}</span>
+              {draftUsesLocal && (
+                <span className="text-content-secondary">
+                  {" · sidecars from Settings"}
+                </span>
+              )}
+              {draftUsesCloud && (
+                <span className="text-content-secondary">
+                  {" · pool ("}
+                  {draftPoolSource === "summary_models"
+                    ? "summary, linked"
+                    : "extraction"}
+                  {"): "}
+                  {draftPool.length === 0
+                    ? "EMPTY"
+                    : draftPool
+                        .map((p) => `${p.model} @${p.max_concurrent ?? 1}`)
+                        .join(", ")}
+                </span>
+              )}
+              {draftErrors.map((e, i) => (
+                <div key={`de-${i}`} className="text-error">
+                  ERROR: {e}
+                </div>
+              ))}
+            </>
+          ) : contractDown ? (
             <span className="text-content-tertiary">
               [SAVED_CONTRACT_UNAVAILABLE] — backend build without the contract
               endpoint; showing config only
@@ -1355,9 +1366,9 @@ function IngestionModelsSection({
                 <span className="text-content-secondary">
                   {" · pool ("}
                   {contract.pool_source === "summary_models"
-                    ? linked
+                    ? contract.models_linked
                       ? "summary, linked"
-                      : "summary, fallback"
+                      : "summary"
                     : "extraction"}
                   {"): "}
                   {contract.pool.length === 0
@@ -1369,14 +1380,32 @@ function IngestionModelsSection({
               )}
               {contract.errors.map((e, i) => (
                 <div key={`ce-${i}`} className="text-error">
-                  ✗ {e}
+                  ERROR: {e}
                 </div>
               ))}
               {contract.warnings.map((w, i) => (
                 <div key={`cw-${i}`} className="text-amber-300">
-                  ⚠ {w}
+                  WARN: {w}
                 </div>
               ))}
+              {editing && draftChanged && (
+                <div className="text-accent-secondary">
+                  PENDING AFTER SAVE: {draft.toUpperCase()}
+                  {draftUsesCloud
+                    ? ` · ${draftPoolSource === "summary_models" ? "summary" : "extraction"} pool: ${
+                        draftPool.length === 0
+                          ? "EMPTY"
+                          : draftPool.map((p) => `${p.model} @${p.max_concurrent ?? 1}`).join(", ")
+                      }`
+                    : ""}
+                </div>
+              )}
+              {editing &&
+                draftErrors.map((e, i) => (
+                  <div key={`pe-${i}`} className="text-error">
+                    PENDING ERROR: {e}
+                  </div>
+                ))}
             </>
           )}
         </div>
@@ -1402,8 +1431,12 @@ function IngestionModelsSection({
         value={extractionPool}
         onChange={(next) => onPatch({ extraction_models: next })}
         editing={editing}
-        readOnly={linked}
-        readOnlyHint="Uncheck 'Reuse Summary pool' to configure Extraction independently."
+        readOnly={!draftUsesCloud || linked}
+        readOnlyHint={
+          !draftUsesCloud
+            ? "Enable CLOUD extraction above to use this pool."
+            : "Uncheck 'Reuse Summary pool' to configure Extraction independently."
+        }
         testKind="chat"
         testContext={{
           corpusId,

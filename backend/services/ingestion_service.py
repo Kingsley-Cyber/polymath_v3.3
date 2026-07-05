@@ -70,6 +70,7 @@ MUTABLE_CONFIG_FIELDS: frozenset[str] = frozenset({
     "modal_containers",
     "summary_models",
     "extraction_models",
+    "extraction_engine",
     "entity_confidence_threshold",
     "models_linked",
 })
@@ -97,7 +98,8 @@ def freeze_snapshot(config: IngestionConfig) -> dict:
     """Return the dict to persist onto a document record — frozen fields only.
 
     Mutable provider-wiring fields (embed_*, summary_models, extraction_models,
-    entity_confidence_threshold, models_linked, modal_containers) are
+    extraction_engine, entity_confidence_threshold, models_linked,
+    modal_containers) are
     deliberately excluded. The worker re-reads them live from the corpus on
     every ingest, so freezing them onto the doc snapshot would create two
     sources of truth and silently ignore user edits.
@@ -1902,7 +1904,7 @@ class IngestionService:
         settings = get_settings()
         extraction_pool = (
             ingestion_config.summary_models
-            if ingestion_config.models_linked or not ingestion_config.extraction_models
+            if ingestion_config.models_linked
             else ingestion_config.extraction_models
         )
         extraction_concurrency = sum(

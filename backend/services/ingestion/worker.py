@@ -971,10 +971,48 @@ async def _run_ghosts_parallel(
             relation_schema=config.relation_schema,
             strict=config.schema_strict,
         )
-        if config.models_linked or not config.extraction_models:
-            pool = _build_ghost_pool(config.summary_models)
-        else:
-            pool = _build_ghost_pool(config.extraction_models)
+        # Deterministic per-corpus extraction contract (§13 ground-truth
+        # correction): the corpus engine wins, 'inherit' falls back to the
+        # global Settings engine, and contract violations fail the doc with one
+        # clear error instead of thousands of silent chunk failures. Resolve it
+        # before pool/schema-lens setup so every downstream decision shares one
+        # source of truth.
+        from services.ingestion.extraction_contract import (
+            resolve_extraction_contract,
+        )
+
+        _global_engine = "local"
+        _endpoint_urls: list[str] = []
+        try:
+            from services import ghost_b_local as _gbl
+            from services.settings import settings_service as _ss
+
+            ext = await _ss.get_system_extraction()
+            _global_engine = str(getattr(ext, "engine", "local") or "local")
+            _endpoint_urls = [
+                e.url.strip().rstrip("/")
+                for e in (ext.endpoints or [])
+                if e.enabled and e.url and e.url.strip()
+            ]
+            _gbl.RUNTIME_ENDPOINT_URLS = _endpoint_urls or None
+        except Exception as exc:  # noqa: BLE001 — env fallback is fine
+            logger.warning("extraction endpoint settings unavailable: %s", exc)
+
+        contract = resolve_extraction_contract(
+            corpus_engine=getattr(config, "extraction_engine", None),
+            global_engine=_global_engine,
+            models_linked=getattr(config, "models_linked", True),
+            summary_model_count=len(config.summary_models or []),
+            extraction_model_count=len(config.extraction_models or []),
+            enabled_endpoint_urls=_endpoint_urls,
+        )
+        extraction_engine = contract.engine
+        cloud_pool_refs = (
+            config.summary_models
+            if getattr(config, "models_linked", True)
+            else config.extraction_models
+        )
+        pool = _build_ghost_pool(cloud_pool_refs)
         # Exclude noisy parents/children from the schema lens — letting
         # bibliography page entries (publishers, ISBNs, citation bric-a-brac)
         # influence which schema terms get retrieved would erode entity
@@ -995,8 +1033,9 @@ async def _run_ghosts_parallel(
             children=body_children_for_lens or children,
             entity_schema=config.entity_schema,
             relation_schema=config.relation_schema,
-            pool=pool,
+            pool=pool if contract.uses_cloud else [],
             model=model,
+            allow_llm=contract.uses_cloud,
         )
 
         async def _schema_resolver(
@@ -1033,42 +1072,6 @@ async def _run_ghosts_parallel(
                 settings.EXTRACTION_MAX_ACTIVE_DOCS,
                 len(tasks),
             )
-            # Deterministic per-corpus extraction contract (§13 ground-truth
-            # correction): the corpus engine wins, 'inherit' falls back to the
-            # global Settings engine, and contract violations fail the doc
-            # HERE with one clear error instead of thousands of silent chunk
-            # failures. Sidecar endpoints stay global (they are machines, not
-            # corpus concerns) and apply on the next doc without a restart.
-            from services.ingestion.extraction_contract import (
-                resolve_extraction_contract,
-            )
-
-            _global_engine = "local"
-            _endpoint_urls: list[str] = []
-            try:
-                from services import ghost_b_local as _gbl
-                from services.settings import settings_service as _ss
-
-                ext = await _ss.get_system_extraction()
-                _global_engine = str(getattr(ext, "engine", "local") or "local")
-                _endpoint_urls = [
-                    e.url.strip().rstrip("/")
-                    for e in (ext.endpoints or [])
-                    if e.enabled and e.url and e.url.strip()
-                ]
-                _gbl.RUNTIME_ENDPOINT_URLS = _endpoint_urls or None
-            except Exception as exc:  # noqa: BLE001 — env fallback is fine
-                logger.warning("extraction endpoint settings unavailable: %s", exc)
-
-            contract = resolve_extraction_contract(
-                corpus_engine=getattr(config, "extraction_engine", None),
-                global_engine=_global_engine,
-                models_linked=getattr(config, "models_linked", True),
-                summary_model_count=len(config.summary_models or []),
-                extraction_model_count=len(config.extraction_models or []),
-                enabled_endpoint_urls=_endpoint_urls,
-            )
-            extraction_engine = contract.engine
             logger.info(
                 "phase=ghost_b_contract doc=%s corpus=%s engine=%s source=%s "
                 "pool=%s/%d endpoints=%d errors=%d warnings=%d",
@@ -1157,6 +1160,8 @@ async def _run_ghosts_parallel(
                 try:
                     report = await extract_entities(tasks, **_extract_kwargs)
                 except Exception as _local_exc:  # noqa: BLE001
+                    if contract.pool_size == 0:
+                        raise
                     logger.warning(
                         "phase=ghost_b local engine failed (%s) — cloud fallback",
                         _local_exc,

@@ -701,9 +701,10 @@ async def _profile_with_llm(
     relation_schema: list[str],
     pool: list[dict],
     model: str | None,
+    allow_llm: bool = True,
 ) -> dict[str, Any] | None:
     settings = get_settings()
-    if not bool(getattr(settings, "SCHEMA_LENS_LLM_ENABLED", True)):
+    if not allow_llm or not bool(getattr(settings, "SCHEMA_LENS_LLM_ENABLED", True)):
         return None
 
     entry = (
@@ -793,6 +794,7 @@ async def get_or_create_schema_lens(
     relation_schema: list[str] | None,
     pool: list[dict],
     model: str | None,
+    allow_llm: bool = True,
 ) -> SchemaLens:
     """Return a corpus lens, creating/merging it without user prompting.
 
@@ -832,6 +834,7 @@ async def get_or_create_schema_lens(
             relation_schema=relation_vocab,
             pool=pool,
             model=model,
+            allow_llm=allow_llm,
         )
         lens = sanitize_schema_lens(
             llm_payload,

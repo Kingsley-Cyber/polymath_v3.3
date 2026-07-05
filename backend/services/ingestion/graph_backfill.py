@@ -23,9 +23,11 @@ from services.ghost_b import (
     ExtractionResult,
     ExtractionTask,
     SchemaContext,
-    extract_entities,
+    extract_entities as cloud_extract_entities,
     summarize_extraction_batch,
 )
+from services.ghost_b_local import extract_entities as local_extract_entities
+from services.ingestion.extraction_contract import resolve_extraction_contract
 from services.graph.neo4j_writer import write_document_graph
 from services.ingestion.worker import (
     _build_ghost_pool,
@@ -223,18 +225,50 @@ async def _run_ghost_b_backfill(
         relation_schema=config.relation_schema,
         strict=config.schema_strict,
     )
-    pool = (
-        _build_ghost_pool(config.summary_models)
-        if config.models_linked or not config.extraction_models
-        else _build_ghost_pool(config.extraction_models)
+    endpoint_urls: list[str] = []
+    global_engine = "local"
+    try:
+        from services import ghost_b_local as _gbl
+        from services.settings import settings_service
+
+        ext = await settings_service.get_system_extraction()
+        global_engine = str(getattr(ext, "engine", "local") or "local")
+        endpoint_urls = [
+            e.url.strip().rstrip("/")
+            for e in (ext.endpoints or [])
+            if e.enabled and e.url and e.url.strip()
+        ]
+        _gbl.RUNTIME_ENDPOINT_URLS = endpoint_urls or None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("graph_backfill: extraction endpoint settings unavailable: %s", exc)
+
+    contract = resolve_extraction_contract(
+        corpus_engine=getattr(config, "extraction_engine", None),
+        global_engine=global_engine,
+        models_linked=getattr(config, "models_linked", True),
+        summary_model_count=len(config.summary_models or []),
+        extraction_model_count=len(config.extraction_models or []),
+        enabled_endpoint_urls=endpoint_urls,
     )
+    for warning in contract.warnings:
+        logger.warning("graph_backfill contract corpus=%s: %s", corpus_id[:8], warning)
+    if contract.errors:
+        raise RuntimeError(
+            "extraction contract violation — " + "; ".join(contract.errors)
+        )
+
+    cloud_pool_refs = (
+        config.summary_models
+        if getattr(config, "models_linked", True)
+        else config.extraction_models
+    )
+    pool = _build_ghost_pool(cloud_pool_refs)
 
     async def _schema_resolver(kind: str, query_vec: list[float], top_k: int) -> list[str]:
         return await retrieve_schema_for_chunk(qdrant_client, corpus_id, kind, query_vec, top_k)
 
     ghost_b_run_id = f"backfill-{uuid.uuid4()}"
-    report = await extract_entities(
-        tasks,
+    extract_kwargs = dict(
         schema=schema_ctx,
         chunk_vectors=None,
         schema_resolver=_schema_resolver,
@@ -247,6 +281,52 @@ async def _run_ghost_b_backfill(
         ),
         audit_run_id=ghost_b_run_id,
     )
+    if contract.engine == "off":
+        report = ExtractionBatchReport(
+            results=[],
+            failures=[],
+            metrics={
+                "engine": "off",
+                "requested_chunks": len(tasks),
+                "extracted_chunks": 0,
+                "failed_chunks": 0,
+                "skipped": True,
+            },
+        )
+    elif contract.engine == "cloud":
+        report = await cloud_extract_entities(tasks, **extract_kwargs)
+    elif contract.engine == "dual":
+        local_part = tasks[0::2]
+        cloud_part = tasks[1::2]
+        import asyncio
+
+        rep_local, rep_cloud = await asyncio.gather(
+            local_extract_entities(local_part, **extract_kwargs),
+            cloud_extract_entities(cloud_part, **extract_kwargs),
+        )
+        if isinstance(rep_local, ExtractionBatchReport) and isinstance(
+            rep_cloud, ExtractionBatchReport
+        ):
+            report = ExtractionBatchReport(
+                results=list(rep_local.results) + list(rep_cloud.results),
+                failures=list(rep_local.failures) + list(rep_cloud.failures),
+                metrics={
+                    "engine": "dual",
+                    "local": rep_local.metrics,
+                    "cloud": rep_cloud.metrics,
+                },
+            )
+        else:
+            report = list(rep_local) + list(rep_cloud)
+    elif contract.engine == "local_then_cloud":
+        try:
+            report = await local_extract_entities(tasks, **extract_kwargs)
+        except Exception:
+            if contract.pool_size == 0:
+                raise
+            report = await cloud_extract_entities(tasks, **extract_kwargs)
+    else:
+        report = await local_extract_entities(tasks, **extract_kwargs)
     if not isinstance(report, ExtractionBatchReport):
         raise RuntimeError("Ghost B did not return a batch report")
     return report
