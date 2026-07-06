@@ -27,6 +27,7 @@ extractions so large books never need one giant document write.
 """
 
 import asyncio
+import functools
 from collections import Counter
 import hashlib
 import inspect
@@ -128,6 +129,41 @@ from services.storage.qdrant_writer import retrieve_schema_for_chunk
 logger = logging.getLogger(__name__)
 settings = get_settings()
 _PARSE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_PARSE_JOBS))
+
+# ── Chunk-stage process pool (GIL escape) ───────────────────────────────────
+# asyncio.to_thread serialized all concurrent docs' chunking onto ONE core
+# (cpu=101% with 10 slots, 125s/doc, 2026-07-06). Spawn context on purpose:
+# forking a threaded asyncio process inherits held locks. Workers lazily
+# import the chunker on first use; startup cost amortizes over the pool life.
+_CHUNK_POOL = None
+
+
+def _chunk_process_pool():
+    global _CHUNK_POOL
+    if _CHUNK_POOL is None:
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+
+        workers = max(1, int(getattr(get_settings(), "INGEST_CHUNK_PROCESSES", 6)))
+        _CHUNK_POOL = ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=multiprocessing.get_context("spawn"),
+        )
+        logger.info("chunk process pool started: workers=%d (spawn)", workers)
+    return _CHUNK_POOL
+
+
+def _chunk_in_subprocess(parse_result, doc_id, corpus_id, config):
+    """Top-level (picklable) chunk entrypoint for the process pool."""
+    from services.ingestion import tier_chunker as _tc
+
+    return _tc.chunk(
+        parse_result=parse_result,
+        doc_id=doc_id,
+        corpus_id=corpus_id,
+        config=config,
+    )
+
 _MODEL_PHASE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
 _MODEL_PHASE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
 _GHOST_B_FILE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
@@ -2968,22 +3004,28 @@ async def run_ingest_job(
     )
 
     # ── Phase 2: Chunk ───────────────────────────────────────────────────
-    # Run sync chunker in a thread with a wall-clock cap so pathological
-    # docs (PBR4-style: thousands of code/math blocks with no sentence
-    # boundaries) can't stall the whole batch. If the cap trips, raise so
-    # the doc is marked failed and the batch moves on.
+    # Run the sync chunker in a PROCESS pool with a wall-clock cap.
+    # asyncio.to_thread serialized every concurrent doc's chunking onto one
+    # core via the GIL (observed: cpu=101% with 10 slots, 125s/doc,
+    # 2026-07-06) — separate interpreters make chunking scale with cores.
+    # Timeout note: cancelling the future does NOT kill a busy subprocess;
+    # the worker finishes its doc and returns to the pool — bounded waste,
+    # and pathological docs are skip-listed anyway.
     t0 = time.monotonic()
     _chunk_timeout = max(
         60, int(getattr(settings, "TIER_CHUNKER_DOC_TIMEOUT_SECONDS", 600))
     )
     try:
         parents, children, injected_headers = await asyncio.wait_for(
-            asyncio.to_thread(
-                tier_chunker.chunk,
-                parse_result=parse_result,
-                doc_id=doc_id,
-                corpus_id=corpus_id,
-                config=ingestion_config,
+            asyncio.get_running_loop().run_in_executor(
+                _chunk_process_pool(),
+                functools.partial(
+                    _chunk_in_subprocess,
+                    parse_result,
+                    doc_id,
+                    corpus_id,
+                    ingestion_config,
+                ),
             ),
             timeout=_chunk_timeout,
         )

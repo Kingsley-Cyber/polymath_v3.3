@@ -1409,6 +1409,19 @@ class Settings(BaseSettings):
             "should normally enforce this first; this is the extraction safety net."
         ),
     )
+    INGEST_CHUNK_PROCESSES: int = Field(
+        default=6,
+        ge=1,
+        le=16,
+        description=(
+            "Process-pool workers for the chunk stage. Chunking ran in "
+            "asyncio.to_thread — the GIL serialized every parallel doc onto "
+            "ONE core (observed: backend cpu=101% with 10 slots chunking, "
+            "125s/doc avg, 2026-07-06). Separate processes make chunking "
+            "scale with allocated cores; leave headroom for the event loop "
+            "and embed client."
+        ),
+    )
     TIER_CHUNKER_DOC_TIMEOUT_SECONDS: int = Field(
         default=600,
         ge=60,
