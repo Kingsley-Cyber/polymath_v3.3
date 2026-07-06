@@ -63,6 +63,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -489,6 +490,65 @@ def _validated_facts(fact_dicts: list[dict], confidence: float, counters: dict) 
 
 
 # --------------------------------------------------------- synchronous core
+# ---------------------------------------------------------------------------
+# GLiNER windowing (§13-H) — verified 2026-07-06: gliner_medium-v2.1 silently
+# drops everything past its ~384-token window (tail-entity probe: entities in
+# the last sentence of a 546-word chunk vanish; same sentence in a 153-word
+# chunk extracts fine). Retrieval chunks are 512-700 tokens by design, so the
+# chunk is TILED into sentence-bounded windows at extraction time — semantic
+# breaks are never violated, a one-sentence overlap catches boundary
+# straddlers, and spans merge back per chunk (dedup by surface+label; safe
+# because downstream locates entities by surface text in the RAW chunk, not
+# by span offsets).
+
+_GLINER_WINDOW_WORDS = max(80, int(os.environ.get("GLINER_WINDOW_WORDS", "260")))
+_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _gliner_windows(text: str) -> list[str]:
+    """Tile text into <=_GLINER_WINDOW_WORDS-word windows on sentence
+    boundaries with a one-sentence overlap. A single pathological sentence
+    longer than the window (code/tables) is hard-split by words — losing a
+    mid-'sentence' break there beats losing the whole tail."""
+    if len(text.split()) <= _GLINER_WINDOW_WORDS:
+        return [text]
+    sentences: list[str] = []
+    for s in _SENT_SPLIT_RE.split(text):
+        w = s.split()
+        if len(w) <= _GLINER_WINDOW_WORDS:
+            if s.strip():
+                sentences.append(s)
+            continue
+        for i in range(0, len(w), _GLINER_WINDOW_WORDS):
+            sentences.append(" ".join(w[i : i + _GLINER_WINDOW_WORDS]))
+    windows: list[str] = []
+    cur: list[str] = []
+    cur_words = 0
+    for s in sentences:
+        w = len(s.split())
+        if cur and cur_words + w > _GLINER_WINDOW_WORDS:
+            windows.append(" ".join(cur))
+            cur = cur[-1:]  # one-sentence overlap
+            cur_words = len(cur[0].split()) if cur else 0
+        cur.append(s)
+        cur_words += w
+    if cur:
+        windows.append(" ".join(cur))
+    return windows or [text]
+
+
+def _merge_window_spans(spans: list) -> list:
+    """Dedup spans found in overlapping windows by (surface, label), keeping
+    the highest score. Deterministic: first-seen insertion order."""
+    best: dict[tuple[str, Any], Any] = {}
+    for sp in spans:
+        key = (str(sp.get("text", "")).lower(), sp.get("label"))
+        prev = best.get(key)
+        if prev is None or (sp.get("score") or 0) > (prev.get("score") or 0):
+            best[key] = sp
+    return list(best.values())
+
+
 def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) -> list[dict]:
     """The blocking GLiNER+GLiREL+enrich pipeline. Runs under the inference lock
     in whatever process has the ML stack (native worker thread OR the sidecar).
@@ -538,7 +598,17 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
             else:
                 gliner_inputs.append(strip_noise(text))
         raw_per_task: list[list] = [[] for _ in range(n)]
-        live = [(i, s) for i, s in enumerate(gliner_inputs) if s.strip()]
+        # §13-H windowing: tile each chunk into sentence-bounded windows so
+        # GLiNER's ~384-token model cap never silently drops chunk tails
+        # (512-700-token retrieval chunks are the norm now). Windows of all
+        # chunks share the same batches — no extra forward-pass overhead
+        # beyond the genuinely additional text.
+        live = [
+            (i, w)
+            for i, s in enumerate(gliner_inputs)
+            if s.strip()
+            for w in _gliner_windows(s)
+        ]
         for start in range(0, len(live), gliner_bs):
             sl = live[start:start + gliner_bs]
             for (i, _s), spans in zip(
@@ -553,7 +623,10 @@ def _extract_raw(task_dicts: list[dict], do_facts: bool, lens_id: str | None) ->
                     # forward.
                     batch_size=max(1, int(getattr(pc, "GLINER_FORWARD", 8)))),
             ):
-                raw_per_task[i] = spans
+                raw_per_task[i].extend(spans)
+        for i in range(n):
+            if raw_per_task[i]:
+                raw_per_task[i] = _merge_window_spans(raw_per_task[i])
         t_gliner = _time.time()
 
         # ---- Stage B: CPU per chunk — gates, aliases, definitional ---------
