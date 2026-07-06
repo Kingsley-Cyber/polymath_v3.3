@@ -144,6 +144,24 @@ def test_local_then_cloud_empty_pool_is_warning_not_error():
     assert any("rescue lane is unavailable" in w for w in c.warnings)
 
 
+def test_local_then_enrich_uses_both_lanes():
+    c = _c(
+        corpus_engine="local_then_enrich",
+        models_linked=False,
+        extraction_model_count=1,
+    )
+    assert c.engine == "local_then_enrich" and c.source == "corpus"
+    assert not c.errors
+    assert c.uses_local and c.uses_cloud
+    assert c.pool_source == "extraction_models"
+
+
+def test_local_then_enrich_empty_pool_degrades_with_warning_not_error():
+    c = _c(corpus_engine="local_then_enrich", summary_model_count=0)
+    assert not c.errors
+    assert any("enrichment lane is unavailable" in w for w in c.warnings)
+
+
 def test_off_is_a_valid_explicit_state():
     c = _c(corpus_engine="off")
     assert c.engine == "off" and not c.errors and c.pool_source == "none"

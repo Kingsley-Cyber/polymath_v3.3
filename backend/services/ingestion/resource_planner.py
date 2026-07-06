@@ -282,9 +282,9 @@ def classify_extraction_backend(
     if engine == "inherit":
         engine = "local"
     lanes: list[str] = []
-    if engine in {"local", "dual", "local_then_cloud"}:
+    if engine in {"local", "dual", "local_then_cloud", "local_then_enrich"}:
         lanes.append("local_mac_llm")
-    uses_cloud = engine in {"cloud", "dual", "local_then_cloud"}
+    uses_cloud = engine in {"cloud", "dual", "local_then_cloud", "local_then_enrich"}
     if uses_cloud:
         lanes.append(
             "remote_vllm"

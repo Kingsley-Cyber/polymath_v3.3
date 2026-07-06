@@ -839,6 +839,48 @@ class Settings(BaseSettings):
             "of failing before extraction can run."
         ),
     )
+    # §13-H E1 — local_then_enrich quality gate. Thresholds calibrated against
+    # the 2026-07-05 measured baselines: local GLiNER/GLiREL 62% coverage /
+    # 0.4 facts-per-chunk / 57% typed; RTX vLLM 91% / 2.35 / 75-100% typed.
+    EXTRACTION_ENRICH_MIN_COVERAGE: float = Field(
+        default=0.80,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "local_then_enrich: below this extracted/requested chunk coverage "
+            "the doc's gap chunks are queued for cloud/RTX enrichment."
+        ),
+    )
+    EXTRACTION_ENRICH_MIN_FACTS_PER_CHUNK: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=20.0,
+        description=(
+            "local_then_enrich: below this facts/extracted-chunk ratio the "
+            "doc's fact-thin chunks are queued for cloud/RTX enrichment "
+            "(GLiNER/GLiREL measured 0.4 facts/chunk vs RTX 2.35)."
+        ),
+    )
+    EXTRACTION_ENRICH_MAX_RELATED_TO_RATIO: float = Field(
+        default=0.40,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "local_then_enrich: above this generic related_to fraction the "
+            "doc's predicate-ambiguous chunks are queued for cloud/RTX "
+            "enrichment."
+        ),
+    )
+    EXTRACTION_ENRICH_MAX_CHUNK_RATIO: float = Field(
+        default=0.50,
+        ge=0.05,
+        le=1.0,
+        description=(
+            "local_then_enrich: hard cap on the fraction of a doc's chunks "
+            "the enrichment pass may re-extract — RTX stays the precision "
+            "booster, never the bulk engine."
+        ),
+    )
     INGEST_MANAGED_VLLM_MODEL_PHASE_DOCS: int = Field(
         default=2,
         ge=1,

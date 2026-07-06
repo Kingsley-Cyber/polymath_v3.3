@@ -85,6 +85,7 @@ type IngestionWorkflowId =
   | "local_rtx"
   | "cloud_rtx"
   | "all_lanes"
+  | "fast_local_graph_rtx"
   | "vectors_only"
   | "custom";
 
@@ -159,6 +160,16 @@ const WORKFLOW_META: {
     needsCloudPool: true,
     needsRtx: true,
     needsCloudApi: true,
+  },
+  {
+    key: "fast_local_graph_rtx",
+    label: "Fast local graph + RTX enrich",
+    detail:
+      "GLiNER/GLiREL builds the whole graph skeleton locally ($0, fast); RTX vLLM re-extracts only quality-gated gaps: low coverage, thin facts, ambiguous predicates.",
+    engine: "local_then_enrich",
+    needsCloudPool: true,
+    needsRtx: true,
+    needsCloudApi: false,
   },
   {
     key: "vectors_only",
@@ -305,6 +316,9 @@ function inferWorkflow(config: IngestionConfig): IngestionWorkflowId {
     if (hasRtx) return "rtx_only";
     return "cloud_only";
   }
+  if (engine === "local_then_enrich") {
+    return hasRtx ? "fast_local_graph_rtx" : "custom";
+  }
   if (engine === "dual" || engine === "local_then_cloud") {
     if (hasRtx && hasCloud) return "all_lanes";
     if (hasRtx) return "local_rtx";
@@ -353,7 +367,11 @@ function applyWorkflowToConfig(
   // factory shape — user-customized chunking is never overridden, and the
   // backend freeze keeps already-populated corpora unchanged.
   if (
-    (workflow.engine === "cloud" || workflow.engine === "dual") &&
+    (workflow.engine === "cloud" ||
+      workflow.engine === "dual" ||
+      // §13-H: storage chunks at LLM shape; the local GLiREL lane derives
+      // its own sentence windows from parent text at extraction time.
+      workflow.engine === "local_then_enrich") &&
     hasFactoryChunkShape(next)
   ) {
     next = {
@@ -1445,11 +1463,21 @@ function draftEngine(
 }
 
 function usesLocalEngine(engine: ResolvedDraftEngine): boolean {
-  return engine === "local" || engine === "dual" || engine === "local_then_cloud";
+  return (
+    engine === "local" ||
+    engine === "dual" ||
+    engine === "local_then_cloud" ||
+    engine === "local_then_enrich"
+  );
 }
 
 function usesCloudEngine(engine: ResolvedDraftEngine): boolean {
-  return engine === "cloud" || engine === "dual" || engine === "local_then_cloud";
+  return (
+    engine === "cloud" ||
+    engine === "dual" ||
+    engine === "local_then_cloud" ||
+    engine === "local_then_enrich"
+  );
 }
 
 function formatExtractionPoolEntry(
@@ -1554,13 +1582,15 @@ function IngestionModelsSection({
             Extraction workflow
           </span>
           <span className="text-[10px] font-bold tracking-widest text-accent-secondary uppercase">
-            {draftUsesLocal && draftUsesCloud
-              ? "DUAL - both, chunks split"
-              : draftUsesLocal
-                ? "LOCAL"
-                : draftUsesCloud
-                  ? "CLOUD"
-                  : "OFF - vectors only"}
+            {engine === "local_then_enrich"
+              ? "LOCAL FIRST - RTX fills gaps"
+              : draftUsesLocal && draftUsesCloud
+                ? "DUAL - both, chunks split"
+                : draftUsesLocal
+                  ? "LOCAL"
+                  : draftUsesCloud
+                    ? "CLOUD"
+                    : "OFF - vectors only"}
             {engine === "inherit" || engine === undefined ? " (inherited)" : ""}
             {engine === "local_then_cloud" ? " (local->cloud rescue)" : ""}
           </span>

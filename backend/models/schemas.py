@@ -225,7 +225,13 @@ class IngestionConfig(BaseModel):
     # deterministic per corpus. Resolution + fail-fast validation:
     # services/ingestion/extraction_contract.py.
     extraction_engine: Literal[
-        "inherit", "off", "local", "cloud", "dual", "local_then_cloud"
+        "inherit",
+        "off",
+        "local",
+        "cloud",
+        "dual",
+        "local_then_cloud",
+        "local_then_enrich",
     ] = Field(default="inherit")
 
     # Default to the universal vocab so freshly-instantiated configs match
@@ -533,14 +539,18 @@ class ExtractionSettings(BaseModel):
     wiring in the UI; edits persist in Mongo and apply on the next ingest
     without a backend restart (same pattern as Modal settings)."""
 
-    engine: Literal["local", "cloud", "local_then_cloud", "dual"] = Field(
+    engine: Literal[
+        "local", "cloud", "local_then_cloud", "dual", "local_then_enrich"
+    ] = Field(
         default="local",
         description=(
             "Which Ghost B engine runs extraction: 'local' = GLiNER/GLiREL "
             "sidecars (endpoints below); 'cloud' = the EXTRACTION MODELS LLM "
             "pool; 'local_then_cloud' = local first, cloud fallback on "
             "failure; 'dual' = split each doc across BOTH engines concurrently "
-            "for throughput."
+            "for throughput; 'local_then_enrich' = §13-H Fast Local Graph — "
+            "local skeleton always, cloud/RTX re-extracts only quality-gated "
+            "gap chunks (coverage / facts / predicate ambiguity)."
         ),
     )
     endpoints: list[ExtractionEndpoint] = Field(default_factory=list)

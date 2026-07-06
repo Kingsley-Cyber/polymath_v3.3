@@ -238,7 +238,12 @@ def _ghost_b_active_doc_limit(
         )
         return max(1, int(profile.extraction_active_docs))
     current = get_settings()
-    cloud_lane_active = extraction_engine in {"cloud", "dual", "local_then_cloud"}
+    cloud_lane_active = extraction_engine in {
+        "cloud",
+        "dual",
+        "local_then_cloud",
+        "local_then_enrich",
+    }
     if cloud_lane_active and any(_pool_entry_uses_managed_vllm(entry) for entry in pool):
         return max(1, int(getattr(current, "EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS", 2)))
     return max(1, int(getattr(current, "EXTRACTION_MAX_ACTIVE_DOCS", 1)))
@@ -258,7 +263,12 @@ def _ghost_b_file_gate_key(
         )
         if "remote_vllm" in profile.extraction_lanes:
             return "remote_vllm"
-    cloud_lane_active = extraction_engine in {"cloud", "dual", "local_then_cloud"}
+    cloud_lane_active = extraction_engine in {
+        "cloud",
+        "dual",
+        "local_then_cloud",
+        "local_then_enrich",
+    }
     if cloud_lane_active and any(_pool_entry_uses_managed_vllm(entry) for entry in pool):
         return "remote_vllm"
     return "default"
@@ -1404,6 +1414,107 @@ async def _run_ghosts_parallel(
                     from services.ghost_b import extract_entities as _cloud_extract
 
                     report = await _cloud_extract(tasks, **_extract_kwargs)
+            elif extraction_engine == "local_then_enrich":
+                # §13-H E1 — Fast Local Graph + RTX Enrichment. Local
+                # GLiNER/GLiREL always builds the skeleton; the enrichment
+                # gate scores the pass and the cloud/RTX lane re-extracts
+                # ONLY the selected gap chunks (bounded by
+                # EXTRACTION_ENRICH_MAX_CHUNK_RATIO). Cloud results REPLACE
+                # local results for enriched chunk_ids — no double writes.
+                # Enrichment rate is surfaced in metrics per the
+                # silent-fallback accounting law.
+                from services.ingestion.enrichment_gate import (
+                    enrichment_verdict,
+                    select_enrichment_tasks,
+                )
+
+                report = await extract_entities(tasks, **_extract_kwargs)
+                if isinstance(report, ExtractionBatchReport):
+                    _verdict = enrichment_verdict(
+                        report.metrics,
+                        min_coverage=settings.EXTRACTION_ENRICH_MIN_COVERAGE,
+                        min_facts_per_chunk=settings.EXTRACTION_ENRICH_MIN_FACTS_PER_CHUNK,
+                        max_related_to_ratio=settings.EXTRACTION_ENRICH_MAX_RELATED_TO_RATIO,
+                    )
+                    _base_metrics = {
+                        **dict(report.metrics or {}),
+                        "engine": "local_then_enrich",
+                        "enrich_reasons": list(_verdict.reasons),
+                        "enriched_chunks": 0,
+                    }
+                    if _verdict.enrich and contract.pool_size == 0:
+                        _base_metrics["enrich_skipped"] = "no_cloud_pool"
+                        report = ExtractionBatchReport(
+                            results=report.results,
+                            failures=report.failures,
+                            metrics=_base_metrics,
+                        )
+                    elif _verdict.enrich:
+                        _picks = select_enrichment_tasks(
+                            tasks,
+                            report.results,
+                            report.failures,
+                            _verdict,
+                            max_chunk_ratio=settings.EXTRACTION_ENRICH_MAX_CHUNK_RATIO,
+                        )
+                        if _picks:
+                            logger.info(
+                                "phase=ghost_b_enrich doc=%s corpus=%s chunks=%d/%d "
+                                "reasons=%s",
+                                doc_id[:12],
+                                corpus_id[:8],
+                                len(_picks),
+                                len(tasks),
+                                "; ".join(_verdict.reasons),
+                            )
+                            from services.ghost_b import (
+                                extract_entities as _cloud_extract,
+                            )
+
+                            _rep_cloud = await _cloud_extract(
+                                _picks, **_extract_kwargs
+                            )
+                            _enriched_ids = {
+                                r.chunk_id for r in _rep_cloud.results
+                            }
+                            _kept = [
+                                r
+                                for r in report.results
+                                if r.chunk_id not in _enriched_ids
+                            ]
+                            _kept_failures = [
+                                f
+                                for f in report.failures
+                                if str(getattr(f, "chunk_id", ""))
+                                not in _enriched_ids
+                            ]
+                            _base_metrics["enriched_chunks"] = len(_picks)
+                            _base_metrics["enrich_succeeded"] = len(
+                                _rep_cloud.results
+                            )
+                            _base_metrics["enrich_cloud"] = {
+                                k: v
+                                for k, v in dict(_rep_cloud.metrics or {}).items()
+                                if not isinstance(v, (list, dict))
+                            }
+                            report = ExtractionBatchReport(
+                                results=_kept + list(_rep_cloud.results),
+                                failures=_kept_failures
+                                + list(_rep_cloud.failures),
+                                metrics=_base_metrics,
+                            )
+                        else:
+                            report = ExtractionBatchReport(
+                                results=report.results,
+                                failures=report.failures,
+                                metrics=_base_metrics,
+                            )
+                    else:
+                        report = ExtractionBatchReport(
+                            results=report.results,
+                            failures=report.failures,
+                            metrics=_base_metrics,
+                        )
             else:
                 report = await extract_entities(tasks, **_extract_kwargs)
         if not isinstance(report, ExtractionBatchReport):

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-ENGINES = ("off", "local", "cloud", "dual", "local_then_cloud")
+ENGINES = ("off", "local", "cloud", "dual", "local_then_cloud", "local_then_enrich")
 
 # Internal model-chip flags: routing/validation hints read by Polymath itself
 # (output-mode selection, resource planning, save-time validation). They are
@@ -58,9 +58,11 @@ def provider_payload_extras(extra_params: dict | None) -> dict:
 
 # Engines that REQUIRE a non-empty cloud pool to honor the contract.
 _CLOUD_REQUIRED = ("cloud", "dual")
-# Engines where cloud is optional rescue capacity.
-_CLOUD_OPTIONAL = ("local_then_cloud",)
-_LOCAL_ENGINES = ("local", "dual", "local_then_cloud")
+# Engines where cloud is optional capacity: rescue (local_then_cloud) or
+# §13-H quality-gated enrichment (local_then_enrich) — local still functions
+# alone, degraded.
+_CLOUD_OPTIONAL = ("local_then_cloud", "local_then_enrich")
+_LOCAL_ENGINES = ("local", "dual", "local_then_cloud", "local_then_enrich")
 
 
 @dataclass(frozen=True)
@@ -138,10 +140,17 @@ def resolve_extraction_contract(
             f"or switch the corpus to 'local'"
         )
     if engine in _CLOUD_OPTIONAL and pool_size == 0:
-        warnings.append(
-            "local_then_cloud has no cloud pool — the cloud rescue lane is "
-            "unavailable; docs fail hard if the local engine fails"
-        )
+        if engine == "local_then_enrich":
+            warnings.append(
+                "local_then_enrich has no cloud pool — the RTX/cloud "
+                "enrichment lane is unavailable; docs keep the local-only "
+                "skeleton (coverage/fact gaps stay unfilled)"
+            )
+        else:
+            warnings.append(
+                "local_then_cloud has no cloud pool — the cloud rescue lane is "
+                "unavailable; docs fail hard if the local engine fails"
+            )
     if engine in _LOCAL_ENGINES and not urls:
         warnings.append(
             "no enabled sidecar endpoints in Settings — local extraction "

@@ -435,7 +435,8 @@ export type ExtractionEngine =
   | "local"
   | "cloud"
   | "dual"
-  | "local_then_cloud";
+  | "local_then_cloud"
+  | "local_then_enrich";
 
 /** GET /api/corpora/{id}/extraction-contract — the resolved truth. */
 export interface ExtractionContractResponse {
