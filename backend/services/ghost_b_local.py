@@ -66,6 +66,7 @@ import os
 import re
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -139,6 +140,26 @@ SIDECAR_TIMEOUT_S = float(os.environ.get("LOCAL_GHOST_B_EXTRACT_TIMEOUT_S", "180
 # sidecars the doc is split to keep every instance busy (the per-slice facet
 # re-prediction overlap is the accepted price of N-way parallelism).
 SIDECAR_SLICE = max(1, int(os.environ.get("LOCAL_GHOST_B_EXTRACT_SLICE", "2048")))
+
+# Elastic-fleet probe cache: url -> (verdict, monotonic_ts, reason). Verdicts
+# are re-checked after the TTL, so a worker that comes online anywhere in the
+# candidate list joins the fleet within one window and a dead one leaves it —
+# runpod semantics, no manual enable/disable flips.
+_PROBE_CACHE: dict[str, tuple[str, float, str]] = {}
+_PROBE_CACHE_TTL_S = max(5, int(os.environ.get("LOCAL_GHOST_B_PROBE_TTL_S", "20")))
+_LAST_FLEET: set[str] | None = None
+
+
+def _log_fleet_change(live_urls: list[str]) -> None:
+    global _LAST_FLEET
+    fleet = set(live_urls)
+    if fleet != _LAST_FLEET:
+        logger.info(
+            "ghost_b_local fleet: %d worker(s) %s",
+            len(fleet),
+            sorted(fleet) if fleet else "(none)",
+        )
+        _LAST_FLEET = fleet
 EXTRACT_MODE = os.environ.get("LOCAL_GHOST_B_EXTRACT_MODE", "auto").strip().lower()
 
 # Liveness probing is RETRIED with capped exponential backoff. A single
@@ -888,29 +909,49 @@ async def _extract_via_sidecar(task_dicts: list[dict], do_facts: bool, lens_id: 
     # retrying only while at least one endpoint was UNREACHABLE this pass; if
     # every endpoint answered but was unusable (e.g. ONNX-CPU with fallback
     # off), retrying cannot change that, so stop and report it.
+    #
+    # Elastic-fleet semantics (owner 2026-07-06, "runpod config"): probes run
+    # CONCURRENTLY (dead candidates cost one overlapped timeout, not 3s each)
+    # and verdicts are cached for a short TTL — the endpoint list can carry
+    # the whole candidate port range; workers that come online join the fleet
+    # within one cache window, workers that die leave it, nobody flips flags.
     live_urls: list[str] = []
     unusable: dict[str, str] = {}
+
+    async def _probe_one(client: httpx.AsyncClient, u: str, use_cache: bool):
+        cached = _PROBE_CACHE.get(u) if use_cache else None
+        if cached and (time.monotonic() - cached[1]) < _PROBE_CACHE_TTL_S:
+            return u, cached[0], cached[2]
+        try:
+            r = await client.get(f"{u}/health")
+            if r.status_code != 200:
+                verdict, reason = "unreachable", f"http {r.status_code}"
+            else:
+                usable, reason = _sidecar_health_usable(r.json())
+                verdict = "live" if usable else "unusable"
+        except Exception as exc:  # noqa: BLE001 — dead/off instance
+            verdict, reason = "unreachable", type(exc).__name__
+        _PROBE_CACHE[u] = (verdict, time.monotonic(), reason)
+        return u, verdict, reason
+
     for attempt in range(PROBE_ATTEMPTS):
         live_urls = []
         unusable = {}
         had_unreachable = False
-        async with httpx.AsyncClient(timeout=3.0) as probe:
-            for u in pref_urls:
-                try:
-                    r = await probe.get(f"{u}/health")
-                    if r.status_code != 200:
-                        had_unreachable = True
-                        continue
-                    usable, reason = _sidecar_health_usable(r.json())
-                    if usable:
-                        live_urls.append(u)
-                    else:
-                        unusable[u] = reason
-                        logger.warning(
-                            "ghost_b_local: skipping sidecar %s: %s", u, reason)
-                except Exception:  # noqa: BLE001 — dead/off instance, skip
-                    had_unreachable = True
-                    continue
+        async with httpx.AsyncClient(timeout=2.0) as probe:
+            results = await _asyncio.gather(
+                *[_probe_one(probe, u, attempt == 0) for u in pref_urls]
+            )
+        for u, verdict, reason in results:
+            if verdict == "live":
+                live_urls.append(u)
+            elif verdict == "unusable":
+                unusable[u] = reason
+                logger.warning(
+                    "ghost_b_local: skipping sidecar %s: %s", u, reason)
+            else:
+                had_unreachable = True
+        _log_fleet_change(live_urls)
         if live_urls:
             if attempt:
                 logger.info(
