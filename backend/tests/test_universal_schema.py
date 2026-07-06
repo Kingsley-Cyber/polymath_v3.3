@@ -1576,6 +1576,38 @@ def test_related_to_refinement_uses_deterministic_facets():
     assert refine_related_to_predicate("uses", subject, model_object) == "uses"
 
 
+def test_related_to_refinement_promotes_unique_ontology_pair():
+    person = {
+        "canonical_name": "sam",
+        "primary_entity_type": "Person",
+    }
+    organization = {
+        "canonical_name": "openai",
+        "primary_entity_type": "Organization",
+    }
+
+    assert (
+        refine_related_to_predicate("related_to", person, organization)
+        == "member_of"
+    )
+
+
+def test_related_to_refinement_leaves_ambiguous_ontology_pair_as_fallback():
+    person = {
+        "canonical_name": "sam",
+        "primary_entity_type": "Person",
+    }
+    software = {
+        "canonical_name": "polymath",
+        "primary_entity_type": "Software",
+    }
+
+    assert (
+        refine_related_to_predicate("related_to", person, software)
+        == "related_to"
+    )
+
+
 def test_related_to_refinement_recovers_source_predicate_with_evidence():
     subject = {
         "canonical_name": "module",

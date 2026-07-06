@@ -133,6 +133,109 @@ RELATION_FAMILY_MAP = {
 _APPROVED_SPECIFIC_RELATIONS = {
     value for value in UNIVERSAL_RELATION_SCHEMA if value != SchemaContext.RELATION_SENTINEL
 }
+_ONTOLOGY_ALLOWED_PAIR_RAW: dict[str, tuple[tuple[str, str], ...]] = {
+    # Mirrored from config/ontology.yaml. The backend Docker build context is
+    # backend/, so this writer cannot rely on reading the repo-level YAML at
+    # runtime. Keep the raw legacy names here and normalize through
+    # normalize_relation_predicate_alias() below.
+    "includes": (
+        ("Concept", "Concept"), ("Concept", "Method"), ("Concept", "Software"),
+        ("Software", "Method"), ("Software", "Artifact"), ("Product", "Artifact"),
+        ("Document", "Concept"),
+    ),
+    "uses": (
+        ("Person", "Software"), ("Person", "Method"), ("Organization", "Software"),
+        ("Organization", "Method"), ("Software", "Software"), ("Software", "Method"),
+        ("Software", "Standard"), ("Software", "Artifact"), ("Method", "Software"),
+        ("Method", "Concept"), ("Concept", "Method"), ("Concept", "Software"),
+        ("Artifact", "Software"),
+    ),
+    "supports": (
+        ("Software", "Method"), ("Software", "Concept"), ("Software", "Artifact"),
+        ("Artifact", "Method"), ("Artifact", "Concept"), ("Method", "Concept"),
+        ("Concept", "Method"), ("Organization", "Software"), ("Product", "Method"),
+    ),
+    "produces": (
+        ("Software", "Artifact"), ("Software", "Document"), ("Software", "Concept"),
+        ("Method", "Artifact"), ("Method", "Concept"), ("Person", "Document"),
+        ("Organization", "Product"), ("Product", "Artifact"),
+    ),
+    "implements": (
+        ("Software", "Method"), ("Software", "Standard"), ("Software", "Rule"),
+        ("Artifact", "Method"), ("Artifact", "Standard"), ("Method", "Concept"),
+        ("Product", "Method"),
+    ),
+    "has_part": (
+        ("Concept", "Concept"), ("Concept", "Method"), ("Software", "Software"),
+        ("Software", "Artifact"), ("Product", "Artifact"), ("Document", "Concept"),
+        ("Organization", "Organization"),
+    ),
+    "instance_of": (
+        ("Software", "Concept"), ("Product", "Concept"), ("Method", "Concept"),
+        ("Artifact", "Concept"), ("Person", "Concept"), ("Organization", "Concept"),
+        ("Document", "Concept"),
+    ),
+    "references": (
+        ("Document", "Document"), ("Document", "Concept"), ("Software", "Document"),
+        ("Software", "Standard"), ("Method", "Document"), ("Concept", "Document"),
+        ("Person", "Document"), ("Organization", "Document"),
+    ),
+    "depends_on": (
+        ("Software", "Software"), ("Software", "Artifact"), ("Software", "Standard"),
+        ("Method", "Software"), ("Method", "Concept"), ("Concept", "Concept"),
+        ("Product", "Software"),
+    ),
+    "causes": (
+        ("Concept", "Concept"), ("Concept", "Method"), ("Method", "Concept"),
+        ("Software", "Concept"), ("Event", "Event"), ("Rule", "Concept"),
+    ),
+    "synonym_of": (
+        ("Concept", "Concept"), ("Method", "Method"), ("Software", "Software"),
+        ("Artifact", "Artifact"), ("Standard", "Standard"), ("Product", "Product"),
+    ),
+    "member_of": (
+        ("Person", "Organization"), ("Organization", "Organization"),
+        ("Software", "Concept"), ("Product", "Concept"), ("Concept", "Concept"),
+    ),
+    "example_of": (
+        ("Software", "Concept"), ("Product", "Concept"), ("Method", "Concept"),
+        ("Artifact", "Concept"), ("Document", "Concept"), ("Person", "Concept"),
+    ),
+    "deploys": (
+        ("Person", "Software"), ("Organization", "Software"), ("Software", "Location"),
+        ("Software", "Artifact"), ("Method", "Software"), ("Product", "Software"),
+    ),
+    "creates": (
+        ("Person", "Document"), ("Person", "Product"), ("Person", "Software"),
+        ("Organization", "Product"), ("Organization", "Software"),
+        ("Software", "Artifact"), ("Method", "Artifact"),
+    ),
+    "trains": (
+        ("Person", "Method"), ("Organization", "Method"), ("Method", "Software"),
+        ("Software", "Software"), ("Concept", "Software"), ("Artifact", "Software"),
+    ),
+    "runs": (
+        ("Software", "Software"), ("Software", "Location"), ("Software", "Artifact"),
+        ("Product", "Software"), ("Method", "Software"),
+    ),
+    "located_in": (
+        ("Person", "Location"), ("Organization", "Location"), ("Software", "Location"),
+        ("Product", "Location"), ("Artifact", "Location"), ("Concept", "Location"),
+    ),
+}
+_ONTOLOGY_PREDICATE_COMPAT_ALIASES = {
+    # Legacy ontology predicates that predate the current universal schema.
+    "deploys": ("runs_on", False),
+    "runs": ("runs_on", False),
+    "trains": ("trained_on", False),
+    "example_of": ("instance_of", False),
+}
+_ONTOLOGY_PAIR_PROMOTION_DENY = {
+    # Same-type pairs can be uniquely legal as synonym_of in config/ontology.yaml,
+    # but synonymy requires textual alias evidence. Do not infer it from type
+    # compatibility alone.
+    "synonym_of",
+}
 _OPERATIONAL_SUBJECT_DOMAINS = {
     "Feature",
     "Module",
@@ -310,6 +413,44 @@ def _normalized_specific_predicate(predicate: str | None) -> str | None:
     if normalized in _APPROVED_SPECIFIC_RELATIONS:
         return normalized
     return None
+
+
+def _normalize_ontology_predicate(predicate: str) -> tuple[str, bool]:
+    key = re.sub(r"[^a-z0-9]+", "_", str(predicate or "").lower()).strip("_")
+    if key in _ONTOLOGY_PREDICATE_COMPAT_ALIASES:
+        return _ONTOLOGY_PREDICATE_COMPAT_ALIASES[key]
+    return normalize_relation_predicate_alias(predicate)
+
+
+@lru_cache(maxsize=1)
+def _ontology_unique_predicate_by_pair() -> dict[tuple[str, str], str]:
+    candidates: dict[tuple[str, str], set[str]] = {}
+    for raw_predicate, pairs in _ONTOLOGY_ALLOWED_PAIR_RAW.items():
+        predicate, reverse = _normalize_ontology_predicate(raw_predicate)
+        if (
+            predicate not in _APPROVED_SPECIFIC_RELATIONS
+            or predicate in _ONTOLOGY_PAIR_PROMOTION_DENY
+        ):
+            continue
+        for subject_type, object_type in pairs:
+            pair = (object_type, subject_type) if reverse else (subject_type, object_type)
+            candidates.setdefault(pair, set()).add(predicate)
+    return {
+        pair: next(iter(predicates))
+        for pair, predicates in candidates.items()
+        if len(predicates) == 1
+    }
+
+
+def _promote_related_to_by_unique_ontology_pair(
+    subject_identity: dict | None,
+    object_identity: dict | None,
+) -> str | None:
+    subject_type = _identity_value(subject_identity, "primary_entity_type")
+    object_type = _identity_value(object_identity, "primary_entity_type")
+    if not subject_type or not object_type:
+        return None
+    return _ontology_unique_predicate_by_pair().get((subject_type, object_type))
 
 
 def _candidate_predicate_records(
@@ -562,6 +703,13 @@ def refine_related_to_predicate(
         evidence_phrase,
     ):
         return original_predicate
+
+    ontology_pair_predicate = _promote_related_to_by_unique_ontology_pair(
+        subject_identity,
+        object_identity,
+    )
+    if ontology_pair_predicate:
+        return ontology_pair_predicate
 
     subject_domain = _identity_value(subject_identity, "domain_type")
     object_domain = _identity_value(object_identity, "domain_type")
