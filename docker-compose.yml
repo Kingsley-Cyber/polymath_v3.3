@@ -619,6 +619,8 @@ services:
       # ran at the default 3 all night; P5 two-phase couldn't activate).
       INGEST_GLOBAL_MAX_DOCS: ${INGEST_GLOBAL_MAX_DOCS:-3}
       TWO_PHASE_INGEST: ${TWO_PHASE_INGEST:-false}
+      # Remote chunk cars (RTX box CPU) — elastic, falls back to local pool.
+      CHUNK_REMOTE_URLS: ${CHUNK_REMOTE_URLS:-}
       EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}
       # Keep expensive graph/cache rebuilds off the hot ingest path. They can
       # still run after the durable batch leaves "running".
