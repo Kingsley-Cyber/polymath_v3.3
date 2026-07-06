@@ -823,6 +823,25 @@ GLiREL calibration prereq (from the bundled eval): per-predicate thresholds + a
 verifier/merge step before local relations write at full trust — weak predicates
 (related_to confusables: part_of/uses) route to RTX enrichment instead of writing junk.
 
+FACT DOCTRINE (owner-ratified 2026-07-06, supersedes E1's inline enrichment):
+1. Local deterministic facts (enrich.py: quantity/timestamp/threshold/property +
+   qualitative status/category/tag/rule_*) ALWAYS run, under EVERY engine —
+   cloud lanes merge them with LLM facts (dedupe subject+property+value; the
+   regex lane is ~ms/chunk CPU, never skipped).
+2. Fact-thin detection ALWAYS runs at doc completion (facts/file and facts/MB
+   thresholds; reuse enrichment_gate signals) — regardless of engine.
+3. Missing-fact RECOVERY is asynchronous: thin docs enqueue RTX/cloud fact
+   enrichment; file extraction completion NEVER blocks on it (E1's inline
+   cloud pass inside ghosts is retired in favor of the queue).
+4. Doc-level fact states surfaced everywhere: extracted | fact-thin |
+   enrichment-pending | enriched. Distinction pinned verbatim: "Fact
+   extraction = extract facts the current lane finds. Missing-fact recovery =
+   detect that a chunk/file is fact-thin and route it to another lane."
+Build: F1 always-run deterministic facts + merge; F2 fact_status field +
+always-on thin detection; F3 enrichment queue (backfill-pattern sweep runner,
+cloud lane, bounded chunk selection from enrichment_gate); F4 UI fact-state
+chips (library rows + batch ladder).
+
 UI CONTRACT: Corpus Manager must render the resolved lane sentence — e.g. "Extraction:
 local GLiNER/GLiREL first; RTX fills low-coverage/fact gaps (threshold: cov<80% |
 facts<1.0/chunk | related_to>40%)" — via the extraction-contract truth endpoint, never
