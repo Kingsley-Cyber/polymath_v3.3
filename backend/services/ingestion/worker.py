@@ -329,25 +329,83 @@ def _model_phase_gate_key(config: IngestionConfig) -> str:
     return "default"
 
 
+class AdjustableSemaphore:
+    """Resizable async gate that PRESERVES holder accounting when the limit
+    changes (2026-07-06 audit, critical): the old swap-on-change logic
+    discarded the semaphore object whenever a different config computed a new
+    limit for the same key — docs still holding the old object no longer
+    counted, the gate silently over-admitted, and effective concurrency became
+    arrival-order dependent (non-deterministic across runs). Here set_limit()
+    mutates the cap in place; existing holders always count; reductions apply
+    to new admissions while current holders drain naturally."""
+
+    def __init__(self, limit: int) -> None:
+        self._limit = max(1, int(limit))
+        self._active = 0
+        self._cond = asyncio.Condition()
+
+    def set_limit(self, limit: int) -> None:
+        new = max(1, int(limit))
+        if new == self._limit:
+            return
+        widened = new > self._limit
+        self._limit = new
+        if widened:
+            asyncio.get_running_loop().create_task(self._notify_all())
+
+    async def _notify_all(self) -> None:
+        async with self._cond:
+            self._cond.notify_all()
+
+    async def __aenter__(self):
+        async with self._cond:
+            while self._active >= self._limit:
+                await self._cond.wait()
+            self._active += 1
+        return self
+
+    async def __aexit__(self, *exc):
+        async with self._cond:
+            self._active -= 1
+            self._cond.notify_all()
+        return False
+
+
 def _shared_semaphore(
-    semaphores: dict[str, asyncio.Semaphore],
+    semaphores: dict[str, "AdjustableSemaphore"],
     state: dict[str, tuple[int, asyncio.AbstractEventLoop]],
     *,
     key: str,
     limit: int,
-) -> asyncio.Semaphore:
+) -> "AdjustableSemaphore":
     normalized = max(1, int(limit or 1))
     loop = asyncio.get_running_loop()
     previous = state.get(key)
-    if (
-        key not in semaphores
-        or previous is None
-        or previous[0] != normalized
-        or previous[1] is not loop
-    ):
-        semaphores[key] = asyncio.Semaphore(normalized)
+    if key not in semaphores or previous is None or previous[1] is not loop:
+        semaphores[key] = AdjustableSemaphore(normalized)
+        state[key] = (normalized, loop)
+    elif previous[0] != normalized:
+        semaphores[key].set_limit(normalized)
         state[key] = (normalized, loop)
     return semaphores[key]
+
+
+_EMBED_PHASE_SEMAPHORES: dict[str, "AdjustableSemaphore"] = {}
+_EMBED_PHASE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
+
+
+def _embed_phase_semaphore() -> "AdjustableSemaphore":
+    """Embed-domain gate (audit 2026-07-06, critical): embed and ghosts shared
+    ONE model-phase semaphore, so a 400s embed dwell held extraction slots and
+    vice versa — the direct mechanism of the observed stage waves (10/14 docs
+    piled in embedding while GPUs idled). Disjoint resources get disjoint
+    gates; the embedder server serializes internally regardless."""
+    return _shared_semaphore(
+        _EMBED_PHASE_SEMAPHORES,
+        _EMBED_PHASE_SEMAPHORE_STATE,
+        key="embed",
+        limit=int(getattr(get_settings(), "INGEST_EMBED_DOCS", 2)),
+    )
 
 
 def _model_phase_semaphore(config: IngestionConfig) -> asyncio.Semaphore:
@@ -930,14 +988,28 @@ async def _find_near_duplicate_documents(
     ingestion; it stores a quality warning so RAG audits can explain why a
     corpus is overweighting repeated concepts.
     """
-    incoming = _doc_shingle_set(parent_texts)
+    incoming = await asyncio.to_thread(_doc_shingle_set, parent_texts)
     if len(incoming) < dedup.MIN_SHINGLES:
         return []
 
     candidates: list[dict] = []
-    cursor = db["documents"].find(
-        {"corpus_id": corpus_id, "doc_id": {"$ne": doc_id}},
-        {"doc_id": 1, "corpus_id": 1, "filename": 1},
+    # Audit 2026-07-06 (major): this was an UNBOUNDED O(corpus) sweep — every
+    # new doc fetched every existing doc's full parents and shingled them in
+    # pure Python on the event loop; per-doc cost grew with the corpus and
+    # froze all in-flight pipelines. Bounded to the most recent K docs
+    # (duplicates overwhelmingly arrive near each other in ingest order) and
+    # the shingle/jaccard math moved off the loop.
+    _scan_cap = max(
+        10, int(getattr(get_settings(), "INGEST_DEDUP_SCAN_RECENT_DOCS", 250))
+    )
+    cursor = (
+        db["documents"]
+        .find(
+            {"corpus_id": corpus_id, "doc_id": {"$ne": doc_id}},
+            {"doc_id": 1, "corpus_id": 1, "filename": 1},
+        )
+        .sort("created_at", -1)
+        .limit(_scan_cap)
     )
     async for doc in cursor:
         parent_rows = await mongo_reader.get_parent_chunks(
@@ -950,7 +1022,7 @@ async def _find_near_duplicate_documents(
             for p in parent_rows
             if isinstance(p, dict)
         ]
-        existing = _doc_shingle_set(existing_texts)
+        existing = await asyncio.to_thread(_doc_shingle_set, existing_texts)
         if not existing:
             continue
         similarity = dedup.jaccard(incoming, existing)
@@ -1717,10 +1789,23 @@ async def _run_ghosts_parallel(
     # running both branches at once doubles provider pressure and makes
     # high-throughput API settings unsafe during batch ingest.
     summaries: list[SummaryResult] | None = None
+    # Audit 2026-07-06 (major): A then B strictly sequential per doc. The
+    # provider-pressure rationale only holds when BOTH branches hit the same
+    # cloud provider — with a local/sidecar extraction engine they use
+    # disjoint resources, so B (the long pole) starts first and A overlaps.
+    _engine_hint = str(
+        getattr(config, "extraction_engine", "") or ""
+    ).strip().lower()
+    _parallel_ghosts = _engine_hint in ("local", "local_then_enrich", "off")
+    _b_task: asyncio.Task | None = None
+    if _parallel_ghosts:
+        _b_task = asyncio.create_task(_b_branch())
     try:
         summaries = await _a_branch()
     except GhostAFailure as exc:
         if not bool(getattr(settings, "INGEST_SAFE_SUMMARY_FAILURES", True)):
+            if _b_task is not None:
+                _b_task.cancel()
             raise
         warning = (
             "Ghost A parent summarization deferred: "
@@ -1735,7 +1820,11 @@ async def _run_ghosts_parallel(
             corpus_id[:8],
             exc,
         )
-    ghost_b_out = await _b_branch()
+    except BaseException:
+        if _b_task is not None:
+            _b_task.cancel()
+        raise
+    ghost_b_out = await (_b_task if _b_task is not None else _b_branch())
     # Phase A: deterministic enrichment (numeric + qualitative facts, in-text
     # aliases) now runs INSIDE services.ghost_b_local per chunk, so the former
     # external Pass-1/Pass-2 (services.ingestion.slm_enrich) call is removed —
@@ -3580,7 +3669,9 @@ async def run_ingest_job(
                 stage="embedding",
                 on_phase=on_phase,
             )
-            async with _model_phase_semaphore(ingestion_config):
+            # Audit 2026-07-06: embed uses its OWN gate — sharing the
+            # extraction model-phase semaphore stage-waved the whole batch.
+            async with _embed_phase_semaphore():
                 t0 = time.monotonic()
                 vec_map, summary_vec_map = await _embed_batch_for_doc(
                     children=children,
@@ -3612,14 +3703,25 @@ async def run_ingest_job(
             # Prose chunks pass through unchanged.
             from services.storage.sparse_encoder import encode_text as _bm25_encode
             t0 = time.monotonic()
-            child_sparse_map = {
-                c.chunk_id: _bm25_encode(_searchable_text(c))
-                for c in children
-                if c.chunk_id in vec_map
-            }
-            summary_sparse_map = {
-                s.parent_id: _bm25_encode(s.summary) for s in (summaries or [])
-            }
+            # Audit 2026-07-06 (major): these comprehensions ran ON the event
+            # loop — a 5,000-child book froze every other in-flight doc for
+            # seconds right after embed. Thread offload keeps the loop live.
+            def _build_sparse_maps():
+                return (
+                    {
+                        c.chunk_id: _bm25_encode(_searchable_text(c))
+                        for c in children
+                        if c.chunk_id in vec_map
+                    },
+                    {
+                        s.parent_id: _bm25_encode(s.summary)
+                        for s in (summaries or [])
+                    },
+                )
+
+            child_sparse_map, summary_sparse_map = await asyncio.to_thread(
+                _build_sparse_maps
+            )
             logger.info(
                 "phase=sparse_encode duration=%.2fs doc=%s corpus=%s children=%d summaries=%d",
                 time.monotonic() - t0,

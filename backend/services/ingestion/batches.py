@@ -938,11 +938,23 @@ async def _lease_next_item(
     lease_seconds: int,
 ) -> dict[str, Any] | None:
     now = _now()
+    # Audit 2026-07-06 (critical): `attempts` was incremented but never READ —
+    # a doc that deterministically kills its worker (OOM, pathological
+    # chunking) retried forever (observed: 270+ attempts crash-looping a
+    # batch all night). Items over the cap are excluded here and reaped to a
+    # terminal failure below by the runner's sweep.
+    max_attempts = max(
+        1, int(getattr(get_settings(), "INGEST_MAX_ITEM_ATTEMPTS", 5))
+    )
     return await db[ITEMS].find_one_and_update(
         {
             "batch_id": batch_id,
             "source": {"$in": RUNNABLE_SOURCES},
             "status": {"$in": [ITEM_QUEUED, ITEM_FAILED_RECOVERABLE]},
+            "$or": [
+                {"attempts": {"$exists": False}},
+                {"attempts": {"$lt": max_attempts}},
+            ],
         },
         {
             "$set": {
@@ -967,6 +979,63 @@ async def _lease_next_item(
 async def _wait_for_ingest_slot() -> None:
     while not await admission.try_acquire_ingest_slot():
         await asyncio.sleep(1.0)
+
+
+async def _reap_over_attempt_items(db: AsyncIOMotorDatabase, batch_id: str) -> int:
+    """Terminal-fail items that exceeded the attempt cap (audit 2026-07-06,
+    critical): attempts was incremented but never read, so deterministic
+    killers retried forever (270+ attempts observed). Loud, named, manual
+    re-queue only."""
+    max_attempts = max(1, int(getattr(get_settings(), "INGEST_MAX_ITEM_ATTEMPTS", 5)))
+    res = await db[ITEMS].update_many(
+        {
+            "batch_id": batch_id,
+            "status": {"$in": [ITEM_QUEUED, ITEM_FAILED_RECOVERABLE]},
+            "attempts": {"$gte": max_attempts},
+        },
+        {
+            "$set": {
+                "status": ITEM_FAILED,
+                "phase": "failed",
+                "failure_stage": "max_attempts",
+                "error": (
+                    f"exceeded INGEST_MAX_ITEM_ATTEMPTS={max_attempts} — "
+                    "deterministic failure loop; inspect the doc, then "
+                    "re-queue manually if appropriate"
+                ),
+                "updated_at": _now(),
+            },
+        },
+    )
+    if res.modified_count:
+        logger.warning(
+            "batch %s: reaped %d item(s) at attempt cap", batch_id[:8], res.modified_count
+        )
+    return res.modified_count
+
+
+async def _lease_heartbeat(
+    db: AsyncIOMotorDatabase, item_id: str, lease_seconds: int
+) -> None:
+    """Renew the lease while the item is actively processing (audit
+    2026-07-06, critical): leases were NEVER renewed, so any doc that
+    legitimately ran longer than the stale threshold was reclaimed WHILE
+    STILL RUNNING — double processing and phantom casualties. Renews both
+    fields the stale sweep checks."""
+    interval = max(15, int(lease_seconds / 2))
+    while True:
+        await asyncio.sleep(interval)
+        now = _now()
+        await db[ITEMS].update_one(
+            {"item_id": item_id, "status": ITEM_RUNNING},
+            {
+                "$set": {
+                    "lease_until": now + timedelta(seconds=lease_seconds),
+                    "last_heartbeat_at": now,
+                    "updated_at": now,
+                }
+            },
+        )
 
 
 async def _build_item_config(
@@ -1280,6 +1349,7 @@ async def run_local_batch(
     sem = _global_doc_semaphore()
     lease_seconds = max(60, int(get_settings().INGEST_STALE_JOB_MINUTES * 60))
     concurrency = _runtime_batch_concurrency(batch, get_settings())
+    await _reap_over_attempt_items(db, batch_id)
 
     async def _worker(worker_idx: int) -> None:
         owner = f"{owner_prefix}:{worker_idx}"
@@ -1293,12 +1363,21 @@ async def run_local_batch(
             if not item:
                 return
             async with sem:
-                await _process_local_item(
-                    db=db,
-                    ingestion_service=ingestion_service,
-                    batch=batch,
-                    item=item,
+                # Lease heartbeat covers the WHOLE hold — including the
+                # admission wait inside _process_local_item — so a live doc
+                # can never be reclaimed as stale mid-run.
+                _hb = asyncio.create_task(
+                    _lease_heartbeat(db, item["item_id"], lease_seconds)
                 )
+                try:
+                    await _process_local_item(
+                        db=db,
+                        ingestion_service=ingestion_service,
+                        batch=batch,
+                        item=item,
+                    )
+                finally:
+                    _hb.cancel()
             await refresh_batch_counts(db, batch_id, user_id=user_id)
 
     await asyncio.gather(*[_worker(idx) for idx in range(concurrency)])

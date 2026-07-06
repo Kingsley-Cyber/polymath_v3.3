@@ -1409,6 +1409,30 @@ class Settings(BaseSettings):
             "should normally enforce this first; this is the extraction safety net."
         ),
     )
+    INGEST_MAX_ITEM_ATTEMPTS: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description=(
+            "Terminal cap on per-item lease attempts. Audit 2026-07-06 "
+            "(critical): attempts was incremented but never read — docs that "
+            "deterministically kill their worker retried forever (270+ "
+            "attempts observed crash-looping a batch). Over-cap items fail "
+            "loudly with failure_stage=max_attempts."
+        ),
+    )
+    INGEST_EMBED_DOCS: int = Field(
+        default=2,
+        ge=1,
+        le=16,
+        description=(
+            "Docs concurrently in the EMBED phase. Audit 2026-07-06 (critical): "
+            "embed shared the extraction model-phase gate, so a 400s embed "
+            "dwell held ghost slots and synchronized the batch into stage "
+            "waves. Embed now has its own small gate — the embedder server "
+            "serializes internally anyway."
+        ),
+    )
     INGEST_CHUNK_PROCESSES: int = Field(
         default=4,
         ge=1,
