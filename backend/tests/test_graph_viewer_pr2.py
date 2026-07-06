@@ -61,6 +61,32 @@ class _BrainViewDriver:
         return self.session_obj
 
 
+class _SequentialSession:
+    def __init__(self, record_sets: list[list[dict[str, Any]]]):
+        self.record_sets = record_sets
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def run(self, query: str, **params: Any):
+        self.calls.append((query, params))
+        idx = len(self.calls) - 1
+        records = self.record_sets[idx] if idx < len(self.record_sets) else []
+        return _AsyncRecords(records)
+
+
+class _SequentialDriver:
+    def __init__(self, record_sets: list[list[dict[str, Any]]]):
+        self.session_obj = _SequentialSession(record_sets)
+
+    def session(self):
+        return self.session_obj
+
+
 # ─── services.graph.queries.get_brain_view ──────────────────────────────────
 
 
@@ -480,3 +506,97 @@ def test_top_entities_cap_bumped_to_50_in_overview_builder():
     assert len(concept_node["top_entities"]) == 50
     # member_ids field should also be present for the frontend drill.
     assert "member_ids" in concept_node
+
+
+@pytest.mark.asyncio
+async def test_full_corpora_graph_narrows_edge_provenance_to_selected_corpora():
+    from services.graph.neo4j_reader import get_full_corpora_graph
+
+    driver = _SequentialDriver([
+        [
+            {
+                "id": "entity:a",
+                "display_name": "A",
+                "entity_type": "Concept",
+                "mention_count": 2,
+                "source_corpora": ["alpha"],
+            },
+            {
+                "id": "entity:b",
+                "display_name": "B",
+                "entity_type": "Concept",
+                "mention_count": 1,
+                "source_corpora": ["alpha"],
+            },
+        ],
+        [
+            {
+                "source": "entity:a",
+                "target": "entity:b",
+                "predicate": "uses",
+                "relation_family": "Operational",
+                "confidence": 0.9,
+                "source_corpora": ["alpha", "deselected"],
+                "evidence_chunk_ids": ["chunk-a"],
+                "selected_support_count": 1,
+                "support_count": 3,
+                "avg_confidence": 0.8,
+            }
+        ],
+    ])
+
+    result = await get_full_corpora_graph(driver, ["alpha"], max_nodes=10, max_edges=10)
+
+    edge = result["edges"][0]
+    assert edge["source_corpora"] == ["alpha"]
+    assert edge["source_corpus"] == "alpha"
+    assert edge["evidence_chunk_ids"] == ["chunk-a"]
+    assert edge["selected_support_count"] == 1
+    assert edge["support_count"] == 3
+    edge_query = driver.session_obj.calls[1][0]
+    assert "WHERE cid IN $corpus_ids" in edge_query
+    assert "selected_support_count" in edge_query
+
+
+@pytest.mark.asyncio
+async def test_concept_community_drops_edges_without_selected_provenance():
+    from services.graph.neo4j_reader import get_concept_community_full
+
+    driver = _SequentialDriver([
+        [
+            {
+                "id": "entity:a",
+                "display_name": "A",
+                "entity_type": "Concept",
+                "mention_count": 2,
+                "source_corpora": ["alpha"],
+            },
+            {
+                "id": "entity:b",
+                "display_name": "B",
+                "entity_type": "Concept",
+                "mention_count": 1,
+                "source_corpora": ["alpha"],
+            },
+        ],
+        [
+            {
+                "source": "entity:a",
+                "target": "entity:b",
+                "predicate": "related_to",
+                "relation_family": "WeakAssociation",
+                "confidence": 0.4,
+                "source_corpora": ["deselected"],
+            }
+        ],
+    ])
+
+    result = await get_concept_community_full(
+        driver,
+        entity_ids=["entity:a", "entity:b"],
+        corpus_ids=["alpha"],
+        max_nodes=10,
+        max_edges=10,
+    )
+
+    assert result["edges"] == []

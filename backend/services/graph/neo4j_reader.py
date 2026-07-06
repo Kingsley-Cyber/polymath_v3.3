@@ -175,12 +175,20 @@ async def get_full_corpus_graph(
            MATCH (ec:Chunk {corpus_id: $corpus_id})
            WHERE ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
        }
-    RETURN DISTINCT a.entity_id AS source,
-                    b.entity_id AS target,
-                    r.predicate AS predicate,
-                    coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
-                    r.confidence AS confidence
+    WITH DISTINCT a, b, r
     LIMIT $max_edges
+    OPTIONAL MATCH (ec:Chunk {corpus_id: $corpus_id})
+    WHERE ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+    WITH a, b, r, collect(DISTINCT ec.chunk_id) AS selected_evidence_chunk_ids
+    RETURN a.entity_id AS source,
+           b.entity_id AS target,
+           r.predicate AS predicate,
+           coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
+           r.confidence AS confidence,
+           selected_evidence_chunk_ids[..25] AS evidence_chunk_ids,
+           size(selected_evidence_chunk_ids) AS selected_support_count,
+           coalesce(r.support_count, size(coalesce(r.evidence_chunk_ids, []))) AS support_count,
+           coalesce(r.avg_confidence, r.confidence) AS avg_confidence
     """
     async with driver.session() as session:
         nodes_res = await session.run(
@@ -576,13 +584,24 @@ async def get_full_corpora_graph(
     edges_cypher = """
     MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
     WHERE any(cid IN $corpus_ids WHERE cid IN coalesce(r.corpus_ids, []))
-    RETURN DISTINCT a.entity_id AS source,
-                    b.entity_id AS target,
-                    r.predicate AS predicate,
-                    coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
-                    r.confidence AS confidence,
-                    coalesce(r.corpus_ids, []) AS source_corpora
+    WITH a, b, r,
+         [cid IN coalesce(r.corpus_ids, []) WHERE cid IN $corpus_ids] AS source_corpora
+    ORDER BY coalesce(r.confidence, 0.0) DESC
     LIMIT $max_edges
+    OPTIONAL MATCH (ec:Chunk)
+    WHERE ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+      AND ec.corpus_id IN $corpus_ids
+    WITH a, b, r, source_corpora, collect(DISTINCT ec.chunk_id) AS selected_evidence_chunk_ids
+    RETURN a.entity_id AS source,
+           b.entity_id AS target,
+           r.predicate AS predicate,
+           coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
+           r.confidence AS confidence,
+           source_corpora,
+           selected_evidence_chunk_ids[..25] AS evidence_chunk_ids,
+           size(selected_evidence_chunk_ids) AS selected_support_count,
+           coalesce(r.support_count, size(coalesce(r.evidence_chunk_ids, []))) AS support_count,
+           coalesce(r.avg_confidence, r.confidence) AS avg_confidence
     """
 
     async with driver.session() as session:
@@ -606,8 +625,11 @@ async def get_full_corpora_graph(
     # Annotate edges; mark dangling when target outside loaded set (truncation
     # or the relation references entities not surfaced at this max_nodes cap).
     surviving_edges: list[dict] = []
+    requested_corpora = set(corpus_ids)
     for e in edges:
-        sc = sorted(e.get("source_corpora") or [])
+        sc = sorted(cid for cid in (e.get("source_corpora") or []) if cid in requested_corpora)
+        if not sc:
+            continue
         e["source_corpora"] = sc
         e["source_corpus"] = sc[0] if sc else ""
         e["dangling"] = (e["source"] not in node_ids) or (e["target"] not in node_ids)
@@ -665,13 +687,24 @@ async def get_concept_community_full(
     MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
     WHERE a.entity_id IN $entity_ids AND b.entity_id IN $entity_ids
       AND any(cid IN $corpus_ids WHERE cid IN coalesce(r.corpus_ids, []))
-    RETURN DISTINCT a.entity_id AS source,
-                    b.entity_id AS target,
-                    r.predicate AS predicate,
-                    coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
-                    r.confidence AS confidence,
-                    coalesce(r.corpus_ids, []) AS source_corpora
+    WITH a, b, r,
+         [cid IN coalesce(r.corpus_ids, []) WHERE cid IN $corpus_ids] AS source_corpora
+    ORDER BY coalesce(r.confidence, 0.0) DESC
     LIMIT $max_edges
+    OPTIONAL MATCH (ec:Chunk)
+    WHERE ec.chunk_id IN coalesce(r.evidence_chunk_ids, [])
+      AND ec.corpus_id IN $corpus_ids
+    WITH a, b, r, source_corpora, collect(DISTINCT ec.chunk_id) AS selected_evidence_chunk_ids
+    RETURN a.entity_id AS source,
+           b.entity_id AS target,
+           r.predicate AS predicate,
+           coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
+           r.confidence AS confidence,
+           source_corpora,
+           selected_evidence_chunk_ids[..25] AS evidence_chunk_ids,
+           size(selected_evidence_chunk_ids) AS selected_support_count,
+           coalesce(r.support_count, size(coalesce(r.evidence_chunk_ids, []))) AS support_count,
+           coalesce(r.avg_confidence, r.confidence) AS avg_confidence
     """
 
     async with driver.session() as session:
@@ -696,8 +729,11 @@ async def get_concept_community_full(
         n["source_corpora"] = sc
         n["source_corpus"] = sc[0] if sc else ""
     surviving: list[dict] = []
+    requested_corpora = set(corpus_ids)
     for e in edges:
-        sc = sorted(e.get("source_corpora") or [])
+        sc = sorted(cid for cid in (e.get("source_corpora") or []) if cid in requested_corpora)
+        if not sc:
+            continue
         e["source_corpora"] = sc
         e["source_corpus"] = sc[0] if sc else ""
         e["dangling"] = (e["source"] not in node_ids) or (e["target"] not in node_ids)

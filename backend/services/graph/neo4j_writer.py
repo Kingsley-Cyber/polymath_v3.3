@@ -43,6 +43,7 @@ CANONICAL_FAMILIES_PATH = Path(__file__).with_name("canonical_families.json")
 ENTITY_TYPE_OVERRIDES_PATH = Path(__file__).with_name("entity_type_overrides.json")
 ONTOLOGY_VERSION = "2026-04-25-v3"
 ENTITY_ID_PREFIX = "entity"
+GRAPH_PROMOTE_VERSION = "polymath.promote.v1"
 ENTITY_TYPE_PRIORITY = [
     # Phase 5 — scoped Roblox/Luau types come BEFORE the generic universal
     # types so an entity observed as both "RobloxService" (from Phase 5's
@@ -1337,6 +1338,9 @@ async def _prune_relates_to_for_document(
         WHERE any(chunk_id IN coalesce(r.evidence_chunk_ids, []) WHERE chunk_id IN chunk_ids)
            OR any(rel_doc_id IN coalesce(r.evidence_doc_ids, []) WHERE rel_doc_id IN doc_ids)
            OR r.latest_doc_id IN doc_ids
+        WITH r, chunk_ids, doc_ids,
+             coalesce(r.support_confidence_chunk_ids, []) AS support_ids,
+             coalesce(r.support_confidence_values, []) AS support_values
         SET r.evidence_chunk_ids = [
                 chunk_id IN coalesce(r.evidence_chunk_ids, [])
                 WHERE NOT chunk_id IN chunk_ids
@@ -1348,6 +1352,19 @@ async def _prune_relates_to_for_document(
             r.latest_doc_id = CASE
                 WHEN r.latest_doc_id IN doc_ids THEN NULL
                 ELSE r.latest_doc_id
+            END,
+            r.support_confidence_chunk_ids = [
+                support_id IN support_ids
+                WHERE NOT support_id IN chunk_ids
+            ],
+            r.support_confidence_values = CASE
+                WHEN size(support_ids) = 0 THEN []
+                ELSE [
+                    idx IN range(0, size(support_ids) - 1)
+                    WHERE idx < size(support_values)
+                      AND NOT support_ids[idx] IN chunk_ids
+                    | support_values[idx]
+                ]
             END
         WITH r
         OPTIONAL MATCH (remaining:Chunk {corpus_id: $corpus_id})
@@ -1360,6 +1377,13 @@ async def _prune_relates_to_for_document(
             ]
             ELSE coalesce(r.corpus_ids, [])
         END
+        WITH r
+        SET r.support_count = size(coalesce(r.evidence_chunk_ids, [])),
+            r.avg_confidence = CASE
+                WHEN size(coalesce(r.support_confidence_values, [])) = 0 THEN toFloat(coalesce(r.confidence, 0.0))
+                ELSE reduce(total = 0.0, conf IN coalesce(r.support_confidence_values, []) | total + toFloat(conf))
+                     / size(coalesce(r.support_confidence_values, []))
+            END
         WITH r
         WHERE size(coalesce(r.corpus_ids, [])) = 0
         DELETE r
@@ -1382,6 +1406,9 @@ async def _prune_relates_to_for_corpus(
              [did IN collect(DISTINCT c.doc_id) WHERE did IS NOT NULL] AS doc_ids
         MATCH ()-[r:RELATES_TO]->()
         WHERE $corpus_id IN coalesce(r.corpus_ids, [])
+        WITH r, chunk_ids, doc_ids,
+             coalesce(r.support_confidence_chunk_ids, []) AS support_ids,
+             coalesce(r.support_confidence_values, []) AS support_values
         SET r.corpus_ids = [
                 cid IN coalesce(r.corpus_ids, [])
                 WHERE cid <> $corpus_id
@@ -1397,6 +1424,26 @@ async def _prune_relates_to_for_corpus(
             r.latest_doc_id = CASE
                 WHEN r.latest_doc_id IN doc_ids THEN NULL
                 ELSE r.latest_doc_id
+            END,
+            r.support_confidence_chunk_ids = [
+                support_id IN support_ids
+                WHERE NOT support_id IN chunk_ids
+            ],
+            r.support_confidence_values = CASE
+                WHEN size(support_ids) = 0 THEN []
+                ELSE [
+                    idx IN range(0, size(support_ids) - 1)
+                    WHERE idx < size(support_values)
+                      AND NOT support_ids[idx] IN chunk_ids
+                    | support_values[idx]
+                ]
+            END
+        WITH r
+        SET r.support_count = size(coalesce(r.evidence_chunk_ids, [])),
+            r.avg_confidence = CASE
+                WHEN size(coalesce(r.support_confidence_values, [])) = 0 THEN toFloat(coalesce(r.confidence, 0.0))
+                ELSE reduce(total = 0.0, conf IN coalesce(r.support_confidence_values, []) | total + toFloat(conf))
+                     / size(coalesce(r.support_confidence_values, []))
             END
         WITH r
         WHERE size(coalesce(r.corpus_ids, [])) = 0
@@ -1757,6 +1804,7 @@ async def write_document_graph(
                 "subject_id": subject_identity["entity_id"],
                 "object_id": object_identity["entity_id"],
                 "predicate": refined_predicate,
+                "schema_version": r.schema_version,
                 "source_predicate": source_predicate_raw,
                 "relation_family": relation_family_for_predicate(refined_predicate),
                 "predicate_refined": predicate_refined,
@@ -1965,6 +2013,9 @@ async def write_document_graph(
                 MATCH (s:Entity {entity_id: row.subject_id})
                 MATCH (o:Entity {entity_id: row.object_id})
                 MERGE (s)-[r:RELATES_TO {predicate: row.predicate}]->(o)
+                WITH r, row,
+                     row.chunk_id IN coalesce(r.evidence_chunk_ids, []) AS chunk_already_supported,
+                     row.chunk_id IN coalesce(r.support_confidence_chunk_ids, []) AS confidence_already_supported
                 SET r.confidence = CASE
                         WHEN r.confidence IS NULL OR row.confidence > r.confidence THEN row.confidence
                         ELSE r.confidence
@@ -2022,9 +2073,37 @@ async def write_document_graph(
                     WHEN $corpus_id IN r.corpus_ids THEN r.corpus_ids
                     ELSE r.corpus_ids + [$corpus_id]
                 END
+                SET r.support_confidence_chunk_ids = CASE
+                    WHEN row.chunk_id IS NULL OR row.chunk_id = '' THEN coalesce(r.support_confidence_chunk_ids, [])
+                    WHEN chunk_already_supported OR confidence_already_supported THEN coalesce(r.support_confidence_chunk_ids, [])
+                    WHEN r.support_confidence_chunk_ids IS NULL THEN [row.chunk_id]
+                    ELSE r.support_confidence_chunk_ids + [row.chunk_id]
+                END,
+                    r.support_confidence_values = CASE
+                    WHEN row.chunk_id IS NULL OR row.chunk_id = '' THEN coalesce(r.support_confidence_values, [])
+                    WHEN chunk_already_supported OR confidence_already_supported THEN coalesce(r.support_confidence_values, [])
+                    WHEN r.support_confidence_values IS NULL THEN [toFloat(coalesce(row.confidence, 0.0))]
+                    ELSE r.support_confidence_values + [toFloat(coalesce(row.confidence, 0.0))]
+                END
+                SET r.extract_schema_versions = CASE
+                    WHEN row.schema_version IS NULL OR row.schema_version = '' THEN coalesce(r.extract_schema_versions, [])
+                    WHEN r.extract_schema_versions IS NULL THEN [row.schema_version]
+                    WHEN row.schema_version IN r.extract_schema_versions THEN r.extract_schema_versions
+                    ELSE r.extract_schema_versions + [row.schema_version]
+                END
+                SET r.support_count = size(coalesce(r.evidence_chunk_ids, [])),
+                    r.avg_confidence = CASE
+                        WHEN size(coalesce(r.support_confidence_values, [])) = 0 THEN toFloat(coalesce(r.confidence, row.confidence, 0.0))
+                        ELSE reduce(total = 0.0, conf IN coalesce(r.support_confidence_values, []) | total + toFloat(conf))
+                             / size(coalesce(r.support_confidence_values, []))
+                    END,
+                    r.extract_schema_version = coalesce(r.extract_schema_version, row.schema_version, 'polymath.extract.v1'),
+                    r.promote_version = $promote_version,
+                    r.last_seen_at = timestamp()
                 """,
                 rows=relation_rows,
                 corpus_id=corpus_id,
+                promote_version=GRAPH_PROMOTE_VERSION,
             )
             await session.run(
                 """

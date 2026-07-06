@@ -48,6 +48,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.confidence)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.edge_strength)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.eligible_for_synthesis)",
+    "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.support_count)",
     # Bridge detection across multi-corpus selections — replaces full-graph scans.
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.corpus_ids)",
     "CREATE INDEX IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.evidence_doc_ids)",

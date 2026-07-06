@@ -178,9 +178,18 @@ async def test_write_document_graph_persists_relation_doc_provenance():
     assert "r.evidence_chunk_ids" in query
     assert "r.evidence_doc_ids" in query
     assert "r.latest_doc_id" in query
+    assert "r.support_count" in query
+    assert "r.avg_confidence" in query
+    assert "r.extract_schema_version" in query
+    assert "r.promote_version" in query
+    assert "r.last_seen_at" in query
+    assert "r.support_confidence_chunk_ids" in query
+    assert "r.support_confidence_values" in query
     row = params["rows"][0]
     assert row["chunk_id"] == "c1"
     assert row["doc_id"] == "d1"
+    assert row["schema_version"] == "polymath.extract.v1"
+    assert params["promote_version"] == "polymath.promote.v1"
 
 
 @pytest.mark.asyncio
@@ -191,6 +200,10 @@ async def test_delete_document_graph_prunes_relation_provenance_before_nodes():
 
     queries = [query for query, _params in driver.calls]
     assert "r.evidence_doc_ids" in queries[0]
+    assert "r.support_count" in queries[0]
+    assert "r.avg_confidence" in queries[0]
+    assert "r.support_confidence_chunk_ids" in queries[0]
+    assert "r.support_confidence_values" in queries[0]
     assert "remaining_corpus_support" in queries[0]
     assert "MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})" in queries[1]
     assert "NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }" in queries[2]
@@ -206,6 +219,10 @@ async def test_delete_corpus_graph_prunes_array_scoped_relations_before_nodes():
     queries = [query for query, _params in driver.calls]
     assert "r.corpus_ids" in queries[0]
     assert "r.evidence_doc_ids" in queries[0]
+    assert "r.support_count" in queries[0]
+    assert "r.avg_confidence" in queries[0]
+    assert "r.support_confidence_chunk_ids" in queries[0]
+    assert "r.support_confidence_values" in queries[0]
     assert "WHERE size(coalesce(r.corpus_ids, [])) = 0" in queries[0]
     assert "MATCH (n {corpus_id: $corpus_id})" in queries[1]
     assert "NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }" in queries[2]
