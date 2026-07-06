@@ -614,6 +614,11 @@ services:
       INGEST_MAX_MODEL_PHASE_DOCS: ${INGEST_MAX_MODEL_PHASE_DOCS:-8}
       INGEST_MAX_ACTIVE_JOBS: ${INGEST_MAX_ACTIVE_JOBS:-16}
       INGEST_BATCH_WORKERS: ${INGEST_BATCH_WORKERS:-2}
+      # Compose only forwards DECLARED vars — these two sat in .env doing
+      # nothing until mapped here (found 2026-07-06: the 6-doc cap silently
+      # ran at the default 3 all night; P5 two-phase couldn't activate).
+      INGEST_GLOBAL_MAX_DOCS: ${INGEST_GLOBAL_MAX_DOCS:-3}
+      TWO_PHASE_INGEST: ${TWO_PHASE_INGEST:-false}
       EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}
       # Keep expensive graph/cache rebuilds off the hot ingest path. They can
       # still run after the durable batch leaves "running".
