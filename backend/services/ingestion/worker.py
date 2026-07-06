@@ -3062,17 +3062,40 @@ async def run_ingest_job(
     try:
         from services.retrieval_readiness import ensure_corpus_retrieval_ready
 
-        readiness = await ensure_corpus_retrieval_ready(
-            db=db,
-            qdrant_client=qdrant_client,
-            neo4j_driver=neo4j_driver,
-            corpus_id=corpus_id,
-            corpus_doc=corpus_doc,
-            corpus_name=corpus_doc.get("name"),
-            ingestion_config=ingestion_config,
-            neo4j_enabled=settings.NEO4J_ENABLED,
-            default_dim=settings.EMBEDDING_DIMENSION,
-        )
+        # Retry-class errors (2026-07-06): Qdrant answers 408 under another
+        # batch's write saturation — transient store pressure must never fail
+        # a doc. Bounded exponential backoff before giving up for real.
+        readiness = None
+        for _attempt in range(4):
+            try:
+                readiness = await ensure_corpus_retrieval_ready(
+                    db=db,
+                    qdrant_client=qdrant_client,
+                    neo4j_driver=neo4j_driver,
+                    corpus_id=corpus_id,
+                    corpus_doc=corpus_doc,
+                    corpus_name=corpus_doc.get("name"),
+                    ingestion_config=ingestion_config,
+                    neo4j_enabled=settings.NEO4J_ENABLED,
+                    default_dim=settings.EMBEDDING_DIMENSION,
+                )
+                break
+            except Exception as _setup_exc:  # noqa: BLE001
+                _msg = str(_setup_exc)
+                _transient = any(
+                    s in _msg
+                    for s in ("408", "Timeout", "timed out", "Connection", "503")
+                )
+                if not _transient or _attempt == 3:
+                    raise
+                _wait = 5 * (2 ** _attempt)
+                logger.warning(
+                    "phase=retrieval_setup transient (%s) doc=%s — retry %d/3 in %ds",
+                    _msg[:80], doc_id[:12], _attempt + 1, _wait,
+                )
+                await asyncio.sleep(_wait)
+        if readiness is None:
+            raise RuntimeError("retrieval setup exhausted retries")
         if not readiness.ok:
             raise RuntimeError("; ".join(readiness.errors))
         logger.info(
