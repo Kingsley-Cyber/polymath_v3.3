@@ -987,19 +987,28 @@ async def recover_local_batch_runners(
     ingestion_service: Any,
     user_id: str | None = None,
     max_batches: int = 100,
+    reclaim_active_running: bool = False,
 ) -> dict[str, Any]:
     """Rehydrate durable local-folder batches after a backend restart.
 
     The batch manifest is durable in Mongo, but the asyncio runner is process
-    local. On startup, any item still marked ``running`` is necessarily
-    orphaned in the single-backend deployment and must be made resumable before
-    the next runner leases work.
+    local. On startup, any item still marked ``running`` is orphaned in this
+    process and must be made resumable before the next runner leases work.
+    During periodic polling, only expired leases are reclaimed; otherwise the
+    poller can mark its own live Ghost B item stale while the heartbeat is
+    still extending the lease.
     """
     now = _now()
     running_filter: dict[str, Any] = {
         "source": {"$in": RUNNABLE_SOURCES},
         "status": ITEM_RUNNING,
     }
+    if not reclaim_active_running:
+        running_filter["$or"] = [
+            {"lease_until": {"$exists": False}},
+            {"lease_until": None},
+            {"lease_until": {"$lt": now}},
+        ]
     if user_id is not None:
         running_filter["user_id"] = user_id
     orphaned = await db[ITEMS].find(

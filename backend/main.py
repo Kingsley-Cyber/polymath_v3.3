@@ -356,6 +356,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         result = await ingest_batches.recover_local_batch_runners(
             db=conversation_service._db,
             ingestion_service=ingestion_service,
+            reclaim_active_running=(reason == "startup"),
         )
         if result["reclaimed_items"] or result["started_batches"]:
             logger.info(
