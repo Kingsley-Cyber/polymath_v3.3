@@ -34,7 +34,7 @@ RUNTIME TOPOLOGY (two modes, auto-detected):
 
   Override with LOCAL_GHOST_B_EXTRACT_MODE=auto|inproc|http.
   Sidecar URL: LOCAL_GHOST_B_EXTRACT_URL  (default http://host.docker.internal:8084)
-  Timeout:     LOCAL_GHOST_B_EXTRACT_TIMEOUT_S (default 600 — a whole doc's
+  Timeout:     LOCAL_GHOST_B_EXTRACT_TIMEOUT_S (default 5400 — a whole doc's
                chunks travel in one request; 230 chunks ≈ 80 s warm).
   Safety:      LOCAL_GHOST_B_ALLOW_ONNX_CPU_FALLBACK=1 explicitly allows an
                ONNX sidecar whose active providers do not include CUDA.
