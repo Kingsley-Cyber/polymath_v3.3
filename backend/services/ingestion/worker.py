@@ -133,36 +133,69 @@ _PARSE_SEMAPHORE = asyncio.Semaphore(max(1, settings.INGEST_MAX_PARSE_JOBS))
 # ── Chunk-stage process pool (GIL escape) ───────────────────────────────────
 # asyncio.to_thread serialized all concurrent docs' chunking onto ONE core
 # (cpu=101% with 10 slots, 125s/doc, 2026-07-06). Spawn context on purpose:
-# forking a threaded asyncio process inherits held locks. Workers lazily
-# import the chunker on first use; startup cost amortizes over the pool life.
+# forking a threaded asyncio process inherits held locks.
+#
+# HARD LESSON (04:05-05:04 same day, 407 docs mass-failed): a child killed by
+# the cgroup OOM-killer bricks a ProcessPoolExecutor PERMANENTLY, and workers
+# that import this module cost ~1GB each. Mitigations, all mandatory:
+#   1. children import services.ingestion.chunk_subprocess (tier_chunker
+#      only), never this module;
+#   2. BrokenProcessPool -> pool recreated + one retry;
+#   3. repeated breakage -> per-doc fallback to asyncio.to_thread (slow but
+#      correct — degraded is not failed);
+#   4. default workers 4, bounded by INGEST_CHUNK_PROCESSES.
 _CHUNK_POOL = None
 
 
-def _chunk_process_pool():
+def _chunk_process_pool(recreate: bool = False):
     global _CHUNK_POOL
+    if recreate and _CHUNK_POOL is not None:
+        try:
+            _CHUNK_POOL.shutdown(wait=False, cancel_futures=True)
+        except Exception:  # noqa: BLE001
+            pass
+        _CHUNK_POOL = None
+        logger.warning("chunk process pool recreated after breakage")
     if _CHUNK_POOL is None:
         import multiprocessing
         from concurrent.futures import ProcessPoolExecutor
 
-        workers = max(1, int(getattr(get_settings(), "INGEST_CHUNK_PROCESSES", 6)))
+        workers = max(1, int(getattr(get_settings(), "INGEST_CHUNK_PROCESSES", 4)))
         _CHUNK_POOL = ProcessPoolExecutor(
             max_workers=workers,
             mp_context=multiprocessing.get_context("spawn"),
         )
-        logger.info("chunk process pool started: workers=%d (spawn)", workers)
+        logger.info("chunk process pool started: workers=%d (spawn, lean)", workers)
     return _CHUNK_POOL
 
 
-def _chunk_in_subprocess(parse_result, doc_id, corpus_id, config):
-    """Top-level (picklable) chunk entrypoint for the process pool."""
-    from services.ingestion import tier_chunker as _tc
+async def _chunk_with_pool(parse_result, doc_id, corpus_id, config, timeout: int):
+    """Chunk in the process pool; survive pool breakage; never mass-fail."""
+    from concurrent.futures.process import BrokenProcessPool
 
-    return _tc.chunk(
-        parse_result=parse_result,
-        doc_id=doc_id,
-        corpus_id=corpus_id,
-        config=config,
+    from services.ingestion.chunk_subprocess import chunk_entry
+
+    call = functools.partial(chunk_entry, parse_result, doc_id, corpus_id, config)
+    loop = asyncio.get_running_loop()
+    for attempt in (1, 2):
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(_chunk_process_pool(attempt == 2), call),
+                timeout=timeout,
+            )
+        except BrokenProcessPool:
+            if attempt == 2:
+                break
+            logger.warning(
+                "chunk pool broken (doc=%s) — recreating and retrying once",
+                doc_id[:12],
+            )
+    logger.error(
+        "chunk pool broken twice (doc=%s) — falling back to in-thread "
+        "chunking for this doc (GIL-slow, correct)",
+        doc_id[:12],
     )
+    return await asyncio.wait_for(asyncio.to_thread(call), timeout=timeout)
 
 _MODEL_PHASE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
 _MODEL_PHASE_SEMAPHORE_STATE: dict[str, tuple[int, asyncio.AbstractEventLoop]] = {}
@@ -3016,17 +3049,11 @@ async def run_ingest_job(
         60, int(getattr(settings, "TIER_CHUNKER_DOC_TIMEOUT_SECONDS", 600))
     )
     try:
-        parents, children, injected_headers = await asyncio.wait_for(
-            asyncio.get_running_loop().run_in_executor(
-                _chunk_process_pool(),
-                functools.partial(
-                    _chunk_in_subprocess,
-                    parse_result,
-                    doc_id,
-                    corpus_id,
-                    ingestion_config,
-                ),
-            ),
+        parents, children, injected_headers = await _chunk_with_pool(
+            parse_result,
+            doc_id,
+            corpus_id,
+            ingestion_config,
             timeout=_chunk_timeout,
         )
     except asyncio.TimeoutError as exc:

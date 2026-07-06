@@ -1410,7 +1410,7 @@ class Settings(BaseSettings):
         ),
     )
     INGEST_CHUNK_PROCESSES: int = Field(
-        default=6,
+        default=4,
         ge=1,
         le=16,
         description=(
