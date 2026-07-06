@@ -985,12 +985,21 @@ class IngestionService:
 
         doc_counts = await _counts("documents")
         chunk_counts = await _counts("chunks")
+        # Owner 2026-07-06: doc_count alone misled — every file that STARTS
+        # parsing gets a document row, so a churned batch showed "498" while
+        # ~80 were actually complete. ready_doc_count = fully verified docs.
+        ready_rows = await self._db["documents"].aggregate([
+            {"$match": {"corpus_id": {"$in": corpus_ids}, "write_state.verified": True}},
+            {"$group": {"_id": "$corpus_id", "count": {"$sum": 1}}},
+        ]).to_list(length=None)
+        ready_counts = {str(r["_id"]): int(r["count"]) for r in ready_rows}
         for doc in docs:
             cid = doc.get("corpus_id")
             if not cid:
                 continue
             actual_docs = doc_counts.get(cid, 0)
             actual_chunks = chunk_counts.get(cid, 0)
+            doc["ready_doc_count"] = ready_counts.get(cid, 0)
             if doc.get("doc_count", 0) != actual_docs or doc.get("chunk_count", 0) != actual_chunks:
                 await self._db["corpora"].update_one(
                     {"corpus_id": cid},

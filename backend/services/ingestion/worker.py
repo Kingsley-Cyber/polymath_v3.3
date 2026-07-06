@@ -164,13 +164,79 @@ def _chunk_process_pool(recreate: bool = False):
         _CHUNK_POOL = ProcessPoolExecutor(
             max_workers=workers,
             mp_context=multiprocessing.get_context("spawn"),
+            # Memory-release discipline (owner 2026-07-06): recycle each
+            # child after N docs so per-worker heap growth is structurally
+            # capped instead of accumulating for the batch's lifetime.
+            max_tasks_per_child=max(
+                1, int(getattr(get_settings(), "INGEST_CHUNK_TASKS_PER_CHILD", 25))
+            ),
         )
-        logger.info("chunk process pool started: workers=%d (spawn, lean)", workers)
+        logger.info(
+            "chunk process pool started: workers=%d (spawn, lean, recycle@25)",
+            workers,
+        )
     return _CHUNK_POOL
 
 
+# Remote chunk cars (owner 2026-07-06): comma-separated chunk_svc URLs, e.g.
+# "http://192.168.1.83:8090". Empty = feature off, zero hot-path impact.
+# Elastic like the extraction fleet: probed per doc, any failure falls back
+# to the local process pool — remote is an accelerator, never a dependency.
+_CHUNK_REMOTE_URLS = [
+    u.strip().rstrip("/")
+    for u in os.environ.get("CHUNK_REMOTE_URLS", "").split(",")
+    if u.strip()
+]
+_CHUNK_RPC_SCHEMA = "polymath.chunk_rpc.v1"
+
+
+async def _chunk_via_remote(parse_result, doc_id, corpus_id, config, timeout: int):
+    """Try each remote chunk car; return None to signal local fallback."""
+    import base64
+    import pickle
+
+    import httpx
+
+    body = {
+        "schema_version": _CHUNK_RPC_SCHEMA,
+        "doc_id": doc_id,
+        "corpus_id": corpus_id,
+        "parse_result_b64": base64.b64encode(pickle.dumps(parse_result)).decode(),
+        "config_b64": base64.b64encode(pickle.dumps(config)).decode(),
+    }
+    async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=3.0)) as cli:
+        for url in _CHUNK_REMOTE_URLS:
+            try:
+                r = await cli.post(f"{url}/chunk", json=body)
+                if r.status_code != 200:
+                    logger.warning(
+                        "remote chunk %s -> %d (doc=%s) — trying next/local",
+                        url, r.status_code, doc_id[:12],
+                    )
+                    continue
+                out = pickle.loads(base64.b64decode(r.json()["result_b64"]))
+                logger.info(
+                    "phase=chunk_remote url=%s doc=%s", url, doc_id[:12]
+                )
+                return out
+            except Exception as exc:  # noqa: BLE001 — elastic fallback
+                logger.warning(
+                    "remote chunk %s unreachable (%s) doc=%s — trying next/local",
+                    url, type(exc).__name__, doc_id[:12],
+                )
+    return None
+
+
 async def _chunk_with_pool(parse_result, doc_id, corpus_id, config, timeout: int):
-    """Chunk in the process pool; survive pool breakage; never mass-fail."""
+    """Chunk remotely when cars exist, else in the local process pool;
+    survive pool breakage; never mass-fail."""
+    if _CHUNK_REMOTE_URLS:
+        remote = await _chunk_via_remote(
+            parse_result, doc_id, corpus_id, config, timeout
+        )
+        if remote is not None:
+            return remote
+
     from concurrent.futures.process import BrokenProcessPool
 
     from services.ingestion.chunk_subprocess import chunk_entry

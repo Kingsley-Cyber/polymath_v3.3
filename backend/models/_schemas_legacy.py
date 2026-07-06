@@ -989,6 +989,9 @@ class CorpusResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     doc_count: int = 0
+    # Fully verified documents — doc_count counts every row ever created
+    # (in-flight and failed docs included), which misreads as completions.
+    ready_doc_count: int = 0
     chunk_count: int = 0
     embedding_model_id: str | None = None
     default_ingestion_config: IngestionConfig

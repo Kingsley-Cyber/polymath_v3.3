@@ -1118,9 +1118,14 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                       {/* Stats */}
                       {!isEditing && (
                         <div className="flex items-center gap-3 text-[9px] text-content-tertiary tracking-wider shrink-0">
-                          <span className="flex items-center gap-1">
+                          <span
+                            className="flex items-center gap-1"
+                            title={`${corpus.ready_doc_count ?? 0} fully verified of ${corpus.doc_count} document rows (in-flight and failed rows included in the total)`}
+                          >
                             <FileText className="w-3 h-3" />
-                            {corpus.doc_count}
+                            {corpus.ready_doc_count != null
+                              ? `${corpus.ready_doc_count}/${corpus.doc_count} ready`
+                              : corpus.doc_count}
                           </span>
                           <span>{corpus.chunk_count} chunks</span>
                         </div>

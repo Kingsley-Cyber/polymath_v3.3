@@ -258,6 +258,8 @@ export interface CorpusResponse {
   created_at: string;
   updated_at: string;
   doc_count: number;
+  /** Fully verified docs — doc_count includes in-flight/failed rows. */
+  ready_doc_count?: number;
   chunk_count: number;
   embedding_model_id: string | null;
   default_ingestion_config: IngestionConfig;
