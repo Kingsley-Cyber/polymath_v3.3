@@ -793,6 +793,19 @@ export default function AtomicView({
     (synthesis?.auto_synthesis as { markdown?: string } | undefined)?.markdown ||
     "";
 
+  const edgeStateCounts = useMemo(() => {
+    const raw = synthesis?.metrics?.relation_edge_state_counts;
+    if (!raw) return null;
+    const counts = {
+      typed: Number(raw.typed || 0),
+      refined: Number(raw.refined || 0),
+      family: Number(raw.family || 0),
+      fallback: Number(raw.fallback || 0),
+    };
+    const total = counts.typed + counts.refined + counts.family + counts.fallback;
+    return total > 0 ? counts : null;
+  }, [synthesis?.metrics?.relation_edge_state_counts]);
+
   return (
     <div className="relative w-full h-full">
       {/* Top-left legend — role swatches + lane chips + view toggle */}
@@ -855,6 +868,23 @@ export default function AtomicView({
             <LaneChip lane="web" label="web" />
           )}
         </div>
+
+        {edgeStateCounts && (
+          <div
+            className="flex flex-wrap items-center gap-1.5 rounded-md border border-border-minimal px-2 py-1.5 text-[10px] font-mono backdrop-blur"
+            style={{
+              background: "rgba(17, 20, 27, 0.9)",
+              color: "var(--ink-tertiary)",
+            }}
+            title="Relation edge states: typed/refined/family/fallback. Fallback edges are evidence-gated and discounted at query time."
+          >
+            <span className="text-content-tertiary">edges</span>
+            <span className="text-content-secondary">typed {edgeStateCounts.typed}</span>
+            <span className="text-content-secondary">refined {edgeStateCounts.refined}</span>
+            <span className="text-amber-300">family {edgeStateCounts.family}</span>
+            <span className="text-error">fallback {edgeStateCounts.fallback}</span>
+          </div>
+        )}
       </div>
 
       {viewMode === "2d" ? (
