@@ -1069,6 +1069,7 @@ async def _run_ghosts_parallel(
     neo4j_driver,
     existing_doc: dict | None,
     ws: WriteState,
+    extraction_endpoint_urls: list[str] | None = None,
 ) -> GhostRunResult:
     """Fan out GHOST A + GHOST B in parallel. Either branch may be disabled
     by config OR skipped via resume gates (Decision D).
@@ -3346,6 +3347,7 @@ async def run_ingest_job(
             neo4j_driver=neo4j_driver,
             existing_doc=existing_doc,
             ws=ws,
+            extraction_endpoint_urls=extraction_endpoint_urls,
         )
     if isinstance(ghost_result, GhostRunResult):
         summaries = ghost_result.summaries
