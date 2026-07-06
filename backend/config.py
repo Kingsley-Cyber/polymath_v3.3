@@ -760,6 +760,24 @@ class Settings(BaseSettings):
         le=16,
         description="Process-local cap for concurrent parse/chunk phases.",
     )
+    INGEST_RUNNERS_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "When false, this process may create/read ingest batches but will "
+            "not run durable batch workers. Use false on the 6 GB query API "
+            "and true on the 20 GB offline-ingest worker so memory-heavy "
+            "phases do not live in the query process."
+        ),
+    )
+    INGEST_RUNNER_POLL_SECONDS: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=300.0,
+        description=(
+            "Worker-mode poll interval for discovering queued/recoverable "
+            "durable ingest batches created by a separate query API process."
+        ),
+    )
     INGEST_BLOCK_NEAR_DUPLICATES: bool = Field(
         default=True,
         description=(

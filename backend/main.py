@@ -336,56 +336,85 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("graph_sessions multi-corpus migration failed (non-fatal): %s", exc)
 
-    try:
-        # Readiness gate (2026-07-05): after a Docker VM restart the backend
-        # boots FASTER than Qdrant/Neo4j accept connections. Resuming batches
-        # immediately burned 81 docs on retrieval_setup connection-refused in
-        # one storm. Wait (bounded) for both stores to answer before starting
-        # batch runners — on timeout, resume anyway and let per-item retry
-        # handle it (better late than never, never worse than before).
-        async def _stores_ready() -> bool:
-            import httpx as _hx
+    ingest_poll_task: asyncio.Task | None = None
 
-            try:
-                async with _hx.AsyncClient(timeout=2.0) as cli:
-                    q = await cli.get(f"{settings.QDRANT_URL}/readyz")
-                    if q.status_code != 200:
-                        return False
-                if ingestion_service.neo4j_driver is not None:
-                    await ingestion_service.neo4j_driver.verify_connectivity()
-                return True
-            except Exception:  # noqa: BLE001
-                return False
+    async def _stores_ready() -> bool:
+        import httpx as _hx
 
-        for _attempt in range(24):  # up to ~120s
-            if await _stores_ready():
-                if _attempt:
-                    logger.info(
-                        "Ingest recovery readiness gate: stores ready after %ds",
-                        _attempt * 5,
-                    )
-                break
-            await asyncio.sleep(5)
-        else:
-            logger.warning(
-                "Ingest recovery readiness gate: stores not ready after 120s — "
-                "resuming anyway (per-item failures will surface)"
-            )
+        try:
+            async with _hx.AsyncClient(timeout=2.0) as cli:
+                q = await cli.get(f"{settings.QDRANT_URL}/readyz")
+                if q.status_code != 200:
+                    return False
+            if ingestion_service.neo4j_driver is not None:
+                await ingestion_service.neo4j_driver.verify_connectivity()
+            return True
+        except Exception:  # noqa: BLE001
+            return False
 
+    async def _recover_ingest_batches(reason: str) -> dict:
         result = await ingest_batches.recover_local_batch_runners(
             db=conversation_service._db,
             ingestion_service=ingestion_service,
         )
         if result["reclaimed_items"] or result["started_batches"]:
             logger.info(
-                "Durable ingest startup recovery: reclaimed_items=%d "
+                "Durable ingest %s recovery: reclaimed_items=%d "
                 "candidate_batches=%d started_batches=%d",
+                reason,
                 result["reclaimed_items"],
                 result["candidate_batches"],
                 result["started_batches"],
             )
-    except Exception as exc:
-        logger.warning("Durable ingest startup recovery failed (non-fatal): %s", exc)
+        return result
+
+    async def _ingest_worker_poll_loop() -> None:
+        interval = float(getattr(settings, "INGEST_RUNNER_POLL_SECONDS", 10.0) or 10.0)
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await _recover_ingest_batches("poll")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Durable ingest poll recovery failed (non-fatal): %s", exc)
+
+    if settings.INGEST_RUNNERS_ENABLED:
+        try:
+            # Readiness gate (2026-07-05): after a Docker VM restart the backend
+            # boots FASTER than Qdrant/Neo4j accept connections. Resuming batches
+            # immediately burned 81 docs on retrieval_setup connection-refused in
+            # one storm. Wait (bounded) for both stores to answer before starting
+            # batch runners — on timeout, resume anyway and let per-item retry
+            # handle it (better late than never, never worse than before).
+            for _attempt in range(24):  # up to ~120s
+                if await _stores_ready():
+                    if _attempt:
+                        logger.info(
+                            "Ingest recovery readiness gate: stores ready after %ds",
+                            _attempt * 5,
+                        )
+                    break
+                await asyncio.sleep(5)
+            else:
+                logger.warning(
+                    "Ingest recovery readiness gate: stores not ready after 120s — "
+                    "resuming anyway (per-item failures will surface)"
+                )
+
+            await _recover_ingest_batches("startup")
+            ingest_poll_task = asyncio.create_task(_ingest_worker_poll_loop())
+            logger.info(
+                "Durable ingest runners enabled; polling every %.1fs",
+                float(getattr(settings, "INGEST_RUNNER_POLL_SECONDS", 10.0) or 10.0),
+            )
+        except Exception as exc:
+            logger.warning("Durable ingest startup recovery failed (non-fatal): %s", exc)
+    else:
+        logger.info(
+            "Durable ingest runners disabled for this process "
+            "(INGEST_RUNNERS_ENABLED=false)"
+        )
 
     # Optional chat-model warmup. The chat model is user-selected at request
     # time, so there is no reliable default to warm — this is opt-in via
@@ -417,6 +446,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown
     logger.info("Shutting down Polymath RAG API")
+    if ingest_poll_task is not None:
+        ingest_poll_task.cancel()
+        try:
+            await ingest_poll_task
+        except asyncio.CancelledError:
+            pass
     await auth_service.disconnect()
     await ingestion_service.disconnect()
     await conversation_service.disconnect()

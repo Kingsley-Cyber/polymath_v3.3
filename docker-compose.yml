@@ -610,6 +610,8 @@ services:
       # to Pydantic defaults (1 doc through the model phase) and serializes
       # 5+ uploads even when cloud Ghost pools have headroom for parallel
       # processing. Default 8 allows the typical batch upload to fan out.
+      INGEST_RUNNERS_ENABLED: ${INGEST_RUNNERS_ENABLED:-true}
+      INGEST_RUNNER_POLL_SECONDS: ${INGEST_RUNNER_POLL_SECONDS:-10}
       INGEST_MAX_PARSE_JOBS: ${INGEST_MAX_PARSE_JOBS:-8}
       INGEST_MAX_MODEL_PHASE_DOCS: ${INGEST_MAX_MODEL_PHASE_DOCS:-8}
       INGEST_MAX_ACTIVE_JOBS: ${INGEST_MAX_ACTIVE_JOBS:-16}

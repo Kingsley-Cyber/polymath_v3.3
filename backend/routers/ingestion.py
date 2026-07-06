@@ -64,6 +64,29 @@ def _get_active_count() -> int:
     return _admission.active_count()
 
 
+def _start_batch_runner_if_enabled(*, batch_id: str, user_id: str) -> bool:
+    """Start a durable batch only from processes allowed to own ingest memory.
+
+    Offline-ingest deployments run the public/query API with
+    INGEST_RUNNERS_ENABLED=false and a separate 20 GB worker with the flag true.
+    The query API still creates/resumes durable batches; the worker discovers
+    them through startup/poll recovery.
+    """
+    if not bool(get_settings().INGEST_RUNNERS_ENABLED):
+        logger.info(
+            "Ingest runner start deferred: batch=%s "
+            "INGEST_RUNNERS_ENABLED=false",
+            batch_id[:8],
+        )
+        return False
+    return ingest_batches.start_local_batch_runner(
+        db=ingestion_service.db,
+        ingestion_service=ingestion_service,
+        batch_id=batch_id,
+        user_id=user_id,
+    )
+
+
 # Keep this below frontend/nginx.conf's 300s proxy timeout. OCR is disabled,
 # but layout-heavy documents can still take time before doc_id exists.
 PARSE_DOC_ID_WAIT_SECONDS = 240.0
@@ -1140,9 +1163,7 @@ async def create_local_ingest_batch(
         raise HTTPException(status_code=400, detail=str(exc))
     started = False
     if body.start:
-        started = ingest_batches.start_local_batch_runner(
-            db=ingestion_service.db,
-            ingestion_service=ingestion_service,
+        started = _start_batch_runner_if_enabled(
             batch_id=batch["batch_id"],
             user_id=current_user["user_id"],
         )
@@ -1210,9 +1231,7 @@ async def create_upload_ingest_batch(
 
     started = False
     if start:
-        started = ingest_batches.start_local_batch_runner(
-            db=ingestion_service.db,
-            ingestion_service=ingestion_service,
+        started = _start_batch_runner_if_enabled(
             batch_id=batch["batch_id"],
             user_id=current_user["user_id"],
         )
@@ -1319,9 +1338,7 @@ async def resume_ingest_batch(
         batch_id=batch_id,
         user_id=current_user["user_id"],
     )
-    started = ingest_batches.start_local_batch_runner(
-        db=ingestion_service.db,
-        ingestion_service=ingestion_service,
+    started = _start_batch_runner_if_enabled(
         batch_id=batch_id,
         user_id=current_user["user_id"],
     )
@@ -1365,9 +1382,7 @@ async def rescan_ingest_batch(
             batch_id=batch_id,
             user_id=current_user["user_id"],
         )
-        started = ingest_batches.start_local_batch_runner(
-            db=ingestion_service.db,
-            ingestion_service=ingestion_service,
+        started = _start_batch_runner_if_enabled(
             batch_id=batch_id,
             user_id=current_user["user_id"],
         )
