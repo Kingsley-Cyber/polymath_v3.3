@@ -699,8 +699,11 @@ async def upsert_summaries(
         assert len(sparse_vectors) == len(summary_payloads), "sparse length mismatch"
     sv_iter = sparse_vectors or [None] * len(summary_payloads)
 
-    payloads = [
-        {
+    payloads = []
+    for p in summary_payloads:
+        summary_text = p.get("summary") or p.get("summary_text") or ""
+        retrieval_text = p.get("retrieval_text") or summary_text
+        payloads.append({
             "corpus_id": p["corpus_id"],
             "doc_id": p["doc_id"],
             "filename": p.get("filename") or p.get("doc_name") or "",
@@ -708,9 +711,11 @@ async def upsert_summaries(
             "chunk_id": f"{p['parent_id']}_summary",
             "parent_id": p["parent_id"],
             "chunk_type": "summary",
+            "summary_id": p.get("summary_id") or f"{p['parent_id']}_summary",
             "schema_version": p.get("schema_version") or "parent_summary.v1",
             "summary_type": p.get("summary_type") or "parent_retrieval_replacement",
-            "summary_text": p["summary"],
+            "summary_text": summary_text,
+            "retrieval_text": retrieval_text,
             "central_claim": p.get("central_claim") or "",
             "key_points": p.get("key_points") or [],
             "main_mechanism": p.get("main_mechanism") or "",
@@ -719,10 +724,17 @@ async def upsert_summaries(
             "retrieval_uses": p.get("retrieval_uses") or [],
             "abstraction_level": p.get("abstraction_level") or "medium",
             "source_child_ids": p.get("source_child_ids") or p.get("child_ids") or [],
+            "source_hash": p.get("source_hash") or "",
+            "summary_model": p.get("summary_model") or "",
+            "summary_created_at": p.get("summary_created_at") or "",
+            "validation_status": p.get("validation_status") or "",
+            "repair_status": p.get("repair_status") or "",
+            "quality_score": p.get("quality_score"),
+            "quality_flags": p.get("quality_flags") or [],
             "source_tier": p["source_tier"],
             "heading_path": p.get("heading_path"),
-            "chunk_text": p["summary"],
-            **payload_text_contract(p.get("summary")),
+            "chunk_text": retrieval_text,
+            **payload_text_contract(retrieval_text),
             "user_id": p.get("user_id", ""),
             "chunk_kind": p.get("chunk_kind", "body"),
             "language": p.get("language"),
@@ -735,9 +747,7 @@ async def upsert_summaries(
             "content_facet_confidence": p.get("content_facet_confidence"),
             "doc_facet_ids": p.get("doc_facet_ids") or [],
             "facet_schema_version": p.get("facet_schema_version") or "",
-        }
-        for p in summary_payloads
-    ]
+        })
 
     for kind in target_kinds:
         if kind == "graph":

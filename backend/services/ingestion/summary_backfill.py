@@ -35,6 +35,11 @@ import os
 from datetime import datetime, timezone
 
 from config import get_settings
+from services.ingestion.summary_semantics import (
+    PARENT_SUMMARY_SCHEMA_VERSION,
+    looks_like_raw_json_text,
+    repair_parent_summary_row,
+)
 
 _POOL_FILE = os.environ.get("POLYMATH_SUMMARY_POOL_FILE", "/tmp/summary_pool.json")
 _EMBED_DIM = 1024  # MLX Qwen3-Embedding — same space as children + query path
@@ -163,8 +168,11 @@ async def index_existing(corpus_id: str, *, batch: int = 256) -> dict:
             nonlocal indexed
             if not buf:
                 return
-            vecs = await _embed([p["summary"] for p in buf])
-            await upsert_summaries(qc, corpus_id, buf, vecs, target_kinds=["hrag"])
+            vecs = await _embed([
+                p.get("retrieval_text") or p["summary"]
+                for p in buf
+            ])
+            await upsert_summaries(qc, corpus_id, buf, vecs, target_kinds=["naive", "hrag"])
             indexed += len(buf)
             print(f"  indexed {indexed}/{total}")
             buf.clear()
@@ -173,7 +181,7 @@ async def index_existing(corpus_id: str, *, batch: int = 256) -> dict:
             if len(buf) >= batch:
                 await flush()
         await flush()
-        print(f"INDEXED {indexed} summary points -> hrag")
+        print(f"INDEXED {indexed} summary points -> naive+hrag")
         return {"indexed": indexed, "total_with_summary": total}
     finally:
         await qc.close()
@@ -275,6 +283,15 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
                                        "retrieval_uses": getattr(r, "retrieval_uses", None),
                                        "abstraction_level": getattr(r, "abstraction_level", None),
                                        "source_child_ids": getattr(r, "source_child_ids", None),
+                                       "summary_id": getattr(r, "summary_id", None),
+                                       "source_hash": getattr(r, "source_hash", None),
+                                       "summary_model": getattr(r, "summary_model", None),
+                                       "summary_created_at": getattr(r, "summary_created_at", None),
+                                       "validation_status": getattr(r, "validation_status", None),
+                                       "repair_status": getattr(r, "repair_status", None),
+                                       "quality_score": getattr(r, "quality_score", None),
+                                       "quality_flags": getattr(r, "quality_flags", None),
+                                       "retrieval_text": getattr(r, "retrieval_text", None),
                                        "summary_updated_at": datetime.now(timezone.utc)}})
                    for r in results]
             if ops:
@@ -291,6 +308,128 @@ async def generate(corpus_id: str, *, batch: int = 400, limit: int | None = None
         return {"made": made, "batches": batches, "skipped": len(failed_ids),
                 "remaining": remaining, "aborted": aborted}
     finally:
+        mc.close()
+
+
+# ── repair (free, deterministic) ────────────────────────────────────────────
+async def repair_existing(
+    corpus_id: str,
+    *,
+    batch: int = 500,
+    limit: int | None = None,
+    apply: bool = False,
+    reindex: bool = False,
+) -> dict:
+    """Repair malformed parent_summary.v1 rows and optionally rebuild vectors.
+
+    This is deterministic: no model calls. Raw JSON-looking summaries are
+    parsed/salvaged into bounded fields or quarantined for later regeneration.
+    """
+    from pymongo import UpdateOne
+    from services.storage.qdrant_writer import upsert_summaries
+
+    mc, db = _mongo()
+    qc = _qdrant() if reindex and apply else None
+    scanned = changed = repaired = quarantined = indexed = raw_json = 0
+    ops: list[UpdateOne] = []
+    reindex_buf: list[dict] = []
+    tracked = [
+        "summary_id", "summary", "schema_version", "summary_type",
+        "central_claim", "key_points", "main_mechanism", "concept_tags",
+        "entity_hints", "retrieval_uses", "abstraction_level",
+        "source_child_ids", "source_hash", "summary_model",
+        "summary_created_at", "validation_status", "repair_status",
+        "quality_score", "quality_flags", "retrieval_text",
+    ]
+
+    async def flush_updates() -> None:
+        nonlocal ops
+        if not ops:
+            return
+        if apply:
+            await db["parent_chunks"].bulk_write(ops, ordered=False)
+        ops = []
+
+    async def flush_reindex() -> None:
+        nonlocal indexed, reindex_buf
+        if not reindex_buf:
+            return
+        if qc is not None:
+            vecs = await _embed([p["retrieval_text"] for p in reindex_buf])
+            await upsert_summaries(
+                qc,
+                corpus_id,
+                reindex_buf,
+                vecs,
+                target_kinds=["naive", "hrag"],
+            )
+            indexed += len(reindex_buf)
+        reindex_buf = []
+
+    try:
+        q = {"corpus_id": corpus_id, "schema_version": PARENT_SUMMARY_SCHEMA_VERSION}
+        total = await db["parent_chunks"].count_documents(q)
+        print(
+            f"repair: {total} parent_summary.v1 rows"
+            + (f" (capped to {limit})" if limit else "")
+            + (" APPLY" if apply else " DRY-RUN")
+            + (" +REINDEX" if reindex and apply else "")
+        )
+        cursor = db["parent_chunks"].find(q).limit(limit or 0)
+        async for row in cursor:
+            scanned += 1
+            now = datetime.now(timezone.utc)
+            before_raw = looks_like_raw_json_text(row.get("summary"))
+            raw_json += 1 if before_raw else 0
+            fixed = repair_parent_summary_row(row, now=now)
+            status = fixed.get("validation_status")
+            quarantined += 1 if status == "quarantined" else 0
+            repaired += 1 if fixed.get("repair_status") == "repaired" else 0
+            diff = {
+                key: fixed.get(key)
+                for key in tracked
+                if row.get(key) != fixed.get(key)
+            }
+            if diff:
+                changed += 1
+                diff["summary_repaired_at"] = now
+                if fixed.get("validation_status") == "quarantined":
+                    diff["summary_quarantine_reason"] = fixed.get("quality_flags") or []
+                    if before_raw:
+                        diff["summary_quarantine_raw"] = row.get("summary")
+                ops.append(UpdateOne(
+                    {
+                        "corpus_id": row.get("corpus_id"),
+                        "doc_id": row.get("doc_id"),
+                        "parent_id": row.get("parent_id"),
+                    },
+                    {"$set": diff},
+                ))
+            if reindex and apply and fixed.get("validation_status") == "valid":
+                reindex_buf.append({**row, **fixed})
+            if len(ops) >= batch:
+                await flush_updates()
+            if len(reindex_buf) >= min(batch, 256):
+                await flush_reindex()
+        await flush_updates()
+        await flush_reindex()
+        print(
+            f"REPAIR scanned={scanned} changed={changed} raw_json={raw_json} "
+            f"repaired={repaired} quarantined={quarantined} indexed={indexed}"
+        )
+        return {
+            "scanned": scanned,
+            "changed": changed,
+            "raw_json": raw_json,
+            "repaired": repaired,
+            "quarantined": quarantined,
+            "indexed": indexed,
+            "applied": apply,
+            "reindexed": bool(reindex and apply),
+        }
+    finally:
+        if qc is not None:
+            await qc.close()
         mc.close()
 
 
@@ -357,6 +496,9 @@ def main() -> None:
     ap.add_argument("--apply-heal", action="store_true", help="with --heal-all: auto-index orphaned summaries")
     ap.add_argument("--index", action="store_true", help="index parents that have summary text")
     ap.add_argument("--generate", action="store_true", help="summarize missing parents via pool")
+    ap.add_argument("--repair", action="store_true", help="repair/quarantine malformed parent_summary.v1 rows")
+    ap.add_argument("--apply", action="store_true", help="with --repair: persist deterministic repair fields")
+    ap.add_argument("--reindex", action="store_true", help="with --repair --apply: re-embed clean retrieval_text")
     ap.add_argument("--verify", action="store_true", help="readiness assertion")
     ap.add_argument("--batch", type=int, default=400)
     ap.add_argument("--limit", type=int, default=None, help="cap parents processed this run (probe)")
@@ -368,12 +510,20 @@ def main() -> None:
         ap.error("--corpus is required for --verify / --index / --generate")
     if args.verify:
         asyncio.run(verify(args.corpus))
+    if args.repair:
+        asyncio.run(repair_existing(
+            args.corpus,
+            batch=args.batch,
+            limit=args.limit,
+            apply=args.apply,
+            reindex=args.reindex,
+        ))
     if args.index:
         asyncio.run(index_existing(args.corpus, batch=min(256, args.batch)))
     if args.generate:
         asyncio.run(generate(args.corpus, batch=args.batch, limit=args.limit))
-    if not (args.verify or args.index or args.generate):
-        ap.error("pass at least one of --verify / --index / --generate / --heal-all")
+    if not (args.verify or args.repair or args.index or args.generate):
+        ap.error("pass at least one of --verify / --repair / --index / --generate / --heal-all")
 
 
 if __name__ == "__main__":

@@ -65,6 +65,7 @@ _SYSTEM = (
 )
 from services.ingestion.summary_semantics import (  # noqa: E402
     SEMANTIC_SUMMARY_INSTRUCTION as _SEM_INSTR,
+    canonical_parent_summary_fields,
     parse_semantic_summary,
 )
 _SYSTEM = _SYSTEM.replace("__SEMANTIC_INSTRUCTION__", _SEM_INSTR)
@@ -118,6 +119,15 @@ class SummaryResult:
     retrieval_uses: list[str] | None = None
     abstraction_level: str | None = None
     source_child_ids: list[str] | None = None
+    summary_id: str | None = None
+    source_hash: str | None = None
+    summary_model: str | None = None
+    summary_created_at: str | None = None
+    validation_status: str | None = None
+    repair_status: str | None = None
+    quality_score: float | None = None
+    quality_flags: list[str] | None = None
+    retrieval_text: str | None = None
 
 
 def _parse_summary_json(raw: str) -> tuple[str, str | None, list[str] | None]:
@@ -399,11 +409,21 @@ async def summarize_parents(
                     source_child_ids=task.source_child_ids or [],
                     source_text=task.text,
                 )
-                summary = _sem["summary"]
+                _artifact = canonical_parent_summary_fields(
+                    _sem,
+                    parent_id=task.parent_id,
+                    doc_id=task.doc_id,
+                    corpus_id=task.corpus_id,
+                    source_text=task.text,
+                    source_child_ids=task.source_child_ids or [],
+                    summary_model=entry["model"],
+                    repair_status=_sem.get("repair_status"),
+                )
+                summary = _artifact["summary"]
                 _dom = _sem["domain"]
                 domain = _dom if _dom in _DOMAIN_TAXONOMY else ("other" if _dom else None)
                 topics = None  # retired
-                if not summary:
+                if not summary or _artifact.get("validation_status") != "valid":
                     return None
                 return SummaryResult(
                     parent_id=task.parent_id,
@@ -416,16 +436,25 @@ async def summarize_parents(
                     semantic_chunk_type=_sem["semantic_chunk_type"],
                     key_terms=_sem["key_terms"] or None,
                     mechanisms=_sem["mechanisms"] or None,
-                    schema_version=_sem["schema_version"],
-                    summary_type=_sem["summary_type"],
-                    central_claim=_sem["central_claim"],
-                    key_points=_sem["key_points"] or None,
-                    main_mechanism=_sem["main_mechanism"],
-                    concept_tags=_sem["concept_tags"] or None,
-                    entity_hints=_sem["entity_hints"] or None,
-                    retrieval_uses=_sem["retrieval_uses"] or None,
-                    abstraction_level=_sem["abstraction_level"],
-                    source_child_ids=_sem["source_child_ids"] or None,
+                    schema_version=_artifact["schema_version"],
+                    summary_type=_artifact["summary_type"],
+                    central_claim=_artifact["central_claim"],
+                    key_points=_artifact["key_points"] or None,
+                    main_mechanism=_artifact["main_mechanism"],
+                    concept_tags=_artifact["concept_tags"] or None,
+                    entity_hints=_artifact["entity_hints"] or None,
+                    retrieval_uses=_artifact["retrieval_uses"] or None,
+                    abstraction_level=_artifact["abstraction_level"],
+                    source_child_ids=_artifact["source_child_ids"] or None,
+                    summary_id=_artifact["summary_id"],
+                    source_hash=_artifact["source_hash"],
+                    summary_model=_artifact["summary_model"],
+                    summary_created_at=_artifact["summary_created_at"],
+                    validation_status=_artifact["validation_status"],
+                    repair_status=_artifact["repair_status"],
+                    quality_score=_artifact["quality_score"],
+                    quality_flags=_artifact["quality_flags"],
+                    retrieval_text=_artifact["retrieval_text"],
                 )
         except Exception as exc:
             if is_fatal_provider_error(exc):
@@ -574,24 +603,45 @@ async def summarize_parents(
                 source_child_ids=task.source_child_ids or [],
                 source_text=task.text,
             )
+            _artifact = canonical_parent_summary_fields(
+                _sem,
+                parent_id=task.parent_id,
+                doc_id=task.doc_id,
+                corpus_id=task.corpus_id,
+                source_text=task.text,
+                source_child_ids=task.source_child_ids or [],
+                summary_model="extractive_fallback",
+                repair_status="regenerated",
+            )
+            if not _artifact["summary"] or _artifact["validation_status"] != "valid":
+                continue
             results_by_parent_id[task.parent_id] = SummaryResult(
                 parent_id=task.parent_id,
                 doc_id=task.doc_id,
                 corpus_id=task.corpus_id,
                 source_tier=task.source_tier,
-                summary=summary,
+                summary=_artifact["summary"],
                 domain=domain,
                 topics=topics,
-                schema_version=_sem["schema_version"],
-                summary_type=_sem["summary_type"],
-                central_claim=_sem["central_claim"],
-                key_points=_sem["key_points"] or None,
-                main_mechanism=_sem["main_mechanism"],
-                concept_tags=(_sem["concept_tags"] or topics or None),
-                entity_hints=_sem["entity_hints"] or None,
-                retrieval_uses=_sem["retrieval_uses"] or None,
-                abstraction_level=_sem["abstraction_level"],
-                source_child_ids=_sem["source_child_ids"] or None,
+                schema_version=_artifact["schema_version"],
+                summary_type=_artifact["summary_type"],
+                central_claim=_artifact["central_claim"],
+                key_points=_artifact["key_points"] or None,
+                main_mechanism=_artifact["main_mechanism"],
+                concept_tags=(_artifact["concept_tags"] or topics or None),
+                entity_hints=_artifact["entity_hints"] or None,
+                retrieval_uses=_artifact["retrieval_uses"] or None,
+                abstraction_level=_artifact["abstraction_level"],
+                source_child_ids=_artifact["source_child_ids"] or None,
+                summary_id=_artifact["summary_id"],
+                source_hash=_artifact["source_hash"],
+                summary_model=_artifact["summary_model"],
+                summary_created_at=_artifact["summary_created_at"],
+                validation_status=_artifact["validation_status"],
+                repair_status=_artifact["repair_status"],
+                quality_score=_artifact["quality_score"],
+                quality_flags=_artifact["quality_flags"],
+                retrieval_text=_artifact["retrieval_text"],
             )
 
     results = [

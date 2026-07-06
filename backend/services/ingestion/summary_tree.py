@@ -281,6 +281,7 @@ async def build_and_store_tree(
                 continue
             from services.ingestion.summary_semantics import (
                 SEMANTIC_SUMMARY_INSTRUCTION,
+                canonical_parent_summary_fields,
                 parse_semantic_summary,
                 topic_key_for,
             )
@@ -305,27 +306,46 @@ async def build_and_store_tree(
                 source_child_ids=source_child_ids,
                 source_text=text,
             )
-            if sem["summary"]:
+            artifact = canonical_parent_summary_fields(
+                sem,
+                parent_id=str(r["parent_id"]),
+                doc_id=doc_id,
+                corpus_id=corpus_id,
+                source_text=text,
+                source_child_ids=source_child_ids,
+                summary_model="summary_tree_heal",
+                repair_status=sem.get("repair_status"),
+            )
+            if artifact["summary"] and artifact["validation_status"] == "valid":
                 domain = sem["domain"] or r.get("domain")
                 update_fields = {
-                    "summary": sem["summary"],
+                    "summary": artifact["summary"],
                     "domain": domain,
                     "semantic_chunk_type": sem["semantic_chunk_type"],
                     "key_terms": sem["key_terms"] or None,
                     "mechanisms": sem["mechanisms"] or None,
-                    "schema_version": sem["schema_version"],
-                    "summary_type": sem["summary_type"],
-                    "central_claim": sem["central_claim"],
-                    "key_points": sem["key_points"] or None,
-                    "main_mechanism": sem["main_mechanism"],
-                    "concept_tags": sem["concept_tags"] or None,
-                    "entity_hints": sem["entity_hints"] or None,
-                    "retrieval_uses": sem["retrieval_uses"] or None,
-                    "abstraction_level": sem["abstraction_level"],
-                    "source_child_ids": sem["source_child_ids"] or source_child_ids,
+                    "schema_version": artifact["schema_version"],
+                    "summary_type": artifact["summary_type"],
+                    "central_claim": artifact["central_claim"],
+                    "key_points": artifact["key_points"] or None,
+                    "main_mechanism": artifact["main_mechanism"],
+                    "concept_tags": artifact["concept_tags"] or None,
+                    "entity_hints": artifact["entity_hints"] or None,
+                    "retrieval_uses": artifact["retrieval_uses"] or None,
+                    "abstraction_level": artifact["abstraction_level"],
+                    "source_child_ids": artifact["source_child_ids"] or source_child_ids,
+                    "summary_id": artifact["summary_id"],
+                    "source_hash": artifact["source_hash"],
+                    "summary_model": artifact["summary_model"],
+                    "summary_created_at": artifact["summary_created_at"],
+                    "validation_status": artifact["validation_status"],
+                    "repair_status": artifact["repair_status"],
+                    "quality_score": artifact["quality_score"],
+                    "quality_flags": artifact["quality_flags"],
+                    "retrieval_text": artifact["retrieval_text"],
                     "topic_key": topic_key_for(domain, r.get("heading_path")),
                 }
-                r["summary"] = sem["summary"]
+                r["summary"] = artifact["summary"]
                 r["domain"] = domain
                 await db["parent_chunks"].update_one(
                     {"corpus_id": corpus_id, "parent_id": r["parent_id"]},

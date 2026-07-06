@@ -112,8 +112,17 @@ class ParentSummaryContractTests(unittest.TestCase):
                             "parent_id": "parent_1",
                             "source_tier": "tier_a",
                             "summary": "Parent-level retrieval replacement summary.",
+                            "retrieval_text": "Parent summaries provide recall.\nParent-level retrieval replacement summary.\nKey points: Child chunks are evidence.",
                             "summary_type": "parent_retrieval_replacement",
                             "schema_version": "parent_summary.v1",
+                            "summary_id": "sum_parent_unit",
+                            "source_hash": "a" * 64,
+                            "summary_model": "unit-model",
+                            "summary_created_at": "2026-07-06T00:00:00+00:00",
+                            "validation_status": "valid",
+                            "repair_status": "none",
+                            "quality_score": 0.91,
+                            "quality_flags": ["summary_short"],
                             "summary_text": "Parent-level retrieval replacement summary.",
                             "central_claim": "Parent summaries provide recall.",
                             "key_points": [
@@ -137,6 +146,14 @@ class ParentSummaryContractTests(unittest.TestCase):
         self.assertEqual(payload["schema_version"], "parent_summary.v1")
         self.assertEqual(payload["summary_type"], "parent_retrieval_replacement")
         self.assertEqual(payload["summary_text"], "Parent-level retrieval replacement summary.")
+        self.assertEqual(payload["retrieval_text"], "Parent summaries provide recall.\nParent-level retrieval replacement summary.\nKey points: Child chunks are evidence.")
+        self.assertEqual(payload["chunk_text"], payload["retrieval_text"])
+        self.assertEqual(payload["summary_id"], "sum_parent_unit")
+        self.assertEqual(payload["source_hash"], "a" * 64)
+        self.assertEqual(payload["summary_model"], "unit-model")
+        self.assertEqual(payload["validation_status"], "valid")
+        self.assertEqual(payload["repair_status"], "none")
+        self.assertEqual(payload["quality_score"], 0.91)
         self.assertEqual(payload["source_child_ids"], ["child_1", "child_2"])
         self.assertEqual(payload["chunk_type"], "summary")
 

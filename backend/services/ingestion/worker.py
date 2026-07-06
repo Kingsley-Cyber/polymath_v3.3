@@ -109,7 +109,10 @@ from services.ghost_b import (
 from services.ghost_b_local import extract_entities
 from services.facets import build_ingest_facet_profile
 from services.ingestion import dedup, docling_adapter, tier_chunker
-from services.ingestion.summary_semantics import topic_key_for as _topic_key_for
+from services.ingestion.summary_semantics import (
+    repair_parent_summary_row,
+    topic_key_for as _topic_key_for,
+)
 from services.ingestion.schema_lens import get_or_create_schema_lens
 from services.ingestion.section_classifier import (
     ChunkKind,
@@ -966,28 +969,43 @@ def _reconstruct_summaries_from_mongo(
         summary = (ep.get("summary") or "").strip()
         if not summary:
             continue
+        repaired = repair_parent_summary_row(
+            ep,
+            default_summary_model=ep.get("summary_model") or "legacy_mongo",
+        )
+        if repaired.get("validation_status") != "valid":
+            continue
         out.append(
             SummaryResult(
                 parent_id=p.parent_id,
                 doc_id=p.doc_id,
                 corpus_id=p.corpus_id,
                 source_tier=p.source_tier,
-                summary=summary,
+                summary=repaired["summary"],
                 domain=ep.get("domain"),
                 topics=ep.get("topics"),
                 semantic_chunk_type=ep.get("semantic_chunk_type"),
                 key_terms=ep.get("key_terms"),
                 mechanisms=ep.get("mechanisms"),
-                schema_version=ep.get("schema_version"),
-                summary_type=ep.get("summary_type"),
-                central_claim=ep.get("central_claim"),
-                key_points=ep.get("key_points"),
-                main_mechanism=ep.get("main_mechanism"),
-                concept_tags=ep.get("concept_tags"),
-                entity_hints=ep.get("entity_hints"),
-                retrieval_uses=ep.get("retrieval_uses"),
-                abstraction_level=ep.get("abstraction_level"),
-                source_child_ids=ep.get("source_child_ids") or ep.get("child_ids"),
+                schema_version=repaired.get("schema_version"),
+                summary_type=repaired.get("summary_type"),
+                central_claim=repaired.get("central_claim"),
+                key_points=repaired.get("key_points"),
+                main_mechanism=repaired.get("main_mechanism"),
+                concept_tags=repaired.get("concept_tags"),
+                entity_hints=repaired.get("entity_hints"),
+                retrieval_uses=repaired.get("retrieval_uses"),
+                abstraction_level=repaired.get("abstraction_level"),
+                source_child_ids=repaired.get("source_child_ids"),
+                summary_id=repaired.get("summary_id"),
+                source_hash=repaired.get("source_hash"),
+                summary_model=repaired.get("summary_model"),
+                summary_created_at=repaired.get("summary_created_at"),
+                validation_status=repaired.get("validation_status"),
+                repair_status=repaired.get("repair_status"),
+                quality_score=repaired.get("quality_score"),
+                quality_flags=repaired.get("quality_flags"),
+                retrieval_text=repaired.get("retrieval_text"),
             )
         )
     return out
@@ -1979,6 +1997,15 @@ def _build_parent_dicts(
                 "entity_hints": getattr(sr, "entity_hints", None) if sr else None,
                 "retrieval_uses": getattr(sr, "retrieval_uses", None) if sr else None,
                 "abstraction_level": getattr(sr, "abstraction_level", None) if sr else None,
+                "summary_id": getattr(sr, "summary_id", None) if sr else None,
+                "source_hash": getattr(sr, "source_hash", None) if sr else None,
+                "summary_model": getattr(sr, "summary_model", None) if sr else None,
+                "summary_created_at": getattr(sr, "summary_created_at", None) if sr else None,
+                "validation_status": getattr(sr, "validation_status", None) if sr else None,
+                "repair_status": getattr(sr, "repair_status", None) if sr else None,
+                "quality_score": getattr(sr, "quality_score", None) if sr else None,
+                "quality_flags": getattr(sr, "quality_flags", None) if sr else None,
+                "retrieval_text": getattr(sr, "retrieval_text", None) if sr else None,
                 "source_child_ids": (
                     getattr(sr, "source_child_ids", None)
                     if sr and getattr(sr, "source_child_ids", None)
@@ -2464,6 +2491,15 @@ async def _set_ingest_stage(
     )
 
 
+def _summary_vector_text(summary: SummaryResult) -> str:
+    """Compiled parent-summary text used for dense and sparse retrieval."""
+    return (
+        getattr(summary, "retrieval_text", None)
+        or getattr(summary, "summary", None)
+        or ""
+    )
+
+
 async def _embed_batch_for_doc(
     *,
     children,
@@ -2491,7 +2527,7 @@ async def _embed_batch_for_doc(
         )
     child_texts = [c.text for c in vector_children]
     summary_list = summaries or []
-    summary_texts = [s.summary for s in summary_list]
+    summary_texts = [_summary_vector_text(s) for s in summary_list]
     all_texts = [*child_texts, *summary_texts]
     if not all_texts:
         return {}, {}
@@ -2652,6 +2688,7 @@ async def _write_qdrant_for_doc(
                     "filename": filename,
                     "doc_name": filename,
                     "summary": s.summary,
+                    "retrieval_text": getattr(s, "retrieval_text", None),
                     "schema_version": getattr(s, "schema_version", None),
                     "summary_type": getattr(s, "summary_type", None),
                     "central_claim": getattr(s, "central_claim", None),
@@ -2662,6 +2699,14 @@ async def _write_qdrant_for_doc(
                     "retrieval_uses": getattr(s, "retrieval_uses", None),
                     "abstraction_level": getattr(s, "abstraction_level", None),
                     "source_child_ids": getattr(s, "source_child_ids", None),
+                    "summary_id": getattr(s, "summary_id", None),
+                    "source_hash": getattr(s, "source_hash", None),
+                    "summary_model": getattr(s, "summary_model", None),
+                    "summary_created_at": getattr(s, "summary_created_at", None),
+                    "validation_status": getattr(s, "validation_status", None),
+                    "repair_status": getattr(s, "repair_status", None),
+                    "quality_score": getattr(s, "quality_score", None),
+                    "quality_flags": getattr(s, "quality_flags", None),
                     "heading_path": hp_map.get(s.parent_id),
                     "user_id": user_id,
                     "chunk_kind": kind_map.get(s.parent_id, ChunkKind.BODY),
@@ -3852,7 +3897,7 @@ async def run_ingest_job(
                         if c.chunk_id in vec_map
                     },
                     {
-                        s.parent_id: _bm25_encode(s.summary)
+                        s.parent_id: _bm25_encode(_summary_vector_text(s))
                         for s in (summaries or [])
                     },
                 )
