@@ -1666,6 +1666,7 @@ async def run_local_batch(
             )
             if not item:
                 return
+            await refresh_batch_counts(db, batch_id, user_id=user_id)
             async with sem:
                 # Lease heartbeat covers the WHOLE hold — including the
                 # admission wait inside _process_local_item — so a live doc
