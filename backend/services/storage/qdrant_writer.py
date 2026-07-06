@@ -640,6 +640,18 @@ async def upsert_children(
             "content_facet_confidence": c.get("content_facet_confidence"),
             "doc_facet_ids": c.get("doc_facet_ids") or [],
             "facet_schema_version": c.get("facet_schema_version") or "",
+            # Graph-promotion fields are filled after extraction by promote_doc().
+            # Keep empty defaults on first write so every active point has the
+            # same retrieval contract shape.
+            "concepts": c.get("concepts") or [],
+            "entity_ids": c.get("entity_ids") or [],
+            "relation_predicates": c.get("relation_predicates") or [],
+            "relation_families": c.get("relation_families") or [],
+            "fact_types": c.get("fact_types") or [],
+            "related_entities": c.get("related_entities") or [],
+            "has_relations": bool(c.get("has_relations", False)),
+            "extract_schema_version": c.get("extract_schema_version") or "",
+            "promote_version": c.get("promote_version") or "",
         }
         for c in chunks
     ]

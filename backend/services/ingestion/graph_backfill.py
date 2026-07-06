@@ -124,8 +124,26 @@ def _graph_parent_count(doc: dict) -> int:
     return len(parents) if isinstance(parents, list) else 0
 
 
+async def _chunk_parent_map(
+    db: AsyncIOMotorDatabase,
+    *,
+    corpus_id: str,
+    doc_id: str,
+) -> dict[str, str]:
+    rows = await db["chunks"].find(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {"chunk_id": 1, "parent_id": 1, "_id": 0},
+    ).to_list(length=None)
+    return {
+        str(row.get("chunk_id") or ""): str(row.get("parent_id") or "")
+        for row in rows
+        if row.get("chunk_id")
+    }
+
+
 async def _write_graph_results(
     *,
+    db: AsyncIOMotorDatabase,
     neo4j_driver: Any,
     doc: dict,
     corpus_id: str,
@@ -134,6 +152,7 @@ async def _write_graph_results(
     extraction_results: list[ExtractionResult],
     all_chunk_ids: list[str],
     metrics: dict,
+    chunk_parent_ids: dict[str, str] | None = None,
     parent_count: int | None = None,
 ) -> None:
     await write_document_graph(
@@ -162,6 +181,8 @@ async def _write_graph_results(
             if metrics.get("requested_chunks") is not None
             else None
         ),
+        db=db,
+        chunk_parent_ids=chunk_parent_ids,
     )
 
 
@@ -423,7 +444,9 @@ async def backfill_failed_graph_chunks(
             )
         ]
         doc_metrics = doc.get("ghost_b_metrics") or {}
+        parent_by_chunk = await _chunk_parent_map(db, corpus_id=corpus_id, doc_id=doc_id)
         await _write_graph_results(
+            db=db,
             neo4j_driver=neo4j_driver,
             doc=doc,
             corpus_id=corpus_id,
@@ -431,6 +454,7 @@ async def backfill_failed_graph_chunks(
             user_id=user_id,
             extraction_results=staged_results,
             all_chunk_ids=all_chunk_ids,
+            chunk_parent_ids=parent_by_chunk,
             metrics=doc_metrics,
             parent_count=parent_count,
         )
@@ -476,7 +500,9 @@ async def backfill_failed_graph_chunks(
                 call_metrics=[],
                 models=[],
             )
+            parent_by_chunk = await _chunk_parent_map(db, corpus_id=corpus_id, doc_id=doc_id)
             await _write_graph_results(
+                db=db,
                 neo4j_driver=neo4j_driver,
                 doc=doc,
                 corpus_id=corpus_id,
@@ -484,6 +510,7 @@ async def backfill_failed_graph_chunks(
                 user_id=user_id,
                 extraction_results=[],
                 all_chunk_ids=all_chunk_ids,
+                chunk_parent_ids=parent_by_chunk,
                 metrics=metrics,
             )
             await db["documents"].update_one(
@@ -530,7 +557,9 @@ async def backfill_failed_graph_chunks(
             previous_metrics={},
             retry_metrics=report.metrics,
         )
+        parent_by_chunk = await _chunk_parent_map(db, corpus_id=corpus_id, doc_id=doc_id)
         await _write_graph_results(
+            db=db,
             neo4j_driver=neo4j_driver,
             doc=doc,
             corpus_id=corpus_id,
@@ -538,6 +567,7 @@ async def backfill_failed_graph_chunks(
             user_id=user_id,
             extraction_results=staged_results,
             all_chunk_ids=all_chunk_ids,
+            chunk_parent_ids=parent_by_chunk,
             metrics=metrics,
             parent_count=parent_count,
         )
@@ -656,6 +686,7 @@ async def backfill_failed_graph_chunks(
             or doc_metrics.get("schema_lens")
         )
 
+        parent_by_chunk = await _chunk_parent_map(db, corpus_id=corpus_id, doc_id=doc_id)
         await write_document_graph(
             driver=neo4j_driver,
             doc_id=doc_id,
@@ -670,6 +701,8 @@ async def backfill_failed_graph_chunks(
             ghost_b_success_rate=float(success_rate) if success_rate is not None else None,
             ghost_b_extracted=int(extracted) if extracted is not None else None,
             ghost_b_total=int(total) if total is not None else None,
+            db=db,
+            chunk_parent_ids=parent_by_chunk,
         )
 
     warnings = _clean_graph_warnings((doc.get("write_state") or {}).get("warnings") or [])

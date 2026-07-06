@@ -20,6 +20,7 @@ import re
 import unicodedata
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from neo4j import AsyncDriver
 
@@ -44,6 +45,22 @@ ENTITY_TYPE_OVERRIDES_PATH = Path(__file__).with_name("entity_type_overrides.jso
 ONTOLOGY_VERSION = "2026-04-25-v3"
 ENTITY_ID_PREFIX = "entity"
 GRAPH_PROMOTE_VERSION = "polymath.promote.v1"
+GENERIC_ENTITY_TERMS = {
+    "agent",
+    "attention",
+    "class",
+    "data",
+    "example",
+    "field",
+    "memory",
+    "method",
+    "model",
+    "object",
+    "process",
+    "system",
+    "user",
+    "value",
+}
 ENTITY_TYPE_PRIORITY = [
     # Phase 5 — scoped Roblox/Luau types come BEFORE the generic universal
     # types so an entity observed as both "RobloxService" (from Phase 5's
@@ -839,6 +856,105 @@ def entity_id_from_name(canonical_name: str, entity_type: str | None = None) -> 
     return f"{ENTITY_ID_PREFIX}:{_slugify_name(canonical_name)}"
 
 
+def is_generic_entity_name(canonical_name: str) -> bool:
+    normalized = canonicalize_entity_name(canonical_name)
+    return normalized in GENERIC_ENTITY_TERMS
+
+
+def _support_id_for_row(
+    *,
+    edge_key: str,
+    corpus_id: str,
+    doc_id: str,
+    parent_id: str,
+    chunk_id: str,
+) -> str:
+    raw = "\x1f".join([edge_key, corpus_id, doc_id, parent_id, chunk_id])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _relation_support_records(
+    *,
+    relation_rows: list[dict],
+    corpus_id: str,
+    doc_id: str,
+    chunk_parent_ids: dict[str, str] | None,
+) -> list[dict]:
+    parent_lookup = chunk_parent_ids or {}
+    records: list[dict] = []
+    for row in relation_rows:
+        chunk_id = str(row.get("chunk_id") or "")
+        if not chunk_id:
+            continue
+        source_entity_id = str(row.get("subject_id") or "")
+        target_entity_id = str(row.get("object_id") or "")
+        predicate = str(row.get("predicate") or "")
+        if not source_entity_id or not target_entity_id or not predicate:
+            continue
+        row_doc_id = str(row.get("doc_id") or doc_id)
+        parent_id = str(row.get("parent_id") or parent_lookup.get(chunk_id) or "")
+        edge_key = "|".join([source_entity_id, predicate, target_entity_id])
+        records.append({
+            "support_id": _support_id_for_row(
+                edge_key=edge_key,
+                corpus_id=corpus_id,
+                doc_id=row_doc_id,
+                parent_id=parent_id,
+                chunk_id=chunk_id,
+            ),
+            "edge_key": edge_key,
+            "source_entity_id": source_entity_id,
+            "predicate": predicate,
+            "target_entity_id": target_entity_id,
+            "corpus_id": corpus_id,
+            "doc_id": row_doc_id,
+            "parent_id": parent_id,
+            "chunk_id": chunk_id,
+            "evidence_quote": row.get("evidence_phrase") or "",
+            "confidence": float(row.get("confidence") or 0.0),
+            "relation_family": row.get("relation_family") or "",
+            "source_predicate": row.get("source_predicate") or predicate,
+            "relation_cue": row.get("relation_cue") or "",
+            "validation_status": row.get("validation_status") or "",
+            "extract_schema_version": row.get("schema_version") or "polymath.extract.v1",
+            "promote_version": GRAPH_PROMOTE_VERSION,
+        })
+    return records
+
+
+async def _refresh_entity_aggregates(session, entity_ids: list[str]) -> None:
+    unique_ids = [eid for eid in dict.fromkeys(entity_ids) if eid]
+    for idx in range(0, len(unique_ids), 1000):
+        batch = unique_ids[idx: idx + 1000]
+        await session.run(
+            """
+            UNWIND $entity_ids AS entity_id
+            MATCH (e:Entity {entity_id: entity_id})
+            WITH e, toLower(coalesce(e.canonical_name, e.normalized_name, e.display_name, '')) AS entity_name
+            OPTIONAL MATCH (c:Chunk)-[:MENTIONS]->(e)
+            WITH e, entity_name,
+                 count(DISTINCT c.chunk_id) AS mentions,
+                 [cid IN collect(DISTINCT c.corpus_id) WHERE cid IS NOT NULL] AS source_corpora
+            OPTIONAL MATCH (e)-[r:RELATES_TO]-()
+            WITH e, entity_name, mentions, source_corpora, count(DISTINCT r) AS graph_degree,
+                 entity_name IN $generic_terms AS is_generic
+            SET e.source_corpora = source_corpora,
+                e.corpus_count = size(source_corpora),
+                e.mentions = mentions,
+                e.graph_degree = graph_degree,
+                e.generic_entity = coalesce(e.generic_entity, is_generic),
+                e.ambiguous = coalesce(e.ambiguous, is_generic),
+                e.needs_review = coalesce(e.needs_review, is_generic),
+                e.graph_expansion_allowed = CASE
+                    WHEN is_generic THEN false
+                    ELSE coalesce(e.graph_expansion_allowed, true)
+                END
+            """,
+            entity_ids=batch,
+            generic_terms=list(GENERIC_ENTITY_TERMS),
+        )
+
+
 async def _resolve_entity_id_redirects(session, ids: list[str]) -> dict[str, str]:
     """Map merged-away entity ids to their live survivors before graph writes.
 
@@ -1461,6 +1577,16 @@ async def delete_document_graph(
 ) -> None:
     """Delete Neo4j graph state for one document and prune shared edges."""
     async with driver.session() as session:
+        affected_res = await session.run(
+            """
+            MATCH (c:Chunk {doc_id: $doc_id, corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)
+            RETURN collect(DISTINCT e.entity_id) AS entity_ids
+            """,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+        )
+        affected_row = await affected_res.single()
+        affected_entity_ids = list((affected_row or {}).get("entity_ids") or [])
         await _prune_relates_to_for_document(
             session,
             corpus_id=corpus_id,
@@ -1475,6 +1601,8 @@ async def delete_document_graph(
             corpus_id=corpus_id,
         )
         await _delete_orphan_entities(session)
+        if affected_entity_ids:
+            await _refresh_entity_aggregates(session, affected_entity_ids)
 
 
 async def delete_corpus_graph(
@@ -1489,6 +1617,15 @@ async def delete_corpus_graph(
     timeout AND can exhaust Neo4j's heap. Deleting in 10k auto-commit batches
     keeps each transaction small and bounded — loop until none remain."""
     async with driver.session() as session:
+        affected_res = await session.run(
+            """
+            MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)
+            RETURN collect(DISTINCT e.entity_id) AS entity_ids
+            """,
+            corpus_id=corpus_id,
+        )
+        affected_row = await affected_res.single()
+        affected_entity_ids = list((affected_row or {}).get("entity_ids") or [])
         await _prune_relates_to_for_corpus(session, corpus_id=corpus_id)
         while True:
             res = await session.run(
@@ -1504,6 +1641,8 @@ async def delete_corpus_graph(
             if not row or int(row["deleted"]) == 0:
                 break
         await _delete_orphan_entities(session)
+        if affected_entity_ids:
+            await _refresh_entity_aggregates(session, affected_entity_ids)
 
 
 async def write_document_graph(
@@ -1523,6 +1662,8 @@ async def write_document_graph(
     ghost_b_success_rate: float | None = None,
     ghost_b_extracted: int | None = None,
     ghost_b_total: int | None = None,
+    db: Any | None = None,
+    chunk_parent_ids: dict[str, str] | None = None,
 ) -> None:
     """
     Write the full graph for one document after GHOST B completes.
@@ -1694,6 +1835,7 @@ async def write_document_graph(
             "domain_type_root": ontology.get("domain_type_root"),
             "canonical_family": ontology.get("canonical_family"),
             "ontology_version": ontology.get("ontology_version"),
+            "generic_entity": is_generic_entity_name(canonical),
             # Pt 10c — query-facing fields for Mode B entity search and
             # chat-citation context. Both default-safe (empty list / "") on
             # pre-Pt-10c entities so existing data + Cypher coalesces work
@@ -1728,6 +1870,7 @@ async def write_document_graph(
                 "normalized_name": canonical_normalized,
                 "canonical_name": identity["canonical_name"],
                 "display_name": identity["display_name"],
+                "generic_entity": identity["generic_entity"],
                 "surface_form": entity.surface_form or entity.canonical_name,
                 # PRD parity — keep the chunk-grounded evidence phrase on the
                 # MENTIONS edge so downstream retrieval can render "this is
@@ -1887,6 +2030,35 @@ async def write_document_graph(
             fact_rows=fact_rows,
         )
 
+        if db is not None:
+            try:
+                from services.storage.mongo_writer import replace_relation_support_for_document
+
+                support_records = _relation_support_records(
+                    relation_rows=relation_rows,
+                    corpus_id=corpus_id,
+                    doc_id=doc_id,
+                    chunk_parent_ids=chunk_parent_ids,
+                )
+                support_count = await replace_relation_support_for_document(
+                    db,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    records=support_records,
+                )
+                logger.info(
+                    "Mongo relation support records refreshed: doc=%s corpus=%s count=%d",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    support_count,
+                )
+            except Exception:
+                logger.exception(
+                    "Mongo relation support record refresh failed: doc=%s corpus=%s",
+                    doc_id[:12],
+                    corpus_id[:8],
+                )
+
         # Chunks + HAS_CHUNK edges.
         if chunk_rows:
             await session.run(
@@ -1974,6 +2146,13 @@ async def write_document_graph(
                         WHEN row.definitional_phrase IS NULL OR row.definitional_phrase = '' THEN coalesce(e.definitional_phrase, '')
                         WHEN coalesce(e.definitional_phrase, '') = '' THEN row.definitional_phrase
                         ELSE e.definitional_phrase
+                    END,
+                    e.generic_entity = coalesce(e.generic_entity, false) OR row.generic_entity,
+                    e.ambiguous = coalesce(e.ambiguous, false) OR row.generic_entity,
+                    e.needs_review = coalesce(e.needs_review, false) OR row.generic_entity,
+                    e.graph_expansion_allowed = CASE
+                        WHEN row.generic_entity THEN false
+                        ELSE coalesce(e.graph_expansion_allowed, true)
                     END
                 WITH e, row
                 SET e.observed_entity_types = reduce(
@@ -2148,6 +2327,15 @@ async def write_document_graph(
                 rows=fact_rows,
                 corpus_id=corpus_id,
             )
+
+        touched_entity_ids: list[str] = []
+        touched_entity_ids.extend(row.get("entity_id", "") for row in mention_rows)
+        for row in relation_rows:
+            touched_entity_ids.append(row.get("subject_id", ""))
+            touched_entity_ids.append(row.get("object_id", ""))
+        touched_entity_ids.extend(row.get("subject_entity_id", "") for row in fact_rows)
+        if touched_entity_ids:
+            await _refresh_entity_aggregates(session, touched_entity_ids)
 
     entity_count = sum(len(r.entities) for r in extraction_results)
     relation_count = sum(len(r.relations) for r in extraction_results)

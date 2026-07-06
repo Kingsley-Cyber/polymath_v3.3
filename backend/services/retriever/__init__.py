@@ -470,8 +470,10 @@ class RetrieverOrchestrator:
             db = conversation_service._db
             if db is None:
                 return corpus_ids, []
+            from services.storage.record_status import with_active_records
+
             docs = await db["corpora"].find(
-                {"corpus_id": {"$in": corpus_ids}}, {"corpus_id": 1}
+                with_active_records({"corpus_id": {"$in": corpus_ids}}), {"corpus_id": 1}
             ).to_list(length=None)
             existing = {d["corpus_id"] for d in docs}
             filtered = [c for c in corpus_ids if c in existing]
@@ -629,8 +631,10 @@ class RetrieverOrchestrator:
             db = conversation_service._db
             if db is None:
                 return None
+            from services.storage.record_status import with_active_records
+
             doc = await db["corpora"].find_one(
-                {"corpus_id": cid},
+                with_active_records({"corpus_id": cid}),
                 {"default_ingestion_config": 1, "_id": 0},
             )
             cfg = (doc or {}).get("default_ingestion_config")
@@ -666,9 +670,10 @@ class RetrieverOrchestrator:
             db = conversation_service._db
             if db is None:
                 return requested_tier, None
+            from services.storage.record_status import with_active_records
 
             corpus_docs = await db["corpora"].find(
-                {"corpus_id": {"$in": corpus_ids}}
+                with_active_records({"corpus_id": {"$in": corpus_ids}})
             ).to_list(length=None)
 
             if len(corpus_docs) < len(corpus_ids):

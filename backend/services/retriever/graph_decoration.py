@@ -441,12 +441,16 @@ class GraphDecorator:
         // Pt 10d — graph decoration over winners (RELATES_TO walk)
         MATCH (winner:Chunk)-[m:MENTIONS]->(seed:Entity)
         WHERE winner.chunk_id IN $winning_chunk_ids
+          AND coalesce(seed.generic_entity, false) = false
+          AND coalesce(seed.graph_expansion_allowed, true) <> false
         WITH winner, seed, max(coalesce(m.confidence, 0.5)) AS mention_confidence
         ORDER BY mention_confidence DESC
         WITH winner, collect(seed)[..$seed_entities_per_chunk] AS seed_entities
         UNWIND seed_entities AS seed
         MATCH (seed)-[r:RELATES_TO]-(neighbor:Entity)
         WHERE seed <> neighbor
+          AND coalesce(neighbor.generic_entity, false) = false
+          AND coalesce(neighbor.graph_expansion_allowed, true) <> false
           AND r.eligible_for_synthesis = true
           AND r.edge_strength IN ['strong', 'repaired']
           AND (size($wanted_families) = 0 OR r.relation_family IN $wanted_families)
@@ -576,6 +580,10 @@ class GraphDecorator:
         MATCH (winner:Chunk)-[:MENTIONS]->(seed:Entity)-[r:CALLS]-(neighbor:Entity)
         WHERE winner.chunk_id IN $winning_chunk_ids
           AND seed <> neighbor
+          AND coalesce(seed.generic_entity, false) = false
+          AND coalesce(seed.graph_expansion_allowed, true) <> false
+          AND coalesce(neighbor.generic_entity, false) = false
+          AND coalesce(neighbor.graph_expansion_allowed, true) <> false
         """
         if corpus_ids:
             cypher += "  AND any(cid IN $corpus_ids WHERE cid IN coalesce(r.corpus_ids, []))\n"

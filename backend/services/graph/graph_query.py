@@ -618,6 +618,7 @@ async def expand_subgraph(
     WHERE src.entity_id IN $frontier_ids
       AND NOT other.entity_id IN $seen_ids
       AND $corpus_id IN coalesce(r.corpus_ids, [])
+      AND coalesce(other.graph_expansion_allowed, true) <> false
     WITH src, other, r,
          coalesce(r.predicate, 'related_to') AS predicate,
          coalesce(r.confidence, 0.0) AS rel_confidence,
@@ -1031,6 +1032,7 @@ async def find_bridges(
     MATCH (seed)-[r:RELATES_TO]-(bridge:Entity)
     WHERE NOT bridge.entity_id IN $entity_ids
       AND $corpus_id IN coalesce(r.corpus_ids, [])
+      AND coalesce(bridge.graph_expansion_allowed, true) <> false
     WITH seed, bridge, r,
          coalesce(r.predicate, 'related_to') AS predicate,
          coalesce(r.confidence, 0.0) AS rel_confidence,

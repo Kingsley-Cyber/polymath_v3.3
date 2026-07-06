@@ -2,11 +2,33 @@
 # MongoDB index definitions for all collections.
 # Called once at startup. Idempotent — safe to call on every restart.
 
+import asyncio
 import logging
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.errors import OperationFailure
 
 logger = logging.getLogger(__name__)
+
+
+async def _ensure_index(collection, *args, **kwargs):
+    """Create an index, retrying if another process aborts the build mid-startup."""
+    for attempt in range(4):
+        try:
+            return await collection.create_index(*args, **kwargs)
+        except OperationFailure as exc:
+            if exc.code != 276 and "IndexBuildAborted" not in str(exc):
+                raise
+            if attempt == 3:
+                raise
+            delay = 0.5 * (attempt + 1)
+            logger.warning(
+                "Mongo index build aborted for %s; retrying in %.1fs: %s",
+                collection.name,
+                delay,
+                exc,
+            )
+            await asyncio.sleep(delay)
 
 
 async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
@@ -22,25 +44,26 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
         - (conversation_id, created_at)  (ordered history retrieval)
     """
     # --- conversations ---
-    await db["conversations"].create_index("updated_at")
-    await db["conversations"].create_index("created_at")
+    await _ensure_index(db["conversations"], "updated_at")
+    await _ensure_index(db["conversations"], "created_at")
     logger.info("Indexes ensured: conversations")
 
     # --- messages ---
-    await db["messages"].create_index("conversation_id")
-    await db["messages"].create_index(
+    await _ensure_index(db["messages"], "conversation_id")
+    await _ensure_index(
+        db["messages"],
         [("conversation_id", 1), ("created_at", 1)],
         name="messages_conv_time",
     )
     logger.info("Indexes ensured: messages")
 
     # --- users ---
-    await db["users"].create_index("username", unique=True)
+    await _ensure_index(db["users"], "username", unique=True)
     logger.info("Indexes ensured: users (unique username)")
 
     # --- corpora ---
-    await db["corpora"].create_index("corpus_id", unique=True)
-    await db["corpora"].create_index("user_id")
+    await _ensure_index(db["corpora"], "corpus_id", unique=True)
+    await _ensure_index(db["corpora"], "user_id")
     logger.info("Indexes ensured: corpora")
 
     # --- documents ---
@@ -51,12 +74,13 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
         await db["documents"].drop_index("doc_id_1")
     except Exception:
         pass
-    await db["documents"].create_index(
+    await _ensure_index(
+        db["documents"],
         [("corpus_id", 1), ("doc_id", 1)], unique=True, name="corpus_doc_unique"
     )
-    await db["documents"].create_index("doc_id")  # non-unique cross-corpus lookup
-    await db["documents"].create_index("corpus_id")
-    await db["documents"].create_index("user_id")
+    await _ensure_index(db["documents"], "doc_id")  # non-unique cross-corpus lookup
+    await _ensure_index(db["documents"], "corpus_id")
+    await _ensure_index(db["documents"], "user_id")
     logger.info("Indexes ensured: documents")
 
     # --- chunks ---
@@ -66,13 +90,14 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
         await db["chunks"].drop_index("chunk_id_1")
     except Exception:
         pass
-    await db["chunks"].create_index(
+    await _ensure_index(
+        db["chunks"],
         [("corpus_id", 1), ("chunk_id", 1)], unique=True, name="corpus_chunk_unique"
     )
-    await db["chunks"].create_index("chunk_id")  # non-unique cross-corpus lookup
-    await db["chunks"].create_index("parent_id")
-    await db["chunks"].create_index("doc_id")
-    await db["chunks"].create_index("user_id")
+    await _ensure_index(db["chunks"], "chunk_id")  # non-unique cross-corpus lookup
+    await _ensure_index(db["chunks"], "parent_id")
+    await _ensure_index(db["chunks"], "doc_id")
+    await _ensure_index(db["chunks"], "user_id")
     # CRITICAL: language_override="_text_language" (a field that never exists
     # in our chunk docs) disables MongoDB's per-doc stemmer-override behavior.
     # Without this, MongoDB looks at the chunk's `language` field (which we
@@ -91,7 +116,8 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     except Exception as exc:  # pragma: no cover - best-effort cleanup
         logger.warning("Could not check legacy chunks text index: %s", exc)
     try:
-        await db["chunks"].create_index(
+        await _ensure_index(
+            db["chunks"],
             [("text", "text"), ("heading_path", "text")],
             name="chunks_text_search",
             weights={"heading_path": 5, "text": 1},
@@ -105,83 +131,119 @@ async def create_all_indexes(db: AsyncIOMotorDatabase) -> None:
     # --- parent_chunks ---
     # Parent rows are the hydration/summarization unit. They used to live
     # inline in documents.parent_chunks, which breaks on large books.
-    await db["parent_chunks"].create_index(
+    await _ensure_index(
+        db["parent_chunks"],
         [("corpus_id", 1), ("doc_id", 1), ("parent_id", 1)],
         unique=True,
         name="corpus_doc_parent_unique",
     )
-    await db["parent_chunks"].create_index(
+    await _ensure_index(
+        db["parent_chunks"],
         [("corpus_id", 1), ("doc_id", 1)],
         name="parent_chunks_doc",
     )
-    await db["parent_chunks"].create_index("parent_id")
+    await _ensure_index(db["parent_chunks"], "parent_id")
     logger.info("Indexes ensured: parent_chunks")
 
     # --- ghost_b_extractions ---
     # One durable Ghost B checkpoint per child chunk. Successful rows feed
     # graph backfill; error rows can be retried independently.
-    await db["ghost_b_extractions"].create_index(
+    await _ensure_index(
+        db["ghost_b_extractions"],
         [("corpus_id", 1), ("doc_id", 1), ("chunk_id", 1)],
         unique=True,
         name="corpus_doc_chunk_extraction_unique",
     )
-    await db["ghost_b_extractions"].create_index(
+    await _ensure_index(
+        db["ghost_b_extractions"],
         [("corpus_id", 1), ("doc_id", 1), ("status", 1)],
         name="ghost_b_extractions_doc_status",
     )
-    await db["ghost_b_extractions"].create_index("chunk_id")
+    await _ensure_index(db["ghost_b_extractions"], "chunk_id")
     logger.info("Indexes ensured: ghost_b_extractions")
+
+    # --- relation support records ---
+    # Canonical per-chunk support rows for graph relations. These are replaced
+    # per document during graph promotion and filtered by corpus during delete.
+    await _ensure_index(
+        db["relation_support_records"],
+        "support_id",
+        unique=True,
+        name="relation_support_support_id_unique",
+    )
+    await _ensure_index(
+        db["relation_support_records"],
+        [("corpus_id", 1), ("doc_id", 1), ("status", 1)],
+        name="relation_support_doc_status",
+    )
+    await _ensure_index(
+        db["relation_support_records"],
+        [("corpus_id", 1), ("status", 1)],
+        name="relation_support_corpus_status",
+    )
+    await _ensure_index(
+        db["relation_support_records"],
+        [("edge_key", 1), ("status", 1), ("corpus_id", 1)],
+        name="relation_support_edge_status",
+    )
+    await _ensure_index(db["relation_support_records"], "chunk_id")
+    logger.info("Indexes ensured: relation_support_records")
 
     # --- ghost_b_error_events ---
     # Sampled forensic rows for Ghost B extraction failures. These are small by
     # design: no child text, only raw output snippets plus failure metadata.
-    await db["ghost_b_error_events"].create_index("run_id")
-    await db["ghost_b_error_events"].create_index("doc_id")
-    await db["ghost_b_error_events"].create_index(
+    await _ensure_index(db["ghost_b_error_events"], "run_id")
+    await _ensure_index(db["ghost_b_error_events"], "doc_id")
+    await _ensure_index(
+        db["ghost_b_error_events"],
         [("corpus_id", 1), ("doc_id", 1), ("created_at", -1)],
         name="ghost_b_error_doc_time",
     )
-    await db["ghost_b_error_events"].create_index(
+    await _ensure_index(
+        db["ghost_b_error_events"],
         [("event", 1), ("created_at", -1)],
         name="ghost_b_error_event_time",
     )
     logger.info("Indexes ensured: ghost_b_error_events")
 
     # --- ingest batches ---
-    await db["ingest_batches"].create_index("batch_id", unique=True)
-    await db["ingest_batches"].create_index([("user_id", 1), ("created_at", -1)])
-    await db["ingest_batches"].create_index([("corpus_id", 1), ("created_at", -1)])
-    await db["ingest_batch_items"].create_index("item_id", unique=True)
-    await db["ingest_batch_items"].create_index(
+    await _ensure_index(db["ingest_batches"], "batch_id", unique=True)
+    await _ensure_index(db["ingest_batches"], [("user_id", 1), ("created_at", -1)])
+    await _ensure_index(db["ingest_batches"], [("corpus_id", 1), ("created_at", -1)])
+    await _ensure_index(db["ingest_batch_items"], "item_id", unique=True)
+    await _ensure_index(
+        db["ingest_batch_items"],
         [("batch_id", 1), ("ordinal", 1)],
         name="ingest_batch_items_order",
     )
-    await db["ingest_batch_items"].create_index(
+    await _ensure_index(
+        db["ingest_batch_items"],
         [("batch_id", 1), ("status", 1), ("ordinal", 1)],
         name="ingest_batch_items_status_order",
     )
-    await db["ingest_batch_items"].create_index(
+    await _ensure_index(
+        db["ingest_batch_items"],
         [("status", 1), ("lease_until", 1)],
         name="ingest_batch_items_stale_lease",
     )
-    await db["ingest_batch_items"].create_index("doc_id")
+    await _ensure_index(db["ingest_batch_items"], "doc_id")
     logger.info("Indexes ensured: ingest_batches / ingest_batch_items")
 
     # --- settings ---
-    await db["settings"].create_index("user_id", unique=True)
+    await _ensure_index(db["settings"], "user_id", unique=True)
     logger.info("Indexes ensured: settings (unique user_id)")
 
     # --- model_profiles (Phase 19.3 — custom chat model profiles) ---
-    await db["model_profiles"].create_index("profile_id", unique=True)
-    await db["model_profiles"].create_index("user_id")
+    await _ensure_index(db["model_profiles"], "profile_id", unique=True)
+    await _ensure_index(db["model_profiles"], "user_id")
     logger.info("Indexes ensured: model_profiles")
 
     # --- model_pool (Phase E — unified model pool) ---
-    await db["model_pool"].create_index("entry_id", unique=True)
-    await db["model_pool"].create_index("user_id")
-    await db["model_pool"].create_index([("user_id", 1), ("enabled", 1)])
+    await _ensure_index(db["model_pool"], "entry_id", unique=True)
+    await _ensure_index(db["model_pool"], "user_id")
+    await _ensure_index(db["model_pool"], [("user_id", 1), ("enabled", 1)])
     logger.info("Indexes ensured: model_pool")
 
     # --- user_query_preferences (Phase F — per-user role→pool mappings + ollama exclusions) ---
-    await db["user_query_preferences"].create_index("user_id", unique=True)
+    await _ensure_index(db["user_query_preferences"], "user_id", unique=True)
     logger.info("Indexes ensured: user_query_preferences (unique user_id)")

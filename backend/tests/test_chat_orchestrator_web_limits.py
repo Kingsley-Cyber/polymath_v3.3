@@ -15,11 +15,14 @@ from services.chat_orchestrator import (
     _cap_web_sources_for_turn,
     _classify_web_evidence_sufficiency,
     _dedupe_sources_for_context,
+    _filter_facts_to_selected_corpora,
+    _filter_sources_to_selected_corpora,
+    _format_evidence_packet_block,
     _looks_like_raw_tool_request_content,
     _limit_tool_calls_for_turn,
     _resolve_web_evidence_options,
 )
-from models.schemas import ChatRequest, ModelOverrides, SourceChunk
+from models.schemas import ChatRequest, ModelOverrides, SourceChunk, SourceFact
 
 
 def _tool_call(name: str, call_id: str) -> dict:
@@ -37,11 +40,82 @@ def _tool_schema(name: str) -> dict:
     }
 
 
+def _corpus_chunk(chunk_id: str, corpus_id: str, text: str) -> SourceChunk:
+    return SourceChunk(
+        chunk_id=chunk_id,
+        parent_id=f"parent-{chunk_id}",
+        doc_id=f"doc-{chunk_id}",
+        corpus_id=corpus_id,
+        text=text,
+        summary=text,
+        score=0.8,
+        source_tier="qdrant_mongo_graph",
+        doc_name=f"{chunk_id}.md",
+    )
+
+
+def test_final_source_scope_keeps_selected_corpus_and_web_only():
+    selected = _corpus_chunk("a", "corpus-a", "Selected corpus evidence about GLiNER.")
+    leaked = _corpus_chunk("b", "corpus-b", "Deselected corpus evidence about GLiNER.")
+    web = SourceChunk(
+        chunk_id="web:https://example.test",
+        parent_id="web-parent",
+        doc_id="https://example.test",
+        corpus_id="live-web",
+        text="Web evidence stays available when web/tool mode is active.",
+        summary="web",
+        score=0.6,
+        source_tier="web_search",
+        doc_name="example.test",
+    )
+
+    filtered = _filter_sources_to_selected_corpora(
+        [selected, leaked, web],
+        ["corpus-a"],
+    )
+
+    assert [source.chunk_id for source in filtered] == [
+        "a",
+        "web:https://example.test",
+    ]
+
+
+def test_evidence_packet_never_formats_deselected_corpus_source():
+    selected = _corpus_chunk("a", "corpus-a", "Allowed source survives.")
+    leaked = _corpus_chunk("b", "corpus-b", "Forbidden source must not appear.")
+    request = ChatRequest(message="What did the selected corpus say?", corpus_ids=["corpus-a"])
+
+    packet = _format_evidence_packet_block(sources=[selected, leaked], request=request)
+
+    assert "Allowed source survives" in packet
+    assert "Forbidden source must not appear" not in packet
+    assert "Corpus sources included: 1" in packet
+
+
+def test_final_fact_scope_keeps_only_selected_corpus_facts():
+    selected = SourceFact(
+        fact_id="f1",
+        subject="GLiNER",
+        fact_type="property",
+        value="selected",
+        corpus_id="corpus-a",
+    )
+    leaked = SourceFact(
+        fact_id="f2",
+        subject="GLiNER",
+        fact_type="property",
+        value="leaked",
+        corpus_id="corpus-b",
+    )
+
+    assert _filter_facts_to_selected_corpora([selected, leaked], ["corpus-a"]) == [selected]
+
+
 def test_budgeted_augmented_prompt_compacts_oversized_current_rag_turn():
     repeated = (
         "Python is a programming language used around AI systems. "
         "Artificial intelligence is not essentially Python. "
-    ) * 450
+    ) * 5000
     sources = [
         SourceChunk(
             chunk_id=f"chunk-{idx}",

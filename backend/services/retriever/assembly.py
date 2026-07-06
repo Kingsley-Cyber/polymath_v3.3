@@ -27,6 +27,7 @@ from services.retriever.waterfall import (
     SharedEntity,
     allocate,
 )
+from services.storage.record_status import with_active_records
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,8 @@ async def build_waterfall_packet(
             if corpus_ids:
                 q["corpus_id"] = {"$in": list(corpus_ids)}
             async for row in db["parent_chunks"].find(
-                q, {"_id": 0, "parent_id": 1, "doc_id": 1, "text": 1, "summary": 1}
+                with_active_records(q),
+                {"_id": 0, "parent_id": 1, "doc_id": 1, "text": 1, "summary": 1},
             ):
                 parent_map[(str(row.get("doc_id") or ""), str(row.get("parent_id") or ""))] = row
 
@@ -152,7 +154,7 @@ async def build_waterfall_packet(
                     str(getattr(c, "doc_id", "") or "") for c in chunks
                 } - {""})
                 docs = await db["documents"].find(
-                    {"doc_id": {"$in": doc_ids}},
+                    with_active_records({"doc_id": {"$in": doc_ids}}),
                     {"_id": 0, "doc_id": 1, "title": 1, "author": 1},
                 ).to_list(length=None)
                 anchor_doc_ids = detect_anchor_doc_ids(query, docs)

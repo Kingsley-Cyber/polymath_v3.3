@@ -78,15 +78,24 @@ async def apply_graph_degree_boost(
     cypher = """
     UNWIND $chunk_ids AS cid
     MATCH (c:Chunk {chunk_id: cid})-[:MENTIONS]->(e:Entity)
+    WHERE c.corpus_id IN $corpus_ids
     WITH c.chunk_id AS chunk_id, e
     OPTIONAL MATCH (e)-[r:RELATES_TO]-()
     WITH chunk_id, e, count(r) AS degree
-    RETURN chunk_id, max(degree) AS max_degree
+    RETURN chunk_id,
+           max(
+               CASE
+                   WHEN coalesce(e.generic_entity, false)
+                     OR coalesce(e.graph_expansion_allowed, true) = false
+                   THEN 0
+                   ELSE degree
+               END
+           ) AS max_degree
     """
     degree_by_id: dict[str, int] = {}
     try:
         async with neo4j_driver.session() as session:
-            result = await session.run(cypher, chunk_ids=chunk_ids)
+            result = await session.run(cypher, chunk_ids=chunk_ids, corpus_ids=corpus_ids)
             async for record in result:
                 cid = str(record.get("chunk_id") or "")
                 deg = record.get("max_degree")
@@ -217,16 +226,25 @@ async def apply_graph_degree_boost_metrics_aware(
     cypher = """
     UNWIND $chunk_ids AS cid
     MATCH (c:Chunk {chunk_id: cid})-[:MENTIONS]->(e:Entity)
+    WHERE c.corpus_id IN $corpus_ids
     WITH c.chunk_id AS chunk_id, e
     OPTIONAL MATCH (e)-[r:RELATES_TO]-()
     WITH chunk_id, e.entity_id AS entity_id, count(r) AS degree
     RETURN chunk_id,
-           collect({entity_id: entity_id, degree: degree}) AS entities
+           collect({
+               entity_id: entity_id,
+               degree: CASE
+                   WHEN coalesce(e.generic_entity, false)
+                     OR coalesce(e.graph_expansion_allowed, true) = false
+                   THEN 0
+                   ELSE degree
+               END
+           }) AS entities
     """
     chunk_to_entities: dict[str, list[dict]] = {}
     try:
         async with neo4j_driver.session() as session:
-            result = await session.run(cypher, chunk_ids=chunk_ids)
+            result = await session.run(cypher, chunk_ids=chunk_ids, corpus_ids=corpus_ids)
             async for record in result:
                 cid = str(record.get("chunk_id") or "")
                 entities = list(record.get("entities") or [])

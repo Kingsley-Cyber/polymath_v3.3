@@ -13,13 +13,21 @@ from datetime import datetime
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo import ReplaceOne
+from pymongo import ReplaceOne, UpdateOne
+
+from services.storage.record_status import (
+    ACTIVE_STATUS,
+    DELETED_STATUS,
+    DELETING_STATUS,
+    mark_active,
+)
 
 logger = logging.getLogger(__name__)
 
 
 async def upsert_corpus(db: AsyncIOMotorDatabase, corpus_doc: dict) -> None:
     """Insert or replace corpus record by corpus_id."""
+    corpus_doc = mark_active(dict(corpus_doc))
     await db["corpora"].replace_one(
         {"corpus_id": corpus_doc["corpus_id"]},
         corpus_doc,
@@ -37,6 +45,7 @@ async def upsert_document(db: AsyncIOMotorDatabase, doc: dict) -> None:
     ingestion_config, write_state. Bulk artifacts such as parent chunks and
     Ghost B staging must be written to their own collections.
     """
+    doc = mark_active(dict(doc))
     await db["documents"].replace_one(
         {"doc_id": doc["doc_id"], "corpus_id": doc["corpus_id"]},
         doc,
@@ -54,7 +63,7 @@ async def upsert_parent_chunks(
     now = datetime.utcnow()
     ops = []
     for parent in parent_chunks:
-        row = dict(parent)
+        row = mark_active(dict(parent))
         row["updated_at"] = now
         ops.append(
             ReplaceOne(
@@ -77,7 +86,11 @@ async def upsert_chunks(db: AsyncIOMotorDatabase, chunks: list[dict]) -> None:
     # Scope upsert by (corpus_id, chunk_id) to match the compound unique index.
     # Each chunk record carries its own corpus_id.
     ops = [
-        ReplaceOne({"corpus_id": c["corpus_id"], "chunk_id": c["chunk_id"]}, c, upsert=True)
+        ReplaceOne(
+            {"corpus_id": c["corpus_id"], "chunk_id": c["chunk_id"]},
+            mark_active(dict(c)),
+            upsert=True,
+        )
         for c in chunks
     ]
     await db["chunks"].bulk_write(ops, ordered=False)
@@ -122,49 +135,92 @@ async def update_corpus(
 
 
 async def delete_corpus(db: AsyncIOMotorDatabase, corpus_id: str) -> bool:
-    """Delete a corpus record by corpus_id. Returns True if deleted."""
-    result = await db["corpora"].delete_one({"corpus_id": corpus_id})
-    return result.deleted_count > 0
+    """Mark a corpus deleted. Returns True if a corpus row existed."""
+    result = await db["corpora"].update_one(
+        {"corpus_id": corpus_id},
+        {
+            "$set": {
+                "status": DELETED_STATUS,
+                "deleted_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            }
+        },
+    )
+    return result.matched_count > 0
+
+
+async def mark_corpus_deleting(db: AsyncIOMotorDatabase, corpus_id: str) -> bool:
+    """Mark a corpus as deleting before projection cleanup starts."""
+    result = await db["corpora"].update_one(
+        {"corpus_id": corpus_id},
+        {
+            "$set": {
+                "status": DELETING_STATUS,
+                "deleting_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            }
+        },
+    )
+    return result.matched_count > 0
 
 
 async def delete_documents_by_corpus(db: AsyncIOMotorDatabase, corpus_id: str) -> int:
-    """Delete all documents belonging to a corpus. Returns count deleted."""
-    await db["parent_chunks"].delete_many({"corpus_id": corpus_id})
-    await db["ghost_b_extractions"].delete_many({"corpus_id": corpus_id})
-    result = await db["documents"].delete_many({"corpus_id": corpus_id})
-    return result.deleted_count
+    """Mark corpus documents and parent/support rows deleted."""
+    now = datetime.utcnow()
+    deleted = {"status": DELETED_STATUS, "deleted_at": now, "updated_at": now}
+    await db["parent_chunks"].update_many({"corpus_id": corpus_id}, {"$set": deleted})
+    await db["ghost_b_extractions"].update_many({"corpus_id": corpus_id}, {"$set": deleted})
+    await db["relation_support_records"].update_many({"corpus_id": corpus_id}, {"$set": deleted})
+    result = await db["documents"].update_many({"corpus_id": corpus_id}, {"$set": deleted})
+    return result.modified_count
 
 
 async def delete_chunks_by_corpus(db: AsyncIOMotorDatabase, corpus_id: str) -> int:
-    """Delete all chunks belonging to a corpus. Returns count deleted."""
-    result = await db["chunks"].delete_many({"corpus_id": corpus_id})
-    return result.deleted_count
+    """Mark all chunks belonging to a corpus deleted."""
+    result = await db["chunks"].update_many(
+        {"corpus_id": corpus_id},
+        {
+            "$set": {
+                "status": DELETED_STATUS,
+                "deleted_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            }
+        },
+    )
+    return result.modified_count
 
 
 async def delete_chunks_by_doc(
     db: AsyncIOMotorDatabase, corpus_id: str, doc_id: str
 ) -> int:
-    """Delete all chunks for a single document. Returns count deleted."""
-    result = await db["chunks"].delete_many(
-        {"corpus_id": corpus_id, "doc_id": doc_id}
+    """Mark all chunks for a single document deleted."""
+    result = await db["chunks"].update_many(
+        {"corpus_id": corpus_id, "doc_id": doc_id},
+        {
+            "$set": {
+                "status": DELETED_STATUS,
+                "deleted_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            }
+        },
     )
-    return result.deleted_count
+    return result.modified_count
 
 
 async def delete_document(
     db: AsyncIOMotorDatabase, corpus_id: str, doc_id: str
 ) -> bool:
-    """Delete a single document record. Returns True if deleted."""
-    await db["parent_chunks"].delete_many(
-        {"corpus_id": corpus_id, "doc_id": doc_id}
+    """Mark a single document and its support rows deleted."""
+    now = datetime.utcnow()
+    deleted = {"status": DELETED_STATUS, "deleted_at": now, "updated_at": now}
+    await db["parent_chunks"].update_many({"corpus_id": corpus_id, "doc_id": doc_id}, {"$set": deleted})
+    await db["ghost_b_extractions"].update_many({"corpus_id": corpus_id, "doc_id": doc_id}, {"$set": deleted})
+    await db["relation_support_records"].update_many({"corpus_id": corpus_id, "doc_id": doc_id}, {"$set": deleted})
+    result = await db["documents"].update_one(
+        {"corpus_id": corpus_id, "doc_id": doc_id},
+        {"$set": deleted},
     )
-    await db["ghost_b_extractions"].delete_many(
-        {"corpus_id": corpus_id, "doc_id": doc_id}
-    )
-    result = await db["documents"].delete_one(
-        {"corpus_id": corpus_id, "doc_id": doc_id}
-    )
-    return result.deleted_count > 0
+    return result.matched_count > 0
 
 
 async def delete_ghost_b_extractions(
@@ -240,6 +296,51 @@ async def stash_ghost_b(
             "$unset": {"ghost_b_staging": ""},
         },
     )
+
+
+async def replace_relation_support_for_document(
+    db: AsyncIOMotorDatabase,
+    *,
+    doc_id: str,
+    corpus_id: str,
+    records: list[dict],
+) -> int:
+    """Replace active relation-support records for one document.
+
+    Neo4j stores materialized traversal edges. This Mongo collection stores the
+    canonical per-chunk support rows those edges summarize.
+    """
+    now = datetime.utcnow()
+    await db["relation_support_records"].update_many(
+        {"doc_id": doc_id, "corpus_id": corpus_id},
+        {
+            "$set": {
+                "status": DELETED_STATUS,
+                "deleted_at": now,
+                "updated_at": now,
+            }
+        },
+    )
+    if not records:
+        return 0
+
+    ops = []
+    for record in records:
+        row = mark_active(dict(record))
+        row["updated_at"] = now
+        ops.append(
+            UpdateOne(
+                {"support_id": row["support_id"]},
+                {
+                    "$set": row,
+                    "$setOnInsert": {"created_at": now},
+                    "$unset": {"deleted_at": ""},
+                },
+                upsert=True,
+            )
+        )
+    await db["relation_support_records"].bulk_write(ops, ordered=False)
+    return len(ops)
 
 
 async def stash_ghost_b_failures(

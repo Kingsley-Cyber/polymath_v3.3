@@ -20,6 +20,7 @@ from models.schemas import SourceChunk
 from services.conversation import conversation_service
 from services.facets import metadata_with_facets
 from services.retriever.query_semantics import lexical_terms
+from services.storage.record_status import with_active_records
 
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])")
 
@@ -196,8 +197,11 @@ async def hydrate_chunks(
     if orphans:
         orphan_ids = [c.chunk_id for c in orphans]
         try:
+            orphan_query: dict = {"chunk_id": {"$in": orphan_ids}}
+            if corpus_ids:
+                orphan_query["corpus_id"] = {"$in": corpus_ids}
             chunk_records = await db["chunks"].find(
-                {"chunk_id": {"$in": orphan_ids}}
+                with_active_records(orphan_query)
             ).to_list(length=None)
             pid_map = {r["chunk_id"]: r.get("parent_id", "") for r in chunk_records}
             did_map = {r["chunk_id"]: r.get("doc_id", "") for r in chunk_records}
@@ -228,7 +232,7 @@ async def hydrate_chunks(
         mongo_query["corpus_id"] = {"$in": corpus_ids}
 
     try:
-        docs = await db["documents"].find(mongo_query).to_list(length=None)
+        docs = await db["documents"].find(with_active_records(mongo_query)).to_list(length=None)
     except Exception as exc:
         logger.error("Hydration documents query failed: %s", exc)
         return chunks
@@ -245,7 +249,7 @@ async def hydrate_chunks(
             parent_query["corpus_id"] = {"$in": corpus_ids}
         try:
             parent_rows = await db["parent_chunks"].find(
-                parent_query,
+                with_active_records(parent_query),
                 {"_id": 0},
             ).to_list(length=None)
             for pc in parent_rows:
@@ -387,7 +391,7 @@ async def hydrate_rerank_texts(
 
     try:
         records = await db["chunks"].find(
-            query,
+            with_active_records(query),
             {
                 "_id": 0,
                 "chunk_id": 1,
@@ -493,7 +497,7 @@ async def hydrate_summary_rerank_texts(
 
     try:
         docs = await db["documents"].find(
-            query,
+            with_active_records(query),
             {
                 "_id": 0,
                 "doc_id": 1,
@@ -531,7 +535,7 @@ async def hydrate_summary_rerank_texts(
             parent_query["corpus_id"] = {"$in": corpus_ids}
         try:
             parent_rows = await db["parent_chunks"].find(
-                parent_query,
+                with_active_records(parent_query),
                 {"_id": 0},
             ).to_list(length=None)
             for parent in parent_rows:

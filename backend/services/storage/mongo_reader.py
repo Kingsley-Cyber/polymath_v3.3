@@ -8,11 +8,13 @@ import logging
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from services.storage.record_status import with_active_records
+
 logger = logging.getLogger(__name__)
 
 
 async def get_corpus(db: AsyncIOMotorDatabase, corpus_id: str) -> dict | None:
-    return await db["corpora"].find_one({"corpus_id": corpus_id})
+    return await db["corpora"].find_one(with_active_records({"corpus_id": corpus_id}))
 
 
 async def list_corpora(
@@ -23,7 +25,7 @@ async def list_corpora(
     query: dict = {}
     if user_id:
         query["user_id"] = user_id
-    cursor = db["corpora"].find(query).sort("created_at", -1).limit(limit)
+    cursor = db["corpora"].find(with_active_records(query)).sort("created_at", -1).limit(limit)
     return await cursor.to_list(length=limit)
 
 
@@ -41,7 +43,7 @@ async def get_document(
     q: dict = {"doc_id": doc_id}
     if corpus_id is not None:
         q["corpus_id"] = corpus_id
-    return await db["documents"].find_one(q)
+    return await db["documents"].find_one(with_active_records(q))
 
 
 async def get_parent_chunks(
@@ -52,7 +54,7 @@ async def get_parent_chunks(
     """Return parent chunk rows, with legacy inline fallback."""
     try:
         rows = await db["parent_chunks"].find(
-            {"doc_id": doc_id, "corpus_id": corpus_id},
+            with_active_records({"doc_id": doc_id, "corpus_id": corpus_id}),
             {"_id": 0},
         ).sort("parent_id", 1).to_list(length=None)
         if rows:
@@ -62,7 +64,7 @@ async def get_parent_chunks(
 
     try:
         doc = await db["documents"].find_one(
-            {"doc_id": doc_id, "corpus_id": corpus_id},
+            with_active_records({"doc_id": doc_id, "corpus_id": corpus_id}),
             {"parent_chunks": 1},
         )
     except Exception as exc:
@@ -84,7 +86,7 @@ async def get_parent_by_id(
     if corpus_id is not None:
         q["corpus_id"] = corpus_id
     try:
-        row = await db["parent_chunks"].find_one(q, {"_id": 0})
+        row = await db["parent_chunks"].find_one(with_active_records(q), {"_id": 0})
         if row:
             return row
     except Exception as exc:
@@ -95,7 +97,7 @@ async def get_parent_by_id(
         doc_q["corpus_id"] = corpus_id
     try:
         doc = await db["documents"].find_one(
-            doc_q,
+            with_active_records(doc_q),
             {"parent_chunks.$": 1},
         )
     except Exception as exc:
@@ -114,7 +116,9 @@ async def get_chunks(
     """Fetch child chunks by chunk_id list, scoped to corpus."""
     if not chunk_ids:
         return []
-    cursor = db["chunks"].find({"chunk_id": {"$in": chunk_ids}, "corpus_id": corpus_id})
+    cursor = db["chunks"].find(
+        with_active_records({"chunk_id": {"$in": chunk_ids}, "corpus_id": corpus_id})
+    )
     return await cursor.to_list(length=len(chunk_ids))
 
 
@@ -126,7 +130,7 @@ async def list_all_user_documents(
     """List all documents across all corpora for a user, sorted by ingested_at desc."""
     cursor = (
         db["documents"]
-        .find({"user_id": user_id}, {"_id": 0, "parent_chunks": 0, "ghost_b_staging": 0})
+        .find(with_active_records({"user_id": user_id}), {"_id": 0, "parent_chunks": 0, "ghost_b_staging": 0})
         .sort("ingested_at", -1)
         .limit(limit)
     )
@@ -244,7 +248,7 @@ async def list_documents(
     # default encoder; the API identifies docs by doc_id anyway).
     cursor = (
         db["documents"]
-        .find(query, {"_id": 0, "parent_chunks": 0, "ghost_b_staging": 0})
+        .find(with_active_records(query), {"_id": 0, "parent_chunks": 0, "ghost_b_staging": 0})
         .sort("ingested_at", -1)
         .skip(offset)
         .limit(limit)
@@ -256,7 +260,7 @@ async def list_documents(
     if docs:
         doc_ids = [d["doc_id"] for d in docs]
         chunk_pipeline = [
-            {"$match": {"corpus_id": corpus_id, "doc_id": {"$in": doc_ids}}},
+            {"$match": with_active_records({"corpus_id": corpus_id, "doc_id": {"$in": doc_ids}})},
             {"$group": {"_id": "$doc_id", "count": {"$sum": 1}}},
         ]
         counts = {
@@ -264,7 +268,7 @@ async def list_documents(
             async for row in db["chunks"].aggregate(chunk_pipeline)
         }
         parent_pipeline = [
-            {"$match": {"corpus_id": corpus_id, "doc_id": {"$in": doc_ids}}},
+            {"$match": with_active_records({"corpus_id": corpus_id, "doc_id": {"$in": doc_ids}})},
             {"$group": {"_id": "$doc_id", "count": {"$sum": 1}}},
         ]
         parent_counts = {

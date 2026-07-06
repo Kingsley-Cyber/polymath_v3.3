@@ -583,6 +583,60 @@ def _is_web_source_data(data: dict[str, Any]) -> bool:
     )
 
 
+def _source_allowed_by_corpus_scope(source: Any, corpus_ids: list[str] | None) -> bool:
+    """Final evidence guard: selected corpora own corpus evidence authority.
+
+    Retrieval layers already apply corpus filters, but this last-mile check keeps
+    merged support/tool paths from accidentally passing deselected corpus chunks
+    into the final prompt, SSE source bundle, or persisted assistant message.
+    Web/tool evidence remains allowed because it is not corpus evidence.
+    """
+
+    if not corpus_ids:
+        return True
+    data = _source_to_dict(source)
+    if not data:
+        return False
+    if _is_web_source_data(data):
+        return True
+    return str(data.get("corpus_id") or "").strip() in set(corpus_ids)
+
+
+def _filter_sources_to_selected_corpora(
+    sources: list[Any] | None,
+    corpus_ids: list[str] | None,
+) -> list[Any]:
+    if not sources:
+        return []
+    return [
+        source
+        for source in sources
+        if _source_allowed_by_corpus_scope(source, corpus_ids)
+    ]
+
+
+def _filter_facts_to_selected_corpora(
+    facts: list[Any] | None,
+    corpus_ids: list[str] | None,
+) -> list[Any]:
+    if not facts:
+        return []
+    if not corpus_ids:
+        return list(facts)
+    allowed = {str(cid) for cid in corpus_ids}
+    filtered: list[Any] = []
+    for fact in facts:
+        if hasattr(fact, "model_dump"):
+            data = fact.model_dump(mode="json")
+        elif isinstance(fact, dict):
+            data = fact
+        else:
+            data = vars(fact) if hasattr(fact, "__dict__") else {}
+        if str(data.get("corpus_id") or "").strip() in allowed:
+            filtered.append(fact)
+    return filtered
+
+
 def _web_source_key(source: Any) -> str | None:
     data = _source_to_dict(source)
     if not data or not _is_web_source_data(data):
@@ -1630,10 +1684,12 @@ def _format_evidence_packet_block(
     request: ChatRequest | None,
 ) -> str:
     """Build the explicit evidence contract shown to the final chat model."""
+    selected_corpus_ids = list(getattr(request, "corpus_ids", None) or [])
     source_dicts = [
         data
         for source in (sources or [])
         if (data := _source_to_dict(source)) is not None
+        and _source_allowed_by_corpus_scope(source, selected_corpus_ids)
     ]
     if not source_dicts and not _collect_web_run_summaries(request):
         return ""
@@ -6742,6 +6798,7 @@ class ChatOrchestrator:
             evidence_plan=evidence_plan,
             search_mode=resolved_mode,
         )
+        sources = _filter_sources_to_selected_corpora(sources, request.corpus_ids)
         if answerability_chunk_gate_meta.get("enabled"):
             retrieval_diagnostics["answerability_chunk_gate"] = answerability_chunk_gate_meta
         effective_tier_for_trace = getattr(
@@ -6837,6 +6894,7 @@ class ChatOrchestrator:
                 retrieval.effective_tier,
             )
             facts = []
+        facts = _filter_facts_to_selected_corpora(facts, request.corpus_ids)
         # Deterministic FACTS counter for the UI — the real number of graph facts
         # seeded into the answer context (post tier-gating), taken straight from
         # the retrieval result. Never an LLM-authored value, so it cannot lie.
@@ -8141,6 +8199,10 @@ class ChatOrchestrator:
                             list(pending_tool_sources),
                         )
                     )
+                )
+                sources = _filter_sources_to_selected_corpora(
+                    sources,
+                    request.corpus_ids,
                 )
                 chunks_returned = len(sources)
                 object.__setattr__(request, "_pending_tool_sources", [])

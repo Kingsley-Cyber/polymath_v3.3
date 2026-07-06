@@ -978,10 +978,11 @@ class IngestionService:
         corpus_ids = [d.get("corpus_id") for d in docs if d.get("corpus_id")]
         if not corpus_ids:
             return
+        from services.storage.record_status import with_active_records
 
         async def _counts(collection: str) -> dict[str, int]:
             pipeline = [
-                {"$match": {"corpus_id": {"$in": corpus_ids}}},
+                {"$match": with_active_records({"corpus_id": {"$in": corpus_ids}})},
                 {"$group": {"_id": "$corpus_id", "count": {"$sum": 1}}},
             ]
             rows = await self._db[collection].aggregate(pipeline).to_list(length=None)
@@ -993,7 +994,7 @@ class IngestionService:
         # parsing gets a document row, so a churned batch showed "498" while
         # ~80 were actually complete. ready_doc_count = fully verified docs.
         ready_rows = await self._db["documents"].aggregate([
-            {"$match": {"corpus_id": {"$in": corpus_ids}, "write_state.verified": True}},
+            {"$match": with_active_records({"corpus_id": {"$in": corpus_ids}, "write_state.verified": True})},
             {"$group": {"_id": "$corpus_id", "count": {"$sum": 1}}},
         ]).to_list(length=None)
         ready_counts = {str(r["_id"]): int(r["count"]) for r in ready_rows}
@@ -1300,23 +1301,25 @@ class IngestionService:
     async def delete_corpus(self, corpus_id: str) -> bool:
         """
         Cascade delete: corpus → documents → chunks → Qdrant points → Neo4j.
-        Returns True if the corpus existed and its record was removed.
+        Returns True if the corpus existed and deletion was scheduled.
 
         FAST-RETURN DESIGN: the heavy parts (deleting ~570k chunks and ~1.7M
         Neo4j elements on a large corpus) used to run synchronously inside the
         request and blow past the 60s proxy timeout → DELETE 504'd, the UI
         looked broken, and re-clicks raced. We now do only the cheap, vanish-
         making work synchronously (drop Qdrant collections — O(1) collection
-        drops; delete the corpus record + document records — small), then
-        background the bulk chunk + graph deletion (keyed by corpus_id, so it
-        completes correctly even after the corpus record is gone). The corpus
-        disappears from the UI immediately; orphaned bulk data clears behind it.
+        drops; mark corpus/documents/support rows stale), then background the
+        bulk chunk + graph cleanup. The corpus disappears from normal reads
+        immediately because ``status=deleting`` is non-active; it is only marked
+        ``deleted`` after projections are consistent.
         """
         from services.storage.mongo_writer import (
-            delete_corpus,
             delete_documents_by_corpus,
+            mark_corpus_deleting,
         )
         from services.storage.qdrant_writer import drop_collections_for_corpus
+
+        existed = await mark_corpus_deleting(self._db, corpus_id)
 
         # Phase 7.5 — atomically drop all 4 per-corpus collections (naive,
         # hrag, graph, schemas). A whole-collection drop is fast regardless of
@@ -1328,10 +1331,9 @@ class IngestionService:
                 "Failed to drop per-corpus Qdrant collections for %s", corpus_id
             )
 
-        # Remove the document records + corpus record synchronously so the
-        # corpus vanishes from list/get right away (both are small).
+        # Mark document/support rows synchronously so evidence cannot be read
+        # while the heavier chunk + graph projection cleanup runs.
         await delete_documents_by_corpus(self._db, corpus_id)
-        removed = await delete_corpus(self._db, corpus_id)
 
         # Background the bulk deletes (chunks + Neo4j) — they no longer gate
         # the HTTP response.
@@ -1342,18 +1344,19 @@ class IngestionService:
             # still cleaned, just slower.
             await self._purge_corpus_bulk(corpus_id)
 
-        return removed
+        return existed
 
     async def _purge_corpus_bulk(self, corpus_id: str) -> None:
         """Background bulk cleanup for a deleted corpus: Mongo chunks +
         batched Neo4j graph. Best-effort — orphaned rows keyed by a dead
         corpus_id are harmless and re-runnable."""
-        from services.storage.mongo_writer import delete_chunks_by_corpus
+        from services.storage.mongo_writer import delete_chunks_by_corpus, delete_corpus
 
         try:
             await delete_chunks_by_corpus(self._db, corpus_id)
         except Exception:
             logger.warning("Background chunk purge failed for corpus %s", corpus_id)
+            return
         if self._settings.NEO4J_ENABLED and self._neo4j:
             try:
                 from services.graph.neo4j_writer import delete_corpus_graph
@@ -1361,6 +1364,11 @@ class IngestionService:
                 await delete_corpus_graph(self._neo4j, corpus_id=corpus_id)
             except Exception:
                 logger.warning("Background Neo4j purge failed for corpus %s", corpus_id)
+                return
+        try:
+            await delete_corpus(self._db, corpus_id)
+        except Exception:
+            logger.warning("Final corpus tombstone mark failed for corpus %s", corpus_id)
         logger.info("Background purge complete for corpus %s", corpus_id)
 
     async def list_documents(

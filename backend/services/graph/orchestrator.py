@@ -18,6 +18,7 @@ from services.facets import (
     matching_vector_facets,
     metadata_facet_terms,
 )
+from services.storage.record_status import with_active_records
 
 try:
     import bson as _bson  # noqa: F401
@@ -4688,7 +4689,7 @@ async def _hydrate_trace_source_docs(
     chunk_by_id: dict[str, dict[str, Any]] = {}
     if chunk_ids:
         cursor = db["chunks"].find(
-            {"corpus_id": corpus_id, "chunk_id": {"$in": chunk_ids}},
+            with_active_records({"corpus_id": corpus_id, "chunk_id": {"$in": chunk_ids}}),
             {
                 "_id": 0,
                 "chunk_id": 1,
@@ -4717,7 +4718,7 @@ async def _hydrate_trace_source_docs(
     parent_by_doc: dict[str, dict[str, dict[str, Any]]] = {}
     if doc_ids:
         cursor = db["documents"].find(
-            {"corpus_id": corpus_id, "doc_id": {"$in": list(doc_ids)}},
+            with_active_records({"corpus_id": corpus_id, "doc_id": {"$in": list(doc_ids)}}),
             {
                 "_id": 0,
                 "doc_id": 1,
@@ -8141,10 +8142,10 @@ async def _enrich_packet_with_extractions(
     if rationale_chunk_ids and db is not None:
         try:
             cursor = db["chunks"].find(
-                {
+                with_active_records({
                     "corpus_id": corpus_id,
                     "chunk_id": {"$in": list(rationale_chunk_ids)[:24]},
-                },
+                }),
                 {
                     "_id": 0,
                     "chunk_id": 1,
@@ -8287,7 +8288,7 @@ async def _enrich_packet_with_extractions(
     if doc_ids_in_scope and db is not None:
         try:
             cursor = db["documents"].find(
-                {"corpus_id": corpus_id, "doc_id": {"$in": doc_ids_in_scope[:8]}},
+                with_active_records({"corpus_id": corpus_id, "doc_id": {"$in": doc_ids_in_scope[:8]}}),
                 {
                     "_id": 0,
                     "doc_id": 1,

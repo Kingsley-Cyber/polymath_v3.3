@@ -203,6 +203,37 @@ async def test_relates_to_decoration_uses_evidence_chunk_ids_not_neighbor_fanout
 
 
 @pytest.mark.asyncio
+async def test_graph_decoration_blocks_generic_entity_expansion(decorator, monkeypatch):
+    relates_capture: dict = {}
+    calls_capture: dict = {}
+    monkeypatch.setattr(decorator._settings, "NEO4J_ENABLED", True, raising=False)
+
+    decorator._driver = _CaptureDriver(relates_capture)
+    await decorator._decorate_via_relates_to(
+        winning_chunk_ids=["winner-1"],
+        corpus_ids=["corpus-1"],
+        wanted_families=None,
+        neighbor_limit=8,
+        chunks_per_neighbor=2,
+        query=None,
+    )
+
+    decorator._driver = _CaptureDriver(calls_capture)
+    await decorator._decorate_via_calls(
+        winning_chunk_ids=["winner-1"],
+        corpus_ids=["corpus-1"],
+        neighbor_limit=8,
+        chunks_per_neighbor=2,
+    )
+
+    for query in (relates_capture["query"], calls_capture["query"]):
+        assert "coalesce(seed.generic_entity, false) = false" in query
+        assert "coalesce(seed.graph_expansion_allowed, true) <> false" in query
+        assert "coalesce(neighbor.generic_entity, false) = false" in query
+        assert "coalesce(neighbor.graph_expansion_allowed, true) <> false" in query
+
+
+@pytest.mark.asyncio
 async def test_warm_cache_annotates_betweenness_and_pagerank(decorator):
     """Cache present with both betweenness and top_pagerank entries
     matching the entity_ids → all 4 numeric annotations land."""

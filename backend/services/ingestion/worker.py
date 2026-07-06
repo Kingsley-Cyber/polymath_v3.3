@@ -2885,6 +2885,7 @@ def _synthesize_code_extraction_results(graph_children) -> list:
 
 async def _write_neo4j_for_doc(
     *,
+    db: AsyncIOMotorDatabase,
     neo4j_driver,
     doc_id: str,
     corpus_id: str,
@@ -2965,6 +2966,8 @@ async def _write_neo4j_for_doc(
         ghost_b_success_rate=float(success_rate) if success_rate is not None else None,
         ghost_b_extracted=int(extracted) if extracted is not None else None,
         ghost_b_total=int(total) if total is not None else None,
+        db=db,
+        chunk_parent_ids={c.chunk_id: c.parent_id for c in graph_children},
     )
 
     # Phase 4.5 — opt-in graphify augmentation. Runs only when the setting
@@ -4163,6 +4166,7 @@ async def run_ingest_job(
                     max(1, int(getattr(settings, "NEO4J_INGEST_WRITE_CONCURRENCY", 1))),
                 )
                 await _write_neo4j_for_doc(
+                    db=db,
                     neo4j_driver=neo4j_driver,
                     doc_id=doc_id,
                     corpus_id=corpus_id,

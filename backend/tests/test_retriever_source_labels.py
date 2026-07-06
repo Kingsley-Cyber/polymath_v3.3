@@ -273,6 +273,11 @@ async def test_qdrant_child_and_summary_payloads_include_readable_doc_label(monk
     assert child_payload["facet_ids"] == ["event_driven_compute"]
     assert child_payload["doc_facet_ids"] == ["aws_lambda"]
     assert child_payload["facet_schema_version"] == "polymath.facets.v1"
+    assert child_payload["entity_ids"] == []
+    assert child_payload["relation_predicates"] == []
+    assert child_payload["fact_types"] == []
+    assert child_payload["has_relations"] is False
+    assert child_payload["promote_version"] == ""
     assert summary_payload["filename"] == "aws.txt"
     assert summary_payload["doc_name"] == "aws.txt"
     assert summary_payload["facet_ids"] == ["aws_service_recommendations"]
