@@ -137,6 +137,7 @@ export interface IngestionConfig {
 }
 
 export type IngestionPreset = "fast" | "balanced" | "deep" | "custom";
+export type IngestProfileName = "mac_safe" | "rtx_assisted";
 
 /** Open-time preset inference — used by the corpus create/edit forms to
  * decide which radio option to pre-select. If the stored preset disagrees
@@ -361,12 +362,15 @@ export interface IngestBatchItemResponse {
   status:
     | "queued"
     | "running"
+    | "staged"
     | "done"
     | "failed"
     | "failed_recoverable"
     | "skipped";
   attempts: number;
   phase?: string | null;
+  stage?: string | null;
+  stage_rank?: number | null;
   failure_stage?: string | null;
   doc_id?: string | null;
   error?: string | null;
@@ -399,6 +403,7 @@ export interface IngestBatchResponse {
     mb_done: number;
     mb_extracted: number;
     mb_total: number;
+    ladder?: Record<string, number>;
   };
   options?: Record<string, unknown>;
   runner_started?: boolean;
@@ -409,6 +414,7 @@ export interface IngestBatchResponse {
 
 export interface LocalIngestBatchRequest {
   root_path: string;
+  profile?: IngestProfileName | null;
   recursive?: boolean;
   extensions?: string[];
   max_files?: number;

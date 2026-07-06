@@ -31,6 +31,7 @@ import type {
   DocumentResponse,
   IngestBatchItemResponse,
   IngestBatchResponse,
+  IngestProfileName,
   ModalStatus,
   WriteState,
 } from "../../types";
@@ -70,11 +71,36 @@ function getParentCount(doc: DocumentResponse): number {
 }
 
 function getBatchItemStatusLabel(item: IngestBatchItemResponse): string {
+  if (item.status === "staged") {
+    return item.stage ? `staged · ${item.stage}` : "staged";
+  }
   if (item.status === "failed_recoverable") {
     return item.phase === "stale" ? "stale" : "recoverable";
   }
   return item.status;
 }
+
+function defaultBatchProfile(corpus: CorpusResponse): IngestProfileName {
+  const cfg = corpus.default_ingestion_config;
+  const engine = cfg.extraction_engine ?? "local";
+  const hasRemotePool =
+    (cfg.extraction_models ?? []).some((m) => {
+      const url = (m.base_url ?? "").toLowerCase();
+      const extras = m.extra_params ?? {};
+      return (
+        url.includes("/v1") ||
+        url.includes("192.168.") ||
+        extras.resource_class === "remote_vllm" ||
+        extras.managed_vllm === true
+      );
+    }) || ["cloud", "dual", "local_then_enrich"].includes(engine);
+  return hasRemotePool ? "rtx_assisted" : "mac_safe";
+}
+
+const PROFILE_LABELS: Record<IngestProfileName, string> = {
+  rtx_assisted: "RTX assisted",
+  mac_safe: "Mac safe",
+};
 
 // Pipeline phase → words a human can read. Raw phase stays in tooltips.
 const PHASE_LABELS: Record<string, string> = {
@@ -159,6 +185,9 @@ export function CorpusDetail({
   const [showLocalBatch, setShowLocalBatch] = useState(true);
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [localBatchPath, setLocalBatchPath] = useState(LOCAL_BATCH_DEFAULT_PATH);
+  const [localBatchProfile, setLocalBatchProfile] = useState<IngestProfileName>(
+    () => defaultBatchProfile(corpus),
+  );
   const [localBatchConcurrency, setLocalBatchConcurrency] = useState(1);
   const [localBatch, setLocalBatch] = useState<IngestBatchResponse | null>(null);
   const [isStartingLocalBatch, setIsStartingLocalBatch] = useState(false);
@@ -168,6 +197,10 @@ export function CorpusDetail({
   // Modal global status — used to warn when corpus default is embed_mode='modal'
   // but Modal isn't deployed.
   const [modalStatus, setModalStatus] = useState<ModalStatus | null>(null);
+  useEffect(() => {
+    setLocalBatchProfile(defaultBatchProfile(corpus));
+  }, [corpus.corpus_id, corpus.default_ingestion_config.extraction_engine]);
+
   useEffect(() => {
     api
       .getModalStatus()
@@ -356,6 +389,7 @@ export function CorpusDetail({
     try {
       const batch = await api.createLocalIngestBatch(corpus.corpus_id, {
         root_path: rootPath,
+        profile: localBatchProfile,
         recursive: true,
         store_files: true,
         max_total_bytes: 2 * 1024 * 1024 * 1024,
@@ -418,6 +452,7 @@ export function CorpusDetail({
         chunk_summarization: overrides.chunk_summarization,
         model: overrides.model,
         concurrency: Math.max(1, Math.min(4, selected.length)),
+        profile: localBatchProfile,
         start: true,
       });
       setLocalBatch(batch);
@@ -588,7 +623,21 @@ export function CorpusDetail({
 
       {showLocalBatch && (
         <div className="border-b border-border-minimal bg-bg-base/70 px-4 py-3 shrink-0">
-          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_88px_auto_auto_auto] gap-2 items-end">
+          <div className="grid grid-cols-1 md:grid-cols-[150px_minmax(0,1fr)_88px_auto_auto_auto] gap-2 items-end">
+            <label>
+              <span className="block text-[9px] font-bold tracking-widest text-content-tertiary uppercase mb-1">
+                Ingest Profile
+              </span>
+              <select
+                value={localBatchProfile}
+                onChange={(e) => setLocalBatchProfile(e.target.value as IngestProfileName)}
+                className="w-full h-8 px-2 bg-bg-surface border border-border-minimal text-[11px] text-content-primary outline-none focus:border-accent-main"
+                title="Controls backend resource planning for this durable batch"
+              >
+                <option value="rtx_assisted">RTX assisted</option>
+                <option value="mac_safe">Mac safe</option>
+              </select>
+            </label>
             <label className="min-w-0">
               <span className="block text-[9px] font-bold tracking-widest text-content-tertiary uppercase mb-1">
                 Backend Path
@@ -648,10 +697,19 @@ export function CorpusDetail({
             </button>
           </div>
           {localBatch && (
-            <div className="mt-2 grid grid-cols-1 sm:grid-cols-4 xl:grid-cols-10 gap-2 text-[9px] font-mono">
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-4 xl:grid-cols-11 gap-2 text-[9px] font-mono">
               <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Status</div>
                 <div className="text-content-primary">{localBatch.status}</div>
+              </div>
+              <div className="border border-border-minimal px-2 py-1">
+                <div className="text-content-tertiary uppercase">Profile</div>
+                <div className="text-content-primary">
+                  {PROFILE_LABELS[
+                    ((localBatch.options?.profile as IngestProfileName | undefined) ??
+                      localBatchProfile)
+                  ] ?? "Default"}
+                </div>
               </div>
               <div className="border border-border-minimal px-2 py-1">
                 <div className="text-content-tertiary uppercase">Files</div>
@@ -688,6 +746,17 @@ export function CorpusDetail({
                       {" "}· {localBatch.progress.mb_extracted}/
                       {localBatch.progress.mb_total} MB
                     </span>
+                  </div>
+                </div>
+              )}
+              {localBatch.progress?.ladder && (
+                <div
+                  className="border border-border-minimal px-2 py-1"
+                  title="Fully queryable files, inferred from the staged ingestion ladder"
+                >
+                  <div className="text-content-tertiary uppercase">Queryable</div>
+                  <div className="text-content-primary">
+                    {localBatch.progress.ladder.queryable ?? 0}
                   </div>
                 </div>
               )}

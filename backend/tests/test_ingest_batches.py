@@ -65,6 +65,34 @@ def test_runtime_batch_concurrency_uses_worker_default_when_unset():
     assert batches._runtime_batch_concurrency(batch, settings) == 2
 
 
+def test_normalize_profile_rejects_unknown_value():
+    assert batches._normalize_profile("RTX_ASSISTED") == "rtx_assisted"
+    assert batches._normalize_profile("") is None
+    with pytest.raises(ValueError, match="Unknown ingest profile"):
+        batches._normalize_profile("turbo_mystery")
+
+
+def test_infer_item_stage_from_legacy_phase_rows():
+    assert (
+        batches._infer_item_stage(
+            {"status": batches.ITEM_DONE, "phase": "complete"}
+        )
+        == "queryable"
+    )
+    assert (
+        batches._infer_item_stage(
+            {"status": batches.ITEM_DONE, "phase": "awaiting_summary"}
+        )
+        == "indexed"
+    )
+    assert (
+        batches._infer_item_stage(
+            {"status": batches.ITEM_RUNNING, "phase": "mongo"}
+        )
+        == "extracted"
+    )
+
+
 def test_storage_quota_counts_existing_bytes(tmp_path):
     storage = tmp_path / "spool"
     storage.mkdir()
@@ -341,6 +369,46 @@ class _RecoveryCollection:
         del projection
         return _RecoveryCursor([row for row in self.rows if _matches_query(row, query)])
 
+    def aggregate(self, pipeline):
+        batch_id = pipeline[0]["$match"]["batch_id"]
+        rows = [row for row in self.rows if row.get("batch_id") == batch_id]
+        pre_extraction_phases = {
+            "queued",
+            "reading",
+            "starting_worker",
+            "parse",
+            "retrieval_setup",
+            "chunking",
+            "summaries",
+            "summary",
+            "summary_tree",
+            "ghosts",
+            "paused_cost_brake",
+            "failed",
+            "stale",
+        }
+
+        def extracted(row):
+            return row.get("status") == batches.ITEM_DONE or (
+                row.get("status") == batches.ITEM_RUNNING
+                and (row.get("phase") or "queued") not in pre_extraction_phases
+            )
+
+        result = {
+            "_id": None,
+            "total_bytes": sum(int(row.get("size_bytes") or 0) for row in rows),
+            "done_bytes": sum(
+                int(row.get("size_bytes") or 0)
+                for row in rows
+                if row.get("status") == batches.ITEM_DONE
+            ),
+            "extracted_files": sum(1 for row in rows if extracted(row)),
+            "extracted_bytes": sum(
+                int(row.get("size_bytes") or 0) for row in rows if extracted(row)
+            ),
+        }
+        return _RecoveryCursor([result])
+
     async def find_one(self, query, projection=None):
         del projection
         for row in self.rows:
@@ -513,12 +581,14 @@ async def test_create_upload_batch_stores_browser_files_as_runnable_batch(monkey
             }
         ],
         concurrency=4,
+        profile="rtx_assisted",
     )
 
     assert result["source"] == batches.SOURCE_BROWSER_UPLOAD
     assert result["counts"][batches.ITEM_QUEUED] == 1
     assert result["stored_bytes"] == len(b"# Quick")
     assert result["options"]["concurrency"] == 4
+    assert result["options"]["profile"] == "rtx_assisted"
     item = db.collections[batches.ITEMS].rows[0]
     assert item["source"] == batches.SOURCE_BROWSER_UPLOAD
     assert item["relative_path"] == "quick.md"

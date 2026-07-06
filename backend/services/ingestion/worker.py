@@ -855,6 +855,55 @@ def _build_ghost_pool(refs) -> list[dict]:
     return out
 
 
+def _summary_tree_llm_from_pool(pool: list[dict], max_tokens: int) -> Callable[[str], Any] | None:
+    """Build the owner-summary-tree LLM hook from the same corpus Summary pool.
+
+    Without this, summary_tree falls back to services.llm's global default,
+    which can be a totally different provider/model than the corpus contract.
+    """
+    if not pool:
+        return None
+
+    lane_idx = 0
+
+    async def _call(prompt: str) -> str:
+        nonlocal lane_idx
+        import httpx
+
+        from services.ingestion.extraction_contract import provider_payload_extras
+
+        entry = pool[lane_idx % len(pool)]
+        lane_idx += 1
+        payload: dict[str, Any] = {
+            "model": entry["model"],
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "max_tokens": max(128, min(1024, int(max_tokens or 300))),
+        }
+        if entry.get("base_url"):
+            payload["api_base"] = entry["base_url"]
+        if entry.get("api_key"):
+            payload["api_key"] = entry["api_key"]
+        payload.update(provider_payload_extras(entry.get("extra_params")))
+        model_name = str(entry.get("model") or "").lower()
+        if "v4-flash" in model_name or "v4-pro" in model_name or "deepseek-v4" in model_name:
+            payload.setdefault("thinking", {"type": "disabled"})
+        headers = {
+            "Authorization": f"Bearer {settings.LITELLM_MASTER_KEY}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{settings.LITELLM_URL}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            return str(resp.json()["choices"][0]["message"]["content"] or "").strip()
+
+    return _call
+
+
 def _rehydrate_ghost_b_staging(staged: list[dict]) -> list[ExtractionResult]:
     """Reconstruct ExtractionResult dataclasses from a Mongo-stored staging list.
 
@@ -3472,8 +3521,24 @@ async def run_ingest_job(
             from config import get_settings as _gs
             if bool(getattr(_gs(), "SUMMARY_TREE_ENABLED", True)):
                 from services.ingestion.summary_tree import build_and_store_tree
+                _summary_tree_pool = _build_ghost_pool(
+                    getattr(ingestion_config, "summary_models", None) or []
+                )
+                _summary_tree_llm = (
+                    _summary_tree_llm_from_pool(
+                        _summary_tree_pool,
+                        getattr(ingestion_config, "max_summary_tokens", 300),
+                    )
+                    if getattr(ingestion_config, "chunk_summarization", False)
+                    else None
+                )
                 _tree_counts = await build_and_store_tree(
-                    db=db, doc_id=doc_id, corpus_id=corpus_id
+                    db=db,
+                    doc_id=doc_id,
+                    corpus_id=corpus_id,
+                    llm_fn=_summary_tree_llm,
+                    use_llm=_summary_tree_llm is not None,
+                    heal_missing=_summary_tree_llm is not None,
                 )
                 logger.info(
                     "phase=summary_tree doc=%s corpus=%s %s",

@@ -524,6 +524,7 @@ export async function createUploadIngestBatch(
     chunk_summarization?: boolean;
     model?: string;
     concurrency?: number;
+    profile?: "mac_safe" | "rtx_assisted" | null;
     start?: boolean;
   } = {},
 ): Promise<IngestBatchResponse> {
@@ -541,6 +542,7 @@ export async function createUploadIngestBatch(
   if (options.concurrency !== undefined) {
     form.append("concurrency", String(options.concurrency));
   }
+  if (options.profile) form.append("profile", options.profile);
   form.append("start", String(options.start ?? true));
 
   const token = getPersistedToken();

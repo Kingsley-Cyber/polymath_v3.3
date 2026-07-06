@@ -111,6 +111,7 @@ class LocalIngestBatchRequest(BaseModel):
     """Create a durable backend-owned ingest batch from a local folder path."""
 
     root_path: str = Field(..., min_length=1)
+    profile: Literal["mac_safe", "rtx_assisted"] | None = None
     recursive: bool = True
     extensions: list[str] | None = None
     max_files: int | None = Field(default=None, ge=1, le=20000)
@@ -1133,6 +1134,7 @@ async def create_local_ingest_batch(
             chunk_summarization=body.chunk_summarization,
             model=body.model,
             concurrency=body.concurrency,
+            profile=body.profile,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1155,6 +1157,7 @@ async def create_upload_ingest_batch(
     chunk_summarization: bool | None = Form(default=None),
     model: str = Form(default=""),
     concurrency: int | None = Form(default=1),
+    profile: Literal["mac_safe", "rtx_assisted"] | None = Form(default=None),
     start: bool = Form(default=True),
     current_user: dict = Depends(get_current_user),
 ):
@@ -1200,6 +1203,7 @@ async def create_upload_ingest_batch(
             chunk_summarization=chunk_summarization,
             model=model,
             concurrency=concurrency,
+            profile=profile,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

@@ -89,6 +89,18 @@ INGEST_PROFILES: dict[str, dict] = {
 }
 
 
+def _normalize_profile(profile: str | None) -> str | None:
+    value = str(profile or "").strip().lower()
+    if not value:
+        return None
+    if value not in INGEST_PROFILES:
+        raise ValueError(
+            "Unknown ingest profile "
+            f"{profile!r}; expected one of {', '.join(sorted(INGEST_PROFILES))}"
+        )
+    return value
+
+
 def _profile_endpoint_urls(batch: dict[str, Any]) -> list[str] | None:
     prof = INGEST_PROFILES.get(
         str((batch.get("options") or {}).get("profile") or "").strip().lower()
@@ -229,6 +241,31 @@ def _item_identity(item: dict[str, Any]) -> tuple[str, int, int] | None:
     return (rel_path, int(item.get("size_bytes") or 0), mtime_ms)
 
 
+def _infer_item_stage(item: dict[str, Any]) -> str | None:
+    """Best-effort ladder position for old and new batch rows.
+
+    New rows persist stage/stage_rank. Live batches created before §13-S only
+    have status/phase, so the UI otherwise undercounts progress after a deploy.
+    """
+    explicit = str(item.get("stage") or "").strip()
+    if explicit in STAGE_RANK:
+        return explicit
+
+    status = str(item.get("status") or "").strip()
+    phase = str(item.get("phase") or "").strip()
+    if status == ITEM_SKIPPED:
+        return None
+    if status == ITEM_DONE:
+        if phase == "awaiting_summary":
+            return "indexed"
+        return _PHASE_TO_STAGE.get(phase) or "queryable"
+    if phase in _PHASE_TO_STAGE:
+        return _PHASE_TO_STAGE[phase]
+    if status in {ITEM_QUEUED, ITEM_RUNNING, ITEM_FAILED_RECOVERABLE, ITEM_FAILED}:
+        return "registered"
+    return None
+
+
 def discover_local_files(
     root_path: str,
     *,
@@ -333,6 +370,7 @@ async def create_local_batch(
     chunk_summarization: bool | None = None,
     model: str = "",
     concurrency: int | None = None,
+    profile: str | None = None,
 ) -> dict[str, Any]:
     root, files = discover_local_files(
         root_path,
@@ -346,6 +384,7 @@ async def create_local_batch(
     now = _now()
     batch_id = str(uuid.uuid4())
     settings = get_settings()
+    normalized_profile = _normalize_profile(profile)
     total_source_bytes = _sum_file_sizes(files)
     storage_root = Path(settings.INGEST_FILE_STORAGE_DIR).expanduser().resolve()
     storage_limit = int(max_total_bytes or settings.INGEST_FILE_STORAGE_MAX_BYTES)
@@ -410,6 +449,7 @@ async def create_local_batch(
             "chunk_summarization": chunk_summarization,
             "model": model or "",
             "concurrency": worker_count,
+            "profile": normalized_profile,
         },
         "created_at": now,
         "updated_at": now,
@@ -447,6 +487,7 @@ async def create_upload_batch(
     chunk_summarization: bool | None = None,
     model: str = "",
     concurrency: int | None = None,
+    profile: str | None = None,
 ) -> dict[str, Any]:
     """Create a durable one-off browser-upload batch from already-read bytes."""
     if not files:
@@ -474,6 +515,7 @@ async def create_upload_batch(
     now = _now()
     batch_id = str(uuid.uuid4())
     settings = get_settings()
+    normalized_profile = _normalize_profile(profile)
     storage_root = Path(settings.INGEST_FILE_STORAGE_DIR).expanduser().resolve()
     storage_limit = int(max_total_bytes or settings.INGEST_FILE_STORAGE_MAX_BYTES)
     _ensure_storage_quota(
@@ -534,6 +576,7 @@ async def create_upload_batch(
             "chunk_summarization": chunk_summarization,
             "model": model or "",
             "concurrency": worker_count,
+            "profile": normalized_profile,
         },
         "created_at": now,
         "updated_at": now,
@@ -833,13 +876,15 @@ async def refresh_batch_counts(
     ).to_list(1)
     sizes = rows[0] if rows else {}
     _mb = lambda b: round(float(b or 0) / 1048576, 1)  # noqa: E731
-    ladder_rows = await db[ITEMS].aggregate(
-        [
-            {"$match": {"batch_id": batch_id, "stage": {"$exists": True}}},
-            {"$group": {"_id": "$stage", "n": {"$sum": 1}}},
-        ]
+    ladder_items = await db[ITEMS].find(
+        {"batch_id": batch_id},
+        {"_id": 0, "stage": 1, "status": 1, "phase": 1},
     ).to_list(length=None)
-    _by_stage = {str(r["_id"]): int(r["n"]) for r in ladder_rows}
+    _by_stage: dict[str, int] = {}
+    for item in ladder_items:
+        stage = _infer_item_stage(item)
+        if stage:
+            _by_stage[stage] = _by_stage.get(stage, 0) + 1
     # Cumulative ladder: a file AT rung k has passed every rung below it.
     ladder = {}
     _cum = 0
@@ -1313,17 +1358,30 @@ async def _preflight_summary_canary(db, batch: dict) -> str | None:
     responses; prose-only fallback swallowing structure)."""
     import httpx as _hx
 
+    from services.ingestion.extraction_contract import provider_payload_extras
     from services.ingestion.summary_semantics import (
         SEMANTIC_SUMMARY_INSTRUCTION,
         parse_semantic_summary,
     )
+    from services.secrets import decrypt as _decrypt_secret
 
     settings = get_settings()
     corpus = await db["corpora"].find_one({"corpus_id": batch.get("corpus_id")}) or {}
-    pool = ((corpus.get("default_ingestion_config") or {}).get("summary_model_pool")
-            or [])
+    cfg = corpus.get("default_ingestion_config") or {}
+    opts = batch.get("options") or {}
+    summary_enabled = opts.get("chunk_summarization")
+    if summary_enabled is None:
+        summary_enabled = cfg.get("chunk_summarization")
+    if not bool(summary_enabled):
+        return None
+    pool = (cfg.get("summary_models") or cfg.get("summary_model_pool") or [])
     entry = dict(pool[0]) if pool else {"model": getattr(
         settings, "GHOST_A_DEFAULT_MODEL", "") or settings.DEFAULT_COMPLETION_MODEL}
+    for field in ("api_key", "lifecycle_api_key"):
+        secret = entry.get(field)
+        if secret:
+            plaintext = _decrypt_secret(secret)
+            entry[field] = plaintext if plaintext is not None else secret
     model = str(entry.get("model") or "")
     if not model:
         return "no summary model configured (chip empty and no default)"
@@ -1339,6 +1397,7 @@ async def _preflight_summary_canary(db, batch: dict) -> str | None:
         payload["api_base"] = entry["base_url"]
     if entry.get("api_key"):
         payload["api_key"] = entry["api_key"]
+    payload.update(provider_payload_extras(entry.get("extra_params")))
     _m = model.lower()
     if "v4-flash" in _m or "v4-pro" in _m or "deepseek-v4" in _m:
         payload.setdefault("thinking", {"type": "disabled"})
