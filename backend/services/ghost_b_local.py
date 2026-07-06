@@ -877,7 +877,12 @@ def _metrics(raw: list[dict]) -> dict:
 
 
 # ------------------------------------------------------------- http client
-async def _extract_via_sidecar(task_dicts: list[dict], do_facts: bool, lens_id: str | None) -> list[dict]:
+async def _extract_via_sidecar(
+    task_dicts: list[dict],
+    do_facts: bool,
+    lens_id: str | None,
+    endpoint_urls: list[str] | None = None,
+) -> list[dict]:
     """POST the doc's tasks to the ghost_b_extract sidecar(s) and return the
     concatenated raw wire dicts, order preserved.
 
@@ -902,7 +907,7 @@ async def _extract_via_sidecar(task_dicts: list[dict], do_facts: bool, lens_id: 
     # own pace. Probe cost is one /health round-trip per URL per doc.
     # Settings-UI endpoints (RUNTIME_ENDPOINT_URLS, set by the worker per
     # ingest) take precedence over the env list.
-    pref_urls = RUNTIME_ENDPOINT_URLS or SIDECAR_URLS
+    pref_urls = endpoint_urls or RUNTIME_ENDPOINT_URLS or SIDECAR_URLS
     # Retry the liveness sweep with capped exponential backoff: a transient
     # blip (a wedged host.docker.internal route after sleep/wake, a sidecar
     # still warming) must not fail the batch on one bad round-trip. Keep
@@ -1044,9 +1049,15 @@ async def extract_entities(
     enable_facts: bool | None = None,
     audit_event_sink: Any = None,
     audit_run_id: str | None = None,
+    endpoint_urls: list[str] | None = None,
 ) -> list:
     """Local Ghost B extraction. Signature mirrors services.ghost_b.extract_entities
     so the worker's _b_branch swaps the import with no call-site change.
+
+    endpoint_urls (§13-S per-call contract scoping): when given, ONLY these
+    sidecars are candidates for this call — replaces reliance on the
+    process-global RUNTIME_ENDPOINT_URLS, whose last-writer-wins behavior
+    raced across concurrently-ingesting corpora with different profiles.
 
     Honored: tasks, schema_lens (id passthrough), return_report, enable_facts.
     Accepted-and-ignored (no LLM in this lane): model, schema, chunk_vectors,
@@ -1066,7 +1077,9 @@ async def extract_entities(
     if mode == "inproc":
         raw = await asyncio.to_thread(_extract_raw, task_dicts, do_facts, lens_id)
     else:
-        raw = await _extract_via_sidecar(task_dicts, do_facts, lens_id)
+        raw = await _extract_via_sidecar(
+            task_dicts, do_facts, lens_id, endpoint_urls=endpoint_urls
+        )
 
     results = _to_results(raw)
 

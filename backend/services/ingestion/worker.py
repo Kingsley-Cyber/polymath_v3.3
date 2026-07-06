@@ -1405,18 +1405,19 @@ async def _run_ghosts_parallel(
         )
 
         _global_engine = "local"
-        _endpoint_urls: list[str] = []
+        _endpoint_urls: list[str] = list(extraction_endpoint_urls or [])
         try:
             from services import ghost_b_local as _gbl
             from services.settings import settings_service as _ss
 
             ext = await _ss.get_system_extraction()
             _global_engine = str(getattr(ext, "engine", "local") or "local")
-            _endpoint_urls = [
-                e.url.strip().rstrip("/")
-                for e in (ext.endpoints or [])
-                if e.enabled and e.url and e.url.strip()
-            ]
+            if not _endpoint_urls:
+                _endpoint_urls = [
+                    e.url.strip().rstrip("/")
+                    for e in (ext.endpoints or [])
+                    if e.enabled and e.url and e.url.strip()
+                ]
             _gbl.RUNTIME_ENDPOINT_URLS = _endpoint_urls or None
         except Exception as exc:  # noqa: BLE001 — env fallback is fine
             logger.warning("extraction endpoint settings unavailable: %s", exc)
@@ -1591,7 +1592,7 @@ async def _run_ghosts_parallel(
                 _local_part = tasks[0::2]
                 _cloud_part = tasks[1::2]
                 _rep_local, _rep_cloud = await asyncio.gather(
-                    extract_entities(_local_part, **_extract_kwargs),
+                    extract_entities(_local_part, **_extract_kwargs, endpoint_urls=_endpoint_urls or None),
                     _cloud_extract(_cloud_part, **_extract_kwargs),
                 )
                 if isinstance(_rep_local, ExtractionBatchReport) and isinstance(
@@ -1610,7 +1611,7 @@ async def _run_ghosts_parallel(
                     report = list(_rep_local) + list(_rep_cloud)
             elif extraction_engine == "local_then_cloud":
                 try:
-                    report = await extract_entities(tasks, **_extract_kwargs)
+                    report = await extract_entities(tasks, **_extract_kwargs, endpoint_urls=_endpoint_urls or None)
                 except Exception as _local_exc:  # noqa: BLE001
                     if contract.pool_size == 0:
                         raise
@@ -1635,7 +1636,7 @@ async def _run_ghosts_parallel(
                     select_enrichment_tasks,
                 )
 
-                report = await extract_entities(tasks, **_extract_kwargs)
+                report = await extract_entities(tasks, **_extract_kwargs, endpoint_urls=_endpoint_urls or None)
                 if isinstance(report, ExtractionBatchReport):
                     _verdict = enrichment_verdict(
                         report.metrics,
@@ -1723,7 +1724,7 @@ async def _run_ghosts_parallel(
                             metrics=_base_metrics,
                         )
             else:
-                report = await extract_entities(tasks, **_extract_kwargs)
+                report = await extract_entities(tasks, **_extract_kwargs, endpoint_urls=_endpoint_urls or None)
         if not isinstance(report, ExtractionBatchReport):
             fresh_results = report
             failures: list[ExtractionFailureItem] = []
@@ -2912,6 +2913,13 @@ async def run_ingest_job(
     # under ~2s even when the full pipeline will run for 30+ minutes.
     on_doc_id: "Callable[[str], None] | None" = None,
     on_phase: "Callable[[str, dict], None] | None" = None,
+    # §13-S pass driver: complete THROUGH this ladder stage then exit with
+    # status="staged" — durable artifacts persisted, memory released, the
+    # next pass resumes from checkpoints. None = run to completion.
+    target_stage: str | None = None,
+    # §13-S per-call extraction endpoint scoping (profile override) — kills
+    # the RUNTIME_ENDPOINT_URLS last-writer-wins race across corpora.
+    extraction_endpoint_urls: list[str] | None = None,
 ) -> IngestJobResponse:
     """Run the locked ingestion pipeline for a single document.
 
@@ -3660,6 +3668,19 @@ async def run_ingest_job(
         not ws.qdrant_written
         or (summary_write_required and not ws.summaries_indexed)
     )
+    if target_stage == "extracted":
+        # §13-S pass driver: durable through 'extracted' — exit, release
+        # memory; the next pass resumes from persisted checkpoints.
+        await _emit_ingest_phase(
+            on_phase, "staged_extracted", doc_id=doc_id, corpus_id=corpus_id
+        )
+        return IngestJobResponse(
+            job_id=job_id, doc_id=doc_id, corpus_id=corpus_id,
+            filename=filename, source_tier=source_tier.value,
+            status="staged", write_state=ws,
+            chunk_count=len(children), parent_count=len(parents),
+        )
+
     if qdrant_phase_needed:
         try:
             await _set_ingest_stage(
@@ -3884,6 +3905,19 @@ async def run_ingest_job(
                     "phase=embed_qdrant warn-persist failed doc=%s err=%s",
                     doc_id[:12], warn_persist_exc,
                 )
+
+    if target_stage == "indexed":
+        # §13-S pass driver: durable through 'indexed' (vectors + sparse in
+        # Qdrant, text in Mongo) — exit; graph/summaries run in a later pass.
+        await _emit_ingest_phase(
+            on_phase, "staged_indexed", doc_id=doc_id, corpus_id=corpus_id
+        )
+        return IngestJobResponse(
+            job_id=job_id, doc_id=doc_id, corpus_id=corpus_id,
+            filename=filename, source_tier=source_tier.value,
+            status="staged", write_state=ws,
+            chunk_count=len(children), parent_count=len(parents),
+        )
 
     # ── Phase 7: Neo4j (optional) ────────────────────────────────────────
     if (

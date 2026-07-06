@@ -41,6 +41,77 @@ ITEM_DONE = "done"
 ITEM_FAILED = "failed"
 ITEM_FAILED_RECOVERABLE = "failed_recoverable"
 ITEM_SKIPPED = "skipped"
+ITEM_STAGED = "staged"  # §13-S: durable through the batch's target_stage
+
+# ── §13-S stage ladder — monotonic per-item progress, distinct from `phase`
+# (current activity). Rank persisted so lease queries can compare cheaply.
+STAGE_LADDER = [
+    "registered", "parsed", "chunked", "extracted",
+    "indexed", "summarized", "promoted", "queryable",
+]
+STAGE_RANK = {s: i for i, s in enumerate(STAGE_LADDER)}
+# Worker phase ENTRY events certify the PREVIOUS stage completed.
+_PHASE_TO_STAGE = {
+    "reading": "registered",
+    "chunking": "parsed",
+    "summaries": "chunked",
+    "ghosts": "chunked",
+    "mongo": "extracted",
+    "staged_extracted": "extracted",
+    "embedding": "extracted",
+    "qdrant": "extracted",
+    "staged_indexed": "indexed",
+    "neo4j": "indexed",
+    "verifying": "indexed",
+    "awaiting_summary": "indexed",
+    "complete": "queryable",
+}
+
+# ── §13-S named profiles (deterministic one-knob presets) ────────────────────
+# mac_safe: staged passes, tiny concurrency, Mac sidecar extraction, memory
+# released per pass — small files must be feasible on the M1 Studio ALONE.
+# rtx_assisted: the elastic-car topology; single full pass.
+INGEST_PROFILES: dict[str, dict] = {
+    "mac_safe": {
+        "concurrency": 2,
+        "pass_plan": ["extracted", "indexed", None],  # None = run to completion
+        "extraction_endpoint_urls": [
+            os.environ.get(
+                "MAC_SIDECAR_URL", "http://host.docker.internal:8084"
+            ).rstrip("/")
+        ],
+    },
+    "rtx_assisted": {
+        "concurrency": None,  # honor batch/env
+        "pass_plan": [None],
+        "extraction_endpoint_urls": None,  # settings/global fleet
+    },
+}
+
+
+def _profile_endpoint_urls(batch: dict[str, Any]) -> list[str] | None:
+    prof = INGEST_PROFILES.get(
+        str((batch.get("options") or {}).get("profile") or "").strip().lower()
+    )
+    return (prof or {}).get("extraction_endpoint_urls")
+
+
+async def _advance_item_stage(
+    db: AsyncIOMotorDatabase, item_id: str, stage: str
+) -> None:
+    rank = STAGE_RANK.get(stage)
+    if rank is None:
+        return
+    await db[ITEMS].update_one(
+        {
+            "item_id": item_id,
+            "$or": [
+                {"stage_rank": {"$exists": False}},
+                {"stage_rank": {"$lt": rank}},
+            ],
+        },
+        {"$set": {"stage": stage, "stage_rank": rank}},
+    )
 
 BATCH_QUEUED = "queued"
 BATCH_RUNNING = "running"
@@ -677,10 +748,17 @@ async def refresh_batch_counts(
             ITEM_FAILED,
             ITEM_FAILED_RECOVERABLE,
             ITEM_SKIPPED,
+            ITEM_STAGED,
         )
     }
     total = sum(counts.values())
-    unfinished = counts[ITEM_QUEUED] + counts[ITEM_RUNNING] + counts[ITEM_FAILED_RECOVERABLE]
+    unfinished = (
+        counts[ITEM_QUEUED]
+        + counts[ITEM_RUNNING]
+        + counts[ITEM_FAILED_RECOVERABLE]
+        # §13-S: staged = mid-pass, never terminal.
+        + counts[ITEM_STAGED]
+    )
     if total == 0:
         status = BATCH_FAILED
     elif unfinished > 0:
@@ -755,6 +833,20 @@ async def refresh_batch_counts(
     ).to_list(1)
     sizes = rows[0] if rows else {}
     _mb = lambda b: round(float(b or 0) / 1048576, 1)  # noqa: E731
+    ladder_rows = await db[ITEMS].aggregate(
+        [
+            {"$match": {"batch_id": batch_id, "stage": {"$exists": True}}},
+            {"$group": {"_id": "$stage", "n": {"$sum": 1}}},
+        ]
+    ).to_list(length=None)
+    _by_stage = {str(r["_id"]): int(r["n"]) for r in ladder_rows}
+    # Cumulative ladder: a file AT rung k has passed every rung below it.
+    ladder = {}
+    _cum = 0
+    for s in reversed(STAGE_LADDER):
+        _cum += _by_stage.get(s, 0)
+        ladder[s] = _cum
+
     progress = {
         "files_done": counts[ITEM_DONE],
         "files_total": total,
@@ -762,6 +854,8 @@ async def refresh_batch_counts(
         "mb_done": _mb(sizes.get("done_bytes")),
         "mb_extracted": _mb(sizes.get("extracted_bytes")),
         "mb_total": _mb(sizes.get("total_bytes")),
+        # §13-S honest ladder ("500 chunked / 320 extracted / 60 queryable").
+        "ladder": ladder,
     }
 
     update: dict[str, Any] = {
@@ -936,6 +1030,7 @@ async def _lease_next_item(
     batch_id: str,
     owner: str,
     lease_seconds: int,
+    target_rank: int | None = None,
 ) -> dict[str, Any] | None:
     now = _now()
     # Audit 2026-07-06 (critical): `attempts` was incremented but never READ —
@@ -950,10 +1045,19 @@ async def _lease_next_item(
         {
             "batch_id": batch_id,
             "source": {"$in": RUNNABLE_SOURCES},
-            "status": {"$in": [ITEM_QUEUED, ITEM_FAILED_RECOVERABLE]},
-            "$or": [
-                {"attempts": {"$exists": False}},
-                {"attempts": {"$lt": max_attempts}},
+            "$and": [
+                {"$or": [
+                    {"status": {"$in": [ITEM_QUEUED, ITEM_FAILED_RECOVERABLE]}},
+                    # §13-S: staged items re-lease when the batch target moved
+                    # past their persisted rung (next pass).
+                    {"status": ITEM_STAGED,
+                     "stage_rank": {"$lt": target_rank}} if target_rank is not None
+                    else {"status": ITEM_STAGED},
+                ]},
+                {"$or": [
+                    {"attempts": {"$exists": False}},
+                    {"attempts": {"$lt": max_attempts}},
+                ]},
             ],
         },
         {
@@ -1138,6 +1242,9 @@ async def _process_local_item(
             phase_doc_id = details.get("doc_id")
             phase_error = details.get("error")
             failure_stage = phase if phase.endswith("failed") else None
+            _ladder = _PHASE_TO_STAGE.get(phase)
+            if _ladder:
+                await _advance_item_stage(db, item_id, _ladder)
             await _set_item_phase(
                 db,
                 item_id,
@@ -1158,8 +1265,13 @@ async def _process_local_item(
             ingest_overrides=None,
             on_doc_id=_on_doc_id,
             on_phase=_on_phase,
+            target_stage=(batch.get("options") or {}).get("target_stage") or None,
+            extraction_endpoint_urls=_profile_endpoint_urls(batch),
         )
-        if result.status == "done":
+        if result.status == "staged":
+            # §13-S: durable through the pass target; next pass re-leases it.
+            status, item_phase, failure_stage = ITEM_STAGED, "staged", None
+        elif result.status == "done":
             status, item_phase, failure_stage = ITEM_DONE, "complete", None
         elif result.status == "awaiting_summary":
             status, item_phase, failure_stage = ITEM_DONE, "awaiting_summary", None
@@ -1351,7 +1463,20 @@ async def run_local_batch(
     concurrency = _runtime_batch_concurrency(batch, get_settings())
     await _reap_over_attempt_items(db, batch_id)
 
-    async def _worker(worker_idx: int) -> None:
+    # ── §13-S pass driver ────────────────────────────────────────────────────
+    # A profile's pass_plan sweeps the whole batch stage-by-stage: each pass
+    # sets options.target_stage, runs the worker pool until nothing is
+    # leaseable, then advances. Durable artifacts + resume rehydration make
+    # repeated passes cheap; memory is released between passes (mac_safe's
+    # core property). Default plan = one full pass (today's behavior).
+    _profile = INGEST_PROFILES.get(
+        str((batch.get("options") or {}).get("profile") or "").strip().lower()
+    )
+    pass_plan = list((_profile or {}).get("pass_plan") or [None])
+    if (_profile or {}).get("concurrency"):
+        concurrency = min(concurrency, int(_profile["concurrency"])) or 1
+
+    async def _worker(worker_idx: int, target_rank: int | None) -> None:
         owner = f"{owner_prefix}:{worker_idx}"
         while True:
             item = await _lease_next_item(
@@ -1359,6 +1484,7 @@ async def run_local_batch(
                 batch_id=batch_id,
                 owner=owner,
                 lease_seconds=lease_seconds,
+                target_rank=target_rank,
             )
             if not item:
                 return
@@ -1380,7 +1506,19 @@ async def run_local_batch(
                     _hb.cancel()
             await refresh_batch_counts(db, batch_id, user_id=user_id)
 
-    await asyncio.gather(*[_worker(idx) for idx in range(concurrency)])
+    for _pass_target in pass_plan:
+        _rank = STAGE_RANK.get(_pass_target) if _pass_target else None
+        batch.setdefault("options", {})["target_stage"] = _pass_target
+        await db[BATCHES].update_one(
+            {"batch_id": batch_id},
+            {"$set": {"options.target_stage": _pass_target, "updated_at": _now()}},
+        )
+        if len(pass_plan) > 1:
+            logger.info(
+                "batch %s pass -> %s (plan %s)",
+                batch_id[:8], _pass_target or "full", pass_plan,
+            )
+        await asyncio.gather(*[_worker(idx, _rank) for idx in range(concurrency)])
     try:
         report = await _batch_quality_report(db, batch)
         await db[BATCHES].update_one(
