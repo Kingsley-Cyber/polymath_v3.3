@@ -1747,6 +1747,7 @@ class CorpusMetrics:
     cluster_pair_gaps: list[dict[str, Any]] = field(default_factory=list)
     latent_topics: list[dict[str, Any]] = field(default_factory=list)
     metrics_engine: str = "networkx"
+    relation_edge_state_counts: dict[str, int] = field(default_factory=dict)  # typed / refined / family / fallback
 
 
 # ── Graph construction from Neo4j ───────────────────────────────────────────
@@ -1784,6 +1785,7 @@ RETURN a.entity_id AS source,
        b.entity_id AS target,
        r.predicate AS predicate,
        coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
+       coalesce(r.edge_state, CASE WHEN r.predicate = 'related_to' THEN 'fallback' ELSE 'typed' END) AS edge_state,
        coalesce(r.edge_strength, CASE WHEN r.predicate = 'related_to' THEN 'weak' ELSE 'strong' END) AS edge_strength,
        coalesce(r.eligible_for_synthesis, r.predicate <> 'related_to') AS eligible_for_synthesis
 """
@@ -1941,6 +1943,10 @@ async def _load_relations_into_graph(
             strengths = G[s][t].setdefault("edge_strengths", [])
             if strength not in strengths:
                 strengths.append(strength)
+            state = rec.get("edge_state") or "typed"
+            states = G[s][t].setdefault("edge_states", [])
+            if state not in states:
+                states.append(state)
             G[s][t]["eligible_for_synthesis"] = bool(
                 G[s][t].get("eligible_for_synthesis")
                 or rec.get("eligible_for_synthesis")
@@ -1951,6 +1957,8 @@ async def _load_relations_into_graph(
                 predicate=rec.get("predicate") or "related_to",
                 relation_family=rec.get("relation_family") or "WeakAssociation",
                 relation_families=[rec.get("relation_family") or "WeakAssociation"],
+                edge_state=rec.get("edge_state") or "typed",
+                edge_states=[rec.get("edge_state") or "typed"],
                 edge_strength=rec.get("edge_strength") or "strong",
                 edge_strengths=[rec.get("edge_strength") or "strong"],
                 eligible_for_synthesis=bool(rec.get("eligible_for_synthesis")),
@@ -2105,6 +2113,16 @@ def compute_relation_family_counts(G) -> dict[str, int]:
         families = attrs.get("relation_families") or [attrs.get("relation_family")]
         for family in families:
             counts[str(family or "WeakAssociation")] += 1
+    return dict(counts)
+
+
+def compute_relation_edge_state_counts(G) -> dict[str, int]:
+    """Count typed/refined/family/fallback edge-state distribution."""
+    counts: Counter[str] = Counter()
+    for _, _, attrs in G.edges(data=True):
+        states = attrs.get("edge_states") or [attrs.get("edge_state")]
+        for state in states:
+            counts[str(state or "typed")] += 1
     return dict(counts)
 
 
@@ -3264,6 +3282,7 @@ async def compute_all_metrics(
             domain_density={},
             per_domain_edge_counts={},
             relation_family_counts={},
+            relation_edge_state_counts={},
             top_pagerank=[],
             top_cross_domain_pagerank=[],
             node_domain_map={},
@@ -3300,6 +3319,7 @@ async def compute_all_metrics(
     cross_pct = compute_cross_domain_edge_pct(G, node_primary)
     per_domain = compute_per_domain_edge_counts(G, node_primary)
     relation_families = compute_relation_family_counts(G)
+    relation_edge_states = compute_relation_edge_state_counts(G)
     dom_density = compute_domain_density(G, node_primary)
     modularity_proxy = round(
         1 - (cross_pct / 100.0) if cross_pct else 1.0, 3
@@ -3372,6 +3392,7 @@ async def compute_all_metrics(
         domain_density=dom_density,
         per_domain_edge_counts=per_domain,
         relation_family_counts=relation_families,
+        relation_edge_state_counts=relation_edge_states,
         top_pagerank=_top_list(pagerank),
         top_cross_domain_pagerank=_top_list(cd_pagerank),
         node_domain_map=node_primary,
@@ -3535,6 +3556,7 @@ def _serialize_metrics(m: CorpusMetrics) -> dict:
         "domain_density": m.domain_density,
         "per_domain_edge_counts": m.per_domain_edge_counts,
         "relation_family_counts": m.relation_family_counts,
+        "relation_edge_state_counts": m.relation_edge_state_counts,
         "top_pagerank": m.top_pagerank,
         "top_cross_domain_pagerank": m.top_cross_domain_pagerank,
         "node_domain_map": node_domain_map,
@@ -3571,6 +3593,7 @@ def _deserialize_metrics(doc: dict) -> CorpusMetrics:
         domain_density=doc.get("domain_density", {}),
         per_domain_edge_counts=doc.get("per_domain_edge_counts", {}),
         relation_family_counts=doc.get("relation_family_counts", {}),
+        relation_edge_state_counts=doc.get("relation_edge_state_counts", {}),
         top_pagerank=doc.get("top_pagerank", []),
         top_cross_domain_pagerank=doc.get("top_cross_domain_pagerank", []),
         node_domain_map=doc.get("node_domain_map", {}),

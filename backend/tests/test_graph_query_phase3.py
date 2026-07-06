@@ -236,6 +236,12 @@ async def test_expand_subgraph_prunes_edges_and_clamps_hops():
     assert "evidence_count" in joined
     assert "$hop_min_confidence" in joined
     assert "$generic_min_confidence" in joined
+    assert "$allow_related_to_edges" in joined
+    assert "fallback_edge_count" in joined
+    assert "typed_edge_count" in joined
+    assert "predicate <> 'related_to' OR evidence_count > 0" in joined
+    assert "query_weight" in joined
+    assert "related_to_query_weight" in joined
     assert out["trace"]["hops_requested"] == 3
     assert out["trace"]["hops_used"] == 2
     assert out["trace"]["edge_policy"]["min_confidence"] == pytest.approx(0.20)

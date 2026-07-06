@@ -258,6 +258,77 @@ async def test_write_document_graph_persists_relation_doc_provenance():
 
 
 @pytest.mark.asyncio
+async def test_write_document_graph_stamps_related_to_fallback_contract():
+    driver = FakeDriver()
+    result = ExtractionResult(
+        schema_version="polymath.extract.v1",
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        entities=[
+            EntityItem(
+                canonical_name="alpha idea",
+                surface_form="Alpha idea",
+                entity_type="Concept",
+                confidence=0.9,
+            ),
+            EntityItem(
+                canonical_name="beta idea",
+                surface_form="Beta idea",
+                entity_type="Concept",
+                confidence=0.9,
+            ),
+        ],
+        relations=[
+            RelationItem(
+                subject="alpha idea",
+                predicate="related_to",
+                object="beta idea",
+                object_kind="entity",
+                confidence=0.72,
+                evidence_phrase="Alpha idea is loosely associated with Beta idea in the analogy.",
+                relation_cue="runs on",
+                source_predicate="related_to",
+            )
+        ],
+    )
+
+    await write_document_graph(
+        driver=driver,
+        doc_id="d1",
+        corpus_id="corp1",
+        extraction_results=[result],
+        user_id="u1",
+        file_id="f1",
+        all_chunk_ids=["c1"],
+    )
+
+    query, params = next(
+        (query, params)
+        for query, params in driver.calls
+        if "MERGE (s)-[r:RELATES_TO" in query
+    )
+    assert "r.edge_state" in query
+    assert "r.fallback_family" in query
+    assert "r.candidate_predicates" in query
+    assert "r.related_to_query_weight" in query
+    row = params["rows"][0]
+    assert row["predicate"] == "related_to"
+    assert row["edge_state"] == "family"
+    assert row["fallback"] is True
+    assert row["relation_family"] == "Operational"
+    assert row["fallback_family"] == "Operational"
+    assert row["candidate_predicates"] == ["runs_on"]
+    assert row["candidate_scores"] == [0.72]
+    assert row["candidate_score_sources"] == ["evidence_cue"]
+    assert row["fallback_evidence_phrase"] == (
+        "Alpha idea is loosely associated with Beta idea in the analogy."
+    )
+    assert row["related_to_query_weight"] == 0.5
+    assert row["related_to_max_hops"] == 1
+
+
+@pytest.mark.asyncio
 async def test_write_document_graph_refreshes_mongo_relation_support_records():
     driver = FakeDriver()
     db = FakeDb()

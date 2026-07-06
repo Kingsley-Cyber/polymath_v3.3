@@ -99,6 +99,7 @@ export interface DiscoverMetrics {
   modularity_proxy: number;
   per_domain_edge_counts: Record<string, { internal: number; external: number }>;
   relation_family_counts?: Record<string, number>;
+  relation_edge_state_counts?: Record<string, number>;
   domain_density: Record<string, number>;
   top_cross_domain_pagerank: Array<{
     entity_id: string;

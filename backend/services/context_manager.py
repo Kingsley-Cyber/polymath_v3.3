@@ -771,6 +771,9 @@ class ContextManager:
                         seed_b = None
                         neighbor_b = None
                         edge_evidence = ""
+                        fallback = False
+                        edge_state = ""
+                        fallback_family = ""
                         evidence_chunks: list = []
                         if hasattr(d, "predicate"):
                             pred = getattr(d, "predicate", "") or ""
@@ -783,6 +786,9 @@ class ContextManager:
                             seed_b = getattr(d, "seed_betweenness", None)
                             neighbor_b = getattr(d, "neighbor_betweenness", None)
                             edge_evidence = str(getattr(d, "edge_evidence", "") or "")
+                            fallback = bool(getattr(d, "fallback", False))
+                            edge_state = str(getattr(d, "edge_state", "") or "")
+                            fallback_family = str(getattr(d, "fallback_family", "") or "")
                             evidence_chunks = list(getattr(d, "evidence_chunks", None) or [])
                         elif isinstance(d, dict):
                             pred = str(d.get("predicate") or "")
@@ -795,13 +801,27 @@ class ContextManager:
                             seed_b = d.get("seed_betweenness")
                             neighbor_b = d.get("neighbor_betweenness")
                             edge_evidence = str(d.get("edge_evidence") or "")
+                            fallback = bool(d.get("fallback") or False)
+                            edge_state = str(d.get("edge_state") or "")
+                            fallback_family = str(d.get("fallback_family") or "")
                             evidence_chunks = list(d.get("evidence_chunks") or [])
                         else:
                             continue
                         if not pred or not neighbor:
                             continue
-                        # Format: "seed → predicate(family) → neighbor"
-                        if fam:
+                        # Format: "seed → predicate(family) → neighbor".
+                        # Bare fallback related_to is rendered as an
+                        # evidence pointer, not as a factual relation.
+                        is_fallback_related = pred == "related_to" and (
+                            fallback or edge_state in {"fallback", "family"}
+                        )
+                        if is_fallback_related:
+                            family_hint = fallback_family or fam
+                            arrow = f"{seed} ↔ {neighbor} [fallback recall"
+                            if family_hint:
+                                arrow += f"; likely family={family_hint}"
+                            arrow += "]"
+                        elif fam:
                             arrow = f"{seed} → {pred}({fam}) → {neighbor}"
                         else:
                             arrow = f"{seed} → {pred} → {neighbor}"

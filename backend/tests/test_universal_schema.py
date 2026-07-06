@@ -48,6 +48,7 @@ from services.graph.neo4j_writer import (
     resolve_facets,
     resolve_ontology_metadata,
     resolve_primary_entity_type,
+    build_relation_edge_mitigation,
     refine_related_to_predicate,
     relation_family_for_predicate,
 )
@@ -1635,6 +1636,50 @@ def test_related_to_refinement_uses_evidence_and_source_predicate():
         )
         == "trained_on"
     )
+
+
+def test_related_to_mitigation_keeps_family_candidates_and_evidence():
+    mitigation = build_relation_edge_mitigation(
+        extracted_predicate="related_to",
+        refined_predicate="related_to",
+        source_predicate="uses",
+        confidence=0.72,
+        evidence_phrase="The ingestion worker uses Qdrant for vector writes.",
+        relation_cue="uses",
+        predicate_refined=False,
+    )
+
+    assert mitigation.edge_state == "family"
+    assert mitigation.fallback is True
+    assert mitigation.relation_family == "Operational"
+    assert mitigation.fallback_family == "Operational"
+    assert mitigation.candidate_predicates == ["uses"]
+    assert mitigation.candidate_scores == [0.72]
+    assert mitigation.candidate_score_sources == ["evidence_cue"]
+    assert mitigation.fallback_evidence_phrase == (
+        "The ingestion worker uses Qdrant for vector writes."
+    )
+    assert mitigation.related_to_query_weight == 0.5
+    assert mitigation.related_to_max_hops == 1
+
+
+def test_related_to_mitigation_marks_deterministic_refinement_as_refined():
+    mitigation = build_relation_edge_mitigation(
+        extracted_predicate="related_to",
+        refined_predicate="runs_on",
+        source_predicate="runs_on",
+        confidence=0.81,
+        evidence_phrase="The model runs on the RTX server.",
+        relation_cue="runs on",
+        predicate_refined=True,
+    )
+
+    assert mitigation.edge_state == "refined"
+    assert mitigation.fallback is False
+    assert mitigation.relation_family == "Operational"
+    assert mitigation.promoted_by == "deterministic_related_to_refinement"
+    assert mitigation.related_to_query_weight == 1.0
+    assert mitigation.related_to_max_hops == 2
 
 
 def test_entity_aliases_canonicalize_before_id_generation():

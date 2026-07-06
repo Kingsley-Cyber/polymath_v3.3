@@ -542,18 +542,24 @@ async def _build_context_packet(
                 MATCH (seed:Entity)-[r:RELATES_TO]-(other:Entity)
                 WHERE seed.entity_id IN $entity_ids
                   AND any(cid IN $corpus_ids WHERE cid IN coalesce(r.corpus_ids, []))
-                WITH seed, other, r,
-                     coalesce(r.confidence, 0.5) AS confidence,
-                     size(coalesce(r.evidence_chunk_ids, [])) AS evidence_count
-                RETURN
-                    coalesce(seed.display_name, seed.normalized_name, seed.entity_id) AS seed,
-                    coalesce(other.display_name, other.normalized_name, other.entity_id) AS neighbor,
-                    coalesce(r.predicate, 'related_to') AS predicate,
-                    coalesce(r.relation_family, '') AS family,
-                    confidence,
-                    evidence_count
-                ORDER BY confidence DESC, evidence_count DESC
-                LIMIT 24
+	                WITH seed, other, r,
+	                     coalesce(r.confidence, 0.5) AS confidence,
+	                     size(coalesce(r.evidence_chunk_ids, [])) AS evidence_count,
+	                     coalesce(r.predicate, 'related_to') AS predicate,
+	                     coalesce(r.related_to_query_weight, CASE WHEN coalesce(r.predicate, 'related_to') = 'related_to' THEN 0.5 ELSE 1.0 END) AS query_weight
+	                WHERE predicate <> 'related_to' OR evidence_count > 0
+	                RETURN
+	                    coalesce(seed.display_name, seed.normalized_name, seed.entity_id) AS seed,
+	                    coalesce(other.display_name, other.normalized_name, other.entity_id) AS neighbor,
+	                    predicate,
+	                    coalesce(r.relation_family, '') AS family,
+	                    coalesce(r.edge_state, CASE WHEN predicate = 'related_to' THEN 'fallback' ELSE 'typed' END) AS edge_state,
+	                    coalesce(r.fallback, predicate = 'related_to') AS fallback,
+	                    coalesce(r.fallback_family, '') AS fallback_family,
+	                    confidence,
+	                    evidence_count
+	                ORDER BY confidence * query_weight DESC, evidence_count DESC
+	                LIMIT 24
                 """,
                 entity_ids=entity_ids,
                 corpus_ids=corpus_ids,

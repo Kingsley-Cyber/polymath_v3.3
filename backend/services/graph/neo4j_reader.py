@@ -182,12 +182,20 @@ async def get_full_corpus_graph(
     WITH a, b, r, collect(DISTINCT ec.chunk_id) AS selected_evidence_chunk_ids
     RETURN a.entity_id AS source,
            b.entity_id AS target,
-           r.predicate AS predicate,
-           coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
-           r.confidence AS confidence,
-           selected_evidence_chunk_ids[..25] AS evidence_chunk_ids,
-           size(selected_evidence_chunk_ids) AS selected_support_count,
-           coalesce(r.support_count, size(coalesce(r.evidence_chunk_ids, []))) AS support_count,
+	           r.predicate AS predicate,
+	           coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
+	           r.confidence AS confidence,
+	           coalesce(r.edge_state, CASE WHEN r.predicate = 'related_to' THEN 'fallback' ELSE 'typed' END) AS edge_state,
+	           coalesce(r.fallback, r.predicate = 'related_to') AS fallback,
+	           coalesce(r.fallback_family, '') AS fallback_family,
+	           coalesce(r.candidate_predicates, []) AS candidate_predicates,
+	           coalesce(r.candidate_scores, []) AS candidate_scores,
+	           coalesce(r.candidate_score_sources, []) AS candidate_score_sources,
+	           coalesce(r.fallback_evidence_phrase, r.evidence_phrases[0], r.evidence_phrase, '') AS fallback_evidence_phrase,
+	           coalesce(r.related_to_query_weight, CASE WHEN r.predicate = 'related_to' THEN 0.5 ELSE 1.0 END) AS related_to_query_weight,
+	           selected_evidence_chunk_ids[..25] AS evidence_chunk_ids,
+	           size(selected_evidence_chunk_ids) AS selected_support_count,
+	           coalesce(r.support_count, size(coalesce(r.evidence_chunk_ids, []))) AS support_count,
            coalesce(r.avg_confidence, r.confidence) AS avg_confidence
     """
     async with driver.session() as session:
@@ -343,11 +351,19 @@ async def get_documents_as_clusters(
     WHERE any(cid IN $corpus_ids WHERE cid IN coalesce(r.corpus_ids, []))
     RETURN DISTINCT a.entity_id AS source,
                     b.entity_id AS target,
-                    r.predicate AS predicate,
-                    coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
-                    r.confidence AS confidence
-    LIMIT $max_edges
-    """
+	                    r.predicate AS predicate,
+	                    coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
+	                    r.confidence AS confidence,
+	                    coalesce(r.edge_state, CASE WHEN r.predicate = 'related_to' THEN 'fallback' ELSE 'typed' END) AS edge_state,
+	                    coalesce(r.fallback, r.predicate = 'related_to') AS fallback,
+	                    coalesce(r.fallback_family, '') AS fallback_family,
+	                    coalesce(r.candidate_predicates, []) AS candidate_predicates,
+	                    coalesce(r.candidate_scores, []) AS candidate_scores,
+	                    coalesce(r.candidate_score_sources, []) AS candidate_score_sources,
+	                    coalesce(r.fallback_evidence_phrase, r.evidence_phrases[0], r.evidence_phrase, '') AS fallback_evidence_phrase,
+	                    coalesce(r.related_to_query_weight, CASE WHEN r.predicate = 'related_to' THEN 0.5 ELSE 1.0 END) AS related_to_query_weight
+	    LIMIT $max_edges
+	    """
 
     async with driver.session() as session:
         mention_params: dict[str, object] = {"corpus_ids": corpus_ids}
@@ -594,11 +610,19 @@ async def get_full_corpora_graph(
     WITH a, b, r, source_corpora, collect(DISTINCT ec.chunk_id) AS selected_evidence_chunk_ids
     RETURN a.entity_id AS source,
            b.entity_id AS target,
-           r.predicate AS predicate,
-           coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
-           r.confidence AS confidence,
-           source_corpora,
-           selected_evidence_chunk_ids[..25] AS evidence_chunk_ids,
+	           r.predicate AS predicate,
+	           coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
+	           r.confidence AS confidence,
+	           coalesce(r.edge_state, CASE WHEN r.predicate = 'related_to' THEN 'fallback' ELSE 'typed' END) AS edge_state,
+	           coalesce(r.fallback, r.predicate = 'related_to') AS fallback,
+	           coalesce(r.fallback_family, '') AS fallback_family,
+	           coalesce(r.candidate_predicates, []) AS candidate_predicates,
+	           coalesce(r.candidate_scores, []) AS candidate_scores,
+	           coalesce(r.candidate_score_sources, []) AS candidate_score_sources,
+	           coalesce(r.fallback_evidence_phrase, r.evidence_phrases[0], r.evidence_phrase, '') AS fallback_evidence_phrase,
+	           coalesce(r.related_to_query_weight, CASE WHEN r.predicate = 'related_to' THEN 0.5 ELSE 1.0 END) AS related_to_query_weight,
+	           source_corpora,
+	           selected_evidence_chunk_ids[..25] AS evidence_chunk_ids,
            size(selected_evidence_chunk_ids) AS selected_support_count,
            coalesce(r.support_count, size(coalesce(r.evidence_chunk_ids, []))) AS support_count,
            coalesce(r.avg_confidence, r.confidence) AS avg_confidence

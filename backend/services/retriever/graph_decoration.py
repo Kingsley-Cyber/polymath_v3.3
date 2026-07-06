@@ -15,10 +15,12 @@ one quality-filtered Cypher to gather their neighbor-entity edges, and
 attaches that structured context to synthesis. Winning chunks are
 unchanged. No ranking risk. One revert rolls everything back.
 
-Cypher quality gates (write-only properties from the ingest writer that
-finally have a read path):
-  - r.eligible_for_synthesis = true        (explicitly designed for chat)
-  - r.edge_strength IN ['strong', 'repaired']  (drops weak + thin)
+    Cypher quality gates (write-only properties from the ingest writer that
+    finally have a read path):
+      - typed/refined edges require r.eligible_for_synthesis = true and
+        r.edge_strength IN ['strong', 'repaired']
+      - fallback related_to edges require stored evidence and get discounted as
+        recall pointers, not rendered as trusted facts
 
 Cypher coherence guard:
   - parent_boost CASE on winner.doc_id      (prefer sibling chunks of the
@@ -451,24 +453,47 @@ class GraphDecorator:
         WHERE seed <> neighbor
           AND coalesce(neighbor.generic_entity, false) = false
           AND coalesce(neighbor.graph_expansion_allowed, true) <> false
-          AND r.eligible_for_synthesis = true
-          AND r.edge_strength IN ['strong', 'repaired']
-          AND (size($wanted_families) = 0 OR r.relation_family IN $wanted_families)
         WITH winner, seed, neighbor, r,
-             coalesce(r.confidence, 0.5) * CASE r.edge_strength
-                 WHEN 'strong'   THEN 1.0
-                 WHEN 'repaired' THEN 0.7
+             coalesce(r.predicate, 'related_to') AS predicate,
+             coalesce(r.edge_state, CASE WHEN coalesce(r.predicate, 'related_to') = 'related_to' THEN 'fallback' ELSE 'typed' END) AS edge_state,
+             coalesce(r.fallback, coalesce(r.predicate, 'related_to') = 'related_to') AS fallback,
+             coalesce(r.fallback_family, '') AS fallback_family,
+             coalesce(r.evidence_phrases[0], r.fallback_evidence_phrase, r.evidence_phrase, '') AS edge_evidence,
+             coalesce(r.related_to_query_weight, CASE WHEN coalesce(r.predicate, 'related_to') = 'related_to' THEN 0.5 ELSE 1.0 END) AS query_weight,
+             coalesce(r.related_to_max_hops, CASE WHEN coalesce(r.predicate, 'related_to') = 'related_to' THEN 1 ELSE 2 END) AS max_hops
+        WHERE (
+              (r.eligible_for_synthesis = true AND r.edge_strength IN ['strong', 'repaired'])
+              OR (
+                  predicate = 'related_to'
+                  AND edge_evidence <> ''
+                  AND size(coalesce(r.evidence_chunk_ids, [])) > 0
+                  AND max_hops <= 1
+              )
+          )
+          AND (
+              size($wanted_families) = 0
+              OR coalesce(r.relation_family, '') IN $wanted_families
+              OR fallback_family IN $wanted_families
+          )
+        WITH winner, seed, neighbor, r, predicate, edge_state, fallback,
+             fallback_family, edge_evidence,
+             coalesce(r.confidence, 0.5) * CASE
+                 WHEN predicate = 'related_to' THEN query_weight
+                 WHEN r.edge_strength = 'strong' THEN 1.0
+                 WHEN r.edge_strength = 'repaired' THEN 0.7
                  ELSE 0.0
              END AS edge_weight
         ORDER BY edge_weight DESC
         LIMIT $neighbor_limit
-        WITH winner, seed, neighbor, r, edge_weight,
+        WITH winner, seed, neighbor, r, predicate, edge_state, fallback,
+             fallback_family, edge_evidence, edge_weight,
              coalesce(r.evidence_chunk_ids, [])[..$chunks_per_neighbor] AS evidence_ids
         OPTIONAL MATCH (evidence:Chunk)
         WHERE evidence.chunk_id IN evidence_ids
           AND (size($corpus_ids) = 0 OR evidence.corpus_id IN $corpus_ids)
           AND evidence.chunk_id <> winner.chunk_id
-        WITH winner, seed, neighbor, r, edge_weight, evidence,
+        WITH winner, seed, neighbor, r, predicate, edge_state, fallback,
+             fallback_family, edge_evidence, edge_weight, evidence,
              CASE WHEN evidence.doc_id = winner.doc_id THEN 2 ELSE 1 END AS parent_boost
         WITH winner.chunk_id              AS winner_chunk_id,
              coalesce(seed.display_name, seed.normalized_name, '')     AS seed_entity,
@@ -477,12 +502,12 @@ class GraphDecorator:
              // step can look up entity_betweenness + top_pagerank.
              coalesce(seed.entity_id, '')      AS seed_entity_id,
              coalesce(neighbor.entity_id, '')  AS neighbor_entity_id,
-             coalesce(r.predicate, '')        AS predicate,
-             coalesce(r.relation_family, '')  AS relation_family,
-             // GERG: prefer the (reliably-populated) evidence_phrases[0] over
-             // the often-empty singular evidence_phrase, so the rendered edge
-             // carries real justification text the LLM can ground on.
-             coalesce(r.evidence_phrases[0], r.evidence_phrase, '') AS edge_evidence,
+             predicate,
+             CASE WHEN fallback_family <> '' THEN fallback_family ELSE coalesce(r.relation_family, '') END AS relation_family,
+             edge_evidence,
+             edge_state,
+             fallback,
+             fallback_family,
              coalesce(r.direction_repaired, false) AS direction_repaired,
              coalesce(r.predicate_refined,  false) AS predicate_refined,
              edge_weight,
@@ -495,6 +520,7 @@ class GraphDecorator:
         RETURN winner_chunk_id, seed_entity, neighbor_entity,
                seed_entity_id, neighbor_entity_id,
                predicate, relation_family, edge_evidence,
+               edge_state, fallback, fallback_family,
                direction_repaired, predicate_refined,
                edge_weight, evidence_chunks
         LIMIT $neighbor_limit
@@ -684,6 +710,9 @@ class GraphDecorator:
                     predicate=str(row.get("predicate") or ""),
                     relation_family=str(row.get("relation_family") or ""),
                     edge_evidence=str(row.get("edge_evidence") or ""),
+                    edge_state=str(row.get("edge_state") or ""),
+                    fallback=bool(row.get("fallback") or False),
+                    fallback_family=str(row.get("fallback_family") or ""),
                     direction_repaired=bool(row.get("direction_repaired") or False),
                     predicate_refined=bool(row.get("predicate_refined") or False),
                     edge_weight=float(row.get("edge_weight") or 0.0),

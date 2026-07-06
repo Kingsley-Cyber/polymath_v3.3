@@ -620,17 +620,18 @@ async def expand_subgraph(
       AND $corpus_id IN coalesce(r.corpus_ids, [])
       AND coalesce(other.graph_expansion_allowed, true) <> false
     WITH src, other, r,
-         coalesce(r.predicate, 'related_to') AS predicate,
-         coalesce(r.confidence, 0.0) AS rel_confidence,
-         coalesce(r.edge_strength, CASE WHEN coalesce(r.predicate, 'related_to') = 'related_to' THEN 'weak' ELSE 'strong' END) AS edge_strength,
-         coalesce(r.eligible_for_synthesis, false) AS eligible_for_synthesis,
-         size(coalesce(r.evidence_chunk_ids, [])) AS evidence_count
-    WHERE rel_confidence >= $min_edge_confidence
-      AND rel_confidence >= $hop_min_confidence
-      AND (
-          eligible_for_synthesis = true
-          OR NOT (predicate IN $generic_predicates)
-          OR edge_strength IN $strong_edge_strengths
+             coalesce(r.predicate, 'related_to') AS predicate,
+             coalesce(r.confidence, 0.0) AS rel_confidence,
+             coalesce(r.edge_strength, CASE WHEN coalesce(r.predicate, 'related_to') = 'related_to' THEN 'weak' ELSE 'strong' END) AS edge_strength,
+             coalesce(r.eligible_for_synthesis, false) AS eligible_for_synthesis,
+             size(coalesce(r.evidence_chunk_ids, [])) AS evidence_count
+        WHERE rel_confidence >= $min_edge_confidence
+          AND rel_confidence >= $hop_min_confidence
+          AND (predicate <> 'related_to' OR $allow_related_to_edges = true)
+          AND (
+              eligible_for_synthesis = true
+              OR NOT (predicate IN $generic_predicates)
+              OR edge_strength IN $strong_edge_strengths
           OR evidence_count > 0
       )
       AND (
@@ -640,11 +641,13 @@ async def expand_subgraph(
           OR evidence_count > 0
       )
     OPTIONAL MATCH (mc:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(other)
-    WITH other,
-         count(DISTINCT src.entity_id) AS frontier_hits,
-         count(DISTINCT r) AS edge_count,
-         count(DISTINCT mc) AS mention_count,
-         toLower(coalesce(other.display_name, other.normalized_name, other.canonical_name, other.entity_id, '')) AS surface_text
+        WITH other,
+             count(DISTINCT src.entity_id) AS frontier_hits,
+             count(DISTINCT r) AS edge_count,
+             sum(CASE WHEN predicate = 'related_to' THEN 1 ELSE 0 END) AS fallback_edge_count,
+             sum(CASE WHEN predicate <> 'related_to' THEN 1 ELSE 0 END) AS typed_edge_count,
+             count(DISTINCT mc) AS mention_count,
+             toLower(coalesce(other.display_name, other.normalized_name, other.canonical_name, other.entity_id, '')) AS surface_text
     WHERE mention_count > 0
       AND surface_text <> ''
       AND NOT surface_text IN $junk_exact
@@ -659,9 +662,11 @@ async def expand_subgraph(
         other.canonical_family                                AS canonical_family,
         coalesce(other.confidence, other.confidence_score)    AS confidence,
         mention_count,
-        false                                                AS is_seed,
-        frontier_hits,
-        edge_count
+            false                                                AS is_seed,
+            frontier_hits,
+            edge_count,
+            fallback_edge_count,
+            typed_edge_count
     ORDER BY frontier_hits DESC, mention_count DESC, edge_count DESC, id ASC
     LIMIT $hop_limit
     """
@@ -705,6 +710,7 @@ async def expand_subgraph(
                 ),
                 generic_predicates=list(_GENERIC_EDGE_PREDICATES),
                 strong_edge_strengths=list(_STRONG_EDGE_STRENGTHS),
+                allow_related_to_edges=hop_index == 1,
                 junk_exact=list(_JUNK_EXACT_LOWER),
                 junk_pattern=_JUNK_NAME_PATTERN,
             )
@@ -714,7 +720,12 @@ async def expand_subgraph(
                 if not nid or nid in node_by_id or _is_junk_entity_row(row):
                     continue
                 node_by_id[nid] = row
-                new_frontier.append(nid)
+                reached_only_by_fallback = (
+                    int(row.get("fallback_edge_count") or 0) > 0
+                    and int(row.get("typed_edge_count") or 0) == 0
+                )
+                if not reached_only_by_fallback:
+                    new_frontier.append(nid)
                 if len(node_by_id) >= node_limit:
                     break
             frontier_ids = new_frontier
@@ -734,39 +745,48 @@ async def expand_subgraph(
       AND $corpus_id IN coalesce(r.corpus_ids, [])
     WITH a, b, r,
          coalesce(r.predicate, 'related_to') AS predicate,
-         coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
-         coalesce(r.confidence, 0.0) AS confidence,
-         coalesce(r.edge_strength, CASE WHEN coalesce(r.predicate, 'related_to') = 'related_to' THEN 'weak' ELSE 'strong' END) AS edge_strength,
-         coalesce(r.eligible_for_synthesis, false) AS eligible_for_synthesis,
-         size(coalesce(r.evidence_chunk_ids, [])) AS evidence_count
-    WHERE confidence >= $min_edge_confidence
-      AND (
-          eligible_for_synthesis = true
+             coalesce(r.relation_family, 'WeakAssociation') AS relation_family,
+             coalesce(r.confidence, 0.0) AS confidence,
+             coalesce(r.edge_state, CASE WHEN coalesce(r.predicate, 'related_to') = 'related_to' THEN 'fallback' ELSE 'typed' END) AS edge_state,
+             coalesce(r.fallback, coalesce(r.predicate, 'related_to') = 'related_to') AS fallback,
+             coalesce(r.fallback_family, '') AS fallback_family,
+             coalesce(r.edge_strength, CASE WHEN coalesce(r.predicate, 'related_to') = 'related_to' THEN 'weak' ELSE 'strong' END) AS edge_strength,
+             coalesce(r.eligible_for_synthesis, false) AS eligible_for_synthesis,
+             size(coalesce(r.evidence_chunk_ids, [])) AS evidence_count,
+             coalesce(r.related_to_query_weight, CASE WHEN coalesce(r.predicate, 'related_to') = 'related_to' THEN 0.5 ELSE 1.0 END) AS query_weight
+        WHERE confidence >= $min_edge_confidence
+          AND (
+              eligible_for_synthesis = true
           OR NOT (predicate IN $generic_predicates)
           OR edge_strength IN $strong_edge_strengths
           OR evidence_count > 0
       )
       AND (
           NOT (predicate IN $generic_predicates)
-          OR confidence >= $generic_min_confidence
-          OR edge_strength IN $strong_edge_strengths
-          OR evidence_count > 0
-      )
-    WITH a, b, predicate, relation_family, confidence, edge_strength,
-         eligible_for_synthesis, evidence_count,
-         confidence
-         + CASE WHEN eligible_for_synthesis THEN 0.20 ELSE 0.0 END
-         + CASE edge_strength WHEN 'strong' THEN 0.20 WHEN 'repaired' THEN 0.14 ELSE 0.0 END
-         + CASE WHEN predicate IN $generic_predicates THEN 0.0 ELSE 0.12 END
-         + CASE WHEN evidence_count > 0 THEN 0.08 ELSE 0.0 END AS edge_rank
-    RETURN
-        a.entity_id                               AS source,
-        b.entity_id                               AS target,
-        predicate,
-        relation_family,
-        confidence,
-        edge_strength,
-        eligible_for_synthesis,
+              OR confidence >= $generic_min_confidence
+              OR edge_strength IN $strong_edge_strengths
+              OR evidence_count > 0
+          )
+          AND (predicate <> 'related_to' OR evidence_count > 0)
+        WITH a, b, predicate, relation_family, confidence, edge_state, fallback,
+             fallback_family, edge_strength, eligible_for_synthesis, evidence_count,
+             query_weight,
+             (confidence
+             + CASE WHEN eligible_for_synthesis THEN 0.20 ELSE 0.0 END
+             + CASE edge_strength WHEN 'strong' THEN 0.20 WHEN 'repaired' THEN 0.14 ELSE 0.0 END
+             + CASE WHEN predicate IN $generic_predicates THEN 0.0 ELSE 0.12 END
+             + CASE WHEN evidence_count > 0 THEN 0.08 ELSE 0.0 END) * query_weight AS edge_rank
+        RETURN
+            a.entity_id                               AS source,
+            b.entity_id                               AS target,
+            predicate,
+            relation_family,
+            confidence,
+            edge_state,
+            fallback,
+            fallback_family,
+            edge_strength,
+            eligible_for_synthesis,
         evidence_count,
         edge_rank
     ORDER BY edge_rank DESC, confidence DESC, source ASC, target ASC
@@ -1046,13 +1066,14 @@ async def find_bridges(
           OR edge_strength IN $strong_edge_strengths
           OR evidence_count > 0
       )
-      AND (
-          NOT (predicate IN $generic_predicates)
-          OR rel_confidence >= $generic_min_confidence
-          OR edge_strength IN $strong_edge_strengths
-          OR evidence_count > 0
-      )
-    OPTIONAL MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(bridge)
+          AND (
+              NOT (predicate IN $generic_predicates)
+              OR rel_confidence >= $generic_min_confidence
+              OR edge_strength IN $strong_edge_strengths
+              OR evidence_count > 0
+          )
+          AND (predicate <> 'related_to' OR evidence_count > 0)
+        OPTIONAL MATCH (c:Chunk {corpus_id: $corpus_id})-[:MENTIONS]->(bridge)
 
     WITH bridge,
          collect(DISTINCT seed.entity_id) AS connected_seeds,

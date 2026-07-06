@@ -18,6 +18,7 @@ import logging
 import json
 import re
 import unicodedata
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -257,6 +258,23 @@ def relation_family_for_predicate(predicate: str | None) -> str:
     return RELATION_FAMILY_MAP.get(normalized, "WeakAssociation")
 
 
+@dataclass(frozen=True)
+class RelationEdgeMitigation:
+    """Query-facing metadata that keeps weak fallback edges bounded and useful."""
+
+    edge_state: str
+    relation_family: str
+    fallback: bool
+    fallback_family: str
+    candidate_predicates: list[str]
+    candidate_scores: list[float]
+    candidate_score_sources: list[str]
+    promoted_by: str
+    fallback_evidence_phrase: str
+    related_to_query_weight: float
+    related_to_max_hops: int
+
+
 def _identity_value(identity: dict | None, key: str) -> str:
     if not identity:
         return ""
@@ -285,6 +303,107 @@ def _predicate_from_evidence(*parts: str | None) -> str | None:
         if any(cue in text for cue in cues):
             return predicate
     return None
+
+
+def _normalized_specific_predicate(predicate: str | None) -> str | None:
+    normalized, _reverse = normalize_relation_predicate_alias(str(predicate or "").strip())
+    if normalized in _APPROVED_SPECIFIC_RELATIONS:
+        return normalized
+    return None
+
+
+def _candidate_predicate_records(
+    *,
+    source_predicate: str | None,
+    evidence_phrase: str | None,
+    relation_cue: str | None,
+    confidence: float,
+) -> list[tuple[str, float, str]]:
+    """Recover deterministic candidate predicates for surviving fallback edges.
+
+    GLiREL/LLM validation can demote a relation to `related_to`; the original
+    predicate and evidence cue are still partial signal. Store those signals as
+    primitive arrays so Neo4j can persist them directly on the relationship.
+    """
+
+    candidates: list[tuple[str, float, str]] = []
+    seen: set[str] = set()
+
+    def add(predicate: str | None, source: str, score: float) -> None:
+        normalized = _normalized_specific_predicate(predicate)
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        candidates.append((normalized, round(max(0.0, min(1.0, score)), 4), source))
+
+    cue_predicate = _predicate_from_evidence(evidence_phrase, relation_cue)
+    add(cue_predicate, "evidence_cue", max(float(confidence or 0.0), 0.55))
+    add(source_predicate, "source_predicate", float(confidence or 0.0))
+    return candidates
+
+
+def build_relation_edge_mitigation(
+    *,
+    extracted_predicate: str,
+    refined_predicate: str,
+    source_predicate: str | None,
+    confidence: float,
+    evidence_phrase: str | None,
+    relation_cue: str | None,
+    predicate_refined: bool,
+) -> RelationEdgeMitigation:
+    """Classify a relation edge for bounded fallback use at write/query time.
+
+    The predicate remains honest. When an edge is still `related_to`, this
+    helper records the partial family/candidate/evidence signal needed for
+    later refinement and ensures query traversal treats it as recall, not trust.
+    """
+
+    sentinel = SchemaContext.RELATION_SENTINEL
+    evidence = str(evidence_phrase or "").strip()
+    candidates = _candidate_predicate_records(
+        source_predicate=source_predicate,
+        evidence_phrase=evidence_phrase,
+        relation_cue=relation_cue,
+        confidence=confidence,
+    )
+
+    if refined_predicate != sentinel:
+        edge_state = "refined" if predicate_refined and extracted_predicate == sentinel else "typed"
+        return RelationEdgeMitigation(
+            edge_state=edge_state,
+            relation_family=relation_family_for_predicate(refined_predicate),
+            fallback=False,
+            fallback_family="",
+            candidate_predicates=[p for p, _score, _source in candidates],
+            candidate_scores=[score for _p, score, _source in candidates],
+            candidate_score_sources=[source for _p, _score, source in candidates],
+            promoted_by="deterministic_related_to_refinement" if edge_state == "refined" else "",
+            fallback_evidence_phrase="",
+            related_to_query_weight=1.0,
+            related_to_max_hops=2,
+        )
+
+    candidate_families = {
+        relation_family_for_predicate(predicate)
+        for predicate, _score, _source in candidates
+        if relation_family_for_predicate(predicate) != "WeakAssociation"
+    }
+    fallback_family = next(iter(candidate_families)) if len(candidate_families) == 1 else ""
+    relation_family = fallback_family or relation_family_for_predicate(refined_predicate)
+    return RelationEdgeMitigation(
+        edge_state="family" if fallback_family else "fallback",
+        relation_family=relation_family,
+        fallback=True,
+        fallback_family=fallback_family,
+        candidate_predicates=[p for p, _score, _source in candidates],
+        candidate_scores=[score for _p, score, _source in candidates],
+        candidate_score_sources=[source for _p, _score, source in candidates],
+        promoted_by="",
+        fallback_evidence_phrase=evidence,
+        related_to_query_weight=0.5,
+        related_to_max_hops=1,
+    )
 
 
 def _identity_domain_kind_type(identity: dict | None) -> tuple[str, str, str]:
@@ -914,6 +1033,15 @@ def _relation_support_records(
             "confidence": float(row.get("confidence") or 0.0),
             "relation_family": row.get("relation_family") or "",
             "source_predicate": row.get("source_predicate") or predicate,
+            "edge_state": row.get("edge_state") or "",
+            "fallback": bool(row.get("fallback") or False),
+            "fallback_family": row.get("fallback_family") or "",
+            "candidate_predicates": list(row.get("candidate_predicates") or []),
+            "candidate_scores": list(row.get("candidate_scores") or []),
+            "candidate_score_sources": list(row.get("candidate_score_sources") or []),
+            "promoted_by": row.get("promoted_by") or "",
+            "related_to_query_weight": float(row.get("related_to_query_weight") or 1.0),
+            "related_to_max_hops": int(row.get("related_to_max_hops") or 2),
             "relation_cue": row.get("relation_cue") or "",
             "validation_status": row.get("validation_status") or "",
             "extract_schema_version": row.get("schema_version") or "polymath.extract.v1",
@@ -1386,7 +1514,16 @@ async def _upsert_relation(
     )
     subject_id = entity_id_from_name(relation.subject, subject_type)
     object_id = entity_id_from_name(relation.object, object_type)
-    relation_family = relation_family_for_predicate(relation.predicate)
+    edge_mitigation = build_relation_edge_mitigation(
+        extracted_predicate=relation.predicate,
+        refined_predicate=relation.predicate,
+        source_predicate=relation.source_predicate or relation.predicate,
+        confidence=relation.confidence,
+        evidence_phrase=relation.evidence_phrase,
+        relation_cue=relation.relation_cue,
+        predicate_refined=False,
+    )
+    relation_family = edge_mitigation.relation_family
     edge_strength = relation_edge_strength(
         relation.predicate,
         relation.confidence,
@@ -1405,7 +1542,16 @@ async def _upsert_relation(
             SET r.confidence = $confidence,
                 r.relation_family = $relation_family,
                 r.edge_strength = $edge_strength,
-                r.eligible_for_synthesis = $eligible_for_synthesis
+                r.eligible_for_synthesis = $eligible_for_synthesis,
+                r.edge_state = $edge_state,
+                r.fallback = $fallback,
+                r.fallback_family = $fallback_family,
+                r.candidate_predicates = $candidate_predicates,
+                r.candidate_scores = $candidate_scores,
+                r.candidate_score_sources = $candidate_score_sources,
+                r.fallback_evidence_phrase = $fallback_evidence_phrase,
+                r.related_to_query_weight = $related_to_query_weight,
+                r.related_to_max_hops = $related_to_max_hops
             """,
             subject_id=subject_id,
             object_id=object_id,
@@ -1415,6 +1561,15 @@ async def _upsert_relation(
             eligible_for_synthesis=relation_eligible_for_synthesis(
                 relation.predicate, relation.confidence, relation.validation_status
             ),
+            edge_state=edge_mitigation.edge_state,
+            fallback=edge_mitigation.fallback,
+            fallback_family=edge_mitigation.fallback_family,
+            candidate_predicates=edge_mitigation.candidate_predicates,
+            candidate_scores=edge_mitigation.candidate_scores,
+            candidate_score_sources=edge_mitigation.candidate_score_sources,
+            fallback_evidence_phrase=edge_mitigation.fallback_evidence_phrase,
+            related_to_query_weight=edge_mitigation.related_to_query_weight,
+            related_to_max_hops=edge_mitigation.related_to_max_hops,
             confidence=relation.confidence,
         )
 
@@ -1943,19 +2098,38 @@ async def write_document_graph(
                 validation_status,
                 predicate_refined=predicate_refined,
             )
+            edge_mitigation = build_relation_edge_mitigation(
+                extracted_predicate=relation.predicate,
+                refined_predicate=refined_predicate,
+                source_predicate=source_predicate_raw,
+                confidence=relation.confidence,
+                evidence_phrase=relation.evidence_phrase,
+                relation_cue=relation.relation_cue,
+                predicate_refined=predicate_refined,
+            )
             relation_rows.append({
                 "subject_id": subject_identity["entity_id"],
                 "object_id": object_identity["entity_id"],
                 "predicate": refined_predicate,
                 "schema_version": r.schema_version,
                 "source_predicate": source_predicate_raw,
-                "relation_family": relation_family_for_predicate(refined_predicate),
+                "relation_family": edge_mitigation.relation_family,
                 "predicate_refined": predicate_refined,
                 "direction_repaired": reverse_relation,
                 "edge_strength": edge_strength,
                 "eligible_for_synthesis": relation_eligible_for_synthesis(
                     refined_predicate, relation.confidence, validation_status
                 ),
+                "edge_state": edge_mitigation.edge_state,
+                "fallback": edge_mitigation.fallback,
+                "fallback_family": edge_mitigation.fallback_family,
+                "candidate_predicates": edge_mitigation.candidate_predicates,
+                "candidate_scores": edge_mitigation.candidate_scores,
+                "candidate_score_sources": edge_mitigation.candidate_score_sources,
+                "promoted_by": edge_mitigation.promoted_by,
+                "fallback_evidence_phrase": edge_mitigation.fallback_evidence_phrase,
+                "related_to_query_weight": edge_mitigation.related_to_query_weight,
+                "related_to_max_hops": edge_mitigation.related_to_max_hops,
                 "validation_status": validation_status,
                 "evidence_phrase": relation.evidence_phrase,
                 "relation_cue": relation.relation_cue,
@@ -2202,6 +2376,23 @@ async def write_document_graph(
                     r.relation_family = row.relation_family,
                     r.predicate_refined = coalesce(r.predicate_refined, false) OR row.predicate_refined,
                     r.direction_repaired = coalesce(r.direction_repaired, false) OR row.direction_repaired,
+                    r.edge_state = CASE
+                        WHEN row.edge_state IN ['typed', 'refined'] THEN row.edge_state
+                        WHEN coalesce(r.edge_state, '') IN ['', 'fallback'] AND row.edge_state = 'family' THEN 'family'
+                        WHEN coalesce(r.edge_state, '') = '' THEN row.edge_state
+                        ELSE r.edge_state
+                    END,
+                    r.fallback = row.fallback,
+                    r.fallback_family = CASE
+                        WHEN row.fallback_family IS NULL OR row.fallback_family = '' THEN coalesce(r.fallback_family, '')
+                        ELSE row.fallback_family
+                    END,
+                    r.promoted_by = CASE
+                        WHEN row.promoted_by IS NULL OR row.promoted_by = '' THEN coalesce(r.promoted_by, '')
+                        ELSE row.promoted_by
+                    END,
+                    r.related_to_query_weight = toFloat(coalesce(row.related_to_query_weight, CASE WHEN row.predicate = 'related_to' THEN 0.5 ELSE 1.0 END)),
+                    r.related_to_max_hops = toInteger(coalesce(row.related_to_max_hops, CASE WHEN row.predicate = 'related_to' THEN 1 ELSE 2 END)),
                     r.edge_strength = CASE
                         WHEN row.edge_strength = 'strong' THEN 'strong'
                         WHEN row.edge_strength = 'repaired' AND coalesce(r.edge_strength, '') <> 'strong' THEN 'repaired'
@@ -2225,23 +2416,41 @@ async def write_document_graph(
                         ELSE row.doc_id
                     END
                 SET r.evidence_phrases = CASE
-                    WHEN row.evidence_phrase IS NULL OR row.evidence_phrase = '' THEN coalesce(r.evidence_phrases, [])
-                    WHEN r.evidence_phrases IS NULL THEN [row.evidence_phrase]
-                    WHEN row.evidence_phrase IN r.evidence_phrases THEN r.evidence_phrases
-                    ELSE r.evidence_phrases + [row.evidence_phrase]
-                END
-                SET r.relation_cues = CASE
-                    WHEN row.relation_cue IS NULL OR row.relation_cue = '' THEN coalesce(r.relation_cues, [])
-                    WHEN r.relation_cues IS NULL THEN [row.relation_cue]
-                    WHEN row.relation_cue IN r.relation_cues THEN r.relation_cues
-                    ELSE r.relation_cues + [row.relation_cue]
+                        WHEN row.evidence_phrase IS NULL OR row.evidence_phrase = '' THEN coalesce(r.evidence_phrases, [])
+                        WHEN r.evidence_phrases IS NULL THEN [row.evidence_phrase]
+                        WHEN row.evidence_phrase IN r.evidence_phrases THEN r.evidence_phrases
+                        ELSE r.evidence_phrases + [row.evidence_phrase]
+                    END,
+                        r.fallback_evidence_phrase = CASE
+                        WHEN row.fallback_evidence_phrase IS NULL OR row.fallback_evidence_phrase = '' THEN coalesce(r.fallback_evidence_phrase, '')
+                        ELSE row.fallback_evidence_phrase
+                    END
+                    SET r.relation_cues = CASE
+                        WHEN row.relation_cue IS NULL OR row.relation_cue = '' THEN coalesce(r.relation_cues, [])
+                        WHEN r.relation_cues IS NULL THEN [row.relation_cue]
+                        WHEN row.relation_cue IN r.relation_cues THEN r.relation_cues
+                        ELSE r.relation_cues + [row.relation_cue]
                 END
                 SET r.source_predicates = CASE
-                    WHEN r.source_predicates IS NULL THEN [row.source_predicate]
-                    WHEN row.source_predicate IN r.source_predicates THEN r.source_predicates
-                    ELSE r.source_predicates + [row.source_predicate]
-                END
-                SET r.validation_statuses = CASE
+                        WHEN r.source_predicates IS NULL THEN [row.source_predicate]
+                        WHEN row.source_predicate IN r.source_predicates THEN r.source_predicates
+                        ELSE r.source_predicates + [row.source_predicate]
+                    END
+                    SET r.candidate_predicates = CASE
+                        WHEN size(coalesce(row.candidate_predicates, [])) = 0 THEN coalesce(r.candidate_predicates, [])
+                        WHEN r.candidate_predicates IS NULL THEN row.candidate_predicates
+                        ELSE reduce(candidates = r.candidate_predicates, candidate IN row.candidate_predicates |
+                            CASE WHEN candidate IN candidates THEN candidates ELSE candidates + candidate END)
+                    END,
+                        r.candidate_scores = CASE
+                        WHEN size(coalesce(row.candidate_scores, [])) = 0 THEN coalesce(r.candidate_scores, [])
+                        ELSE row.candidate_scores
+                    END,
+                        r.candidate_score_sources = CASE
+                        WHEN size(coalesce(row.candidate_score_sources, [])) = 0 THEN coalesce(r.candidate_score_sources, [])
+                        ELSE row.candidate_score_sources
+                    END
+                    SET r.validation_statuses = CASE
                     WHEN row.validation_status IS NULL OR row.validation_status = '' THEN coalesce(r.validation_statuses, [])
                     WHEN r.validation_statuses IS NULL THEN [row.validation_status]
                     WHEN row.validation_status IN r.validation_statuses THEN r.validation_statuses

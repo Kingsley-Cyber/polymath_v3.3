@@ -1148,6 +1148,9 @@ class GraphDecoration(BaseModel):
     predicate: str
     relation_family: str
     edge_evidence: str = ""
+    edge_state: str = ""
+    fallback: bool = False
+    fallback_family: str = ""
     direction_repaired: bool = False
     predicate_refined: bool = False
     edge_weight: float = 0.0

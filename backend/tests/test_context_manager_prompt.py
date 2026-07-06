@@ -163,3 +163,41 @@ def test_augmented_prompt_renders_chunk_to_chunk_graph_links():
     assert "NLP models use attention to weight tokens." in prompt
     # the arrow itself is still rendered
     assert "NLP" in prompt and "Attention" in prompt
+
+
+def test_augmented_prompt_renders_related_to_as_fallback_recall_not_fact():
+    from models.schemas import GraphDecoration
+
+    winner = SourceChunk(
+        chunk_id="A",
+        parent_id="pA",
+        doc_id="docA",
+        corpus_id="corpus-1",
+        text="Alpha module was described with a beta service dependency.",
+        score=0.9,
+        source_tier="child",
+        doc_name="Alpha.md",
+    )
+    decoration = GraphDecoration(
+        winner_chunk_id="A",
+        seed_entity="Alpha module",
+        neighbor_entity="Beta service",
+        predicate="related_to",
+        relation_family="Operational",
+        edge_state="family",
+        fallback=True,
+        fallback_family="Operational",
+        edge_evidence="Alpha module uses Beta service for ingestion.",
+        edge_weight=0.36,
+    )
+
+    prompt = context_manager.build_augmented_prompt(
+        "how does alpha ingest",
+        [winner],
+        decoration=[decoration],
+    )
+
+    assert "fallback recall" in prompt
+    assert "likely family=Operational" in prompt
+    assert "Alpha module uses Beta service for ingestion." in prompt
+    assert "Alpha module → related_to" not in prompt

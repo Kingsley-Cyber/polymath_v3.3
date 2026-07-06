@@ -198,6 +198,11 @@ async def test_relates_to_decoration_uses_evidence_chunk_ids_not_neighbor_fanout
     params = capture["params"]
     assert "(neighbor)<-[:MENTIONS]-(evidence:Chunk)" not in query
     assert "evidence.chunk_id IN evidence_ids" in query
+    assert "predicate = 'related_to'" in query
+    assert "edge_evidence <> ''" in query
+    assert "related_to_query_weight" in query
+    assert "THEN 0.5 ELSE 1.0" in query
+    assert "max_hops <= 1" in query
     assert params["neighbor_limit"] == 24
     assert params["chunks_per_neighbor"] == 2
 
