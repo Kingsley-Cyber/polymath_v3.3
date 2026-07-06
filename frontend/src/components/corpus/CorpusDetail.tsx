@@ -741,7 +741,7 @@ export function CorpusDetail({
                 >
                   <div className="text-content-tertiary uppercase">Extracted</div>
                   <div className="text-accent-secondary">
-                    {localBatch.progress.files_extracted}
+                    {localBatch.progress.ladder?.extracted ?? localBatch.progress.files_extracted}
                     <span className="text-content-tertiary">
                       {" "}· {localBatch.progress.mb_extracted}/
                       {localBatch.progress.mb_total} MB

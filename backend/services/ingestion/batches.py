@@ -838,6 +838,17 @@ async def refresh_batch_counts(
             {"$eq": ["$status", ITEM_DONE]},
             {
                 "$and": [
+                    {"$eq": ["$status", ITEM_STAGED]},
+                    {
+                        "$gte": [
+                            {"$ifNull": ["$stage_rank", -1]},
+                            STAGE_RANK["extracted"],
+                        ]
+                    },
+                ]
+            },
+            {
+                "$and": [
                     {"$eq": ["$status", ITEM_RUNNING]},
                     {
                         "$not": [
