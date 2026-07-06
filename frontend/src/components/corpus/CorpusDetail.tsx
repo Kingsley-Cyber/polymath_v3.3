@@ -116,6 +116,17 @@ const PHASE_LABELS: Record<string, string> = {
   verify: "verifying",
 };
 
+const INGEST_STAGE_LABELS = [
+  ["registered", "Registered"],
+  ["parsed", "Parsed"],
+  ["chunked", "Chunked"],
+  ["extracted", "Extracted"],
+  ["indexed", "Indexed"],
+  ["summarized", "Summarized"],
+  ["promoted", "Promoted"],
+  ["queryable", "Queryable"],
+] as const;
+
 function phaseLabel(phase?: string | null): string {
   if (!phase) return "queued";
   return PHASE_LABELS[phase] ?? phase;
@@ -780,6 +791,39 @@ export function CorpusDetail({
                   {formatBytes(localBatch.stored_bytes)}
                 </div>
               </div>
+            </div>
+          )}
+          {localBatch?.progress?.ladder && (
+            <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 text-[9px] font-mono">
+              {INGEST_STAGE_LABELS.map(([stage, label]) => {
+                const value = localBatch.progress?.ladder?.[stage] ?? 0;
+                const total = localBatch.progress?.files_total ?? localBatch.total ?? 0;
+                const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+                return (
+                  <div
+                    key={stage}
+                    className="border border-border-minimal px-2 py-1"
+                    title={`${label}: ${value}/${total} files complete`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-content-tertiary uppercase truncate">
+                        {label}
+                      </span>
+                      <span className="text-content-tertiary">{pct}%</span>
+                    </div>
+                    <div className="mt-1 h-1 bg-bg-surface border border-border-minimal overflow-hidden">
+                      <div
+                        className="h-full bg-accent-secondary"
+                        style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                      />
+                    </div>
+                    <div className="mt-1 text-content-primary">
+                      {value}
+                      <span className="text-content-tertiary">/{total}</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
           {localBatch?.items && localBatch.items.length > 0 && (
