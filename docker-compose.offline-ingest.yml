@@ -12,6 +12,9 @@
 #   - backend: query/API only, 6 GB cap, does not own ingest runners.
 #   - ingest-worker: conditional 20 GB worker, no public port, owns durable
 #     batch recovery/polling and runs memory-heavy ingest phases.
+#   - local batches use the global Mac rule: one active document, staged
+#     extracted/indexed/full sweeps, and bounded inner phase parallelism.
+#   - increase phase knobs before increasing active documents.
 #
 # Docker Desktop must have enough VM memory for this to be real. Set Docker
 # memory to at least 26 GiB, preferably 32+ GiB once Mongo/Qdrant/Neo4j are
@@ -76,14 +79,14 @@ services:
       INGEST_RUNNERS_ENABLED: "true"
       INGEST_RUNNER_POLL_SECONDS: ${INGEST_RUNNER_POLL_SECONDS:-10}
       INGEST_BACKEND_RAM_TARGET_MB: ${INGEST_WORKER_RAM_TARGET_MB:-20480}
-      INGEST_MAX_PARSE_JOBS: ${OFFLINE_INGEST_MAX_PARSE_JOBS:-4}
+      INGEST_MAX_PARSE_JOBS: ${OFFLINE_INGEST_MAX_PARSE_JOBS:-2}
       INGEST_MAX_MODEL_PHASE_DOCS: ${OFFLINE_INGEST_MAX_MODEL_PHASE_DOCS:-1}
-      INGEST_MAX_ACTIVE_JOBS: ${OFFLINE_INGEST_MAX_ACTIVE_JOBS:-4}
+      INGEST_MAX_ACTIVE_JOBS: ${OFFLINE_INGEST_MAX_ACTIVE_JOBS:-1}
       INGEST_BATCH_WORKERS: ${OFFLINE_INGEST_BATCH_WORKERS:-1}
       INGEST_GLOBAL_MAX_DOCS: ${OFFLINE_INGEST_GLOBAL_MAX_DOCS:-1}
       INGEST_EMBED_DOCS: ${OFFLINE_INGEST_EMBED_DOCS:-1}
       INGEST_CHUNK_PROCESSES: ${OFFLINE_INGEST_CHUNK_PROCESSES:-4}
-      EMBED_BATCH_SIZE: ${OFFLINE_INGEST_EMBED_BATCH_SIZE:-32}
+      EMBED_BATCH_SIZE: ${OFFLINE_INGEST_EMBED_BATCH_SIZE:-64}
       TWO_PHASE_INGEST: ${TWO_PHASE_INGEST:-false}
       GRAPH_CACHE_WARMUP_SKIP_DURING_ACTIVE_INGEST: "true"
       GRAPH_CACHE_WARMUP_ACTIVE_INGEST_DEFER_SECONDS: ${GRAPH_CACHE_WARMUP_ACTIVE_INGEST_DEFER_SECONDS:-120}

@@ -68,12 +68,16 @@ _PHASE_TO_STAGE = {
 }
 
 # ── §13-S named profiles (deterministic one-knob presets) ────────────────────
-# mac_safe: staged passes, tiny concurrency, Mac sidecar extraction, memory
-# released per pass — small files must be feasible on the M1 Studio ALONE.
+# mac_safe is the global local/Mac rule:
+#   - one active document owns the heavy phase budget;
+#   - staged sweeps release memory between extraction, indexing, and completion;
+#   - local Mac sidecars are preferred over remote/cloud pools.
+# The worker currently has durable stop-points at extracted and indexed; chunked
+# can become its own stop once the worker has an explicit chunk-stage return.
 # rtx_assisted: the elastic-car topology; single full pass.
 INGEST_PROFILES: dict[str, dict] = {
     "mac_safe": {
-        "concurrency": 2,
+        "concurrency": 1,
         "pass_plan": ["extracted", "indexed", None],  # None = run to completion
         "extraction_endpoint_urls": [
             os.environ.get(

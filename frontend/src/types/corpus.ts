@@ -137,6 +137,8 @@ export interface IngestionConfig {
 }
 
 export type IngestionPreset = "fast" | "balanced" | "deep" | "custom";
+// mac_safe is displayed as "Mac optimized": one active local document, staged
+// extraction/index/full sweeps, and bounded phase-level parallelism.
 export type IngestProfileName = "mac_safe" | "rtx_assisted";
 
 /** Open-time preset inference — used by the corpus create/edit forms to

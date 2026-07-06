@@ -99,7 +99,7 @@ function defaultBatchProfile(corpus: CorpusResponse): IngestProfileName {
 
 const PROFILE_LABELS: Record<IngestProfileName, string> = {
   rtx_assisted: "RTX assisted",
-  mac_safe: "Mac safe",
+  mac_safe: "Mac optimized",
 };
 
 // Pipeline phase → words a human can read. Raw phase stays in tooltips.
@@ -632,10 +632,10 @@ export function CorpusDetail({
                 value={localBatchProfile}
                 onChange={(e) => setLocalBatchProfile(e.target.value as IngestProfileName)}
                 className="w-full h-8 px-2 bg-bg-surface border border-border-minimal text-[11px] text-content-primary outline-none focus:border-accent-main"
-                title="Controls backend resource planning for this durable batch"
+                title="Controls backend resource planning for this durable batch. Mac optimized uses one active document and staged local passes."
               >
                 <option value="rtx_assisted">RTX assisted</option>
-                <option value="mac_safe">Mac safe</option>
+                <option value="mac_safe">Mac optimized</option>
               </select>
             </label>
             <label className="min-w-0">
