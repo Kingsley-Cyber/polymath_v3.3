@@ -837,6 +837,58 @@ sample, coverage/typed%/facts-per-chunk vs the 2026-07-05 baselines (local 62%/5
 RTX 91%/75-100%/2.35), file-rate on a 20-file probe corpus.
 
 
+### §13-S STAGED INGESTION ARCHITECTURE (OWNER-RATIFIED 2026-07-06 — supersedes
+### per-file end-to-end pipelining as the production shape)
+
+Owner directive, core invariant verbatim: "Each stage writes durable artifacts and
+exits. The next stage picks up from storage. Nothing has to stay in memory." On
+constrained hardware, durable phase batches with backpressure beat an eager
+end-to-end pipeline per file.
+
+STAGE LADDER (file states, replaces queued/running/done as the ONLY vocabulary):
+registered -> parsed -> chunked -> extracted -> indexed(embedded+qdrant) ->
+summarized -> promoted(graph) -> queryable. UI reports the ladder honestly
+("500 chunked / 320 extracted / 80 indexed / 60 queryable") — "done" never again
+means seven hidden things.
+
+PASS MODEL: Pass1 parse+chunk ALL -> Pass2 extract ALL -> Pass3 embed ALL ->
+Pass4 qdrant ALL -> Pass5 summarize/promote/verify. Each pass has its own
+resource profile; a pass sweeps the whole batch then exits.
+
+PROFILES (deterministic, named):
+- mac_safe: staged, one active stage, doc_concurrency 1-2, embed batch 4-8,
+  qdrant_writes 1, neo4j_writes 1, summary+graph deferral ON, artifacts
+  persisted immediately, memory-pressure pause ON.
+- rtx_assisted: Mac = parse/store/schedule/verify + bounded batch writes;
+  RTX = extraction (+optional embedding, +optional SLM/GLiNER/GLiREL cars).
+
+WHAT ALREADY EXISTS (validated 2026-07-06 the hard way — the run converged onto
+this shape): durable chunk persistence + ghost_b staging + resume-from-checkpoint
+rehydration (the secret weapon: per-doc resume already skips completed stages);
+summary deferral (safe mode + backfill); graph promotion deferral (batch
+use_neo4j=false + staged artifacts + backfill sweep); elastic RTX cars for
+extraction (ghost_b fleet) and chunking (chunk_svc, 2-7s/doc vs Mac 50-125s);
+extracted-milestone progress{}; planner admission backpressure; unbrickable
+chunk pool with child recycling.
+
+WHAT TO BUILD (S-track):
+S1 stage-state ladder on batch items (persistent `stage` field + per-stage
+   progress counters + UI ladder) — additive, no orchestration change.
+S2 pass driver: batch option `target_stage`; the runner sweeps the queue with
+   per-doc early-exit after target_stage (resume rehydration makes repeated
+   passes cheap); batch-level pass sequencing = run N sweeps in ladder order.
+S3 named profiles (mac_safe / rtx_assisted) as one-knob presets binding the
+   full config set; workflow picker exposes them.
+S4 embed car (repo embedder container on RTX CUDA, EMBEDDER_URL switch;
+   embedding identity frozen — same Qwen3-Embedding-0.6B/1024) — kills the
+   last Mac serialization point (measured: 10/14 docs queued in embedding,
+   429s dwell, while chunk=0.2s and ghosts=10.8s).
+S5 elastic multi-embed client (embed cars list + fallback, same pattern as
+   extraction/chunk fleets).
+Receipts per §10.4 discipline; stage rates per pass, ladder counts, zero
+silent-fallback classes.
+
+
 ## 12. TEMPORAL LAYER + GRAPH PRECOMPUTE + EMBEDDING-JOBS DOCTRINE (owner research 2026-07-03)
 
 ### 12.0 Confirmations (no change — owner research restates ratified design)
