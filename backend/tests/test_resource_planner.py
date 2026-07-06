@@ -65,6 +65,7 @@ def test_remote_vllm_profile_uses_one_doc_under_tight_backend_cap():
     assert profile.extraction_max_concurrent == 60
     assert profile.extraction_active_docs == 1
     assert profile.model_phase_docs == 1
+    assert profile.recommended_ingest_profile == "rtx_assisted"
     assert profile.ram_cap_mb == 4_096
     assert profile.embedding_backend == "local_metal"
     assert profile.warnings
@@ -202,6 +203,7 @@ def test_local_mac_llm_with_local_metal_embeddings_pins_doc_fanout():
     assert profile.extraction_active_docs == 1
     assert profile.model_phase_docs == 1
     assert profile.embedding_batch_size == 16
+    assert profile.recommended_ingest_profile == "mac_queryable_first"
 
 
 def test_storage_mode_classification():

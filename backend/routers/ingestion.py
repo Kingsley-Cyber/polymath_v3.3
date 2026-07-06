@@ -134,7 +134,7 @@ class LocalIngestBatchRequest(BaseModel):
     """Create a durable backend-owned ingest batch from a local folder path."""
 
     root_path: str = Field(..., min_length=1)
-    profile: Literal["mac_safe", "rtx_assisted"] | None = None
+    profile: Literal["mac_safe", "mac_queryable_first", "rtx_assisted"] | None = None
     recursive: bool = True
     extensions: list[str] | None = None
     max_files: int | None = Field(default=None, ge=1, le=20000)
@@ -494,6 +494,21 @@ def _resolve_ingest_progress(
             "verify_errors": verify_errors,
             "warnings": warnings,
             "error": doc.get("summary_pending_reason"),
+        }
+
+    ingest_stage = str(doc.get("ingest_stage") or "")
+    if ingest_stage.startswith("queryable_with_pending_") or ingest_stage == "queryable":
+        return {
+            "status": ingest_stage,
+            "stage": ingest_stage,
+            "mongo_done": mongo_done,
+            "qdrant_done": qdrant_done,
+            "summaries_indexed": summaries_indexed,
+            "neo4j_done": neo4j_done,
+            "verified": verified,
+            "verify_errors": verify_errors,
+            "warnings": warnings,
+            "error": doc.get("enrichment_pending_reason") or doc.get("summary_pending_reason"),
         }
 
     required_qdrant_done = (not qdrant_required) or qdrant_done
@@ -1178,7 +1193,7 @@ async def create_upload_ingest_batch(
     chunk_summarization: bool | None = Form(default=None),
     model: str = Form(default=""),
     concurrency: int | None = Form(default=1),
-    profile: Literal["mac_safe", "rtx_assisted"] | None = Form(default=None),
+    profile: Literal["mac_safe", "mac_queryable_first", "rtx_assisted"] | None = Form(default=None),
     start: bool = Form(default=True),
     current_user: dict = Depends(get_current_user),
 ):
@@ -1780,7 +1795,14 @@ async def stream_job_progress(
                 yield f"data: {payload}\n\n"
                 last_status = payload
 
-            if progress["status"] in ("done", "failed"):
+            if progress["status"] in (
+                "done",
+                "failed",
+                "queryable",
+                "queryable_with_pending_summary",
+                "queryable_with_pending_graph",
+                "queryable_with_pending_summary_and_graph",
+            ):
                 yield build_sse_done()
                 return
 

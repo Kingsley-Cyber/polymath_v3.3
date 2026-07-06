@@ -220,9 +220,9 @@ def _install_mocks(
             ret_value=_parse_result(), is_async=True
         )
     )
-    chunk_mock = MagicMock(
+    chunk_mock = AsyncMock(
         side_effect=recorder.tag("chunk")(
-            ret_value=(parents, children, []), is_async=False
+            ret_value=(parents, children, []), is_async=True
         )
     )
 
@@ -280,7 +280,7 @@ def _install_mocks(
 
     patches = [
         patch.object(worker.docling_adapter, "parse_document", parse_mock),
-        patch.object(worker.tier_chunker, "chunk", chunk_mock),
+        patch.object(worker, "_chunk_with_pool", chunk_mock),
         patch.object(worker, "_run_ghosts_parallel", run_ghosts_mock),
         patch.object(worker, "_write_mongo_all", mongo_write_mock),
         patch.object(worker, "_embed_batch_for_doc", embed_mock),
@@ -327,7 +327,13 @@ def _install_mocks(
     }
 
 
-async def _run_job(mocks, config: IngestionConfig, *, corpus_id: str = "c" * 36):
+async def _run_job(
+    mocks,
+    config: IngestionConfig,
+    *,
+    corpus_id: str = "c" * 36,
+    target_stage: str | None = None,
+):
     return await worker.run_ingest_job(
         job_id="job-1",
         data=b"dummy bytes",
@@ -339,6 +345,7 @@ async def _run_job(mocks, config: IngestionConfig, *, corpus_id: str = "c" * 36)
         qdrant_client=MagicMock(),
         neo4j_driver=MagicMock(),
         model="ollama/qwen3:1.7b",
+        target_stage=target_stage,
     )
 
 
@@ -358,7 +365,7 @@ async def test_parse_progress_and_doc_id_callback_happen_before_chunk_failure():
     async def _parse_progress(**kwargs):
         events.append("parse_progress")
 
-    def _chunk(*args, **kwargs):
+    async def _chunk(*args, **kwargs):
         events.append("chunk")
         raise RuntimeError("chunk exploded")
 
@@ -371,7 +378,7 @@ async def test_parse_progress_and_doc_id_callback_happen_before_chunk_failure():
          })), \
          patch.object(worker.mongo_reader, "get_document", AsyncMock(return_value=None)), \
          patch.object(worker.docling_adapter, "parse_document", AsyncMock(side_effect=_parse)), \
-         patch.object(worker.tier_chunker, "chunk", MagicMock(side_effect=_chunk)), \
+         patch.object(worker, "_chunk_with_pool", AsyncMock(side_effect=_chunk)), \
          patch("services.retrieval_readiness.ensure_corpus_retrieval_ready", AsyncMock(return_value=_ready_report())), \
          patch.object(worker, "_ensure_parse_progress_document", AsyncMock(side_effect=_parse_progress)):
         with pytest.raises(RuntimeError, match="tier_chunker failed: chunk exploded"):
@@ -476,7 +483,7 @@ async def test_verify_failed_resume_rewrites_store_surfaces():
 
 
 @pytest.mark.asyncio
-async def test_deep_mode_without_summaries_finishes_awaiting_summary():
+async def test_deep_mode_without_summaries_finishes_queryable_pending_summary():
     """Safe mode should keep child vectors and graph writes even when Ghost A is pending."""
     rec = PhaseRecorder()
     p, c = _parent("stub-doc", "c" * 36)
@@ -495,16 +502,16 @@ async def test_deep_mode_without_summaries_finishes_awaiting_summary():
             target_qdrant_collections=["naive", "hrag", "graph"],
         )
         result = await _run_job(m, cfg)
-        assert result.status == "awaiting_summary"
+        assert result.status == "queryable_with_pending_summary"
         assert result.error is not None
-        assert result.error.startswith("Summary pending:")
+        assert result.error.startswith("Queryable with pending enrichment:")
         assert rec.events == [
             "parse", "chunk", "chunk_checkpoint", "ghosts_parallel",
             "mongo_write", "embed", "qdrant_write", "neo4j_write",
         ]
         assert m["db"].__getitem__.return_value.update_one.await_args_list[-1].args[1]["$set"][
             "ingest_stage"
-        ] == "awaiting_summary"
+        ] == "queryable_with_pending_summary"
     finally:
         m["stop_all"]()
 
@@ -560,6 +567,66 @@ async def test_phase_order_balanced_mode():
         kwargs = m["mongo_write"].await_args.kwargs
         assert kwargs["summaries"] is None
         assert kwargs["ghost_b_out"] == ghost_b_out
+    finally:
+        m["stop_all"]()
+
+
+@pytest.mark.asyncio
+async def test_queryable_target_defers_enrichment_before_qdrant():
+    rec = PhaseRecorder()
+    p, c = _parent("stub-doc", "c" * 36)
+    summaries = [_fake_summary_result(p.parent_id, "stub-doc", "c" * 36)]
+    ghost_b_out = [_fake_extraction_result(c.chunk_id, "stub-doc", "c" * 36)]
+    m = _install_mocks(
+        rec,
+        parents=[p],
+        children=[c],
+        summaries=summaries,
+        ghost_b_out=ghost_b_out,
+    )
+    try:
+        cfg = IngestionConfig(
+            use_neo4j=True,
+            chunk_summarization=True,
+            target_qdrant_collections=["naive", "hrag", "graph"],
+        )
+        result = await _run_job(m, cfg, target_stage="queryable")
+
+        assert result.status == "staged"
+        assert rec.events == [
+            "parse", "chunk", "chunk_checkpoint", "ghosts_parallel",
+            "mongo_write", "embed", "qdrant_write",
+        ]
+        assert "neo4j_write" not in rec.events
+        assert m["ghosts"].await_args.kwargs["defer_summaries"] is True
+        assert m["ghosts"].await_args.kwargs["defer_ghost_b"] is True
+    finally:
+        m["stop_all"]()
+
+
+@pytest.mark.asyncio
+async def test_graph_pending_after_queryability_is_not_failed():
+    rec = PhaseRecorder()
+    p, c = _parent("stub-doc", "c" * 36)
+    m = _install_mocks(
+        rec,
+        parents=[p],
+        children=[c],
+        summaries=None,
+        ghost_b_out=None,
+    )
+    try:
+        cfg = IngestionConfig(
+            use_neo4j=True,
+            chunk_summarization=False,
+            target_qdrant_collections=["naive", "hrag", "graph"],
+        )
+        result = await _run_job(m, cfg)
+
+        assert result.status == "queryable_with_pending_graph"
+        assert result.error is not None
+        assert result.error.startswith("Queryable with pending enrichment:")
+        assert "neo4j_write" not in rec.events
     finally:
         m["stop_all"]()
 
@@ -901,6 +968,52 @@ async def test_ghost_a_zero_summaries_safe_mode_continues_to_extraction():
     assert len(result.ghost_b_out) == 1
     assert result.warnings
     assert result.warnings[0].startswith("Ghost A parent summarization deferred:")
+
+
+@pytest.mark.asyncio
+async def test_defer_flags_skip_summary_and_ghost_b_calls():
+    doc_id, corpus_id = "doc-queryable-first", "c" * 36
+    p1, c1 = _parent(doc_id, corpus_id, pid="p0", child_id="c0")
+    cfg = IngestionConfig(
+        use_neo4j=True,
+        chunk_summarization=True,
+        target_qdrant_collections=["naive", "hrag", "graph"],
+    )
+
+    summarize_mock = AsyncMock(return_value=[_fake_summary_result("p0", doc_id, corpus_id)])
+    extract_mock = AsyncMock(
+        return_value=ExtractionBatchReport(
+            results=[_fake_extraction_result("c0", doc_id, corpus_id)],
+            failures=[],
+            metrics={"requested_chunks": 1, "extracted_chunks": 1},
+        )
+    )
+
+    with patch.object(worker.mongo_reader, "get_parent_chunks", new_callable=AsyncMock) as parent_mock, \
+         patch.object(worker, "summarize_parents", summarize_mock), \
+         patch.object(worker, "extract_entities", extract_mock), \
+         patch.object(worker.settings, "NEO4J_ENABLED", True):
+        parent_mock.return_value = []
+        result = await worker._run_ghosts_parallel(
+            config=cfg,
+            parents=[p1],
+            children=[c1],
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            model="m",
+            db=MagicMock(),
+            qdrant_client=MagicMock(),
+            neo4j_driver=MagicMock(),
+            existing_doc=None,
+            ws=WriteState(),
+            defer_summaries=True,
+            defer_ghost_b=True,
+        )
+
+    assert summarize_mock.await_count == 0
+    assert extract_mock.await_count == 0
+    assert result.summaries is None
+    assert result.ghost_b_out is None
 
 
 @pytest.mark.asyncio

@@ -94,11 +94,12 @@ function defaultBatchProfile(corpus: CorpusResponse): IngestProfileName {
         extras.managed_vllm === true
       );
     }) || ["cloud", "dual", "local_then_enrich"].includes(engine);
-  return hasRemotePool ? "rtx_assisted" : "mac_safe";
+  return hasRemotePool ? "rtx_assisted" : "mac_queryable_first";
 }
 
 const PROFILE_LABELS: Record<IngestProfileName, string> = {
   rtx_assisted: "RTX assisted",
+  mac_queryable_first: "Mac queryable-first",
   mac_safe: "Mac optimized",
 };
 
@@ -120,11 +121,14 @@ const INGEST_STAGE_LABELS = [
   ["registered", "Registered"],
   ["parsed", "Parsed"],
   ["chunked", "Chunked"],
-  ["extracted", "Extracted"],
   ["indexed", "Indexed"],
-  ["summarized", "Summarized"],
-  ["promoted", "Promoted"],
   ["queryable", "Queryable"],
+  ["summary_pending", "Summary pending"],
+  ["summary_complete", "Summary complete"],
+  ["graph_pending", "Graph pending"],
+  ["graph_extracted", "Graph extracted"],
+  ["graph_promoted", "Graph promoted"],
+  ["fully_enriched", "Fully enriched"],
 ] as const;
 
 function phaseLabel(phase?: string | null): string {
@@ -643,9 +647,10 @@ export function CorpusDetail({
                 value={localBatchProfile}
                 onChange={(e) => setLocalBatchProfile(e.target.value as IngestProfileName)}
                 className="w-full h-8 px-2 bg-bg-surface border border-border-minimal text-[11px] text-content-primary outline-none focus:border-accent-main"
-                title="Controls backend resource planning for this durable batch. Mac optimized uses one active document and staged local passes."
+                title="Controls backend resource planning for this durable batch. Mac queryable-first uses one active document and indexes retrieval before enrichment."
               >
                 <option value="rtx_assisted">RTX assisted</option>
+                <option value="mac_queryable_first">Mac queryable-first</option>
                 <option value="mac_safe">Mac optimized</option>
               </select>
             </label>
@@ -748,13 +753,16 @@ export function CorpusDetail({
               {localBatch.progress && (
                 <div
                   className="border border-accent-secondary/40 px-2 py-1"
-                  title="Extraction finished (knowledge pulled by the extraction lane) — embeds/graph writes may still be running. This is the milestone the RTX box controls."
+                  title="Graph extraction finished. Retrieval readiness is the Queryable count."
                 >
-                  <div className="text-content-tertiary uppercase">Extracted</div>
+                  <div className="text-content-tertiary uppercase">Graph extracted</div>
                   <div className="text-accent-secondary">
-                    {localBatch.progress.ladder?.extracted ?? localBatch.progress.files_extracted}
+                    {localBatch.progress.ladder?.graph_extracted ??
+                      localBatch.progress.files_graph_extracted ??
+                      localBatch.progress.files_extracted}
                     <span className="text-content-tertiary">
-                      {" "}· {localBatch.progress.mb_extracted}/
+                      {" "}· {localBatch.progress.mb_graph_extracted ??
+                        localBatch.progress.mb_extracted}/
                       {localBatch.progress.mb_total} MB
                     </span>
                   </div>
@@ -767,7 +775,13 @@ export function CorpusDetail({
                 >
                   <div className="text-content-tertiary uppercase">Queryable</div>
                   <div className="text-content-primary">
-                    {localBatch.progress.ladder.queryable ?? 0}
+                    {localBatch.progress.ladder.queryable ??
+                      localBatch.progress.files_queryable ??
+                      0}
+                    <span className="text-content-tertiary">
+                      {" "}· {localBatch.progress.mb_queryable ??
+                        localBatch.progress.mb_done} MB
+                    </span>
                   </div>
                 </div>
               )}

@@ -524,7 +524,7 @@ export async function createUploadIngestBatch(
     chunk_summarization?: boolean;
     model?: string;
     concurrency?: number;
-    profile?: "mac_safe" | "rtx_assisted" | null;
+    profile?: "mac_safe" | "mac_queryable_first" | "rtx_assisted" | null;
     start?: boolean;
   } = {},
 ): Promise<IngestBatchResponse> {

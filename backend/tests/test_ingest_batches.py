@@ -67,9 +67,17 @@ def test_runtime_batch_concurrency_uses_worker_default_when_unset():
 
 def test_normalize_profile_rejects_unknown_value():
     assert batches._normalize_profile("RTX_ASSISTED") == "rtx_assisted"
+    assert batches._normalize_profile("MAC_QUERYABLE_FIRST") == "mac_queryable_first"
     assert batches._normalize_profile("") is None
     with pytest.raises(ValueError, match="Unknown ingest profile"):
         batches._normalize_profile("turbo_mystery")
+
+
+def test_mac_profiles_are_queryable_first():
+    assert batches.INGEST_PROFILES["mac_queryable_first"]["concurrency"] == 1
+    assert batches.INGEST_PROFILES["mac_queryable_first"]["pass_plan"][0] == "queryable"
+    assert batches.INGEST_PROFILES["mac_safe"]["pass_plan"][0] == "queryable"
+    assert "extracted" not in batches.INGEST_PROFILES["mac_safe"]["pass_plan"][:-1]
 
 
 def test_infer_item_stage_from_legacy_phase_rows():
@@ -77,19 +85,45 @@ def test_infer_item_stage_from_legacy_phase_rows():
         batches._infer_item_stage(
             {"status": batches.ITEM_DONE, "phase": "complete"}
         )
-        == "queryable"
+        == "fully_enriched"
     )
     assert (
         batches._infer_item_stage(
             {"status": batches.ITEM_DONE, "phase": "awaiting_summary"}
         )
-        == "indexed"
+        == "summary_pending"
     )
     assert (
         batches._infer_item_stage(
             {"status": batches.ITEM_RUNNING, "phase": "mongo"}
         )
         == "extracted"
+    )
+    assert (
+        batches._infer_item_stage(
+            {"status": batches.ITEM_STAGED, "phase": "staged", "stage": "queryable"}
+        )
+        == "queryable"
+    )
+    assert (
+        batches._infer_item_stage(
+            {
+                "status": batches.ITEM_DONE,
+                "phase": "complete",
+                "stage": "queryable",
+            }
+        )
+        == "fully_enriched"
+    )
+    assert (
+        batches._infer_item_stage(
+            {
+                "status": batches.ITEM_DONE,
+                "phase": "queryable_with_pending_summary_and_graph",
+                "stage": "queryable",
+            }
+        )
+        == "graph_pending"
     )
 
 
@@ -259,6 +293,110 @@ async def test_local_batch_item_failed_result_does_not_requeue(monkeypatch, tmp_
     assert final["failure_stage"] == "worker_result_failed"
 
 
+@pytest.mark.asyncio
+async def test_local_batch_item_queryable_pending_graph_is_not_failed(monkeypatch, tmp_path):
+    source = tmp_path / "queryable.md"
+    source.write_text("# queryable", encoding="utf-8")
+    db = _ItemUpdatesDb()
+    item = {
+        "item_id": "item-graph-pending",
+        "source_path": str(source),
+        "filename": source.name,
+    }
+    batch = {
+        "corpus_id": "corpus-1",
+        "user_id": "user-1",
+        "options": {},
+    }
+
+    class FakeIngestionService:
+        async def _get_corpus_raw(self, _corpus_id):
+            return {"default_ingestion_config": {}}
+
+        async def ingest(self, **kwargs):
+            await kwargs["on_doc_id"]("doc-queryable")
+            await kwargs["on_phase"](
+                "queryable_with_pending_graph",
+                {"doc_id": "doc-queryable"},
+            )
+            return SimpleNamespace(
+                status="queryable_with_pending_graph",
+                doc_id="doc-queryable",
+                error=None,
+            )
+
+    async def fake_wait_for_slot():
+        return None
+
+    async def fake_release_slot():
+        return None
+
+    monkeypatch.setattr(batches, "_wait_for_ingest_slot", fake_wait_for_slot)
+    monkeypatch.setattr(batches.admission, "release_ingest_slot", fake_release_slot)
+
+    await batches._process_local_item(
+        db=db,
+        ingestion_service=FakeIngestionService(),
+        batch=batch,
+        item=item,
+    )
+
+    final = db.items.updates[-1][1]["$set"]
+    assert final["status"] == batches.ITEM_DONE
+    assert final["phase"] == "queryable_with_pending_graph"
+    assert final.get("failure_stage") is None
+
+
+@pytest.mark.asyncio
+async def test_local_batch_item_preserves_combined_pending_phase(monkeypatch, tmp_path):
+    source = tmp_path / "queryable-both.md"
+    source.write_text("# queryable", encoding="utf-8")
+    db = _ItemUpdatesDb()
+    item = {
+        "item_id": "item-both-pending",
+        "source_path": str(source),
+        "filename": source.name,
+    }
+    batch = {
+        "corpus_id": "corpus-1",
+        "user_id": "user-1",
+        "options": {},
+    }
+
+    class FakeIngestionService:
+        async def _get_corpus_raw(self, _corpus_id):
+            return {"default_ingestion_config": {}}
+
+        async def ingest(self, **kwargs):
+            await kwargs["on_doc_id"]("doc-queryable")
+            return SimpleNamespace(
+                status="queryable_with_pending_summary_and_graph",
+                doc_id="doc-queryable",
+                error=None,
+            )
+
+    async def fake_wait_for_slot():
+        return None
+
+    async def fake_release_slot():
+        return None
+
+    monkeypatch.setattr(batches, "_wait_for_ingest_slot", fake_wait_for_slot)
+    monkeypatch.setattr(batches.admission, "release_ingest_slot", fake_release_slot)
+
+    await batches._process_local_item(
+        db=db,
+        ingestion_service=FakeIngestionService(),
+        batch=batch,
+        item=item,
+    )
+
+    final = db.items.updates[-1][1]["$set"]
+    assert final["status"] == batches.ITEM_DONE
+    assert final["phase"] == "queryable_with_pending_summary_and_graph"
+    assert final.get("failure_stage") is None
+
+
 class _BatchCursor:
     def __init__(self, rows):
         self.rows = rows
@@ -331,10 +469,25 @@ async def test_list_batches_returns_recent_user_batches():
 
 def _matches_query(row, query):
     for key, expected in query.items():
+        if key == "$or":
+            if not any(_matches_query(row, clause) for clause in expected):
+                return False
+            continue
+        if key == "$and":
+            if not all(_matches_query(row, clause) for clause in expected):
+                return False
+            continue
         actual = row.get(key)
         if isinstance(expected, dict):
             if "$in" in expected and actual not in expected["$in"]:
                 return False
+            elif "$exists" in expected:
+                exists = key in row
+                if bool(expected["$exists"]) != exists:
+                    return False
+            elif "$lt" in expected:
+                if actual is None or not actual < expected["$lt"]:
+                    return False
             elif "$in" not in expected:
                 raise AssertionError(f"Unsupported query operator in {expected!r}")
         elif actual != expected:
@@ -469,13 +622,14 @@ async def test_recover_local_batch_runners_reclaims_orphaned_running_items(monke
         }
     ]
     item_rows = [
-        {
-            "item_id": "running",
-            "batch_id": "batch-1",
-            "source": "local_folder",
-            "user_id": "user-1",
-            "status": batches.ITEM_RUNNING,
-        },
+            {
+                "item_id": "running",
+                "batch_id": "batch-1",
+                "source": "local_folder",
+                "user_id": "user-1",
+                "status": batches.ITEM_RUNNING,
+                "lease_until": None,
+            },
         {
             "item_id": "queued",
             "batch_id": "batch-1",

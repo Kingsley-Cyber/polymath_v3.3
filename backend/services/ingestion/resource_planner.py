@@ -64,6 +64,7 @@ class ResourceProfile:
     qdrant_write_concurrency: int
     neo4j_write_concurrency: int
     backpressure_enabled: bool = True
+    recommended_ingest_profile: str = "mac_queryable_first"
     warnings: tuple[str, ...] = field(default_factory=tuple)
     notes: tuple[str, ...] = field(default_factory=tuple)
 
@@ -409,6 +410,9 @@ def plan_ingestion_resources(
     if has_remote_vllm and max_concurrent < 60:
         notes.append(f"remote_vllm concurrency capped by configured chips at {max_concurrent}")
 
+    recommended_profile = (
+        "rtx_assisted" if has_remote_vllm else "mac_queryable_first"
+    )
     name_parts = [extraction_backend, embedding_backend, storage_mode]
     return ResourceProfile(
         name="+".join(name_parts),
@@ -436,6 +440,7 @@ def plan_ingestion_resources(
             1,
             int(getattr(settings, "NEO4J_INGEST_WRITE_CONCURRENCY", 1)),
         ),
+        recommended_ingest_profile=recommended_profile,
         warnings=tuple(warnings),
         notes=tuple(notes),
     )

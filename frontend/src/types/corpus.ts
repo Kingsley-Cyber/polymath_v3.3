@@ -137,9 +137,9 @@ export interface IngestionConfig {
 }
 
 export type IngestionPreset = "fast" | "balanced" | "deep" | "custom";
-// mac_safe is displayed as "Mac optimized": one active local document, staged
-// extraction/index/full sweeps, and bounded phase-level parallelism.
-export type IngestProfileName = "mac_safe" | "rtx_assisted";
+// mac_queryable_first/mac_safe are displayed as "Mac optimized": one active
+// local document, retrieval-first sweeps, and bounded phase-level parallelism.
+export type IngestProfileName = "mac_safe" | "mac_queryable_first" | "rtx_assisted";
 
 /** Open-time preset inference — used by the corpus create/edit forms to
  * decide which radio option to pre-select. If the stored preset disagrees
@@ -402,8 +402,12 @@ export interface IngestBatchResponse {
     files_done: number;
     files_total: number;
     files_extracted: number;
+    files_queryable?: number;
+    files_graph_extracted?: number;
     mb_done: number;
     mb_extracted: number;
+    mb_queryable?: number;
+    mb_graph_extracted?: number;
     mb_total: number;
     ladder?: Record<string, number>;
   };

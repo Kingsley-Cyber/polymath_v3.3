@@ -1119,6 +1119,8 @@ async def _run_ghosts_parallel(
     existing_doc: dict | None,
     ws: WriteState,
     extraction_endpoint_urls: list[str] | None = None,
+    defer_summaries: bool = False,
+    defer_ghost_b: bool = False,
 ) -> GhostRunResult:
     """Fan out GHOST A + GHOST B in parallel. Either branch may be disabled
     by config OR skipped via resume gates (Decision D).
@@ -1140,7 +1142,7 @@ async def _run_ghosts_parallel(
     if not existing_parent_chunks and existing_doc:
         existing_parent_chunks = (existing_doc or {}).get("parent_chunks") or []
     summaries_from_mongo: list[SummaryResult] | None = None
-    need_ghost_a = config.chunk_summarization
+    need_ghost_a = config.chunk_summarization and not defer_summaries
     summary_targets = _summary_target_kinds(config)
     summarizable_parents = _summarizable_parents(parents)
     expected_summary_count = len(summarizable_parents)
@@ -1224,9 +1226,23 @@ async def _run_ghosts_parallel(
     # ── GHOST B path decisions ────────────────────────────────────────────
     need_ghost_b = (
         config.use_neo4j and settings.NEO4J_ENABLED and not ws.neo4j_written
+        and not defer_ghost_b
     )
     ghost_b_from_staging: list[ExtractionResult] | None = None
     ghost_b_missing_ids: set[str] | None = None
+    if defer_summaries and config.chunk_summarization:
+        logger.info(
+            "phase=ghost_a_deferred reason=queryable_first doc=%s corpus=%s",
+            doc_id[:12],
+            corpus_id[:8],
+        )
+    if defer_ghost_b and config.use_neo4j and settings.NEO4J_ENABLED and not ws.neo4j_written:
+        logger.info(
+            "phase=ghost_b_deferred reason=queryable_first doc=%s corpus=%s",
+            doc_id[:12],
+            corpus_id[:8],
+        )
+
     if need_ghost_b and neo4j_driver is None:
         need_ghost_b = False
     elif need_ghost_b:
@@ -3395,6 +3411,8 @@ async def run_ingest_job(
             facet_profile=base_facet_profile,
         )
 
+    queryable_first_pass = str(target_stage or "").lower() in {"indexed", "queryable"}
+
     # ── Phase 3: Ghost model phases ──────────────────────────────────────
     await _set_ingest_stage(
         db=db,
@@ -3420,6 +3438,8 @@ async def run_ingest_job(
             existing_doc=existing_doc,
             ws=ws,
             extraction_endpoint_urls=extraction_endpoint_urls,
+            defer_summaries=queryable_first_pass,
+            defer_ghost_b=queryable_first_pass,
         )
     if isinstance(ghost_result, GhostRunResult):
         summaries = ghost_result.summaries
@@ -3515,40 +3535,47 @@ async def run_ingest_job(
             warnings=ws.warnings,
         )
         ws.mongo_written = True
-        # B3 — owner summary tree (parent summaries → rollups → sections →
-        # document profile). Best-effort: never fails the ingest.
-        try:
-            from config import get_settings as _gs
-            if bool(getattr(_gs(), "SUMMARY_TREE_ENABLED", True)):
-                from services.ingestion.summary_tree import build_and_store_tree
-                _summary_tree_pool = _build_ghost_pool(
-                    getattr(ingestion_config, "summary_models", None) or []
-                )
-                _summary_tree_llm = (
-                    _summary_tree_llm_from_pool(
-                        _summary_tree_pool,
-                        getattr(ingestion_config, "max_summary_tokens", 300),
-                    )
-                    if getattr(ingestion_config, "chunk_summarization", False)
-                    else None
-                )
-                _tree_counts = await build_and_store_tree(
-                    db=db,
-                    doc_id=doc_id,
-                    corpus_id=corpus_id,
-                    llm_fn=_summary_tree_llm,
-                    use_llm=_summary_tree_llm is not None,
-                    heal_missing=_summary_tree_llm is not None,
-                )
-                logger.info(
-                    "phase=summary_tree doc=%s corpus=%s %s",
-                    doc_id[:12], corpus_id[:8], _tree_counts,
-                )
-        except Exception as _tree_exc:  # noqa: BLE001
-            logger.warning(
-                "phase=summary_tree doc=%s FAILED (non-fatal): %s",
-                doc_id[:12], _tree_exc,
+        if queryable_first_pass:
+            logger.info(
+                "phase=summary_tree_deferred reason=queryable_first doc=%s corpus=%s",
+                doc_id[:12],
+                corpus_id[:8],
             )
+        else:
+            # B3 — owner summary tree (parent summaries → rollups → sections →
+            # document profile). Best-effort: never fails the ingest.
+            try:
+                from config import get_settings as _gs
+                if bool(getattr(_gs(), "SUMMARY_TREE_ENABLED", True)):
+                    from services.ingestion.summary_tree import build_and_store_tree
+                    _summary_tree_pool = _build_ghost_pool(
+                        getattr(ingestion_config, "summary_models", None) or []
+                    )
+                    _summary_tree_llm = (
+                        _summary_tree_llm_from_pool(
+                            _summary_tree_pool,
+                            getattr(ingestion_config, "max_summary_tokens", 300),
+                        )
+                        if getattr(ingestion_config, "chunk_summarization", False)
+                        else None
+                    )
+                    _tree_counts = await build_and_store_tree(
+                        db=db,
+                        doc_id=doc_id,
+                        corpus_id=corpus_id,
+                        llm_fn=_summary_tree_llm,
+                        use_llm=_summary_tree_llm is not None,
+                        heal_missing=_summary_tree_llm is not None,
+                    )
+                    logger.info(
+                        "phase=summary_tree doc=%s corpus=%s %s",
+                        doc_id[:12], corpus_id[:8], _tree_counts,
+                    )
+            except Exception as _tree_exc:  # noqa: BLE001
+                logger.warning(
+                    "phase=summary_tree doc=%s FAILED (non-fatal): %s",
+                    doc_id[:12], _tree_exc,
+                )
         logger.info(
             "phase=mongo duration=%.2fs doc=%s corpus=%s parents=%d children=%d summaries=%d",
             time.monotonic() - t0,
@@ -3996,11 +4023,51 @@ async def run_ingest_job(
                     doc_id[:12], warn_persist_exc,
                 )
 
-    if target_stage == "indexed":
-        # §13-S pass driver: durable through 'indexed' (vectors + sparse in
-        # Qdrant, text in Mongo) — exit; graph/summaries run in a later pass.
+    if str(target_stage or "").lower() in {"indexed", "queryable"}:
+        # §13-S pass driver: durable through queryability (Mongo text + dense
+        # and sparse vectors). Graph/summaries are enrichment and run later.
+        pending: list[str] = []
+        if summary_gate_required and not ws.summaries_indexed:
+            pending.append("summary")
+        if ingestion_config.use_neo4j and settings.NEO4J_ENABLED and not ws.neo4j_written:
+            pending.append("graph")
+        queryable_stage = (
+            "queryable_with_pending_" + "_and_".join(pending)
+            if pending
+            else "queryable"
+        )
+        try:
+            await db["documents"].update_one(
+                {"doc_id": doc_id, "corpus_id": corpus_id},
+                {
+                    "$set": {
+                        "ingest_stage": queryable_stage,
+                        "queryable": True,
+                        "enrichment_pending_reason": (
+                            "Queryable; pending enrichment lanes: "
+                            + ", ".join(pending)
+                            + "."
+                            if pending
+                            else None
+                        ),
+                        "enrichment_status": {
+                            "summary": "pending" if "summary" in pending else "complete",
+                            "graph": "pending" if "graph" in pending else "complete",
+                        },
+                        "updated_at": datetime.utcnow(),
+                    },
+                    "$unset": {"error": ""},
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "phase=queryable_status doc=%s corpus=%s failed: %s",
+                doc_id[:12],
+                corpus_id[:8],
+                exc,
+            )
         await _emit_ingest_phase(
-            on_phase, "staged_indexed", doc_id=doc_id, corpus_id=corpus_id
+            on_phase, "staged_queryable", doc_id=doc_id, corpus_id=corpus_id
         )
         return IngestJobResponse(
             job_id=job_id, doc_id=doc_id, corpus_id=corpus_id,
@@ -4187,12 +4254,12 @@ async def run_ingest_job(
 
     neo4j_required = bool(ingestion_config.use_neo4j and settings.NEO4J_ENABLED)
     summary_complete = (not summary_gate_required) or ws.summaries_indexed
-    awaiting_summary = bool(
-        summary_gate_required
-        and not summary_complete
-        and ws.mongo_written
-        and ws.qdrant_written
-        and ((not neo4j_required) or ws.neo4j_written)
+    queryable_complete = bool(ws.mongo_written and ws.qdrant_written)
+    pending_summary = bool(summary_gate_required and not summary_complete)
+    pending_graph = bool(neo4j_required and not ws.neo4j_written)
+    awaiting_enrichment = bool(
+        queryable_complete
+        and (pending_summary or pending_graph)
         and bool(getattr(settings, "INGEST_SAFE_SUMMARY_FAILURES", True))
     )
     storage_complete = (
@@ -4205,13 +4272,32 @@ async def run_ingest_job(
     final_status = (
         "done"
         if verified_complete
-        else ("awaiting_summary" if awaiting_summary else "failed")
+        else (
+            "queryable_with_pending_summary_and_graph"
+            if awaiting_enrichment and pending_summary and pending_graph
+            else (
+                "queryable_with_pending_summary"
+                if awaiting_enrichment and pending_summary
+                else (
+                    "queryable_with_pending_graph"
+                    if awaiting_enrichment and pending_graph
+                    else "failed"
+                )
+            )
+        )
     )
     final_error = None
-    if awaiting_summary:
+    if awaiting_enrichment:
+        pending_names = []
+        if pending_summary:
+            pending_names.append("summary")
+        if pending_graph:
+            pending_names.append("graph")
         final_error = (
-            "Summary pending: chunks, vectors, and available graph extractions "
-            "were persisted; rerun this document when the summary lane is healthy."
+            "Queryable with pending enrichment: chunks, text, dense vectors, "
+            "and sparse vectors were persisted; pending lanes: "
+            + ", ".join(pending_names)
+            + "."
         )
     elif ws.verified is False and ws.verify_errors:
         final_error = "; ".join(ws.verify_errors)
@@ -4229,17 +4315,24 @@ async def run_ingest_job(
             missing.append("verification")
         final_error = "Ingest incomplete: " + ", ".join(missing)
     final_stage = (
-        "complete"
+        "fully_enriched"
         if verified_complete
-        else ("awaiting_summary" if awaiting_summary else "failed")
+        else (final_status if awaiting_enrichment else "failed")
     )
     final_update: dict[str, Any] = {
         "ingest_stage": final_stage,
         "updated_at": datetime.utcnow(),
     }
     final_unset: dict[str, str] = {}
-    if awaiting_summary:
-        final_update["summary_pending_reason"] = final_error
+    if awaiting_enrichment:
+        final_update["enrichment_pending_reason"] = final_error
+        if pending_summary:
+            final_update["summary_pending_reason"] = final_error
+        final_update["queryable"] = True
+        final_update["enrichment_status"] = {
+            "summary": "pending" if pending_summary else "complete",
+            "graph": "pending" if pending_graph else "complete",
+        }
         final_update["write_state.warnings"] = ws.warnings
         final_unset["error"] = ""
     elif verified_complete:
@@ -4252,7 +4345,13 @@ async def run_ingest_job(
         if repaired_warnings != ws.warnings:
             ws.warnings = repaired_warnings
         final_update["write_state.warnings"] = ws.warnings
+        final_update["queryable"] = True
+        final_update["enrichment_status"] = {
+            "summary": "complete",
+            "graph": "complete",
+        }
         final_unset["summary_pending_reason"] = ""
+        final_unset["enrichment_pending_reason"] = ""
         final_unset["error"] = ""
     else:
         final_update["error"] = final_error

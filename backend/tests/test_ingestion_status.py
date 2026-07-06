@@ -43,6 +43,28 @@ def test_deep_poll_status_waits_for_neo4j_after_qdrant():
     assert progress["stage"] == "graph_extracting"
 
 
+def test_queryable_with_pending_graph_is_not_reported_failed():
+    progress = _resolve_ingest_progress(
+        {
+            "ingest_stage": "queryable_with_pending_graph",
+            "enrichment_pending_reason": "Queryable; graph pending.",
+            "ingestion_config": DEEP_CONFIG,
+            "write_state": {
+                "mongo_written": True,
+                "qdrant_written": True,
+                "neo4j_written": False,
+                "verified": False,
+                "verify_errors": ["neo4j missing"],
+            },
+        },
+        neo4j_enabled=True,
+    )
+
+    assert progress["status"] == "queryable_with_pending_graph"
+    assert progress["stage"] == "queryable_with_pending_graph"
+    assert progress["error"] == "Queryable; graph pending."
+
+
 def test_deep_poll_status_waits_for_summary_indexing_after_qdrant():
     progress = _resolve_ingest_progress(
         {

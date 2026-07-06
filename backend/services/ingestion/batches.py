@@ -46,8 +46,22 @@ ITEM_STAGED = "staged"  # §13-S: durable through the batch's target_stage
 # ── §13-S stage ladder — monotonic per-item progress, distinct from `phase`
 # (current activity). Rank persisted so lease queries can compare cheaply.
 STAGE_LADDER = [
-    "registered", "parsed", "chunked", "extracted",
-    "indexed", "summarized", "promoted", "queryable",
+    "registered",
+    "parsed",
+    "chunked",
+    # Legacy pre-index extraction checkpoint. New graph-specific progress uses
+    # graph_extracted below so "queryable" is not hidden behind Ghost B.
+    "extracted",
+    "indexed",
+    "queryable",
+    "summary_pending",
+    "summarized",
+    "summary_complete",
+    "graph_pending",
+    "graph_extracted",
+    "promoted",
+    "graph_promoted",
+    "fully_enriched",
 ]
 STAGE_RANK = {s: i for i, s in enumerate(STAGE_LADDER)}
 # Worker phase ENTRY events certify the PREVIOUS stage completed.
@@ -60,25 +74,39 @@ _PHASE_TO_STAGE = {
     "staged_extracted": "extracted",
     "embedding": "extracted",
     "qdrant": "extracted",
-    "staged_indexed": "indexed",
-    "neo4j": "indexed",
-    "verifying": "indexed",
-    "awaiting_summary": "indexed",
-    "complete": "queryable",
+    "staged_indexed": "queryable",
+    "staged_queryable": "queryable",
+    "neo4j": "graph_extracted",
+    "verifying": "graph_promoted",
+    "awaiting_summary": "summary_pending",
+    "complete": "fully_enriched",
+    "fully_enriched": "fully_enriched",
+    "queryable_with_pending_summary": "summary_pending",
+    "queryable_with_pending_graph": "graph_pending",
+    "queryable_with_pending_summary_and_graph": "graph_pending",
 }
 
 # ── §13-S named profiles (deterministic one-knob presets) ────────────────────
 # mac_safe is the global local/Mac rule:
 #   - one active document owns the heavy phase budget;
-#   - staged sweeps release memory between extraction, indexing, and completion;
+#   - staged sweeps release memory between queryability and enrichment;
 #   - local Mac sidecars are preferred over remote/cloud pools.
-# The worker currently has durable stop-points at extracted and indexed; chunked
-# can become its own stop once the worker has an explicit chunk-stage return.
+# First pass is queryable-first: Mongo chunks + dense/sparse vectors land before
+# Ghost B/Neo4j, so local extraction can never gate initial retrieval.
 # rtx_assisted: the elastic-car topology; single full pass.
 INGEST_PROFILES: dict[str, dict] = {
+    "mac_queryable_first": {
+        "concurrency": 1,
+        "pass_plan": ["queryable", None],  # None = run enrichment to completion
+        "extraction_endpoint_urls": [
+            os.environ.get(
+                "MAC_SIDECAR_URL", "http://host.docker.internal:8084"
+            ).rstrip("/")
+        ],
+    },
     "mac_safe": {
         "concurrency": 1,
-        "pass_plan": ["extracted", "indexed", None],  # None = run to completion
+        "pass_plan": ["queryable", None],  # legacy name, same safe contract
         "extraction_endpoint_urls": [
             os.environ.get(
                 "MAC_SIDECAR_URL", "http://host.docker.internal:8084"
@@ -251,18 +279,19 @@ def _infer_item_stage(item: dict[str, Any]) -> str | None:
     New rows persist stage/stage_rank. Live batches created before §13-S only
     have status/phase, so the UI otherwise undercounts progress after a deploy.
     """
-    explicit = str(item.get("stage") or "").strip()
-    if explicit in STAGE_RANK:
-        return explicit
-
     status = str(item.get("status") or "").strip()
     phase = str(item.get("phase") or "").strip()
     if status == ITEM_SKIPPED:
         return None
     if status == ITEM_DONE:
         if phase == "awaiting_summary":
-            return "indexed"
-        return _PHASE_TO_STAGE.get(phase) or "queryable"
+            return "summary_pending"
+        return _PHASE_TO_STAGE.get(phase) or "fully_enriched"
+
+    explicit = str(item.get("stage") or "").strip()
+    if explicit in STAGE_RANK:
+        return explicit
+
     if phase in _PHASE_TO_STAGE:
         return _PHASE_TO_STAGE[phase]
     if status in {ITEM_QUEUED, ITEM_RUNNING, ITEM_FAILED_RECOVERABLE, ITEM_FAILED}:
@@ -868,6 +897,55 @@ async def refresh_batch_counts(
             },
         ]
     }
+    queryable_cond = {
+        "$or": [
+            {"$eq": ["$status", ITEM_DONE]},
+            {
+                "$and": [
+                    {"$eq": ["$status", ITEM_STAGED]},
+                    {
+                        "$gte": [
+                            {"$ifNull": ["$stage_rank", -1]},
+                            STAGE_RANK["queryable"],
+                        ]
+                    },
+                ]
+            },
+        ]
+    }
+    graph_extracted_cond = {
+        "$or": [
+            {
+                "$and": [
+                    {"$eq": ["$status", ITEM_DONE]},
+                    {
+                        "$not": [
+                            {
+                                "$in": [
+                                    {"$ifNull": ["$phase", ""]},
+                                    [
+                                        "queryable_with_pending_graph",
+                                        "queryable_with_pending_summary_and_graph",
+                                    ],
+                                ]
+                            }
+                        ]
+                    },
+                ]
+            },
+            {
+                "$and": [
+                    {"$eq": ["$status", ITEM_STAGED]},
+                    {
+                        "$gte": [
+                            {"$ifNull": ["$stage_rank", -1]},
+                            STAGE_RANK["graph_extracted"],
+                        ]
+                    },
+                ]
+            },
+        ]
+    }
     size_of = {"$ifNull": ["$size_bytes", 0]}
     rows = await db[ITEMS].aggregate(
         [
@@ -884,6 +962,16 @@ async def refresh_batch_counts(
                     "extracted_files": {"$sum": {"$cond": [extracted_cond, 1, 0]}},
                     "extracted_bytes": {
                         "$sum": {"$cond": [extracted_cond, size_of, 0]}
+                    },
+                    "queryable_files": {"$sum": {"$cond": [queryable_cond, 1, 0]}},
+                    "queryable_bytes": {
+                        "$sum": {"$cond": [queryable_cond, size_of, 0]}
+                    },
+                    "graph_extracted_files": {
+                        "$sum": {"$cond": [graph_extracted_cond, 1, 0]}
+                    },
+                    "graph_extracted_bytes": {
+                        "$sum": {"$cond": [graph_extracted_cond, size_of, 0]}
                     },
                 }
             },
@@ -911,10 +999,14 @@ async def refresh_batch_counts(
         "files_done": counts[ITEM_DONE],
         "files_total": total,
         "files_extracted": int(sizes.get("extracted_files") or 0),
+        "files_queryable": int(sizes.get("queryable_files") or 0),
+        "files_graph_extracted": int(sizes.get("graph_extracted_files") or 0),
         "mb_done": _mb(sizes.get("done_bytes")),
         "mb_extracted": _mb(sizes.get("extracted_bytes")),
+        "mb_queryable": _mb(sizes.get("queryable_bytes")),
+        "mb_graph_extracted": _mb(sizes.get("graph_extracted_bytes")),
         "mb_total": _mb(sizes.get("total_bytes")),
-        # §13-S honest ladder ("500 chunked / 320 extracted / 60 queryable").
+        # §13-S honest ladder ("500 chunked / 320 queryable / 60 graph promoted").
         "ladder": ladder,
     }
 
@@ -1033,7 +1125,7 @@ async def recover_local_batch_runners(
 
     work_filter: dict[str, Any] = {
         "source": {"$in": RUNNABLE_SOURCES},
-        "status": {"$in": [ITEM_QUEUED, ITEM_FAILED_RECOVERABLE]},
+        "status": {"$in": [ITEM_QUEUED, ITEM_FAILED_RECOVERABLE, ITEM_STAGED]},
     }
     if user_id is not None:
         work_filter["user_id"] = user_id
@@ -1344,6 +1436,9 @@ async def _process_local_item(
             status, item_phase, failure_stage = ITEM_DONE, "complete", None
         elif result.status == "awaiting_summary":
             status, item_phase, failure_stage = ITEM_DONE, "awaiting_summary", None
+        elif str(result.status).startswith("queryable_with_pending_"):
+            item_phase = str(result.status)
+            status, failure_stage = ITEM_DONE, None
         elif result.status == "skipped_duplicate":
             # Deliberate skip (near-duplicate) — NOT a failure; don't retry.
             status, item_phase, failure_stage = ITEM_SKIPPED, "skipped", None
