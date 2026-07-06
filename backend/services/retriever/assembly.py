@@ -21,12 +21,14 @@ import logging
 from typing import Any, Iterable, Optional, Sequence
 
 from services.retriever.waterfall import (
+    DocNote,
     OrphanChild,
     Packet,
     ParentCandidate,
     SharedEntity,
     allocate,
 )
+from services.ingestion.doc_artifact import format_source_role_header
 from services.storage.record_status import with_active_records
 
 logger = logging.getLogger(__name__)
@@ -111,6 +113,29 @@ def entity_lines_from_chunks(
     return out
 
 
+def doc_notes_from_chunks(chunks: Sequence[Any], cap: int = 12) -> list[DocNote]:
+    """Final-ranked chunks -> one passive source-role note per distinct doc."""
+    out: list[DocNote] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        doc_id = str(getattr(chunk, "doc_id", "") or "")
+        if not doc_id or doc_id in seen:
+            continue
+        metadata = getattr(chunk, "metadata", None) or {}
+        artifact = metadata.get("doc_artifact") if isinstance(metadata, dict) else None
+        if not isinstance(artifact, dict):
+            continue
+        label = str(getattr(chunk, "doc_name", "") or doc_id)
+        note = format_source_role_header(label, artifact)
+        if not note:
+            continue
+        out.append(DocNote(doc_id=doc_id, text=note))
+        seen.add(doc_id)
+        if len(out) >= cap:
+            break
+    return out
+
+
 async def build_waterfall_packet(
     chunks: Sequence[Any],
     corpus_ids: Optional[list[str]],
@@ -163,16 +188,19 @@ async def build_waterfall_packet(
 
         parents, orphans = group_parent_candidates(chunks, parent_map, anchor_doc_ids)
         entities = entity_lines_from_chunks(chunks)
+        doc_notes = doc_notes_from_chunks(chunks)
         packet = allocate(
             parents,
             budget_tokens=int(getattr(settings, "WATERFALL_BUDGET_TOKENS", 4000)),
             orphans=orphans,
             entities=entities,
+            doc_notes=doc_notes,
             anchor_quota=0.6,
         )
         packet.diagnostics["parents_in"] = len(parents)
         packet.diagnostics["orphans_in"] = len(orphans)
         packet.diagnostics["entities_in"] = len(entities)
+        packet.diagnostics["doc_notes_in"] = len(doc_notes)
         packet.diagnostics["anchor_doc_ids"] = anchor_doc_ids
         return packet
     except Exception as exc:  # noqa: BLE001

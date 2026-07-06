@@ -132,6 +132,9 @@ class _FakeFind:
     def sort(self, *_args, **_kwargs):
         return self
 
+    def limit(self, *_args, **_kwargs):
+        return self
+
     async def to_list(self, length=None):
         return list(self.rows if length is None else self.rows[:length])
 
@@ -180,6 +183,16 @@ class _FakeDb:
                 "child_ids": ["child_1"],
             }]),
             "summary_tree": _FakeCollection(),
+            "corpora": _FakeCollection([{
+                "corpus_id": "corpus_1",
+                "description": "Owner corpus note: use this as reference context.",
+            }]),
+            "ghost_b_extractions": _FakeCollection([{
+                "doc_id": "doc_1",
+                "corpus_id": "corpus_1",
+                "status": "ok",
+                "entities": [{"canonical_name": "Polymath"}],
+            }]),
         }
 
     def __getitem__(self, name):
@@ -223,6 +236,10 @@ def test_heal_missing_summary_persists_parent_artifact_fields():
     assert update["summary_type"] == "parent_retrieval_replacement"
     assert update["source_child_ids"] == ["child_1"]
     assert update["key_points"][0]["supporting_child_ids"] == ["child_1"]
+    doc_profile = db["documents"].updates[-1][1]["$set"]["doc_profile"]
+    assert doc_profile["doc_artifact"]["artifact_version"] == "polymath.doc_artifact.v1"
+    assert doc_profile["doc_artifact"]["field_provenance"]["owner_intent"] == "corpus_description"
+    assert doc_profile["doc_artifact"]["synthesis_hint"]
 
 
 def _run_all():

@@ -252,7 +252,14 @@ async def build_and_store_tree(
 
     doc = await db["documents"].find_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"title": 1, "filename": 1, "source_type": 1},
+        {
+            "title": 1,
+            "filename": 1,
+            "source_type": 1,
+            "source_path": 1,
+            "facet_profile": 1,
+            "doc_profile": 1,
+        },
     )
     if not doc:
         return {"skipped": "no_document"}
@@ -378,17 +385,58 @@ async def build_and_store_tree(
         rec["updated_at"] = now
         await db["summary_tree"].replace_one({"node_id": n.node_id}, rec, upsert=True)
     profile = nodes[-1]
+    doc_profile = {
+        "summary_id": profile.node_id,
+        "summary": profile.summary,
+        "concepts": profile.concepts,
+        "domains": profile.domains,
+        "section_ids": profile.child_node_ids,
+        "schema_version": profile.schema_version,
+        "updated_at": now,
+    }
+    try:
+        from services.ingestion.doc_artifact import build_doc_artifact
+
+        corpus_doc = await db["corpora"].find_one(
+            {"corpus_id": corpus_id},
+            {"_id": 0, "description": 1},
+        )
+        ghost_rows = await db["ghost_b_extractions"].find(
+            {"doc_id": doc_id, "corpus_id": corpus_id, "status": "ok"},
+            {"_id": 0, "entities": 1},
+        ).limit(300).to_list(length=300)
+        ghost_entities = [
+            entity
+            for row in ghost_rows
+            for entity in (row.get("entities") or [])
+        ]
+        chunk_kind_stats: dict[str, int] = {}
+        for row in rows:
+            kind = str(row.get("chunk_kind") or "body")
+            chunk_kind_stats[kind] = chunk_kind_stats.get(kind, 0) + 1
+        existing_artifact = ((doc.get("doc_profile") or {}).get("doc_artifact") or {})
+        artifact = build_doc_artifact(
+            doc_profile=doc_profile,
+            facet_profile=doc.get("facet_profile") or {},
+            source_meta={
+                "title": doc.get("title"),
+                "filename": doc.get("filename"),
+                "source_type": doc.get("source_type"),
+                "source_path": doc.get("source_path"),
+            },
+            ghost_b_entities=ghost_entities,
+            chunk_kind_stats=chunk_kind_stats,
+            owner_fields=existing_artifact,
+            corpus_description=(corpus_doc or {}).get("description"),
+        )
+        if artifact:
+            doc_profile["doc_artifact"] = artifact
+    except Exception:
+        pass
+
     await db["documents"].update_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},
-        {"$set": {"doc_profile": {
-            "summary_id": profile.node_id,
-            "summary": profile.summary,
-            "concepts": profile.concepts,
-            "domains": profile.domains,
-            "section_ids": profile.child_node_ids,
-            "schema_version": profile.schema_version,
-            "updated_at": now,
-        }}},
+        {"$set": {"doc_profile": doc_profile}},
     )
     counts: dict[str, Any] = {}
     for n in nodes:

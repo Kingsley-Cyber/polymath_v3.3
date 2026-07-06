@@ -9,6 +9,7 @@ from typing import Optional
 from config import get_settings
 from models.schemas import ChatMessage, SourceChunk
 from services import code_lane_skills
+from services.ingestion.doc_artifact import format_source_role_header
 from utils.tokens import count_tokens, count_tokens_messages, get_model_context_limit
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,38 @@ class ContextManager:
             f"History trimmed: {original_count} → {trimmed_count} messages "
             f"({pairs_removed} pairs removed, {tokens_saved} tokens saved)"
         )
+
+    def _is_generative_task_query(self, query: str) -> bool:
+        q = f" {(query or '').lower()} "
+        return any(
+            term in q
+            for term in (
+                " create ",
+                " generate ",
+                " write ",
+                " draft ",
+                " build ",
+                " design ",
+                " blueprint",
+                " prompt",
+                " prompts",
+                " script",
+                " scripts",
+                " plan",
+                " storyboard",
+                " shot list",
+            )
+        )
+
+    def _source_role_header(self, source: SourceChunk) -> str:
+        metadata = getattr(source, "metadata", None) or {}
+        if not isinstance(metadata, dict):
+            return ""
+        artifact = metadata.get("doc_artifact")
+        if not isinstance(artifact, dict):
+            return ""
+        doc_label = source.doc_name or source.doc_id or "Unknown"
+        return format_source_role_header(doc_label, artifact)
 
     def trim_history(
         self,
@@ -576,6 +609,7 @@ class ContextManager:
             # removed as redundant.
             passages: list[str] = []
             has_web_sources = False
+            rendered_doc_headers: set[str] = set()
             # W2 §10.3 — waterfall packet renders IN ALLOCATOR ORDER (full
             # parents -> summaries -> orphan children -> entity lines) and
             # REPLACES the per-source loop. Everything downstream (facts
@@ -588,9 +622,17 @@ class ContextManager:
                     )
                     for s in sources
                 }
+                _doc_notes = {
+                    str(_it.get("doc_id") or ""): str(_it.get("text") or "").strip()
+                    for _it in packet["items"]
+                    if _it.get("kind") == "doc_note" and str(_it.get("text") or "").strip()
+                }
+                _seen_doc_notes: set[str] = set()
                 _entity_lines: list[str] = []
                 for _it in packet["items"]:
                     _kind = _it.get("kind")
+                    if _kind == "doc_note":
+                        continue
                     _text = str(_it.get("text") or "").strip()
                     if not _text:
                         continue
@@ -600,6 +642,10 @@ class ContextManager:
                     _label = _doc_names.get(str(_it.get("doc_id") or ""), "") or (
                         _it.get("doc_id") or "Unknown"
                     )
+                    _doc_id = str(_it.get("doc_id") or "")
+                    if _doc_id and _doc_id in _doc_notes and _doc_id not in _seen_doc_notes:
+                        passages.append(_doc_notes[_doc_id])
+                        _seen_doc_notes.add(_doc_id)
                     if _kind == "full":
                         passages.append(f'From "{_label}": {_text}')
                     elif _kind == "summary":
@@ -618,6 +664,12 @@ class ContextManager:
                     isinstance(metadata, dict) and metadata.get("web_content_untrusted")
                 )
                 has_web_sources = has_web_sources or is_web_source
+                _doc_header_key = s.doc_id or doc_label
+                if _doc_header_key and _doc_header_key not in rendered_doc_headers and not is_web_source:
+                    header = self._source_role_header(s)
+                    if header:
+                        passages.append(header)
+                        rendered_doc_headers.add(_doc_header_key)
 
                 # Code lane (Phase 2) — code chunks render as
                 # <file language="…" path="…">…<code>…</code></file>. The
@@ -885,6 +937,20 @@ class ContextManager:
                 "evidence supports rather than fabricating the rest.\n"
                 "</rag_answer_policy>\n\n"
             )
+            generative_policy = ""
+            if self._is_generative_task_query(query):
+                generative_policy = (
+                    "<generative_task_policy>\n"
+                    "When the user asks you to create prompts, blueprints, scripts, plans, "
+                    "storyboards, or similar generative artifacts, use the retrieved sources "
+                    "as ingredients and jurisdiction labels, not as a cage. Separate model-"
+                    "specific syntax/constraints from transferable technique. You may compose "
+                    "a new artifact, but every concrete factual claim about a source, model, "
+                    "limit, or workflow must still be grounded in retrieved child chunks or "
+                    "key_facts. Source-role headers are context only and are not citable "
+                    "evidence.\n"
+                    "</generative_task_policy>\n\n"
+                )
             render_hint = self._answer_render_hint(query)
             render_policy = (
                 "<answer_render_policy>\n"
@@ -902,11 +968,11 @@ class ContextManager:
             )
 
             if facts_block and context_block:
-                base = f"{rag_policy}{render_policy}{facts_block}{context_block}\n\nQuestion: {query}"
+                base = f"{rag_policy}{generative_policy}{render_policy}{facts_block}{context_block}\n\nQuestion: {query}"
             elif facts_block:
-                base = f"{rag_policy}{render_policy}{facts_block}Question: {query}"
+                base = f"{rag_policy}{generative_policy}{render_policy}{facts_block}Question: {query}"
             else:
-                base = f"{rag_policy}{render_policy}{context_block}\n\nQuestion: {query}"
+                base = f"{rag_policy}{generative_policy}{render_policy}{context_block}\n\nQuestion: {query}"
 
         # Phase 24 — Skills as context. Each active skill's `instructions`
         # is wrapped in a <skill> block and prepended above <context>. Skills

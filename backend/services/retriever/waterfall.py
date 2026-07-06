@@ -35,6 +35,7 @@ __all__ = [
     "ParentCandidate",
     "OrphanChild",
     "SharedEntity",
+    "DocNote",
     "PacketItem",
     "Packet",
     "allocate",
@@ -90,8 +91,16 @@ class SharedEntity:
 
 
 @dataclass(frozen=True)
+class DocNote:
+    """Passive source-role note. Lowest-priority synthesis context."""
+
+    doc_id: str
+    text: str
+
+
+@dataclass(frozen=True)
 class PacketItem:
-    kind: str  # "full" | "summary" | "child" | "entity"
+    kind: str  # "full" | "summary" | "child" | "entity" | "doc_note"
     ref_id: str  # parent_id / chunk_id / entity_id
     doc_id: str
     lane: str
@@ -146,6 +155,7 @@ def allocate(
     budget_tokens: int,
     orphans: Sequence[OrphanChild] = (),
     entities: Sequence[SharedEntity] = (),
+    doc_notes: Sequence[DocNote] = (),
     anchor_quota: float = 0.6,
     spillover_threshold: float | None = None,
     count_tokens: Callable[[str], int] | None = None,
@@ -205,7 +215,7 @@ def allocate(
             included_parents.add(o.parent_id)  # its parent is now represented
     diag["orphans_dropped_parent_included"] = dropped_orphans
 
-    # Rule 3b — shared entities last.
+    # Rule 3b — shared entities last among graph/evidence signals.
     for e in entities:
         t = count(e.text)
         if e.text and used + t <= budget:
@@ -229,6 +239,15 @@ def allocate(
             promoted += 1
     diag["summaries_promoted"] = promoted
 
+    # Rule 7 — passive source-role notes consume only true leftover budget after
+    # evidence selection and summary promotion. They are synthesis hints, not
+    # evidence, so token pressure drops them before any evidence-bearing item.
+    for note in doc_notes:
+        t = count(note.text)
+        if note.text and used + t <= budget:
+            items.append(PacketItem("doc_note", note.doc_id, note.doc_id, "note", t, note.text))
+            used += t
+
     pkt = Packet(
         items=items,
         packet_hash=_hash(items),
@@ -237,6 +256,7 @@ def allocate(
         diagnostics=diag,
     )
     diag["counts"] = {
-        k: sum(1 for it in items if it.kind == k) for k in ("full", "summary", "child", "entity")
+        k: sum(1 for it in items if it.kind == k)
+        for k in ("full", "summary", "child", "entity", "doc_note")
     }
     return pkt

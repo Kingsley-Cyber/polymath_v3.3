@@ -266,6 +266,7 @@ async def hydrate_chunks(
             "doc_name": _document_display_name(doc),
             "source_path": doc.get("source_path", ""),
             "corpus_id": doc.get("corpus_id", ""),
+            "doc_artifact": (doc.get("doc_profile") or {}).get("doc_artifact") or None,
         }
         for pc in doc.get("parent_chunks", []):
             pid = pc.get("parent_id", "")
@@ -334,6 +335,11 @@ async def hydrate_chunks(
 
             meta = doc_meta.get(chunk.doc_id, {})
             chunk.doc_name = meta.get("doc_name") or chunk.doc_id
+            doc_artifact = meta.get("doc_artifact")
+            if doc_artifact:
+                metadata = dict(chunk.metadata or {})
+                metadata["doc_artifact"] = doc_artifact
+                chunk.metadata = metadata
 
         chunk.corpus_name = (
             corpus_name_map.get(chunk.corpus_id, "") or chunk.corpus_id
