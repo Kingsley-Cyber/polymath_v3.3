@@ -61,6 +61,7 @@ correct.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import logging
 import os
 import re
@@ -140,6 +141,27 @@ SIDECAR_TIMEOUT_S = float(os.environ.get("LOCAL_GHOST_B_EXTRACT_TIMEOUT_S", "180
 # sidecars the doc is split to keep every instance busy (the per-slice facet
 # re-prediction overlap is the accepted price of N-way parallelism).
 SIDECAR_SLICE = max(1, int(os.environ.get("LOCAL_GHOST_B_EXTRACT_SLICE", "2048")))
+# The legacy slice above is a hard upper bound, not the operational request
+# size. GLiNER/GLiREL on MPS fails when hundreds of chunks are sent as one
+# document-scale request. Keep sidecar calls as microbatches so a slow slice
+# becomes a few per-chunk failures instead of discarding a whole book.
+SIDECAR_MICRO_BATCH = max(
+    1,
+    int(
+        os.environ.get(
+            "LOCAL_GHOST_B_EXTRACT_MICRO_BATCH",
+            os.environ.get("LOCAL_GHOST_B_EXTRACT_MAX_TASKS_PER_REQUEST", "8"),
+        )
+    ),
+)
+SIDECAR_SLICE_TIMEOUT_S = max(
+    1.0,
+    float(os.environ.get("LOCAL_GHOST_B_EXTRACT_SLICE_TIMEOUT_S", "90")),
+)
+SIDECAR_MAX_IN_FLIGHT = max(
+    1,
+    int(os.environ.get("LOCAL_GHOST_B_EXTRACT_MAX_IN_FLIGHT", "1")),
+)
 
 # Elastic-fleet probe cache: url -> (verdict, monotonic_ts, reason). Verdicts
 # are re-checked after the TTL, so a worker that comes online anywhere in the
@@ -876,26 +898,55 @@ def _metrics(raw: list[dict]) -> dict:
     }
 
 
+@dataclass
+class _SidecarReport:
+    raw: list[dict]
+    failures: list[dict]
+    metrics: dict
+
+
+def _failure_rows_for_slice(
+    sl: list[dict],
+    *,
+    url: str,
+    lane: int,
+    attempts: int,
+    error_type: str,
+    error_message: str,
+) -> list[dict]:
+    rows: list[dict] = []
+    message = error_message[:1000]
+    for task in sl:
+        rows.append(
+            {
+                "chunk_id": str(task.get("chunk_id") or ""),
+                "doc_id": str(task.get("doc_id") or ""),
+                "corpus_id": str(task.get("corpus_id") or ""),
+                "model": url,
+                "lane": lane,
+                "attempts": attempts,
+                "error_type": error_type,
+                "error_message": message,
+            }
+        )
+    return [row for row in rows if row["chunk_id"]]
+
+
 # ------------------------------------------------------------- http client
-async def _extract_via_sidecar(
+async def _extract_via_sidecar_report(
     task_dicts: list[dict],
     do_facts: bool,
     lens_id: str | None,
     endpoint_urls: list[str] | None = None,
-) -> list[dict]:
+) -> _SidecarReport:
     """POST the doc's tasks to the ghost_b_extract sidecar(s) and return the
-    concatenated raw wire dicts, order preserved.
+    concatenated raw wire dicts plus per-chunk failure rows.
 
-    Slicing bounds request size/timeout for book-scale docs. With ONE sidecar,
-    slices go sequentially (SIDECAR_SLICE keeps most docs single-slice so the
-    doc-level facet/definitional dedup sees the whole document). With MULTIPLE
-    sidecars (comma-separated LOCAL_GHOST_B_EXTRACT_URL), the doc is split so
-    every instance works in parallel — slices dispatch round-robin and run
-    concurrently. Per-slice facet re-prediction overlap and lost cross-slice
-    definitional backfill are the accepted price of N-way parallelism (the
-    cloud lane had no doc-level pass at all). Timing dicts from each slice
-    response are logged for remote stage diagnosis. Raises on any failure —
-    extraction is the pipeline, not an optional enrichment."""
+    The important shape is microbatching: a book with hundreds of chunks is
+    decomposed into small sidecar requests. A timed-out slice records failures
+    for that slice and preserves earlier successful slices, so the worker's
+    existing ghost_b_extractions/ghost_b_failures staging can resume/backfill
+    missing chunks later instead of losing the entire document."""
     import asyncio as _asyncio
 
     import httpx
@@ -988,18 +1039,25 @@ async def _extract_via_sidecar(
         )
 
     n_urls = len(live_urls)
-    slice_size = SIDECAR_SLICE
-    if n_urls > 1 and task_dicts:
-        # Split the doc across instances, but never below 64 chunks per slice
-        # (tiny slices waste batching) and never above SIDECAR_SLICE.
-        per_url = -(-len(task_dicts) // n_urls)  # ceil
-        slice_size = max(64, min(SIDECAR_SLICE, per_url))
+    slice_size = max(1, min(SIDECAR_SLICE, SIDECAR_MICRO_BATCH))
 
     slices = [task_dicts[s:s + slice_size]
               for s in range(0, len(task_dicts), slice_size)]
+    request_timeout = min(SIDECAR_TIMEOUT_S, SIDECAR_SLICE_TIMEOUT_S)
+    logger.info(
+        "ghost_b_local: dispatching %d chunks as %d sidecar slice(s) "
+        "slice_size=%d timeout=%.1fs max_in_flight=%d urls=%d",
+        len(task_dicts),
+        len(slices),
+        slice_size,
+        request_timeout,
+        SIDECAR_MAX_IN_FLIGHT,
+        n_urls,
+    )
 
     async def _post_slice(client: httpx.AsyncClient, idx: int, sl: list[dict]) -> list[dict]:
         url = live_urls[idx % n_urls]
+        started = time.monotonic()
         resp = await client.post(
             f"{url}/extract",
             json={"tasks": sl, "enable_facts": do_facts, "schema_lens_id": lens_id},
@@ -1009,30 +1067,150 @@ async def _extract_via_sidecar(
         t = data.get("timings")
         if t:
             logger.info("ghost_b_local: sidecar %s slice %d -> %s", url, idx, t)
+        else:
+            logger.info(
+                "ghost_b_local: sidecar %s slice %d chunks=%d duration=%.2fs",
+                url, idx, len(sl), time.monotonic() - started,
+            )
         return list(data.get("results") or [])
 
-    try:
-        async with httpx.AsyncClient(timeout=SIDECAR_TIMEOUT_S) as client:
-            if n_urls == 1:
-                out: list[list[dict]] = []
-                for i, sl in enumerate(slices):
-                    out.append(await _post_slice(client, i, sl))
-            else:
-                out = list(await _asyncio.gather(
-                    *(_post_slice(client, i, sl) for i, sl in enumerate(slices))
-                ))
-    except Exception as exc:
-        raise RuntimeError(
-            f"ghost_b_local: extract sidecar(s) {SIDECAR_URLS} failed "
-            f"({type(exc).__name__}: {exc}). Start via "
-            "scripts/apple_ml_services/start.sh (START_GHOST_B_EXTRACT=true) "
-            "or run the worker natively where torch/gliner/glirel are importable."
-        ) from exc
-
     results: list[dict] = []
-    for r in out:
-        results.extend(r)
-    return results
+    failures: list[dict] = []
+    timeout = httpx.Timeout(request_timeout, connect=3.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        if SIDECAR_MAX_IN_FLIGHT <= 1 or len(slices) <= 1:
+            for i, sl in enumerate(slices):
+                url = live_urls[i % n_urls]
+                try:
+                    results.extend(await _post_slice(client, i, sl))
+                except Exception as exc:  # noqa: BLE001 — slice-level failure
+                    logger.warning(
+                        "ghost_b_local: sidecar slice %d failed url=%s chunks=%d "
+                        "error=%s: %s",
+                        i,
+                        url,
+                        len(sl),
+                        type(exc).__name__,
+                        exc,
+                    )
+                    failures.extend(
+                        _failure_rows_for_slice(
+                            sl,
+                            url=url,
+                            lane=i % n_urls,
+                            attempts=1,
+                            error_type=type(exc).__name__,
+                            error_message=(
+                                f"sidecar slice {i} with {len(sl)} chunk(s) "
+                                f"failed via {url}: {exc}"
+                            ),
+                        )
+                    )
+                    # With one in-flight slice, a timeout usually means the
+                    # sidecar is still holding the model lock. Do not queue the
+                    # rest behind a known-stuck request; mark the remainder for
+                    # backfill and return what succeeded.
+                    remaining = slices[i + 1 :]
+                    if remaining:
+                        for j, rem in enumerate(remaining, start=i + 1):
+                            rem_url = live_urls[j % n_urls]
+                            failures.extend(
+                                _failure_rows_for_slice(
+                                    rem,
+                                    url=rem_url,
+                                    lane=j % n_urls,
+                                    attempts=0,
+                                    error_type="not_processed_after_slice_failure",
+                                    error_message=(
+                                        "Extraction slice was not dispatched "
+                                        "because an earlier slice failed or timed out; "
+                                        "retry/backfill this chunk later."
+                                    ),
+                                )
+                            )
+                    break
+        else:
+            semaphore = _asyncio.Semaphore(SIDECAR_MAX_IN_FLIGHT)
+
+            async def _guarded(i: int, sl: list[dict]) -> tuple[int, list[dict], list[dict]]:
+                url = live_urls[i % n_urls]
+                async with semaphore:
+                    try:
+                        return i, await _post_slice(client, i, sl), []
+                    except Exception as exc:  # noqa: BLE001 — slice-level failure
+                        logger.warning(
+                            "ghost_b_local: sidecar slice %d failed url=%s chunks=%d "
+                            "error=%s: %s",
+                            i,
+                            url,
+                            len(sl),
+                            type(exc).__name__,
+                            exc,
+                        )
+                        return i, [], _failure_rows_for_slice(
+                            sl,
+                            url=url,
+                            lane=i % n_urls,
+                            attempts=1,
+                            error_type=type(exc).__name__,
+                            error_message=(
+                                f"sidecar slice {i} with {len(sl)} chunk(s) "
+                                f"failed via {url}: {exc}"
+                            ),
+                        )
+
+            out = await _asyncio.gather(
+                *(_guarded(i, sl) for i, sl in enumerate(slices))
+            )
+            for _i, slice_results, slice_failures in sorted(out, key=lambda x: x[0]):
+                results.extend(slice_results)
+                failures.extend(slice_failures)
+
+    metrics = _metrics(results)
+    metrics.update(
+        {
+            "requested_chunks": len(task_dicts),
+            "extracted_chunks": len(results),
+            "failed_chunks": len(failures),
+            "success_rate": round(len(results) / len(task_dicts), 4)
+            if task_dicts
+            else 1.0,
+            "sidecar_slice_size": slice_size,
+            "sidecar_slice_count": len(slices),
+            "sidecar_slice_timeout_s": request_timeout,
+            "sidecar_max_in_flight": SIDECAR_MAX_IN_FLIGHT,
+            "sidecar_failed_slices": len({f.get("error_message") for f in failures}),
+        }
+    )
+    if failures:
+        error_counts: dict[str, int] = {}
+        for failure in failures:
+            key = str(failure.get("error_type") or "unknown")
+            error_counts[key] = error_counts.get(key, 0) + 1
+        metrics["error_counts"] = error_counts
+        logger.warning(
+            "ghost_b_local: partial sidecar extraction results=%d failures=%d "
+            "requested=%d error_counts=%s",
+            len(results),
+            len(failures),
+            len(task_dicts),
+            error_counts,
+        )
+    return _SidecarReport(raw=results, failures=failures, metrics=metrics)
+
+
+async def _extract_via_sidecar(
+    task_dicts: list[dict],
+    do_facts: bool,
+    lens_id: str | None,
+    endpoint_urls: list[str] | None = None,
+) -> list[dict]:
+    """Compatibility wrapper for tests and older callers."""
+    return (
+        await _extract_via_sidecar_report(
+            task_dicts, do_facts, lens_id, endpoint_urls=endpoint_urls
+        )
+    ).raw
 
 
 # ----------------------------------------------------------------- entry point
@@ -1076,14 +1254,41 @@ async def extract_entities(
 
     if mode == "inproc":
         raw = await asyncio.to_thread(_extract_raw, task_dicts, do_facts, lens_id)
+        failures: list = []
+        metrics = _metrics(raw)
     else:
-        raw = await _extract_via_sidecar(
+        report = await _extract_via_sidecar_report(
             task_dicts, do_facts, lens_id, endpoint_urls=endpoint_urls
         )
+        raw = report.raw
+        metrics = report.metrics
+        if report.failures:
+            from services.ghost_b import ExtractionFailureItem
+
+            failures = [
+                ExtractionFailureItem(
+                    chunk_id=str(row.get("chunk_id") or ""),
+                    doc_id=str(row.get("doc_id") or ""),
+                    corpus_id=str(row.get("corpus_id") or ""),
+                    model=str(row.get("model") or "ghost_b_local_sidecar"),
+                    lane=int(row.get("lane") or 0),
+                    attempts=int(row.get("attempts") or 0),
+                    error_type=str(row.get("error_type") or "unknown"),
+                    error_message=str(row.get("error_message") or ""),
+                )
+                for row in report.failures
+                if row.get("chunk_id")
+            ]
+        else:
+            failures = []
 
     results = _to_results(raw)
 
     if return_report:
         from services.ghost_b import ExtractionBatchReport
-        return ExtractionBatchReport(results=results, failures=[], metrics=_metrics(raw))
+        return ExtractionBatchReport(
+            results=results,
+            failures=failures,
+            metrics=metrics,
+        )
     return results

@@ -11,6 +11,9 @@ fail FAST without burning the retry budget.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
+import sys
+import types
 
 import httpx
 import pytest
@@ -81,6 +84,7 @@ def _install(monkeypatch, health_script, urls=None):
     monkeypatch.setattr(ghost_b_local, "PROBE_BACKOFF_S", 0.0)
     monkeypatch.setattr(ghost_b_local, "PROBE_BACKOFF_MAX_S", 0.0)
     monkeypatch.setattr(ghost_b_local, "RUNTIME_ENDPOINT_URLS", None)
+    ghost_b_local._PROBE_CACHE.clear()
     monkeypatch.setattr(
         ghost_b_local, "SIDECAR_URLS", urls or ["http://host.docker.internal:8084"])
     return state
@@ -131,3 +135,209 @@ def test_unusable_sidecar_fails_fast_without_retry(monkeypatch):
     msg = str(ei.value)
     assert "unusable" in msg.lower()
     assert "CUDAExecutionProvider" in msg
+
+
+def test_sidecar_microbatch_timeout_preserves_successes(monkeypatch):
+    """A slow slice must not discard earlier successful chunk results."""
+    state = {"get": 0, "post": 0}
+
+    class _Client:
+        def __init__(self, **_):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url):
+            state["get"] += 1
+            return _Resp(status_code=200, payload=_HEALTHY)
+
+        async def post(self, url, json=None):
+            state["post"] += 1
+            tasks = list((json or {}).get("tasks") or [])
+            if state["post"] == 2:
+                raise httpx.ReadTimeout("simulated slow GLiREL slice")
+            return _Resp(
+                status_code=200,
+                payload={
+                    "results": [
+                        {
+                            "schema_version": ghost_b_local.SCHEMA_VERSION,
+                            "chunk_id": t["chunk_id"],
+                            "doc_id": t["doc_id"],
+                            "corpus_id": t["corpus_id"],
+                            "entities": [],
+                            "relations": [],
+                            "facts": [],
+                            "text": t.get("text") or "",
+                        }
+                        for t in tasks
+                    ],
+                    "timings": {"chunks": len(tasks), "total_s": 0.1},
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _Client(**kw))
+    monkeypatch.setattr(ghost_b_local, "PROBE_ATTEMPTS", 1)
+    monkeypatch.setattr(ghost_b_local, "RUNTIME_ENDPOINT_URLS", None)
+    monkeypatch.setattr(ghost_b_local, "SIDECAR_URLS", ["http://sidecar.local"])
+    monkeypatch.setattr(ghost_b_local, "SIDECAR_SLICE", 2048)
+    monkeypatch.setattr(ghost_b_local, "SIDECAR_MICRO_BATCH", 2)
+    monkeypatch.setattr(ghost_b_local, "SIDECAR_MAX_IN_FLIGHT", 1)
+    monkeypatch.setattr(ghost_b_local, "SIDECAR_SLICE_TIMEOUT_S", 30.0)
+    ghost_b_local._PROBE_CACHE.clear()
+    tasks = [
+        {"chunk_id": f"c{i}", "doc_id": "d", "corpus_id": "k", "text": "x"}
+        for i in range(5)
+    ]
+
+    report = asyncio.run(
+        ghost_b_local._extract_via_sidecar_report(
+            tasks,
+            do_facts=False,
+            lens_id=None,
+        )
+    )
+
+    assert [r["chunk_id"] for r in report.raw] == ["c0", "c1"]
+    assert [f["chunk_id"] for f in report.failures] == ["c2", "c3", "c4"]
+    assert report.failures[0]["error_type"] == "ReadTimeout"
+    assert report.failures[-1]["error_type"] == "not_processed_after_slice_failure"
+    assert report.metrics["requested_chunks"] == 5
+    assert report.metrics["extracted_chunks"] == 2
+    assert report.metrics["failed_chunks"] == 3
+    assert state["post"] == 2
+
+
+def test_extract_entities_report_carries_sidecar_failures(monkeypatch):
+    fake_ghost_b = types.ModuleType("services.ghost_b")
+
+    @dataclass
+    class _EntityItem:
+        canonical_name: str
+        surface_form: str = ""
+        entity_type: str = "Concept"
+        confidence: float = 1.0
+        query_aliases: list[str] = field(default_factory=list)
+        definitional_phrase: str = ""
+        object_kind: str = ""
+
+    @dataclass
+    class _RelationItem:
+        subject: str
+        predicate: str
+        object: str
+        object_kind: str = "literal"
+        confidence: float = 1.0
+        evidence_phrase: str = ""
+        relation_cue: str = ""
+
+    @dataclass
+    class _FactItem:
+        subject: str
+        fact_type: str
+        property_name: str
+        value: str
+        unit: str | None = None
+        condition: str | None = None
+        confidence: float = 1.0
+        evidence_phrase: str = ""
+
+    @dataclass
+    class _ExtractionResult:
+        schema_version: str
+        chunk_id: str
+        doc_id: str
+        corpus_id: str
+        entities: list = field(default_factory=list)
+        relations: list = field(default_factory=list)
+        facts: list = field(default_factory=list)
+        text: str = ""
+        entity_drop_count: int = 0
+        relation_drop_count: int = 0
+        evidence_drop_count: int = 0
+        fact_drop_count: int = 0
+        schema_lens_id: str | None = None
+
+    @dataclass
+    class _ExtractionFailureItem:
+        chunk_id: str
+        doc_id: str
+        corpus_id: str
+        model: str
+        lane: int
+        attempts: int
+        error_type: str
+        error_message: str
+
+    @dataclass
+    class _ExtractionBatchReport:
+        results: list
+        failures: list
+        metrics: dict
+
+    fake_ghost_b.EntityItem = _EntityItem
+    fake_ghost_b.RelationItem = _RelationItem
+    fake_ghost_b.FactItem = _FactItem
+    fake_ghost_b.ExtractionResult = _ExtractionResult
+    fake_ghost_b.ExtractionFailureItem = _ExtractionFailureItem
+    fake_ghost_b.ExtractionBatchReport = _ExtractionBatchReport
+    monkeypatch.setitem(sys.modules, "services.ghost_b", fake_ghost_b)
+
+    raw = [
+        {
+            "schema_version": ghost_b_local.SCHEMA_VERSION,
+            "chunk_id": "c-ok",
+            "doc_id": "d",
+            "corpus_id": "k",
+            "entities": [],
+            "relations": [],
+            "facts": [],
+            "text": "ok",
+        }
+    ]
+    failures = [
+        {
+            "chunk_id": "c-fail",
+            "doc_id": "d",
+            "corpus_id": "k",
+            "model": "http://sidecar.local",
+            "lane": 0,
+            "attempts": 1,
+            "error_type": "ReadTimeout",
+            "error_message": "slice timed out",
+        }
+    ]
+
+    async def _fake_report(*_args, **_kwargs):
+        return ghost_b_local._SidecarReport(
+            raw=raw,
+            failures=failures,
+            metrics={
+                "requested_chunks": 2,
+                "extracted_chunks": 1,
+                "failed_chunks": 1,
+                "success_rate": 0.5,
+            },
+        )
+
+    monkeypatch.setattr(ghost_b_local, "EXTRACT_MODE", "http")
+    monkeypatch.setattr(ghost_b_local, "_extract_via_sidecar_report", _fake_report)
+
+    report = asyncio.run(
+        ghost_b_local.extract_entities(
+            [
+                {"chunk_id": "c-ok", "doc_id": "d", "corpus_id": "k", "text": "ok"},
+                {"chunk_id": "c-fail", "doc_id": "d", "corpus_id": "k", "text": "bad"},
+            ],
+            return_report=True,
+        )
+    )
+
+    assert [r.chunk_id for r in report.results] == ["c-ok"]
+    assert [f.chunk_id for f in report.failures] == ["c-fail"]
+    assert report.failures[0].error_type == "ReadTimeout"
+    assert report.metrics["failed_chunks"] == 1
