@@ -121,8 +121,11 @@ test("live process-timeline tabs render, stream, and collapse in the real UI", a
   } catch (e) {
     await page.screenshot({ path: `${SHOT_DIR}/ERR-no-cards.png`, fullPage: true });
     const txt = (await page.getByTestId("response-panel").innerText().catch(() => "")).slice(0, 600);
-    throw new Error(
-      `No .process-group cards rendered within 45s of submit. Panel text:\n${txt}\nconsoleErrors=${consoleErrors.join(" | ")}\n(${e})`,
+    throw Object.assign(
+      new Error(
+        `No .process-group cards rendered within 45s of submit. Panel text:\n${txt}\nconsoleErrors=${consoleErrors.join(" | ")}\n(${e})`,
+      ),
+      { cause: e },
     );
   }
   log(`first trace card appeared after ${((Date.now() - tSubmit) / 1000).toFixed(1)}s`);

@@ -462,7 +462,7 @@ function nodeMobility(
 ): number {
   const kind = String(graph.getNodeAttribute(id, "nodeKind") || "");
   if (kind === "Book") return 0.42;
-  if (Boolean(graph.getNodeAttribute(id, "forceLabel"))) return 0.58;
+  if (graph.getNodeAttribute(id, "forceLabel")) return 0.58;
   return 1.0;
 }
 

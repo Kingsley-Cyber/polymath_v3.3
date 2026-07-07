@@ -220,14 +220,14 @@ def test_json_object_prompt_renders_strict_primary_contract():
     assert "predicate one of: part_of=X subcomponent of Y" in prompt
 
 
-def test_output_mode_is_jsonl_primary_even_for_deepseek_and_legacy_config():
+def test_output_mode_prefers_structured_provider_modes_for_frontier_lanes():
     assert (
         _select_extraction_output_mode(
             "auto",
             {"model": "deepseek/deepseek-v4-flash", "base_url": None},
             profile_name="normal",
         )
-        == "jsonl"
+        == "json_schema"
     )
     assert (
         _select_extraction_output_mode(
@@ -243,7 +243,7 @@ def test_output_mode_is_jsonl_primary_even_for_deepseek_and_legacy_config():
             {"model": "test-model", "base_url": None},
             profile_name="normal",
         )
-        == "jsonl"
+        == "json_object"
     )
     assert (
         _select_extraction_output_mode(
@@ -670,12 +670,7 @@ async def test_deepseek_auto_uses_json_schema_payload_on_primary(monkeypatch):
 @pytest.mark.asyncio
 async def test_mimo_auto_disables_thinking_for_extraction(monkeypatch):
     calls: list[dict] = []
-    content = "\n".join(
-        [
-            '{"t":"e","cn":"mimo","sf":"MiMo","et":"Concept","cf":0.95}',
-            '{"t":"x"}',
-        ]
-    )
+    content = '{"entities":[{"canonical_name":"mimo","surface_form":"MiMo","entity_type":"Concept","confidence":0.95}],"relations":[],"facts":[]}'
 
     class FakeResponse:
         def raise_for_status(self) -> None:
@@ -761,7 +756,7 @@ async def test_mimo_auto_disables_thinking_for_extraction(monkeypatch):
     assert len(calls) == 1
     assert calls[0]["thinking"] == {"type": "disabled"}
     assert "response_format" not in calls[0]
-    assert "Output JSONL only" in calls[0]["messages"][1]["content"]
+    assert "Return exactly one valid JSON object" in calls[0]["messages"][1]["content"]
     assert report.results and report.results[0].entities[0].canonical_name == "mimo"
     assert report.metrics["attempt_count"] == 1
 

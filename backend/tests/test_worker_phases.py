@@ -718,6 +718,7 @@ async def test_neo4j_write_replaces_doc_graph_before_upsert(monkeypatch):
         ghost_b_out=ghost_b_out,
         filename="doc.txt",
         parents=[parent],
+        db=MagicMock(),
     )
 
     assert calls[:2] == [
@@ -1069,6 +1070,7 @@ async def test_ghost_b_zero_extractions_leaves_neo4j_pending():
         use_neo4j=True,
         chunk_summarization=False,
         target_qdrant_collections=["naive", "hrag", "graph"],
+        extraction_engine="legacy_local",
     )
     failure = ExtractionFailureItem(
         chunk_id="c0",
@@ -1148,6 +1150,7 @@ async def test_ghost_b_file_gate_serializes_concurrent_documents():
             use_neo4j=True,
             chunk_summarization=False,
             target_qdrant_collections=["naive", "hrag", "graph"],
+            extraction_engine="legacy_local",
             extraction_models=[
                 ModelProfileRef(model="test-model", max_concurrent=45),
             ],

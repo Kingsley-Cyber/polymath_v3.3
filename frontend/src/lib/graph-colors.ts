@@ -128,7 +128,7 @@ function rgbToHue({ r, g, b }: { r: number; g: number; b: number }): number {
   const min = Math.min(nr, ng, nb);
   const delta = max - min;
   if (delta === 0) return 42;
-  let hue = 0;
+  let hue: number;
   if (max === nr) hue = ((ng - nb) / delta) % 6;
   else if (max === ng) hue = (nb - nr) / delta + 2;
   else hue = (nr - ng) / delta + 4;
