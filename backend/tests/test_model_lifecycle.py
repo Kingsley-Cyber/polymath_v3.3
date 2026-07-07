@@ -34,12 +34,14 @@ async def test_shutdown_model_lifecycle_posts_down_once_per_control_plane(monkey
             "lifecycle_down_path": "/down",
             "lifecycle_api_key": "manager-key",
             "lifecycle_auto_stop": True,
+            "extra_params": {"lifecycle_idle_shutdown_seconds": 0},
         },
         {
             "lifecycle_base_url": "http://192.168.1.83:8085",
             "lifecycle_down_path": "down",
             "lifecycle_api_key": "manager-key",
             "lifecycle_auto_stop": True,
+            "extra_params": {"lifecycle_idle_shutdown_seconds": 0},
         },
         {
             "lifecycle_base_url": "http://192.168.1.84:8085",

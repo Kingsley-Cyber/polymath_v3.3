@@ -17,6 +17,13 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_IDLE_SHUTDOWN_SECONDS = 600
+
+LifecycleKey = tuple[str, str, str]
+
+_shutdown_tasks: dict[LifecycleKey, asyncio.Task] = {}
+_shutdown_generations: dict[LifecycleKey, int] = {}
+
 
 def _managed_entries(pool: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     if not pool:
@@ -39,6 +46,113 @@ def _url(entry: dict[str, Any], path_field: str, default_path: str) -> str:
 def _headers(entry: dict[str, Any]) -> dict[str, str]:
     key = str(entry.get("lifecycle_api_key") or "").strip()
     return {"X-Api-Key": key} if key else {}
+
+
+def _lifecycle_key(entry: dict[str, Any]) -> LifecycleKey:
+    down_path = str(entry.get("lifecycle_down_path") or "/down").strip() or "/down"
+    if not down_path.startswith("/"):
+        down_path = "/" + down_path
+    return (
+        str(entry.get("lifecycle_base_url") or "").strip().rstrip("/"),
+        down_path,
+        str(entry.get("lifecycle_api_key") or ""),
+    )
+
+
+def _idle_shutdown_seconds(entry: dict[str, Any]) -> int:
+    extra = entry.get("extra_params") or {}
+    if not isinstance(extra, dict):
+        extra = {}
+    raw = (
+        entry.get("lifecycle_idle_shutdown_seconds")
+        if entry.get("lifecycle_idle_shutdown_seconds") is not None
+        else extra.get("lifecycle_idle_shutdown_seconds")
+    )
+    if raw is None:
+        raw = extra.get("idle_shutdown_seconds")
+    if raw is None:
+        raw = extra.get("idle_auto_stop_seconds")
+    if raw is None:
+        return DEFAULT_IDLE_SHUTDOWN_SECONDS
+    try:
+        return max(0, int(float(raw)))
+    except (TypeError, ValueError):
+        return DEFAULT_IDLE_SHUTDOWN_SECONDS
+
+
+def _cancel_pending_shutdown(entry: dict[str, Any], *, purpose: str) -> None:
+    key = _lifecycle_key(entry)
+    _shutdown_generations[key] = _shutdown_generations.get(key, 0) + 1
+    task = _shutdown_tasks.pop(key, None)
+    if task and not task.done():
+        task.cancel()
+        logger.info(
+            "model lifecycle idle shutdown cancelled purpose=%s control=%s",
+            purpose,
+            key[0],
+        )
+
+
+async def _post_down(
+    entry: dict[str, Any],
+    *,
+    purpose: str,
+    client: httpx.AsyncClient | None = None,
+) -> None:
+    base = str(entry.get("lifecycle_base_url") or "").strip().rstrip("/")
+
+    async def _send(cli: httpx.AsyncClient) -> None:
+        try:
+            resp = await cli.post(
+                _url(entry, "lifecycle_down_path", "/down"),
+                headers=_headers(entry),
+            )
+            if resp.status_code >= 400:
+                logger.warning(
+                    "model lifecycle stop failed purpose=%s control=%s http=%d",
+                    purpose,
+                    base,
+                    resp.status_code,
+                )
+            else:
+                logger.info(
+                    "model lifecycle stopped purpose=%s control=%s",
+                    purpose,
+                    base,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "model lifecycle stop unavailable purpose=%s control=%s: %s",
+                purpose,
+                base,
+                exc,
+            )
+
+    if client is not None:
+        await _send(client)
+        return
+    async with httpx.AsyncClient(timeout=20.0) as owned:
+        await _send(owned)
+
+
+async def _shutdown_after_idle(
+    entry: dict[str, Any],
+    *,
+    purpose: str,
+    key: LifecycleKey,
+    generation: int,
+    delay_seconds: int,
+) -> None:
+    try:
+        await asyncio.sleep(delay_seconds)
+        if _shutdown_generations.get(key) != generation:
+            return
+        await _post_down(entry, purpose=f"{purpose}:idle")
+    except asyncio.CancelledError:
+        return
+    finally:
+        if _shutdown_generations.get(key) == generation:
+            _shutdown_tasks.pop(key, None)
 
 
 async def ensure_model_lifecycle_ready(
@@ -65,6 +179,9 @@ async def ensure_model_lifecycle_ready(
             continue
         seen.add(key)
         unique.append(entry)
+
+    for entry in unique:
+        _cancel_pending_shutdown(entry, purpose=purpose)
 
     await asyncio.gather(*[_ensure_one_ready(entry, purpose=purpose) for entry in unique])
 
@@ -118,7 +235,13 @@ async def shutdown_model_lifecycle(
     *,
     purpose: str,
 ) -> None:
-    """Best-effort stop for entries that explicitly opt into auto-stop."""
+    """Best-effort idle stop for entries that explicitly opt into auto-stop.
+
+    Managed RTX/vLLM servers are expensive to keep hot, but immediate shutdown
+    after every document causes cold-load thrash. Auto-stop therefore means
+    "stop after the configured idle lease" by default. A new extraction call
+    cancels and refreshes the pending lease before posting /up.
+    """
 
     entries = [
         entry
@@ -144,31 +267,34 @@ async def shutdown_model_lifecycle(
         seen.add(key)
         unique.append(entry)
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        for entry in unique:
-            base = str(entry.get("lifecycle_base_url") or "").strip().rstrip("/")
-            try:
-                resp = await client.post(
-                    _url(entry, "lifecycle_down_path", "/down"),
-                    headers=_headers(entry),
-                )
-                if resp.status_code >= 400:
-                    logger.warning(
-                        "model lifecycle stop failed purpose=%s control=%s http=%d",
-                        purpose,
-                        base,
-                        resp.status_code,
-                    )
-                else:
-                    logger.info(
-                        "model lifecycle stopped purpose=%s control=%s",
-                        purpose,
-                        base,
-                    )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "model lifecycle stop unavailable purpose=%s control=%s: %s",
-                    purpose,
-                    base,
-                    exc,
-                )
+    immediate: list[dict[str, Any]] = []
+    for entry in unique:
+        delay = _idle_shutdown_seconds(entry)
+        if delay <= 0:
+            immediate.append(entry)
+            continue
+        key = _lifecycle_key(entry)
+        _cancel_pending_shutdown(entry, purpose=purpose)
+        generation = _shutdown_generations.get(key, 0) + 1
+        _shutdown_generations[key] = generation
+        task = asyncio.create_task(
+            _shutdown_after_idle(
+                dict(entry),
+                purpose=purpose,
+                key=key,
+                generation=generation,
+                delay_seconds=delay,
+            )
+        )
+        _shutdown_tasks[key] = task
+        logger.info(
+            "model lifecycle idle shutdown scheduled purpose=%s control=%s idle_seconds=%d",
+            purpose,
+            key[0],
+            delay,
+        )
+
+    if immediate:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            for entry in immediate:
+                await _post_down(entry, purpose=purpose, client=client)

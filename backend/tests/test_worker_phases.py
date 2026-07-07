@@ -188,6 +188,14 @@ async def test_ghost_b_error_event_sink_samples_to_mongo():
                 "doc_id": "d1",
                 "chunk_id": f"s{i}",
             })
+        for i in range(2):
+            await sink({
+                "event": "ghost_b_attempt_succeeded_with_validation_rejections",
+                "run_id": "run-1",
+                "doc_id": "d1",
+                "chunk_id": f"v{i}",
+                "validation": {"validation_rejections": 2},
+            })
         await sink({
             "event": "ghost_b_failure_budget_tripped",
             "run_id": "run-1",
@@ -196,9 +204,32 @@ async def test_ghost_b_error_event_sink_samples_to_mongo():
 
     assert [doc["event"] for doc in inserted].count("ghost_b_attempt_failed") == 3
     assert [doc["event"] for doc in inserted].count("ghost_b_attempt_succeeded") == 1
+    assert [
+        doc["event"] for doc in inserted
+    ].count("ghost_b_attempt_succeeded_with_validation_rejections") == 1
     assert [doc["event"] for doc in inserted].count("ghost_b_failure_budget_tripped") == 1
     assert all(doc["run_id"] == "run-1" for doc in inserted)
     assert all(doc.get("created_at") for doc in inserted)
+
+
+def test_build_ghost_pool_gives_managed_vllm_idle_autostop_default():
+    pool = worker._build_ghost_pool(
+        [
+            {
+                "provider_preset": "vllm-rtx",
+                "model": "openai/polymath-extract",
+                "base_url": "http://192.168.1.83:8000/v1",
+                "max_concurrent": 60,
+                "lifecycle_base_url": "http://192.168.1.83:8085",
+                "lifecycle_auto_start": True,
+                "lifecycle_auto_stop": False,
+                "extra_params": {"managed_vllm": True, "resource_class": "rtx"},
+            }
+        ]
+    )
+
+    assert pool[0]["lifecycle_auto_stop"] is True
+    assert pool[0]["extra_params"]["lifecycle_idle_shutdown_seconds"] == 600
 
 
 def _install_mocks(

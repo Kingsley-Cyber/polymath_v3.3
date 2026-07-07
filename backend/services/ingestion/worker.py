@@ -660,6 +660,7 @@ def _build_ghost_b_error_event_sink(
     counts = {
         "ghost_b_attempt_failed": 0,
         "ghost_b_attempt_succeeded": 0,
+        "ghost_b_attempt_succeeded_with_validation_rejections": 0,
         "ghost_b_failure_budget_tripped": 0,
     }
     lock = asyncio.Lock()
@@ -673,6 +674,11 @@ def _build_ghost_b_error_event_sink(
                 counts[name] += 1
                 sample_index = counts[name]
             elif name == "ghost_b_attempt_succeeded":
+                if counts[name] >= max_success:
+                    return
+                counts[name] += 1
+                sample_index = counts[name]
+            elif name == "ghost_b_attempt_succeeded_with_validation_rejections":
                 if counts[name] >= max_success:
                     return
                 counts[name] += 1
@@ -841,6 +847,15 @@ def _build_ghost_pool(refs) -> list[dict]:
             if ct:
                 pt = _decrypt_api_key(ct)
                 data[secret_field] = pt if pt is not None else ct
+        extra_params = data.get("extra_params") or {}
+        if not isinstance(extra_params, dict):
+            extra_params = {}
+        managed_vllm = _pool_entry_uses_managed_vllm(data)
+        if managed_vllm and not bool(extra_params.get("disable_lifecycle_auto_stop")):
+            extra_params.setdefault("lifecycle_idle_shutdown_seconds", 600)
+            lifecycle_auto_stop = True
+        else:
+            lifecycle_auto_stop = bool(data.get("lifecycle_auto_stop"))
         out.append(
             {
                 "provider_preset": data.get("provider_preset") or "",
@@ -851,14 +866,14 @@ def _build_ghost_pool(refs) -> list[dict]:
                 "lifecycle_base_url": data.get("lifecycle_base_url") or None,
                 "lifecycle_api_key": data.get("lifecycle_api_key") or None,
                 "lifecycle_auto_start": bool(data.get("lifecycle_auto_start")),
-                "lifecycle_auto_stop": bool(data.get("lifecycle_auto_stop")),
+                "lifecycle_auto_stop": lifecycle_auto_stop,
                 "lifecycle_up_path": data.get("lifecycle_up_path") or "/up",
                 "lifecycle_status_path": data.get("lifecycle_status_path") or "/status",
                 "lifecycle_down_path": data.get("lifecycle_down_path") or "/down",
                 "lifecycle_ready_timeout_seconds": int(
                     data.get("lifecycle_ready_timeout_seconds") or 360
                 ),
-                "extra_params": data.get("extra_params") or {},
+                "extra_params": extra_params,
             }
         )
     return out

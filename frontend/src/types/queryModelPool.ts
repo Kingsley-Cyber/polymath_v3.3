@@ -101,6 +101,7 @@ export interface PoolProviderPreset {
     auto_start?: boolean;
     auto_stop?: boolean;
     ready_timeout_seconds?: number;
+    idle_shutdown_seconds?: number;
   };
   kwargs?: Record<string, unknown>;
 }
@@ -117,8 +118,9 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
     lifecycle: {
       base_url: "http://192.168.1.83:8085",
       auto_start: true,
-      auto_stop: false,
+      auto_stop: true,
       ready_timeout_seconds: 360,
+      idle_shutdown_seconds: 600,
     },
   },
   {

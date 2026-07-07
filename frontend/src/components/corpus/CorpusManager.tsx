@@ -318,6 +318,8 @@ function makeRtxExtractionModel(): ModelProfileRef {
       failure_backfill_policy: "retry_then_stage",
       adaptive_vram: true,
       vram_safety_ratio: 0.85,
+      lifecycle_idle_shutdown_seconds:
+        preset?.lifecycle?.idle_shutdown_seconds ?? 600,
     },
   };
 }
