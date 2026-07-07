@@ -929,7 +929,7 @@ async def test_ghost_a_zero_summaries_safe_mode_continues_to_extraction():
         use_neo4j=True,
         chunk_summarization=True,
         target_qdrant_collections=["naive", "hrag"],
-        extraction_engine="local",
+        extraction_engine="legacy_local",
     )
 
     summarize_mock = AsyncMock(return_value=[])

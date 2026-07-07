@@ -21,6 +21,23 @@ resolve = _mod.resolve_extraction_contract
 provider_payload_extras = _mod.provider_payload_extras
 
 
+def _rtx_entry():
+    return {
+        "provider_preset": "vllm-rtx",
+        "model": "polymath-extract",
+        "base_url": "http://192.168.1.83:8000/v1",
+        "extra_params": {"managed_vllm": True, "resource_class": "rtx"},
+    }
+
+
+def _cloud_entry():
+    return {
+        "provider_preset": "openai",
+        "model": "gpt-4o",
+        "base_url": "https://api.openai.com/v1",
+    }
+
+
 def test_payload_extras_strip_internal_flags():
     # The live RTX chip shape (2026-07-05) — routing flags must not leak.
     out = provider_payload_extras(
@@ -72,9 +89,10 @@ def _c(**kw):
         corpus_engine=None,
         global_engine="local",
         models_linked=True,
-        summary_model_count=0,
+        summary_model_count=1,
         extraction_model_count=0,
         enabled_endpoint_urls=["http://mac:8084"],
+        provider_pool_entries=[_rtx_entry()],
     )
     base.update(kw)
     return resolve(**base)
@@ -92,15 +110,16 @@ def test_inherit_falls_back_to_global():
 
 
 def test_missing_everything_defaults_local_never_cloud():
-    c = _c(corpus_engine=None, global_engine=None)
+    c = _c(corpus_engine=None, global_engine=None, summary_model_count=0, provider_pool_entries=[])
     assert c.engine == "local" and c.source == "default"
-    assert not c.errors
+    assert c.errors and "local/private provider-card LLM" in c.errors[0]
 
 
 def test_unknown_corpus_engine_defaults_local_with_warning():
     c = _c(corpus_engine="turbo")
     assert c.engine == "local" and c.source == "default"
     assert any("unknown corpus" in w for w in c.warnings)
+    assert not c.errors
 
 
 def test_the_qwen_collapse_is_now_a_fast_failure():
@@ -153,6 +172,20 @@ def test_dual_requires_pool_too():
     assert c.errors
 
 
+def test_local_requires_private_provider_chip():
+    c = _c(corpus_engine="local", provider_pool_entries=[_cloud_entry()])
+    assert c.errors
+    assert "requires at least one local_private_vllm" in c.errors[0]
+
+
+def test_local_private_provider_uses_pool_without_sidecar_warning():
+    c = _c(corpus_engine="local", enabled_endpoint_urls=[])
+    assert not c.errors
+    assert c.uses_provider_llm
+    assert not c.uses_legacy_local
+    assert not any("sidecar" in w for w in c.warnings)
+
+
 def test_local_then_cloud_empty_pool_is_warning_not_error():
     c = _c(corpus_engine="local_then_cloud", summary_model_count=0)
     assert not c.errors
@@ -167,7 +200,7 @@ def test_local_then_enrich_uses_both_lanes():
     )
     assert c.engine == "local_then_enrich" and c.source == "corpus"
     assert not c.errors
-    assert c.uses_local and c.uses_cloud
+    assert c.uses_legacy_local and c.uses_provider_llm
     assert c.pool_source == "extraction_models"
 
 
@@ -182,17 +215,19 @@ def test_off_is_a_valid_explicit_state():
     assert c.engine == "off" and not c.errors and c.pool_source == "none"
 
 
-def test_local_without_endpoints_warns_env_floor():
-    c = _c(corpus_engine="local", enabled_endpoint_urls=[])
+def test_legacy_local_without_endpoints_warns_env_floor():
+    c = _c(corpus_engine="legacy_local", enabled_endpoint_urls=[])
     assert not c.errors
     assert any("env-wired defaults" in w for w in c.warnings)
 
 
-def test_uses_cloud_uses_local_flags():
+def test_provider_and_legacy_flags():
     assert _c(corpus_engine="dual", summary_model_count=1).uses_cloud
     assert _c(corpus_engine="dual", summary_model_count=1).uses_local
-    assert not _c(corpus_engine="local").uses_cloud
+    assert _c(corpus_engine="local").uses_provider_llm
+    assert not _c(corpus_engine="local").uses_local
     assert not _c(corpus_engine="cloud", summary_model_count=1).uses_local
+    assert _c(corpus_engine="legacy_local").uses_legacy_local
 
 
 def _run_all():

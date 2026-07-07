@@ -100,7 +100,7 @@ function defaultBatchProfile(corpus: CorpusResponse): IngestProfileName {
         extras.resource_class === "remote_vllm" ||
         extras.managed_vllm === true
       );
-    }) || ["cloud", "dual", "local_then_cloud", "local_then_enrich"].includes(engine);
+    }) || ["local", "cloud", "dual", "local_then_cloud", "local_then_enrich"].includes(engine);
   return hasRemotePool ? "rtx_assisted" : "mac_queryable_first";
 }
 
@@ -2037,7 +2037,7 @@ function IngestOverridesPanel({
   const cfg = corpus.default_ingestion_config;
   const summaryDefault = cfg.summary_models?.[0]?.model ?? "(none)";
   const extractionEngine = cfg.extraction_engine ?? "cloud";
-  const extractionUsesProvider = ["cloud", "dual", "local_then_cloud", "local_then_enrich"].includes(
+  const extractionUsesProvider = ["local", "cloud", "dual", "local_then_cloud", "local_then_enrich"].includes(
     extractionEngine,
   );
   const extractionPool = cfg.models_linked ? cfg.summary_models ?? [] : cfg.extraction_models ?? [];

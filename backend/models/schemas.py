@@ -218,10 +218,11 @@ class IngestionConfig(BaseModel):
     extraction_models: list[_legacy.ModelProfileRef] = Field(default_factory=list)
     entity_confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     models_linked: bool = False
-    # Per-corpus extraction contract. New production extraction should use
-    # provider-card LLM lanes in extraction_models (cloud/private RTX). The
-    # legacy 'local' engine still means the GLiNER/GLiREL sidecar path.
-    # 'inherit' = legacy fallback to the global Settings engine; the lifespan
+    # Per-corpus extraction contract. New production extraction uses
+    # provider-card LLM lanes in extraction_models/summary_models. "local" now
+    # means a local/private OpenAI-compatible provider endpoint (RTX/vLLM),
+    # while "legacy_local" is the deprecated GLiNER/GLiREL sidecar path.
+    # "inherit" = legacy fallback to the global Settings engine; the lifespan
     # migration stamps existing corpora explicit so the resolved workflow is
     # deterministic per corpus. Resolution + fail-fast validation:
     # services/ingestion/extraction_contract.py.
@@ -230,6 +231,7 @@ class IngestionConfig(BaseModel):
         "off",
         "local",
         "cloud",
+        "legacy_local",
         "dual",
         "local_then_cloud",
         "local_then_enrich",
@@ -541,15 +543,22 @@ class ExtractionSettings(BaseModel):
     without a backend restart (same pattern as Modal settings)."""
 
     engine: Literal[
-        "off", "local", "cloud", "local_then_cloud", "dual", "local_then_enrich"
+        "off",
+        "local",
+        "cloud",
+        "legacy_local",
+        "local_then_cloud",
+        "dual",
+        "local_then_enrich",
     ] = Field(
         default="local",
         description=(
-            "Which Ghost B engine runs extraction: 'cloud' = provider-card "
-            "LLM pool, including private RTX/vLLM endpoints; 'local' = "
-            "LEGACY GLiNER/GLiREL sidecars; 'dual' = legacy local plus "
-            "provider LLM pool; 'local_then_cloud' and 'local_then_enrich' "
-            "are transitional legacy-local modes. Use 'off' for vectors-only."
+            "Which Ghost B engine runs extraction: 'local' = local/private "
+            "provider-card LLM endpoint such as RTX/vLLM; 'cloud' = remote "
+            "provider-card LLM pool; 'legacy_local' = deprecated "
+            "GLiNER/GLiREL sidecars; 'dual' = legacy local plus provider LLM "
+            "pool; 'local_then_cloud' and 'local_then_enrich' are "
+            "transitional legacy-local modes. Use 'off' for vectors-only."
         ),
     )
     endpoints: list[ExtractionEndpoint] = Field(default_factory=list)

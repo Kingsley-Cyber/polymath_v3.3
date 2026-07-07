@@ -120,7 +120,15 @@ function ExtractionEnginesCard() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [engine, setEngine] = useState<"local" | "cloud" | "local_then_cloud" | "dual">("local");
+  const [engine, setEngine] = useState<
+    | "local"
+    | "cloud"
+    | "legacy_local"
+    | "local_then_cloud"
+    | "local_then_enrich"
+    | "dual"
+    | "off"
+  >("local");
   const [validating, setValidating] = useState(false);
   const [report, setReport] = useState<ExtractionValidationReport | null>(null);
 
@@ -202,10 +210,13 @@ function ExtractionEnginesCard() {
       <div className="flex items-center gap-2">
         <span className="text-[10px] tracking-widest text-gray-500 uppercase">Engine</span>
         {([
-          ["local", "LOCAL (GLiNER/GLiREL)"],
-          ["cloud", "CLOUD (LLM pool)"],
-          ["local_then_cloud", "LOCAL → CLOUD"],
-          ["dual", "DUAL (LOCAL + CLOUD)"],
+          ["local", "LOCAL PRIVATE LLM"],
+          ["cloud", "CLOUD/API LLM"],
+          ["legacy_local", "LEGACY SIDECAR"],
+          ["local_then_cloud", "LEGACY → PROVIDER"],
+          ["local_then_enrich", "LEGACY + ENRICH"],
+          ["dual", "DUAL (LEGACY + PROVIDER)"],
+          ["off", "OFF"],
         ] as const).map(([val, label]) => (
           <button
             key={val}

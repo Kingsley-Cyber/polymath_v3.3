@@ -95,7 +95,7 @@ export interface IngestionConfig {
   summary_models: ModelProfileRef[];
 
   // GHOST B — Extraction Model Pool (round-robin dispatch)
-  // Used when cloud extraction is enabled and models_linked === false.
+  // Used when provider-card extraction is enabled and models_linked === false.
   extraction_models: ModelProfileRef[];
   entity_confidence_threshold: number;
 
@@ -107,8 +107,9 @@ export interface IngestionConfig {
 
   /**
    * Per-corpus extraction contract. Modern production extraction uses
-   * provider-card LLM chips through "cloud", including private RTX/vLLM
-   * endpoints. "local" is the legacy GLiNER/GLiREL sidecar path. "inherit" =
+   * provider-card LLM chips. "local" means a local/private OpenAI-compatible
+   * provider endpoint such as RTX/vLLM. "cloud" means external provider API.
+   * "legacy_local" is the deprecated GLiNER/GLiREL sidecar path. "inherit" =
    * legacy fallback to global Settings; the lifespan migration stamps existing
    * corpora explicit. Resolved truthfully by GET /api/corpora/{id}/extraction-contract.
    */
@@ -231,8 +232,8 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
   models_linked: false,
   // New corpora are EXPLICIT about the extraction workflow — never "inherit".
   // Modern extraction is provider-card LLM based; the UI scaffolds a private
-  // RTX/vLLM chip for create flows. "local" remains a legacy sidecar mode.
-  extraction_engine: "cloud",
+  // RTX/vLLM chip for create flows. "legacy_local" is the deprecated sidecar.
+  extraction_engine: "local",
   // entity_schema / relation_schema / schema_strict intentionally omitted —
   // backend fills them from the universal schema on POST.
   use_neo4j: true,
@@ -448,6 +449,7 @@ export type ExtractionEngine =
   | "off"
   | "local"
   | "cloud"
+  | "legacy_local"
   | "dual"
   | "local_then_cloud"
   | "local_then_enrich";

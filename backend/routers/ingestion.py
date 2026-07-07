@@ -682,6 +682,11 @@ async def get_extraction_contract(
         for e in endpoints
         if e.enabled and e.url and e.url.strip()
     ]
+    provider_pool_refs = (
+        cfg.summary_models
+        if cfg.models_linked
+        else cfg.extraction_models
+    )
     contract = resolve_extraction_contract(
         corpus_engine=getattr(cfg, "extraction_engine", None),
         global_engine=engine_global,
@@ -689,6 +694,7 @@ async def get_extraction_contract(
         summary_model_count=len(cfg.summary_models or []),
         extraction_model_count=len(cfg.extraction_models or []),
         enabled_endpoint_urls=enabled_urls,
+        provider_pool_entries=provider_pool_refs,
     )
 
     async def _probe(url: str) -> bool:
@@ -700,7 +706,7 @@ async def get_extraction_contract(
             return False
 
     alive: dict[str, bool] = {}
-    if contract.uses_local and enabled_urls:
+    if contract.uses_legacy_local and enabled_urls:
         flags = await _asyncio.gather(*[_probe(u) for u in enabled_urls])
         alive = dict(zip(enabled_urls, flags))
 
@@ -729,7 +735,7 @@ async def get_extraction_contract(
             }
 
     pool_items = []
-    if contract.uses_cloud and contract.pool_source != "none":
+    if contract.uses_provider_llm and contract.pool_source != "none":
         for m in pool_refs or []:
             card = resolve_extraction_provider_card(m)
             pool_items.append(
@@ -749,7 +755,7 @@ async def get_extraction_contract(
             )
     pool = (
         pool_items
-        if contract.uses_cloud and contract.pool_source != "none"
+        if contract.uses_provider_llm and contract.pool_source != "none"
         else []
     )
 
@@ -757,7 +763,7 @@ async def get_extraction_contract(
         "engine": contract.engine,
         "source": contract.source,
         "models_linked": cfg.models_linked,
-        "pool_source": contract.pool_source if contract.uses_cloud else "none",
+        "pool_source": contract.pool_source if contract.uses_provider_llm else "none",
         "pool": pool,
         "endpoints": [
             {

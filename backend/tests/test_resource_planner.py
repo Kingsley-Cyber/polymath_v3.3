@@ -177,14 +177,40 @@ def test_openai_cloud_pool_is_not_classified_as_remote_vllm():
     assert profile.extraction_max_concurrent == 8
 
 
-def test_local_mac_llm_with_local_metal_embeddings_pins_doc_fanout():
+def test_local_private_provider_profile_uses_remote_vllm():
     cfg = IngestionConfig(
         extraction_engine="local",
+        models_linked=False,
+        extraction_models=_rtx_pool(),
         embed_mode="local",
     )
     profile = plan_ingestion_resources(
         config=cfg,
         extraction_engine="local",
+        extraction_pool=cfg.extraction_models,
+        settings=_settings(),
+        resources=SystemResources(
+            cpu_cores=12,
+            ram_total_mb=65_536,
+            cgroup_limit_mb=32_768,
+            process_rss_mb=1_024,
+            metal_available=True,
+        ),
+    )
+
+    assert profile.extraction_backend == "remote_vllm"
+    assert "remote_vllm" in profile.extraction_lanes
+    assert profile.recommended_ingest_profile == "rtx_assisted"
+
+
+def test_local_mac_llm_with_local_metal_embeddings_pins_doc_fanout():
+    cfg = IngestionConfig(
+        extraction_engine="legacy_local",
+        embed_mode="local",
+    )
+    profile = plan_ingestion_resources(
+        config=cfg,
+        extraction_engine="legacy_local",
         extraction_pool=[],
         settings=_settings(
             EXTRACTION_MAX_ACTIVE_DOCS=4,

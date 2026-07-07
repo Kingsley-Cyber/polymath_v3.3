@@ -315,10 +315,21 @@ class IngestionService:
             logger.warning("migrate_extraction_engine: DB not connected — skipping")
             return {"scanned": 0, "stamped": 0, "engine": global_engine}
 
-        valid = {"off", "local", "cloud", "dual", "local_then_cloud", "local_then_enrich"}
+        valid = {
+            "off",
+            "local",
+            "cloud",
+            "legacy_local",
+            "dual",
+            "local_then_cloud",
+            "local_then_enrich",
+        }
         engine = (global_engine or "").strip().lower()
         if engine not in valid:
-            engine = "local"  # deterministic floor — never silently cloud
+            # Deterministic floor: "local" is now a private/provider LLM lane.
+            # It may fail fast without a provider chip, but it will not silently
+            # run the deprecated GLiNER/GLiREL sidecar.
+            engine = "local"
 
         scanned = 0
         stamped: list[str] = []

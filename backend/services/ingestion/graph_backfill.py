@@ -263,6 +263,11 @@ async def _run_ghost_b_backfill(
     except Exception as exc:  # noqa: BLE001
         logger.warning("graph_backfill: extraction endpoint settings unavailable: %s", exc)
 
+    cloud_pool_refs = (
+        config.summary_models
+        if getattr(config, "models_linked", True)
+        else config.extraction_models
+    )
     contract = resolve_extraction_contract(
         corpus_engine=getattr(config, "extraction_engine", None),
         global_engine=global_engine,
@@ -270,6 +275,7 @@ async def _run_ghost_b_backfill(
         summary_model_count=len(config.summary_models or []),
         extraction_model_count=len(config.extraction_models or []),
         enabled_endpoint_urls=endpoint_urls,
+        provider_pool_entries=cloud_pool_refs,
     )
     for warning in contract.warnings:
         logger.warning("graph_backfill contract corpus=%s: %s", corpus_id[:8], warning)
@@ -278,11 +284,6 @@ async def _run_ghost_b_backfill(
             "extraction contract violation — " + "; ".join(contract.errors)
         )
 
-    cloud_pool_refs = (
-        config.summary_models
-        if getattr(config, "models_linked", True)
-        else config.extraction_models
-    )
     pool = _build_ghost_pool(cloud_pool_refs)
 
     async def _schema_resolver(kind: str, query_vec: list[float], top_k: int) -> list[str]:
@@ -314,8 +315,10 @@ async def _run_ghost_b_backfill(
                 "skipped": True,
             },
         )
-    elif contract.engine == "cloud":
+    elif contract.engine in {"local", "cloud"}:
         report = await cloud_extract_entities(tasks, **extract_kwargs)
+    elif contract.engine == "legacy_local":
+        report = await local_extract_entities(tasks, **extract_kwargs)
     elif contract.engine == "dual":
         local_part = tasks[0::2]
         cloud_part = tasks[1::2]
@@ -346,8 +349,10 @@ async def _run_ghost_b_backfill(
             if contract.pool_size == 0:
                 raise
             report = await cloud_extract_entities(tasks, **extract_kwargs)
-    else:
+    elif contract.engine == "local_then_enrich":
         report = await local_extract_entities(tasks, **extract_kwargs)
+    else:
+        raise RuntimeError(f"unknown extraction engine {contract.engine!r}")
     if not isinstance(report, ExtractionBatchReport):
         raise RuntimeError("Ghost B did not return a batch report")
     return report

@@ -424,13 +424,14 @@ def _ghost_b_active_doc_limit(
         )
         return max(1, int(profile.extraction_active_docs))
     current = get_settings()
-    cloud_lane_active = extraction_engine in {
+    provider_lane_active = extraction_engine in {
+        "local",
         "cloud",
         "dual",
         "local_then_cloud",
         "local_then_enrich",
     }
-    if cloud_lane_active and any(_pool_entry_uses_managed_vllm(entry) for entry in pool):
+    if provider_lane_active and any(_pool_entry_uses_managed_vllm(entry) for entry in pool):
         return max(1, int(getattr(current, "EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS", 2)))
     return max(1, int(getattr(current, "EXTRACTION_MAX_ACTIVE_DOCS", 1)))
 
@@ -449,13 +450,14 @@ def _ghost_b_file_gate_key(
         )
         if "remote_vllm" in profile.extraction_lanes:
             return "remote_vllm"
-    cloud_lane_active = extraction_engine in {
+    provider_lane_active = extraction_engine in {
+        "local",
         "cloud",
         "dual",
         "local_then_cloud",
         "local_then_enrich",
     }
-    if cloud_lane_active and any(_pool_entry_uses_managed_vllm(entry) for entry in pool):
+    if provider_lane_active and any(_pool_entry_uses_managed_vllm(entry) for entry in pool):
         return "remote_vllm"
     return "default"
 
@@ -1496,6 +1498,11 @@ async def _run_ghosts_parallel(
         except Exception as exc:  # noqa: BLE001 — env fallback is fine
             logger.warning("extraction endpoint settings unavailable: %s", exc)
 
+        cloud_pool_refs = (
+            config.summary_models
+            if getattr(config, "models_linked", True)
+            else config.extraction_models
+        )
         contract = resolve_extraction_contract(
             corpus_engine=getattr(config, "extraction_engine", None),
             global_engine=_global_engine,
@@ -1503,21 +1510,17 @@ async def _run_ghosts_parallel(
             summary_model_count=len(config.summary_models or []),
             extraction_model_count=len(config.extraction_models or []),
             enabled_endpoint_urls=_endpoint_urls,
+            provider_pool_entries=cloud_pool_refs,
         )
         extraction_engine = contract.engine
-        cloud_pool_refs = (
-            config.summary_models
-            if getattr(config, "models_linked", True)
-            else config.extraction_models
-        )
         pool = _build_ghost_pool(cloud_pool_refs)
         resource_profile = _resource_profile_for_config(
             config,
             extraction_engine=extraction_engine,
             pool=pool,
         )
-        cloud_primary = contract.engine in {"cloud", "dual"}
-        if cloud_primary and pool:
+        provider_lane_active = contract.uses_provider_llm and bool(pool)
+        if provider_lane_active:
             from services.ingestion.model_lifecycle import ensure_model_lifecycle_ready
 
             await ensure_model_lifecycle_ready(pool, purpose="schema_lens")
@@ -1541,9 +1544,9 @@ async def _run_ghosts_parallel(
             children=body_children_for_lens or children,
             entity_schema=config.entity_schema,
             relation_schema=config.relation_schema,
-            pool=pool if cloud_primary else [],
+            pool=pool if provider_lane_active else [],
             model=model,
-            allow_llm=cloud_primary,
+            allow_llm=provider_lane_active,
         )
 
         async def _schema_resolver(
@@ -1634,10 +1637,11 @@ async def _run_ghosts_parallel(
                 ),
                 audit_run_id=ghost_b_run_id,
             )
-            # Owner-selectable engine (per-corpus contract; two-toggle model):
-            # off = vectors-only (explicit), local = GLiNER/GLiREL sidecars,
-            # cloud = Ghost B LLM pool, dual = both (even/odd chunk split),
-            # local_then_cloud = local primary with cloud rescue.
+            # Owner-selectable engine (per-corpus contract):
+            # off = vectors-only; local = private/provider LLM pool
+            # (for example LAN RTX/vLLM); cloud = provider LLM pool;
+            # legacy_local = deprecated GLiNER/GLiREL sidecars; dual and
+            # local_then_* are transitional legacy-local mixed modes.
             if extraction_engine == "off":
                 report = ExtractionBatchReport(
                     results=[],
@@ -1650,10 +1654,16 @@ async def _run_ghosts_parallel(
                         "skipped": True,
                     },
                 )
-            elif extraction_engine == "cloud":
+            elif extraction_engine in {"local", "cloud"}:
                 from services.ghost_b import extract_entities as _cloud_extract
 
                 report = await _cloud_extract(tasks, **_extract_kwargs)
+            elif extraction_engine == "legacy_local":
+                report = await extract_entities(
+                    tasks,
+                    **_extract_kwargs,
+                    endpoint_urls=_endpoint_urls or None,
+                )
             elif extraction_engine == "dual":
                 # DUAL (owner: throughput) — split the doc across BOTH engines
                 # concurrently: even-index chunks → local GLiNER/GLiREL, odd →
@@ -1798,7 +1808,7 @@ async def _run_ghosts_parallel(
                             metrics=_base_metrics,
                         )
             else:
-                report = await extract_entities(tasks, **_extract_kwargs, endpoint_urls=_endpoint_urls or None)
+                raise RuntimeError(f"unknown extraction engine {extraction_engine!r}")
         if not isinstance(report, ExtractionBatchReport):
             fresh_results = report
             failures: list[ExtractionFailureItem] = []
@@ -1871,7 +1881,7 @@ async def _run_ghosts_parallel(
     _engine_hint = str(
         getattr(config, "extraction_engine", "") or ""
     ).strip().lower()
-    _parallel_ghosts = _engine_hint in ("local", "local_then_enrich", "off")
+    _parallel_ghosts = _engine_hint in ("legacy_local", "local_then_enrich", "off")
     _b_task: asyncio.Task | None = None
     if _parallel_ghosts:
         _b_task = asyncio.create_task(_b_branch())

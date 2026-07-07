@@ -103,7 +103,7 @@ const WORKFLOW_META: {
     label: "Private RTX LLM",
     detail:
       "Local desktop vLLM receives the same strict provider-card extraction contract as a cloud model.",
-    engine: "cloud",
+    engine: "local",
     needsCloudPool: true,
     needsRtx: true,
     needsCloudApi: false,
@@ -132,7 +132,7 @@ const WORKFLOW_META: {
     label: "Legacy Mac sidecar",
     detail:
       "Deprecated GLiNER/GLiREL sidecar path. Use only for compatibility or controlled backfills.",
-    engine: "local",
+    engine: "legacy_local",
     needsCloudPool: false,
     needsRtx: false,
     needsCloudApi: false,
@@ -254,10 +254,10 @@ function createDefaultIngestionConfig(
     extraction_models: [...DEFAULT_INGESTION_CONFIG.extraction_models],
     embedding_models: [...DEFAULT_INGESTION_CONFIG.embedding_models],
   };
-  if ((next.extraction_engine ?? "cloud") === "cloud") {
+  if ((next.extraction_engine ?? "local") === "local") {
     next.extraction_models = ensureRtxExtractionModel(next.extraction_models ?? []);
   }
-  if (usesCloudEngine(draftEngine(next.extraction_engine, "cloud")) && hasFactoryChunkShape(next)) {
+  if (usesProviderEngine(draftEngine(next.extraction_engine, "cloud")) && hasFactoryChunkShape(next)) {
     next = {
       ...next,
       child_chunk_algorithm: "sentence_merge",
@@ -333,7 +333,8 @@ function inferWorkflow(config: IngestionConfig): IngestionWorkflowId {
   const hasRtx = pool.some(isRtxModel);
   const hasCloud = hasNonRtxCloudModel(pool);
   if (engine === "off") return "vectors_only";
-  if (engine === "local") return "local_only";
+  if (engine === "legacy_local") return "local_only";
+  if (engine === "local") return hasRtx ? "rtx_only" : "custom";
   if (engine === "cloud") {
     if (hasRtx && hasCloud) return "cloud_rtx";
     if (hasRtx) return "rtx_only";
@@ -391,6 +392,7 @@ function applyWorkflowToConfig(
   // backend freeze keeps already-populated corpora unchanged.
   if (
     (workflow.engine === "cloud" ||
+      workflow.engine === "local" ||
       workflow.engine === "dual" ||
       // §13-H: storage chunks at LLM shape; the local GLiREL lane derives
       // its own sentence windows from parent text at extraction time.
@@ -520,7 +522,7 @@ function IngestionWorkflowSelector({
   const currentMeta = WORKFLOW_META.find((item) => item.key === current) ?? WORKFLOW_META[0];
   const extractionPool = config.extraction_models ?? [];
   const summaryPool = config.summary_models ?? [];
-  const cloudActive = usesCloudEngine(draftEngine(config.extraction_engine, "local"));
+  const providerActive = usesProviderEngine(draftEngine(config.extraction_engine, "local"));
 
   return (
     <div className="border border-accent-main/25 bg-bg-base/50 px-3 py-2 space-y-2">
@@ -560,7 +562,7 @@ function IngestionWorkflowSelector({
             {draftEngine(config.extraction_engine, "local").replace(/_/g, " ")}
           </div>
           <div className="text-content-tertiary mt-0.5">
-            {cloudActive ? poolLabel(extractionPool) : "provider pool inactive"}
+            {providerActive ? poolLabel(extractionPool) : "provider pool inactive"}
           </div>
         </div>
         <div className="border border-border-minimal bg-bg-surface/50 px-2 py-1.5">
@@ -1488,17 +1490,18 @@ function draftEngine(
   return engine && engine !== "inherit" ? engine : (inheritedEngine ?? "local");
 }
 
-function usesLocalEngine(engine: ResolvedDraftEngine): boolean {
+function usesLegacyLocalEngine(engine: ResolvedDraftEngine): boolean {
   return (
-    engine === "local" ||
+    engine === "legacy_local" ||
     engine === "dual" ||
     engine === "local_then_cloud" ||
     engine === "local_then_enrich"
   );
 }
 
-function usesCloudEngine(engine: ResolvedDraftEngine): boolean {
+function usesProviderEngine(engine: ResolvedDraftEngine): boolean {
   return (
+    engine === "local" ||
     engine === "cloud" ||
     engine === "dual" ||
     engine === "local_then_cloud" ||
@@ -1646,9 +1649,9 @@ function IngestionModelsSection({
 
   const engine = config.extraction_engine;
   const draft = draftEngine(engine, contract?.engine);
-  const draftUsesLocal = usesLocalEngine(draft);
-  const draftUsesCloud = usesCloudEngine(draft);
-  const draftPoolSource = draftUsesCloud
+  const draftUsesLegacyLocal = usesLegacyLocalEngine(draft);
+  const draftUsesProvider = usesProviderEngine(draft);
+  const draftPoolSource = draftUsesProvider
     ? linked
       ? "summary_models"
       : "extraction_models"
@@ -1660,18 +1663,22 @@ function IngestionModelsSection({
         ? (config.extraction_models ?? [])
         : [];
   const draftErrors =
-    draftUsesCloud && draftPool.length === 0
+    draftUsesProvider && draftPool.length === 0
       ? [
           linked
-            ? "CLOUD extraction needs at least one Summary model chip."
-            : "CLOUD extraction needs at least one Extraction model chip.",
+            ? "Provider extraction needs at least one Summary model chip."
+            : "Provider extraction needs at least one Extraction model chip.",
         ]
+      : draft === "local" && !draftPool.some(isRtxModel)
+        ? [
+            "Local private extraction requires at least one RTX/vLLM extraction chip.",
+          ]
       : [];
   const draftChanged =
     !!contract &&
     (contract.engine !== draft ||
       contract.models_linked !== linked ||
-      (draftUsesCloud &&
+      (draftUsesProvider &&
         contract.pool.map(formatExtractionPoolEntry).join("|") !==
           draftPool.map(formatExtractionPoolEntry).join("|")));
 
@@ -1701,7 +1708,7 @@ function IngestionModelsSection({
           Ingestion Models
         </div>
         <div className="text-[10px] text-content-tertiary tracking-wider uppercase">
-          {draftUsesCloud ? "provider extraction pool active" : "provider pool hidden"}
+          {draftUsesProvider ? "provider extraction pool active" : "provider pool hidden"}
         </div>
       </div>
 
@@ -1717,12 +1724,14 @@ function IngestionModelsSection({
           <span className="text-[10px] font-bold tracking-widest text-accent-secondary uppercase">
             {engine === "local_then_enrich"
               ? "LEGACY LOCAL FIRST - RTX fills gaps"
-              : draftUsesLocal && draftUsesCloud
+              : draftUsesLegacyLocal && draftUsesProvider
                 ? "TRANSITION - legacy sidecar + provider LLM"
-                : draftUsesLocal
+                : draftUsesLegacyLocal
                   ? "LEGACY LOCAL SIDECAR"
-                : draftUsesCloud
-                    ? "PROVIDER LLM"
+                : draftUsesProvider
+                    ? draft === "local"
+                      ? "PRIVATE PROVIDER LLM"
+                      : "PROVIDER LLM"
                     : "OFF - vectors only"}
             {engine === "inherit" || engine === undefined ? " (inherited)" : ""}
             {engine === "local_then_cloud" ? " (local->cloud rescue)" : ""}
@@ -1731,10 +1740,10 @@ function IngestionModelsSection({
             Change via Ingestion workflow above.
           </span>
         </div>
-        {linked && draftUsesCloud && (
+        {linked && draftUsesProvider && (
           <div className="flex flex-wrap items-center gap-2 border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
             <span>
-              Legacy summary reuse is active: cloud extraction borrows Summary
+              Legacy summary reuse is active: provider extraction borrows Summary
               Models. New workflows use a dedicated Extraction pool.
             </span>
             {editing && (
@@ -1757,12 +1766,12 @@ function IngestionModelsSection({
                 NEW CONTRACT:{" "}
               </span>
               <span className="text-content-primary font-bold uppercase">{draft}</span>
-              {draftUsesLocal && (
+              {draftUsesLegacyLocal && (
                 <span className="text-content-secondary">
                   {" · legacy GLiNER/GLiREL sidecars from Settings"}
                 </span>
               )}
-              {draftUsesCloud && (
+              {draftUsesProvider && (
                 <span className="text-content-secondary">
                   {" · pool ("}
                   {draftPoolSource === "summary_models"
@@ -1794,7 +1803,7 @@ function IngestionModelsSection({
               <span className="text-content-tertiary tracking-wider">SAVED CONTRACT: </span>
               <span className="text-content-primary font-bold uppercase">{contract.engine}</span>
               <span className="text-content-tertiary"> ({contract.source})</span>
-              {(contract.engine === "local" ||
+              {(contract.engine === "legacy_local" ||
                 contract.engine === "dual" ||
                 contract.engine === "local_then_cloud" ||
                 contract.engine === "local_then_enrich") && (
@@ -1813,7 +1822,8 @@ function IngestionModelsSection({
                         .join(" · ")}
                 </span>
               )}
-              {(contract.engine === "cloud" ||
+              {(contract.engine === "local" ||
+                contract.engine === "cloud" ||
                 contract.engine === "dual" ||
                 contract.engine === "local_then_cloud" ||
                 contract.engine === "local_then_enrich") && (
@@ -1845,7 +1855,7 @@ function IngestionModelsSection({
               {editing && draftChanged && (
                 <div className="text-accent-secondary">
                   PENDING AFTER SAVE: {draft.toUpperCase()}
-                  {draftUsesCloud
+                  {draftUsesProvider
                     ? ` · ${draftPoolSource === "summary_models" ? "summary" : "extraction"} pool: ${
                         draftPool.length === 0
                           ? "EMPTY"
@@ -1875,12 +1885,12 @@ function IngestionModelsSection({
         testContext={{ corpusId, poolField: "summary_models" }}
       />
 
-      {draftUsesCloud ? (
+      {draftUsesProvider ? (
         <IngestionModelPool
           title="Extraction Models (GHOST B)"
           subtitle={
             linked
-              ? "Legacy mode: Summary pool is currently reused for cloud extraction"
+              ? "Legacy mode: Summary pool is currently reused for provider extraction"
               : "Provider-card extraction lane · private RTX and API chips share this pool"
           }
           value={extractionPool}
