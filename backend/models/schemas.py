@@ -218,8 +218,9 @@ class IngestionConfig(BaseModel):
     extraction_models: list[_legacy.ModelProfileRef] = Field(default_factory=list)
     entity_confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     models_linked: bool = False
-    # Per-corpus extraction contract (owner two-toggle model: local on ->
-    # 'local', cloud on -> 'cloud', both -> 'dual', neither -> 'off').
+    # Per-corpus extraction contract. New production extraction should use
+    # provider-card LLM lanes in extraction_models (cloud/private RTX). The
+    # legacy 'local' engine still means the GLiNER/GLiREL sidecar path.
     # 'inherit' = legacy fallback to the global Settings engine; the lifespan
     # migration stamps existing corpora explicit so the resolved workflow is
     # deterministic per corpus. Resolution + fail-fast validation:
@@ -540,17 +541,15 @@ class ExtractionSettings(BaseModel):
     without a backend restart (same pattern as Modal settings)."""
 
     engine: Literal[
-        "local", "cloud", "local_then_cloud", "dual", "local_then_enrich"
+        "off", "local", "cloud", "local_then_cloud", "dual", "local_then_enrich"
     ] = Field(
         default="local",
         description=(
-            "Which Ghost B engine runs extraction: 'local' = GLiNER/GLiREL "
-            "sidecars (endpoints below); 'cloud' = the EXTRACTION MODELS LLM "
-            "pool; 'local_then_cloud' = local first, cloud fallback on "
-            "failure; 'dual' = split each doc across BOTH engines concurrently "
-            "for throughput; 'local_then_enrich' = §13-H Fast Local Graph — "
-            "local skeleton always, cloud/RTX re-extracts only quality-gated "
-            "gap chunks (coverage / facts / predicate ambiguity)."
+            "Which Ghost B engine runs extraction: 'cloud' = provider-card "
+            "LLM pool, including private RTX/vLLM endpoints; 'local' = "
+            "LEGACY GLiNER/GLiREL sidecars; 'dual' = legacy local plus "
+            "provider LLM pool; 'local_then_cloud' and 'local_then_enrich' "
+            "are transitional legacy-local modes. Use 'off' for vectors-only."
         ),
     )
     endpoints: list[ExtractionEndpoint] = Field(default_factory=list)

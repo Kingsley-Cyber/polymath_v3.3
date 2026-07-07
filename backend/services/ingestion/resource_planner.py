@@ -221,21 +221,9 @@ def _entry_dict(entry: Any) -> dict[str, Any]:
 
 
 def entry_uses_remote_vllm(entry: Any) -> bool:
-    data = _entry_dict(entry)
-    provider = str(data.get("provider_preset") or data.get("provider") or "").lower()
-    model = str(data.get("model") or data.get("model_name") or "").lower()
-    base_url = str(data.get("base_url") or data.get("api_base") or "").lower()
-    lifecycle = str(data.get("lifecycle_base_url") or "").lower()
-    extra = data.get("extra_params") or {}
-    if not isinstance(extra, dict):
-        extra = {}
-    if provider in {"vllm", "vllm-rtx", "rtx"}:
-        return True
-    if bool(extra.get("managed_vllm")) or str(extra.get("resource_class") or "").lower() == "rtx":
-        return True
-    if "polymath-extract" in model and (":8000" in base_url or "192.168." in base_url):
-        return True
-    return "vllm" in model or "vllm" in base_url or "vllm" in lifecycle
+    from services.extraction_provider_cards import extraction_lane_uses_private_vllm
+
+    return extraction_lane_uses_private_vllm(entry)
 
 
 def _pool_concurrency(pool: list[Any] | tuple[Any, ...] | None) -> int:

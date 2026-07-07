@@ -26,6 +26,10 @@ import httpx
 import tiktoken
 
 from config import get_settings
+from services.extraction_provider_cards import (
+    provider_payload_defaults,
+    resolve_extraction_provider_card,
+)
 from services.llm_lane_pool import (
     FatalLaneError,
     SOFT_FATAL_DISABLE_STRIKES,
@@ -239,7 +243,18 @@ DOMAIN_RANGE_MAP: dict[str, dict[str, list[str]]] = {
         "object_types": ["Organization"],
     },
     "created_by": {
-        "subject_types": ["Artifact", "Concept", "Document", "Method", "Product", "Rule", "Law"],
+        "subject_types": [
+            "Artifact",
+            "Concept",
+            "Document",
+            "Method",
+            "Organization",
+            "Product",
+            "Software",
+            "Standard",
+            "Rule",
+            "Law",
+        ],
         "object_types": ["Person", "Organization"],
     },
     "owns": {
@@ -1092,20 +1107,7 @@ async def resolve_chunk_vocab(
 
 def _lane_supports_json_object(entry: dict) -> bool:
     """Return True for provider lanes known to honor OpenAI JSON object mode."""
-    model = str(entry.get("model") or "").lower()
-    base_url = str(entry.get("base_url") or "").lower()
-    provider = str(entry.get("provider_preset") or "").lower()
-    extra_params = entry.get("extra_params") or {}
-    explicit = extra_params.get("supports_json_object")
-    if isinstance(explicit, bool):
-        return explicit
-    if isinstance(explicit, str):
-        return explicit.strip().lower() in {"1", "true", "yes", "on"}
-    if "deepseek" in model or "deepseek" in base_url or provider == "deepseek":
-        return True
-    if "api.openai.com" in base_url or provider == "openai":
-        return True
-    return model.startswith("openai/") or model.startswith("gpt-")
+    return resolve_extraction_provider_card(entry).supports_json_object
 
 
 def _lane_supports_json_schema(entry: dict) -> bool:
@@ -1122,49 +1124,7 @@ def _lane_supports_json_schema(entry: dict) -> bool:
     nonconformant provider. If a lane claims support but rejects the payload,
     _process_one records json_schema_unsupported and falls back to JSONL once.
     """
-    model = str(entry.get("model") or "").lower()
-    base_url = str(entry.get("base_url") or "").lower()
-    provider = str(entry.get("provider_preset") or "").lower()
-    extra_params = entry.get("extra_params") or {}
-    explicit = extra_params.get("supports_json_schema")
-    if isinstance(explicit, bool):
-        return explicit
-    if isinstance(explicit, str):
-        return explicit.strip().lower() in {"1", "true", "yes", "on"}
-    if provider in {"openai", "deepseek", "vllm", "vllm-rtx"}:
-        return True
-    if "api.openai.com" in base_url or "api.deepseek.com" in base_url:
-        return True
-    if "vllm" in provider or "vllm" in model:
-        return True
-    private_openai_compatible = model.startswith("openai/") and any(
-        marker in base_url
-        for marker in (
-            "localhost",
-            "127.0.0.1",
-            "192.168.",
-            "10.",
-            "172.16.",
-            "172.17.",
-            "172.18.",
-            "172.19.",
-            "172.20.",
-            "172.21.",
-            "172.22.",
-            "172.23.",
-            "172.24.",
-            "172.25.",
-            "172.26.",
-            "172.27.",
-            "172.28.",
-            "172.29.",
-            "172.30.",
-            "172.31.",
-        )
-    )
-    if private_openai_compatible:
-        return True
-    return False
+    return resolve_extraction_provider_card(entry).supports_json_schema
 
 
 def _select_extraction_output_mode(
@@ -1172,7 +1132,7 @@ def _select_extraction_output_mode(
     entry: dict,
     *,
     profile_name: str,
-) -> Literal["json_object", "jsonl", "json_schema"]:
+) -> Literal["json_object", "json_object_prompt", "jsonl", "json_schema"]:
     """Resolve the actual Ghost B output contract for one lane attempt.
 
     JSONL is the compatibility fallback. json_schema (Pt9c) is the production
@@ -1188,12 +1148,16 @@ def _select_extraction_output_mode(
     """
     if profile_name != "normal":
         return "jsonl"
-    # Known-capable json_schema lanes win unless explicitly disabled.
-    if _lane_supports_json_schema(entry):
+    card = resolve_extraction_provider_card(entry)
+    if card.schema_mode == "json_schema":
         return "json_schema"
-    # configured_mode is a legacy hook — kept callable, but the default
-    # for unknown lanes is JSONL.
-    _ = configured_mode
+    if card.schema_mode == "json_object":
+        return "json_object"
+    if card.schema_mode == "json_object_prompt":
+        return "json_object_prompt"
+    configured = str(configured_mode or "").strip().lower()
+    if configured in {"json_object", "json_object_prompt"}:
+        return configured  # type: ignore[return-value]
     return "jsonl"
 
 
@@ -1787,6 +1751,8 @@ class ExtractionResult:
     domain_range_warn_count: int = 0  # soft domain/range mismatch kept with warning
     endpoint_completion_count: int = 0  # missing relation endpoints added as entities
     evidence_cue_repair_count: int = 0  # evidence phrase repaired predicate/direction
+    semantic_direction_repair_count: int = 0
+    semantic_direction_drop_count: int = 0
     # Phase B evidence gate — relations whose evidence_phrase is empty,
     # missing, or not a substring of the chunk text get dropped before
     # they reach Mongo / Neo4j. The counter exposes the rejection rate at
@@ -2369,6 +2335,96 @@ def _apply_domain_range(
     return out
 
 
+_CREATOR_ENTITY_TYPES = {"Person", "Organization"}
+_CREATED_ENTITY_TYPES = {
+    "Product",
+    "Software",
+    "Document",
+    "Standard",
+    "Rule",
+    "Artifact",
+    "Method",
+    "Concept",
+    "Event",
+    "Organization",
+}
+_EMPLOYER_ENTITY_TYPES = {"Organization"}
+_OWNED_ENTITY_TYPES = {
+    "Product",
+    "Software",
+    "Document",
+    "Artifact",
+    "Standard",
+    "Location",
+}
+
+
+def _apply_semantic_direction_checks(
+    entities: list[EntityItem],
+    relations: list[RelationItem],
+    counters: dict[str, int],
+) -> list[RelationItem]:
+    """Repair obvious subject/object reversals before graph promotion.
+
+    The goal is not ontology perfection. It is a deterministic gate for the
+    common LLM mistake where the predicate is correct but the arrow is flipped:
+    "Alice created Widget" emitted as Alice -created_by-> Widget. Ambiguous
+    cases fall through to the existing domain/range gate instead of guessing.
+    """
+
+    name_to_type = {
+        _entity_key(entity.canonical_name): entity.entity_type
+        for entity in entities
+    }
+    out: list[RelationItem] = []
+    for relation in relations:
+        if relation.object_kind != "entity":
+            out.append(relation)
+            continue
+        subject_type = name_to_type.get(_entity_key(relation.subject))
+        object_type = name_to_type.get(_entity_key(relation.object))
+
+        should_reverse = False
+        if relation.predicate == "created_by":
+            should_reverse = (
+                subject_type in _CREATOR_ENTITY_TYPES
+                and object_type in _CREATED_ENTITY_TYPES
+            )
+        elif relation.predicate == "works_for":
+            should_reverse = (
+                subject_type in _EMPLOYER_ENTITY_TYPES
+                and object_type == "Person"
+            )
+        elif relation.predicate == "owns":
+            should_reverse = (
+                subject_type in _OWNED_ENTITY_TYPES
+                and object_type in _CREATOR_ENTITY_TYPES
+            )
+
+        if should_reverse:
+            counters["semantic_direction_repair_count"] += 1
+            repaired = _relation_with_predicate(
+                relation,
+                relation.predicate,
+                reverse=True,
+                validation_status=_append_validation_status(
+                    relation.validation_status, "semantic_direction_repair"
+                ),
+            )
+            logger.debug(
+                "GHOST B semantic direction repair %r subject=%r object=%r -> subject=%r object=%r",
+                relation.predicate,
+                relation.subject,
+                relation.object,
+                repaired.subject,
+                repaired.object,
+            )
+            out.append(repaired)
+            continue
+        out.append(relation)
+    return out
+
+
 def _apply_schema(
     entities: list[EntityItem],
     relations: list[RelationItem],
@@ -2387,6 +2443,8 @@ def _apply_schema(
         "domain_range_warn_count": 0,
         "endpoint_completion_count": 0,
         "evidence_cue_repair_count": 0,
+        "semantic_direction_repair_count": 0,
+        "semantic_direction_drop_count": 0,
     }
 
     # No schema or strict='off' → pass-through
@@ -2501,6 +2559,9 @@ def _apply_schema(
         _repair_relation_from_evidence(relation, counters)
         for relation in out_relations
     ]
+    out_relations = _apply_semantic_direction_checks(
+        out_entities, out_relations, counters
+    )
     out_entities = _complete_relation_endpoint_entities(
         out_entities, out_relations, counters
     )
@@ -2860,6 +2921,8 @@ def _parse(
         domain_range_warn_count=counters["domain_range_warn_count"],
         endpoint_completion_count=counters["endpoint_completion_count"],
         evidence_cue_repair_count=counters["evidence_cue_repair_count"],
+        semantic_direction_repair_count=counters["semantic_direction_repair_count"],
+        semantic_direction_drop_count=counters["semantic_direction_drop_count"],
         evidence_drop_count=evidence_drop_count,
         fact_drop_count=fact_drop_count,
         schema_lens_id=lens.lens_id if lens else None,
@@ -3389,6 +3452,62 @@ async def extract_entities(
     await ensure_model_lifecycle_ready(pool, purpose="ghost_b")
 
     lane_limits = [max(1, int(entry.get("max_concurrent") or 1) or 1) for entry in pool]
+    try:
+        from services.private_vllm_capacity import (
+            fetch_private_vllm_capacity,
+            plan_private_vllm_concurrency,
+        )
+
+        for idx, entry in enumerate(pool):
+            card = resolve_extraction_provider_card(entry)
+            if card.concurrency_policy != "adaptive_vram_85" or not card.lifecycle_base_url:
+                continue
+            extra = entry.get("extra_params") or {}
+            if not isinstance(extra, dict):
+                extra = {}
+            safety_ratio = float(extra.get("vram_safety_ratio") or 0.85)
+            per_request_vram_gb = extra.get("per_request_vram_gb")
+            try:
+                per_request = (
+                    float(per_request_vram_gb)
+                    if per_request_vram_gb not in (None, "")
+                    else None
+                )
+            except (TypeError, ValueError):
+                per_request = None
+            capacity = await fetch_private_vllm_capacity(
+                card.lifecycle_base_url,
+                api_key=entry.get("lifecycle_api_key"),
+                status_path=str(entry.get("lifecycle_status_path") or "/status"),
+                timeout_s=5.0,
+            )
+            effective, meta = plan_private_vllm_concurrency(
+                lane_limits[idx],
+                capacity,
+                safety_ratio=safety_ratio,
+                per_request_vram_gb=per_request,
+            )
+            if effective < lane_limits[idx]:
+                logger.warning(
+                    "GHOST B private vLLM concurrency reduced: lane=%d requested=%d effective=%d reason=%s free_vram_gb=%s recommended=%s",
+                    idx,
+                    lane_limits[idx],
+                    effective,
+                    meta.get("reason"),
+                    capacity.gpu_vram_free_gb,
+                    capacity.recommended_concurrency,
+                )
+                lane_limits[idx] = effective
+            else:
+                logger.info(
+                    "GHOST B private vLLM capacity accepted: lane=%d concurrency=%d free_vram_gb=%s recommended=%s",
+                    idx,
+                    lane_limits[idx],
+                    capacity.gpu_vram_free_gb,
+                    capacity.recommended_concurrency,
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("GHOST B private vLLM capacity check unavailable: %s", exc)
     configured_lane_concurrency = sum(lane_limits) or max(1, settings.EXTRACTION_MAX_CONCURRENT)
     global_max_concurrent = min(
         settings.EXTRACTION_GLOBAL_MAX_CONCURRENT,
@@ -3544,17 +3663,17 @@ async def extract_entities(
         )
         normal_max_entities = (
             min(max_entities, json_object_max_entities)
-            if normal_output_mode == "json_object"
+            if normal_output_mode in ("json_object", "json_object_prompt")
             else max_entities
         )
         normal_max_relations = (
             min(max_relations, json_object_max_relations)
-            if normal_output_mode == "json_object"
+            if normal_output_mode in ("json_object", "json_object_prompt")
             else max_relations
         )
         normal_max_facts = (
             min(max_facts, json_object_max_facts)
-            if normal_output_mode == "json_object"
+            if normal_output_mode in ("json_object", "json_object_prompt")
             else max_facts
         )
         normal_profile = ExtractionAttemptProfile(
@@ -3589,6 +3708,9 @@ async def extract_entities(
         from services.ingestion.extraction_contract import provider_payload_extras
 
         payload_base.update(provider_payload_extras(entry.get("extra_params")))
+        provider_card = resolve_extraction_provider_card(entry)
+        for key, value in provider_payload_defaults(provider_card).items():
+            payload_base.setdefault(key, value)
         model_name = str(entry["model"])
         base_url = str(entry.get("base_url") or "")
         model_key = model_name.lower()
@@ -3665,6 +3787,7 @@ async def extract_entities(
                 "finish_reason": finish_reason,
                 "hit_output_cap": hit_output_cap,
                 "facts_enabled": profile.enable_facts,
+                "provider_card": provider_card.to_safe_dict(),
                 "caps": {
                     "entities": profile.max_entities,
                     "relations": profile.max_relations,
@@ -3716,10 +3839,10 @@ async def extract_entities(
             profile_output_mode = (
                 normal_output_mode if profile.name == "normal" else "jsonl"
             )
-            # Pt9c — json_schema and json_object both use the JSON-object
-            # prompt builder (single-object response shape) and the same
-            # system message. The response_format payload differs.
-            if profile_output_mode in ("json_object", "json_schema"):
+            # Pt9c/provider-card — json_schema, json_object, and compiler-
+            # gated json_object_prompt all use the single-object prompt. Only
+            # the first two send provider-native response_format payloads.
+            if profile_output_mode in ("json_object", "json_schema", "json_object_prompt"):
                 prompt = build_json_object_prompt(
                     **{k: v for k, v in profile_kwargs.items() if k != "max_total_lines"},
                     evidence_max_chars=evidence_max_chars,
@@ -3745,7 +3868,7 @@ async def extract_entities(
                     "role": "system",
                     "content": (
                         _JSON_OBJECT_SYSTEM
-                        if profile_output_mode in ("json_object", "json_schema")
+                        if profile_output_mode in ("json_object", "json_schema", "json_object_prompt")
                         else _SYSTEM
                     ),
                 },
@@ -3827,7 +3950,11 @@ async def extract_entities(
                     merged_jsonl_items: list[dict[str, Any]] = []
                     line_cap_exceeded = False
                     empty_after_claimed_items = False
-                    object_mode = profile_output_mode in ("json_object", "json_schema")
+                    object_mode = profile_output_mode in (
+                        "json_object",
+                        "json_schema",
+                        "json_object_prompt",
+                    )
                     object_claimed_items = False
                     used_jsonl_fallback = False
                     # Pt9c — json_schema produces the same single-JSON-object
@@ -3938,6 +4065,10 @@ async def extract_entities(
                         {
                             "chunk_id": task.chunk_id,
                             "model": entry["model"],
+                            "provider": provider_card.provider,
+                            "schema_mode": provider_card.schema_mode,
+                            "json_repair_mode": provider_card.json_repair_mode,
+                            "semantic_verifier_mode": provider_card.semantic_verifier_mode,
                             "lane": pool_idx,
                             "profile": profile.name,
                             "output_mode": profile_output_mode,
@@ -4093,7 +4224,7 @@ async def extract_entities(
                 # path the same way, accepting one degraded attempt rather
                 # than failing the whole chunk.
                 if (
-                    profile_output_mode in ("json_object", "json_schema")
+                    profile_output_mode in ("json_object", "json_schema", "json_object_prompt")
                     and isinstance(exc, httpx.HTTPStatusError)
                     and exc.response is not None
                     and exc.response.status_code in {400, 422}
@@ -4108,6 +4239,10 @@ async def extract_entities(
                         {
                             "chunk_id": task.chunk_id,
                             "model": entry["model"],
+                            "provider": provider_card.provider,
+                            "schema_mode": provider_card.schema_mode,
+                            "json_repair_mode": provider_card.json_repair_mode,
+                            "semantic_verifier_mode": provider_card.semantic_verifier_mode,
                             "lane": pool_idx,
                             "profile": profile.name,
                             "output_mode": profile_output_mode,

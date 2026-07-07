@@ -18,8 +18,10 @@ which is the part new to Pt9c.
 """
 from __future__ import annotations
 
+import json
 import sys
 from types import ModuleType
+from types import SimpleNamespace
 
 
 # ── Auth-package stubs (same pattern as other unit tests) ──────────
@@ -97,9 +99,14 @@ _install_stubs_if_missing()
 
 
 from services.ghost_b import (  # noqa: E402
+    ExtractionTask,
+    SchemaContext,
+    UNIVERSAL_ENTITY_SCHEMA,
+    UNIVERSAL_RELATION_SCHEMA,
     _json_schema_response_format,
     _lane_supports_json_object,
     _lane_supports_json_schema,
+    _parse,
     _pin_all_required,
     _select_extraction_output_mode,
 )
@@ -399,6 +406,16 @@ def test_select_mode_returns_json_schema_for_known_lane():
     assert mode == "json_schema"
 
 
+def test_select_mode_returns_json_object_prompt_for_compiler_gated_provider():
+    entry = {
+        "model": "openai/tencent/Hy3-preview",
+        "provider_preset": "siliconflow",
+        "base_url": "https://api.siliconflow.com/v1",
+    }
+    mode = _select_extraction_output_mode(None, entry, profile_name="normal")
+    assert mode == "json_object_prompt"
+
+
 def test_select_mode_returns_json_schema_when_flag_set_for_unknown_lane():
     entry = {
         "model": "test-model",
@@ -449,10 +466,10 @@ def test_process_one_sites_recognize_json_schema():
     # (because the payload differs), plus optionally inside the
     # log/error-type branches. The other 4 occurrences must use the
     # `in (...)` form. We assert the wider form is present:
-    assert body.count('in ("json_object", "json_schema")') >= 3, (
+    assert body.count('in ("json_object", "json_schema", "json_object_prompt")') >= 3, (
         "json_schema mode missing from the prompt/system/parser sites. "
         "Expected at least 3 occurrences of 'in (\"json_object\", "
-        "\"json_schema\")' in _process_one — found fewer. A site has "
+        "\"json_schema\", \"json_object_prompt\")' in _process_one — found fewer. A site has "
         "narrowed back to json_object-only."
     )
     # The retry handler should also handle json_schema (the 5th site).
@@ -461,3 +478,69 @@ def test_process_one_sites_recognize_json_schema():
         "error_type='json_schema_unsupported' when the rejected mode was "
         "json_schema, mirroring the json_object_unsupported case."
     )
+
+
+def test_parse_repairs_obvious_created_by_direction(monkeypatch):
+    import services.ghost_b as gb
+
+    monkeypatch.setattr(
+        gb,
+        "get_settings",
+        lambda: SimpleNamespace(
+            EXTRACTION_DROP_UNKNOWN_RELATIONS=True,
+            EXTRACTION_ENABLE_FACTS=False,
+            EXTRACTION_MAX_FACTS_PER_CHUNK=0,
+        ),
+    )
+    task = ExtractionTask(
+        chunk_id="chunk-1",
+        doc_id="doc-1",
+        corpus_id="corpus-1",
+        text="Mira Chen created HarborLight Analytics in 2024.",
+    )
+    raw = {
+        "schema_version": "polymath.extract.v1",
+        "entities": [
+            {
+                "canonical_name": "mira chen",
+                "surface_form": "Mira Chen",
+                "entity_type": "Person",
+                "confidence": 0.95,
+            },
+            {
+                "canonical_name": "harborlight analytics",
+                "surface_form": "HarborLight Analytics",
+                "entity_type": "Organization",
+                "confidence": 0.95,
+            },
+        ],
+        "relations": [
+            {
+                "subject": "mira chen",
+                "predicate": "created_by",
+                "object": "harborlight analytics",
+                "object_kind": "entity",
+                "confidence": 0.9,
+                "evidence_phrase": "Mira Chen created HarborLight Analytics",
+            }
+        ],
+        "facts": [],
+    }
+    result = _parse(
+        json.dumps(raw),
+        task,
+        threshold=0.5,
+        schema=SchemaContext(
+            entity_schema=UNIVERSAL_ENTITY_SCHEMA,
+            relation_schema=UNIVERSAL_RELATION_SCHEMA,
+            strict="soft",
+        ),
+    )
+
+    assert result is not None
+    assert result.semantic_direction_repair_count == 1
+    relation = result.relations[0]
+    assert relation.subject == "harborlight analytics"
+    assert relation.predicate == "created_by"
+    assert relation.object == "mira chen"
+    assert relation.validation_status == "semantic_direction_repair"

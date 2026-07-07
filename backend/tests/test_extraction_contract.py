@@ -36,6 +36,21 @@ def test_payload_extras_strip_json_capability_flags():
     assert out == {}
 
 
+def test_payload_extras_strip_provider_card_flags():
+    out = provider_payload_extras(
+        {
+            "schema_mode": "json_object_prompt",
+            "json_repair_mode": "deterministic_compiler",
+            "semantic_verifier_mode": "strict",
+            "disable_thinking": True,
+            "adaptive_vram": True,
+            "vram_safety_ratio": 0.85,
+            "seed": 7,
+        }
+    )
+    assert out == {"seed": 7}
+
+
 def test_payload_extras_reserved_keys_never_overridden():
     out = provider_payload_extras(
         {"model": "evil", "messages": [], "response_format": {"type": "json"}}

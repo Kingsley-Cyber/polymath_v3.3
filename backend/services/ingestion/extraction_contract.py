@@ -12,10 +12,10 @@ silently borrowed 3 duplicate Qwen2.5-7B summary chips that could not hold the
 JSONL contract, the enabled sidecars idled, and 110/113 docs finished
 graph-dead while every screen looked green.
 
-Owner semantics (the two-toggle model): local enabled -> "local", cloud
-enabled -> "cloud", both -> "dual" (even/odd chunk split across both engines),
-neither -> "off" (vectors-only, explicit). "local_then_cloud" survives as a
-resilience value (local primary, cloud rescue). "inherit" exists only for
+Owner semantics: provider-card LLM lanes run through "cloud" even when the
+endpoint is a private LAN RTX/vLLM server. "local" remains the legacy
+GLiNER/GLiREL sidecar path until it is fully removed. "dual" and the
+local_then_* modes are transitional mixed paths. "inherit" exists only for
 pre-migration configs; the lifespan migration stamps every corpus explicit.
 
 Dependency-free on purpose: takes primitives, returns a frozen dataclass —
@@ -39,6 +39,16 @@ INTERNAL_MODEL_FLAGS = frozenset(
         "skip_model_validation",
         "managed_vllm",
         "resource_class",
+        "schema_mode",
+        "json_repair_mode",
+        "semantic_verifier_mode",
+        "concurrency_policy",
+        "failure_backfill_policy",
+        "disable_thinking",
+        "local_private",
+        "adaptive_vram",
+        "vram_safety_ratio",
+        "lifecycle_base_url",
     }
 )
 

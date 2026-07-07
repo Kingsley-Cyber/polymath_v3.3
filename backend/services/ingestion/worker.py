@@ -281,19 +281,9 @@ def _plain_model_ref(ref: Any) -> dict[str, Any]:
 
 
 def _pool_entry_uses_managed_vllm(entry: dict[str, Any] | Any) -> bool:
-    data = _plain_model_ref(entry)
-    provider = str(data.get("provider_preset") or "").strip().lower()
-    model = str(data.get("model") or "").strip().lower()
-    base_url = str(data.get("base_url") or "").strip().lower()
-    lifecycle_base = str(data.get("lifecycle_base_url") or "").strip().lower()
-    extra = data.get("extra_params") or {}
-    if not isinstance(extra, dict):
-        extra = {}
-    if provider in {"vllm", "vllm-rtx"}:
-        return True
-    if bool(extra.get("managed_vllm")) or str(extra.get("resource_class") or "").lower() == "rtx":
-        return True
-    return "vllm" in model or "vllm" in base_url or "vllm" in lifecycle_base
+    from services.extraction_provider_cards import extraction_lane_uses_private_vllm
+
+    return extraction_lane_uses_private_vllm(entry)
 
 
 def _cloud_pool_refs_for_config(config: IngestionConfig) -> list[Any]:

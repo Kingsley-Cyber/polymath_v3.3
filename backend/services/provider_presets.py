@@ -32,6 +32,10 @@ PROVIDER_PRESET_PREFIX: dict[str, str] = {
     "zai": "openai",
     "glm-coding": "openai",
     "openrouter": "openrouter",
+    "local_private_vllm": "openai",
+    "private_vllm": "openai",
+    "vllm": "openai",
+    "vllm-rtx": "openai",
     # Chat turns should use Ollama's /api/chat path. LiteLLM exposes that
     # as ollama_chat/*; the older ollama/* route uses generate-style parsing
     # and drops/errors on native streamed thinking chunks.

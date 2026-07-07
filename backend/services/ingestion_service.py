@@ -315,7 +315,7 @@ class IngestionService:
             logger.warning("migrate_extraction_engine: DB not connected — skipping")
             return {"scanned": 0, "stamped": 0, "engine": global_engine}
 
-        valid = {"off", "local", "cloud", "dual", "local_then_cloud"}
+        valid = {"off", "local", "cloud", "dual", "local_then_cloud", "local_then_enrich"}
         engine = (global_engine or "").strip().lower()
         if engine not in valid:
             engine = "local"  # deterministic floor — never silently cloud
@@ -1946,22 +1946,9 @@ class IngestionService:
         )
 
         def _uses_managed_vllm(ref) -> bool:
-            data = ref.model_dump() if hasattr(ref, "model_dump") else dict(ref or {})
-            provider = str(data.get("provider_preset") or "").lower()
-            model_name = str(data.get("model") or "").lower()
-            base_url = str(data.get("base_url") or "").lower()
-            lifecycle = str(data.get("lifecycle_base_url") or "").lower()
-            extra = data.get("extra_params") or {}
-            if not isinstance(extra, dict):
-                extra = {}
-            return (
-                provider in {"vllm", "vllm-rtx"}
-                or bool(extra.get("managed_vllm"))
-                or str(extra.get("resource_class") or "").lower() == "rtx"
-                or "vllm" in model_name
-                or "vllm" in base_url
-                or "vllm" in lifecycle
-            )
+            from services.extraction_provider_cards import extraction_lane_uses_private_vllm
+
+            return extraction_lane_uses_private_vllm(ref)
 
         managed_vllm = any(_uses_managed_vllm(m) for m in extraction_pool)
         active_extraction_docs = (
