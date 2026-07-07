@@ -29,9 +29,16 @@ def test_parse_status_accepts_nested_controller_capacity_payload():
         {
             "ready": True,
             "active_requests": 3,
+            "gpu_memory": {
+                "free_gb": 66.44,
+                "used_gb": 27.88,
+                "total_gb": 95.59,
+            },
             "capacity": {
                 "free_vram_gb": 60,
-                "total_vram_gb": 100,
+                "reserved_vram_gb": 9.97,
+                "usable_vram_gb": 51,
+                "estimated_vram_per_request_gb": 0.65,
                 "recommended_concurrency": 78,
                 "queue_depth": 4,
             },
@@ -39,8 +46,12 @@ def test_parse_status_accepts_nested_controller_capacity_payload():
     )
 
     assert capacity.ready is True
-    assert capacity.gpu_vram_total_gb == 100
+    assert capacity.gpu_vram_total_gb == 95.59
+    assert capacity.gpu_vram_used_gb == 27.88
     assert capacity.gpu_vram_free_gb == 60
+    assert capacity.usable_vram_gb == 51
+    assert capacity.reserved_vram_gb == 9.97
+    assert capacity.estimated_vram_per_request_gb == 0.65
     assert capacity.recommended_concurrency == 78
     assert capacity.running_requests == 3
     assert capacity.waiting_requests == 4
@@ -70,6 +81,44 @@ def test_plan_clamps_to_85_percent_of_available_vram():
     )
 
     assert effective == 51
+    assert meta["reason"] == "vram_budget"
+
+
+def test_plan_applies_vram_budget_even_when_server_recommends_more():
+    capacity = parse_private_vllm_status(
+        {
+            "ready": True,
+            "capacity": {
+                "free_vram_gb": 60,
+                "estimated_vram_per_request_gb": 1.0,
+                "recommended_concurrency": 100,
+            },
+        }
+    )
+
+    effective, meta = plan_private_vllm_concurrency(100, capacity, safety_ratio=0.85)
+
+    assert effective == 51
+    assert meta["vram_budget_limit"] == 51
+    assert meta["reason"] == "vram_budget"
+
+
+def test_plan_uses_controller_usable_vram_budget_when_present():
+    capacity = parse_private_vllm_status(
+        {
+            "ready": True,
+            "capacity": {
+                "free_vram_gb": 60,
+                "usable_vram_gb": 40,
+                "estimated_vram_per_request_gb": 1.0,
+            },
+        }
+    )
+
+    effective, meta = plan_private_vllm_concurrency(100, capacity, safety_ratio=0.85)
+
+    assert effective == 40
+    assert meta["vram_budget_limit"] == 40
     assert meta["reason"] == "vram_budget"
 
 

@@ -719,10 +719,15 @@ async def get_extraction_contract(
         lifecycle = str(getattr(m, "lifecycle_base_url", "") or "").strip()
         if not lifecycle:
             return None
+        lifecycle_api_key = getattr(m, "lifecycle_api_key", None)
+        if lifecycle_api_key:
+            from services.secrets import decrypt
+
+            lifecycle_api_key = decrypt(lifecycle_api_key) or lifecycle_api_key
         try:
             capacity = await fetch_private_vllm_capacity(
                 lifecycle,
-                api_key=getattr(m, "lifecycle_api_key", None),
+                api_key=lifecycle_api_key,
                 status_path=str(getattr(m, "lifecycle_status_path", "/status") or "/status"),
                 timeout_s=1.5,
             )
