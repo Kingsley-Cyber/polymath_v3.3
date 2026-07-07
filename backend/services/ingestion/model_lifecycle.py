@@ -131,9 +131,12 @@ async def shutdown_model_lifecycle(
     seen: set[tuple[str, str, str]] = set()
     unique: list[dict[str, Any]] = []
     for entry in entries:
+        down_path = str(entry.get("lifecycle_down_path") or "/down").strip() or "/down"
+        if not down_path.startswith("/"):
+            down_path = "/" + down_path
         key = (
             str(entry.get("lifecycle_base_url") or "").strip().rstrip("/"),
-            str(entry.get("lifecycle_down_path") or "/down"),
+            down_path,
             str(entry.get("lifecycle_api_key") or ""),
         )
         if key in seen:
