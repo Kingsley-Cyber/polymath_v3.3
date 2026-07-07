@@ -48,6 +48,7 @@ KNOWN_PROVIDERS = frozenset(
         "kimi",
         "minimax",
         "mimo",
+        "longcat",
         "mimo-coding",
         "glm-coding",
         # Sprint 3 — QueryModelPoolEntry.provider coverage. Added so

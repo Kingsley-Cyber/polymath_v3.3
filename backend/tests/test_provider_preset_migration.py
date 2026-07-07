@@ -289,6 +289,15 @@ async def test_multiple_providers_in_one_corpus():
     assert cfg["extraction_models"][1]["model"] == "openai/mimo-v2.5"
 
 
+def test_provider_registry_normalizes_longcat_to_openai_compatible_route():
+    from services.provider_presets import normalize_model_for_litellm
+
+    assert (
+        normalize_model_for_litellm("longcat", "LongCat-2.0")
+        == "openai/LongCat-2.0"
+    )
+
+
 @pytest.mark.asyncio
 async def test_settings_query_model_pool_preserved():
     """settings.models.query_model_pool[] uses `provider` + `model_name`.

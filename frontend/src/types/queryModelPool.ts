@@ -261,12 +261,27 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
     },
   },
   {
+    id: "longcat",
+    name: "LongCat",
+    litellm_provider: "openai",
+    base_url: "https://api.longcat.chat/openai/v1",
+    example_model: "LongCat-2.0",
+    example_models: ["LongCat-2.0"],
+    model_dropdown_only: true,
+    default_max_concurrent: 3,
+    kwargs: {
+      thinking: { type: "disabled" },
+    },
+  },
+  {
     id: "siliconflow",
     name: "SiliconFlow",
     litellm_provider: "openai",
     base_url: "https://api.siliconflow.com/v1",
-    example_model: "Qwen/Qwen2.5-7B-Instruct",
+    example_model: "tencent/Hy3",
     example_models: [
+      "tencent/Hy3",
+      "tencent/Hy3-preview",
       "Qwen/Qwen2.5-7B-Instruct",
       "Qwen/Qwen3-8B",
       "deepseek-ai/DeepSeek-V4-Flash",

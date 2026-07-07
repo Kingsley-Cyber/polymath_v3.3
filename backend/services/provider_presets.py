@@ -28,6 +28,7 @@ PROVIDER_PRESET_PREFIX: dict[str, str] = {
     "together": "together_ai",
     "xai": "xai",
     "mimo": "openai",
+    "longcat": "openai",
     "siliconflow": "openai",
     "zai": "openai",
     "glm-coding": "openai",
