@@ -658,7 +658,9 @@ async def get_extraction_contract(
 
     import httpx as _httpx
 
+    from services.extraction_provider_cards import resolve_extraction_provider_card
     from services.ingestion.extraction_contract import resolve_extraction_contract
+    from services.private_vllm_capacity import fetch_private_vllm_capacity
     from services.settings import settings_service as _ss
 
     corpus = await ingestion_service.get_corpus(corpus_id)
@@ -707,18 +709,46 @@ async def get_extraction_contract(
         if contract.pool_source == "extraction_models"
         else cfg.summary_models
     )
-    pool = (
-        [
-            {
-                "model": m.model,
-                "base_url": m.base_url,
-                "max_concurrent": m.max_concurrent,
-                "lifecycle_base_url": m.lifecycle_base_url,
-                "lifecycle_auto_start": m.lifecycle_auto_start,
-                "lifecycle_auto_stop": m.lifecycle_auto_stop,
+    async def _capacity_status(m) -> dict | None:
+        lifecycle = str(getattr(m, "lifecycle_base_url", "") or "").strip()
+        if not lifecycle:
+            return None
+        try:
+            capacity = await fetch_private_vllm_capacity(
+                lifecycle,
+                api_key=getattr(m, "lifecycle_api_key", None),
+                status_path=str(getattr(m, "lifecycle_status_path", "/status") or "/status"),
+                timeout_s=1.5,
+            )
+            return {"ok": True, **capacity.to_dict()}
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "ready": False,
+                "error": str(exc)[:200],
             }
-            for m in (pool_refs or [])
-        ]
+
+    pool_items = []
+    if contract.uses_cloud and contract.pool_source != "none":
+        for m in pool_refs or []:
+            card = resolve_extraction_provider_card(m)
+            pool_items.append(
+                {
+                    "provider_preset": m.provider_preset,
+                    "model": m.model,
+                    "base_url": m.base_url,
+                    "max_concurrent": m.max_concurrent,
+                    "lifecycle_base_url": m.lifecycle_base_url,
+                    "lifecycle_auto_start": m.lifecycle_auto_start,
+                    "lifecycle_auto_stop": m.lifecycle_auto_stop,
+                    "provider_card": card.to_safe_dict(),
+                    "lifecycle_status": await _capacity_status(m)
+                    if card.managed_vllm
+                    else None,
+                }
+            )
+    pool = (
+        pool_items
         if contract.uses_cloud and contract.pool_source != "none"
         else []
     )

@@ -99,18 +99,10 @@ const WORKFLOW_META: {
   needsCloudApi: boolean;
 }[] = [
   {
-    key: "local_only",
-    label: "Local only",
-    detail: "Mac sidecars run extraction; no LLM extraction API calls.",
-    engine: "local",
-    needsCloudPool: false,
-    needsRtx: false,
-    needsCloudApi: false,
-  },
-  {
     key: "rtx_only",
-    label: "RTX vLLM only",
-    detail: "Windows vLLM server receives the cloud-shaped extraction contract.",
+    label: "Private RTX LLM",
+    detail:
+      "Local desktop vLLM receives the same strict provider-card extraction contract as a cloud model.",
     engine: "cloud",
     needsCloudPool: true,
     needsRtx: true,
@@ -118,17 +110,38 @@ const WORKFLOW_META: {
   },
   {
     key: "cloud_only",
-    label: "Cloud API only",
-    detail: "Extraction goes to configured cloud/API model chips.",
+    label: "Cloud/API LLM",
+    detail:
+      "Extraction goes to configured provider-card cloud chips with strict promotion gates.",
     engine: "cloud",
     needsCloudPool: true,
     needsRtx: false,
     needsCloudApi: true,
   },
   {
+    key: "cloud_rtx",
+    label: "Cloud + private RTX",
+    detail: "Cloud/API and RTX provider-card chips share the extraction pool.",
+    engine: "cloud",
+    needsCloudPool: true,
+    needsRtx: true,
+    needsCloudApi: true,
+  },
+  {
+    key: "local_only",
+    label: "Legacy Mac sidecar",
+    detail:
+      "Deprecated GLiNER/GLiREL sidecar path. Use only for compatibility or controlled backfills.",
+    engine: "local",
+    needsCloudPool: false,
+    needsRtx: false,
+    needsCloudApi: false,
+  },
+  {
     key: "local_cloud",
-    label: "Local + cloud",
-    detail: "Local sidecars and cloud chips split chunks deterministically.",
+    label: "Legacy sidecar + cloud",
+    detail:
+      "Transition mode: deprecated Mac sidecars and cloud chips split chunks deterministically.",
     engine: "dual",
     needsCloudPool: true,
     needsRtx: false,
@@ -136,26 +149,18 @@ const WORKFLOW_META: {
   },
   {
     key: "local_rtx",
-    label: "Local + RTX",
-    detail: "Mac sidecars and RTX vLLM split extraction chunks.",
+    label: "Legacy sidecar + RTX",
+    detail: "Transition mode: deprecated Mac sidecars and RTX vLLM split extraction chunks.",
     engine: "dual",
     needsCloudPool: true,
     needsRtx: true,
     needsCloudApi: false,
   },
   {
-    key: "cloud_rtx",
-    label: "Cloud + RTX",
-    detail: "Cloud/API and RTX chips share the extraction pool.",
-    engine: "cloud",
-    needsCloudPool: true,
-    needsRtx: true,
-    needsCloudApi: true,
-  },
-  {
     key: "all_lanes",
-    label: "Local + cloud + RTX",
-    detail: "Mac sidecars plus all configured cloud/RTX extraction chips.",
+    label: "Legacy sidecar + cloud + RTX",
+    detail:
+      "Transition mode: deprecated Mac sidecars plus all configured cloud/RTX extraction chips.",
     engine: "dual",
     needsCloudPool: true,
     needsRtx: true,
@@ -163,9 +168,9 @@ const WORKFLOW_META: {
   },
   {
     key: "fast_local_graph_rtx",
-    label: "Fast local graph + RTX enrich",
+    label: "Deprecated local graph + RTX enrich",
     detail:
-      "GLiNER/GLiREL builds the whole graph skeleton locally ($0, fast); RTX vLLM re-extracts only quality-gated gaps: low coverage, thin facts, ambiguous predicates.",
+      "Legacy GLiNER/GLiREL skeleton first, then RTX re-extracts quality-gated gaps. Kept for migration only.",
     engine: "local_then_enrich",
     needsCloudPool: true,
     needsRtx: true,
@@ -236,7 +241,7 @@ function createDefaultIngestionConfig(
       patch.use_neo4j = true;
     }
   }
-  return {
+  let next: IngestionConfig = {
     ...DEFAULT_INGESTION_CONFIG,
     ...patch,
     parent_chunk_tokens: { ...DEFAULT_INGESTION_CONFIG.parent_chunk_tokens },
@@ -249,6 +254,17 @@ function createDefaultIngestionConfig(
     extraction_models: [...DEFAULT_INGESTION_CONFIG.extraction_models],
     embedding_models: [...DEFAULT_INGESTION_CONFIG.embedding_models],
   };
+  if ((next.extraction_engine ?? "cloud") === "cloud") {
+    next.extraction_models = ensureRtxExtractionModel(next.extraction_models ?? []);
+  }
+  if (usesCloudEngine(draftEngine(next.extraction_engine, "cloud")) && hasFactoryChunkShape(next)) {
+    next = {
+      ...next,
+      child_chunk_algorithm: "sentence_merge",
+      child_chunk_tokens: { min_tokens: 128, target_tokens: 512, max_tokens: 700 },
+    };
+  }
+  return next;
 }
 
 function isRtxModel(entry: ModelProfileRef): boolean {
@@ -295,6 +311,13 @@ function makeRtxExtractionModel(): ModelProfileRef {
       managed_vllm: true,
       resource_class: "rtx",
       supports_json_schema: true,
+      schema_mode: "json_schema",
+      json_repair_mode: "provider_native",
+      semantic_verifier_mode: "strict_with_direction_repair",
+      concurrency_policy: "adaptive_vram_85",
+      failure_backfill_policy: "retry_then_stage",
+      adaptive_vram: true,
+      vram_safety_ratio: 0.85,
     },
   };
 }
@@ -385,9 +408,7 @@ function applyWorkflowToConfig(
 
 function poolLabel(entries: ModelProfileRef[]): string {
   if (!entries.length) return "empty";
-  return entries
-    .map((entry) => `${entry.provider_preset || "custom"}:${entry.model} @${entry.max_concurrent}`)
-    .join(", ");
+  return entries.map(formatExtractionPoolEntry).join(" | ");
 }
 
 interface PresetSelectorProps {
@@ -539,7 +560,7 @@ function IngestionWorkflowSelector({
             {draftEngine(config.extraction_engine, "local").replace(/_/g, " ")}
           </div>
           <div className="text-content-tertiary mt-0.5">
-            {cloudActive ? poolLabel(extractionPool) : "cloud pool inactive"}
+            {cloudActive ? poolLabel(extractionPool) : "provider pool inactive"}
           </div>
         </div>
         <div className="border border-border-minimal bg-bg-surface/50 px-2 py-1.5">
@@ -1485,16 +1506,123 @@ function usesCloudEngine(engine: ResolvedDraftEngine): boolean {
   );
 }
 
+type ContractPoolEntry = ExtractionContractResponse["pool"][number];
+type ProviderCard = NonNullable<ContractPoolEntry["provider_card"]>;
+
+function isContractPoolEntry(
+  entry: ModelProfileRef | ContractPoolEntry,
+): entry is ContractPoolEntry {
+  return "provider_card" in entry || "lifecycle_status" in entry;
+}
+
+function inferDraftProviderCard(entry: ModelProfileRef): ProviderCard {
+  const provider = (entry.provider_preset || "custom").toLowerCase();
+  const model = (entry.model || "").toLowerCase();
+  const base = (entry.base_url || "").toLowerCase();
+  const extra = entry.extra_params || {};
+  const rtx = isRtxModel(entry);
+  const longcat = provider === "longcat" || base.includes("longcat") || model.includes("longcat");
+  const siliconflow =
+    provider === "siliconflow" || base.includes("siliconflow") || model.includes("hy3");
+  const mimo = provider === "mimo" || base.includes("xiaomimimo") || model.includes("mimo");
+  const openrouterNemo = provider === "openrouter" && model.includes("mistral-nemo");
+  const nativeSchema =
+    Boolean(extra.supports_json_schema) ||
+    rtx ||
+    provider === "openai" ||
+    provider === "deepseek" ||
+    openrouterNemo;
+  const compilerGated = longcat || siliconflow || mimo || !nativeSchema;
+  return {
+    provider: rtx ? "local_private_vllm" : provider,
+    model: entry.model,
+    endpoint: entry.base_url || "litellm_default",
+    auth_mode: entry.api_key ? "bearer_api_key" : rtx ? "none_or_lan_bearer" : "bearer_api_key",
+    schema_mode: nativeSchema ? "json_schema" : "json_object_prompt",
+    json_repair_mode: compilerGated ? "deterministic_compiler" : "provider_native",
+    semantic_verifier_mode: "strict_with_direction_repair",
+    concurrency_policy: rtx ? "adaptive_vram_85" : "static_lane_cap",
+    failure_backfill_policy: "retry_then_stage",
+    supports_json_schema: nativeSchema,
+    supports_json_object: !compilerGated,
+    disable_thinking: longcat || mimo || provider === "deepseek",
+    local_private: rtx,
+    managed_vllm: rtx || Boolean(entry.lifecycle_base_url),
+    lifecycle_base_url: entry.lifecycle_base_url || "",
+    promotion_gate: [
+      "json_parse",
+      "pydantic_extraction_response",
+      "allowed_predicate",
+      "required_evidence_phrase",
+      "sane_endpoints",
+      "semantic_direction_check",
+    ],
+    notes: [],
+  };
+}
+
+function providerLabel(card: ProviderCard | null | undefined, entry?: ModelProfileRef | ContractPoolEntry): string {
+  const provider = (card?.provider || entry?.provider_preset || "custom").toLowerCase();
+  if (provider === "local_private_vllm" || provider === "vllm-rtx" || provider === "vllm") {
+    return "Local RTX vLLM";
+  }
+  if (provider === "siliconflow") return "SiliconFlow";
+  if (provider === "openrouter") return "OpenRouter";
+  if (provider === "longcat") return "LongCat";
+  if (provider === "deepseek") return "DeepSeek";
+  if (provider === "openai") return "OpenAI";
+  if (provider === "mimo") return "MiMo";
+  return provider || "custom";
+}
+
+function schemaModeLabel(card: ProviderCard | null | undefined): string {
+  if (!card) return "schema unknown";
+  if (card.schema_mode === "json_schema") return "json_schema";
+  if (card.schema_mode === "json_object_prompt") return "compiler-gated JSON";
+  if (card.schema_mode === "json_object") return "json_object";
+  return "JSONL repair";
+}
+
+function concurrencyLabel(card: ProviderCard | null | undefined, maxConcurrent?: number | null): string {
+  if (card?.concurrency_policy === "adaptive_vram_85") {
+    return `adaptive 85% VRAM · cap ${maxConcurrent ?? 1}`;
+  }
+  return `static cap ${maxConcurrent ?? 1}`;
+}
+
+function lifecycleStatusLabel(entry: ContractPoolEntry): string | null {
+  const status = entry.lifecycle_status;
+  if (!status) return null;
+  if (!status.ok) return `control DOWN${status.error ? ` · ${status.error}` : ""}`;
+  const free =
+    typeof status.gpu_vram_free_gb === "number"
+      ? ` · ${status.gpu_vram_free_gb.toFixed(1)}GB free`
+      : "";
+  const rec =
+    typeof status.recommended_concurrency === "number"
+      ? ` · rec ${status.recommended_concurrency}`
+      : "";
+  return `${status.ready ? "READY" : "NOT READY"}${free}${rec}`;
+}
+
 function formatExtractionPoolEntry(
   entry:
     | ModelProfileRef
     | ExtractionContractResponse["pool"][number],
 ): string {
-  const base = `${entry.model} @${entry.max_concurrent ?? 1}`;
-  if (entry.lifecycle_auto_start && entry.lifecycle_base_url) {
-    return `${base} warms ${entry.lifecycle_base_url}`;
-  }
-  return base;
+  const card = isContractPoolEntry(entry)
+    ? entry.provider_card
+    : inferDraftProviderCard(entry);
+  const lifecycle = isContractPoolEntry(entry) ? lifecycleStatusLabel(entry) : null;
+  const pieces = [
+    `${providerLabel(card, entry)}: ${entry.model} @${entry.max_concurrent ?? 1}`,
+    `schema ${schemaModeLabel(card)}`,
+    `repair ${card?.json_repair_mode ?? "unknown"}`,
+    `verifier ${card?.semantic_verifier_mode ?? "strict"}`,
+    concurrencyLabel(card, entry.max_concurrent),
+  ];
+  if (lifecycle) pieces.push(lifecycle);
+  return pieces.join(" · ");
 }
 
 function IngestionModelsSection({
@@ -1573,7 +1701,7 @@ function IngestionModelsSection({
           Ingestion Models
         </div>
         <div className="text-[10px] text-content-tertiary tracking-wider uppercase">
-          {draftUsesCloud ? "extraction pool active" : "cloud pool hidden"}
+          {draftUsesCloud ? "provider extraction pool active" : "provider pool hidden"}
         </div>
       </div>
 
@@ -1588,13 +1716,13 @@ function IngestionModelsSection({
           </span>
           <span className="text-[10px] font-bold tracking-widest text-accent-secondary uppercase">
             {engine === "local_then_enrich"
-              ? "LOCAL FIRST - RTX fills gaps"
+              ? "LEGACY LOCAL FIRST - RTX fills gaps"
               : draftUsesLocal && draftUsesCloud
-                ? "DUAL - both, chunks split"
+                ? "TRANSITION - legacy sidecar + provider LLM"
                 : draftUsesLocal
-                  ? "LOCAL"
-                  : draftUsesCloud
-                    ? "CLOUD"
+                  ? "LEGACY LOCAL SIDECAR"
+                : draftUsesCloud
+                    ? "PROVIDER LLM"
                     : "OFF - vectors only"}
             {engine === "inherit" || engine === undefined ? " (inherited)" : ""}
             {engine === "local_then_cloud" ? " (local->cloud rescue)" : ""}
@@ -1631,7 +1759,7 @@ function IngestionModelsSection({
               <span className="text-content-primary font-bold uppercase">{draft}</span>
               {draftUsesLocal && (
                 <span className="text-content-secondary">
-                  {" · sidecars from Settings"}
+                  {" · legacy GLiNER/GLiREL sidecars from Settings"}
                 </span>
               )}
               {draftUsesCloud && (
@@ -1668,9 +1796,10 @@ function IngestionModelsSection({
               <span className="text-content-tertiary"> ({contract.source})</span>
               {(contract.engine === "local" ||
                 contract.engine === "dual" ||
-                contract.engine === "local_then_cloud") && (
+                contract.engine === "local_then_cloud" ||
+                contract.engine === "local_then_enrich") && (
                 <span className="text-content-secondary">
-                  {" · sidecars: "}
+                  {" · legacy sidecars: "}
                   {contract.endpoints.filter((e) => e.enabled).length === 0
                     ? "none enabled (env floor)"
                     : contract.endpoints
@@ -1686,7 +1815,8 @@ function IngestionModelsSection({
               )}
               {(contract.engine === "cloud" ||
                 contract.engine === "dual" ||
-                contract.engine === "local_then_cloud") && (
+                contract.engine === "local_then_cloud" ||
+                contract.engine === "local_then_enrich") && (
                 <span className="text-content-secondary">
                   {" · pool ("}
                   {contract.pool_source === "summary_models"
@@ -1751,7 +1881,7 @@ function IngestionModelsSection({
           subtitle={
             linked
               ? "Legacy mode: Summary pool is currently reused for cloud extraction"
-              : "Cloud/OpenAI-compatible extraction lane · RTX and API chips share this pool"
+              : "Provider-card extraction lane · private RTX and API chips share this pool"
           }
           value={extractionPool}
           onChange={(next) => onPatch({ extraction_models: next })}
@@ -1767,7 +1897,7 @@ function IngestionModelsSection({
       ) : (
         <div className="border border-border-minimal bg-bg-base/40 px-3 py-2 text-[10px] text-content-tertiary leading-snug">
           Extraction model pool hidden because this workflow does not send Ghost
-          B to cloud or RTX. Local sidecars are configured globally in Settings.
+          B to provider-card LLM chips. Legacy sidecars are configured globally in Settings.
         </div>
       )}
     </div>

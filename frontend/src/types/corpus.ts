@@ -106,11 +106,11 @@ export interface IngestionConfig {
   models_linked: boolean;
 
   /**
-   * Per-corpus extraction contract (owner two-toggle model): local sidecars
-   * on → "local", cloud pool on → "cloud", both → "dual", neither → "off".
-   * "inherit" = legacy fallback to the global Settings engine (the lifespan
-   * migration stamps existing corpora explicit). Resolved truthfully by
-   * GET /api/corpora/{id}/extraction-contract.
+   * Per-corpus extraction contract. Modern production extraction uses
+   * provider-card LLM chips through "cloud", including private RTX/vLLM
+   * endpoints. "local" is the legacy GLiNER/GLiREL sidecar path. "inherit" =
+   * legacy fallback to global Settings; the lifespan migration stamps existing
+   * corpora explicit. Resolved truthfully by GET /api/corpora/{id}/extraction-contract.
    */
   extraction_engine?: ExtractionEngine;
 
@@ -229,10 +229,10 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
   extraction_models: [],
   entity_confidence_threshold: 0.5,
   models_linked: false,
-  // New corpora are EXPLICIT about the extraction workflow — never "inherit"
-  // (§13: the silent global fallback is how a corpus ran the wrong engine
-  // for 14 hours). Local sidecars are the proven $0 default.
-  extraction_engine: "local",
+  // New corpora are EXPLICIT about the extraction workflow — never "inherit".
+  // Modern extraction is provider-card LLM based; the UI scaffolds a private
+  // RTX/vLLM chip for create flows. "local" remains a legacy sidecar mode.
+  extraction_engine: "cloud",
   // entity_schema / relation_schema / schema_strict intentionally omitted —
   // backend fills them from the universal schema on POST.
   use_neo4j: true,
@@ -459,12 +459,48 @@ export interface ExtractionContractResponse {
   models_linked: boolean;
   pool_source: "extraction_models" | "summary_models" | "none";
   pool: Array<{
+    provider_preset?: string | null;
     model: string;
     base_url?: string | null;
     max_concurrent?: number | null;
     lifecycle_base_url?: string | null;
     lifecycle_auto_start?: boolean | null;
     lifecycle_auto_stop?: boolean | null;
+    provider_card?: {
+      provider: string;
+      model: string;
+      endpoint: string;
+      auth_mode: string;
+      schema_mode: "json_schema" | "json_object" | "json_object_prompt" | "jsonl";
+      json_repair_mode:
+        | "provider_native"
+        | "balanced_object_repair"
+        | "jsonl_repair_resume"
+        | "deterministic_compiler";
+      semantic_verifier_mode: "strict" | "strict_with_direction_repair";
+      concurrency_policy: "static_lane_cap" | "adaptive_vram_85";
+      failure_backfill_policy: "retry_then_stage" | "stage_failures";
+      supports_json_schema: boolean;
+      supports_json_object: boolean;
+      disable_thinking: boolean;
+      local_private: boolean;
+      managed_vllm: boolean;
+      lifecycle_base_url: string;
+      promotion_gate: string[];
+      notes: string[];
+    } | null;
+    lifecycle_status?: {
+      ok: boolean;
+      ready: boolean;
+      gpu_vram_total_gb?: number | null;
+      gpu_vram_used_gb?: number | null;
+      gpu_vram_free_gb?: number | null;
+      recommended_concurrency?: number | null;
+      running_requests?: number;
+      waiting_requests?: number;
+      source?: string;
+      error?: string | null;
+    } | null;
   }>;
   endpoints: Array<{
     label?: string | null;

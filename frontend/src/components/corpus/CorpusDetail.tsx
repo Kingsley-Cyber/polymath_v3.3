@@ -86,14 +86,21 @@ function defaultBatchProfile(corpus: CorpusResponse): IngestProfileName {
   const hasRemotePool =
     (cfg.extraction_models ?? []).some((m) => {
       const url = (m.base_url ?? "").toLowerCase();
+      const provider = (m.provider_preset ?? "").toLowerCase();
+      const model = (m.model ?? "").toLowerCase();
       const extras = m.extra_params ?? {};
       return (
+        provider === "vllm-rtx" ||
+        provider === "vllm" ||
         url.includes("/v1") ||
         url.includes("192.168.") ||
+        model.includes("polymath-extract") ||
+        model.includes("vllm") ||
+        extras.resource_class === "rtx" ||
         extras.resource_class === "remote_vllm" ||
         extras.managed_vllm === true
       );
-    }) || ["cloud", "dual", "local_then_enrich"].includes(engine);
+    }) || ["cloud", "dual", "local_then_cloud", "local_then_enrich"].includes(engine);
   return hasRemotePool ? "rtx_assisted" : "mac_queryable_first";
 }
 
@@ -2029,6 +2036,20 @@ function IngestOverridesPanel({
 }) {
   const cfg = corpus.default_ingestion_config;
   const summaryDefault = cfg.summary_models?.[0]?.model ?? "(none)";
+  const extractionEngine = cfg.extraction_engine ?? "cloud";
+  const extractionUsesProvider = ["cloud", "dual", "local_then_cloud", "local_then_enrich"].includes(
+    extractionEngine,
+  );
+  const extractionPool = cfg.models_linked ? cfg.summary_models ?? [] : cfg.extraction_models ?? [];
+  const extractionDefault = extractionUsesProvider
+    ? extractionPool.length
+      ? extractionPool
+          .map((m) => `${m.provider_preset || "custom"}:${m.model} @${m.max_concurrent}`)
+          .join(" | ")
+      : "provider pool empty"
+    : extractionEngine === "off"
+      ? "off — vectors only"
+      : "legacy GLiNER/GLiREL sidecar";
 
   const [editEmbed, setEditEmbed] = useState(false);
   const [editSummary, setEditSummary] = useState(false);
@@ -2175,24 +2196,23 @@ function IngestOverridesPanel({
         </div>
       </OverrideRow>
 
-      {/* Extraction row — Ghost B runs the LOCAL deterministic lane
-          (GLiNER ×2 + GLiREL + rules) unconditionally since the local
-          transition; there is no per-batch LLM to override. Showing the
-          linked summary model here (the old behavior) was a lie that
-          confused which engine does extraction. Engine selection +
-          validation lives in Settings → Ingestion → Extraction Engines. */}
+      {/* Extraction row — per-batch overrides intentionally do not replace
+          provider-card extraction routing. The corpus contract owns which
+          provider/model pool Ghost B uses. */}
       <div className="flex items-start justify-between gap-3 py-2">
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-wide text-content-tertiary">
             Extraction (GHOST B)
           </div>
           <div className="text-[12px] text-content-primary font-mono truncate">
-            GLiNER ×2 + GLiREL — local engine
+            {extractionDefault}
           </div>
           <div className="text-[11px] text-content-tertiary">
-            Routed via Settings → Ingestion → Extraction Engines (Validate
-            shows the live engine + GPU state). Not an LLM; no per-batch
-            override.
+            {extractionUsesProvider
+              ? "Provider-card LLM extraction is configured on the corpus; strict schema gates run before graph promotion."
+              : extractionEngine === "off"
+                ? "Graph extraction is disabled for this corpus."
+                : "Legacy local sidecar mode. Configure provider-card RTX/cloud extraction in Corpus Manager."}
           </div>
         </div>
       </div>
