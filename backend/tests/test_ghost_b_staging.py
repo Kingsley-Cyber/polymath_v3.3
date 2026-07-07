@@ -473,7 +473,11 @@ async def test_resume_skip_keeps_ghost_b_partial_metrics():
     ) as extract_mock, patch.object(worker.settings, "NEO4J_ENABLED", True):
         parent_mock.return_value = []
         result = await worker._run_ghosts_parallel(
-            config=IngestionConfig(use_neo4j=True, chunk_summarization=False),
+            config=IngestionConfig(
+                use_neo4j=True,
+                chunk_summarization=False,
+                extraction_engine="legacy_local",
+            ),
             parents=[],
             children=[],
             doc_id="d-resume",
@@ -565,7 +569,11 @@ async def test_resume_extracts_only_missing_ghost_b_chunks():
         failures_mock.return_value = []
         lens_mock.return_value = lens
         result = await worker._run_ghosts_parallel(
-            config=IngestionConfig(use_neo4j=True, chunk_summarization=False),
+            config=IngestionConfig(
+                use_neo4j=True,
+                chunk_summarization=False,
+                extraction_engine="legacy_local",
+            ),
             parents=[],
             children=children,
             doc_id="d-resume",
@@ -653,7 +661,11 @@ async def test_resume_keeps_staged_ghost_b_when_missing_retry_totally_fails():
         failures_mock.return_value = []
         lens_mock.return_value = lens
         result = await worker._run_ghosts_parallel(
-            config=IngestionConfig(use_neo4j=True, chunk_summarization=False),
+            config=IngestionConfig(
+                use_neo4j=True,
+                chunk_summarization=False,
+                extraction_engine="legacy_local",
+            ),
             parents=[],
             children=children,
             doc_id="d-resume",

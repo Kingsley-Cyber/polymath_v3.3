@@ -1267,6 +1267,162 @@ def test_parse_facts_keeps_valid_and_drops_invalid_without_failing_chunk():
         evidence_phrase="Orders over $500 require manager approval",
     )
     assert result.fact_drop_count == 2
+    assert result.validation_rejection_count == 2
+
+
+@pytest.mark.asyncio
+async def test_success_with_validation_rejections_is_audited(monkeypatch):
+    audit_events: list[dict] = []
+    raw = json.dumps({
+        "schema_version": "polymath.extract.v1",
+        "entities": [
+            {
+                "canonical_name": "alpha",
+                "surface_form": "Alpha",
+                "entity_type": "Concept",
+                "confidence": 0.95,
+            },
+            {
+                "canonical_name": "beta",
+                "surface_form": "Beta",
+                "entity_type": "Concept",
+                "confidence": 0.95,
+            },
+        ],
+        "relations": [
+            {
+                "subject": "alpha",
+                "predicate": "uses",
+                "object": "beta",
+                "object_kind": "entity",
+                "confidence": 0.9,
+                "evidence_phrase": "Alpha uses Beta",
+            },
+            {
+                "subject": "alpha",
+                "predicate": "uses",
+                "object": "beta",
+                "object_kind": "entity",
+                "confidence": 0.9,
+                "evidence_phrase": "not actually in the chunk",
+            },
+        ],
+        "facts": [],
+    })
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "usage": {
+                    "total_tokens": 50,
+                    "prompt_tokens": 35,
+                    "completion_tokens": 15,
+                },
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": raw},
+                    }
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            return FakeResponse()
+
+    fake_settings = SimpleNamespace(
+        ENTITY_CONFIDENCE_THRESHOLD=0.0,
+        SCHEMA_INLINE_LIMIT=30,
+        SCHEMA_RETRIEVAL_TOP_K=10,
+        EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_OUTPUT_MODE="json_object",
+        EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK=12,
+        EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK=4,
+        EXTRACTION_EVIDENCE_MAX_CHARS=120,
+        EXTRACTION_FACT_VALUE_MAX_CHARS=160,
+        EXTRACTION_RESCUE_MAX_TOKENS=900,
+        EXTRACTION_ENABLE_FACTS=True,
+        EXTRACTION_MAX_FACTS_PER_CHUNK=5,
+        EXTRACTION_JSONL_MAX_CALLS=1,
+        EXTRACTION_FOREGROUND_MAX_CALLS=1,
+        EXTRACTION_JSONL_DEBUG_RAW=False,
+        EXTRACTION_ERROR_AUDIT_RAW_FIRST_CHARS=200,
+        EXTRACTION_ERROR_AUDIT_RAW_LAST_CHARS=400,
+        EXTRACTION_MAX_INPUT_TOKENS=700,
+        EXTRACTION_MAX_TOTAL_LINES=20,
+        EXTRACTION_RESCUE_MAX_TOTAL_LINES=16,
+        EXTRACTION_MAX_ENTITIES_PER_CHUNK=14,
+        EXTRACTION_MAX_RELATIONS_PER_CHUNK=20,
+        EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK=8,
+        LITELLM_MASTER_KEY="test-key",
+        LITELLM_URL="http://litellm",
+        DEFAULT_COMPLETION_MODEL="test-model",
+        EXTRACTION_MAX_CONCURRENT=1,
+        EXTRACTION_GLOBAL_MAX_CONCURRENT=180,
+        EXTRACTION_FAILURE_PAUSE_PERCENT=100.0,
+        EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS=20,
+        EXTRACTION_DROP_UNKNOWN_RELATIONS=True,
+    )
+    monkeypatch.setattr(ghost_b, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(ghost_b.httpx, "AsyncClient", FakeClient)
+
+    async def _audit(event: dict) -> None:
+        audit_events.append(event)
+
+    report = await ghost_b.extract_entities(
+        [
+            ExtractionTask(
+                chunk_id="c1",
+                doc_id="d1",
+                corpus_id="corp1",
+                text="Alpha uses Beta.",
+            )
+        ],
+        pool=[{
+            "provider_preset": "openai",
+            "model": "gpt-test",
+            "base_url": None,
+            "api_key": None,
+            "max_concurrent": 1,
+            "extra_params": {},
+        }],
+        return_report=True,
+        enable_facts=True,
+        audit_event_sink=_audit,
+        audit_run_id="run-validation",
+    )
+
+    assert len(report.results) == 1
+    assert len(report.failures) == 0
+    assert len(report.results[0].relations) == 1
+    assert report.results[0].evidence_drop_count == 1
+    assert report.results[0].validation_rejection_count == 1
+    assert report.metrics["validation_rejection_count"] == 1
+    event = next(
+        e for e in audit_events
+        if e["event"] == "ghost_b_attempt_succeeded_with_validation_rejections"
+    )
+    assert event["run_id"] == "run-validation"
+    assert event["prompt_hash"]
+    assert event["error_type"] == "validation_gate_rejected_items"
+    assert event["validation"]["evidence_drops"] == 1
+    assert event["validation"]["validation_rejections"] == 1
+    assert event["raw"]["sha256"]
+    assert event["raw"]["first"].startswith("{")
 
 
 def test_schema_strict_legacy_values_deserialize():

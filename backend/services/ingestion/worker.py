@@ -764,6 +764,20 @@ def _ghost_b_metrics_for_skipped(results: list[ExtractionResult] | None) -> dict
         "entity_drop_count": sum(r.entity_drop_count for r in results),
         "relation_drop_count": sum(r.relation_drop_count for r in results),
         "fact_drop_count": sum(getattr(r, "fact_drop_count", 0) for r in results),
+        "entity_evidence_drop_count": sum(
+            getattr(r, "entity_evidence_drop_count", 0) for r in results
+        ),
+        "citation_drop_count": sum(getattr(r, "citation_drop_count", 0) for r in results),
+        "strict_entity_drop_count": sum(
+            getattr(r, "strict_entity_drop_count", 0) for r in results
+        ),
+        "strict_relation_drop_count": sum(
+            getattr(r, "strict_relation_drop_count", 0) for r in results
+        ),
+        "validation_rejection_count": sum(
+            int(getattr(r, "validation_rejection_count", 0) or 0)
+            for r in results
+        ),
         "schema_lens_ids": lens_ids,
         "error_counts": {},
     }
@@ -931,6 +945,12 @@ def _rehydrate_ghost_b_staging(staged: list[dict]) -> list[ExtractionResult]:
                 domain_range_warn_count=r.get("domain_range_warn_count", 0),
                 endpoint_completion_count=r.get("endpoint_completion_count", 0),
                 evidence_cue_repair_count=r.get("evidence_cue_repair_count", 0),
+                semantic_direction_repair_count=r.get("semantic_direction_repair_count", 0),
+                semantic_direction_drop_count=r.get("semantic_direction_drop_count", 0),
+                entity_evidence_drop_count=r.get("entity_evidence_drop_count", 0),
+                citation_drop_count=r.get("citation_drop_count", 0),
+                strict_entity_drop_count=r.get("strict_entity_drop_count", 0),
+                strict_relation_drop_count=r.get("strict_relation_drop_count", 0),
                 evidence_drop_count=r.get("evidence_drop_count", 0),
                 fact_drop_count=r.get("fact_drop_count", 0),
                 schema_lens_id=r.get("schema_lens_id"),

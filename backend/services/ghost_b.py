@@ -1753,6 +1753,10 @@ class ExtractionResult:
     evidence_cue_repair_count: int = 0  # evidence phrase repaired predicate/direction
     semantic_direction_repair_count: int = 0
     semantic_direction_drop_count: int = 0
+    entity_evidence_drop_count: int = 0
+    citation_drop_count: int = 0
+    strict_entity_drop_count: int = 0
+    strict_relation_drop_count: int = 0
     # Phase B evidence gate — relations whose evidence_phrase is empty,
     # missing, or not a substring of the chunk text get dropped before
     # they reach Mongo / Neo4j. The counter exposes the rejection rate at
@@ -1762,6 +1766,26 @@ class ExtractionResult:
     evidence_drop_count: int = 0
     fact_drop_count: int = 0
     schema_lens_id: str | None = None
+
+    @property
+    def validation_rejection_count(self) -> int:
+        """Total emitted items rejected by promotion gates.
+
+        This intentionally excludes deterministic repairs/remaps that still
+        produce a schema-valid promoted item. It counts only items dropped by
+        evidence, citation, schema, strict Pydantic, or fact gates.
+        """
+        return (
+            self.entity_drop_count
+            + self.relation_drop_count
+            + self.entity_evidence_drop_count
+            + self.citation_drop_count
+            + self.strict_entity_drop_count
+            + self.strict_relation_drop_count
+            + self.semantic_direction_drop_count
+            + self.evidence_drop_count
+            + self.fact_drop_count
+        )
 
 
 @dataclass
@@ -1831,6 +1855,12 @@ def _result_counts(result: ExtractionResult | None) -> dict[str, int]:
         "relations": len(result.relations),
         "facts": len(getattr(result, "facts", []) or []),
     }
+
+
+def _validation_rejection_count(result: ExtractionResult | None) -> int:
+    if result is None:
+        return 0
+    return int(getattr(result, "validation_rejection_count", 0) or 0)
 
 
 async def _emit_ghost_b_audit_event(
@@ -1928,6 +1958,19 @@ def summarize_extraction_batch(
         "evidence_cue_repair_count": sum(r.evidence_cue_repair_count for r in results),
         "evidence_drop_count": sum(r.evidence_drop_count for r in results),
         "fact_drop_count": sum(getattr(r, "fact_drop_count", 0) for r in results),
+        "entity_evidence_drop_count": sum(
+            getattr(r, "entity_evidence_drop_count", 0) for r in results
+        ),
+        "citation_drop_count": sum(getattr(r, "citation_drop_count", 0) for r in results),
+        "strict_entity_drop_count": sum(
+            getattr(r, "strict_entity_drop_count", 0) for r in results
+        ),
+        "strict_relation_drop_count": sum(
+            getattr(r, "strict_relation_drop_count", 0) for r in results
+        ),
+        "validation_rejection_count": sum(
+            _validation_rejection_count(r) for r in results
+        ),
         "entity_drop_count": sum(r.entity_drop_count for r in results),
         "relation_drop_count": sum(r.relation_drop_count for r in results),
         "schema_lens_ids": lens_ids,
@@ -2923,6 +2966,10 @@ def _parse(
         evidence_cue_repair_count=counters["evidence_cue_repair_count"],
         semantic_direction_repair_count=counters["semantic_direction_repair_count"],
         semantic_direction_drop_count=counters["semantic_direction_drop_count"],
+        entity_evidence_drop_count=entity_evidence_drop_count,
+        citation_drop_count=citation_drop_count,
+        strict_entity_drop_count=strict_entity_drops,
+        strict_relation_drop_count=strict_relation_drops,
         evidence_drop_count=evidence_drop_count,
         fact_drop_count=fact_drop_count,
         schema_lens_id=lens.lens_id if lens else None,
@@ -3810,14 +3857,22 @@ async def extract_entities(
                     "post_entities": post_counts["entities"],
                     "post_relations": post_counts["relations"],
                     "post_facts": post_counts["facts"],
+                    "entity_schema_drops": getattr(result, "entity_drop_count", 0) if result else 0,
+                    "relation_schema_drops": getattr(result, "relation_drop_count", 0) if result else 0,
+                    "entity_evidence_drops": getattr(result, "entity_evidence_drop_count", 0) if result else 0,
+                    "citation_drops": getattr(result, "citation_drop_count", 0) if result else 0,
+                    "strict_entity_drops": getattr(result, "strict_entity_drop_count", 0) if result else 0,
+                    "strict_relation_drops": getattr(result, "strict_relation_drop_count", 0) if result else 0,
+                    "semantic_direction_drops": getattr(result, "semantic_direction_drop_count", 0) if result else 0,
                     "evidence_drops": getattr(result, "evidence_drop_count", 0) if result else 0,
                     "fact_drops": getattr(result, "fact_drop_count", 0) if result else 0,
+                    "validation_rejections": _validation_rejection_count(result),
                     "empty_after_validation": empty_after_validation,
                 },
                 "error_type": error_type,
                 "error_message": (error_message or "")[:1000],
             }
-            if event == "ghost_b_attempt_failed":
+            if event == "ghost_b_attempt_failed" or raw_fingerprint is not None:
                 body["raw"] = raw_fingerprint or _raw_output_fingerprint(
                     "",
                     first_chars=audit_raw_first_chars,
@@ -4096,13 +4151,27 @@ async def extract_entities(
                         }
                     )
                     if complete and result:
+                        validation_rejections = _validation_rejection_count(result)
                         await _audit_attempt(
-                            event="ghost_b_attempt_succeeded",
+                            event=(
+                                "ghost_b_attempt_succeeded_with_validation_rejections"
+                                if validation_rejections
+                                else "ghost_b_attempt_succeeded"
+                            ),
                             attempt=attempt + 1,
                             profile=profile,
                             output_mode=profile_output_mode,
                             prompt_hash=prompt_hash,
                             prompt_chars=prompt_chars,
+                            raw_fingerprint=(
+                                _raw_output_fingerprint(
+                                    raw,
+                                    first_chars=audit_raw_first_chars,
+                                    last_chars=audit_raw_last_chars,
+                                )
+                                if validation_rejections
+                                else None
+                            ),
                             result=result,
                             jsonl_chunk=jsonl_chunk,
                             jsonl_items=jsonl_items,
@@ -4113,6 +4182,17 @@ async def extract_entities(
                             finish_reason=finish_reason,
                             usage=usage,
                             max_tokens=attempt_max_tokens,
+                            error_type=(
+                                "validation_gate_rejected_items"
+                                if validation_rejections
+                                else None
+                            ),
+                            error_message=(
+                                f"{validation_rejections} emitted extraction item(s) "
+                                "were rejected by promotion gates"
+                                if validation_rejections
+                                else None
+                            ),
                         )
                         raw = ""
                         logger.debug(
