@@ -24,6 +24,28 @@ def test_parse_status_accepts_vram_aliases_and_derives_free():
     assert capacity.waiting_requests == 1
 
 
+def test_parse_status_accepts_nested_controller_capacity_payload():
+    capacity = parse_private_vllm_status(
+        {
+            "ready": True,
+            "active_requests": 3,
+            "capacity": {
+                "free_vram_gb": 60,
+                "total_vram_gb": 100,
+                "recommended_concurrency": 78,
+                "queue_depth": 4,
+            },
+        }
+    )
+
+    assert capacity.ready is True
+    assert capacity.gpu_vram_total_gb == 100
+    assert capacity.gpu_vram_free_gb == 60
+    assert capacity.recommended_concurrency == 78
+    assert capacity.running_requests == 3
+    assert capacity.waiting_requests == 4
+
+
 def test_plan_prefers_server_recommended_concurrency():
     capacity = parse_private_vllm_status(
         {"ready": True, "gpu_vram_free_gb": 20, "recommended_concurrency": 37}
@@ -33,6 +55,22 @@ def test_plan_prefers_server_recommended_concurrency():
 
     assert effective == 37
     assert meta["reason"] == "server_recommended"
+
+
+def test_plan_clamps_to_85_percent_of_available_vram():
+    capacity = parse_private_vllm_status(
+        {"ready": True, "capacity": {"free_vram_gb": 60}}
+    )
+
+    effective, meta = plan_private_vllm_concurrency(
+        100,
+        capacity,
+        safety_ratio=0.85,
+        per_request_vram_gb=1.0,
+    )
+
+    assert effective == 51
+    assert meta["reason"] == "vram_budget"
 
 
 def test_plan_uses_85_percent_free_vram_budget_when_estimate_available():

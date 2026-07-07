@@ -41,32 +41,60 @@ def _int_or_none(value: Any) -> int | None:
 
 def parse_private_vllm_status(payload: dict[str, Any] | None) -> PrivateVllmCapacity:
     data = payload or {}
+    nested_capacity = data.get("capacity")
+    capacity = nested_capacity if isinstance(nested_capacity, dict) else {}
     total = (
         _float_or_none(data.get("gpu_vram_total_gb"))
         or _float_or_none(data.get("vram_total_gb"))
         or _float_or_none(data.get("total_vram_gb"))
+        or _float_or_none(capacity.get("gpu_vram_total_gb"))
+        or _float_or_none(capacity.get("vram_total_gb"))
+        or _float_or_none(capacity.get("total_vram_gb"))
     )
     used = (
         _float_or_none(data.get("gpu_vram_used_gb"))
         or _float_or_none(data.get("vram_used_gb"))
         or _float_or_none(data.get("used_vram_gb"))
+        or _float_or_none(capacity.get("gpu_vram_used_gb"))
+        or _float_or_none(capacity.get("vram_used_gb"))
+        or _float_or_none(capacity.get("used_vram_gb"))
     )
     free = (
         _float_or_none(data.get("gpu_vram_free_gb"))
         or _float_or_none(data.get("vram_free_gb"))
         or _float_or_none(data.get("free_vram_gb"))
+        or _float_or_none(capacity.get("gpu_vram_free_gb"))
+        or _float_or_none(capacity.get("vram_free_gb"))
+        or _float_or_none(capacity.get("free_vram_gb"))
     )
     if free is None and total is not None and used is not None:
         free = max(0.0, total - used)
+    recommended = (
+        _int_or_none(data.get("recommended_concurrency"))
+        or _int_or_none(capacity.get("recommended_concurrency"))
+        or _int_or_none(capacity.get("adaptive_limit"))
+    )
 
     return PrivateVllmCapacity(
         ready=bool(data.get("ready")),
         gpu_vram_total_gb=total,
         gpu_vram_used_gb=used,
         gpu_vram_free_gb=free,
-        recommended_concurrency=_int_or_none(data.get("recommended_concurrency")),
-        running_requests=_int_or_none(data.get("running_requests")) or 0,
-        waiting_requests=_int_or_none(data.get("waiting_requests")) or 0,
+        recommended_concurrency=recommended,
+        running_requests=(
+            _int_or_none(data.get("running_requests"))
+            or _int_or_none(data.get("active_requests"))
+            or _int_or_none(capacity.get("running_requests"))
+            or _int_or_none(capacity.get("active_requests"))
+            or 0
+        ),
+        waiting_requests=(
+            _int_or_none(data.get("waiting_requests"))
+            or _int_or_none(data.get("queue_depth"))
+            or _int_or_none(capacity.get("waiting_requests"))
+            or _int_or_none(capacity.get("queue_depth"))
+            or 0
+        ),
         source=str(data.get("source") or "status"),
     )
 
