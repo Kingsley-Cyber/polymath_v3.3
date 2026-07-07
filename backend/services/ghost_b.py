@@ -2847,7 +2847,7 @@ def _parse(
     # if it fails — closing the off-schema escape hatch that previously
     # silently demoted ~21% of edges to the `related_to` sentinel. Same
     # tier of guarantee as the Pt 7f and Phase B gates above.
-    from services.ghost_b_schemas import LLMEntity, LLMRelation
+    from services.ghost_b_schemas import ExtractionResponse, LLMEntity, LLMRelation
     from pydantic import ValidationError
 
     strict_entities: list[EntityItem] = []
@@ -2938,6 +2938,54 @@ def _parse(
             entity_names={_entity_key(e.canonical_name) for e in entities},
             max_facts=fact_cap,
         )
+
+    try:
+        ExtractionResponse(
+            entities=[
+                {
+                    "canonical_name": e.canonical_name,
+                    "surface_form": e.surface_form or "",
+                    "entity_type": e.entity_type,
+                    "confidence": float(e.confidence),
+                    "query_aliases": list(getattr(e, "query_aliases", []) or []),
+                    "definitional_phrase": getattr(e, "definitional_phrase", "") or "",
+                    "object_kind": getattr(e, "object_kind", "") or "",
+                }
+                for e in entities
+            ],
+            relations=[
+                {
+                    "subject": r.subject,
+                    "predicate": r.predicate,
+                    "object": r.object,
+                    "object_kind": r.object_kind,
+                    "confidence": float(r.confidence),
+                    "evidence_phrase": r.evidence_phrase,
+                    "relation_cue": r.relation_cue or "",
+                }
+                for r in relations
+            ],
+            facts=[
+                {
+                    "subject": f.subject,
+                    "fact_type": f.fact_type,
+                    "property_name": f.property_name,
+                    "value": f.value,
+                    "unit": f.unit or "",
+                    "condition": f.condition or "",
+                    "confidence": float(f.confidence),
+                    "evidence_phrase": f.evidence_phrase,
+                }
+                for f in facts
+            ],
+        )
+    except ValidationError as ve:
+        logger.warning(
+            "GHOST B promoted ExtractionResponse validation failed chunk_id=%s reason=%s",
+            task.chunk_id,
+            str(ve)[:300],
+        )
+        return None
 
     lens = (
         schema_lens
