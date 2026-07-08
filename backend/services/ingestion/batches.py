@@ -317,12 +317,21 @@ def discover_local_files(
     candidates = root.rglob("*") if recursive else root.glob("*")
     files: list[Path] = []
     for path in sorted(candidates, key=lambda p: str(p).lower()):
-        if not path.is_file():
-            continue
         # AppleDouble resource forks ("._x.md") and other dotfiles satisfy the
         # extension filter but are never documents — exFAT drives grow them on
-        # any Finder copy.
-        if path.name.startswith("."):
+        # any Finder copy. Check before stat: Docker can raise EPERM when
+        # statting macOS metadata files on mounted external volumes.
+        try:
+            relative_parts = path.relative_to(root).parts
+        except ValueError:
+            relative_parts = (path.name,)
+        if any(part.startswith(".") for part in relative_parts):
+            continue
+        try:
+            if not path.is_file():
+                continue
+        except OSError as exc:
+            logger.debug("Skipping unreadable ingest candidate %s: %s", path, exc)
             continue
         if allowed_exts and path.suffix.lower() not in allowed_exts:
             continue

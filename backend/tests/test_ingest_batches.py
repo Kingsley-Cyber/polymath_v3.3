@@ -43,6 +43,29 @@ def test_discover_local_files_respects_max_files(tmp_path):
     assert len(files) == 2
 
 
+def test_discover_local_files_skips_appledouble_before_stat(tmp_path, monkeypatch):
+    good = tmp_path / "book.md"
+    good.write_text("# Book", encoding="utf-8")
+    apple_double = tmp_path / "._book.md"
+    apple_double.write_text("metadata", encoding="utf-8")
+    original_is_file = Path.is_file
+
+    def fake_is_file(path):
+        if path.name.startswith("._"):
+            raise PermissionError("Operation not permitted")
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", fake_is_file)
+
+    _root, files = batches.discover_local_files(
+        str(tmp_path),
+        recursive=False,
+        extensions=[".md"],
+    )
+
+    assert files == [good]
+
+
 def test_runtime_batch_concurrency_caps_instead_of_floors():
     settings = SimpleNamespace(
         INGEST_BATCH_WORKERS=2,
