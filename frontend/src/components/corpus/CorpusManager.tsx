@@ -1285,10 +1285,10 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                             size="sm"
                             onClick={() => setSelectedCorpus(corpus)}
                             className="font-bold tracking-widest uppercase text-[10px]"
-                            title="Browse documents and start backend folder ingest"
+                            title="View corpus documents and ingestion controls"
                           >
                             <ExternalLink className="w-3 h-3" />
-                            <span>Open</span>
+                            <span>View</span>
                           </Button>
                           <Button
                             variant="ghost"

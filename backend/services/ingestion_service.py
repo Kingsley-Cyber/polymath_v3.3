@@ -1393,24 +1393,66 @@ class IngestionService:
         corpus_id are harmless and re-runnable."""
         from services.storage.mongo_writer import delete_chunks_by_corpus, delete_corpus
 
+        cleanup_warnings: list[dict[str, str]] = []
         try:
             await delete_chunks_by_corpus(self._db, corpus_id)
-        except Exception:
-            logger.warning("Background chunk purge failed for corpus %s", corpus_id)
-            return
+        except Exception as exc:
+            logger.warning(
+                "Background chunk purge failed for corpus %s; finalizing tombstone anyway",
+                corpus_id,
+                exc_info=True,
+            )
+            cleanup_warnings.append(
+                {
+                    "stage": "mongo_chunks",
+                    "error": str(exc),
+                    "at": datetime.utcnow().isoformat(),
+                }
+            )
         if self._settings.NEO4J_ENABLED and self._neo4j:
             try:
                 from services.graph.neo4j_writer import delete_corpus_graph
 
                 await delete_corpus_graph(self._neo4j, corpus_id=corpus_id)
-            except Exception:
-                logger.warning("Background Neo4j purge failed for corpus %s", corpus_id)
-                return
+            except Exception as exc:
+                logger.warning(
+                    "Background Neo4j purge failed for corpus %s; finalizing tombstone anyway",
+                    corpus_id,
+                    exc_info=True,
+                )
+                cleanup_warnings.append(
+                    {
+                        "stage": "neo4j_graph",
+                        "error": str(exc),
+                        "at": datetime.utcnow().isoformat(),
+                    }
+                )
         try:
             await delete_corpus(self._db, corpus_id)
+            cleanup_status = "partial" if cleanup_warnings else "complete"
+            await self._db["corpora"].update_one(
+                {"corpus_id": corpus_id},
+                {
+                    "$set": {
+                        "cleanup_status": cleanup_status,
+                        "cleanup_completed_at": datetime.utcnow(),
+                        "updated_at": datetime.utcnow(),
+                        **(
+                            {"cleanup_warnings": cleanup_warnings}
+                            if cleanup_warnings
+                            else {}
+                        ),
+                    }
+                },
+            )
         except Exception:
-            logger.warning("Final corpus tombstone mark failed for corpus %s", corpus_id)
-        logger.info("Background purge complete for corpus %s", corpus_id)
+            logger.warning("Final corpus tombstone mark failed for corpus %s", corpus_id, exc_info=True)
+            return
+        logger.info(
+            "Background purge %s for corpus %s",
+            "completed with warnings" if cleanup_warnings else "complete",
+            corpus_id,
+        )
 
     async def list_documents(
         self,

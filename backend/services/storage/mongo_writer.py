@@ -136,14 +136,16 @@ async def update_corpus(
 
 async def delete_corpus(db: AsyncIOMotorDatabase, corpus_id: str) -> bool:
     """Mark a corpus deleted. Returns True if a corpus row existed."""
+    now = datetime.utcnow()
     result = await db["corpora"].update_one(
         {"corpus_id": corpus_id},
         {
             "$set": {
                 "status": DELETED_STATUS,
-                "deleted_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
-            }
+                "deleted_at": now,
+                "updated_at": now,
+            },
+            "$unset": {"deleting_at": ""},
         },
     )
     return result.matched_count > 0
