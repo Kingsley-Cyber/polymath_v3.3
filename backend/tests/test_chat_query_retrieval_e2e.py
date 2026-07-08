@@ -11,13 +11,14 @@ def _chunk(
     score: float,
     source_tier: str = "qdrant_child",
     doc_id: str | None = None,
+    corpus_id: str = "c1",
     text: str | None = None,
 ) -> SourceChunk:
     return SourceChunk(
         chunk_id=chunk_id,
         parent_id=f"parent-{chunk_id}",
         doc_id=doc_id or f"doc-{chunk_id}",
-        corpus_id="c1",
+        corpus_id=corpus_id,
         text=text or f"Evidence for {chunk_id}",
         score=score,
         source_tier=source_tier,
@@ -159,6 +160,57 @@ async def test_chat_query_e2e_hybrid_does_not_enter_graph_lanes(monkeypatch):
     assert "fact_seed" not in events
     assert "graph_expand" not in events
     assert {chunk.chunk_id for chunk in result.chunks} >= {"child", "lexical"}
+
+
+@pytest.mark.asyncio
+async def test_chat_query_e2e_multi_corpus_rank_fusion_uses_per_corpus_ranks(monkeypatch):
+    _install_common_mocks(monkeypatch)
+    monkeypatch.setattr(retriever_module.settings, "NEO4J_ENABLED", False)
+    monkeypatch.setattr(retriever_module, "hydrate_rerank_texts", _identity_hydrate)
+
+    async def fake_a(*_args, **_kwargs):
+        return []
+
+    async def fake_b(_query_vector, corpus_ids, *_args, **_kwargs):
+        corpus_id = corpus_ids[0]
+        if corpus_id == "alpha":
+            return [
+                _chunk("alpha-top", score=0.99, doc_id="alpha-doc-1", corpus_id="alpha"),
+                _chunk("alpha-second", score=0.98, doc_id="alpha-doc-2", corpus_id="alpha"),
+            ]
+        return [
+            _chunk("beta-top", score=0.40, doc_id="beta-doc-1", corpus_id="beta"),
+        ]
+
+    async def fake_lexical(*_args, **_kwargs):
+        return []
+
+    async def fake_document_anchor(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(retriever_module.funnel_a, "search", fake_a)
+    monkeypatch.setattr(retriever_module.funnel_b, "search", fake_b)
+    monkeypatch.setattr(retriever_module.lexical_retriever, "search", fake_lexical)
+    monkeypatch.setattr(
+        retriever_module.document_anchor_retriever,
+        "search",
+        fake_document_anchor,
+    )
+
+    result = await RetrieverOrchestrator().retrieve(
+        query="Compare architecture evidence across both selected corpora.",
+        corpus_ids=["alpha", "beta"],
+        retrieval_tier=RetrievalTier.qdrant_mongo,
+        collections=None,
+        retrieval_k=40,
+        rerank_enabled=False,
+        rerank_top_n=2,
+        final_top_k=2,
+    )
+
+    assert [chunk.chunk_id for chunk in result.chunks] == ["alpha-top", "beta-top"]
+    assert result.diagnostics["counts"]["pool_rank_fusion_per_corpus"] == 1
+    assert result.diagnostics["counts"]["merged_after_rerank_cap"] == 2
 
 
 @pytest.mark.asyncio

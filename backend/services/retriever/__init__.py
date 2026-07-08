@@ -1594,12 +1594,27 @@ class RetrieverOrchestrator:
         }
         _lane_ranks: dict[str, dict[str, int]] = {}
 
-        def _record_lane_ranks(lane: str, chunks_in_lane: list[SourceChunk]) -> None:
+        def _record_lane_ranks(
+            lane: str,
+            chunks_in_lane: list[SourceChunk],
+            *,
+            per_corpus: bool = False,
+        ) -> None:
             table = _lane_ranks.setdefault(lane, {})
-            for _rank, _c in enumerate(chunks_in_lane):
-                _key = str(_c.chunk_id or _c.parent_id or "")
-                if _key and _key not in table:
-                    table[_key] = _rank
+            rank_groups: list[list[SourceChunk]]
+            if per_corpus:
+                grouped: dict[str, list[SourceChunk]] = {}
+                for _c in chunks_in_lane:
+                    _cid = str(getattr(_c, "corpus_id", "") or "__unknown__")
+                    grouped.setdefault(_cid, []).append(_c)
+                rank_groups = list(grouped.values())
+            else:
+                rank_groups = [chunks_in_lane]
+            for _group in rank_groups:
+                for _rank, _c in enumerate(_group):
+                    _key = str(_c.chunk_id or _c.parent_id or "")
+                    if _key and (_key not in table or _rank < table[_key]):
+                        table[_key] = _rank
 
         def _rrf_fused(chunk: SourceChunk) -> float:
             _key = str(chunk.chunk_id or chunk.parent_id or "")
@@ -1625,11 +1640,13 @@ class RetrieverOrchestrator:
                 ),
             )
 
-        _record_lane_ranks("fact", fact_seed_chunks)
-        _record_lane_ranks("a", a_results)
-        _record_lane_ranks("b", b_results)
-        _record_lane_ranks("lex", lexical_results)
-        _record_lane_ranks("anchor", document_anchor_results)
+        _record_lane_ranks("fact", fact_seed_chunks, per_corpus=multi)
+        _record_lane_ranks("a", a_results, per_corpus=multi)
+        _record_lane_ranks("b", b_results, per_corpus=multi)
+        _record_lane_ranks("lex", lexical_results, per_corpus=multi)
+        _record_lane_ranks("anchor", document_anchor_results, per_corpus=multi)
+        if multi:
+            counts["pool_rank_fusion_per_corpus"] = 1
 
         # [4] Merge + dedupe by parent_id. Lexical and fact-seeded candidates
         # are deliberately merged before graph expansion, so exact
@@ -1759,7 +1776,7 @@ class RetrieverOrchestrator:
                 counts["graph_expansion_cap"] = effective_expansion_cap
                 counts["graph_expanded"] = len(expanded)
                 if expanded:
-                    _record_lane_ranks("graph", expanded)
+                    _record_lane_ranks("graph", expanded, per_corpus=multi)
                     merged = merge_pools(merged, expanded)
                     counts["merged_after_graph"] = len(merged)
             except asyncio.TimeoutError:
