@@ -159,6 +159,49 @@ const INGEST_STAGE_LABELS = [
   ["fully_enriched", "Fully enriched"],
 ] as const;
 
+function hasUsefulBatchProgress(batch: IngestBatchResponse): boolean {
+  const counts = batch.counts ?? {};
+  if (
+    (counts.running ?? 0) > 0 ||
+    (counts.queued ?? 0) > 0 ||
+    (counts.done ?? 0) > 0 ||
+    (counts.staged ?? 0) > 0 ||
+    (counts.failed_recoverable ?? 0) > 0
+  ) {
+    return true;
+  }
+
+  const progress = batch.progress;
+  const ladder = progress?.ladder ?? {};
+  return (
+    (progress?.files_done ?? 0) > 0 ||
+    (progress?.files_queryable ?? 0) > 0 ||
+    (progress?.files_graph_extracted ?? 0) > 0 ||
+    (ladder.queryable ?? 0) > 0 ||
+    (ladder.indexed ?? 0) > 0 ||
+    (ladder.extracted ?? 0) > 0 ||
+    (ladder.graph_extracted ?? 0) > 0 ||
+    (ladder.graph_promoted ?? 0) > 0
+  );
+}
+
+function selectDisplayBatch(
+  batches: IngestBatchResponse[],
+): IngestBatchResponse | null {
+  const active = batches.find((batch) =>
+    batch.status === "queued" || batch.status === "running"
+  );
+  if (active) return active;
+
+  return (
+    batches.find(
+      (batch) =>
+        (batch.status === "done" || batch.status === "partial") &&
+        hasUsefulBatchProgress(batch),
+    ) ?? null
+  );
+}
+
 function phaseLabel(phase?: string | null): string {
   if (!phase) return "queued";
   return PHASE_LABELS[phase] ?? phase;
@@ -273,20 +316,21 @@ export function CorpusDetail({
   useEffect(() => {
     let cancelled = false;
     api
-      .listIngestBatches(corpus.corpus_id, 1)
+      .listIngestBatches(corpus.corpus_id, 10)
       .then((batches) => {
         if (cancelled || batches.length === 0) return;
-        const latest = batches[0];
-        setLocalBatch(latest);
-        if (["queued", "running"].includes(latest.status)) {
+        const selected = selectDisplayBatch(batches);
+        setLocalBatch(selected);
+        if (!selected) return;
+        if (["queued", "running"].includes(selected.status)) {
           setShowLocalBatch(true);
         }
         // The library's PROCESSING / FAILED sections need the item list; the
         // list endpoint may return counts only. Hydrate items once — the 3s
         // poll runs include_items=false and preserves whatever we load here.
-        if (!latest.items?.length) {
+        if (!selected.items?.length) {
           api
-            .getIngestBatch(latest.batch_id)
+            .getIngestBatch(selected.batch_id)
             .then((full) => {
               if (cancelled) return;
               setLocalBatch((prev) =>

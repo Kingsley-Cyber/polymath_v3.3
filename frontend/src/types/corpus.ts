@@ -431,7 +431,7 @@ export interface IngestBatchResponse {
   total_source_bytes?: number;
   stored_bytes?: number;
   storage_limit_bytes?: number | null;
-  status: "queued" | "running" | "done" | "partial" | "failed";
+  status: "queued" | "running" | "done" | "partial" | "failed" | "cancelled";
   total: number;
   counts: Record<string, number>;
   /** Owner metric: FILES + MB with an explicit "extracted" milestone —
