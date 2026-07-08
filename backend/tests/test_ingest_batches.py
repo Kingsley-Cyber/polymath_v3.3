@@ -188,6 +188,150 @@ class _ItemUpdatesDb:
         return self.items
 
 
+def _get_nested(row: dict, key: str):
+    value = row
+    for part in key.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value
+
+
+def _matches_query(row: dict, query: dict) -> bool:
+    for key, expected in (query or {}).items():
+        actual = _get_nested(row, key)
+        if isinstance(expected, dict) and "$exists" in expected:
+            exists = _get_nested(row, key) is not None
+            if exists != bool(expected["$exists"]):
+                return False
+            continue
+        if actual != expected:
+            return False
+    return True
+
+
+class _QualityCursor:
+    def __init__(self, rows):
+        self.rows = list(rows)
+
+    def __aiter__(self):
+        self._idx = 0
+        return self
+
+    async def __anext__(self):
+        if self._idx >= len(self.rows):
+            raise StopAsyncIteration
+        row = self.rows[self._idx]
+        self._idx += 1
+        return row
+
+    async def to_list(self, length=None):
+        return self.rows if length is None else self.rows[:length]
+
+
+class _QualityCollection:
+    def __init__(self, rows):
+        self.rows = list(rows)
+
+    def find(self, query=None, projection=None):
+        return _QualityCursor(
+            row for row in self.rows if _matches_query(row, query or {})
+        )
+
+    async def count_documents(self, query):
+        return sum(1 for row in self.rows if _matches_query(row, query or {}))
+
+
+class _QualityDb(dict):
+    def __init__(self, **collections):
+        super().__init__(
+            {name: _QualityCollection(rows) for name, rows in collections.items()}
+        )
+
+
+@pytest.mark.asyncio
+async def test_batch_quality_report_uses_summarizable_parent_denominator():
+    db = _QualityDb(
+        documents=[
+            {
+                "corpus_id": "corpus-1",
+                "doc_id": "doc-ok",
+                "write_state": {"verified": True},
+                "ghost_b_metrics": {
+                    "requested_chunks": 4,
+                    "extracted_chunks": 4,
+                    "failed_chunks": 0,
+                    "relation_count": 10,
+                    "related_to_count": 1,
+                    "validation_rejection_count": 2,
+                    "lane_call_counts": {"0": 3},
+                    "provider_call_counts": {"local_private_vllm": 3},
+                    "model_call_counts": {"openai/polymath-extract": 3},
+                },
+            },
+            {
+                "corpus_id": "corpus-1",
+                "doc_id": "doc-partial",
+                "write_state": {"verified": True},
+                "ghost_b_metrics": {
+                    "requested_chunks": 5,
+                    "extracted_chunks": 2,
+                    "failed_chunks": 3,
+                    "relation_count": 2,
+                    "related_to_count": 0,
+                    "provider_call_counts": {"siliconflow": 2},
+                },
+            },
+        ],
+        parent_chunks=[
+            {
+                "corpus_id": "corpus-1",
+                "chunk_kind": "body",
+                "summary": "summary",
+                "semantic_chunk_type": "argument",
+            },
+            {
+                "corpus_id": "corpus-1",
+                "chunk_kind": "body",
+                "summary": "",
+                "semantic_chunk_type": "",
+            },
+            {"corpus_id": "corpus-1", "chunk_kind": "code", "summary": ""},
+            {"corpus_id": "corpus-1", "chunk_kind": "bibliography", "summary": ""},
+        ],
+        chunks=[
+            {"corpus_id": "corpus-1", "chunk_id": "c1", "promote_version": 1},
+            {"corpus_id": "corpus-1", "chunk_id": "c2"},
+        ],
+    )
+
+    report = await batches._batch_quality_report(db, {"corpus_id": "corpus-1"})
+
+    assert report["parents"] == 4
+    assert report["parents_summary_required"] == 2
+    assert report["parents_summary_skipped"] == 2
+    assert report["parents_summarized"] == 1
+    assert report["parents_summary_required_summarized"] == 1
+    assert report["parents_summary_missing_required"] == 1
+    assert report["summary_coverage_rate"] == 0.5
+    assert report["summary_fallback_rate"] == 0.5
+    assert report["summary_raw_missing_rate"] == 0.75
+    assert report["ghost_b_requested_chunks"] == 9
+    assert report["ghost_b_extracted_chunks"] == 6
+    assert report["ghost_b_failed_chunks"] == 3
+    assert report["ghost_b_success_rate"] == 0.6667
+    assert report["ghost_b_docs_requested"] == 2
+    assert report["ghost_b_docs_partial"] == 1
+    assert report["ghost_b_docs_dead"] == 0
+    assert report["ghost_b_related_to_ratio"] == 0.0833
+    assert report["ghost_b_validation_rejection_count"] == 2
+    assert report["ghost_b_provider_call_counts"] == {
+        "local_private_vllm": 3,
+        "siliconflow": 2,
+    }
+    assert any("partial graph extraction" in alert for alert in report["alerts"])
+
+
 @pytest.mark.asyncio
 async def test_local_batch_item_exception_is_terminal_failed(monkeypatch, tmp_path):
     source = tmp_path / "bad.md"

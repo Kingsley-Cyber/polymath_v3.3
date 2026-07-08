@@ -60,6 +60,27 @@ function formatBytes(bytes?: number | null): string {
   return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIdx]}`;
 }
 
+function formatRate(value?: number | null): string {
+  if (typeof value !== "number" || Number.isNaN(value)) return "n/a";
+  return `${Math.round(value * 100)}%`;
+}
+
+function providerLabel(provider: string): string {
+  const key = provider.toLowerCase();
+  if (key.includes("vllm") || key.includes("rtx")) return "RTX";
+  if (key.includes("silicon")) return "SiliconFlow";
+  if (key.includes("longcat")) return "LongCat";
+  if (key.includes("deepseek")) return "DeepSeek";
+  return provider.replace(/^openai\//, "");
+}
+
+function topCountEntries(counts?: Record<string, number>, limit = 4) {
+  return Object.entries(counts ?? {})
+    .filter(([, value]) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit);
+}
+
 function getWriteStateMessages(
   state: Pick<WriteState, "warnings" | "verify_errors">,
 ) {
@@ -519,6 +540,12 @@ export function CorpusDetail({
 
   const localBatchStaleCount =
     localBatch?.items?.filter((item) => item.phase === "stale").length ?? 0;
+  const batchReport = localBatch?.report;
+  const batchRouteCounts =
+    batchReport?.ghost_b_provider_call_counts ??
+    batchReport?.ghost_b_model_call_counts ??
+    {};
+  const batchRouteEntries = topCountEntries(batchRouteCounts);
 
   return (
     <div className="flex flex-col h-full relative">
@@ -796,9 +823,9 @@ export function CorpusDetail({
               </div>
             </div>
           )}
-          {localBatch?.progress?.ladder && (
-            <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 text-[9px] font-mono">
-              {INGEST_STAGE_LABELS.map(([stage, label]) => {
+	          {localBatch?.progress?.ladder && (
+	            <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 text-[9px] font-mono">
+	              {INGEST_STAGE_LABELS.map(([stage, label]) => {
                 const value = localBatch.progress?.ladder?.[stage] ?? 0;
                 const total = localBatch.progress?.files_total ?? localBatch.total ?? 0;
                 const pct = total > 0 ? Math.round((value / total) * 100) : 0;
@@ -826,11 +853,128 @@ export function CorpusDetail({
                     </div>
                   </div>
                 );
-              })}
-            </div>
-          )}
-          {localBatch?.items && localBatch.items.length > 0 && (
-            <div className="mt-2 border border-border-minimal">
+	              })}
+	            </div>
+	          )}
+	          {batchReport && (
+	            <div className="mt-2 grid grid-cols-1 xl:grid-cols-[1.5fr_1fr] gap-2 text-[9px] font-mono">
+	              <div className="border border-border-minimal px-2 py-2">
+	                <div className="flex items-center justify-between gap-2">
+	                  <div className="text-content-tertiary uppercase">
+	                    Batch quality
+	                  </div>
+	                  <div className="text-content-tertiary">
+	                    verified {batchReport.docs_verified ?? 0}/{batchReport.docs ?? 0}
+	                  </div>
+	                </div>
+	                <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+	                  <div>
+	                    <div className="text-content-tertiary uppercase">Summary</div>
+	                    <div className="text-content-primary">
+	                      {batchReport.parents_summary_required_summarized ??
+	                        batchReport.parents_summarized ??
+	                        0}
+	                      /{batchReport.parents_summary_required ?? 0}
+	                      <span className="text-content-tertiary">
+	                        {" "}· {formatRate(batchReport.summary_coverage_rate)}
+	                      </span>
+	                    </div>
+	                    <div className="text-content-tertiary">
+	                      {batchReport.parents_summary_skipped ?? 0} skipped by design
+	                    </div>
+	                  </div>
+	                  <div>
+	                    <div className="text-content-tertiary uppercase">Structure</div>
+	                    <div className="text-content-primary">
+	                      {batchReport.parents_summary_required_structured ??
+	                        batchReport.parents_structured ??
+	                        0}
+	                      /{batchReport.parents_summary_required ?? 0}
+	                      <span className="text-content-tertiary">
+	                        {" "}· {formatRate(batchReport.structure_rate)}
+	                      </span>
+	                    </div>
+	                    <div className="text-content-tertiary">
+	                      raw missing {formatRate(batchReport.summary_raw_missing_rate)}
+	                    </div>
+	                  </div>
+	                  <div>
+	                    <div className="text-content-tertiary uppercase">Graph extract</div>
+	                    <div className="text-accent-secondary">
+	                      {batchReport.ghost_b_extracted_chunks ?? 0}/
+	                      {batchReport.ghost_b_requested_chunks ?? 0}
+	                      <span className="text-content-tertiary">
+	                        {" "}· {formatRate(batchReport.ghost_b_success_rate)}
+	                      </span>
+	                    </div>
+	                    <div className="text-content-tertiary">
+	                      failed {batchReport.ghost_b_failed_chunks ?? 0}
+	                    </div>
+	                  </div>
+	                  <div>
+	                    <div className="text-content-tertiary uppercase">Graph QA</div>
+	                    <div className="text-content-primary">
+	                      partial {batchReport.ghost_b_docs_partial ?? 0}
+	                      <span className="text-content-tertiary">
+	                        {" "}· dead {batchReport.ghost_b_docs_dead ?? 0}
+	                      </span>
+	                    </div>
+	                    <div className="text-content-tertiary">
+	                      related_to {formatRate(batchReport.ghost_b_related_to_ratio)}
+	                      {" "}· rejects {batchReport.ghost_b_validation_rejection_count ?? 0}
+	                    </div>
+	                  </div>
+	                </div>
+	                {batchReport.alerts && batchReport.alerts.length > 0 ? (
+	                  <div className="mt-2 space-y-1 text-amber-300">
+	                    {batchReport.alerts.slice(0, 3).map((alert, idx) => (
+	                      <div
+	                        key={`batch-quality-alert-${idx}`}
+	                        className="flex items-start gap-1.5 leading-snug"
+	                      >
+	                        <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+	                        <span>{alert}</span>
+	                      </div>
+	                    ))}
+	                  </div>
+	                ) : (
+	                  <div className="mt-2 text-content-tertiary">
+	                    No batch quality alerts.
+	                  </div>
+	                )}
+	              </div>
+	              <div className="border border-border-minimal px-2 py-2">
+	                <div className="text-content-tertiary uppercase">Extraction route</div>
+	                {batchRouteEntries.length > 0 ? (
+	                  <div className="mt-2 flex flex-wrap gap-1.5">
+	                    {batchRouteEntries.map(([provider, count]) => (
+	                      <span
+	                        key={provider}
+	                        className="px-2 py-1 border border-border-minimal text-content-primary"
+	                        title={provider}
+	                      >
+	                        {providerLabel(provider)} {count}
+	                      </span>
+	                    ))}
+	                  </div>
+	                ) : (
+	                  <div className="mt-2 text-content-tertiary">
+	                    No extraction route calls recorded yet.
+	                  </div>
+	                )}
+	                {batchReport.ghost_b_model_call_counts &&
+	                  Object.keys(batchReport.ghost_b_model_call_counts).length > 0 && (
+	                    <div className="mt-2 text-content-tertiary leading-snug">
+	                      {topCountEntries(batchReport.ghost_b_model_call_counts, 3)
+	                        .map(([model, count]) => `${providerLabel(model)} ${count}`)
+	                        .join(" · ")}
+	                    </div>
+	                  )}
+	              </div>
+	            </div>
+	          )}
+	          {localBatch?.items && localBatch.items.length > 0 && (
+	            <div className="mt-2 border border-border-minimal">
               <div className="hidden md:grid grid-cols-[42px_minmax(0,1.4fr)_86px_92px_minmax(0,1fr)] gap-2 px-2 py-1 text-[9px] font-bold tracking-widest text-content-tertiary uppercase border-b border-border-minimal">
                 <span>Size</span>
                 <span>File</span>

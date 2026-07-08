@@ -1558,31 +1558,175 @@ async def _batch_quality_report(db, batch: dict) -> dict[str, Any]:
             {"corpus_id": corpus_id}, {"doc_id": 1})
     ]
     q = {"corpus_id": corpus_id}
-    parents = await db["parent_chunks"].count_documents(q)
-    summarized = await db["parent_chunks"].count_documents(
-        {**q, "summary": {"$nin": [None, ""]}})
-    structured = await db["parent_chunks"].count_documents(
-        {**q, "semantic_chunk_type": {"$nin": [None, ""]}})
+    parent_rows = await db["parent_chunks"].find(
+        q,
+        {
+            "_id": 0,
+            "chunk_kind": 1,
+            "summary": 1,
+            "semantic_chunk_type": 1,
+        },
+    ).to_list(length=None)
+    parents = len(parent_rows)
+    try:
+        from services.ingestion.section_classifier import ChunkKind, should_skip_ghost_b
+
+        def _summary_required(parent: dict[str, Any]) -> bool:
+            return not should_skip_ghost_b(
+                str(parent.get("chunk_kind") or ChunkKind.BODY)
+            )
+    except Exception:  # noqa: BLE001 - reporting must not fail a batch
+        def _summary_required(parent: dict[str, Any]) -> bool:
+            return True
+
+    required_parents = [parent for parent in parent_rows if _summary_required(parent)]
+    skipped_parents = parents - len(required_parents)
+    summarized_all = sum(
+        1 for parent in parent_rows if str(parent.get("summary") or "").strip()
+    )
+    structured_all = sum(
+        1
+        for parent in parent_rows
+        if str(parent.get("semantic_chunk_type") or "").strip()
+    )
+    summarized_required = sum(
+        1 for parent in required_parents if str(parent.get("summary") or "").strip()
+    )
+    structured_required = sum(
+        1
+        for parent in required_parents
+        if str(parent.get("semantic_chunk_type") or "").strip()
+    )
     children = await db["chunks"].count_documents(q)
     promoted = await db["chunks"].count_documents(
         {**q, "promote_version": {"$exists": True}})
     verified = await db["documents"].count_documents(
         {**q, "write_state.verified": True})
+    graph_docs = await db["documents"].find(
+        q,
+        {
+            "_id": 0,
+            "ghost_b_metrics": 1,
+            "write_state.warnings": 1,
+        },
+    ).to_list(length=None)
+    graph_requested = 0
+    graph_extracted = 0
+    graph_failed = 0
+    graph_relations = 0
+    graph_related_to = 0
+    graph_validation_rejections = 0
+    graph_docs_requested = 0
+    graph_docs_partial = 0
+    graph_docs_dead = 0
+    lane_call_counts: dict[str, int] = {}
+    provider_call_counts: dict[str, int] = {}
+    model_call_counts: dict[str, int] = {}
+
+    def _add_counts(target: dict[str, int], source: dict | None) -> None:
+        for key, value in (source or {}).items():
+            try:
+                target[str(key)] = target.get(str(key), 0) + int(value or 0)
+            except (TypeError, ValueError):
+                continue
+
+    for doc in graph_docs:
+        metrics = doc.get("ghost_b_metrics") or {}
+        try:
+            requested = int(metrics.get("requested_chunks") or 0)
+            extracted = int(metrics.get("extracted_chunks") or 0)
+            failed = int(metrics.get("failed_chunks") or 0)
+        except (TypeError, ValueError):
+            requested = extracted = failed = 0
+        graph_requested += requested
+        graph_extracted += extracted
+        graph_failed += failed
+        graph_relations += int(metrics.get("relation_count") or 0)
+        graph_related_to += int(metrics.get("related_to_count") or 0)
+        graph_validation_rejections += int(
+            metrics.get("validation_rejection_count") or 0
+        )
+        _add_counts(lane_call_counts, metrics.get("lane_call_counts"))
+        _add_counts(provider_call_counts, metrics.get("provider_call_counts"))
+        _add_counts(model_call_counts, metrics.get("model_call_counts"))
+        if requested > 0:
+            graph_docs_requested += 1
+            if extracted <= 0:
+                graph_docs_dead += 1
+            elif extracted < requested or failed > 0:
+                graph_docs_partial += 1
+
+    summary_required_count = len(required_parents)
+    summary_missing_required = max(summary_required_count - summarized_required, 0)
+    summary_coverage_rate = (
+        round(summarized_required / summary_required_count, 3)
+        if summary_required_count
+        else None
+    )
+    structure_rate = (
+        round(structured_required / summary_required_count, 3)
+        if summary_required_count
+        else None
+    )
     report = {
         "docs": len(doc_ids),
         "docs_verified": verified,
         "parents": parents,
-        "parents_summarized": summarized,
-        "parents_structured": structured,
-        "summary_fallback_rate": round(1 - (summarized / parents), 3) if parents else None,
-        "structure_rate": round(structured / parents, 3) if parents else None,
+        "parents_summary_required": summary_required_count,
+        "parents_summary_skipped": skipped_parents,
+        # Backward-compatible total count, including intentionally skipped parents.
+        "parents_summarized": summarized_all,
+        "parents_summary_required_summarized": summarized_required,
+        "parents_summary_missing_required": summary_missing_required,
+        "parents_structured": structured_all,
+        "parents_summary_required_structured": structured_required,
+        "summary_coverage_rate": summary_coverage_rate,
+        "summary_fallback_rate": (
+            round(1 - summary_coverage_rate, 3)
+            if summary_coverage_rate is not None
+            else None
+        ),
+        "summary_raw_missing_rate": (
+            round(1 - (summarized_all / parents), 3) if parents else None
+        ),
+        "structure_rate": structure_rate,
         "children": children,
         "children_promoted": promoted,
+        "ghost_b_requested_chunks": graph_requested,
+        "ghost_b_extracted_chunks": graph_extracted,
+        "ghost_b_failed_chunks": graph_failed,
+        "ghost_b_success_rate": round(graph_extracted / graph_requested, 4)
+        if graph_requested
+        else None,
+        "ghost_b_docs_requested": graph_docs_requested,
+        "ghost_b_docs_partial": graph_docs_partial,
+        "ghost_b_docs_dead": graph_docs_dead,
+        "ghost_b_related_to_ratio": round(graph_related_to / graph_relations, 4)
+        if graph_relations
+        else 0.0,
+        "ghost_b_validation_rejection_count": graph_validation_rejections,
+        "ghost_b_lane_call_counts": lane_call_counts,
+        "ghost_b_provider_call_counts": provider_call_counts,
+        "ghost_b_model_call_counts": model_call_counts,
     }
-    if parents and summarized < parents * 0.5:
-        report["alert"] = "over half of parents have NO summary — model path degraded"
-    elif parents and structured < summarized * 0.5:
-        report["alert"] = "summaries exist but structure rate <50% — JSON schema not honored"
+    alerts = []
+    if summary_required_count and summarized_required < summary_required_count * 0.5:
+        alerts.append(
+            "over half of summarizable parents have NO summary — model path degraded"
+        )
+    if summarized_required and structured_required < summarized_required * 0.5:
+        alerts.append("summaries exist but structure rate <50% — JSON schema not honored")
+    if graph_docs_dead:
+        alerts.append(
+            f"{graph_docs_dead} document(s) are graph-dead — extraction produced zero chunk results"
+        )
+    if graph_docs_partial:
+        alerts.append(
+            f"{graph_docs_partial} document(s) have partial graph extraction — backfill recommended"
+        )
+    if alerts:
+        report["alerts"] = alerts
+        report["alert"] = alerts[0]
     return report
 
 

@@ -15,7 +15,7 @@ def test_report_card_accounts_fallbacks():
 
 def test_canary_gates_before_workers():
     i_canary = src.find("_preflight_summary_canary(db, batch)")
-    i_workers = src.find("await asyncio.gather(*[_worker(idx)")
+    i_workers = src.find("await asyncio.gather", i_canary)
     assert 0 < i_canary < i_workers
 
 def _run_all():

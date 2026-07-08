@@ -307,19 +307,26 @@ export interface DocumentResponse {
     attempts?: number;
     model?: string;
   }>;
-  ghost_b_metrics?: {
-    requested_chunks?: number;
-    extracted_chunks?: number;
-    failed_chunks?: number;
-    success_rate?: number;
-    total_tokens?: number;
-    relation_count?: number;
-    related_to_count?: number;
-    related_to_ratio?: number;
-    domain_range_remap_count?: number;
-    /** "off" when the corpus contract disabled extraction (vectors-only). */
-    engine?: string;
-  };
+	  ghost_b_metrics?: {
+	    requested_chunks?: number;
+	    extracted_chunks?: number;
+	    failed_chunks?: number;
+	    success_rate?: number;
+	    total_tokens?: number;
+	    relation_count?: number;
+	    related_to_count?: number;
+	    related_to_ratio?: number;
+	    fact_count?: number;
+	    validation_rejection_count?: number;
+	    routing_policy?: string;
+	    lane_call_counts?: Record<string, number>;
+	    provider_call_counts?: Record<string, number>;
+	    model_call_counts?: Record<string, number>;
+	    error_counts?: Record<string, number>;
+	    domain_range_remap_count?: number;
+	    /** "off" when the corpus contract disabled extraction (vectors-only). */
+	    engine?: string;
+	  };
   write_state: WriteState;
   ingested_at?: string;
   created_at?: string;
@@ -412,9 +419,42 @@ export interface IngestBatchResponse {
     mb_total: number;
     ladder?: Record<string, number>;
   };
-  options?: Record<string, unknown>;
-  runner_started?: boolean;
-  appended_items?: number;
+	  options?: Record<string, unknown>;
+	  report?: {
+	    docs?: number;
+	    docs_verified?: number;
+	    parents?: number;
+	    parents_summary_required?: number;
+	    parents_summary_skipped?: number;
+	    parents_summarized?: number;
+	    parents_summary_required_summarized?: number;
+	    parents_summary_missing_required?: number;
+	    parents_structured?: number;
+	    parents_summary_required_structured?: number;
+	    summary_coverage_rate?: number | null;
+	    summary_fallback_rate?: number | null;
+	    summary_raw_missing_rate?: number | null;
+	    structure_rate?: number | null;
+	    children?: number;
+	    children_promoted?: number;
+	    ghost_b_requested_chunks?: number;
+	    ghost_b_extracted_chunks?: number;
+	    ghost_b_failed_chunks?: number;
+	    ghost_b_success_rate?: number | null;
+	    ghost_b_docs_requested?: number;
+	    ghost_b_docs_partial?: number;
+	    ghost_b_docs_dead?: number;
+	    ghost_b_related_to_ratio?: number;
+	    ghost_b_validation_rejection_count?: number;
+	    ghost_b_lane_call_counts?: Record<string, number>;
+	    ghost_b_provider_call_counts?: Record<string, number>;
+	    ghost_b_model_call_counts?: Record<string, number>;
+	    alerts?: string[];
+	    alert?: string;
+	    [key: string]: unknown;
+	  };
+	  runner_started?: boolean;
+	  appended_items?: number;
   discovered_files?: number;
   items?: IngestBatchItemResponse[];
 }
