@@ -111,3 +111,63 @@ async def test_shutdown_model_lifecycle_positive_idle_schedules_without_down(
     await asyncio.gather(*tasks, return_exceptions=True)
     model_lifecycle._shutdown_tasks.clear()
     model_lifecycle._shutdown_generations.clear()
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_hold_defers_shutdown_until_release(monkeypatch):
+    posts: list[tuple[str, dict[str, str]]] = []
+
+    class FakeResponse:
+        status_code = 200
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers):
+            posts.append((url, dict(headers or {})))
+            return FakeResponse()
+
+    monkeypatch.setattr(model_lifecycle.httpx, "AsyncClient", FakeClient)
+    model_lifecycle._shutdown_tasks.clear()
+    model_lifecycle._shutdown_generations.clear()
+    model_lifecycle._lifecycle_holds.clear()
+
+    pool = [
+        {
+            "lifecycle_base_url": "http://192.168.1.83:8085",
+            "lifecycle_down_path": "/down",
+            "lifecycle_api_key": "manager-key",
+            "lifecycle_auto_start": False,
+            "lifecycle_auto_stop": True,
+            "extra_params": {"lifecycle_idle_shutdown_seconds": 0},
+        }
+    ]
+
+    await model_lifecycle.acquire_model_lifecycle_hold(
+        pool,
+        purpose="batch:a1",
+        hold_id="batch:a1-full",
+    )
+    await model_lifecycle.shutdown_model_lifecycle(pool, purpose="ghost_b")
+    assert posts == []
+
+    await model_lifecycle.release_model_lifecycle_hold(
+        pool,
+        purpose="batch:a1",
+        hold_id="batch:a1-full",
+    )
+
+    assert posts == [
+        (
+            "http://192.168.1.83:8085/down",
+            {"X-Api-Key": "manager-key"},
+        )
+    ]
+    assert model_lifecycle._lifecycle_holds == {}

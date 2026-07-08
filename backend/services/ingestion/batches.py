@@ -1320,6 +1320,49 @@ async def _build_item_config(
     return IngestionConfig(**cfg_dict)
 
 
+async def _batch_lifecycle_pool(
+    *,
+    ingestion_service: Any,
+    corpus_id: str,
+    options: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Resolve managed model entries once for a durable batch.
+
+    The worker still uses the normal per-document routing code. This helper is
+    only for remote runtime lifecycle control so a managed RTX/vLLM server stays
+    hot across the batch instead of cooling down between documents.
+    """
+
+    try:
+        config = await _build_item_config(
+            ingestion_service=ingestion_service,
+            corpus_id=corpus_id,
+            options=options,
+        )
+    except Exception as exc:  # noqa: BLE001 - lifecycle must not block batch setup
+        logger.warning("batch lifecycle pool resolution failed: %s", exc)
+        return []
+
+    refs: list[Any] = []
+    for attr in ("summary_models", "extraction_models", "embedding_models"):
+        value = getattr(config, attr, None)
+        if value:
+            refs.extend(list(value))
+    if not refs:
+        return []
+
+    plaintext_pool = []
+    decrypt_pool = getattr(ingestion_service, "_plaintext_model_pool", None)
+    if callable(decrypt_pool):
+        plaintext_pool = decrypt_pool(refs)
+    else:
+        plaintext_pool = [
+            ref.model_dump() if hasattr(ref, "model_dump") else dict(ref)
+            for ref in refs
+        ]
+    return [entry for entry in plaintext_pool if entry.get("lifecycle_base_url")]
+
+
 async def _set_item_phase(
     db: AsyncIOMotorDatabase,
     item_id: str,
@@ -1858,29 +1901,57 @@ async def run_local_batch(
                     _hb.cancel()
             await refresh_batch_counts(db, batch_id, user_id=user_id)
 
-    for _pass_target in pass_plan:
-        _rank = STAGE_RANK.get(_pass_target) if _pass_target else None
-        batch.setdefault("options", {})["target_stage"] = _pass_target
-        await db[BATCHES].update_one(
-            {"batch_id": batch_id},
-            {"$set": {"options.target_stage": _pass_target, "updated_at": _now()}},
-        )
-        if len(pass_plan) > 1:
-            logger.info(
-                "batch %s pass -> %s (plan %s)",
-                batch_id[:8], _pass_target or "full", pass_plan,
-            )
-        await asyncio.gather(*[_worker(idx, _rank) for idx in range(concurrency)])
+    lifecycle_pool = await _batch_lifecycle_pool(
+        ingestion_service=ingestion_service,
+        corpus_id=batch["corpus_id"],
+        options=batch.get("options") or {},
+    )
+    lifecycle_hold_acquired = False
+    lifecycle_hold_id = f"batch:{batch_id}"
+    lifecycle_purpose = f"batch:{batch_id[:8]}"
     try:
-        report = await _batch_quality_report(db, batch)
-        await db[BATCHES].update_one(
-            {"batch_id": batch_id},
-            {"$set": {"report": report, "updated_at": _now()}},
-        )
-        logger.info("Batch %s quality report: %s", batch_id[:8], report)
-    except Exception as exc:  # noqa: BLE001 — reporting never fails the batch
-        logger.warning("Batch quality report failed: %s", exc)
-    return await refresh_batch_counts(db, batch_id, user_id=user_id)
+        if lifecycle_pool:
+            from services.ingestion.model_lifecycle import acquire_model_lifecycle_hold
+
+            await acquire_model_lifecycle_hold(
+                lifecycle_pool,
+                purpose=lifecycle_purpose,
+                hold_id=lifecycle_hold_id,
+            )
+            lifecycle_hold_acquired = True
+
+        for _pass_target in pass_plan:
+            _rank = STAGE_RANK.get(_pass_target) if _pass_target else None
+            batch.setdefault("options", {})["target_stage"] = _pass_target
+            await db[BATCHES].update_one(
+                {"batch_id": batch_id},
+                {"$set": {"options.target_stage": _pass_target, "updated_at": _now()}},
+            )
+            if len(pass_plan) > 1:
+                logger.info(
+                    "batch %s pass -> %s (plan %s)",
+                    batch_id[:8], _pass_target or "full", pass_plan,
+                )
+            await asyncio.gather(*[_worker(idx, _rank) for idx in range(concurrency)])
+        try:
+            report = await _batch_quality_report(db, batch)
+            await db[BATCHES].update_one(
+                {"batch_id": batch_id},
+                {"$set": {"report": report, "updated_at": _now()}},
+            )
+            logger.info("Batch %s quality report: %s", batch_id[:8], report)
+        except Exception as exc:  # noqa: BLE001 — reporting never fails the batch
+            logger.warning("Batch quality report failed: %s", exc)
+        return await refresh_batch_counts(db, batch_id, user_id=user_id)
+    finally:
+        if lifecycle_hold_acquired:
+            from services.ingestion.model_lifecycle import release_model_lifecycle_hold
+
+            await release_model_lifecycle_hold(
+                lifecycle_pool,
+                purpose=lifecycle_purpose,
+                hold_id=lifecycle_hold_id,
+            )
 
 
 def _runtime_batch_concurrency(batch: dict[str, Any], settings: Any) -> int:

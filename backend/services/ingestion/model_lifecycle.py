@@ -23,6 +23,7 @@ LifecycleKey = tuple[str, str, str]
 
 _shutdown_tasks: dict[LifecycleKey, asyncio.Task] = {}
 _shutdown_generations: dict[LifecycleKey, int] = {}
+_lifecycle_holds: dict[LifecycleKey, set[str]] = {}
 
 
 def _managed_entries(pool: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -33,6 +34,29 @@ def _managed_entries(pool: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         for entry in pool
         if entry.get("lifecycle_base_url") and entry.get("lifecycle_auto_start")
     ]
+
+
+def _lifecycle_entries(pool: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if not pool:
+        return []
+    return [
+        entry
+        for entry in pool
+        if entry.get("lifecycle_base_url")
+        and (entry.get("lifecycle_auto_start") or entry.get("lifecycle_auto_stop"))
+    ]
+
+
+def _unique_entries_by_lifecycle_key(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[LifecycleKey] = set()
+    unique: list[dict[str, Any]] = []
+    for entry in entries:
+        key = _lifecycle_key(entry)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(entry)
+    return unique
 
 
 def _url(entry: dict[str, Any], path_field: str, default_path: str) -> str:
@@ -186,6 +210,81 @@ async def ensure_model_lifecycle_ready(
     await asyncio.gather(*[_ensure_one_ready(entry, purpose=purpose) for entry in unique])
 
 
+async def acquire_model_lifecycle_hold(
+    pool: list[dict[str, Any]] | None,
+    *,
+    purpose: str,
+    hold_id: str,
+    ensure_ready: bool = True,
+) -> None:
+    """Keep managed runtimes hot across a larger unit of work.
+
+    Per-document callers still schedule their normal idle shutdown, but a batch
+    hold defers those shutdowns until the batch releases the hold. This avoids
+    RTX/vLLM cold-load thrash between files when parsing, summaries, embedding,
+    or graph writes take longer than the per-call idle lease.
+    """
+
+    entries = _unique_entries_by_lifecycle_key(_lifecycle_entries(pool))
+    if not entries:
+        return
+
+    acquired: list[LifecycleKey] = []
+    for entry in entries:
+        key = _lifecycle_key(entry)
+        _cancel_pending_shutdown(entry, purpose=purpose)
+        _lifecycle_holds.setdefault(key, set()).add(str(hold_id))
+        acquired.append(key)
+        logger.info(
+            "model lifecycle hold acquired purpose=%s hold=%s control=%s active_holds=%d",
+            purpose,
+            hold_id,
+            key[0],
+            len(_lifecycle_holds.get(key, set())),
+        )
+
+    if not ensure_ready:
+        return
+    try:
+        await ensure_model_lifecycle_ready(pool, purpose=purpose)
+    except Exception:
+        for key in acquired:
+            holds = _lifecycle_holds.get(key)
+            if holds:
+                holds.discard(str(hold_id))
+                if not holds:
+                    _lifecycle_holds.pop(key, None)
+        raise
+
+
+async def release_model_lifecycle_hold(
+    pool: list[dict[str, Any]] | None,
+    *,
+    purpose: str,
+    hold_id: str,
+) -> None:
+    entries = _unique_entries_by_lifecycle_key(_lifecycle_entries(pool))
+    if not entries:
+        return
+
+    for entry in entries:
+        key = _lifecycle_key(entry)
+        holds = _lifecycle_holds.get(key)
+        if holds:
+            holds.discard(str(hold_id))
+            if not holds:
+                _lifecycle_holds.pop(key, None)
+        logger.info(
+            "model lifecycle hold released purpose=%s hold=%s control=%s active_holds=%d",
+            purpose,
+            hold_id,
+            key[0],
+            len(_lifecycle_holds.get(key, set())),
+        )
+
+    await shutdown_model_lifecycle(pool, purpose=purpose)
+
+
 async def _ensure_one_ready(entry: dict[str, Any], *, purpose: str) -> None:
     base = str(entry.get("lifecycle_base_url") or "").strip().rstrip("/")
     timeout_s = max(5, int(entry.get("lifecycle_ready_timeout_seconds") or 360))
@@ -269,11 +368,20 @@ async def shutdown_model_lifecycle(
 
     immediate: list[dict[str, Any]] = []
     for entry in unique:
+        key = _lifecycle_key(entry)
+        holds = _lifecycle_holds.get(key)
+        if holds:
+            logger.info(
+                "model lifecycle idle shutdown deferred purpose=%s control=%s active_holds=%d",
+                purpose,
+                key[0],
+                len(holds),
+            )
+            continue
         delay = _idle_shutdown_seconds(entry)
         if delay <= 0:
             immediate.append(entry)
             continue
-        key = _lifecycle_key(entry)
         _cancel_pending_shutdown(entry, purpose=purpose)
         generation = _shutdown_generations.get(key, 0) + 1
         _shutdown_generations[key] = generation
