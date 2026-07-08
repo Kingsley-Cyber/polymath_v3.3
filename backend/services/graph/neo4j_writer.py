@@ -13,6 +13,7 @@ the node, `extracted_type` on MENTIONS) instead of fragmenting identity.
 Entry point: write_document_graph() — call after GHOST B returns ExtractionResult list.
 """
 
+import asyncio
 import hashlib
 import logging
 import json
@@ -24,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from neo4j import AsyncDriver
+from neo4j.exceptions import TransientError
 
 from services.ghost_b import (
     EntityItem,
@@ -46,6 +48,8 @@ ENTITY_TYPE_OVERRIDES_PATH = Path(__file__).with_name("entity_type_overrides.jso
 ONTOLOGY_VERSION = "2026-04-25-v3"
 ENTITY_ID_PREFIX = "entity"
 GRAPH_PROMOTE_VERSION = "polymath.promote.v1"
+GRAPH_WRITE_MAX_ATTEMPTS = 3
+GRAPH_WRITE_DEADLOCK_BACKOFF_SECONDS = 0.75
 GENERIC_ENTITY_TERMS = {
     "agent",
     "attention",
@@ -1991,7 +1995,38 @@ async def delete_corpus_graph(
             await _refresh_entity_aggregates(session, affected_entity_ids)
 
 
-async def write_document_graph(
+def _is_retryable_graph_write_transient(exc: TransientError) -> bool:
+    code = str(getattr(exc, "code", "") or "")
+    text = str(exc)
+    return "DeadlockDetected" in code or "DeadlockDetected" in text
+
+
+async def write_document_graph(*args: Any, **kwargs: Any) -> None:
+    doc_id = str(kwargs.get("doc_id") or (args[1] if len(args) > 1 else ""))
+    corpus_id = str(kwargs.get("corpus_id") or (args[2] if len(args) > 2 else ""))
+    for attempt in range(1, GRAPH_WRITE_MAX_ATTEMPTS + 1):
+        try:
+            await _write_document_graph_once(*args, **kwargs)
+            return
+        except TransientError as exc:
+            if (
+                not _is_retryable_graph_write_transient(exc)
+                or attempt >= GRAPH_WRITE_MAX_ATTEMPTS
+            ):
+                raise
+            delay = GRAPH_WRITE_DEADLOCK_BACKOFF_SECONDS * attempt
+            logger.warning(
+                "Neo4j graph write deadlock; retrying doc=%s corpus=%s attempt=%d/%d delay=%.2fs",
+                doc_id[:12],
+                corpus_id[:8],
+                attempt + 1,
+                GRAPH_WRITE_MAX_ATTEMPTS,
+                delay,
+            )
+            await asyncio.sleep(delay)
+
+
+async def _write_document_graph_once(
     driver: AsyncDriver,
     doc_id: str,
     corpus_id: str,
