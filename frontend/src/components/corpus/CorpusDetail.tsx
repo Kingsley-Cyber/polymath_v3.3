@@ -160,6 +160,8 @@ const INGEST_STAGE_LABELS = [
 ] as const;
 
 function hasUsefulBatchProgress(batch: IngestBatchResponse): boolean {
+  if (batch.status === "cancelled") return false;
+
   const counts = batch.counts ?? {};
   if (
     (counts.running ?? 0) > 0 ||
@@ -314,11 +316,18 @@ export function CorpusDetail({
   }, [localBatch?.batch_id, localBatch?.status]);
 
   useEffect(() => {
+    setLocalBatch(null);
+    setShowLocalBatch(true);
+
     let cancelled = false;
     api
       .listIngestBatches(corpus.corpus_id, 10)
       .then((batches) => {
-        if (cancelled || batches.length === 0) return;
+        if (cancelled) return;
+        if (batches.length === 0) {
+          setLocalBatch(null);
+          return;
+        }
         const selected = selectDisplayBatch(batches);
         setLocalBatch(selected);
         if (!selected) return;
