@@ -300,6 +300,34 @@ export function CorpusDetail({
       .catch(() => setModalStatus(null));
   }, []);
 
+  const refreshDisplayBatch = useCallback(
+    async (hydrateItems = false, isCurrent: () => boolean = () => true) => {
+      const batches = await api.listIngestBatches(corpus.corpus_id, 10);
+      if (!isCurrent()) return;
+      const selected = selectDisplayBatch(batches);
+      setLocalBatch((prev) => {
+        if (!selected) return null;
+        return prev && prev.batch_id === selected.batch_id
+          ? { ...selected, items: selected.items ?? prev.items }
+          : selected;
+      });
+      if (selected && ["queued", "running"].includes(selected.status)) {
+        setShowLocalBatch(true);
+      }
+
+      if (hydrateItems && selected && !selected.items?.length) {
+        const full = await api.getIngestBatch(selected.batch_id);
+        if (!isCurrent()) return;
+        setLocalBatch((prev) =>
+          prev && prev.batch_id === full.batch_id
+            ? { ...prev, items: full.items ?? prev.items }
+            : prev,
+        );
+      }
+    },
+    [corpus.corpus_id],
+  );
+
   useEffect(() => {
     if (!localBatch?.batch_id) return;
     if (!["queued", "running"].includes(localBatch.status)) return;
@@ -327,42 +355,22 @@ export function CorpusDetail({
     setShowLocalBatch(true);
 
     let cancelled = false;
-    api
-      .listIngestBatches(corpus.corpus_id, 10)
-      .then((batches) => {
-        if (cancelled) return;
-        if (batches.length === 0) {
-          setLocalBatch(null);
-          return;
-        }
-        const selected = selectDisplayBatch(batches);
-        setLocalBatch(selected);
-        if (!selected) return;
-        if (["queued", "running"].includes(selected.status)) {
-          setShowLocalBatch(true);
-        }
-        // The library's PROCESSING / FAILED sections need the item list; the
-        // list endpoint may return counts only. Hydrate items once — the 3s
-        // poll runs include_items=false and preserves whatever we load here.
-        if (!selected.items?.length) {
-          api
-            .getIngestBatch(selected.batch_id)
-            .then((full) => {
-              if (cancelled) return;
-              setLocalBatch((prev) =>
-                prev && prev.batch_id === full.batch_id
-                  ? { ...prev, items: full.items ?? prev.items }
-                  : prev,
-              );
-            })
-            .catch(() => undefined);
-        }
-      })
+    // The library's PROCESSING / FAILED sections need the item list; hydrate
+    // once, then poll the lightweight list endpoint below so cancelled repair
+    // batches cannot remain pinned as the live corpus status.
+    refreshDisplayBatch(true, () => !cancelled)
       .catch(() => undefined);
+
+    const timer = window.setInterval(() => {
+      if (cancelled) return;
+      refreshDisplayBatch(false, () => !cancelled).catch(() => undefined);
+    }, 10000);
+
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
-  }, [corpus.corpus_id]);
+  }, [corpus.corpus_id, refreshDisplayBatch]);
 
   const [retryHint, setRetryHint] = useState<string | null>(null);
   const [backfillingDocs, setBackfillingDocs] = useState<Set<string>>(new Set());
