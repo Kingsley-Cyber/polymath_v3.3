@@ -145,6 +145,27 @@ def build_effective_config(
     return IngestionConfig(**merged)
 
 
+def _summary_backfill_index_scope(
+    *,
+    generate: bool,
+    limit: int | None,
+    generated_parent_ids: list[str],
+    summary_text_clause: dict,
+) -> tuple[str, list[dict]]:
+    """Return the summary-index query scope for a backfill call.
+
+    Operator probes often call ``generate=True, index=True, limit=N``. In that
+    mode, indexing must stay bounded to the summaries generated in the same
+    call. Full-corpus reindexing is still available through explicit index-only
+    maintenance runs.
+    """
+
+    clauses: list[dict] = [summary_text_clause]
+    if generate and limit is not None:
+        return "generated_in_call", [*clauses, {"parent_id": {"$in": generated_parent_ids}}]
+    return "all_existing_summaries", clauses
+
+
 # ── Preset normalization ───────────────────────────────────────────────────
 #
 # `IngestionConfig.preset` is a convenience shortcut. apply_preset() rewrites
@@ -1585,10 +1606,12 @@ class IngestionService:
 
         This intentionally does not mutate the frozen ``chunk_summarization``
         ingest flag. It fills missing body-parent summaries, idempotently
-        indexes all available parent-summary text into Qdrant, and updates each
-        document's ``write_state.summaries_indexed`` when its body parents are
-        covered. That lets older balanced corpora gain the summary retrieval
-        lane without delete/reingest churn.
+        indexes parent-summary text into Qdrant, and updates each document's
+        ``write_state.summaries_indexed`` when its body parents are covered.
+        Capped generate+index calls index only the summaries generated in that
+        call; explicit index-only calls still rebuild all existing summary
+        points. That lets older balanced corpora gain the summary retrieval
+        lane without delete/reingest churn or surprise full-corpus work.
         """
 
         from pymongo import UpdateOne
@@ -1679,6 +1702,7 @@ class IngestionService:
         attempted = 0
         generation_batches = 0
         generation_errors: list[str] = []
+        generated_parent_ids: list[str] = []
 
         if generate and (limit is None or limit > 0):
             runtime_summary = (
@@ -1789,6 +1813,7 @@ class IngestionService:
                         ],
                         ordered=False,
                     )
+                    generated_parent_ids.extend(str(r.parent_id) for r in results)
                     generated += len(results)
                     if len(results) < len(tasks):
                         generation_errors.append(
@@ -1796,14 +1821,21 @@ class IngestionService:
                         )
 
         indexed = 0
+        index_scope = "skipped"
         if index:
             target_kinds = [
                 kind
                 for kind in (cfg.target_qdrant_collections or ["hrag"])
                 if kind in ("naive", "hrag")
             ] or ["hrag"]
+            index_scope, index_clauses = _summary_backfill_index_scope(
+                generate=generate,
+                limit=limit,
+                generated_parent_ids=generated_parent_ids,
+                summary_text_clause=summary_text_clause,
+            )
             cursor = self._db["parent_chunks"].find(
-                _parent_query(summary_text_clause),
+                _parent_query(*index_clauses),
                 {
                     "_id": 0,
                     "parent_id": 1,
@@ -1916,6 +1948,7 @@ class IngestionService:
             "generated": generated,
             "attempted": attempted,
             "indexed": indexed,
+            "index_scope": index_scope,
             "generation_batches": generation_batches,
             "generation_errors": generation_errors,
             "before": before,

@@ -9,9 +9,40 @@ from models.schemas import (
     GlobalIngestionSummarySettings,
     IngestionConfig,
 )
-from services.ingestion_service import IngestionService
+from services.ingestion_service import IngestionService, _summary_backfill_index_scope
 from services.secrets import decrypt, encrypt
 from services.settings import SettingsService, settings_service
+
+
+def test_summary_backfill_limited_generate_indexes_only_generated_parents() -> None:
+    clause = {"summary": {"$exists": True, "$nin": [None, ""]}}
+
+    scope, clauses = _summary_backfill_index_scope(
+        generate=True,
+        limit=200,
+        generated_parent_ids=["parent-a", "parent-b"],
+        summary_text_clause=clause,
+    )
+
+    assert scope == "generated_in_call"
+    assert clauses == [
+        clause,
+        {"parent_id": {"$in": ["parent-a", "parent-b"]}},
+    ]
+
+
+def test_summary_backfill_index_only_rebuilds_all_existing_summaries() -> None:
+    clause = {"summary": {"$exists": True, "$nin": [None, ""]}}
+
+    scope, clauses = _summary_backfill_index_scope(
+        generate=False,
+        limit=200,
+        generated_parent_ids=["parent-a"],
+        summary_text_clause=clause,
+    )
+
+    assert scope == "all_existing_summaries"
+    assert clauses == [clause]
 
 
 def test_global_summary_settings_encrypt_mask_and_decrypt() -> None:
