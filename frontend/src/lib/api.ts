@@ -587,9 +587,12 @@ export async function createUploadIngestBatch(
 export async function listIngestBatches(
   corpusId: string,
   limit = 10,
+  opts?: { includeArchived?: boolean },
 ): Promise<IngestBatchResponse[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (opts?.includeArchived) params.set("include_archived", "true");
   return fetchJSON(
-    `/corpora/${encodeURIComponent(corpusId)}/ingest-batches?limit=${encodeURIComponent(String(limit))}`,
+    `/corpora/${encodeURIComponent(corpusId)}/ingest-batches?${params.toString()}`,
   );
 }
 

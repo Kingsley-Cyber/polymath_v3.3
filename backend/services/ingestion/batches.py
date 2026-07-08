@@ -677,11 +677,25 @@ async def list_batches(
     *,
     user_id: str,
     limit: int = 10,
+    include_archived: bool = False,
 ) -> list[dict[str, Any]]:
-    """Return recent durable ingest batches for a corpus."""
+    """Return recent durable ingest batches for a corpus.
+
+    The default is the operator-facing "current" view: queued/running and
+    successfully completed batches. Cancelled/failed terminal rows are history,
+    not live truth, and showing them as the primary corpus card caused stale
+    progress displays after repair/cancel workflows. Callers that need audit
+    history can opt in with include_archived=True.
+    """
     limit = max(1, min(int(limit), 100))
+    query: dict[str, Any] = {"corpus_id": corpus_id, "user_id": user_id}
+    if not include_archived:
+        query["$or"] = [
+            {"status": {"$in": [BATCH_QUEUED, BATCH_RUNNING, BATCH_DONE, BATCH_PARTIAL]}},
+            {"status": {"$exists": False}},
+        ]
     cursor = db[BATCHES].find(
-        {"corpus_id": corpus_id, "user_id": user_id},
+        query,
         {"_id": 0},
     ).sort("created_at", -1).limit(limit)
     return await cursor.to_list(length=limit)

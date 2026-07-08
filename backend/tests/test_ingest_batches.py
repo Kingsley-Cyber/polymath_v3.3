@@ -809,12 +809,7 @@ class _BatchCollection:
         self.rows = rows
 
     def find(self, query, projection=None):
-        rows = [
-            dict(row)
-            for row in self.rows
-            if row.get("corpus_id") == query.get("corpus_id")
-            and row.get("user_id") == query.get("user_id")
-        ]
+        rows = [dict(row) for row in self.rows if _matches_query(row, query)]
         return _BatchCursor(rows)
 
 
@@ -853,6 +848,58 @@ async def test_list_batches_returns_recent_user_batches():
     )
 
     assert [row["batch_id"] for row in rows] == ["new"]
+
+
+@pytest.mark.asyncio
+async def test_list_batches_hides_archived_terminal_batches_by_default():
+    db = {
+        batches.BATCHES: _BatchCollection(
+            [
+                {
+                    "batch_id": "cancelled-newest",
+                    "corpus_id": "corpus-1",
+                    "user_id": "user-1",
+                    "status": "cancelled",
+                    "created_at": datetime(2024, 1, 3),
+                },
+                {
+                    "batch_id": "failed-middle",
+                    "corpus_id": "corpus-1",
+                    "user_id": "user-1",
+                    "status": batches.BATCH_FAILED,
+                    "created_at": datetime(2024, 1, 2),
+                },
+                {
+                    "batch_id": "running-current",
+                    "corpus_id": "corpus-1",
+                    "user_id": "user-1",
+                    "status": batches.BATCH_RUNNING,
+                    "created_at": datetime(2024, 1, 1),
+                },
+            ]
+        )
+    }
+
+    rows = await batches.list_batches(
+        db,
+        "corpus-1",
+        user_id="user-1",
+        limit=10,
+    )
+    history = await batches.list_batches(
+        db,
+        "corpus-1",
+        user_id="user-1",
+        limit=10,
+        include_archived=True,
+    )
+
+    assert [row["batch_id"] for row in rows] == ["running-current"]
+    assert [row["batch_id"] for row in history] == [
+        "cancelled-newest",
+        "failed-middle",
+        "running-current",
+    ]
 
 
 def _matches_query(row, query):

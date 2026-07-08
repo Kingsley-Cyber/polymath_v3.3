@@ -1442,6 +1442,10 @@ async def browse_ingest_source(
 async def list_ingest_batches(
     corpus_id: str,
     limit: int = Query(default=10, ge=1, le=100),
+    include_archived: bool = Query(
+        default=False,
+        description="Include terminal failed/cancelled historical batches.",
+    ),
     current_user: dict = Depends(get_current_user),
 ):
     corpus = await ingestion_service.get_corpus(corpus_id)
@@ -1452,6 +1456,7 @@ async def list_ingest_batches(
         corpus_id,
         user_id=current_user["user_id"],
         limit=limit,
+        include_archived=include_archived,
     )
 
 
