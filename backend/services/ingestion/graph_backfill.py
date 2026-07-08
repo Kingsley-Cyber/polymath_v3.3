@@ -68,6 +68,30 @@ def _clean_graph_warnings(warnings: list[str]) -> list[str]:
     ]
 
 
+def _is_graph_verify_error(raw: object) -> bool:
+    text = str(raw or "").lower()
+    return "neo4j" in text or "has_chunk" in text
+
+
+def _graph_verify_mismatch(write_state: dict[str, Any]) -> bool:
+    if write_state.get("verified") is True:
+        return False
+    return any(_is_graph_verify_error(err) for err in write_state.get("verify_errors") or [])
+
+
+def _write_state_after_graph_flush(write_state: dict[str, Any]) -> dict[str, Any]:
+    remaining_verify_errors = [
+        err
+        for err in write_state.get("verify_errors") or []
+        if not _is_graph_verify_error(err)
+    ]
+    return {
+        "write_state.neo4j_written": True,
+        "write_state.verify_errors": remaining_verify_errors,
+        "write_state.verified": True if not remaining_verify_errors else False,
+    }
+
+
 def _merge_metrics(
     *,
     total_chunks: int,
@@ -374,9 +398,10 @@ async def backfill_failed_graph_chunks(
 
     1. **Failure retry** — if `ghost_b_failures` is non-empty, re-extract
        those chunks via Ghost B and merge the results into staging.
-    2. **Neo4j flush** — if `write_state.neo4j_written` is not True and
-       `ghost_b_staging` is non-empty, fire `write_document_graph` against
-       the staged results so Neo4j catches up.
+    2. **Neo4j flush** — if `write_state.neo4j_written` is not True, or
+       verification proves Neo4j chunk links are broken, and `ghost_b_staging`
+       is non-empty, fire `write_document_graph` against the staged results so
+       Neo4j catches up.
 
     Either trigger (or both) leads to the same idempotent MERGE pass —
     safe to call repeatedly. The function is no-op only when there's
@@ -402,12 +427,14 @@ async def backfill_failed_graph_chunks(
     ]
     write_state = doc.get("write_state") or {}
     neo4j_already_written = bool(write_state.get("neo4j_written"))
+    neo4j_verify_mismatch = _graph_verify_mismatch(write_state)
     staged_raw = await mongo_reader.read_ghost_b_staging(db, doc_id, corpus_id) or []
-    needs_neo4j_flush = (not neo4j_already_written) and bool(staged_raw)
+    needs_graph_repair = (not neo4j_already_written) or neo4j_verify_mismatch
+    needs_neo4j_flush = needs_graph_repair and bool(staged_raw)
     needs_full_replay = (
         not failures
         and not needs_neo4j_flush
-        and not neo4j_already_written
+        and needs_graph_repair
         and bool(write_state.get("mongo_written"))
         and bool(write_state.get("qdrant_written"))
     )
@@ -464,12 +491,13 @@ async def backfill_failed_graph_chunks(
             parent_count=parent_count,
         )
         # Flip the flag — same contract the worker uses on success.
+        update_set = {
+            **_write_state_after_graph_flush(write_state),
+            "updated_at": datetime.utcnow(),
+        }
         await db["documents"].update_one(
             {"doc_id": doc_id, "corpus_id": corpus_id},
-            {"$set": {
-                "write_state.neo4j_written": True,
-                "updated_at": datetime.utcnow(),
-            }},
+            {"$set": update_set},
         )
         logger.info(
             "phase=ghost_b_backfill_flush doc=%s corpus=%s chunks=%d staged=%d",
@@ -525,7 +553,7 @@ async def backfill_failed_graph_chunks(
                     "ghost_b_failures": [],
                     "ghost_b_failure_count": 0,
                     "ghost_b_metrics": metrics,
-                    "write_state.neo4j_written": True,
+                    **_write_state_after_graph_flush(write_state),
                     "updated_at": datetime.utcnow(),
                 },
                 "$unset": {"ghost_b_staging": ""},
@@ -613,7 +641,7 @@ async def backfill_failed_graph_chunks(
                 "ghost_b_failures": [asdict(failure) for failure in remaining_failures][:20],
                 "ghost_b_failure_count": len(remaining_failures),
                 "ghost_b_metrics": metrics,
-                "write_state.neo4j_written": True,
+                **_write_state_after_graph_flush(write_state),
                 "write_state.warnings": warnings,
                 "updated_at": datetime.utcnow(),
             },
@@ -761,7 +789,7 @@ async def backfill_failed_graph_chunks(
         "updated_at": datetime.utcnow(),
     }
     if report.results:
-        update_set["write_state.neo4j_written"] = True
+        update_set.update(_write_state_after_graph_flush(write_state))
 
     await db["documents"].update_one(
         {"doc_id": doc_id, "corpus_id": corpus_id},

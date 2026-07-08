@@ -1477,3 +1477,76 @@ async def test_graph_backfill_flushes_from_extraction_collection(monkeypatch):
     assert result["status"] == "flushed_to_neo4j"
     assert len(seen["written_results"]) == 1
     assert seen["parent_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_graph_backfill_flushes_when_verifier_reports_graph_mismatch(monkeypatch):
+    doc = {
+        "doc_id": "doc-3",
+        "corpus_id": "corpus-1",
+        "user_id": "user-1",
+        "filename": "book.pdf",
+        "ingestion_config": {"use_neo4j": True, "target_qdrant_collections": ["graph"]},
+        "write_state": {
+            "mongo_written": True,
+            "qdrant_written": True,
+            "neo4j_written": True,
+            "verified": False,
+            "verify_errors": [
+                "neo4j: HAS_CHUNK count=0 but expected=459",
+                "mismatch: expected=459 child vectors but corpus has 145",
+            ],
+        },
+        "ghost_b_failures": [],
+        "ghost_b_staging_count": 1,
+        "parent_count": 1,
+        "updated_at": datetime.utcnow(),
+    }
+    chunks = [
+        {
+            "doc_id": "doc-3",
+            "corpus_id": "corpus-1",
+            "chunk_id": "chunk-body",
+            "text": "substantive body text",
+            "chunk_kind": "body",
+        }
+    ]
+    db = _FakeDb(doc, chunks)
+    db.collections["ghost_b_extractions"] = _FakeCollection(
+        [
+            {
+                "doc_id": "doc-3",
+                "corpus_id": "corpus-1",
+                "chunk_id": "chunk-body",
+                "schema_version": "test",
+                "entities": [],
+                "relations": [],
+                "facts": [],
+                "status": "ok",
+            }
+        ]
+    )
+    seen = {}
+
+    async def fake_write_graph_results(**kwargs):
+        seen["written_results"] = kwargs["extraction_results"]
+
+    monkeypatch.setattr(graph_backfill, "_write_graph_results", fake_write_graph_results)
+
+    result = await graph_backfill.backfill_failed_graph_chunks(
+        db=db,
+        qdrant_client=object(),
+        neo4j_driver=object(),
+        corpus_id="corpus-1",
+        doc_id="doc-3",
+        user_id="user-1",
+    )
+
+    assert result["status"] == "flushed_to_neo4j"
+    assert len(seen["written_results"]) == 1
+    update = db["documents"].updates[-1][1]["$set"]
+    assert update["write_state.neo4j_written"] is True
+    assert update["write_state.verify_errors"] == [
+        "mismatch: expected=459 child vectors but corpus has 145",
+    ]
+    assert update["write_state.verified"] is False
