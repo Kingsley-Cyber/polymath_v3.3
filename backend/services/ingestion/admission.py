@@ -55,18 +55,22 @@ _ingest_active_count: int = 0
 _admission_lock = asyncio.Lock()
 
 
-async def try_acquire_ingest_slot() -> bool:
+async def try_acquire_ingest_slot(limit: int | None = None) -> bool:
     """Try to reserve an ingest slot.
 
-    Returns True if the active count was below INGEST_ACTIVE_LIMIT
+    Returns True if the active count was below the selected limit
     and was incremented; False when the cap is already saturated.
     Callers MUST pair every True return with a matching
     release_ingest_slot() call (typically in a finally block or
     in the background worker task's finally).
+
+    ``limit`` lets profile-aware durable batch runners request a tighter or
+    wider cap without weakening the default HTTP/MCP upload guard.
     """
     global _ingest_active_count
+    cap = max(1, int(limit if limit is not None else INGEST_ACTIVE_LIMIT))
     async with _admission_lock:
-        if _ingest_active_count >= INGEST_ACTIVE_LIMIT:
+        if _ingest_active_count >= cap:
             return False
         _ingest_active_count += 1
         return True

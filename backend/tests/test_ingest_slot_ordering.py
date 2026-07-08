@@ -148,6 +148,17 @@ async def test_slot_acquire_returns_false_at_limit():
 
 
 @pytest.mark.asyncio
+async def test_slot_acquire_can_use_profile_aware_limit():
+    """Durable RTX-assisted batches can request a wider cap without changing
+    the default HTTP/MCP admission limit."""
+    _admission.INGEST_ACTIVE_LIMIT = 1
+    assert await ing._try_acquire_ingest_slot() is True
+    assert await ing._try_acquire_ingest_slot() is False
+    assert await ing._try_acquire_ingest_slot(limit=2) is True
+    assert _admission._ingest_active_count == 2
+
+
+@pytest.mark.asyncio
 async def test_release_frees_slot_for_next_acquire():
     """A successful release allows the next acquire to succeed."""
     _admission.INGEST_ACTIVE_LIMIT = 1

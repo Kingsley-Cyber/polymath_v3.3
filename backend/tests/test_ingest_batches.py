@@ -466,7 +466,7 @@ async def test_local_batch_item_exception_is_terminal_failed(monkeypatch, tmp_pa
             )
             raise RuntimeError("chunker timeout")
 
-    async def fake_wait_for_slot():
+    async def fake_wait_for_slot(_limit=None):
         return None
 
     async def fake_release_slot():
@@ -520,7 +520,7 @@ async def test_local_batch_item_failed_result_does_not_requeue(monkeypatch, tmp_
                 error="Ingest incomplete: qdrant",
             )
 
-    async def fake_wait_for_slot():
+    async def fake_wait_for_slot(_limit=None):
         return None
 
     async def fake_release_slot():
@@ -575,7 +575,7 @@ async def test_local_batch_item_queryable_pending_graph_is_not_failed(monkeypatc
                 error=None,
             )
 
-    async def fake_wait_for_slot():
+    async def fake_wait_for_slot(_limit=None):
         return None
 
     async def fake_release_slot():
@@ -625,7 +625,7 @@ async def test_local_batch_item_preserves_combined_pending_phase(monkeypatch, tm
                 error=None,
             )
 
-    async def fake_wait_for_slot():
+    async def fake_wait_for_slot(_limit=None):
         return None
 
     async def fake_release_slot():
@@ -677,7 +677,7 @@ async def test_local_batch_item_passes_batch_summary_defer_flag(monkeypatch, tmp
                 error=None,
             )
 
-    async def fake_wait_for_slot():
+    async def fake_wait_for_slot(_limit=None):
         return None
 
     async def fake_release_slot():

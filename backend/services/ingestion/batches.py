@@ -1250,8 +1250,8 @@ async def _lease_next_item(
     )
 
 
-async def _wait_for_ingest_slot() -> None:
-    while not await admission.try_acquire_ingest_slot():
+async def _wait_for_ingest_slot(limit: int | None = None) -> None:
+    while not await admission.try_acquire_ingest_slot(limit=limit):
         await asyncio.sleep(1.0)
 
 
@@ -1431,7 +1431,7 @@ async def _process_local_item(
 
     slot_acquired = False
     try:
-        await _wait_for_ingest_slot()
+        await _wait_for_ingest_slot(_global_doc_limit_for_batch(batch, get_settings()))
         slot_acquired = True
         await _set_item_phase(db, item_id, "reading", status=ITEM_RUNNING)
         data = path.read_bytes()
