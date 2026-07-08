@@ -1972,6 +1972,7 @@ class RetrieverOrchestrator:
             intent=retrieval_intent,
             tier=effective_tier,
             multi_corpus=multi,
+            selected_corpus_ids=corpus_ids or [],
             query=rank_query,
         )
         selection_diagnostics = dict(diversity.diagnostics or {})

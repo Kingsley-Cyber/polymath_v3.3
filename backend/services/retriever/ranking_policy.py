@@ -947,6 +947,31 @@ def _near_duplicate_pairs(
     return pairs
 
 
+def _ordered_unique(values: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        item = str(value or "").strip()
+        if not item or item in seen:
+            continue
+        ordered.append(item)
+        seen.add(item)
+    return ordered
+
+
+def _selected_corpus_counts(
+    selected_indices: list[int],
+    ranked: list[SourceChunk],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for idx in selected_indices:
+        corpus_id = str(getattr(ranked[idx], "corpus_id", "") or "")
+        if not corpus_id:
+            continue
+        counts[corpus_id] = counts.get(corpus_id, 0) + 1
+    return counts
+
+
 def _evaluate_sufficiency(
     *,
     query: str | None,
@@ -1136,6 +1161,7 @@ def select_with_diversity(
     intent: RetrievalIntent,
     tier: RetrievalTier,
     multi_corpus: bool = False,
+    selected_corpus_ids: list[str] | None = None,
     query: str | None = None,
 ) -> DiversityResult:
     """Select final context with tier-aware MMR/atomic diversity.
@@ -1511,6 +1537,153 @@ def select_with_diversity(
             final_top_k=final_top_k,
         )
     )
+    chosen_idx = set(selected_indices)
+    covered_atoms.clear()
+    for idx in selected_indices:
+        covered_atoms.update(fingerprints[idx]["atoms"])
+
+    corpus_floor_meta: dict[str, Any] = {
+        "enabled": False,
+        "target_corpora": [],
+        "covered_corpora": [],
+        "added": 0,
+        "replaced": 0,
+        "skipped": [],
+    }
+    if multi_corpus and final_top_k > 1:
+        requested_corpora = _ordered_unique(selected_corpus_ids)
+        if not requested_corpora:
+            requested_corpora = _ordered_unique(
+                [str(getattr(chunk, "corpus_id", "") or "") for chunk in ranked]
+            )
+        requested_set = set(requested_corpora)
+        eligible_by_corpus: dict[str, int] = {}
+        for idx, candidate in enumerate(ranked):
+            corpus_id = str(getattr(candidate, "corpus_id", "") or "")
+            if not corpus_id or (requested_set and corpus_id not in requested_set):
+                continue
+            if corpus_id in eligible_by_corpus:
+                continue
+            if not _passes_relevance_floor(
+                idx=idx,
+                candidate=candidate,
+                fp=fingerprints[idx],
+                relevance_by_idx=relevance_by_idx,
+                policy=policy,
+                top_score=top_score,
+            ):
+                continue
+            eligible_by_corpus[corpus_id] = idx
+
+        # Prefer the user's corpus order when possible, but never reserve more
+        # corpora than there are final slots. Corpora with no strong candidate
+        # are intentionally absent: coverage is a floor, not forced noise.
+        target_corpora = [
+            corpus_id for corpus_id in requested_corpora if corpus_id in eligible_by_corpus
+        ][:final_top_k]
+        corpus_floor_meta["enabled"] = bool(target_corpora)
+        corpus_floor_meta["target_corpora"] = target_corpora
+
+        protected_reasons = {
+            "document_anchor_reserve",
+            "graph_reserve",
+            "sufficiency_repair",
+        }
+        required_atoms = set(sufficiency.get("required_atoms") or [])
+
+        def _rebuild_atoms() -> None:
+            covered_atoms.clear()
+            for selected_idx in selected_indices:
+                covered_atoms.update(fingerprints[selected_idx]["atoms"])
+
+        def _try_replace(pos: int, new_idx: int, score: float) -> bool:
+            old_idx = selected_indices[pos]
+            old_score = selected_scores.get(old_idx)
+            old_reason = selected_by.get(old_idx)
+            old_sufficiency = sufficiency
+
+            selected_indices[pos] = new_idx
+            chosen_idx.discard(old_idx)
+            chosen_idx.add(new_idx)
+            selected_scores.pop(old_idx, None)
+            selected_by.pop(old_idx, None)
+            selected_scores[new_idx] = score
+            selected_by[new_idx] = "corpus_floor"
+            _rebuild_atoms()
+
+            new_sufficiency = _evaluate_sufficiency(
+                query=query,
+                selected_indices=selected_indices,
+                fingerprints=fingerprints,
+            )
+            if old_sufficiency.get("answerable") and not new_sufficiency.get("answerable"):
+                selected_indices[pos] = old_idx
+                chosen_idx.discard(new_idx)
+                chosen_idx.add(old_idx)
+                selected_scores.pop(new_idx, None)
+                selected_by.pop(new_idx, None)
+                if old_score is not None:
+                    selected_scores[old_idx] = old_score
+                if old_reason is not None:
+                    selected_by[old_idx] = old_reason
+                _rebuild_atoms()
+                return False
+            return True
+
+        for corpus_id in target_corpora:
+            corpus_counts = _selected_corpus_counts(selected_indices, ranked)
+            if corpus_counts.get(corpus_id, 0) > 0:
+                continue
+            idx = eligible_by_corpus.get(corpus_id)
+            if idx is None or idx in chosen_idx:
+                continue
+            reserve_score = relevance_by_idx.get(idx, 0.0) + 0.10
+            if len(selected_indices) < final_top_k:
+                _take(idx, reserve_score, "corpus_floor")
+                corpus_floor_meta["added"] += 1
+                continue
+
+            atom_counts = _atom_counts(selected_indices, fingerprints)
+            replace_pos: int | None = None
+            replace_score = float("inf")
+            for pos, selected_idx in enumerate(selected_indices):
+                selected_corpus = str(getattr(ranked[selected_idx], "corpus_id", "") or "")
+                if not selected_corpus or corpus_counts.get(selected_corpus, 0) <= 1:
+                    continue
+                if selected_by.get(selected_idx) in protected_reasons:
+                    continue
+                unique_required = [
+                    atom
+                    for atom in fingerprints[selected_idx]["atoms"]
+                    if atom in required_atoms and atom_counts.get(atom, 0) == 1
+                ]
+                if unique_required:
+                    continue
+                score = selected_scores.get(
+                    selected_idx,
+                    relevance_by_idx.get(selected_idx, 0.0),
+                )
+                if score < replace_score:
+                    replace_score = score
+                    replace_pos = pos
+            if replace_pos is None:
+                corpus_floor_meta["skipped"].append(corpus_id)
+                continue
+            if _try_replace(replace_pos, idx, reserve_score):
+                corpus_floor_meta["replaced"] += 1
+            else:
+                corpus_floor_meta["skipped"].append(corpus_id)
+
+        corpus_floor_meta["covered_corpora"] = [
+            corpus_id
+            for corpus_id in target_corpora
+            if _selected_corpus_counts(selected_indices, ranked).get(corpus_id, 0) > 0
+        ]
+        sufficiency = _evaluate_sufficiency(
+            query=query,
+            selected_indices=selected_indices,
+            fingerprints=fingerprints,
+        )
 
     annotated = [
         _annotated_copy(
@@ -1544,6 +1717,7 @@ def select_with_diversity(
         ),
         "repair_rounds": repair_rounds,
         "sufficiency": sufficiency,
+        "corpus_floor": corpus_floor_meta,
     }
     for chunk in annotated:
         metadata = dict(chunk.metadata or {})

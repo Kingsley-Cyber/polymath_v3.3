@@ -3,7 +3,9 @@
 This module sits after retrieval/reranking. It does not retrieve anything and
 does not know about chat, graph, Qdrant, Mongo, or Neo4j. Its job is narrow:
 given scored candidates with facet/lane tags, keep strong global evidence while
-reserving room for lanes the coverage detector says are missing.
+reserving room for lanes the coverage detector says are missing and, when the
+caller supplies an explicit multi-corpus scope, preserving at least one strong
+candidate from each represented corpus within the final budget.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ class FacetCandidate:
     lanes: set[str] = field(default_factory=set)
     key: str = ""
     doc_id: str = ""
+    corpus_id: str = ""
     domain: str = ""
     junk: bool = False
     order: int = 0
@@ -45,6 +48,34 @@ def _candidate_key(candidate: FacetCandidate) -> str:
     return f"text:{doc_id}:{text}" if text else f"item:{id(item)}"
 
 
+def _candidate_corpus_id(candidate: FacetCandidate) -> str:
+    return str(
+        candidate.corpus_id
+        or getattr(candidate.item, "corpus_id", "")
+        or ""
+    ).strip()
+
+
+def _ordered_unique(values: list[str] | set[str] | None) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        item = str(value or "").strip()
+        if not item or item in seen:
+            continue
+        ordered.append(item)
+        seen.add(item)
+    return ordered
+
+
+def _strong_score_floor(score: float, top_score: float) -> bool:
+    if top_score <= 0:
+        return score > 0
+    if 0.0 <= score <= top_score <= 1.0 and top_score > 0.0:
+        return (score / top_score) >= 0.80 and score >= 0.35
+    return score >= top_score - 1.25
+
+
 def select_facet_final(
     candidates: list[FacetCandidate],
     *,
@@ -55,6 +86,7 @@ def select_facet_final(
     source_cap: int | None = None,
     max_per_domain: int | None = None,
     per_doc_cap: int | None = None,
+    selected_corpus_ids: list[str] | set[str] | None = None,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Select final context candidates using lane reservations plus score order.
 
@@ -64,7 +96,9 @@ def select_facet_final(
     3. Reserve the best candidate for each missing lane, if available.
     4. Fill the remaining budget by score while respecting a soft lane quota.
     5. Relax quotas if there are still empty slots.
-    6. Return items in selector order: reserved lane evidence first, then global
+    6. Reserve strong candidates from selected corpora that would otherwise be
+       missing from the final packet.
+    7. Return items in selector order: reserved lane evidence first, then global
        evidence. The prompt already carries source scores, and this order makes
        facet coverage visible to the model.
     """
@@ -171,6 +205,107 @@ def select_facet_final(
                 continue
             add(lane_candidates[0])
 
+    def reserve_corpora() -> dict[str, Any]:
+        corpus_meta: dict[str, Any] = {
+            "enabled": False,
+            "target_corpora": [],
+            "covered_corpora": [],
+            "added": 0,
+            "replaced": 0,
+            "skipped": [],
+        }
+        requested = _ordered_unique(selected_corpus_ids)
+        if len(requested) < 2 or max_items <= 1:
+            return corpus_meta
+        top_score = float(ranked[0].score or 0.0) if ranked else 0.0
+        eligible_by_corpus: dict[str, FacetCandidate] = {}
+        requested_set = set(requested)
+        for candidate in ranked:
+            corpus_id = _candidate_corpus_id(candidate)
+            if not corpus_id or corpus_id not in requested_set or corpus_id in eligible_by_corpus:
+                continue
+            if not _strong_score_floor(float(candidate.score or 0.0), top_score):
+                continue
+            eligible_by_corpus[corpus_id] = candidate
+
+        target = [
+            corpus_id for corpus_id in requested if corpus_id in eligible_by_corpus
+        ][:max_items]
+        corpus_meta["enabled"] = bool(target)
+        corpus_meta["target_corpora"] = target
+        if not target:
+            return corpus_meta
+
+        def corpus_counts() -> dict[str, int]:
+            counts: dict[str, int] = {}
+            for candidate in selected:
+                corpus_id = _candidate_corpus_id(candidate)
+                if not corpus_id:
+                    continue
+                counts[corpus_id] = counts.get(corpus_id, 0) + 1
+            return counts
+
+        for corpus_id in target:
+            counts = corpus_counts()
+            if counts.get(corpus_id, 0) > 0:
+                continue
+            candidate = eligible_by_corpus[corpus_id]
+            if len(selected) < max_items:
+                if add(candidate):
+                    corpus_meta["added"] += 1
+                    continue
+            replace_pos: int | None = None
+            replace_score = float("inf")
+            for pos, existing in enumerate(selected):
+                existing_corpus = _candidate_corpus_id(existing)
+                if not existing_corpus or counts.get(existing_corpus, 0) <= 1:
+                    continue
+                # Do not drop explicit lane reservations unless there is no
+                # alternative; lane coverage is the selector's first contract.
+                if existing.lanes & tracked_set:
+                    continue
+                score = float(existing.score or 0.0)
+                if score < replace_score:
+                    replace_score = score
+                    replace_pos = pos
+            if replace_pos is None:
+                corpus_meta["skipped"].append(corpus_id)
+                continue
+
+            old = selected[replace_pos]
+            seen_keys.discard(_candidate_key(old))
+            if old.doc_id:
+                old_doc = str(old.doc_id)
+                doc_counts[old_doc] = max(0, doc_counts.get(old_doc, 0) - 1)
+                if doc_counts[old_doc] <= 0:
+                    doc_counts.pop(old_doc, None)
+                    seen_docs.discard(old_doc)
+            old_domain = str(getattr(old, "domain", "") or "")
+            if old_domain:
+                domain_counts[old_domain] = max(0, domain_counts.get(old_domain, 0) - 1)
+                if domain_counts[old_domain] <= 0:
+                    domain_counts.pop(old_domain, None)
+            for lane in old.lanes & tracked_set:
+                lane_counts[lane] = max(0, lane_counts.get(lane, 0) - 1)
+
+            selected[replace_pos] = candidate
+            seen_keys.add(_candidate_key(candidate))
+            if candidate.doc_id:
+                new_doc = str(candidate.doc_id)
+                seen_docs.add(new_doc)
+                doc_counts[new_doc] = doc_counts.get(new_doc, 0) + 1
+            new_domain = str(getattr(candidate, "domain", "") or "")
+            if new_domain:
+                domain_counts[new_domain] = domain_counts.get(new_domain, 0) + 1
+            for lane in candidate.lanes & tracked_set:
+                lane_counts[lane] = lane_counts.get(lane, 0) + 1
+            corpus_meta["replaced"] += 1
+
+        corpus_meta["covered_corpora"] = [
+            corpus_id for corpus_id in target if corpus_counts().get(corpus_id, 0) > 0
+        ]
+        return corpus_meta
+
     # Pass 1: reserve query-stated facets before dynamic/global score fill.
     reserve_lanes(priority)
 
@@ -203,6 +338,8 @@ def select_facet_final(
             break
         add(candidate, enforce_domain_cap=False)
 
+    corpus_floor = reserve_corpora()
+
     covered = [lane for lane in missing if lane_counts.get(lane, 0) > 0]
     priority_covered = [lane for lane in priority if lane_counts.get(lane, 0) > 0]
     return [candidate.item for candidate in selected[:max_items]], {
@@ -218,4 +355,5 @@ def select_facet_final(
         "covered_lanes": covered,
         "uncovered_lanes": [lane for lane in missing if lane not in covered],
         "lane_counts": lane_counts,
+        "corpus_floor": corpus_floor,
     }

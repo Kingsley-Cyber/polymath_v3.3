@@ -7,6 +7,7 @@ from services.facets.final_selector import FacetCandidate, select_facet_final
 class DummyChunk:
     chunk_id: str
     doc_id: str
+    corpus_id: str = "c1"
     text: str = ""
 
 
@@ -16,16 +17,22 @@ def _candidate(
     score: float,
     lanes: set[str] | None = None,
     doc_id: str | None = None,
+    corpus_id: str = "c1",
     junk: bool = False,
     order: int = 0,
 ) -> FacetCandidate:
-    item = DummyChunk(chunk_id=chunk_id, doc_id=doc_id or f"doc-{chunk_id}")
+    item = DummyChunk(
+        chunk_id=chunk_id,
+        doc_id=doc_id or f"doc-{chunk_id}",
+        corpus_id=corpus_id,
+    )
     return FacetCandidate(
         item=item,
         score=score,
         lanes=lanes or set(),
         key=f"chunk:{chunk_id}",
         doc_id=item.doc_id,
+        corpus_id=item.corpus_id,
         junk=junk,
         order=order,
     )
@@ -85,3 +92,35 @@ def test_facet_final_selector_filters_junk_when_clean_evidence_exists():
 
     assert [item.chunk_id for item in selected] == ["substantive"]
     assert meta["filtered_junk"] == 1
+
+
+def test_facet_final_selector_reserves_selected_corpus_when_candidate_is_strong():
+    selected, meta = select_facet_final(
+        [
+            _candidate("a1", score=1.00, corpus_id="alpha", order=1),
+            _candidate("a2", score=0.98, corpus_id="alpha", order=2),
+            _candidate("b1", score=0.88, corpus_id="beta", order=3),
+        ],
+        missing_lanes=[],
+        max_items=2,
+        selected_corpus_ids=["alpha", "beta"],
+    )
+
+    assert {item.corpus_id for item in selected} == {"alpha", "beta"}
+    assert meta["corpus_floor"]["covered_corpora"] == ["alpha", "beta"]
+
+
+def test_facet_final_selector_does_not_force_weak_selected_corpus():
+    selected, meta = select_facet_final(
+        [
+            _candidate("a1", score=1.00, corpus_id="alpha", order=1),
+            _candidate("a2", score=0.98, corpus_id="alpha", order=2),
+            _candidate("b-weak", score=0.10, corpus_id="beta", order=3),
+        ],
+        missing_lanes=[],
+        max_items=2,
+        selected_corpus_ids=["alpha", "beta"],
+    )
+
+    assert [item.corpus_id for item in selected] == ["alpha", "alpha"]
+    assert meta["corpus_floor"]["target_corpora"] == ["alpha"]

@@ -3344,6 +3344,7 @@ def _chat_selector_candidates(
                 lanes=_chat_source_candidate_lanes(cleaned, facets),
                 key=key,
                 doc_id=str(cleaned.doc_id or ""),
+                corpus_id=str(cleaned.corpus_id or ""),
                 domain=str(getattr(cleaned, "domain", "") or ""),
                 junk=_chat_source_is_low_value(cleaned, original_query),
                 order=order,
@@ -3381,6 +3382,7 @@ def _select_chat_coverage_sources(
     source_cap: int | None = None,
     max_per_domain: int | None = None,
     per_doc_cap: int | None = None,
+    selected_corpus_ids: list[str] | None = None,
 ) -> tuple[list[SourceChunk], int, dict[str, Any]]:
     max_sources = max(1, int(max_sources or len(base_sources) or 1))
     all_sources = [*base_sources, *support_sources]
@@ -3401,6 +3403,7 @@ def _select_chat_coverage_sources(
         # entirely (per_doc_cap=0 would otherwise reject every candidate, since
         # doc_counts.get(doc_id, 0) >= 0 is always true).
         per_doc_cap=per_doc_cap or (_CHAT_PER_DOC_CAP or None),
+        selected_corpus_ids=selected_corpus_ids or [],
     )
     actual_support = [
         source
@@ -3794,6 +3797,7 @@ async def _enforce_chat_query_coverage(
             if str(search_mode or "").lower() == "global"
             else None
         ),
+        selected_corpus_ids=corpus_ids or [],
     )
     actual_support = [
         source

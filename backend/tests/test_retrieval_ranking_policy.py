@@ -16,6 +16,7 @@ def _chunk(
     score: float,
     parent_id: str | None = None,
     doc_id: str | None = None,
+    corpus_id: str = "corpus-1",
     text: str | None = None,
     summary: str | None = None,
     source_tier: str = "tier_a",
@@ -26,7 +27,7 @@ def _chunk(
         chunk_id=chunk_id,
         parent_id=parent_id or chunk_id,
         doc_id=doc_id or f"doc-{chunk_id}",
-        corpus_id="corpus-1",
+        corpus_id=corpus_id,
         text=text or summary or f"text {chunk_id}",
         summary=summary,
         score=score,
@@ -81,6 +82,50 @@ def test_mmr_keeps_final_k_and_prefers_distinct_sources_for_broad_hybrid():
     assert len(result.candidates) == 3
     assert result.added == 1
     assert [c.chunk_id for c in result.candidates] == ["c1", "c3", "c4"]
+
+
+def test_multi_corpus_final_selection_reserves_strong_selected_corpus():
+    intent = infer_retrieval_intent("compare architecture patterns across selected corpora")
+    ranked = [
+        _chunk("a1", score=1.00, parent_id="pa1", doc_id="da1", corpus_id="alpha"),
+        _chunk("a2", score=0.99, parent_id="pa2", doc_id="da2", corpus_id="alpha"),
+        _chunk("a3", score=0.98, parent_id="pa3", doc_id="da3", corpus_id="alpha"),
+        _chunk("b1", score=0.90, parent_id="pb1", doc_id="db1", corpus_id="beta"),
+    ]
+
+    result = select_with_diversity(
+        ranked,
+        final_top_k=3,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+        multi_corpus=True,
+        selected_corpus_ids=["alpha", "beta"],
+    )
+
+    assert {c.corpus_id for c in result.candidates} == {"alpha", "beta"}
+    assert "b1" in [c.chunk_id for c in result.candidates]
+    assert result.diagnostics["corpus_floor"]["covered_corpora"] == ["alpha", "beta"]
+
+
+def test_multi_corpus_final_selection_does_not_force_weak_corpus_candidate():
+    intent = infer_retrieval_intent("define one specific architecture pattern")
+    ranked = [
+        _chunk("a1", score=1.00, parent_id="pa1", doc_id="da1", corpus_id="alpha"),
+        _chunk("a2", score=0.99, parent_id="pa2", doc_id="da2", corpus_id="alpha"),
+        _chunk("b-weak", score=0.20, parent_id="pb1", doc_id="db1", corpus_id="beta"),
+    ]
+
+    result = select_with_diversity(
+        ranked,
+        final_top_k=2,
+        intent=intent,
+        tier=RetrievalTier.qdrant_mongo,
+        multi_corpus=True,
+        selected_corpus_ids=["alpha", "beta"],
+    )
+
+    assert [c.corpus_id for c in result.candidates] == ["alpha", "alpha"]
+    assert result.diagnostics["corpus_floor"]["target_corpora"] == ["alpha"]
 
 
 def test_diversity_skips_weak_or_duplicate_candidates():
