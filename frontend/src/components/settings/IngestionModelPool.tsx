@@ -16,6 +16,8 @@ import {
   AlertTriangle,
   Power,
   List,
+  Cloud,
+  Server,
 } from "lucide-react";
 import type { ModelProfileRef } from "../../types";
 import { PROVIDER_PRESETS, composeModelString } from "../../types";
@@ -77,6 +79,62 @@ const EMPTY_DRAFT = {
   lifecycle_auto_stop: false,
   lifecycle_ready_timeout_seconds: 360,
 };
+
+type RouteKind = "private_rtx" | "cloud_api" | "custom" | "local";
+
+function inferRouteKind(entry: ModelProfileRef): RouteKind {
+  const provider = (entry.provider_preset || "").toLowerCase();
+  const base = (entry.base_url || "").toLowerCase();
+  const model = (entry.model || "").toLowerCase();
+  const extra = entry.extra_params || {};
+  if (
+    provider === "vllm-rtx" ||
+    provider === "vllm" ||
+    extra.resource_class === "rtx" ||
+    extra.resource_class === "remote_vllm" ||
+    extra.managed_vllm === true ||
+    model.includes("polymath-extract") ||
+    base.includes("192.168.") ||
+    base.includes("host.docker.internal")
+  ) {
+    return "private_rtx";
+  }
+  if (base.startsWith("http")) return "cloud_api";
+  if (provider) return "custom";
+  return "local";
+}
+
+function routeBadge(kind: RouteKind): { label: string; className: string } {
+  if (kind === "private_rtx") {
+    return {
+      label: "Private RTX",
+      className: "border-cyan-300/40 bg-cyan-300/10 text-cyan-100",
+    };
+  }
+  if (kind === "cloud_api") {
+    return {
+      label: "Cloud API",
+      className: "border-sky-300/40 bg-sky-300/10 text-sky-100",
+    };
+  }
+  if (kind === "custom") {
+    return {
+      label: "Custom",
+      className: "border-content-secondary/30 bg-content-secondary/10 text-content-secondary",
+    };
+  }
+  return {
+    label: "Default",
+    className: "border-border-minimal bg-bg-base text-content-tertiary",
+  };
+}
+
+function RouteIcon({ kind }: { kind: RouteKind }) {
+  const className = "w-3 h-3 shrink-0";
+  if (kind === "private_rtx") return <Server className={className} />;
+  if (kind === "cloud_api") return <Cloud className={className} />;
+  return <Cpu className={className} />;
+}
 
 export function IngestionModelPool({
   title,
@@ -282,6 +340,8 @@ export function IngestionModelPool({
         {value.map((m, idx) => {
           const fid = `${idx}-${m.model}`;
           const testId = `chip-${idx}`;
+          const kind = inferRouteKind(m);
+          const badge = routeBadge(kind);
           const isFresh =
             flashId !== null &&
             idx === value.length - 1 &&
@@ -289,7 +349,7 @@ export function IngestionModelPool({
           return (
             <div
               key={fid}
-              className={`group flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-mono tracking-wide transition-all ${
+              className={`group flex flex-wrap items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-mono tracking-wide transition-all ${
                 isFresh
                   ? "border-accent-main bg-accent-main/15 scale-[1.03]"
                   : "border-white/10 bg-[#0b0c10]"
@@ -300,6 +360,12 @@ export function IngestionModelPool({
                   : ""
               }`}
             >
+              <span
+                className={`inline-flex items-center gap-1 border px-1 py-0.5 text-[8px] font-bold tracking-widest uppercase ${badge.className}`}
+              >
+                <RouteIcon kind={kind} />
+                {badge.label}
+              </span>
               <span className="text-content-tertiary uppercase text-[8px]">
                 {m.provider_preset || "custom"}
               </span>
@@ -324,7 +390,7 @@ export function IngestionModelPool({
                 type="button"
                 onClick={() => testEntry(testId, m.model, m, idx)}
                 disabled={testingId !== null}
-                className="ml-0.5 text-content-tertiary hover:text-accent-main disabled:opacity-40"
+                className="ml-0.5 inline-flex items-center gap-0.5 border border-border-minimal px-1 py-0.5 text-[8px] font-bold uppercase text-content-tertiary hover:text-accent-main hover:border-accent-main disabled:opacity-40"
                 title="Test API key and model connection"
               >
                 {testingId === testId ? (
@@ -336,12 +402,13 @@ export function IngestionModelPool({
                 ) : (
                   <Zap className="w-2.5 h-2.5" />
                 )}
+                Test
               </button>
               <button
                 type="button"
                 onClick={() => listEntryModels(testId, m.model, m, idx)}
                 disabled={listingId !== null || !m.base_url}
-                className="ml-0.5 text-content-tertiary hover:text-accent-main disabled:opacity-40"
+                className="ml-0.5 inline-flex items-center gap-0.5 border border-border-minimal px-1 py-0.5 text-[8px] font-bold uppercase text-content-tertiary hover:text-accent-main hover:border-accent-main disabled:opacity-40"
                 title="List live models from this endpoint"
               >
                 {listingId === testId ? (
@@ -349,6 +416,7 @@ export function IngestionModelPool({
                 ) : (
                   <List className="w-2.5 h-2.5" />
                 )}
+                Models
               </button>
               {!readOnly && editing && (
                 <button
@@ -371,6 +439,14 @@ export function IngestionModelPool({
             rowDisabled ? "opacity-50 pointer-events-none" : ""
           }`}
         >
+          <div className="basis-full flex flex-wrap items-center justify-between gap-2 text-[9px] text-content-tertiary">
+            <span className="font-bold tracking-widest uppercase">
+              Add model card
+            </span>
+            <span>
+              Provider → Base URL → Model → Concurrency → Key. Use Test or Models before Add.
+            </span>
+          </div>
           <select
             value={draft.provider_preset}
             onChange={(e) => applyPreset(e.target.value)}
@@ -529,7 +605,7 @@ export function IngestionModelPool({
             ) : (
               <Zap className="w-3 h-3" />
             )}
-            Test
+            Test route
           </button>
           <button
             type="button"
@@ -543,7 +619,7 @@ export function IngestionModelPool({
             ) : (
               <List className="w-3 h-3" />
             )}
-            Models
+            List models
           </button>
           <button
             onClick={commit}
@@ -552,7 +628,7 @@ export function IngestionModelPool({
             title="Add to pool (or press Enter)"
           >
             <Plus className="w-3 h-3" />
-            Add
+            Add route
           </button>
         </div>
       )}

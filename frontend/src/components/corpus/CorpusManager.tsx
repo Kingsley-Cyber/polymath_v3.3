@@ -12,6 +12,11 @@ import {
   X,
   Check,
   Database,
+  Cloud,
+  Server,
+  ShieldCheck,
+  Ban,
+  Route,
   Loader2,
   AlertTriangle,
   ExternalLink,
@@ -59,6 +64,10 @@ const WORKFLOW_META: {
   key: IngestionWorkflowId;
   label: string;
   detail: string;
+  execution: string;
+  outcome: string;
+  badge: string;
+  kind: "private" | "cloud" | "hybrid" | "legacy" | "off" | "custom";
   engine: ExtractionEngine;
   needsCloudPool: boolean;
   needsRtx: boolean;
@@ -66,9 +75,13 @@ const WORKFLOW_META: {
 }[] = [
   {
     key: "rtx_only",
-    label: "Private RTX LLM",
+    label: "Private RTX server",
     detail:
-      "Local desktop vLLM receives the same strict provider-card extraction contract as a cloud model.",
+      "Your desktop vLLM endpoint receives the strict cloud-style extraction contract.",
+    execution: "Calls LAN vLLM URL, not the Mac sidecar",
+    outcome: "Structured entities, relations, facts, evidence",
+    badge: "Private LAN",
+    kind: "private",
     engine: "local",
     needsCloudPool: true,
     needsRtx: true,
@@ -76,9 +89,13 @@ const WORKFLOW_META: {
   },
   {
     key: "cloud_only",
-    label: "Cloud/API LLM",
+    label: "Cloud API provider",
     detail:
-      "Extraction goes to configured provider-card cloud chips with strict promotion gates.",
+      "Extraction goes to configured API providers such as SiliconFlow, DeepSeek, LongCat, OpenRouter, or OpenAI.",
+    execution: "Calls external API keys",
+    outcome: "Structured graph output, validated before promotion",
+    badge: "Cloud API",
+    kind: "cloud",
     engine: "cloud",
     needsCloudPool: true,
     needsRtx: false,
@@ -86,8 +103,12 @@ const WORKFLOW_META: {
   },
   {
     key: "cloud_rtx",
-    label: "Cloud + private RTX",
-    detail: "Cloud/API and RTX provider-card chips share the extraction pool.",
+    label: "Cloud API + RTX",
+    detail: "Cloud/API providers and the private RTX server share the same extraction pool.",
+    execution: "Routes across API chips and LAN vLLM",
+    outcome: "Fast failover and mixed-provider extraction",
+    badge: "Hybrid",
+    kind: "hybrid",
     engine: "cloud",
     needsCloudPool: true,
     needsRtx: true,
@@ -98,6 +119,10 @@ const WORKFLOW_META: {
     label: "Legacy Mac sidecar",
     detail:
       "Deprecated GLiNER/GLiREL sidecar path. Use only for compatibility or controlled backfills.",
+    execution: "Runs local sidecar models on the Mac",
+    outcome: "Compatibility path, not the default graph lane",
+    badge: "Legacy",
+    kind: "legacy",
     engine: "legacy_local",
     needsCloudPool: false,
     needsRtx: false,
@@ -108,6 +133,10 @@ const WORKFLOW_META: {
     label: "Legacy sidecar + cloud",
     detail:
       "Transition mode: deprecated Mac sidecars and cloud chips split chunks deterministically.",
+    execution: "Mac sidecar plus external API calls",
+    outcome: "Migration route only",
+    badge: "Legacy hybrid",
+    kind: "legacy",
     engine: "dual",
     needsCloudPool: true,
     needsRtx: false,
@@ -117,6 +146,10 @@ const WORKFLOW_META: {
     key: "local_rtx",
     label: "Legacy sidecar + RTX",
     detail: "Transition mode: deprecated Mac sidecars and RTX vLLM split extraction chunks.",
+    execution: "Mac sidecar plus LAN vLLM",
+    outcome: "Migration route only",
+    badge: "Legacy hybrid",
+    kind: "legacy",
     engine: "dual",
     needsCloudPool: true,
     needsRtx: true,
@@ -127,6 +160,10 @@ const WORKFLOW_META: {
     label: "Legacy sidecar + cloud + RTX",
     detail:
       "Transition mode: deprecated Mac sidecars plus all configured cloud/RTX extraction chips.",
+    execution: "Mac sidecar, external APIs, and LAN vLLM",
+    outcome: "Migration route only",
+    badge: "Legacy all-lane",
+    kind: "legacy",
     engine: "dual",
     needsCloudPool: true,
     needsRtx: true,
@@ -137,6 +174,10 @@ const WORKFLOW_META: {
     label: "Deprecated local graph + RTX enrich",
     detail:
       "Legacy GLiNER/GLiREL skeleton first, then RTX re-extracts quality-gated gaps. Kept for migration only.",
+    execution: "Mac sidecar first, then LAN vLLM enrichment",
+    outcome: "Backfill/migration route only",
+    badge: "Deprecated",
+    kind: "legacy",
     engine: "local_then_enrich",
     needsCloudPool: true,
     needsRtx: true,
@@ -146,6 +187,10 @@ const WORKFLOW_META: {
     key: "vectors_only",
     label: "Vectors only",
     detail: "Skip graph extraction; vector/hybrid retrieval only.",
+    execution: "No Ghost B extraction calls",
+    outcome: "Documents become searchable, graph stays off",
+    badge: "No graph",
+    kind: "off",
     engine: "off",
     needsCloudPool: false,
     needsRtx: false,
@@ -155,6 +200,10 @@ const WORKFLOW_META: {
     key: "custom",
     label: "Custom",
     detail: "Keep the current engine and pools exactly as configured.",
+    execution: "Uses the current saved backend fields",
+    outcome: "Advanced/manual route",
+    badge: "Custom",
+    kind: "custom",
     engine: "inherit",
     needsCloudPool: false,
     needsRtx: false,
@@ -381,6 +430,65 @@ function poolLabel(entries: ModelProfileRef[]): string {
   return entries.map(formatExtractionPoolEntry).join(" | ");
 }
 
+type WorkflowMeta = (typeof WORKFLOW_META)[number];
+
+function workflowKindClass(kind: WorkflowMeta["kind"], selected = false): string {
+  const base = {
+    private: selected
+      ? "border-cyan-300 bg-cyan-300/10 text-cyan-100"
+      : "border-cyan-300/30 bg-bg-surface text-cyan-100 hover:border-cyan-300",
+    cloud: selected
+      ? "border-sky-300 bg-sky-300/10 text-sky-100"
+      : "border-sky-300/30 bg-bg-surface text-sky-100 hover:border-sky-300",
+    hybrid: selected
+      ? "border-violet-300 bg-violet-300/10 text-violet-100"
+      : "border-violet-300/30 bg-bg-surface text-violet-100 hover:border-violet-300",
+    legacy: selected
+      ? "border-amber-300 bg-amber-300/10 text-amber-100"
+      : "border-amber-300/30 bg-bg-surface text-amber-100 hover:border-amber-300",
+    off: selected
+      ? "border-zinc-300 bg-zinc-300/10 text-zinc-100"
+      : "border-zinc-400/25 bg-bg-surface text-zinc-200 hover:border-zinc-300",
+    custom: selected
+      ? "border-content-secondary bg-content-secondary/10 text-content-primary"
+      : "border-border-minimal bg-bg-surface text-content-secondary hover:border-content-secondary",
+  }[kind];
+  return base;
+}
+
+function workflowBadgeClass(kind: WorkflowMeta["kind"]): string {
+  return {
+    private: "border-cyan-300/40 bg-cyan-300/10 text-cyan-100",
+    cloud: "border-sky-300/40 bg-sky-300/10 text-sky-100",
+    hybrid: "border-violet-300/40 bg-violet-300/10 text-violet-100",
+    legacy: "border-amber-300/40 bg-amber-300/10 text-amber-100",
+    off: "border-zinc-300/30 bg-zinc-300/10 text-zinc-200",
+    custom: "border-border-minimal bg-bg-base text-content-secondary",
+  }[kind];
+}
+
+function WorkflowIcon({ kind }: { kind: WorkflowMeta["kind"] }) {
+  const className = "w-4 h-4 shrink-0";
+  if (kind === "private") return <Server className={className} />;
+  if (kind === "cloud") return <Cloud className={className} />;
+  if (kind === "hybrid") return <Route className={className} />;
+  if (kind === "legacy") return <AlertTriangle className={className} />;
+  if (kind === "off") return <Ban className={className} />;
+  return <ShieldCheck className={className} />;
+}
+
+function humanEngineLabel(engine: ExtractionEngine | string | undefined): string {
+  if (!engine || engine === "inherit") return "Inherited";
+  if (engine === "local") return "Private provider LLM";
+  if (engine === "cloud") return "Cloud/API provider LLM";
+  if (engine === "dual") return "Legacy sidecar + provider LLM";
+  if (engine === "local_then_cloud") return "Legacy local, cloud rescue";
+  if (engine === "local_then_enrich") return "Legacy local, RTX enrichment";
+  if (engine === "legacy_local") return "Legacy Mac sidecar";
+  if (engine === "off") return "Off";
+  return String(engine).replace(/_/g, " ");
+}
+
 function IngestionWorkflowSelector({
   config,
   onChange,
@@ -409,7 +517,7 @@ function IngestionWorkflowSelector({
     .filter(Boolean) as typeof WORKFLOW_META;
 
   return (
-    <div className="border border-accent-main/25 bg-bg-base/50 px-3 py-2 space-y-3">
+    <div className="border border-accent-main/25 bg-bg-base px-3 py-3 space-y-3">
       <div>
         <div className="flex items-center justify-between gap-2">
           <div>
@@ -417,12 +525,17 @@ function IngestionWorkflowSelector({
               Extraction Profile
             </div>
             <div className="mt-0.5 text-[10px] text-content-tertiary leading-snug">
-              Choose what extraction contract should run. The backend derives the
-              resource plan from the selected route and model pool.
+              Pick the execution route. The model cards below provide URL, key,
+              model name, concurrency, live test, and live model listing.
             </div>
           </div>
-          <div className="hidden sm:block text-[9px] font-bold tracking-widest uppercase text-accent-secondary">
-            structured output · evidence gate · graph promotion
+          <div
+            className={`hidden sm:flex items-center gap-1.5 border px-2 py-1 text-[9px] font-bold tracking-widest uppercase ${workflowBadgeClass(
+              currentMeta.kind,
+            )}`}
+          >
+            <WorkflowIcon kind={currentMeta.kind} />
+            {currentMeta.badge}
           </div>
         </div>
         <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
@@ -435,20 +548,41 @@ function IngestionWorkflowSelector({
                 data-testid={`${idPrefix}-ingestion-workflow-${item.key}`}
                 type="button"
                 onClick={() => onChange(applyWorkflowToConfig(config, item.key))}
-                className={`min-h-[78px] text-left border px-2.5 py-2 transition-colors ${
-                  selected
-                    ? "border-accent-main bg-accent-main/10 text-content-primary"
-                    : "border-border-minimal bg-bg-surface/40 text-content-secondary hover:border-content-secondary"
-                }`}
+                className={`min-h-[138px] text-left border px-3 py-2.5 transition-colors ${workflowKindClass(
+                  item.kind,
+                  selected,
+                )}`}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <span className="text-[11px] font-bold tracking-widest uppercase">
-                    {item.label}
+                  <span
+                    className={`inline-flex items-center gap-1.5 border px-1.5 py-0.5 text-[8px] font-bold tracking-widest uppercase ${workflowBadgeClass(
+                      item.kind,
+                    )}`}
+                  >
+                    <WorkflowIcon kind={item.kind} />
+                    {item.badge}
                   </span>
-                  {selected && <Check className="w-3.5 h-3.5 text-accent-main shrink-0" />}
+                  {selected && <Check className="w-4 h-4 shrink-0" />}
                 </div>
-                <div className="mt-1 text-[9px] leading-snug text-content-tertiary">
+                <div className="mt-2 text-[12px] font-bold tracking-wider uppercase text-content-primary">
+                  {item.label}
+                </div>
+                <div className="mt-1 text-[10px] leading-snug text-content-secondary">
                   {item.detail}
+                </div>
+                <div className="mt-2 grid gap-1 text-[9px] leading-snug">
+                  <div>
+                    <span className="font-bold uppercase tracking-widest text-content-tertiary">
+                      Runs:
+                    </span>{" "}
+                    <span className="text-content-primary">{item.execution}</span>
+                  </div>
+                  <div>
+                    <span className="font-bold uppercase tracking-widest text-content-tertiary">
+                      Output:
+                    </span>{" "}
+                    <span className="text-content-primary">{item.outcome}</span>
+                  </div>
                 </div>
               </button>
             );
@@ -467,9 +601,13 @@ function IngestionWorkflowSelector({
                 key={item.key}
                 type="button"
                 onClick={() => onChange(applyWorkflowToConfig(config, item.key))}
-                className="text-left border border-border-minimal bg-bg-surface/30 px-2.5 py-2 text-content-secondary hover:border-content-secondary"
+                className={`text-left border px-2.5 py-2 transition-colors ${workflowKindClass(
+                  item.kind,
+                  false,
+                )}`}
               >
-                <div className="text-[10px] font-bold tracking-widest uppercase">
+                <div className="flex items-center gap-1.5 text-[10px] font-bold tracking-widest uppercase">
+                  <WorkflowIcon kind={item.kind} />
                   {item.label}
                 </div>
                 <div className="mt-1 text-[9px] leading-snug text-content-tertiary">
@@ -485,20 +623,25 @@ function IngestionWorkflowSelector({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-[10px]">
-        <div className="border border-border-minimal bg-bg-surface/50 px-2 py-1.5">
-          <div className="text-content-tertiary uppercase tracking-widest text-[8px]">
-            Extraction
+        <div className="border border-border-minimal bg-bg-surface px-2 py-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-content-tertiary uppercase tracking-widest text-[8px]">
+              Extraction route
+            </div>
+            <span className={`border px-1 py-0.5 text-[8px] uppercase ${workflowBadgeClass(currentMeta.kind)}`}>
+              {currentMeta.badge}
+            </span>
           </div>
           <div className="text-content-primary font-bold uppercase mt-0.5">
-            {draftEngine(config.extraction_engine, "local").replace(/_/g, " ")}
+            {humanEngineLabel(draftEngine(config.extraction_engine, "local"))}
           </div>
           <div className="text-content-tertiary mt-0.5">
             {providerActive ? poolLabel(extractionPool) : "provider pool inactive"}
           </div>
         </div>
-        <div className="border border-border-minimal bg-bg-surface/50 px-2 py-1.5">
+        <div className="border border-border-minimal bg-bg-surface px-2 py-1.5">
           <div className="text-content-tertiary uppercase tracking-widest text-[8px]">
-            Summary
+            Summary route
           </div>
           <div className="text-content-primary font-bold uppercase mt-0.5">
             {config.chunk_summarization ? "enabled" : "off"}
@@ -507,9 +650,9 @@ function IngestionWorkflowSelector({
             {summaryPool.length ? poolLabel(summaryPool) : "configure below"}
           </div>
         </div>
-        <div className="border border-border-minimal bg-bg-surface/50 px-2 py-1.5">
+        <div className="border border-border-minimal bg-bg-surface px-2 py-1.5">
           <div className="text-content-tertiary uppercase tracking-widest text-[8px]">
-            Embedding
+            Embedding route
           </div>
           <div className="text-content-primary font-bold uppercase mt-0.5">
             {config.embed_mode ?? "local"}
@@ -1619,6 +1762,8 @@ function IngestionModelsSection({
       : draftPoolSource === "extraction_models"
         ? (config.extraction_models ?? [])
         : [];
+  const workflow =
+    WORKFLOW_META.find((item) => item.key === inferWorkflow(config)) ?? WORKFLOW_META[0];
   const draftErrors =
     draftUsesProvider && draftPool.length === 0
       ? [
@@ -1661,22 +1806,32 @@ function IngestionModelsSection({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <div className="text-[12px] font-bold tracking-widest text-content-tertiary uppercase">
-          Model Routing
+        <div>
+          <div className="text-[12px] font-bold tracking-widest text-content-tertiary uppercase">
+            Model Routing
+          </div>
+          <div className="text-[10px] text-content-tertiary">
+            Configure the endpoints behind the selected extraction route.
+          </div>
         </div>
-        <div className="text-[10px] text-content-tertiary tracking-wider uppercase">
-          {draftUsesProvider ? "provider extraction pool active" : "provider pool hidden"}
+        <div
+          className={`inline-flex items-center gap-1.5 border px-2 py-1 text-[9px] font-bold tracking-widest uppercase ${workflowBadgeClass(
+            workflow.kind,
+          )}`}
+        >
+          <WorkflowIcon kind={workflow.kind} />
+          {workflow.badge}
         </div>
       </div>
 
       {/* ── Extraction contract — the deterministic workflow switch ── */}
       <div
-        className="border border-border-minimal bg-bg-base/50 px-3 py-2 space-y-1.5"
+        className="border border-border-minimal bg-bg-base px-3 py-2 space-y-2"
         data-testid="extraction-contract-block"
       >
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[10px] font-bold tracking-widest text-content-tertiary uppercase">
-            Extraction workflow
+            Extraction contract
           </span>
           <span className="text-[10px] font-bold tracking-widest text-accent-secondary uppercase">
             {engine === "local_then_enrich"
@@ -1696,6 +1851,32 @@ function IngestionModelsSection({
           <span className="ml-auto text-[10px] text-content-tertiary">
             Change via Extraction Profile above.
           </span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-1.5 text-[10px]">
+          <div className="border border-border-minimal bg-bg-surface px-2 py-1.5">
+            <div className="text-[8px] font-bold tracking-widest uppercase text-content-tertiary">
+              Calls go to
+            </div>
+            <div className="mt-0.5 text-content-primary font-bold">
+              {workflow.execution}
+            </div>
+          </div>
+          <div className="border border-border-minimal bg-bg-surface px-2 py-1.5">
+            <div className="text-[8px] font-bold tracking-widest uppercase text-content-tertiary">
+              Expected output
+            </div>
+            <div className="mt-0.5 text-content-primary font-bold">
+              {workflow.outcome}
+            </div>
+          </div>
+          <div className="border border-border-minimal bg-bg-surface px-2 py-1.5">
+            <div className="text-[8px] font-bold tracking-widest uppercase text-content-tertiary">
+              Safety gate
+            </div>
+            <div className="mt-0.5 text-content-primary font-bold">
+              Pydantic schema + evidence + graph promotion
+            </div>
+          </div>
         </div>
         {linked && draftUsesProvider && (
           <div className="flex flex-wrap items-center gap-2 border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
@@ -1722,7 +1903,9 @@ function IngestionModelsSection({
               <span className="text-content-tertiary tracking-wider">
                 NEW CONTRACT:{" "}
               </span>
-              <span className="text-content-primary font-bold uppercase">{draft}</span>
+              <span className="text-content-primary font-bold uppercase">
+                {humanEngineLabel(draft)}
+              </span>
               {draftUsesLegacyLocal && (
                 <span className="text-content-secondary">
                   {" · legacy GLiNER/GLiREL sidecars from Settings"}
@@ -1758,7 +1941,9 @@ function IngestionModelsSection({
           ) : (
             <>
               <span className="text-content-tertiary tracking-wider">SAVED CONTRACT: </span>
-              <span className="text-content-primary font-bold uppercase">{contract.engine}</span>
+              <span className="text-content-primary font-bold uppercase">
+                {humanEngineLabel(contract.engine)}
+              </span>
               <span className="text-content-tertiary"> ({contract.source})</span>
               {(contract.engine === "legacy_local" ||
                 contract.engine === "dual" ||
