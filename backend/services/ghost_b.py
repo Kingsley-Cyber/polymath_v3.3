@@ -32,9 +32,12 @@ from services.extraction_provider_cards import (
 )
 from services.llm_lane_pool import (
     FatalLaneError,
+    RateLimitedLaneError,
     SOFT_FATAL_DISABLE_STRIKES,
+    is_rate_limit_provider_error,
     provider_error_tier,
     provider_error_summary,
+    rate_limit_retry_after_seconds,
 )
 
 # Phase 14.2 — pluggable schema retriever. Worker injects a closure over qdrant_client +
@@ -4489,6 +4492,53 @@ async def extract_entities(
                 last_exc = exc
                 last_error_type = exc.__class__.__name__
                 exception_failures += 1
+                if is_rate_limit_provider_error(exc):
+                    retry_after_seconds = rate_limit_retry_after_seconds(exc)
+                    last_error_type = "rate_limited"
+                    call_metrics.append(
+                        {
+                            "chunk_id": task.chunk_id,
+                            "model": entry["model"],
+                            "provider": provider_card.provider,
+                            "schema_mode": provider_card.schema_mode,
+                            "json_repair_mode": provider_card.json_repair_mode,
+                            "semantic_verifier_mode": provider_card.semantic_verifier_mode,
+                            "lane": pool_idx,
+                            "profile": profile.name,
+                            "output_mode": profile_output_mode,
+                            "attempt": attempt + 1,
+                            "duration_seconds": round(time.perf_counter() - started, 3),
+                            "total_tokens": 0,
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "finish_reason": None,
+                            "max_tokens": attempt_payload.get("max_tokens"),
+                            "prompt_hash": prompt_hash,
+                            "prompt_chars": prompt_chars,
+                            "success": False,
+                            "error_type": last_error_type,
+                            "retry_after_seconds": retry_after_seconds,
+                            "routing_policy": routing_policy,
+                        }
+                    )
+                    await _audit_attempt(
+                        event="ghost_b_attempt_rate_limited",
+                        attempt=attempt + 1,
+                        profile=profile,
+                        output_mode=profile_output_mode,
+                        prompt_hash=prompt_hash,
+                        prompt_chars=prompt_chars,
+                        hit_output_cap=False,
+                        finish_reason=None,
+                        usage={},
+                        max_tokens=attempt_payload.get("max_tokens"),
+                        error_type=last_error_type,
+                        error_message=str(exc),
+                    )
+                    raise RateLimitedLaneError(
+                        exc,
+                        retry_after_seconds=retry_after_seconds,
+                    ) from exc
                 # Pt9c — json_schema mode shares the 400/422 retry path
                 # with json_object. Some providers reject malformed
                 # response_format payloads (or unsupported schema features)
@@ -4654,6 +4704,16 @@ async def extract_entities(
                     return
                 try:
                     result = await _process_one(task, pool_idx)
+                except RateLimitedLaneError as exc:
+                    task_queue.put_nowait(task)
+                    logger.warning(
+                        "GHOST B requeued chunk_id=%s after rate limit on lane=%d; cooldown=%.1fs",
+                        task.chunk_id,
+                        pool_idx,
+                        exc.retry_after_seconds,
+                    )
+                    await asyncio.sleep(exc.retry_after_seconds)
+                    continue
                 except FatalLaneError as exc:
                     task_queue.put_nowait(task)
                     if await _lane_disable_ready(pool_idx, exc.original):

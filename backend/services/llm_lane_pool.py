@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Literal
 
 import httpx
@@ -51,6 +53,15 @@ class FatalLaneError(Exception):
         super().__init__(provider_error_summary(original))
 
 
+class RateLimitedLaneError(Exception):
+    """Raised when a pool entry should cool down without failing the chunk."""
+
+    def __init__(self, original: Exception, *, retry_after_seconds: float):
+        self.original = original
+        self.retry_after_seconds = max(0.5, float(retry_after_seconds or 0.5))
+        super().__init__(provider_error_summary(original))
+
+
 def _response_text(exc: httpx.HTTPStatusError) -> str:
     try:
         return exc.response.text or ""
@@ -79,6 +90,46 @@ def is_fatal_provider_error(exc: Exception) -> bool:
     """
 
     return provider_error_tier(exc) is not None
+
+
+def is_rate_limit_provider_error(exc: Exception) -> bool:
+    """True for provider throttling that should be retried after cooldown."""
+
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response is not None
+        and exc.response.status_code == 429
+    )
+
+
+def rate_limit_retry_after_seconds(
+    exc: Exception,
+    *,
+    default_seconds: float = 5.0,
+    max_seconds: float = 60.0,
+) -> float:
+    """Resolve Retry-After for 429s, capped so other lanes keep making progress."""
+
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response is None:
+        return default_seconds
+    retry_after = exc.response.headers.get("retry-after")
+    if not retry_after:
+        return default_seconds
+    retry_after = retry_after.strip()
+    try:
+        return min(max_seconds, max(0.5, float(retry_after)))
+    except ValueError:
+        pass
+    try:
+        dt = parsedate_to_datetime(retry_after)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return min(
+            max_seconds,
+            max(0.5, (dt - datetime.now(timezone.utc)).total_seconds()),
+        )
+    except Exception:
+        return default_seconds
 
 
 def provider_error_tier(exc: Exception) -> FatalErrorTier | None:
