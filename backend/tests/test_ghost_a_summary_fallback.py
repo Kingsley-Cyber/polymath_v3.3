@@ -4,6 +4,7 @@ import pytest
 
 from services import ghost_a
 from services.ghost_a import SummaryTask, summarize_parents
+from services.ingestion import model_lifecycle
 
 
 class _BlankSummaryResponse:
@@ -66,3 +67,48 @@ async def test_blank_model_content_uses_extractive_summary_fallback(monkeypatch)
     assert "Shopify lets sellers create an online store" in results[0].summary
     assert results[0].domain == "other"
     assert "shopify" in (results[0].topics or [])
+
+
+@pytest.mark.asyncio
+async def test_summary_lifecycle_shutdown_runs_when_worker_raises(monkeypatch) -> None:
+    ensure_calls = []
+    shutdown_calls = []
+
+    async def fake_ensure(pool, *, purpose):
+        ensure_calls.append((pool, purpose))
+
+    async def fake_shutdown(pool, *, purpose):
+        shutdown_calls.append((pool, purpose))
+
+    monkeypatch.setattr(model_lifecycle, "ensure_model_lifecycle_ready", fake_ensure)
+    monkeypatch.setattr(model_lifecycle, "shutdown_model_lifecycle", fake_shutdown)
+
+    with pytest.raises(KeyError):
+        await summarize_parents(
+            [
+                SummaryTask(
+                    parent_id="parent-1",
+                    doc_id="doc-1",
+                    corpus_id="corpus-1",
+                    source_tier="parent",
+                    text="A managed summary lane should still idle-stop after failure.",
+                )
+            ],
+            max_summary_tokens=80,
+            pool=[
+                {
+                    "base_url": "https://api.example.test/v1",
+                    "api_key": "test-key",
+                    "max_concurrent": 1,
+                    "lifecycle_base_url": "http://192.168.1.83:8085",
+                    "lifecycle_auto_start": True,
+                    "lifecycle_auto_stop": True,
+                    "extra_params": {},
+                }
+            ],
+            global_max_concurrent=1,
+        )
+
+    assert len(ensure_calls) == 1
+    assert len(shutdown_calls) == 1
+    assert shutdown_calls[0][1] == "ghost_a"

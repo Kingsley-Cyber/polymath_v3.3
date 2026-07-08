@@ -558,32 +558,35 @@ async def summarize_parents(
             if parent_id not in results_by_parent_id
         ]
 
-    await _run_enabled_workers()
-    await _drain_pending_queue()
-
-    for attempt in range(1, _SUMMARY_RETRY_ATTEMPTS + 1):
-        missing = _missing_tasks()
-        if not missing:
-            break
-        if _enabled_lane_count() <= 0:
-            logger.error(
-                "GHOST A cannot retry %d missing parents because all summary lanes are disabled",
-                len(missing),
-            )
-            break
-        _clear_pending_queue()
-        if _SUMMARY_RETRY_BACKOFF_SECONDS > 0:
-            await asyncio.sleep(_SUMMARY_RETRY_BACKOFF_SECONDS * attempt)
-        logger.warning(
-            "GHOST A retry %d/%d for %d missing parent summaries",
-            attempt,
-            _SUMMARY_RETRY_ATTEMPTS,
-            len(missing),
-        )
-        for task in missing:
-            task_queue.put_nowait(task)
+    try:
         await _run_enabled_workers()
         await _drain_pending_queue()
+
+        for attempt in range(1, _SUMMARY_RETRY_ATTEMPTS + 1):
+            missing = _missing_tasks()
+            if not missing:
+                break
+            if _enabled_lane_count() <= 0:
+                logger.error(
+                    "GHOST A cannot retry %d missing parents because all summary lanes are disabled",
+                    len(missing),
+                )
+                break
+            _clear_pending_queue()
+            if _SUMMARY_RETRY_BACKOFF_SECONDS > 0:
+                await asyncio.sleep(_SUMMARY_RETRY_BACKOFF_SECONDS * attempt)
+            logger.warning(
+                "GHOST A retry %d/%d for %d missing parent summaries",
+                attempt,
+                _SUMMARY_RETRY_ATTEMPTS,
+                len(missing),
+            )
+            for task in missing:
+                task_queue.put_nowait(task)
+            await _run_enabled_workers()
+            await _drain_pending_queue()
+    finally:
+        await shutdown_model_lifecycle(pool, purpose="ghost_a")
 
     if not task_queue.empty():
         _clear_pending_queue()
@@ -663,5 +666,4 @@ async def summarize_parents(
         len(pool),
         ", ".join(e["model"] for e in pool),
     )
-    await shutdown_model_lifecycle(pool, purpose="ghost_a")
     return results
