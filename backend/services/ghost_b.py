@@ -3902,17 +3902,17 @@ async def extract_entities(
         )
         normal_max_entities = (
             min(max_entities, json_object_max_entities)
-            if normal_output_mode in ("json_object", "json_object_prompt")
+            if normal_output_mode in ("json_object", "json_schema", "json_object_prompt")
             else max_entities
         )
         normal_max_relations = (
             min(max_relations, json_object_max_relations)
-            if normal_output_mode in ("json_object", "json_object_prompt")
+            if normal_output_mode in ("json_object", "json_schema", "json_object_prompt")
             else max_relations
         )
         normal_max_facts = (
             min(max_facts, json_object_max_facts)
-            if normal_output_mode in ("json_object", "json_object_prompt")
+            if normal_output_mode in ("json_object", "json_schema", "json_object_prompt")
             else max_facts
         )
         normal_profile = ExtractionAttemptProfile(

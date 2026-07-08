@@ -659,8 +659,8 @@ async def test_deepseek_auto_uses_json_schema_payload_on_primary(monkeypatch):
     assert calls[0]["response_format"]["json_schema"]["strict"] is True
     assert "Return exactly one valid JSON object" in calls[0]["messages"][1]["content"]
     assert "Output JSONL only" not in calls[0]["messages"][1]["content"]
-    assert "entities: max 14" in calls[0]["messages"][1]["content"]
-    assert "relations: max 20" in calls[0]["messages"][1]["content"]
+    assert "entities: max 8" in calls[0]["messages"][1]["content"]
+    assert "relations: max 12" in calls[0]["messages"][1]["content"]
     assert "every relation must include evidence_phrase copied from TEXT" in calls[0]["messages"][1]["content"]
     assert report.results and report.results[0].entities[0].canonical_name == "alpha"
     assert report.metrics["attempt_count"] == 1

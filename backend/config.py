@@ -1358,8 +1358,8 @@ class Settings(BaseSettings):
         ge=1,
         le=32,
         description=(
-            "Legacy JSON-object cap retained for env compatibility. JSONL "
-            "primary extraction ignores this value."
+            "Object-mode Ghost B entity cap, used by json_object, "
+            "json_object_prompt, and provider-native json_schema lanes."
         ),
     )
     EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK: int = Field(
@@ -1367,8 +1367,8 @@ class Settings(BaseSettings):
         ge=0,
         le=32,
         description=(
-            "Legacy JSON-object cap retained for env compatibility. JSONL "
-            "primary extraction ignores this value."
+            "Object-mode Ghost B relation cap, used by json_object, "
+            "json_object_prompt, and provider-native json_schema lanes."
         ),
     )
     EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK: int = Field(
@@ -1376,8 +1376,8 @@ class Settings(BaseSettings):
         ge=0,
         le=12,
         description=(
-            "Legacy JSON-object cap retained for env compatibility. JSONL "
-            "primary extraction ignores this value."
+            "Object-mode Ghost B fact cap, used by json_object, "
+            "json_object_prompt, and provider-native json_schema lanes."
         ),
     )
     EXTRACTION_EVIDENCE_MAX_CHARS: int = Field(
