@@ -4689,32 +4689,35 @@ async def extract_entities(
         if workers:
             await asyncio.gather(*workers, return_exceptions=False)
 
-    await _run_enabled_workers()
-    while not task_queue.empty():
-        if failure_budget_open:
-            logger.error(
-                "GHOST B stopped with %d chunks still queued after failure budget tripped",
-                task_queue.qsize(),
-            )
-            break
-        enabled_count = sum(
-            1 for pool_idx in range(len(pool)) if pool_idx not in disabled_lanes
-        )
-        if enabled_count <= 0:
-            logger.error(
-                "GHOST B stopped with %d chunks still queued because all extraction lanes were disabled",
-                task_queue.qsize(),
-            )
-            break
-        pending_before = task_queue.qsize()
-        disabled_before = len(disabled_lanes)
+    try:
         await _run_enabled_workers()
-        if task_queue.qsize() >= pending_before and len(disabled_lanes) == disabled_before:
-            logger.warning(
-                "GHOST B stopped with %d chunks still queued after retry drain made no progress",
-                task_queue.qsize(),
+        while not task_queue.empty():
+            if failure_budget_open:
+                logger.error(
+                    "GHOST B stopped with %d chunks still queued after failure budget tripped",
+                    task_queue.qsize(),
+                )
+                break
+            enabled_count = sum(
+                1 for pool_idx in range(len(pool)) if pool_idx not in disabled_lanes
             )
-            break
+            if enabled_count <= 0:
+                logger.error(
+                    "GHOST B stopped with %d chunks still queued because all extraction lanes were disabled",
+                    task_queue.qsize(),
+                )
+                break
+            pending_before = task_queue.qsize()
+            disabled_before = len(disabled_lanes)
+            await _run_enabled_workers()
+            if task_queue.qsize() >= pending_before and len(disabled_lanes) == disabled_before:
+                logger.warning(
+                    "GHOST B stopped with %d chunks still queued after retry drain made no progress",
+                    task_queue.qsize(),
+                )
+                break
+    finally:
+        await shutdown_model_lifecycle(pool, purpose="ghost_b")
 
     results = results_list  # alias for the unchanged stats block below
     if disabled_lanes:
@@ -4793,7 +4796,6 @@ async def extract_entities(
         total_entity_drops,
         total_relation_drops,
     )
-    await shutdown_model_lifecycle(pool, purpose="ghost_b")
     if return_report:
         return ExtractionBatchReport(
             results=results,

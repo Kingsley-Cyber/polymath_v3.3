@@ -5,6 +5,7 @@ import pytest
 
 import services.ghost_b as ghost_b
 from services.ghost_b import ExtractionTask
+from services.ingestion import model_lifecycle
 
 
 def test_mixed_private_vllm_and_cloud_defaults_to_balanced_routing():
@@ -202,3 +203,88 @@ async def test_balanced_routing_records_calls_on_multiple_lanes(monkeypatch):
     assert report.metrics["lane_call_counts"]["0"] > 0
     assert report.metrics["lane_call_counts"]["1"] > 0
     assert set(calls) == {"lane-a", "lane-b"}
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_shutdown_runs_when_worker_drain_raises(monkeypatch):
+    ensure_calls = []
+    shutdown_calls = []
+
+    fake_settings = SimpleNamespace(
+        ENTITY_CONFIDENCE_THRESHOLD=0.0,
+        SCHEMA_INLINE_LIMIT=30,
+        SCHEMA_RETRIEVAL_TOP_K=10,
+        EXTRACTION_MAX_TOKENS=1200,
+        EXTRACTION_OUTPUT_MODE="jsonl",
+        EXTRACTION_JSON_OBJECT_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_JSON_OBJECT_MAX_RELATIONS_PER_CHUNK=12,
+        EXTRACTION_JSON_OBJECT_MAX_FACTS_PER_CHUNK=4,
+        EXTRACTION_EVIDENCE_MAX_CHARS=120,
+        EXTRACTION_FACT_VALUE_MAX_CHARS=160,
+        EXTRACTION_RESCUE_MAX_TOKENS=900,
+        EXTRACTION_ENABLE_FACTS=False,
+        EXTRACTION_MAX_FACTS_PER_CHUNK=5,
+        EXTRACTION_JSONL_MAX_CALLS=2,
+        EXTRACTION_FOREGROUND_MAX_CALLS=2,
+        EXTRACTION_JSONL_DEBUG_RAW=False,
+        EXTRACTION_MAX_INPUT_TOKENS=700,
+        EXTRACTION_MAX_TOTAL_LINES=20,
+        EXTRACTION_RESCUE_MAX_TOTAL_LINES=16,
+        EXTRACTION_MAX_ENTITIES_PER_CHUNK=14,
+        EXTRACTION_MAX_RELATIONS_PER_CHUNK=20,
+        EXTRACTION_RESCUE_MAX_ENTITIES_PER_CHUNK=8,
+        EXTRACTION_RESCUE_MAX_RELATIONS_PER_CHUNK=8,
+        LITELLM_MASTER_KEY="test-key",
+        LITELLM_URL="http://litellm",
+        DEFAULT_COMPLETION_MODEL="test-model",
+        EXTRACTION_MAX_CONCURRENT=1,
+        EXTRACTION_GLOBAL_MAX_CONCURRENT=1,
+        EXTRACTION_FAILURE_PAUSE_PERCENT=100.0,
+        EXTRACTION_FAILURE_PAUSE_MIN_CHUNKS=20,
+    )
+
+    async def fake_ensure(pool, *, purpose):
+        ensure_calls.append((pool, purpose))
+
+    async def fake_shutdown(pool, *, purpose):
+        shutdown_calls.append((pool, purpose))
+
+    monkeypatch.setattr(ghost_b, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(model_lifecycle, "ensure_model_lifecycle_ready", fake_ensure)
+    monkeypatch.setattr(model_lifecycle, "shutdown_model_lifecycle", fake_shutdown)
+    monkeypatch.setattr(
+        ghost_b,
+        "_worker_lane_spawn_order",
+        lambda lane_limits, disabled_lanes, routing_policy: [99],
+    )
+
+    with pytest.raises(IndexError):
+        await ghost_b.extract_entities(
+            [
+                ExtractionTask(
+                    chunk_id="c1",
+                    doc_id="d1",
+                    corpus_id="corp1",
+                    text="Alpha works.",
+                )
+            ],
+            pool=[
+                {
+                    "provider_preset": "openai",
+                    "model": "managed-test",
+                    "base_url": "https://api.example.test/v1",
+                    "api_key": "test-key",
+                    "max_concurrent": 1,
+                    "lifecycle_base_url": "http://192.168.1.83:8085",
+                    "lifecycle_auto_start": True,
+                    "lifecycle_auto_stop": True,
+                    "extra_params": {"schema_mode": "jsonl"},
+                }
+            ],
+            return_report=True,
+            enable_facts=False,
+        )
+
+    assert len(ensure_calls) == 1
+    assert len(shutdown_calls) == 1
+    assert shutdown_calls[0][1] == "ghost_b"
