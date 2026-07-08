@@ -31,13 +31,28 @@ const STAGE_LABEL: Record<IngestionStage, string> = {
   uploading: "uploading",
   ingesting: "parsing + chunking",
   embedding: "embedding",
+  summary_indexing: "indexing summaries",
   graph_extracting: "extracting graph",
   verifying: "verifying",
   verified: "verified",
   verify_failed: "verify failed",
   finalized: "finalized",
   failed: "failed",
+  skipped_duplicate: "skipped duplicate",
+  awaiting_summary: "awaiting summary",
+  queryable: "queryable",
+  queryable_with_pending_summary: "queryable; summary pending",
+  queryable_with_pending_graph: "queryable; graph pending",
+  queryable_with_pending_summary_and_graph: "queryable; summary + graph pending",
 };
+
+function isPendingEnrichment(job: IngestionJob): boolean {
+  return (
+    job.status === "awaiting_summary" ||
+    job.status === "queryable" ||
+    String(job.status).startsWith("queryable_with_pending_")
+  );
+}
 
 function JobRow({ job }: { job: IngestionJob }) {
   const removeJob = useIngestionQueueStore((s) => s.removeJob);
@@ -47,7 +62,17 @@ function JobRow({ job }: { job: IngestionJob }) {
     if (job.status === "failed" || job.stage === "verify_failed") {
       return [<XCircle key="i" className="w-3.5 h-3.5 text-red-500" />, "red"];
     }
-    if (job.stage === "verified" || job.stage === "finalized") {
+    if (isPendingEnrichment(job)) {
+      return [
+        <AlertTriangle key="i" className="w-3.5 h-3.5 text-amber-500" />,
+        "amber",
+      ];
+    }
+    if (
+      job.stage === "verified" ||
+      job.stage === "finalized" ||
+      job.stage === "skipped_duplicate"
+    ) {
       return [
         <CheckCircle2 key="i" className="w-3.5 h-3.5 text-green-500" />,
         "green",
@@ -66,7 +91,7 @@ function JobRow({ job }: { job: IngestionJob }) {
   const progressPct =
     currentIdx >= 0
       ? Math.round(((currentIdx + 1) / STAGE_ORDER.length) * 100)
-      : job.stage === "verify_failed" || job.stage === "failed"
+      : job.stage === "verify_failed" || job.stage === "failed" || isPendingEnrichment(job)
         ? 100
         : 0;
 
@@ -103,6 +128,8 @@ function JobRow({ job }: { job: IngestionJob }) {
               ? "bg-red-500"
               : tone === "green"
                 ? "bg-green-500"
+                : tone === "amber"
+                  ? "bg-amber-500"
                 : "bg-accent-main"
           }`}
           style={{ width: `${progressPct}%` }}
@@ -116,6 +143,8 @@ function JobRow({ job }: { job: IngestionJob }) {
               ? "text-red-500"
               : tone === "green"
                 ? "text-green-500"
+                : tone === "amber"
+                  ? "text-amber-500"
                 : "text-content-secondary"
           } tracking-wider uppercase`}
         >
@@ -191,6 +220,7 @@ export function IngestionDashboard() {
   const completed = allJobs.filter(
     (j) => j.status === "done" && j.stage === "verified",
   ).length;
+  const pending = allJobs.filter((j) => isPendingEnrichment(j)).length;
   const failed = allJobs.filter(
     (j) => j.status === "failed" || j.stage === "verify_failed",
   ).length;
@@ -214,6 +244,7 @@ export function IngestionDashboard() {
           <span className="text-[9px] text-content-tertiary">
             {active > 0 ? `${active} running` : "idle"}
             {completed > 0 && ` · ${completed} ✓`}
+            {pending > 0 && ` · ${pending} pending`}
             {failed > 0 && ` · ${failed} ✗`}
           </span>
         </div>

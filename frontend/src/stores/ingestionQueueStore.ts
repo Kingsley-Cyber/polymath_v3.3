@@ -5,17 +5,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import * as api from "../lib/api";
+import type { IngestJobStage, IngestJobStatus } from "../types/corpus";
 
-export type IngestionStage =
-  | "uploading"
-  | "ingesting"
-  | "embedding"
-  | "graph_extracting"
-  | "verifying"
-  | "verified"
-  | "verify_failed"
-  | "finalized"
-  | "failed";
+export type IngestionStage = IngestJobStage;
 
 export interface IngestionJob {
   doc_id: string;
@@ -23,7 +15,7 @@ export interface IngestionJob {
   corpus_id: string;
   corpus_name: string;
   stage: IngestionStage;
-  status: "processing" | "done" | "failed";
+  status: IngestJobStatus;
   chunk_count: number;
   parent_count: number;
   verified: boolean | null;
@@ -168,7 +160,13 @@ export const useIngestionQueueStore = create<IngestionQueueStore>()(
                     verify_errors: evt.write_state.verify_errors,
                     error: evt.error,
                   });
-                  if (evt.status === "done" || evt.status === "failed") {
+                  if (
+                    evt.status === "done" ||
+                    evt.status === "failed" ||
+                    evt.status === "skipped_duplicate" ||
+                    evt.status === "awaiting_summary" ||
+                    String(evt.status).startsWith("queryable_with_pending_")
+                  ) {
                     sawTerminal = true;
                     break;
                   }

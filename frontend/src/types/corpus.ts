@@ -176,6 +176,36 @@ export interface WriteState {
   verify_errors?: string[];
 }
 
+export type IngestJobStatus =
+  | "queued"
+  | "processing"
+  | "done"
+  | "failed"
+  | "skipped_duplicate"
+  | "awaiting_summary"
+  | "queryable"
+  | "queryable_with_pending_summary"
+  | "queryable_with_pending_graph"
+  | "queryable_with_pending_summary_and_graph";
+
+export type IngestJobStage =
+  | "uploading"
+  | "ingesting"
+  | "embedding"
+  | "summary_indexing"
+  | "graph_extracting"
+  | "verifying"
+  | "verified"
+  | "verify_failed"
+  | "finalized"
+  | "failed"
+  | "skipped_duplicate"
+  | "awaiting_summary"
+  | "queryable"
+  | "queryable_with_pending_summary"
+  | "queryable_with_pending_graph"
+  | "queryable_with_pending_summary_and_graph";
+
 export interface PresetMode {
   label: string;
   use_neo4j: boolean;
@@ -354,7 +384,8 @@ export interface IngestJobResponse {
   corpus_id: string;
   filename: string;
   source_tier: string | null;
-  status: "queued" | "processing" | "done" | "failed";
+  status: IngestJobStatus;
+  stage?: IngestJobStage;
   write_state: WriteState;
   chunk_count: number;
   parent_count: number;
