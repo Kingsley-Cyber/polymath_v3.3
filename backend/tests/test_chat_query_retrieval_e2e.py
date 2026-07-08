@@ -392,3 +392,101 @@ async def test_chat_query_e2e_graph_pipeline_seeds_facts_before_expand(monkeypat
     rerank_ids = next(ids for name, ids in events if name == "rerank")
     assert {"fact-seed", "fowler-layering"} <= set(expand_ids)
     assert "graph-neighbor" in rerank_ids
+
+
+@pytest.mark.asyncio
+async def test_graph_fact_seed_queries_all_selected_corpora_round_robin(monkeypatch):
+    from services.graph import graph_query
+    from services.ingestion_service import ingestion_service
+    from services.retriever.fact_retrieval import fact_retrieval
+
+    corpus_ids = ["c1", "c2", "c3", "c4", "c5"]
+    calls: list[str] = []
+    captured: dict = {}
+    monkeypatch.setattr(retriever_module.settings, "NEO4J_ENABLED", True)
+    monkeypatch.setattr(retriever_module.settings, "GRAPH_ENTITY_LIMIT", 5, raising=False)
+    monkeypatch.setattr(retriever_module.settings, "GRAPH_FACT_SEED_LIMIT", 10, raising=False)
+    monkeypatch.setattr(ingestion_service, "_neo4j", object(), raising=False)
+    monkeypatch.setattr(ingestion_service, "_qdrant", object(), raising=False)
+
+    async def fake_extract_query_entities(
+        query,
+        corpus_id,
+        driver,
+        *,
+        limit_per_token,
+        qdrant,
+        allow_literal_fallback,
+    ):
+        del query, driver, limit_per_token, qdrant, allow_literal_fallback
+        calls.append(corpus_id)
+        return [
+            {
+                "display_name": f"Layering {corpus_id}",
+                "entity_id": f"entity:{corpus_id}",
+            }
+        ]
+
+    async def fake_retrieve_facts_for_entities(
+        *,
+        entity_names,
+        entity_ids,
+        corpus_ids,
+        fact_types,
+        limit,
+    ):
+        captured.update(
+            {
+                "entity_names": list(entity_names),
+                "entity_ids": list(entity_ids),
+                "corpus_ids": list(corpus_ids),
+                "fact_types": fact_types,
+                "limit": limit,
+            }
+        )
+        return [
+            SourceFact(
+                fact_id=f"fact:{idx}",
+                subject=name,
+                fact_type="concept",
+                property_name="uses",
+                value="layering",
+                confidence=0.9,
+                evidence_phrase=f"{name} uses layering.",
+                chunk_id=f"chunk:{idx}",
+                doc_id=f"doc:{idx}",
+                corpus_id=corpus_ids[idx % len(corpus_ids)],
+            )
+            for idx, name in enumerate(entity_names)
+        ]
+
+    monkeypatch.setattr(graph_query, "extract_query_entities", fake_extract_query_entities)
+    monkeypatch.setattr(
+        fact_retrieval,
+        "retrieve_facts_for_entities",
+        fake_retrieve_facts_for_entities,
+    )
+
+    facts = await RetrieverOrchestrator()._retrieve_graph_seed_facts(
+        "How does layering shape architecture?",
+        corpus_ids,
+        fact_seed_limit=10,
+    )
+
+    assert calls == corpus_ids
+    assert captured["corpus_ids"] == corpus_ids
+    assert captured["entity_names"] == [
+        "Layering c1",
+        "Layering c2",
+        "Layering c3",
+        "Layering c4",
+        "Layering c5",
+    ]
+    assert captured["entity_ids"] == [
+        "entity:c1",
+        "entity:c2",
+        "entity:c3",
+        "entity:c4",
+        "entity:c5",
+    ]
+    assert len(facts) == 5

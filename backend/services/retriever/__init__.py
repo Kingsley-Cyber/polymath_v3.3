@@ -18,8 +18,10 @@ Flow (spec §RETRIEVAL RECIPE):
       (hydrate resolves parent_id for Mode A chunks; drops empty-text results)
 
 Cross-corpus constraints (spec §CROSS-CORPUS QUERY CONSTRAINTS):
-  - Hard cap: 3 corpora (validated in ChatRequest.corpus_ids)
-  - Round-robin: limit=20 per corpus → 60 max → rerank → top-10
+  - Request cap: ChatRequest.corpus_ids enforces the configured max (currently 32)
+  - Funnel round-robin: limit=20 per corpus → rerank → top-k
+  - Graph fact seeding probes all selected corpora, then round-robin selects
+    seed entities within GRAPH_ENTITY_LIMIT
   - Fair mode: FUNNEL A (summaries) skipped for multi-corpus
   - Strategy intersection: graph requires use_neo4j=True on ALL selected corpora
 """
@@ -522,6 +524,7 @@ class RetrieverOrchestrator:
                 )
                 return []
 
+            entity_limit = max(1, min(int(getattr(settings, "GRAPH_ENTITY_LIMIT", 8)), 50))
             entity_names: list[str] = []
             entity_ids: list[str] = []
             seen_entities: set[str] = set()
@@ -546,45 +549,93 @@ class RetrieverOrchestrator:
                 if getattr(g, "key", "") not in _GENERIC_QUERY_CONCEPTS
             ]
 
-            for cid in corpus_ids[:3]:
+            # Multi-corpus correctness: do not silently truncate graph fact
+            # seeding to the first three corpora. Probe every selected corpus
+            # concurrently, then select candidate entities round-robin so an
+            # 8-entity budget cannot be monopolized by the first corpus.
+            detect_sem = asyncio.Semaphore(8)
+
+            async def _detect_for_corpus(cid: str) -> tuple[str, list[dict[str, Any]]]:
+                async with detect_sem:
+                    try:
+                        rows = await extract_query_entities(
+                            query,
+                            cid,
+                            driver,
+                            limit_per_token=3,
+                            qdrant=qdrant,
+                            allow_literal_fallback=False,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Graph fact seeding: entity detection failed for corpus=%s: %s",
+                            cid,
+                            exc,
+                        )
+                        return cid, []
+                    return cid, list(rows or [])
+
+            detected = await asyncio.gather(
+                *[_detect_for_corpus(str(cid)) for cid in corpus_ids]
+            )
+            candidates_by_corpus: dict[str, list[tuple[str, str]]] = {
+                str(cid): [] for cid in corpus_ids
+            }
+            for cid, rows in detected:
                 try:
-                    rows = await extract_query_entities(
-                        query,
-                        cid,
-                        driver,
-                        limit_per_token=3,
-                        qdrant=qdrant,
-                        allow_literal_fallback=False,
-                    )
+                    bucket = candidates_by_corpus.setdefault(cid, [])
+                    for row in rows:
+                        name = str(row.get("display_name") or "").strip()
+                        eid = str(row.get("entity_id") or "").strip()
+                        if not name:
+                            continue
+                        # Junk-name gate (catches "[12]", "page 3", single letters).
+                        if is_junk_entity_name(name):
+                            continue
+                        # Query-relevance gate — drops the off-topic high-mention
+                        # entity (the ACL conference). Over-prune guard: a purely
+                        # generic query (no anchor concept) keeps frequency order.
+                        if _non_generic and not any(
+                            group_matches_text(g, name) for g in _non_generic
+                        ):
+                            continue
+                        bucket.append((name, eid))
                 except Exception as exc:
                     logger.warning(
-                        "Graph fact seeding: entity detection failed for corpus=%s: %s",
+                        "Graph fact seeding: candidate filtering failed for corpus=%s: %s",
                         cid,
                         exc,
                     )
-                    continue
-                for row in rows:
-                    name = str(row.get("display_name") or "").strip()
-                    eid = str(row.get("entity_id") or "").strip()
-                    if not name:
-                        continue
-                    # Junk-name gate (catches "[12]", "page 3", single letters).
-                    if is_junk_entity_name(name):
-                        continue
-                    # Query-relevance gate — drops the off-topic high-mention
-                    # entity (the ACL conference). Over-prune guard: a purely
-                    # generic query (no anchor concept) keeps frequency order.
-                    if _non_generic and not any(
-                        group_matches_text(g, name) for g in _non_generic
-                    ):
-                        continue
-                    key = name.lower()
-                    if key not in seen_entities:
-                        entity_names.append(name)
-                        seen_entities.add(key)
-                    if eid and eid not in seen_ids:
-                        entity_ids.append(eid)
-                        seen_ids.add(eid)
+
+            positions = {cid: 0 for cid in candidates_by_corpus}
+            selected_corpora: set[str] = set()
+            while True:
+                if len(entity_names) >= entity_limit and len(entity_ids) >= entity_limit:
+                    break
+                progressed = False
+                for cid in corpus_ids:
+                    bucket = candidates_by_corpus.get(str(cid)) or []
+                    while positions[str(cid)] < len(bucket):
+                        name, eid = bucket[positions[str(cid)]]
+                        positions[str(cid)] += 1
+                        added = False
+                        key = name.lower()
+                        if key not in seen_entities and len(entity_names) < entity_limit:
+                            entity_names.append(name)
+                            seen_entities.add(key)
+                            added = True
+                        if eid and eid not in seen_ids and len(entity_ids) < entity_limit:
+                            entity_ids.append(eid)
+                            seen_ids.add(eid)
+                            added = True
+                        if added:
+                            selected_corpora.add(str(cid))
+                            progressed = True
+                            break
+                    if len(entity_names) >= entity_limit and len(entity_ids) >= entity_limit:
+                        break
+                if not progressed:
+                    break
 
             if not entity_names and not entity_ids:
                 return []
@@ -593,8 +644,6 @@ class RetrieverOrchestrator:
             limit = max(0, min(int(fact_seed_limit or graph_fact_limit), graph_fact_limit))
             if limit <= 0:
                 return []
-            entity_limit = max(1, min(int(getattr(settings, "GRAPH_ENTITY_LIMIT", 8)), 50))
-
             facts = await fact_retrieval.retrieve_facts_for_entities(
                 entity_names=entity_names[:entity_limit],
                 entity_ids=entity_ids[:entity_limit],
@@ -603,7 +652,10 @@ class RetrieverOrchestrator:
                 limit=limit,
             )
             logger.info(
-                "Graph fact seeding: entities=%d ids=%d facts=%d entity_limit=%d fact_limit=%d",
+                "Graph fact seeding: corpus_seeds=%d/%d candidate_corpora=%d entities=%d ids=%d facts=%d entity_limit=%d fact_limit=%d",
+                len(selected_corpora),
+                len(corpus_ids),
+                sum(1 for rows in candidates_by_corpus.values() if rows),
                 len(entity_names),
                 len(entity_ids),
                 len(facts),
