@@ -1912,8 +1912,10 @@ class Settings(BaseSettings):
         description=(
             "Maximum documents allowed to run foreground Ghost B extraction "
             "when the selected extraction pool contains a managed vLLM/RTX "
-            "lane. Chunk requests still share the pool's max_concurrent budget "
-            "(for example, two docs share 60 total requests; they do not become 120)."
+            "lane. This limits document fanout only: provider lanes still keep "
+            "their independent max_concurrent budgets and are summed under "
+            "EXTRACTION_GLOBAL_MAX_CONCURRENT, so two docs do not multiply each "
+            "lane's configured concurrency."
         ),
     )
     EXTRACTION_FAILURE_PAUSE_PERCENT: float = Field(

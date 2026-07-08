@@ -3770,9 +3770,10 @@ async def extract_entities(
     routing_policy = _resolve_extraction_routing_policy(pool)
     balanced_start_offset = _next_balanced_route_offset(pool, routing_policy)
     logger.info(
-        "GHOST B routing selected: policy=%s lane_limits=%s start_offset=%d models=%s",
+        "GHOST B routing selected: policy=%s lane_limits=%s global_max=%d start_offset=%d models=%s",
         routing_policy,
         lane_limits,
+        global_max_concurrent,
         balanced_start_offset,
         [str(entry.get("model") or "") for entry in pool],
     )

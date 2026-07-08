@@ -1728,10 +1728,16 @@ class IngestionService:
             runtime_summary = (
                 await settings_service.get_runtime_ingestion_settings(effective_user_id)
             ).summary
+            corpus_summary_models = list(cfg.summary_models or [])
+            use_corpus_summary_pool = bool(corpus_summary_models)
             pool_refs = (
-                runtime_summary.summary_models
-                if runtime_summary.enabled and runtime_summary.summary_models
-                else cfg.summary_models
+                corpus_summary_models
+                if use_corpus_summary_pool
+                else (
+                    runtime_summary.summary_models
+                    if runtime_summary.enabled and runtime_summary.summary_models
+                    else []
+                )
             )
             from services.secrets import decrypt
 
@@ -1762,16 +1768,30 @@ class IngestionService:
                 }
                 for ref in (pool_refs or [])
             ]
-            max_summary_tokens = (
-                runtime_summary.max_summary_tokens
-                if runtime_summary.enabled
-                else cfg.max_summary_tokens
+            max_summary_tokens = cfg.max_summary_tokens
+            default_tokens = IngestionConfig.model_fields["max_summary_tokens"].default
+            if (
+                runtime_summary.enabled
+                and max_summary_tokens == default_tokens
+                and runtime_summary.max_summary_tokens != default_tokens
+            ):
+                max_summary_tokens = runtime_summary.max_summary_tokens
+            global_max_concurrent = (
+                None
+                if use_corpus_summary_pool
+                else runtime_summary.max_concurrent if runtime_summary.enabled else None
             )
-            global_max_concurrent = runtime_summary.max_concurrent if runtime_summary.enabled else None
 
             if not pool:
                 generation_errors.append("no summary model pool configured")
             else:
+                logger.info(
+                    "summary_backfill pool corpus=%s source=%s models=%s global_cap=%s",
+                    corpus_id[:8],
+                    "corpus" if use_corpus_summary_pool else "settings",
+                    [str(entry.get("model") or "") for entry in pool],
+                    global_max_concurrent or "-",
+                )
                 while limit is None or attempted < limit:
                     fetch = batch if limit is None else max(0, min(batch, limit - attempted))
                     if fetch <= 0:
