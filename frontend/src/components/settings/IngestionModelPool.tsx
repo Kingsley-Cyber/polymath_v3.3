@@ -15,11 +15,13 @@ import {
   CheckCircle,
   AlertTriangle,
   Power,
+  List,
 } from "lucide-react";
 import type { ModelProfileRef } from "../../types";
 import { PROVIDER_PRESETS, composeModelString } from "../../types";
 import * as api from "../../lib/api";
 import type {
+  IngestionModelListResult,
   IngestionModelPoolField,
   IngestionModelTestKind,
   IngestionModelTestResult,
@@ -38,6 +40,7 @@ type PoolPreset = {
     auto_start?: boolean;
     auto_stop?: boolean;
     ready_timeout_seconds?: number;
+    idle_shutdown_seconds?: number;
   };
   kwargs?: Record<string, unknown>;
 };
@@ -97,6 +100,12 @@ export function IngestionModelPool({
     label: string;
     result: IngestionModelTestResult;
   } | null>(null);
+  const [listingId, setListingId] = useState<string | null>(null);
+  const [lastModels, setLastModels] = useState<{
+    id: string;
+    label: string;
+    result: IngestionModelListResult;
+  } | null>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
 
   const canAdd = draft.model.trim().length > 0;
@@ -133,6 +142,10 @@ export function IngestionModelPool({
     const extraParams: Record<string, unknown> = preset?.kwargs
       ? { ...(preset.kwargs as Record<string, unknown>) }
       : {};
+    if (preset?.lifecycle?.idle_shutdown_seconds) {
+      extraParams.lifecycle_idle_shutdown_seconds =
+        preset.lifecycle.idle_shutdown_seconds;
+    }
     return {
       provider_preset: draft.provider_preset,
       // Safety net: prefix with the preset's LiteLLM provider unless already
@@ -183,6 +196,40 @@ export function IngestionModelPool({
       });
     } finally {
       setTestingId(null);
+    }
+  };
+
+  const listEntryModels = async (
+    id: string,
+    label: string,
+    entry: ModelProfileRef,
+    index?: number,
+  ) => {
+    if (!entry.base_url?.trim()) return;
+    setListingId(id);
+    setLastModels(null);
+    try {
+      const result = await api.listIngestionModelRefModels({
+        kind: testKind,
+        entry,
+        corpus_id: testContext?.corpusId ?? null,
+        pool_field: testContext?.poolField ?? null,
+        index: index ?? null,
+      });
+      setLastModels({ id, label, result });
+    } catch (err) {
+      setLastModels({
+        id,
+        label,
+        result: {
+          ok: false,
+          models: [],
+          base_url: entry.base_url,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    } finally {
+      setListingId(null);
     }
   };
 
@@ -288,6 +335,19 @@ export function IngestionModelPool({
                   <AlertTriangle className="w-2.5 h-2.5 text-error" />
                 ) : (
                   <Zap className="w-2.5 h-2.5" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => listEntryModels(testId, m.model, m, idx)}
+                disabled={listingId !== null || !m.base_url}
+                className="ml-0.5 text-content-tertiary hover:text-accent-main disabled:opacity-40"
+                title="List live models from this endpoint"
+              >
+                {listingId === testId ? (
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                ) : (
+                  <List className="w-2.5 h-2.5" />
                 )}
               </button>
               {!readOnly && editing && (
@@ -453,7 +513,7 @@ export function IngestionModelPool({
                   }
                   className="accent-accent-main"
                 />
-                down after call
+                idle stop
               </label>
             </div>
           )}
@@ -470,6 +530,20 @@ export function IngestionModelPool({
               <Zap className="w-3 h-3" />
             )}
             Test
+          </button>
+          <button
+            type="button"
+            onClick={() => listEntryModels("draft", "draft route", buildDraftRef())}
+            disabled={!draft.base_url.trim() || listingId !== null}
+            className="flex items-center gap-1 px-2 py-1 rounded border border-border-minimal text-content-secondary text-[10px] font-bold uppercase tracking-widest hover:border-accent-main hover:text-accent-main disabled:opacity-40 disabled:cursor-not-allowed"
+            title="List live models from base_url + /models"
+          >
+            {listingId === "draft" ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <List className="w-3 h-3" />
+            )}
+            Models
           </button>
           <button
             onClick={commit}
@@ -508,6 +582,52 @@ export function IngestionModelPool({
                 }`
               : lastTest.result.error || "connection failed"}
           </span>
+        </div>
+      )}
+
+      {lastModels && (
+        <div
+          className={`px-2 py-1.5 rounded border text-[10px] font-mono leading-snug ${
+            lastModels.result.ok
+              ? "border-cyan-400/30 bg-cyan-400/5 text-cyan-200"
+              : "border-error/30 bg-error/5 text-error"
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            {lastModels.result.ok ? (
+              <CheckCircle className="w-3 h-3 shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+            )}
+            <span className="break-words">
+              {lastModels.label}:{" "}
+              {lastModels.result.ok
+                ? `${lastModels.result.models.length} live model(s) · ${
+                    lastModels.result.latency_ms ?? "?"
+                  }ms`
+                : lastModels.result.error || "model list failed"}
+            </span>
+          </div>
+          {lastModels.result.ok && lastModels.result.models.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {lastModels.result.models.slice(0, 24).map((model) => (
+                <button
+                  key={model}
+                  type="button"
+                  onClick={() =>
+                    setDraft((prev) => ({
+                      ...prev,
+                      model: composeModel(prev.provider_preset, model),
+                    }))
+                  }
+                  className="px-1.5 py-0.5 rounded border border-cyan-300/20 bg-cyan-300/5 text-cyan-100 hover:border-cyan-200"
+                  title="Use this model name in the draft row"
+                >
+                  {model}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

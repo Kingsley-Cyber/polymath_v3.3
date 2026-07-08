@@ -43,40 +43,6 @@ interface CorpusManagerProps {
 
 // DEFAULT_INGESTION_CONFIG imported from ../../types (complete version with all IngestionConfig fields)
 
-// ── Preset selector ───────────────────────────────────────────────────────
-// Four-way radio group. Fast / Balanced / Deep write both the `preset` field
-// AND the underlying toggles so the outbound payload matches what the
-// backend would apply anyway. Custom reveals the use_neo4j +
-// chunk_summarization checkboxes for manual override.
-
-const PRESET_META: {
-  key: IngestionPreset;
-  label: string;
-  tooltip: string;
-}[] = [
-  {
-    key: "fast",
-    label: "Fast",
-    tooltip: "Fastest ingest; vector/hybrid search only, no knowledge graph.",
-  },
-  {
-    key: "balanced",
-    label: "Balanced",
-    tooltip: "Adds knowledge graph. No per-chunk summaries.",
-  },
-  {
-    key: "deep",
-    label: "Deep",
-    tooltip:
-      "Adds chunk summaries for hierarchical retrieval. Slowest, best recall.",
-  },
-  {
-    key: "custom",
-    label: "Custom",
-    tooltip: "Reveal the underlying toggles and set them by hand.",
-  },
-];
-
 type IngestionWorkflowId =
   | "local_only"
   | "rtx_only"
@@ -415,102 +381,6 @@ function poolLabel(entries: ModelProfileRef[]): string {
   return entries.map(formatExtractionPoolEntry).join(" | ");
 }
 
-interface PresetSelectorProps {
-  config: IngestionConfig;
-  onChange: (next: IngestionConfig) => void;
-  idPrefix: string; // unique per form (create vs edit) for radio grouping
-}
-
-function PresetModeSelector({ config, onChange, idPrefix }: PresetSelectorProps) {
-  const current: IngestionPreset = config.preset ?? inferPreset(config);
-  const isCustom = current === "custom";
-  return (
-    <div>
-      <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
-        Retrieval Depth
-      </div>
-      <div
-        role="radiogroup"
-        aria-label="Retrieval depth"
-        className="grid grid-cols-2 sm:grid-cols-4 gap-1.5"
-      >
-        {PRESET_META.map((p) => {
-          const checked = current === p.key;
-          const id = `${idPrefix}-preset-${p.key}`;
-          return (
-            <label
-              key={p.key}
-              htmlFor={id}
-              title={p.tooltip}
-              className={`flex items-center justify-center gap-1.5 px-2 py-1.5 text-[9px] font-bold tracking-widest uppercase border cursor-pointer transition-none ${
-                checked
-                  ? "border-accent-main text-accent-main bg-accent-main/10"
-                  : "border-border-minimal text-content-secondary hover:border-accent-main hover:text-accent-main"
-              }`}
-            >
-              <input
-                id={id}
-                type="radio"
-                name={`${idPrefix}-preset`}
-                value={p.key}
-                checked={checked}
-                onChange={() => onChange(applyPresetToConfig(config, p.key))}
-                className="accent-accent-main"
-              />
-              {p.label}
-            </label>
-          );
-        })}
-      </div>
-      <div
-        className="text-[9px] text-content-tertiary/70 leading-relaxed mt-1"
-        data-testid={`${idPrefix}-preset-hint`}
-      >
-        {PRESET_META.find((p) => p.key === current)?.tooltip}
-      </div>
-
-      {isCustom && (
-        <div
-          className="flex flex-wrap gap-3 mt-2"
-          data-testid={`${idPrefix}-custom-toggles`}
-        >
-          <label className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider">
-            <input
-              type="checkbox"
-              checked={config.use_neo4j}
-              onChange={(e) =>
-                onChange({
-                  ...config,
-                  preset: "custom",
-                  use_neo4j: e.target.checked,
-                })
-              }
-              className="accent-accent-main"
-            />
-            use_neo4j
-          </label>
-          <label className="flex items-center gap-1.5 text-[11px] text-content-secondary tracking-wider">
-            <input
-              type="checkbox"
-              checked={config.chunk_summarization}
-              onChange={(e) =>
-                onChange({
-                  ...config,
-                  preset: "custom",
-                  chunk_summarization: e.target.checked,
-                })
-              }
-              className="accent-accent-main"
-            />
-            chunk_summarization
-          </label>
-        </div>
-      )}
-
-    </div>
-  );
-}
-
 function IngestionWorkflowSelector({
   config,
   onChange,
@@ -525,32 +395,91 @@ function IngestionWorkflowSelector({
   const extractionPool = config.extraction_models ?? [];
   const summaryPool = config.summary_models ?? [];
   const providerActive = usesProviderEngine(draftEngine(config.extraction_engine, "local"));
+  const primaryWorkflowIds: IngestionWorkflowId[] = [
+    "rtx_only",
+    "cloud_only",
+    "cloud_rtx",
+    "vectors_only",
+  ];
+  const visibleWorkflowIds = primaryWorkflowIds.includes(current)
+    ? primaryWorkflowIds
+    : [current, ...primaryWorkflowIds];
+  const visibleWorkflows = visibleWorkflowIds
+    .map((key) => WORKFLOW_META.find((item) => item.key === key))
+    .filter(Boolean) as typeof WORKFLOW_META;
 
   return (
-    <div className="border border-accent-main/25 bg-bg-base/50 px-3 py-2 space-y-2">
+    <div className="border border-accent-main/25 bg-bg-base/50 px-3 py-2 space-y-3">
       <div>
-        <label
-          htmlFor={`${idPrefix}-ingestion-workflow`}
-          className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase"
-        >
-          Ingestion workflow
-        </label>
-        <select
-          id={`${idPrefix}-ingestion-workflow`}
-          data-testid={`${idPrefix}-ingestion-workflow`}
-          value={current}
-          onChange={(event) =>
-            onChange(applyWorkflowToConfig(config, event.target.value as IngestionWorkflowId))
-          }
-          className="mt-1 w-full px-2 py-1.5 bg-bg-base border border-border-minimal text-[12px] text-content-primary focus:outline-none focus:border-accent-main"
-        >
-          {WORKFLOW_META.map((item) => (
-            <option key={item.key} value={item.key}>
-              {item.label}
-            </option>
-          ))}
-        </select>
-        <div className="mt-1 text-[10px] text-content-tertiary leading-snug">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase">
+              Extraction Profile
+            </div>
+            <div className="mt-0.5 text-[10px] text-content-tertiary leading-snug">
+              Choose what extraction contract should run. The backend derives the
+              resource plan from the selected route and model pool.
+            </div>
+          </div>
+          <div className="hidden sm:block text-[9px] font-bold tracking-widest uppercase text-accent-secondary">
+            structured output · evidence gate · graph promotion
+          </div>
+        </div>
+        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+          {visibleWorkflows.map((item) => {
+            const selected = item.key === current;
+            return (
+              <button
+                key={item.key}
+                id={`${idPrefix}-ingestion-workflow-${item.key}`}
+                data-testid={`${idPrefix}-ingestion-workflow-${item.key}`}
+                type="button"
+                onClick={() => onChange(applyWorkflowToConfig(config, item.key))}
+                className={`min-h-[78px] text-left border px-2.5 py-2 transition-colors ${
+                  selected
+                    ? "border-accent-main bg-accent-main/10 text-content-primary"
+                    : "border-border-minimal bg-bg-surface/40 text-content-secondary hover:border-content-secondary"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-[11px] font-bold tracking-widest uppercase">
+                    {item.label}
+                  </span>
+                  {selected && <Check className="w-3.5 h-3.5 text-accent-main shrink-0" />}
+                </div>
+                <div className="mt-1 text-[9px] leading-snug text-content-tertiary">
+                  {item.detail}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <details className="mt-2">
+          <summary className="cursor-pointer text-[9px] font-bold tracking-widest uppercase text-content-tertiary hover:text-content-secondary">
+            Legacy / migration routes
+          </summary>
+          <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+            {WORKFLOW_META.filter(
+              (item) =>
+                !primaryWorkflowIds.includes(item.key) && item.key !== current,
+            ).map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => onChange(applyWorkflowToConfig(config, item.key))}
+                className="text-left border border-border-minimal bg-bg-surface/30 px-2.5 py-2 text-content-secondary hover:border-content-secondary"
+              >
+                <div className="text-[10px] font-bold tracking-widest uppercase">
+                  {item.label}
+                </div>
+                <div className="mt-1 text-[9px] leading-snug text-content-tertiary">
+                  {item.detail}
+                </div>
+              </button>
+            ))}
+          </div>
+        </details>
+        <div className="mt-2 text-[10px] text-content-tertiary leading-snug">
           {currentMeta.detail}
         </div>
       </div>
@@ -886,29 +815,50 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
             list is hidden to avoid a squished dual-scroll region. */}
         {showCreateForm && (
           <div className="flex-1 min-h-0 px-4 py-3 border-b border-border-minimal bg-bg-surface/50 space-y-3 overflow-y-auto custom-scrollbar">
-            <div className="text-[11px] font-bold tracking-widest text-content-secondary uppercase">
-              &gt; Create New Corpus
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-[11px] font-bold tracking-widest text-content-secondary uppercase">
+                  &gt; New Ingestion Control Plane
+                </div>
+                <div className="mt-0.5 text-[10px] text-content-tertiary">
+                  Corpus setup → extraction profile → model routing → validation → ready
+                </div>
+              </div>
+              <div className="text-[9px] font-bold tracking-widest uppercase text-accent-secondary">
+                new runs use this contract
+              </div>
             </div>
-            <input
-              data-testid="corpus-name-input"
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="corpus_name"
-              className="w-full px-2 py-1.5 bg-bg-base border border-border-minimal text-[12px] text-content-primary placeholder:text-content-tertiary focus:outline-none focus:border-accent-main"
-            />
-            <IngestionWorkflowSelector
-              config={newConfig}
-              onChange={setNewConfig}
-              idPrefix="create"
-            />
-            <input
-              type="text"
-              value={newDescription}
-              onChange={(e) => setNewDescription(e.target.value)}
-              placeholder="description (optional)"
-              className="w-full px-2 py-1.5 bg-bg-base border border-border-minimal text-[12px] text-content-primary placeholder:text-content-tertiary focus:outline-none focus:border-accent-main"
-            />
+
+            <section className="border border-border-minimal bg-bg-base/40 px-3 py-2 space-y-2">
+              <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase">
+                1. Corpus / Document Setup
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-2">
+                <input
+                  data-testid="corpus-name-input"
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="corpus_name"
+                  className="w-full px-2 py-1.5 bg-bg-base border border-border-minimal text-[12px] text-content-primary placeholder:text-content-tertiary focus:outline-none focus:border-accent-main"
+                />
+                <input
+                  type="text"
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                  placeholder="description (optional)"
+                  className="w-full px-2 py-1.5 bg-bg-base border border-border-minimal text-[12px] text-content-primary placeholder:text-content-tertiary focus:outline-none focus:border-accent-main"
+                />
+              </div>
+            </section>
+
+            <section className="space-y-2">
+              <IngestionWorkflowSelector
+                config={newConfig}
+                onChange={setNewConfig}
+                idPrefix="create"
+              />
+            </section>
 
             {/* Parent/child token budgets are AUTO-TUNED (validated defaults
                 sent on create). Overrides remain available via the API only —
@@ -917,10 +867,10 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
             {/* Chunking is AUTO-tuned end to end — token budgets, overlap and
                 summary caps all ship validated defaults on create; overrides
                 are deliberately API-only (owner decision 2026-07-03). */}
-            <div>
-              <label className="text-[9px] text-content-tertiary tracking-wider">
-                CHUNKING
-              </label>
+            <section className="border border-border-minimal bg-bg-base/40 px-3 py-2">
+              <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
+                2. Clean / Chunk
+              </div>
               <div
                 className="w-full px-2 py-1 bg-bg-base border border-border-minimal text-[12px] text-content-primary"
                 title="Resolved per file after parsing: prose → semantic_split (one idea per child); lists/lines/code/tables/transcripts auto-route; SaT sentence engine; topic-fused paragraphs escalate via embeddings; structureless docs get semantic parents."
@@ -930,35 +880,43 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
               <div className="mt-1 text-[8px] text-content-tertiary leading-tight">
                 file-type routers · child: semantic_split · budgets, overlap &amp; summaries auto-tuned
               </div>
-            </div>
+            </section>
 
             {/* GHOST A + GHOST B Model Profiles (Phase 19.3) */}
-            <IngestionModelsSection
-              config={newConfig}
-              onPatch={(patch) =>
-                setNewConfig((prev) => ({ ...prev, ...patch }))
-              }
-              editing={true}
-            />
+            <section className="space-y-2">
+              <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase">
+                3. Model Routing
+              </div>
+              <IngestionModelsSection
+                config={newConfig}
+                onPatch={(patch) =>
+                  setNewConfig((prev) => ({ ...prev, ...patch }))
+                }
+                editing={true}
+              />
+            </section>
 
             {/* Embed dispatch — three-way selector + per-mode credentials */}
-            <EmbedSection
-              config={newConfig}
-              onPatch={(patch) =>
-                setNewConfig((prev) => ({ ...prev, ...patch }))
-              }
-              modalStatus={modalStatus}
-            />
-
-            <PresetModeSelector
-              config={newConfig}
-              onChange={setNewConfig}
-              idPrefix="create"
-            />
+            <section className="space-y-2">
+              <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase">
+                4. Indexing Route
+              </div>
+              <EmbedSection
+                config={newConfig}
+                onPatch={(patch) =>
+                  setNewConfig((prev) => ({ ...prev, ...patch }))
+                }
+                modalStatus={modalStatus}
+              />
+            </section>
 
             {/* Confidence threshold sits on its own because it's GHOST-B-specific
                 and orthogonal to the model identity. */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+            <section className="border border-border-minimal bg-bg-base/40 px-3 py-2 space-y-2">
+              <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase">
+                5. Validation &amp; Promotion
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
               <div>
                 <label className="text-[9px] text-content-tertiary tracking-wider">
                   ENTITY CONFIDENCE
@@ -986,21 +944,18 @@ export function CorpusManager({ isOpen, onClose }: CorpusManagerProps) {
                   enforcement. 0.5 is a balanced default.
                 </div>
               </div>
-            </div>
+              </div>
 
             {/* Universal Extraction Schema — read-only notice.
                 Entity types / relation predicates / strict mode are now
                 baked into ghost_b.UNIVERSAL_*_SCHEMA and applied to every
                 corpus. See GOTCHAS.md §66. */}
-            <div>
-              <div className="text-[11px] font-bold tracking-widest text-content-tertiary uppercase mb-1.5">
-                Extraction Schema
-              </div>
               <div className="text-[9px] text-content-tertiary/70 leading-relaxed">
-                Extraction uses a universal 12-type / 17-predicate schema
-                (baked backend-side). No per-corpus tuning.
+                Extraction uses the universal schema backend-side. Structured
+                output, required evidence, semantic direction checks, and graph
+                promotion gates decide what can become durable graph data.
               </div>
-            </div>
+            </section>
 
             <div className="flex gap-2">
               <Button
@@ -1707,7 +1662,7 @@ function IngestionModelsSection({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="text-[12px] font-bold tracking-widest text-content-tertiary uppercase">
-          Ingestion Models
+          Model Routing
         </div>
         <div className="text-[10px] text-content-tertiary tracking-wider uppercase">
           {draftUsesProvider ? "provider extraction pool active" : "provider pool hidden"}
@@ -1739,7 +1694,7 @@ function IngestionModelsSection({
             {engine === "local_then_cloud" ? " (local->cloud rescue)" : ""}
           </span>
           <span className="ml-auto text-[10px] text-content-tertiary">
-            Change via Ingestion workflow above.
+            Change via Extraction Profile above.
           </span>
         </div>
         {linked && draftUsesProvider && (
@@ -1878,7 +1833,7 @@ function IngestionModelsSection({
       </div>
 
       <IngestionModelPool
-        title="Summary Models (GHOST A)"
+        title="Summary Route"
         subtitle="Parent-chunk summarization · tasks round-robined across chips"
         value={summaryPool}
         onChange={(next) => onPatch({ summary_models: next })}
@@ -1889,7 +1844,7 @@ function IngestionModelsSection({
 
       {draftUsesProvider ? (
         <IngestionModelPool
-          title="Extraction Models (GHOST B)"
+          title="Extraction Route"
           subtitle={
             linked
               ? "Legacy mode: Summary pool is currently reused for provider extraction"

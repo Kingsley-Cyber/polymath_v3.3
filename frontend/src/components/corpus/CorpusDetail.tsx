@@ -210,7 +210,7 @@ export function CorpusDetail({
   const [localBatchProfile, setLocalBatchProfile] = useState<IngestProfileName>(
     () => defaultBatchProfile(corpus),
   );
-  const [localBatchConcurrency, setLocalBatchConcurrency] = useState(1);
+  const localBatchConcurrency = 1;
   const [localBatch, setLocalBatch] = useState<IngestBatchResponse | null>(null);
   const [isStartingLocalBatch, setIsStartingLocalBatch] = useState(false);
   const [isQuickUploading, setIsQuickUploading] = useState(false);
@@ -589,7 +589,7 @@ export function CorpusDetail({
             title="Start a durable backend-owned folder ingest"
           >
             <FolderOpen className="w-3 h-3" />
-            <span>Backend Folder</span>
+            <span>Ingest Folder</span>
           </button>
           <button
             onClick={() => setShowDuplicates((open) => !open)}
@@ -645,25 +645,10 @@ export function CorpusDetail({
 
       {showLocalBatch && (
         <div className="border-b border-border-minimal bg-bg-base/70 px-4 py-3 shrink-0">
-          <div className="grid grid-cols-1 md:grid-cols-[150px_minmax(0,1fr)_88px_auto_auto_auto] gap-2 items-end">
-            <label>
-              <span className="block text-[9px] font-bold tracking-widest text-content-tertiary uppercase mb-1">
-                Ingest Profile
-              </span>
-              <select
-                value={localBatchProfile}
-                onChange={(e) => setLocalBatchProfile(e.target.value as IngestProfileName)}
-                className="w-full h-8 px-2 bg-bg-surface border border-border-minimal text-[11px] text-content-primary outline-none focus:border-accent-main"
-                title="Controls backend resource planning for this durable batch. Mac queryable-first uses one active document and indexes retrieval before enrichment."
-              >
-                <option value="rtx_assisted">RTX assisted</option>
-                <option value="mac_queryable_first">Mac queryable-first</option>
-                <option value="mac_safe">Mac optimized</option>
-              </select>
-            </label>
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(210px,0.45fr)_auto_auto_auto] gap-2 items-end">
             <label className="min-w-0">
               <span className="block text-[9px] font-bold tracking-widest text-content-tertiary uppercase mb-1">
-                Backend Path
+                Source Folder
               </span>
               <input
                 value={localBatchPath}
@@ -672,23 +657,20 @@ export function CorpusDetail({
                 placeholder="/ingest-source/authentic_files"
               />
             </label>
-            <label>
-              <span className="block text-[9px] font-bold tracking-widest text-content-tertiary uppercase mb-1">
-                Workers
-              </span>
-              <input
-                value={localBatchConcurrency}
-                onChange={(e) =>
-                  setLocalBatchConcurrency(
-                    Math.max(1, Math.min(32, Number(e.target.value) || 1)),
-                  )
-                }
-                type="number"
-                min={1}
-                max={32}
-                className="w-full h-8 px-2 bg-bg-surface border border-border-minimal text-[11px] text-content-primary font-mono outline-none focus:border-accent-main"
-              />
-            </label>
+            <div
+              className="h-8 flex items-center justify-between gap-2 px-2 bg-bg-surface border border-border-minimal"
+              title="Derived from this corpus extraction and embedding contract. The backend owns resource planning."
+            >
+              <div className="min-w-0">
+                <div className="text-[8px] font-bold tracking-widest uppercase text-content-tertiary">
+                  Run Contract
+                </div>
+                <div className="text-[10px] text-content-primary truncate">
+                  {PROFILE_LABELS[localBatchProfile]} · auto workers
+                </div>
+              </div>
+              <CheckCircle2 className="w-3.5 h-3.5 text-accent-secondary shrink-0" />
+            </div>
             <button
               onClick={handleStartLocalBatch}
               disabled={isStartingLocalBatch}
@@ -699,7 +681,7 @@ export function CorpusDetail({
               ) : (
                 <FolderOpen className="w-3 h-3" />
               )}
-              <span>Start</span>
+              <span>Run</span>
             </button>
             <button
               onClick={handleResumeLocalBatch}
@@ -726,7 +708,7 @@ export function CorpusDetail({
                 <div className="text-content-primary">{localBatch.status}</div>
               </div>
               <div className="border border-border-minimal px-2 py-1">
-                <div className="text-content-tertiary uppercase">Profile</div>
+                <div className="text-content-tertiary uppercase">Run contract</div>
                 <div className="text-content-primary">
                   {PROFILE_LABELS[
                     ((localBatch.options?.profile as IngestProfileName | undefined) ??

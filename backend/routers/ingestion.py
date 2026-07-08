@@ -195,6 +195,15 @@ class ModelRefTestResult(BaseModel):
     error: str | None = None
 
 
+class ModelRefModelsResult(BaseModel):
+    ok: bool
+    status: int | None = None
+    latency_ms: int | None = None
+    base_url: str | None = None
+    models: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["ingestion"])
 
@@ -433,6 +442,80 @@ async def _test_embedding_model_ref(entry: dict) -> ModelRefTestResult:
         )
 
 
+def _model_ids_from_models_payload(payload: dict) -> list[str]:
+    raw = payload.get("data")
+    if raw is None:
+        raw = payload.get("models")
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        model_id = None
+        if isinstance(item, dict):
+            model_id = item.get("id") or item.get("name") or item.get("model")
+        elif isinstance(item, str):
+            model_id = item
+        if model_id:
+            out.append(str(model_id))
+    return sorted(dict.fromkeys(out))
+
+
+async def _list_model_ref_models(entry: dict) -> ModelRefModelsResult:
+    base_url = (entry.get("base_url") or "").strip()
+    if not base_url:
+        return ModelRefModelsResult(
+            ok=False,
+            error="Base URL is required to list live provider models.",
+        )
+    url = base_url.rstrip("/") + "/models"
+    headers: dict[str, str] = {}
+    if entry.get("api_key"):
+        headers["Authorization"] = f"Bearer {entry['api_key']}"
+
+    from services.ingestion.model_lifecycle import (
+        ensure_model_lifecycle_ready,
+        shutdown_model_lifecycle,
+    )
+
+    started = time.monotonic()
+    try:
+        await ensure_model_lifecycle_ready([entry], purpose="model_ref_models")
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url, headers=headers)
+        latency_ms = int((time.monotonic() - started) * 1000)
+        if resp.status_code >= 400:
+            return ModelRefModelsResult(
+                ok=False,
+                status=resp.status_code,
+                latency_ms=latency_ms,
+                base_url=base_url,
+                error=_safe_provider_text(resp.text),
+            )
+        models = _model_ids_from_models_payload(resp.json())
+        return ModelRefModelsResult(
+            ok=True,
+            status=resp.status_code,
+            latency_ms=latency_ms,
+            base_url=base_url,
+            models=models[:200],
+        )
+    except httpx.TimeoutException:
+        return ModelRefModelsResult(
+            ok=False,
+            base_url=base_url,
+            error="Request timed out after 20s",
+        )
+    except Exception as exc:
+        logger.warning("ingestion model list probe failed: %s", exc)
+        return ModelRefModelsResult(
+            ok=False,
+            base_url=base_url,
+            error=_safe_provider_text(str(exc)),
+        )
+    finally:
+        await shutdown_model_lifecycle([entry], purpose="model_ref_models")
+
+
 def _resolve_ingest_progress(
     doc: dict,
     *,
@@ -641,6 +724,22 @@ async def test_ingestion_model_ref(
     if body.kind == "embedding":
         return await _test_embedding_model_ref(entry)
     return await _test_chat_model_ref(entry)
+
+
+@router.post("/ingestion/model-ref/models", response_model=ModelRefModelsResult)
+async def list_ingestion_model_ref_models(
+    body: ModelRefTestRequest,
+    current_user: dict = Depends(get_current_user),
+) -> ModelRefModelsResult:
+    """List live OpenAI-compatible models for an ingestion model-pool chip."""
+    entry, error = await _model_ref_for_test(body, user_id=current_user["user_id"])
+    if error:
+        return ModelRefModelsResult(
+            ok=False,
+            base_url=entry.get("base_url"),
+            error=error,
+        )
+    return await _list_model_ref_models(entry)
 
 
 @router.get("/corpora/{corpus_id}/extraction-contract")

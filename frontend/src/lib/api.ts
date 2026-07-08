@@ -480,10 +480,28 @@ export interface IngestionModelTestResult {
   error?: string | null;
 }
 
+export interface IngestionModelListResult {
+  ok: boolean;
+  status?: number | null;
+  latency_ms?: number | null;
+  base_url?: string | null;
+  models: string[];
+  error?: string | null;
+}
+
 export async function testIngestionModelRef(
   body: IngestionModelTestRequest,
 ): Promise<IngestionModelTestResult> {
   return fetchJSON("/ingestion/model-ref/test", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listIngestionModelRefModels(
+  body: IngestionModelTestRequest,
+): Promise<IngestionModelListResult> {
+  return fetchJSON("/ingestion/model-ref/models", {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -1368,6 +1386,7 @@ export const api = {
   updateCorpus,
   deleteCorpus,
   testIngestionModelRef,
+  listIngestionModelRefModels,
   getExtractionContract,
   listDocuments,
   createLocalIngestBatch,
