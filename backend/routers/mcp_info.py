@@ -108,9 +108,16 @@ async def create_mcp_api_key(
     from polymath_mcp.key_store import create_mcp_key
 
     name = None
+    scopes = None
     if isinstance(body, dict):
         name = body.get("name")
-    key = await create_mcp_key(db, user_id=current_user["user_id"], name=name)
+        scopes = body.get("scopes")
+    key = await create_mcp_key(
+        db,
+        user_id=current_user["user_id"],
+        name=name,
+        scopes=scopes if isinstance(scopes, list) else None,
+    )
     return {"key": key}
 
 

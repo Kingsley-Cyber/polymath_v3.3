@@ -90,6 +90,7 @@ async def test_user_mcp_key_is_shown_once_hashed_listed_and_revoked():
             "key_id": created["key_id"],
             "name": "Cursor",
             "prefix": created["prefix"],
+            "scopes": ["read", "write"],
             "created_at": created["created_at"],
             "last_used_at": None,
             "revoked_at": None,
@@ -105,3 +106,22 @@ async def test_user_mcp_key_is_shown_once_hashed_listed_and_revoked():
     )
     assert await key_store.validate_user_mcp_key(db, created["api_key"]) is None
     assert await key_store.list_mcp_keys(db, user_id="user-1") == []
+
+
+@pytest.mark.asyncio
+async def test_user_mcp_key_scopes_are_normalized_and_returned_on_validation():
+    db = _Db()
+
+    created = await key_store.create_mcp_key(
+        db,
+        user_id="user-1",
+        name="Read only",
+        scopes=["read", "read", "unknown"],
+    )
+
+    assert created["scopes"] == ["read"]
+    listed = await key_store.list_mcp_keys(db, user_id="user-1")
+    assert listed[0]["scopes"] == ["read"]
+
+    details = await key_store.validate_user_mcp_key_details(db, created["api_key"])
+    assert details == {"user_id": "user-1", "scopes": ["read"]}

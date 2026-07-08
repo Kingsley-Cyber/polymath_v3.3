@@ -80,7 +80,7 @@ _install_auth_stubs_if_missing()
 
 
 from polymath_mcp import tools as mcp_tools  # noqa: E402
-from polymath_mcp.auth import SYSTEM_USER_ID, _current_user_id  # noqa: E402
+from polymath_mcp.auth import SYSTEM_USER_ID, _current_scopes, _current_user_id  # noqa: E402
 from models.schemas import GlobalIngestionSettings, GlobalIngestionSummarySettings  # noqa: E402
 from services.settings import settings_service  # noqa: E402
 
@@ -103,6 +103,18 @@ def real_user():
         yield "user-abc-123"
     finally:
         _current_user_id.reset(token)
+
+
+@pytest.fixture
+def read_only_user():
+    """Authenticate as a user-scoped MCP key with read only."""
+    user_token = _current_user_id.set("user-read-only")
+    scope_token = _current_scopes.set(frozenset({"read"}))
+    try:
+        yield "user-read-only"
+    finally:
+        _current_scopes.reset(scope_token)
+        _current_user_id.reset(user_token)
 
 
 @pytest.fixture
@@ -150,6 +162,7 @@ async def test_mcp_status_reports_toolsets_and_masks_summary_keys(monkeypatch, s
     payload = json.dumps(result)
 
     assert result["auth"]["mode"] == "system_api_key"
+    assert result["auth"]["scopes"] == ["admin", "read", "write"]
     assert {"context", "retrieval", "graph", "ingestion"} <= toolset_names
     assert "polymath_plan_ingestion" in result["registered_tools"]
     assert result["ingestion"]["summary_defaults"]["enabled"] is True
@@ -542,6 +555,13 @@ async def test_create_corpus_rejects_anonymous_when_auth_required(anonymous):
             await mcp_tools.polymath_create_corpus(name="test")
     finally:
         settings.MCP_REQUIRE_AUTH = original
+
+
+@pytest.mark.asyncio
+async def test_create_corpus_rejects_read_only_mcp_key(read_only_user):
+    del read_only_user
+    with pytest.raises(mcp_tools.AuthError, match="write"):
+        await mcp_tools.polymath_create_corpus(name="read only should fail")
 
 
 # ─── polymath_upload_document ─────────────────────────────────────────────

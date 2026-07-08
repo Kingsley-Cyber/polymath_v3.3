@@ -22,7 +22,26 @@ import {
   Trash2,
 } from "lucide-react";
 import * as api from "../../lib/api";
-import type { McpApiKeyCreated, McpApiKeyPublic, McpInfo } from "../../lib/api";
+import type {
+  McpApiKeyCreated,
+  McpApiKeyPublic,
+  McpApiKeyScope,
+  McpInfo,
+} from "../../lib/api";
+
+const MCP_SCOPE_OPTIONS: Array<{
+  value: McpApiKeyScope;
+  label: string;
+  description: string;
+}> = [
+  { value: "read", label: "Read", description: "Search, graph, and context tools" },
+  { value: "write", label: "Write", description: "Ingestion and document actions" },
+  { value: "admin", label: "Admin", description: "Settings and model administration" },
+];
+
+function scopesForDisplay(scopes?: Array<McpApiKeyScope | string>) {
+  return scopes?.length ? scopes : ["read", "write"];
+}
 
 export function McpTab() {
   const [info, setInfo] = useState<McpInfo | null>(null);
@@ -32,6 +51,10 @@ export function McpTab() {
   const [keys, setKeys] = useState<McpApiKeyPublic[]>([]);
   const [generatedKey, setGeneratedKey] = useState<McpApiKeyCreated | null>(null);
   const [keyName, setKeyName] = useState("Desktop MCP key");
+  const [keyScopes, setKeyScopes] = useState<Array<McpApiKeyScope | string>>([
+    "read",
+    "write",
+  ]);
   const [generating, setGenerating] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
 
@@ -73,7 +96,7 @@ export function McpTab() {
     setGenerating(true);
     setError(null);
     try {
-      const result = await api.createMcpApiKey(keyName);
+      const result = await api.createMcpApiKey(keyName, keyScopes);
       setGeneratedKey(result.key);
       const keyData = await api.listMcpApiKeys();
       setKeys(keyData.keys || []);
@@ -85,6 +108,16 @@ export function McpTab() {
     } finally {
       setGenerating(false);
     }
+  };
+
+  const toggleScope = (scope: McpApiKeyScope) => {
+    if (scope === "read") return;
+    setKeyScopes((current) => {
+      const next = current.includes(scope)
+        ? current.filter((value) => value !== scope)
+        : [...current, scope];
+      return next.includes("read") ? next : ["read", ...next];
+    });
   };
 
   const handleRevokeKey = async (keyId: string) => {
@@ -361,10 +394,52 @@ curl -fsS -X POST "${mcpEndpoint}" \\
             </button>
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {MCP_SCOPE_OPTIONS.map((scope) => {
+              const enabled = keyScopes.includes(scope.value);
+              const pinned = scope.value === "read";
+              return (
+                <button
+                  key={scope.value}
+                  type="button"
+                  onClick={() => toggleScope(scope.value)}
+                  disabled={pinned}
+                  className={`text-left px-3 py-2 rounded border transition ${
+                    enabled
+                      ? "border-cyan-400/35 bg-cyan-400/10 text-cyan-50"
+                      : "border-white/10 bg-[#1a1a1a] text-gray-400 hover:border-white/20"
+                  } ${pinned ? "cursor-default" : ""}`}
+                >
+                  <span className="flex items-center gap-2 text-[12px] font-semibold">
+                    {enabled ? (
+                      <Check className="w-3.5 h-3.5" />
+                    ) : (
+                      <span className="w-3.5 h-3.5 rounded border border-current opacity-50" />
+                    )}
+                    {scope.label}
+                  </span>
+                  <span className="block mt-1 text-[10px] text-gray-500 leading-snug">
+                    {scope.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
           {generatedKey && (
             <div className="border border-emerald-400/25 bg-emerald-400/5 rounded-lg p-3 space-y-2">
               <div className="text-[12px] text-emerald-200 font-semibold">
                 New key created. Copy it now; it will not be shown again.
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {scopesForDisplay(generatedKey.scopes).map((scope) => (
+                  <span
+                    key={scope}
+                    className="px-2 py-0.5 rounded border border-emerald-300/20 bg-emerald-300/10 text-[10px] uppercase tracking-widest text-emerald-100"
+                  >
+                    {scope}
+                  </span>
+                ))}
               </div>
               <div className="flex items-center gap-2 bg-[#111] border border-white/10 rounded px-3 py-2">
                 <code className="flex-1 min-w-0 font-mono text-[11px] text-emerald-100 break-all">
@@ -400,8 +475,18 @@ curl -fsS -X POST "${mcpEndpoint}" \\
                   <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="text-[12px] text-white">{key.name}</div>
-                    <div className="text-[11px] text-gray-500 font-mono">
+                    <div className="text-[11px] text-gray-500 font-mono mb-1">
                       {key.prefix}… · created {key.created_at || "unknown"}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {scopesForDisplay(key.scopes).map((scope) => (
+                        <span
+                          key={`${key.key_id}-${scope}`}
+                          className="px-1.5 py-0.5 rounded border border-white/10 bg-white/5 text-[9px] uppercase tracking-widest text-gray-300"
+                        >
+                          {scope}
+                        </span>
+                      ))}
                     </div>
                   </div>
                   <button

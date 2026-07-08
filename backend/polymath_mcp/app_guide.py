@@ -154,6 +154,7 @@ MCP_TOOLSETS: list[dict[str, Any]] = [
     {
         "name": "context",
         "enabled_by_default": True,
+        "required_scope": "read",
         "purpose": "Understand Polymath, current MCP readiness, and visible corpora.",
         "tools": [
             "polymath_mcp_status",
@@ -165,6 +166,7 @@ MCP_TOOLSETS: list[dict[str, Any]] = [
     {
         "name": "retrieval",
         "enabled_by_default": True,
+        "required_scope": "read",
         "purpose": "Retrieve evidence and answer through the same stack as Chat Query.",
         "tools": [
             "polymath_search",
@@ -175,6 +177,7 @@ MCP_TOOLSETS: list[dict[str, Any]] = [
     {
         "name": "graph",
         "enabled_by_default": True,
+        "required_scope": "read",
         "purpose": "Use Neo4j-backed graph synthesis, visual query maps, and entity inspection.",
         "tools": [
             "polymath_graph_query",
@@ -188,6 +191,7 @@ MCP_TOOLSETS: list[dict[str, Any]] = [
     {
         "name": "ingestion",
         "enabled_by_default": True,
+        "required_scope": "write",
         "purpose": "Plan, ingest, poll, repair summaries, verify, and optionally delete.",
         "tools": [
             "polymath_check_source",
@@ -203,6 +207,7 @@ MCP_TOOLSETS: list[dict[str, Any]] = [
     {
         "name": "skills",
         "enabled_by_default": False,
+        "required_scope": "read",
         "purpose": "Read user-authored Polymath skills and app-side tools.",
         "tools": [
             "polymath_list_skills",
@@ -483,6 +488,7 @@ REMOTE_AGENT_SETUP: dict[str, Any] = {
         "secret_type": "Polymath MCP API key",
         "notes": [
             "Generate user-scoped keys from Settings -> MCP Server when possible.",
+            "Use scopes intentionally: read for retrieval/graph, write for ingestion/deletion, admin for settings/model administration.",
             "Static MCP_API_KEY remains supported for trusted system agents.",
             "Never confuse the Polymath MCP key with model-provider keys.",
         ],

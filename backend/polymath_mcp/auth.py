@@ -18,6 +18,7 @@ from __future__ import annotations
 import hmac
 import logging
 from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Optional
 
 from config import get_settings
@@ -36,6 +37,18 @@ SYSTEM_USER_ID = "__mcp_system__"
 _current_user_id: ContextVar[Optional[str]] = ContextVar(
     "mcp_current_user_id", default=None
 )
+_current_scopes: ContextVar[frozenset[str] | None] = ContextVar(
+    "mcp_current_scopes", default=None
+)
+
+ALL_MCP_SCOPES = frozenset({"read", "write", "admin"})
+DEFAULT_USER_MCP_SCOPES = frozenset({"read", "write"})
+
+
+@dataclass(frozen=True)
+class MCPAuthContext:
+    user_id: Optional[str]
+    scopes: frozenset[str]
 
 
 class AuthError(Exception):
@@ -43,14 +56,60 @@ class AuthError(Exception):
     converts this into an MCP-shaped error response."""
 
 
-def set_current_user_id(user_id: Optional[str]) -> None:
+def _normalize_scopes(scopes: list[str] | tuple[str, ...] | set[str] | None) -> frozenset[str]:
+    allowed = set(ALL_MCP_SCOPES)
+    normalized = {
+        str(scope or "").strip().lower()
+        for scope in (scopes or DEFAULT_USER_MCP_SCOPES)
+        if str(scope or "").strip().lower() in allowed
+    }
+    normalized.add("read")
+    return frozenset(normalized or DEFAULT_USER_MCP_SCOPES)
+
+
+def _default_scopes_for_user(user_id: Optional[str]) -> frozenset[str]:
+    if user_id == SYSTEM_USER_ID:
+        return ALL_MCP_SCOPES
+    if user_id is None:
+        return ALL_MCP_SCOPES
+    return ALL_MCP_SCOPES
+
+
+def set_current_user_id(user_id: Optional[str], scopes: list[str] | tuple[str, ...] | set[str] | None = None) -> None:
     """Stash the authenticated user_id for the duration of this request."""
     _current_user_id.set(user_id)
+    _current_scopes.set(
+        _normalize_scopes(scopes) if scopes is not None else _default_scopes_for_user(user_id)
+    )
+
+
+def set_current_auth_context(auth: MCPAuthContext | None) -> None:
+    """Stash the authenticated subject and MCP scopes for this request."""
+    if auth is None:
+        set_current_user_id(None)
+        return
+    _current_user_id.set(auth.user_id)
+    _current_scopes.set(auth.scopes)
 
 
 def get_current_user_id() -> Optional[str]:
     """Read the user_id stashed by the auth middleware (or None when not set)."""
     return _current_user_id.get()
+
+
+def get_current_scopes() -> frozenset[str]:
+    """Read current MCP scopes, deriving legacy defaults for old test paths."""
+    scopes = _current_scopes.get()
+    if scopes is not None:
+        return scopes
+    return _default_scopes_for_user(get_current_user_id())
+
+
+def require_mcp_scope(scope: str) -> None:
+    """Raise AuthError when the current MCP key lacks a required scope."""
+    required = str(scope or "").strip().lower()
+    if required and required not in get_current_scopes():
+        raise AuthError(f"MCP key lacks required scope: {required}")
 
 
 def extract_bearer_token(authorization_header: str | None) -> str | None:
@@ -113,9 +172,21 @@ async def validate_token_async(token: str | None) -> Optional[str]:
     normal JWTs. User-generated MCP keys live in MongoDB, so the HTTP
     middleware calls this async wrapper.
     """
-    user_id = validate_token(token)
-    if user_id is not None:
-        return user_id
+    auth = await validate_token_context_async(token)
+    return auth.user_id if auth else None
+
+
+async def validate_token_context_async(token: str | None) -> MCPAuthContext | None:
+    """Validate bearer token and return the authenticated subject + scopes."""
+    if not token:
+        return None
+    if validate_api_key(token):
+        return MCPAuthContext(SYSTEM_USER_ID, ALL_MCP_SCOPES)
+    token_data = auth_service.verify_token(token)
+    if token_data is not None:
+        # JWTs are first-party app sessions, not shareable MCP keys. Preserve
+        # historical full capability for the interactive user.
+        return MCPAuthContext(token_data.user_id, ALL_MCP_SCOPES)
     if not token:
         return None
     db = conversation_service._db
@@ -123,9 +194,15 @@ async def validate_token_async(token: str | None) -> Optional[str]:
         logger.warning("MCP auth: MongoDB not connected; cannot validate user key")
         return None
     try:
-        from .key_store import validate_user_mcp_key
+        from .key_store import validate_user_mcp_key_details
 
-        return await validate_user_mcp_key(db, token)
+        details = await validate_user_mcp_key_details(db, token)
+        if not details:
+            return None
+        return MCPAuthContext(
+            str(details["user_id"]),
+            _normalize_scopes(details.get("scopes")),
+        )
     except Exception as exc:
         logger.warning("MCP auth: user key validation failed: %s", exc)
         return None

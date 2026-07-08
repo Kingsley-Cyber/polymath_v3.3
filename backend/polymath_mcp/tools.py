@@ -38,7 +38,9 @@ from .auth import (
     AuthError,
     assert_corpus_allowed,
     allowed_corpus_ids,
+    get_current_scopes,
     get_current_user_id,
+    require_mcp_scope,
     resolve_request_scope,
 )
 from .app_guide import MCP_TOOLSETS, get_app_guide
@@ -1346,7 +1348,7 @@ async def polymath_mcp_status(
     if detail not in ("summary", "full"):
         raise ValueError("detail must be 'summary' or 'full'")
 
-    from .auth import SYSTEM_USER_ID, allowed_corpus_ids, get_current_user_id
+    from .auth import SYSTEM_USER_ID, allowed_corpus_ids, get_current_scopes, get_current_user_id
     from services.conversation import conversation_service
     from services.settings import settings_service
 
@@ -1383,6 +1385,7 @@ async def polymath_mcp_status(
             "mode": auth_mode,
             "require_auth": settings.MCP_REQUIRE_AUTH,
             "has_subject": uid is not None,
+            "scopes": sorted(get_current_scopes()),
         },
         "connection": {
             "transport": settings.MCP_TRANSPORT,
@@ -1874,6 +1877,7 @@ def _require_user_id_for_write() -> str:
 
     Raises AuthError when MCP_REQUIRE_AUTH=True and no user_id is present.
     """
+    require_mcp_scope("write")
     uid = get_current_user_id()
     if uid is None:
         if get_settings().MCP_REQUIRE_AUTH:

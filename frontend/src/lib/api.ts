@@ -1509,10 +1509,13 @@ export interface McpInfo {
   tools: Array<{ name: string; description: string }>;
 }
 
+export type McpApiKeyScope = "read" | "write" | "admin";
+
 export interface McpApiKeyPublic {
   key_id: string;
   name: string;
   prefix: string;
+  scopes: Array<McpApiKeyScope | string>;
   created_at: string | null;
   last_used_at: string | null;
   revoked_at?: string | null;
@@ -1524,6 +1527,7 @@ export interface McpApiKeyCreated {
   name: string;
   api_key: string;
   prefix: string;
+  scopes: Array<McpApiKeyScope | string>;
   created_at: string;
   restart_required: boolean;
   scope: "user" | string;
@@ -1670,10 +1674,13 @@ export async function listMcpApiKeys(): Promise<{ keys: McpApiKeyPublic[] }> {
   return fetchJSON("/mcp/api-keys");
 }
 
-export async function createMcpApiKey(name?: string): Promise<{ key: McpApiKeyCreated }> {
+export async function createMcpApiKey(
+  name?: string,
+  scopes?: Array<McpApiKeyScope | string>,
+): Promise<{ key: McpApiKeyCreated }> {
   return fetchJSON("/mcp/api-keys", {
     method: "POST",
-    body: JSON.stringify({ name: name || "MCP key" }),
+    body: JSON.stringify({ name: name || "MCP key", scopes }),
   });
 }
 
