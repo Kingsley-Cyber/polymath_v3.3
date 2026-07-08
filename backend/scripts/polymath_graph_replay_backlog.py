@@ -50,6 +50,7 @@ log = logging.getLogger("polymath_graph_replay_backlog")
 
 DEFAULT_POLYMATH_V2_CORPUS_ID = "999b5934-272e-4f20-a538-b5d422249a05"
 ACTIVE_BATCH_STATUSES = {"queued", "running"}
+GRAPH_VERIFY_PATTERN = "neo4j|HAS_CHUNK"
 
 
 def _json_default(value: Any) -> str:
@@ -124,6 +125,19 @@ async def _row_count(db: Any, collection: str, *, corpus_id: str, doc_id: str) -
     )
 
 
+def _graph_gap_reason(row: dict[str, Any]) -> str | None:
+    write_state = row.get("write_state") or {}
+    if write_state.get("neo4j_written") is not True:
+        return "neo4j_missing"
+    if write_state.get("verified") is True:
+        return None
+    for raw in write_state.get("verify_errors") or []:
+        text = str(raw).lower()
+        if "neo4j" in text or "has_chunk" in text:
+            return "neo4j_verify_mismatch"
+    return None
+
+
 async def _candidate_rows(
     db: Any,
     *,
@@ -136,7 +150,16 @@ async def _candidate_rows(
         {
             "corpus_id": corpus_id,
             "write_state.qdrant_written": True,
-            "write_state.neo4j_written": {"$ne": True},
+            "$or": [
+                {"write_state.neo4j_written": {"$ne": True}},
+                {
+                    "write_state.verified": {"$ne": True},
+                    "write_state.verify_errors": {
+                        "$regex": GRAPH_VERIFY_PATTERN,
+                        "$options": "i",
+                    },
+                },
+            ],
         },
         {
             "_id": 0,
@@ -147,6 +170,7 @@ async def _candidate_rows(
             "ingest_stage": 1,
             "summary_count": 1,
             "ghost_b_failure_count": 1,
+            "write_state": 1,
             "updated_at": 1,
         },
     )
@@ -156,6 +180,11 @@ async def _candidate_rows(
         doc_id = str(row.get("doc_id") or "")
         if not doc_id:
             continue
+        reason = _graph_gap_reason(row)
+        if reason is None:
+            continue
+        row["graph_gap_reason"] = reason
+        row.pop("write_state", None)
         child_chunks = await _chunk_count(db, corpus_id=corpus_id, doc_id=doc_id)
         if max_chunks is not None and child_chunks > max_chunks:
             continue
@@ -210,6 +239,7 @@ async def _write_run_record(
                 "filename": row.get("filename"),
                 "child_chunks": row.get("child_chunks"),
                 "parents": row.get("parents"),
+                "graph_gap_reason": row.get("graph_gap_reason"),
                 "staged_extractions": row.get("staged_extractions"),
                 "failure_rows": row.get("failure_rows"),
             }
