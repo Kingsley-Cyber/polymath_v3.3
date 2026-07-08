@@ -406,6 +406,104 @@ async def test_delete_document_graph_prunes_relation_provenance_before_nodes():
 
 
 @pytest.mark.asyncio
+async def test_write_document_graph_clears_stale_payload_before_rewrite():
+    driver = FakeDriver()
+    result = ExtractionResult(
+        schema_version="polymath.extract.v1",
+        chunk_id="c2",
+        doc_id="d1",
+        corpus_id="corp1",
+        entities=[],
+        relations=[],
+        facts=[],
+    )
+
+    await write_document_graph(
+        driver=driver,
+        doc_id="d1",
+        corpus_id="corp1",
+        extraction_results=[result],
+        user_id="u1",
+        file_id="f1",
+        all_chunk_ids=["c2"],
+    )
+
+    queries = [query for query, _params in driver.calls]
+    assert "RETURN collect(DISTINCT e.entity_id) AS entity_ids" in queries[0]
+    assert "r.evidence_doc_ids" in queries[1]
+    assert "MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})" in queries[2]
+    assert "WHERE NOT n:Document" in queries[2]
+    document_write_idx = next(
+        idx for idx, query in enumerate(queries) if "MERGE (d:Document" in query
+    )
+    chunk_write_idx = next(
+        idx for idx, query in enumerate(queries) if "MERGE (c:Chunk" in query
+    )
+    assert document_write_idx > 2
+    assert chunk_write_idx > document_write_idx
+
+
+@pytest.mark.asyncio
+async def test_write_document_graph_uses_mongo_chunk_ids_as_authoritative():
+    driver = FakeDriver()
+    stale_result = ExtractionResult(
+        schema_version="polymath.extract.v1",
+        chunk_id="old-c99",
+        doc_id="d1",
+        corpus_id="corp1",
+        entities=[
+            EntityItem(
+                canonical_name="stale concept",
+                surface_form="stale concept",
+                entity_type="Concept",
+                confidence=0.9,
+            )
+        ],
+        relations=[],
+        facts=[],
+    )
+    current_result = ExtractionResult(
+        schema_version="polymath.extract.v1",
+        chunk_id="c1",
+        doc_id="d1",
+        corpus_id="corp1",
+        entities=[
+            EntityItem(
+                canonical_name="current concept",
+                surface_form="current concept",
+                entity_type="Concept",
+                confidence=0.9,
+            )
+        ],
+        relations=[],
+        facts=[],
+    )
+
+    await write_document_graph(
+        driver=driver,
+        doc_id="d1",
+        corpus_id="corp1",
+        extraction_results=[stale_result, current_result],
+        user_id="u1",
+        file_id="f1",
+        all_chunk_ids=["c1"],
+    )
+
+    chunk_call = next(
+        (query, params)
+        for query, params in driver.calls
+        if "MERGE (c:Chunk" in query
+    )
+    mention_call = next(
+        (query, params)
+        for query, params in driver.calls
+        if "MERGE (c)-[m:MENTIONS]->(e)" in query
+    )
+    assert chunk_call[1]["rows"] == [{"chunk_id": "c1"}]
+    assert {row["chunk_id"] for row in mention_call[1]["rows"]} == {"c1"}
+
+
+@pytest.mark.asyncio
 async def test_delete_corpus_graph_prunes_array_scoped_relations_before_nodes():
     driver = FakeDriver()
 

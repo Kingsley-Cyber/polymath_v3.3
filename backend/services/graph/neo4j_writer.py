@@ -1908,6 +1908,49 @@ async def delete_document_graph(
             await _refresh_entity_aggregates(session, affected_entity_ids)
 
 
+async def _clear_document_graph_payload(
+    driver: AsyncDriver,
+    *,
+    corpus_id: str,
+    doc_id: str,
+) -> None:
+    """Remove replaceable graph payload for one document/corpus before rewrite.
+
+    ``write_document_graph`` is a replace operation from Mongo/Ghost B state.
+    MERGE keeps identical rows idempotent, but it cannot remove stale Chunk,
+    Fact, MENTION, or HAS_CHUNK rows left by a prior retry with a different
+    chunk set. Keep the Document anchor and clear only corpus-scoped payload.
+    """
+    async with driver.session() as session:
+        affected_res = await session.run(
+            """
+            MATCH (c:Chunk {doc_id: $doc_id, corpus_id: $corpus_id})-[:MENTIONS]->(e:Entity)
+            RETURN collect(DISTINCT e.entity_id) AS entity_ids
+            """,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+        )
+        affected_row = await affected_res.single()
+        affected_entity_ids = list((affected_row or {}).get("entity_ids") or [])
+        await _prune_relates_to_for_document(
+            session,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+        )
+        await session.run(
+            """
+            MATCH (n {doc_id: $doc_id, corpus_id: $corpus_id})
+            WHERE NOT n:Document
+            DETACH DELETE n
+            """,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+        )
+        await _delete_orphan_entities(session)
+        if affected_entity_ids:
+            await _refresh_entity_aggregates(session, affected_entity_ids)
+
+
 async def delete_corpus_graph(
     driver: AsyncDriver,
     *,
@@ -1989,8 +2032,34 @@ async def write_document_graph(
     anchor for the books-as-clusters view. `chunk_count` is auto-derived
     from `all_chunk_ids` + the extraction-result chunk ids.
     """
-    # 1. Document node — rich anchor MERGE with cluster-anchor flags.
-    chunk_ids = list(dict.fromkeys([*(all_chunk_ids or []), *[r.chunk_id for r in extraction_results]]))
+    await _clear_document_graph_payload(
+        driver,
+        corpus_id=corpus_id,
+        doc_id=doc_id,
+    )
+
+    # 1. Document node — rich anchor MERGE with cluster-anchor flags. When the
+    # caller provides all_chunk_ids, Mongo's current chunk table is the source
+    # of truth. Retry/resume can leave stale Ghost B rows for old chunk IDs; do
+    # not reintroduce those as HAS_CHUNK edges.
+    if all_chunk_ids is not None:
+        canonical_chunk_ids = list(dict.fromkeys(all_chunk_ids))
+        allowed_chunk_ids = set(canonical_chunk_ids)
+        original_result_count = len(extraction_results)
+        extraction_results = [
+            result for result in extraction_results if result.chunk_id in allowed_chunk_ids
+        ]
+        dropped_stale_results = original_result_count - len(extraction_results)
+        if dropped_stale_results:
+            logger.warning(
+                "Neo4j graph write dropped stale extraction rows: doc=%s corpus=%s dropped=%d",
+                doc_id[:12],
+                corpus_id[:8],
+                dropped_stale_results,
+            )
+        chunk_ids = canonical_chunk_ids
+    else:
+        chunk_ids = list(dict.fromkeys([r.chunk_id for r in extraction_results]))
     # Pt 6 scaling fix: compute dominant family + entity type here from the
     # in-memory extraction results, write to the Document node. Brain View
     # Cypher then reads the property instead of OPTIONAL MATCH'ing every
