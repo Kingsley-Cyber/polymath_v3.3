@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from services.ingestion import model_lifecycle
@@ -59,3 +61,53 @@ async def test_shutdown_model_lifecycle_posts_down_once_per_control_plane(monkey
             {"X-Api-Key": "manager-key"},
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_shutdown_model_lifecycle_positive_idle_schedules_without_down(
+    monkeypatch,
+):
+    posts: list[tuple[str, dict[str, str]]] = []
+
+    class FakeResponse:
+        status_code = 200
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers):
+            posts.append((url, dict(headers or {})))
+            return FakeResponse()
+
+    monkeypatch.setattr(model_lifecycle.httpx, "AsyncClient", FakeClient)
+    model_lifecycle._shutdown_tasks.clear()
+    model_lifecycle._shutdown_generations.clear()
+
+    pool = [
+        {
+            "lifecycle_base_url": "http://192.168.1.83:8085",
+            "lifecycle_down_path": "/down",
+            "lifecycle_api_key": "manager-key",
+            "lifecycle_auto_stop": True,
+            "extra_params": {"lifecycle_idle_shutdown_seconds": 600},
+        }
+    ]
+
+    await model_lifecycle.shutdown_model_lifecycle(pool, purpose="ghost_b")
+
+    assert posts == []
+    assert len(model_lifecycle._shutdown_tasks) == 1
+
+    tasks = list(model_lifecycle._shutdown_tasks.values())
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    model_lifecycle._shutdown_tasks.clear()
+    model_lifecycle._shutdown_generations.clear()

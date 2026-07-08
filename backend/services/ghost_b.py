@@ -43,6 +43,7 @@ from services.llm_lane_pool import (
 #   returns: list of allowed terms ranked by similarity
 SchemaResolver = Callable[[str, list[float], int], Awaitable[list[str]]]
 GhostBAuditSink = Callable[[dict[str, Any]], Awaitable[None]]
+ExtractionRoutingPolicy = Literal["work_stealing", "balanced", "primary_fallback"]
 
 logger = logging.getLogger(__name__)
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
@@ -1161,6 +1162,86 @@ def _select_extraction_output_mode(
     return "jsonl"
 
 
+def _entry_extra_params(entry: dict | object) -> dict[str, Any]:
+    if hasattr(entry, "model_dump"):
+        data = entry.model_dump()  # type: ignore[attr-defined]
+    elif isinstance(entry, dict):
+        data = entry
+    else:
+        data = dict(entry or {})  # type: ignore[arg-type]
+    extra = data.get("extra_params") or {}
+    return extra if isinstance(extra, dict) else {}
+
+
+def _normalize_extraction_routing_policy(value: Any) -> ExtractionRoutingPolicy | None:
+    text = str(value or "").strip().lower().replace("-", "_")
+    if text in {"balanced", "balanced_fanout", "fanout", "parallel"}:
+        return "balanced"
+    if text in {"work_stealing", "workstealing", "spillover", "fastest", "auto"}:
+        return "work_stealing"
+    if text in {"primary_fallback", "primary_failover", "fallback", "failover"}:
+        return "primary_fallback"
+    return None
+
+
+def _resolve_extraction_routing_policy(pool: list[dict]) -> ExtractionRoutingPolicy:
+    """Resolve how a provider pool should consume the chunk queue.
+
+    Work-stealing remains the fastest default for a single provider family.
+    Mixed private-vLLM plus cloud pools default to balanced fanout so "RTX +
+    cloud" visibly means both lanes participate, unless the operator asks for
+    explicit primary/fallback behavior.
+    """
+
+    for entry in pool:
+        explicit = _normalize_extraction_routing_policy(entry.get("routing_policy"))
+        if explicit:
+            return explicit
+        extra = _entry_extra_params(entry)
+        explicit = _normalize_extraction_routing_policy(
+            extra.get("routing_policy") or extra.get("route_policy")
+        )
+        if explicit:
+            return explicit
+
+    if len(pool) < 2:
+        return "work_stealing"
+    cards = [resolve_extraction_provider_card(entry) for entry in pool]
+    has_private = any(card.local_private for card in cards)
+    has_cloud = any(not card.local_private for card in cards)
+    if has_private and has_cloud:
+        return "balanced"
+    return "work_stealing"
+
+
+def _worker_lane_spawn_order(
+    lane_limits: list[int],
+    disabled_lanes: set[int],
+    routing_policy: ExtractionRoutingPolicy,
+) -> list[int]:
+    enabled = [
+        idx
+        for idx, limit in enumerate(lane_limits)
+        if idx not in disabled_lanes and int(limit or 0) > 0
+    ]
+    if routing_policy == "primary_fallback":
+        return [enabled[0]] * int(lane_limits[enabled[0]]) if enabled else []
+    if routing_policy != "balanced":
+        return [
+            idx
+            for idx in enabled
+            for _ in range(int(lane_limits[idx]))
+        ]
+
+    order: list[int] = []
+    max_slots = max((int(lane_limits[idx]) for idx in enabled), default=0)
+    for slot in range(max_slots):
+        for idx in enabled:
+            if slot < int(lane_limits[idx]):
+                order.append(idx)
+    return order
+
+
 def _json_object_response_format() -> dict[str, str]:
     return {"type": "json_object"}
 
@@ -1934,6 +2015,21 @@ def summarize_extraction_batch(
     error_counts: dict[str, int] = {}
     for failure in failures:
         error_counts[failure.error_type] = error_counts.get(failure.error_type, 0) + 1
+    lane_call_counts: dict[str, int] = {}
+    provider_call_counts: dict[str, int] = {}
+    model_call_counts: dict[str, int] = {}
+    routing_policies: set[str] = set()
+    for metric in call_metrics:
+        lane_key = str(metric.get("lane", "unknown"))
+        lane_call_counts[lane_key] = lane_call_counts.get(lane_key, 0) + 1
+        provider = str(metric.get("provider") or "unknown")
+        provider_call_counts[provider] = provider_call_counts.get(provider, 0) + 1
+        model = str(metric.get("model") or "unknown")
+        model_call_counts[model] = model_call_counts.get(model, 0) + 1
+        policy = str(metric.get("routing_policy") or "").strip()
+        if policy:
+            routing_policies.add(policy)
+    ordered_policies = sorted(routing_policies)
     return {
         "requested_chunks": total_chunks,
         "extracted_chunks": len(results),
@@ -1941,6 +2037,14 @@ def summarize_extraction_batch(
         "success_rate": round(len(results) / total_chunks, 4) if total_chunks else 1.0,
         "attempt_count": len(call_metrics),
         "models": models,
+        "routing_policy": (
+            ordered_policies[0]
+            if len(ordered_policies) == 1
+            else ordered_policies
+        ),
+        "lane_call_counts": lane_call_counts,
+        "provider_call_counts": provider_call_counts,
+        "model_call_counts": model_call_counts,
         "total_tokens": total_tokens,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
@@ -3632,6 +3736,13 @@ async def extract_entities(
         _model_lane_semaphore(entry, idx, lane_limits[idx])
         for idx, entry in enumerate(pool)
     ]
+    routing_policy = _resolve_extraction_routing_policy(pool)
+    logger.info(
+        "GHOST B routing selected: policy=%s lane_limits=%s models=%s",
+        routing_policy,
+        lane_limits,
+        [str(entry.get("model") or "") for entry in pool],
+    )
 
     # Phase K — WORK-STEALING POOL. Instead of round-robin assignment
     # (task i → pool[i%N]), we spawn one worker coroutine PER lane slot
@@ -4191,6 +4302,7 @@ async def extract_entities(
                             "input_truncated": input_truncated,
                             "success": bool(complete),
                             "error_type": attempt_error_type,
+                            "routing_policy": routing_policy,
                             "jsonl_valid_lines": jsonl_chunk.valid_lines,
                             "jsonl_finished": jsonl_chunk.finished,
                             "jsonl_accepted_items": len(accepted_jsonl_items),
@@ -4388,6 +4500,7 @@ async def extract_entities(
                             "prompt_chars": prompt_chars,
                             "success": False,
                             "error_type": last_error_type,
+                            "routing_policy": routing_policy,
                         }
                     )
                     await _audit_attempt(
@@ -4419,6 +4532,10 @@ async def extract_entities(
                     {
                         "chunk_id": task.chunk_id,
                         "model": entry["model"],
+                        "provider": provider_card.provider,
+                        "schema_mode": provider_card.schema_mode,
+                        "json_repair_mode": provider_card.json_repair_mode,
+                        "semantic_verifier_mode": provider_card.semantic_verifier_mode,
                         "lane": pool_idx,
                         "profile": profile.name,
                         "output_mode": profile_output_mode,
@@ -4437,6 +4554,7 @@ async def extract_entities(
                             if fatal_lane
                             else last_error_type
                         ),
+                        "routing_policy": routing_policy,
                     }
                 )
                 await _audit_attempt(
@@ -4562,12 +4680,12 @@ async def extract_entities(
     async def _run_enabled_workers() -> None:
         # Spawn total_concurrency workers = sum of enabled per-lane max_concurrent.
         workers: list[asyncio.Task] = []
-        for pool_idx, entry in enumerate(pool):
-            if pool_idx in disabled_lanes:
-                continue
-            slots = lane_limits[pool_idx]
-            for _ in range(slots):
-                workers.append(asyncio.create_task(_lane_worker(pool_idx)))
+        for pool_idx in _worker_lane_spawn_order(
+            lane_limits,
+            disabled_lanes,
+            routing_policy,
+        ):
+            workers.append(asyncio.create_task(_lane_worker(pool_idx)))
         if workers:
             await asyncio.gather(*workers, return_exceptions=False)
 

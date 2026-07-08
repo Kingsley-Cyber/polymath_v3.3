@@ -57,6 +57,10 @@ INTERNAL_MODEL_FLAGS = frozenset(
         "adaptive_vram",
         "vram_safety_ratio",
         "lifecycle_base_url",
+        "routing_policy",
+        "route_policy",
+        "lane_role",
+        "route_weight",
     }
 )
 

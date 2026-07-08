@@ -62,6 +62,7 @@ def test_payload_extras_strip_provider_card_flags():
             "disable_thinking": True,
             "adaptive_vram": True,
             "vram_safety_ratio": 0.85,
+            "routing_policy": "balanced",
             "seed": 7,
         }
     )

@@ -8,6 +8,14 @@ import pytest
 from services.ingestion import verify
 
 
+class _Cursor:
+    def __init__(self, rows):
+        self.rows = rows
+
+    async def to_list(self, length=None):
+        return self.rows
+
+
 class _FakeChunks:
     async def count_documents(self, _query):
         return 1
@@ -130,3 +138,47 @@ async def test_verify_ingest_fails_when_graph_retrieval_indexes_are_offline(
     assert ok is False
     assert any("neo4j.retrieval_indexes" in err for err in errors)
     assert any("fact_text_ft POPULATING" in err for err in errors)
+
+
+@pytest.mark.asyncio
+async def test_expected_qdrant_texts_use_summary_retrieval_text():
+    class FakeCollection:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def find(self, _query, _projection=None):
+            return _Cursor(self.rows)
+
+    class FakeDb:
+        def __getitem__(self, name):
+            if name == "chunks":
+                return FakeCollection(
+                    [{"chunk_id": "child-1", "text": "Canonical child text."}]
+                )
+            if name == "parent_chunks":
+                return FakeCollection(
+                    [
+                        {
+                            "parent_id": "parent-1",
+                            "summary": "Short generated summary.",
+                            "retrieval_text": (
+                                "Central claim: summaries improve recall.\n"
+                                "Short generated summary.\n"
+                                "Key points: child evidence anchors the parent."
+                            ),
+                        }
+                    ]
+                )
+            raise KeyError(name)
+
+    expected = await verify._expected_qdrant_texts(
+        FakeDb(),
+        doc_id="doc-1",
+        corpus_id="corpus-1",
+    )
+
+    assert expected["child-1"] == "Canonical child text."
+    assert expected["parent-1_summary"].startswith(
+        "Central claim: summaries improve recall."
+    )
+    assert expected["parent-1_summary"] != "Short generated summary."
